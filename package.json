@@ -1,0 +1,42 @@
+{
+  "name": "vskill",
+  "version": "0.1.0",
+  "description": "Secure multi-platform AI skill installer — scan before you install",
+  "bin": {
+    "vskill": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "skills",
+    "security",
+    "agent",
+    "cli",
+    "claude",
+    "cursor",
+    "copilot",
+    "verified-skill"
+  ],
+  "author": "Anton Abyzov",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anton-abyzov/vskill"
+  },
+  "homepage": "https://verified-skill.com",
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

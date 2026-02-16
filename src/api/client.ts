@@ -1,0 +1,104 @@
+// ---------------------------------------------------------------------------
+// HTTP client for verified-skill.com API
+// ---------------------------------------------------------------------------
+
+const BASE_URL = "https://verified-skill.com";
+
+export interface SkillSearchResult {
+  name: string;
+  author: string;
+  tier: string;
+  score: number;
+  installs: number;
+  description: string;
+}
+
+export interface SkillDetail {
+  name: string;
+  author: string;
+  tier: string;
+  score: number;
+  version: string;
+  sha: string;
+  description: string;
+  content?: string;
+  installs: number;
+  updatedAt: string;
+}
+
+export interface SubmissionResponse {
+  id: string;
+  status: string;
+  trackingUrl: string;
+}
+
+export interface SubmissionRequest {
+  repoUrl: string;
+  skillName?: string;
+  email?: string;
+}
+
+async function apiRequest<T>(
+  path: string,
+  options?: RequestInit
+): Promise<T> {
+  const url = `${BASE_URL}${path}`;
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": "vskill-cli",
+      ...options?.headers,
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `API request failed: ${res.status} ${res.statusText}${body ? ` - ${body}` : ""}`
+    );
+  }
+
+  return res.json() as Promise<T>;
+}
+
+/**
+ * Search for skills in the registry.
+ */
+export async function searchSkills(
+  query: string
+): Promise<SkillSearchResult[]> {
+  const encoded = encodeURIComponent(query);
+  return apiRequest<SkillSearchResult[]>(
+    `/api/v1/skills?search=${encoded}`
+  );
+}
+
+/**
+ * Get a single skill by name.
+ */
+export async function getSkill(name: string): Promise<SkillDetail> {
+  const encoded = encodeURIComponent(name);
+  return apiRequest<SkillDetail>(`/api/v1/skills/${encoded}`);
+}
+
+/**
+ * Submit a skill for verification.
+ */
+export async function submitSkill(
+  data: SubmissionRequest
+): Promise<SubmissionResponse> {
+  return apiRequest<SubmissionResponse>("/api/v1/submissions", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Get the status of a submission.
+ */
+export async function getSubmission(
+  id: string
+): Promise<{ id: string; status: string; result?: unknown }> {
+  return apiRequest(`/api/v1/submissions/${encodeURIComponent(id)}`);
+}

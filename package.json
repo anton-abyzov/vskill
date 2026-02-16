@@ -1,6 +1,7 @@
 {
   "name": "vskill",
   "version": "0.1.0",
+  "type": "module",
   "description": "Secure multi-platform AI skill installer — scan before you install",
   "bin": {
     "vskill": "./dist/index.js"
@@ -32,11 +33,19 @@
     "url": "https://github.com/anton-abyzov/vskill"
   },
   "homepage": "https://verified-skill.com",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "devDependencies": {
+    "@types/node": "^25.2.3",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "commander": "^14.0.3"
   }
 }

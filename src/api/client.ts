@@ -69,9 +69,17 @@ export async function searchSkills(
   query: string
 ): Promise<SkillSearchResult[]> {
   const encoded = encodeURIComponent(query);
-  return apiRequest<SkillSearchResult[]>(
+  const data = await apiRequest<{ skills: Array<Record<string, unknown>> }>(
     `/api/v1/skills?search=${encoded}`
   );
+  return (data.skills || []).map((s) => ({
+    name: String(s.name || ""),
+    author: String(s.author || ""),
+    tier: String(s.certTier || s.tier || "SCANNED"),
+    score: Number(s.certScore ?? s.score ?? 0),
+    installs: Number(s.vskillInstalls ?? s.installs ?? 0),
+    description: String(s.description || ""),
+  }));
 }
 
 /**

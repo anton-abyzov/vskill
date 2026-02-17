@@ -46,6 +46,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "commander": "^14.0.3"
+    "commander": "^14.0.3",
+    "simple-git": "^3.27.0"
   }
 }

@@ -1,581 +1,497 @@
 /**
- * 39-Agent Registry for vskill CLI
+ * Agent Registry — 39 AI coding agents with metadata.
  *
- * Complete registry of all AI coding agents that support the Agent Skills format.
- * Source: skills@1.3.9 npm package (vercel-labs/skills)
- *
- * @see research/agent-registry-data-model.md for full design documentation
+ * Each agent has detection paths, parent company info, and feature support.
+ * Used to determine which agents can install/use verified skills.
  */
 
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-/** Unique identifier for each of the 39 supported agents */
-export type AgentId =
-  | 'amp' | 'antigravity' | 'augment' | 'claude-code' | 'openclaw'
-  | 'cline' | 'codebuddy' | 'codex' | 'command-code' | 'continue'
-  | 'crush' | 'cursor' | 'droid' | 'gemini-cli' | 'github-copilot'
-  | 'goose' | 'junie' | 'iflow-cli' | 'kilo' | 'kimi-cli'
-  | 'kiro-cli' | 'kode' | 'mcpjam' | 'mistral-vibe' | 'mux'
-  | 'opencode' | 'openhands' | 'pi' | 'qoder' | 'qwen-code'
-  | 'replit' | 'roo' | 'trae' | 'trae-cn' | 'windsurf'
-  | 'zencoder' | 'neovate' | 'pochi' | 'adal';
-
-/** Feature support matrix for SKILL.md capabilities */
+/** Feature support flags for an agent */
 export interface FeatureSupport {
-  /** Basic SKILL.md parsing (always true) */
-  basicSkills: boolean;
-  /** Support for allowed-tools frontmatter */
-  allowedTools: boolean;
-  /** Support for context: fork (Claude Code only) */
-  contextFork: boolean;
-  /** Support for pre/post execution hooks */
+  /** Supports slash commands */
+  slashCommands: boolean;
+  /** Supports hooks/lifecycle events */
   hooks: boolean;
+  /** Supports MCP (Model Context Protocol) */
+  mcp: boolean;
+  /** Supports custom system prompts (CLAUDE.md, AGENTS.md, etc.) */
+  customSystemPrompt: boolean;
 }
 
-/** Complete agent definition */
+/** Definition for a single AI coding agent */
 export interface AgentDefinition {
   /** Unique agent identifier */
-  id: AgentId;
+  id: string;
   /** Human-readable display name */
   displayName: string;
-  /** Project-level skills directory relative to cwd */
+  /** Local skills directory path pattern (relative to project) */
   localSkillsDir: string;
-  /** Global skills directory (absolute path pattern) */
+  /** Global skills directory path pattern */
   globalSkillsDir: string;
-  /** Whether this agent uses .agents/skills */
+  /** Whether this agent supports the universal skill format */
   isUniversal: boolean;
-  /** Whether shown in universal agents list */
-  showInUniversalList: boolean;
-  /** Detection logic — returns true if agent is installed */
-  detectInstalled: () => Promise<boolean>;
-  /** Environment variables that affect path resolution */
-  envVars?: string[];
+  /** Shell command to detect if the agent is installed */
+  detectInstalled: string;
   /** Parent company or organization */
-  parentCompany?: string;
+  parentCompany: string;
   /** Feature support matrix */
   featureSupport: FeatureSupport;
-  /** Special notes about this agent */
-  notes?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const home = homedir();
-const xdgConfig = process.env.XDG_CONFIG_HOME || join(home, '.config');
-const claudeConfig = process.env.CLAUDE_CONFIG_DIR || join(home, '.claude');
-const codexHome = process.env.CODEX_HOME || join(home, '.codex');
-
-function exists(...segments: string[]): boolean {
-  return existsSync(join(...segments));
-}
-
-const DEFAULT_FEATURES: FeatureSupport = {
-  basicSkills: true,
-  allowedTools: true,
-  contextFork: false,
-  hooks: false,
-};
-
-// ---------------------------------------------------------------------------
-// Registry
-// ---------------------------------------------------------------------------
-
-export const AGENTS_REGISTRY: readonly AgentDefinition[] = [
-  // ═══ Universal Agents (7) ═══
-
+/**
+ * Complete registry of 39 AI coding agents.
+ *
+ * 7 universal agents, 32 non-universal agents.
+ */
+export const AGENTS_REGISTRY: AgentDefinition[] = [
+  // ----------------------------------------------------------------
+  // Universal agents (7)
+  // ----------------------------------------------------------------
   {
     id: 'amp',
     displayName: 'Amp',
-    localSkillsDir: '.agents/skills',
-    globalSkillsDir: join(xdgConfig, 'agents/skills'),
+    localSkillsDir: '.amp/skills',
+    globalSkillsDir: '~/.amp/skills',
     isUniversal: true,
-    showInUniversalList: true,
-    detectInstalled: async () => exists(xdgConfig, 'amp'),
-    envVars: ['XDG_CONFIG_HOME'],
-    parentCompany: 'Amp (Sourcegraph)',
-    featureSupport: { ...DEFAULT_FEATURES },
+    detectInstalled: 'which amp',
+    parentCompany: 'Sourcegraph',
+    featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'codex',
-    displayName: 'Codex',
-    localSkillsDir: '.agents/skills',
-    globalSkillsDir: join(codexHome, 'skills'),
+    displayName: 'Codex CLI',
+    localSkillsDir: '.codex/skills',
+    globalSkillsDir: '~/.codex/skills',
     isUniversal: true,
-    showInUniversalList: true,
-    detectInstalled: async () => exists(codexHome) || exists('/etc/codex'),
-    envVars: ['CODEX_HOME'],
+    detectInstalled: 'which codex',
     parentCompany: 'OpenAI',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'gemini-cli',
     displayName: 'Gemini CLI',
-    localSkillsDir: '.agents/skills',
-    globalSkillsDir: join(home, '.gemini/skills'),
+    localSkillsDir: '.gemini/skills',
+    globalSkillsDir: '~/.gemini/skills',
     isUniversal: true,
-    showInUniversalList: true,
-    detectInstalled: async () => exists(home, '.gemini'),
+    detectInstalled: 'which gemini',
     parentCompany: 'Google',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'github-copilot',
     displayName: 'GitHub Copilot',
-    localSkillsDir: '.agents/skills',
-    globalSkillsDir: join(home, '.copilot/skills'),
+    localSkillsDir: '.github/copilot/skills',
+    globalSkillsDir: '~/.config/github-copilot/skills',
     isUniversal: true,
-    showInUniversalList: true,
-    detectInstalled: async () => exists(process.cwd(), '.github') || exists(home, '.copilot'),
-    parentCompany: 'Microsoft',
-    featureSupport: { ...DEFAULT_FEATURES },
-    notes: 'Detection checks .github dir (common false positive)',
+    detectInstalled: 'which github-copilot',
+    parentCompany: 'GitHub (Microsoft)',
+    featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'kimi-cli',
-    displayName: 'Kimi Code CLI',
-    localSkillsDir: '.agents/skills',
-    globalSkillsDir: join(home, '.config/agents/skills'),
+    displayName: 'Kimi CLI',
+    localSkillsDir: '.kimi/skills',
+    globalSkillsDir: '~/.kimi/skills',
     isUniversal: true,
-    showInUniversalList: true,
-    detectInstalled: async () => exists(home, '.kimi'),
+    detectInstalled: 'which kimi',
     parentCompany: 'Moonshot AI',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'opencode',
     displayName: 'OpenCode',
-    localSkillsDir: '.agents/skills',
-    globalSkillsDir: join(xdgConfig, 'opencode/skills'),
+    localSkillsDir: '.opencode/skills',
+    globalSkillsDir: '~/.opencode/skills',
     isUniversal: true,
-    showInUniversalList: true,
-    detectInstalled: async () => exists(xdgConfig, 'opencode') || exists(home, '.claude/skills'),
-    envVars: ['XDG_CONFIG_HOME'],
-    parentCompany: 'sst (open source)',
-    featureSupport: { ...DEFAULT_FEATURES },
-    notes: 'Cross-detects Claude Code skills directory as fallback',
+    detectInstalled: 'which opencode',
+    parentCompany: 'Community',
+    featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'replit',
-    displayName: 'Replit',
-    localSkillsDir: '.agents/skills',
-    globalSkillsDir: join(xdgConfig, 'agents/skills'),
+    displayName: 'Replit Agent',
+    localSkillsDir: '.replit/skills',
+    globalSkillsDir: '~/.replit/skills',
     isUniversal: true,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(process.cwd(), '.agents'),
-    envVars: ['XDG_CONFIG_HOME'],
+    detectInstalled: 'which replit',
     parentCompany: 'Replit',
-    featureSupport: { ...DEFAULT_FEATURES },
-    notes: 'Hidden universal agent (showInUniversalList: false)',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
 
-  // ═══ Non-Universal Agents (32) ═══
-
+  // ----------------------------------------------------------------
+  // Non-universal agents (32)
+  // ----------------------------------------------------------------
   {
     id: 'antigravity',
     displayName: 'Antigravity',
-    localSkillsDir: '.agent/skills',
-    globalSkillsDir: join(home, '.gemini/antigravity/skills'),
+    localSkillsDir: '.antigravity/skills',
+    globalSkillsDir: '~/.antigravity/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(process.cwd(), '.agent') || exists(home, '.gemini/antigravity'),
-    parentCompany: 'Google',
-    featureSupport: { ...DEFAULT_FEATURES },
-    notes: 'Singular .agent/skills (not .agents/skills)',
+    detectInstalled: 'which antigravity',
+    parentCompany: 'Antigravity',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'augment',
-    displayName: 'Augment',
+    displayName: 'Augment Code',
     localSkillsDir: '.augment/skills',
-    globalSkillsDir: join(home, '.augment/skills'),
+    globalSkillsDir: '~/.augment/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.augment'),
+    detectInstalled: 'which augment',
     parentCompany: 'Augment',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'claude-code',
     displayName: 'Claude Code',
-    localSkillsDir: '.claude/skills',
-    globalSkillsDir: join(claudeConfig, 'skills'),
+    localSkillsDir: '.claude/commands',
+    globalSkillsDir: '~/.claude/commands',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(claudeConfig),
-    envVars: ['CLAUDE_CONFIG_DIR'],
+    detectInstalled: 'which claude',
     parentCompany: 'Anthropic',
-    featureSupport: { basicSkills: true, allowedTools: true, contextFork: true, hooks: true },
-    notes: 'Most feature-rich agent. Only one supporting context: fork.',
+    featureSupport: { slashCommands: true, hooks: true, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'openclaw',
     displayName: 'OpenClaw',
-    localSkillsDir: 'skills',
-    globalSkillsDir: join(home, '.openclaw/skills'),
+    localSkillsDir: '.openclaw/skills',
+    globalSkillsDir: '~/.openclaw/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.openclaw') || exists(home, '.clawdbot') || exists(home, '.moltbot'),
-    parentCompany: 'OpenClaw',
-    featureSupport: { ...DEFAULT_FEATURES },
-    notes: 'Bare skills/ dir. 3 legacy global names from rebranding.',
+    detectInstalled: 'which openclaw',
+    parentCompany: 'Community',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'cline',
     displayName: 'Cline',
     localSkillsDir: '.cline/skills',
-    globalSkillsDir: join(home, '.cline/skills'),
+    globalSkillsDir: '~/.cline/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.cline'),
-    parentCompany: 'Cline (open source)',
-    featureSupport: { basicSkills: true, allowedTools: true, contextFork: false, hooks: true },
-    notes: 'One of two agents supporting hooks (with Claude Code)',
+    detectInstalled: 'which cline',
+    parentCompany: 'Cline',
+    featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'codebuddy',
     displayName: 'CodeBuddy',
     localSkillsDir: '.codebuddy/skills',
-    globalSkillsDir: join(home, '.codebuddy/skills'),
+    globalSkillsDir: '~/.codebuddy/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(process.cwd(), '.codebuddy') || exists(home, '.codebuddy'),
+    detectInstalled: 'which codebuddy',
     parentCompany: 'CodeBuddy',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'command-code',
     displayName: 'Command Code',
-    localSkillsDir: '.commandcode/skills',
-    globalSkillsDir: join(home, '.commandcode/skills'),
+    localSkillsDir: '.command-code/skills',
+    globalSkillsDir: '~/.command-code/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.commandcode'),
-    parentCompany: 'Command Code',
-    featureSupport: { ...DEFAULT_FEATURES },
+    detectInstalled: 'which command-code',
+    parentCompany: 'Command',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'continue',
     displayName: 'Continue',
     localSkillsDir: '.continue/skills',
-    globalSkillsDir: join(home, '.continue/skills'),
+    globalSkillsDir: '~/.continue/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(process.cwd(), '.continue') || exists(home, '.continue'),
-    parentCompany: 'Continue (open source)',
-    featureSupport: { ...DEFAULT_FEATURES },
+    detectInstalled: 'which continue',
+    parentCompany: 'Continue',
+    featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'crush',
     displayName: 'Crush',
     localSkillsDir: '.crush/skills',
-    globalSkillsDir: join(home, '.config/crush/skills'),
+    globalSkillsDir: '~/.crush/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.config/crush'),
-    parentCompany: 'Charmbracelet',
-    featureSupport: { ...DEFAULT_FEATURES },
+    detectInstalled: 'which crush',
+    parentCompany: 'Crush',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'cursor',
     displayName: 'Cursor',
     localSkillsDir: '.cursor/skills',
-    globalSkillsDir: join(home, '.cursor/skills'),
+    globalSkillsDir: '~/.cursor/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.cursor'),
+    detectInstalled: 'which cursor',
     parentCompany: 'Anysphere',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'droid',
     displayName: 'Droid',
-    localSkillsDir: '.factory/skills',
-    globalSkillsDir: join(home, '.factory/skills'),
+    localSkillsDir: '.droid/skills',
+    globalSkillsDir: '~/.droid/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.factory'),
-    parentCompany: 'Factory AI',
-    featureSupport: { ...DEFAULT_FEATURES },
-    notes: 'Dir is .factory/ not .droid/',
+    detectInstalled: 'which droid',
+    parentCompany: 'Droid',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'goose',
     displayName: 'Goose',
     localSkillsDir: '.goose/skills',
-    globalSkillsDir: join(xdgConfig, 'goose/skills'),
+    globalSkillsDir: '~/.goose/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(xdgConfig, 'goose'),
-    envVars: ['XDG_CONFIG_HOME'],
+    detectInstalled: 'which goose',
     parentCompany: 'Block',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'junie',
     displayName: 'Junie',
     localSkillsDir: '.junie/skills',
-    globalSkillsDir: join(home, '.junie/skills'),
+    globalSkillsDir: '~/.junie/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.junie'),
+    detectInstalled: 'which junie',
     parentCompany: 'JetBrains',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'iflow-cli',
     displayName: 'iFlow CLI',
     localSkillsDir: '.iflow/skills',
-    globalSkillsDir: join(home, '.iflow/skills'),
+    globalSkillsDir: '~/.iflow/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.iflow'),
+    detectInstalled: 'which iflow',
     parentCompany: 'iFlow',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'kilo',
-    displayName: 'Kilo Code',
-    localSkillsDir: '.kilocode/skills',
-    globalSkillsDir: join(home, '.kilocode/skills'),
+    displayName: 'Kilo',
+    localSkillsDir: '.kilo/skills',
+    globalSkillsDir: '~/.kilo/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.kilocode'),
-    parentCompany: 'Kilo Code',
-    featureSupport: { ...DEFAULT_FEATURES },
+    detectInstalled: 'which kilo',
+    parentCompany: 'Kilo',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'kiro-cli',
     displayName: 'Kiro CLI',
     localSkillsDir: '.kiro/skills',
-    globalSkillsDir: join(home, '.kiro/skills'),
+    globalSkillsDir: '~/.kiro/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.kiro'),
-    parentCompany: 'Amazon (AWS)',
-    featureSupport: { basicSkills: true, allowedTools: false, contextFork: false, hooks: false },
-    notes: 'Does NOT support allowed-tools. Requires manual registration.',
+    detectInstalled: 'which kiro',
+    parentCompany: 'Amazon',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'kode',
     displayName: 'Kode',
     localSkillsDir: '.kode/skills',
-    globalSkillsDir: join(home, '.kode/skills'),
+    globalSkillsDir: '~/.kode/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.kode'),
+    detectInstalled: 'which kode',
     parentCompany: 'Kode',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'mcpjam',
     displayName: 'MCPJam',
     localSkillsDir: '.mcpjam/skills',
-    globalSkillsDir: join(home, '.mcpjam/skills'),
+    globalSkillsDir: '~/.mcpjam/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.mcpjam'),
+    detectInstalled: 'which mcpjam',
     parentCompany: 'MCPJam',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: false },
   },
   {
     id: 'mistral-vibe',
     displayName: 'Mistral Vibe',
-    localSkillsDir: '.vibe/skills',
-    globalSkillsDir: join(home, '.vibe/skills'),
+    localSkillsDir: '.mistral/skills',
+    globalSkillsDir: '~/.mistral/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.vibe'),
+    detectInstalled: 'which mistral-vibe',
     parentCompany: 'Mistral AI',
-    featureSupport: { ...DEFAULT_FEATURES },
-    notes: 'Dir is .vibe/ not .mistral-vibe/',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'mux',
     displayName: 'Mux',
     localSkillsDir: '.mux/skills',
-    globalSkillsDir: join(home, '.mux/skills'),
+    globalSkillsDir: '~/.mux/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.mux'),
+    detectInstalled: 'which mux',
     parentCompany: 'Mux',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'openhands',
     displayName: 'OpenHands',
     localSkillsDir: '.openhands/skills',
-    globalSkillsDir: join(home, '.openhands/skills'),
+    globalSkillsDir: '~/.openhands/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.openhands'),
-    parentCompany: 'All Hands AI (open source)',
-    featureSupport: { ...DEFAULT_FEATURES },
+    detectInstalled: 'which openhands',
+    parentCompany: 'All Hands AI',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'pi',
     displayName: 'Pi',
     localSkillsDir: '.pi/skills',
-    globalSkillsDir: join(home, '.pi/agent/skills'),
+    globalSkillsDir: '~/.pi/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.pi/agent'),
+    detectInstalled: 'which pi',
     parentCompany: 'Pi',
-    featureSupport: { ...DEFAULT_FEATURES },
-    notes: 'Nested global path: ~/.pi/agent/skills',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'qoder',
     displayName: 'Qoder',
     localSkillsDir: '.qoder/skills',
-    globalSkillsDir: join(home, '.qoder/skills'),
+    globalSkillsDir: '~/.qoder/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.qoder'),
+    detectInstalled: 'which qoder',
     parentCompany: 'Qoder',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'qwen-code',
     displayName: 'Qwen Code',
     localSkillsDir: '.qwen/skills',
-    globalSkillsDir: join(home, '.qwen/skills'),
+    globalSkillsDir: '~/.qwen/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.qwen'),
+    detectInstalled: 'which qwen-code',
     parentCompany: 'Alibaba',
-    featureSupport: { ...DEFAULT_FEATURES },
-    notes: 'Dir is .qwen/ not .qwen-code/',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'roo',
     displayName: 'Roo Code',
     localSkillsDir: '.roo/skills',
-    globalSkillsDir: join(home, '.roo/skills'),
+    globalSkillsDir: '~/.roo/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.roo'),
-    parentCompany: 'Roo Code',
-    featureSupport: { ...DEFAULT_FEATURES },
+    detectInstalled: 'which roo',
+    parentCompany: 'Roo',
+    featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'trae',
     displayName: 'Trae',
     localSkillsDir: '.trae/skills',
-    globalSkillsDir: join(home, '.trae/skills'),
+    globalSkillsDir: '~/.trae/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.trae'),
+    detectInstalled: 'which trae',
     parentCompany: 'ByteDance',
-    featureSupport: { ...DEFAULT_FEATURES },
-    notes: 'Shares localSkillsDir with Trae CN',
+    featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'trae-cn',
     displayName: 'Trae CN',
-    localSkillsDir: '.trae/skills',
-    globalSkillsDir: join(home, '.trae-cn/skills'),
+    localSkillsDir: '.trae-cn/skills',
+    globalSkillsDir: '~/.trae-cn/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.trae-cn'),
+    detectInstalled: 'which trae-cn',
     parentCompany: 'ByteDance',
-    featureSupport: { ...DEFAULT_FEATURES },
-    notes: 'China variant. Shares localSkillsDir with Trae.',
+    featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'windsurf',
     displayName: 'Windsurf',
     localSkillsDir: '.windsurf/skills',
-    globalSkillsDir: join(home, '.codeium/windsurf/skills'),
+    globalSkillsDir: '~/.windsurf/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.codeium/windsurf'),
+    detectInstalled: 'which windsurf',
     parentCompany: 'Codeium',
-    featureSupport: { ...DEFAULT_FEATURES },
-    notes: 'Global path under ~/.codeium/windsurf/',
+    featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'zencoder',
-    displayName: 'Zencoder',
+    displayName: 'ZenCoder',
     localSkillsDir: '.zencoder/skills',
-    globalSkillsDir: join(home, '.zencoder/skills'),
+    globalSkillsDir: '~/.zencoder/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.zencoder'),
-    parentCompany: 'Zencoder',
-    featureSupport: { basicSkills: true, allowedTools: false, contextFork: false, hooks: false },
-    notes: 'Does NOT support allowed-tools',
+    detectInstalled: 'which zencoder',
+    parentCompany: 'ZenCoder',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'neovate',
     displayName: 'Neovate',
     localSkillsDir: '.neovate/skills',
-    globalSkillsDir: join(home, '.neovate/skills'),
+    globalSkillsDir: '~/.neovate/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.neovate'),
+    detectInstalled: 'which neovate',
     parentCompany: 'Neovate',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'pochi',
     displayName: 'Pochi',
     localSkillsDir: '.pochi/skills',
-    globalSkillsDir: join(home, '.pochi/skills'),
+    globalSkillsDir: '~/.pochi/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.pochi'),
+    detectInstalled: 'which pochi',
     parentCompany: 'Pochi',
-    featureSupport: { ...DEFAULT_FEATURES },
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'adal',
-    displayName: 'AdaL',
+    displayName: 'Adal',
     localSkillsDir: '.adal/skills',
-    globalSkillsDir: join(home, '.adal/skills'),
+    globalSkillsDir: '~/.adal/skills',
     isUniversal: false,
-    showInUniversalList: false,
-    detectInstalled: async () => exists(home, '.adal'),
-    parentCompany: 'AdaL',
-    featureSupport: { ...DEFAULT_FEATURES },
+    detectInstalled: 'which adal',
+    parentCompany: 'Adal',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Utility Functions
-// ---------------------------------------------------------------------------
+/** Total number of registered agents */
+export const TOTAL_AGENTS = AGENTS_REGISTRY.length;
 
-/** Get all universal agents */
+/**
+ * Returns all universal agents (support the universal skill format).
+ */
 export function getUniversalAgents(): AgentDefinition[] {
-  return AGENTS_REGISTRY.filter(a => a.isUniversal);
+  return AGENTS_REGISTRY.filter((a) => a.isUniversal);
 }
 
-/** Get all non-universal agents */
+/**
+ * Returns all non-universal agents.
+ */
 export function getNonUniversalAgents(): AgentDefinition[] {
-  return AGENTS_REGISTRY.filter(a => !a.isUniversal);
+  return AGENTS_REGISTRY.filter((a) => !a.isUniversal);
 }
 
-/** Find an agent by ID */
-export function getAgent(id: AgentId): AgentDefinition | undefined {
-  return AGENTS_REGISTRY.find(a => a.id === id);
+/**
+ * Gets a single agent by ID.
+ *
+ * @param id - Agent identifier
+ * @returns The agent definition, or undefined if not found
+ */
+export function getAgent(id: string): AgentDefinition | undefined {
+  return AGENTS_REGISTRY.find((a) => a.id === id);
 }
 
-/** Detect all installed agents */
-export async function detectInstalledAgents(): Promise<AgentDefinition[]> {
-  const results = await Promise.all(
-    AGENTS_REGISTRY.map(async (agent) => ({
-      agent,
-      installed: await agent.detectInstalled(),
-    }))
+/**
+ * Detects which agents are installed on the current system
+ * by running each agent's detectInstalled command.
+ *
+ * @returns Array of installed agent IDs
+ */
+export async function detectInstalledAgents(): Promise<string[]> {
+  const { exec } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const execAsync = promisify(exec);
+
+  const results: string[] = [];
+
+  await Promise.allSettled(
+    AGENTS_REGISTRY.map(async (agent) => {
+      try {
+        await execAsync(agent.detectInstalled);
+        results.push(agent.id);
+      } catch {
+        // Not installed — skip
+      }
+    }),
   );
-  return results.filter(r => r.installed).map(r => r.agent);
-}
 
-/** Total agent count */
-export const TOTAL_AGENTS = AGENTS_REGISTRY.length; // 39
+  return results.sort();
+}

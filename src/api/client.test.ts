@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import {
   searchSkills,
   getSkill,
@@ -44,6 +44,10 @@ const BASE_URL = "https://verified-skill.com";
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+afterAll(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("searchSkills", () => {
@@ -92,6 +96,54 @@ describe("searchSkills", () => {
     const results = await searchSkills("nothing");
 
     expect(results).toEqual([]);
+  });
+
+  it("falls back to 'tier' when 'certTier' is missing", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ skills: [{ name: "s", tier: "VERIFIED" }] })
+    );
+    const results = await searchSkills("test");
+    expect(results[0].tier).toBe("VERIFIED");
+  });
+
+  it("defaults tier to 'SCANNED' when no tier field exists", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ skills: [{ name: "s" }] })
+    );
+    const results = await searchSkills("test");
+    expect(results[0].tier).toBe("SCANNED");
+  });
+
+  it("falls back to 'score' when 'certScore' is missing", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ skills: [{ name: "s", score: 75 }] })
+    );
+    const results = await searchSkills("test");
+    expect(results[0].score).toBe(75);
+  });
+
+  it("defaults score to 0 when no score field exists", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ skills: [{ name: "s" }] })
+    );
+    const results = await searchSkills("test");
+    expect(results[0].score).toBe(0);
+  });
+
+  it("falls back to 'installs' when 'vskillInstalls' is missing", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ skills: [{ name: "s", installs: 500 }] })
+    );
+    const results = await searchSkills("test");
+    expect(results[0].installs).toBe(500);
+  });
+
+  it("defaults installs to 0 when no installs field exists", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ skills: [{ name: "s" }] })
+    );
+    const results = await searchSkills("test");
+    expect(results[0].installs).toBe(0);
   });
 });
 
@@ -212,6 +264,12 @@ describe("error handling", () => {
     await expect(submitSkill({ repoUrl: "https://x.com/r" })).rejects.toThrow(
       /API request failed: 403 Forbidden/
     );
+  });
+
+  it("propagates network errors when fetch throws", async () => {
+    mockFetch.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await expect(searchSkills("test")).rejects.toThrow("Failed to fetch");
   });
 });
 

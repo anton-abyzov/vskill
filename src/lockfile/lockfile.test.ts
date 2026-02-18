@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { VskillLock, SkillLockEntry } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -59,6 +59,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-02-17T12:00:00.000Z"));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("readLockfile", () => {
@@ -178,5 +182,79 @@ describe("removeSkillFromLock", () => {
     removeSkillFromLock("nonexistent", TEST_DIR);
 
     expect(mockWriteFileSync).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TC-008: Extended entry with marketplace field round-trips
+// ---------------------------------------------------------------------------
+describe("lockfile extended fields", () => {
+  it("TC-008: extended entry with marketplace field round-trips", () => {
+    const extendedEntry = makeEntry({
+      marketplace: "specweave",
+      pluginDir: true,
+      scope: "user",
+      installedPath: "~/.claude/plugins/cache/specweave/sw/1.0.0",
+    });
+
+    const lock = makeLock({ skills: { "sw-frontend": extendedEntry } });
+    mockExistsSync.mockReturnValue(true);
+
+    // Write the lockfile
+    writeLockfile(lock, TEST_DIR);
+
+    // Capture what was written
+    const writtenJson = JSON.parse(
+      mockWriteFileSync.mock.calls[0][1].trimEnd()
+    );
+
+    // Simulate reading it back
+    mockReadFileSync.mockReturnValue(JSON.stringify(writtenJson));
+    const readBack = readLockfile(TEST_DIR);
+
+    expect(readBack).not.toBeNull();
+    const entry = readBack!.skills["sw-frontend"];
+    expect(entry.marketplace).toBe("specweave");
+    expect(entry.pluginDir).toBe(true);
+    expect(entry.scope).toBe("user");
+    expect(entry.installedPath).toBe(
+      "~/.claude/plugins/cache/specweave/sw/1.0.0"
+    );
+    // Original fields still present
+    expect(entry.version).toBe("1.0.0");
+    expect(entry.sha).toBe("abc123");
+    expect(entry.tier).toBe("SCANNED");
+    expect(entry.source).toBe("registry");
+  });
+
+  // TC-009: Backward-compatible with existing entries
+  it("TC-009: backward-compatible with existing entries", () => {
+    // Old-format entry with only the original fields
+    const oldEntry = {
+      version: "1.0.0",
+      sha: "abc123",
+      tier: "SCANNED",
+      installedAt: "2026-01-01T00:00:00.000Z",
+      source: "registry",
+    };
+    const lock = makeLock({ skills: { "old-skill": oldEntry } });
+
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify(lock));
+
+    const result = readLockfile(TEST_DIR);
+
+    expect(result).not.toBeNull();
+    const entry = result!.skills["old-skill"];
+    expect(entry.version).toBe("1.0.0");
+    expect(entry.sha).toBe("abc123");
+    expect(entry.tier).toBe("SCANNED");
+    expect(entry.installedAt).toBe("2026-01-01T00:00:00.000Z");
+    expect(entry.source).toBe("registry");
+    // New fields should be undefined
+    expect(entry.marketplace).toBeUndefined();
+    expect(entry.pluginDir).toBeUndefined();
+    expect(entry.scope).toBeUndefined();
+    expect(entry.installedPath).toBeUndefined();
   });
 });

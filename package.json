@@ -13,6 +13,7 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "clean": "rm -rf dist",
+    "preuninstall": "node scripts/preuninstall.cjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -35,6 +36,7 @@
   "homepage": "https://verified-skill.com",
   "files": [
     "dist",
+    "scripts/preuninstall.cjs",
     "README.md"
   ],
   "devDependencies": {

@@ -1,13 +1,23 @@
 // ---------------------------------------------------------------------------
-// vskill add -- install a skill from GitHub with security scanning
+// vskill add -- install a skill from GitHub or local plugin directory
 // ---------------------------------------------------------------------------
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  cpSync,
+  chmodSync,
+  readdirSync,
+} from "node:fs";
+import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
+import { resolveTilde } from "../utils/paths.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { ensureLockfile, writeLockfile } from "../lockfile/index.js";
 import { runTier1Scan } from "../scanner/index.js";
+import { getPluginSource, getPluginVersion } from "../marketplace/index.js";
 import {
   bold,
   green,
@@ -20,6 +30,8 @@ import {
 
 interface AddOptions {
   skill?: string;
+  plugin?: string;
+  pluginDir?: string;
   global?: boolean;
   force?: boolean;
 }
@@ -50,11 +62,211 @@ async function fetchSkillContent(url: string): Promise<string> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Plugin directory installation (local path)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the plugin subdirectory from marketplace.json.
+ * Returns the absolute path to the plugin's source directory.
+ */
+function resolvePluginDir(
+  basePath: string,
+  pluginName: string,
+): string | null {
+  const marketplacePath = join(basePath, ".claude-plugin", "marketplace.json");
+  if (!existsSync(marketplacePath)) return null;
+
+  const content = readFileSync(marketplacePath, "utf-8");
+  const source = getPluginSource(pluginName, content);
+  if (!source) return null;
+
+  return resolve(basePath, source);
+}
+
+/**
+ * Collect all file contents from a plugin directory for security scanning.
+ * Concatenates content from all readable files.
+ */
+function collectPluginContent(pluginDir: string): string {
+  const files = readdirSync(pluginDir, { recursive: true }) as string[];
+  const parts: string[] = [];
+
+  for (const file of files) {
+    const fullPath = join(pluginDir, file);
+    try {
+      const content = readFileSync(fullPath, "utf-8");
+      parts.push(`--- ${file} ---\n${content}`);
+    } catch {
+      // Skip unreadable files (directories, binary, etc.)
+    }
+  }
+
+  return parts.join("\n");
+}
+
+/**
+ * Fix permissions on hook scripts (.sh files) in the installed directory.
+ */
+function fixHookPermissions(targetDir: string): void {
+  const files = readdirSync(targetDir, { recursive: true }) as string[];
+
+  for (const file of files) {
+    if (file.endsWith(".sh")) {
+      chmodSync(join(targetDir, file), 0o755);
+    }
+  }
+}
+
+/**
+ * Install a plugin from a local directory.
+ */
+async function installPluginDir(
+  basePath: string,
+  pluginName: string,
+  opts: AddOptions,
+): Promise<void> {
+  // Resolve the plugin subdirectory from marketplace.json
+  const pluginDir = resolvePluginDir(basePath, pluginName);
+  if (!pluginDir) {
+    console.error(
+      red(`Plugin "${pluginName}" not found in marketplace.json\n`) +
+        dim(`Checked: ${join(basePath, ".claude-plugin", "marketplace.json")}`)
+    );
+    process.exit(1);
+  }
+
+  // Collect all file content for scanning
+  console.log(dim("\nCollecting plugin files for security scan..."));
+  const content = collectPluginContent(pluginDir);
+
+  // Run tier1 scan on all plugin content
+  console.log(dim("Running security scan..."));
+  const scanResult = runTier1Scan(content);
+
+  const verdictColor =
+    scanResult.verdict === "PASS"
+      ? green
+      : scanResult.verdict === "CONCERNS"
+        ? yellow
+        : red;
+
+  console.log(
+    `${bold("Score:")} ${verdictColor(String(scanResult.score))}/100  ` +
+      `${bold("Verdict:")} ${verdictColor(scanResult.verdict)}\n`
+  );
+
+  if (scanResult.findings.length > 0) {
+    console.log(
+      dim(
+        `Found ${scanResult.findings.length} issue${scanResult.findings.length === 1 ? "" : "s"}: ` +
+          `${scanResult.criticalCount} critical, ${scanResult.highCount} high, ${scanResult.mediumCount} medium`
+      )
+    );
+  }
+
+  // Decision based on verdict
+  if (scanResult.verdict === "FAIL" && !opts.force) {
+    console.error(
+      red("\nScan FAILED. Refusing to install.\n") +
+        dim("Use --force to install anyway (not recommended).")
+    );
+    process.exit(1);
+  }
+
+  if (scanResult.verdict === "CONCERNS" && !opts.force) {
+    console.error(
+      yellow("\nScan found CONCERNS. Refusing to install.\n") +
+        dim("Use --force to install anyway.")
+    );
+    process.exit(1);
+  }
+
+  if (scanResult.verdict === "FAIL" && opts.force) {
+    console.log(yellow("\n--force: installing despite FAIL verdict.\n"));
+  }
+
+  if (scanResult.verdict === "CONCERNS" && opts.force) {
+    console.log(yellow("\n--force: installing despite CONCERNS.\n"));
+  }
+
+  // Detect installed agents
+  const agents = await detectInstalledAgents();
+  if (agents.length === 0) {
+    console.error(
+      red("No AI agents detected. Run ") +
+        cyan("vskill init") +
+        red(" first.")
+    );
+    process.exit(1);
+  }
+
+  // Read version from marketplace.json
+  const marketplacePath = join(basePath, ".claude-plugin", "marketplace.json");
+  const marketplaceContent = readFileSync(marketplacePath, "utf-8");
+  const version = getPluginVersion(pluginName, marketplaceContent) || "0.0.0";
+
+  // Install: recursively copy plugin directory to cache
+  const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
+  const locations: string[] = [];
+
+  for (const agent of agents) {
+    const cacheDir = join(
+      opts.global ? resolveTilde(agent.globalSkillsDir) : join(process.cwd(), agent.localSkillsDir),
+      pluginName,
+    );
+
+    try {
+      mkdirSync(cacheDir, { recursive: true });
+      cpSync(pluginDir, cacheDir, { recursive: true });
+      fixHookPermissions(cacheDir);
+      locations.push(`${agent.displayName}: ${cacheDir}`);
+    } catch (err) {
+      console.error(
+        yellow(`Failed to install to ${agent.displayName}: `) +
+          dim((err as Error).message)
+      );
+    }
+  }
+
+  // Update lockfile
+  const lock = ensureLockfile();
+  lock.skills[pluginName] = {
+    version,
+    sha,
+    tier: "SCANNED",
+    installedAt: new Date().toISOString(),
+    source: `local:${basePath}`,
+  };
+  lock.agents = agents.map((a: { id: string }) => a.id);
+  writeLockfile(lock);
+
+  // Print summary
+  console.log(
+    green(
+      `\nInstalled ${bold(pluginName)} to ${locations.length} agent${locations.length === 1 ? "" : "s"}:\n`
+    )
+  );
+  for (const loc of locations) {
+    console.log(`  ${dim(">")} ${loc}`);
+  }
+  console.log(dim(`\nSHA: ${sha} | Version: ${version}`));
+}
+
+// ---------------------------------------------------------------------------
+// Main entry point
+// ---------------------------------------------------------------------------
+
 export async function addCommand(
   source: string,
   opts: AddOptions
 ): Promise<void> {
-  // Parse owner/repo
+  // Plugin directory mode: local path with --plugin
+  if (opts.pluginDir && opts.plugin) {
+    return installPluginDir(opts.pluginDir, opts.plugin, opts);
+  }
+
+  // GitHub mode: owner/repo
   const parts = source.split("/");
   if (parts.length !== 2) {
     console.error(red("Invalid source format. Use: ") + cyan("owner/repo"));
@@ -138,7 +350,7 @@ export async function addCommand(
 
   for (const agent of agents) {
     const baseDir = opts.global
-      ? agent.globalSkillsDir
+      ? resolveTilde(agent.globalSkillsDir)
       : join(process.cwd(), agent.localSkillsDir);
 
     const skillDir = join(baseDir, skillName);
@@ -164,7 +376,7 @@ export async function addCommand(
     installedAt: new Date().toISOString(),
     source: `github:${owner}/${repo}`,
   };
-  lock.agents = agents.map((a) => a.id);
+  lock.agents = agents.map((a: { id: string }) => a.id);
   writeLockfile(lock);
 
   // Print summary

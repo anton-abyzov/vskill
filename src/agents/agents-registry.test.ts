@@ -198,7 +198,7 @@ describe("detectInstalledAgents", () => {
     expect(result).toHaveLength(0);
   });
 
-  it("returns installed agent IDs when commands succeed", async () => {
+  it("returns installed agent definitions when commands succeed", async () => {
     // Make only "which claude" succeed (claude-code's detectInstalled)
     mockExec.mockImplementation(async (cmd: string) => {
       if (cmd === "which claude") {
@@ -208,10 +208,11 @@ describe("detectInstalledAgents", () => {
     });
 
     const result = await detectInstalledAgents();
-    expect(result).toContain("claude-code");
+    expect(result.map((a) => a.id)).toContain("claude-code");
+    expect(result[0]).toHaveProperty("displayName");
   });
 
-  it("returns sorted results", async () => {
+  it("returns sorted results by id", async () => {
     // Make cursor and claude succeed
     mockExec.mockImplementation(async (cmd: string) => {
       if (cmd === "which claude" || cmd === "which cursor") {
@@ -221,8 +222,9 @@ describe("detectInstalledAgents", () => {
     });
 
     const result = await detectInstalledAgents();
-    const sorted = [...result].sort();
-    expect(result).toEqual(sorted);
+    const ids = result.map((a) => a.id);
+    const sorted = [...ids].sort();
+    expect(ids).toEqual(sorted);
   });
 
   it("returns multiple installed agents when many commands succeed", async () => {
@@ -231,5 +233,16 @@ describe("detectInstalledAgents", () => {
 
     const result = await detectInstalledAgents();
     expect(result.length).toBe(TOTAL_AGENTS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TC-013: Claude Code agent has pluginCacheDir
+// ---------------------------------------------------------------------------
+describe("AGENTS_REGISTRY — pluginCacheDir", () => {
+  it("TC-013: claude-code agent has pluginCacheDir", () => {
+    const claudeCode = getAgent("claude-code");
+    expect(claudeCode).toBeDefined();
+    expect(claudeCode!.pluginCacheDir).toBe("~/.claude/plugins/cache");
   });
 });

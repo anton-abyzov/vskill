@@ -1,12 +1,13 @@
 // ---------------------------------------------------------------------------
-// vskill submit -- submit a skill for verification
+// vskill submit -- open browser for skill submission via GitHub OAuth
 // ---------------------------------------------------------------------------
 
-import { submitSkill } from "../api/client.js";
+import { openBrowser } from "../utils/browser.js";
 import { bold, green, red, dim, cyan } from "../utils/output.js";
+import { validateRepoSegment, validateSkillName } from "../utils/validation.js";
 
 interface SubmitOptions {
-  email?: string;
+  skill?: string;
 }
 
 export async function submitCommand(
@@ -23,31 +24,42 @@ export async function submitCommand(
   }
 
   const [owner, repo] = parts;
-  const repoUrl = `https://github.com/${owner}/${repo}`;
 
-  console.log(dim(`Submitting ${bold(`${owner}/${repo}`)} for verification...\n`));
-
-  try {
-    const result = await submitSkill({
-      repoUrl,
-      skillName: repo,
-      email: opts.email,
-    });
-
-    console.log(green("Submission received!\n"));
-    console.log(`${bold("Submission ID:")} ${result.id}`);
-    console.log(`${bold("Status:")}        ${result.status}`);
-    console.log(
-      `${bold("Track at:")}      ${cyan(result.trackingUrl || `https://verified-skill.com/submissions/${result.id}`)}`
-    );
-    console.log(
-      dim("\nYou will receive updates as the review progresses.")
-    );
-  } catch (err) {
+  if (!validateRepoSegment(owner) || !validateRepoSegment(repo)) {
     console.error(
-      red("Submission failed: ") +
-        dim((err as Error).message)
+      red("Invalid owner/repo name. ") + dim("Only letters, numbers, dots, hyphens, and underscores are allowed.")
     );
     process.exit(1);
+  }
+
+  if (opts.skill && !validateSkillName(opts.skill)) {
+    console.error(
+      red("Invalid skill name. ") + dim("Path traversal patterns are not allowed.")
+    );
+    process.exit(1);
+  }
+
+  const submitUrl = new URL("https://verified-skill.com/submit");
+  submitUrl.searchParams.set("repo", `${owner}/${repo}`);
+  if (opts.skill) {
+    submitUrl.searchParams.set("skill", opts.skill);
+  }
+  const url = submitUrl.toString();
+
+  console.log(dim(`Opening browser to submit ${bold(`${owner}/${repo}`)} for verification...\n`));
+
+  try {
+    await openBrowser(url);
+    console.log(green("Browser opened!\n"));
+    console.log(`Complete your submission in the browser at:`);
+    console.log(cyan(url));
+    console.log(dim("\nYou will authenticate with GitHub and complete the submission there."));
+  } catch (err) {
+    console.error(
+      red("Could not open browser: ") +
+        dim((err as Error).message)
+    );
+    console.log(`\nOpen this URL manually in your browser:`);
+    console.log(cyan(url));
   }
 }

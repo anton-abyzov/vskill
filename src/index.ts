@@ -23,8 +23,10 @@ program
 
 program
   .command("add <source>")
-  .description("Install a skill from GitHub with security scanning")
+  .description("Install a skill from GitHub or local plugin directory")
   .option("--skill <name>", "Skill name within a multi-skill repo")
+  .option("--plugin <name>", "Plugin name from marketplace.json")
+  .option("--plugin-dir <path>", "Local plugin directory path")
   .option("--global", "Install to global agent directories")
   .option("--force", "Install even if scan finds issues")
   .action(async (source: string, opts) => {
@@ -51,6 +53,17 @@ program
   });
 
 program
+  .command("remove <skill-name>")
+  .description("Remove an installed skill from all agents")
+  .option("--global", "Only remove from global agent directories")
+  .option("--local", "Only remove from local agent directories")
+  .option("--force", "Skip confirmation and proceed even if not in lockfile")
+  .action(async (skillName: string, opts) => {
+    const { removeCommand } = await import("./commands/remove.js");
+    await removeCommand(skillName, opts);
+  });
+
+program
   .command("find <query>")
   .description("Search the verified-skill.com registry")
   .action(async (query: string) => {
@@ -70,7 +83,7 @@ program
 program
   .command("submit <source>")
   .description("Submit a skill for verification on verified-skill.com")
-  .option("--email <email>", "Email for submission updates")
+  .option("--skill <name>", "Skill name within a multi-skill repo")
   .action(async (source: string, opts) => {
     const { submitCommand } = await import("./commands/submit.js");
     await submitCommand(source, opts);

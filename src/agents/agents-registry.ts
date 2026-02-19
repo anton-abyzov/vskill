@@ -35,6 +35,8 @@ export interface AgentDefinition {
   parentCompany: string;
   /** Feature support matrix */
   featureSupport: FeatureSupport;
+  /** Directory path for cached plugin installations (agent-specific) */
+  pluginCacheDir?: string;
 }
 
 /**
@@ -149,6 +151,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: 'which claude',
     parentCompany: 'Anthropic',
     featureSupport: { slashCommands: true, hooks: true, mcp: true, customSystemPrompt: true },
+    pluginCacheDir: '~/.claude/plugins/cache',
   },
   {
     id: 'openclaw',
@@ -473,25 +476,25 @@ export function getAgent(id: string): AgentDefinition | undefined {
  * Detects which agents are installed on the current system
  * by running each agent's detectInstalled command.
  *
- * @returns Array of installed agent IDs
+ * @returns Array of installed agent definitions
  */
-export async function detectInstalledAgents(): Promise<string[]> {
+export async function detectInstalledAgents(): Promise<AgentDefinition[]> {
   const { exec } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const execAsync = promisify(exec);
 
-  const results: string[] = [];
+  const results: AgentDefinition[] = [];
 
   await Promise.allSettled(
     AGENTS_REGISTRY.map(async (agent) => {
       try {
         await execAsync(agent.detectInstalled);
-        results.push(agent.id);
+        results.push(agent);
       } catch {
         // Not installed — skip
       }
     }),
   );
 
-  return results.sort();
+  return results.sort((a, b) => a.id.localeCompare(b.id));
 }

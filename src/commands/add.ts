@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
+import { execSync } from "node:child_process";
 import { resolveTilde } from "../utils/paths.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { ensureLockfile, writeLockfile } from "../lockfile/index.js";
@@ -79,6 +80,25 @@ function copyPluginFiltered(sourceDir: string, targetDir: string, relBase = ""):
       copyFileSync(sourcePath, join(targetDir, entry));
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Plugin cache cleanup
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove a plugin installed via Claude Code's plugin system.
+ * The cache at ~/.claude/plugins/cache/ contains ALL files without filtering,
+ * causing internal .md files to leak as ghost slash commands.
+ *
+ * Uses `claude plugin uninstall` CLI to properly remove the plugin through
+ * Claude Code's own API rather than directly manipulating internal files.
+ */
+function cleanPluginCache(pluginName: string, marketplace: string): void {
+  const pluginKey = `${pluginName}@${marketplace}`;
+  try {
+    execSync(`claude plugin uninstall "${pluginKey}"`, { stdio: "ignore", timeout: 10_000 });
+  } catch { /* ignore - plugin might not be installed via CLI */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +318,16 @@ async function installPluginDir(
   const marketplacePath = join(basePath, ".claude-plugin", "marketplace.json");
   const marketplaceContent = readFileSync(marketplacePath, "utf-8");
   const version = getPluginVersion(pluginName, marketplaceContent) || "0.0.0";
+
+  // Remove unfiltered plugin cache that Claude Code's plugin system creates.
+  // The cache at ~/.claude/plugins/cache/ contains ALL files without filtering,
+  // causing internal .md files to leak as ghost slash commands.
+  try {
+    const marketplaceName = JSON.parse(marketplaceContent).name;
+    if (marketplaceName) {
+      cleanPluginCache(pluginName, marketplaceName);
+    }
+  } catch { /* ignore parse errors */ }
 
   // Install: recursively copy plugin directory to cache
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);

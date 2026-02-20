@@ -7,7 +7,8 @@ import {
   writeFileSync,
   readFileSync,
   existsSync,
-  cpSync,
+  copyFileSync,
+  statSync,
   chmodSync,
   readdirSync,
 } from "node:fs";
@@ -30,6 +31,52 @@ import {
   cyan,
   spinner,
 } from "../utils/output.js";
+
+// ---------------------------------------------------------------------------
+// Command file filter (prevents plugin internals leaking as slash commands)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true for .md files that should NOT be installed into an agent's
+ * commands directory. Claude Code (and similar agents) register every .md
+ * file they find recursively as a slash command, so plugin-internal files
+ * must be excluded.
+ */
+function shouldSkipFromCommands(relPath: string): boolean {
+  const normalized = relPath.replace(/\\/g, "/");
+  const parts = normalized.split("/");
+  const filename = parts[parts.length - 1];
+
+  if (!filename.endsWith(".md")) return false;
+  if (parts.length === 1 && filename === "PLUGIN.md") return true;
+  if (filename === "README.md") return true;
+  if (filename === "FRESHNESS.md") return true;
+
+  const internalRootDirs = new Set(["knowledge-base", "lib", "templates"]);
+  if (parts.length > 1 && internalRootDirs.has(parts[0])) return true;
+
+  if (parts[0] === "skills" && parts.length > 2 && filename !== "SKILL.md") return true;
+
+  return false;
+}
+
+function copyPluginFiltered(sourceDir: string, targetDir: string, relBase = ""): void {
+  mkdirSync(targetDir, { recursive: true });
+  const entries = readdirSync(sourceDir);
+  for (const entry of entries) {
+    const relPath = relBase ? `${relBase}/${entry}` : entry;
+    const sourcePath = join(sourceDir, entry);
+    const targetPath = join(targetDir, entry);
+    const stat = statSync(sourcePath);
+    if (stat.isDirectory()) {
+      copyPluginFiltered(sourcePath, targetPath, relPath);
+    } else if (stat.isFile() && !shouldSkipFromCommands(relPath)) {
+      copyFileSync(sourcePath, targetPath);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 interface AddOptions {
   skill?: string;
@@ -258,8 +305,7 @@ async function installPluginDir(
     );
 
     try {
-      mkdirSync(cacheDir, { recursive: true });
-      cpSync(pluginDir, cacheDir, { recursive: true });
+      copyPluginFiltered(pluginDir, cacheDir);
       fixHookPermissions(cacheDir);
       locations.push(`${agent.displayName}: ${cacheDir}`);
     } catch (err) {

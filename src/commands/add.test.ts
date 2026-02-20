@@ -12,6 +12,7 @@ const mockChmodSync = vi.fn();
 const mockReaddirSync = vi.fn();
 const mockStatSync = vi.fn();
 const mockCopyFileSync = vi.fn();
+const mockRmSync = vi.fn();
 
 vi.mock("node:fs", () => ({
   mkdirSync: (...args: unknown[]) => mockMkdirSync(...args),
@@ -23,6 +24,7 @@ vi.mock("node:fs", () => ({
   readdirSync: (...args: unknown[]) => mockReaddirSync(...args),
   statSync: (...args: unknown[]) => mockStatSync(...args),
   copyFileSync: (...args: unknown[]) => mockCopyFileSync(...args),
+  rmSync: (...args: unknown[]) => mockRmSync(...args),
 }));
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ import {
   statSync,
   chmodSync,
   readdirSync,
+  rmSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
@@ -52,7 +53,9 @@ function shouldSkipFromCommands(relPath: string): boolean {
   if (filename === "README.md") return true;
   if (filename === "FRESHNESS.md") return true;
 
-  const internalRootDirs = new Set(["knowledge-base", "lib", "templates"]);
+  if (parts.length > 1 && parts[0].startsWith(".")) return true;
+
+  const internalRootDirs = new Set(["knowledge-base", "lib", "templates", "scripts", "hooks"]);
   if (parts.length > 1 && internalRootDirs.has(parts[0])) return true;
 
   if (parts[0] === "skills" && parts.length > 2 && filename !== "SKILL.md") return true;
@@ -66,12 +69,14 @@ function copyPluginFiltered(sourceDir: string, targetDir: string, relBase = ""):
   for (const entry of entries) {
     const relPath = relBase ? `${relBase}/${entry}` : entry;
     const sourcePath = join(sourceDir, entry);
-    const targetPath = join(targetDir, entry);
     const stat = statSync(sourcePath);
     if (stat.isDirectory()) {
-      copyPluginFiltered(sourcePath, targetPath, relPath);
+      // Flatten: root-level commands/ and skills/ merge into the parent target dir
+      const isFlattened = !relBase && (entry === "commands" || entry === "skills");
+      const nextTargetDir = isFlattened ? targetDir : join(targetDir, entry);
+      copyPluginFiltered(sourcePath, nextTargetDir, relPath);
     } else if (stat.isFile() && !shouldSkipFromCommands(relPath)) {
-      copyFileSync(sourcePath, targetPath);
+      copyFileSync(sourcePath, join(targetDir, entry));
     }
   }
 }
@@ -305,6 +310,10 @@ async function installPluginDir(
     );
 
     try {
+      // Full clean before copy: removes stale files from older installs
+      if (existsSync(cacheDir)) {
+        rmSync(cacheDir, { recursive: true, force: true });
+      }
       copyPluginFiltered(pluginDir, cacheDir);
       fixHookPermissions(cacheDir);
       locations.push(`${agent.displayName}: ${cacheDir}`);

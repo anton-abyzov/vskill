@@ -89,4 +89,12 @@ program
     await submitCommand(source, opts);
   });
 
+program
+  .command("blocklist [subcommand] [name]")
+  .description("Manage the malicious skills blocklist")
+  .action(async (subcommand?: string, name?: string) => {
+    const { blocklistCommand } = await import("./commands/blocklist.js");
+    await blocklistCommand(subcommand || "list", name);
+  });
+
 program.parse();

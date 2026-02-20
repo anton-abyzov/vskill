@@ -18,6 +18,9 @@ import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { ensureLockfile, writeLockfile } from "../lockfile/index.js";
 import { runTier1Scan } from "../scanner/index.js";
 import { getPluginSource, getPluginVersion } from "../marketplace/index.js";
+import { checkBlocklist } from "../blocklist/blocklist.js";
+import type { BlocklistEntry } from "../blocklist/types.js";
+import { checkPlatformSecurity } from "../security/index.js";
 import {
   bold,
   green,
@@ -60,6 +63,34 @@ async function fetchSkillContent(url: string): Promise<string> {
     console.error(red("Network error: ") + dim((err as Error).message));
     return process.exit(1);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Blocklist enforcement
+// ---------------------------------------------------------------------------
+
+function printBlockedError(entry: BlocklistEntry): void {
+  console.error(red(bold("\n  BLOCKED: Known-malicious skill")));
+  console.error(red(`  Skill: "${entry.skillName}"`));
+  console.error(red(`  Threat: ${entry.threatType} (${entry.severity})`));
+  console.error(red(`  Reason: ${entry.reason}`));
+  console.error(dim("\n  Use --force to override (NOT recommended)"));
+}
+
+function printBlockedWarning(entry: BlocklistEntry): void {
+  const line = (s: string) => console.error(red(s));
+  line("");
+  line("  +-------------------------------------------------+");
+  line("  |  WARNING: Installing a known-malicious skill!    |");
+  line("  |                                                   |");
+  line(`  |  Skill: "${entry.skillName}"`);
+  line(`  |  Threat: ${entry.threatType} (${entry.severity})`);
+  line(`  |  Reason: ${entry.reason}`);
+  line("  |                                                   |");
+  line("  |  This skill is on the malicious skills blocklist. |");
+  line("  |  Proceeding because --force was specified.         |");
+  line("  +-------------------------------------------------+");
+  line("");
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +165,16 @@ async function installPluginDir(
         dim(`Checked: ${join(basePath, ".claude-plugin", "marketplace.json")}`)
     );
     process.exit(1);
+  }
+
+  // Blocklist check (before scanning)
+  const blocked = await checkBlocklist(pluginName);
+  if (blocked && !opts.force) {
+    printBlockedError(blocked);
+    process.exit(1);
+  }
+  if (blocked && opts.force) {
+    printBlockedWarning(blocked);
   }
 
   // Collect all file content for scanning
@@ -282,6 +323,44 @@ export async function addCommand(
   // Fetch SKILL.md
   const content = await fetchSkillContent(url);
 
+  // Blocklist check (before scanning)
+  const skillName = opts.skill || repo;
+  const blocked = await checkBlocklist(skillName, undefined);
+  if (blocked && !opts.force) {
+    printBlockedError(blocked);
+    process.exit(1);
+  }
+  if (blocked && opts.force) {
+    printBlockedWarning(blocked);
+  }
+
+  // Platform security check (best-effort, non-blocking on network error)
+  const platformSecurity = await checkPlatformSecurity(skillName);
+
+  if (platformSecurity && platformSecurity.hasCritical && !opts.force) {
+    const criticalProviders = platformSecurity.providers
+      .filter((p) => p.status === "FAIL" && p.criticalCount > 0)
+      .map((p) => p.provider);
+    console.error(red("\n  BLOCKED: External security scan found CRITICAL findings"));
+    console.error(red(`  Providers: ${criticalProviders.join(", ")}`));
+    console.error(red(`  Report: https://verified-skill.com${platformSecurity.reportUrl}`));
+    console.error(dim("\n  Use --force to override (NOT recommended)"));
+    return process.exit(1);
+  }
+
+  if (platformSecurity && platformSecurity.hasCritical && opts.force) {
+    console.error(yellow("\n  WARNING: External scans found CRITICAL findings"));
+    const criticalProviders = platformSecurity.providers
+      .filter((p) => p.status === "FAIL" && p.criticalCount > 0)
+      .map((p) => p.provider);
+    console.error(yellow(`  Providers: ${criticalProviders.join(", ")}`));
+    console.error(yellow("  --force: proceeding despite CRITICAL findings\n"));
+  }
+
+  if (platformSecurity && platformSecurity.overallVerdict === "PENDING") {
+    console.log(dim("\n  External scans are pending. Proceeding with install.\n"));
+  }
+
   // Run tier1 scan
   console.log(dim("\nRunning security scan..."));
   const scanResult = runTier1Scan(content);
@@ -344,7 +423,6 @@ export async function addCommand(
   }
 
   // Install to each agent
-  const skillName = opts.skill || repo;
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
   const locations: string[] = [];
 

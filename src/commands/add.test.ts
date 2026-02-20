@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Mock node:fs
@@ -70,6 +70,22 @@ vi.mock("../scanner/index.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock blocklist
+// ---------------------------------------------------------------------------
+const mockCheckBlocklist = vi.fn();
+vi.mock("../blocklist/blocklist.js", () => ({
+  checkBlocklist: (...args: unknown[]) => mockCheckBlocklist(...args),
+}));
+
+// ---------------------------------------------------------------------------
+// Mock security (platform security check)
+// ---------------------------------------------------------------------------
+const mockCheckPlatformSecurity = vi.fn();
+vi.mock("../security/index.js", () => ({
+  checkPlatformSecurity: (...args: unknown[]) => mockCheckPlatformSecurity(...args),
+}));
+
+// ---------------------------------------------------------------------------
 // Mock utils/output (suppress console output in tests)
 // ---------------------------------------------------------------------------
 vi.mock("../utils/output.js", () => ({
@@ -126,6 +142,8 @@ beforeEach(() => {
   // Suppress console output during tests
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
+  // Default: platform security returns null (non-fatal, no external results)
+  mockCheckPlatformSecurity.mockResolvedValue(null);
 });
 
 describe("addCommand with --plugin option (plugin directory support)", () => {
@@ -378,5 +396,405 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
       expect(scannedContent).toContain("rm -rf");
       expect(scannedContent).toContain("curl");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-013: Blocklist check in GitHub path
+// ---------------------------------------------------------------------------
+
+describe("addCommand blocklist check (GitHub path)", () => {
+  // Mock global fetch for GitHub path tests
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Safe Skill\nNormal content",
+    }) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("blocks installation when skill is on the blocklist", async () => {
+    mockCheckBlocklist.mockResolvedValue({
+      skillName: "evil-repo",
+      threatType: "credential-theft",
+      severity: "critical",
+      reason: "Steals AWS credentials",
+      evidenceUrls: [],
+      discoveredAt: "2026-02-01T00:00:00Z",
+    });
+
+    const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit");
+    });
+
+    await expect(
+      addCommand("owner/evil-repo", {}),
+    ).rejects.toThrow("process.exit");
+
+    expect(mockCheckBlocklist).toHaveBeenCalledWith("evil-repo", undefined);
+    expect(mockExit).toHaveBeenCalledWith(1);
+
+    // Tier 1 scan should NOT have been called (blocked before scan)
+    expect(mockRunTier1Scan).not.toHaveBeenCalled();
+
+    const errorOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(errorOutput).toContain("BLOCKED");
+    expect(errorOutput).toContain("credential-theft");
+
+    mockExit.mockRestore();
+  });
+
+  it("proceeds normally when skill is NOT on the blocklist", async () => {
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await addCommand("owner/safe-repo", {});
+
+    expect(mockCheckBlocklist).toHaveBeenCalledWith("safe-repo", undefined);
+    expect(mockRunTier1Scan).toHaveBeenCalled();
+  });
+
+  it("uses --skill name for blocklist check when provided", async () => {
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await addCommand("owner/repo", { skill: "my-skill" });
+
+    expect(mockCheckBlocklist).toHaveBeenCalledWith("my-skill", undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-014: Blocklist check in plugin path
+// ---------------------------------------------------------------------------
+
+describe("addCommand blocklist check (plugin path)", () => {
+  it("blocks plugin installation when plugin is on the blocklist", async () => {
+    mockCheckBlocklist.mockResolvedValue({
+      skillName: "evil-plugin",
+      threatType: "prompt-injection",
+      severity: "critical",
+      reason: "Injects malicious prompts",
+      evidenceUrls: [],
+      discoveredAt: "2026-02-01T00:00:00Z",
+    });
+
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockImplementation((p: string) => {
+      if (p.includes("marketplace.json")) {
+        return JSON.stringify({
+          name: "test",
+          version: "1.0.0",
+          plugins: [
+            { name: "evil-plugin", source: "./plugins/evil-plugin", version: "1.0.0" },
+          ],
+        });
+      }
+      return "";
+    });
+
+    const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit");
+    });
+
+    await expect(
+      addCommand("source", { plugin: "evil-plugin", pluginDir: "/tmp/test" }),
+    ).rejects.toThrow("process.exit");
+
+    expect(mockCheckBlocklist).toHaveBeenCalledWith("evil-plugin");
+    expect(mockRunTier1Scan).not.toHaveBeenCalled();
+
+    mockExit.mockRestore();
+  });
+
+  it("proceeds with plugin installation when not blocklisted", async () => {
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockImplementation((p: string) => {
+      if (p.includes("marketplace.json")) {
+        return JSON.stringify({
+          name: "test",
+          version: "1.0.0",
+          plugins: [
+            { name: "safe-plugin", source: "./plugins/safe-plugin", version: "1.0.0" },
+          ],
+        });
+      }
+      return "";
+    });
+
+    mockReaddirSync.mockReturnValue(["SKILL.md"]);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await addCommand("source", { plugin: "safe-plugin", pluginDir: "/tmp/test" });
+
+    expect(mockCheckBlocklist).toHaveBeenCalledWith("safe-plugin");
+    expect(mockRunTier1Scan).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-015: --force override with warning for blocked skills
+// ---------------------------------------------------------------------------
+
+describe("addCommand --force with blocked skill", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("shows warning box and continues when --force + blocked (GitHub path)", async () => {
+    mockCheckBlocklist.mockResolvedValue({
+      skillName: "evil-skill",
+      threatType: "credential-theft",
+      severity: "critical",
+      reason: "Base64-encoded AWS credential exfil",
+      evidenceUrls: [],
+      discoveredAt: "2026-02-01T00:00:00Z",
+    });
+
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await addCommand("owner/evil-skill", { force: true });
+
+    // Should show warning but NOT exit
+    const allOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(allOutput).toContain("WARNING");
+    expect(allOutput).toContain("malicious");
+
+    // Should proceed to tier 1 scan
+    expect(mockRunTier1Scan).toHaveBeenCalled();
+  });
+
+  it("shows warning box and continues when --force + blocked (plugin path)", async () => {
+    mockCheckBlocklist.mockResolvedValue({
+      skillName: "evil-plugin",
+      threatType: "prompt-injection",
+      severity: "critical",
+      reason: "Injects malicious prompts",
+      evidenceUrls: [],
+      discoveredAt: "2026-02-01T00:00:00Z",
+    });
+
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockImplementation((p: string) => {
+      if (p.includes("marketplace.json")) {
+        return JSON.stringify({
+          name: "test",
+          version: "1.0.0",
+          plugins: [
+            { name: "evil-plugin", source: "./plugins/evil-plugin", version: "1.0.0" },
+          ],
+        });
+      }
+      return "";
+    });
+
+    mockReaddirSync.mockReturnValue(["SKILL.md"]);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await addCommand("source", { plugin: "evil-plugin", pluginDir: "/tmp/test", force: true });
+
+    const allOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(allOutput).toContain("WARNING");
+
+    expect(mockRunTier1Scan).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-016/T-017: Platform security check in GitHub path
+// ---------------------------------------------------------------------------
+
+describe("addCommand platform security check (GitHub path)", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Safe Skill\nNormal content",
+    }) as unknown as typeof fetch;
+
+    mockCheckBlocklist.mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("blocks installation when platform reports CRITICAL findings", async () => {
+    mockCheckPlatformSecurity.mockResolvedValue({
+      hasCritical: true,
+      overallVerdict: "FAIL",
+      providers: [
+        { provider: "semgrep", status: "FAIL", verdict: "critical", criticalCount: 3 },
+        { provider: "snyk", status: "PASS", verdict: "clean", criticalCount: 0 },
+      ],
+      reportUrl: "/skills/evil-skill/security",
+    });
+
+    const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit");
+    });
+
+    await expect(
+      addCommand("owner/evil-skill", {}),
+    ).rejects.toThrow("process.exit");
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+
+    const errorOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(errorOutput).toContain("BLOCKED");
+    expect(errorOutput).toContain("CRITICAL");
+    expect(errorOutput).toContain("semgrep");
+
+    // Should NOT proceed to tier 1 scan
+    expect(mockRunTier1Scan).not.toHaveBeenCalled();
+
+    mockExit.mockRestore();
+  });
+
+  it("shows warning and proceeds when CRITICAL + --force", async () => {
+    mockCheckPlatformSecurity.mockResolvedValue({
+      hasCritical: true,
+      overallVerdict: "FAIL",
+      providers: [
+        { provider: "semgrep", status: "FAIL", verdict: "critical", criticalCount: 2 },
+      ],
+      reportUrl: "/skills/evil-skill/security",
+    });
+
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await addCommand("owner/evil-skill", { force: true });
+
+    const errorOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(errorOutput).toContain("WARNING");
+    expect(errorOutput).toContain("CRITICAL");
+    expect(errorOutput).toContain("semgrep");
+
+    // Should proceed to tier 1 scan
+    expect(mockRunTier1Scan).toHaveBeenCalled();
+  });
+
+  it("shows info message and proceeds when scans are PENDING", async () => {
+    mockCheckPlatformSecurity.mockResolvedValue({
+      hasCritical: false,
+      overallVerdict: "PENDING",
+      providers: [
+        { provider: "semgrep", status: "PENDING", verdict: null, criticalCount: 0 },
+      ],
+      reportUrl: "/skills/test-skill/security",
+    });
+
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await addCommand("owner/test-skill", {});
+
+    const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(logOutput).toContain("pending");
+
+    // Should proceed to tier 1 scan
+    expect(mockRunTier1Scan).toHaveBeenCalled();
+  });
+
+  it("proceeds normally when platform check returns null (network error)", async () => {
+    mockCheckPlatformSecurity.mockResolvedValue(null);
+
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await addCommand("owner/safe-skill", {});
+
+    // Should proceed to tier 1 scan without any blocking
+    expect(mockRunTier1Scan).toHaveBeenCalled();
   });
 });

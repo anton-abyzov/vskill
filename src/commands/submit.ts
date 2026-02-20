@@ -4,7 +4,7 @@
 
 import { openBrowser } from "../utils/browser.js";
 import { bold, green, red, dim, cyan } from "../utils/output.js";
-import { validateRepoSegment, validateSkillName } from "../utils/validation.js";
+import { parseGitHubSource, validateSkillName } from "../utils/validation.js";
 
 interface SubmitOptions {
   skill?: string;
@@ -14,23 +14,15 @@ export async function submitCommand(
   source: string,
   opts: SubmitOptions
 ): Promise<void> {
-  // Parse owner/repo
-  const parts = source.split("/");
-  if (parts.length !== 2) {
+  const parsed = parseGitHubSource(source);
+  if (!parsed) {
     console.error(
-      red("Invalid source format. Use: ") + cyan("owner/repo")
+      red("Invalid source. Use: ") + cyan("owner/repo") + dim(" or ") + cyan("https://github.com/owner/repo")
     );
     process.exit(1);
   }
 
-  const [owner, repo] = parts;
-
-  if (!validateRepoSegment(owner) || !validateRepoSegment(repo)) {
-    console.error(
-      red("Invalid owner/repo name. ") + dim("Only letters, numbers, dots, hyphens, and underscores are allowed.")
-    );
-    process.exit(1);
-  }
+  const { owner, repo } = parsed;
 
   if (opts.skill && !validateSkillName(opts.skill)) {
     console.error(

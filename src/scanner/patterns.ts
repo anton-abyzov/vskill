@@ -38,7 +38,7 @@ export interface ScanFinding {
   context: string;
 }
 
-// ---- Patterns (37 total) --------------------------------------------------
+// ---- Patterns (38 total) --------------------------------------------------
 
 export const SCAN_PATTERNS: ScanPattern[] = [
   // --- Command Injection (1-7) ---------------------------------------------
@@ -96,6 +96,14 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     severity: "high",
     description: "Detects string interpolation in shell commands",
     pattern: /exec\s*\(\s*`[^`]*\$\{/g,
+    category: "command-injection",
+  },
+  {
+    id: "CI-008",
+    name: "Pipe-to-shell execution",
+    severity: "critical",
+    description: "Detects curl/wget output piped directly to a shell interpreter (download-and-execute)",
+    pattern: /\b(?:curl|wget)\b[^|]*\|\s*(?:ba|z|da|k)?sh\b/g,
     category: "command-injection",
   },
 
@@ -307,7 +315,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Curl/wget to unknown host",
     severity: "high",
     description: "Detects curl or wget commands that download from external hosts",
-    pattern: /\b(?:curl|wget)\s+(?:-[a-zA-Z]*\s+)*(?:https?:\/\/|[`"'])/g,
+    pattern: /\b(?:curl|wget)\s+(?:-[\w=-]+\s+)*(?:https?:\/\/|[`"'])/g,
     category: "network-access",
   },
   {
@@ -357,7 +365,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
 // ---- Scanner function -----------------------------------------------------
 
 /**
- * Scan content against all 37 patterns, returning every match found.
+ * Scan content against all 38 patterns, returning every match found.
  */
 export function scanContent(content: string): ScanFinding[] {
   const lines = content.split("\n");

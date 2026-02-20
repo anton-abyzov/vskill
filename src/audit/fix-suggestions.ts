@@ -16,6 +16,7 @@ export const FIX_SUGGESTIONS: Record<string, string> = {
   "CI-005": "Use execFile/spawn instead of execSync/spawnSync when possible; never pass unsanitized input",
   "CI-006": "Avoid shell pipe operators in exec calls; use separate process pipelines",
   "CI-007": "Never interpolate user input into exec() template strings; use execFile with argument arrays",
+  "CI-008": "Never pipe curl/wget output directly to a shell; download to a file first, verify its integrity, then execute",
   "DE-001": "Validate and allowlist URLs before making fetch requests; avoid dynamic URL construction",
   "DE-002": "Replace XMLHttpRequest with fetch() and apply URL allowlisting",
   "DE-003": "Validate WebSocket connection URLs against an allowlist",

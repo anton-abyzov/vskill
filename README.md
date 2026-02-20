@@ -3,7 +3,9 @@
 **Secure multi-platform AI skill installer.** Scan before you install.
 
 ```bash
-npx vskill add owner/repo
+npx vskill install                              # detect your AI agents
+npx vskill find remotion                        # search the registry
+npx vskill add https://github.com/owner/repo    # install a skill
 ```
 
 ## Why?
@@ -17,10 +19,12 @@ vskill fixes this with **three-tier verification** and **version-pinned trust**.
 ## Commands
 
 ```bash
-vskill add <owner/repo>     # Install skill after security scan
+vskill install               # Detect installed AI agents, create lockfile
+vskill find <query>          # Search the registry (alias: search)
+vskill add <owner/repo>      # Install skill after security scan
 vskill scan <source>         # Scan without installing
 vskill list                  # Show installed skills with status
-vskill submit <source>       # Submit for verification on verified-skill.com
+vskill submit <source>       # Submit for verification (owner/repo or GitHub URL)
 vskill update                # Update with diff scanning
 ```
 

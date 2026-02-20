@@ -310,7 +310,7 @@ async function installPluginDir(
   if (agents.length === 0) {
     console.error(
       red("No AI agents detected. Run ") +
-        cyan("vskill init") +
+        cyan("vskill install") +
         red(" first.")
     );
     process.exit(1);
@@ -425,6 +425,9 @@ async function installOneGitHubSkill(
 
   // Platform security check
   const platformSecurity = await checkPlatformSecurity(skillName);
+  if (!platformSecurity) {
+    console.log(yellow("  Platform security check unavailable -- proceeding with local scan only."));
+  }
   if (platformSecurity && platformSecurity.hasCritical && !opts.force) {
     return { skillName, installed: false, verdict: "SECURITY_FAIL" };
   }
@@ -490,7 +493,7 @@ export async function addCommand(
   // Multi-skill install
   const agents = await detectInstalledAgents();
   if (agents.length === 0) {
-    console.error(red("No AI agents detected. Run ") + cyan("vskill init") + red(" first."));
+    console.error(red("No AI agents detected. Run ") + cyan("vskill install") + red(" first."));
     process.exit(1);
   }
 
@@ -557,6 +560,9 @@ async function installSingleSkillLegacy(
 
   // Platform security check (best-effort, non-blocking on network error)
   const platformSecurity = await checkPlatformSecurity(skillName);
+  if (!platformSecurity) {
+    console.log(yellow("  Platform security check unavailable -- proceeding with local scan only."));
+  }
 
   if (platformSecurity && platformSecurity.hasCritical && !opts.force) {
     const criticalProviders = platformSecurity.providers
@@ -637,7 +643,7 @@ async function installSingleSkillLegacy(
   if (agents.length === 0) {
     console.error(
       red("No AI agents detected. Run ") +
-        cyan("vskill init") +
+        cyan("vskill install") +
         red(" first.")
     );
     process.exit(1);

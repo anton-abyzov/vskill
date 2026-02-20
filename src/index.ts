@@ -14,7 +14,8 @@ program
   .version(pkg.version, "-v, --version");
 
 program
-  .command("init")
+  .command("install")
+  .alias("i")
   .description("Initialize vskill and detect installed AI agents")
   .action(async () => {
     const { initCommand } = await import("./commands/init.js");
@@ -65,6 +66,7 @@ program
 
 program
   .command("find <query>")
+  .alias("search")
   .description("Search the verified-skill.com registry")
   .action(async (query: string) => {
     const { findCommand } = await import("./commands/find.js");

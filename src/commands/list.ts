@@ -61,7 +61,7 @@ async function listSkills(json?: boolean): Promise<void> {
   if (!lock) {
     console.log(
       yellow("No vskill.lock found. Run ") +
-        cyan("vskill init") +
+        cyan("vskill install") +
         yellow(" first.")
     );
     process.exit(1);

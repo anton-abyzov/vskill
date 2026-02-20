@@ -29,8 +29,9 @@ export async function discoverSkills(
       headers: { Accept: "application/vnd.github.v3+json" },
     });
     if (!res.ok) return [];
-    const data = (await res.json()) as { tree: Array<{ path: string; type: string }> };
-    tree = data.tree;
+    const data = (await res.json()) as { tree?: unknown };
+    if (!Array.isArray(data?.tree)) return [];
+    tree = data.tree as Array<{ path: string; type: string }>;
   } catch {
     return [];
   }

@@ -24,6 +24,8 @@ import { getPluginSource, getPluginVersion } from "../marketplace/index.js";
 import { checkBlocklist } from "../blocklist/blocklist.js";
 import type { BlocklistEntry } from "../blocklist/types.js";
 import { checkPlatformSecurity } from "../security/index.js";
+import { discoverSkills } from "../discovery/github-tree.js";
+import type { DiscoveredSkill } from "../discovery/github-tree.js";
 import {
   bold,
   green,

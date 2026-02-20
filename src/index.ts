@@ -90,6 +90,31 @@ program
   });
 
 program
+  .command("audit [path]")
+  .description("Audit a local project for security vulnerabilities")
+  .option("--json", "Output results as JSON")
+  .option("--ci", "Output SARIF v2.1.0 for CI integration")
+  .option("--report [path]", "Generate markdown report")
+  .option("--fix", "Include suggested fixes for each finding")
+  .option("--tier1-only", "Skip LLM analysis, use regex patterns only")
+  .option("--exclude <patterns>", "Comma-separated exclude patterns")
+  .option("--severity <level>", "Minimum severity to report")
+  .option("--max-files <n>", "Maximum files to scan (default: 500)")
+  .action(async (path: string | undefined, opts) => {
+    const { auditCommand } = await import("./commands/audit.js");
+    await auditCommand(path || ".", {
+      json: opts.json,
+      ci: opts.ci,
+      report: opts.report,
+      fix: opts.fix,
+      tier1Only: opts.tier1Only,
+      exclude: opts.exclude,
+      severity: opts.severity,
+      maxFiles: opts.maxFiles,
+    });
+  });
+
+program
   .command("blocklist [subcommand] [name]")
   .description("Manage the malicious skills blocklist")
   .action(async (subcommand?: string, name?: string) => {

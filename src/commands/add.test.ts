@@ -90,6 +90,14 @@ vi.mock("../security/index.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock discovery (GitHub Trees skill discovery)
+// ---------------------------------------------------------------------------
+const mockDiscoverSkills = vi.fn();
+vi.mock("../discovery/github-tree.js", () => ({
+  discoverSkills: (...args: unknown[]) => mockDiscoverSkills(...args),
+}));
+
+// ---------------------------------------------------------------------------
 // Mock utils/output (suppress console output in tests)
 // ---------------------------------------------------------------------------
 vi.mock("../utils/output.js", () => ({
@@ -821,5 +829,144 @@ describe("addCommand platform security check (GitHub path)", () => {
 
     // Should proceed to tier 1 scan without any blocking
     expect(mockRunTier1Scan).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Multi-skill repo discovery + install
+// ---------------------------------------------------------------------------
+
+describe("addCommand multi-skill discovery (GitHub path)", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckPlatformSecurity.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  // TC-007: Multi-skill repo installs all discovered skills
+  it("installs all discovered skills from a multi-skill repo", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "repo", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/SKILL.md" },
+      { name: "foo", path: "skills/foo/SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/skills/foo/SKILL.md" },
+      { name: "bar", path: "skills/bar/SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/skills/bar/SKILL.md" },
+    ]);
+
+    // Each fetch for individual SKILL.md content succeeds
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+
+    await addCommand("owner/repo", {});
+
+    // Should have fetched 3 SKILL.md files
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+    // Should have scanned 3 skills
+    expect(mockRunTier1Scan).toHaveBeenCalledTimes(3);
+    // Lockfile should have 3 entries
+    expect(mockWriteLockfile).toHaveBeenCalled();
+    const lockArg = mockWriteLockfile.mock.calls[0][0];
+    expect(Object.keys(lockArg.skills)).toHaveLength(3);
+    expect(lockArg.skills).toHaveProperty("repo");
+    expect(lockArg.skills).toHaveProperty("foo");
+    expect(lockArg.skills).toHaveProperty("bar");
+  });
+
+  // TC-008: Single-skill repo behaves identically to before
+  it("installs single skill when repo has only root SKILL.md", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "repo", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/SKILL.md" },
+    ]);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+
+    await addCommand("owner/repo", {});
+
+    expect(mockRunTier1Scan).toHaveBeenCalledTimes(1);
+    const lockArg = mockWriteLockfile.mock.calls[0][0];
+    expect(Object.keys(lockArg.skills)).toHaveLength(1);
+    expect(lockArg.skills).toHaveProperty("repo");
+  });
+
+  // TC-009: --skill flag bypasses discovery
+  it("bypasses discovery when --skill flag is provided", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Specific skill",
+    }) as unknown as typeof fetch;
+
+    await addCommand("owner/repo", { skill: "specific" });
+
+    // Discovery should NOT have been called
+    expect(mockDiscoverSkills).not.toHaveBeenCalled();
+    // Should fetch from skills/specific/SKILL.md
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://raw.githubusercontent.com/owner/repo/main/skills/specific/SKILL.md"
+    );
+  });
+
+  // TC-010: Failed scan for one skill does not block others
+  it("skips failed skills and installs the rest", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "good1", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/SKILL.md" },
+      { name: "bad", path: "skills/bad/SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/skills/bad/SKILL.md" },
+      { name: "good2", path: "skills/good2/SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/skills/good2/SKILL.md" },
+    ]);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+
+    // Second scan fails
+    mockRunTier1Scan
+      .mockReturnValueOnce(makeScanResult())
+      .mockReturnValueOnce(makeScanResult({ verdict: "FAIL", score: 10 }))
+      .mockReturnValueOnce(makeScanResult());
+
+    await addCommand("owner/repo", {});
+
+    // All 3 scanned, but only 2 installed
+    expect(mockRunTier1Scan).toHaveBeenCalledTimes(3);
+    const lockArg = mockWriteLockfile.mock.calls[0][0];
+    expect(Object.keys(lockArg.skills)).toHaveLength(2);
+    expect(lockArg.skills).toHaveProperty("good1");
+    expect(lockArg.skills).toHaveProperty("good2");
+    expect(lockArg.skills).not.toHaveProperty("bad");
+  });
+
+  // TC-011: Discovery API failure falls back to single-skill install
+  it("falls back to single root SKILL.md when discovery returns empty", async () => {
+    mockDiscoverSkills.mockResolvedValue([]);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Root skill content",
+    }) as unknown as typeof fetch;
+
+    await addCommand("owner/repo", {});
+
+    // Should fall back to fetching root SKILL.md directly
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://raw.githubusercontent.com/owner/repo/main/SKILL.md"
+    );
+    expect(mockRunTier1Scan).toHaveBeenCalledTimes(1);
   });
 });

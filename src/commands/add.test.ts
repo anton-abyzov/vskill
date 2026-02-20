@@ -11,6 +11,7 @@ const mockCpSync = vi.fn();
 const mockChmodSync = vi.fn();
 const mockReaddirSync = vi.fn();
 const mockStatSync = vi.fn();
+const mockCopyFileSync = vi.fn();
 
 vi.mock("node:fs", () => ({
   mkdirSync: (...args: unknown[]) => mockMkdirSync(...args),
@@ -21,6 +22,7 @@ vi.mock("node:fs", () => ({
   chmodSync: (...args: unknown[]) => mockChmodSync(...args),
   readdirSync: (...args: unknown[]) => mockReaddirSync(...args),
   statSync: (...args: unknown[]) => mockStatSync(...args),
+  copyFileSync: (...args: unknown[]) => mockCopyFileSync(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -147,6 +149,11 @@ beforeEach(() => {
 });
 
 describe("addCommand with --plugin option (plugin directory support)", () => {
+  beforeEach(() => {
+    // Plugin path hits blocklist check first — return null (not blocked)
+    mockCheckBlocklist.mockResolvedValue(null);
+  });
+
   // TC-001: --plugin <name> flag selects sub-plugin from multi-plugin repo
   describe("TC-001: plugin flag selects sub-plugin directory", () => {
     it("selects the sw-frontend plugin directory from a local path with plugins/ structure", async () => {
@@ -173,13 +180,17 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
         return "";
       });
 
-      // readdirSync for collectPluginContent and fixHookPermissions
+      // readdirSync: recursive for collectPluginContent, non-recursive for copyPluginFiltered
       mockReaddirSync.mockImplementation((_dir: string, opts?: unknown) => {
         if (typeof opts === "object" && opts !== null && (opts as Record<string, unknown>).recursive) {
           return ["skills/SKILL.md", "hooks/setup.sh"];
         }
-        return [];
+        // copyPluginFiltered calls readdirSync without recursive
+        return ["SKILL.md"];
       });
+
+      // statSync for copyPluginFiltered: treat everything as a file
+      mockStatSync.mockReturnValue({ isDirectory: () => false, isFile: () => true });
 
       mockRunTier1Scan.mockReturnValue(makeScanResult());
       mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
@@ -194,9 +205,9 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
       // Call addCommand with plugin option and pluginDir (local source)
       await addCommand(localPath, { plugin: "sw-frontend", pluginDir: localPath });
 
-      // The cpSync should have been called with the resolved plugin subdirectory
-      expect(mockCpSync).toHaveBeenCalled();
-      const cpCall = mockCpSync.mock.calls[0];
+      // copyFileSync should have been called (copyPluginFiltered uses it)
+      expect(mockCopyFileSync).toHaveBeenCalled();
+      const cpCall = mockCopyFileSync.mock.calls[0];
       // Source should include plugins/specweave-frontend
       expect(cpCall[0]).toContain("plugins/specweave-frontend");
     });
@@ -206,7 +217,6 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
   describe("TC-002: full directory structure is preserved", () => {
     it("recursively copies all subdirectories (skills, hooks, commands, agents, .claude-plugin) to cache", async () => {
       const localPath = "/tmp/test-plugin";
-      const pluginSubdir = "/tmp/test-plugin/plugins/specweave-frontend";
 
       mockExistsSync.mockReturnValue(true);
       mockReadFileSync.mockImplementation((p: string) => {
@@ -222,15 +232,25 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
         return "# Plugin content";
       });
 
-      // Simulate directory listing for scan
-      mockReaddirSync.mockReturnValue([
-        "skills",
-        "hooks",
-        "commands",
-        "agents",
-        ".claude-plugin",
-      ]);
-      mockStatSync.mockReturnValue({ isDirectory: () => true });
+      // copyPluginFiltered walks the tree: top-level has dirs, each dir has a file
+      let depth = 0;
+      mockReaddirSync.mockImplementation((_dir: string, opts?: unknown) => {
+        // collectPluginContent uses { recursive: true }
+        if (typeof opts === "object" && opts !== null && (opts as Record<string, unknown>).recursive) {
+          return ["skills/SKILL.md", "hooks/setup.sh"];
+        }
+        // copyPluginFiltered: first call returns subdirs, deeper calls return files
+        if (depth === 0) {
+          depth++;
+          return ["skills", "hooks"];
+        }
+        return ["SKILL.md"];
+      });
+
+      mockStatSync.mockImplementation((p: string) => ({
+        isDirectory: () => p.endsWith("skills") || p.endsWith("hooks"),
+        isFile: () => !p.endsWith("skills") && !p.endsWith("hooks"),
+      }));
 
       mockRunTier1Scan.mockReturnValue(makeScanResult());
       mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
@@ -244,10 +264,13 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
 
       await addCommand(localPath, { plugin: "sw-frontend", pluginDir: localPath });
 
-      // cpSync must have been called with recursive: true
-      expect(mockCpSync).toHaveBeenCalled();
-      const cpCall = mockCpSync.mock.calls[0];
-      expect(cpCall[2]).toEqual(expect.objectContaining({ recursive: true }));
+      // mkdirSync is called for each directory level (recursive copy)
+      expect(mockMkdirSync).toHaveBeenCalled();
+      // copyFileSync is called for files within subdirectories
+      expect(mockCopyFileSync).toHaveBeenCalled();
+      // Verify it created subdirectory structure
+      const mkdirCalls = mockMkdirSync.mock.calls.map((c: unknown[]) => String(c[0]));
+      expect(mkdirCalls.some((p: string) => p.includes("skills") || p.includes("hooks"))).toBe(true);
     });
   });
 

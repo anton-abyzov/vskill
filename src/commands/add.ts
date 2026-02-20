@@ -382,6 +382,77 @@ async function installPluginDir(
 }
 
 // ---------------------------------------------------------------------------
+// Single GitHub skill install (fetch, scan, install to agents)
+// Returns null on failure, skill entry on success.
+// ---------------------------------------------------------------------------
+
+interface SkillInstallResult {
+  skillName: string;
+  installed: boolean;
+  verdict: string;
+  sha?: string;
+}
+
+async function installOneGitHubSkill(
+  owner: string,
+  repo: string,
+  skillName: string,
+  rawUrl: string,
+  opts: AddOptions,
+  agents: Array<{ id: string; displayName: string; localSkillsDir: string; globalSkillsDir: string }>,
+): Promise<SkillInstallResult> {
+  // Fetch content (non-exiting for multi-skill support)
+  let content: string;
+  try {
+    const res = await fetch(rawUrl);
+    if (!res.ok) {
+      return { skillName, installed: false, verdict: "FETCH_FAILED" };
+    }
+    content = await res.text();
+  } catch {
+    return { skillName, installed: false, verdict: "FETCH_FAILED" };
+  }
+
+  // Blocklist check
+  const blocked = await checkBlocklist(skillName, undefined);
+  if (blocked && !opts.force) {
+    printBlockedError(blocked);
+    return { skillName, installed: false, verdict: "BLOCKED" };
+  }
+  if (blocked && opts.force) {
+    printBlockedWarning(blocked);
+  }
+
+  // Platform security check
+  const platformSecurity = await checkPlatformSecurity(skillName);
+  if (platformSecurity && platformSecurity.hasCritical && !opts.force) {
+    return { skillName, installed: false, verdict: "SECURITY_FAIL" };
+  }
+
+  // Tier 1 scan
+  const scanResult = runTier1Scan(content);
+
+  if ((scanResult.verdict === "FAIL" || scanResult.verdict === "CONCERNS") && !opts.force) {
+    return { skillName, installed: false, verdict: scanResult.verdict };
+  }
+
+  // Install to each agent
+  const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
+  for (const agent of agents) {
+    const baseDir = opts.global
+      ? resolveTilde(agent.globalSkillsDir)
+      : join(process.cwd(), agent.localSkillsDir);
+    const skillDir = join(baseDir, skillName);
+    try {
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, "SKILL.md"), content, "utf-8");
+    } catch { /* skip agent on write error */ }
+  }
+
+  return { skillName, installed: true, verdict: scanResult.verdict, sha };
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -402,16 +473,79 @@ export async function addCommand(
   }
 
   const [owner, repo] = parts;
-  const skillSubpath = opts.skill
-    ? `skills/${opts.skill}/SKILL.md`
-    : "SKILL.md";
+
+  // --skill flag: single-skill mode (no discovery, backward compat)
+  if (opts.skill) {
+    return installSingleSkillLegacy(owner, repo, opts.skill, opts);
+  }
+
+  // Discovery mode: find all skills in the repo
+  const discovered: DiscoveredSkill[] = (await discoverSkills(owner, repo)) || [];
+
+  if (discovered.length === 0) {
+    // Fallback: discovery returned nothing — try root SKILL.md directly
+    return installSingleSkillLegacy(owner, repo, undefined, opts);
+  }
+
+  // Multi-skill install
+  const agents = await detectInstalledAgents();
+  if (agents.length === 0) {
+    console.error(red("No AI agents detected. Run ") + cyan("vskill init") + red(" first."));
+    process.exit(1);
+  }
+
+  const results: SkillInstallResult[] = [];
+  for (const skill of discovered) {
+    console.log(dim(`\nInstalling skill: ${bold(skill.name)}...`));
+    const result = await installOneGitHubSkill(owner, repo, skill.name, skill.rawUrl, opts, agents);
+    results.push(result);
+  }
+
+  // Update lockfile with all installed skills
+  const lock = ensureLockfile();
+  for (const r of results) {
+    if (r.installed && r.sha) {
+      lock.skills[r.skillName] = {
+        version: "0.0.0",
+        sha: r.sha,
+        tier: "SCANNED",
+        installedAt: new Date().toISOString(),
+        source: `github:${owner}/${repo}`,
+      };
+    }
+  }
+  lock.agents = agents.map((a: { id: string }) => a.id);
+  writeLockfile(lock);
+
+  // Summary
+  const installed = results.filter((r) => r.installed);
+  const skipped = results.filter((r) => !r.installed);
+  console.log(green(`\nInstalled ${bold(String(installed.length))} of ${results.length} skills:\n`));
+  for (const r of results) {
+    const icon = r.installed ? green("✓") : red("✗");
+    const detail = r.installed ? dim(`(${r.verdict})`) : red(`(${r.verdict})`);
+    console.log(`  ${icon} ${r.skillName} ${detail}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Legacy single-skill install (preserves original behavior exactly)
+// ---------------------------------------------------------------------------
+
+async function installSingleSkillLegacy(
+  owner: string,
+  repo: string,
+  skill: string | undefined,
+  opts: AddOptions,
+): Promise<void> {
+  const skillSubpath = skill ? `skills/${skill}/SKILL.md` : "SKILL.md";
   const url = `https://raw.githubusercontent.com/${owner}/${repo}/main/${skillSubpath}`;
 
   // Fetch SKILL.md
   const content = await fetchSkillContent(url);
 
   // Blocklist check (before scanning)
-  const skillName = opts.skill || repo;
+  const skillName = skill || repo;
   const blocked = await checkBlocklist(skillName, undefined);
   if (blocked && !opts.force) {
     printBlockedError(blocked);

@@ -8,12 +8,12 @@ import { auditCommand } from "./audit.js";
 
 describe("audit command", () => {
   let tmpDir: string;
-  let exitSpy: ReturnType<typeof vi.spyOn>;
+  let exitSpy: any;
   let logSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "vskill-audit-cmd-"));
-    exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as never);
+    exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
   });

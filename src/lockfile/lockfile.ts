@@ -5,11 +5,12 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { VskillLock, SkillLockEntry } from "./types.js";
+import { getProjectRoot } from "./project-root.js";
 
 const LOCKFILE_NAME = "vskill.lock";
 
 function lockPath(dir?: string): string {
-  return join(dir || process.cwd(), LOCKFILE_NAME);
+  return join(dir ?? getProjectRoot(), LOCKFILE_NAME);
 }
 
 /**

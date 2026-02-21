@@ -48,6 +48,22 @@ export const FIX_SUGGESTIONS: Record<string, string> = {
   "CE-002": "Avoid new Function(); use explicit function definitions instead",
   "CE-003": "Avoid dynamic imports with user-controlled paths; use a module allowlist",
 
+  // --- DCI-abuse patterns ---
+  "DCI-001": "Remove DCI blocks that read credential files (~/.ssh/, ~/.aws/, .env); use a secrets manager instead",
+  "DCI-002": "Remove DCI blocks that write to agent config files (CLAUDE.md, .claude/); legitimate skills do not modify agent configuration",
+  "DCI-003": "Remove DCI blocks that make network calls (curl, wget); DCI blocks should not perform outbound network requests",
+  "DCI-004": "Remove DCI blocks that use base64 decoding; this is a common obfuscation technique for hiding malicious payloads",
+  "DCI-005": "Remove DCI blocks that pipe downloads to shell (curl|sh); download and verify files separately before execution",
+  "DCI-006": "Remove DCI blocks that use eval or source; these execute arbitrary code and can be exploited",
+  "DCI-007": "Remove DCI blocks that use hex/octal escape sequences; this is an obfuscation technique to hide malicious intent",
+  "DCI-008": "Remove DCI blocks that use netcat (nc); reverse shells and network listeners are critical security threats",
+  "DCI-009": "Remove DCI blocks that read sensitive directories (.gnupg/, .docker/); these contain private keys and credentials",
+  "DCI-010": "Remove DCI blocks that write to .specweave/ directories; legitimate skills do not modify framework configuration",
+  "DCI-011": "Remove DCI blocks that write to AGENTS.md; legitimate skills do not modify agent instruction files",
+  "DCI-012": "Remove DCI blocks that post data externally (curl -d, curl --data); this is a data exfiltration technique",
+  "DCI-013": "Remove DCI blocks that modify file permissions (chmod); DCI blocks should not alter system permissions",
+  "DCI-014": "Remove DCI blocks that access .kube/config; Kubernetes credentials should be managed through a secrets manager",
+
   // --- Project-specific AUDIT_PATTERNS ---
   "SQLI-001": "Use parameterized queries or prepared statements instead of string concatenation in SQL",
   "SQLI-002": "Use parameterized queries; never use template literals for SQL with user input",

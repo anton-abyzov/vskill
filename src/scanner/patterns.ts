@@ -15,7 +15,8 @@ export type PatternCategory =
   | "prompt-injection"
   | "filesystem-access"
   | "network-access"
-  | "code-execution";
+  | "code-execution"
+  | "dci-abuse";
 
 export type ScanVerdict = "PASS" | "CONCERNS" | "FAIL";
 
@@ -360,12 +361,143 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     pattern: /import\s*\(\s*(?:`[^`]*\$\{|[a-zA-Z_]\w*\s*[\+)])/g,
     category: "code-execution",
   },
+
+  // --- DCI Block Abuse (38-51) -----------------------------------------------
+  // DCI blocks are shell commands in SKILL.md executed via ! prefix.
+  // These patterns detect malicious use within DCI contexts.
+  {
+    id: "DCI-001",
+    name: "DCI credential file read",
+    severity: "critical",
+    description: "DCI block reads credential files (~/.ssh/, ~/.aws/, .env)",
+    pattern: /^!\s*`[^`]*(?:~\/\.ssh\/|~\/\.aws\/|\.env\b|\.gnupg\/)/gm,
+    category: "dci-abuse",
+  },
+  {
+    id: "DCI-002",
+    name: "DCI network exfiltration",
+    severity: "critical",
+    description: "DCI block uses curl/wget for network access",
+    pattern: /^!\s*`[^`]*\b(?:curl|wget)\b/gm,
+    category: "dci-abuse",
+  },
+  {
+    id: "DCI-003",
+    name: "DCI fetch/nc network call",
+    severity: "critical",
+    description: "DCI block uses fetch or netcat for network access",
+    pattern: /^!\s*`[^`]*\b(?:fetch|nc|ncat|netcat)\b/gm,
+    category: "dci-abuse",
+  },
+  {
+    id: "DCI-004",
+    name: "DCI agent config write",
+    severity: "critical",
+    description: "DCI block writes to agent config files (CLAUDE.md, AGENTS.md, .claude/)",
+    pattern: /^!\s*`[^`]*(?:>\s*.*(?:CLAUDE\.md|AGENTS\.md|\.claude\/|\.specweave\/))/gm,
+    category: "dci-abuse",
+  },
+  {
+    id: "DCI-005",
+    name: "DCI agent config modify",
+    severity: "critical",
+    description: "DCI block modifies agent config via tee/sed/echo append",
+    pattern: /^!\s*`[^`]*(?:tee|sed\s+-i|echo\s+.*>>)\s*.*(?:CLAUDE\.md|AGENTS\.md|\.claude\/)/gm,
+    category: "dci-abuse",
+  },
+  {
+    id: "DCI-006",
+    name: "DCI base64 decode",
+    severity: "critical",
+    description: "DCI block contains base64 decoding (obfuscation)",
+    pattern: /^!\s*`[^`]*\b(?:base64\s+(?:-[dD]|--decode)|atob\s*\()/gm,
+    category: "dci-abuse",
+  },
+  {
+    id: "DCI-007",
+    name: "DCI hex escape obfuscation",
+    severity: "critical",
+    description: "DCI block contains hex escape sequences (obfuscation)",
+    pattern: /^!\s*`[^`]*\\x[0-9a-fA-F]{2}(?:\\x[0-9a-fA-F]{2}){3,}/gm,
+    category: "dci-abuse",
+  },
+  {
+    id: "DCI-008",
+    name: "DCI eval execution",
+    severity: "critical",
+    description: "DCI block uses eval for code execution",
+    pattern: /^!\s*`[^`]*\beval\b/gm,
+    category: "dci-abuse",
+  },
+  {
+    id: "DCI-009",
+    name: "DCI download and execute",
+    severity: "critical",
+    description: "DCI block pipes downloaded content to shell (download-and-execute)",
+    pattern: /^!\s*`[^`]*\b(?:curl|wget)\b[^`]*\|\s*(?:ba|z|da|k)?sh\b/gm,
+    category: "dci-abuse",
+  },
+  {
+    id: "DCI-010",
+    name: "DCI reverse shell",
+    severity: "critical",
+    description: "DCI block establishes a reverse shell connection",
+    pattern: /^!\s*`[^`]*(?:\/dev\/tcp\/|bash\s+-i\s+>&|mkfifo|nc\s+-[a-z]*e)/gm,
+    category: "dci-abuse",
+  },
+  {
+    id: "DCI-011",
+    name: "DCI sudo escalation",
+    severity: "critical",
+    description: "DCI block uses sudo for privilege escalation",
+    pattern: /^!\s*`[^`]*\bsudo\b/gm,
+    category: "dci-abuse",
+  },
+  {
+    id: "DCI-012",
+    name: "DCI rm destructive command",
+    severity: "critical",
+    description: "DCI block executes destructive rm -rf command",
+    pattern: /^!\s*`[^`]*\brm\s+-[a-zA-Z]*r[a-zA-Z]*f/gm,
+    category: "dci-abuse",
+  },
+  {
+    id: "DCI-013",
+    name: "DCI home dir exfiltration",
+    severity: "critical",
+    description: "DCI block reads from home directory sensitive paths",
+    pattern: /^!\s*`[^`]*(?:cat|less|head|tail|strings)\s+[^`]*(?:~\/\.|\/home\/[^`]*\.)/gm,
+    category: "dci-abuse",
+  },
+  {
+    id: "DCI-014",
+    name: "DCI data pipe to network",
+    severity: "critical",
+    description: "DCI block pipes local data to a network command",
+    pattern: /^!\s*`[^`]*(?:cat|tar|zip)\s+[^|`]*\|\s*(?:curl|wget|nc)\b/gm,
+    category: "dci-abuse",
+  },
 ];
+
+// ---- Safe-context patterns for DCI blocks ----------------------------------
+// The canonical skill-memories lookup is a known-safe DCI pattern.
+// Suppress DCI-abuse findings when the line matches this pattern.
+
+const SAFE_DCI_PATTERNS: RegExp[] = [
+  /^!\s*`for\s+d\s+in\s+\.specweave\/skill-memories/,
+];
+
+/**
+ * Returns true if the line matches a known-safe DCI pattern.
+ */
+function isSafeDciBlock(line: string): boolean {
+  return SAFE_DCI_PATTERNS.some((p) => p.test(line));
+}
 
 // ---- Scanner function -----------------------------------------------------
 
 /**
- * Scan content against all 38 patterns, returning every match found.
+ * Scan content against all patterns, returning every match found.
  */
 export function scanContent(content: string): ScanFinding[] {
   const lines = content.split("\n");
@@ -380,6 +512,11 @@ export function scanContent(content: string): ScanFinding[] {
       let match: RegExpExecArray | null;
 
       while ((match = regex.exec(line)) !== null) {
+        // Suppress DCI-abuse findings for known-safe DCI patterns
+        if (pattern.category === "dci-abuse" && isSafeDciBlock(line)) {
+          continue;
+        }
+
         // Build context: up to 1 line before and after
         const contextLines: string[] = [];
         if (lineIdx > 0) contextLines.push(lines[lineIdx - 1]);

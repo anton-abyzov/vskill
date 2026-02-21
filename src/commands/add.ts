@@ -666,6 +666,21 @@ export async function addCommand(
 }
 
 // ---------------------------------------------------------------------------
+// Trust tier labels
+// ---------------------------------------------------------------------------
+
+function getTrustLabel(tier: string): string {
+  switch (tier) {
+    case "T0": return "Blocked";
+    case "T1": return "Unscanned";
+    case "T2": return "Scanned";
+    case "T3": return "Verified";
+    case "T4": return "Certified";
+    default: return "Unknown";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Registry name install — look up skill by name, install from content
 // ---------------------------------------------------------------------------
 
@@ -679,6 +694,30 @@ async function installFromRegistry(
   try {
     detail = await getSkill(skillName);
     spin.stop(green(`Found: ${detail.name} by ${detail.author}`));
+
+    // Display trust tier and score if available
+    if (detail.trustTier) {
+      const trustLabel = getTrustLabel(detail.trustTier);
+      const trustColor = detail.trustTier === "T0" ? red
+        : detail.trustTier === "T1" ? yellow
+        : green;
+      console.log(
+        `${bold("Trust:")} ${trustColor(`${detail.trustTier} (${trustLabel})`)}` +
+          (detail.trustScore != null ? ` ${dim(`score ${detail.trustScore}/100`)}` : "")
+      );
+
+      // T0 (blocked): require --force
+      if (detail.trustTier === "T0" && !opts.force) {
+        console.error(red(bold("\n  BLOCKED: This skill has trust tier T0 (blocked)")));
+        console.error(dim("  Use --force to override (NOT recommended)"));
+        process.exit(1);
+      }
+
+      // T1 (unscanned): amber warning
+      if (detail.trustTier === "T1") {
+        console.log(yellow("  Warning: Unverified skill (T1 -- no scan results)"));
+      }
+    }
   } catch {
     spin.stop();
     console.error(

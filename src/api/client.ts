@@ -25,6 +25,12 @@ export interface SkillDetail {
   installs: number;
   updatedAt: string;
   repoUrl?: string;
+  /** Trust tier classification (T0-T4) */
+  trustTier?: string;
+  /** Composite trust score (0-100) */
+  trustScore?: number;
+  /** Whether author-repo ownership is verified */
+  provenanceVerified?: boolean;
 }
 
 export interface SubmissionResponse {
@@ -105,6 +111,9 @@ export async function getSkill(name: string): Promise<SkillDetail> {
     installs: Number(raw.vskillInstalls ?? raw.installs ?? 0),
     updatedAt: String(raw.updatedAt || ""),
     repoUrl: raw.repoUrl ? String(raw.repoUrl) : undefined,
+    trustTier: raw.trustTier ? String(raw.trustTier) : undefined,
+    trustScore: raw.trustScore != null ? Number(raw.trustScore) : undefined,
+    provenanceVerified: raw.provenanceVerified != null ? Boolean(raw.provenanceVerified) : undefined,
   };
 }
 

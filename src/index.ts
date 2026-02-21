@@ -126,6 +126,14 @@ program
   });
 
 program
+  .command("info <skill-name>")
+  .description("Display detailed information about a skill from the registry")
+  .action(async (skillName: string) => {
+    const { infoCommand } = await import("./commands/info.js");
+    await infoCommand(skillName);
+  });
+
+program
   .command("blocklist [subcommand] [name]")
   .description("Manage the malicious skills blocklist")
   .action(async (subcommand?: string, name?: string) => {

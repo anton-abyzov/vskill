@@ -23,6 +23,7 @@ import { runTier1Scan } from "../scanner/index.js";
 import { getPluginSource, getPluginVersion } from "../marketplace/index.js";
 import { checkBlocklist } from "../blocklist/blocklist.js";
 import type { BlocklistEntry } from "../blocklist/types.js";
+import { getSkill } from "../api/client.js";
 import { checkPlatformSecurity } from "../security/index.js";
 import { discoverSkills } from "../discovery/github-tree.js";
 import type { DiscoveredSkill } from "../discovery/github-tree.js";
@@ -310,7 +311,7 @@ async function installPluginDir(
   if (agents.length === 0) {
     console.error(
       red("No AI agents detected. Run ") +
-        cyan("vskill install") +
+        cyan("vskill init") +
         red(" first.")
     );
     process.exit(1);
@@ -471,8 +472,8 @@ export async function addCommand(
   // GitHub mode: owner/repo
   const parts = source.split("/");
   if (parts.length !== 2) {
-    console.error(red("Invalid source format. Use: ") + cyan("owner/repo"));
-    process.exit(1);
+    // No slash → try registry lookup by skill name
+    return installFromRegistry(source, opts);
   }
 
   const [owner, repo] = parts;
@@ -493,7 +494,7 @@ export async function addCommand(
   // Multi-skill install
   const agents = await detectInstalledAgents();
   if (agents.length === 0) {
-    console.error(red("No AI agents detected. Run ") + cyan("vskill install") + red(" first."));
+    console.error(red("No AI agents detected. Run ") + cyan("vskill init") + red(" first."));
     process.exit(1);
   }
 
@@ -529,6 +530,123 @@ export async function addCommand(
     const detail = r.installed ? dim(`(${r.verdict})`) : red(`(${r.verdict})`);
     console.log(`  ${icon} ${r.skillName} ${detail}`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Registry name install — look up skill by name, install from content
+// ---------------------------------------------------------------------------
+
+async function installFromRegistry(
+  skillName: string,
+  opts: AddOptions,
+): Promise<void> {
+  const spin = spinner("Looking up skill in registry");
+  let detail: Awaited<ReturnType<typeof getSkill>>;
+
+  try {
+    detail = await getSkill(skillName);
+    spin.stop(green(`Found: ${detail.name} by ${detail.author}`));
+  } catch {
+    spin.stop();
+    console.error(
+      red(`Skill "${skillName}" not found in registry.\n`) +
+        dim(`Use ${cyan("owner/repo")} for GitHub installs, or `) +
+        dim(`${cyan("vskill find <query>")} to search.`)
+    );
+    process.exit(1);
+    return;
+  }
+
+  if (!detail.content) {
+    console.error(
+      red(`Skill found but content not available from registry.\n`) +
+        dim(`Try: vskill install ${detail.author}/${skillName}`)
+    );
+    process.exit(1);
+    return;
+  }
+
+  const content = detail.content;
+
+  // Blocklist check
+  const blocked = await checkBlocklist(skillName, undefined);
+  if (blocked && !opts.force) {
+    printBlockedError(blocked);
+    process.exit(1);
+  }
+  if (blocked && opts.force) {
+    printBlockedWarning(blocked);
+  }
+
+  // Tier 1 scan
+  console.log(dim("\nRunning security scan..."));
+  const scanResult = runTier1Scan(content);
+
+  const verdictColor =
+    scanResult.verdict === "PASS"
+      ? green
+      : scanResult.verdict === "CONCERNS"
+        ? yellow
+        : red;
+
+  console.log(
+    `${bold("Score:")} ${verdictColor(String(scanResult.score))}/100  ` +
+      `${bold("Verdict:")} ${verdictColor(scanResult.verdict)}\n`
+  );
+
+  if ((scanResult.verdict === "FAIL" || scanResult.verdict === "CONCERNS") && !opts.force) {
+    console.error(
+      red(`\nScan ${scanResult.verdict}. Refusing to install.\n`) +
+        dim("Use --force to install anyway.")
+    );
+    process.exit(1);
+  }
+
+  // Detect installed agents
+  const agents = await detectInstalledAgents();
+  if (agents.length === 0) {
+    console.error(red("No AI agents detected. Run ") + cyan("vskill init") + red(" first."));
+    process.exit(1);
+  }
+
+  // Install to each agent
+  const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
+  const locations: string[] = [];
+
+  for (const agent of agents) {
+    const baseDir = opts.global
+      ? resolveTilde(agent.globalSkillsDir)
+      : join(process.cwd(), agent.localSkillsDir);
+    const skillDir = join(baseDir, skillName);
+    try {
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, "SKILL.md"), content, "utf-8");
+      locations.push(`${agent.displayName}: ${skillDir}`);
+    } catch (err) {
+      console.error(
+        yellow(`Failed to write to ${agent.displayName}: `) +
+          dim((err as Error).message)
+      );
+    }
+  }
+
+  // Update lockfile
+  const lock = ensureLockfile();
+  lock.skills[skillName] = {
+    version: detail.version || "0.0.0",
+    sha,
+    tier: "SCANNED",
+    installedAt: new Date().toISOString(),
+    source: `registry:${skillName}`,
+  };
+  lock.agents = agents.map((a: { id: string }) => a.id);
+  writeLockfile(lock);
+
+  console.log(green(`\nInstalled ${bold(skillName)} to ${locations.length} agent${locations.length === 1 ? "" : "s"}:\n`));
+  for (const loc of locations) {
+    console.log(`  ${dim(">")} ${loc}`);
+  }
+  console.log(dim(`\nSHA: ${sha} | Version: ${detail.version || "0.0.0"}`));
 }
 
 // ---------------------------------------------------------------------------
@@ -643,7 +761,7 @@ async function installSingleSkillLegacy(
   if (agents.length === 0) {
     console.error(
       red("No AI agents detected. Run ") +
-        cyan("vskill install") +
+        cyan("vskill init") +
         red(" first.")
     );
     process.exit(1);

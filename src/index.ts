@@ -29,6 +29,14 @@ program
   });
 
 program
+  .command("init")
+  .description("Detect installed AI agents and create lockfile")
+  .action(async () => {
+    const { initCommand } = await import("./commands/init.js");
+    await initCommand();
+  });
+
+program
   .command("scan <path>")
   .description("Run tier-1 security scan on a SKILL.md file")
   .action(async (path: string) => {

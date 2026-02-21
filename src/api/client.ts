@@ -24,6 +24,7 @@ export interface SkillDetail {
   content?: string;
   installs: number;
   updatedAt: string;
+  repoUrl?: string;
 }
 
 export interface SubmissionResponse {
@@ -87,7 +88,24 @@ export async function searchSkills(
  */
 export async function getSkill(name: string): Promise<SkillDetail> {
   const encoded = encodeURIComponent(name);
-  return apiRequest<SkillDetail>(`/api/v1/skills/${encoded}`);
+  const data = await apiRequest<Record<string, unknown>>(`/api/v1/skills/${encoded}`);
+
+  // API wraps the skill object under a "skill" key
+  const raw = (data.skill as Record<string, unknown>) ?? data;
+
+  return {
+    name: String(raw.name || ""),
+    author: String(raw.author || ""),
+    tier: String(raw.certTier || raw.tier || "SCANNED"),
+    score: Number(raw.certScore ?? raw.score ?? 0),
+    version: String(raw.currentVersion || raw.version || "0.0.0"),
+    sha: String(raw.sha || ""),
+    description: String(raw.description || ""),
+    content: raw.content ? String(raw.content) : undefined,
+    installs: Number(raw.vskillInstalls ?? raw.installs ?? 0),
+    updatedAt: String(raw.updatedAt || ""),
+    repoUrl: raw.repoUrl ? String(raw.repoUrl) : undefined,
+  };
 }
 
 /**

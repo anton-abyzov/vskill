@@ -90,6 +90,14 @@ vi.mock("../security/index.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock API client (registry lookup)
+// ---------------------------------------------------------------------------
+const mockGetSkill = vi.fn();
+vi.mock("../api/client.js", () => ({
+  getSkill: (...args: unknown[]) => mockGetSkill(...args),
+}));
+
+// ---------------------------------------------------------------------------
 // Mock discovery (GitHub Trees skill discovery)
 // ---------------------------------------------------------------------------
 const mockDiscoverSkills = vi.fn();
@@ -968,5 +976,115 @@ describe("addCommand multi-skill discovery (GitHub path)", () => {
       "https://raw.githubusercontent.com/owner/repo/main/SKILL.md"
     );
     expect(mockRunTier1Scan).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Registry install (installFromRegistry) — no slash in source
+// ---------------------------------------------------------------------------
+
+describe("addCommand registry install (no slash in source)", () => {
+  beforeEach(() => {
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  it("installs a skill when registry returns content", async () => {
+    mockGetSkill.mockResolvedValue({
+      name: "my-skill",
+      author: "alice",
+      tier: "VERIFIED",
+      score: 90,
+      version: "1.0.0",
+      sha: "",
+      description: "A skill",
+      content: "# My Skill\nDoes great things.",
+      installs: 5,
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+
+    await addCommand("my-skill", {});
+
+    expect(mockGetSkill).toHaveBeenCalledWith("my-skill");
+    expect(mockRunTier1Scan).toHaveBeenCalledWith("# My Skill\nDoes great things.");
+    expect(mockWriteFileSync).toHaveBeenCalledWith(
+      expect.stringContaining("my-skill"),
+      "# My Skill\nDoes great things.",
+      "utf-8"
+    );
+    expect(mockWriteLockfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skills: expect.objectContaining({
+          "my-skill": expect.objectContaining({ source: "registry:my-skill" }),
+        }),
+      })
+    );
+  });
+
+  it("exits with error when skill is not in registry", async () => {
+    mockGetSkill.mockRejectedValue(new Error("API request failed: 404 Not Found"));
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    await addCommand("nonexistent-skill", {});
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+    mockExit.mockRestore();
+  });
+
+  it("exits with error and suggests owner/repo from repoUrl when content is missing", async () => {
+    mockGetSkill.mockResolvedValue({
+      name: "remotion-dev-skills-remotion",
+      author: "remotion-dev",
+      tier: "VERIFIED",
+      score: 100,
+      version: "1.0.0",
+      sha: "",
+      description: "Remotion skill",
+      content: undefined,
+      installs: 0,
+      updatedAt: "2026-02-20T00:00:00Z",
+      repoUrl: "https://github.com/remotion-dev/skills",
+    });
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    await addCommand("remotion-dev-skills-remotion", {});
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("remotion-dev/skills")
+    );
+    mockExit.mockRestore();
+  });
+
+  it("falls back to author/skillName in suggestion when repoUrl is absent", async () => {
+    mockGetSkill.mockResolvedValue({
+      name: "some-skill",
+      author: "bob",
+      tier: "SCANNED",
+      score: 50,
+      version: "0.1.0",
+      sha: "",
+      description: "",
+      content: undefined,
+      installs: 0,
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    await addCommand("some-skill", {});
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("bob/some-skill")
+    );
+    mockExit.mockRestore();
   });
 });

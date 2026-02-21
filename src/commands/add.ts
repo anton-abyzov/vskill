@@ -558,9 +558,14 @@ async function installFromRegistry(
   }
 
   if (!detail.content) {
+    let ownerRepo = `${detail.author}/${skillName}`;
+    if (detail.repoUrl) {
+      const match = detail.repoUrl.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?(?:\/|$)/);
+      if (match) ownerRepo = match[1];
+    }
     console.error(
       red(`Skill found but content not available from registry.\n`) +
-        dim(`Try: vskill install ${detail.author}/${skillName}`)
+        dim(`Try: vskill install ${ownerRepo}`)
     );
     process.exit(1);
     return;

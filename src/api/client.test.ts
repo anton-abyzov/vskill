@@ -148,7 +148,45 @@ describe("searchSkills", () => {
 });
 
 describe("getSkill", () => {
-  it("fetches a skill by name", async () => {
+  it("unwraps the skill wrapper and normalizes field names", async () => {
+    const apiResponse = {
+      skill: {
+        name: "remotion-dev-skills-remotion",
+        author: "remotion-dev",
+        certTier: "VERIFIED",
+        certScore: null,
+        currentVersion: "1.0.0",
+        sha: "",
+        description: "A great skill",
+        vskillInstalls: 0,
+        updatedAt: "2026-02-20T00:00:00Z",
+        repoUrl: "https://github.com/remotion-dev/skills",
+      },
+    };
+    mockFetch.mockResolvedValue(jsonResponse(apiResponse));
+
+    const result = await getSkill("remotion-dev-skills-remotion");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE_URL}/api/v1/skills/remotion-dev-skills-remotion`,
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          "User-Agent": "vskill-cli",
+        }),
+      })
+    );
+    expect(result.name).toBe("remotion-dev-skills-remotion");
+    expect(result.author).toBe("remotion-dev");
+    expect(result.tier).toBe("VERIFIED");
+    expect(result.score).toBe(0);
+    expect(result.version).toBe("1.0.0");
+    expect(result.installs).toBe(0);
+    expect(result.repoUrl).toBe("https://github.com/remotion-dev/skills");
+    expect(result.content).toBeUndefined();
+  });
+
+  it("falls back to flat response when no skill wrapper exists", async () => {
     const detail = {
       name: "test-skill",
       author: "bob",
@@ -164,16 +202,30 @@ describe("getSkill", () => {
 
     const result = await getSkill("test-skill");
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      `${BASE_URL}/api/v1/skills/test-skill`,
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          "Content-Type": "application/json",
-          "User-Agent": "vskill-cli",
-        }),
-      })
-    );
-    expect(result).toEqual(detail);
+    expect(result.name).toBe("test-skill");
+    expect(result.author).toBe("bob");
+    expect(result.tier).toBe("SCANNED");
+    expect(result.score).toBe(50);
+    expect(result.version).toBe("1.2.3");
+  });
+
+  it("normalizes certTier and certScore field aliases", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({
+      skill: { name: "s", author: "a", certTier: "CERTIFIED", certScore: 95, currentVersion: "2.0.0", vskillInstalls: 42 },
+    }));
+    const result = await getSkill("s");
+    expect(result.tier).toBe("CERTIFIED");
+    expect(result.score).toBe(95);
+    expect(result.version).toBe("2.0.0");
+    expect(result.installs).toBe(42);
+  });
+
+  it("returns content when present in response", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({
+      skill: { name: "s", author: "a", content: "# My Skill\nDoes things." },
+    }));
+    const result = await getSkill("s");
+    expect(result.content).toBe("# My Skill\nDoes things.");
   });
 
   it("encodes special characters in skill name", async () => {

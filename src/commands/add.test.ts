@@ -1039,7 +1039,7 @@ describe("addCommand registry install (no slash in source)", () => {
     mockExit.mockRestore();
   });
 
-  it("exits with error and suggests owner/repo from repoUrl when content is missing", async () => {
+  it("falls back to GitHub install via repoUrl when content is missing", async () => {
     mockGetSkill.mockResolvedValue({
       name: "remotion-dev-skills-remotion",
       author: "remotion-dev",
@@ -1053,18 +1053,28 @@ describe("addCommand registry install (no slash in source)", () => {
       updatedAt: "2026-02-20T00:00:00Z",
       repoUrl: "https://github.com/remotion-dev/skills",
     });
-    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    // After fallback, addCommand calls discoverSkills("remotion-dev", "skills")
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "remotion", path: "skills/remotion/SKILL.md", rawUrl: "https://raw.githubusercontent.com/remotion-dev/skills/main/skills/remotion/SKILL.md" },
+    ]);
+    // Then fetches the skill content from GitHub
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Remotion skill content",
+    }) as unknown as typeof fetch;
 
     await addCommand("remotion-dev-skills-remotion", {});
 
-    expect(mockExit).toHaveBeenCalledWith(1);
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining("remotion-dev/skills")
+    expect(mockDiscoverSkills).toHaveBeenCalledWith("remotion-dev", "skills");
+    expect(mockWriteFileSync).toHaveBeenCalledWith(
+      expect.stringContaining("remotion"),
+      "# Remotion skill content",
+      "utf-8"
     );
-    mockExit.mockRestore();
   });
 
-  it("falls back to author/skillName in suggestion when repoUrl is absent", async () => {
+  it("falls back to GitHub install via author/skillName when repoUrl is absent", async () => {
     mockGetSkill.mockResolvedValue({
       name: "some-skill",
       author: "bob",
@@ -1077,14 +1087,39 @@ describe("addCommand registry install (no slash in source)", () => {
       installs: 0,
       updatedAt: "2026-01-01T00:00:00Z",
     });
-    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    // Fallback uses author/skillName → discoverSkills("bob", "some-skill")
+    mockDiscoverSkills.mockResolvedValue([]);
+    // Discovery empty → falls back to root SKILL.md fetch
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Some skill",
+    }) as unknown as typeof fetch;
 
     await addCommand("some-skill", {});
 
+    expect(mockDiscoverSkills).toHaveBeenCalledWith("bob", "some-skill");
+    expect(mockRunTier1Scan).toHaveBeenCalled();
+  });
+
+  it("exits when no content, no repoUrl, and no author", async () => {
+    mockGetSkill.mockResolvedValue({
+      name: "",
+      author: "",
+      tier: "SCANNED",
+      score: 0,
+      version: "0.0.0",
+      sha: "",
+      description: "",
+      content: undefined,
+      installs: 0,
+      updatedAt: "",
+    });
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    await addCommand("mystery-skill", {});
+
     expect(mockExit).toHaveBeenCalledWith(1);
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining("bob/some-skill")
-    );
     mockExit.mockRestore();
   });
 });

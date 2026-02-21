@@ -558,17 +558,25 @@ async function installFromRegistry(
   }
 
   if (!detail.content) {
-    let ownerRepo = `${detail.author}/${skillName}`;
+    // Registry doesn't serve content inline — fall back to GitHub install
+    let ownerRepo: string | undefined;
     if (detail.repoUrl) {
       const match = detail.repoUrl.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?(?:\/|$)/);
       if (match) ownerRepo = match[1];
     }
-    console.error(
-      red(`Skill found but content not available from registry.\n`) +
-        dim(`Try: vskill install ${ownerRepo}`)
-    );
-    process.exit(1);
-    return;
+    if (!ownerRepo && detail.author) {
+      ownerRepo = `${detail.author}/${skillName}`;
+    }
+    if (!ownerRepo) {
+      console.error(
+        red(`Skill found but content not available and no source repo.\n`) +
+          dim(`Use ${cyan("owner/repo")} for GitHub installs.`)
+      );
+      process.exit(1);
+      return;
+    }
+    console.log(dim(`Registry has no inline content — installing from GitHub (${ownerRepo})...`));
+    return addCommand(ownerRepo, opts);
   }
 
   const content = detail.content;

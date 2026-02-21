@@ -13,7 +13,7 @@ import {
   readdirSync,
   rmSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, basename } from "node:path";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import { resolveTilde } from "../utils/paths.js";
@@ -123,6 +123,22 @@ interface AddOptions {
 }
 
 /**
+ * Join base dir with localSkillsDir, avoiding double-nesting when base already
+ * ends with the agent's dotfolder (e.g. running from inside ~/.openclaw/).
+ *
+ * Example without fix: join("~/.openclaw", ".openclaw/skills") → ~/.openclaw/.openclaw/skills
+ * Example with fix:    join("~/.openclaw", ".openclaw/skills") → ~/.openclaw/skills
+ */
+function resolveSkillsPath(base: string, localSkillsDir: string): string {
+  const parts = localSkillsDir.split("/");
+  const agentBase = parts[0]; // e.g. ".openclaw", ".claude", ".gemini"
+  if (basename(base) === agentBase) {
+    return join(base, ...parts.slice(1));
+  }
+  return join(base, localSkillsDir);
+}
+
+/**
  * Resolve the base directory for local skill installation.
  *
  * Priority:
@@ -141,7 +157,7 @@ function resolveInstallBase(
   const cwd = process.cwd();
 
   if (opts.cwd) {
-    return join(cwd, agent.localSkillsDir);
+    return resolveSkillsPath(cwd, agent.localSkillsDir);
   }
 
   const projectRoot = findProjectRoot(cwd);
@@ -149,7 +165,7 @@ function resolveInstallBase(
     console.log(
       yellow("No project root found; installing relative to current directory."),
     );
-    return join(cwd, agent.localSkillsDir);
+    return resolveSkillsPath(cwd, agent.localSkillsDir);
   }
 
   if (projectRoot !== cwd) {
@@ -158,7 +174,7 @@ function resolveInstallBase(
     );
   }
 
-  return join(projectRoot, agent.localSkillsDir);
+  return resolveSkillsPath(projectRoot, agent.localSkillsDir);
 }
 
 async function fetchSkillContent(url: string): Promise<string> {

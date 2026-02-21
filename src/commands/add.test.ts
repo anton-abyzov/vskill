@@ -1275,3 +1275,82 @@ describe("addCommand --agent filter", () => {
     mockConsoleError.mockRestore();
   });
 });
+
+// ---------------------------------------------------------------------------
+// TC-016: Nested directory bug — running install from inside agent base dir
+// ---------------------------------------------------------------------------
+
+describe("addCommand nested directory fix (TC-016)", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  // TC-016a: cwd is agent base dir → must NOT produce nested path
+  it("does not create nested agent dir when projectRoot ends with agent base folder", async () => {
+    // Simulate running `vskill install` from inside ~/.openclaw/
+    const agentBaseDir = "/home/user/.openclaw";
+    mockFindProjectRoot.mockReturnValue(agentBaseDir);
+
+    const openclaw = makeAgent({
+      id: "openclaw",
+      displayName: "OpenClaw",
+      localSkillsDir: ".openclaw/skills",
+      globalSkillsDir: "~/.openclaw/skills",
+    });
+    mockDetectInstalledAgents.mockResolvedValue([openclaw]);
+
+    await addCommand("owner/safe-repo", {});
+
+    expect(mockWriteFileSync).toHaveBeenCalled();
+    const writePath = mockWriteFileSync.mock.calls[0][0] as string;
+
+    // Must NOT contain double-nested agent dir
+    expect(writePath).not.toMatch(/\.openclaw[/\\]\.openclaw/);
+    // Must install into skills/ under the agent base dir
+    expect(writePath).toContain(`${agentBaseDir}/skills`);
+  });
+
+  // TC-016b: same bug via --cwd flag when cwd is agent base dir
+  it("does not create nested agent dir when --cwd and cwd is agent base dir", async () => {
+    // Spy on process.cwd() to return the agent base dir
+    const agentBaseDir = "/home/user/.openclaw";
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(agentBaseDir);
+
+    const openclaw = makeAgent({
+      id: "openclaw",
+      displayName: "OpenClaw",
+      localSkillsDir: ".openclaw/skills",
+      globalSkillsDir: "~/.openclaw/skills",
+    });
+    mockDetectInstalledAgents.mockResolvedValue([openclaw]);
+
+    await addCommand("owner/safe-repo", { cwd: true });
+
+    expect(mockWriteFileSync).toHaveBeenCalled();
+    const writePath = mockWriteFileSync.mock.calls[0][0] as string;
+
+    expect(writePath).not.toMatch(/\.openclaw[/\\]\.openclaw/);
+    expect(writePath).toContain(`${agentBaseDir}/skills`);
+
+    cwdSpy.mockRestore();
+  });
+});

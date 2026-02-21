@@ -5,19 +5,19 @@
 ```bash
 # npm
 npx vskill find remotion                             # search the registry
-npx vskill install google/remotion                   # install after security scan
+npx vskill install remotion-dev/skills                   # install after security scan
 
 # bun
 bunx vskill find remotion
-bunx vskill install google/remotion
+bunx vskill install remotion-dev/skills
 
 # pnpm
 pnpx vskill find remotion
-pnpx vskill install google/remotion
+pnpx vskill install remotion-dev/skills
 
 # yarn
 yarn dlx vskill find remotion
-yarn dlx vskill install google/remotion
+yarn dlx vskill install remotion-dev/skills
 ```
 
 ## Why?

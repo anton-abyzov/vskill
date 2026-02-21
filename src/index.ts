@@ -14,17 +14,10 @@ program
   .version(pkg.version, "-v, --version");
 
 program
-  .command("install")
+  .command("install <source>")
   .alias("i")
-  .description("Initialize vskill and detect installed AI agents")
-  .action(async () => {
-    const { initCommand } = await import("./commands/init.js");
-    await initCommand();
-  });
-
-program
-  .command("add <source>")
-  .description("Install a skill from GitHub or local plugin directory")
+  .alias("add")
+  .description("Install a skill from GitHub after security scan")
   .option("--skill <name>", "Skill name within a multi-skill repo")
   .option("--plugin <name>", "Plugin name from marketplace.json")
   .option("--plugin-dir <path>", "Local plugin directory path")

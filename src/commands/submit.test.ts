@@ -78,6 +78,17 @@ describe("submitCommand", () => {
     });
   });
 
+  // TC-014: Accepts full GitHub URL
+  describe("TC-014: accepts full GitHub URL", () => {
+    it("opens browser with correct URL when given https://github.com/owner/repo", async () => {
+      await submitCommand("https://github.com/myorg/myskill", {});
+
+      expect(mockOpenBrowser).toHaveBeenCalledOnce();
+      const url = mockOpenBrowser.mock.calls[0][0] as string;
+      expect(url).toBe("https://verified-skill.com/submit?repo=myorg%2Fmyskill");
+    });
+  });
+
   // TC-004: Prints message telling user to complete in browser
   describe("TC-004: prints browser instructions", () => {
     it("logs a message about completing submission in browser", async () => {

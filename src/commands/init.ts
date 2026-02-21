@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// vskill init -- detect agents and create lockfile
+// vskill install -- detect agents and create lockfile
 // ---------------------------------------------------------------------------
 
 import {

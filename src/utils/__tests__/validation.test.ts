@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateRepoSegment, validateSkillName } from "../validation.js";
+import { validateRepoSegment, validateSkillName, parseGitHubSource } from "../validation.js";
 
 describe("validateRepoSegment (T-011)", () => {
   it("TC-023: accepts valid owner/repo names", () => {
@@ -55,5 +55,39 @@ describe("validateSkillName (T-011)", () => {
 
   it("rejects empty string", () => {
     expect(validateSkillName("")).toBe(false);
+  });
+});
+
+describe("parseGitHubSource", () => {
+  it("TC-006: parses owner/repo shorthand", () => {
+    expect(parseGitHubSource("myorg/myskill")).toEqual({ owner: "myorg", repo: "myskill" });
+  });
+
+  it("TC-007: parses full GitHub URL", () => {
+    expect(parseGitHubSource("https://github.com/myorg/myskill")).toEqual({ owner: "myorg", repo: "myskill" });
+  });
+
+  it("TC-008: strips .git suffix", () => {
+    expect(parseGitHubSource("https://github.com/myorg/myskill.git")).toEqual({ owner: "myorg", repo: "myskill" });
+  });
+
+  it("TC-009: strips trailing slash", () => {
+    expect(parseGitHubSource("https://github.com/myorg/myskill/")).toEqual({ owner: "myorg", repo: "myskill" });
+  });
+
+  it("TC-010: handles tree/branch path segments", () => {
+    expect(parseGitHubSource("https://github.com/myorg/myskill/tree/main/src")).toEqual({ owner: "myorg", repo: "myskill" });
+  });
+
+  it("TC-011: rejects non-GitHub URLs", () => {
+    expect(parseGitHubSource("https://gitlab.com/myorg/myskill")).toBeNull();
+  });
+
+  it("TC-012: rejects URLs with insufficient path segments", () => {
+    expect(parseGitHubSource("https://github.com/myorg")).toBeNull();
+  });
+
+  it("TC-013: rejects empty input", () => {
+    expect(parseGitHubSource("")).toBeNull();
   });
 });

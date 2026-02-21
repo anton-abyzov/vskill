@@ -3,9 +3,9 @@
 **Secure multi-platform AI skill installer.** Scan before you install.
 
 ```bash
-npx vskill install                              # detect your AI agents
-npx vskill find remotion                        # search the registry
-npx vskill add https://github.com/owner/repo    # install a skill
+npx vskill find remotion                             # search the registry
+npx vskill install google/remotion                   # install after security scan
+npx vskill install https://github.com/owner/repo     # also accepts full GitHub URLs
 ```
 
 ## Why?
@@ -19,9 +19,8 @@ vskill fixes this with **three-tier verification** and **version-pinned trust**.
 ## Commands
 
 ```bash
-vskill install               # Detect installed AI agents, create lockfile
 vskill find <query>          # Search the registry (alias: search)
-vskill add <owner/repo>      # Install skill after security scan
+vskill install <source>      # Install skill after security scan (alias: add, i)
 vskill scan <source>         # Scan without installing
 vskill list                  # Show installed skills with status
 vskill submit <source>       # Submit for verification (owner/repo or GitHub URL)
@@ -36,7 +35,7 @@ Works across Claude Code, Cursor, GitHub Copilot, Windsurf, Codex, Gemini CLI, C
 
 | Tier | Method | Badge |
 |------|--------|-------|
-| **Scanned** | 37 deterministic pattern checks | Basic Trust |
+| **Scanned** | 38 deterministic pattern checks | Basic Trust |
 | **Verified** | Scanner + LLM intent analysis | Recommended |
 | **Certified** | Full manual security review | Highest Trust |
 

@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // ---------------------------------------------------------------------------
 // Import module under test
 // ---------------------------------------------------------------------------
-import { discoverSkills } from "./github-tree.js";
+import { discoverSkills, extractDescription } from "./github-tree.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -158,6 +158,27 @@ describe("discoverSkills", () => {
     expect(names).not.toContain("nested");
   });
 
+  // TC-021: discoverSkills populates descriptions from fetched content
+  it("populates description field from SKILL.md content", async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => makeTreeResponse(["skills/foo/SKILL.md", "skills/bar/SKILL.md"]),
+      })
+      .mockResolvedValue({
+        ok: true,
+        text: async () => "# Foo Skill\n\nThis skill does X",
+      });
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+
+    expect(result).toHaveLength(2);
+    // At least one skill should have a description populated
+    const hasDescription = result.some((s) => s.description !== undefined);
+    expect(hasDescription).toBe(true);
+  });
+
   // Calls correct GitHub Trees API URL
   it("calls the GitHub Trees API with correct URL", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
@@ -176,5 +197,39 @@ describe("discoverSkills", () => {
         }),
       })
     );
+  });
+});
+
+describe("extractDescription", () => {
+  it("returns first non-heading, non-empty line as description", () => {
+    const content = "# Title\n\nThis skill does X\n\nMore content";
+    expect(extractDescription(content)).toBe("This skill does X");
+  });
+
+  it("truncates description at 80 chars with ellipsis", () => {
+    const longLine = "A".repeat(120);
+    const content = `# Title\n\n${longLine}`;
+    const result = extractDescription(content);
+    expect(result).toBe("A".repeat(77) + "...");
+    expect(result!.length).toBe(80);
+  });
+
+  it("skips YAML frontmatter delimiters", () => {
+    const content = "---\ntitle: foo\n---\n# Title\nDescription here";
+    expect(extractDescription(content)).toBe("Description here");
+  });
+
+  it("returns undefined when content has only headings", () => {
+    const content = "# Title\n## Section\n### Subsection";
+    expect(extractDescription(content)).toBeUndefined();
+  });
+
+  it("returns undefined for empty content", () => {
+    expect(extractDescription("")).toBeUndefined();
+  });
+
+  it("skips blank lines before first content line", () => {
+    const content = "\n\n# Title\n\n\nActual description";
+    expect(extractDescription(content)).toBe("Actual description");
   });
 });

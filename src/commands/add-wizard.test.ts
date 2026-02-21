@@ -264,11 +264,8 @@ describe("wizard integration: --agent flag skips agent selection", () => {
       { name: "skill-b", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-b/SKILL.md" },
     ]);
 
-    // Wizard prompts: select all skills, skip agent (because --agent), project scope, symlink method, confirm
+    // Wizard prompts: select all skills, skip agent (--agent), no scope/method prompts, confirm
     mockPromptCheckboxList.mockResolvedValue([0, 1]); // select all skills
-    mockPromptChoice
-      .mockResolvedValueOnce(0)  // scope: project
-      .mockResolvedValueOnce(0); // method: symlink
     mockPromptConfirm.mockResolvedValue(true);
 
     await addCommand("owner/repo", { agent: ["claude-code"] });
@@ -276,6 +273,8 @@ describe("wizard integration: --agent flag skips agent selection", () => {
     // Agent checkbox should NOT be called (--agent flag)
     // Skill checkbox IS called (multi-skill)
     expect(mockPromptCheckboxList).toHaveBeenCalledTimes(1);
+    // Scope/method prompts removed
+    expect(mockPromptChoice).not.toHaveBeenCalled();
   });
 });
 
@@ -288,17 +287,14 @@ describe("wizard integration: --global flag skips scope selection", () => {
       { name: "skill-b", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-b/SKILL.md" },
     ]);
 
-    // Wizard: skills, agents, (no scope), method, confirm
-    mockPromptCheckboxList
-      .mockResolvedValueOnce([0, 1])  // skills
-      .mockResolvedValueOnce([0]);     // agents
-    mockPromptChoice.mockResolvedValueOnce(0); // method: symlink (no scope prompt)
+    // Wizard: skills, (no agents - 1 agent), no scope, no method, confirm
+    mockPromptCheckboxList.mockResolvedValueOnce([0, 1]); // skills
     mockPromptConfirm.mockResolvedValue(true);
 
     await addCommand("owner/repo", { global: true });
 
-    // Only 1 promptChoice call (method), not 2 (scope + method)
-    expect(mockPromptChoice).toHaveBeenCalledTimes(1);
+    // No scope or method prompts
+    expect(mockPromptChoice).not.toHaveBeenCalled();
   });
 });
 
@@ -311,12 +307,7 @@ describe("wizard integration: abort at confirmation", () => {
       { name: "skill-b", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-b/SKILL.md" },
     ]);
 
-    mockPromptCheckboxList
-      .mockResolvedValueOnce([0, 1])
-      .mockResolvedValueOnce([0]);
-    mockPromptChoice
-      .mockResolvedValueOnce(0)
-      .mockResolvedValueOnce(0);
+    mockPromptCheckboxList.mockResolvedValueOnce([0, 1]); // skills (1 agent, no agent prompt)
     mockPromptConfirm.mockResolvedValue(false); // user says NO
 
     const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
@@ -326,9 +317,82 @@ describe("wizard integration: abort at confirmation", () => {
     await expect(addCommand("owner/repo", {})).rejects.toThrow("process.exit");
     mockExit.mockRestore();
 
+    // No scope/method prompts
+    expect(mockPromptChoice).not.toHaveBeenCalled();
     // No skills should have been installed
     expect(mockWriteFileSync).not.toHaveBeenCalled();
     expect(mockInstallSymlink).not.toHaveBeenCalled();
     expect(mockInstallCopy).not.toHaveBeenCalled();
+  });
+});
+
+// TC-014: Wizard shows only skills + confirm for single-agent (no scope/method prompts)
+describe("wizard integration: TC-014 no scope/method prompts for single-agent", () => {
+  it("shows skills selection and confirmation only", async () => {
+    const agents = [makeAgent()];
+    mockDetectInstalledAgents.mockResolvedValue(agents);
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "skill-a", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-a/SKILL.md" },
+      { name: "skill-b", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-b/SKILL.md" },
+    ]);
+
+    mockPromptCheckboxList.mockResolvedValueOnce([0, 1]); // select both skills
+    mockPromptConfirm.mockResolvedValue(true);
+
+    await addCommand("owner/repo", {});
+
+    // Only one checkbox prompt (skills, not agents)
+    expect(mockPromptCheckboxList).toHaveBeenCalledTimes(1);
+    // No scope or method prompts
+    expect(mockPromptChoice).not.toHaveBeenCalled();
+    // Confirm was called once
+    expect(mockPromptConfirm).toHaveBeenCalledTimes(1);
+    // Installation proceeded
+    expect(mockWriteFileSync).toHaveBeenCalled();
+  });
+});
+
+// TC-015: Multi-agent shows agent selection but still no scope/method prompts
+describe("wizard integration: TC-015 multi-agent no scope/method prompts", () => {
+  it("shows skills + agents checkboxes and confirmation only", async () => {
+    const agents = [makeAgent(), makeAgent({ id: "cursor", displayName: "Cursor" })];
+    mockDetectInstalledAgents.mockResolvedValue(agents);
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "skill-a", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-a/SKILL.md" },
+      { name: "skill-b", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-b/SKILL.md" },
+    ]);
+
+    mockPromptCheckboxList
+      .mockResolvedValueOnce([0, 1])  // skills
+      .mockResolvedValueOnce([0]);     // agents
+    mockPromptConfirm.mockResolvedValue(true);
+
+    await addCommand("owner/repo", {});
+
+    // Two checkbox prompts: skills + agents
+    expect(mockPromptCheckboxList).toHaveBeenCalledTimes(2);
+    // No scope or method prompts
+    expect(mockPromptChoice).not.toHaveBeenCalled();
+    expect(mockPromptConfirm).toHaveBeenCalledTimes(1);
+  });
+});
+
+// TC-016: --copy flag causes copy behavior instead of symlink
+describe("wizard integration: TC-016 --copy flag", () => {
+  it("accepts --copy flag without error and completes installation", async () => {
+    const agents = [makeAgent()];
+    mockDetectInstalledAgents.mockResolvedValue(agents);
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "skill-a", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-a/SKILL.md" },
+      { name: "skill-b", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-b/SKILL.md" },
+    ]);
+
+    mockPromptCheckboxList.mockResolvedValueOnce([0, 1]);
+    mockPromptConfirm.mockResolvedValue(true);
+
+    // Should not throw - --copy is a valid flag
+    await addCommand("owner/repo", { copy: true });
+
+    expect(mockWriteFileSync).toHaveBeenCalled();
   });
 });

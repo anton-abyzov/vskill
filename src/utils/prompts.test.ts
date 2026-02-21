@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Readable, Writable } from "node:stream";
-import { isTTY, createPrompter } from "./prompts.js";
+import { isTTY, createPrompter, isEscapeSequence, parseToggleInput } from "./prompts.js";
 
 describe("isTTY", () => {
   it("returns false when stdin.isTTY is undefined", () => {
@@ -191,5 +191,172 @@ describe("createPrompter", () => {
       await prompter.promptConfirm("Proceed?", false);
       expect(outputData).toContain("y/N");
     });
+  });
+
+  describe("escape sequence handling in promptCheckboxList", () => {
+    it("ignores arrow key escape sequences and processes subsequent input", async () => {
+      // Simulate: up arrow (ignored), then toggle item 1, then confirm
+      const input = makeInput("\x1b[A\n1\n\n");
+      const prompter = createPrompter(input, output);
+
+      const result = await prompter.promptCheckboxList([
+        { label: "skill-one", checked: false },
+        { label: "skill-two", checked: false },
+        { label: "skill-three", checked: false },
+      ]);
+
+      // Arrow key ignored; only item 1 (index 0) toggled on
+      expect(result).toEqual([0]);
+    });
+
+    it("ignores mixed escape+input line like \\x1b[A\\x1b[B6 and parses the 6", async () => {
+      // Simulate what real terminal sends: arrow escapes + number on same readline
+      const input = makeInput("\x1b[A\x1b[B6\n\n");
+      const prompter = createPrompter(input, output);
+
+      const result = await prompter.promptCheckboxList([
+        { label: "s1", checked: false },
+        { label: "s2", checked: false },
+        { label: "s3", checked: false },
+        { label: "s4", checked: false },
+        { label: "s5", checked: false },
+        { label: "s6", checked: false },
+      ]);
+
+      // Escape sequences stripped; "6" parsed → item 6 (index 5) toggled
+      expect(result).toEqual([5]);
+    });
+
+    it("toggles a range of items with '1-2' input", async () => {
+      const input = makeInput("1-2\n\n");
+      const prompter = createPrompter(input, output);
+
+      const result = await prompter.promptCheckboxList([
+        { label: "skill-one", checked: false },
+        { label: "skill-two", checked: false },
+        { label: "skill-three", checked: false },
+      ]);
+
+      expect(result).toEqual([0, 1]);
+    });
+
+    it("toggles comma-separated items with '1,3' input", async () => {
+      const input = makeInput("1,3\n\n");
+      const prompter = createPrompter(input, output);
+
+      const result = await prompter.promptCheckboxList([
+        { label: "skill-one", checked: false },
+        { label: "skill-two", checked: false },
+        { label: "skill-three", checked: false },
+      ]);
+
+      expect(result).toEqual([0, 2]);
+    });
+
+    it("render output includes usage instructions", async () => {
+      const input = makeInput("\n");
+      const prompter = createPrompter(input, output);
+
+      await prompter.promptCheckboxList([{ label: "test-skill" }]);
+
+      expect(outputData).toContain("Enter=done");
+    });
+  });
+
+  describe("escape sequence handling in promptChoice", () => {
+    it("ignores arrow key escape sequences and waits for valid input", async () => {
+      // Down arrow (ignored), then "1"
+      const input = makeInput("\x1b[B\n1\n");
+      const prompter = createPrompter(input, output);
+
+      const result = await prompter.promptChoice("Scope:", [
+        { label: "Project" },
+        { label: "Global" },
+      ]);
+
+      // Arrow key ignored; "1" accepted → index 0
+      expect(result).toBe(0);
+    });
+  });
+});
+
+describe("isEscapeSequence", () => {
+  it("returns true for up arrow escape sequence", () => {
+    expect(isEscapeSequence("\x1b[A")).toBe(true);
+  });
+
+  it("returns true for down arrow escape sequence", () => {
+    expect(isEscapeSequence("\x1b[B")).toBe(true);
+  });
+
+  it("returns true for right arrow escape sequence", () => {
+    expect(isEscapeSequence("\x1b[C")).toBe(true);
+  });
+
+  it("returns true for left arrow escape sequence", () => {
+    expect(isEscapeSequence("\x1b[D")).toBe(true);
+  });
+
+  it("returns true for multiple chained escape sequences", () => {
+    expect(isEscapeSequence("\x1b[A\x1b[B")).toBe(true);
+  });
+
+  it("returns false for a normal number", () => {
+    expect(isEscapeSequence("1")).toBe(false);
+  });
+
+  it("returns false for toggle-all 'a'", () => {
+    expect(isEscapeSequence("a")).toBe(false);
+  });
+
+  it("returns false for empty string", () => {
+    expect(isEscapeSequence("")).toBe(false);
+  });
+
+  it("returns false for mixed escape + real input", () => {
+    // "\x1b[A6" has a real "6" after stripping → not purely escape sequences
+    expect(isEscapeSequence("\x1b[A6")).toBe(false);
+  });
+});
+
+describe("parseToggleInput", () => {
+  it("parses single number '2' → [1]", () => {
+    expect(parseToggleInput("2", 5)).toEqual([1]);
+  });
+
+  it("parses range '1-3' → [0, 1, 2]", () => {
+    expect(parseToggleInput("1-3", 5)).toEqual([0, 1, 2]);
+  });
+
+  it("parses comma-separated '1,3,5' → [0, 2, 4]", () => {
+    expect(parseToggleInput("1,3,5", 5)).toEqual([0, 2, 4]);
+  });
+
+  it("parses mixed '1-3,5' → [0, 1, 2, 4]", () => {
+    expect(parseToggleInput("1-3,5", 10)).toEqual([0, 1, 2, 4]);
+  });
+
+  it("rejects invalid range '5-2' → []", () => {
+    expect(parseToggleInput("5-2", 5)).toEqual([]);
+  });
+
+  it("rejects out-of-bounds '0' → []", () => {
+    expect(parseToggleInput("0", 5)).toEqual([]);
+  });
+
+  it("rejects out-of-bounds '999' with maxIndex 5 → []", () => {
+    expect(parseToggleInput("999", 5)).toEqual([]);
+  });
+
+  it("deduplicates '1,1,2' → [0, 1]", () => {
+    expect(parseToggleInput("1,1,2", 5)).toEqual([0, 1]);
+  });
+
+  it("returns empty for non-numeric input", () => {
+    expect(parseToggleInput("abc", 5)).toEqual([]);
+  });
+
+  it("returns sorted result for range", () => {
+    expect(parseToggleInput("3-5", 10)).toEqual([2, 3, 4]);
   });
 });

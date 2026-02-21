@@ -30,6 +30,7 @@ program
   .option("--force", "Install even if scan finds issues")
   .option("--agent <id>", "Install to specific agent only (repeatable)", collect, [])
   .option("--cwd", "Install relative to current directory instead of project root")
+  .option("--copy", "Install as independent copies instead of symlinks (default: symlink)")
   .option("-y, --yes", "Skip all prompts, use defaults (all skills, all agents, project scope, symlink)")
   .action(async (source: string, opts) => {
     const { addCommand } = await import("./commands/add.js");

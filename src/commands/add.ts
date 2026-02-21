@@ -120,6 +120,7 @@ interface AddOptions {
   agent?: string[];
   cwd?: boolean;
   yes?: boolean;
+  copy?: boolean;
 }
 
 /**
@@ -579,7 +580,7 @@ export async function addCommand(
   let selectedSkills = discovered;
   let selectedAgents = agents;
   let useGlobal = !!opts.global;
-  let method: "symlink" | "copy" = "symlink";
+  const method: "symlink" | "copy" = opts.copy ? "copy" : "symlink";
 
   const interactive = discovered.length > 1 && isTTY() && !opts.yes;
 
@@ -588,8 +589,8 @@ export async function addCommand(
 
     // Step 1: Skill selection
     const skillIndices = await prompter.promptCheckboxList(
-      discovered.map((s) => ({ label: s.name, checked: true })),
-      { title: "Select skills to install (space to toggle)" },
+      discovered.map((s) => ({ label: s.name, description: s.description, checked: true })),
+      { title: "Select skills to install" },
     );
     selectedSkills = skillIndices.map((i) => discovered[i]);
 
@@ -613,33 +614,15 @@ export async function addCommand(
       }
     }
 
-    // Step 3: Scope selection (skip if --global flag provided)
-    if (!opts.global) {
-      const prompter3 = createPrompter();
-      const scopeIdx = await prompter3.promptChoice("Installation scope:", [
-        { label: "Project", hint: "Install in current directory (committed with your project)" },
-        { label: "Global", hint: "Install to ~/.<agent>/ directories" },
-      ]);
-      useGlobal = scopeIdx === 1;
-    }
-
-    // Step 4: Install method
-    const prompter4 = createPrompter();
-    const methodIdx = await prompter4.promptChoice("Installation method:", [
-      { label: "Symlink", hint: "Single source of truth, easy updates" },
-      { label: "Copy", hint: "Independent copies to all agents" },
-    ]);
-    method = methodIdx === 0 ? "symlink" : "copy";
-
-    // Step 5: Summary and confirmation
+    // Step 3: Summary and confirmation
     console.log(dim("\n--- Installation Summary ---"));
     console.log(`  Skills: ${selectedSkills.map((s) => s.name).join(", ")}`);
     console.log(`  Agents: ${selectedAgents.map((a) => a.displayName).join(", ")}`);
     console.log(`  Scope:  ${useGlobal ? "Global" : "Project"}`);
     console.log(`  Method: ${method}`);
 
-    const prompter5 = createPrompter();
-    const proceed = await prompter5.promptConfirm("\nProceed?", true);
+    const prompter3 = createPrompter();
+    const proceed = await prompter3.promptConfirm("\nProceed?", true);
     if (!proceed) {
       return process.exit(0);
     }

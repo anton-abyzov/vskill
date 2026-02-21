@@ -60,7 +60,7 @@ export function parseGitHubSource(
 export function validateSkillName(name: string): boolean {
   if (!name) return false;
   if (name.includes("\0")) return false;
-  if (name.includes("../") || name.includes("..\\")) return false;
+  if (name.includes("/") || name.includes("\\")) return false;
   if (name === ".." || name === ".") return false;
   return true;
 }

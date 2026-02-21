@@ -28,6 +28,7 @@ import type { BlocklistEntry } from "../blocklist/types.js";
 import { getSkill } from "../api/client.js";
 import { checkPlatformSecurity } from "../security/index.js";
 import { discoverSkills } from "../discovery/github-tree.js";
+import { parseGitHubSource } from "../utils/validation.js";
 import type { DiscoveredSkill } from "../discovery/github-tree.js";
 import {
   bold,
@@ -38,6 +39,8 @@ import {
   cyan,
   spinner,
 } from "../utils/output.js";
+import { isTTY, createPrompter } from "../utils/prompts.js";
+import { installSymlink, installCopy } from "../installer/canonical.js";
 
 // ---------------------------------------------------------------------------
 // Command file filter (prevents plugin internals leaking as slash commands)
@@ -116,6 +119,7 @@ interface AddOptions {
   force?: boolean;
   agent?: string[];
   cwd?: boolean;
+  yes?: boolean;
 }
 
 /**
@@ -359,7 +363,13 @@ async function installPluginDir(
     );
     process.exit(1);
   }
-  agents = filterAgents(agents, opts.agent);
+  try {
+    agents = filterAgents(agents, opts.agent);
+  } catch (e) {
+    console.error(red((e as Error).message));
+    process.exit(1);
+    return;
+  }
 
   // Read version from marketplace.json
   const marketplacePath = join(basePath, ".claude-plugin", "marketplace.json");
@@ -411,7 +421,7 @@ async function installPluginDir(
     installedAt: new Date().toISOString(),
     source: `local:${basePath}`,
   };
-  lock.agents = agents.map((a: { id: string }) => a.id);
+  lock.agents = [...new Set([...(lock.agents || []), ...agents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock);
 
   // Print summary
@@ -511,6 +521,12 @@ export async function addCommand(
     return installPluginDir(opts.pluginDir, opts.plugin, opts);
   }
 
+  // Normalize full GitHub URLs to owner/repo shorthand
+  const parsed = parseGitHubSource(source);
+  if (parsed) {
+    source = `${parsed.owner}/${parsed.repo}`;
+  }
+
   // GitHub mode: owner/repo
   const parts = source.split("/");
   if (parts.length !== 2) {
@@ -533,18 +549,98 @@ export async function addCommand(
     return installSingleSkillLegacy(owner, repo, undefined, opts);
   }
 
-  // Multi-skill install
+  // Detect agents
   let agents = await detectInstalledAgents();
   if (agents.length === 0) {
     console.error(red("No AI agents detected. Run ") + cyan("vskill init") + red(" first."));
     process.exit(1);
   }
-  agents = filterAgents(agents, opts.agent);
+  try {
+    agents = filterAgents(agents, opts.agent);
+  } catch (e) {
+    console.error(red((e as Error).message));
+    process.exit(1);
+    return;
+  }
 
+  // Determine selected skills, agents, scope, and method
+  let selectedSkills = discovered;
+  let selectedAgents = agents;
+  let useGlobal = !!opts.global;
+  let method: "symlink" | "copy" = "symlink";
+
+  const interactive = discovered.length > 1 && isTTY() && !opts.yes;
+
+  if (interactive) {
+    const prompter = createPrompter();
+
+    // Step 1: Skill selection
+    const skillIndices = await prompter.promptCheckboxList(
+      discovered.map((s) => ({ label: s.name, checked: true })),
+      { title: "Select skills to install (space to toggle)" },
+    );
+    selectedSkills = skillIndices.map((i) => discovered[i]);
+
+    if (selectedSkills.length === 0) {
+      console.log(dim("No skills selected. Aborting."));
+      return process.exit(0);
+    }
+
+    // Step 2: Agent selection (skip if --agent flag provided or only 1 agent)
+    if (!opts.agent?.length && agents.length > 1) {
+      const prompter2 = createPrompter();
+      const agentIndices = await prompter2.promptCheckboxList(
+        agents.map((a) => ({ label: a.displayName, description: a.parentCompany, checked: true })),
+        { title: `Detected ${agents.length} agents` },
+      );
+      selectedAgents = agentIndices.map((i) => agents[i]);
+
+      if (selectedAgents.length === 0) {
+        console.log(dim("No agents selected. Aborting."));
+        return process.exit(0);
+      }
+    }
+
+    // Step 3: Scope selection (skip if --global flag provided)
+    if (!opts.global) {
+      const prompter3 = createPrompter();
+      const scopeIdx = await prompter3.promptChoice("Installation scope:", [
+        { label: "Project", hint: "Install in current directory (committed with your project)" },
+        { label: "Global", hint: "Install to ~/.<agent>/ directories" },
+      ]);
+      useGlobal = scopeIdx === 1;
+    }
+
+    // Step 4: Install method
+    const prompter4 = createPrompter();
+    const methodIdx = await prompter4.promptChoice("Installation method:", [
+      { label: "Symlink", hint: "Single source of truth, easy updates" },
+      { label: "Copy", hint: "Independent copies to all agents" },
+    ]);
+    method = methodIdx === 0 ? "symlink" : "copy";
+
+    // Step 5: Summary and confirmation
+    console.log(dim("\n--- Installation Summary ---"));
+    console.log(`  Skills: ${selectedSkills.map((s) => s.name).join(", ")}`);
+    console.log(`  Agents: ${selectedAgents.map((a) => a.displayName).join(", ")}`);
+    console.log(`  Scope:  ${useGlobal ? "Global" : "Project"}`);
+    console.log(`  Method: ${method}`);
+
+    const prompter5 = createPrompter();
+    const proceed = await prompter5.promptConfirm("\nProceed?", true);
+    if (!proceed) {
+      return process.exit(0);
+    }
+  }
+
+  // Override global flag based on wizard choice
+  if (useGlobal) opts.global = true;
+
+  // Install selected skills
   const results: SkillInstallResult[] = [];
-  for (const skill of discovered) {
+  for (const skill of selectedSkills) {
     console.log(dim(`\nInstalling skill: ${bold(skill.name)}...`));
-    const result = await installOneGitHubSkill(owner, repo, skill.name, skill.rawUrl, opts, agents);
+    const result = await installOneGitHubSkill(owner, repo, skill.name, skill.rawUrl, opts, selectedAgents);
     results.push(result);
   }
 
@@ -561,13 +657,11 @@ export async function addCommand(
       };
     }
   }
-  lock.agents = agents.map((a: { id: string }) => a.id);
+  lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock);
 
   // Summary
-  const installed = results.filter((r) => r.installed);
-  const skipped = results.filter((r) => !r.installed);
-  console.log(green(`\nInstalled ${bold(String(installed.length))} of ${results.length} skills:\n`));
+  console.log(green(`\nInstalled ${bold(String(results.filter((r) => r.installed).length))} of ${results.length} skills:\n`));
   for (const r of results) {
     const icon = r.installed ? green("✓") : red("✗");
     const detail = r.installed ? dim(`(${r.verdict})`) : red(`(${r.verdict})`);
@@ -664,7 +758,13 @@ async function installFromRegistry(
     console.error(red("No AI agents detected. Run ") + cyan("vskill init") + red(" first."));
     process.exit(1);
   }
-  agents = filterAgents(agents, opts.agent);
+  try {
+    agents = filterAgents(agents, opts.agent);
+  } catch (e) {
+    console.error(red((e as Error).message));
+    process.exit(1);
+    return;
+  }
 
   // Install to each agent
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
@@ -694,7 +794,7 @@ async function installFromRegistry(
     installedAt: new Date().toISOString(),
     source: `registry:${skillName}`,
   };
-  lock.agents = agents.map((a: { id: string }) => a.id);
+  lock.agents = [...new Set([...(lock.agents || []), ...agents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock);
 
   console.log(green(`\nInstalled ${bold(skillName)} to ${locations.length} agent${locations.length === 1 ? "" : "s"}:\n`));
@@ -821,7 +921,13 @@ async function installSingleSkillLegacy(
     );
     process.exit(1);
   }
-  agents = filterAgents(agents, opts.agent);
+  try {
+    agents = filterAgents(agents, opts.agent);
+  } catch (e) {
+    console.error(red((e as Error).message));
+    process.exit(1);
+    return;
+  }
 
   // Install to each agent
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
@@ -853,7 +959,7 @@ async function installSingleSkillLegacy(
     installedAt: new Date().toISOString(),
     source: `github:${owner}/${repo}`,
   };
-  lock.agents = agents.map((a: { id: string }) => a.id);
+  lock.agents = [...new Set([...(lock.agents || []), ...agents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock);
 
   // Print summary

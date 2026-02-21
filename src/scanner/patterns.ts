@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Tier 1 Security Scan Patterns
-// 37 regex-based patterns for static analysis of skill content.
+// 38 regex-based patterns for static analysis of skill content.
 // ---------------------------------------------------------------------------
 
 // ---- Types ----------------------------------------------------------------
@@ -103,7 +103,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Pipe-to-shell execution",
     severity: "critical",
     description: "Detects curl/wget output piped directly to a shell interpreter (download-and-execute)",
-    pattern: /\b(?:curl|wget)\b[^|]*\|\s*(?:ba|z|da|k)?sh\b/g,
+    pattern: /\b(?:curl|wget)\b[^|]*\|\s*(?:(?:\/\w+)*\/)?(?:env\s+)?(?:ba|z|da|k)?sh\b/g,
     category: "command-injection",
   },
 

@@ -1262,12 +1262,16 @@ describe("addCommand --agent filter", () => {
     mockFilterAgents.mockImplementation(() => {
       throw new Error("Unknown agent(s): nonexistent. Available: claude-code");
     });
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+    const mockConsoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(
-      addCommand("owner/safe-repo", { agent: ["nonexistent"] }),
-    ).rejects.toThrow("Unknown agent(s): nonexistent");
+    await addCommand("owner/safe-repo", { agent: ["nonexistent"] });
 
+    expect(mockExit).toHaveBeenCalledWith(1);
     // Should NOT have written any files
     expect(mockWriteFileSync).not.toHaveBeenCalled();
+
+    mockExit.mockRestore();
+    mockConsoleError.mockRestore();
   });
 });

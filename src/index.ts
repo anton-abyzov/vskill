@@ -13,6 +13,11 @@ program
   .description("Secure multi-platform AI skill installer -- scan before you install")
   .version(pkg.version, "-v, --version");
 
+function collect(val: string, acc: string[]): string[] {
+  acc.push(val);
+  return acc;
+}
+
 program
   .command("install <source>")
   .alias("i")
@@ -23,6 +28,8 @@ program
   .option("--plugin-dir <path>", "Local plugin directory path")
   .option("--global", "Install to global agent directories")
   .option("--force", "Install even if scan finds issues")
+  .option("--agent <id>", "Install to specific agent only (repeatable)", collect, [])
+  .option("--cwd", "Install relative to current directory instead of project root")
   .action(async (source: string, opts) => {
     const { addCommand } = await import("./commands/add.js");
     await addCommand(source, opts);

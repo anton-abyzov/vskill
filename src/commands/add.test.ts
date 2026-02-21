@@ -106,6 +106,22 @@ vi.mock("../discovery/github-tree.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock project root resolution
+// ---------------------------------------------------------------------------
+const mockFindProjectRoot = vi.fn();
+vi.mock("../utils/project-root.js", () => ({
+  findProjectRoot: (...args: unknown[]) => mockFindProjectRoot(...args),
+}));
+
+// ---------------------------------------------------------------------------
+// Mock agent filter (pass-through by default)
+// ---------------------------------------------------------------------------
+const mockFilterAgents = vi.fn();
+vi.mock("../utils/agent-filter.js", () => ({
+  filterAgents: (...args: unknown[]) => mockFilterAgents(...args),
+}));
+
+// ---------------------------------------------------------------------------
 // Mock utils/output (suppress console output in tests)
 // ---------------------------------------------------------------------------
 vi.mock("../utils/output.js", () => ({
@@ -164,6 +180,10 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   // Default: platform security returns null (non-fatal, no external results)
   mockCheckPlatformSecurity.mockResolvedValue(null);
+  // Default: findProjectRoot returns cwd (same as old behavior)
+  mockFindProjectRoot.mockReturnValue(process.cwd());
+  // Default: filterAgents passes through agents unchanged
+  mockFilterAgents.mockImplementation((agents: unknown[]) => agents);
 });
 
 describe("addCommand with --plugin option (plugin directory support)", () => {
@@ -1121,5 +1141,133 @@ describe("addCommand registry install (no slash in source)", () => {
 
     expect(mockExit).toHaveBeenCalledWith(1);
     mockExit.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-012 through T-015: Smart project root and agent filter integration
+// ---------------------------------------------------------------------------
+
+describe("addCommand smart project root resolution", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  // TC-012: Install from subdirectory resolves to project root
+  it("installs skill relative to project root when cwd is a subdirectory", async () => {
+    const projectRoot = "/home/user/project";
+    mockFindProjectRoot.mockReturnValue(projectRoot);
+
+    await addCommand("owner/safe-repo", {});
+
+    // writeFileSync should write to <projectRoot>/.claude/commands/<skill>/SKILL.md
+    expect(mockWriteFileSync).toHaveBeenCalled();
+    const writePath = mockWriteFileSync.mock.calls[0][0] as string;
+    expect(writePath).toContain(projectRoot);
+    expect(writePath).toContain(".claude/commands");
+  });
+
+  // TC-013: --cwd flag uses process.cwd() directly
+  it("installs relative to process.cwd() when --cwd flag is used", async () => {
+    const projectRoot = "/home/user/project";
+    mockFindProjectRoot.mockReturnValue(projectRoot);
+
+    await addCommand("owner/safe-repo", { cwd: true });
+
+    // findProjectRoot should NOT be consulted for the base dir when --cwd
+    // writeFileSync should write relative to process.cwd(), not projectRoot
+    const writePath = mockWriteFileSync.mock.calls[0][0] as string;
+    expect(writePath).toContain(process.cwd());
+    // Should NOT be under projectRoot (unless cwd === projectRoot)
+    expect(writePath).not.toContain(projectRoot);
+  });
+});
+
+describe("addCommand --agent filter", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  // TC-014: --agent filters to specific agent
+  it("installs only to the filtered agent when --agent is provided", async () => {
+    const claude = makeAgent({ id: "claude-code", displayName: "Claude Code" });
+    const cursor = makeAgent({
+      id: "cursor",
+      displayName: "Cursor",
+      localSkillsDir: ".cursor/skills",
+      globalSkillsDir: "~/.cursor/skills",
+    });
+
+    mockDetectInstalledAgents.mockResolvedValue([claude, cursor]);
+    // filterAgents returns only claude when agent=["claude-code"]
+    mockFilterAgents.mockReturnValue([claude]);
+
+    await addCommand("owner/safe-repo", { agent: ["claude-code"] });
+
+    // filterAgents should have been called with both agents and the filter
+    expect(mockFilterAgents).toHaveBeenCalledWith(
+      [claude, cursor],
+      ["claude-code"],
+    );
+
+    // Only 1 write (to claude-code), not 2
+    expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
+    const writePath = mockWriteFileSync.mock.calls[0][0] as string;
+    expect(writePath).toContain(".claude/commands");
+  });
+
+  // TC-015: --agent with invalid ID shows error
+  it("exits with error when --agent specifies unknown ID", async () => {
+    const claude = makeAgent();
+    mockDetectInstalledAgents.mockResolvedValue([claude]);
+    mockFilterAgents.mockImplementation(() => {
+      throw new Error("Unknown agent(s): nonexistent. Available: claude-code");
+    });
+
+    await expect(
+      addCommand("owner/safe-repo", { agent: ["nonexistent"] }),
+    ).rejects.toThrow("Unknown agent(s): nonexistent");
+
+    // Should NOT have written any files
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
   });
 });

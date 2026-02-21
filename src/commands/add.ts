@@ -17,6 +17,8 @@ import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import { resolveTilde } from "../utils/paths.js";
+import { findProjectRoot } from "../utils/project-root.js";
+import { filterAgents } from "../utils/agent-filter.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { ensureLockfile, writeLockfile } from "../lockfile/index.js";
 import { runTier1Scan } from "../scanner/index.js";
@@ -112,6 +114,47 @@ interface AddOptions {
   pluginDir?: string;
   global?: boolean;
   force?: boolean;
+  agent?: string[];
+  cwd?: boolean;
+}
+
+/**
+ * Resolve the base directory for local skill installation.
+ *
+ * Priority:
+ * 1. `--global` -> agent's globalSkillsDir
+ * 2. `--cwd`   -> process.cwd() + agent's localSkillsDir
+ * 3. default   -> findProjectRoot(cwd) + agent's localSkillsDir (with fallback warning)
+ */
+function resolveInstallBase(
+  opts: AddOptions,
+  agent: { globalSkillsDir: string; localSkillsDir: string },
+): string {
+  if (opts.global) {
+    return resolveTilde(agent.globalSkillsDir);
+  }
+
+  const cwd = process.cwd();
+
+  if (opts.cwd) {
+    return join(cwd, agent.localSkillsDir);
+  }
+
+  const projectRoot = findProjectRoot(cwd);
+  if (!projectRoot) {
+    console.log(
+      yellow("No project root found; installing relative to current directory."),
+    );
+    return join(cwd, agent.localSkillsDir);
+  }
+
+  if (projectRoot !== cwd) {
+    console.log(
+      dim(`Project root: ${projectRoot}`),
+    );
+  }
+
+  return join(projectRoot, agent.localSkillsDir);
 }
 
 async function fetchSkillContent(url: string): Promise<string> {
@@ -306,8 +349,8 @@ async function installPluginDir(
     console.log(yellow("\n--force: installing despite CONCERNS.\n"));
   }
 
-  // Detect installed agents
-  const agents = await detectInstalledAgents();
+  // Detect installed agents and apply --agent filter
+  let agents = await detectInstalledAgents();
   if (agents.length === 0) {
     console.error(
       red("No AI agents detected. Run ") +
@@ -316,6 +359,7 @@ async function installPluginDir(
     );
     process.exit(1);
   }
+  agents = filterAgents(agents, opts.agent);
 
   // Read version from marketplace.json
   const marketplacePath = join(basePath, ".claude-plugin", "marketplace.json");
@@ -338,7 +382,7 @@ async function installPluginDir(
 
   for (const agent of agents) {
     const cacheDir = join(
-      opts.global ? resolveTilde(agent.globalSkillsDir) : join(process.cwd(), agent.localSkillsDir),
+      resolveInstallBase(opts, agent),
       pluginName,
     );
 
@@ -443,9 +487,7 @@ async function installOneGitHubSkill(
   // Install to each agent
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
   for (const agent of agents) {
-    const baseDir = opts.global
-      ? resolveTilde(agent.globalSkillsDir)
-      : join(process.cwd(), agent.localSkillsDir);
+    const baseDir = resolveInstallBase(opts, agent);
     const skillDir = join(baseDir, skillName);
     try {
       mkdirSync(skillDir, { recursive: true });
@@ -492,11 +534,12 @@ export async function addCommand(
   }
 
   // Multi-skill install
-  const agents = await detectInstalledAgents();
+  let agents = await detectInstalledAgents();
   if (agents.length === 0) {
     console.error(red("No AI agents detected. Run ") + cyan("vskill init") + red(" first."));
     process.exit(1);
   }
+  agents = filterAgents(agents, opts.agent);
 
   const results: SkillInstallResult[] = [];
   for (const skill of discovered) {
@@ -615,21 +658,20 @@ async function installFromRegistry(
     process.exit(1);
   }
 
-  // Detect installed agents
-  const agents = await detectInstalledAgents();
+  // Detect installed agents and apply --agent filter
+  let agents = await detectInstalledAgents();
   if (agents.length === 0) {
     console.error(red("No AI agents detected. Run ") + cyan("vskill init") + red(" first."));
     process.exit(1);
   }
+  agents = filterAgents(agents, opts.agent);
 
   // Install to each agent
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
   const locations: string[] = [];
 
   for (const agent of agents) {
-    const baseDir = opts.global
-      ? resolveTilde(agent.globalSkillsDir)
-      : join(process.cwd(), agent.localSkillsDir);
+    const baseDir = resolveInstallBase(opts, agent);
     const skillDir = join(baseDir, skillName);
     try {
       mkdirSync(skillDir, { recursive: true });
@@ -769,8 +811,8 @@ async function installSingleSkillLegacy(
     console.log(yellow("\n--force: installing despite CONCERNS.\n"));
   }
 
-  // Detect installed agents
-  const agents = await detectInstalledAgents();
+  // Detect installed agents and apply --agent filter
+  let agents = await detectInstalledAgents();
   if (agents.length === 0) {
     console.error(
       red("No AI agents detected. Run ") +
@@ -779,15 +821,14 @@ async function installSingleSkillLegacy(
     );
     process.exit(1);
   }
+  agents = filterAgents(agents, opts.agent);
 
   // Install to each agent
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
   const locations: string[] = [];
 
   for (const agent of agents) {
-    const baseDir = opts.global
-      ? resolveTilde(agent.globalSkillsDir)
-      : join(process.cwd(), agent.localSkillsDir);
+    const baseDir = resolveInstallBase(opts, agent);
 
     const skillDir = join(baseDir, skillName);
 

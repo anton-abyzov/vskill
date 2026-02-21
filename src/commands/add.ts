@@ -356,11 +356,7 @@ async function installPluginDir(
   // Detect installed agents and apply --agent filter
   let agents = await detectInstalledAgents();
   if (agents.length === 0) {
-    console.error(
-      red("No AI agents detected. Run ") +
-        cyan("vskill init") +
-        red(" first.")
-    );
+    console.error(red("No AI agents detected. Install Claude Code, Cursor, or another supported agent and try again."));
     process.exit(1);
   }
   try {
@@ -552,7 +548,7 @@ export async function addCommand(
   // Detect agents
   let agents = await detectInstalledAgents();
   if (agents.length === 0) {
-    console.error(red("No AI agents detected. Run ") + cyan("vskill init") + red(" first."));
+    console.error(red("No AI agents detected. Install Claude Code, Cursor, or another supported agent and try again."));
     process.exit(1);
   }
   try {
@@ -755,7 +751,7 @@ async function installFromRegistry(
   // Detect installed agents and apply --agent filter
   let agents = await detectInstalledAgents();
   if (agents.length === 0) {
-    console.error(red("No AI agents detected. Run ") + cyan("vskill init") + red(" first."));
+    console.error(red("No AI agents detected. Install Claude Code, Cursor, or another supported agent and try again."));
     process.exit(1);
   }
   try {
@@ -914,11 +910,7 @@ async function installSingleSkillLegacy(
   // Detect installed agents and apply --agent filter
   let agents = await detectInstalledAgents();
   if (agents.length === 0) {
-    console.error(
-      red("No AI agents detected. Run ") +
-        cyan("vskill init") +
-        red(" first.")
-    );
+    console.error(red("No AI agents detected. Install Claude Code, Cursor, or another supported agent and try again."));
     process.exit(1);
   }
   try {

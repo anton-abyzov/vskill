@@ -48,6 +48,6 @@ export async function initCommand(): Promise<void> {
   }
 
   console.log(
-    dim(`\nRun ${cyan("vskill add <owner/repo>")} to install a skill.`)
+    dim(`\nRun ${cyan("vskill install <owner/repo>")} to install a skill.`)
   );
 }

@@ -2,7 +2,7 @@
 // vskill list -- show installed skills or detected agents
 // ---------------------------------------------------------------------------
 
-import { readLockfile } from "../lockfile/index.js";
+import { readLockfile, readSkillsShLock } from "../lockfile/index.js";
 import {
   detectInstalledAgents,
   AGENTS_REGISTRY,
@@ -75,15 +75,20 @@ async function listSkills(json?: boolean): Promise<void> {
     return;
   }
 
-  if (skillNames.length === 0) {
+  // Also read skills.sh lock file for cross-tool visibility
+  const skillsShEntries = readSkillsShLock();
+  const skillsShNames = new Set(skillsShEntries.map((e) => e.name));
+
+  if (skillNames.length === 0 && skillsShNames.size === 0) {
     console.log(dim("No skills installed yet."));
     console.log(
-      dim(`Run ${cyan("vskill add <owner/repo>")} to install a skill.`)
+      dim(`Run ${cyan("vskill install <owner/repo>")} to install a skill.`)
     );
     return;
   }
 
-  console.log(bold(`Installed Skills (${skillNames.length})\n`));
+  const totalCount = skillNames.length + [...skillsShNames].filter((n) => !lock.skills[n]).length;
+  console.log(bold(`Installed Skills (${totalCount})\n`));
 
   const headers = ["Skill", "Version", "Tier", "Source", "Installed"];
   const rows = skillNames.map((name) => {
@@ -102,6 +107,19 @@ async function listSkills(json?: boolean): Promise<void> {
       dim(s.installedAt ? new Date(s.installedAt).toLocaleDateString() : "-"),
     ];
   });
+
+  // Append skills from .skill-lock.json that aren't already in vskill.lock
+  for (const entry of skillsShEntries) {
+    if (!lock.skills[entry.name]) {
+      rows.push([
+        bold(entry.name),
+        "-",
+        dim("SCANNED"),
+        dim("skills.sh"),
+        dim("-"),
+      ]);
+    }
+  }
 
   console.log(table(headers, rows));
 }

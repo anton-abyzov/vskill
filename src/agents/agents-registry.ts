@@ -1,5 +1,5 @@
 /**
- * Agent Registry — 39 AI coding agents with metadata.
+ * Agent Registry — 50 AI coding agents with metadata.
  *
  * Each agent has detection paths, parent company info, and feature support.
  * Used to determine which agents can install/use verified skills.
@@ -40,9 +40,9 @@ export interface AgentDefinition {
 }
 
 /**
- * Complete registry of 39 AI coding agents.
+ * Complete registry of 50 AI coding agents.
  *
- * 7 universal agents, 32 non-universal agents.
+ * 7 universal agents, 43 non-universal agents.
  */
 export const AGENTS_REGISTRY: AgentDefinition[] = [
   // ----------------------------------------------------------------
@@ -120,7 +120,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
   },
 
   // ----------------------------------------------------------------
-  // Non-universal agents (32)
+  // Non-universal agents (43)
   // ----------------------------------------------------------------
   {
     id: 'antigravity',
@@ -145,8 +145,8 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
   {
     id: 'claude-code',
     displayName: 'Claude Code',
-    localSkillsDir: '.claude/commands',
-    globalSkillsDir: '~/.claude/commands',
+    localSkillsDir: '.claude/skills',
+    globalSkillsDir: '~/.claude/skills',
     isUniversal: false,
     detectInstalled: 'which claude',
     parentCompany: 'Anthropic',
@@ -441,6 +441,116 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     isUniversal: false,
     detectInstalled: 'which adal',
     parentCompany: 'Adal',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+  },
+  {
+    id: 'cortex',
+    displayName: 'Cortex',
+    localSkillsDir: '.cortex/skills',
+    globalSkillsDir: '~/.cortex/skills',
+    isUniversal: false,
+    detectInstalled: 'which cortex',
+    parentCompany: 'Cortex',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+  },
+  {
+    id: 'clawdbot',
+    displayName: 'Clawdbot',
+    localSkillsDir: '.clawdbot/skills',
+    globalSkillsDir: '~/.clawdbot/skills',
+    isUniversal: false,
+    detectInstalled: 'which clawdbot',
+    parentCompany: 'Clawdbot',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+  },
+  {
+    id: 'aider',
+    displayName: 'Aider',
+    localSkillsDir: '.aider/skills',
+    globalSkillsDir: '~/.aider/skills',
+    isUniversal: false,
+    detectInstalled: 'which aider',
+    parentCompany: 'Aider',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+  },
+  {
+    id: 'tabnine',
+    displayName: 'Tabnine Chat',
+    localSkillsDir: '.tabnine/skills',
+    globalSkillsDir: '~/.tabnine/skills',
+    isUniversal: false,
+    detectInstalled: 'which tabnine',
+    parentCompany: 'Tabnine',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+  },
+  {
+    id: 'devin',
+    displayName: 'Devin',
+    localSkillsDir: '.devin/skills',
+    globalSkillsDir: '~/.devin/skills',
+    isUniversal: false,
+    detectInstalled: 'which devin',
+    parentCompany: 'Cognition',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+  },
+  {
+    id: 'bolt-new',
+    displayName: 'bolt.new',
+    localSkillsDir: '.bolt/skills',
+    globalSkillsDir: '~/.bolt/skills',
+    isUniversal: false,
+    detectInstalled: 'which bolt',
+    parentCompany: 'StackBlitz',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+  },
+  {
+    id: 'v0',
+    displayName: 'v0',
+    localSkillsDir: '.v0/skills',
+    globalSkillsDir: '~/.v0/skills',
+    isUniversal: false,
+    detectInstalled: 'which v0',
+    parentCompany: 'Vercel',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+  },
+  {
+    id: 'gpt-pilot',
+    displayName: 'GPT Pilot',
+    localSkillsDir: '.gpt-pilot/skills',
+    globalSkillsDir: '~/.gpt-pilot/skills',
+    isUniversal: false,
+    detectInstalled: 'which gpt-pilot',
+    parentCompany: 'Pythagora',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+  },
+  {
+    id: 'plandex',
+    displayName: 'Plandex',
+    localSkillsDir: '.plandex/skills',
+    globalSkillsDir: '~/.plandex/skills',
+    isUniversal: false,
+    detectInstalled: 'which plandex',
+    parentCompany: 'Plandex',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+  },
+  {
+    id: 'sweep',
+    displayName: 'Sweep',
+    localSkillsDir: '.sweep/skills',
+    globalSkillsDir: '~/.sweep/skills',
+    isUniversal: false,
+    detectInstalled: 'which sweep',
+    parentCompany: 'Sweep AI',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+  },
+  {
+    id: 'mentat',
+    displayName: 'Mentat',
+    localSkillsDir: '.mentat/skills',
+    globalSkillsDir: '~/.mentat/skills',
+    isUniversal: false,
+    detectInstalled: 'which mentat',
+    parentCompany: 'AbanteAI',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
 ];

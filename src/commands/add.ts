@@ -29,6 +29,11 @@ import { getSkill } from "../api/client.js";
 import { checkPlatformSecurity } from "../security/index.js";
 import { discoverSkills } from "../discovery/github-tree.js";
 import { parseGitHubSource } from "../utils/validation.js";
+import {
+  parseSkillsShUrl,
+  isCompleteParsed,
+  isIncompleteParsed,
+} from "../resolvers/url-resolver.js";
 import type { DiscoveredSkill } from "../discovery/github-tree.js";
 import {
   bold,
@@ -532,6 +537,24 @@ export async function addCommand(
   // Plugin directory mode: local path with --plugin
   if (opts.pluginDir && opts.plugin) {
     return installPluginDir(opts.pluginDir, opts.plugin, opts);
+  }
+
+  // Skills.sh URL resolver — handle marketplace browse URLs
+  if (source.includes("://")) {
+    const skillsShResult = parseSkillsShUrl(source);
+    if (isIncompleteParsed(skillsShResult)) {
+      console.error(
+        red("Incomplete skills.sh URL — expected /owner/toolkit/skill")
+      );
+      process.exit(1);
+      return;
+    }
+    if (isCompleteParsed(skillsShResult)) {
+      console.log(dim("Resolving skills.sh URL..."));
+      // Resolve to owner/toolkit and install the specific skill
+      source = `${skillsShResult.owner}/${skillsShResult.toolkit}`;
+      opts.skill = skillsShResult.skill;
+    }
   }
 
   // Normalize full GitHub URLs to owner/repo shorthand

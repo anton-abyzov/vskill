@@ -12,12 +12,8 @@ import {
 // Registry size
 // ---------------------------------------------------------------------------
 describe("AGENTS_REGISTRY", () => {
-  it("has exactly 39 entries", () => {
-    expect(AGENTS_REGISTRY).toHaveLength(39);
-  });
-
-  it("TOTAL_AGENTS equals 39", () => {
-    expect(TOTAL_AGENTS).toBe(39);
+  it("TC-044: has at least 50 entries", () => {
+    expect(AGENTS_REGISTRY.length).toBeGreaterThanOrEqual(50);
   });
 
   it("TOTAL_AGENTS matches AGENTS_REGISTRY.length", () => {
@@ -34,9 +30,9 @@ describe("AGENTS_REGISTRY — universal/non-universal split", () => {
     expect(universal).toHaveLength(7);
   });
 
-  it("has exactly 32 non-universal agents", () => {
+  it("has at least 43 non-universal agents", () => {
     const nonUniversal = AGENTS_REGISTRY.filter((a) => !a.isUniversal);
-    expect(nonUniversal).toHaveLength(32);
+    expect(nonUniversal.length).toBeGreaterThanOrEqual(43);
   });
 
   it("universal + non-universal equals total", () => {
@@ -94,6 +90,20 @@ describe("AGENTS_REGISTRY — required fields", () => {
 // ---------------------------------------------------------------------------
 // getUniversalAgents()
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// TC-043: Claude Code uses .claude/skills
+// ---------------------------------------------------------------------------
+describe("AGENTS_REGISTRY — Claude Code path", () => {
+  it("TC-043: claude-code agent uses .claude/skills as localSkillsDir", () => {
+    const claudeCode = getAgent("claude-code");
+    expect(claudeCode).toBeDefined();
+    expect(claudeCode!.localSkillsDir).toBe(".claude/skills");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getUniversalAgents()
+// ---------------------------------------------------------------------------
 describe("getUniversalAgents", () => {
   it("returns exactly 7 agents", () => {
     expect(getUniversalAgents()).toHaveLength(7);
@@ -121,8 +131,8 @@ describe("getUniversalAgents", () => {
 // getNonUniversalAgents()
 // ---------------------------------------------------------------------------
 describe("getNonUniversalAgents", () => {
-  it("returns exactly 32 agents", () => {
-    expect(getNonUniversalAgents()).toHaveLength(32);
+  it("returns at least 43 agents", () => {
+    expect(getNonUniversalAgents().length).toBeGreaterThanOrEqual(43);
   });
 
   it("all returned agents have isUniversal === false", () => {
@@ -227,7 +237,7 @@ describe("detectInstalledAgents", () => {
     expect(ids).toEqual(sorted);
   });
 
-  it("returns multiple installed agents when many commands succeed", async () => {
+  it("returns all agents when all commands succeed", async () => {
     // Make all commands succeed
     mockExec.mockResolvedValue({ stdout: "/usr/local/bin/tool", stderr: "" });
 

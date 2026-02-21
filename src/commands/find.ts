@@ -5,7 +5,12 @@
 import { searchSkills } from "../api/client.js";
 import { bold, green, yellow, dim, cyan, red, table } from "../utils/output.js";
 
-export async function findCommand(query: string): Promise<void> {
+interface FindOptions {
+  json?: boolean;
+  noHint?: boolean;
+}
+
+export async function findCommand(query: string, opts?: FindOptions): Promise<void> {
   console.log(dim(`Searching for "${query}"...\n`));
 
   let results;
@@ -26,6 +31,12 @@ export async function findCommand(query: string): Promise<void> {
     console.log(
       dim(`Try a broader search or visit ${cyan("https://verified-skill.com")}`)
     );
+    return;
+  }
+
+  // JSON output mode — no table, no hints
+  if (opts?.json) {
+    console.log(JSON.stringify(results, null, 2));
     return;
   }
 
@@ -50,4 +61,16 @@ export async function findCommand(query: string): Promise<void> {
   console.log(
     dim(`\n${results.length} result${results.length === 1 ? "" : "s"} found`)
   );
+
+  // Install hint — suppress with --json or --no-hint
+  if (!opts?.noHint) {
+    const firstName = results[0]?.name ?? "<name>";
+    if (process.stdout.isTTY) {
+      // Interactive TTY mode
+      console.log(dim(`\n↑↓ navigate  i install  q quit`));
+    } else {
+      // Non-interactive / piped output
+      console.log(dim(`\nTo install: npx skills add ${firstName}`));
+    }
+  }
 }

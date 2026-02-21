@@ -8,6 +8,7 @@ import type { VskillLock, SkillLockEntry } from "./types.js";
 import { getProjectRoot } from "./project-root.js";
 
 const LOCKFILE_NAME = "vskill.lock";
+const SKILLS_SH_LOCKFILE = ".skill-lock.json";
 
 function lockPath(dir?: string): string {
   return join(dir ?? getProjectRoot(), LOCKFILE_NAME);
@@ -67,6 +68,29 @@ export function addSkillToLock(
   const lock = ensureLockfile(dir);
   lock.skills[name] = info;
   writeLockfile(lock, dir);
+}
+
+/**
+ * Read .skill-lock.json (skills.sh lock file) for cross-tool visibility.
+ * Returns skill names found, or empty array if file doesn't exist.
+ */
+export function readSkillsShLock(dir?: string): { name: string; source: string }[] {
+  const p = join(dir ?? getProjectRoot(), SKILLS_SH_LOCKFILE);
+  if (!existsSync(p)) return [];
+  try {
+    const raw = readFileSync(p, "utf-8");
+    const data = JSON.parse(raw);
+    // skills.sh lock format: { skills: { "name": { ... } } } or array-based
+    if (data && typeof data === "object" && data.skills) {
+      return Object.keys(data.skills).map((name) => ({
+        name,
+        source: "skills.sh",
+      }));
+    }
+    return [];
+  } catch {
+    return [];
+  }
 }
 
 /**

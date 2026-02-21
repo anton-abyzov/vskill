@@ -3,9 +3,21 @@
 **Secure multi-platform AI skill installer.** Scan before you install.
 
 ```bash
+# npm
 npx vskill find remotion                             # search the registry
 npx vskill install google/remotion                   # install after security scan
-npx vskill install https://github.com/owner/repo     # also accepts full GitHub URLs
+
+# bun
+bunx vskill find remotion
+bunx vskill install google/remotion
+
+# pnpm
+pnpx vskill find remotion
+pnpx vskill install google/remotion
+
+# yarn
+yarn dlx vskill find remotion
+yarn dlx vskill install google/remotion
 ```
 
 ## Why?
@@ -26,6 +38,8 @@ vskill list                  # Show installed skills with status
 vskill submit <source>       # Submit for verification (owner/repo or GitHub URL)
 vskill update                # Update with diff scanning
 ```
+
+> Replace `vskill` with `npx vskill`, `bunx vskill`, `pnpx vskill`, or `yarn dlx vskill` if not installed globally.
 
 ## 39 Agent Platforms
 

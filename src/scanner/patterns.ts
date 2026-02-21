@@ -370,7 +370,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI credential file read",
     severity: "critical",
     description: "DCI block reads credential files (~/.ssh/, ~/.aws/, .env)",
-    pattern: /^!\s*`[^`]*(?:~\/\.ssh\/|~\/\.aws\/|\.env\b|\.gnupg\/)/gm,
+    pattern: /^\s*!\s*`[^`]*(?:~\/\.ssh\/|~\/\.aws\/|\.env\b|\.gnupg\/)/gm,
     category: "dci-abuse",
   },
   {
@@ -378,7 +378,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI network exfiltration",
     severity: "critical",
     description: "DCI block uses curl/wget for network access",
-    pattern: /^!\s*`[^`]*\b(?:curl|wget)\b/gm,
+    pattern: /^\s*!\s*`[^`]*\b(?:curl|wget)\b/gm,
     category: "dci-abuse",
   },
   {
@@ -386,7 +386,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI fetch/nc network call",
     severity: "critical",
     description: "DCI block uses fetch or netcat for network access",
-    pattern: /^!\s*`[^`]*\b(?:fetch|nc|ncat|netcat)\b/gm,
+    pattern: /^\s*!\s*`[^`]*\b(?:fetch|nc|ncat|netcat)\b/gm,
     category: "dci-abuse",
   },
   {
@@ -394,7 +394,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI agent config write",
     severity: "critical",
     description: "DCI block writes to agent config files (CLAUDE.md, AGENTS.md, .claude/)",
-    pattern: /^!\s*`[^`]*(?:>\s*.*(?:CLAUDE\.md|AGENTS\.md|\.claude\/|\.specweave\/))/gm,
+    pattern: /^\s*!\s*`[^`]*(?:>\s*.*(?:CLAUDE\.md|AGENTS\.md|\.claude\/|\.specweave\/))/gm,
     category: "dci-abuse",
   },
   {
@@ -402,7 +402,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI agent config modify",
     severity: "critical",
     description: "DCI block modifies agent config via tee/sed/echo append",
-    pattern: /^!\s*`[^`]*(?:tee|sed\s+-i|echo\s+.*>>)\s*.*(?:CLAUDE\.md|AGENTS\.md|\.claude\/)/gm,
+    pattern: /^\s*!\s*`[^`]*(?:tee|sed\s+-i|echo\s+.*>>)\s*.*(?:CLAUDE\.md|AGENTS\.md|\.claude\/)/gm,
     category: "dci-abuse",
   },
   {
@@ -410,7 +410,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI base64 decode",
     severity: "critical",
     description: "DCI block contains base64 decoding (obfuscation)",
-    pattern: /^!\s*`[^`]*\b(?:base64\s+(?:-[dD]|--decode)|atob\s*\()/gm,
+    pattern: /^\s*!\s*`[^`]*\b(?:base64\s+(?:-[dD]|--decode)|atob\s*\()/gm,
     category: "dci-abuse",
   },
   {
@@ -418,7 +418,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI hex escape obfuscation",
     severity: "critical",
     description: "DCI block contains hex escape sequences (obfuscation)",
-    pattern: /^!\s*`[^`]*\\x[0-9a-fA-F]{2}(?:\\x[0-9a-fA-F]{2}){3,}/gm,
+    pattern: /^\s*!\s*`[^`]*\\x[0-9a-fA-F]{2}(?:\\x[0-9a-fA-F]{2}){3,}/gm,
     category: "dci-abuse",
   },
   {
@@ -426,7 +426,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI eval execution",
     severity: "critical",
     description: "DCI block uses eval for code execution",
-    pattern: /^!\s*`[^`]*\beval\b/gm,
+    pattern: /^\s*!\s*`[^`]*\beval\b/gm,
     category: "dci-abuse",
   },
   {
@@ -434,7 +434,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI download and execute",
     severity: "critical",
     description: "DCI block pipes downloaded content to shell (download-and-execute)",
-    pattern: /^!\s*`[^`]*\b(?:curl|wget)\b[^`]*\|\s*(?:ba|z|da|k)?sh\b/gm,
+    pattern: /^\s*!\s*`[^`]*\b(?:curl|wget)\b[^`]*\|\s*(?:ba|z|da|k)?sh\b/gm,
     category: "dci-abuse",
   },
   {
@@ -442,7 +442,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI reverse shell",
     severity: "critical",
     description: "DCI block establishes a reverse shell connection",
-    pattern: /^!\s*`[^`]*(?:\/dev\/tcp\/|bash\s+-i\s+>&|mkfifo|nc\s+-[a-z]*e)/gm,
+    pattern: /^\s*!\s*`[^`]*(?:\/dev\/tcp\/|bash\s+-i\s+>&|mkfifo|nc\s+-[a-z]*e)/gm,
     category: "dci-abuse",
   },
   {
@@ -450,7 +450,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI sudo escalation",
     severity: "critical",
     description: "DCI block uses sudo for privilege escalation",
-    pattern: /^!\s*`[^`]*\bsudo\b/gm,
+    pattern: /^\s*!\s*`[^`]*\bsudo\b/gm,
     category: "dci-abuse",
   },
   {
@@ -458,7 +458,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI rm destructive command",
     severity: "critical",
     description: "DCI block executes destructive rm -rf command",
-    pattern: /^!\s*`[^`]*\brm\s+-[a-zA-Z]*r[a-zA-Z]*f/gm,
+    pattern: /^\s*!\s*`[^`]*\brm\s+-[a-zA-Z]*r[a-zA-Z]*f/gm,
     category: "dci-abuse",
   },
   {
@@ -466,7 +466,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI home dir exfiltration",
     severity: "critical",
     description: "DCI block reads from home directory sensitive paths",
-    pattern: /^!\s*`[^`]*(?:cat|less|head|tail|strings)\s+[^`]*(?:~\/\.|\/home\/[^`]*\.)/gm,
+    pattern: /^\s*!\s*`[^`]*(?:cat|less|head|tail|strings)\s+[^`]*(?:~\/\.|\/home\/[^`]*\.)/gm,
     category: "dci-abuse",
   },
   {
@@ -474,24 +474,39 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI data pipe to network",
     severity: "critical",
     description: "DCI block pipes local data to a network command",
-    pattern: /^!\s*`[^`]*(?:cat|tar|zip)\s+[^|`]*\|\s*(?:curl|wget|nc)\b/gm,
+    pattern: /^\s*!\s*`[^`]*(?:cat|tar|zip)\s+[^|`]*\|\s*(?:curl|wget|nc)\b/gm,
     category: "dci-abuse",
   },
 ];
 
 // ---- Safe-context patterns for DCI blocks ----------------------------------
 // The canonical skill-memories lookup is a known-safe DCI pattern.
-// Suppress DCI-abuse findings when the line matches this pattern.
+// Suppress DCI-abuse findings when the line matches this pattern AND
+// no malicious DCI pattern also matches (prevents appended-command bypass).
 
 const SAFE_DCI_PATTERNS: RegExp[] = [
-  /^!\s*`for\s+d\s+in\s+\.specweave\/skill-memories/,
+  /^\s*!\s*`for\s+d\s+in\s+\.specweave\/skill-memories/,
 ];
 
+/** All malicious DCI patterns extracted for the two-pass safe check */
+const MALICIOUS_DCI_PATTERNS: RegExp[] = SCAN_PATTERNS
+  .filter((p) => p.category === "dci-abuse")
+  .map((p) => new RegExp(p.pattern.source, p.pattern.flags));
+
 /**
- * Returns true if the line matches a known-safe DCI pattern.
+ * Returns true if the line matches a known-safe DCI pattern
+ * AND no malicious DCI pattern also matches (two-pass check).
  */
 function isSafeDciBlock(line: string): boolean {
-  return SAFE_DCI_PATTERNS.some((p) => p.test(line));
+  const matchesSafe = SAFE_DCI_PATTERNS.some((p) => p.test(line));
+  if (!matchesSafe) return false;
+
+  // Two-pass: if ANY malicious DCI pattern also matches, it's NOT safe
+  const matchesMalicious = MALICIOUS_DCI_PATTERNS.some((p) => {
+    p.lastIndex = 0;
+    return p.test(line);
+  });
+  return !matchesMalicious;
 }
 
 // ---- Scanner function -----------------------------------------------------

@@ -64,7 +64,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "system() call",
     severity: "critical",
     description: "Detects system-level command execution",
-    pattern: /\bsystem\s*\(/g,
+    pattern: /\bsystem\(/g,
     category: "command-injection",
   },
   {

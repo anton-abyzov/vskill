@@ -161,6 +161,16 @@ describe("scanContent — command-injection patterns", () => {
     expect(findings.some((f) => f.patternId === "CI-003")).toBe(true);
   });
 
+  it("CI-003: does NOT flag 'system' followed by space-paren (English text)", () => {
+    const findings = scanContent("Plugin system (Complete)");
+    expect(findings.some((f) => f.patternId === "CI-003")).toBe(false);
+  });
+
+  it("CI-003: still flags os.system(cmd)", () => {
+    const findings = scanContent('os.system("whoami")');
+    expect(findings.some((f) => f.patternId === "CI-003")).toBe(true);
+  });
+
   it("CI-004: detects shell command strings", () => {
     const findings = scanContent('const cmd = "/bin/bash -c test";');
     expect(findings.some((f) => f.patternId === "CI-004")).toBe(true);

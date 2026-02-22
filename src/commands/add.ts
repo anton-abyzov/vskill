@@ -20,6 +20,7 @@ import { resolveTilde } from "../utils/paths.js";
 import { findProjectRoot } from "../utils/project-root.js";
 import { filterAgents } from "../utils/agent-filter.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
+import type { AgentDefinition } from "../agents/agents-registry.js";
 import { ensureLockfile, writeLockfile } from "../lockfile/index.js";
 import { runTier1Scan } from "../scanner/index.js";
 import { getPluginSource, getPluginVersion } from "../marketplace/index.js";
@@ -126,6 +127,7 @@ interface AddOptions {
   cwd?: boolean;
   yes?: boolean;
   copy?: boolean;
+  select?: boolean;
 }
 
 /**
@@ -181,6 +183,67 @@ function resolveInstallBase(
   }
 
   return resolveSkillsPath(projectRoot, agent.localSkillsDir);
+}
+
+// ---------------------------------------------------------------------------
+// Interactive agent/scope selection (shared across all install paths)
+// ---------------------------------------------------------------------------
+
+interface InstallSelections {
+  agents: AgentDefinition[];
+  global: boolean;
+}
+
+/**
+ * Prompt the user for agent selection and installation scope.
+ *
+ * Interactive by default when TTY is available. Skipped when:
+ * - `--yes` flag is passed
+ * - Not a TTY (CI/piped)
+ * - `--agent` flag narrows to specific agents (skip agent prompt only)
+ * - `--global` or `--cwd` explicitly sets scope (skip scope prompt only)
+ */
+async function promptInstallOptions(
+  agents: AgentDefinition[],
+  opts: AddOptions,
+): Promise<InstallSelections> {
+  const shouldPrompt = isTTY() && !opts.yes;
+  let selectedAgents = agents;
+  let useGlobal = !!opts.global;
+
+  if (!shouldPrompt) {
+    return { agents: selectedAgents, global: useGlobal };
+  }
+
+  // Agent selection
+  if (!opts.agent?.length && agents.length > 1) {
+    console.log(dim(`\nDetected ${agents.length} agents:`));
+    const prompter = createPrompter();
+    const agentIndices = await prompter.promptCheckboxList(
+      agents.map((a) => ({ label: a.displayName, description: a.parentCompany, checked: true })),
+      { title: "Select agents to install to" },
+    );
+    selectedAgents = agentIndices.map((i) => agents[i]);
+
+    if (selectedAgents.length === 0) {
+      console.log(dim("No agents selected. Aborting."));
+      return process.exit(0);
+    }
+  } else if (agents.length === 1) {
+    console.log(dim(`\nDetected agent: ${agents[0].displayName}`));
+  }
+
+  // Scope selection (skip if --global or --cwd already set)
+  if (!opts.global && !opts.cwd) {
+    const prompter2 = createPrompter();
+    const scopeIdx = await prompter2.promptChoice("Installation scope:", [
+      { label: "Project", hint: "install in current project root" },
+      { label: "Global", hint: "install in user home directory" },
+    ]);
+    useGlobal = scopeIdx === 1;
+  }
+
+  return { agents: selectedAgents, global: useGlobal };
 }
 
 async function fetchSkillContent(url: string): Promise<string> {
@@ -389,6 +452,11 @@ async function installPluginDir(
     return;
   }
 
+  // Interactive agent/scope selection
+  const selections = await promptInstallOptions(agents, opts);
+  const selectedAgents = selections.agents;
+  if (selections.global) opts.global = true;
+
   // Read version from marketplace.json
   const marketplacePath = join(basePath, ".claude-plugin", "marketplace.json");
   const marketplaceContent = readFileSync(marketplacePath, "utf-8");
@@ -408,7 +476,7 @@ async function installPluginDir(
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
   const locations: string[] = [];
 
-  for (const agent of agents) {
+  for (const agent of selectedAgents) {
     const cacheDir = join(
       resolveInstallBase(opts, agent),
       pluginName,
@@ -439,7 +507,7 @@ async function installPluginDir(
     installedAt: new Date().toISOString(),
     source: `local:${basePath}`,
   };
-  lock.agents = [...new Set([...(lock.agents || []), ...agents.map((a: { id: string }) => a.id)])];
+  lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock);
 
   // Print summary
@@ -599,18 +667,15 @@ export async function addCommand(
     return;
   }
 
-  // Determine selected skills, agents, scope, and method
+  // Interactive agent/scope selection
+  const selections = await promptInstallOptions(agents, opts);
+  const selectedAgents = selections.agents;
+  if (selections.global) opts.global = true;
+
+  // Skill selection (multi-skill repos, when interactive)
   let selectedSkills = discovered;
-  let selectedAgents = agents;
-  let useGlobal = !!opts.global;
-  const method: "symlink" | "copy" = opts.copy ? "copy" : "symlink";
-
-  const interactive = discovered.length > 1 && isTTY() && !opts.yes;
-
-  if (interactive) {
+  if (discovered.length > 1 && isTTY() && !opts.yes) {
     const prompter = createPrompter();
-
-    // Step 1: Skill selection
     const skillIndices = await prompter.promptCheckboxList(
       discovered.map((s) => ({ label: s.name, description: s.description, checked: true })),
       { title: "Select skills to install" },
@@ -621,38 +686,7 @@ export async function addCommand(
       console.log(dim("No skills selected. Aborting."));
       return process.exit(0);
     }
-
-    // Step 2: Agent selection (skip if --agent flag provided or only 1 agent)
-    if (!opts.agent?.length && agents.length > 1) {
-      const prompter2 = createPrompter();
-      const agentIndices = await prompter2.promptCheckboxList(
-        agents.map((a) => ({ label: a.displayName, description: a.parentCompany, checked: true })),
-        { title: `Detected ${agents.length} agents` },
-      );
-      selectedAgents = agentIndices.map((i) => agents[i]);
-
-      if (selectedAgents.length === 0) {
-        console.log(dim("No agents selected. Aborting."));
-        return process.exit(0);
-      }
-    }
-
-    // Step 3: Summary and confirmation
-    console.log(dim("\n--- Installation Summary ---"));
-    console.log(`  Skills: ${selectedSkills.map((s) => s.name).join(", ")}`);
-    console.log(`  Agents: ${selectedAgents.map((a) => a.displayName).join(", ")}`);
-    console.log(`  Scope:  ${useGlobal ? "Global" : "Project"}`);
-    console.log(`  Method: ${method}`);
-
-    const prompter3 = createPrompter();
-    const proceed = await prompter3.promptConfirm("\nProceed?", true);
-    if (!proceed) {
-      return process.exit(0);
-    }
   }
-
-  // Override global flag based on wizard choice
-  if (useGlobal) opts.global = true;
 
   // Install selected skills
   const results: SkillInstallResult[] = [];
@@ -823,11 +857,16 @@ async function installFromRegistry(
     return;
   }
 
+  // Interactive agent/scope selection
+  const selections = await promptInstallOptions(agents, opts);
+  const selectedAgents = selections.agents;
+  if (selections.global) opts.global = true;
+
   // Install to each agent
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
   const locations: string[] = [];
 
-  for (const agent of agents) {
+  for (const agent of selectedAgents) {
     const baseDir = resolveInstallBase(opts, agent);
     const skillDir = join(baseDir, skillName);
     try {
@@ -851,7 +890,7 @@ async function installFromRegistry(
     installedAt: new Date().toISOString(),
     source: `registry:${skillName}`,
   };
-  lock.agents = [...new Set([...(lock.agents || []), ...agents.map((a: { id: string }) => a.id)])];
+  lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock);
 
   console.log(green(`\nInstalled ${bold(skillName)} to ${locations.length} agent${locations.length === 1 ? "" : "s"}:\n`));
@@ -982,15 +1021,18 @@ async function installSingleSkillLegacy(
     return;
   }
 
+  // Interactive agent/scope selection
+  const selections = await promptInstallOptions(agents, opts);
+  const selectedAgents = selections.agents;
+  if (selections.global) opts.global = true;
+
   // Install to each agent
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
   const locations: string[] = [];
 
-  for (const agent of agents) {
+  for (const agent of selectedAgents) {
     const baseDir = resolveInstallBase(opts, agent);
-
     const skillDir = join(baseDir, skillName);
-
     try {
       mkdirSync(skillDir, { recursive: true });
       writeFileSync(join(skillDir, "SKILL.md"), content, "utf-8");
@@ -1012,7 +1054,7 @@ async function installSingleSkillLegacy(
     installedAt: new Date().toISOString(),
     source: `github:${owner}/${repo}`,
   };
-  lock.agents = [...new Set([...(lock.agents || []), ...agents.map((a: { id: string }) => a.id)])];
+  lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock);
 
   // Print summary

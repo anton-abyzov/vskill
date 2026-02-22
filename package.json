@@ -1,6 +1,6 @@
 {
   "name": "vskill",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "type": "module",
   "description": "Secure multi-platform AI skill installer — scan before you install",
   "bin": {

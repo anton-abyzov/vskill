@@ -398,6 +398,16 @@ describe("scanContent — code-execution patterns", () => {
     );
   });
 
+  it("CE-001: does NOT flag model.eval() (PyTorch method)", () => {
+    const findings = scanContent("model.eval()");
+    expect(findings.some((f) => f.patternId === "CE-001")).toBe(false);
+  });
+
+  it("CE-001: does NOT flag trainer.eval() or tf.eval()", () => {
+    const findings = scanContent("trainer.eval()\ntf.eval()");
+    expect(findings.some((f) => f.patternId === "CE-001")).toBe(false);
+  });
+
   it("CE-002: detects Function() constructor", () => {
     const findings = scanContent('const fn = new Function("return 1");');
     expect(findings.some((f) => f.patternId === "CE-002")).toBe(true);

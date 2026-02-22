@@ -342,7 +342,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "eval() usage",
     severity: "critical",
     description: "Detects eval() which executes arbitrary code",
-    pattern: /\beval\s*\(/g,
+    pattern: /(?<!\.)eval\s*\(/g,
     category: "code-execution",
   },
   {

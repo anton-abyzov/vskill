@@ -53,6 +53,10 @@ vi.mock("node:crypto", () => ({
 const mockDetectInstalledAgents = vi.fn();
 vi.mock("../agents/agents-registry.js", () => ({
   detectInstalledAgents: (...args: unknown[]) => mockDetectInstalledAgents(...args),
+  AGENTS_REGISTRY: [
+    { id: "claude-code", displayName: "Claude Code", isUniversal: false, parentCompany: "Anthropic", localSkillsDir: ".claude/commands", globalSkillsDir: "~/.claude/commands" },
+    { id: "cursor", displayName: "Cursor", isUniversal: false, parentCompany: "Anysphere", localSkillsDir: ".cursor/commands", globalSkillsDir: "~/.cursor/commands" },
+  ],
 }));
 
 // ---------------------------------------------------------------------------

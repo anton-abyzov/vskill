@@ -26,6 +26,7 @@ program
   .option("--skill <name>", "Skill name within a multi-skill repo")
   .option("--plugin <name>", "Plugin name from marketplace.json")
   .option("--plugin-dir <path>", "Local plugin directory path")
+  .option("--repo <owner/repo>", "GitHub repo with marketplace.json (use with --plugin)")
   .option("--global", "Install to global agent directories")
   .option("--force", "Install even if scan finds issues")
   .option("--agent <id>", "Install to specific agent only (repeatable)", collect, [])

@@ -1,0 +1,26 @@
+{
+  "name": "kafka",
+  "description": "Apache Kafka event streaming integration with MCP servers, CLI tools (kcat), Terraform modules, and comprehensive observability stack",
+  "version": "1.0.0",
+  "author": {
+    "name": "SpecWeave Team",
+    "url": "https://github.com/anton-abyzov/vskill"
+  },
+  "repository": "https://github.com/anton-abyzov/vskill",
+  "homepage": "https://github.com/anton-abyzov/vskill",
+  "license": "MIT",
+  "keywords": [
+    "kafka",
+    "event-streaming",
+    "mcp",
+    "kcat",
+    "terraform",
+    "prometheus",
+    "grafana",
+    "opentelemetry",
+    "apache-kafka",
+    "redpanda",
+    "aws-msk",
+    "azure-event-hubs"
+  ]
+}

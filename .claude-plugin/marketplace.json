@@ -1,0 +1,97 @@
+{
+  "name": "vskill",
+  "version": "1.0.0",
+  "description": "Universal AI skills library — domain expertise for any AI coding tool",
+  "plugins": [
+    {
+      "name": "frontend",
+      "description": "Frontend development — React, Next.js, Vue, Angular, design systems, i18n",
+      "source": "./plugins/frontend",
+      "version": "1.0.0"
+    },
+    {
+      "name": "backend",
+      "description": "Backend development — Node.js, Python, .NET, Go, Rust, Java Spring, GraphQL",
+      "source": "./plugins/backend",
+      "version": "1.0.0"
+    },
+    {
+      "name": "infra",
+      "description": "Cloud infrastructure — Terraform, AWS, Azure, GCP, GitHub Actions, observability",
+      "source": "./plugins/infra",
+      "version": "1.0.0"
+    },
+    {
+      "name": "mobile",
+      "description": "Mobile development — React Native, Expo, Flutter, SwiftUI, Jetpack Compose",
+      "source": "./plugins/mobile",
+      "version": "1.0.0"
+    },
+    {
+      "name": "ml",
+      "description": "Machine learning — pipelines, LLM fine-tuning, RAG, MLOps, edge ML",
+      "source": "./plugins/ml",
+      "version": "1.0.0"
+    },
+    {
+      "name": "testing",
+      "description": "Testing — unit, e2e, performance, accessibility, mutation testing",
+      "source": "./plugins/testing",
+      "version": "1.0.0"
+    },
+    {
+      "name": "k8s",
+      "description": "Kubernetes — manifests, Helm charts, GitOps, security policies",
+      "source": "./plugins/k8s",
+      "version": "1.0.0"
+    },
+    {
+      "name": "payments",
+      "description": "Payment processing — Stripe, PayPal, billing, PCI compliance",
+      "source": "./plugins/payments",
+      "version": "1.0.0"
+    },
+    {
+      "name": "cost",
+      "description": "Cloud cost optimization — AWS, Azure, GCP pricing and FinOps",
+      "source": "./plugins/cost",
+      "version": "1.0.0"
+    },
+    {
+      "name": "kafka",
+      "description": "Apache Kafka — architecture, operations, monitoring, MCP integration",
+      "source": "./plugins/kafka",
+      "version": "1.0.0"
+    },
+    {
+      "name": "kafka-streams",
+      "description": "Kafka Streams — topology design, state stores, windowing, joins",
+      "source": "./plugins/kafka-streams",
+      "version": "1.0.0"
+    },
+    {
+      "name": "confluent",
+      "description": "Confluent Cloud — Schema Registry, ksqlDB, Kafka Connect",
+      "source": "./plugins/confluent",
+      "version": "1.0.0"
+    },
+    {
+      "name": "docs",
+      "description": "Documentation — Docusaurus, technical writing, brainstorming",
+      "source": "./plugins/docs",
+      "version": "1.0.0"
+    },
+    {
+      "name": "n8n",
+      "description": "n8n workflow automation with Kafka integration",
+      "source": "./plugins/n8n",
+      "version": "1.0.0"
+    },
+    {
+      "name": "security",
+      "description": "Security assessment, vulnerability detection, code simplification",
+      "source": "./plugins/security",
+      "version": "1.0.0"
+    }
+  ]
+}

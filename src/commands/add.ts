@@ -19,11 +19,11 @@ import { execSync } from "node:child_process";
 import { resolveTilde } from "../utils/paths.js";
 import { findProjectRoot } from "../utils/project-root.js";
 import { filterAgents } from "../utils/agent-filter.js";
-import { detectInstalledAgents } from "../agents/agents-registry.js";
+import { detectInstalledAgents, AGENTS_REGISTRY } from "../agents/agents-registry.js";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { ensureLockfile, writeLockfile } from "../lockfile/index.js";
 import { runTier1Scan } from "../scanner/index.js";
-import { getPluginSource, getPluginVersion } from "../marketplace/index.js";
+import { getAvailablePlugins, getPluginSource, getPluginVersion } from "../marketplace/index.js";
 import { checkBlocklist } from "../blocklist/blocklist.js";
 import type { BlocklistEntry } from "../blocklist/types.js";
 import { getSkill } from "../api/client.js";
@@ -121,6 +121,7 @@ interface AddOptions {
   skill?: string;
   plugin?: string;
   pluginDir?: string;
+  repo?: string;
   global?: boolean;
   force?: boolean;
   agent?: string[];
@@ -163,13 +164,16 @@ function resolveInstallBase(
   }
 
   const cwd = process.cwd();
+  const home = process.env.HOME || process.env.USERPROFILE || "";
 
   if (opts.cwd) {
     return resolveSkillsPath(cwd, agent.localSkillsDir);
   }
 
   const projectRoot = findProjectRoot(cwd);
-  if (!projectRoot) {
+
+  // Guard: never treat $HOME as project root — that would pollute the home dir
+  if (!projectRoot || (home && resolve(projectRoot) === resolve(home))) {
     console.log(
       yellow("No project root found; installing relative to current directory."),
     );
@@ -215,22 +219,38 @@ async function promptInstallOptions(
     return { agents: selectedAgents, global: useGlobal };
   }
 
-  // Agent selection
-  if (!opts.agent?.length && agents.length > 1) {
-    console.log(dim(`\nDetected ${agents.length} agents:`));
-    const prompter = createPrompter();
-    const agentIndices = await prompter.promptCheckboxList(
-      agents.map((a) => ({ label: a.displayName, description: a.parentCompany, checked: true })),
-      { title: "Select agents to install to" },
+  // Agent selection — show detected agents (pre-checked) + all others (unchecked)
+  if (!opts.agent?.length) {
+    const detectedIds = new Set(agents.map((a) => a.id));
+    const undetected = AGENTS_REGISTRY.filter(
+      (a) => !a.isUniversal && !detectedIds.has(a.id),
     );
-    selectedAgents = agentIndices.map((i) => agents[i]);
 
-    if (selectedAgents.length === 0) {
-      console.log(dim("No agents selected. Aborting."));
-      return process.exit(0);
+    // Build combined list: detected first (checked), then undetected (unchecked)
+    const allAgents = [...agents, ...undetected];
+    const items = allAgents.map((a) => ({
+      label: a.displayName,
+      description: detectedIds.has(a.id)
+        ? a.parentCompany
+        : `${a.parentCompany} — not detected`,
+      checked: detectedIds.has(a.id),
+    }));
+
+    if (allAgents.length > 1) {
+      console.log(dim(`\nDetected ${agents.length} of ${AGENTS_REGISTRY.filter((a) => !a.isUniversal).length} supported agents:`));
+      const prompter = createPrompter();
+      const agentIndices = await prompter.promptCheckboxList(items, {
+        title: "Select agents to install to",
+      });
+      selectedAgents = agentIndices.map((i) => allAgents[i]);
+
+      if (selectedAgents.length === 0) {
+        console.log(dim("No agents selected. Aborting."));
+        return process.exit(0);
+      }
+    } else if (agents.length === 1) {
+      console.log(dim(`\nDetected agent: ${agents[0].displayName}`));
     }
-  } else if (agents.length === 1) {
-    console.log(dim(`\nDetected agent: ${agents[0].displayName}`));
   }
 
   // Scope selection (skip if --global or --cwd already set)
@@ -241,6 +261,20 @@ async function promptInstallOptions(
       { label: "Global", hint: "install in user home directory" },
     ]);
     useGlobal = scopeIdx === 1;
+  }
+
+  // Preview install paths so user knows exactly where files go
+  console.log(dim(`\nInstall targets:`));
+  for (const agent of selectedAgents) {
+    const base = useGlobal
+      ? resolveTilde(agent.globalSkillsDir)
+      : resolveSkillsPath(
+          opts.cwd
+            ? process.cwd()
+            : findProjectRoot(process.cwd()) || process.cwd(),
+          agent.localSkillsDir,
+        );
+    console.log(dim(`  ${agent.displayName}: ${base}/`));
   }
 
   return { agents: selectedAgents, global: useGlobal };
@@ -595,6 +629,228 @@ async function installOneGitHubSkill(
 }
 
 // ---------------------------------------------------------------------------
+// Remote plugin installation from a GitHub repository with marketplace.json
+// ---------------------------------------------------------------------------
+
+async function installRepoPlugin(
+  ownerRepo: string,
+  pluginName: string,
+  opts: AddOptions,
+): Promise<void> {
+  const [owner, repo] = ownerRepo.split("/");
+  if (!owner || !repo) {
+    console.error(red("--repo must be in owner/repo format (e.g. anton-abyzov/vskill)"));
+    process.exit(1);
+  }
+
+  // Fetch marketplace.json from GitHub
+  const manifestUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/.claude-plugin/marketplace.json`;
+  const manifestSpin = spinner("Fetching marketplace.json");
+  let manifestContent: string;
+  try {
+    const res = await fetch(manifestUrl);
+    if (!res.ok) {
+      manifestSpin.stop();
+      console.error(
+        red(`marketplace.json not found at ${owner}/${repo}\n`) +
+          dim("Ensure the repo has .claude-plugin/marketplace.json on the main branch.")
+      );
+      process.exit(1);
+    }
+    manifestContent = await res.text();
+    manifestSpin.stop(green("Found marketplace.json"));
+  } catch (err) {
+    manifestSpin.stop();
+    console.error(red("Network error: ") + dim((err as Error).message));
+    process.exit(1);
+    return;
+  }
+
+  // Find the plugin in the marketplace
+  const pluginSource = getPluginSource(pluginName, manifestContent);
+  if (!pluginSource) {
+    const available = getAvailablePlugins(manifestContent).map((p) => p.name);
+    console.error(
+      red(`Plugin "${pluginName}" not found in marketplace.json\n`) +
+        dim(`Available plugins: ${available.join(", ")}`)
+    );
+    process.exit(1);
+  }
+  const pluginVersion = getPluginVersion(pluginName, manifestContent) || "0.0.0";
+  const pluginPath = pluginSource.replace(/^\.\//, "");
+
+  // Discover skills via GitHub Contents API
+  const discoverSpin = spinner(`Discovering skills in ${pluginName}`);
+  interface GHEntry { name: string; type: string; download_url?: string }
+
+  let skillEntries: GHEntry[] = [];
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${pluginPath}/skills`,
+      { headers: { "User-Agent": "vskill-cli" } },
+    );
+    if (res.ok) {
+      skillEntries = ((await res.json()) as GHEntry[]).filter((e) => e.type === "dir");
+    }
+  } catch { /* skills dir might not exist */ }
+
+  let cmdEntries: GHEntry[] = [];
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${pluginPath}/commands`,
+      { headers: { "User-Agent": "vskill-cli" } },
+    );
+    if (res.ok) {
+      cmdEntries = ((await res.json()) as GHEntry[]).filter((e) => e.name.endsWith(".md"));
+    }
+  } catch { /* commands dir might not exist */ }
+
+  discoverSpin.stop(green(`Found ${skillEntries.length} skills, ${cmdEntries.length} commands`));
+
+  if (skillEntries.length === 0 && cmdEntries.length === 0) {
+    console.error(red(`No skills or commands found in plugin "${pluginName}"`));
+    process.exit(1);
+  }
+
+  // Fetch all skill and command content
+  const allContent: string[] = [];
+  const skills: Array<{ name: string; content: string }> = [];
+  for (const entry of skillEntries) {
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/${pluginPath}/skills/${entry.name}/SKILL.md`;
+    try {
+      const res = await fetch(rawUrl);
+      if (res.ok) {
+        const content = await res.text();
+        skills.push({ name: entry.name, content });
+        allContent.push(content);
+      }
+    } catch { /* skip unavailable skills */ }
+  }
+
+  const commands: Array<{ name: string; content: string }> = [];
+  for (const entry of cmdEntries) {
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/${pluginPath}/commands/${entry.name}`;
+    try {
+      const res = await fetch(rawUrl);
+      if (res.ok) {
+        const content = await res.text();
+        commands.push({ name: entry.name, content });
+        allContent.push(content);
+      }
+    } catch { /* skip unavailable */ }
+  }
+
+  // Blocklist check
+  const blocked = await checkBlocklist(pluginName);
+  if (blocked && !opts.force) {
+    printBlockedError(blocked);
+    process.exit(1);
+  }
+  if (blocked && opts.force) {
+    printBlockedWarning(blocked);
+  }
+
+  // Tier 1 scan on all content combined
+  console.log(dim("\nRunning security scan..."));
+  const combined = allContent.join("\n---\n");
+  const scanResult = runTier1Scan(combined);
+
+  const verdictColor =
+    scanResult.verdict === "PASS"
+      ? green
+      : scanResult.verdict === "CONCERNS"
+        ? yellow
+        : red;
+
+  console.log(
+    `${bold("Score:")} ${verdictColor(String(scanResult.score))}/100  ` +
+      `${bold("Verdict:")} ${verdictColor(scanResult.verdict)}\n`
+  );
+
+  if ((scanResult.verdict === "FAIL" || scanResult.verdict === "CONCERNS") && !opts.force) {
+    console.error(
+      red(`\nScan ${scanResult.verdict}. Refusing to install.\n`) +
+        dim("Use --force to install anyway.")
+    );
+    process.exit(1);
+  }
+
+  // Detect agents
+  let agents = await detectInstalledAgents();
+  if (agents.length === 0) {
+    console.error(red("No AI agents detected. Install Claude Code, Cursor, or another supported agent and try again."));
+    process.exit(1);
+  }
+  try {
+    agents = filterAgents(agents, opts.agent);
+  } catch (e) {
+    console.error(red((e as Error).message));
+    process.exit(1);
+    return;
+  }
+
+  const selections = await promptInstallOptions(agents, opts);
+  const selectedAgents = selections.agents;
+  if (selections.global) opts.global = true;
+
+  // Install skills and commands with namespace prefix
+  const sha = createHash("sha256").update(combined).digest("hex").slice(0, 12);
+  const locations: string[] = [];
+
+  for (const agent of selectedAgents) {
+    const baseDir = resolveInstallBase(opts, agent);
+    const plugDir = join(baseDir, pluginName);
+
+    try {
+      // Skills: {agent-dir}/{plugin-name}/{skill-name}/SKILL.md
+      for (const skill of skills) {
+        const skillDir = join(plugDir, skill.name);
+        mkdirSync(skillDir, { recursive: true });
+        writeFileSync(join(skillDir, "SKILL.md"), skill.content, "utf-8");
+      }
+      // Commands: {agent-dir}/{plugin-name}/{command-name}.md
+      for (const cmd of commands) {
+        mkdirSync(plugDir, { recursive: true });
+        writeFileSync(join(plugDir, cmd.name), cmd.content, "utf-8");
+      }
+      locations.push(`${agent.displayName}: ${plugDir}`);
+    } catch (err) {
+      console.error(
+        yellow(`Failed to install to ${agent.displayName}: `) +
+          dim((err as Error).message)
+      );
+    }
+  }
+
+  // Update lockfile
+  const lock = ensureLockfile();
+  lock.skills[pluginName] = {
+    version: pluginVersion,
+    sha,
+    tier: "SCANNED",
+    installedAt: new Date().toISOString(),
+    source: `github:${owner}/${repo}#plugin:${pluginName}`,
+  };
+  lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
+  writeLockfile(lock);
+
+  // Summary
+  console.log(
+    green(
+      `\nInstalled ${bold(pluginName)} (${skills.length} skills, ${commands.length} commands) ` +
+        `to ${locations.length} agent${locations.length === 1 ? "" : "s"}:\n`
+    )
+  );
+  for (const loc of locations) {
+    console.log(`  ${dim(">")} ${loc}`);
+  }
+  console.log(dim(`\nSHA: ${sha} | Version: ${pluginVersion}`));
+  if (skills.length > 0) {
+    console.log(dim(`Skills: ${skills.map((s) => `${pluginName}:${s.name}`).join(", ")}`));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -602,6 +858,11 @@ export async function addCommand(
   source: string,
   opts: AddOptions
 ): Promise<void> {
+  // Remote plugin mode: GitHub repo with --plugin
+  if (opts.repo && opts.plugin) {
+    return installRepoPlugin(opts.repo, opts.plugin, opts);
+  }
+
   // Plugin directory mode: local path with --plugin
   if (opts.pluginDir && opts.plugin) {
     return installPluginDir(opts.pluginDir, opts.plugin, opts);

@@ -3,21 +3,9 @@
 **Secure multi-platform AI skill installer.** Scan before you install.
 
 ```bash
-# npm
-npx vskill find remotion                             # search the registry
-npx vskill install remotion-dev/skills                   # install after security scan
-
-# bun
-bunx vskill find remotion
-bunx vskill install remotion-dev/skills
-
-# pnpm
-pnpx vskill find remotion
-pnpx vskill install remotion-dev/skills
-
-# yarn
-yarn dlx vskill find remotion
-yarn dlx vskill install remotion-dev/skills
+npx vskill install remotion-dev/skills                           # all skills from a repo
+npx vskill install remotion-dev/skills/remotion-best-practices   # specific skill (3-part)
+npx vskill install remotion-best-practices                       # registry lookup
 ```
 
 ## Why?
@@ -28,22 +16,122 @@ yarn dlx vskill install remotion-dev/skills
 
 vskill fixes this with **three-tier verification** and **version-pinned trust**.
 
-## Commands
+## Install Formats
+
+### 1. All skills from a repo
 
 ```bash
-vskill find <query>          # Search the registry (alias: search)
-vskill install <source>      # Install skill after security scan (alias: add, i)
-vskill scan <source>         # Scan without installing
-vskill list                  # Show installed skills with status
-vskill submit <source>       # Submit for verification (owner/repo or GitHub URL)
-vskill update                # Update with diff scanning
+vskill install remotion-dev/skills
 ```
+
+Discovers all SKILL.md files in the repo via GitHub Trees API. You'll be prompted to select which skills to install.
+
+### 2. Specific skill (3-part format)
+
+```bash
+vskill install remotion-dev/skills/remotion-best-practices
+```
+
+Installs a single skill directly. The path maps to `owner/repo/skill-name`, where `skill-name` is the directory containing `SKILL.md`.
+
+### 3. Specific skill (flag format)
+
+```bash
+vskill install remotion-dev/skills --skill remotion-best-practices
+```
+
+Equivalent to the 3-part format above.
+
+### 4. Registry lookup
+
+```bash
+vskill install remotion-best-practices
+```
+
+Looks up the skill in the [verified-skill.com](https://verified-skill.com) registry and installs from the mapped source repo.
+
+### 5. Local plugin
+
+```bash
+vskill install . --plugin-dir . --plugin sw-frontend
+```
+
+Installs a plugin from a local directory containing `.claude-plugin/marketplace.json`. The `--plugin` flag selects which sub-plugin to install.
+
+### 6. Remote plugin
+
+```bash
+vskill install . --repo specweave/specweave --plugin sw-frontend
+```
+
+Clones a GitHub repo and installs a plugin from it. Combines `--repo` with `--plugin` to target a specific sub-plugin.
 
 > Replace `vskill` with `npx vskill`, `bunx vskill`, `pnpx vskill`, or `yarn dlx vskill` if not installed globally.
 
-## 39 Agent Platforms
+## Interactive Prompts
 
-Works across Claude Code, Cursor, GitHub Copilot, Windsurf, Codex, Gemini CLI, Cline, Amp, Roo Code, and 30 more.
+When run in a terminal, vskill prompts you interactively:
+
+- **Agent selection** — checkboxes for detected AI agents (pre-checked). Supports 49 agents with scrolling viewport.
+- **Scope** — Project (`./<agent>/commands/`) or Global (`~/.<agent>/commands/`)
+- **Method** — Symlink (default, saves disk) or Copy (for agents that need it)
+- **Skill selection** — when a repo has multiple skills, pick which ones to install
+- **Claude Code native plugin** — when installing a plugin with Claude Code detected, choose native plugin install (recommended) or skill extraction
+
+All prompts can be skipped with `--yes` (accept defaults) or controlled via flags (`--global`, `--copy`, `--agent`).
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `install <source>` | Install skill after security scan (aliases: `add`, `i`) |
+| `find <query>` | Search the registry (alias: `search`) |
+| `scan <path>` | Scan without installing |
+| `list` | Show installed skills with status |
+| `remove <skill>` | Remove an installed skill |
+| `update [skill]` | Update with diff scanning |
+| `submit <source>` | Submit for verification |
+| `audit [path]` | Security audit with LLM analysis |
+| `info <skill>` | Show skill details |
+| `blocklist` | Manage blocked skills |
+| `init` | Initialize vskill in a project |
+
+### Install flags
+
+| Flag | Description |
+|------|-------------|
+| `--yes` / `-y` | Accept all defaults, no prompts |
+| `--global` / `-g` | Install to global scope |
+| `--copy` | Copy files instead of symlinking |
+| `--skill <name>` | Select a specific skill from a multi-skill repo |
+| `--plugin <name>` | Select a sub-plugin from a plugin repo |
+| `--plugin-dir <path>` | Use a local directory as plugin source |
+| `--repo <owner/repo>` | Use a remote GitHub repo as plugin source |
+| `--agent <id>` | Target a specific agent (e.g., `--agent cursor`) |
+| `--force` | Install even if blocklisted |
+| `--cwd <path>` | Override project root directory |
+
+## Skills vs Plugins
+
+**Skills** are single SKILL.md files that work with any AI agent. They follow the [Agent Skills Standard](https://agentskills.io) — a SKILL.md file is placed in the agent's commands directory (e.g., `.claude/commands/`, `.cursor/commands/`).
+
+**Plugins** are multi-component containers exclusive to Claude Code. A plugin repo has `.claude-plugin/marketplace.json` listing sub-plugins, each containing skills, hooks, commands, and agents. Plugins enable `plugin-name:skill-name` namespacing, enable/disable support, and marketplace integration.
+
+## Claude Code Native Plugin Install
+
+When vskill detects a plugin repo and Claude Code is among your selected agents, it offers **native plugin install**:
+
+1. vskill runs its security scan first (always)
+2. Registers the plugin directory as a marketplace: `claude plugin marketplace add <path>`
+3. Installs the plugin natively: `claude plugin install <plugin>@<marketplace>`
+
+**Benefits**: `marketplace:plugin-name` namespacing, `claude plugin enable/disable`, marketplace management.
+
+Native install is available for local plugins (`--plugin-dir`) only. Remote plugins (`--repo`) fall back to skill extraction. Use `--copy` to skip native install and extract skills individually.
+
+## 49 Agent Platforms
+
+Works across Claude Code, Cursor, GitHub Copilot, Windsurf, Codex, Gemini CLI, Cline, Amp, Roo Code, and 40 more — including universal agents (VS Code, JetBrains, Zed, Neovim, Emacs, Sublime Text, Xcode).
 
 ## Three-Tier Verification
 

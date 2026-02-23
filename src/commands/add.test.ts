@@ -162,15 +162,16 @@ vi.mock("../utils/claude-cli.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Mock getMarketplaceName (imported separately in add.ts)
+// Mock getMarketplaceName (preserve real marketplace functions)
 // ---------------------------------------------------------------------------
 const mockGetMarketplaceName = vi.fn().mockReturnValue(null);
-vi.mock("../marketplace/index.js", () => ({
-  getAvailablePlugins: vi.fn().mockReturnValue([]),
-  getPluginSource: vi.fn().mockReturnValue(null),
-  getPluginVersion: vi.fn().mockReturnValue("1.0.0"),
-  getMarketplaceName: (...args: unknown[]) => mockGetMarketplaceName(...args),
-}));
+vi.mock("../marketplace/index.js", async () => {
+  const actual = await vi.importActual<typeof import("../marketplace/index.js")>("../marketplace/index.js");
+  return {
+    ...actual,
+    getMarketplaceName: (...args: unknown[]) => mockGetMarketplaceName(...args),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Import module under test AFTER mocks

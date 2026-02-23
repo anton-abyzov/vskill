@@ -1039,6 +1039,152 @@ describe("addCommand multi-skill discovery (GitHub path)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Source format routing — 3-part, URL normalization, edge cases
+// ---------------------------------------------------------------------------
+
+describe("addCommand source format routing", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckPlatformSecurity.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  // TC-017: 3-part format owner/repo/skill routes to installSingleSkillLegacy
+  it("3-part format fetches from skills/<skill>/SKILL.md and bypasses discovery", async () => {
+    await addCommand("owner/repo/my-skill", {});
+
+    expect(mockDiscoverSkills).not.toHaveBeenCalled();
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md"
+    );
+    expect(mockRunTier1Scan).toHaveBeenCalledTimes(1);
+  });
+
+  // TC-018: 3-part format writes correct skill name to lockfile
+  it("3-part format writes skill name (not repo) to lockfile", async () => {
+    await addCommand("owner/repo/my-skill", {});
+
+    expect(mockWriteLockfile).toHaveBeenCalled();
+    const lockArg = mockWriteLockfile.mock.calls[0][0];
+    expect(lockArg.skills).toHaveProperty("my-skill");
+    expect(lockArg.skills["my-skill"].source).toBe("github:owner/repo");
+  });
+
+  // TC-019: 4+ parts falls through to registry lookup (not 3-part)
+  it("4-part source falls through to registry lookup", async () => {
+    mockGetSkill.mockResolvedValue({ content: "# Skill" });
+
+    await addCommand("a/b/c/d", {});
+
+    // Not treated as 3-part (parts.length === 4, not 3)
+    expect(mockDiscoverSkills).not.toHaveBeenCalled();
+    // Falls to registry because parts.length !== 2
+    expect(mockGetSkill).toHaveBeenCalledWith("a/b/c/d");
+  });
+
+  // TC-020: Full GitHub URL normalized to 2-part before routing
+  it("GitHub URL normalizes to owner/repo and triggers discovery", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "repo", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/SKILL.md" },
+    ]);
+
+    await addCommand("https://github.com/owner/repo", {});
+
+    expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
+  });
+
+  // TC-021: GitHub URL with .git suffix stripped
+  it("GitHub URL with .git suffix strips it before routing", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "repo", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/SKILL.md" },
+    ]);
+
+    await addCommand("https://github.com/owner/repo.git", {});
+
+    expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
+  });
+
+  // TC-022: No source provided exits with error
+  it("exits with error when source is undefined and no flags set", async () => {
+    const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit");
+    });
+
+    await expect(
+      addCommand(undefined, {}),
+    ).rejects.toThrow("process.exit");
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+    mockExit.mockRestore();
+  });
+
+  // TC-023: 3-part format with --copy uses copy installer
+  it("3-part format with --copy flag uses installCopy", async () => {
+    await addCommand("owner/repo/my-skill", { copy: true });
+
+    expect(mockInstallCopy).toHaveBeenCalled();
+    expect(mockInstallSymlink).not.toHaveBeenCalled();
+  });
+
+  // TC-024: 3-part format with --global installs globally
+  it("3-part format with --global flag passes global option", async () => {
+    await addCommand("owner/repo/my-skill", { global: true });
+
+    expect(mockInstallSymlink).toHaveBeenCalled();
+    const installArgs = mockInstallSymlink.mock.calls[0];
+    // installSymlink(skillName, content, agents, { global, projectRoot })
+    expect(installArgs[3]).toEqual(expect.objectContaining({ global: true }));
+  });
+
+  // TC-025: 2-part + --skill is equivalent to 3-part format
+  it("2-part with --skill fetches same URL as 3-part format", async () => {
+    const expectedUrl = "https://raw.githubusercontent.com/owner/repo/main/skills/specific/SKILL.md";
+
+    // 2-part with --skill flag
+    await addCommand("owner/repo", { skill: "specific" });
+    expect(globalThis.fetch).toHaveBeenCalledWith(expectedUrl);
+
+    // Reset fetch mock
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockClear();
+    vi.clearAllMocks();
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckPlatformSecurity.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    // 3-part format
+    await addCommand("owner/repo/specific", {});
+    expect(globalThis.fetch).toHaveBeenCalledWith(expectedUrl);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Registry install (installFromRegistry) — no slash in source
 // ---------------------------------------------------------------------------
 
@@ -1641,5 +1787,155 @@ describe("addCommand native Claude Code plugin install", () => {
     await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
 
     expect(mockRegisterMarketplace).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --all flag tests (bulk repo install)
+// ---------------------------------------------------------------------------
+
+describe("addCommand with --repo --all flag (bulk install)", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const marketplaceJson = JSON.stringify({
+    name: "vskill",
+    version: "1.0.0",
+    plugins: [
+      { name: "frontend", source: "./plugins/frontend", description: "Frontend skills", version: "1.0.0" },
+      { name: "backend", source: "./plugins/backend", description: "Backend skills", version: "1.0.0" },
+      { name: "testing", source: "./plugins/testing", description: "Testing skills", version: "1.0.0" },
+    ],
+  });
+
+  function setupAllHappyPath() {
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockFindProjectRoot.mockReturnValue("/project");
+    mockExistsSync.mockReturnValue(false);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("marketplace.json")) {
+        return { ok: true, text: async () => marketplaceJson, json: async () => JSON.parse(marketplaceJson) };
+      }
+      // Skills directory for any plugin
+      if (url.includes("/contents/plugins/") && url.includes("/skills")) {
+        return {
+          ok: true,
+          json: async () => [{ name: "skill-one", type: "dir" }],
+        };
+      }
+      // Commands directory
+      if (url.includes("/contents/plugins/") && url.includes("/commands")) {
+        return { ok: true, json: async () => [] };
+      }
+      // SKILL.md content
+      if (url.includes("/SKILL.md")) {
+        return { ok: true, text: async () => "# Test Skill\nDomain expertise" };
+      }
+      return { ok: false };
+    }) as unknown as typeof fetch;
+  }
+
+  it("installs all plugins from marketplace when --all is passed", async () => {
+    setupAllHappyPath();
+
+    await addCommand(undefined, { repo: "anton-abyzov/vskill", all: true });
+
+    // Should write lockfile entries for all 3 plugins
+    expect(mockWriteLockfile).toHaveBeenCalledTimes(3);
+
+    const lockCalls = mockWriteLockfile.mock.calls;
+    const pluginNames = lockCalls.map((call) =>
+      Object.keys((call[0] as { skills: Record<string, unknown> }).skills).filter(k => ["frontend", "backend", "testing"].includes(k))
+    ).flat();
+    expect(pluginNames).toContain("frontend");
+    expect(pluginNames).toContain("backend");
+    expect(pluginNames).toContain("testing");
+  });
+
+  it("writes lockfile with github source for each plugin", async () => {
+    setupAllHappyPath();
+
+    await addCommand(undefined, { repo: "anton-abyzov/vskill", all: true });
+
+    // Check each call has correct source format
+    const allLocks = mockWriteLockfile.mock.calls.map((call) => call[0] as { skills: Record<string, { source: string }> });
+    const sources = allLocks.flatMap(lock =>
+      Object.entries(lock.skills).map(([name, entry]) => ({ name, source: entry.source }))
+    );
+
+    const frontendEntry = sources.find(s => s.name === "frontend");
+    expect(frontendEntry?.source).toBe("github:anton-abyzov/vskill#plugin:frontend");
+  });
+
+  it("continues installing after one plugin fails", async () => {
+    setupAllHappyPath();
+
+    // Make "backend" fail by having its skills dir return empty
+    let callCount = 0;
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("marketplace.json")) {
+        return { ok: true, text: async () => marketplaceJson, json: async () => JSON.parse(marketplaceJson) };
+      }
+      // Make the second plugin (backend) return no skills
+      if (url.includes("/contents/plugins/backend/skills")) {
+        return { ok: true, json: async () => [] };
+      }
+      if (url.includes("/contents/plugins/backend/commands")) {
+        return { ok: true, json: async () => [] };
+      }
+      if (url.includes("/contents/plugins/") && url.includes("/skills")) {
+        return {
+          ok: true,
+          json: async () => [{ name: "skill-one", type: "dir" }],
+        };
+      }
+      if (url.includes("/contents/plugins/") && url.includes("/commands")) {
+        return { ok: true, json: async () => [] };
+      }
+      if (url.includes("/SKILL.md")) {
+        return { ok: true, text: async () => "# Test Skill\nContent" };
+      }
+      return { ok: false };
+    }) as unknown as typeof fetch;
+
+    await addCommand(undefined, { repo: "anton-abyzov/vskill", all: true });
+
+    // Should still install frontend and testing (backend fails)
+    // lockfile written at least twice (for frontend and testing)
+    expect(mockWriteLockfile.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("exits with error when --all used without --repo", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+
+    try {
+      await addCommand(undefined, { all: true });
+    } catch { /* expected */ }
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
+  });
+
+  it("does not require source argument when --repo --all is used", async () => {
+    setupAllHappyPath();
+
+    // source is undefined — should work fine with --repo --all
+    await addCommand(undefined, { repo: "anton-abyzov/vskill", all: true });
+
+    // Should not throw — verify plugins were installed
+    expect(mockWriteLockfile).toHaveBeenCalled();
   });
 });

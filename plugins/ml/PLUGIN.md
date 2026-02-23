@@ -1,7 +1,7 @@
 # ML Plugin
 
 **Version**: 1.1.0
-**Author**: SpecWeave Contributors
+**Author**: vskill Contributors
 **License**: MIT
 
 ## Description
@@ -25,10 +25,10 @@ Comprehensive AI/ML plugin covering traditional ML, LLM application development,
 ## Installation
 
 ```bash
-vskill add specweave --plugin sw-ml
+vskill add --repo anton-abyzov/vskill --plugin ml
 ```
 
 ## Requirements
 
-- SpecWeave core plugin (sw@specweave)
+- vskill CLI installed
 - Python 3.9+ environment

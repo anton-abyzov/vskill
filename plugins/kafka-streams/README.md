@@ -1,6 +1,6 @@
-# specweave-kafka-streams
+# vskill-kafka-streams
 
-**Kafka Streams Library Integration Plugin for SpecWeave**
+**Kafka Streams Library Integration Plugin for vskill**
 
 Stream processing with Java/Kotlin using Kafka Streams library - topology patterns, state management, windowing, joins, and testing frameworks.
 
@@ -39,11 +39,8 @@ Stream processing with Java/Kotlin using Kafka Streams library - topology patter
 ### Install Plugin
 
 ```bash
-# Via SpecWeave marketplace
-specweave plugin install sw-kafka-streams
-
-# Or via Claude Code plugin system
-/plugin install sw-kafka-streams@specweave
+# Via vskill CLI
+vskill add --repo anton-abyzov/vskill --plugin kafka-streams
 ```
 
 ## Quick Start
@@ -278,10 +275,10 @@ public void testWordCount() {
 
 ## Documentation
 
-- **Getting Started**: `.specweave/docs/public/guides/kafka-streams-getting-started.md`
-- **Topology Patterns**: `.specweave/docs/public/guides/kafka-streams-patterns.md`
-- **State Stores**: `.specweave/docs/public/guides/kafka-streams-state.md`
-- **Testing Guide**: `.specweave/docs/public/guides/kafka-streams-testing.md`
+- **Getting Started**: `docs/guides/kafka-streams-getting-started.md`
+- **Topology Patterns**: `docs/guides/kafka-streams-patterns.md`
+- **State Stores**: `docs/guides/kafka-streams-state.md`
+- **Testing Guide**: `docs/guides/kafka-streams-testing.md`
 
 ## Contributing
 
@@ -289,9 +286,9 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md) for development setup and guideline
 
 ## Related Plugins
 
-- **specweave-kafka** - Core Kafka plugin (Apache Kafka, producers, consumers)
-- **specweave-confluent** - Confluent Cloud features (Schema Registry, ksqlDB)
-- **specweave-n8n** - n8n workflow automation with Kafka integration
+- **vskill-kafka** - Core Kafka plugin (Apache Kafka, producers, consumers)
+- **vskill-confluent** - Confluent Cloud features (Schema Registry, ksqlDB)
+- **vskill-n8n** - n8n workflow automation with Kafka integration
 
 ## License
 
@@ -299,9 +296,9 @@ MIT License - see [LICENSE](../../LICENSE)
 
 ## Support
 
-- **Documentation**: https://spec-weave.com/docs/plugins/kafka-streams
-- **Issues**: https://github.com/anton-abyzov/specweave/issues
-- **Discussions**: https://github.com/anton-abyzov/specweave/discussions
+- **Documentation**: https://github.com/anton-abyzov/vskill
+- **Issues**: https://github.com/anton-abyzov/vskill/issues
+- **Discussions**: https://github.com/anton-abyzov/vskill/discussions
 
 ---
 

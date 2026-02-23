@@ -1,7 +1,7 @@
 # Confluent Stream Processing Plugin
 
 **Version**: 1.0.0
-**Author**: SpecWeave Contributors
+**Author**: vskill Contributors
 **License**: MIT
 
 ## Description
@@ -25,10 +25,10 @@ Expert knowledge and guidance for Confluent Kafka ecosystem including Kafka Conn
 ## Installation
 
 ```bash
-vskill add specweave --plugin sw-confluent
+vskill add --repo anton-abyzov/vskill --plugin confluent
 ```
 
 ## Requirements
 
-- SpecWeave core plugin (sw@specweave)
+- vskill CLI installed
 - Confluent Kafka cluster (Cloud or self-hosted)

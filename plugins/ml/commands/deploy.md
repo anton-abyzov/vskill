@@ -19,12 +19,11 @@ You are preparing an ML model for production deployment. Generate all necessary 
 ### Step 1: Generate FastAPI App
 
 ```python
-from specweave import create_model_api
+from fastapi import FastAPI
+import joblib
 
-api = create_model_api(
-    model_path="models/model.pkl",
-    framework="fastapi"
-)
+app = FastAPI()
+model = joblib.load("models/model.pkl")
 ```
 
 Creates: `api/main.py`, `api/models.py`, `api/predict.py`

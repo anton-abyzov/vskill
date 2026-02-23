@@ -27,4 +27,4 @@ npm run eos-pipeline
 
 ## Documentation
 
-See [Advanced Usage Guide](../../.specweave/docs/public/guides/kafka-advanced-usage.md#exactly-once-semantics-eos)
+See [Advanced Usage Guide](../../docs/guides/kafka-advanced-usage.md#exactly-once-semantics-eos)

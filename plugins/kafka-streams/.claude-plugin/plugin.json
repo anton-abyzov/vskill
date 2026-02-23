@@ -3,7 +3,7 @@
   "description": "Kafka Streams library integration - Stream processing with Java/Kotlin, topology patterns, state stores, windowing, joins, and testing frameworks",
   "version": "1.0.0",
   "author": {
-    "name": "SpecWeave Team",
+    "name": "vskill Contributors",
     "url": "https://github.com/anton-abyzov/vskill"
   },
   "repository": "https://github.com/anton-abyzov/vskill",

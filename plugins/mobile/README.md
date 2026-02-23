@@ -1,12 +1,12 @@
-# SpecWeave Mobile Plugin
+# vskill Mobile Plugin
 
-Comprehensive **React Native** and **Expo** development support for SpecWeave. Streamlines mobile app development with expert guidance on setup, debugging, performance optimization, and testing.
+Comprehensive **React Native** and **Expo** development support. Streamlines mobile app development with expert guidance on setup, debugging, performance optimization, and testing.
 
 **IMPORTANT**: This plugin provides patterns and architectural guidance. For version-specific APIs, always use Context7 to fetch current React Native and Expo documentation.
 
 ## Overview
 
-The SpecWeave Mobile plugin provides specialized skills and agents for modern React Native and Expo development, covering the entire mobile development lifecycle from environment setup to production deployment.
+The vskill Mobile plugin provides specialized skills and agents for modern React Native and Expo development, covering the entire mobile development lifecycle from environment setup to production deployment.
 
 ### Key Capabilities
 
@@ -80,7 +80,7 @@ The `react-native-expert` skill covers both architecture and hands-on implementa
 
 ## Installation
 
-The plugin is automatically installed with SpecWeave. To verify installation:
+The plugin is automatically installed with vskill. To verify installation:
 
 ```bash
 # List installed plugins
@@ -91,7 +91,7 @@ To reinstall or update:
 
 ```bash
 # Reinstall plugin
-vskill add specweave --plugin sw-mobile
+vskill add --repo anton-abyzov/vskill --plugin mobile
 ```
 
 ## Usage
@@ -167,7 +167,7 @@ Skill({
 - Designs navigation architecture
 - Provides implementation templates
 
-## Integration with SpecWeave Workflows
+## Integration with vskill Workflows
 
 ### During Increment Planning
 
@@ -190,8 +190,8 @@ When using `/sw:do`:
 
 ### Documentation
 
-- **Setup Guide**: See `.specweave/docs/public/guides/mobile/react-native-setup-guide.md`
-- **Architecture Decisions**: Documented in ADRs (`.specweave/docs/internal/architecture/adr/`)
+- **Setup Guide**: See `docs/public/guides/mobile/react-native-setup-guide.md`
+- **Architecture Decisions**: Documented in ADRs (`docs/internal/architecture/adr/`)
 - **Performance Reports**: Track bundle size and metrics in increment reports
 
 ## Skill Activation Keywords
@@ -311,7 +311,7 @@ React Navigation with:
 
 ### Need More Help?
 
-- Check the [React Native Setup Guide](.specweave/docs/public/guides/mobile/react-native-setup-guide.md)
+- Check the [React Native Setup Guide](docs/public/guides/mobile/react-native-setup-guide.md)
 - Review skill documentation in `skills/*/SKILL.md`
 - Invoke the react-native-expert skill for architectural questions
 
@@ -319,8 +319,8 @@ React Navigation with:
 
 To add new skills or improve existing ones:
 
-1. Fork the SpecWeave repository
-2. Add/modify skills in `plugins/specweave-mobile/skills/`
+1. Fork the vskill repository
+2. Add/modify skills in `plugins/mobile/skills/`
 3. Follow the skill template in existing skills
 4. Test with Claude Code
 5. Submit a pull request
@@ -349,9 +349,9 @@ To add new skills or improve existing ones:
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/anton-abyzov/specweave/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/anton-abyzov/specweave/discussions)
-- **Documentation**: [SpecWeave Docs](https://spec-weave.com)
+- **Issues**: [GitHub Issues](https://github.com/anton-abyzov/vskill/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/anton-abyzov/vskill/discussions)
+- **Documentation**: [vskill Docs](https://github.com/anton-abyzov/vskill)
 
 ## License
 

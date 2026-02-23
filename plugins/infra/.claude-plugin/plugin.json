@@ -3,7 +3,7 @@
   "description": "Comprehensive infrastructure and DevOps: Terraform/OpenTofu, OpenTelemetry, GitHub Actions, DevSecOps, secret management, Azure (Bicep/AKS), AWS (CDK/EKS/Lambda), and cloud-native patterns.",
   "version": "1.1.0",
   "author": {
-    "name": "SpecWeave Team",
+    "name": "vskill Contributors",
     "url": "https://github.com/anton-abyzov/vskill"
   },
   "homepage": "https://github.com/anton-abyzov/vskill",

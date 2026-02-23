@@ -1,7 +1,7 @@
 # Kafka Streams Plugin
 
 **Version**: 1.0.0
-**Author**: SpecWeave Contributors
+**Author**: vskill Contributors
 **License**: MIT
 
 ## Description
@@ -17,11 +17,11 @@ Specialized plugin for Kafka Streams topology design and stream processing. Cove
 ## Installation
 
 ```bash
-vskill add specweave --plugin sw-kafka-streams
+vskill add --repo anton-abyzov/vskill --plugin kafka-streams
 ```
 
 ## Requirements
 
-- SpecWeave core plugin (sw@specweave)
+- vskill CLI installed
 - Apache Kafka Streams knowledge
 - Java or Kotlin development environment

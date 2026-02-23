@@ -180,4 +180,4 @@ kafka-consumer-groups --bootstrap-server localhost:9092 \
 
 - [KafkaJS Documentation](https://kafka.js.org/)
 - [Apache Kafka Documentation](https://kafka.apache.org/documentation/)
-- [SpecWeave Getting Started Guide](../../.specweave/docs/public/guides/kafka-getting-started.md)
+- [Getting Started Guide](../../docs/guides/kafka-getting-started.md)

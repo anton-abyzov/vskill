@@ -1,7 +1,7 @@
 # Kubernetes Plugin
 
 **Version**: 1.0.0
-**Author**: SpecWeave Contributors
+**Author**: vskill Contributors
 **License**: MIT
 
 ## Description
@@ -20,11 +20,11 @@ Comprehensive Kubernetes orchestration plugin for manifest generation, Helm temp
 ## Installation
 
 ```bash
-vskill add specweave --plugin sw-kubernetes
+vskill add --repo anton-abyzov/vskill --plugin k8s
 ```
 
 ## Requirements
 
-- SpecWeave core plugin (sw@specweave)
+- vskill CLI installed
 - Kubernetes cluster access
 - kubectl CLI installed

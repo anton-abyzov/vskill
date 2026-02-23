@@ -1,22 +1,22 @@
 ---
-description: Initialize Docusaurus documentation site with spec-driven structure, living docs integration, and SpecWeave-optimized configuration.
+description: Initialize Docusaurus documentation site with spec-driven structure, living docs integration, and optimized configuration.
 ---
 
 # Initialize Documentation Site
 
-Initialize a Docusaurus documentation site with spec-driven documentation structure, living docs integration, and SpecWeave-optimized configuration.
+Initialize a Docusaurus documentation site with spec-driven documentation structure, living docs integration, and optimized configuration.
 
 ## Usage
 
 ```
-/sw-docs:init [options]
+/docs:init [options]
 ```
 
 ## What I Do
 
 1. **Scaffold Docusaurus Site**: Create standard Docusaurus 3.x structure
 2. **Configure Plugins**: Set up Mermaid diagrams, search, versioning
-3. **SpecWeave Integration**: Link to `.specweave/docs/` living documentation
+3. **Docs Integration**: Link to `docs/` living documentation
 4. **Theme Customization**: Apply professional theme with dark mode
 5. **Sidebar Generation**: Auto-generate sidebar from directory structure
 
@@ -52,11 +52,11 @@ docs-site/
 └── tsconfig.json
 ```
 
-## SpecWeave Integration
+## Docs Integration
 
 ### Living Docs Auto-Sync
 
-Automatically imports content from `.specweave/docs/`:
+Automatically imports content from `docs/`:
 
 ```typescript
 // docusaurus.config.ts
@@ -65,9 +65,9 @@ module.exports = {
     [
       '@docusaurus/plugin-content-docs',
       {
-        id: 'specweave-docs',
-        path: '../.specweave/docs',
-        routeBasePath: 'specweave',
+        id: 'project-docs',
+        path: '../docs',
+        routeBasePath: 'docs',
         sidebarPath: './sidebars.ts',
       },
     ],
@@ -77,7 +77,7 @@ module.exports = {
 
 ### Architecture Diagrams
 
-Mermaid integration for `.specweave/docs/architecture/`:
+Mermaid integration for `docs/architecture/`:
 
 ```markdown
 # System Architecture
@@ -104,7 +104,7 @@ plugins: [
       docsPluginId: 'classic',
       config: {
         api: {
-          specPath: '../.specweave/docs/api/openapi.yaml',
+          specPath: '../docs/api/openapi.yaml',
           outputDir: 'docs/api',
         },
       },
@@ -136,7 +136,7 @@ themeConfig: {
         label: 'Docs',
       },
       {
-        to: '/specweave',
+        to: '/docs',
         label: 'Architecture',
       },
       {
@@ -205,7 +205,7 @@ Generate interactive API documentation from OpenAPI specs.
 Document architecture, design decisions (ADRs), and technical specs.
 
 ### 4. Living Documentation
-Auto-sync SpecWeave living docs (features, user stories, modules).
+Auto-sync living docs (features, user stories, modules).
 
 ### 5. Internal Knowledge Base
 Team documentation, runbooks, incident reports, postmortems.
@@ -287,29 +287,29 @@ themeConfig: {
 
 ### Basic Initialization
 ```bash
-/sw-docs:docs-init
+/docs:docs-init
 ```
 
 ### TypeScript with Mermaid
 ```bash
-/sw-docs:docs-init --typescript --mermaid
+/docs:docs-init --typescript --mermaid
 ```
 
 ### Material Theme with Versioning
 ```bash
-/sw-docs:docs-init --template material --versioning
+/docs:docs-init --template material --versioning
 ```
 
 ### Custom Output Directory
 ```bash
-/sw-docs:init --output ./documentation
+/docs:init --output ./documentation
 ```
 
 ## Related Commands
 
-- `/sw-docs:generate` - Generate docs from code/specs
-- `/sw-docs:view` - Launch documentation server
-- `/sw-docs:build` - Build static documentation site
+- `/docs:generate` - Generate docs from code/specs
+- `/docs:view` - Launch documentation server
+- `/docs:build` - Build static documentation site
 
 ## Requirements
 

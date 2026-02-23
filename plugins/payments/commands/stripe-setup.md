@@ -2,7 +2,7 @@
 description: Complete Stripe integration setup with checkout flows, payment intents, customer management, and security best practices
 ---
 
-# /sw-payments:stripe-setup
+# /payments:stripe-setup
 
 Complete Stripe integration setup guide with production-ready code templates, security best practices, and testing workflows.
 

@@ -4,7 +4,7 @@ description: Generate model explainability reports (SHAP, LIME, feature importan
 
 # Explain ML Model
 
-You are generating explainability artifacts for an ML model in a SpecWeave increment. Make the black box transparent.
+You are generating explainability artifacts for an ML model. Make the black box transparent.
 
 ## Your Task
 
@@ -17,10 +17,10 @@ You are generating explainability artifacts for an ML model in a SpecWeave incre
 
 ### Step 1: Feature Importance
 ```python
-from specweave import ModelExplainer
+import shap
 
-explainer = ModelExplainer(model, X_train)
-importance = explainer.feature_importance()
+explainer = shap.TreeExplainer(model)
+importance = explainer.shap_values(X_train)
 ```
 
 Create: `feature-importance.png`

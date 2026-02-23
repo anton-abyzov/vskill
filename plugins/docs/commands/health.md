@@ -10,16 +10,16 @@ Analyze your documentation for health issues including freshness, coverage, nami
 
 ```bash
 # Full health report
-/sw-docs:health
+/docs:health
 
 # Include archived documents
-/sw-docs:health --include-archived
+/docs:health --include-archived
 
 # Output as JSON
-/sw-docs:health --format json
+/docs:health --format json
 
 # Save report to file
-/sw-docs:health --output health-report.md
+/docs:health --output health-report.md
 ```
 
 ## Your Task
@@ -80,7 +80,7 @@ if (report.recommendations.length > 0) {
 }
 
 // Optionally save full report
-const outputPath = path.join(projectPath, '.specweave/docs/ENTERPRISE-HEALTH.md');
+const outputPath = path.join(projectPath, 'docs/ENTERPRISE-HEALTH.md');
 fs.writeFileSync(outputPath, markdownReport);
 console.log(`\nFull report saved to: ${outputPath}`);
 ```
@@ -187,7 +187,7 @@ Actionable suggestions based on analysis:
 - Add acceptance criteria
 - Fix naming conventions
 - Consolidate duplicates
-- Run `/sw-docs:organize` for large folders
+- Run `/docs:organize` for large folders
 
 ## Output Example
 
@@ -220,9 +220,9 @@ RECOMMENDATIONS
 • Documentation coverage is limited. Add acceptance criteria to more documents.
 • 8 files use ALL CAPS naming. Rename to lowercase-kebab-case.
 • 3 sets of duplicate documents detected. Consider consolidating.
-• "ADRs" has 147 files. Run /sw-docs:organize to generate themed indexes.
+• "ADRs" has 147 files. Run /docs:organize to generate themed indexes.
 
-Full report saved to: .specweave/docs/ENTERPRISE-HEALTH.md
+Full report saved to: docs/ENTERPRISE-HEALTH.md
 ```
 
 ## Integrations
@@ -236,7 +236,7 @@ name: Documentation Health
 on:
   push:
     paths:
-      - '.specweave/docs/**'
+      - 'docs/**'
 
 jobs:
   health-check:
@@ -245,7 +245,7 @@ jobs:
       - uses: actions/checkout@v3
       - name: Check Documentation Health
         run: |
-          npx specweave docs:health --format json > health.json
+          npx vskill docs:health --format json > health.json
           SCORE=$(jq '.healthScore.overall' health.json)
           if [ $SCORE -lt 70 ]; then
             echo "Documentation health below threshold: $SCORE%"
@@ -257,11 +257,11 @@ jobs:
 
 ```bash
 # Run weekly health check
-0 9 * * 1 cd /project && npx specweave docs:health --output weekly-health.md
+0 9 * * 1 cd /project && npx vskill docs:health --output weekly-health.md
 ```
 
 ## See Also
 
-- `/sw-docs:organize` - Organize large folders with themed indexes
-- `/sw-docs:view` - View documentation with Docusaurus
-- `/sw-docs:generate` - Generate docs from code
+- `/docs:organize` - Organize large folders with themed indexes
+- `/docs:view` - View documentation with Docusaurus
+- `/docs:generate` - Generate docs from code

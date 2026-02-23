@@ -42,10 +42,10 @@ Successfully implemented a **comprehensive Apache Kafka event streaming integrat
 3. ✅ `kafka-observability` - Monitoring setup, performance analysis
 
 #### Commands (4)
-1. ✅ `/sw-kafka:deploy` - Interactive Terraform deployment
-2. ✅ `/sw-kafka:monitor-setup` - Prometheus + Grafana stack
-3. ✅ `/sw-kafka:mcp-configure` - MCP server auto-detection
-4. ✅ `/sw-kafka:dev-env` - Docker Compose local environment
+1. ✅ `/kafka:deploy` - Interactive Terraform deployment
+2. ✅ `/kafka:monitor-setup` - Prometheus + Grafana stack
+3. ✅ `/kafka:mcp-configure` - MCP server auto-detection
+4. ✅ `/kafka:dev-env` - Docker Compose local environment
 
 #### Infrastructure (3 Terraform Modules)
 1. ✅ `apache-kafka/` - Self-hosted Kafka (KRaft mode, Kubernetes)
@@ -330,14 +330,14 @@ Successfully implemented a **comprehensive Apache Kafka event streaming integrat
 
 ### Deploy Production Kafka Cluster
 ```bash
-/sw-kafka:deploy aws-msk
+/kafka:deploy aws-msk
 # Interactive wizard: instance type, storage, auth, VPC config
 # Generates Terraform, deploys to AWS
 ```
 
 ### Setup Complete Monitoring
 ```bash
-/sw-kafka:monitor-setup
+/kafka:monitor-setup
 # Deploys: Prometheus + 5 Grafana dashboards + 14 alerts
 # Auto-configures JMX exporter
 # Opens Grafana UI
@@ -345,7 +345,7 @@ Successfully implemented a **comprehensive Apache Kafka event streaming integrat
 
 ### Local Development Environment
 ```bash
-/sw-kafka:dev-env start
+/kafka:dev-env start
 # Docker Compose: Kafka KRaft + Schema Registry + UI + Prometheus + Grafana
 # Ready in 60 seconds
 ```
@@ -400,13 +400,13 @@ await consumerTracing.traceMessage(topic, partition, message, 'my-group', async 
 ## 🎓 Learning Path
 
 ### Beginner
-1. Start with `/sw-kafka:dev-env` - Local Kafka in 60 seconds
+1. Start with `/kafka:dev-env` - Local Kafka in 60 seconds
 2. Read `kafka-architecture` skill - Core concepts
 3. Try `kafka-cli-tools` skill - kcat basics
 
 ### Intermediate
-1. Deploy with `/sw-kafka:deploy` - Terraform automation
-2. Setup monitoring with `/sw-kafka:monitor-setup`
+1. Deploy with `/kafka:deploy` - Terraform automation
+2. Setup monitoring with `/kafka:monitor-setup`
 3. Explore `confluent-schema-registry` - Schema evolution
 4. Try `confluent-ksqldb` - Stream processing
 

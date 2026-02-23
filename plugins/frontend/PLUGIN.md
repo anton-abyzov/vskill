@@ -1,7 +1,7 @@
 # Frontend Plugin
 
 **Version**: 1.0.0
-**Author**: SpecWeave Contributors
+**Author**: vskill Contributors
 **License**: MIT
 
 ## Description
@@ -23,9 +23,9 @@ Complete frontend development ecosystem for React, Next.js, Vue, and Angular. Pr
 ## Installation
 
 ```bash
-vskill add specweave --plugin sw-frontend
+vskill add --repo anton-abyzov/vskill --plugin frontend
 ```
 
 ## Requirements
 
-- SpecWeave core plugin (sw@specweave)
+- vskill CLI installed

@@ -74,7 +74,7 @@ Create ready-to-use n8n workflow JSON files with Kafka integration patterns.
 
 ```bash
 # Generate workflow template
-/sw-n8n:workflow-template
+/n8n:workflow-template
 
 # I'll ask:
 # 1. Which pattern? (Enrichment, Fan-Out, Retry+DLQ, CDC)
@@ -245,8 +245,8 @@ kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
 
 ## Related Commands
 
-- `/sw-kafka:dev-env` - Set up local Kafka cluster
-- `/sw-n8n:test-workflow` - Test workflow with sample data (coming soon)
+- `/kafka:dev-env` - Set up local Kafka cluster
+- `/n8n:test-workflow` - Test workflow with sample data (coming soon)
 
 ## Documentation
 

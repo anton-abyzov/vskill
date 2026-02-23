@@ -1,6 +1,6 @@
-# specweave-n8n
+# vskill-n8n
 
-**n8n Workflow Automation Integration with Kafka for SpecWeave**
+**n8n Workflow Automation Integration with Kafka for vskill**
 
 Event-driven workflows, Kafka triggers, producers, and no-code/low-code patterns for workflow automation with Apache Kafka.
 
@@ -38,11 +38,8 @@ Event-driven workflows, Kafka triggers, producers, and no-code/low-code patterns
 ### Install Plugin
 
 ```bash
-# Via SpecWeave marketplace
-specweave plugin install sw-n8n
-
-# Or via Claude Code plugin system
-/plugin install sw-n8n@specweave
+# Via vskill CLI
+vskill add --repo anton-abyzov/vskill --plugin n8n
 ```
 
 ## Quick Start
@@ -322,10 +319,10 @@ if (exists) return { skip: true };
 
 ## Documentation
 
-- **Getting Started**: `.specweave/docs/public/guides/n8n-kafka-getting-started.md`
-- **Workflow Patterns**: `.specweave/docs/public/guides/n8n-kafka-patterns.md`
-- **Error Handling**: `.specweave/docs/public/guides/n8n-error-handling.md`
-- **Best Practices**: `.specweave/docs/public/guides/n8n-best-practices.md`
+- **Getting Started**: `docs/guides/n8n-kafka-getting-started.md`
+- **Workflow Patterns**: `docs/guides/n8n-kafka-patterns.md`
+- **Error Handling**: `docs/guides/n8n-error-handling.md`
+- **Best Practices**: `docs/guides/n8n-best-practices.md`
 
 ## Contributing
 
@@ -333,9 +330,9 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md) for development setup and guideline
 
 ## Related Plugins
 
-- **specweave-kafka** - Core Kafka plugin (Apache Kafka integration)
-- **specweave-confluent** - Confluent Cloud features (Schema Registry, ksqlDB)
-- **specweave-kafka-streams** - Kafka Streams library (Java/Kotlin stream processing)
+- **vskill-kafka** - Core Kafka plugin (Apache Kafka integration)
+- **vskill-confluent** - Confluent Cloud features (Schema Registry, ksqlDB)
+- **vskill-kafka-streams** - Kafka Streams library (Java/Kotlin stream processing)
 
 ## License
 
@@ -343,9 +340,9 @@ MIT License - see [LICENSE](../../LICENSE)
 
 ## Support
 
-- **Documentation**: https://spec-weave.com/docs/plugins/n8n
-- **Issues**: https://github.com/anton-abyzov/specweave/issues
-- **Discussions**: https://github.com/anton-abyzov/specweave/discussions
+- **Documentation**: https://github.com/anton-abyzov/vskill
+- **Issues**: https://github.com/anton-abyzov/vskill/issues
+- **Discussions**: https://github.com/anton-abyzov/vskill/discussions
 
 ---
 

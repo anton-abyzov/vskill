@@ -4,7 +4,7 @@ description: Evaluate ML model with comprehensive metrics
 
 # Evaluate ML Model
 
-You are evaluating an ML model in a SpecWeave increment. Generate a comprehensive evaluation report following ML best practices.
+You are evaluating an ML model. Generate a comprehensive evaluation report following ML best practices.
 
 ## Your Task
 
@@ -28,10 +28,10 @@ y_test = load_test_labels(increment_path)
 
 ### Step 3: Compute Metrics
 ```python
-from specweave import ModelEvaluator
+from sklearn.metrics import classification_report, confusion_matrix
 
-evaluator = ModelEvaluator(model, X_test, y_test)
-metrics = evaluator.compute_all_metrics()
+predictions = model.predict(X_test)
+metrics = classification_report(y_test, predictions, output_dict=True)
 ```
 
 ### Step 4: Generate Visualizations

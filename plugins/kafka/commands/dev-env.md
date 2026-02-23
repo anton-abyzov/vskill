@@ -39,7 +39,7 @@ Spin up a complete local Kafka development environment with one command.
 
 ```bash
 # Start dev environment setup
-/sw-kafka:dev-env
+/kafka:dev-env
 
 # I'll ask:
 # 1. Which stack? (Kafka or Redpanda)

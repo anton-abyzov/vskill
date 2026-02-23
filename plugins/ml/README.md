@@ -1,14 +1,14 @@
-# SpecWeave ML Plugin
+# vskill ML Plugin
 
-**Complete ML/AI workflow integration for SpecWeave - From experiment tracking to production deployment**
+**Complete ML/AI workflow integration - From experiment tracking to production deployment**
 
-Transform chaotic ML experimentation into disciplined, reproducible ML engineering using SpecWeave's increment-based workflow.
+Transform chaotic ML experimentation into disciplined, reproducible ML engineering using an increment-based workflow.
 
 ---
 
 ## 🎯 What This Plugin Does
 
-Brings the same engineering discipline to ML that SpecWeave brings to software:
+Brings the same engineering discipline to ML that vskill brings to software:
 
 - ✅ **ML as Increments**: Every ML feature is a spec → plan → tasks → implement workflow
 - ✅ **Experiment Tracking**: All experiments logged, versioned, and tied to increments
@@ -18,7 +18,7 @@ Brings the same engineering discipline to ML that SpecWeave brings to software:
 
 **The Problem**: ML development is often chaotic—Jupyter notebooks with no version control, experiments without documentation, models deployed with no reproducibility.
 
-**The Solution**: SpecWeave ML plugin brings software engineering discipline to data science.
+**The Solution**: The vskill ML plugin brings software engineering discipline to data science.
 
 ---
 
@@ -27,12 +27,12 @@ Brings the same engineering discipline to ML that SpecWeave brings to software:
 ### Installation
 
 ```bash
-# Install SpecWeave ML plugin
-/plugin install sw-ml@specweave
+# Install vskill ML plugin
+vskill add --repo anton-abyzov/vskill --plugin ml
 
 # Verify installation
-/plugin list
-# Should show: specweave-ml (13 skills, 1 agent, 3 commands)
+vskill list
+# Should show: ml (13 skills, 1 agent, 3 commands)
 ```
 
 ### Your First ML Increment
@@ -42,7 +42,7 @@ Brings the same engineering discipline to ML that SpecWeave brings to software:
 /sw:inc "build recommendation model"
 
 # The ml-pipeline-orchestrator skill activates and creates:
-# .specweave/increments/0042-recommendation-model/
+# increments/0042-recommendation-model/
 # ├── spec.md            # ML requirements, success metrics
 # ├── plan.md            # Pipeline architecture
 # ├── tasks.md           # Implementation tasks
@@ -74,7 +74,7 @@ Brings the same engineering discipline to ML that SpecWeave brings to software:
 
 #### 1. **ml-pipeline-orchestrator**
 
-Orchestrates complete ML pipelines within SpecWeave increments.
+Orchestrates complete ML pipelines within increments.
 
 **Activates for**: "ML pipeline", "train model", "build ML system"
 
@@ -110,9 +110,9 @@ Manages ML experiment tracking with MLflow, W&B, or built-in tracking.
 
 **Example**:
 ```python
-from specweave import track_experiment
+import mlflow
 
-# Automatically logs to: .specweave/increments/0042.../experiments/
+# Automatically logs to: increments/0042.../experiments/
 with track_experiment("xgboost-v1") as exp:
     model.fit(X_train, y_train)
     exp.log_metric("accuracy", 0.87)
@@ -139,7 +139,7 @@ Comprehensive model evaluation with multiple metrics and statistical testing.
 
 **Example**:
 ```python
-from specweave import ModelEvaluator
+from sklearn.metrics import classification_report
 
 evaluator = ModelEvaluator(model, X_test, y_test, increment="0042")
 report = evaluator.evaluate_all()
@@ -165,7 +165,7 @@ Model interpretability using SHAP, LIME, and feature importance.
 
 **Example**:
 ```python
-from specweave import ModelExplainer
+import shap
 
 explainer = ModelExplainer(model, X_train, increment="0042")
 explainer.generate_all_reports()
@@ -193,7 +193,7 @@ Prepares models for production with APIs, containers, monitoring, A/B testing.
 
 **Example**:
 ```python
-from specweave import create_model_api
+from fastapi import FastAPI
 
 api = create_model_api(
     model_path="models/model-v3.pkl",
@@ -453,7 +453,7 @@ Generate deployment artifacts.
 **Task 1: Data Exploration**
 ```python
 # Auto-generated EDA template
-from specweave import track_experiment
+import mlflow
 
 with track_experiment("exp-001-eda", increment="0042") as exp:
     df = pd.read_csv("data/interactions.csv")
@@ -591,7 +591,7 @@ explainer.generate_all_reports()
 
 **Updates**:
 ```markdown
-<!-- .specweave/docs/internal/architecture/ml-models.md -->
+<!-- docs/internal/architecture/ml-models.md -->
 
 ## Recommendation Model (Increment 0042)
 
@@ -683,20 +683,19 @@ if load_test_results["p95_latency"] > 100:  # ms
 ```python
 # Auto-configured to log to increment
 import mlflow
-from specweave import configure_mlflow
+mlflow.set_tracking_uri("./mlruns")
+mlflow.set_experiment("increment-0042")
 
-configure_mlflow(increment="0042")
-
-# All MLflow logs → .specweave/increments/0042.../experiments/
+# All MLflow logs stored locally in ./mlruns/
 ```
 
 ### Weights & Biases Integration
 
 ```python
 import wandb
-from specweave import configure_wandb
+import wandb
 
-configure_wandb(increment="0042")
+wandb.init(project="increment-0042")
 
 # W&B project = increment ID
 # Logs both to W&B dashboard + local increment folder
@@ -705,15 +704,14 @@ configure_wandb(increment="0042")
 ### Custom Tracking Backend
 
 ```python
-from specweave import register_tracking_backend
-
 # Use your own tracking system
-register_tracking_backend(MyCustomTracker)
+# Configure MLflow with a custom backend
+mlflow.set_tracking_uri("http://my-custom-tracker:5000")
 ```
 
 ---
 
-## 📊 Integration with SpecWeave
+## 📊 Integration with vskill
 
 ### With Increments
 
@@ -728,7 +726,7 @@ All ML work is an increment:
 
 ML decisions captured in docs:
 ```
-.specweave/docs/internal/
+docs/internal/
 ├── architecture/
 │   ├── ml-models.md              # All models documented
 │   ├── adr/
@@ -754,7 +752,7 @@ ML decisions captured in docs:
 
 ## 🎯 When to Use This Plugin
 
-**Use specweave-ml when you need to**:
+**Use the ml plugin when you need to**:
 
 - ✅ Build ML features with same discipline as software
 - ✅ Track experiments systematically (not scattered notebooks)
@@ -776,7 +774,7 @@ ML decisions captured in docs:
 ### Multi-Stage ML Pipelines
 
 ```python
-from specweave import ExperimentPipeline
+from mlflow.tracking import MlflowClient
 
 pipeline = ExperimentPipeline("recommendation-full-pipeline")
 
@@ -801,7 +799,7 @@ with pipeline.stage("training") as stage:
 ### Model Registry
 
 ```python
-from specweave import ModelRegistry
+from mlflow import MlflowClient
 
 # Register model versions
 registry = ModelRegistry()
@@ -823,7 +821,7 @@ registry.rollback_to("0042-v2")
 ### Feature Store Integration
 
 ```python
-from specweave import FeatureStore
+from feast import FeatureStore
 
 # Define features in increment
 features = FeatureStore(increment="0042")
@@ -843,10 +841,10 @@ features_df = features.get_features(["user_7day_purchase_count"])
 
 ## 📖 Resources
 
-- **SpecWeave Docs**: https://spec-weave.com
-- **ML Plugin Guide**: https://spec-weave.com/plugins/ml
+- **vskill Docs**: https://github.com/anton-abyzov/vskill
+- **ML Plugin Guide**: See skills/ directory
 - **Example Increments**: [examples/ml/](/examples/ml/)
-- **Community**: https://github.com/anton-abyzov/specweave/discussions
+- **Community**: https://github.com/anton-abyzov/vskill/discussions
 
 ---
 
@@ -855,11 +853,11 @@ features_df = features.get_features(["user_7day_purchase_count"])
 Want to improve the ML plugin?
 
 ```bash
-# Clone SpecWeave
-git clone https://github.com/anton-abyzov/specweave
+# Clone vskill
+git clone https://github.com/anton-abyzov/vskill
 
 # Navigate to ML plugin
-cd plugins/specweave-ml
+cd plugins/ml
 
 # Make improvements
 vim skills/ml-pipeline-orchestrator/SKILL.md
@@ -879,7 +877,7 @@ MIT License - See [LICENSE](../../LICENSE)
 
 ---
 
-**Transform ML chaos into ML discipline with SpecWeave ML Plugin** 🤖📊✨
+**Transform ML chaos into ML discipline with the vskill ML Plugin**
 
 **Version**: 1.0.0
 **Last Updated**: 2024-01-15

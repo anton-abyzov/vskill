@@ -3,7 +3,7 @@
   "description": "Full-stack backend development for Node.js, Python, .NET, Go, Java/Spring Boot, Rust, and GraphQL. REST APIs, gRPC, authentication, database optimization, and enterprise patterns.",
   "version": "1.1.0",
   "author": {
-    "name": "SpecWeave Team",
+    "name": "vskill Contributors",
     "url": "https://github.com/anton-abyzov/vskill"
   },
   "homepage": "https://github.com/anton-abyzov/vskill",

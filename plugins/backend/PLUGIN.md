@@ -1,7 +1,7 @@
 # Backend Development Plugin
 
 **Version**: 1.1.0
-**Author**: SpecWeave Contributors
+**Author**: vskill Contributors
 **License**: MIT
 
 ## Description
@@ -24,9 +24,9 @@ Full-stack backend development across 7 languages and frameworks: Node.js, .NET,
 ## Installation
 
 ```bash
-vskill add specweave --plugin sw-backend
+vskill add --repo anton-abyzov/vskill --plugin backend
 ```
 
 ## Requirements
 
-- SpecWeave core plugin (sw@specweave)
+- vskill CLI installed

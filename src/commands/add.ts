@@ -237,7 +237,7 @@ async function promptInstallOptions(
     }));
 
     if (allAgents.length > 1) {
-      console.log(dim(`\nDetected ${agents.length} of ${AGENTS_REGISTRY.filter((a) => !a.isUniversal).length} supported agents:`));
+      console.log(dim(`\nDetected ${agents.length} of ${AGENTS_REGISTRY.filter((a) => !a.isUniversal).length} supported agents (checked via CLI binary or config directory):`));
       const prompter = createPrompter();
       const agentIndices = await prompter.promptCheckboxList(items, {
         title: "Select agents to install to",

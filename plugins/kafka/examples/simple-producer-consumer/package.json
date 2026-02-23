@@ -9,7 +9,7 @@
     "start": "npm run consumer"
   },
   "keywords": ["kafka", "producer", "consumer", "example"],
-  "author": "SpecWeave",
+  "author": "vskill Contributors",
   "license": "MIT",
   "dependencies": {
     "kafkajs": "^2.2.4",

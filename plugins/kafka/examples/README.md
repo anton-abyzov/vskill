@@ -1,6 +1,6 @@
 # Kafka Examples
 
-**Working code examples for SpecWeave Kafka plugins**
+**Working code examples for vskill Kafka plugins**
 
 This directory contains 5 complete, runnable examples demonstrating Kafka best practices.
 
@@ -172,10 +172,10 @@ These examples are for learning. For production:
 
 ## Documentation
 
-- **Getting Started**: [kafka-getting-started.md](../../../.specweave/docs/public/guides/kafka-getting-started.md)
-- **Advanced Usage**: [kafka-advanced-usage.md](../../../.specweave/docs/public/guides/kafka-advanced-usage.md)
-- **Terraform Guide**: [kafka-terraform.md](../../../.specweave/docs/public/guides/kafka-terraform.md)
-- **Troubleshooting**: [kafka-troubleshooting.md](../../../.specweave/docs/public/guides/kafka-troubleshooting.md)
+- **Getting Started**: [kafka-getting-started.md](../../../docs/guides/kafka-getting-started.md)
+- **Advanced Usage**: [kafka-advanced-usage.md](../../../docs/guides/kafka-advanced-usage.md)
+- **Terraform Guide**: [kafka-terraform.md](../../../docs/guides/kafka-terraform.md)
+- **Troubleshooting**: [kafka-troubleshooting.md](../../../docs/guides/kafka-troubleshooting.md)
 
 ## Contributing
 
@@ -183,8 +183,8 @@ Found a bug or want to add an example? See [CONTRIBUTING.md](../../../CONTRIBUTI
 
 ## Support
 
-- **GitHub Issues**: [Report a problem](https://github.com/anton-abyzov/specweave/issues)
-- **Discussions**: [Ask questions](https://github.com/anton-abyzov/specweave/discussions)
+- **GitHub Issues**: [Report a problem](https://github.com/anton-abyzov/vskill/issues)
+- **Discussions**: [Ask questions](https://github.com/anton-abyzov/vskill/discussions)
 
 ---
 

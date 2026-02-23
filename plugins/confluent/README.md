@@ -1,6 +1,6 @@
-# specweave-confluent
+# vskill-confluent
 
-**Confluent Cloud Integration Plugin for SpecWeave**
+**Confluent Cloud Integration Plugin for vskill**
 
 Enterprise Kafka features including Schema Registry, ksqlDB stream processing, Cluster Linking, and Confluent Cloud architecture patterns.
 
@@ -41,11 +41,8 @@ Enterprise Kafka features including Schema Registry, ksqlDB stream processing, C
 ### Install Plugin
 
 ```bash
-# Via SpecWeave marketplace
-specweave plugin install sw-confluent
-
-# Or via Claude Code plugin system
-/plugin install sw-confluent@specweave
+# Via vskill CLI
+vskill add --repo anton-abyzov/vskill --plugin confluent
 ```
 
 ## Quick Start
@@ -343,10 +340,10 @@ npm run test:e2e
 
 ## Documentation
 
-- **Schema Registry Guide**: `.specweave/docs/public/guides/confluent-schema-registry.md`
-- **ksqlDB Tutorial**: `.specweave/docs/public/guides/confluent-ksqldb.md`
-- **Cluster Linking**: `.specweave/docs/public/guides/confluent-cluster-linking.md`
-- **Cost Optimization**: `.specweave/docs/public/guides/confluent-cost-optimization.md`
+- **Schema Registry Guide**: `docs/guides/confluent-schema-registry.md`
+- **ksqlDB Tutorial**: `docs/guides/confluent-ksqldb.md`
+- **Cluster Linking**: `docs/guides/confluent-cluster-linking.md`
+- **Cost Optimization**: `docs/guides/confluent-cost-optimization.md`
 
 ## Contributing
 
@@ -354,9 +351,9 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md) for development setup and guideline
 
 ## Related Plugins
 
-- **specweave-kafka** - Core Kafka plugin (Apache Kafka, AWS MSK, Azure Event Hubs)
-- **specweave-kafka-streams** - Kafka Streams library and patterns
-- **specweave-n8n** - n8n workflow automation with Kafka/Confluent integration
+- **vskill-kafka** - Core Kafka plugin (Apache Kafka, AWS MSK, Azure Event Hubs)
+- **vskill-kafka-streams** - Kafka Streams library and patterns
+- **vskill-n8n** - n8n workflow automation with Kafka/Confluent integration
 
 ## License
 
@@ -364,9 +361,9 @@ MIT License - see [LICENSE](../../LICENSE)
 
 ## Support
 
-- **Documentation**: https://spec-weave.com/docs/plugins/confluent
-- **Issues**: https://github.com/anton-abyzov/specweave/issues
-- **Discussions**: https://github.com/anton-abyzov/specweave/discussions
+- **Documentation**: https://github.com/anton-abyzov/vskill
+- **Issues**: https://github.com/anton-abyzov/vskill/issues
+- **Discussions**: https://github.com/anton-abyzov/vskill/discussions
 
 ---
 

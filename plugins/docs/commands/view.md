@@ -12,16 +12,16 @@ Launch Docusaurus development server with hot reload, Mermaid diagrams, and auto
 
 ```bash
 # View internal docs (default) - port 3015
-/sw-docs:view
+/docs:view
 
 # View public docs - port 3016
-/sw-docs:view --public
-/sw-docs:view public
+/docs:view --public
+/docs:view public
 ```
 
 ## Your Task
 
-**IMPORTANT**: This command must work in ANY SpecWeave user project, not just the SpecWeave repo itself.
+**IMPORTANT**: This command must work in ANY project, not just the vskill repo itself.
 
 ### Step 0: Parse Arguments
 
@@ -32,17 +32,17 @@ const isPublic = args.includes('--public') || args.includes('public');
 
 const config = isPublic
   ? {
-      docsPath: '.specweave/docs/public',
+      docsPath: 'docs/public',
       port: 3016,
       title: 'Public Documentation',
-      cachePath: '.specweave/cache/docs-site-public',
+      cachePath: '.cache/docs-site-public',
       navbarTitle: 'Public Docs'
     }
   : {
-      docsPath: '.specweave/docs/internal',
+      docsPath: 'docs/internal',
       port: 3015,
       title: 'Internal Documentation',
-      cachePath: '.specweave/cache/docs-site',
+      cachePath: '.cache/docs-site',
       navbarTitle: 'Internal Docs'
     };
 
@@ -57,7 +57,7 @@ ls -la ${config.docsPath}/
 
 # If missing, inform user:
 # "No documentation found at ${config.docsPath}/.
-#  Run 'specweave init' first or create the folder structure."
+#  Run 'vskill init' first or create the folder structure."
 ```
 
 ### Step 1.5: CRITICAL - Run Pre-Flight Validation
@@ -127,7 +127,7 @@ fs.mkdirSync(config.cachePath, { recursive: true });
 
 // Create package.json
 const packageJson = {
-  name: isPublic ? 'specweave-docs-public' : 'specweave-docs-internal',
+  name: isPublic ? 'vskill-docs-public' : 'vskill-docs-internal',
   version: '1.0.0',
   private: true,
   scripts: {
@@ -167,7 +167,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: '${config.title}',
-  tagline: 'SpecWeave Living Documentation',
+  tagline: 'Living Documentation',
   favicon: 'img/favicon.ico',
   future: { v4: true },
   url: 'http://localhost:${config.port}',
@@ -209,7 +209,7 @@ const config: Config = {
     },
     footer: {
       style: 'dark',
-      copyright: 'SpecWeave Living Documentation',
+      copyright: 'Living Documentation',
     },
     prism: {
       theme: prismThemes.github,
@@ -315,7 +315,7 @@ After starting, display:
 ### View Internal Docs (Default)
 
 ```bash
-/sw-docs:view
+/docs:view
 
 # Output:
 📚 Starting Internal Documentation server...
@@ -325,13 +325,13 @@ After starting, display:
 📚 Documentation View Server Started!
    Mode: INTERNAL docs
    URL: http://localhost:3015
-   Content: .specweave/docs/internal/
+   Content: docs/internal/
 ```
 
 ### View Public Docs
 
 ```bash
-/sw-docs:view --public
+/docs:view --public
 
 # Output:
 📚 Starting Public Documentation server...
@@ -341,7 +341,7 @@ After starting, display:
 📚 Documentation View Server Started!
    Mode: PUBLIC docs
    URL: http://localhost:3016
-   Content: .specweave/docs/public/
+   Content: docs/public/
 ```
 
 ### View Both Simultaneously
@@ -349,10 +349,10 @@ After starting, display:
 Run in separate terminals:
 ```bash
 # Terminal 1: Internal docs
-/sw-docs:view
+/docs:view
 
 # Terminal 2: Public docs
-/sw-docs:view --public
+/docs:view --public
 
 # Now both servers are running!
 # Internal: http://localhost:3015
@@ -373,10 +373,10 @@ lsof -i :3016 && kill -9 $(lsof -t -i :3016)
 ### Reinstall from scratch
 ```bash
 # For internal docs
-rm -rf .specweave/cache/docs-site && /sw-docs:view
+rm -rf .cache/docs-site && /docs:view
 
 # For public docs
-rm -rf .specweave/cache/docs-site-public && /sw-docs:view --public
+rm -rf .cache/docs-site-public && /docs:view --public
 ```
 
 ### npm registry issues
@@ -384,7 +384,7 @@ The setup uses `--registry=https://registry.npmjs.org` to bypass private registr
 
 ## See Also
 
-- `/sw-docs:build` - Build static site for deployment
-- `/sw-docs:organize` - Generate themed indexes for large folders
-- `/sw-docs:health` - Documentation health report
-- `/sw-docs:validate` - Validate documentation without starting server
+- `/docs:build` - Build static site for deployment
+- `/docs:organize` - Generate themed indexes for large folders
+- `/docs:health` - Documentation health report
+- `/docs:validate` - Validate documentation without starting server

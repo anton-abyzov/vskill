@@ -1,7 +1,7 @@
 # Cloud Cost Optimization Plugin
 
 **Version**: 1.0.0
-**Author**: SpecWeave Contributors
+**Author**: vskill Contributors
 **License**: MIT
 
 ## Description
@@ -25,10 +25,10 @@ FinOps expertise for optimizing cloud costs across AWS, Azure, and GCP. Provides
 ## Installation
 
 ```bash
-vskill add specweave --plugin sw-cost-optimizer
+vskill add --repo anton-abyzov/vskill --plugin cost
 ```
 
 ## Requirements
 
-- SpecWeave core plugin (sw@specweave)
+- vskill CLI installed
 - Access to cloud provider cost dashboards (Cost Explorer, Billing reports, etc.)

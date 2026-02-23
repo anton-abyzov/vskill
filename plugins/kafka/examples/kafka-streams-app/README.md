@@ -27,4 +27,4 @@ npm run streams
 
 ## Documentation
 
-See [Advanced Usage Guide](../../.specweave/docs/public/guides/kafka-advanced-usage.md#kafka-streams-applications)
+See [Advanced Usage Guide](../../docs/guides/kafka-advanced-usage.md#kafka-streams-applications)

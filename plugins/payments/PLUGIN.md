@@ -1,7 +1,7 @@
 # Payments Integration
 
 **Version**: 1.0.0
-**Author**: SpecWeave Contributors
+**Author**: vskill Contributors
 **License**: MIT
 
 ## Description
@@ -20,20 +20,20 @@ Complete payment processing expertise for Stripe, PayPal, and marketplace paymen
 
 | Command | Description |
 |---------|-------------|
-| /sw-payments:stripe-setup | Complete Stripe integration setup with production-ready code templates, security best practices, and testing workflows |
-| /sw-payments:subscription-flow | Implement subscription billing workflows with recurring charges, billing cycles, and customer management |
-| /sw-payments:subscription-manage | Manage existing subscriptions including upgrades, downgrades, cancellations, and dunning workflows |
-| /sw-payments:webhook-setup | Configure Stripe webhooks for payment events with signature validation and idempotent processing |
+| /payments:stripe-setup | Complete Stripe integration setup with production-ready code templates, security best practices, and testing workflows |
+| /payments:subscription-flow | Implement subscription billing workflows with recurring charges, billing cycles, and customer management |
+| /payments:subscription-manage | Manage existing subscriptions including upgrades, downgrades, cancellations, and dunning workflows |
+| /payments:webhook-setup | Configure Stripe webhooks for payment events with signature validation and idempotent processing |
 
 ## Installation
 
 ```bash
-vskill add specweave --plugin sw-payments
+vskill add --repo anton-abyzov/vskill --plugin payments
 ```
 
 ## Requirements
 
-- SpecWeave core plugin (sw@specweave)
+- vskill CLI installed
 - Stripe account with API keys
 - HTTPS endpoint for webhook handling
 - Database for payment records

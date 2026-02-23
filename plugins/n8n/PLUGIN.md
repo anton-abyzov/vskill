@@ -1,7 +1,7 @@
 # n8n Kafka Workflows
 
 **Version**: 1.0.0
-**Author**: SpecWeave Contributors
+**Author**: vskill Contributors
 **License**: MIT
 
 ## Description
@@ -18,16 +18,16 @@ Event-driven workflow automation with Apache Kafka integration. Master Kafka tri
 
 | Command | Description |
 |---------|-------------|
-| /sw-n8n:workflow-template | Generate n8n workflow JSON template with Kafka integration patterns (enrichment, fan-out, retry+DLQ, CDC) |
+| /n8n:workflow-template | Generate n8n workflow JSON template with Kafka integration patterns (enrichment, fan-out, retry+DLQ, CDC) |
 
 ## Installation
 
 ```bash
-vskill add specweave --plugin sw-n8n
+vskill add --repo anton-abyzov/vskill --plugin n8n
 ```
 
 ## Requirements
 
-- SpecWeave core plugin (sw@specweave)
+- vskill CLI installed
 - n8n instance (self-hosted or cloud)
 - Apache Kafka broker (local or cloud-hosted)

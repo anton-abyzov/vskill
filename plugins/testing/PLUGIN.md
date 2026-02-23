@@ -1,7 +1,7 @@
 # Testing Framework
 
 **Version**: 1.0.0
-**Author**: SpecWeave Contributors
+**Author**: vskill Contributors
 **License**: MIT
 
 ## Description
@@ -22,12 +22,12 @@ Comprehensive testing infrastructure expert covering unit testing (Vitest/Jest),
 ## Installation
 
 ```bash
-vskill add specweave --plugin sw-testing
+vskill add --repo anton-abyzov/vskill --plugin testing
 ```
 
 ## Requirements
 
-- SpecWeave core plugin (sw@specweave)
+- vskill CLI installed
 - Node.js 18+ for modern testing tools
 - TypeScript (recommended for type-safe tests)
 - Git for tracking test coverage over time

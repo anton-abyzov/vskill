@@ -2,7 +2,7 @@
 description: Scaffold a complete frontend project with modern tooling, TypeScript, and best practices for React, Vue, Angular, or Next.js.
 ---
 
-# /sw-frontend:frontend-scaffold
+# /frontend:frontend-scaffold
 
 Scaffold a complete frontend project with modern tooling and best practices.
 
@@ -185,7 +185,7 @@ export function formatPrice(price: number | null | undefined, currency = 'USD', 
 - NEVER show "No image" text boxes or broken image icons. Use one of these approaches:
   1. **Unsplash** (free, high-quality): `https://images.unsplash.com/photo-{id}?w=600&h=400&fit=crop`
   2. **Picsum** (free, random): `https://picsum.photos/seed/{slug}/600/400`
-  3. **AI-generated**: Invoke `/sw-media:image` to generate custom product/hero images
+  3. **AI-generated**: Use AI image generation tools to create custom product/hero images
   4. **SVG placeholders**: Use tasteful gradient SVGs with subtle icons (not gray boxes)
 - For e-commerce: provide 4-6 realistic product image URLs in seed data
 - For dashboards: use chart/graph placeholder components with realistic mock data

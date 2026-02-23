@@ -10,7 +10,7 @@ Build production-ready static documentation site for deployment to any static ho
 
 ## Your Task
 
-**IMPORTANT**: This command must work in ANY SpecWeave user project, not just the SpecWeave repo itself.
+**IMPORTANT**: This command must work in ANY project, not just the vskill repo itself.
 
 ### Step 1: CRITICAL - Run Pre-Flight Validation
 
@@ -20,7 +20,7 @@ Build production-ready static documentation site for deployment to any static ho
 import { DocsValidator } from '../../../src/utils/docs-validator.js';
 
 const validator = new DocsValidator({
-  docsPath: '.specweave/docs/internal',
+  docsPath: 'docs/internal',
   autoFix: true,  // Auto-fix common issues
 });
 
@@ -44,19 +44,19 @@ console.log('\n✅ Validation passed! Proceeding with build...\n');
 
 ```bash
 # Check if Docusaurus is set up
-if [ ! -d ".specweave/cache/docs-site/node_modules" ]; then
+if [ ! -d ".cache/docs-site/node_modules" ]; then
   echo "Setting up Docusaurus first..."
   # Run the same setup as preview command (see preview.md for full setup)
   # After setup, continue to build
 fi
 ```
 
-If not set up, follow the same setup steps as `/sw-docs:view` (Step 3 in view.md).
+If not set up, follow the same setup steps as `/docs:view` (Step 3 in view.md).
 
 ### Step 3: Run Build
 
 ```bash
-cd .specweave/cache/docs-site && npm run build
+cd .cache/docs-site && npm run build
 ```
 
 ### Step 3: Report Output
@@ -65,10 +65,10 @@ cd .specweave/cache/docs-site && npm run build
 echo ""
 echo "📦 Build Complete!"
 echo ""
-echo "   Output: .specweave/cache/docs-site/build/"
+echo "   Output: .cache/docs-site/build/"
 echo ""
 echo "   Deploy with:"
-echo "   • npx serve .specweave/cache/docs-site/build/"
+echo "   • npx serve .cache/docs-site/build/"
 echo "   • Copy to your static host"
 echo ""
 ```
@@ -76,7 +76,7 @@ echo ""
 ## Output Structure
 
 ```
-.specweave/cache/docs-site/build/
+.cache/docs-site/build/
 ├── index.html              <- Landing page
 ├── strategy/
 ├── specs/
@@ -96,14 +96,14 @@ echo ""
 ### 1. Preview Locally
 
 ```bash
-npx serve .specweave/cache/docs-site/build/
+npx serve .cache/docs-site/build/
 ```
 
 ### 2. Copy to Custom Location
 
 ```bash
 # Copy build to docs folder for GitHub Pages
-cp -r .specweave/cache/docs-site/build/* docs/
+cp -r .cache/docs-site/build/* docs/
 git add docs/
 git commit -m "docs: update documentation site"
 ```
@@ -112,7 +112,7 @@ git commit -m "docs: update documentation site"
 
 ```bash
 # Point your deployment to:
-.specweave/cache/docs-site/build/
+.cache/docs-site/build/
 ```
 
 ## Build vs Preview
@@ -131,9 +131,9 @@ git commit -m "docs: update documentation site"
 ### Build fails with broken links
 ```bash
 # View docs first to find errors
-/sw-docs:view
+/docs:view
 # Fix broken links, then build
-/sw-docs:build
+/docs:build
 ```
 
 ### Out of memory
@@ -143,17 +143,17 @@ NODE_OPTIONS="--max-old-space-size=4096" npm run build
 
 ### Cache issues
 ```bash
-cd .specweave/cache/docs-site && npm run clear && npm run build
+cd .cache/docs-site && npm run clear && npm run build
 ```
 
 ### Reinstall from scratch
 ```bash
-rm -rf .specweave/cache/docs-site
-/sw-docs:build
+rm -rf .cache/docs-site
+/docs:build
 ```
 
 ## See Also
 
-- `/sw-docs:view` - View docs locally with hot reload
-- `/sw-docs:organize` - Organize large folders with themed indexes
-- `/sw-docs:health` - Documentation health report
+- `/docs:view` - View docs locally with hot reload
+- `/docs:organize` - Organize large folders with themed indexes
+- `/docs:health` - Documentation health report

@@ -193,14 +193,6 @@ find . -name "*.test.ts" -o -name "*.spec.ts" | xargs grep -l "featureName"
 grep -rn "describe.*featureName\|it.*should" --include="*.test.ts"
 ```
 
-## Integration with SpecWeave
-
-When exploring for SpecWeave increments:
-1. Map discovered code to User Stories (US-xxx)
-2. Identify which Acceptance Criteria (AC-xxx) are covered
-3. Document technical debt discovered during exploration
-4. Note architectural decisions that should become ADRs
-
 ## Best Practices
 
 1. **Document as you go** - Create notes while exploring

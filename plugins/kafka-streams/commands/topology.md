@@ -93,7 +93,7 @@ deduplicated.to("unique-events");
 
 ```bash
 # Generate topology
-/sw-kafka-streams:topology
+/kafka-streams:topology
 
 # I'll ask:
 # 1. Language? (Java or Kotlin)
@@ -419,8 +419,8 @@ kafka-topics.sh --alter --topic input-topic --partitions 8
 
 ## Related Commands
 
-- `/sw-kafka:dev-env` - Set up local Kafka cluster for testing
-- `/sw-kafka:monitor-setup` - Configure Prometheus + Grafana monitoring
+- `/kafka:dev-env` - Set up local Kafka cluster for testing
+- `/kafka:monitor-setup` - Configure Prometheus + Grafana monitoring
 
 ## Documentation
 

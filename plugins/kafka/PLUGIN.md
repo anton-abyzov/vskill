@@ -1,7 +1,7 @@
 # Kafka Plugin
 
 **Version**: 1.0.0
-**Author**: SpecWeave Contributors
+**Author**: vskill Contributors
 **License**: MIT
 
 ## Description
@@ -18,10 +18,10 @@ Expert-driven plugin for Apache Kafka architecture design and operations. Covers
 ## Installation
 
 ```bash
-vskill add specweave --plugin sw-kafka
+vskill add --repo anton-abyzov/vskill --plugin kafka
 ```
 
 ## Requirements
 
-- SpecWeave core plugin (sw@specweave)
+- vskill CLI installed
 - Apache Kafka knowledge or active Kafka infrastructure

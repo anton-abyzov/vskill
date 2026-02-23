@@ -1,6 +1,6 @@
-# specweave-kafka
+# vskill-kafka
 
-**Apache Kafka Event Streaming Integration Plugin for SpecWeave**
+**Apache Kafka Event Streaming Integration Plugin for vskill**
 
 Comprehensive plugin providing MCP server integration, CLI tools (kcat), Terraform infrastructure modules, and full observability stack (Prometheus/Grafana/OpenTelemetry) for Apache Kafka.
 
@@ -34,10 +34,10 @@ Comprehensive plugin providing MCP server integration, CLI tools (kcat), Terrafo
 
 ### ⚡ Commands (4)
 
-- `/sw-kafka:deploy` - Deploy Kafka cluster via Terraform (AWS MSK, Azure Event Hubs, Apache Kafka)
-- `/sw-kafka:monitor-setup` - Setup Prometheus/Grafana monitoring stack with 5 dashboards and 14 alerts
-- `/sw-kafka:mcp-configure` - Configure MCP server integration (auto-detects kanapuli, tuannvm, Joel-hanson, Confluent)
-- `/sw-kafka:dev-env` - Setup local development environment (Docker Compose: Kafka KRaft or Redpanda)
+- `/kafka:deploy` - Deploy Kafka cluster via Terraform (AWS MSK, Azure Event Hubs, Apache Kafka)
+- `/kafka:monitor-setup` - Setup Prometheus/Grafana monitoring stack with 5 dashboards and 14 alerts
+- `/kafka:mcp-configure` - Configure MCP server integration (auto-detects kanapuli, tuannvm, Joel-hanson, Confluent)
+- `/kafka:dev-env` - Setup local development environment (Docker Compose: Kafka KRaft or Redpanda)
 
 ## Installation
 
@@ -46,16 +46,13 @@ Comprehensive plugin providing MCP server integration, CLI tools (kcat), Terrafo
 - Node.js 18+
 - Docker 20+ (for local development)
 - Terraform 1.5+ (for infrastructure deployment)
-- Claude Code (SpecWeave runtime)
+- Claude Code with vskill
 
 ### Install Plugin
 
 ```bash
-# Via SpecWeave marketplace
-specweave plugin install sw-kafka
-
-# Or via Claude Code plugin system
-/plugin install sw-kafka@specweave
+# Via vskill CLI
+vskill add --repo anton-abyzov/vskill --plugin kafka
 ```
 
 ## Quick Start
@@ -63,7 +60,7 @@ specweave plugin install sw-kafka
 ### 1. Start Local Kafka Cluster
 
 ```bash
-/sw-kafka:dev-env start
+/kafka:dev-env start
 ```
 
 This starts a Kafka cluster (KRaft mode) with Schema Registry and Kafka UI on your local machine.
@@ -71,7 +68,7 @@ This starts a Kafka cluster (KRaft mode) with Schema Registry and Kafka UI on yo
 ### 2. Configure MCP Server
 
 ```bash
-/sw-kafka:mcp-configure
+/kafka:mcp-configure
 ```
 
 Auto-detects available MCP servers and generates configuration.
@@ -81,7 +78,7 @@ Auto-detects available MCP servers and generates configuration.
 Use the provided code templates:
 
 ```javascript
-// Producer example (plugins/specweave-kafka/templates/examples/nodejs-producer.js)
+// Producer example (plugins/kafka/templates/examples/nodejs-producer.js)
 const { Kafka } = require('kafkajs');
 
 const kafka = new Kafka({
@@ -100,7 +97,7 @@ await producer.send({
 ### 4. Setup Monitoring
 
 ```bash
-/sw-kafka:monitor-setup
+/kafka:monitor-setup
 ```
 
 Deploys Prometheus, Grafana, and pre-built dashboards for Kafka monitoring.
@@ -111,19 +108,19 @@ Deploys Prometheus, Grafana, and pre-built dashboards for Kafka monitoring.
 
 Skills work together in coordinated workflows:
 
-**Deployment Workflow** (`/sw-kafka:deploy`):
+**Deployment Workflow** (`/kafka:deploy`):
 1. `kafka-architect` → Cluster sizing and partitioning strategy
 2. `kafka-iac-deployment` → Generate Terraform modules
 3. `kafka-kubernetes` → Kubernetes manifests (if K8s deployment)
 4. `kafka-observability` → Monitoring stack configuration
 
-**Monitoring Workflow** (`/sw-kafka:monitor-setup`):
+**Monitoring Workflow** (`/kafka:monitor-setup`):
 1. `kafka-observability` → JMX exporter configuration
 2. `kafka-observability` → Prometheus scraping setup
 3. `kafka-observability` → Grafana dashboard provisioning (5 dashboards)
 4. `kafka-observability` → Alerting rules deployment (14 critical/high/warning alerts)
 
-**Local Development** (`/sw-kafka:dev-env`):
+**Local Development** (`/kafka:dev-env`):
 1. `kafka-cli-tools` → Docker Compose stack selection (Kafka or Redpanda)
 2. `kafka-observability` → Monitoring integration
 3. `kafka-mcp-integration` → Configure MCP server for local cluster
@@ -166,7 +163,7 @@ Skills work together in coordinated workflows:
 ### Deploy to AWS MSK
 
 ```bash
-/sw-kafka:deploy aws-msk
+/kafka:deploy aws-msk
 ```
 
 Interactive prompts guide you through:
@@ -180,7 +177,7 @@ Interactive prompts guide you through:
 Use the provided configuration templates:
 
 ```bash
-cp plugins/specweave-kafka/templates/security/sasl-scram-config.properties ./kafka-config.properties
+cp plugins/kafka/templates/security/sasl-scram-config.properties ./kafka-config.properties
 ```
 
 Edit and apply:
@@ -191,7 +188,7 @@ Edit and apply:
 ### Monitor Multiple Clusters
 
 ```bash
-/sw-kafka:monitor-setup --multi-cluster
+/kafka:monitor-setup --multi-cluster
 ```
 
 Creates unified Grafana dashboard with cluster selector.
@@ -229,10 +226,10 @@ Measures: producer/consumer throughput, end-to-end latency (p50/p95/p99), batch 
 
 ## Documentation
 
-- **Getting Started**: `.specweave/docs/public/guides/kafka-getting-started.md`
-- **Advanced Usage**: `.specweave/docs/public/guides/kafka-advanced-usage.md`
-- **Terraform Guide**: `.specweave/docs/public/guides/kafka-terraform.md`
-- **Troubleshooting**: `.specweave/docs/public/guides/kafka-troubleshooting.md`
+- **Getting Started**: `docs/guides/kafka-getting-started.md`
+- **Advanced Usage**: `docs/guides/kafka-advanced-usage.md`
+- **Terraform Guide**: `docs/guides/kafka-terraform.md`
+- **Troubleshooting**: `docs/guides/kafka-troubleshooting.md`
 - **API Reference**: Generated via TypeDoc
 
 ## Contributing
@@ -241,9 +238,9 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md) for development setup and guideline
 
 ## Related Plugins
 
-- **specweave-confluent** - Confluent Cloud specific features
-- **specweave-kafka-streams** - Kafka Streams + Red Hat AMQ Streams
-- **specweave-n8n** - n8n workflow automation with Kafka
+- **vskill-confluent** - Confluent Cloud specific features
+- **vskill-kafka-streams** - Kafka Streams + Red Hat AMQ Streams
+- **vskill-n8n** - n8n workflow automation with Kafka
 
 ## License
 
@@ -251,9 +248,9 @@ MIT License - see [LICENSE](../../LICENSE)
 
 ## Support
 
-- **Documentation**: https://spec-weave.com/docs/plugins/kafka
-- **Issues**: https://github.com/anton-abyzov/specweave/issues
-- **Discussions**: https://github.com/anton-abyzov/specweave/discussions
+- **Documentation**: https://github.com/anton-abyzov/vskill
+- **Issues**: https://github.com/anton-abyzov/vskill/issues
+- **Discussions**: https://github.com/anton-abyzov/vskill/discussions
 
 ---
 

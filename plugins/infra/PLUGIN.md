@@ -1,7 +1,7 @@
 # Infrastructure Plugin
 
 **Version**: 1.1.0
-**Author**: SpecWeave Contributors
+**Author**: vskill Contributors
 **License**: MIT
 
 ## Description
@@ -26,9 +26,9 @@ Comprehensive infrastructure, DevOps, and cloud platform expertise. Covers Terra
 ## Installation
 
 ```bash
-vskill add specweave --plugin sw-infra
+vskill add --repo anton-abyzov/vskill --plugin infra
 ```
 
 ## Requirements
 
-- SpecWeave core plugin (sw@specweave)
+- vskill CLI installed

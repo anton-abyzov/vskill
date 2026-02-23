@@ -43,7 +43,7 @@ Based on your answers, I'll:
 
 ```bash
 # Start deployment wizard
-/sw-kafka:deploy
+/kafka:deploy
 
 # I'll activate kafka-iac-deployment skill and guide you through:
 # 1. Platform selection
@@ -89,10 +89,10 @@ Based on your answers, I'll:
 After deployment succeeds, I'll:
 1. ✅ Output bootstrap servers
 2. ✅ Provide connection examples
-3. ✅ Suggest running `/sw-kafka:monitor-setup` for Prometheus + Grafana
-4. ✅ Suggest testing with `/sw-kafka:dev-env` locally
+3. ✅ Suggest running `/kafka:monitor-setup` for Prometheus + Grafana
+4. ✅ Suggest testing with `/kafka:dev-env` locally
 
 ---
 
 **Skills Activated**: kafka-iac-deployment, kafka-architecture
-**Related Commands**: /sw-kafka:monitor-setup, /sw-kafka:dev-env
+**Related Commands**: /kafka:monitor-setup, /kafka:dev-env

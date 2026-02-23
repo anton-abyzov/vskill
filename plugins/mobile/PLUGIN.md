@@ -1,7 +1,7 @@
 # Mobile Plugin
 
 **Version**: 1.1.0
-**Author**: SpecWeave Contributors
+**Author**: vskill Contributors
 **License**: MIT
 
 ## Description
@@ -25,9 +25,9 @@ Comprehensive mobile development plugin covering native iOS (SwiftUI), native An
 ## Installation
 
 ```bash
-vskill add specweave --plugin sw-mobile
+vskill add --repo anton-abyzov/vskill --plugin mobile
 ```
 
 ## Requirements
 
-- SpecWeave core plugin (sw@specweave)
+- vskill CLI installed

@@ -136,7 +136,16 @@ function createInteractivePrompter(): Prompter {
     async promptCheckboxList(items: CheckboxItem[], options?: CheckboxOptions): Promise<number[]> {
       const checked = items.map((item) => item.checked ?? false);
       let cursor = 0;
+      let scrollOffset = 0;
       let renderedLines = 0;
+
+      // Scrolling viewport: fit within terminal, leave room for header/footer
+      const termRows = out.rows || 24;
+      const maxVisible = Math.min(items.length, Math.max(8, termRows - 6));
+
+      function selectedCount(): number {
+        return checked.filter(Boolean).length;
+      }
 
       function render() {
         // Move up to overwrite previous render
@@ -144,15 +153,34 @@ function createInteractivePrompter(): Prompter {
           write(moveUp(renderedLines) + "\r");
         }
 
+        // Keep cursor within viewport
+        if (cursor < scrollOffset) scrollOffset = cursor;
+        if (cursor >= scrollOffset + maxVisible) scrollOffset = cursor - maxVisible + 1;
+
         const lines: string[] = [];
 
-        for (let i = 0; i < items.length; i++) {
+        // Scroll indicator: above
+        if (scrollOffset > 0) {
+          lines.push(`${CLEAR_LINE}  \x1b[2m  ↑ ${scrollOffset} more above\x1b[0m`);
+        }
+
+        // Visible window
+        const end = Math.min(scrollOffset + maxVisible, items.length);
+        for (let i = scrollOffset; i < end; i++) {
           const mark = checked[i] ? "x" : " ";
           const pointer = i === cursor ? ">" : " ";
           const desc = items[i].description ? ` \x1b[2m— ${items[i].description}\x1b[0m` : "";
           lines.push(`${CLEAR_LINE}  ${pointer} [${mark}] ${items[i].label}${desc}`);
         }
-        lines.push(`${CLEAR_LINE}  \x1b[2m↑/↓ move · space toggle · a all · enter done\x1b[0m`);
+
+        // Scroll indicator: below
+        const remaining = items.length - end;
+        if (remaining > 0) {
+          lines.push(`${CLEAR_LINE}  \x1b[2m  ↓ ${remaining} more below\x1b[0m`);
+        }
+
+        // Footer with counts and controls
+        lines.push(`${CLEAR_LINE}  \x1b[2m${selectedCount()}/${items.length} selected · ↑/↓ move · space toggle · a all · enter done\x1b[0m`);
 
         write(lines.join("\n") + "\n");
         renderedLines = lines.length;
@@ -175,9 +203,13 @@ function createInteractivePrompter(): Prompter {
 
           if (key === KEY_UP) {
             cursor = cursor > 0 ? cursor - 1 : items.length - 1;
+            // Wrap to bottom: scroll to end
+            if (cursor === items.length - 1) scrollOffset = Math.max(0, items.length - maxVisible);
             render();
           } else if (key === KEY_DOWN) {
             cursor = cursor < items.length - 1 ? cursor + 1 : 0;
+            // Wrap to top: scroll to start
+            if (cursor === 0) scrollOffset = 0;
             render();
           } else if (key === KEY_SPACE) {
             checked[cursor] = !checked[cursor];

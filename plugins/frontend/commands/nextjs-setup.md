@@ -2,7 +2,7 @@
 description: Set up Next.js 14+ App Router project with Server Components, metadata configuration, and production-ready best practices.
 ---
 
-# /sw-frontend:nextjs-setup
+# /frontend:nextjs-setup
 
 Set up Next.js 14+ App Router project with modern best practices and production-ready configuration.
 

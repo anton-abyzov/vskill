@@ -2,7 +2,7 @@
 description: Generate React/Vue/Angular components with tests, Storybook stories, and documentation following Atomic Design principles.
 ---
 
-# /sw-frontend:component-generate
+# /frontend:component-generate
 
 Generate React/Vue/Angular components with tests, stories, and documentation following Atomic Design principles.
 

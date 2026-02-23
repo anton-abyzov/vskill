@@ -2,7 +2,7 @@
 description: Implement cost optimization recommendations with automated resource modifications and savings plan purchases across AWS, Azure, and GCP.
 ---
 
-# /sw-cost:cost-optimize
+# /cost:cost-optimize
 
 Implement cost optimization recommendations with automated resource modifications and savings plan purchases.
 

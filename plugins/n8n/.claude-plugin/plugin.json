@@ -3,7 +3,7 @@
   "description": "n8n workflow automation integration with Kafka - Event-driven workflows, Kafka triggers, producers, consumers, and workflow patterns for no-code/low-code event processing",
   "version": "1.0.0",
   "author": {
-    "name": "SpecWeave Team",
+    "name": "vskill Contributors",
     "url": "https://github.com/anton-abyzov/vskill"
   },
   "repository": "https://github.com/anton-abyzov/vskill",

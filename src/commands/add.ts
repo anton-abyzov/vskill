@@ -196,6 +196,7 @@ function resolveInstallBase(
 interface InstallSelections {
   agents: AgentDefinition[];
   global: boolean;
+  symlink: boolean;
 }
 
 /**
@@ -216,7 +217,7 @@ async function promptInstallOptions(
   let useGlobal = !!opts.global;
 
   if (!shouldPrompt) {
-    return { agents: selectedAgents, global: useGlobal };
+    return { agents: selectedAgents, global: useGlobal, symlink: !opts.copy };
   }
 
   // Agent selection — show detected agents (pre-checked) + all others (unchecked)
@@ -263,8 +264,25 @@ async function promptInstallOptions(
     useGlobal = scopeIdx === 1;
   }
 
-  // Preview install paths so user knows exactly where files go
-  console.log(dim(`\nInstall targets:`));
+  // Installation method (skip if --copy explicitly set)
+  let useSymlink = !opts.copy;
+  if (!opts.copy) {
+    const prompter3 = createPrompter();
+    const methodIdx = await prompter3.promptChoice("Installation method:", [
+      { label: "Symlink", hint: "single source of truth, easy updates" },
+      { label: "Copy to all agents", hint: "independent copies, no symlink dependency" },
+    ]);
+    useSymlink = methodIdx === 0;
+  }
+
+  // Installation summary
+  const methodLabel = useSymlink ? "Symlink" : "Copy";
+  const scopeLabel = useGlobal ? "Global" : "Project";
+  console.log("");
+  console.log(cyan("  Installation Summary"));
+  console.log(dim("  ─────────────────────────────────────────────────"));
+  console.log(dim(`  Scope: ${bold(scopeLabel)}  |  Method: ${bold(methodLabel)}`));
+  console.log(dim(`  Agents (${selectedAgents.length}):`));
   for (const agent of selectedAgents) {
     const base = useGlobal
       ? resolveTilde(agent.globalSkillsDir)
@@ -274,10 +292,11 @@ async function promptInstallOptions(
             : findProjectRoot(process.cwd()) || process.cwd(),
           agent.localSkillsDir,
         );
-    console.log(dim(`  ${agent.displayName}: ${base}/`));
+    console.log(dim(`    ${agent.displayName}: ${base}/`));
   }
+  console.log(dim("  ─────────────────────────────────────────────────"));
 
-  return { agents: selectedAgents, global: useGlobal };
+  return { agents: selectedAgents, global: useGlobal, symlink: useSymlink };
 }
 
 async function fetchSkillContent(url: string): Promise<string> {
@@ -614,16 +633,20 @@ async function installOneGitHubSkill(
     return { skillName, installed: false, verdict: scanResult.verdict };
   }
 
-  // Install to each agent
+  // Install to each agent using canonical installer
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
-  for (const agent of agents) {
-    const baseDir = resolveInstallBase(opts, agent);
-    const skillDir = join(baseDir, skillName);
-    try {
-      mkdirSync(skillDir, { recursive: true });
-      writeFileSync(join(skillDir, "SKILL.md"), content, "utf-8");
-    } catch { /* skip agent on write error */ }
-  }
+  const projectRoot = opts.cwd
+    ? process.cwd()
+    : (findProjectRoot(process.cwd()) || process.cwd());
+  const installOpts = { global: !!opts.global, projectRoot };
+
+  try {
+    if (opts.copy) {
+      installCopy(skillName, content, agents as AgentDefinition[], installOpts);
+    } else {
+      installSymlink(skillName, content, agents as AgentDefinition[], installOpts);
+    }
+  } catch { /* skip on write error */ }
 
   return { skillName, installed: true, verdict: scanResult.verdict, sha };
 }
@@ -792,6 +815,7 @@ async function installRepoPlugin(
   const selections = await promptInstallOptions(agents, opts);
   const selectedAgents = selections.agents;
   if (selections.global) opts.global = true;
+  if (!selections.symlink) opts.copy = true;
 
   // Install skills and commands with namespace prefix
   const sha = createHash("sha256").update(combined).digest("hex").slice(0, 12);
@@ -892,8 +916,15 @@ export async function addCommand(
     source = `${parsed.owner}/${parsed.repo}`;
   }
 
-  // GitHub mode: owner/repo
+  // GitHub mode: owner/repo or owner/repo/skill
   const parts = source.split("/");
+
+  // 3-part format: owner/repo/skill-name → single skill install
+  if (parts.length === 3) {
+    const [threeOwner, threeRepo, threeSkill] = parts;
+    return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts);
+  }
+
   if (parts.length !== 2) {
     // No slash → try registry lookup by skill name
     return installFromRegistry(source, opts);
@@ -928,10 +959,11 @@ export async function addCommand(
     return;
   }
 
-  // Interactive agent/scope selection
+  // Interactive agent/scope/method selection
   const selections = await promptInstallOptions(agents, opts);
   const selectedAgents = selections.agents;
   if (selections.global) opts.global = true;
+  if (!selections.symlink) opts.copy = true;
 
   // Skill selection (multi-skill repos, when interactive)
   let selectedSkills = discovered;
@@ -1286,25 +1318,18 @@ async function installSingleSkillLegacy(
   const selections = await promptInstallOptions(agents, opts);
   const selectedAgents = selections.agents;
   if (selections.global) opts.global = true;
+  if (!selections.symlink) opts.copy = true;
 
-  // Install to each agent
+  // Install to each agent using canonical installer
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
-  const locations: string[] = [];
+  const projectRoot = opts.cwd
+    ? process.cwd()
+    : (findProjectRoot(process.cwd()) || process.cwd());
+  const installOpts = { global: !!opts.global, projectRoot };
 
-  for (const agent of selectedAgents) {
-    const baseDir = resolveInstallBase(opts, agent);
-    const skillDir = join(baseDir, skillName);
-    try {
-      mkdirSync(skillDir, { recursive: true });
-      writeFileSync(join(skillDir, "SKILL.md"), content, "utf-8");
-      locations.push(`${agent.displayName}: ${skillDir}`);
-    } catch (err) {
-      console.error(
-        yellow(`Failed to write to ${agent.displayName}: `) +
-          dim((err as Error).message)
-      );
-    }
-  }
+  const locations = opts.copy
+    ? installCopy(skillName, content, selectedAgents, installOpts)
+    : installSymlink(skillName, content, selectedAgents, installOpts);
 
   // Update lockfile
   const lock = ensureLockfile();
@@ -1319,7 +1344,8 @@ async function installSingleSkillLegacy(
   writeLockfile(lock);
 
   // Print summary
-  console.log(green(`\nInstalled ${bold(skillName)} to ${locations.length} agent${locations.length === 1 ? "" : "s"}:\n`));
+  const method = opts.copy ? "copied" : "symlinked";
+  console.log(green(`\nInstalled ${bold(skillName)} (${method}) to ${locations.length} agent${locations.length === 1 ? "" : "s"}:\n`));
   for (const loc of locations) {
     console.log(`  ${dim(">")} ${loc}`);
   }

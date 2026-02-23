@@ -42,14 +42,14 @@ describe("canonical installer", () => {
 
   describe("ensureCanonicalDir", () => {
     it("creates .agents/skills/ directory under base", () => {
-      const dir = ensureCanonicalDir(tempDir);
+      const dir = ensureCanonicalDir(tempDir, false);
       expect(dir).toBe(join(tempDir, ".agents", "skills"));
       expect(lstatSync(dir).isDirectory()).toBe(true);
     });
 
     it("is idempotent - does not throw if dir exists", () => {
-      ensureCanonicalDir(tempDir);
-      expect(() => ensureCanonicalDir(tempDir)).not.toThrow();
+      ensureCanonicalDir(tempDir, false);
+      expect(() => ensureCanonicalDir(tempDir, false)).not.toThrow();
     });
   });
 
@@ -80,10 +80,10 @@ describe("canonical installer", () => {
   });
 
   describe("installSymlink", () => {
-    it("creates canonical dir with SKILL.md and symlinks for each agent", () => {
+    it("creates canonical dir with SKILL.md and symlinks for non-fallback agents", () => {
       const agents = [
-        makeAgent({ id: "claude-code", localSkillsDir: ".claude/commands" }),
         makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" }),
+        makeAgent({ id: "windsurf", localSkillsDir: ".windsurf/skills" }),
       ];
 
       const result = installSymlink("my-skill", "# My Skill\nContent here", agents, {
@@ -96,21 +96,45 @@ describe("canonical installer", () => {
       expect(readFileSync(canonicalPath, "utf-8")).toBe("# My Skill\nContent here");
 
       // Each agent dir has a symlink
-      const claudeLink = join(tempDir, ".claude", "commands", "my-skill");
-      expect(lstatSync(claudeLink).isSymbolicLink()).toBe(true);
-
       const cursorLink = join(tempDir, ".cursor", "skills", "my-skill");
       expect(lstatSync(cursorLink).isSymbolicLink()).toBe(true);
+
+      const windsurfLink = join(tempDir, ".windsurf", "skills", "my-skill");
+      expect(lstatSync(windsurfLink).isSymbolicLink()).toBe(true);
 
       // Returned paths include all locations
       expect(result).toHaveLength(2);
     });
 
+    it("uses copy fallback for Claude Code (known symlink issues)", () => {
+      const agents = [
+        makeAgent({ id: "claude-code", localSkillsDir: ".claude/skills" }),
+        makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" }),
+      ];
+
+      const result = installSymlink("my-skill", "# My Skill\nContent here", agents, {
+        global: false,
+        projectRoot: tempDir,
+      });
+
+      // Claude Code gets a direct copy (not a symlink)
+      const claudePath = join(tempDir, ".claude", "skills", "my-skill");
+      expect(lstatSync(claudePath).isDirectory()).toBe(true);
+      expect(lstatSync(claudePath).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(claudePath, "SKILL.md"), "utf-8")).toBe("# My Skill\nContent here");
+
+      // Cursor gets a symlink
+      const cursorLink = join(tempDir, ".cursor", "skills", "my-skill");
+      expect(lstatSync(cursorLink).isSymbolicLink()).toBe(true);
+
+      expect(result).toHaveLength(2);
+    });
+
     it("overwrites existing symlink or directory at target", () => {
-      const agents = [makeAgent()];
+      const agents = [makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" })];
 
       // Pre-create a regular directory at the target
-      const existingDir = join(tempDir, ".claude", "commands", "my-skill");
+      const existingDir = join(tempDir, ".cursor", "skills", "my-skill");
       mkdirSync(existingDir, { recursive: true });
 
       installSymlink("my-skill", "# Content", agents, {

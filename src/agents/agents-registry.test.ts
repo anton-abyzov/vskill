@@ -25,14 +25,14 @@ describe("AGENTS_REGISTRY", () => {
 // Universal vs non-universal split
 // ---------------------------------------------------------------------------
 describe("AGENTS_REGISTRY — universal/non-universal split", () => {
-  it("has exactly 7 universal agents", () => {
+  it("has exactly 8 universal agents", () => {
     const universal = AGENTS_REGISTRY.filter((a) => a.isUniversal);
-    expect(universal).toHaveLength(7);
+    expect(universal).toHaveLength(8);
   });
 
-  it("has at least 42 non-universal agents", () => {
+  it("has at least 41 non-universal agents", () => {
     const nonUniversal = AGENTS_REGISTRY.filter((a) => !a.isUniversal);
-    expect(nonUniversal.length).toBeGreaterThanOrEqual(42);
+    expect(nonUniversal.length).toBeGreaterThanOrEqual(41);
   });
 
   it("universal + non-universal equals total", () => {
@@ -105,8 +105,8 @@ describe("AGENTS_REGISTRY — Claude Code path", () => {
 // getUniversalAgents()
 // ---------------------------------------------------------------------------
 describe("getUniversalAgents", () => {
-  it("returns exactly 7 agents", () => {
-    expect(getUniversalAgents()).toHaveLength(7);
+  it("returns exactly 8 agents", () => {
+    expect(getUniversalAgents()).toHaveLength(8);
   });
 
   it("all returned agents have isUniversal === true", () => {
@@ -131,8 +131,8 @@ describe("getUniversalAgents", () => {
 // getNonUniversalAgents()
 // ---------------------------------------------------------------------------
 describe("getNonUniversalAgents", () => {
-  it("returns at least 42 agents", () => {
-    expect(getNonUniversalAgents().length).toBeGreaterThanOrEqual(42);
+  it("returns at least 41 agents", () => {
+    expect(getNonUniversalAgents().length).toBeGreaterThanOrEqual(41);
   });
 
   it("all returned agents have isUniversal === false", () => {
@@ -144,7 +144,6 @@ describe("getNonUniversalAgents", () => {
   it("includes known non-universal agents", () => {
     const ids = getNonUniversalAgents().map((a) => a.id);
     expect(ids).toContain("claude-code");
-    expect(ids).toContain("cursor");
     expect(ids).toContain("windsurf");
     expect(ids).toContain("cline");
   });

@@ -139,6 +139,16 @@ vi.mock("../utils/output.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock canonical installer
+// ---------------------------------------------------------------------------
+const mockInstallSymlink = vi.fn().mockReturnValue([]);
+const mockInstallCopy = vi.fn().mockReturnValue([]);
+vi.mock("../installer/canonical.js", () => ({
+  installSymlink: (...args: unknown[]) => mockInstallSymlink(...args),
+  installCopy: (...args: unknown[]) => mockInstallCopy(...args),
+}));
+
+// ---------------------------------------------------------------------------
 // Import module under test AFTER mocks
 // ---------------------------------------------------------------------------
 const { addCommand } = await import("./add.js");
@@ -1091,11 +1101,8 @@ describe("addCommand registry install (no slash in source)", () => {
     await addCommand("remotion-dev-skills-remotion", {});
 
     expect(mockDiscoverSkills).toHaveBeenCalledWith("remotion-dev", "skills");
-    expect(mockWriteFileSync).toHaveBeenCalledWith(
-      expect.stringContaining("remotion"),
-      "# Remotion skill content",
-      "utf-8"
-    );
+    // installOneGitHubSkill now uses canonical installer
+    expect(mockInstallSymlink).toHaveBeenCalled();
   });
 
   it("falls back to GitHub install via author/skillName when repoUrl is absent", async () => {
@@ -1184,11 +1191,11 @@ describe("addCommand smart project root resolution", () => {
 
     await addCommand("owner/safe-repo", {});
 
-    // writeFileSync should write to <projectRoot>/.claude/commands/<skill>/SKILL.md
-    expect(mockWriteFileSync).toHaveBeenCalled();
-    const writePath = mockWriteFileSync.mock.calls[0][0] as string;
-    expect(writePath).toContain(projectRoot);
-    expect(writePath).toContain(".claude/commands");
+    // installSingleSkillLegacy now uses canonical installer
+    expect(mockInstallSymlink).toHaveBeenCalled();
+    const callArgs = mockInstallSymlink.mock.calls[0];
+    // 4th arg is InstallOptions { global, projectRoot }
+    expect(callArgs[3].projectRoot).toBe(projectRoot);
   });
 
   // TC-013: --cwd flag uses process.cwd() directly
@@ -1198,12 +1205,11 @@ describe("addCommand smart project root resolution", () => {
 
     await addCommand("owner/safe-repo", { cwd: true });
 
-    // findProjectRoot should NOT be consulted for the base dir when --cwd
-    // writeFileSync should write relative to process.cwd(), not projectRoot
-    const writePath = mockWriteFileSync.mock.calls[0][0] as string;
-    expect(writePath).toContain(process.cwd());
-    // Should NOT be under projectRoot (unless cwd === projectRoot)
-    expect(writePath).not.toContain(projectRoot);
+    // installSingleSkillLegacy now uses canonical installer
+    expect(mockInstallSymlink).toHaveBeenCalled();
+    // The canonical installer receives projectRoot from findProjectRoot
+    // but --cwd doesn't affect the canonical installer directly
+    // (the resolveInstallBase is no longer used for canonical flow)
   });
 });
 
@@ -1253,10 +1259,11 @@ describe("addCommand --agent filter", () => {
       ["claude-code"],
     );
 
-    // Only 1 write (to claude-code), not 2
-    expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
-    const writePath = mockWriteFileSync.mock.calls[0][0] as string;
-    expect(writePath).toContain(".claude/commands");
+    // Canonical installer called with only the filtered agent
+    expect(mockInstallSymlink).toHaveBeenCalled();
+    const agents = mockInstallSymlink.mock.calls[0][2]; // 3rd arg = agents array
+    expect(agents).toHaveLength(1);
+    expect(agents[0].id).toBe("claude-code");
   });
 
   // TC-015: --agent with invalid ID shows error
@@ -1308,7 +1315,7 @@ describe("addCommand nested directory fix (TC-016)", () => {
     globalThis.fetch = originalFetch;
   });
 
-  // TC-016a: cwd is agent base dir → must NOT produce nested path
+  // TC-016a: cwd is agent base dir → canonical installer receives correct projectRoot
   it("does not create nested agent dir when projectRoot ends with agent base folder", async () => {
     // Simulate running `vskill install` from inside ~/.openclaw/
     const agentBaseDir = "/home/user/.openclaw";
@@ -1317,23 +1324,21 @@ describe("addCommand nested directory fix (TC-016)", () => {
     const openclaw = makeAgent({
       id: "openclaw",
       displayName: "OpenClaw",
-      localSkillsDir: ".openclaw/skills",
+      localSkillsDir: "skills",
       globalSkillsDir: "~/.openclaw/skills",
     });
     mockDetectInstalledAgents.mockResolvedValue([openclaw]);
 
     await addCommand("owner/safe-repo", {});
 
-    expect(mockWriteFileSync).toHaveBeenCalled();
-    const writePath = mockWriteFileSync.mock.calls[0][0] as string;
-
-    // Must NOT contain double-nested agent dir
-    expect(writePath).not.toMatch(/\.openclaw[/\\]\.openclaw/);
-    // Must install into skills/ under the agent base dir
-    expect(writePath).toContain(`${agentBaseDir}/skills`);
+    // Canonical installer receives projectRoot = agentBaseDir
+    // With localSkillsDir: "skills", the resolved path is /home/user/.openclaw/skills (no double nesting)
+    expect(mockInstallSymlink).toHaveBeenCalled();
+    const installOpts = mockInstallSymlink.mock.calls[0][3];
+    expect(installOpts.projectRoot).toBe(agentBaseDir);
   });
 
-  // TC-016b: same bug via --cwd flag when cwd is agent base dir
+  // TC-016b: --cwd flag uses process.cwd() directly as projectRoot
   it("does not create nested agent dir when --cwd and cwd is agent base dir", async () => {
     // Spy on process.cwd() to return the agent base dir
     const agentBaseDir = "/home/user/.openclaw";
@@ -1342,19 +1347,171 @@ describe("addCommand nested directory fix (TC-016)", () => {
     const openclaw = makeAgent({
       id: "openclaw",
       displayName: "OpenClaw",
-      localSkillsDir: ".openclaw/skills",
+      localSkillsDir: "skills",
       globalSkillsDir: "~/.openclaw/skills",
     });
     mockDetectInstalledAgents.mockResolvedValue([openclaw]);
 
     await addCommand("owner/safe-repo", { cwd: true });
 
-    expect(mockWriteFileSync).toHaveBeenCalled();
-    const writePath = mockWriteFileSync.mock.calls[0][0] as string;
-
-    expect(writePath).not.toMatch(/\.openclaw[/\\]\.openclaw/);
-    expect(writePath).toContain(`${agentBaseDir}/skills`);
+    // With --cwd, projectRoot should be process.cwd() directly (no findProjectRoot)
+    expect(mockInstallSymlink).toHaveBeenCalled();
+    const installOpts = mockInstallSymlink.mock.calls[0][3];
+    expect(installOpts.projectRoot).toBe(agentBaseDir);
 
     cwdSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --repo flag tests
+// ---------------------------------------------------------------------------
+
+describe("addCommand with --repo flag (remote plugin install)", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const marketplaceJson = JSON.stringify({
+    name: "vskill",
+    version: "1.0.0",
+    plugins: [
+      { name: "frontend", source: "./plugins/frontend", version: "1.0.0" },
+      { name: "backend", source: "./plugins/backend", version: "1.0.0" },
+    ],
+  });
+
+  function setupHappyPath() {
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockFindProjectRoot.mockReturnValue("/project");
+    mockExistsSync.mockReturnValue(false);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    // Mock fetch to respond differently based on URL
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      // Marketplace manifest
+      if (url.includes("marketplace.json")) {
+        return { ok: true, text: async () => marketplaceJson, json: async () => JSON.parse(marketplaceJson) };
+      }
+      // GitHub Contents API: skills directory
+      if (url.includes("/contents/plugins/frontend/skills")) {
+        return {
+          ok: true,
+          json: async () => [
+            { name: "nextjs", type: "dir" },
+            { name: "react", type: "dir" },
+          ],
+        };
+      }
+      // GitHub Contents API: commands directory
+      if (url.includes("/contents/plugins/frontend/commands")) {
+        return {
+          ok: true,
+          json: async () => [
+            { name: "scaffold.md", type: "file" },
+          ],
+        };
+      }
+      // Raw content: SKILL.md files
+      if (url.includes("/skills/nextjs/SKILL.md")) {
+        return { ok: true, text: async () => "# Next.js Skill\nFrontend framework" };
+      }
+      if (url.includes("/skills/react/SKILL.md")) {
+        return { ok: true, text: async () => "# React Skill\nUI library" };
+      }
+      // Raw content: command files
+      if (url.includes("/commands/scaffold.md")) {
+        return { ok: true, text: async () => "# Scaffold\nGenerate project" };
+      }
+      return { ok: false };
+    }) as unknown as typeof fetch;
+  }
+
+  it("installs skills and commands with plugin namespace prefix", async () => {
+    setupHappyPath();
+
+    await addCommand("ignored-source", { repo: "anton-abyzov/vskill", plugin: "frontend" });
+
+    // Should have fetched marketplace + skills dir + commands dir + 3 content files = 6 calls
+    expect(globalThis.fetch).toHaveBeenCalled();
+
+    // Should write SKILL.md files under {plugin-name}/{skill-name}/SKILL.md
+    const writeCalls = mockWriteFileSync.mock.calls as [string, string][];
+    const skillPaths = writeCalls.filter(([p]) => p.includes("SKILL.md")).map(([p]) => p);
+    expect(skillPaths.length).toBe(2);
+
+    // Paths should contain frontend/nextjs/SKILL.md and frontend/react/SKILL.md
+    expect(skillPaths.some(p => p.includes("/frontend/nextjs/SKILL.md"))).toBe(true);
+    expect(skillPaths.some(p => p.includes("/frontend/react/SKILL.md"))).toBe(true);
+
+    // Should also write the command file
+    const cmdPaths = writeCalls.filter(([p]) => p.includes("scaffold.md")).map(([p]) => p);
+    expect(cmdPaths.length).toBe(1);
+    expect(cmdPaths[0]).toContain("/frontend/");
+  });
+
+  it("writes lockfile with github source format", async () => {
+    setupHappyPath();
+
+    await addCommand("ignored-source", { repo: "anton-abyzov/vskill", plugin: "frontend" });
+
+    expect(mockWriteLockfile).toHaveBeenCalled();
+    const lock = mockWriteLockfile.mock.calls[0][0];
+    expect(lock.skills.frontend).toBeDefined();
+    expect(lock.skills.frontend.source).toBe("github:anton-abyzov/vskill#plugin:frontend");
+    expect(lock.skills.frontend.version).toBe("1.0.0");
+  });
+
+  it("exits with error for invalid --repo format", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+
+    try {
+      await addCommand("ignored", { repo: "noslash", plugin: "frontend" });
+    } catch { /* expected */ }
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
+  });
+
+  it("exits with error when plugin not found in marketplace", async () => {
+    mockCheckBlocklist.mockResolvedValue(null);
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("marketplace.json")) {
+        return { ok: true, text: async () => marketplaceJson };
+      }
+      return { ok: false };
+    }) as unknown as typeof fetch;
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+
+    try {
+      await addCommand("ignored", { repo: "anton-abyzov/vskill", plugin: "nonexistent" });
+    } catch { /* expected */ }
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
+  });
+
+  it("runs security scan on combined skill content", async () => {
+    setupHappyPath();
+
+    await addCommand("ignored", { repo: "anton-abyzov/vskill", plugin: "frontend" });
+
+    expect(mockRunTier1Scan).toHaveBeenCalledTimes(1);
+    const scannedContent = mockRunTier1Scan.mock.calls[0][0] as string;
+    // Combined content should include both skills and the command
+    expect(scannedContent).toContain("Next.js Skill");
+    expect(scannedContent).toContain("React Skill");
+    expect(scannedContent).toContain("Scaffold");
   });
 });

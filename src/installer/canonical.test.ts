@@ -172,5 +172,32 @@ describe("canonical installer", () => {
 
       expect(result).toHaveLength(2);
     });
+
+    it("installs to explicit projectRoot, not a parent directory", () => {
+      // Simulates bug: user runs from /Projects/vskill-test/ but
+      // findProjectRoot resolves to parent /Projects/
+      const parentDir = join(tempDir, "Projects");
+      const userCwd = join(parentDir, "vskill-test");
+      mkdirSync(userCwd, { recursive: true });
+
+      const agents = [
+        makeAgent({ id: "claude-code", localSkillsDir: ".claude/skills" }),
+      ];
+
+      // Pass userCwd explicitly as projectRoot (the fix)
+      const result = installCopy("remotion", "# Remotion\nCreate videos", agents, {
+        global: false,
+        projectRoot: userCwd,
+      });
+
+      // Skill should be under vskill-test, NOT under Projects/
+      expect(result).toHaveLength(1);
+      expect(result[0]).toContain("vskill-test");
+      expect(result[0]).not.toContain(join("Projects", ".claude"));
+
+      // Verify the file actually exists at the correct location
+      const skillPath = join(userCwd, ".claude", "skills", "remotion", "SKILL.md");
+      expect(readFileSync(skillPath, "utf-8")).toBe("# Remotion\nCreate videos");
+    });
   });
 });

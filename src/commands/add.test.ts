@@ -1230,7 +1230,8 @@ describe("addCommand registry install (no slash in source)", () => {
         skills: expect.objectContaining({
           "my-skill": expect.objectContaining({ source: "registry:my-skill" }),
         }),
-      })
+      }),
+      expect.any(String),
     );
   });
 
@@ -1937,5 +1938,226 @@ describe("addCommand with --repo --all flag (bulk install)", () => {
 
     // Should not throw — verify plugins were installed
     expect(mockWriteLockfile).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Project root consistency — lockfile and skills use the same base dir
+// ---------------------------------------------------------------------------
+
+describe("addCommand project root consistency", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckPlatformSecurity.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("passes projectRoot to ensureLockfile and writeLockfile in discovery flow", async () => {
+    const projectRoot = "/home/user/my-project";
+    mockFindProjectRoot.mockReturnValue(projectRoot);
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "skill-a", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/o/r/main/SKILL.md" },
+    ]);
+
+    await addCommand("owner/repo", {});
+
+    // Lockfile calls must receive projectRoot as dir argument
+    expect(mockEnsureLockfile).toHaveBeenCalledWith(projectRoot);
+    expect(mockWriteLockfile).toHaveBeenCalledWith(expect.anything(), projectRoot);
+  });
+
+  it("passes projectRoot to ensureLockfile and writeLockfile in single-skill legacy flow", async () => {
+    const projectRoot = "/home/user/my-project";
+    mockFindProjectRoot.mockReturnValue(projectRoot);
+
+    await addCommand("owner/repo/my-skill", {});
+
+    expect(mockEnsureLockfile).toHaveBeenCalledWith(projectRoot);
+    expect(mockWriteLockfile).toHaveBeenCalledWith(expect.anything(), projectRoot);
+  });
+
+  it("passes projectRoot to ensureLockfile and writeLockfile in registry flow with content", async () => {
+    const projectRoot = "/home/user/my-project";
+    mockFindProjectRoot.mockReturnValue(projectRoot);
+    mockGetSkill.mockResolvedValue({
+      name: "my-skill",
+      author: "alice",
+      version: "1.0.0",
+      content: "# My Skill",
+      installs: 0,
+      updatedAt: "",
+    });
+
+    await addCommand("my-skill", {});
+
+    expect(mockEnsureLockfile).toHaveBeenCalledWith(projectRoot);
+    expect(mockWriteLockfile).toHaveBeenCalledWith(expect.anything(), projectRoot);
+  });
+
+  it("canonical installer and lockfile both use same projectRoot in discovery flow", async () => {
+    const projectRoot = "/home/user/deep/project";
+    mockFindProjectRoot.mockReturnValue(projectRoot);
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "alpha", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/o/r/main/SKILL.md" },
+    ]);
+
+    await addCommand("owner/repo", {});
+
+    // Canonical installer receives same projectRoot
+    expect(mockInstallSymlink).toHaveBeenCalled();
+    const installOpts = mockInstallSymlink.mock.calls[0][3];
+    expect(installOpts.projectRoot).toBe(projectRoot);
+
+    // Lockfile also receives same projectRoot
+    expect(mockEnsureLockfile).toHaveBeenCalledWith(projectRoot);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Error handling — installOneGitHubSkill must not silently swallow errors
+// ---------------------------------------------------------------------------
+
+describe("addCommand error handling in discovery flow", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckPlatformSecurity.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockFindProjectRoot.mockReturnValue(process.cwd());
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("logs error and marks skill as not installed when canonical installer throws", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "broken", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/o/r/main/SKILL.md" },
+    ]);
+
+    mockInstallSymlink.mockImplementation(() => {
+      throw new Error("EACCES: permission denied");
+    });
+
+    await addCommand("owner/repo", {});
+
+    // Error should be logged (not swallowed)
+    const errorOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(errorOutput).toContain("Failed to install");
+    expect(errorOutput).toContain("EACCES");
+
+    // Skill should NOT appear in lockfile
+    const lockArg = mockWriteLockfile.mock.calls[0]?.[0] as { skills: Record<string, unknown> } | undefined;
+    if (lockArg) {
+      expect(lockArg.skills).not.toHaveProperty("broken");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Flat name deprecation — tip message for owner/repo format
+// ---------------------------------------------------------------------------
+
+describe("addCommand flat name identifier guidance", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckPlatformSecurity.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockFindProjectRoot.mockReturnValue(process.cwd());
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("shows format tip when source is a flat name going to registry", async () => {
+    mockGetSkill.mockResolvedValue({
+      name: "my-skill",
+      author: "alice",
+      version: "1.0.0",
+      content: "# My Skill",
+      installs: 0,
+      updatedAt: "",
+    });
+
+    await addCommand("my-skill", {});
+
+    const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(logOutput).toContain("owner/repo");
+  });
+
+  it("shows resolution hint when registry falls back to GitHub", async () => {
+    mockGetSkill.mockResolvedValue({
+      name: "remotion-dev-skills-remotion",
+      author: "remotion-dev",
+      content: undefined,
+      repoUrl: "https://github.com/remotion-dev/skills",
+      installs: 0,
+      updatedAt: "",
+    });
+
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "remotion", path: "skills/remotion/SKILL.md", rawUrl: "https://raw.githubusercontent.com/remotion-dev/skills/main/skills/remotion/SKILL.md" },
+    ]);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Remotion skill",
+    }) as unknown as typeof fetch;
+
+    await addCommand("remotion-dev-skills-remotion", {});
+
+    const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    // Should suggest the direct format
+    expect(logOutput).toContain("remotion-dev/skills");
   });
 });

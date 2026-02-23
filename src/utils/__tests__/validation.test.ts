@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateRepoSegment, validateSkillName, parseGitHubSource } from "../validation.js";
+import { validateRepoSegment, validateSkillName, parseGitHubSource, classifyIdentifier } from "../validation.js";
 
 describe("validateRepoSegment (T-011)", () => {
   it("TC-023: accepts valid owner/repo names", () => {
@@ -89,5 +89,45 @@ describe("parseGitHubSource", () => {
 
   it("TC-013: rejects empty input", () => {
     expect(parseGitHubSource("")).toBeNull();
+  });
+});
+
+describe("classifyIdentifier", () => {
+  it("classifies owner/repo as owner-repo", () => {
+    const r = classifyIdentifier("remotion-dev/skills");
+    expect(r).toEqual({ type: "owner-repo", owner: "remotion-dev", repo: "skills" });
+  });
+
+  it("classifies owner/repo/skill as owner-repo-skill", () => {
+    const r = classifyIdentifier("remotion-dev/skills/remotion");
+    expect(r).toEqual({ type: "owner-repo-skill", owner: "remotion-dev", repo: "skills", skill: "remotion" });
+  });
+
+  it("classifies flat name as flat", () => {
+    const r = classifyIdentifier("remotion-dev-skills-remotion");
+    expect(r).toEqual({ type: "flat", name: "remotion-dev-skills-remotion" });
+  });
+
+  it("classifies single word as flat", () => {
+    const r = classifyIdentifier("myskill");
+    expect(r).toEqual({ type: "flat", name: "myskill" });
+  });
+
+  it("classifies https URL as url", () => {
+    expect(classifyIdentifier("https://github.com/foo/bar").type).toBe("url");
+  });
+
+  it("classifies github.com shorthand as url", () => {
+    expect(classifyIdentifier("github.com/foo/bar").type).toBe("url");
+  });
+
+  it("classifies 4+ part paths as flat (not parseable)", () => {
+    const r = classifyIdentifier("a/b/c/d");
+    expect(r).toEqual({ type: "flat", name: "a/b/c/d" });
+  });
+
+  it("classifies empty string as flat", () => {
+    const r = classifyIdentifier("");
+    expect(r).toEqual({ type: "flat", name: "" });
   });
 });

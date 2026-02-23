@@ -29,7 +29,7 @@ import type { BlocklistEntry } from "../blocklist/types.js";
 import { getSkill } from "../api/client.js";
 import { checkPlatformSecurity } from "../security/index.js";
 import { discoverSkills } from "../discovery/github-tree.js";
-import { parseGitHubSource } from "../utils/validation.js";
+import { parseGitHubSource, classifyIdentifier } from "../utils/validation.js";
 import {
   parseSkillsShUrl,
   isCompleteParsed,
@@ -648,8 +648,13 @@ async function installPluginDir(
     }
   }
 
-  // Update lockfile
-  const lock = ensureLockfile();
+  // Compute project root for consistent lockfile location
+  const pluginProjectRoot = opts.cwd
+    ? process.cwd()
+    : (findProjectRoot(process.cwd()) || process.cwd());
+
+  // Update lockfile (same project root as skills)
+  const lock = ensureLockfile(pluginProjectRoot);
   lock.skills[pluginName] = {
     version,
     sha,
@@ -658,7 +663,7 @@ async function installPluginDir(
     source: `local:${basePath}`,
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
-  writeLockfile(lock);
+  writeLockfile(lock, pluginProjectRoot);
 
   // Print summary
   console.log(
@@ -691,6 +696,7 @@ async function installOneGitHubSkill(
   rawUrl: string,
   opts: AddOptions,
   agents: Array<{ id: string; displayName: string; localSkillsDir: string; globalSkillsDir: string }>,
+  projectRoot: string,
 ): Promise<SkillInstallResult> {
   // Fetch content (non-exiting for multi-skill support)
   let content: string;
@@ -732,9 +738,6 @@ async function installOneGitHubSkill(
 
   // Install to each agent using canonical installer
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
-  const projectRoot = opts.cwd
-    ? process.cwd()
-    : (findProjectRoot(process.cwd()) || process.cwd());
   const installOpts = { global: !!opts.global, projectRoot };
 
   try {
@@ -743,7 +746,10 @@ async function installOneGitHubSkill(
     } else {
       installSymlink(skillName, content, agents as AgentDefinition[], installOpts);
     }
-  } catch { /* skip on write error */ }
+  } catch (err) {
+    console.error(red(`  Failed to install skill "${skillName}": ${(err as Error).message}`));
+    return { skillName, installed: false, verdict: "WRITE_ERROR" };
+  }
 
   return { skillName, installed: true, verdict: scanResult.verdict, sha };
 }
@@ -987,6 +993,11 @@ async function installRepoPlugin(
     );
   }
 
+  // Compute project root for consistent lockfile + skill locations
+  const projectRoot = opts.cwd
+    ? process.cwd()
+    : (findProjectRoot(process.cwd()) || process.cwd());
+
   // Install skills and commands with namespace prefix
   const sha = createHash("sha256").update(combined).digest("hex").slice(0, 12);
   const locations: string[] = [];
@@ -1016,8 +1027,8 @@ async function installRepoPlugin(
     }
   }
 
-  // Update lockfile
-  const lock = ensureLockfile();
+  // Update lockfile (same projectRoot as skills)
+  const lock = ensureLockfile(projectRoot);
   lock.skills[pluginName] = {
     version: pluginVersion,
     sha,
@@ -1026,7 +1037,7 @@ async function installRepoPlugin(
     source: `github:${owner}/${repo}#plugin:${pluginName}`,
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
-  writeLockfile(lock);
+  writeLockfile(lock, projectRoot);
 
   // Summary
   console.log(
@@ -1114,6 +1125,9 @@ export async function addCommand(
 
   if (parts.length !== 2) {
     // No slash → try registry lookup by skill name
+    console.log(
+      yellow("Tip: Prefer owner/repo or owner/repo/skill format for direct GitHub installs.")
+    );
     return installFromRegistry(source, opts);
   }
 
@@ -1152,6 +1166,11 @@ export async function addCommand(
   if (selections.global) opts.global = true;
   if (!selections.symlink) opts.copy = true;
 
+  // Compute project root ONCE for consistent lockfile + skill locations
+  const projectRoot = opts.cwd
+    ? process.cwd()
+    : (findProjectRoot(process.cwd()) || process.cwd());
+
   // Skill selection (multi-skill repos, when interactive)
   let selectedSkills = discovered;
   if (discovered.length > 1 && isTTY() && !opts.yes) {
@@ -1172,12 +1191,12 @@ export async function addCommand(
   const results: SkillInstallResult[] = [];
   for (const skill of selectedSkills) {
     console.log(dim(`\nInstalling skill: ${bold(skill.name)}...`));
-    const result = await installOneGitHubSkill(owner, repo, skill.name, skill.rawUrl, opts, selectedAgents);
+    const result = await installOneGitHubSkill(owner, repo, skill.name, skill.rawUrl, opts, selectedAgents, projectRoot);
     results.push(result);
   }
 
-  // Update lockfile with all installed skills
-  const lock = ensureLockfile();
+  // Update lockfile with all installed skills (same projectRoot as skills)
+  const lock = ensureLockfile(projectRoot);
   for (const r of results) {
     if (r.installed && r.sha) {
       lock.skills[r.skillName] = {
@@ -1190,7 +1209,7 @@ export async function addCommand(
     }
   }
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
-  writeLockfile(lock);
+  writeLockfile(lock, projectRoot);
 
   // Summary
   console.log(green(`\nInstalled ${bold(String(results.filter((r) => r.installed).length))} of ${results.length} skills:\n`));
@@ -1284,6 +1303,7 @@ async function installFromRegistry(
       return;
     }
     console.log(dim(`Registry has no inline content — installing from GitHub (${ownerRepo})...`));
+    console.log(yellow(`Tip: Next time use: vskill add ${ownerRepo}`));
     return addCommand(ownerRepo, opts);
   }
 
@@ -1342,6 +1362,11 @@ async function installFromRegistry(
   const selectedAgents = selections.agents;
   if (selections.global) opts.global = true;
 
+  // Compute project root for consistent lockfile + skill locations
+  const projectRoot = opts.cwd
+    ? process.cwd()
+    : (findProjectRoot(process.cwd()) || process.cwd());
+
   // Install to each agent
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
   const locations: string[] = [];
@@ -1361,8 +1386,8 @@ async function installFromRegistry(
     }
   }
 
-  // Update lockfile
-  const lock = ensureLockfile();
+  // Update lockfile (same projectRoot as skills)
+  const lock = ensureLockfile(projectRoot);
   lock.skills[skillName] = {
     version: detail.version || "0.0.0",
     sha,
@@ -1371,7 +1396,7 @@ async function installFromRegistry(
     source: `registry:${skillName}`,
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
-  writeLockfile(lock);
+  writeLockfile(lock, projectRoot);
 
   console.log(green(`\nInstalled ${bold(skillName)} to ${locations.length} agent${locations.length === 1 ? "" : "s"}:\n`));
   for (const loc of locations) {
@@ -1518,8 +1543,8 @@ async function installSingleSkillLegacy(
     ? installCopy(skillName, content, selectedAgents, installOpts)
     : installSymlink(skillName, content, selectedAgents, installOpts);
 
-  // Update lockfile
-  const lock = ensureLockfile();
+  // Update lockfile (same projectRoot as skills)
+  const lock = ensureLockfile(projectRoot);
   lock.skills[skillName] = {
     version: "0.0.0",
     sha,
@@ -1528,7 +1553,7 @@ async function installSingleSkillLegacy(
     source: `github:${owner}/${repo}`,
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
-  writeLockfile(lock);
+  writeLockfile(lock, projectRoot);
 
   // Print summary
   const method = opts.copy ? "copied" : "symlinked";

@@ -64,3 +64,40 @@ export function validateSkillName(name: string): boolean {
   if (name === ".." || name === ".") return false;
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// Identifier format classification
+// ---------------------------------------------------------------------------
+
+export type IdentifierFormat =
+  | { type: "owner-repo"; owner: string; repo: string }
+  | { type: "owner-repo-skill"; owner: string; repo: string; skill: string }
+  | { type: "url" }
+  | { type: "flat"; name: string };
+
+/**
+ * Classify a source identifier into its format type.
+ * Used for UX messaging and guardrails — does NOT validate existence.
+ *
+ * - `owner/repo` → owner-repo
+ * - `owner/repo/skill` → owner-repo-skill
+ * - URLs (http://, github.com/) → url
+ * - Everything else → flat (ambiguous, registry lookup)
+ */
+export function classifyIdentifier(source: string): IdentifierFormat {
+  if (source.includes("://") || source.startsWith("github.com/")) {
+    return { type: "url" };
+  }
+
+  const parts = source.split("/");
+
+  if (parts.length === 2) {
+    return { type: "owner-repo", owner: parts[0], repo: parts[1] };
+  }
+
+  if (parts.length === 3) {
+    return { type: "owner-repo-skill", owner: parts[0], repo: parts[1], skill: parts[2] };
+  }
+
+  return { type: "flat", name: source };
+}

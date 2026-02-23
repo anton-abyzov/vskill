@@ -12,8 +12,8 @@ import {
 // Registry size
 // ---------------------------------------------------------------------------
 describe("AGENTS_REGISTRY", () => {
-  it("TC-044: has at least 50 entries", () => {
-    expect(AGENTS_REGISTRY.length).toBeGreaterThanOrEqual(50);
+  it("TC-044: has at least 49 entries", () => {
+    expect(AGENTS_REGISTRY.length).toBeGreaterThanOrEqual(49);
   });
 
   it("TOTAL_AGENTS matches AGENTS_REGISTRY.length", () => {
@@ -30,9 +30,9 @@ describe("AGENTS_REGISTRY — universal/non-universal split", () => {
     expect(universal).toHaveLength(7);
   });
 
-  it("has at least 43 non-universal agents", () => {
+  it("has at least 42 non-universal agents", () => {
     const nonUniversal = AGENTS_REGISTRY.filter((a) => !a.isUniversal);
-    expect(nonUniversal.length).toBeGreaterThanOrEqual(43);
+    expect(nonUniversal.length).toBeGreaterThanOrEqual(42);
   });
 
   it("universal + non-universal equals total", () => {
@@ -131,8 +131,8 @@ describe("getUniversalAgents", () => {
 // getNonUniversalAgents()
 // ---------------------------------------------------------------------------
 describe("getNonUniversalAgents", () => {
-  it("returns at least 43 agents", () => {
-    expect(getNonUniversalAgents().length).toBeGreaterThanOrEqual(43);
+  it("returns at least 42 agents", () => {
+    expect(getNonUniversalAgents().length).toBeGreaterThanOrEqual(42);
   });
 
   it("all returned agents have isUniversal === false", () => {
@@ -187,6 +187,7 @@ describe("detectInstalledAgents", () => {
   const mockExec = vi.hoisted(() =>
     vi.fn<(cmd: string) => Promise<{ stdout: string; stderr: string }>>(),
   );
+  const mockExistsSync = vi.hoisted(() => vi.fn().mockReturnValue(false));
 
   vi.mock("node:child_process", () => ({
     exec: mockExec,
@@ -195,6 +196,15 @@ describe("detectInstalledAgents", () => {
   vi.mock("node:util", () => ({
     promisify: () => mockExec,
   }));
+
+  vi.mock("node:fs", () => ({
+    existsSync: (...args: unknown[]) => mockExistsSync(...args),
+  }));
+
+  vi.mock("node:path", async () => {
+    const actual = await vi.importActual<typeof import("node:path")>("node:path");
+    return { ...actual };
+  });
 
   it("returns an array", async () => {
     mockExec.mockRejectedValue(new Error("not found"));

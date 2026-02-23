@@ -83,13 +83,228 @@ export function parseToggleInput(input: string, maxIndex: number): number[] {
   return Array.from(indices).sort((a, b) => a - b);
 }
 
-export function createPrompter(input?: Readable, output?: Writable): Prompter {
-  const inp = input ?? process.stdin;
-  const out = output ?? process.stdout;
+// ---------------------------------------------------------------------------
+// ANSI helpers
+// ---------------------------------------------------------------------------
 
-  const rl = createInterface({ input: inp, output: out, terminal: false });
+const ESC = "\x1b[";
+const HIDE_CURSOR = `${ESC}?25l`;
+const SHOW_CURSOR = `${ESC}?25h`;
+const CLEAR_LINE = `${ESC}2K`;
 
-  // Line queue: lines arriving before ask() is called get buffered here
+function moveUp(n: number): string {
+  return n > 0 ? `${ESC}${n}A` : "";
+}
+
+// ---------------------------------------------------------------------------
+// Raw mode keypress reader
+// ---------------------------------------------------------------------------
+
+const KEY_UP = "\x1b[A";
+const KEY_DOWN = "\x1b[B";
+const KEY_SPACE = " ";
+const KEY_ENTER_CR = "\r";
+const KEY_ENTER_LF = "\n";
+const KEY_CTRL_C = "\x03";
+
+/**
+ * Read a single keypress from stdin in raw mode.
+ * Returns the raw key string (may be multi-byte for arrow keys).
+ */
+function readKey(): Promise<string> {
+  return new Promise((resolve) => {
+    function onData(data: Buffer) {
+      process.stdin.removeListener("data", onData);
+      resolve(data.toString());
+    }
+    process.stdin.on("data", onData);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Interactive prompter (raw mode, arrow keys, real TTY)
+// ---------------------------------------------------------------------------
+
+function createInteractivePrompter(): Prompter {
+  const out = process.stdout;
+
+  function write(s: string): void {
+    out.write(s);
+  }
+
+  return {
+    async promptCheckboxList(items: CheckboxItem[], options?: CheckboxOptions): Promise<number[]> {
+      const checked = items.map((item) => item.checked ?? false);
+      let cursor = 0;
+      let renderedLines = 0;
+
+      function render() {
+        // Move up to overwrite previous render
+        if (renderedLines > 0) {
+          write(moveUp(renderedLines) + "\r");
+        }
+
+        const lines: string[] = [];
+
+        for (let i = 0; i < items.length; i++) {
+          const mark = checked[i] ? "x" : " ";
+          const pointer = i === cursor ? ">" : " ";
+          const desc = items[i].description ? ` \x1b[2m— ${items[i].description}\x1b[0m` : "";
+          lines.push(`${CLEAR_LINE}  ${pointer} [${mark}] ${items[i].label}${desc}`);
+        }
+        lines.push(`${CLEAR_LINE}  \x1b[2m↑/↓ move · space toggle · a all · enter done\x1b[0m`);
+
+        write(lines.join("\n") + "\n");
+        renderedLines = lines.length;
+      }
+
+      // Print title
+      if (options?.title) {
+        write(`\n${options.title}\n`);
+      }
+
+      write(HIDE_CURSOR);
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+
+      render();
+
+      try {
+        while (true) {
+          const key = await readKey();
+
+          if (key === KEY_UP) {
+            cursor = cursor > 0 ? cursor - 1 : items.length - 1;
+            render();
+          } else if (key === KEY_DOWN) {
+            cursor = cursor < items.length - 1 ? cursor + 1 : 0;
+            render();
+          } else if (key === KEY_SPACE) {
+            checked[cursor] = !checked[cursor];
+            render();
+          } else if (key.toLowerCase() === "a") {
+            const allChecked = checked.every(Boolean);
+            checked.fill(!allChecked);
+            render();
+          } else if (key === KEY_ENTER_CR || key === KEY_ENTER_LF) {
+            break;
+          } else if (key === KEY_CTRL_C) {
+            write(SHOW_CURSOR + "\n");
+            process.stdin.setRawMode(false);
+            process.exit(0);
+          }
+        }
+      } finally {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        write(SHOW_CURSOR);
+      }
+
+      return checked.reduce<number[]>((acc, val, idx) => {
+        if (val) acc.push(idx);
+        return acc;
+      }, []);
+    },
+
+    async promptChoice(question: string, choices: ChoiceItem[]): Promise<number> {
+      let cursor = 0;
+      let renderedLines = 0;
+
+      function render() {
+        if (renderedLines > 0) {
+          write(moveUp(renderedLines) + "\r");
+        }
+
+        const lines: string[] = [];
+        for (let i = 0; i < choices.length; i++) {
+          const pointer = i === cursor ? ">" : " ";
+          const dot = i === cursor ? "●" : "○";
+          const hint = choices[i].hint ? ` \x1b[2m(${choices[i].hint})\x1b[0m` : "";
+          lines.push(`${CLEAR_LINE}  ${pointer} ${dot} ${choices[i].label}${hint}`);
+        }
+        lines.push(`${CLEAR_LINE}  \x1b[2m↑/↓ move · enter select\x1b[0m`);
+
+        write(lines.join("\n") + "\n");
+        renderedLines = lines.length;
+      }
+
+      write(`\n${question}\n`);
+      write(HIDE_CURSOR);
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+
+      render();
+
+      try {
+        while (true) {
+          const key = await readKey();
+
+          if (key === KEY_UP) {
+            cursor = cursor > 0 ? cursor - 1 : choices.length - 1;
+            render();
+          } else if (key === KEY_DOWN) {
+            cursor = cursor < choices.length - 1 ? cursor + 1 : 0;
+            render();
+          } else if (key === KEY_ENTER_CR || key === KEY_ENTER_LF) {
+            break;
+          } else if (key === KEY_CTRL_C) {
+            write(SHOW_CURSOR + "\n");
+            process.stdin.setRawMode(false);
+            process.exit(0);
+          }
+        }
+      } finally {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        write(SHOW_CURSOR);
+      }
+
+      return cursor;
+    },
+
+    async promptConfirm(question: string, defaultYes?: boolean): Promise<boolean> {
+      const hint = defaultYes ? "Y/n" : "y/N";
+      write(`${question} (${hint}): `);
+
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+
+      try {
+        while (true) {
+          const key = await readKey();
+          if (key === KEY_ENTER_CR || key === KEY_ENTER_LF) {
+            write("\n");
+            return !!defaultYes;
+          }
+          if (key.toLowerCase() === "y") {
+            write("y\n");
+            return true;
+          }
+          if (key.toLowerCase() === "n") {
+            write("n\n");
+            return false;
+          }
+          if (key === KEY_CTRL_C) {
+            write("\n");
+            process.stdin.setRawMode(false);
+            process.exit(0);
+          }
+        }
+      } finally {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Text-based prompter (fallback for non-TTY / custom streams / tests)
+// ---------------------------------------------------------------------------
+
+function createTextPrompter(input: Readable, output: Writable): Prompter {
+  const rl = createInterface({ input, output, terminal: false });
+
   const lineQueue: string[] = [];
   const waiters: Array<(line: string) => void> = [];
 
@@ -103,7 +318,7 @@ export function createPrompter(input?: Readable, output?: Writable): Prompter {
   });
 
   function ask(prompt: string): Promise<string> {
-    out.write(prompt);
+    output.write(prompt);
     return new Promise((resolve) => {
       const buffered = lineQueue.shift();
       if (buffered !== undefined) {
@@ -115,7 +330,7 @@ export function createPrompter(input?: Readable, output?: Writable): Prompter {
   }
 
   function writeLine(text: string): void {
-    out.write(text + "\n");
+    output.write(text + "\n");
   }
 
   function renderCheckbox(items: CheckboxItem[], checked: boolean[]): void {
@@ -142,14 +357,8 @@ export function createPrompter(input?: Readable, output?: Writable): Prompter {
         const raw = await ask("> ");
         const line = stripEscapeSequences(raw);
 
-        // Only escape sequences (e.g. arrow key alone) — silently ignore
-        if (raw !== "" && line === "") {
-          continue;
-        }
-
-        if (line === "") {
-          break;
-        }
+        if (raw !== "" && line === "") continue;
+        if (line === "") break;
 
         if (line.toLowerCase() === "a") {
           const allChecked = checked.every(Boolean);
@@ -186,7 +395,6 @@ export function createPrompter(input?: Readable, output?: Writable): Prompter {
       while (true) {
         const raw = await ask("> ");
         const line = stripEscapeSequences(raw);
-        // Only escape sequences — ignore
         if (raw !== "" && line === "") continue;
         const num = parseInt(line, 10);
         if (num >= 1 && num <= choices.length) {
@@ -201,11 +409,31 @@ export function createPrompter(input?: Readable, output?: Writable): Prompter {
       const line = await ask(`${question} (${hint}): `);
       rl.close();
 
-      if (line === "") {
-        return !!defaultYes;
-      }
-
+      if (line === "") return !!defaultYes;
       return line.toLowerCase() === "y";
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a Prompter instance.
+ *
+ * - When called without arguments on a real TTY → interactive raw mode
+ *   (arrow keys, space toggle, proper cursor movement)
+ * - When called with custom streams or on non-TTY → text-based fallback
+ *   (type numbers, compatible with piped input and tests)
+ */
+export function createPrompter(input?: Readable, output?: Writable): Prompter {
+  const canUseInteractive =
+    !input && !output && isTTY() && typeof process.stdin.setRawMode === "function";
+
+  if (canUseInteractive) {
+    return createInteractivePrompter();
+  }
+
+  return createTextPrompter(input ?? process.stdin, output ?? process.stdout);
 }

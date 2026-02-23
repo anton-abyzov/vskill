@@ -1,5 +1,5 @@
 /**
- * Agent Registry — 50 AI coding agents with metadata.
+ * Agent Registry — 49 AI coding agents with metadata.
  *
  * Each agent has detection paths, parent company info, and feature support.
  * Used to determine which agents can install/use verified skills.
@@ -40,9 +40,9 @@ export interface AgentDefinition {
 }
 
 /**
- * Complete registry of 50 AI coding agents.
+ * Complete registry of 49 AI coding agents.
  *
- * 7 universal agents, 43 non-universal agents.
+ * 7 universal agents, 42 non-universal agents.
  */
 export const AGENTS_REGISTRY: AgentDefinition[] = [
   // ----------------------------------------------------------------
@@ -454,16 +454,6 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
-    id: 'clawdbot',
-    displayName: 'Clawdbot',
-    localSkillsDir: '.clawdbot/skills',
-    globalSkillsDir: '~/.clawdbot/skills',
-    isUniversal: false,
-    detectInstalled: 'which clawdbot',
-    parentCompany: 'Clawdbot',
-    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
-  },
-  {
     id: 'aider',
     displayName: 'Aider',
     localSkillsDir: '.aider/skills',
@@ -583,25 +573,62 @@ export function getAgent(id: string): AgentDefinition | undefined {
 }
 
 /**
- * Detects which agents are installed on the current system
- * by running each agent's detectInstalled command.
+ * Resolve a tilde-prefixed path to an absolute path.
+ */
+function expandHome(p: string): string {
+  if (p.startsWith('~/')) {
+    const home = process.env.HOME || process.env.USERPROFILE || '';
+    return home + p.slice(1);
+  }
+  return p;
+}
+
+/**
+ * Detects which agents are installed on the current system.
+ *
+ * Detection strategy (in order):
+ * 1. Run agent's `detectInstalled` shell command (typically `which <binary>`)
+ * 2. Fallback: check if the agent's global config directory exists
+ *    (e.g. ~/.cursor, ~/.windsurf — derived from globalSkillsDir parent)
+ *
+ * This two-tier approach catches desktop apps and IDE extensions that
+ * create config directories but don't install CLI binaries in PATH.
  *
  * @returns Array of installed agent definitions
  */
 export async function detectInstalledAgents(): Promise<AgentDefinition[]> {
   const { exec } = await import('node:child_process');
   const { promisify } = await import('node:util');
+  const { existsSync } = await import('node:fs');
+  const { dirname } = await import('node:path');
   const execAsync = promisify(exec);
 
   const results: AgentDefinition[] = [];
 
   await Promise.allSettled(
     AGENTS_REGISTRY.map(async (agent) => {
+      // Tier 1: CLI binary detection
       try {
         await execAsync(agent.detectInstalled);
         results.push(agent);
+        return;
       } catch {
-        // Not installed — skip
+        // Binary not found — try directory fallback
+      }
+
+      // Tier 2: Config directory detection
+      // Derive the agent's config dir from globalSkillsDir
+      // e.g. "~/.cursor/skills" → "~/.cursor"
+      try {
+        const globalDir = expandHome(agent.globalSkillsDir);
+        const configDir = dirname(globalDir);
+        // Guard: don't match on generic dirs like $HOME or $HOME/.config
+        const home = process.env.HOME || process.env.USERPROFILE || '';
+        if (configDir !== home && configDir !== `${home}/.config` && existsSync(configDir)) {
+          results.push(agent);
+        }
+      } catch {
+        // Skip on any error
       }
     }),
   );

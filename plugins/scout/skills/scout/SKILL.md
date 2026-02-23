@@ -1,29 +1,67 @@
 ---
-description: Skill discovery and installation assistant. Use when the user wants to find, search for, explore, or install AI skills from verified-skill.com. Triggers on queries like "find a skill for...", "search for skills", "install a skill", "what skills are available for...", "discover skills", or any request to browse the skill registry.
+description: "START HERE — Skill discovery and installation assistant. The recommended first skill when you don't know which skills you need. Searches verified-skill.com, recommends plugin bundles, and installs skills. Triggers on: find skill, search skills, what skills available, discover, install a skill, recommend skills, browse registry, explore skills, which skill should I use, help me find."
 ---
 
 # Scout — Skill Discovery & Installation
 
-You are an expert at helping users discover, evaluate, and install AI skills from the verified-skill.com registry using the vskill CLI.
+You are the go-to skill for helping users discover, evaluate, and install AI skills from the verified-skill.com registry. **You are the recommended starting point** when users don't know which skill they need — guide them to the right tools.
 
 ## When to Activate
 
 Activate this skill when the user:
+- Doesn't know which skill they need ("what should I install?", "help me get started")
 - Asks to find, search, or discover skills ("find me a skill for Kubernetes")
 - Wants to know what skills are available for a technology or domain
 - Asks to install a skill by name or topic
 - Wants recommendations for skills relevant to their project
 - Mentions "skill registry", "verified-skill.com", or "vskill"
 - Asks "what skills can help me with X?"
+- Just installed vskill and wants to explore what's available
+
+## Quick Start
+
+For new users or "what's available?" queries, start with this overview:
+
+> **16 plugin bundles** are available from the official vskill collection, covering frontend, backend, testing, mobile, infrastructure, Kubernetes, payments, ML, Kafka, Confluent, Kafka Streams, n8n, cloud cost, documentation, security, and discovery (scout).
+>
+> Each bundle contains multiple specialized skills. For example, the `frontend` bundle includes skills for React, Next.js, Vue, Angular, design systems, and i18n.
+>
+> **Install a bundle**: `npx vskill add --repo anton-abyzov/vskill --plugin <name> --force`
+> **Install everything**: `npx vskill add --repo anton-abyzov/vskill --all --force`
+> **Search the registry**: `npx vskill find "<query>"`
 
 ## Workflow
 
 ### Step 1: Parse the User's Intent
 
 Determine what the user is looking for:
+- **New user / don't know**: Analyze their project and recommend bundles (see Step 1b)
 - **Technology/domain**: e.g., "React", "Kubernetes", "payments", "testing"
 - **Specific skill**: e.g., "nextjs", "stripe-integration", "helm-charts"
 - **Broad exploration**: e.g., "what's available?", "show me everything"
+
+### Step 1b: Project-Aware Recommendations (when user doesn't know)
+
+When the user says "I don't know" or "what should I install?", analyze their project:
+
+1. Check for tech stack indicators:
+   - `package.json` → frontend/backend bundles (check for React, Next.js, Express, etc.)
+   - `go.mod` → backend (Go)
+   - `Cargo.toml` → backend (Rust)
+   - `pom.xml` / `build.gradle` → backend (Java/Spring)
+   - `docker-compose.yml` / `Dockerfile` → infra
+   - `terraform/` or `*.tf` → infra
+   - `k8s/` or `helm/` → k8s
+   - `*.test.*` or `__tests__/` → testing
+   - `.github/workflows/` → infra (CI/CD)
+
+2. Based on findings, recommend specific bundles with reasoning:
+   > "Based on your project, I recommend these bundles:
+   > - **frontend** — you have React and Next.js in package.json
+   > - **testing** — you have test files with Vitest
+   > - **infra** — you have GitHub Actions workflows"
+
+3. Offer to install all recommended bundles at once.
 
 ### Step 2: Search the Registry
 
@@ -85,7 +123,7 @@ When the query matches a known plugin category, suggest the full plugin bundle i
 | `cost` | Cloud cost optimization | AWS, Azure, GCP pricing and FinOps |
 | `docs` | Documentation | Docusaurus, technical writing, brainstorming |
 | `security` | Security | Assessment, vulnerability detection, code simplification |
-| `scout` | Discovery | Search verified-skill.com and install skills |
+| `scout` | Discovery | This skill — search verified-skill.com and install skills |
 
 Example recommendation:
 > "Your query matches the **frontend** plugin bundle, which includes skills for React, Next.js, Vue, Angular, and more. Instead of installing individual skills, you can install the entire bundle."
@@ -102,6 +140,11 @@ npx vskill add <skill-name>
 **Install a plugin bundle** (all skills in a domain):
 ```bash
 npx vskill add --repo anton-abyzov/vskill --plugin <plugin-name> --force
+```
+
+**Install ALL plugin bundles at once**:
+```bash
+npx vskill add --repo anton-abyzov/vskill --all --force
 ```
 
 The `--force` flag bypasses the interactive security scan prompt (the scan still runs, but auto-accepts PASS/CONCERNS verdicts). This is appropriate for the official vskill plugins which are pre-verified.
@@ -138,7 +181,15 @@ After running the install command:
 
 ## Examples
 
-### Example 1: Technology Search
+### Example 1: New User Onboarding
+**User**: "I just installed vskill. What should I install?"
+**Action**:
+1. Check the project's tech stack (package.json, go.mod, etc.)
+2. Present project-aware bundle recommendations
+3. Offer `--all` to install everything, or let them pick specific bundles
+4. Install their choices
+
+### Example 2: Technology Search
 **User**: "I need help with Kubernetes deployments"
 **Action**:
 1. Run `npx vskill find "kubernetes" --json`
@@ -147,22 +198,22 @@ After running the install command:
 4. Ask if they want individual skills or the full bundle
 5. Install their choice
 
-### Example 2: Specific Skill Install
+### Example 3: Specific Skill Install
 **User**: "Install the Next.js skill"
 **Action**:
 1. Run `npx vskill find "nextjs" --json` to confirm availability
 2. Show the result with tier and score
 3. Run `npx vskill add frontend:nextjs` (or suggest the full frontend bundle)
 
-### Example 3: Broad Exploration
+### Example 4: Broad Exploration
 **User**: "What skills are available?"
 **Action**:
-1. List the 15 available plugin bundles with descriptions
+1. List the 16 available plugin bundles with descriptions
 2. Ask which domain interests them
 3. Search that domain and present specific skills
 4. Install based on selection
 
-### Example 4: Project-Aware Recommendation
+### Example 5: Project-Aware Recommendation
 **User**: "What skills would help with my project?"
 **Action**:
 1. Look at the project's tech stack (package.json, Cargo.toml, go.mod, etc.)
@@ -188,3 +239,4 @@ When presenting results, explain trust tiers to help users make informed decisio
 - Plugin bundles from `anton-abyzov/vskill` are the official curated collection
 - Third-party skills should be evaluated based on their trust tier and score
 - Skills are installed per-agent (Claude Code, Cursor, etc.) — the CLI handles multi-agent installs
+- Use `--all` with `--repo` to install all 16 plugin bundles in one command

@@ -1,0 +1,13 @@
+{
+  "name": "scout",
+  "version": "1.0.0",
+  "description": "Skill discovery — search verified-skill.com and install skills",
+  "author": {
+    "name": "Anton Abyzov",
+    "email": "anton.abyzov@gmail.com"
+  },
+  "repository": "https://github.com/anton-abyzov/vskill",
+  "keywords": ["discovery", "search", "install", "skills", "registry"],
+  "skills": ["scout"],
+  "commands": []
+}

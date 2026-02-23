@@ -92,6 +92,17 @@
       "description": "Security assessment, vulnerability detection, code simplification",
       "source": "./plugins/security",
       "version": "1.0.0"
+    },
+    {
+      "name": "scout",
+      "source": "./plugins/scout",
+      "description": "Skill discovery — search verified-skill.com and install skills",
+      "category": "productivity",
+      "version": "1.0.0",
+      "author": {
+        "name": "Anton Abyzov",
+        "email": "anton.abyzov@gmail.com"
+      }
     }
   ]
 }

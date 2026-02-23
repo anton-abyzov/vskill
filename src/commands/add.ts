@@ -196,6 +196,7 @@ interface AddOptions {
   plugin?: string;
   pluginDir?: string;
   repo?: string;
+  all?: boolean;
   global?: boolean;
   force?: boolean;
   agent?: string[];
@@ -748,12 +749,11 @@ async function installOneGitHubSkill(
 }
 
 // ---------------------------------------------------------------------------
-// Remote plugin installation from a GitHub repository with marketplace.json
+// Bulk repo plugin installation: --repo with --all
 // ---------------------------------------------------------------------------
 
-async function installRepoPlugin(
+async function installAllRepoPlugins(
   ownerRepo: string,
-  pluginName: string,
   opts: AddOptions,
 ): Promise<void> {
   const [owner, repo] = ownerRepo.split("/");
@@ -762,7 +762,7 @@ async function installRepoPlugin(
     process.exit(1);
   }
 
-  // Fetch marketplace.json from GitHub
+  // Fetch marketplace.json
   const manifestUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/.claude-plugin/marketplace.json`;
   const manifestSpin = spinner("Fetching marketplace.json");
   let manifestContent: string;
@@ -785,15 +785,87 @@ async function installRepoPlugin(
     return;
   }
 
+  // Get all plugins
+  const allPlugins = getAvailablePlugins(manifestContent);
+  if (allPlugins.length === 0) {
+    console.error(red("No plugins found in marketplace.json"));
+    process.exit(1);
+  }
+
+  console.log(bold(`\nInstalling all ${allPlugins.length} plugins from ${owner}/${repo}:\n`));
+  for (const p of allPlugins) {
+    console.log(`  ${dim(">")} ${p.name}${p.description ? dim(` — ${p.description}`) : ""}`);
+  }
+  console.log();
+
+  // Install each plugin sequentially (--all implies --yes)
+  const forceOpts = { ...opts, yes: true };
+  let installed = 0;
+  let failed = 0;
+
+  for (let i = 0; i < allPlugins.length; i++) {
+    const p = allPlugins[i];
+    console.log(dim(`[${i + 1}/${allPlugins.length}] `) + bold(p.name));
+    try {
+      await installRepoPlugin(ownerRepo, p.name, forceOpts);
+      installed++;
+    } catch (err) {
+      console.error(yellow(`  Failed: ${(err as Error).message}`));
+      failed++;
+    }
+  }
+
+  // Summary
+  console.log(
+    `\n${green(bold("Done!"))} Installed ${bold(String(installed))}` +
+      (failed > 0 ? `, ${red(`failed ${failed}`)}` : "") +
+      ` of ${allPlugins.length} plugins.`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Remote plugin installation from a GitHub repository with marketplace.json
+// ---------------------------------------------------------------------------
+
+async function installRepoPlugin(
+  ownerRepo: string,
+  pluginName: string,
+  opts: AddOptions,
+): Promise<void> {
+  const [owner, repo] = ownerRepo.split("/");
+  if (!owner || !repo) {
+    throw new Error("--repo must be in owner/repo format (e.g. anton-abyzov/vskill)");
+  }
+
+  // Fetch marketplace.json from GitHub
+  const manifestUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/.claude-plugin/marketplace.json`;
+  const manifestSpin = spinner("Fetching marketplace.json");
+  let manifestContent: string;
+  try {
+    const res = await fetch(manifestUrl);
+    if (!res.ok) {
+      manifestSpin.stop();
+      throw new Error(
+        `marketplace.json not found at ${owner}/${repo}. ` +
+          "Ensure the repo has .claude-plugin/marketplace.json on the main branch."
+      );
+    }
+    manifestContent = await res.text();
+    manifestSpin.stop(green("Found marketplace.json"));
+  } catch (err) {
+    manifestSpin.stop();
+    if (err instanceof Error && err.message.startsWith("marketplace.json not found")) throw err;
+    throw new Error(`Network error: ${(err as Error).message}`);
+  }
+
   // Find the plugin in the marketplace
   const pluginSource = getPluginSource(pluginName, manifestContent);
   if (!pluginSource) {
     const available = getAvailablePlugins(manifestContent).map((p) => p.name);
-    console.error(
-      red(`Plugin "${pluginName}" not found in marketplace.json\n`) +
-        dim(`Available plugins: ${available.join(", ")}`)
+    throw new Error(
+      `Plugin "${pluginName}" not found in marketplace.json. ` +
+        `Available plugins: ${available.join(", ")}`
     );
-    process.exit(1);
   }
   const pluginVersion = getPluginVersion(pluginName, manifestContent) || "0.0.0";
   const pluginPath = pluginSource.replace(/^\.\//, "");
@@ -827,8 +899,7 @@ async function installRepoPlugin(
   discoverSpin.stop(green(`Found ${skillEntries.length} skills, ${cmdEntries.length} commands`));
 
   if (skillEntries.length === 0 && cmdEntries.length === 0) {
-    console.error(red(`No skills or commands found in plugin "${pluginName}"`));
-    process.exit(1);
+    throw new Error(`No skills or commands found in plugin "${pluginName}"`);
   }
 
   // Fetch all skill and command content
@@ -863,7 +934,7 @@ async function installRepoPlugin(
   const blocked = await checkBlocklist(pluginName);
   if (blocked && !opts.force) {
     printBlockedError(blocked);
-    process.exit(1);
+    throw new Error(`Plugin "${pluginName}" is on the blocklist`);
   }
   if (blocked && opts.force) {
     printBlockedWarning(blocked);
@@ -887,25 +958,18 @@ async function installRepoPlugin(
   );
 
   if ((scanResult.verdict === "FAIL" || scanResult.verdict === "CONCERNS") && !opts.force) {
-    console.error(
-      red(`\nScan ${scanResult.verdict}. Refusing to install.\n`) +
-        dim("Use --force to install anyway.")
-    );
-    process.exit(1);
+    throw new Error(`Scan ${scanResult.verdict}. Refusing to install. Use --force to install anyway.`);
   }
 
   // Detect agents
   let agents = await detectInstalledAgents();
   if (agents.length === 0) {
-    console.error(red("No AI agents detected. Install Claude Code, Cursor, or another supported agent and try again."));
-    process.exit(1);
+    throw new Error("No AI agents detected. Install Claude Code, Cursor, or another supported agent and try again.");
   }
   try {
     agents = filterAgents(agents, opts.agent);
   } catch (e) {
-    console.error(red((e as Error).message));
-    process.exit(1);
-    return;
+    throw new Error((e as Error).message);
   }
 
   const selections = await promptInstallOptions(agents, opts);
@@ -985,17 +1049,34 @@ async function installRepoPlugin(
 // ---------------------------------------------------------------------------
 
 export async function addCommand(
-  source: string,
+  source: string | undefined,
   opts: AddOptions
 ): Promise<void> {
+  // Bulk repo mode: --repo with --all
+  if (opts.repo && opts.all) {
+    return installAllRepoPlugins(opts.repo, opts);
+  }
+
   // Remote plugin mode: GitHub repo with --plugin
   if (opts.repo && opts.plugin) {
-    return installRepoPlugin(opts.repo, opts.plugin, opts);
+    try {
+      return await installRepoPlugin(opts.repo, opts.plugin, opts);
+    } catch (err) {
+      console.error(red((err as Error).message));
+      process.exit(1);
+    }
   }
 
   // Plugin directory mode: local path with --plugin
   if (opts.pluginDir && opts.plugin) {
     return installPluginDir(opts.pluginDir, opts.plugin, opts);
+  }
+
+  // All other modes require source
+  if (!source) {
+    console.error(red("Please provide a source (owner/repo, URL, or local path)"));
+    process.exit(1);
+    return;
   }
 
   // Skills.sh URL resolver — handle marketplace browse URLs

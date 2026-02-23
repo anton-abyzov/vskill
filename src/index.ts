@@ -19,7 +19,7 @@ function collect(val: string, acc: string[]): string[] {
 }
 
 program
-  .command("install <source>")
+  .command("install [source]")
   .alias("i")
   .alias("add")
   .description("Install a skill from GitHub after security scan")
@@ -27,6 +27,7 @@ program
   .option("--plugin <name>", "Plugin name from marketplace.json")
   .option("--plugin-dir <path>", "Local plugin directory path")
   .option("--repo <owner/repo>", "GitHub repo with marketplace.json (use with --plugin)")
+  .option("--all", "Install all plugins from --repo marketplace")
   .option("--global", "Install to global agent directories")
   .option("--force", "Install even if scan finds issues")
   .option("--agent <id>", "Install to specific agent only (repeatable)", collect, [])
@@ -34,7 +35,7 @@ program
   .option("--copy", "Install as independent copies instead of symlinks (default: symlink)")
   .option("--select", "Interactively select skills and agents (default: install all)")
   .option("-y, --yes", "Skip all prompts, use defaults (all skills, all agents, project scope, symlink)")
-  .action(async (source: string, opts) => {
+  .action(async (source: string | undefined, opts) => {
     const { addCommand } = await import("./commands/add.js");
     await addCommand(source, opts);
   });

@@ -1,7 +1,7 @@
 {
-  "name": "specweave-kafka",
+  "name": "vskill-kafka",
   "version": "1.0.1",
-  "description": "Apache Kafka event streaming integration plugin for SpecWeave",
+  "description": "Apache Kafka event streaming integration plugin for vskill",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -14,12 +14,12 @@
   },
   "keywords": [
     "kafka",
-    "specweave",
+    "vskill",
     "event-streaming",
     "mcp",
     "terraform"
   ],
-  "author": "SpecWeave Team",
+  "author": "vskill Contributors",
   "license": "MIT",
   "dependencies": {
     "kafkajs": "^2.2.4",
@@ -36,6 +36,6 @@
     "prettier": "^2.8.8"
   },
   "peerDependencies": {
-    "specweave": ">=0.18.0"
+    "vskill": ">=0.1.0"
   }
 }

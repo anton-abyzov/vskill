@@ -8,6 +8,7 @@ const {
   getAvailablePlugins,
   getPluginSource,
   getPluginVersion,
+  getMarketplaceName,
 } = await import("./index.js");
 
 // ---------------------------------------------------------------------------
@@ -125,6 +126,28 @@ describe("marketplace.json parser", () => {
       const version = getPluginVersion("sw-nonexistent", content);
 
       expect(version).toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // getMarketplaceName
+  // ---------------------------------------------------------------------------
+  describe("getMarketplaceName", () => {
+    it("returns the top-level name from valid marketplace.json", () => {
+      const content = makeMarketplaceJson();
+      expect(getMarketplaceName(content)).toBe("specweave");
+    });
+
+    it("returns null for invalid JSON", () => {
+      expect(getMarketplaceName("not json")).toBeNull();
+    });
+
+    it("returns null when name field is missing", () => {
+      expect(getMarketplaceName('{"plugins": []}')).toBeNull();
+    });
+
+    it("returns null when name field is empty string", () => {
+      expect(getMarketplaceName('{"name": "", "plugins": []}')).toBeNull();
     });
   });
 });

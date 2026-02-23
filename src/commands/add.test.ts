@@ -149,6 +149,30 @@ vi.mock("../installer/canonical.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock claude-cli (native Claude Code plugin install)
+// ---------------------------------------------------------------------------
+const mockIsClaudeCliAvailable = vi.fn().mockReturnValue(false);
+const mockRegisterMarketplace = vi.fn().mockReturnValue(false);
+const mockInstallNativePlugin = vi.fn().mockReturnValue(false);
+vi.mock("../utils/claude-cli.js", () => ({
+  isClaudeCliAvailable: (...args: unknown[]) => mockIsClaudeCliAvailable(...args),
+  registerMarketplace: (...args: unknown[]) => mockRegisterMarketplace(...args),
+  installNativePlugin: (...args: unknown[]) => mockInstallNativePlugin(...args),
+  uninstallNativePlugin: vi.fn().mockReturnValue(false),
+}));
+
+// ---------------------------------------------------------------------------
+// Mock getMarketplaceName (imported separately in add.ts)
+// ---------------------------------------------------------------------------
+const mockGetMarketplaceName = vi.fn().mockReturnValue(null);
+vi.mock("../marketplace/index.js", () => ({
+  getAvailablePlugins: vi.fn().mockReturnValue([]),
+  getPluginSource: vi.fn().mockReturnValue(null),
+  getPluginVersion: vi.fn().mockReturnValue("1.0.0"),
+  getMarketplaceName: (...args: unknown[]) => mockGetMarketplaceName(...args),
+}));
+
+// ---------------------------------------------------------------------------
 // Import module under test AFTER mocks
 // ---------------------------------------------------------------------------
 const { addCommand } = await import("./add.js");
@@ -1513,5 +1537,108 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
     expect(scannedContent).toContain("Next.js Skill");
     expect(scannedContent).toContain("React Skill");
     expect(scannedContent).toContain("Scaffold");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Native Claude Code plugin install (via installPluginDir)
+// ---------------------------------------------------------------------------
+describe("addCommand native Claude Code plugin install", () => {
+  const pluginDir = "/tmp/test-plugin";
+  const marketplaceJson = JSON.stringify({
+    name: "test-mkt",
+    version: "1.0.0",
+    plugins: [{ name: "sw-test", source: "./plugins/test", version: "1.0.0" }],
+  });
+
+  beforeEach(() => {
+    mockCheckBlocklist.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    // Plugin dir structure
+    mockExistsSync.mockImplementation((p: string) => {
+      if (p.includes("plugins/test")) return true;
+      if (p.includes(".claude-plugin/marketplace.json")) return true;
+      return false;
+    });
+    mockReadFileSync.mockReturnValue(marketplaceJson);
+    mockReaddirSync.mockReturnValue([]);
+    mockStatSync.mockReturnValue({ isDirectory: () => true, isFile: () => false });
+
+    // Claude Code agent with claude CLI available
+    const claudeAgent = makeAgent({ id: "claude-code", displayName: "Claude Code" });
+    mockDetectInstalledAgents.mockResolvedValue([claudeAgent]);
+  });
+
+  it("skips native install when claude CLI is not available", async () => {
+    mockIsClaudeCliAvailable.mockReturnValue(false);
+
+    await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
+
+    expect(mockIsClaudeCliAvailable).toHaveBeenCalled();
+    expect(mockRegisterMarketplace).not.toHaveBeenCalled();
+    expect(mockInstallNativePlugin).not.toHaveBeenCalled();
+  });
+
+  it("skips native install when --copy flag is set", async () => {
+    mockIsClaudeCliAvailable.mockReturnValue(true);
+    mockGetMarketplaceName.mockReturnValue("test-mkt");
+
+    await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true, copy: true });
+
+    expect(mockRegisterMarketplace).not.toHaveBeenCalled();
+    expect(mockInstallNativePlugin).not.toHaveBeenCalled();
+  });
+
+  it("calls registerMarketplace and installNativePlugin when claude CLI available", async () => {
+    mockIsClaudeCliAvailable.mockReturnValue(true);
+    mockGetMarketplaceName.mockReturnValue("test-mkt");
+    mockRegisterMarketplace.mockReturnValue(true);
+    mockInstallNativePlugin.mockReturnValue(true);
+
+    await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
+
+    expect(mockRegisterMarketplace).toHaveBeenCalled();
+    expect(mockInstallNativePlugin).toHaveBeenCalledWith("sw-test", "test-mkt");
+  });
+
+  it("falls back to extraction when marketplace registration fails", async () => {
+    mockIsClaudeCliAvailable.mockReturnValue(true);
+    mockGetMarketplaceName.mockReturnValue("test-mkt");
+    mockRegisterMarketplace.mockReturnValue(false);
+
+    await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
+
+    expect(mockRegisterMarketplace).toHaveBeenCalled();
+    expect(mockInstallNativePlugin).not.toHaveBeenCalled();
+  });
+
+  it("falls back to extraction when native install command fails", async () => {
+    mockIsClaudeCliAvailable.mockReturnValue(true);
+    mockGetMarketplaceName.mockReturnValue("test-mkt");
+    mockRegisterMarketplace.mockReturnValue(true);
+    mockInstallNativePlugin.mockReturnValue(false);
+
+    await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
+
+    expect(mockRegisterMarketplace).toHaveBeenCalled();
+    expect(mockInstallNativePlugin).toHaveBeenCalled();
+    // Falls back to extraction — copyFileSync or mkdirSync should be called
+  });
+
+  it("skips native install when getMarketplaceName returns null", async () => {
+    mockIsClaudeCliAvailable.mockReturnValue(true);
+    mockGetMarketplaceName.mockReturnValue(null);
+
+    await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
+
+    expect(mockRegisterMarketplace).not.toHaveBeenCalled();
   });
 });

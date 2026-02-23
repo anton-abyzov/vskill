@@ -425,12 +425,12 @@ kafka-topics.sh --alter --topic input-topic --partitions 8
 ## Documentation
 
 - **Kafka Streams Docs**: https://kafka.apache.org/documentation/streams/
-- **Topology Patterns**: `.specweave/docs/public/guides/kafka-streams-patterns.md`
-- **State Stores**: `.specweave/docs/public/guides/kafka-streams-state.md`
-- **Testing Guide**: `.specweave/docs/public/guides/kafka-streams-testing.md`
+- **Topology Patterns**: `docs/guides/kafka-streams-patterns.md`
+- **State Stores**: `docs/guides/kafka-streams-state.md`
+- **Testing Guide**: `docs/guides/kafka-streams-testing.md`
 
 ---
 
-**Plugin**: specweave-kafka-streams
+**Plugin**: vskill-kafka-streams
 **Version**: 1.0.0
 **Status**: ✅ Production Ready

@@ -251,11 +251,11 @@ kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
 ## Documentation
 
 - **n8n Kafka Nodes**: https://docs.n8n.io/integrations/builtin/app-nodes/n8n-nodes-base.kafka/
-- **Workflow Patterns**: `.specweave/docs/public/guides/n8n-kafka-patterns.md`
-- **Error Handling**: `.specweave/docs/public/guides/n8n-error-handling.md`
+- **Workflow Patterns**: `docs/guides/n8n-kafka-patterns.md`
+- **Error Handling**: `docs/guides/n8n-error-handling.md`
 
 ---
 
-**Plugin**: specweave-n8n
+**Plugin**: vskill-n8n
 **Version**: 1.0.0
 **Status**: ✅ Production Ready

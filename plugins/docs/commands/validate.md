@@ -65,7 +65,7 @@ import * as path from 'path';
 // Get options from command args
 const autoFix = process.argv.includes('--fix');
 const docsType = process.argv.find(a => a === 'public') ? 'public' : 'internal';
-const docsPath = path.resolve(`.specweave/docs/${docsType}`);
+const docsPath = path.resolve(`docs/${docsType}`);
 
 // Create validator
 const validator = new DocsValidator({

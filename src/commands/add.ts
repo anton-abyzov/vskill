@@ -47,6 +47,12 @@ import {
 } from "../utils/output.js";
 import { isTTY, createPrompter } from "../utils/prompts.js";
 import { installSymlink, installCopy } from "../installer/canonical.js";
+import {
+  isClaudeCliAvailable,
+  registerMarketplace,
+  installNativePlugin,
+} from "../utils/claude-cli.js";
+import { getMarketplaceName } from "../marketplace/index.js";
 
 // ---------------------------------------------------------------------------
 // Command file filter (prevents plugin internals leaking as slash commands)
@@ -113,6 +119,74 @@ function cleanPluginCache(pluginName: string, marketplace: string): void {
   try {
     execSync(`claude plugin uninstall "${pluginKey}"`, { stdio: "ignore", timeout: 10_000 });
   } catch { /* ignore - plugin might not be installed via CLI */ }
+}
+
+// ---------------------------------------------------------------------------
+// Native Claude Code plugin install
+// ---------------------------------------------------------------------------
+
+/**
+ * Attempt to install a plugin via Claude Code's native plugin system.
+ *
+ * Returns true if native install succeeded (Claude Code should be excluded
+ * from the extraction agent list). Returns false if native install was
+ * skipped or failed (fall back to extraction).
+ *
+ * Conditions for native install:
+ * - `claude` CLI is available on PATH
+ * - --copy flag is NOT set
+ * - User opts in (interactive prompt) OR --yes flag is set
+ */
+async function tryNativeClaudeInstall(
+  marketplacePath: string,
+  marketplaceContent: string,
+  pluginName: string,
+  opts: AddOptions,
+): Promise<boolean> {
+  if (opts.copy) return false;
+  if (!isClaudeCliAvailable()) return false;
+
+  const marketplaceName = getMarketplaceName(marketplaceContent);
+  if (!marketplaceName) return false;
+
+  // Prompt user unless --yes
+  if (isTTY() && !opts.yes) {
+    const prompter = createPrompter();
+    const choice = await prompter.promptChoice(
+      "Claude Code plugin install method:",
+      [
+        { label: "Native plugin install", hint: `recommended — enables ${marketplaceName}:${pluginName} namespacing` },
+        { label: "Extract skills individually", hint: "copies files to .claude/skills/ directory" },
+      ],
+    );
+    if (choice !== 0) return false;
+  }
+
+  // Register marketplace
+  const regSpin = spinner("Registering marketplace with Claude Code");
+  const registered = registerMarketplace(marketplacePath);
+  if (!registered) {
+    regSpin.stop();
+    console.log(yellow("  Failed to register marketplace — falling back to extraction."));
+    return false;
+  }
+  regSpin.stop();
+
+  // Install plugin
+  const installSpin = spinner(`Installing ${pluginName} via Claude Code plugin system`);
+  const installed = installNativePlugin(pluginName, marketplaceName);
+  if (!installed) {
+    installSpin.stop();
+    console.log(yellow("  Native install failed — falling back to extraction."));
+    return false;
+  }
+  installSpin.stop();
+
+  console.log(green(`  ${bold(pluginName)} installed as native Claude Code plugin`));
+  console.log(dim(`  Namespace: ${marketplaceName}:${pluginName}`));
+  console.log(dim(`  Manage: claude plugin list | claude plugin uninstall "${pluginName}@${marketplaceName}"`));
+
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -511,25 +585,47 @@ async function installPluginDir(
   if (selections.global) opts.global = true;
 
   // Read version from marketplace.json
-  const marketplacePath = join(basePath, ".claude-plugin", "marketplace.json");
-  const marketplaceContent = readFileSync(marketplacePath, "utf-8");
-  const version = getPluginVersion(pluginName, marketplaceContent) || "0.0.0";
+  const mktPath = join(basePath, ".claude-plugin", "marketplace.json");
+  const mktContent = readFileSync(mktPath, "utf-8");
+  const version = getPluginVersion(pluginName, mktContent) || "0.0.0";
 
-  // Remove unfiltered plugin cache that Claude Code's plugin system creates.
-  // The cache at ~/.claude/plugins/cache/ contains ALL files without filtering,
-  // causing internal .md files to leak as ghost slash commands.
-  try {
-    const marketplaceName = JSON.parse(marketplaceContent).name;
-    if (marketplaceName) {
-      cleanPluginCache(pluginName, marketplaceName);
-    }
-  } catch { /* ignore parse errors */ }
+  // Native Claude Code plugin install
+  const hasClaude = selectedAgents.some((a) => a.id === "claude-code");
+  let claudeNativeSuccess = false;
 
-  // Install: recursively copy plugin directory to cache
+  if (hasClaude) {
+    claudeNativeSuccess = await tryNativeClaudeInstall(
+      resolve(basePath),
+      mktContent,
+      pluginName,
+      opts,
+    );
+  }
+
+  // Filter Claude Code out of extraction if native install succeeded
+  const extractionAgents = claudeNativeSuccess
+    ? selectedAgents.filter((a) => a.id !== "claude-code")
+    : selectedAgents;
+
+  // Clean stale plugin cache only when NOT using native install
+  if (!claudeNativeSuccess) {
+    try {
+      const marketplaceName = JSON.parse(mktContent).name;
+      if (marketplaceName) {
+        cleanPluginCache(pluginName, marketplaceName);
+      }
+    } catch { /* ignore parse errors */ }
+  }
+
+  // Install: recursively copy plugin directory to each agent
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
   const locations: string[] = [];
 
-  for (const agent of selectedAgents) {
+  if (claudeNativeSuccess) {
+    locations.push("Claude Code: native plugin");
+  }
+
+  for (const agent of extractionAgents) {
     const cacheDir = join(
       resolveInstallBase(opts, agent),
       pluginName,
@@ -816,6 +912,16 @@ async function installRepoPlugin(
   const selectedAgents = selections.agents;
   if (selections.global) opts.global = true;
   if (!selections.symlink) opts.copy = true;
+
+  // Native Claude Code plugin install is only available for local plugins.
+  // Remote plugins require marketplace registration with a local path.
+  const hasClaude = selectedAgents.some((a) => a.id === "claude-code");
+  if (hasClaude && !opts.copy) {
+    console.log(
+      dim("\n  Note: Native Claude Code plugin install requires a local path.") +
+        dim("\n  Use --plugin-dir for native install. Extracting skills for Claude Code.\n")
+    );
+  }
 
   // Install skills and commands with namespace prefix
   const sha = createHash("sha256").update(combined).digest("hex").slice(0, 12);

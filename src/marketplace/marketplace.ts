@@ -71,3 +71,19 @@ export function getPluginVersion(
   const found = plugins.find((p) => p.name === name);
   return found?.version ?? null;
 }
+
+/**
+ * Get the marketplace name (top-level "name" field) from marketplace.json.
+ * Used as the marketplace identifier in `claude plugin install <plugin>@<marketplace>`.
+ *
+ * @param content - Raw JSON string from marketplace.json
+ * @returns Marketplace name (e.g. "specweave") or null
+ */
+export function getMarketplaceName(content: string): string | null {
+  try {
+    const manifest: MarketplaceManifest = JSON.parse(content);
+    return manifest.name || null;
+  } catch {
+    return null;
+  }
+}

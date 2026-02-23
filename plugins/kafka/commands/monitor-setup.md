@@ -92,4 +92,4 @@ After setup completes, I'll:
 
 **Skills Activated**: kafka-observability
 **Related Commands**: /kafka:deploy
-**Dashboard Locations**: `plugins/specweave-kafka/monitoring/grafana/dashboards/`
+**Dashboard Locations**: `plugins/kafka/monitoring/grafana/dashboards/`

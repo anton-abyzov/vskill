@@ -171,5 +171,5 @@ docker-compose ps
 ---
 
 **Skills Activated**: kafka-cli-tools
-**Docker Compose Location**: `plugins/specweave-kafka/docker/`
-**Sample Code**: `plugins/specweave-kafka/docker/templates/`
+**Docker Compose Location**: `plugins/kafka/docker/`
+**Sample Code**: `plugins/kafka/docker/templates/`

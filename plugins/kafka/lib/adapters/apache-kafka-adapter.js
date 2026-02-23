@@ -19,7 +19,7 @@ class ApacheKafkaAdapter {
     }
     this.config = config;
     const kafkaConfig = {
-      clientId: config.clientId || "specweave-kafka-adapter",
+      clientId: config.clientId || "vskill-kafka-adapter",
       brokers: config.brokers,
       connectionTimeout: config.connectionTimeout || 3e4,
       requestTimeout: config.requestTimeout || 3e4

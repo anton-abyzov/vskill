@@ -39,7 +39,7 @@ export class ApacheKafkaAdapter implements PlatformAdapter {
     this.config = config;
 
     const kafkaConfig: any = {
-      clientId: config.clientId || 'specweave-kafka-adapter',
+      clientId: config.clientId || 'vskill-kafka-adapter',
       brokers: config.brokers,
       connectionTimeout: config.connectionTimeout || 30000,
       requestTimeout: config.requestTimeout || 30000,

@@ -18,6 +18,7 @@ import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import { resolveTilde } from "../utils/paths.js";
 import { findProjectRoot } from "../utils/project-root.js";
+import { reportInstall } from "../api/client.js";
 import { filterAgents } from "../utils/agent-filter.js";
 import { detectInstalledAgents, AGENTS_REGISTRY } from "../agents/agents-registry.js";
 import type { AgentDefinition } from "../agents/agents-registry.js";
@@ -185,6 +186,7 @@ async function tryNativeClaudeInstall(
   console.log(green(`  ${bold(pluginName)} installed as native Claude Code plugin`));
   console.log(dim(`  Namespace: ${marketplaceName}:${pluginName}`));
   console.log(dim(`  Manage: claude plugin list | claude plugin uninstall "${pluginName}@${marketplaceName}"`));
+  reportInstall(pluginName).catch(() => {});
 
   return true;
 }
@@ -1282,6 +1284,7 @@ export async function addCommand(
     const icon = r.installed ? green("✓") : red("✗");
     const detail = r.installed ? dim(`(${r.verdict})`) : red(`(${r.verdict})`);
     console.log(`  ${icon} ${r.skillName} ${detail}`);
+    if (r.installed) reportInstall(r.skillName).catch(() => {});
   }
 }
 
@@ -1475,6 +1478,7 @@ async function installFromRegistry(
     console.log(`  ${dim(">")} ${loc}`);
   }
   console.log(dim(`\nSHA: ${sha} | Version: ${detail.version || "0.0.0"}`));
+  reportInstall(skillName).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -1633,6 +1637,9 @@ async function installSingleSkillLegacy(
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock, projectRoot);
+
+  // Phone home (fire-and-forget)
+  reportInstall(skillName).catch(() => {});
 
   // Print summary
   const method = opts.copy ? "copied" : "symlinked";

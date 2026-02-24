@@ -11,6 +11,8 @@ export interface SkillSearchResult {
   score: number;
   installs: number;
   description: string;
+  command?: string | null;
+  pluginName?: string | null;
 }
 
 export interface SkillDetail {
@@ -31,6 +33,8 @@ export interface SkillDetail {
   trustScore?: number;
   /** Whether author-repo ownership is verified */
   provenanceVerified?: boolean;
+  command?: string | null;
+  pluginName?: string | null;
 }
 
 export interface SubmissionResponse {
@@ -90,6 +94,8 @@ export async function searchSkills(
     score: Number(s.certScore ?? s.score ?? 0),
     installs: Number(s.vskillInstalls ?? s.installs ?? 0),
     description: String(s.description || ""),
+    command: s.command ? String(s.command) : null,
+    pluginName: s.pluginName ? String(s.pluginName) : null,
   }));
 }
 
@@ -118,6 +124,8 @@ export async function getSkill(name: string): Promise<SkillDetail> {
     trustTier: raw.trustTier ? String(raw.trustTier) : undefined,
     trustScore: raw.trustScore != null ? Number(raw.trustScore) : undefined,
     provenanceVerified: raw.provenanceVerified != null ? Boolean(raw.provenanceVerified) : undefined,
+    command: raw.command ? String(raw.command) : null,
+    pluginName: raw.pluginName ? String(raw.pluginName) : null,
   };
 }
 
@@ -140,4 +148,33 @@ export async function getSubmission(
   id: string
 ): Promise<{ id: string; status: string; result?: unknown }> {
   return apiRequest(`/api/v1/submissions/${encodeURIComponent(id)}`);
+}
+
+/**
+ * Report a skill install to the platform (fire-and-forget).
+ * Respects VSKILL_NO_TELEMETRY=1 env var for opt-out.
+ * Never throws — all errors are silently swallowed.
+ */
+export async function reportInstall(skillName: string): Promise<void> {
+  try {
+    if (process.env.VSKILL_NO_TELEMETRY === "1") return;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+
+    try {
+      await fetch(
+        `${BASE_URL}/api/v1/skills/${encodeURIComponent(skillName)}/installs`,
+        {
+          method: "POST",
+          headers: { "User-Agent": "vskill-cli" },
+          signal: controller.signal,
+        },
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch {
+    // Silent — install tracking must never block CLI
+  }
 }

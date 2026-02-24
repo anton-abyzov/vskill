@@ -4,6 +4,7 @@ import {
   getSkill,
   submitSkill,
   getSubmission,
+  reportInstall,
 } from "./client.js";
 import type { SubmissionRequest } from "./client.js";
 
@@ -335,5 +336,70 @@ describe("headers", () => {
     const options = callArgs[1];
     expect(options.headers["Content-Type"]).toBe("application/json");
     expect(options.headers["User-Agent"]).toBe("vskill-cli");
+  });
+});
+
+describe("reportInstall", () => {
+  it("sends POST to correct URL", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
+
+    await reportInstall("my-skill");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE_URL}/api/v1/skills/my-skill/installs`,
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "User-Agent": "vskill-cli",
+        }),
+      }),
+    );
+  });
+
+  it("encodes special characters in skill name", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
+
+    await reportInstall("@org/my-skill");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE_URL}/api/v1/skills/%40org%2Fmy-skill/installs`,
+      expect.any(Object),
+    );
+  });
+
+  it("respects VSKILL_NO_TELEMETRY=1", async () => {
+    const orig = process.env.VSKILL_NO_TELEMETRY;
+    process.env.VSKILL_NO_TELEMETRY = "1";
+    try {
+      await reportInstall("my-skill");
+      expect(mockFetch).not.toHaveBeenCalled();
+    } finally {
+      if (orig === undefined) delete process.env.VSKILL_NO_TELEMETRY;
+      else process.env.VSKILL_NO_TELEMETRY = orig;
+    }
+  });
+
+  it("swallows network errors silently", async () => {
+    mockFetch.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    // Should not throw
+    await expect(reportInstall("my-skill")).resolves.toBeUndefined();
+  });
+
+  it("swallows non-ok responses silently", async () => {
+    mockFetch.mockResolvedValue(errorResponse(500, "Internal Server Error"));
+
+    // Should not throw (reportInstall doesn't use apiRequest)
+    await expect(reportInstall("my-skill")).resolves.toBeUndefined();
+  });
+
+  it("passes an AbortSignal for timeout", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
+
+    await reportInstall("my-skill");
+
+    const callArgs = mockFetch.mock.calls[0];
+    const options = callArgs[1];
+    expect(options.signal).toBeInstanceOf(AbortSignal);
   });
 });

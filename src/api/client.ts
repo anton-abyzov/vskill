@@ -71,15 +71,19 @@ async function apiRequest<T>(
 
 /**
  * Search for skills in the registry.
+ * Uses the edge-first search endpoint which is resilient to DB load.
  */
 export async function searchSkills(
   query: string
 ): Promise<SkillSearchResult[]> {
   const encoded = encodeURIComponent(query);
-  const data = await apiRequest<{ skills: Array<Record<string, unknown>> }>(
-    `/api/v1/skills?search=${encoded}`
-  );
-  return (data.skills || []).map((s) => ({
+  const data = await apiRequest<{
+    results: Array<Record<string, unknown>>;
+    // Legacy fallback shape
+    skills?: Array<Record<string, unknown>>;
+  }>(`/api/v1/skills/search?q=${encoded}`);
+  const items = data.results || data.skills || [];
+  return items.map((s) => ({
     name: String(s.name || ""),
     author: String(s.author || ""),
     tier: String(s.certTier || s.tier || "SCANNED"),

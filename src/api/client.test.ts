@@ -53,7 +53,7 @@ afterAll(() => {
 describe("searchSkills", () => {
   it("encodes the query and parses the response", async () => {
     const apiData = {
-      skills: [
+      results: [
         {
           name: "my-skill",
           author: "alice",
@@ -69,7 +69,7 @@ describe("searchSkills", () => {
     const results = await searchSkills("hello world");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      `${BASE_URL}/api/v1/skills?search=hello%20world`,
+      `${BASE_URL}/api/v1/skills/search?q=hello%20world`,
       expect.objectContaining({
         headers: expect.objectContaining({
           "Content-Type": "application/json",
@@ -90,7 +90,7 @@ describe("searchSkills", () => {
     ]);
   });
 
-  it("returns empty array when skills field is missing", async () => {
+  it("returns empty array when results field is missing", async () => {
     mockFetch.mockResolvedValue(jsonResponse({}));
 
     const results = await searchSkills("nothing");
@@ -100,7 +100,7 @@ describe("searchSkills", () => {
 
   it("falls back to 'tier' when 'certTier' is missing", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse({ skills: [{ name: "s", tier: "VERIFIED" }] })
+      jsonResponse({ results: [{ name: "s", tier: "VERIFIED" }] })
     );
     const results = await searchSkills("test");
     expect(results[0].tier).toBe("VERIFIED");
@@ -108,7 +108,7 @@ describe("searchSkills", () => {
 
   it("defaults tier to 'SCANNED' when no tier field exists", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse({ skills: [{ name: "s" }] })
+      jsonResponse({ results: [{ name: "s" }] })
     );
     const results = await searchSkills("test");
     expect(results[0].tier).toBe("SCANNED");
@@ -116,7 +116,7 @@ describe("searchSkills", () => {
 
   it("falls back to 'score' when 'certScore' is missing", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse({ skills: [{ name: "s", score: 75 }] })
+      jsonResponse({ results: [{ name: "s", score: 75 }] })
     );
     const results = await searchSkills("test");
     expect(results[0].score).toBe(75);
@@ -124,7 +124,7 @@ describe("searchSkills", () => {
 
   it("defaults score to 0 when no score field exists", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse({ skills: [{ name: "s" }] })
+      jsonResponse({ results: [{ name: "s" }] })
     );
     const results = await searchSkills("test");
     expect(results[0].score).toBe(0);
@@ -132,7 +132,7 @@ describe("searchSkills", () => {
 
   it("falls back to 'installs' when 'vskillInstalls' is missing", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse({ skills: [{ name: "s", installs: 500 }] })
+      jsonResponse({ results: [{ name: "s", installs: 500 }] })
     );
     const results = await searchSkills("test");
     expect(results[0].installs).toBe(500);
@@ -140,7 +140,7 @@ describe("searchSkills", () => {
 
   it("defaults installs to 0 when no installs field exists", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse({ skills: [{ name: "s" }] })
+      jsonResponse({ results: [{ name: "s" }] })
     );
     const results = await searchSkills("test");
     expect(results[0].installs).toBe(0);
@@ -327,7 +327,7 @@ describe("error handling", () => {
 
 describe("headers", () => {
   it("sends correct Content-Type and User-Agent headers", async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ skills: [] }));
+    mockFetch.mockResolvedValue(jsonResponse({ results: [] }));
 
     await searchSkills("test");
 

@@ -21,3 +21,18 @@ export interface BlocklistCache {
   fetchedAt: string;
   etag?: string;
 }
+
+export interface RejectionInfo {
+  skillName: string;
+  state: string;
+  reason: string;
+  score: number | null;
+  rejectedAt: string;
+}
+
+export interface InstallSafetyResult {
+  blocked: boolean;
+  entry?: BlocklistEntry;
+  rejected: boolean;
+  rejection?: RejectionInfo;
+}

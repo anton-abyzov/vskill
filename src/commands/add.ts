@@ -24,8 +24,8 @@ import type { AgentDefinition } from "../agents/agents-registry.js";
 import { ensureLockfile, writeLockfile } from "../lockfile/index.js";
 import { runTier1Scan } from "../scanner/index.js";
 import { getAvailablePlugins, getPluginSource, getPluginVersion } from "../marketplace/index.js";
-import { checkBlocklist } from "../blocklist/blocklist.js";
-import type { BlocklistEntry } from "../blocklist/types.js";
+import { checkInstallSafety } from "../blocklist/blocklist.js";
+import type { BlocklistEntry, RejectionInfo } from "../blocklist/types.js";
 import { getSkill } from "../api/client.js";
 import { checkPlatformSecurity } from "../security/index.js";
 import { discoverSkills } from "../discovery/github-tree.js";
@@ -428,6 +428,27 @@ function printBlockedWarning(entry: BlocklistEntry): void {
   line("");
 }
 
+function printRejectedError(rejection: RejectionInfo): void {
+  console.error(red(bold("\n  REJECTED: Skill failed platform verification")));
+  console.error(red(`  Skill: "${rejection.skillName}"`));
+  console.error(red(`  Status: ${rejection.state}`));
+  if (rejection.score != null) {
+    console.error(red(`  Score: ${rejection.score}/100`));
+  }
+  console.error(red(`  Reason: ${rejection.reason}`));
+  console.error(dim(`  Rejected: ${rejection.rejectedAt}`));
+  console.error(dim("\n  Use --force to override (NOT recommended)"));
+}
+
+function printRejectedWarning(rejection: RejectionInfo): void {
+  console.error(yellow(bold("\n  WARNING: Installing a skill that failed verification!")));
+  console.error(yellow(`  Skill: "${rejection.skillName}" (${rejection.state})`));
+  if (rejection.score != null) {
+    console.error(yellow(`  Score: ${rejection.score}/100`));
+  }
+  console.error(dim("  --force: proceeding despite rejection\n"));
+}
+
 // ---------------------------------------------------------------------------
 // Plugin directory installation (local path)
 // ---------------------------------------------------------------------------
@@ -502,14 +523,21 @@ async function installPluginDir(
     process.exit(1);
   }
 
-  // Blocklist check (before scanning)
-  const blocked = await checkBlocklist(pluginName);
-  if (blocked && !opts.force) {
-    printBlockedError(blocked);
+  // Blocklist + rejection check (before scanning)
+  const safety = await checkInstallSafety(pluginName);
+  if (safety.blocked && !opts.force) {
+    printBlockedError(safety.entry!);
     process.exit(1);
   }
-  if (blocked && opts.force) {
-    printBlockedWarning(blocked);
+  if (safety.blocked && opts.force) {
+    printBlockedWarning(safety.entry!);
+  }
+  if (safety.rejected && !opts.force) {
+    printRejectedError(safety.rejection!);
+    process.exit(1);
+  }
+  if (safety.rejected && opts.force) {
+    printRejectedWarning(safety.rejection!);
   }
 
   // Collect all file content for scanning
@@ -710,14 +738,21 @@ async function installOneGitHubSkill(
     return { skillName, installed: false, verdict: "FETCH_FAILED" };
   }
 
-  // Blocklist check
-  const blocked = await checkBlocklist(skillName, undefined);
-  if (blocked && !opts.force) {
-    printBlockedError(blocked);
+  // Blocklist + rejection check
+  const safety = await checkInstallSafety(skillName);
+  if (safety.blocked && !opts.force) {
+    printBlockedError(safety.entry!);
     return { skillName, installed: false, verdict: "BLOCKED" };
   }
-  if (blocked && opts.force) {
-    printBlockedWarning(blocked);
+  if (safety.blocked && opts.force) {
+    printBlockedWarning(safety.entry!);
+  }
+  if (safety.rejected && !opts.force) {
+    printRejectedError(safety.rejection!);
+    return { skillName, installed: false, verdict: "REJECTED" };
+  }
+  if (safety.rejected && opts.force) {
+    printRejectedWarning(safety.rejection!);
   }
 
   // Platform security check
@@ -936,14 +971,21 @@ async function installRepoPlugin(
     } catch { /* skip unavailable */ }
   }
 
-  // Blocklist check
-  const blocked = await checkBlocklist(pluginName);
-  if (blocked && !opts.force) {
-    printBlockedError(blocked);
+  // Blocklist + rejection check
+  const safety = await checkInstallSafety(pluginName);
+  if (safety.blocked && !opts.force) {
+    printBlockedError(safety.entry!);
     throw new Error(`Plugin "${pluginName}" is on the blocklist`);
   }
-  if (blocked && opts.force) {
-    printBlockedWarning(blocked);
+  if (safety.blocked && opts.force) {
+    printBlockedWarning(safety.entry!);
+  }
+  if (safety.rejected && !opts.force) {
+    printRejectedError(safety.rejection!);
+    throw new Error(`Plugin "${pluginName}" failed platform verification`);
+  }
+  if (safety.rejected && opts.force) {
+    printRejectedWarning(safety.rejection!);
   }
 
   // Tier 1 scan on all content combined
@@ -1309,14 +1351,21 @@ async function installFromRegistry(
 
   const content = detail.content;
 
-  // Blocklist check
-  const blocked = await checkBlocklist(skillName, undefined);
-  if (blocked && !opts.force) {
-    printBlockedError(blocked);
+  // Blocklist + rejection check
+  const safety = await checkInstallSafety(skillName);
+  if (safety.blocked && !opts.force) {
+    printBlockedError(safety.entry!);
     process.exit(1);
   }
-  if (blocked && opts.force) {
-    printBlockedWarning(blocked);
+  if (safety.blocked && opts.force) {
+    printBlockedWarning(safety.entry!);
+  }
+  if (safety.rejected && !opts.force) {
+    printRejectedError(safety.rejection!);
+    process.exit(1);
+  }
+  if (safety.rejected && opts.force) {
+    printRejectedWarning(safety.rejection!);
   }
 
   // Tier 1 scan
@@ -1421,15 +1470,22 @@ async function installSingleSkillLegacy(
   // Fetch SKILL.md
   const content = await fetchSkillContent(url);
 
-  // Blocklist check (before scanning)
+  // Blocklist + rejection check (before scanning)
   const skillName = skill || repo;
-  const blocked = await checkBlocklist(skillName, undefined);
-  if (blocked && !opts.force) {
-    printBlockedError(blocked);
+  const safety = await checkInstallSafety(skillName);
+  if (safety.blocked && !opts.force) {
+    printBlockedError(safety.entry!);
     process.exit(1);
   }
-  if (blocked && opts.force) {
-    printBlockedWarning(blocked);
+  if (safety.blocked && opts.force) {
+    printBlockedWarning(safety.entry!);
+  }
+  if (safety.rejected && !opts.force) {
+    printRejectedError(safety.rejection!);
+    process.exit(1);
+  }
+  if (safety.rejected && opts.force) {
+    printRejectedWarning(safety.rejection!);
   }
 
   // Platform security check (best-effort, non-blocking on network error)

@@ -67,8 +67,10 @@ vi.mock("../scanner/index.js", () => ({
 }));
 
 const mockCheckBlocklist = vi.fn();
+const mockCheckInstallSafety = vi.fn();
 vi.mock("../blocklist/blocklist.js", () => ({
   checkBlocklist: (...args: unknown[]) => mockCheckBlocklist(...args),
+  checkInstallSafety: (...args: unknown[]) => mockCheckInstallSafety(...args),
 }));
 
 const mockCheckPlatformSecurity = vi.fn();
@@ -189,6 +191,7 @@ beforeEach(() => {
 
   mockRunTier1Scan.mockReturnValue(makeScanResult());
   mockCheckBlocklist.mockResolvedValue(null);
+  mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
   mockCheckPlatformSecurity.mockResolvedValue(null);
   mockEnsureLockfile.mockReturnValue({ skills: {}, agents: [] });
   mockFindProjectRoot.mockReturnValue("/projects/myapp");

@@ -81,8 +81,10 @@ vi.mock("../scanner/index.js", () => ({
 // Mock blocklist
 // ---------------------------------------------------------------------------
 const mockCheckBlocklist = vi.fn();
+const mockCheckInstallSafety = vi.fn();
 vi.mock("../blocklist/blocklist.js", () => ({
   checkBlocklist: (...args: unknown[]) => mockCheckBlocklist(...args),
+  checkInstallSafety: (...args: unknown[]) => mockCheckInstallSafety(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -228,7 +230,7 @@ beforeEach(() => {
 describe("addCommand with --plugin option (plugin directory support)", () => {
   beforeEach(() => {
     // Plugin path hits blocklist check first — return null (not blocked)
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
   });
 
   // TC-001: --plugin <name> flag selects sub-plugin from multi-plugin repo
@@ -519,13 +521,17 @@ describe("addCommand blocklist check (GitHub path)", () => {
   });
 
   it("blocks installation when skill is on the blocklist", async () => {
-    mockCheckBlocklist.mockResolvedValue({
-      skillName: "evil-repo",
-      threatType: "credential-theft",
-      severity: "critical",
-      reason: "Steals AWS credentials",
-      evidenceUrls: [],
-      discoveredAt: "2026-02-01T00:00:00Z",
+    mockCheckInstallSafety.mockResolvedValue({
+      blocked: true,
+      entry: {
+        skillName: "evil-repo",
+        threatType: "credential-theft",
+        severity: "critical",
+        reason: "Steals AWS credentials",
+        evidenceUrls: [],
+        discoveredAt: "2026-02-01T00:00:00Z",
+      },
+      rejected: false,
     });
 
     const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
@@ -536,7 +542,7 @@ describe("addCommand blocklist check (GitHub path)", () => {
       addCommand("owner/evil-repo", {}),
     ).rejects.toThrow("process.exit");
 
-    expect(mockCheckBlocklist).toHaveBeenCalledWith("evil-repo", undefined);
+    expect(mockCheckInstallSafety).toHaveBeenCalledWith("evil-repo");
     expect(mockExit).toHaveBeenCalledWith(1);
 
     // Tier 1 scan should NOT have been called (blocked before scan)
@@ -552,7 +558,7 @@ describe("addCommand blocklist check (GitHub path)", () => {
   });
 
   it("proceeds normally when skill is NOT on the blocklist", async () => {
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
     mockEnsureLockfile.mockReturnValue({
@@ -565,12 +571,12 @@ describe("addCommand blocklist check (GitHub path)", () => {
 
     await addCommand("owner/safe-repo", {});
 
-    expect(mockCheckBlocklist).toHaveBeenCalledWith("safe-repo", undefined);
+    expect(mockCheckInstallSafety).toHaveBeenCalledWith("safe-repo");
     expect(mockRunTier1Scan).toHaveBeenCalled();
   });
 
   it("uses --skill name for blocklist check when provided", async () => {
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
     mockEnsureLockfile.mockReturnValue({
@@ -583,7 +589,7 @@ describe("addCommand blocklist check (GitHub path)", () => {
 
     await addCommand("owner/repo", { skill: "my-skill" });
 
-    expect(mockCheckBlocklist).toHaveBeenCalledWith("my-skill", undefined);
+    expect(mockCheckInstallSafety).toHaveBeenCalledWith("my-skill");
   });
 });
 
@@ -593,13 +599,17 @@ describe("addCommand blocklist check (GitHub path)", () => {
 
 describe("addCommand blocklist check (plugin path)", () => {
   it("blocks plugin installation when plugin is on the blocklist", async () => {
-    mockCheckBlocklist.mockResolvedValue({
-      skillName: "evil-plugin",
-      threatType: "prompt-injection",
-      severity: "critical",
-      reason: "Injects malicious prompts",
-      evidenceUrls: [],
-      discoveredAt: "2026-02-01T00:00:00Z",
+    mockCheckInstallSafety.mockResolvedValue({
+      blocked: true,
+      entry: {
+        skillName: "evil-plugin",
+        threatType: "prompt-injection",
+        severity: "critical",
+        reason: "Injects malicious prompts",
+        evidenceUrls: [],
+        discoveredAt: "2026-02-01T00:00:00Z",
+      },
+      rejected: false,
     });
 
     mockExistsSync.mockReturnValue(true);
@@ -624,14 +634,14 @@ describe("addCommand blocklist check (plugin path)", () => {
       addCommand("source", { plugin: "evil-plugin", pluginDir: "/tmp/test" }),
     ).rejects.toThrow("process.exit");
 
-    expect(mockCheckBlocklist).toHaveBeenCalledWith("evil-plugin");
+    expect(mockCheckInstallSafety).toHaveBeenCalledWith("evil-plugin");
     expect(mockRunTier1Scan).not.toHaveBeenCalled();
 
     mockExit.mockRestore();
   });
 
   it("proceeds with plugin installation when not blocklisted", async () => {
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockImplementation((p: string) => {
       if (p.includes("marketplace.json")) {
@@ -659,7 +669,7 @@ describe("addCommand blocklist check (plugin path)", () => {
 
     await addCommand("source", { plugin: "safe-plugin", pluginDir: "/tmp/test" });
 
-    expect(mockCheckBlocklist).toHaveBeenCalledWith("safe-plugin");
+    expect(mockCheckInstallSafety).toHaveBeenCalledWith("safe-plugin");
     expect(mockRunTier1Scan).toHaveBeenCalled();
   });
 });
@@ -683,13 +693,17 @@ describe("addCommand --force with blocked skill", () => {
   });
 
   it("shows warning box and continues when --force + blocked (GitHub path)", async () => {
-    mockCheckBlocklist.mockResolvedValue({
-      skillName: "evil-skill",
-      threatType: "credential-theft",
-      severity: "critical",
-      reason: "Base64-encoded AWS credential exfil",
-      evidenceUrls: [],
-      discoveredAt: "2026-02-01T00:00:00Z",
+    mockCheckInstallSafety.mockResolvedValue({
+      blocked: true,
+      entry: {
+        skillName: "evil-skill",
+        threatType: "credential-theft",
+        severity: "critical",
+        reason: "Base64-encoded AWS credential exfil",
+        evidenceUrls: [],
+        discoveredAt: "2026-02-01T00:00:00Z",
+      },
+      rejected: false,
     });
 
     mockRunTier1Scan.mockReturnValue(makeScanResult());
@@ -716,13 +730,17 @@ describe("addCommand --force with blocked skill", () => {
   });
 
   it("shows warning box and continues when --force + blocked (plugin path)", async () => {
-    mockCheckBlocklist.mockResolvedValue({
-      skillName: "evil-plugin",
-      threatType: "prompt-injection",
-      severity: "critical",
-      reason: "Injects malicious prompts",
-      evidenceUrls: [],
-      discoveredAt: "2026-02-01T00:00:00Z",
+    mockCheckInstallSafety.mockResolvedValue({
+      blocked: true,
+      entry: {
+        skillName: "evil-plugin",
+        threatType: "prompt-injection",
+        severity: "critical",
+        reason: "Injects malicious prompts",
+        evidenceUrls: [],
+        discoveredAt: "2026-02-01T00:00:00Z",
+      },
+      rejected: false,
     });
 
     mockExistsSync.mockReturnValue(true);
@@ -774,7 +792,7 @@ describe("addCommand platform security check (GitHub path)", () => {
       text: async () => "# Safe Skill\nNormal content",
     }) as unknown as typeof fetch;
 
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
   });
 
   afterEach(() => {
@@ -907,7 +925,7 @@ describe("addCommand multi-skill discovery (GitHub path)", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockCheckPlatformSecurity.mockResolvedValue(null);
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
@@ -1046,7 +1064,7 @@ describe("addCommand source format routing", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockCheckPlatformSecurity.mockResolvedValue(null);
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
@@ -1166,7 +1184,7 @@ describe("addCommand source format routing", () => {
     // Reset fetch mock
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockClear();
     vi.clearAllMocks();
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockCheckPlatformSecurity.mockResolvedValue(null);
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
@@ -1190,7 +1208,7 @@ describe("addCommand source format routing", () => {
 
 describe("addCommand registry install (no slash in source)", () => {
   beforeEach(() => {
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockEnsureLockfile.mockReturnValue({
@@ -1340,7 +1358,7 @@ describe("addCommand smart project root resolution", () => {
       text: async () => "# Skill content",
     }) as unknown as typeof fetch;
 
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
     mockEnsureLockfile.mockReturnValue({
@@ -1394,7 +1412,7 @@ describe("addCommand --agent filter", () => {
       text: async () => "# Skill content",
     }) as unknown as typeof fetch;
 
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockEnsureLockfile.mockReturnValue({
       version: 1,
@@ -1472,7 +1490,7 @@ describe("addCommand nested directory fix (TC-016)", () => {
       text: async () => "# Skill content",
     }) as unknown as typeof fetch;
 
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockEnsureLockfile.mockReturnValue({
       version: 1,
@@ -1556,7 +1574,7 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
   });
 
   function setupHappyPath() {
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
     mockFindProjectRoot.mockReturnValue("/project");
@@ -1656,7 +1674,7 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
   });
 
   it("exits with error when plugin not found in marketplace", async () => {
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("marketplace.json")) {
         return { ok: true, text: async () => marketplaceJson };
@@ -1700,7 +1718,7 @@ describe("addCommand native Claude Code plugin install", () => {
   });
 
   beforeEach(() => {
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockEnsureLockfile.mockReturnValue({
       version: 1,
@@ -1813,7 +1831,7 @@ describe("addCommand with --repo --all flag (bulk install)", () => {
   });
 
   function setupAllHappyPath() {
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
     mockFindProjectRoot.mockReturnValue("/project");
@@ -1954,7 +1972,7 @@ describe("addCommand project root consistency", () => {
       text: async () => "# Skill content",
     }) as unknown as typeof fetch;
 
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockCheckPlatformSecurity.mockResolvedValue(null);
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
@@ -2040,7 +2058,7 @@ describe("addCommand error handling in discovery flow", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockCheckPlatformSecurity.mockResolvedValue(null);
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
@@ -2097,7 +2115,7 @@ describe("addCommand flat name identifier guidance", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    mockCheckBlocklist.mockResolvedValue(null);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     mockCheckPlatformSecurity.mockResolvedValue(null);
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);

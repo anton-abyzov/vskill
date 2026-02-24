@@ -5,7 +5,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { BlocklistEntry, BlocklistCache } from "./types.js";
+import type { BlocklistEntry, BlocklistCache, InstallSafetyResult } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -143,4 +143,37 @@ export async function checkBlocklist(
   }
 
   return findEntry(cache.entries, skillName, contentHash);
+}
+
+/**
+ * Check install safety via the platform API (blocklist + rejection status).
+ *
+ * Makes a single HTTP call to GET /api/v1/blocklist/check?name=X.
+ * Falls back to local checkBlocklist() when the API is unreachable
+ * (graceful degradation: rejected=false).
+ */
+export async function checkInstallSafety(
+  skillName: string,
+  contentHash?: string,
+): Promise<InstallSafetyResult> {
+  try {
+    const url = `${getApiBaseUrl()}/api/v1/blocklist/check?name=${encodeURIComponent(skillName)}`;
+    const res = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!res.ok) {
+      // API error — fall back to local blocklist check
+      const entry = await checkBlocklist(skillName, contentHash);
+      return { blocked: !!entry, entry: entry ?? undefined, rejected: false };
+    }
+
+    const data = (await res.json()) as InstallSafetyResult;
+    return data;
+  } catch {
+    // Network error — fall back to local blocklist check
+    const entry = await checkBlocklist(skillName, contentHash);
+    return { blocked: !!entry, entry: entry ?? undefined, rejected: false };
+  }
 }

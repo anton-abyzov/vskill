@@ -194,12 +194,19 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   mockCheckPlatformSecurity.mockResolvedValue(null);
 
-  // Mock fetch for GitHub path (fetching SKILL.md)
-  globalThis.fetch = vi.fn().mockResolvedValue({
-    ok: true,
-    text: async () => "# Safe Skill\nNormal content",
-    json: async () => ({ entries: [], count: 0, lastUpdated: null }),
-    headers: { get: () => null },
+  // Mock fetch: blocklist check API returns 503 (forcing fallback to local cache),
+  // all other requests (e.g. fetching SKILL.md from GitHub) succeed normally.
+  globalThis.fetch = vi.fn().mockImplementation(async (url: string | URL | Request, init?: RequestInit) => {
+    const urlStr = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+    if (urlStr.includes("/api/v1/blocklist/check")) {
+      return { ok: false, status: 503, statusText: "Service Unavailable" };
+    }
+    return {
+      ok: true,
+      text: async () => "# Safe Skill\nNormal content",
+      json: async () => ({ entries: [], count: 0, lastUpdated: null }),
+      headers: { get: () => null },
+    };
   }) as unknown as typeof fetch;
 
   setupBlocklistCache();

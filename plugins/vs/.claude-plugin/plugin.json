@@ -1,0 +1,18 @@
+{
+  "name": "vs",
+  "description": "Universal AI skills library — 74 domain skills and 41 commands for full-stack development, infrastructure, ML, mobile, testing, security, payments, and more.",
+  "version": "2.0.0",
+  "author": {
+    "name": "Anton Abyzov",
+    "email": "anton.abyzov@gmail.com",
+    "url": "https://github.com/anton-abyzov/vskill"
+  },
+  "homepage": "https://github.com/anton-abyzov/vskill",
+  "repository": "https://github.com/anton-abyzov/vskill",
+  "license": "MIT",
+  "keywords": [
+    "frontend", "backend", "infrastructure", "mobile", "ml",
+    "testing", "kubernetes", "kafka", "payments", "security",
+    "devops", "cloud", "documentation"
+  ]
+}

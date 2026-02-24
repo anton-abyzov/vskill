@@ -8,6 +8,62 @@ npx vskill install remotion-dev/skills/remotion-best-practices   # specific skil
 npx vskill install remotion-best-practices                       # registry lookup
 ```
 
+## Claude Code Plugin
+
+This repo is a **Claude Code plugin** — 74 expert skills across frontend, backend, infra, ML, mobile, testing, and more. Plugin prefix: **`vs`**.
+
+### Install
+
+```bash
+# From GitHub (recommended)
+npx vskill install --repo anton-abyzov/vskill --plugin vs
+
+# From a local clone
+git clone https://github.com/anton-abyzov/vskill.git
+npx vskill install --plugin-dir ./vskill --plugin vs
+```
+
+### Prefix
+
+When installed as a **plugin**, skills are namespaced under `vs:`:
+
+```
+/vs:frontend-nextjs
+/vs:backend-nodejs
+/vs:ml-rag
+/vs:testing-e2e
+/vs:scout
+```
+
+When installed as **standalone skills** (without the plugin), no prefix:
+
+```
+/frontend-nextjs
+/backend-nodejs
+/ml-rag
+```
+
+### Skills (74)
+
+| Domain | Skills |
+|--------|--------|
+| frontend | `frontend`, `frontend-architect`, `frontend-design`, `frontend-design-system`, `frontend-nextjs`, `frontend-figma`, `frontend-code-explorer`, `frontend-i18n` |
+| backend | `backend-nodejs`, `backend-python`, `backend-dotnet`, `backend-go`, `backend-rust`, `backend-java-spring`, `backend-graphql`, `backend-db-optimizer` |
+| infra | `infra-terraform`, `infra-aws`, `infra-azure`, `infra-gcp`, `infra-github-actions`, `infra-devops`, `infra-devsecops`, `infra-secrets`, `infra-observability`, `infra-opentelemetry` |
+| mobile | `mobile-react-native`, `mobile-expo`, `mobile-flutter`, `mobile-swiftui`, `mobile-jetpack`, `mobile-capacitor`, `mobile-deep-linking`, `mobile-testing`, `mobile-appstore` |
+| ml | `ml-engineer`, `ml-mlops`, `ml-data-scientist`, `ml-fine-tuning`, `ml-rag`, `ml-langchain`, `ml-huggingface`, `ml-edge`, `ml-specialist` |
+| testing | `testing-unit`, `testing-e2e`, `testing-performance`, `testing-accessibility`, `testing-mutation`, `testing-qa` |
+| k8s | `k8s-manifests`, `k8s-helm`, `k8s-gitops`, `k8s-security` |
+| payments | `payments`, `payments-billing`, `payments-pci` |
+| cost | `cost-cloud-pricing`, `cost-optimization`, `cost-aws` |
+| kafka | `kafka-architect`, `kafka-ops` |
+| kafka-streams | `kafka-streams-topology` |
+| confluent | `confluent-kafka-connect`, `confluent-ksqldb`, `confluent-schema-registry` |
+| docs | `docs-docusaurus`, `docs-technical-writing`, `docs-brainstorming` |
+| n8n | `n8n-kafka` |
+| security | `security`, `security-patterns`, `security-simplifier` |
+| scout | `scout` |
+
 ## Why?
 
 - **36.82% of AI skills have security flaws** ([Snyk ToxicSkills](https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub/))

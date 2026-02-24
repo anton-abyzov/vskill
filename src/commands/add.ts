@@ -204,6 +204,8 @@ interface AddOptions {
   yes?: boolean;
   copy?: boolean;
   select?: boolean;
+  /** @internal Registry target skill name — auto-select from discovery */
+  _targetSkill?: string;
 }
 
 /**
@@ -1215,13 +1217,24 @@ export async function addCommand(
 
   // Skill selection (multi-skill repos, when interactive)
   let selectedSkills = discovered;
-  if (discovered.length > 1 && isTTY() && !opts.yes) {
+
+  // Auto-filter when coming from registry with a known target skill name
+  if (opts._targetSkill) {
+    const match = discovered.filter((s) => s.name === opts._targetSkill);
+    if (match.length > 0) {
+      selectedSkills = match;
+      console.log(dim(`Auto-selected skill: ${match[0].name}`));
+    }
+    delete opts._targetSkill;
+  }
+
+  if (selectedSkills.length > 1 && isTTY() && !opts.yes) {
     const prompter = createPrompter();
     const skillIndices = await prompter.promptCheckboxList(
-      discovered.map((s) => ({ label: s.name, description: s.description, checked: true })),
+      selectedSkills.map((s) => ({ label: s.name, description: s.description, checked: true })),
       { title: "Select skills to install" },
     );
-    selectedSkills = skillIndices.map((i) => discovered[i]);
+    selectedSkills = skillIndices.map((i) => selectedSkills[i]);
 
     if (selectedSkills.length === 0) {
       console.log(dim("No skills selected. Aborting."));
@@ -1345,8 +1358,8 @@ async function installFromRegistry(
       return;
     }
     console.log(dim(`Registry has no inline content — installing from GitHub (${ownerRepo})...`));
-    console.log(yellow(`Tip: Next time use: vskill add ${ownerRepo}`));
-    return addCommand(ownerRepo, opts);
+    console.log(yellow(`Tip: Next time use: vskill add ${ownerRepo}/${detail.name}`));
+    return addCommand(ownerRepo, { ...opts, _targetSkill: detail.name });
   }
 
   const content = detail.content;

@@ -2175,7 +2175,146 @@ describe("addCommand flat name identifier guidance", () => {
     const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
       .map((c: unknown[]) => String(c[0]))
       .join("\n");
-    // Should suggest the direct format
-    expect(logOutput).toContain("remotion-dev/skills");
+    // Should suggest the direct format including skill name
+    expect(logOutput).toContain("remotion-dev/skills/remotion-dev-skills-remotion");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Registry → GitHub fallback: auto-select matching skill (_targetSkill)
+// ---------------------------------------------------------------------------
+
+describe("addCommand registry fallback auto-selects matching skill", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
+    mockCheckPlatformSecurity.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockFindProjectRoot.mockReturnValue(process.cwd());
+    // Reset canonical installer (earlier test overrides with throwing impl)
+    mockInstallSymlink.mockReturnValue([]);
+    mockInstallCopy.mockReturnValue([]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("auto-selects matching skill from multi-skill repo (installs 1, not all)", async () => {
+    mockGetSkill.mockResolvedValue({
+      name: "excalidraw-diagram-generator",
+      author: "github",
+      content: undefined,
+      repoUrl: "https://github.com/github/awesome-copilot",
+      installs: 100,
+      updatedAt: "2026-02-20T00:00:00Z",
+    });
+
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "code-review", path: "skills/code-review/SKILL.md", rawUrl: "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/code-review/SKILL.md" },
+      { name: "excalidraw-diagram-generator", path: "skills/excalidraw-diagram-generator/SKILL.md", rawUrl: "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/excalidraw-diagram-generator/SKILL.md" },
+      { name: "unit-test-writer", path: "skills/unit-test-writer/SKILL.md", rawUrl: "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/unit-test-writer/SKILL.md" },
+    ]);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Excalidraw Diagram Generator",
+    }) as unknown as typeof fetch;
+
+    await addCommand("excalidraw-diagram-generator", {});
+
+    // Should only install 1 skill, not all 3
+    expect(mockRunTier1Scan).toHaveBeenCalledTimes(1);
+    const lockArg = mockWriteLockfile.mock.calls[0][0];
+    expect(Object.keys(lockArg.skills)).toHaveLength(1);
+    expect(lockArg.skills).toHaveProperty("excalidraw-diagram-generator");
+    expect(lockArg.skills).not.toHaveProperty("code-review");
+    expect(lockArg.skills).not.toHaveProperty("unit-test-writer");
+  });
+
+  it("falls through to install all when registry name does not match any discovered skill", async () => {
+    mockGetSkill.mockResolvedValue({
+      name: "remotion-dev-skills-remotion",
+      author: "remotion-dev",
+      content: undefined,
+      repoUrl: "https://github.com/remotion-dev/skills",
+      installs: 0,
+      updatedAt: "2026-02-20T00:00:00Z",
+    });
+
+    // Registry name "remotion-dev-skills-remotion" does NOT match dir names
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "remotion", path: "skills/remotion/SKILL.md", rawUrl: "https://raw.githubusercontent.com/remotion-dev/skills/main/skills/remotion/SKILL.md" },
+      { name: "video-editor", path: "skills/video-editor/SKILL.md", rawUrl: "https://raw.githubusercontent.com/remotion-dev/skills/main/skills/video-editor/SKILL.md" },
+    ]);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+
+    // Non-TTY → installs all discovered skills (no prompt)
+    await addCommand("remotion-dev-skills-remotion", {});
+
+    // Both skills should be installed (no auto-filter match)
+    expect(mockRunTier1Scan).toHaveBeenCalledTimes(2);
+    const lockArg = mockWriteLockfile.mock.calls[0][0];
+    expect(Object.keys(lockArg.skills)).toHaveLength(2);
+  });
+
+  it("tip message suggests 3-part owner/repo/skill format", async () => {
+    mockGetSkill.mockResolvedValue({
+      name: "excalidraw-diagram-generator",
+      author: "github",
+      content: undefined,
+      repoUrl: "https://github.com/github/awesome-copilot",
+      installs: 0,
+      updatedAt: "2026-02-20T00:00:00Z",
+    });
+
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "excalidraw-diagram-generator", path: "skills/excalidraw-diagram-generator/SKILL.md", rawUrl: "https://raw.githubusercontent.com/github/awesome-copilot/main/skills/excalidraw-diagram-generator/SKILL.md" },
+    ]);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+
+    await addCommand("excalidraw-diagram-generator", {});
+
+    const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(logOutput).toContain("github/awesome-copilot/excalidraw-diagram-generator");
+  });
+
+  it("does not auto-filter when _targetSkill is not set (direct owner/repo)", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "skill-a", path: "skills/skill-a/SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/skills/skill-a/SKILL.md" },
+      { name: "skill-b", path: "skills/skill-b/SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/skills/skill-b/SKILL.md" },
+    ]);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+
+    // Direct install without registry — no _targetSkill
+    await addCommand("owner/repo", {});
+
+    // Both skills should be installed
+    expect(mockRunTier1Scan).toHaveBeenCalledTimes(2);
+    const lockArg = mockWriteLockfile.mock.calls[0][0];
+    expect(Object.keys(lockArg.skills)).toHaveLength(2);
   });
 });

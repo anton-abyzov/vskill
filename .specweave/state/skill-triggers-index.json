@@ -116,6 +116,7 @@
     ],
     "security": [
       "vs:backend-java-spring",
+      "vs:blockchain",
       "vs:infra-devsecops",
       "vs:infra-github-actions",
       "vs:k8s-manifests",
@@ -149,6 +150,70 @@
     ],
     "fastapi": [
       "vs:backend-python"
+    ],
+    "blockchain": [
+      "vs:blockchain"
+    ],
+    "web3": [
+      "vs:blockchain"
+    ],
+    "solidity": [
+      "vs:blockchain"
+    ],
+    "smart contract": [
+      "vs:blockchain"
+    ],
+    "ethereum": [
+      "vs:blockchain"
+    ],
+    "hardhat": [
+      "vs:blockchain"
+    ],
+    "foundry": [
+      "vs:blockchain"
+    ],
+    "erc-20": [
+      "vs:blockchain"
+    ],
+    "erc-721": [
+      "vs:blockchain"
+    ],
+    "nft": [
+      "vs:blockchain"
+    ],
+    "defi": [
+      "vs:blockchain"
+    ],
+    "dapp": [
+      "vs:blockchain"
+    ],
+    "walletconnect": [
+      "vs:blockchain"
+    ],
+    "ipfs": [
+      "vs:blockchain"
+    ],
+    "layer 2": [
+      "vs:blockchain"
+    ],
+    "gas optimization": [
+      "vs:blockchain"
+    ],
+    "reentrancy": [
+      "vs:blockchain"
+    ],
+    "openzeppelin": [
+      "vs:blockchain"
+    ],
+    "optimization": [
+      "vs:blockchain",
+      "vs:cost-aws",
+      "vs:cost-optimization",
+      "vs:frontend-nextjs",
+      "vs:infra-github-actions",
+      "vs:infra-opentelemetry",
+      "vs:ml-edge",
+      "vs:mobile-jetpack"
     ],
     "kafka connect": [
       "vs:confluent-kafka-connect"
@@ -267,15 +332,6 @@
       "vs:infra-aws",
       "vs:infra-secrets",
       "vs:mobile-testing"
-    ],
-    "optimization": [
-      "vs:cost-aws",
-      "vs:cost-optimization",
-      "vs:frontend-nextjs",
-      "vs:infra-github-actions",
-      "vs:infra-opentelemetry",
-      "vs:ml-edge",
-      "vs:mobile-jetpack"
     ],
     "cloud pricing": [
       "vs:cost-cloud-pricing"
@@ -1153,6 +1209,34 @@
       ],
       "description": "Rust backend developer for building high-performance, memory-safe APIs and services. Use when building Rust backends with Axum, Actix-web, Rocket, or ",
       "fqn": "vs:backend-rust"
+    },
+    "vs:blockchain": {
+      "plugin": "vs",
+      "type": "skill",
+      "triggers": [
+        "blockchain",
+        "web3",
+        "solidity",
+        "smart contract",
+        "ethereum",
+        "hardhat",
+        "foundry",
+        "erc-20",
+        "erc-721",
+        "nft",
+        "defi",
+        "dapp",
+        "walletconnect",
+        "ipfs",
+        "layer 2",
+        "gas optimization",
+        "reentrancy",
+        "openzeppelin",
+        "optimization",
+        "security"
+      ],
+      "description": "\"Blockchain and Web3 development with Solidity, Hardhat, Foundry, ethers.js, and smart contract security. Covers Ethereum, Layer 2 solutions, DeFi, NF",
+      "fqn": "vs:blockchain"
     },
     "vs:confluent-kafka-connect": {
       "plugin": "vs",
@@ -2106,7 +2190,7 @@
       "fqn": "vs:testing-unit"
     }
   },
-  "generatedAt": "2026-02-24T05:20:47.683Z",
-  "skillCount": 74,
-  "keywordCount": 279
+  "generatedAt": "2026-02-24T14:47:28.529Z",
+  "skillCount": 75,
+  "keywordCount": 297
 }

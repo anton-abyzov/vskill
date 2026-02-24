@@ -1220,11 +1220,21 @@ export async function addCommand(
 
   // Auto-filter when coming from registry with a known target skill name
   if (opts._targetSkill) {
-    const match = discovered.filter((s) => s.name === opts._targetSkill);
+    const target = opts._targetSkill.toLowerCase();
+    const match = discovered.filter((s) => s.name.toLowerCase() === target);
     if (match.length > 0) {
       selectedSkills = match;
       console.log(dim(`Auto-selected skill: ${match[0].name}`));
+    } else if (!isTTY() && discovered.length > 1) {
+      // Non-TTY + multi-skill repo: don't silently install all — the user asked for a specific skill
+      console.error(
+        red(`Skill "${opts._targetSkill}" not found among ${discovered.length} skills in this repo.`) + "\n" +
+        dim(`Available: ${discovered.map((s) => s.name).join(", ")}`) + "\n" +
+        dim(`Use the exact name: vskill add ${owner}/${repo}/<skill-name>`)
+      );
+      process.exit(1);
     }
+    // TTY + no match: falls through to interactive prompt (correct)
     delete opts._targetSkill;
   }
 

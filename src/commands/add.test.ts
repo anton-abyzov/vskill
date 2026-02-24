@@ -2241,7 +2241,7 @@ describe("addCommand registry fallback auto-selects matching skill", () => {
     expect(lockArg.skills).not.toHaveProperty("unit-test-writer");
   });
 
-  it("falls through to install all when registry name does not match any discovered skill", async () => {
+  it("aborts in non-TTY when registry name does not match any discovered skill", async () => {
     mockGetSkill.mockResolvedValue({
       name: "remotion-dev-skills-remotion",
       author: "remotion-dev",
@@ -2262,13 +2262,53 @@ describe("addCommand registry fallback auto-selects matching skill", () => {
       text: async () => "# Skill content",
     }) as unknown as typeof fetch;
 
-    // Non-TTY → installs all discovered skills (no prompt)
-    await addCommand("remotion-dev-skills-remotion", {});
+    const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit");
+    });
 
-    // Both skills should be installed (no auto-filter match)
-    expect(mockRunTier1Scan).toHaveBeenCalledTimes(2);
+    // Non-TTY + no match → should abort, not install all
+    await expect(
+      addCommand("remotion-dev-skills-remotion", {}),
+    ).rejects.toThrow("process.exit");
+
+    const errorOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(errorOutput).toContain("not found among 2 skills");
+    expect(errorOutput).toContain("remotion, video-editor");
+
+    mockExit.mockRestore();
+  });
+
+  it("auto-selects with case-insensitive match (registry slug vs directory name)", async () => {
+    mockGetSkill.mockResolvedValue({
+      name: "code-review",
+      author: "github",
+      content: undefined,
+      repoUrl: "https://github.com/github/copilot-skills",
+      installs: 50,
+      updatedAt: "2026-02-20T00:00:00Z",
+    });
+
+    // Directory has mixed case — registry slug is lowercase
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "Code-Review", path: "skills/Code-Review/SKILL.md", rawUrl: "https://raw.githubusercontent.com/github/copilot-skills/main/skills/Code-Review/SKILL.md" },
+      { name: "unit-test", path: "skills/unit-test/SKILL.md", rawUrl: "https://raw.githubusercontent.com/github/copilot-skills/main/skills/unit-test/SKILL.md" },
+    ]);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Code Review Skill",
+    }) as unknown as typeof fetch;
+
+    await addCommand("code-review", {});
+
+    // Should auto-select only Code-Review, not unit-test
+    expect(mockRunTier1Scan).toHaveBeenCalledTimes(1);
     const lockArg = mockWriteLockfile.mock.calls[0][0];
-    expect(Object.keys(lockArg.skills)).toHaveLength(2);
+    expect(Object.keys(lockArg.skills)).toHaveLength(1);
+    expect(lockArg.skills).toHaveProperty("Code-Review");
+    expect(lockArg.skills).not.toHaveProperty("unit-test");
   });
 
   it("tip message suggests 3-part owner/repo/skill format", async () => {

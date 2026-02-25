@@ -765,6 +765,16 @@ async function installOneGitHubSkill(
     console.log(yellow("  Platform security check unavailable -- proceeding with local scan only."));
   }
   if (platformSecurity && platformSecurity.hasCritical && !opts.force) {
+    const criticalProviders = platformSecurity.providers
+      .filter((p) => p.status === "FAIL" && p.criticalCount > 0)
+      .map((p) => p.provider);
+    console.log(red(`  BLOCKED: External security scan found CRITICAL findings`));
+    if (criticalProviders.length > 0) {
+      console.log(dim(`  Providers: ${criticalProviders.join(", ")}`));
+    }
+    if (platformSecurity.reportUrl) {
+      console.log(dim(`  Report: https://verified-skill.com${platformSecurity.reportUrl}`));
+    }
     return { skillName, installed: false, verdict: "SECURITY_FAIL" };
   }
 
@@ -772,6 +782,22 @@ async function installOneGitHubSkill(
   const scanResult = runTier1Scan(content);
 
   if ((scanResult.verdict === "FAIL" || scanResult.verdict === "CONCERNS") && !opts.force) {
+    const verdictColor = scanResult.verdict === "FAIL" ? red : yellow;
+    console.log(
+      `  ${bold("Score:")} ${verdictColor(String(scanResult.score))}/100  ` +
+        `${bold("Verdict:")} ${verdictColor(scanResult.verdict)}`
+    );
+    if (scanResult.findings.length > 0) {
+      console.log(
+        dim(
+          `  Found ${scanResult.findings.length} issue${scanResult.findings.length === 1 ? "" : "s"}: ` +
+            `${scanResult.criticalCount} critical, ${scanResult.highCount} high, ${scanResult.mediumCount} medium`
+        )
+      );
+      for (const f of scanResult.findings) {
+        console.log(dim(`    ${f.patternId} [${f.severity}] ${f.patternName}: ${JSON.stringify(f.match)} (line ${f.lineNumber})`));
+      }
+    }
     return { skillName, installed: false, verdict: scanResult.verdict };
   }
 
@@ -1279,12 +1305,19 @@ export async function addCommand(
   writeLockfile(lock, projectRoot);
 
   // Summary
-  console.log(green(`\nInstalled ${bold(String(results.filter((r) => r.installed).length))} of ${results.length} skills:\n`));
+  const installedCount = results.filter((r) => r.installed).length;
+  console.log(green(`\nInstalled ${bold(String(installedCount))} of ${results.length} skills:\n`));
   for (const r of results) {
     const icon = r.installed ? green("✓") : red("✗");
     const detail = r.installed ? dim(`(${r.verdict})`) : red(`(${r.verdict})`);
     console.log(`  ${icon} ${r.skillName} ${detail}`);
     if (r.installed) reportInstall(r.skillName).catch(() => {});
+  }
+  const forceRecoverable = results.some(
+    (r) => !r.installed && ["FAIL", "CONCERNS", "BLOCKED", "REJECTED", "SECURITY_FAIL"].includes(r.verdict),
+  );
+  if (forceRecoverable) {
+    console.log(dim("\nUse --force to install skills that failed security checks."));
   }
 }
 

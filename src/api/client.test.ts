@@ -87,6 +87,8 @@ describe("searchSkills", () => {
         score: 95,
         installs: 1200,
         description: "A great skill",
+        command: null,
+        pluginName: null,
       },
     ]);
   });

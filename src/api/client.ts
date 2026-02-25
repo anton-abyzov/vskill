@@ -90,7 +90,7 @@ export async function searchSkills(
   return items.map((s) => ({
     name: String(s.name || ""),
     author: String(s.author || ""),
-    tier: String(s.certTier || s.tier || "SCANNED"),
+    tier: String(s.certTier || s.tier || "VERIFIED"),
     score: Number(s.certScore ?? s.score ?? 0),
     installs: Number(s.vskillInstalls ?? s.installs ?? 0),
     description: String(s.description || ""),
@@ -112,7 +112,7 @@ export async function getSkill(name: string): Promise<SkillDetail> {
   return {
     name: String(raw.name || ""),
     author: String(raw.author || ""),
-    tier: String(raw.certTier || raw.tier || "SCANNED"),
+    tier: String(raw.certTier || raw.tier || "VERIFIED"),
     score: Number(raw.certScore ?? raw.score ?? 0),
     version: String(raw.currentVersion || raw.version || "0.0.0"),
     sha: String(raw.sha || ""),

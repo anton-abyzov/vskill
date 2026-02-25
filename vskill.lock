@@ -7,203 +7,203 @@
     "ab-test-setup": {
       "version": "0.0.0",
       "sha": "879b3f7dbb0b",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.255Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "ad-creative": {
       "version": "0.0.0",
       "sha": "bcf72e04c5e0",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "ai-seo": {
       "version": "0.0.0",
       "sha": "0e49feddbac8",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "analytics-tracking": {
       "version": "0.0.0",
       "sha": "4ff338d79619",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "churn-prevention": {
       "version": "0.0.0",
       "sha": "2ea8ae616f25",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "cold-email": {
       "version": "0.0.0",
       "sha": "aa842b9c52e6",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:38:01.595Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "competitor-alternatives": {
       "version": "0.0.0",
       "sha": "5332ad802bf8",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:38:01.595Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "content-strategy": {
       "version": "0.0.0",
       "sha": "420db02f3d3d",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "copy-editing": {
       "version": "0.0.0",
       "sha": "c57cdd918167",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "copywriting": {
       "version": "0.0.0",
       "sha": "9625d63adca3",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:38:01.595Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "email-sequence": {
       "version": "0.0.0",
       "sha": "59d02a8e1260",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "form-cro": {
       "version": "0.0.0",
       "sha": "724dde21c9bd",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "free-tool-strategy": {
       "version": "0.0.0",
       "sha": "66e84842ec1a",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "launch-strategy": {
       "version": "0.0.0",
       "sha": "1fcfef697b28",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "marketing-ideas": {
       "version": "0.0.0",
       "sha": "e27802925bfe",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "marketing-psychology": {
       "version": "0.0.0",
       "sha": "6ceb1f41dea1",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:38:01.595Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "onboarding-cro": {
       "version": "0.0.0",
       "sha": "4f238a7546d6",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "page-cro": {
       "version": "0.0.0",
       "sha": "bde759f34829",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "paid-ads": {
       "version": "0.0.0",
       "sha": "7fa06f36f11d",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "paywall-upgrade-cro": {
       "version": "0.0.0",
       "sha": "ed9eb2b51226",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "popup-cro": {
       "version": "0.0.0",
       "sha": "7fafc84cbeb2",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "pricing-strategy": {
       "version": "0.0.0",
       "sha": "b879fec0e75a",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "product-marketing-context": {
       "version": "0.0.0",
       "sha": "40f85f0faada",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "programmatic-seo": {
       "version": "0.0.0",
       "sha": "0602e928f430",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "referral-program": {
       "version": "0.0.0",
       "sha": "5d1f1d0bd5b8",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "schema-markup": {
       "version": "0.0.0",
       "sha": "2b3fb5702dfc",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "seo-audit": {
       "version": "0.0.0",
       "sha": "79aeb99f248c",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:38:01.595Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "signup-flow-cro": {
       "version": "0.0.0",
       "sha": "d8a0cc3e8358",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     },
     "social-content": {
       "version": "0.0.0",
       "sha": "ba590a003e2e",
-      "tier": "SCANNED",
+      "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
     }

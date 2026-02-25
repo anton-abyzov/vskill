@@ -102,7 +102,7 @@ async function listSkills(json?: boolean): Promise<void> {
     return [
       bold(name),
       s.version || "-",
-      tierColor(s.tier || "SCANNED"),
+      tierColor(s.tier || "VERIFIED"),
       dim(s.source || "-"),
       dim(s.installedAt ? new Date(s.installedAt).toLocaleDateString() : "-"),
     ];
@@ -114,7 +114,7 @@ async function listSkills(json?: boolean): Promise<void> {
       rows.push([
         bold(entry.name),
         "-",
-        dim("SCANNED"),
+        dim("VERIFIED"),
         dim("skills.sh"),
         dim("-"),
       ]);

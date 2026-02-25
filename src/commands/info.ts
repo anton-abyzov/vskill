@@ -9,7 +9,7 @@ function getTrustLabel(tier: string): string {
   switch (tier) {
     case "T0": return "Blocked";
     case "T1": return "Unscanned";
-    case "T2": return "Scanned";
+    case "T2": return "Basic";
     case "T3": return "Verified";
     case "T4": return "Certified";
     default: return "Unknown";

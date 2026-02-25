@@ -90,7 +90,7 @@ describe("removeCommand", () => {
         sw: {
           version: "1.0.0",
           sha: "abc123",
-          tier: "SCANNED",
+          tier: "VERIFIED",
           installedAt: "2026-01-01T00:00:00.000Z",
           source: "local:/path",
         },
@@ -140,7 +140,7 @@ describe("removeCommand", () => {
         sw: {
           version: "1.0.0",
           sha: "abc123",
-          tier: "SCANNED",
+          tier: "VERIFIED",
           installedAt: "2026-01-01T00:00:00.000Z",
           source: "local:/path",
         },
@@ -165,7 +165,7 @@ describe("removeCommand", () => {
         sw: {
           version: "1.0.0",
           sha: "abc123",
-          tier: "SCANNED",
+          tier: "VERIFIED",
           installedAt: "2026-01-01T00:00:00.000Z",
           source: "local:/path",
         },
@@ -190,7 +190,7 @@ describe("removeCommand", () => {
         sw: {
           version: "1.0.0",
           sha: "abc123",
-          tier: "SCANNED",
+          tier: "VERIFIED",
           installedAt: "2026-01-01T00:00:00.000Z",
           source: "local:/path",
         },

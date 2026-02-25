@@ -109,12 +109,12 @@ describe("searchSkills", () => {
     expect(results[0].tier).toBe("VERIFIED");
   });
 
-  it("defaults tier to 'SCANNED' when no tier field exists", async () => {
+  it("defaults tier to 'VERIFIED' when no tier field exists", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({ results: [{ name: "s" }] })
     );
     const results = await searchSkills("test");
-    expect(results[0].tier).toBe("SCANNED");
+    expect(results[0].tier).toBe("VERIFIED");
   });
 
   it("falls back to 'score' when 'certScore' is missing", async () => {
@@ -193,7 +193,7 @@ describe("getSkill", () => {
     const detail = {
       name: "test-skill",
       author: "bob",
-      tier: "SCANNED",
+      tier: "VERIFIED",
       score: 50,
       version: "1.2.3",
       sha: "def456",
@@ -207,7 +207,7 @@ describe("getSkill", () => {
 
     expect(result.name).toBe("test-skill");
     expect(result.author).toBe("bob");
-    expect(result.tier).toBe("SCANNED");
+    expect(result.tier).toBe("VERIFIED");
     expect(result.score).toBe(50);
     expect(result.version).toBe("1.2.3");
   });

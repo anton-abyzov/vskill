@@ -51,7 +51,7 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     return [
       bold(r.name),
       r.author || "-",
-      tierColor(r.tier || "SCANNED"),
+      tierColor(r.tier || "VERIFIED"),
       String(r.score ?? "-"),
       String(r.installs ?? 0),
     ];

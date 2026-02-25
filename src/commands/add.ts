@@ -668,7 +668,7 @@ async function installPluginDir(
   lock.skills[pluginName] = {
     version,
     sha,
-    tier: "SCANNED",
+    tier: "VERIFIED",
     installedAt: new Date().toISOString(),
     source: `local:${basePath}`,
   };
@@ -1082,7 +1082,7 @@ async function installRepoPlugin(
   lock.skills[pluginName] = {
     version: pluginVersion,
     sha,
-    tier: "SCANNED",
+    tier: "VERIFIED",
     installedAt: new Date().toISOString(),
     source: `github:${owner}/${repo}#plugin:${pluginName}`,
   };
@@ -1294,7 +1294,7 @@ export async function addCommand(
       lock.skills[r.skillName] = {
         version: "0.0.0",
         sha: r.sha,
-        tier: "SCANNED",
+        tier: "VERIFIED",
         installedAt: new Date().toISOString(),
         source: `github:${owner}/${repo}`,
       };
@@ -1509,7 +1509,7 @@ async function installFromRegistry(
   lock.skills[skillName] = {
     version: detail.version || "0.0.0",
     sha,
-    tier: "SCANNED",
+    tier: "VERIFIED",
     installedAt: new Date().toISOString(),
     source: `registry:${skillName}`,
   };
@@ -1670,7 +1670,7 @@ async function installSingleSkillLegacy(
   lock.skills[skillName] = {
     version: "0.0.0",
     sha,
-    tier: "SCANNED",
+    tier: "VERIFIED",
     installedAt: new Date().toISOString(),
     source: `github:${owner}/${repo}`,
   };

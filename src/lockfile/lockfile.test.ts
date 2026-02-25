@@ -44,7 +44,7 @@ function makeEntry(overrides: Partial<SkillLockEntry> = {}): SkillLockEntry {
   return {
     version: "1.0.0",
     sha: "abc123",
-    tier: "SCANNED",
+    tier: "VERIFIED",
     installedAt: "2026-01-01T00:00:00.000Z",
     source: "registry",
     ...overrides,
@@ -223,7 +223,7 @@ describe("lockfile extended fields", () => {
     // Original fields still present
     expect(entry.version).toBe("1.0.0");
     expect(entry.sha).toBe("abc123");
-    expect(entry.tier).toBe("SCANNED");
+    expect(entry.tier).toBe("VERIFIED");
     expect(entry.source).toBe("registry");
   });
 
@@ -233,7 +233,7 @@ describe("lockfile extended fields", () => {
     const oldEntry = {
       version: "1.0.0",
       sha: "abc123",
-      tier: "SCANNED",
+      tier: "VERIFIED",
       installedAt: "2026-01-01T00:00:00.000Z",
       source: "registry",
     };
@@ -248,7 +248,7 @@ describe("lockfile extended fields", () => {
     const entry = result!.skills["old-skill"];
     expect(entry.version).toBe("1.0.0");
     expect(entry.sha).toBe("abc123");
-    expect(entry.tier).toBe("SCANNED");
+    expect(entry.tier).toBe("VERIFIED");
     expect(entry.installedAt).toBe("2026-01-01T00:00:00.000Z");
     expect(entry.source).toBe("registry");
     // New fields should be undefined

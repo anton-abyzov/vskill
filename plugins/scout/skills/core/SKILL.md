@@ -74,7 +74,7 @@ npx vskill find "<query>" --json
 The `--json` flag returns structured results. Each result contains:
 - `name` — skill identifier (e.g., "frontend:nextjs")
 - `author` — skill author
-- `tier` — certification tier: CERTIFIED, VERIFIED, or SCANNED
+- `tier` — certification tier: CERTIFIED or VERIFIED
 - `score` — trust score (0-100)
 - `installs` — number of installations
 - `description` — what the skill does
@@ -98,7 +98,7 @@ Format search results as a clear table:
 After the table:
 1. **Highlight the best match** based on the user's query context
 2. **Explain why** it's relevant (mention specific capabilities)
-3. **Note tier differences** if results span multiple tiers (CERTIFIED > VERIFIED > SCANNED)
+3. **Note tier differences** if results span multiple tiers (CERTIFIED > VERIFIED)
 
 ### Step 4: Recommend Plugin Bundles
 
@@ -227,8 +227,7 @@ After running the install command:
 When presenting results, explain trust tiers to help users make informed decisions:
 
 - **CERTIFIED** — Highest trust. Manually reviewed and certified by the platform team. Safe to install.
-- **VERIFIED** — High trust. Automated scans passed, author identity verified. Safe to install.
-- **SCANNED** — Basic trust. Automated security scan passed, but no manual review. Exercise normal caution.
+- **VERIFIED** — Basic trust and above. Automated scans passed, author identity verified. Safe to install.
 - **UNSCANNED** — No scan data. Use `--force` to install, but review the skill content first.
 - **BLOCKED** — Known malicious. Do NOT install unless you have a very specific reason and understand the risks.
 

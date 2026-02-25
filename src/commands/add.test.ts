@@ -1336,7 +1336,7 @@ describe("addCommand registry install (no slash in source)", () => {
     mockGetSkill.mockResolvedValue({
       name: "some-skill",
       author: "bob",
-      tier: "SCANNED",
+      tier: "VERIFIED",
       score: 50,
       version: "0.1.0",
       sha: "",
@@ -1364,7 +1364,7 @@ describe("addCommand registry install (no slash in source)", () => {
     mockGetSkill.mockResolvedValue({
       name: "",
       author: "",
-      tier: "SCANNED",
+      tier: "VERIFIED",
       score: 0,
       version: "0.0.0",
       sha: "",

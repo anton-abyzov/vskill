@@ -554,6 +554,7 @@ describe("addCommand blocklist check (GitHub path)", () => {
       .join("\n");
     expect(errorOutput).toContain("BLOCKED");
     expect(errorOutput).toContain("credential-theft");
+    expect(errorOutput).toContain("https://verified-skill.com/skills/evil-repo");
 
     mockExit.mockRestore();
   });
@@ -676,7 +677,7 @@ describe("addCommand blocklist check (plugin path)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// T-015: --force override with warning for blocked skills
+// T-015: --force does NOT override blocked skills
 // ---------------------------------------------------------------------------
 
 describe("addCommand --force with blocked skill", () => {
@@ -693,7 +694,7 @@ describe("addCommand --force with blocked skill", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("shows warning box and continues when --force + blocked (GitHub path)", async () => {
+  it("still blocks even with --force (GitHub path)", async () => {
     mockCheckInstallSafety.mockResolvedValue({
       blocked: true,
       entry: {
@@ -707,30 +708,28 @@ describe("addCommand --force with blocked skill", () => {
       rejected: false,
     });
 
-    mockRunTier1Scan.mockReturnValue(makeScanResult());
-    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
-    mockEnsureLockfile.mockReturnValue({
-      version: 1,
-      agents: [],
-      skills: {},
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
+    const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit");
     });
 
-    await addCommand("owner/evil-skill", { force: true });
+    await expect(
+      addCommand("owner/evil-skill", { force: true }),
+    ).rejects.toThrow("process.exit");
 
-    // Should show warning but NOT exit
-    const allOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+    // Should NOT proceed to tier 1 scan — blocked is absolute
+    expect(mockExit).toHaveBeenCalledWith(1);
+    expect(mockRunTier1Scan).not.toHaveBeenCalled();
+
+    const errorOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
       .map((c: unknown[]) => String(c[0]))
       .join("\n");
-    expect(allOutput).toContain("WARNING");
-    expect(allOutput).toContain("malicious");
+    expect(errorOutput).toContain("BLOCKED");
+    expect(errorOutput).toContain("https://verified-skill.com/skills/evil-skill");
 
-    // Should proceed to tier 1 scan
-    expect(mockRunTier1Scan).toHaveBeenCalled();
+    mockExit.mockRestore();
   });
 
-  it("shows warning box and continues when --force + blocked (plugin path)", async () => {
+  it("still blocks even with --force (plugin path)", async () => {
     mockCheckInstallSafety.mockResolvedValue({
       blocked: true,
       entry: {
@@ -758,7 +757,52 @@ describe("addCommand --force with blocked skill", () => {
       return "";
     });
 
-    mockReaddirSync.mockReturnValue(["SKILL.md"]);
+    const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit");
+    });
+
+    await expect(
+      addCommand("source", { plugin: "evil-plugin", pluginDir: "/tmp/test", force: true }),
+    ).rejects.toThrow("process.exit");
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+    expect(mockRunTier1Scan).not.toHaveBeenCalled();
+
+    mockExit.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-015b: Rejected skill shows warning but proceeds with installation
+// ---------------------------------------------------------------------------
+
+describe("addCommand with rejected skill", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Rejected Skill\nContent here",
+    }) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("shows warning with details link but proceeds (GitHub path)", async () => {
+    mockCheckInstallSafety.mockResolvedValue({
+      blocked: false,
+      rejected: true,
+      rejection: {
+        skillName: "sketchy-skill",
+        state: "REJECTED",
+        reason: "Verification failed (REJECTED)",
+        score: 25,
+        rejectedAt: "2026-02-25T05:26:33.762Z",
+      },
+    });
+
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
     mockEnsureLockfile.mockReturnValue({
@@ -769,13 +813,18 @@ describe("addCommand --force with blocked skill", () => {
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
 
-    await addCommand("source", { plugin: "evil-plugin", pluginDir: "/tmp/test", force: true });
+    await addCommand("owner/sketchy-skill", {});
 
-    const allOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+    // Should show warning
+    const errorOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
       .map((c: unknown[]) => String(c[0]))
       .join("\n");
-    expect(allOutput).toContain("WARNING");
+    expect(errorOutput).toContain("WARNING");
+    expect(errorOutput).toContain("failed platform verification");
+    expect(errorOutput).toContain("25/100");
+    expect(errorOutput).toContain("https://verified-skill.com/skills/sketchy-skill");
 
+    // Should still proceed to tier 1 scan and install
     expect(mockRunTier1Scan).toHaveBeenCalled();
   });
 });

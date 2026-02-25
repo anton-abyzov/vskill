@@ -413,44 +413,19 @@ function printBlockedError(entry: BlocklistEntry): void {
   console.error(red(`  Skill: "${entry.skillName}"`));
   console.error(red(`  Threat: ${entry.threatType} (${entry.severity})`));
   console.error(red(`  Reason: ${entry.reason}`));
-  console.error(dim("\n  Use --force to override (NOT recommended)"));
-}
-
-function printBlockedWarning(entry: BlocklistEntry): void {
-  const line = (s: string) => console.error(red(s));
-  line("");
-  line("  +-------------------------------------------------+");
-  line("  |  WARNING: Installing a known-malicious skill!    |");
-  line("  |                                                   |");
-  line(`  |  Skill: "${entry.skillName}"`);
-  line(`  |  Threat: ${entry.threatType} (${entry.severity})`);
-  line(`  |  Reason: ${entry.reason}`);
-  line("  |                                                   |");
-  line("  |  This skill is on the malicious skills blocklist. |");
-  line("  |  Proceeding because --force was specified.         |");
-  line("  +-------------------------------------------------+");
-  line("");
-}
-
-function printRejectedError(rejection: RejectionInfo): void {
-  console.error(red(bold("\n  REJECTED: Skill failed platform verification")));
-  console.error(red(`  Skill: "${rejection.skillName}"`));
-  console.error(red(`  Status: ${rejection.state}`));
-  if (rejection.score != null) {
-    console.error(red(`  Score: ${rejection.score}/100`));
-  }
-  console.error(red(`  Reason: ${rejection.reason}`));
-  console.error(dim(`  Rejected: ${rejection.rejectedAt}`));
-  console.error(dim("\n  Use --force to override (NOT recommended)"));
+  console.error(dim(`  Details: https://verified-skill.com/skills/${encodeURIComponent(entry.skillName)}`));
+  console.error(red("\n  Installation is not allowed for blocked skills."));
 }
 
 function printRejectedWarning(rejection: RejectionInfo): void {
-  console.error(yellow(bold("\n  WARNING: Installing a skill that failed verification!")));
-  console.error(yellow(`  Skill: "${rejection.skillName}" (${rejection.state})`));
+  console.error(yellow(bold("\n  WARNING: Skill failed platform verification")));
+  console.error(yellow(`  Skill: "${rejection.skillName}"`));
   if (rejection.score != null) {
     console.error(yellow(`  Score: ${rejection.score}/100`));
   }
-  console.error(dim("  --force: proceeding despite rejection\n"));
+  console.error(yellow(`  Reason: ${rejection.reason}`));
+  console.error(dim(`  Details: https://verified-skill.com/skills/${encodeURIComponent(rejection.skillName)}`));
+  console.error("");
 }
 
 // ---------------------------------------------------------------------------
@@ -529,18 +504,11 @@ async function installPluginDir(
 
   // Blocklist + rejection check (before scanning)
   const safety = await checkInstallSafety(pluginName);
-  if (safety.blocked && !opts.force) {
+  if (safety.blocked) {
     printBlockedError(safety.entry!);
     process.exit(1);
   }
-  if (safety.blocked && opts.force) {
-    printBlockedWarning(safety.entry!);
-  }
-  if (safety.rejected && !opts.force) {
-    printRejectedError(safety.rejection!);
-    process.exit(1);
-  }
-  if (safety.rejected && opts.force) {
+  if (safety.rejected) {
     printRejectedWarning(safety.rejection!);
   }
 
@@ -745,18 +713,11 @@ async function installOneGitHubSkill(
 
   // Blocklist + rejection check
   const safety = await checkInstallSafety(skillName);
-  if (safety.blocked && !opts.force) {
+  if (safety.blocked) {
     printBlockedError(safety.entry!);
     return { skillName, installed: false, verdict: "BLOCKED" };
   }
-  if (safety.blocked && opts.force) {
-    printBlockedWarning(safety.entry!);
-  }
-  if (safety.rejected && !opts.force) {
-    printRejectedError(safety.rejection!);
-    return { skillName, installed: false, verdict: "REJECTED" };
-  }
-  if (safety.rejected && opts.force) {
+  if (safety.rejected) {
     printRejectedWarning(safety.rejection!);
   }
 
@@ -1004,18 +965,11 @@ async function installRepoPlugin(
 
   // Blocklist + rejection check
   const safety = await checkInstallSafety(pluginName);
-  if (safety.blocked && !opts.force) {
+  if (safety.blocked) {
     printBlockedError(safety.entry!);
     throw new Error(`Plugin "${pluginName}" is on the blocklist`);
   }
-  if (safety.blocked && opts.force) {
-    printBlockedWarning(safety.entry!);
-  }
-  if (safety.rejected && !opts.force) {
-    printRejectedError(safety.rejection!);
-    throw new Error(`Plugin "${pluginName}" failed platform verification`);
-  }
-  if (safety.rejected && opts.force) {
+  if (safety.rejected) {
     printRejectedWarning(safety.rejection!);
   }
 
@@ -1421,18 +1375,11 @@ async function installFromRegistry(
 
   // Blocklist + rejection check
   const safety = await checkInstallSafety(skillName);
-  if (safety.blocked && !opts.force) {
+  if (safety.blocked) {
     printBlockedError(safety.entry!);
     process.exit(1);
   }
-  if (safety.blocked && opts.force) {
-    printBlockedWarning(safety.entry!);
-  }
-  if (safety.rejected && !opts.force) {
-    printRejectedError(safety.rejection!);
-    process.exit(1);
-  }
-  if (safety.rejected && opts.force) {
+  if (safety.rejected) {
     printRejectedWarning(safety.rejection!);
   }
 
@@ -1542,18 +1489,11 @@ async function installSingleSkillLegacy(
   // Blocklist + rejection check (before scanning)
   const skillName = skill || repo;
   const safety = await checkInstallSafety(skillName);
-  if (safety.blocked && !opts.force) {
+  if (safety.blocked) {
     printBlockedError(safety.entry!);
     process.exit(1);
   }
-  if (safety.blocked && opts.force) {
-    printBlockedWarning(safety.entry!);
-  }
-  if (safety.rejected && !opts.force) {
-    printRejectedError(safety.rejection!);
-    process.exit(1);
-  }
-  if (safety.rejected && opts.force) {
+  if (safety.rejected) {
     printRejectedWarning(safety.rejection!);
   }
 

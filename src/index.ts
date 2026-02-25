@@ -21,7 +21,6 @@ function collect(val: string, acc: string[]): string[] {
 program
   .command("install [source]")
   .alias("i")
-  .alias("add")
   .description("Install a skill from GitHub after security scan")
   .option("--skill <name>", "Skill name within a multi-skill repo")
   .option("--plugin <name>", "Plugin name from marketplace.json")

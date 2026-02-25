@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// E2E integration tests: vskill add with blocklist enforcement
+// E2E integration tests: vskill install with blocklist enforcement
 //
 // Tests the FULL error output chain when a user tries to install
 // known-malicious skills from the ClawHub research. Verifies:
@@ -220,7 +220,7 @@ afterEach(() => {
 // 1. GitHub path — blocking with exact error details
 // ============================================================================
 
-describe("E2E: vskill add blocks ClawHub malicious skills (GitHub path)", () => {
+describe("E2E: vskill install blocks ClawHub malicious skills (GitHub path)", () => {
   it("refuses to install hightower6eu's Clawhub with full threat details", async () => {
     const mockExit = vi
       .spyOn(process, "exit")

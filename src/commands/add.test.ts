@@ -694,7 +694,7 @@ describe("addCommand --force with blocked skill", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("still blocks even with --force (GitHub path)", async () => {
+  it("shows warning but continues with --force (GitHub path)", async () => {
     mockCheckInstallSafety.mockResolvedValue({
       blocked: true,
       entry: {
@@ -708,28 +708,19 @@ describe("addCommand --force with blocked skill", () => {
       rejected: false,
     });
 
-    const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
-      throw new Error("process.exit");
-    });
+    await addCommand("owner/evil-skill", { force: true });
 
-    await expect(
-      addCommand("owner/evil-skill", { force: true }),
-    ).rejects.toThrow("process.exit");
-
-    // Should NOT proceed to tier 1 scan — blocked is absolute
-    expect(mockExit).toHaveBeenCalledWith(1);
-    expect(mockRunTier1Scan).not.toHaveBeenCalled();
+    // --force should show WARNING and continue to tier 1 scan
+    expect(mockRunTier1Scan).toHaveBeenCalled();
 
     const errorOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
       .map((c: unknown[]) => String(c[0]))
       .join("\n");
-    expect(errorOutput).toContain("BLOCKED");
+    expect(errorOutput).toContain("WARNING");
     expect(errorOutput).toContain("https://verified-skill.com/skills/evil-skill");
-
-    mockExit.mockRestore();
   });
 
-  it("still blocks even with --force (plugin path)", async () => {
+  it("shows warning but continues with --force (plugin path)", async () => {
     mockCheckInstallSafety.mockResolvedValue({
       blocked: true,
       entry: {
@@ -757,18 +748,14 @@ describe("addCommand --force with blocked skill", () => {
       return "";
     });
 
-    const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
-      throw new Error("process.exit");
-    });
+    await addCommand("source", { plugin: "evil-plugin", pluginDir: "/tmp/test", force: true });
 
-    await expect(
-      addCommand("source", { plugin: "evil-plugin", pluginDir: "/tmp/test", force: true }),
-    ).rejects.toThrow("process.exit");
-
-    expect(mockExit).toHaveBeenCalledWith(1);
-    expect(mockRunTier1Scan).not.toHaveBeenCalled();
-
-    mockExit.mockRestore();
+    // --force should show WARNING and continue
+    const errorOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(errorOutput).toContain("WARNING");
+    expect(mockRunTier1Scan).toHaveBeenCalled();
   });
 });
 

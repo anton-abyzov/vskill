@@ -2,6 +2,10 @@
   "name": "vskill",
   "version": "2.0.0",
   "description": "Universal AI skills library — domain expertise for any AI coding tool",
+  "owner": {
+    "name": "Anton Abyzov",
+    "email": "anton.abyzov@gmail.com"
+  },
   "plugins": [
     {
       "name": "vs",

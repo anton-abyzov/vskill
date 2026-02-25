@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// vskill add -- install a skill from GitHub or local plugin directory
+// vskill install -- install a skill from GitHub or local plugin directory
 // ---------------------------------------------------------------------------
 
 import {
@@ -414,7 +414,16 @@ function printBlockedError(entry: BlocklistEntry): void {
   console.error(red(`  Threat: ${entry.threatType} (${entry.severity})`));
   console.error(red(`  Reason: ${entry.reason}`));
   console.error(dim(`  Details: https://verified-skill.com/skills/${encodeURIComponent(entry.skillName)}`));
-  console.error(red("\n  Installation is not allowed for blocked skills."));
+  console.error(dim("\n  Use --force to override (NOT recommended)"));
+}
+
+function printBlockedWarning(entry: BlocklistEntry): void {
+  console.error(yellow(bold("\n  WARNING: Installing known-malicious skill with --force")));
+  console.error(yellow(`  Skill: "${entry.skillName}"`));
+  console.error(yellow(`  Threat: ${entry.threatType} (${entry.severity})`));
+  console.error(yellow(`  Reason: ${entry.reason}`));
+  console.error(dim(`  Details: https://verified-skill.com/skills/${encodeURIComponent(entry.skillName)}`));
+  console.error("");
 }
 
 function printRejectedWarning(rejection: RejectionInfo): void {
@@ -504,9 +513,12 @@ async function installPluginDir(
 
   // Blocklist + rejection check (before scanning)
   const safety = await checkInstallSafety(pluginName);
-  if (safety.blocked) {
+  if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
     process.exit(1);
+  }
+  if (safety.blocked && opts.force) {
+    printBlockedWarning(safety.entry!);
   }
   if (safety.rejected) {
     printRejectedWarning(safety.rejection!);
@@ -713,9 +725,12 @@ async function installOneGitHubSkill(
 
   // Blocklist + rejection check
   const safety = await checkInstallSafety(skillName);
-  if (safety.blocked) {
+  if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
     return { skillName, installed: false, verdict: "BLOCKED" };
+  }
+  if (safety.blocked && opts.force) {
+    printBlockedWarning(safety.entry!);
   }
   if (safety.rejected) {
     printRejectedWarning(safety.rejection!);
@@ -965,9 +980,12 @@ async function installRepoPlugin(
 
   // Blocklist + rejection check
   const safety = await checkInstallSafety(pluginName);
-  if (safety.blocked) {
+  if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
     throw new Error(`Plugin "${pluginName}" is on the blocklist`);
+  }
+  if (safety.blocked && opts.force) {
+    printBlockedWarning(safety.entry!);
   }
   if (safety.rejected) {
     printRejectedWarning(safety.rejection!);
@@ -1213,7 +1231,7 @@ export async function addCommand(
       console.error(
         red(`Skill "${opts._targetSkill}" not found among ${discovered.length} skills in this repo.`) + "\n" +
         dim(`Available: ${discovered.map((s) => s.name).join(", ")}`) + "\n" +
-        dim(`Use the exact name: vskill add ${owner}/${repo}/<skill-name>`)
+        dim(`Use the exact name: vskill install ${owner}/${repo}/<skill-name>`)
       );
       process.exit(1);
     }
@@ -1367,7 +1385,7 @@ async function installFromRegistry(
       return;
     }
     console.log(dim(`Registry has no inline content — installing from GitHub (${ownerRepo})...`));
-    console.log(yellow(`Tip: Next time use: vskill add ${ownerRepo}/${detail.name}`));
+    console.log(yellow(`Tip: Next time use: vskill install ${ownerRepo}/${detail.name}`));
     return addCommand(ownerRepo, { ...opts, _targetSkill: detail.name });
   }
 
@@ -1375,9 +1393,12 @@ async function installFromRegistry(
 
   // Blocklist + rejection check
   const safety = await checkInstallSafety(skillName);
-  if (safety.blocked) {
+  if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
     process.exit(1);
+  }
+  if (safety.blocked && opts.force) {
+    printBlockedWarning(safety.entry!);
   }
   if (safety.rejected) {
     printRejectedWarning(safety.rejection!);
@@ -1489,9 +1510,12 @@ async function installSingleSkillLegacy(
   // Blocklist + rejection check (before scanning)
   const skillName = skill || repo;
   const safety = await checkInstallSafety(skillName);
-  if (safety.blocked) {
+  if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
     process.exit(1);
+  }
+  if (safety.blocked && opts.force) {
+    printBlockedWarning(safety.entry!);
   }
   if (safety.rejected) {
     printRejectedWarning(safety.rejection!);

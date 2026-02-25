@@ -26,8 +26,8 @@ For new users or "what's available?" queries, start with this overview:
 >
 > Each bundle contains multiple specialized skills. For example, the `frontend` bundle includes skills for React, Next.js, Vue, Angular, design systems, and i18n.
 >
-> **Install a bundle**: `npx vskill add --repo anton-abyzov/vskill --plugin <name> --force`
-> **Install everything**: `npx vskill add --repo anton-abyzov/vskill --all --force`
+> **Install a bundle**: `npx vskill install --repo anton-abyzov/vskill --plugin <name> --force`
+> **Install everything**: `npx vskill install --repo anton-abyzov/vskill --all --force`
 > **Search the registry**: `npx vskill find "<query>"`
 
 ## Workflow
@@ -134,29 +134,29 @@ After the user selects what to install, execute the appropriate command:
 
 **Install a single skill by name** (from registry):
 ```bash
-npx vskill add <skill-name>
+npx vskill install <skill-name>
 ```
 
 **Install a plugin bundle** (all skills in a domain):
 ```bash
-npx vskill add --repo anton-abyzov/vskill --plugin <plugin-name> --force
+npx vskill install --repo anton-abyzov/vskill --plugin <plugin-name> --force
 ```
 
 **Install ALL plugin bundles at once**:
 ```bash
-npx vskill add --repo anton-abyzov/vskill --all --force
+npx vskill install --repo anton-abyzov/vskill --all --force
 ```
 
 The `--force` flag bypasses the interactive security scan prompt (the scan still runs, but auto-accepts PASS/CONCERNS verdicts). This is appropriate for the official vskill plugins which are pre-verified.
 
 **Install from a third-party GitHub repo**:
 ```bash
-npx vskill add <owner>/<repo>
+npx vskill install <owner>/<repo>
 ```
 
 **Install a specific skill from a repo**:
 ```bash
-npx vskill add <owner>/<repo> --skill <skill-name>
+npx vskill install <owner>/<repo> --skill <skill-name>
 ```
 
 ### Step 6: Confirm Installation
@@ -203,7 +203,7 @@ After running the install command:
 **Action**:
 1. Run `npx vskill find "nextjs" --json` to confirm availability
 2. Show the result with tier and score
-3. Run `npx vskill add frontend:nextjs` (or suggest the full frontend bundle)
+3. Run `npx vskill install frontend:nextjs` (or suggest the full frontend bundle)
 
 ### Example 4: Broad Exploration
 **User**: "What skills are available?"

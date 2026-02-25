@@ -51,21 +51,21 @@ When installed as **standalone skills** (without the plugin), no prefix:
 
 | Plugin | Skills |
 |--------|--------|
-| frontend | `core`, `architect`, `design`, `design-system`, `nextjs`, `figma`, `code-explorer`, `i18n` |
+| frontend | `frontend-core`, `architect`, `design`, `design-system`, `nextjs`, `figma`, `code-explorer`, `i18n` |
 | backend | `nodejs`, `python`, `dotnet`, `go`, `rust`, `java-spring`, `graphql`, `db-optimizer` |
 | infra | `terraform`, `aws`, `azure`, `gcp`, `github-actions`, `devops`, `devsecops`, `secrets`, `observability`, `opentelemetry` |
 | mobile | `react-native`, `expo`, `flutter`, `swiftui`, `jetpack`, `capacitor`, `deep-linking`, `testing`, `appstore` |
 | ml | `engineer`, `mlops`, `data-scientist`, `fine-tuning`, `rag`, `langchain`, `huggingface`, `edge`, `specialist` |
 | testing | `unit`, `e2e`, `performance`, `accessibility`, `mutation`, `qa` |
 | k8s | `manifests`, `helm`, `gitops`, `security` |
-| payments | `core`, `billing`, `pci` |
+| payments | `payment-core`, `billing`, `pci` |
 | cost | `cloud-pricing`, `optimization`, `aws` |
 | kafka | `architect`, `ops`, `streams-topology`, `n8n` |
 | confluent | `kafka-connect`, `ksqldb`, `schema-registry` |
 | docs | `docusaurus`, `technical-writing`, `brainstorming` |
-| security | `core`, `patterns`, `simplifier` |
+| security | `security-core`, `patterns`, `simplifier` |
 | skills | `scout` |
-| blockchain | `core` |
+| blockchain | `blockchain-core` |
 
 ## Why?
 

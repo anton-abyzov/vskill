@@ -186,8 +186,6 @@ async function tryNativeClaudeInstall(
   console.log(green(`  ${bold(pluginName)} installed as native Claude Code plugin`));
   console.log(dim(`  Namespace: ${marketplaceName}:${pluginName}`));
   console.log(dim(`  Manage: claude plugin list | claude plugin uninstall "${pluginName}@${marketplaceName}"`));
-  reportInstall(pluginName).catch(() => {});
-
   return true;
 }
 
@@ -687,6 +685,13 @@ async function installPluginDir(
     console.log(`  ${dim(">")} ${loc}`);
   }
   console.log(dim(`\nSHA: ${sha} | Version: ${version}`));
+
+  // Report individual skill installs (fire-and-forget)
+  try {
+    const skillDirs = readdirSync(pluginDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && existsSync(join(pluginDir, d.name, "SKILL.md")));
+    for (const d of skillDirs) reportInstall(d.name).catch(() => {});
+  } catch { /* best-effort */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -1098,6 +1103,9 @@ async function installRepoPlugin(
   if (skills.length > 0) {
     console.log(dim(`Skills: ${skills.map((s) => `${pluginName}:${s.name}`).join(", ")}`));
   }
+
+  // Report individual skill installs (fire-and-forget)
+  for (const skill of skills) reportInstall(skill.name).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -1133,6 +1141,19 @@ export async function addCommand(
     console.error(red("Please provide a source (owner/repo, URL, or local path)"));
     process.exit(1);
     return;
+  }
+
+  // Source + --plugin: treat source as repo, route to plugin install
+  if (opts.plugin && source && !source.includes("://")) {
+    const srcParts = source.split("/");
+    if (srcParts.length === 2) {
+      try {
+        return await installRepoPlugin(source, opts.plugin, opts);
+      } catch (err) {
+        console.error(red((err as Error).message));
+        process.exit(1);
+      }
+    }
   }
 
   // Skills.sh URL resolver — handle marketplace browse URLs
@@ -1384,6 +1405,18 @@ async function installFromRegistry(
       process.exit(1);
       return;
     }
+
+    // If registry knows the plugin name, use plugin install path
+    if (detail.pluginName && ownerRepo) {
+      console.log(dim(`Registry has no inline content — installing plugin ${detail.pluginName} from GitHub (${ownerRepo})...`));
+      try {
+        return await installRepoPlugin(ownerRepo, detail.pluginName, opts);
+      } catch (err) {
+        console.error(red((err as Error).message));
+        process.exit(1);
+      }
+    }
+
     console.log(dim(`Registry has no inline content — installing from GitHub (${ownerRepo})...`));
     console.log(yellow(`Tip: Next time use: vskill install ${ownerRepo}/${detail.name}`));
     return addCommand(ownerRepo, { ...opts, _targetSkill: detail.name });
@@ -1488,7 +1521,7 @@ async function installFromRegistry(
     console.log(`  ${dim(">")} ${loc}`);
   }
   console.log(dim(`\nSHA: ${sha} | Version: ${detail.version || "0.0.0"}`));
-  reportInstall(skillName).catch(() => {});
+  reportInstall(detail.name || skillName).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------

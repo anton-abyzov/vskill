@@ -1,0 +1,14 @@
+{
+  "name": "k8s",
+  "description": "Kubernetes skills for manifests, Helm charts, GitOps, and cluster security",
+  "version": "2.1.0",
+  "author": {
+    "name": "Anton Abyzov",
+    "email": "anton.abyzov@gmail.com",
+    "url": "https://github.com/anton-abyzov/vskill"
+  },
+  "homepage": "https://github.com/anton-abyzov/vskill",
+  "repository": "https://github.com/anton-abyzov/vskill",
+  "license": "MIT",
+  "keywords": ["kubernetes", "k8s", "helm", "gitops", "argocd", "flux"]
+}

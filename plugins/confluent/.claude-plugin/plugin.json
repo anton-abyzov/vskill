@@ -1,0 +1,14 @@
+{
+  "name": "confluent",
+  "description": "Confluent platform skills for Kafka Connect, ksqlDB, and Schema Registry",
+  "version": "2.1.0",
+  "author": {
+    "name": "Anton Abyzov",
+    "email": "anton.abyzov@gmail.com",
+    "url": "https://github.com/anton-abyzov/vskill"
+  },
+  "homepage": "https://github.com/anton-abyzov/vskill",
+  "repository": "https://github.com/anton-abyzov/vskill",
+  "license": "MIT",
+  "keywords": ["confluent", "kafka-connect", "ksqldb", "schema-registry"]
+}

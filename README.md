@@ -8,61 +8,64 @@ npx vskill install remotion-dev/skills/remotion-best-practices   # specific skil
 npx vskill install remotion-best-practices                       # registry lookup
 ```
 
-## Claude Code Plugin
+## Claude Code Plugin Marketplace
 
-This repo is a **Claude Code plugin** — 74 expert skills across frontend, backend, infra, ML, mobile, testing, and more. Plugin prefix: **`vs`**.
+This repo is a **Claude Code plugin marketplace** — 75 expert skills across 15 domain plugins for frontend, backend, infra, ML, mobile, testing, and more. Install only the plugins you need.
 
 ### Install
 
 ```bash
-# From GitHub (recommended)
-npx vskill install --repo anton-abyzov/vskill --plugin vs
+# Install a specific plugin (recommended)
+npx vskill install --repo anton-abyzov/vskill --plugin frontend
+
+# Install multiple plugins
+npx vskill install --repo anton-abyzov/vskill --plugin backend
+npx vskill install --repo anton-abyzov/vskill --plugin testing
 
 # From a local clone
 git clone https://github.com/anton-abyzov/vskill.git
-npx vskill install --plugin-dir ./vskill --plugin vs
+npx vskill install --plugin-dir ./vskill --plugin frontend
 ```
 
 ### Prefix
 
-When installed as a **plugin**, skills are namespaced under `vs:`:
+Each plugin has its own namespace. Skills are invoked as `plugin:skill`:
 
 ```
-/vs:frontend-nextjs
-/vs:backend-nodejs
-/vs:ml-rag
-/vs:testing-e2e
-/vs:scout
+/frontend:nextjs
+/backend:nodejs
+/ml:rag
+/testing:e2e
+/scout:core
 ```
 
 When installed as **standalone skills** (without the plugin), no prefix:
 
 ```
-/frontend-nextjs
-/backend-nodejs
-/ml-rag
+/nextjs
+/nodejs
+/rag
 ```
 
-### Skills (74)
+### Plugins (15) & Skills (75)
 
-| Domain | Skills |
+| Plugin | Skills |
 |--------|--------|
-| frontend | `frontend`, `frontend-architect`, `frontend-design`, `frontend-design-system`, `frontend-nextjs`, `frontend-figma`, `frontend-code-explorer`, `frontend-i18n` |
-| backend | `backend-nodejs`, `backend-python`, `backend-dotnet`, `backend-go`, `backend-rust`, `backend-java-spring`, `backend-graphql`, `backend-db-optimizer` |
-| infra | `infra-terraform`, `infra-aws`, `infra-azure`, `infra-gcp`, `infra-github-actions`, `infra-devops`, `infra-devsecops`, `infra-secrets`, `infra-observability`, `infra-opentelemetry` |
-| mobile | `mobile-react-native`, `mobile-expo`, `mobile-flutter`, `mobile-swiftui`, `mobile-jetpack`, `mobile-capacitor`, `mobile-deep-linking`, `mobile-testing`, `mobile-appstore` |
-| ml | `ml-engineer`, `ml-mlops`, `ml-data-scientist`, `ml-fine-tuning`, `ml-rag`, `ml-langchain`, `ml-huggingface`, `ml-edge`, `ml-specialist` |
-| testing | `testing-unit`, `testing-e2e`, `testing-performance`, `testing-accessibility`, `testing-mutation`, `testing-qa` |
-| k8s | `k8s-manifests`, `k8s-helm`, `k8s-gitops`, `k8s-security` |
-| payments | `payments`, `payments-billing`, `payments-pci` |
-| cost | `cost-cloud-pricing`, `cost-optimization`, `cost-aws` |
-| kafka | `kafka-architect`, `kafka-ops` |
-| kafka-streams | `kafka-streams-topology` |
-| confluent | `confluent-kafka-connect`, `confluent-ksqldb`, `confluent-schema-registry` |
-| docs | `docs-docusaurus`, `docs-technical-writing`, `docs-brainstorming` |
-| n8n | `n8n-kafka` |
-| security | `security`, `security-patterns`, `security-simplifier` |
-| scout | `scout` |
+| frontend | `core`, `architect`, `design`, `design-system`, `nextjs`, `figma`, `code-explorer`, `i18n` |
+| backend | `nodejs`, `python`, `dotnet`, `go`, `rust`, `java-spring`, `graphql`, `db-optimizer` |
+| infra | `terraform`, `aws`, `azure`, `gcp`, `github-actions`, `devops`, `devsecops`, `secrets`, `observability`, `opentelemetry` |
+| mobile | `react-native`, `expo`, `flutter`, `swiftui`, `jetpack`, `capacitor`, `deep-linking`, `testing`, `appstore` |
+| ml | `engineer`, `mlops`, `data-scientist`, `fine-tuning`, `rag`, `langchain`, `huggingface`, `edge`, `specialist` |
+| testing | `unit`, `e2e`, `performance`, `accessibility`, `mutation`, `qa` |
+| k8s | `manifests`, `helm`, `gitops`, `security` |
+| payments | `core`, `billing`, `pci` |
+| cost | `cloud-pricing`, `optimization`, `aws` |
+| kafka | `architect`, `ops`, `streams-topology`, `n8n` |
+| confluent | `kafka-connect`, `ksqldb`, `schema-registry` |
+| docs | `docusaurus`, `technical-writing`, `brainstorming` |
+| security | `core`, `patterns`, `simplifier` |
+| scout | `core` |
+| blockchain | `core` |
 
 ## Why?
 
@@ -172,6 +175,19 @@ All prompts can be skipped with `--yes` (accept defaults) or controlled via flag
 **Skills** are single SKILL.md files that work with any AI agent. They follow the [Agent Skills Standard](https://agentskills.io) — a SKILL.md file is placed in the agent's commands directory (e.g., `.claude/commands/`, `.cursor/commands/`).
 
 **Plugins** are multi-component containers exclusive to Claude Code. A plugin repo has `.claude-plugin/marketplace.json` listing sub-plugins, each containing skills, hooks, commands, and agents. Plugins enable `plugin-name:skill-name` namespacing, enable/disable support, and marketplace integration.
+
+## The Skills Duplication Problem
+
+The skills ecosystem is already fragmented. Skills can be defined in different repos, published through different channels, and there's no single source of truth.
+
+Even Anthropic has the same skill defined in two different places:
+
+- **As a standalone skill**: [`anthropics/skills`](https://github.com/anthropics/skills/blob/main/skills/frontend-design/SKILL.md)
+- **Inside a plugin**: [`anthropics/claude-code`](https://github.com/anthropics/claude-code/blob/main/plugins/frontend-design/skills/frontend-design/SKILL.md)
+
+Same `frontend-design` skill, two repos. One is used by installing it as a standalone skill, the other comes bundled in a plugin. If you install both, you get duplicates. If they diverge, you get inconsistencies.
+
+This is one of the reasons vskill exists — to give you a single install path with version pinning and deduplication, regardless of where the skill is published.
 
 ## Claude Code Native Plugin Install
 

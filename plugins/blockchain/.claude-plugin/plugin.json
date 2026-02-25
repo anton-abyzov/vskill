@@ -1,0 +1,14 @@
+{
+  "name": "blockchain",
+  "description": "Blockchain and Web3 development with Solidity, Hardhat, Foundry, and smart contract security",
+  "version": "2.1.0",
+  "author": {
+    "name": "Anton Abyzov",
+    "email": "anton.abyzov@gmail.com",
+    "url": "https://github.com/anton-abyzov/vskill"
+  },
+  "homepage": "https://github.com/anton-abyzov/vskill",
+  "repository": "https://github.com/anton-abyzov/vskill",
+  "license": "MIT",
+  "keywords": ["blockchain", "web3", "solidity", "ethereum", "smart-contracts", "hardhat"]
+}

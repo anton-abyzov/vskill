@@ -1,0 +1,14 @@
+{
+  "name": "frontend",
+  "description": "Frontend development skills for React, Vue, Angular, Next.js, design systems, i18n, and Figma integration",
+  "version": "2.1.0",
+  "author": {
+    "name": "Anton Abyzov",
+    "email": "anton.abyzov@gmail.com",
+    "url": "https://github.com/anton-abyzov/vskill"
+  },
+  "homepage": "https://github.com/anton-abyzov/vskill",
+  "repository": "https://github.com/anton-abyzov/vskill",
+  "license": "MIT",
+  "keywords": ["frontend", "react", "vue", "angular", "nextjs", "design-system", "figma", "i18n"]
+}

@@ -18,11 +18,12 @@ const {
 function makeMarketplaceJson(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     name: "specweave",
-    version: "1.0.225",
+    owner: { name: "Test Author", email: "test@example.com" },
     plugins: [
       { name: "sw", source: "./plugins/specweave", version: "1.0.225" },
       { name: "sw-frontend", source: "./plugins/specweave-frontend", version: "1.0.0" },
     ],
+    metadata: { version: "1.0.225" },
     ...overrides,
   });
 }

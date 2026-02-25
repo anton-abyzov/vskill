@@ -7,14 +7,23 @@
 export interface MarketplacePlugin {
   name: string;
   source: string;
-  version: string;
+  version?: string;
   description?: string;
+  category?: string;
+  author?: { name: string; email?: string; url?: string };
+}
+
+export interface MarketplaceOwner {
+  name: string;
+  email?: string;
+  url?: string;
 }
 
 export interface MarketplaceManifest {
   name: string;
-  version: string;
+  owner: MarketplaceOwner;
   plugins: MarketplacePlugin[];
+  metadata?: { version?: string; description?: string };
 }
 
 // ---- Parser ---------------------------------------------------------------

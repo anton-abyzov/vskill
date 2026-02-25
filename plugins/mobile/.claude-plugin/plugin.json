@@ -1,0 +1,14 @@
+{
+  "name": "mobile",
+  "description": "Mobile development skills for React Native, Expo, Flutter, SwiftUI, Jetpack Compose, and app store deployment",
+  "version": "2.1.0",
+  "author": {
+    "name": "Anton Abyzov",
+    "email": "anton.abyzov@gmail.com",
+    "url": "https://github.com/anton-abyzov/vskill"
+  },
+  "homepage": "https://github.com/anton-abyzov/vskill",
+  "repository": "https://github.com/anton-abyzov/vskill",
+  "license": "MIT",
+  "keywords": ["mobile", "react-native", "expo", "flutter", "swiftui", "jetpack-compose", "ios", "android"]
+}

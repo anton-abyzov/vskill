@@ -259,3 +259,82 @@ describe("runTier1Scan — result shape", () => {
     expect(["PASS", "CONCERNS", "FAIL"]).toContain(result.verdict);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FS-003: Markdown link suppression
+// ---------------------------------------------------------------------------
+describe("runTier1Scan — FS-003 markdown link suppression", () => {
+  it("does not flag ../../ inside a markdown link", () => {
+    const result = runTier1Scan("See [reference](../../tools/file.md)");
+    const fs003 = result.findings.filter((f) => f.patternId === "FS-003");
+    expect(fs003).toHaveLength(0);
+  });
+
+  it("does not flag multiple markdown links with ../../ on separate lines", () => {
+    const content = [
+      "| [GA4](../../tools/integrations/ga4.md) |",
+      "| [Mixpanel](../../tools/integrations/mixpanel.md) |",
+      "| [Segment](../../tools/integrations/segment.md) |",
+    ].join("\n");
+    const result = runTier1Scan(content);
+    const fs003 = result.findings.filter((f) => f.patternId === "FS-003");
+    expect(fs003).toHaveLength(0);
+    expect(result.verdict).toBe("PASS");
+  });
+
+  it("still flags ../../ outside markdown links", () => {
+    const content = 'const data = readFile("../../etc/passwd");';
+    const result = runTier1Scan(content);
+    const fs003 = result.findings.filter((f) => f.patternId === "FS-003");
+    expect(fs003.length).toBeGreaterThan(0);
+  });
+
+  it("still flags bare ../../ path traversal", () => {
+    const content = "../../secret/data";
+    const result = runTier1Scan(content);
+    const fs003 = result.findings.filter((f) => f.patternId === "FS-003");
+    expect(fs003.length).toBeGreaterThan(0);
+  });
+
+  it("still flags ../../ after a closed markdown link on the same line", () => {
+    const content = "[safe](safe.md) ../../etc/passwd";
+    const result = runTier1Scan(content);
+    const fs003 = result.findings.filter((f) => f.patternId === "FS-003");
+    expect(fs003.length).toBeGreaterThan(0);
+  });
+
+  it("CT-002 still catches .ssh inside a markdown link (defense-in-depth)", () => {
+    const content = "[keys](../../.ssh/id_rsa)";
+    const result = runTier1Scan(content);
+    // FS-003 suppressed inside markdown link
+    const fs003 = result.findings.filter((f) => f.patternId === "FS-003");
+    expect(fs003).toHaveLength(0);
+    // But CT-002 still flags .ssh/ and id_rsa
+    const ct002 = result.findings.filter((f) => f.patternId === "CT-002");
+    expect(ct002.length).toBeGreaterThan(0);
+    expect(ct002[0].severity).toBe("critical");
+  });
+
+  it("realistic SKILL.md with only markdown-link traversals gets PASS", () => {
+    const content = [
+      "# Analytics Tracking",
+      "",
+      "You are an expert in analytics implementation.",
+      "",
+      "## Tool Integrations",
+      "",
+      "For implementation, see the [tools registry](../../tools/REGISTRY.md).",
+      "",
+      "| Tool | Guide |",
+      "|------|-------|",
+      "| **GA4** | [ga4.md](../../tools/integrations/ga4.md) |",
+      "| **Mixpanel** | [mixpanel.md](../../tools/integrations/mixpanel.md) |",
+      "| **Amplitude** | [amplitude.md](../../tools/integrations/amplitude.md) |",
+      "| **PostHog** | [posthog.md](../../tools/integrations/posthog.md) |",
+      "| **Segment** | [segment.md](../../tools/integrations/segment.md) |",
+    ].join("\n");
+    const result = runTier1Scan(content);
+    expect(result.score).toBe(100);
+    expect(result.verdict).toBe("PASS");
+  });
+});

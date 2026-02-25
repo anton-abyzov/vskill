@@ -509,6 +509,23 @@ function isSafeDciBlock(line: string): boolean {
   return !matchesMalicious;
 }
 
+// ---- Markdown-link safe context for FS-003 ---------------------------------
+
+/**
+ * Returns true if the match at `matchIndex` falls inside a markdown link
+ * target, i.e. between `](` and `)`.  Standard relative links like
+ * `[text](../../tools/file.md)` are not path-traversal attacks.
+ */
+function isInsideMarkdownLink(line: string, matchIndex: number): boolean {
+  const before = line.slice(0, matchIndex);
+  const linkOpen = before.lastIndexOf("](");
+  if (linkOpen === -1) return false;
+  // Ensure the link isn't already closed before our match
+  if (before.slice(linkOpen + 2).includes(")")) return false;
+  // Ensure there's a closing ) after the match
+  return line.indexOf(")", matchIndex) !== -1;
+}
+
 // ---- Scanner function -----------------------------------------------------
 
 /**
@@ -529,6 +546,11 @@ export function scanContent(content: string): ScanFinding[] {
       while ((match = regex.exec(line)) !== null) {
         // Suppress DCI-abuse findings for known-safe DCI patterns
         if (pattern.category === "dci-abuse" && isSafeDciBlock(line)) {
+          continue;
+        }
+
+        // Suppress FS-003 path traversal inside markdown links
+        if (pattern.id === "FS-003" && isInsideMarkdownLink(line, match.index)) {
           continue;
         }
 

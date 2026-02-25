@@ -36,7 +36,7 @@ Each plugin has its own namespace. Skills are invoked as `plugin:skill`:
 /backend:nodejs
 /ml:rag
 /testing:e2e
-/scout:core
+/skills:scout
 ```
 
 When installed as **standalone skills** (without the plugin), no prefix:
@@ -64,7 +64,7 @@ When installed as **standalone skills** (without the plugin), no prefix:
 | confluent | `kafka-connect`, `ksqldb`, `schema-registry` |
 | docs | `docusaurus`, `technical-writing`, `brainstorming` |
 | security | `core`, `patterns`, `simplifier` |
-| scout | `core` |
+| skills | `scout` |
 | blockchain | `core` |
 
 ## Why?

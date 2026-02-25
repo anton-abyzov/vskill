@@ -98,9 +98,9 @@
       "category": "development"
     },
     {
-      "name": "scout",
+      "name": "skills",
       "description": "Skill discovery — find and install the right skills for your project",
-      "source": "./plugins/scout",
+      "source": "./plugins/skills",
       "version": "2.1.0",
       "category": "utility"
     },

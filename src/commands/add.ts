@@ -201,7 +201,7 @@ interface AddOptions {
   all?: boolean;
   global?: boolean;
   force?: boolean;
-  agent?: string[];
+  agent?: string | string[];
   cwd?: boolean;
   yes?: boolean;
   copy?: boolean;
@@ -718,6 +718,7 @@ interface SkillInstallResult {
   skillName: string;
   installed: boolean;
   verdict: string;
+  score?: number;
   sha?: string;
 }
 
@@ -798,7 +799,7 @@ async function installOneGitHubSkill(
         console.log(dim(`    ${f.patternId} [${f.severity}] ${f.patternName}: ${JSON.stringify(f.match)} (line ${f.lineNumber})`));
       }
     }
-    return { skillName, installed: false, verdict: scanResult.verdict };
+    return { skillName, installed: false, verdict: scanResult.verdict, score: scanResult.score };
   }
 
   // Install to each agent using canonical installer
@@ -813,10 +814,10 @@ async function installOneGitHubSkill(
     }
   } catch (err) {
     console.error(red(`  Failed to install skill "${skillName}": ${(err as Error).message}`));
-    return { skillName, installed: false, verdict: "WRITE_ERROR" };
+    return { skillName, installed: false, verdict: "WRITE_ERROR", score: scanResult.score };
   }
 
-  return { skillName, installed: true, verdict: scanResult.verdict, sha };
+  return { skillName, installed: true, verdict: scanResult.verdict, score: scanResult.score, sha };
 }
 
 // ---------------------------------------------------------------------------
@@ -1284,8 +1285,13 @@ export async function addCommand(
   const results: SkillInstallResult[] = [];
   for (const skill of selectedSkills) {
     console.log(dim(`\nInstalling skill: ${bold(skill.name)}...`));
-    const result = await installOneGitHubSkill(owner, repo, skill.name, skill.rawUrl, opts, selectedAgents, projectRoot);
-    results.push(result);
+    try {
+      const result = await installOneGitHubSkill(owner, repo, skill.name, skill.rawUrl, opts, selectedAgents, projectRoot);
+      results.push(result);
+    } catch (err) {
+      console.error(red(`  Unexpected error installing "${skill.name}": ${(err as Error).message}`));
+      results.push({ skillName: skill.name, installed: false, verdict: "ERROR" });
+    }
   }
 
   // Update lockfile with all installed skills (same projectRoot as skills)
@@ -1309,7 +1315,10 @@ export async function addCommand(
   console.log(green(`\nInstalled ${bold(String(installedCount))} of ${results.length} skills:\n`));
   for (const r of results) {
     const icon = r.installed ? green("✓") : red("✗");
-    const detail = r.installed ? dim(`(${r.verdict})`) : red(`(${r.verdict})`);
+    const scoreTag = r.score != null ? ` ${r.score}/100` : "";
+    const detail = r.installed
+      ? dim(`(${r.verdict}${scoreTag})`)
+      : red(`(${r.verdict}${scoreTag})`);
     console.log(`  ${icon} ${r.skillName} ${detail}`);
     if (r.installed) reportInstall(r.skillName).catch(() => {});
   }

@@ -17,14 +17,19 @@ import type { AgentDefinition } from "../agents/agents-registry.js";
  */
 export function filterAgents(
   agents: AgentDefinition[],
-  requestedIds?: string[],
+  requestedIds?: string | string[],
 ): AgentDefinition[] {
-  if (!requestedIds || requestedIds.length === 0) {
+  // Coerce single string to array (defensive: Commander may pass string for --agent)
+  const ids = typeof requestedIds === "string"
+    ? (requestedIds ? [requestedIds] : [])
+    : requestedIds;
+
+  if (!ids || ids.length === 0) {
     return agents;
   }
 
   const available = new Set(agents.map((a) => a.id));
-  const missing = requestedIds.filter((id) => !available.has(id));
+  const missing = ids.filter((id) => !available.has(id));
 
   if (missing.length > 0) {
     const availableList = agents.map((a) => a.id).join(", ");
@@ -33,6 +38,6 @@ export function filterAgents(
     );
   }
 
-  const requested = new Set(requestedIds);
+  const requested = new Set(ids);
   return agents.filter((a) => requested.has(a.id));
 }

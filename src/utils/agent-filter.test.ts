@@ -78,4 +78,17 @@ describe("filterAgents", () => {
     const result = filterAgents(allAgents, []);
     expect(result).toEqual(allAgents);
   });
+
+  // TC-007: String input is coerced to array
+  it("handles single string input by coercing to array", () => {
+    const result = filterAgents(allAgents, "claude-code");
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("claude-code");
+  });
+
+  // TC-008: Empty string returns all agents
+  it("returns all agents when requestedIds is an empty string", () => {
+    const result = filterAgents(allAgents, "");
+    expect(result).toEqual(allAgents);
+  });
 });

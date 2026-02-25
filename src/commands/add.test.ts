@@ -236,12 +236,12 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
 
   // TC-001: --plugin <name> flag selects sub-plugin from multi-plugin repo
   describe("TC-001: plugin flag selects sub-plugin directory", () => {
-    it("selects the sw-frontend plugin directory from a local path with plugins/ structure", async () => {
+    it("selects the frontend plugin directory from a local path with plugins/ structure", async () => {
       const localPath = "/tmp/test-repo";
 
-      // The plugin directory path: /tmp/test-repo/plugins/specweave-frontend/
+      // The plugin directory path: /tmp/test-repo/plugins/frontend/
       mockExistsSync.mockImplementation((p: string) => {
-        if (p.includes("plugins/specweave-frontend")) return true;
+        if (p.includes("plugins/frontend")) return true;
         if (p.includes(".claude-plugin/marketplace.json")) return true;
         return false;
       });
@@ -253,7 +253,7 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
             version: "1.0.225",
             plugins: [
               { name: "sw", source: "./plugins/specweave", version: "1.0.225" },
-              { name: "sw-frontend", source: "./plugins/specweave-frontend", version: "1.0.0" },
+              { name: "frontend", source: "./plugins/frontend", version: "1.0.0" },
             ],
           });
         }
@@ -283,13 +283,13 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
       });
 
       // Call addCommand with plugin option and pluginDir (local source)
-      await addCommand(localPath, { plugin: "sw-frontend", pluginDir: localPath });
+      await addCommand(localPath, { plugin: "frontend", pluginDir: localPath });
 
       // copyFileSync should have been called (copyPluginFiltered uses it)
       expect(mockCopyFileSync).toHaveBeenCalled();
       const cpCall = mockCopyFileSync.mock.calls[0];
-      // Source should include plugins/specweave-frontend
-      expect(cpCall[0]).toContain("plugins/specweave-frontend");
+      // Source should include plugins/frontend
+      expect(cpCall[0]).toContain("plugins/frontend");
     });
   });
 
@@ -305,7 +305,7 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
             name: "specweave",
             version: "1.0.0",
             plugins: [
-              { name: "sw-frontend", source: "./plugins/specweave-frontend", version: "1.0.0" },
+              { name: "frontend", source: "./plugins/frontend", version: "1.0.0" },
             ],
           });
         }
@@ -342,7 +342,7 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
         updatedAt: "2026-01-01T00:00:00.000Z",
       });
 
-      await addCommand(localPath, { plugin: "sw-frontend", pluginDir: localPath });
+      await addCommand(localPath, { plugin: "frontend", pluginDir: localPath });
 
       // mkdirSync is called for each directory level (recursive copy)
       expect(mockMkdirSync).toHaveBeenCalled();
@@ -366,7 +366,7 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
             name: "specweave",
             version: "1.0.0",
             plugins: [
-              { name: "sw-frontend", source: "./plugins/specweave-frontend", version: "1.0.0" },
+              { name: "frontend", source: "./plugins/frontend", version: "1.0.0" },
             ],
           });
         }
@@ -397,7 +397,7 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
         updatedAt: "2026-01-01T00:00:00.000Z",
       });
 
-      await addCommand(localPath, { plugin: "sw-frontend", pluginDir: localPath });
+      await addCommand(localPath, { plugin: "frontend", pluginDir: localPath });
 
       // chmodSync should be called for each .sh file with 0o755
       const chmodCalls = mockChmodSync.mock.calls;
@@ -427,7 +427,7 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
             name: "specweave",
             version: "1.0.0",
             plugins: [
-              { name: "sw-frontend", source: "./plugins/specweave-frontend", version: "1.0.0" },
+              { name: "frontend", source: "./plugins/frontend", version: "1.0.0" },
             ],
           });
         }
@@ -487,7 +487,7 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
 
       // Force install despite failure to reach lockfile update
       await addCommand(localPath, {
-        plugin: "sw-frontend",
+        plugin: "frontend",
         pluginDir: localPath,
         force: true,
       });

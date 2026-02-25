@@ -112,7 +112,7 @@ Looks up the skill in the [verified-skill.com](https://verified-skill.com) regis
 ### 5. Local plugin
 
 ```bash
-vskill install . --plugin-dir . --plugin sw-frontend
+vskill install . --plugin-dir . --plugin frontend
 ```
 
 Installs a plugin from a local directory containing `.claude-plugin/marketplace.json`. The `--plugin` flag selects which sub-plugin to install.
@@ -120,7 +120,7 @@ Installs a plugin from a local directory containing `.claude-plugin/marketplace.
 ### 6. Remote plugin
 
 ```bash
-vskill install . --repo specweave/specweave --plugin sw-frontend
+vskill install . --repo anton-abyzov/vskill --plugin frontend
 ```
 
 Clones a GitHub repo and installs a plugin from it. Combines `--repo` with `--plugin` to target a specific sub-plugin.

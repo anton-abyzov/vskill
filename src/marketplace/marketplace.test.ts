@@ -21,7 +21,7 @@ function makeMarketplaceJson(overrides: Record<string, unknown> = {}): string {
     owner: { name: "Test Author", email: "test@example.com" },
     plugins: [
       { name: "sw", source: "./plugins/specweave", version: "1.0.225" },
-      { name: "sw-frontend", source: "./plugins/specweave-frontend", version: "1.0.0" },
+      { name: "frontend", source: "./plugins/frontend", version: "1.0.0" },
     ],
     metadata: { version: "1.0.225" },
     ...overrides,
@@ -46,8 +46,8 @@ describe("marketplace.json parser", () => {
         version: "1.0.225",
       });
       expect(plugins[1]).toEqual({
-        name: "sw-frontend",
-        source: "./plugins/specweave-frontend",
+        name: "frontend",
+        source: "./plugins/frontend",
         version: "1.0.0",
       });
     });
@@ -84,9 +84,9 @@ describe("marketplace.json parser", () => {
   describe("TC-006: getPluginSource", () => {
     it("returns source path for a known plugin name", () => {
       const content = makeMarketplaceJson();
-      const source = getPluginSource("sw-frontend", content);
+      const source = getPluginSource("frontend", content);
 
-      expect(source).toBe("./plugins/specweave-frontend");
+      expect(source).toBe("./plugins/frontend");
     });
 
     it("returns source path for 'sw' plugin", () => {
@@ -117,7 +117,7 @@ describe("marketplace.json parser", () => {
   describe("getPluginVersion", () => {
     it("returns version for a known plugin", () => {
       const content = makeMarketplaceJson();
-      const version = getPluginVersion("sw-frontend", content);
+      const version = getPluginVersion("frontend", content);
 
       expect(version).toBe("1.0.0");
     });

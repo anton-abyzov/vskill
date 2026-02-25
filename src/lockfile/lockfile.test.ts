@@ -197,7 +197,7 @@ describe("lockfile extended fields", () => {
       installedPath: "~/.claude/plugins/cache/specweave/sw/1.0.0",
     });
 
-    const lock = makeLock({ skills: { "sw-frontend": extendedEntry } });
+    const lock = makeLock({ skills: { "frontend": extendedEntry } });
     mockExistsSync.mockReturnValue(true);
 
     // Write the lockfile
@@ -213,7 +213,7 @@ describe("lockfile extended fields", () => {
     const readBack = readLockfile(TEST_DIR);
 
     expect(readBack).not.toBeNull();
-    const entry = readBack!.skills["sw-frontend"];
+    const entry = readBack!.skills["frontend"];
     expect(entry.marketplace).toBe("specweave");
     expect(entry.pluginDir).toBe(true);
     expect(entry.scope).toBe("user");

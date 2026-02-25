@@ -33,8 +33,8 @@ export function registerMarketplace(marketplacePath: string): boolean {
 /**
  * Install a plugin from a registered marketplace.
  *
- * @param pluginName - Plugin name (e.g. "sw-frontend")
- * @param marketplaceName - Marketplace name from marketplace.json (e.g. "specweave")
+ * @param pluginName - Plugin name (e.g. "frontend")
+ * @param marketplaceName - Marketplace name from marketplace.json (e.g. "vskill")
  * @returns true on success, false on failure
  */
 export function installNativePlugin(pluginName: string, marketplaceName: string): boolean {

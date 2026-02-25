@@ -52,9 +52,9 @@ export function getAvailablePlugins(content: string): MarketplacePlugin[] {
 /**
  * Get the source path for a named plugin from marketplace.json.
  *
- * @param name - Plugin name to look up (e.g. "sw-frontend")
+ * @param name - Plugin name to look up (e.g. "frontend")
  * @param content - Raw JSON string from marketplace.json
- * @returns Source path (e.g. "./plugins/specweave-frontend") or null
+ * @returns Source path (e.g. "./plugins/frontend") or null
  */
 export function getPluginSource(
   name: string,

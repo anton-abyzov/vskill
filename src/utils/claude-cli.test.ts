@@ -73,9 +73,9 @@ describe("registerMarketplace", () => {
 describe("installNativePlugin", () => {
   it("calls claude plugin install with plugin@marketplace format", () => {
     mockExecSync.mockReturnValue(Buffer.from(""));
-    expect(installNativePlugin("sw-frontend", "specweave")).toBe(true);
+    expect(installNativePlugin("frontend", "vskill")).toBe(true);
     expect(mockExecSync).toHaveBeenCalledWith(
-      'claude plugin install "sw-frontend@specweave"',
+      'claude plugin install "frontend@vskill"',
       { stdio: "ignore", timeout: 30_000 },
     );
   });
@@ -84,7 +84,7 @@ describe("installNativePlugin", () => {
     mockExecSync.mockImplementation(() => {
       throw new Error("failed");
     });
-    expect(installNativePlugin("sw-frontend", "specweave")).toBe(false);
+    expect(installNativePlugin("frontend", "vskill")).toBe(false);
   });
 });
 
@@ -94,9 +94,9 @@ describe("installNativePlugin", () => {
 describe("uninstallNativePlugin", () => {
   it("calls claude plugin uninstall with plugin@marketplace format", () => {
     mockExecSync.mockReturnValue(Buffer.from(""));
-    expect(uninstallNativePlugin("sw-frontend", "specweave")).toBe(true);
+    expect(uninstallNativePlugin("frontend", "vskill")).toBe(true);
     expect(mockExecSync).toHaveBeenCalledWith(
-      'claude plugin uninstall "sw-frontend@specweave"',
+      'claude plugin uninstall "frontend@vskill"',
       { stdio: "ignore", timeout: 10_000 },
     );
   });
@@ -105,6 +105,6 @@ describe("uninstallNativePlugin", () => {
     mockExecSync.mockImplementation(() => {
       throw new Error("failed");
     });
-    expect(uninstallNativePlugin("sw-frontend", "specweave")).toBe(false);
+    expect(uninstallNativePlugin("frontend", "vskill")).toBe(false);
   });
 });

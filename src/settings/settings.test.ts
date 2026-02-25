@@ -39,7 +39,7 @@ describe("enablePlugin", () => {
     // settings.json doesn't exist
     mockExistsSync.mockReturnValue(false);
 
-    enablePlugin("sw-frontend@specweave", { scope: "user" });
+    enablePlugin("frontend@vskill", { scope: "user" });
 
     // Should write to ~/.claude/settings.json
     expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
@@ -48,14 +48,14 @@ describe("enablePlugin", () => {
 
     const parsed = JSON.parse(writtenContent);
     expect(parsed).toEqual({
-      enabledPlugins: { "sw-frontend@specweave": true },
+      enabledPlugins: { "frontend@vskill": true },
     });
   });
 
   it("TC-011: project scope writes to correct location", () => {
     mockExistsSync.mockReturnValue(false);
 
-    enablePlugin("sw-frontend@specweave", {
+    enablePlugin("frontend@vskill", {
       scope: "project",
       projectDir: "/tmp/test-project",
     });
@@ -74,7 +74,7 @@ describe("enablePlugin", () => {
       })
     );
 
-    enablePlugin("sw-frontend@specweave", { scope: "user" });
+    enablePlugin("frontend@vskill", { scope: "user" });
 
     expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
     const [, writtenContent] = mockWriteFileSync.mock.calls[0];
@@ -83,7 +83,7 @@ describe("enablePlugin", () => {
       theme: "dark",
       enabledPlugins: {
         other: true,
-        "sw-frontend@specweave": true,
+        "frontend@vskill": true,
       },
     });
   });
@@ -94,16 +94,16 @@ describe("disablePlugin", () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue(
       JSON.stringify({
-        enabledPlugins: { "sw-frontend@specweave": true },
+        enabledPlugins: { "frontend@vskill": true },
       })
     );
 
-    disablePlugin("sw-frontend@specweave", { scope: "user" });
+    disablePlugin("frontend@vskill", { scope: "user" });
 
     expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
     const [, writtenContent] = mockWriteFileSync.mock.calls[0];
     const parsed = JSON.parse(writtenContent);
-    expect(parsed.enabledPlugins["sw-frontend@specweave"]).toBe(false);
+    expect(parsed.enabledPlugins["frontend@vskill"]).toBe(false);
   });
 });
 
@@ -112,12 +112,12 @@ describe("isPluginEnabled", () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue(
       JSON.stringify({
-        enabledPlugins: { "sw-frontend@specweave": true },
+        enabledPlugins: { "frontend@vskill": true },
       })
     );
 
     expect(
-      isPluginEnabled("sw-frontend@specweave", { scope: "user" })
+      isPluginEnabled("frontend@vskill", { scope: "user" })
     ).toBe(true);
   });
 
@@ -125,7 +125,7 @@ describe("isPluginEnabled", () => {
     mockExistsSync.mockReturnValue(false);
 
     expect(
-      isPluginEnabled("sw-frontend@specweave", { scope: "user" })
+      isPluginEnabled("frontend@vskill", { scope: "user" })
     ).toBe(false);
   });
 
@@ -136,7 +136,7 @@ describe("isPluginEnabled", () => {
     );
 
     expect(
-      isPluginEnabled("sw-frontend@specweave", { scope: "user" })
+      isPluginEnabled("frontend@vskill", { scope: "user" })
     ).toBe(false);
   });
 });

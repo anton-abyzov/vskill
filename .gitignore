@@ -2,3 +2,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 .env
+
+# SpecWeave runtime
+.specweave/logs/
+.specweave/state/
+.specweave/skill-memories/
+.specweave/cache/

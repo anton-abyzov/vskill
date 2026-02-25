@@ -1,4 +1,0 @@
-[2026-02-24T16:12:08-05:00] COMPACTION #1 | level=elevated | Context budget reduced to compact. Session is running long.
-[2026-02-24T16:13:39-05:00] HEALTH_CHECK | baseline=45358 | level=normal | claude_md=0 | memory_md=358 | skills=30000
-[2026-02-24T16:55:06-05:00] COMPACTION #1 | level=elevated | Context budget reduced to compact. Session is running long.
-[2026-02-24T16:57:01-05:00] HEALTH_CHECK | baseline=45358 | level=normal | claude_md=0 | memory_md=358 | skills=30000

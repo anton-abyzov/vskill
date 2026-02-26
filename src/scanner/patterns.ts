@@ -39,7 +39,7 @@ export interface ScanFinding {
   context: string;
 }
 
-// ---- Patterns (38 total) --------------------------------------------------
+// ---- Patterns (52 total) --------------------------------------------------
 
 export const SCAN_PATTERNS: ScanPattern[] = [
   // --- Command Injection (1-7) ---------------------------------------------
@@ -48,7 +48,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "exec() call",
     severity: "critical",
     description: "Detects child_process.exec or similar exec calls that run shell commands",
-    pattern: /\bexec\s*\(/g,
+    pattern: /(?<!\.)\bexec\s*\(/g,
     category: "command-injection",
   },
   {
@@ -262,7 +262,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
   {
     id: "PI-003",
     name: "Role impersonation",
-    severity: "high",
+    severity: "medium",
     description: "Detects attempts to assume a different AI role",
     pattern: /you\s+are\s+now\s+(?:a|an)\s+|act\s+as\s+(?:a|an)\s+|pretend\s+(?:to\s+be|you\s+are)/gi,
     category: "prompt-injection",
@@ -282,7 +282,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Recursive delete",
     severity: "high",
     description: "Detects rm -rf or recursive deletion commands",
-    pattern: /rm\s+-[a-zA-Z]*r[a-zA-Z]*f|rm\s+-[a-zA-Z]*f[a-zA-Z]*r|rimraf\s*\(/g,
+    pattern: /rm\s+-[a-zA-Z]*(?:rf|fr)[a-zA-Z]*|rm\s+(?:-r|--recursive)\s+(?:-f|--force)|rm\s+(?:-f|--force)\s+(?:-r|--recursive)|rimraf\s*\(/g,
     category: "filesystem-access",
   },
   {
@@ -314,7 +314,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
   {
     id: "NA-001",
     name: "Curl/wget to unknown host",
-    severity: "high",
+    severity: "low",
     description: "Detects curl or wget commands that download from external hosts",
     pattern: /\b(?:curl|wget)\s+(?:-[\w=-]+\s+)*(?:https?:\/\/|[`"'])/g,
     category: "network-access",
@@ -524,40 +524,62 @@ const SAFE_RM_TARGETS = [
 const SAFE_RM_SET = new Set(SAFE_RM_TARGETS);
 
 /**
+ * Extract targets from an `rm` command with both -r and -f flags.
+ * Handles combined flags (rm -rf), separated flags (rm -r -f),
+ * and long flags (rm --recursive --force).
+ * Returns null if the line doesn't contain rm with both -r and -f.
+ */
+function extractRmRfTargets(line: string): string[] | null {
+  // Combined flags: rm -rf, rm -fr, rm -rfi, etc.
+  let m = line.match(/rm\s+-[a-zA-Z]*(?:rf|fr)[a-zA-Z]*\s+(.*)/);
+  if (m) {
+    const targets = m[1].trim().split(/\s+/).filter(Boolean);
+    return targets.length > 0 ? targets : null;
+  }
+  // Separated/long flags: rm -r -f, rm --recursive --force, etc.
+  m = line.match(/rm\s+((?:--?\w[\w-]*\s+)+)(.*)/);
+  if (m) {
+    const flags = m[1];
+    const hasR = /(?:^|\s)(?:-[a-zA-Z]*r\b|--recursive\b)/.test(flags);
+    const hasF = /(?:^|\s)(?:-[a-zA-Z]*f\b|--force\b)/.test(flags);
+    if (hasR && hasF) {
+      const targets = m[2].trim().split(/\s+/).filter(Boolean);
+      return targets.length > 0 ? targets : null;
+    }
+  }
+  return null;
+}
+
+/**
  * Check if a line containing `rm -rf` only targets safe build artifact dirs.
  * Returns true when ALL targets after the flags are in the safe set.
  */
 function isRmTargetingSafePaths(line: string): boolean {
-  const rmMatch = line.match(/rm\s+-[a-zA-Z]*(?:rf|fr)[a-zA-Z]*\s+(.*)/);
-  if (!rmMatch) return false;
-
-  const targets = rmMatch[1].trim().split(/\s+/).filter(Boolean);
-  if (targets.length === 0) return false;
+  const targets = extractRmRfTargets(line);
+  if (!targets) return false;
 
   return targets.every((t) => {
     const clean = t.replace(/^[`'"]+|[`'"]+$/g, "");
-    return SAFE_RM_SET.has(clean) || SAFE_RM_SET.has(clean.replace(/^~\//, "~/"));
+    return SAFE_RM_SET.has(clean) || SAFE_RM_SET.has(clean.replace(/^~\//, ""));
   });
 }
 
 // ---- FS-001 system-path detection -------------------------------------------
 // Escalate FS-001 when targeting system-critical paths or variable expansion.
 
-const SYSTEM_PATH_PREFIXES = ["/etc", "/usr", "/var", "/System", "/bin", "/sbin", "/opt", "/lib", "C:\\Windows", "C:\\Program"];
-const SYSTEM_PATH_EXACT = new Set(["/", "~", "$HOME", "~/"]);
+const SYSTEM_PATH_PREFIXES = ["/etc", "/usr", "/var", "/System", "/bin", "/sbin", "/opt", "/lib", "/home", "/root", "C:\\Windows", "C:\\Program"];
+const SYSTEM_PATH_EXACT = new Set(["/", "~", "$HOME", "~/", "*", ".", ".."]);
 
 function isRmTargetingSystemPaths(line: string): boolean {
-  const rmMatch = line.match(/rm\s+-[a-zA-Z]*(?:rf|fr)[a-zA-Z]*\s+(.*)/);
-  if (!rmMatch) return false;
-
-  const targets = rmMatch[1].trim().split(/\s+/).filter(Boolean);
-  if (targets.length === 0) return false;
+  const targets = extractRmRfTargets(line);
+  if (!targets) return false;
 
   return targets.some((t) => {
     const clean = t.replace(/^[`'"]+|[`'"]+$/g, "");
     if (SYSTEM_PATH_EXACT.has(clean)) return true;
     if (SYSTEM_PATH_PREFIXES.some((p) => clean.startsWith(p))) return true;
-    if (/\$\{?\w/.test(clean)) return true;
+    if (/\.\.[\\/]/.test(clean)) return true;
+    if (/\$\{?\w|\$\(|`/.test(clean)) return true;
     return false;
   });
 }
@@ -612,7 +634,7 @@ function computeHtmlCommentLines(lines: string[]): Set<number> {
 // These patterns commonly fire on installation instructions and code examples
 // inside fenced code blocks. Downgrade to "info" when in documentation context.
 
-const DOCUMENTATION_SAFE_PATTERNS = new Set(["PE-001", "PE-002", "PE-003", "FS-001"]);
+const DOCUMENTATION_SAFE_PATTERNS = new Set(["PE-001", "PE-002", "PE-003", "FS-001", "CI-008", "CT-002", "NA-001", "PI-003"]);
 
 // ---- Markdown-link safe context for FS-003 ---------------------------------
 
@@ -674,8 +696,9 @@ export function scanContent(content: string): ScanFinding[] {
 
         // Downgrade FS-001 severity based on context:
         // safe targets → info, system paths → keep high, other → low
+        // Only for `rm` commands — rimraf() keeps base severity ("high")
         let severity = pattern.severity;
-        if (pattern.id === "FS-001") {
+        if (pattern.id === "FS-001" && /\brm\s+-/.test(line)) {
           if (isRmTargetingSafePaths(line)) {
             severity = "info";
           } else if (!isRmTargetingSystemPaths(line)) {

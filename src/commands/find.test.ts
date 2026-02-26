@@ -24,7 +24,7 @@ describe("findCommand hints", () => {
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
     mockSearchSkills.mockResolvedValue([
-      { name: "test-skill", author: "test", tier: "VERIFIED", score: 90, installs: 100 },
+      { name: "test-skill", author: "test", tier: "VERIFIED", score: 90 },
     ]);
   });
 

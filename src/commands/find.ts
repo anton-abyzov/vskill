@@ -40,7 +40,7 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     return;
   }
 
-  const headers = ["Name", "Author", "Tier", "Score", "Installs"];
+  const headers = ["Name", "Author", "Tier", "Score"];
   const rows = results.map((r) => {
     const tierColor =
       r.tier === "CERTIFIED"
@@ -53,7 +53,6 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
       r.author || "-",
       tierColor(r.tier || "VERIFIED"),
       String(r.score ?? "-"),
-      String(r.installs ?? 0),
     ];
   });
 

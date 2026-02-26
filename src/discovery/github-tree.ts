@@ -2,6 +2,38 @@
 // GitHub Trees API skill discovery
 // ---------------------------------------------------------------------------
 
+/**
+ * Fetch the default branch for a GitHub repo. Falls back to "main" on error.
+ * Results are cached per owner/repo for the lifetime of the process.
+ */
+const branchCache = new Map<string, string>();
+
+/** @internal Reset cache — for testing only */
+export function _resetBranchCache(): void {
+  branchCache.clear();
+}
+
+export async function getDefaultBranch(owner: string, repo: string): Promise<string> {
+  const key = `${owner}/${repo}`;
+  const cached = branchCache.get(key);
+  if (cached) return cached;
+
+  let branch = "main";
+  try {
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+      headers: { Accept: "application/vnd.github.v3+json" },
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { default_branch?: string };
+      branch = data.default_branch || "main";
+    }
+  } catch {
+    // fall through with "main"
+  }
+  branchCache.set(key, branch);
+  return branch;
+}
+
 export interface DiscoveredSkill {
   name: string;
   path: string;
@@ -64,7 +96,8 @@ export async function discoverSkills(
   owner: string,
   repo: string,
 ): Promise<DiscoveredSkill[]> {
-  const url = `https://api.github.com/repos/${owner}/${repo}/git/trees/main?recursive=1`;
+  const branch = await getDefaultBranch(owner, repo);
+  const url = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
 
   let tree: Array<{ path: string; type: string }>;
   try {
@@ -89,7 +122,7 @@ export async function discoverSkills(
       skills.push({
         name: repo,
         path: "SKILL.md",
-        rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/main/SKILL.md`,
+        rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/SKILL.md`,
       });
       continue;
     }
@@ -101,7 +134,7 @@ export async function discoverSkills(
       skills.push({
         name: skillName,
         path: entry.path,
-        rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/main/${entry.path}`,
+        rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${entry.path}`,
       });
     }
   }

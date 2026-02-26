@@ -59,8 +59,7 @@ describe("searchSkills", () => {
           name: "my-skill",
           author: "alice",
           certTier: "VERIFIED",
-          certScore: 95,
-          vskillInstalls: 1200,
+          trustScore: 95,
           description: "A great skill",
         },
       ],
@@ -85,7 +84,6 @@ describe("searchSkills", () => {
         author: "alice",
         tier: "VERIFIED",
         score: 95,
-        installs: 1200,
         description: "A great skill",
         command: null,
         pluginName: null,
@@ -117,12 +115,28 @@ describe("searchSkills", () => {
     expect(results[0].tier).toBe("VERIFIED");
   });
 
-  it("falls back to 'score' when 'certScore' is missing", async () => {
+  it("uses trustScore as primary score source", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse({ results: [{ name: "s", score: 75 }] })
+      jsonResponse({ results: [{ name: "s", trustScore: 80 }] })
+    );
+    const results = await searchSkills("test");
+    expect(results[0].score).toBe(80);
+  });
+
+  it("falls back to 'certScore' when 'trustScore' is missing", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ results: [{ name: "s", certScore: 75 }] })
     );
     const results = await searchSkills("test");
     expect(results[0].score).toBe(75);
+  });
+
+  it("falls back to 'score' when 'trustScore' and 'certScore' are missing", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ results: [{ name: "s", score: 60 }] })
+    );
+    const results = await searchSkills("test");
+    expect(results[0].score).toBe(60);
   });
 
   it("defaults score to 0 when no score field exists", async () => {
@@ -131,22 +145,6 @@ describe("searchSkills", () => {
     );
     const results = await searchSkills("test");
     expect(results[0].score).toBe(0);
-  });
-
-  it("falls back to 'installs' when 'vskillInstalls' is missing", async () => {
-    mockFetch.mockResolvedValue(
-      jsonResponse({ results: [{ name: "s", installs: 500 }] })
-    );
-    const results = await searchSkills("test");
-    expect(results[0].installs).toBe(500);
-  });
-
-  it("defaults installs to 0 when no installs field exists", async () => {
-    mockFetch.mockResolvedValue(
-      jsonResponse({ results: [{ name: "s" }] })
-    );
-    const results = await searchSkills("test");
-    expect(results[0].installs).toBe(0);
   });
 });
 

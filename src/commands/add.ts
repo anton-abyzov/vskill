@@ -29,7 +29,7 @@ import { checkInstallSafety } from "../blocklist/blocklist.js";
 import type { BlocklistEntry, RejectionInfo } from "../blocklist/types.js";
 import { getSkill } from "../api/client.js";
 import { checkPlatformSecurity } from "../security/index.js";
-import { discoverSkills } from "../discovery/github-tree.js";
+import { discoverSkills, getDefaultBranch } from "../discovery/github-tree.js";
 import { parseGitHubSource, classifyIdentifier } from "../utils/validation.js";
 import {
   parseSkillsShUrl,
@@ -385,7 +385,7 @@ async function fetchSkillContent(url: string): Promise<string> {
       if (res.status === 404) {
         console.error(
           red(`SKILL.md not found at ${url}\n`) +
-            dim("Make sure the repo exists and has a SKILL.md on the main branch.")
+            dim("Make sure the repo exists and has a SKILL.md on the default branch.")
         );
       } else {
         console.error(red(`Failed to fetch: ${res.status} ${res.statusText}`));
@@ -816,7 +816,8 @@ async function installAllRepoPlugins(
   }
 
   // Fetch marketplace.json
-  const manifestUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/.claude-plugin/marketplace.json`;
+  const branch = await getDefaultBranch(owner, repo);
+  const manifestUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/.claude-plugin/marketplace.json`;
   const manifestSpin = spinner("Fetching marketplace.json");
   let manifestContent: string;
   try {
@@ -825,7 +826,7 @@ async function installAllRepoPlugins(
       manifestSpin.stop();
       console.error(
         red(`marketplace.json not found at ${owner}/${repo}\n`) +
-          dim("Ensure the repo has .claude-plugin/marketplace.json on the main branch.")
+          dim("Ensure the repo has .claude-plugin/marketplace.json on the default branch.")
       );
       process.exit(1);
     }
@@ -891,7 +892,8 @@ async function installRepoPlugin(
   }
 
   // Fetch marketplace.json from GitHub
-  const manifestUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/.claude-plugin/marketplace.json`;
+  const branch = await getDefaultBranch(owner, repo);
+  const manifestUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/.claude-plugin/marketplace.json`;
   const manifestSpin = spinner("Fetching marketplace.json");
   let manifestContent: string;
   try {
@@ -900,7 +902,7 @@ async function installRepoPlugin(
       manifestSpin.stop();
       throw new Error(
         `marketplace.json not found at ${owner}/${repo}. ` +
-          "Ensure the repo has .claude-plugin/marketplace.json on the main branch."
+          "Ensure the repo has .claude-plugin/marketplace.json on the default branch."
       );
     }
     manifestContent = await res.text();
@@ -959,7 +961,7 @@ async function installRepoPlugin(
   const allContent: string[] = [];
   const skills: Array<{ name: string; content: string }> = [];
   for (const entry of skillEntries) {
-    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/${pluginPath}/skills/${entry.name}/SKILL.md`;
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/skills/${entry.name}/SKILL.md`;
     try {
       const res = await fetch(rawUrl);
       if (res.ok) {
@@ -972,7 +974,7 @@ async function installRepoPlugin(
 
   const commands: Array<{ name: string; content: string }> = [];
   for (const entry of cmdEntries) {
-    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/${pluginPath}/commands/${entry.name}`;
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/commands/${entry.name}`;
     try {
       const res = await fetch(rawUrl);
       if (res.ok) {
@@ -1534,8 +1536,9 @@ async function installSingleSkillLegacy(
   skill: string | undefined,
   opts: AddOptions,
 ): Promise<void> {
+  const branch = await getDefaultBranch(owner, repo);
   const skillSubpath = skill ? `skills/${skill}/SKILL.md` : "SKILL.md";
-  const url = `https://raw.githubusercontent.com/${owner}/${repo}/main/${skillSubpath}`;
+  const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${skillSubpath}`;
 
   // Fetch SKILL.md
   const content = await fetchSkillContent(url);

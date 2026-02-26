@@ -9,7 +9,6 @@ export interface SkillSearchResult {
   author: string;
   tier: string;
   score: number;
-  installs: number;
   description: string;
   command?: string | null;
   pluginName?: string | null;
@@ -91,8 +90,7 @@ export async function searchSkills(
     name: String(s.name || ""),
     author: String(s.author || ""),
     tier: String(s.certTier || s.tier || "VERIFIED"),
-    score: Number(s.certScore ?? s.score ?? 0),
-    installs: Number(s.vskillInstalls ?? s.installs ?? 0),
+    score: Number(s.trustScore ?? s.certScore ?? s.score ?? 0),
     description: String(s.description || ""),
     command: s.command ? String(s.command) : null,
     pluginName: s.pluginName ? String(s.pluginName) : null,

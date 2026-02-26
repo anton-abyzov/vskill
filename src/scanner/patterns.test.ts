@@ -556,6 +556,209 @@ describe("scanContent — dci-abuse patterns", () => {
 });
 
 // ---------------------------------------------------------------------------
+// FS-001: context-aware severity
+// ---------------------------------------------------------------------------
+describe("scanContent — FS-001 context-aware severity", () => {
+  it("downgrades to info for safe targets (rm -rf dist)", () => {
+    const findings = scanContent("rm -rf dist");
+    const fs001 = findings.filter((f) => f.patternId === "FS-001");
+    expect(fs001.length).toBeGreaterThan(0);
+    expect(fs001[0].severity).toBe("info");
+  });
+
+  it("downgrades to info for multiple safe targets (rm -rf node_modules build)", () => {
+    const findings = scanContent("rm -rf node_modules build");
+    const fs001 = findings.filter((f) => f.patternId === "FS-001");
+    expect(fs001.length).toBeGreaterThan(0);
+    expect(fs001[0].severity).toBe("info");
+  });
+
+  it("downgrades to info inside fenced code block", () => {
+    const content = "# Cleanup\n```bash\nrm -rf /tmp/data\n```";
+    const findings = scanContent(content);
+    const fs001 = findings.filter((f) => f.patternId === "FS-001");
+    expect(fs001.length).toBeGreaterThan(0);
+    expect(fs001[0].severity).toBe("info");
+  });
+
+  it("keeps high severity for rm -rf / (system root)", () => {
+    const findings = scanContent("rm -rf /");
+    const fs001 = findings.filter((f) => f.patternId === "FS-001");
+    expect(fs001.length).toBeGreaterThan(0);
+    expect(fs001[0].severity).toBe("high");
+  });
+
+  it("keeps high severity for rm -rf /etc/config", () => {
+    const findings = scanContent("rm -rf /etc/config");
+    const fs001 = findings.filter((f) => f.patternId === "FS-001");
+    expect(fs001.length).toBeGreaterThan(0);
+    expect(fs001[0].severity).toBe("high");
+  });
+
+  it("keeps high severity for rm -rf $HOME", () => {
+    const findings = scanContent("rm -rf $HOME");
+    const fs001 = findings.filter((f) => f.patternId === "FS-001");
+    expect(fs001.length).toBeGreaterThan(0);
+    expect(fs001[0].severity).toBe("high");
+  });
+
+  it("downgrades to low for non-system non-safe targets (rm -rf ./my-output)", () => {
+    const findings = scanContent("rm -rf ./my-output");
+    const fs001 = findings.filter((f) => f.patternId === "FS-001");
+    expect(fs001.length).toBeGreaterThan(0);
+    expect(fs001[0].severity).toBe("low");
+  });
+
+  it("downgrades system-path rm -rf to info when inside fenced code block", () => {
+    const content = "```\nrm -rf /\n```";
+    const findings = scanContent(content);
+    const fs001 = findings.filter((f) => f.patternId === "FS-001");
+    expect(fs001.length).toBeGreaterThan(0);
+    expect(fs001[0].severity).toBe("info");
+  });
+
+  it("rimraf() inside fenced code block gets info severity", () => {
+    const content = "```js\nrimraf('./build');\n```";
+    const findings = scanContent(content);
+    const fs001 = findings.filter((f) => f.patternId === "FS-001");
+    expect(fs001.length).toBeGreaterThan(0);
+    expect(fs001[0].severity).toBe("info");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CI-005: false-positive prevention for bare mentions
+// ---------------------------------------------------------------------------
+describe("scanContent — CI-005 false-positive prevention", () => {
+  it("does NOT flag bare 'child_process' mention in documentation", () => {
+    const findings = scanContent("This module uses child_process internally");
+    expect(findings.some((f) => f.patternId === "CI-005")).toBe(false);
+  });
+
+  it("does NOT flag bare 'spawnSync' mention in documentation", () => {
+    const findings = scanContent("Use spawnSync for synchronous operations");
+    expect(findings.some((f) => f.patternId === "CI-005")).toBe(false);
+  });
+
+  it("does NOT flag bare 'execFile' mention in documentation", () => {
+    const findings = scanContent("The execFile function is preferred over exec");
+    expect(findings.some((f) => f.patternId === "CI-005")).toBe(false);
+  });
+
+  it("still flags require('child_process')", () => {
+    const findings = scanContent(`const cp = require('child_process');`);
+    expect(findings.some((f) => f.patternId === "CI-005")).toBe(true);
+  });
+
+  it("still flags import from 'child_process'", () => {
+    const findings = scanContent(`import { exec } from 'child_process';`);
+    expect(findings.some((f) => f.patternId === "CI-005")).toBe(true);
+  });
+
+  it("still flags execSync() function call", () => {
+    const findings = scanContent(`execSync('ls -la');`);
+    expect(findings.some((f) => f.patternId === "CI-005")).toBe(true);
+  });
+
+  it("still flags spawnSync() function call", () => {
+    const findings = scanContent(`spawnSync('node', ['script.js']);`);
+    expect(findings.some((f) => f.patternId === "CI-005")).toBe(true);
+  });
+
+  it("still flags require with backtick template literal", () => {
+    const findings = scanContent("require(`child_process`);");
+    expect(findings.some((f) => f.patternId === "CI-005")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fenced code block downgrade for PE-001/PE-002/PE-003
+// ---------------------------------------------------------------------------
+describe("scanContent — fenced code block context downgrade", () => {
+  it("downgrades PE-001 (sudo) to info inside fenced code block", () => {
+    const content = "# Install\n```bash\nsudo apt install nodejs\n```";
+    const findings = scanContent(content);
+    const pe001 = findings.filter((f) => f.patternId === "PE-001");
+    expect(pe001.length).toBeGreaterThan(0);
+    expect(pe001[0].severity).toBe("info");
+  });
+
+  it("keeps PE-001 (sudo) at original severity outside fenced code block", () => {
+    const content = "Run sudo apt install nodejs to set up";
+    const findings = scanContent(content);
+    const pe001 = findings.filter((f) => f.patternId === "PE-001");
+    expect(pe001.length).toBeGreaterThan(0);
+    expect(pe001[0].severity).not.toBe("info");
+  });
+
+  it("downgrades PE-002 (chmod) to info inside fenced code block", () => {
+    const content = "```\nchmod +x script.sh\n```";
+    const findings = scanContent(content);
+    const pe002 = findings.filter((f) => f.patternId === "PE-002");
+    expect(pe002.length).toBeGreaterThan(0);
+    expect(pe002[0].severity).toBe("info");
+  });
+
+  it("downgrades PE-003 (chown) to info inside fenced code block", () => {
+    const content = "```\nchown user:group /opt/app\n```";
+    const findings = scanContent(content);
+    const pe003 = findings.filter((f) => f.patternId === "PE-003");
+    expect(pe003.length).toBeGreaterThan(0);
+    expect(pe003[0].severity).toBe("info");
+  });
+
+  it("does NOT downgrade non-documentation patterns in fenced code blocks", () => {
+    const content = "```\neval(userInput);\n```";
+    const findings = scanContent(content);
+    const ce001 = findings.filter((f) => f.patternId === "CE-001");
+    expect(ce001.length).toBeGreaterThan(0);
+    expect(ce001[0].severity).toBe("critical");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HTML comment suppression
+// ---------------------------------------------------------------------------
+describe("scanContent — HTML comment suppression", () => {
+  it("suppresses findings on interior lines of multi-line HTML comments", () => {
+    const content = "safe line\n<!--\neval(badCode);\nsudo install\n-->\nsafe line";
+    const findings = scanContent(content);
+    const ce001 = findings.filter((f) => f.patternId === "CE-001");
+    const pe001 = findings.filter((f) => f.patternId === "PE-001");
+    expect(ce001).toHaveLength(0);
+    expect(pe001).toHaveLength(0);
+  });
+
+  it("does NOT suppress findings outside HTML comments", () => {
+    const content = "<!-- comment -->\neval(userInput);";
+    const findings = scanContent(content);
+    const ce001 = findings.filter((f) => f.patternId === "CE-001");
+    expect(ce001.length).toBeGreaterThan(0);
+  });
+
+  it("does NOT suppress single-line HTML comments (prevents bypass)", () => {
+    const content = '<!-- --> eval("malicious");';
+    const findings = scanContent(content);
+    const ce001 = findings.filter((f) => f.patternId === "CE-001");
+    expect(ce001.length).toBeGreaterThan(0);
+  });
+
+  it("does NOT suppress content on comment closing line (prevents bypass)", () => {
+    const content = '<!--\ncomment\n--> eval("malicious");';
+    const findings = scanContent(content);
+    const ce001 = findings.filter((f) => f.patternId === "CE-001");
+    expect(ce001.length).toBeGreaterThan(0);
+  });
+
+  it("does NOT suppress content before <!-- on same line", () => {
+    const content = 'eval("malicious"); <!-- hidden -->';
+    const findings = scanContent(content);
+    const ce001 = findings.filter((f) => f.patternId === "CE-001");
+    expect(ce001.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Multiple findings from one content
 // ---------------------------------------------------------------------------
 describe("scanContent — multiple findings", () => {

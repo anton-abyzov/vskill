@@ -80,7 +80,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Backtick shell execution",
     severity: "high",
     description: "Detects backtick-based command substitution patterns",
-    pattern: /child_process|execSync|spawnSync|execFile/g,
+    pattern: /require\s*\(\s*['"`]child_process['"`]\)|from\s+['"`]child_process['"`]|\b(?:execSync|spawnSync|execFile)\s*\(/g,
     category: "command-injection",
   },
   {
@@ -280,7 +280,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
   {
     id: "FS-001",
     name: "Recursive delete",
-    severity: "critical",
+    severity: "high",
     description: "Detects rm -rf or recursive deletion commands",
     pattern: /rm\s+-[a-zA-Z]*r[a-zA-Z]*f|rm\s+-[a-zA-Z]*f[a-zA-Z]*r|rimraf\s*\(/g,
     category: "filesystem-access",
@@ -509,6 +509,111 @@ function isSafeDciBlock(line: string): boolean {
   return !matchesMalicious;
 }
 
+// ---- FS-001 safe target detection ------------------------------------------
+// Downgrade FS-001 (rm -rf) from "high" to "info" when the command only
+// targets known build artifact / cache directories.
+
+const SAFE_RM_TARGETS = [
+  "build", ".build", "dist", "out", "target", ".next", ".open-next",
+  "node_modules", ".gradle", "~/.gradle", "~/.m2", "~/.npm", "~/.cache",
+  ".cache", "__pycache__", ".pytest_cache", ".mypy_cache",
+  ".tox", ".venv", "venv", "env", ".eggs", "*.egg-info",
+  "coverage", ".nyc_output", ".turbo", ".parcel-cache",
+  "tmp", ".tmp", "temp",
+];
+const SAFE_RM_SET = new Set(SAFE_RM_TARGETS);
+
+/**
+ * Check if a line containing `rm -rf` only targets safe build artifact dirs.
+ * Returns true when ALL targets after the flags are in the safe set.
+ */
+function isRmTargetingSafePaths(line: string): boolean {
+  const rmMatch = line.match(/rm\s+-[a-zA-Z]*(?:rf|fr)[a-zA-Z]*\s+(.*)/);
+  if (!rmMatch) return false;
+
+  const targets = rmMatch[1].trim().split(/\s+/).filter(Boolean);
+  if (targets.length === 0) return false;
+
+  return targets.every((t) => {
+    const clean = t.replace(/^[`'"]+|[`'"]+$/g, "");
+    return SAFE_RM_SET.has(clean) || SAFE_RM_SET.has(clean.replace(/^~\//, "~/"));
+  });
+}
+
+// ---- FS-001 system-path detection -------------------------------------------
+// Escalate FS-001 when targeting system-critical paths or variable expansion.
+
+const SYSTEM_PATH_PREFIXES = ["/etc", "/usr", "/var", "/System", "/bin", "/sbin", "/opt", "/lib", "C:\\Windows", "C:\\Program"];
+const SYSTEM_PATH_EXACT = new Set(["/", "~", "$HOME", "~/"]);
+
+function isRmTargetingSystemPaths(line: string): boolean {
+  const rmMatch = line.match(/rm\s+-[a-zA-Z]*(?:rf|fr)[a-zA-Z]*\s+(.*)/);
+  if (!rmMatch) return false;
+
+  const targets = rmMatch[1].trim().split(/\s+/).filter(Boolean);
+  if (targets.length === 0) return false;
+
+  return targets.some((t) => {
+    const clean = t.replace(/^[`'"]+|[`'"]+$/g, "");
+    if (SYSTEM_PATH_EXACT.has(clean)) return true;
+    if (SYSTEM_PATH_PREFIXES.some((p) => clean.startsWith(p))) return true;
+    if (/\$\{?\w/.test(clean)) return true;
+    return false;
+  });
+}
+
+// ---- Markdown fenced code block detection ----------------------------------
+// Pre-compute which lines are inside fenced code blocks (``` or ~~~).
+// Used to downgrade documentation-context patterns (PE-001/PE-002/PE-003/FS-001).
+
+function computeFencedCodeBlockLines(lines: string[]): Set<number> {
+  const fenced = new Set<number>();
+  let inBlock = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(?:```|~~~)/.test(lines[i])) {
+      fenced.add(i);
+      inBlock = !inBlock;
+    } else if (inBlock) {
+      fenced.add(i);
+    }
+  }
+  return fenced;
+}
+
+// ---- HTML comment line detection -------------------------------------------
+// Pre-compute which lines are inside HTML comments (<!-- ... -->).
+// Findings inside HTML comments are suppressed entirely.
+
+function computeHtmlCommentLines(lines: string[]): Set<number> {
+  const commented = new Set<number>();
+  let inComment = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (inComment) {
+      if (line.includes("-->")) {
+        // Closing line — don't mark it (content may follow -->)
+        inComment = false;
+      } else {
+        // Interior line — fully inside comment
+        commented.add(i);
+      }
+    } else if (line.includes("<!--") && !line.includes("-->")) {
+      // Multi-line comment starts — don't mark opening line
+      // (content may precede <!-- or follow on same line)
+      inComment = true;
+    }
+    // Single-line <!-- ... --> comments are NOT marked to prevent
+    // bypass via: <!-- --> eval("malicious")
+  }
+  return commented;
+}
+
+// ---- Documentation-safe patterns -------------------------------------------
+// These patterns commonly fire on installation instructions and code examples
+// inside fenced code blocks. Downgrade to "info" when in documentation context.
+
+const DOCUMENTATION_SAFE_PATTERNS = new Set(["PE-001", "PE-002", "PE-003", "FS-001"]);
+
 // ---- Markdown-link safe context for FS-003 ---------------------------------
 
 /**
@@ -533,6 +638,8 @@ function isInsideMarkdownLink(line: string, matchIndex: number): boolean {
  */
 export function scanContent(content: string): ScanFinding[] {
   const lines = content.split("\n");
+  const fencedLines = computeFencedCodeBlockLines(lines);
+  const commentLines = computeHtmlCommentLines(lines);
   const findings: ScanFinding[] = [];
 
   for (const pattern of SCAN_PATTERNS) {
@@ -549,6 +656,11 @@ export function scanContent(content: string): ScanFinding[] {
           continue;
         }
 
+        // Suppress all findings inside HTML comments
+        if (commentLines.has(lineIdx)) {
+          continue;
+        }
+
         // Suppress FS-003 path traversal inside markdown links
         if (pattern.id === "FS-003" && isInsideMarkdownLink(line, match.index)) {
           continue;
@@ -560,10 +672,26 @@ export function scanContent(content: string): ScanFinding[] {
         contextLines.push(line);
         if (lineIdx < lines.length - 1) contextLines.push(lines[lineIdx + 1]);
 
+        // Downgrade FS-001 severity based on context:
+        // safe targets → info, system paths → keep high, other → low
+        let severity = pattern.severity;
+        if (pattern.id === "FS-001") {
+          if (isRmTargetingSafePaths(line)) {
+            severity = "info";
+          } else if (!isRmTargetingSystemPaths(line)) {
+            severity = "low";
+          }
+        }
+
+        // Downgrade documentation-safe patterns inside fenced code blocks
+        if (DOCUMENTATION_SAFE_PATTERNS.has(pattern.id) && fencedLines.has(lineIdx)) {
+          severity = "info";
+        }
+
         findings.push({
           patternId: pattern.id,
           patternName: pattern.name,
-          severity: pattern.severity,
+          severity,
           category: pattern.category,
           match: match[0],
           lineNumber: lineIdx + 1,

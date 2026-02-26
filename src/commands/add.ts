@@ -209,6 +209,28 @@ interface AddOptions {
 }
 
 /**
+ * Resolve the project root for skill installation, with a HOME-directory guard.
+ *
+ * When `--cwd` is set, uses process.cwd() directly.
+ * Otherwise walks up looking for project markers (.git, package.json, etc.).
+ * If the resolved root IS the home directory (or none found), falls back to
+ * process.cwd() to avoid polluting $HOME with skill files.
+ */
+function safeProjectRoot(opts: { cwd?: boolean }): string {
+  if (opts.cwd) return process.cwd();
+
+  const cwd = process.cwd();
+  const root = findProjectRoot(cwd);
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+
+  // Never treat $HOME as project root — that would pollute the home dir
+  if (!root || (home && resolve(root) === resolve(home))) {
+    return cwd;
+  }
+  return root;
+}
+
+/**
  * Join base dir with localSkillsDir, avoiding double-nesting when base already
  * ends with the agent's dotfolder (e.g. running from inside ~/.openclaw/).
  *
@@ -239,31 +261,7 @@ function resolveInstallBase(
   if (opts.global) {
     return resolveTilde(agent.globalSkillsDir);
   }
-
-  const cwd = process.cwd();
-  const home = process.env.HOME || process.env.USERPROFILE || "";
-
-  if (opts.cwd) {
-    return resolveSkillsPath(cwd, agent.localSkillsDir);
-  }
-
-  const projectRoot = findProjectRoot(cwd);
-
-  // Guard: never treat $HOME as project root — that would pollute the home dir
-  if (!projectRoot || (home && resolve(projectRoot) === resolve(home))) {
-    console.log(
-      yellow("No project root found; installing relative to current directory."),
-    );
-    return resolveSkillsPath(cwd, agent.localSkillsDir);
-  }
-
-  if (projectRoot !== cwd) {
-    console.log(
-      dim(`Project root: ${projectRoot}`),
-    );
-  }
-
-  return resolveSkillsPath(projectRoot, agent.localSkillsDir);
+  return resolveSkillsPath(safeProjectRoot(opts), agent.localSkillsDir);
 }
 
 // ---------------------------------------------------------------------------
@@ -363,12 +361,7 @@ async function promptInstallOptions(
   for (const agent of selectedAgents) {
     const base = useGlobal
       ? resolveTilde(agent.globalSkillsDir)
-      : resolveSkillsPath(
-          opts.cwd
-            ? process.cwd()
-            : findProjectRoot(process.cwd()) || process.cwd(),
-          agent.localSkillsDir,
-        );
+      : resolveSkillsPath(safeProjectRoot(opts), agent.localSkillsDir);
     console.log(dim(`    ${agent.displayName}: ${base}/`));
   }
   console.log(dim("  ─────────────────────────────────────────────────"));
@@ -1046,9 +1039,7 @@ async function installRepoPlugin(
   }
 
   // Compute project root for consistent lockfile + skill locations
-  const projectRoot = opts.cwd
-    ? process.cwd()
-    : (findProjectRoot(process.cwd()) || process.cwd());
+  const projectRoot = safeProjectRoot(opts);
 
   // Install skills and commands with namespace prefix
   const sha = createHash("sha256").update(combined).digest("hex").slice(0, 12);
@@ -1235,9 +1226,7 @@ export async function addCommand(
   if (!selections.symlink) opts.copy = true;
 
   // Compute project root ONCE for consistent lockfile + skill locations
-  const projectRoot = opts.cwd
-    ? process.cwd()
-    : (findProjectRoot(process.cwd()) || process.cwd());
+  const projectRoot = safeProjectRoot(opts);
 
   // Skill selection (multi-skill repos, when interactive)
   let selectedSkills = discovered;
@@ -1483,9 +1472,7 @@ async function installFromRegistry(
   if (selections.global) opts.global = true;
 
   // Compute project root for consistent lockfile + skill locations
-  const projectRoot = opts.cwd
-    ? process.cwd()
-    : (findProjectRoot(process.cwd()) || process.cwd());
+  const projectRoot = safeProjectRoot(opts);
 
   // Install to each agent
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
@@ -1659,9 +1646,7 @@ async function installSingleSkillLegacy(
 
   // Install to each agent using canonical installer
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
-  const projectRoot = opts.cwd
-    ? process.cwd()
-    : (findProjectRoot(process.cwd()) || process.cwd());
+  const projectRoot = safeProjectRoot(opts);
   const installOpts = { global: !!opts.global, projectRoot };
 
   const locations = opts.copy

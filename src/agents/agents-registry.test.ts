@@ -118,12 +118,13 @@ describe("getUniversalAgents", () => {
   it("includes known universal agents", () => {
     const ids = getUniversalAgents().map((a) => a.id);
     expect(ids).toContain("amp");
+    expect(ids).toContain("cline");
     expect(ids).toContain("codex");
+    expect(ids).toContain("cursor");
     expect(ids).toContain("gemini-cli");
     expect(ids).toContain("github-copilot");
     expect(ids).toContain("kimi-cli");
     expect(ids).toContain("opencode");
-    expect(ids).toContain("replit");
   });
 });
 
@@ -145,7 +146,7 @@ describe("getNonUniversalAgents", () => {
     const ids = getNonUniversalAgents().map((a) => a.id);
     expect(ids).toContain("claude-code");
     expect(ids).toContain("windsurf");
-    expect(ids).toContain("cline");
+    expect(ids).toContain("replit");
   });
 });
 

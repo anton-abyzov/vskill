@@ -42,11 +42,11 @@ export interface AgentDefinition {
 /**
  * Complete registry of 49 AI coding agents.
  *
- * 7 universal agents, 42 non-universal agents.
+ * 8 universal agents, 41 non-universal agents.
  */
 export const AGENTS_REGISTRY: AgentDefinition[] = [
   // ----------------------------------------------------------------
-  // Universal agents (7)
+  // Universal agents (8)
   // ----------------------------------------------------------------
   {
     id: 'amp',
@@ -59,6 +59,16 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
+    id: 'cline',
+    displayName: 'Cline',
+    localSkillsDir: '.cline/skills',
+    globalSkillsDir: '~/.cline/skills',
+    isUniversal: true,
+    detectInstalled: 'which cline',
+    parentCompany: 'Cline',
+    featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
+  },
+  {
     id: 'codex',
     displayName: 'Codex CLI',
     localSkillsDir: '.codex/skills',
@@ -67,6 +77,16 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: 'which codex',
     parentCompany: 'OpenAI',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+  },
+  {
+    id: 'cursor',
+    displayName: 'Cursor',
+    localSkillsDir: '.cursor/skills',
+    globalSkillsDir: '~/.cursor/skills',
+    isUniversal: true,
+    detectInstalled: 'which cursor',
+    parentCompany: 'Anysphere',
+    featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'gemini-cli',
@@ -108,19 +128,9 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     parentCompany: 'Community',
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
-  {
-    id: 'replit',
-    displayName: 'Replit Agent',
-    localSkillsDir: '.replit/skills',
-    globalSkillsDir: '~/.config/agents/skills',
-    isUniversal: true,
-    detectInstalled: 'which replit',
-    parentCompany: 'Replit',
-    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
-  },
 
   // ----------------------------------------------------------------
-  // Non-universal agents (43)
+  // Non-universal agents (41)
   // ----------------------------------------------------------------
   {
     id: 'antigravity',
@@ -164,14 +174,14 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
-    id: 'cline',
-    displayName: 'Cline',
-    localSkillsDir: '.cline/skills',
-    globalSkillsDir: '~/.cline/skills',
+    id: 'replit',
+    displayName: 'Replit Agent',
+    localSkillsDir: '.replit/skills',
+    globalSkillsDir: '~/.config/agents/skills',
     isUniversal: false,
-    detectInstalled: 'which cline',
-    parentCompany: 'Cline',
-    featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
+    detectInstalled: 'which replit',
+    parentCompany: 'Replit',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
     id: 'codebuddy',
@@ -212,16 +222,6 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: 'which crush',
     parentCompany: 'Crush',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
-  },
-  {
-    id: 'cursor',
-    displayName: 'Cursor',
-    localSkillsDir: '.cursor/skills',
-    globalSkillsDir: '~/.cursor/skills',
-    isUniversal: true,
-    detectInstalled: 'which cursor',
-    parentCompany: 'Anysphere',
-    featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
     id: 'droid',

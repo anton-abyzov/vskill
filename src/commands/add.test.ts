@@ -28,6 +28,15 @@ vi.mock("node:fs", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock node:os (control homedir for global lockfile tests)
+// ---------------------------------------------------------------------------
+const mockHomedir = vi.fn().mockReturnValue("/home/testuser");
+vi.mock("node:os", () => ({
+  default: { homedir: () => mockHomedir() },
+  homedir: () => mockHomedir(),
+}));
+
+// ---------------------------------------------------------------------------
 // Mock node:path (pass-through with join tracking)
 // ---------------------------------------------------------------------------
 vi.mock("node:path", async () => {
@@ -2086,6 +2095,49 @@ describe("addCommand project root consistency", () => {
 
     // Lockfile also receives same projectRoot
     expect(mockEnsureLockfile).toHaveBeenCalledWith(projectRoot);
+  });
+
+  it("uses ~/.agents/ for lockfile when global scope is selected", async () => {
+    mockHomedir.mockReturnValue("/home/testuser");
+    mockFindProjectRoot.mockReturnValue("/home/testuser/my-project");
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "skill-a", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/o/r/main/SKILL.md" },
+    ]);
+
+    await addCommand("owner/repo", { global: true });
+
+    // Lockfile should go to ~/.agents/, not the project root
+    expect(mockEnsureLockfile).toHaveBeenCalledWith("/home/testuser/.agents");
+    expect(mockWriteLockfile).toHaveBeenCalledWith(expect.anything(), "/home/testuser/.agents");
+  });
+
+  it("sets scope field on lockfile entries for global installs", async () => {
+    mockHomedir.mockReturnValue("/home/testuser");
+    mockFindProjectRoot.mockReturnValue("/home/testuser/my-project");
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "skill-a", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/o/r/main/SKILL.md" },
+    ]);
+
+    await addCommand("owner/repo", { global: true });
+
+    // Check that the lock object passed to writeLockfile has scope: "user"
+    const lockArg = mockWriteLockfile.mock.calls[0]?.[0];
+    const entry = lockArg?.skills?.["skill-a"];
+    expect(entry?.scope).toBe("user");
+  });
+
+  it("sets scope field to 'project' for project-scoped installs", async () => {
+    const projectRoot = "/home/testuser/my-project";
+    mockFindProjectRoot.mockReturnValue(projectRoot);
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "skill-a", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/o/r/main/SKILL.md" },
+    ]);
+
+    await addCommand("owner/repo", {});
+
+    const lockArg = mockWriteLockfile.mock.calls[0]?.[0];
+    const entry = lockArg?.skills?.["skill-a"];
+    expect(entry?.scope).toBe("project");
   });
 });
 

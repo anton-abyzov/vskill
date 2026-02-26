@@ -2,8 +2,8 @@
 // Read/write vskill.lock
 // ---------------------------------------------------------------------------
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 import type { VskillLock, SkillLockEntry } from "./types.js";
 import { getProjectRoot } from "./project-root.js";
 
@@ -35,6 +35,7 @@ export function readLockfile(dir?: string): VskillLock | null {
 export function writeLockfile(lock: VskillLock, dir?: string): void {
   lock.updatedAt = new Date().toISOString();
   const p = lockPath(dir);
+  mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, JSON.stringify(lock, null, 2) + "\n", "utf-8");
 }
 

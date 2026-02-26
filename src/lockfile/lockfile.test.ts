@@ -7,11 +7,13 @@ import type { VskillLock, SkillLockEntry } from "./types.js";
 const mockReadFileSync = vi.fn();
 const mockWriteFileSync = vi.fn();
 const mockExistsSync = vi.fn();
+const mockMkdirSync = vi.fn();
 
 vi.mock("node:fs", () => ({
   readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
   writeFileSync: (...args: unknown[]) => mockWriteFileSync(...args),
   existsSync: (...args: unknown[]) => mockExistsSync(...args),
+  mkdirSync: (...args: unknown[]) => mockMkdirSync(...args),
 }));
 
 // Import after mock is set up
@@ -109,6 +111,15 @@ describe("writeLockfile", () => {
       JSON.stringify(lock, null, 2) + "\n",
       "utf-8"
     );
+  });
+
+  it("ensures parent directory exists before writing", () => {
+    const lock = makeLock();
+
+    writeLockfile(lock, "/some/deep/path");
+
+    expect(mockMkdirSync).toHaveBeenCalledWith("/some/deep/path", { recursive: true });
+    expect(mockWriteFileSync).toHaveBeenCalled();
   });
 });
 

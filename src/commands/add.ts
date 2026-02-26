@@ -16,6 +16,7 @@ import {
 import { join, resolve, basename } from "node:path";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
+import os from "node:os";
 import { resolveTilde } from "../utils/paths.js";
 import { findProjectRoot } from "../utils/project-root.js";
 import { reportInstall } from "../api/client.js";
@@ -228,6 +229,19 @@ function safeProjectRoot(opts: { cwd?: boolean }): string {
     return cwd;
   }
   return root;
+}
+
+/**
+ * Resolve the directory for the lockfile based on scope.
+ *
+ * Global scope  → ~/.agents/ (canonical global directory)
+ * Project scope → safeProjectRoot(opts) (same as before)
+ */
+function lockfileRoot(opts: AddOptions): string {
+  if (opts.global) {
+    return join(os.homedir(), ".agents");
+  }
+  return safeProjectRoot(opts);
 }
 
 /**
@@ -651,22 +665,21 @@ async function installPluginDir(
     }
   }
 
-  // Compute project root for consistent lockfile location
-  const pluginProjectRoot = opts.cwd
-    ? process.cwd()
-    : (findProjectRoot(process.cwd()) || process.cwd());
+  // Compute lockfile directory (global → ~/.agents/, project → project root)
+  const lockDir = lockfileRoot(opts);
 
-  // Update lockfile (same project root as skills)
-  const lock = ensureLockfile(pluginProjectRoot);
+  // Update lockfile
+  const lock = ensureLockfile(lockDir);
   lock.skills[pluginName] = {
     version,
     sha,
     tier: "VERIFIED",
     installedAt: new Date().toISOString(),
     source: `local:${basePath}`,
+    scope: opts.global ? "user" : "project",
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
-  writeLockfile(lock, pluginProjectRoot);
+  writeLockfile(lock, lockDir);
 
   // Print summary
   console.log(
@@ -1070,17 +1083,19 @@ async function installRepoPlugin(
     }
   }
 
-  // Update lockfile (same projectRoot as skills)
-  const lock = ensureLockfile(projectRoot);
+  // Update lockfile (global → ~/.agents/, project → project root)
+  const lockDir = lockfileRoot(opts);
+  const lock = ensureLockfile(lockDir);
   lock.skills[pluginName] = {
     version: pluginVersion,
     sha,
     tier: "VERIFIED",
     installedAt: new Date().toISOString(),
     source: `github:${owner}/${repo}#plugin:${pluginName}`,
+    scope: opts.global ? "user" : "project",
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
-  writeLockfile(lock, projectRoot);
+  writeLockfile(lock, lockDir);
 
   // Summary
   console.log(
@@ -1278,8 +1293,9 @@ export async function addCommand(
     }
   }
 
-  // Update lockfile with all installed skills (same projectRoot as skills)
-  const lock = ensureLockfile(projectRoot);
+  // Update lockfile (global → ~/.agents/, project → project root)
+  const lockDir = lockfileRoot(opts);
+  const lock = ensureLockfile(lockDir);
   for (const r of results) {
     if (r.installed && r.sha) {
       lock.skills[r.skillName] = {
@@ -1288,11 +1304,12 @@ export async function addCommand(
         tier: "VERIFIED",
         installedAt: new Date().toISOString(),
         source: `github:${owner}/${repo}`,
+        scope: opts.global ? "user" : "project",
       };
     }
   }
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
-  writeLockfile(lock, projectRoot);
+  writeLockfile(lock, lockDir);
 
   // Summary
   const installedCount = results.filter((r) => r.installed).length;
@@ -1493,17 +1510,19 @@ async function installFromRegistry(
     }
   }
 
-  // Update lockfile (same projectRoot as skills)
-  const lock = ensureLockfile(projectRoot);
+  // Update lockfile (global → ~/.agents/, project → project root)
+  const lockDir = lockfileRoot(opts);
+  const lock = ensureLockfile(lockDir);
   lock.skills[skillName] = {
     version: detail.version || "0.0.0",
     sha,
     tier: "VERIFIED",
     installedAt: new Date().toISOString(),
     source: `registry:${skillName}`,
+    scope: opts.global ? "user" : "project",
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
-  writeLockfile(lock, projectRoot);
+  writeLockfile(lock, lockDir);
 
   console.log(green(`\nInstalled ${bold(skillName)} to ${locations.length} agent${locations.length === 1 ? "" : "s"}:\n`));
   for (const loc of locations) {
@@ -1653,17 +1672,19 @@ async function installSingleSkillLegacy(
     ? installCopy(skillName, content, selectedAgents, installOpts)
     : installSymlink(skillName, content, selectedAgents, installOpts);
 
-  // Update lockfile (same projectRoot as skills)
-  const lock = ensureLockfile(projectRoot);
+  // Update lockfile (global → ~/.agents/, project → project root)
+  const lockDir = lockfileRoot(opts);
+  const lock = ensureLockfile(lockDir);
   lock.skills[skillName] = {
     version: "0.0.0",
     sha,
     tier: "VERIFIED",
     installedAt: new Date().toISOString(),
     source: `github:${owner}/${repo}`,
+    scope: opts.global ? "user" : "project",
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
-  writeLockfile(lock, projectRoot);
+  writeLockfile(lock, lockDir);
 
   // Phone home (fire-and-forget)
   reportInstall(skillName).catch(() => {});

@@ -34,6 +34,9 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     return;
   }
 
+  // Sort by score descending (best first)
+  results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
   // JSON output mode — no table, no hints
   if (opts?.json) {
     console.log(JSON.stringify(results, null, 2));

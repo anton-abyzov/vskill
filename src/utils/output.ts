@@ -22,6 +22,16 @@ export const bold = wrap("\x1b[1m", "\x1b[22m");
 export const dim = wrap("\x1b[2m", "\x1b[22m");
 export const magenta = wrap("\x1b[35m", "\x1b[39m");
 
+/**
+ * OSC 8 terminal hyperlink. Renders as clickable in modern terminals
+ * (iTerm2, macOS Terminal, Windows Terminal, GNOME Terminal, etc.).
+ * Falls back to plain text in unsupported terminals.
+ */
+export function link(url: string, text: string): string {
+  if (!isColorSupported) return text;
+  return `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
+}
+
 // ---- Table output ---------------------------------------------------------
 
 /**
@@ -67,7 +77,7 @@ export function table(headers: string[], rows: string[][], gap = 2): string {
 
 function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
-  return str.replace(/\x1b\[[0-9;]*m/g, "");
+  return str.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\]8;;[^\x07]*\x07/g, "");
 }
 
 function padRight(str: string, width: number, gap: number): string {

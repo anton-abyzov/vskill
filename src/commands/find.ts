@@ -3,11 +3,28 @@
 // ---------------------------------------------------------------------------
 
 import { searchSkills } from "../api/client.js";
-import { bold, green, yellow, dim, cyan, red, table } from "../utils/output.js";
+import { bold, green, yellow, dim, cyan, red, link, table } from "../utils/output.js";
 
 interface FindOptions {
   json?: boolean;
   noHint?: boolean;
+}
+
+/**
+ * Extract owner/repo from a URL and wrap it in a clickable OSC 8 hyperlink.
+ * Falls back to author name if no URL is available.
+ */
+function formatRepo(repoUrl: string | undefined, author: string): string {
+  if (!repoUrl) return author || "-";
+  try {
+    const ownerRepo = new URL(repoUrl).pathname
+      .replace(/^\//, "")
+      .replace(/\.git$/, "")
+      .replace(/\/$/, "");
+    return link(repoUrl, ownerRepo);
+  } catch {
+    return repoUrl;
+  }
 }
 
 export async function findCommand(query: string, opts?: FindOptions): Promise<void> {
@@ -43,7 +60,7 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     return;
   }
 
-  const headers = ["Name", "Author", "Tier", "Score"];
+  const headers = ["Name", "Repository", "Tier", "Score"];
   const rows = results.map((r) => {
     const tierColor =
       r.tier === "CERTIFIED"
@@ -51,9 +68,10 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
         : r.tier === "VERIFIED"
           ? green
           : dim;
+    const repo = formatRepo(r.repoUrl, r.author);
     return [
       bold(r.name),
-      r.author || "-",
+      repo,
       tierColor(r.tier || "VERIFIED"),
       String(r.score ?? "-"),
     ];

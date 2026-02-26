@@ -7,6 +7,7 @@ const BASE_URL = "https://verified-skill.com";
 export interface SkillSearchResult {
   name: string;
   author: string;
+  repoUrl?: string;
   tier: string;
   score: number;
   description: string;
@@ -89,6 +90,7 @@ export async function searchSkills(
   return items.map((s) => ({
     name: String(s.name || ""),
     author: String(s.author || ""),
+    repoUrl: s.repoUrl ? String(s.repoUrl) : undefined,
     tier: String(s.certTier || s.tier || "VERIFIED"),
     score: Number(s.trustScore ?? s.certScore ?? s.score ?? 0),
     description: String(s.description || ""),

@@ -14,6 +14,12 @@ export interface SkillSearchResult {
   command?: string | null;
   pluginName?: string | null;
   isTainted?: boolean;
+  /** True when the skill is on the blocklist (known malicious) */
+  isBlocked?: boolean;
+  /** Threat classification (e.g. "credential-theft", "prompt-injection") */
+  threatType?: string;
+  /** Severity level (e.g. "critical", "high") */
+  severity?: string;
 }
 
 export interface SkillDetail {
@@ -98,6 +104,9 @@ export async function searchSkills(
     command: s.command ? String(s.command) : null,
     pluginName: s.pluginName ? String(s.pluginName) : null,
     isTainted: !!s.isTainted,
+    isBlocked: !!s.isBlocked,
+    threatType: s.threatType ? String(s.threatType) : undefined,
+    severity: s.severity ? String(s.severity) : undefined,
   }));
 }
 

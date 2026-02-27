@@ -89,6 +89,9 @@ describe("searchSkills", () => {
         command: null,
         pluginName: null,
         isTainted: false,
+        isBlocked: false,
+        threatType: undefined,
+        severity: undefined,
       },
     ]);
   });

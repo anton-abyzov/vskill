@@ -35,4 +35,6 @@ export interface InstallSafetyResult {
   entry?: BlocklistEntry;
   rejected: boolean;
   rejection?: RejectionInfo;
+  tainted?: boolean;
+  taintReason?: string;
 }

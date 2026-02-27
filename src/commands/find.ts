@@ -62,17 +62,20 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
 
   const headers = ["Name", "Repository", "Tier", "Score"];
   const rows = results.map((r) => {
+    const displayTier = r.isTainted ? "TAINTED" : (r.tier || "VERIFIED");
     const tierColor =
-      r.tier === "CERTIFIED"
-        ? yellow
-        : r.tier === "VERIFIED"
-          ? green
-          : dim;
+      r.isTainted
+        ? red
+        : r.tier === "CERTIFIED"
+          ? yellow
+          : r.tier === "VERIFIED"
+            ? green
+            : dim;
     const repo = formatRepo(r.repoUrl, r.author);
     return [
       bold(r.name),
       repo,
-      tierColor(r.tier || "VERIFIED"),
+      tierColor(displayTier),
       String(r.score ?? "-"),
     ];
   });

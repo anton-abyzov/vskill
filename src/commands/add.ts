@@ -431,6 +431,15 @@ function printRejectedWarning(rejection: RejectionInfo): void {
   console.error("");
 }
 
+function printTaintedWarning(skillName: string, reason?: string): void {
+  console.error(yellow(bold("\n  TAINTED: Author has blocked skills")));
+  console.error(yellow(`  Another skill from this author was blocked for malicious behavior.`));
+  if (reason) console.error(yellow(`  Reason: ${reason}`));
+  console.error(dim(`  Details: https://verified-skill.com/skills/${encodeURIComponent(skillName)}`));
+  console.error(dim("  Exercise caution — review the source code before using."));
+  console.error("");
+}
+
 // ---------------------------------------------------------------------------
 // Plugin directory installation (local path)
 // ---------------------------------------------------------------------------
@@ -516,6 +525,9 @@ async function installPluginDir(
   }
   if (safety.rejected) {
     printRejectedWarning(safety.rejection!);
+  }
+  if (safety.tainted) {
+    printTaintedWarning(pluginName, safety.taintReason);
   }
 
   // Collect all file content for scanning
@@ -734,6 +746,9 @@ async function installOneGitHubSkill(
   }
   if (safety.rejected) {
     printRejectedWarning(safety.rejection!);
+  }
+  if (safety.tainted) {
+    printTaintedWarning(skillName, safety.taintReason);
   }
 
   // Platform security check
@@ -991,6 +1006,9 @@ async function installRepoPlugin(
   }
   if (safety.rejected) {
     printRejectedWarning(safety.rejection!);
+  }
+  if (safety.tainted) {
+    printTaintedWarning(pluginName, safety.taintReason);
   }
 
   // Tier 1 scan on all content combined
@@ -1433,6 +1451,9 @@ async function installFromRegistry(
   if (safety.rejected) {
     printRejectedWarning(safety.rejection!);
   }
+  if (safety.tainted) {
+    printTaintedWarning(skillName, safety.taintReason);
+  }
 
   // Tier 1 scan
   console.log(dim("\nRunning security scan..."));
@@ -1550,6 +1571,9 @@ async function installSingleSkillLegacy(
   }
   if (safety.rejected) {
     printRejectedWarning(safety.rejection!);
+  }
+  if (safety.tainted) {
+    printTaintedWarning(skillName, safety.taintReason);
   }
 
   // Platform security check (best-effort, non-blocking on network error)

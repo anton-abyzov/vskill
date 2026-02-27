@@ -82,11 +82,13 @@ describe("searchSkills", () => {
       {
         name: "my-skill",
         author: "alice",
+        repoUrl: undefined,
         tier: "VERIFIED",
         score: 95,
         description: "A great skill",
         command: null,
         pluginName: null,
+        isTainted: false,
       },
     ]);
   });

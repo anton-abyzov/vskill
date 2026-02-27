@@ -13,6 +13,7 @@ export interface SkillSearchResult {
   description: string;
   command?: string | null;
   pluginName?: string | null;
+  isTainted?: boolean;
 }
 
 export interface SkillDetail {
@@ -96,6 +97,7 @@ export async function searchSkills(
     description: String(s.description || ""),
     command: s.command ? String(s.command) : null,
     pluginName: s.pluginName ? String(s.pluginName) : null,
+    isTainted: !!s.isTainted,
   }));
 }
 

@@ -19,7 +19,6 @@ export const PROJECT_MARKERS = [
   "pyproject.toml",
   "requirements.txt",
   "pom.xml",
-  "vskill.lock",
   ".specweave",
 ] as const;
 

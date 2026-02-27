@@ -18,7 +18,6 @@ import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import os from "node:os";
 import { resolveTilde } from "../utils/paths.js";
-import { findProjectRoot } from "../utils/project-root.js";
 import { reportInstall } from "../api/client.js";
 import { filterAgents } from "../utils/agent-filter.js";
 import { detectInstalledAgents, AGENTS_REGISTRY } from "../agents/agents-registry.js";
@@ -217,18 +216,8 @@ interface AddOptions {
  * If the resolved root IS the home directory (or none found), falls back to
  * process.cwd() to avoid polluting $HOME with skill files.
  */
-function safeProjectRoot(opts: { cwd?: boolean }): string {
-  if (opts.cwd) return process.cwd();
-
-  const cwd = process.cwd();
-  const root = findProjectRoot(cwd);
-  const home = process.env.HOME || process.env.USERPROFILE || "";
-
-  // Never treat $HOME as project root — that would pollute the home dir
-  if (!root || (home && resolve(root) === resolve(home))) {
-    return cwd;
-  }
-  return root;
+function safeProjectRoot(_opts: { cwd?: boolean }): string {
+  return process.cwd();
 }
 
 /**
@@ -266,7 +255,7 @@ function resolveSkillsPath(base: string, localSkillsDir: string): string {
  * Priority:
  * 1. `--global` -> agent's globalSkillsDir
  * 2. `--cwd`   -> process.cwd() + agent's localSkillsDir
- * 3. default   -> findProjectRoot(cwd) + agent's localSkillsDir (with fallback warning)
+ * 3. default   -> process.cwd() + agent's localSkillsDir
  */
 function resolveInstallBase(
   opts: AddOptions,

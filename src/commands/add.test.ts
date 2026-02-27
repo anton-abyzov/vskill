@@ -1422,32 +1422,32 @@ describe("addCommand smart project root resolution", () => {
     globalThis.fetch = originalFetch;
   });
 
-  // TC-012: Install from subdirectory resolves to project root
-  it("installs skill relative to project root when cwd is a subdirectory", async () => {
-    const projectRoot = "/home/user/project";
-    mockFindProjectRoot.mockReturnValue(projectRoot);
+  // TC-012: Project scope always uses process.cwd()
+  it("installs skill relative to process.cwd() regardless of parent project markers", async () => {
+    const cwd = "/home/user/project/subdir";
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
 
     await addCommand("owner/safe-repo", {});
 
-    // installSingleSkillLegacy now uses canonical installer
     expect(mockInstallSymlink).toHaveBeenCalled();
     const callArgs = mockInstallSymlink.mock.calls[0];
-    // 4th arg is InstallOptions { global, projectRoot }
-    expect(callArgs[3].projectRoot).toBe(projectRoot);
+    expect(callArgs[3].projectRoot).toBe(cwd);
+
+    cwdSpy.mockRestore();
   });
 
-  // TC-013: --cwd flag uses process.cwd() directly
+  // TC-013: --cwd flag also uses process.cwd() directly
   it("installs relative to process.cwd() when --cwd flag is used", async () => {
-    const projectRoot = "/home/user/project";
-    mockFindProjectRoot.mockReturnValue(projectRoot);
+    const cwd = "/home/user/project/subdir";
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
 
     await addCommand("owner/safe-repo", { cwd: true });
 
-    // installSingleSkillLegacy now uses canonical installer
     expect(mockInstallSymlink).toHaveBeenCalled();
-    // The canonical installer receives projectRoot from findProjectRoot
-    // but --cwd doesn't affect the canonical installer directly
-    // (the resolveInstallBase is no longer used for canonical flow)
+    const callArgs = mockInstallSymlink.mock.calls[0];
+    expect(callArgs[3].projectRoot).toBe(cwd);
+
+    cwdSpy.mockRestore();
   });
 });
 
@@ -1557,7 +1557,7 @@ describe("addCommand nested directory fix (TC-016)", () => {
   it("does not create nested agent dir when projectRoot ends with agent base folder", async () => {
     // Simulate running `vskill install` from inside ~/.openclaw/
     const agentBaseDir = "/home/user/.openclaw";
-    mockFindProjectRoot.mockReturnValue(agentBaseDir);
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(agentBaseDir);
 
     const openclaw = makeAgent({
       id: "openclaw",
@@ -1569,11 +1569,13 @@ describe("addCommand nested directory fix (TC-016)", () => {
 
     await addCommand("owner/safe-repo", {});
 
-    // Canonical installer receives projectRoot = agentBaseDir
+    // Canonical installer receives projectRoot = cwd (agentBaseDir)
     // With localSkillsDir: "skills", the resolved path is /home/user/.openclaw/skills (no double nesting)
     expect(mockInstallSymlink).toHaveBeenCalled();
     const installOpts = mockInstallSymlink.mock.calls[0][3];
     expect(installOpts.projectRoot).toBe(agentBaseDir);
+
+    cwdSpy.mockRestore();
   });
 
   // TC-016b: --cwd flag uses process.cwd() directly as projectRoot
@@ -2037,33 +2039,36 @@ describe("addCommand project root consistency", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("passes projectRoot to ensureLockfile and writeLockfile in discovery flow", async () => {
-    const projectRoot = "/home/user/my-project";
-    mockFindProjectRoot.mockReturnValue(projectRoot);
+  it("passes cwd to ensureLockfile and writeLockfile in discovery flow", async () => {
+    const cwd = "/home/user/my-project";
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
     mockDiscoverSkills.mockResolvedValue([
       { name: "skill-a", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/o/r/main/SKILL.md" },
     ]);
 
     await addCommand("owner/repo", {});
 
-    // Lockfile calls must receive projectRoot as dir argument
-    expect(mockEnsureLockfile).toHaveBeenCalledWith(projectRoot);
-    expect(mockWriteLockfile).toHaveBeenCalledWith(expect.anything(), projectRoot);
+    expect(mockEnsureLockfile).toHaveBeenCalledWith(cwd);
+    expect(mockWriteLockfile).toHaveBeenCalledWith(expect.anything(), cwd);
+
+    cwdSpy.mockRestore();
   });
 
-  it("passes projectRoot to ensureLockfile and writeLockfile in single-skill legacy flow", async () => {
-    const projectRoot = "/home/user/my-project";
-    mockFindProjectRoot.mockReturnValue(projectRoot);
+  it("passes cwd to ensureLockfile and writeLockfile in single-skill legacy flow", async () => {
+    const cwd = "/home/user/my-project";
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
 
     await addCommand("owner/repo/my-skill", {});
 
-    expect(mockEnsureLockfile).toHaveBeenCalledWith(projectRoot);
-    expect(mockWriteLockfile).toHaveBeenCalledWith(expect.anything(), projectRoot);
+    expect(mockEnsureLockfile).toHaveBeenCalledWith(cwd);
+    expect(mockWriteLockfile).toHaveBeenCalledWith(expect.anything(), cwd);
+
+    cwdSpy.mockRestore();
   });
 
-  it("passes projectRoot to ensureLockfile and writeLockfile in registry flow with content", async () => {
-    const projectRoot = "/home/user/my-project";
-    mockFindProjectRoot.mockReturnValue(projectRoot);
+  it("passes cwd to ensureLockfile and writeLockfile in registry flow with content", async () => {
+    const cwd = "/home/user/my-project";
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
     mockGetSkill.mockResolvedValue({
       name: "my-skill",
       author: "alice",
@@ -2075,26 +2080,28 @@ describe("addCommand project root consistency", () => {
 
     await addCommand("my-skill", {});
 
-    expect(mockEnsureLockfile).toHaveBeenCalledWith(projectRoot);
-    expect(mockWriteLockfile).toHaveBeenCalledWith(expect.anything(), projectRoot);
+    expect(mockEnsureLockfile).toHaveBeenCalledWith(cwd);
+    expect(mockWriteLockfile).toHaveBeenCalledWith(expect.anything(), cwd);
+
+    cwdSpy.mockRestore();
   });
 
-  it("canonical installer and lockfile both use same projectRoot in discovery flow", async () => {
-    const projectRoot = "/home/user/deep/project";
-    mockFindProjectRoot.mockReturnValue(projectRoot);
+  it("canonical installer and lockfile both use same cwd in discovery flow", async () => {
+    const cwd = "/home/user/deep/project";
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
     mockDiscoverSkills.mockResolvedValue([
       { name: "alpha", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/o/r/main/SKILL.md" },
     ]);
 
     await addCommand("owner/repo", {});
 
-    // Canonical installer receives same projectRoot
     expect(mockInstallSymlink).toHaveBeenCalled();
     const installOpts = mockInstallSymlink.mock.calls[0][3];
-    expect(installOpts.projectRoot).toBe(projectRoot);
+    expect(installOpts.projectRoot).toBe(cwd);
 
-    // Lockfile also receives same projectRoot
-    expect(mockEnsureLockfile).toHaveBeenCalledWith(projectRoot);
+    expect(mockEnsureLockfile).toHaveBeenCalledWith(cwd);
+
+    cwdSpy.mockRestore();
   });
 
   it("uses ~/.agents/ for lockfile when global scope is selected", async () => {

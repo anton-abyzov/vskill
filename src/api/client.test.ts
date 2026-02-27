@@ -356,9 +356,21 @@ describe("reportInstall", () => {
         method: "POST",
         headers: expect.objectContaining({
           "User-Agent": "vskill-cli",
+          "Content-Type": "application/json",
         }),
+        body: JSON.stringify({}),
       }),
     );
+  });
+
+  it("sends repoUrl in body when provided", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
+
+    await reportInstall("architect", "anton-abyzov/specweave");
+
+    const callArgs = mockFetch.mock.calls[0];
+    const body = JSON.parse(callArgs[1].body);
+    expect(body.repoUrl).toBe("anton-abyzov/specweave");
   });
 
   it("encodes special characters in skill name", async () => {

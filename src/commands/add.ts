@@ -325,9 +325,10 @@ async function installMarketplaceRepo(
   }
   writeLockfile(lockForWrite, lockDir);
 
-  // Telemetry (fire-and-forget)
+  // Telemetry (fire-and-forget) — pass repoUrl for server-side fallback matching
+  const repoUrl = `${owner}/${repo}`;
   for (const r of results) {
-    if (r.installed) reportInstall(r.name).catch(() => {});
+    if (r.installed) reportInstall(r.name, repoUrl).catch(() => {});
   }
 
   // Summary
@@ -982,6 +983,7 @@ async function installPluginDir(
   console.log(dim(`\nSHA: ${sha} | Version: ${version}`));
 
   // Report individual skill installs (fire-and-forget)
+  // Note: no repoUrl for local plugin installs — server uses name-only matching
   try {
     const skillDirs = readdirSync(pluginDir, { withFileTypes: true })
       .filter((d) => d.isDirectory() && existsSync(join(pluginDir, d.name, "SKILL.md")));
@@ -1408,7 +1410,7 @@ async function installRepoPlugin(
   }
 
   // Report individual skill installs (fire-and-forget)
-  for (const skill of skills) reportInstall(skill.name).catch(() => {});
+  for (const skill of skills) reportInstall(skill.name, ownerRepo).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -1633,7 +1635,7 @@ export async function addCommand(
       ? dim(`(${r.verdict}${scoreTag})`)
       : red(`(${r.verdict}${scoreTag})`);
     console.log(`  ${icon} ${r.skillName} ${detail}`);
-    if (r.installed) reportInstall(r.skillName).catch(() => {});
+    if (r.installed) reportInstall(r.skillName, `${owner}/${repo}`).catch(() => {});
   }
   const forceRecoverable = results.some(
     (r) => !r.installed && ["FAIL", "CONCERNS", "BLOCKED", "REJECTED", "SECURITY_FAIL"].includes(r.verdict),
@@ -1853,7 +1855,7 @@ async function installFromRegistry(
     console.log(`  ${dim(">")} ${loc}`);
   }
   console.log(dim(`\nSHA: ${sha} | Version: ${detail.version || "0.0.0"}`));
-  reportInstall(detail.name || skillName).catch(() => {});
+  reportInstall(detail.name || skillName, detail.repoUrl).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -2014,7 +2016,7 @@ async function installSingleSkillLegacy(
   writeLockfile(lock, lockDir);
 
   // Phone home (fire-and-forget)
-  reportInstall(skillName).catch(() => {});
+  reportInstall(skillName, `${owner}/${repo}`).catch(() => {});
 
   // Print summary
   const method = opts.copy ? "copied" : "symlinked";

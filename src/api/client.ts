@@ -165,8 +165,14 @@ export async function getSubmission(
  * Report a skill install to the platform (fire-and-forget).
  * Respects VSKILL_NO_TELEMETRY=1 env var for opt-out.
  * Never throws — all errors are silently swallowed.
+ *
+ * @param skillName - The skill name to report (e.g., "architect")
+ * @param repoUrl - Optional repo URL for fallback matching on the server
  */
-export async function reportInstall(skillName: string): Promise<void> {
+export async function reportInstall(
+  skillName: string,
+  repoUrl?: string,
+): Promise<void> {
   try {
     if (process.env.VSKILL_NO_TELEMETRY === "1") return;
 
@@ -178,7 +184,13 @@ export async function reportInstall(skillName: string): Promise<void> {
         `${BASE_URL}/api/v1/skills/${encodeURIComponent(skillName)}/installs`,
         {
           method: "POST",
-          headers: { "User-Agent": "vskill-cli" },
+          headers: {
+            "User-Agent": "vskill-cli",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ...(repoUrl ? { repoUrl } : {}),
+          }),
           signal: controller.signal,
         },
       );

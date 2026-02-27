@@ -206,8 +206,88 @@
       "tier": "VERIFIED",
       "installedAt": "2026-02-25T06:48:32.256Z",
       "source": "github:coreyhaines31/marketingskills"
+    },
+    "sw": {
+      "version": "1.0.323",
+      "sha": "",
+      "tier": "VERIFIED",
+      "installedAt": "2026-02-27T19:36:15.033Z",
+      "source": "marketplace:anton-abyzov/specweave#sw",
+      "marketplace": "specweave",
+      "pluginDir": true,
+      "scope": "project"
+    },
+    "sw-github": {
+      "version": "1.0.0",
+      "sha": "",
+      "tier": "VERIFIED",
+      "installedAt": "2026-02-27T19:36:15.033Z",
+      "source": "marketplace:anton-abyzov/specweave#sw-github",
+      "marketplace": "specweave",
+      "pluginDir": true,
+      "scope": "project"
+    },
+    "sw-jira": {
+      "version": "1.0.0",
+      "sha": "",
+      "tier": "VERIFIED",
+      "installedAt": "2026-02-27T19:36:15.033Z",
+      "source": "marketplace:anton-abyzov/specweave#sw-jira",
+      "marketplace": "specweave",
+      "pluginDir": true,
+      "scope": "project"
+    },
+    "sw-ado": {
+      "version": "1.0.0",
+      "sha": "",
+      "tier": "VERIFIED",
+      "installedAt": "2026-02-27T19:36:15.033Z",
+      "source": "marketplace:anton-abyzov/specweave#sw-ado",
+      "marketplace": "specweave",
+      "pluginDir": true,
+      "scope": "project"
+    },
+    "sw-release": {
+      "version": "1.0.0",
+      "sha": "",
+      "tier": "VERIFIED",
+      "installedAt": "2026-02-27T19:36:15.033Z",
+      "source": "marketplace:anton-abyzov/specweave#sw-release",
+      "marketplace": "specweave",
+      "pluginDir": true,
+      "scope": "project"
+    },
+    "sw-diagrams": {
+      "version": "1.0.0",
+      "sha": "",
+      "tier": "VERIFIED",
+      "installedAt": "2026-02-27T19:36:15.033Z",
+      "source": "marketplace:anton-abyzov/specweave#sw-diagrams",
+      "marketplace": "specweave",
+      "pluginDir": true,
+      "scope": "project"
+    },
+    "docs": {
+      "version": "1.0.0",
+      "sha": "",
+      "tier": "VERIFIED",
+      "installedAt": "2026-02-27T19:36:15.033Z",
+      "source": "marketplace:anton-abyzov/specweave#docs",
+      "marketplace": "specweave",
+      "pluginDir": true,
+      "scope": "project"
+    },
+    "sw-media": {
+      "version": "1.0.0",
+      "sha": "",
+      "tier": "VERIFIED",
+      "installedAt": "2026-02-27T19:36:15.033Z",
+      "source": "marketplace:anton-abyzov/specweave#sw-media",
+      "marketplace": "specweave",
+      "pluginDir": true,
+      "scope": "project"
     }
   },
   "createdAt": "2026-02-25T06:38:01.595Z",
-  "updatedAt": "2026-02-25T06:48:32.256Z"
+  "updatedAt": "2026-02-27T19:36:15.033Z"
 }

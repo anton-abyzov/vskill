@@ -653,6 +653,42 @@ function isInsideMarkdownLink(line: string, matchIndex: number): boolean {
   return line.indexOf(")", matchIndex) !== -1;
 }
 
+// ---- Markdown inline code detection ----------------------------------------
+// Detect if a regex match falls inside markdown inline code (backticks).
+// Inline code in SKILL.md is referential — it names functions/commands, not
+// invokes them. Example: `eval()` in "Watch for: `eval()`, `exec()`".
+
+/**
+ * Returns true if the match at [matchStart, matchEnd) falls inside a
+ * markdown inline code span (single or double backtick delimiters).
+ * Fenced code block markers (```) are ignored — handled separately.
+ */
+function isInsideInlineCode(line: string, matchStart: number, matchEnd: number): boolean {
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] !== "`") { i++; continue; }
+
+    // Count opening backticks
+    let openLen = 0;
+    while (i + openLen < line.length && line[i + openLen] === "`") openLen++;
+    // Skip fenced code block markers (3+ backticks)
+    if (openLen >= 3) { i += openLen; continue; }
+
+    const contentStart = i + openLen;
+    const closer = "`".repeat(openLen);
+
+    // Find matching closing backtick(s)
+    const closeIdx = line.indexOf(closer, contentStart);
+    if (closeIdx === -1) { i = contentStart; continue; }
+
+    // Check if match falls within this inline code span
+    if (matchStart >= contentStart && matchEnd <= closeIdx) return true;
+
+    i = closeIdx + openLen;
+  }
+  return false;
+}
+
 // ---- Scanner function -----------------------------------------------------
 
 /**
@@ -708,6 +744,12 @@ export function scanContent(content: string): ScanFinding[] {
 
         // Downgrade documentation-safe patterns inside fenced code blocks
         if (DOCUMENTATION_SAFE_PATTERNS.has(pattern.id) && fencedLines.has(lineIdx)) {
+          severity = "info";
+        }
+
+        // Downgrade non-DCI patterns inside markdown inline code to info.
+        // Inline code references (e.g., `eval()`) are educational, not invocations.
+        if (pattern.category !== "dci-abuse" && isInsideInlineCode(line, match.index, match.index + match[0].length)) {
           severity = "info";
         }
 

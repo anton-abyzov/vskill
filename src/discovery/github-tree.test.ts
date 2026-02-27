@@ -3,7 +3,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // ---------------------------------------------------------------------------
 // Import module under test
 // ---------------------------------------------------------------------------
-import { discoverSkills, extractDescription, getDefaultBranch, _resetBranchCache } from "./github-tree.js";
+import {
+  discoverSkills,
+  extractDescription,
+  getDefaultBranch,
+  _resetBranchCache,
+  warnRateLimitOnce,
+  _resetRateLimitWarned,
+} from "./github-tree.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -315,5 +322,134 @@ describe("getDefaultBranch", () => {
     expect(second).toBe("master");
     // Only one fetch call — second was served from cache
     expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// warnRateLimitOnce
+// ---------------------------------------------------------------------------
+
+describe("warnRateLimitOnce", () => {
+  afterEach(() => {
+    _resetRateLimitWarned();
+  });
+
+  // TC-001: prints warning on 403 with x-ratelimit-remaining: 0
+  it("prints warning on 403 with x-ratelimit-remaining: 0", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = {
+      status: 403,
+      headers: new Headers({ "x-ratelimit-remaining": "0" }),
+    } as unknown as Response;
+
+    warnRateLimitOnce(res);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0][0]).toContain("rate limit");
+    spy.mockRestore();
+  });
+
+  // TC-002: does not print on 403 without rate-limit header
+  it("does not print on 403 without rate-limit header", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = {
+      status: 403,
+      headers: new Headers(),
+    } as unknown as Response;
+
+    warnRateLimitOnce(res);
+
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  // TC-003: prints warning only once across multiple calls
+  it("prints warning only once across multiple calls", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = {
+      status: 403,
+      headers: new Headers({ "x-ratelimit-remaining": "0" }),
+    } as unknown as Response;
+
+    warnRateLimitOnce(res);
+    warnRateLimitOnce(res);
+    warnRateLimitOnce(res);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  // TC-004: _resetRateLimitWarned allows re-warning
+  it("_resetRateLimitWarned allows re-warning", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = {
+      status: 403,
+      headers: new Headers({ "x-ratelimit-remaining": "0" }),
+    } as unknown as Response;
+
+    warnRateLimitOnce(res);
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    _resetRateLimitWarned();
+    warnRateLimitOnce(res);
+    expect(spy).toHaveBeenCalledTimes(2);
+    spy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Discovery scope guard
+// ---------------------------------------------------------------------------
+
+describe("discovery scope guard", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    _resetBranchCache();
+  });
+
+  // TC-024: plugins/foo/SKILL.md not matched by discovery
+  it("plugins/foo/SKILL.md not matched by discovery", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse(["plugins/foo/SKILL.md", "README.md"]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+
+    expect(result).toEqual([]);
+  });
+
+  // TC-025: plugins/specweave/skills/pm/SKILL.md not matched
+  it("plugins/specweave/skills/pm/SKILL.md not matched", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse(["plugins/specweave/skills/pm/SKILL.md", "README.md"]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+
+    expect(result).toEqual([]);
+  });
+
+  // TC-026: skills/pm/SKILL.md IS matched (positive control)
+  it("skills/pm/SKILL.md IS matched (positive control)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse(["skills/pm/SKILL.md", "README.md"]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      name: "pm",
+      path: "skills/pm/SKILL.md",
+      rawUrl: "https://raw.githubusercontent.com/owner/repo/main/skills/pm/SKILL.md",
+    });
   });
 });

@@ -2,6 +2,33 @@
 // GitHub Trees API skill discovery
 // ---------------------------------------------------------------------------
 
+import { yellow } from "../utils/output.js";
+
+// ---- Rate-limit warning (deduplicated per CLI invocation) -----------------
+
+let rateLimitWarned = false;
+
+/** @internal Reset flag — for testing only */
+export function _resetRateLimitWarned(): void {
+  rateLimitWarned = false;
+}
+
+/**
+ * Print a yellow warning when a GitHub API response indicates rate limiting.
+ * Only prints once per CLI invocation to avoid noise.
+ */
+export function warnRateLimitOnce(res: Response): void {
+  if (rateLimitWarned) return;
+  if (res.status !== 403) return;
+  if (res.headers.get("x-ratelimit-remaining") !== "0") return;
+  rateLimitWarned = true;
+  console.error(
+    yellow("GitHub API rate limit reached. Set GITHUB_TOKEN for higher limits."),
+  );
+}
+
+// ---- Branch cache ---------------------------------------------------------
+
 /**
  * Fetch the default branch for a GitHub repo. Falls back to "main" on error.
  * Results are cached per owner/repo for the lifetime of the process.
@@ -104,7 +131,10 @@ export async function discoverSkills(
     const res = await fetch(url, {
       headers: { Accept: "application/vnd.github.v3+json" },
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      warnRateLimitOnce(res);
+      return [];
+    }
     const data = (await res.json()) as { tree?: unknown };
     if (!Array.isArray(data?.tree)) return [];
     tree = data.tree as Array<{ path: string; type: string }>;
@@ -128,6 +158,7 @@ export async function discoverSkills(
     }
 
     // skills/{name}/SKILL.md (exactly one directory deep)
+    // IMPORTANT: Only match skills/ directory. Never plugins/ — those are handled by installRepoPlugin.
     const match = entry.path.match(/^skills\/([^/]+)\/SKILL\.md$/);
     if (match) {
       const skillName = match[1];

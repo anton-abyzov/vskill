@@ -9,6 +9,7 @@ const {
   getPluginSource,
   getPluginVersion,
   getMarketplaceName,
+  hasPlugin,
 } = await import("./index.js");
 
 // ---------------------------------------------------------------------------
@@ -149,6 +150,25 @@ describe("marketplace.json parser", () => {
 
     it("returns null when name field is empty string", () => {
       expect(getMarketplaceName('{"name": "", "plugins": []}')).toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // hasPlugin
+  // ---------------------------------------------------------------------------
+  describe("hasPlugin", () => {
+    it("returns true when plugin exists in manifest", () => {
+      const content = makeMarketplaceJson();
+      expect(hasPlugin("sw", content)).toBe(true);
+    });
+
+    it("returns false when plugin does not exist", () => {
+      const content = makeMarketplaceJson();
+      expect(hasPlugin("nonexistent", content)).toBe(false);
+    });
+
+    it("returns false for invalid JSON", () => {
+      expect(hasPlugin("sw", "broken json")).toBe(false);
     });
   });
 });

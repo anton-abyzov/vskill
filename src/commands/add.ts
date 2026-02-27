@@ -4,6 +4,7 @@
 
 import {
   mkdirSync,
+  mkdtempSync,
   writeFileSync,
   readFileSync,
   existsSync,
@@ -22,14 +23,14 @@ import { reportInstall } from "../api/client.js";
 import { filterAgents } from "../utils/agent-filter.js";
 import { detectInstalledAgents, AGENTS_REGISTRY } from "../agents/agents-registry.js";
 import type { AgentDefinition } from "../agents/agents-registry.js";
-import { ensureLockfile, writeLockfile } from "../lockfile/index.js";
+import { ensureLockfile, writeLockfile, readLockfile } from "../lockfile/index.js";
 import { runTier1Scan } from "../scanner/index.js";
-import { getAvailablePlugins, getPluginSource, getPluginVersion } from "../marketplace/index.js";
+import { getAvailablePlugins, getPluginSource, getPluginVersion, hasPlugin } from "../marketplace/index.js";
 import { checkInstallSafety } from "../blocklist/blocklist.js";
 import type { BlocklistEntry, RejectionInfo } from "../blocklist/types.js";
 import { getSkill } from "../api/client.js";
 import { checkPlatformSecurity } from "../security/index.js";
-import { discoverSkills, getDefaultBranch } from "../discovery/github-tree.js";
+import { discoverSkills, getDefaultBranch, warnRateLimitOnce } from "../discovery/github-tree.js";
 import { parseGitHubSource, classifyIdentifier } from "../utils/validation.js";
 import {
   parseSkillsShUrl,
@@ -54,6 +55,293 @@ import {
   installNativePlugin,
 } from "../utils/claude-cli.js";
 import { getMarketplaceName } from "../marketplace/index.js";
+
+// ---------------------------------------------------------------------------
+// Marketplace detection — auto-detect Claude Code plugin marketplaces
+// ---------------------------------------------------------------------------
+
+interface MarketplaceDetectionResult {
+  isMarketplace: boolean;
+  manifestContent?: string;
+}
+
+/**
+ * Try to parse marketplace manifest content from a GitHub Contents API response.
+ * Returns the manifest string if valid, or null.
+ */
+function parseManifestFromContentsApi(
+  data: { download_url?: string; content?: string; encoding?: string },
+): Promise<string | null>;
+async function parseManifestFromContentsApi(
+  data: { download_url?: string; content?: string; encoding?: string },
+): Promise<string | null> {
+  // Prefer download_url for raw content
+  if (data.download_url) {
+    const rawRes = await fetch(data.download_url);
+    if (rawRes.ok) {
+      const content = await rawRes.text();
+      if (getAvailablePlugins(content).length > 0) return content;
+    }
+  }
+  // Fallback: decode base64 content from API response
+  if (data.content && data.encoding === "base64") {
+    const content = Buffer.from(data.content, "base64").toString("utf-8");
+    if (getAvailablePlugins(content).length > 0) return content;
+  }
+  return null;
+}
+
+/**
+ * Check if a GitHub repo contains `.claude-plugin/marketplace.json`.
+ *
+ * Strategy: Contents API → retry once (1s) → raw fallback → give up.
+ * On 404, returns immediately (not a marketplace repo — no retry needed).
+ * On 403 rate limit, warns once and falls through to raw fallback.
+ */
+export async function detectMarketplaceRepo(
+  owner: string,
+  repo: string,
+): Promise<MarketplaceDetectionResult> {
+  const contentsUrl = `https://api.github.com/repos/${owner}/${repo}/contents/.claude-plugin/marketplace.json`;
+  const headers = { Accept: "application/vnd.github.v3+json", "User-Agent": "vskill-cli" };
+
+  // Attempt 1: Contents API
+  try {
+    const res = await fetch(contentsUrl, { headers });
+    if (res.status === 404) return { isMarketplace: false };
+    if (res.status === 403) warnRateLimitOnce(res);
+    if (res.ok) {
+      const data = (await res.json()) as { download_url?: string; content?: string; encoding?: string };
+      const content = await parseManifestFromContentsApi(data);
+      if (content) return { isMarketplace: true, manifestContent: content };
+    }
+  } catch {
+    // network error — continue to retry
+  }
+
+  // Attempt 2: Retry Contents API after 1s delay
+  try {
+    await new Promise((r) => setTimeout(r, 1000));
+    const res = await fetch(contentsUrl, { headers });
+    if (res.status === 404) return { isMarketplace: false };
+    if (res.status === 403) warnRateLimitOnce(res);
+    if (res.ok) {
+      const data = (await res.json()) as { download_url?: string; content?: string; encoding?: string };
+      const content = await parseManifestFromContentsApi(data);
+      if (content) return { isMarketplace: true, manifestContent: content };
+    }
+  } catch {
+    // network error — continue to raw fallback
+  }
+
+  // Attempt 3: Raw fallback (bypasses API rate limits)
+  try {
+    const branch = await getDefaultBranch(owner, repo);
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/.claude-plugin/marketplace.json`;
+    const res = await fetch(rawUrl);
+    if (res.ok) {
+      const content = await res.text();
+      if (getAvailablePlugins(content).length > 0) {
+        return { isMarketplace: true, manifestContent: content };
+      }
+    }
+  } catch {
+    // all attempts exhausted
+  }
+
+  return { isMarketplace: false };
+}
+
+/**
+ * Install plugins from a Claude Code plugin marketplace repo.
+ *
+ * Shows a checkbox list of available plugins (all unchecked by default),
+ * then installs each selected plugin via native `claude plugin` CLI.
+ * Falls back to extraction-based install if Claude CLI is unavailable.
+ */
+async function installMarketplaceRepo(
+  owner: string,
+  repo: string,
+  manifestContent: string,
+  opts: AddOptions,
+  preSelected?: string[],
+): Promise<void> {
+  const plugins = getAvailablePlugins(manifestContent);
+  const marketplaceName = getMarketplaceName(manifestContent);
+
+  if (plugins.length === 0) {
+    console.error(red("No plugins found in marketplace.json"));
+    process.exit(1);
+  }
+
+  console.log(
+    `\n${bold("Claude Code Plugin Marketplace")} detected: ${cyan(`${owner}/${repo}`)}\n` +
+      dim(`Marketplace: ${marketplaceName || "unknown"} — ${plugins.length} plugin${plugins.length === 1 ? "" : "s"} available\n`),
+  );
+
+  // Check lockfile for already-installed plugins
+  const lockDir = lockfileRoot(opts);
+  const lock = readLockfile(lockDir);
+  const installedSet = new Set<string>();
+  if (lock) {
+    for (const [name, entry] of Object.entries(lock.skills)) {
+      if (entry.source?.includes(`${owner}/${repo}`)) {
+        installedSet.add(name);
+      }
+    }
+  }
+
+  // Select plugins
+  let selectedPlugins: typeof plugins;
+
+  if (!isTTY() && !opts.yes && !opts.all) {
+    // Non-TTY: list plugins and exit with guidance
+    console.log("Available plugins:\n");
+    for (const p of plugins) {
+      const installed = installedSet.has(p.name) ? dim(" (installed)") : "";
+      console.log(`  ${bold(p.name)}${installed}${p.description ? dim(` — ${p.description}`) : ""}`);
+    }
+    console.error(red("\nNon-interactive mode. Use --plugin <name> or --yes to select all."));
+    process.exit(1);
+  } else if (opts.yes || opts.all) {
+    if (preSelected && preSelected.length > 0) {
+      const matched = plugins.filter((p) => preSelected.includes(p.name));
+      selectedPlugins = matched.length > 0 ? matched : plugins;
+      if (matched.length > 0) {
+        console.log(dim(`Auto-selecting ${matched.length} plugin${matched.length === 1 ? "" : "s"}: ${matched.map((p) => p.name).join(", ")}`));
+      } else {
+        console.log(dim(`Auto-selecting all ${plugins.length} plugins (--yes/--all)`));
+      }
+    } else {
+      selectedPlugins = plugins;
+      console.log(dim(`Auto-selecting all ${plugins.length} plugins (--yes/--all)`));
+    }
+  } else {
+    const prompter = createPrompter();
+    const indices = await prompter.promptCheckboxList(
+      plugins.map((p) => ({
+        label: p.name + (installedSet.has(p.name) ? dim(" (installed)") : ""),
+        description: p.description,
+        checked: preSelected ? preSelected.includes(p.name) : false,
+      })),
+      { title: "Select plugins to install" },
+    );
+
+    if (indices.length === 0) {
+      console.log(dim("No plugins selected. Aborting."));
+      return;
+    }
+    selectedPlugins = indices.map((i) => plugins[i]);
+  }
+
+  // Attempt native Claude Code install
+  const hasClaude = !opts.copy && isClaudeCliAvailable();
+
+  let tmpDir: string | null = null;
+  let marketplaceRegistered = false;
+
+  if (hasClaude) {
+    // Shallow clone for native install
+    const cloneSpin = spinner(`Cloning ${owner}/${repo}`);
+    try {
+      tmpDir = mkdtempSync(join(os.tmpdir(), "vskill-marketplace-"));
+      execSync(
+        `git clone --depth 1 https://github.com/${owner}/${repo}.git "${tmpDir}"`,
+        { stdio: "ignore", timeout: 60_000 },
+      );
+      cloneSpin.stop();
+
+      // Register marketplace
+      const regSpin = spinner("Registering marketplace with Claude Code");
+      marketplaceRegistered = registerMarketplace(tmpDir);
+      regSpin.stop();
+      if (!marketplaceRegistered) {
+        console.log(yellow("  Failed to register marketplace — will use extraction fallback."));
+      }
+    } catch {
+      cloneSpin.stop();
+      console.log(yellow("  Clone failed — will use extraction fallback."));
+    }
+  }
+
+  // Install each plugin
+  const results: { name: string; installed: boolean; method: string }[] = [];
+
+  for (const plugin of selectedPlugins) {
+    if (hasClaude && marketplaceRegistered && marketplaceName) {
+      // Native install
+      const installSpin = spinner(`Installing ${bold(plugin.name)} via Claude Code plugin system`);
+      const ok = installNativePlugin(plugin.name, marketplaceName);
+      installSpin.stop();
+
+      if (ok) {
+        console.log(green(`  ✓ ${bold(plugin.name)}`) + dim(` (${marketplaceName}:${plugin.name})`));
+        results.push({ name: plugin.name, installed: true, method: "native" });
+      } else {
+        console.log(red(`  ✗ ${bold(plugin.name)}`) + dim(" — native install failed, trying extraction..."));
+        // Fallback to extraction
+        try {
+          await installRepoPlugin(`${owner}/${repo}`, plugin.name, opts);
+          results.push({ name: plugin.name, installed: true, method: "extraction" });
+        } catch {
+          results.push({ name: plugin.name, installed: false, method: "failed" });
+        }
+      }
+    } else {
+      // No Claude CLI — extraction fallback
+      try {
+        await installRepoPlugin(`${owner}/${repo}`, plugin.name, opts);
+        results.push({ name: plugin.name, installed: true, method: "extraction" });
+      } catch (err) {
+        console.error(red(`  ✗ ${plugin.name}: ${(err as Error).message}`));
+        results.push({ name: plugin.name, installed: false, method: "failed" });
+      }
+    }
+  }
+
+  // Cleanup temp directory
+  if (tmpDir) {
+    try {
+      rmSync(tmpDir, { recursive: true, force: true });
+    } catch { /* ignore */ }
+  }
+
+  // Update lockfile
+  const lockForWrite = ensureLockfile(lockDir);
+  for (const r of results) {
+    if (r.installed) {
+      const pluginVersion = getPluginVersion(r.name, manifestContent) || "0.0.0";
+      lockForWrite.skills[r.name] = {
+        version: pluginVersion,
+        sha: "",
+        tier: "VERIFIED",
+        installedAt: new Date().toISOString(),
+        source: `marketplace:${owner}/${repo}#${r.name}`,
+        marketplace: marketplaceName || undefined,
+        pluginDir: true,
+        scope: opts.global ? "user" : "project",
+      };
+    }
+  }
+  writeLockfile(lockForWrite, lockDir);
+
+  // Telemetry (fire-and-forget)
+  for (const r of results) {
+    if (r.installed) reportInstall(r.name).catch(() => {});
+  }
+
+  // Summary
+  const installed = results.filter((r) => r.installed);
+  const failed = results.filter((r) => !r.installed);
+  console.log(
+    `\n${green(bold(`${installed.length} installed`))}` +
+      (failed.length > 0 ? `, ${red(bold(`${failed.length} failed`))}` : "") +
+      ` of ${results.length} plugins`,
+  );
+  if (hasClaude && marketplaceRegistered && marketplaceName) {
+    console.log(dim(`\nManage: claude plugin list | claude plugin uninstall "<plugin>@${marketplaceName}"`));
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Command file filter (prevents plugin internals leaking as slash commands)
@@ -1198,25 +1486,42 @@ export async function addCommand(
   // GitHub mode: owner/repo or owner/repo/skill
   const parts = source.split("/");
 
-  // 3-part format: owner/repo/skill-name → single skill install
+  // 3-part format: owner/repo/skill-name → check marketplace first, then legacy
   if (parts.length === 3) {
     const [threeOwner, threeRepo, threeSkill] = parts;
+    const detection = await detectMarketplaceRepo(threeOwner, threeRepo);
+    if (detection.isMarketplace && detection.manifestContent && hasPlugin(threeSkill, detection.manifestContent)) {
+      return installMarketplaceRepo(threeOwner, threeRepo, detection.manifestContent, opts, [threeSkill]);
+    }
     return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts);
   }
 
   if (parts.length !== 2) {
     // No slash → try registry lookup by skill name
     console.log(
-      yellow("Tip: Prefer owner/repo or owner/repo/skill format for direct GitHub installs.")
+      yellow("Tip: Prefer owner/repo format for direct GitHub installs.")
     );
     return installFromRegistry(source, opts);
   }
 
   const [owner, repo] = parts;
 
-  // --skill flag: single-skill mode (no discovery, backward compat)
+  // --skill flag: check marketplace first, then legacy single-skill mode
   if (opts.skill) {
+    const detection = await detectMarketplaceRepo(owner, repo);
+    if (detection.isMarketplace && detection.manifestContent && hasPlugin(opts.skill, detection.manifestContent)) {
+      return installMarketplaceRepo(owner, repo, detection.manifestContent, opts, [opts.skill]);
+    }
     return installSingleSkillLegacy(owner, repo, opts.skill, opts);
+  }
+
+  // Marketplace detection: check for .claude-plugin/marketplace.json
+  // before running skill discovery (avoids unnecessary API calls)
+  if (!opts.plugin) {
+    const detection = await detectMarketplaceRepo(owner, repo);
+    if (detection.isMarketplace && detection.manifestContent) {
+      return installMarketplaceRepo(owner, repo, detection.manifestContent, opts);
+    }
   }
 
   // Discovery mode: find all skills in the repo
@@ -1439,7 +1744,10 @@ async function installFromRegistry(
     }
 
     console.log(dim(`Registry has no inline content — installing from GitHub (${ownerRepo})...`));
-    console.log(yellow(`Tip: Next time use: vskill install ${ownerRepo}/${detail.name}`));
+    const tipCmd = detail.pluginName
+      ? `vskill install ${ownerRepo} --plugin ${detail.pluginName}`
+      : `vskill install ${ownerRepo}`;
+    console.log(yellow(`Tip: Next time use: ${tipCmd}`));
     return addCommand(ownerRepo, { ...opts, _targetSkill: detail.name });
   }
 

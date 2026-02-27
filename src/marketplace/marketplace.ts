@@ -82,6 +82,17 @@ export function getPluginVersion(
 }
 
 /**
+ * Check whether a named plugin exists in marketplace.json.
+ *
+ * @param name - Plugin name to check (e.g. "sw")
+ * @param content - Raw JSON string from marketplace.json
+ * @returns true if the plugin exists
+ */
+export function hasPlugin(name: string, content: string): boolean {
+  return getPluginSource(name, content) !== null;
+}
+
+/**
  * Get the marketplace name (top-level "name" field) from marketplace.json.
  * Used as the marketplace identifier in `claude plugin install <plugin>@<marketplace>`.
  *

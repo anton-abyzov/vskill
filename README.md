@@ -1,226 +1,292 @@
+<p align="center">
+  <img src="https://img.shields.io/npm/v/vskill?color=cb3837&label=npm&logo=npm" alt="npm version" />
+  <img src="https://img.shields.io/npm/dw/vskill?color=cb3837&logo=npm" alt="npm downloads" />
+  <img src="https://img.shields.io/badge/agents-49_platforms-blue?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2Ij48cGF0aCBmaWxsPSJ3aGl0ZSIgZD0iTTggMWE3IDcgMCAxIDAgMCAxNEE3IDcgMCAwIDAgOCAxem0wIDEyLjVhNS41IDUuNSAwIDEgMSAwLTExIDUuNSA1LjUgMCAwIDEgMCAxMXoiLz48L3N2Zz4=" alt="49 agent platforms" />
+  <img src="https://img.shields.io/badge/plugins-12_domains-8B5CF6" alt="12 plugins" />
+  <img src="https://img.shields.io/badge/skills-41_experts-10B981" alt="41 skills" />
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license" />
+  <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen?logo=node.js" alt="Node.js >= 20" />
+</p>
+
 # vskill
 
 **Secure multi-platform AI skill installer.** Scan before you install.
 
+> **36.82% of AI skills have security flaws** ([Snyk ToxicSkills](https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub/)). Zero versioning on major platforms means updates can inject malware silently. vskill fixes this with **three-tier verification**, **version-pinned trust**, and a **blocklist** of known-malicious skills.
+
 ```bash
 npx vskill install remotion-dev/skills                           # all skills from a repo
-npx vskill install remotion-dev/skills/remotion-best-practices   # specific skill (3-part)
+npx vskill install remotion-dev/skills/remotion-best-practices   # specific skill
 npx vskill install remotion-best-practices                       # registry lookup
 ```
 
-## Claude Code Plugin Marketplace
+---
 
-This repo is a **Claude Code plugin marketplace** — 75 expert skills across 15 domain plugins for frontend, backend, infra, ML, mobile, testing, and more. Install only the plugins you need.
+## Key Features
 
-### Install
+| | Feature | Description |
+|---|---------|-------------|
+| **Security** | Three-tier verification | Pattern scanning + LLM intent analysis + manual review |
+| **Security** | Blocklist protection | Known-malicious skills blocked by default |
+| **Security** | Version pinning | SHA-locked `vskill.lock` — diff scanning on every update |
+| **Reach** | 49 agent platforms | Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Amp, Cline, and 42 more |
+| **Ecosystem** | Plugin marketplace | 41 expert skills across 12 domain plugins |
+| **Ecosystem** | Registry integration | Browse and install from [verified-skill.com](https://verified-skill.com) |
+| **DX** | Interactive prompts | Agent selection, scope, method — or `--yes` for CI |
+| **DX** | Deduplication | Detects and prevents duplicate skill installations |
 
-```bash
-# Install a specific plugin (recommended)
-npx vskill install --repo anton-abyzov/vskill --plugin frontend
+---
 
-# Install multiple plugins
-npx vskill install --repo anton-abyzov/vskill --plugin backend
-npx vskill install --repo anton-abyzov/vskill --plugin testing
-
-# From a local clone
-git clone https://github.com/anton-abyzov/vskill.git
-npx vskill install --plugin-dir ./vskill --plugin frontend
-```
-
-### Prefix
-
-Each plugin has its own namespace. Skills are invoked as `plugin:skill`:
-
-```
-/frontend:nextjs
-/backend:nodejs
-/ml:rag
-/testing:e2e
-/skills:scout
-```
-
-When installed as **standalone skills** (without the plugin), no prefix:
-
-```
-/nextjs
-/nodejs
-/rag
-```
-
-### Plugins (15) & Skills (75)
-
-| Plugin | Skills |
-|--------|--------|
-| frontend | `frontend-core`, `architect`, `design`, `design-system`, `nextjs`, `figma`, `code-explorer`, `i18n` |
-| backend | `nodejs`, `python`, `dotnet`, `go`, `rust`, `java-spring`, `graphql`, `db-optimizer` |
-| infra | `terraform`, `aws`, `azure`, `gcp`, `github-actions`, `devops`, `devsecops`, `secrets`, `observability`, `opentelemetry` |
-| mobile | `react-native`, `expo`, `flutter`, `swiftui`, `jetpack`, `capacitor`, `deep-linking`, `testing`, `appstore` |
-| ml | `engineer`, `mlops`, `data-scientist`, `fine-tuning`, `rag`, `langchain`, `huggingface`, `edge`, `specialist` |
-| testing | `unit`, `e2e`, `performance`, `accessibility`, `mutation`, `qa` |
-| k8s | `manifests`, `helm`, `gitops`, `security` |
-| payments | `payment-core`, `billing`, `pci` |
-| cost | `cloud-pricing`, `optimization`, `aws` |
-| kafka | `architect`, `ops`, `streams-topology`, `n8n` |
-| confluent | `kafka-connect`, `ksqldb`, `schema-registry` |
-| docs | `docusaurus`, `technical-writing`, `brainstorming` |
-| security | `security-core`, `patterns`, `simplifier` |
-| skills | `scout` |
-| blockchain | `blockchain-core` |
-
-## Why?
-
-- **36.82% of AI skills have security flaws** ([Snyk ToxicSkills](https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub/))
-- Zero versioning on major platforms — updates can inject malware silently
-- No pre-install scanning — you're trusting blindly
-
-vskill fixes this with **three-tier verification** and **version-pinned trust**.
-
-## Install Formats
-
-### 1. All skills from a repo
+## Quick Start
 
 ```bash
+# Install globally
+npm install -g vskill
+
+# Or use directly with npx
+npx vskill install <source>
+```
+
+### Install a Skill
+
+```bash
+# From any GitHub repo
+vskill install remotion-dev/skills/remotion-best-practices
+
+# From the registry
+vskill install remotion-best-practices
+
+# Browse a repo and pick skills interactively
 vskill install remotion-dev/skills
 ```
 
-Discovers all SKILL.md files in the repo via GitHub Trees API. You'll be prompted to select which skills to install.
-
-### 2. Specific skill (3-part format)
+### Install a Plugin (Claude Code)
 
 ```bash
-vskill install remotion-dev/skills/remotion-best-practices
+# Install a domain plugin
+npx vskill install --repo anton-abyzov/vskill --plugin frontend
+
+# Install multiple plugins
+npx vskill install --repo anton-abyzov/vskill --plugin mobile
+npx vskill install --repo anton-abyzov/vskill --plugin infra
 ```
 
-Installs a single skill directly. The path maps to `owner/repo/skill-name`, where `skill-name` is the directory containing `SKILL.md`.
+---
 
-### 3. Specific skill (flag format)
+## Plugin Marketplace
 
-```bash
-vskill install remotion-dev/skills --skill remotion-best-practices
+This repo ships a **Claude Code plugin marketplace** — 41 expert skills across 12 domain plugins. Install only the plugins you need.
+
+Each plugin has its own namespace. Skills are invoked as `/plugin:skill`:
+
+```
+/frontend:nextjs      /ml:rag           /mobile:flutter
+/backend:java-spring  /infra:aws        /testing:performance
 ```
 
-Equivalent to the 3-part format above.
+### Plugins & Skills
 
-### 4. Registry lookup
+| Plugin | Skills | Focus |
+|--------|--------|-------|
+| **frontend** | `frontend-core` `design` `figma` `i18n` `nextjs` | React 19, Next.js, design systems, Figma, i18n |
+| **backend** | `java-spring` `rust` | Java Spring Boot, Rust |
+| **infra** | `aws` `azure` `gcp` `github-actions` `devsecops` `opentelemetry` `secrets` | Cloud, CI/CD, observability, secrets |
+| **mobile** | `react-native` `expo` `flutter` `swiftui` `jetpack` `capacitor` `deep-linking` `testing` `appstore` | Cross-platform mobile, native iOS/Android, app store |
+| **ml** | `rag` `langchain` `huggingface` `fine-tuning` `edge` | RAG pipelines, LangChain, Hugging Face, edge ML |
+| **testing** | `performance` `accessibility` `mutation` | Performance, a11y, mutation testing |
+| **kafka** | `streams-topology` `n8n` | Kafka Streams, n8n workflow automation |
+| **confluent** | `kafka-connect` `ksqldb` `schema-registry` | Confluent platform connectors |
+| **payments** | `billing` `pci` | Billing, subscriptions, PCI compliance |
+| **security** | `patterns` | Real-time vulnerability pattern detection |
+| **blockchain** | `blockchain-core` | Solidity, Foundry, smart contract security |
+| **skills** | `scout` | Skill discovery and recommendations |
 
-```bash
-vskill install remotion-best-practices
+---
+
+## Three-Tier Verification
+
+Every skill is scanned before installation. No exceptions.
+
+```
+                ┌─────────────────────────────────────────┐
+                │          THREE-TIER VERIFICATION         │
+                ├─────────────┬─────────────┬─────────────┤
+                │  SCANNED    │  VERIFIED   │  CERTIFIED  │
+                │             │             │             │
+                │  38 pattern │  + LLM      │  + manual   │
+                │  checks     │  intent     │  security   │
+                │             │  analysis   │  review     │
+                │             │             │             │
+                │  Basic      │  Recommended│  Highest    │
+                │  Trust      │             │  Trust      │
+                └─────────────┴─────────────┴─────────────┘
 ```
 
-Looks up the skill in the [verified-skill.com](https://verified-skill.com) registry and installs from the mapped source repo.
+- **Tier 1 — Scanned**: 38 deterministic pattern checks against known attack vectors
+- **Tier 2 — Verified**: Scanner + LLM-based intent analysis for subtle threats
+- **Tier 3 — Certified**: Full manual security review by the vskill team
 
-### 5. Local plugin
+---
 
-```bash
-vskill install . --plugin-dir . --plugin frontend
+## Version Pinning
+
+Every install creates a `vskill.lock` with SHA-256 hash, scan date, and verification tier. When you run `vskill update`, the diff is scanned before applying — new patterns are flagged before they reach your machine.
+
+```json
+{
+  "remotion-best-practices": {
+    "sha": "a1b2c3d4...",
+    "tier": "scanned",
+    "scannedAt": "2026-02-27T10:00:00Z",
+    "source": "remotion-dev/skills"
+  }
+}
 ```
 
-Installs a plugin from a local directory containing `.claude-plugin/marketplace.json`. The `--plugin` flag selects which sub-plugin to install.
+---
 
-### 6. Remote plugin
+## 49 Agent Platforms
 
-```bash
-vskill install . --repo anton-abyzov/vskill --plugin frontend
-```
+Install skills to any AI coding tool. vskill auto-detects installed agents and lets you choose where to install.
 
-Clones a GitHub repo and installs a plugin from it. Combines `--repo` with `--plugin` to target a specific sub-plugin.
+**Terminal agents**: Claude Code, Cursor, GitHub Copilot, Windsurf, Codex, Gemini CLI, Cline, Amp, Roo Code, Kilo, Goose, Aider, Devin, and more
 
-> Replace `vskill` with `npx vskill`, `bunx vskill`, `pnpx vskill`, or `yarn dlx vskill` if not installed globally.
+**IDE agents**: VS Code, JetBrains, Zed, Neovim, Sublime Text, Xcode
 
-## Interactive Prompts
+**Cloud agents**: Replit, Bolt, v0, GPT Pilot
 
-When run in a terminal, vskill prompts you interactively:
-
-- **Agent selection** — checkboxes for detected AI agents (pre-checked). Supports 49 agents with scrolling viewport.
-- **Scope** — Project (`./<agent>/commands/`) or Global (`~/.<agent>/commands/`)
-- **Method** — Symlink (default, saves disk) or Copy (for agents that need it)
-- **Skill selection** — when a repo has multiple skills, pick which ones to install
-- **Claude Code native plugin** — when installing a plugin with Claude Code detected, choose native plugin install (recommended) or skill extraction
-
-All prompts can be skipped with `--yes` (accept defaults) or controlled via flags (`--global`, `--copy`, `--agent`).
+---
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
 | `install <source>` | Install skill after security scan (aliases: `add`, `i`) |
-| `find <query>` | Search the registry (alias: `search`) |
-| `scan <path>` | Scan without installing |
-| `list` | Show installed skills with status |
+| `find <query>` | Search the verified-skill.com registry (alias: `search`) |
+| `scan <path>` | Run security scan without installing |
+| `list` | Show installed skills with verification status |
 | `remove <skill>` | Remove an installed skill |
-| `update [skill]` | Update with diff scanning |
-| `submit <source>` | Submit for verification |
-| `audit [path]` | Security audit with LLM analysis |
-| `info <skill>` | Show skill details |
-| `blocklist` | Manage blocked skills |
+| `update [skill]` | Update with diff scanning (`--all` for everything) |
+| `submit <source>` | Submit a skill for verification |
+| `audit [path]` | Full security audit with LLM analysis |
+| `info <skill>` | Show detailed skill information |
+| `blocklist` | Manage blocked malicious skills |
 | `init` | Initialize vskill in a project |
 
-### Install flags
+### Install Flags
 
 | Flag | Description |
 |------|-------------|
-| `--yes` / `-y` | Accept all defaults, no prompts |
-| `--global` / `-g` | Install to global scope |
+| `--yes` / `-y` | Accept all defaults, skip prompts |
+| `--global` / `-g` | Install to global scope (`~/.<agent>/commands/`) |
 | `--copy` | Copy files instead of symlinking |
 | `--skill <name>` | Select a specific skill from a multi-skill repo |
-| `--plugin <name>` | Select a sub-plugin from a plugin repo |
+| `--plugin <name>` | Install a specific plugin from a marketplace repo |
 | `--plugin-dir <path>` | Use a local directory as plugin source |
 | `--repo <owner/repo>` | Use a remote GitHub repo as plugin source |
 | `--agent <id>` | Target a specific agent (e.g., `--agent cursor`) |
 | `--force` | Install even if blocklisted |
 | `--cwd <path>` | Override project root directory |
+| `--all` | Install all skills from a multi-skill repo |
+
+---
+
+## Install Formats
+
+### GitHub repos
+
+```bash
+# All skills from a repo (interactive selection)
+vskill install remotion-dev/skills
+
+# Specific skill (3-part path)
+vskill install remotion-dev/skills/remotion-best-practices
+
+# Specific skill (flag)
+vskill install remotion-dev/skills --skill remotion-best-practices
+```
+
+### Registry
+
+```bash
+# Lookup by name — resolves via verified-skill.com
+vskill install remotion-best-practices
+```
+
+### Plugins
+
+```bash
+# Remote plugin from GitHub
+vskill install --repo anton-abyzov/vskill --plugin frontend
+
+# Local plugin from cloned directory
+vskill install --plugin-dir ./vskill --plugin frontend
+```
+
+> Works with `npx`, `bunx`, `pnpx`, or `yarn dlx` if not installed globally.
+
+---
 
 ## Skills vs Plugins
 
-**Skills** are single SKILL.md files that work with any AI agent. They follow the [Agent Skills Standard](https://agentskills.io) — a SKILL.md file is placed in the agent's commands directory (e.g., `.claude/commands/`, `.cursor/commands/`).
+**Skills** are single SKILL.md files that work with any AI agent. They follow the [Agent Skills Standard](https://agentskills.io) — a SKILL.md file placed in the agent's commands directory (`.claude/commands/`, `.cursor/commands/`, etc.).
 
-**Plugins** are multi-component containers exclusive to Claude Code. A plugin repo has `.claude-plugin/marketplace.json` listing sub-plugins, each containing skills, hooks, commands, and agents. Plugins enable `plugin-name:skill-name` namespacing, enable/disable support, and marketplace integration.
+**Plugins** are multi-component containers for Claude Code. A plugin repo has `.claude-plugin/marketplace.json` listing sub-plugins, each with skills, hooks, commands, and agents. Plugins enable `plugin:skill` namespacing, enable/disable support, and marketplace integration.
 
-## The Skills Duplication Problem
+---
 
-The skills ecosystem is already fragmented. Skills can be defined in different repos, published through different channels, and there's no single source of truth.
+## The Duplication Problem
 
-Even Anthropic has the same skill defined in two different places:
+The skills ecosystem is fragmented. Even Anthropic has the same skill in two places:
 
-- **As a standalone skill**: [`anthropics/skills`](https://github.com/anthropics/skills/blob/main/skills/frontend-design/SKILL.md)
-- **Inside a plugin**: [`anthropics/claude-code`](https://github.com/anthropics/claude-code/blob/main/plugins/frontend-design/skills/frontend-design/SKILL.md)
+- **Standalone**: [`anthropics/skills`](https://github.com/anthropics/skills/blob/main/skills/frontend-design/SKILL.md)
+- **Bundled in plugin**: [`anthropics/claude-code`](https://github.com/anthropics/claude-code/blob/main/plugins/frontend-design/skills/frontend-design/SKILL.md)
 
-Same `frontend-design` skill, two repos. One is used by installing it as a standalone skill, the other comes bundled in a plugin. If you install both, you get duplicates. If they diverge, you get inconsistencies.
+Same `frontend-design` skill, two repos. Install both and you get duplicates. They diverge and you get inconsistencies. vskill gives you a single install path with version pinning and deduplication, regardless of where the skill is published.
 
-This is one of the reasons vskill exists — to give you a single install path with version pinning and deduplication, regardless of where the skill is published.
+---
 
-## Claude Code Native Plugin Install
+## Security Audit
 
-When vskill detects a plugin repo and Claude Code is among your selected agents, it offers **native plugin install**:
+Scan entire projects for security issues — not just skills:
 
-1. vskill runs its security scan first (always)
-2. Registers the plugin directory as a marketplace: `claude plugin marketplace add <path>`
-3. Installs the plugin natively: `claude plugin install <plugin>@<marketplace>`
+```bash
+# Audit current directory
+vskill audit
 
-**Benefits**: `marketplace:plugin-name` namespacing, `claude plugin enable/disable`, marketplace management.
+# CI-friendly output (SARIF v2.1.0)
+vskill audit --ci --report sarif
 
-Native install is available for local plugins (`--plugin-dir`) only. Remote plugins (`--repo`) fall back to skill extraction. Use `--copy` to skip native install and extract skills individually.
+# Filter by severity
+vskill audit --severity high,critical
+```
 
-## 49 Agent Platforms
-
-Works across Claude Code, Cursor, GitHub Copilot, Windsurf, Codex, Gemini CLI, Cline, Amp, Roo Code, and 40 more — including universal agents (VS Code, JetBrains, Zed, Neovim, Emacs, Sublime Text, Xcode).
-
-## Three-Tier Verification
-
-| Tier | Method | Badge |
-|------|--------|-------|
-| **Scanned** | 38 deterministic pattern checks | Basic Trust |
-| **Verified** | Scanner + LLM intent analysis | Recommended |
-| **Certified** | Full manual security review | Highest Trust |
-
-## Version Pinning
-
-Every install creates a `vskill.lock` with SHA, scan date, and tier. Updates run diff scanning — new patterns flagged before install.
+---
 
 ## Registry
 
-Browse verified skills at [verified-skill.com](https://verified-skill.com).
+Browse verified skills at **[verified-skill.com](https://verified-skill.com)**.
+
+```bash
+# Search from the CLI
+vskill find "react native"
+
+# Get details on a specific skill
+vskill info remotion-best-practices
+```
+
+---
+
+## Contributing
+
+Skills and plugins are welcome. Submit your skill for verification:
+
+```bash
+vskill submit your-org/your-repo/your-skill
+```
+
+---
 
 ## License
 
-MIT
+[MIT](LICENSE)

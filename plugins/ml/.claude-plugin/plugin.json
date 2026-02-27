@@ -1,7 +1,7 @@
 {
   "name": "ml",
-  "description": "Machine learning skills for data science, MLOps, RAG, LangChain, Hugging Face, fine-tuning, and edge ML",
-  "version": "2.1.0",
+  "description": "Machine learning skills for RAG, LangChain, Hugging Face, fine-tuning, and edge ML",
+  "version": "2.2.0",
   "author": {
     "name": "Anton Abyzov",
     "email": "anton.abyzov@gmail.com",
@@ -10,5 +10,5 @@
   "homepage": "https://github.com/anton-abyzov/vskill",
   "repository": "https://github.com/anton-abyzov/vskill",
   "license": "MIT",
-  "keywords": ["machine-learning", "ml", "mlops", "rag", "langchain", "huggingface", "fine-tuning"]
+  "keywords": ["machine-learning", "ml", "rag", "langchain", "huggingface", "fine-tuning", "edge-ml"]
 }

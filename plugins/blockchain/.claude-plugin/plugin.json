@@ -1,7 +1,7 @@
 {
   "name": "blockchain",
   "description": "Blockchain and Web3 development with Solidity, Hardhat, Foundry, and smart contract security",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "author": {
     "name": "Anton Abyzov",
     "email": "anton.abyzov@gmail.com",

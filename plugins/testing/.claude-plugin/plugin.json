@@ -1,7 +1,7 @@
 {
   "name": "testing",
-  "description": "Testing skills for unit tests, E2E, accessibility, performance, mutation testing, and QA",
-  "version": "2.1.0",
+  "description": "Testing skills for accessibility, performance, and mutation testing",
+  "version": "2.2.0",
   "author": {
     "name": "Anton Abyzov",
     "email": "anton.abyzov@gmail.com",
@@ -10,5 +10,5 @@
   "homepage": "https://github.com/anton-abyzov/vskill",
   "repository": "https://github.com/anton-abyzov/vskill",
   "license": "MIT",
-  "keywords": ["testing", "vitest", "jest", "playwright", "e2e", "accessibility", "performance"]
+  "keywords": ["testing", "accessibility", "performance", "mutation", "stryker", "axe-core", "k6"]
 }

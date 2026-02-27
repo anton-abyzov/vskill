@@ -1,7 +1,7 @@
 {
   "name": "backend",
-  "description": "Backend development skills for Node.js, Python, Go, Rust, .NET, Java Spring, GraphQL, and database optimization",
-  "version": "2.1.0",
+  "description": "Backend development skills for Java Spring and Rust",
+  "version": "2.2.0",
   "author": {
     "name": "Anton Abyzov",
     "email": "anton.abyzov@gmail.com",
@@ -10,5 +10,5 @@
   "homepage": "https://github.com/anton-abyzov/vskill",
   "repository": "https://github.com/anton-abyzov/vskill",
   "license": "MIT",
-  "keywords": ["backend", "nodejs", "python", "go", "rust", "dotnet", "java", "graphql"]
+  "keywords": ["backend", "rust", "java", "spring-boot", "axum"]
 }

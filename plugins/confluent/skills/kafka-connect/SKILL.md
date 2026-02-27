@@ -1,76 +1,46 @@
 ---
-description: Kafka Connect integration expert. Covers source and sink connectors, JDBC, Elasticsearch, S3, Debezium CDC, SMT (Single Message Transforms), connector configuration, and data pipeline patterns. Activates for kafka connect, connectors, source connector, sink connector, jdbc connector, debezium, smt, data pipeline, cdc.
+description: "Debezium CDC connector configs (PostgreSQL/MySQL), SMT chain patterns, dead letter queue configuration, and connector error handling."
 ---
 
-# Confluent Kafka Connect Skill
+# Kafka Connect
 
-Expert knowledge of Kafka Connect for building data pipelines with source and sink connectors.
+## Debezium CDC: PostgreSQL
 
-## What I Know
-
-### Connector Types
-
-**Source Connectors** (External System → Kafka):
-- JDBC Source: Databases → Kafka
-- Debezium: CDC (MySQL, PostgreSQL, MongoDB) → Kafka
-- S3 Source: AWS S3 files → Kafka
-- File Source: Local files → Kafka
-
-**Sink Connectors** (Kafka → External System):
-- JDBC Sink: Kafka → Databases
-- Elasticsearch Sink: Kafka → Elasticsearch
-- S3 Sink: Kafka → AWS S3
-- HDFS Sink: Kafka → Hadoop HDFS
-
-**Single Message Transforms (SMTs)**:
-- Field operations: Insert, Mask, Replace, TimestampConverter
-- Routing: RegexRouter, TimestampRouter
-- Filtering: Filter, Predicates
-
-## When to Use This Skill
-
-Activate me when you need help with:
-- Connector setup ("Configure JDBC connector")
-- CDC patterns ("Debezium MySQL CDC")
-- Data pipelines ("Stream database changes to Kafka")
-- SMT transforms ("Mask sensitive fields")
-- Connector troubleshooting ("Connector task failed")
-
-## Common Patterns
-
-### Pattern 1: JDBC Source (Database → Kafka)
-
-**Use Case**: Stream database table changes to Kafka
-
-**Configuration**:
 ```json
 {
-  "name": "jdbc-source-users",
+  "name": "debezium-postgres-cdc",
   "config": {
-    "connector.class": "io.confluent.connect.jdbc.JdbcSourceConnector",
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
     "tasks.max": "1",
-    "connection.url": "jdbc:postgresql://localhost:5432/mydb",
-    "connection.user": "postgres",
-    "connection.password": "password",
-    "mode": "incrementing",
-    "incrementing.column.name": "id",
-    "topic.prefix": "postgres-",
-    "table.whitelist": "users,orders",
-    "poll.interval.ms": "5000"
+    "database.hostname": "localhost",
+    "database.port": "5432",
+    "database.user": "debezium",
+    "database.password": "${file:/secrets/postgres:password}",
+    "database.dbname": "mydb",
+    "topic.prefix": "pg",
+    "schema.include.list": "public",
+    "table.include.list": "public.users,public.orders",
+    "plugin.name": "pgoutput",
+    "slot.name": "debezium_slot",
+    "publication.name": "debezium_pub",
+    "schema.history.internal.kafka.bootstrap.servers": "localhost:9092",
+    "schema.history.internal.kafka.topic": "schema-changes.pg",
+    "snapshot.mode": "initial",
+    "decimal.handling.mode": "string",
+    "heartbeat.interval.ms": "10000"
   }
 }
 ```
 
-**Modes**:
-- `incrementing`: Track by auto-increment ID
-- `timestamp`: Track by timestamp column
-- `timestamp+incrementing`: Both (most reliable)
+Key PostgreSQL settings:
+- `plugin.name`: Use `pgoutput` (native, no extension needed) or `decoderbufs`
+- `slot.name`: Unique replication slot name per connector
+- `publication.name`: PostgreSQL publication for logical replication
+- `snapshot.mode`: `initial` (full snapshot first), `never` (only changes), `when_needed`
+- `heartbeat.interval.ms`: Prevents WAL retention bloat on low-traffic tables
 
-### Pattern 2: Debezium CDC (MySQL → Kafka)
+## Debezium CDC: MySQL
 
-**Use Case**: Capture all database changes (INSERT/UPDATE/DELETE)
-
-**Configuration**:
 ```json
 {
   "name": "debezium-mysql-cdc",
@@ -80,199 +50,56 @@ Activate me when you need help with:
     "database.hostname": "localhost",
     "database.port": "3306",
     "database.user": "debezium",
-    "database.password": "password",
+    "database.password": "${file:/secrets/mysql:password}",
     "database.server.id": "1",
-    "database.server.name": "mysql",
+    "topic.prefix": "mysql",
     "database.include.list": "mydb",
     "table.include.list": "mydb.users,mydb.orders",
     "schema.history.internal.kafka.bootstrap.servers": "localhost:9092",
-    "schema.history.internal.kafka.topic": "schema-changes.mydb"
+    "schema.history.internal.kafka.topic": "schema-changes.mysql"
   }
 }
 ```
 
-**Output Format** (Debezium Envelope):
+### Debezium Envelope Format
+
 ```json
 {
   "before": null,
-  "after": {
-    "id": 1,
-    "name": "John Doe",
-    "email": "john@example.com"
-  },
+  "after": {"id": 1, "name": "John", "email": "john@example.com"},
   "source": {
-    "version": "1.9.0",
-    "connector": "mysql",
-    "name": "mysql",
-    "ts_ms": 1620000000000,
-    "snapshot": "false",
-    "db": "mydb",
-    "table": "users",
-    "server_id": 1,
-    "gtid": null,
-    "file": "mysql-bin.000001",
-    "pos": 12345,
-    "row": 0,
-    "thread": null,
-    "query": null
+    "connector": "mysql", "db": "mydb", "table": "users",
+    "ts_ms": 1620000000000, "file": "mysql-bin.000001", "pos": 12345
   },
-  "op": "c",  // c=CREATE, u=UPDATE, d=DELETE, r=READ
+  "op": "c",  // c=CREATE, u=UPDATE, d=DELETE, r=READ(snapshot)
   "ts_ms": 1620000000000
 }
 ```
 
-### Pattern 3: JDBC Sink (Kafka → Database)
+## SMT (Single Message Transform) Chains
 
-**Use Case**: Write Kafka events to PostgreSQL
+### Mask Sensitive Fields
 
-**Configuration**:
 ```json
 {
-  "name": "jdbc-sink-enriched-orders",
-  "config": {
-    "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
-    "tasks.max": "3",
-    "topics": "enriched-orders",
-    "connection.url": "jdbc:postgresql://localhost:5432/analytics",
-    "connection.user": "postgres",
-    "connection.password": "password",
-    "auto.create": "true",
-    "auto.evolve": "true",
-    "insert.mode": "upsert",
-    "pk.mode": "record_value",
-    "pk.fields": "order_id",
-    "table.name.format": "orders_${topic}"
-  }
+  "transforms": "maskPII",
+  "transforms.maskPII.type": "org.apache.kafka.connect.transforms.MaskField$Value",
+  "transforms.maskPII.fields": "email,phone,ssn"
 }
 ```
 
-**Insert Modes**:
-- `insert`: Append only (fails on duplicate)
-- `update`: Update only (requires PK)
-- `upsert`: INSERT or UPDATE (recommended)
+### Add Processing Timestamp
 
-### Pattern 4: S3 Sink (Kafka → AWS S3)
-
-**Use Case**: Archive Kafka topics to S3
-
-**Configuration**:
 ```json
 {
-  "name": "s3-sink-events",
-  "config": {
-    "connector.class": "io.confluent.connect.s3.S3SinkConnector",
-    "tasks.max": "3",
-    "topics": "user-events,order-events",
-    "s3.region": "us-east-1",
-    "s3.bucket.name": "my-kafka-archive",
-    "s3.part.size": "5242880",
-    "flush.size": "1000",
-    "rotate.interval.ms": "60000",
-    "rotate.schedule.interval.ms": "3600000",
-    "timezone": "UTC",
-    "format.class": "io.confluent.connect.s3.format.json.JsonFormat",
-    "partitioner.class": "io.confluent.connect.storage.partitioner.TimeBasedPartitioner",
-    "path.format": "'year'=YYYY/'month'=MM/'day'=dd/'hour'=HH",
-    "locale": "US",
-    "timestamp.extractor": "Record"
-  }
+  "transforms": "addTimestamp",
+  "transforms.addTimestamp.type": "org.apache.kafka.connect.transforms.InsertField$Value",
+  "transforms.addTimestamp.timestamp.field": "processed_at"
 }
 ```
 
-**Partitioning** (S3 folder structure):
-```
-s3://my-kafka-archive/
-  topics/user-events/year=2025/month=01/day=15/hour=10/
-    user-events+0+0000000000.json
-    user-events+0+0000001000.json
-  topics/order-events/year=2025/month=01/day=15/hour=10/
-    order-events+0+0000000000.json
-```
+### Flatten Nested JSON (for JDBC sink)
 
-### Pattern 5: Elasticsearch Sink (Kafka → Elasticsearch)
-
-**Use Case**: Index Kafka events for search
-
-**Configuration**:
-```json
-{
-  "name": "elasticsearch-sink-logs",
-  "config": {
-    "connector.class": "io.confluent.connect.elasticsearch.ElasticsearchSinkConnector",
-    "tasks.max": "3",
-    "topics": "application-logs",
-    "connection.url": "http://localhost:9200",
-    "connection.username": "elastic",
-    "connection.password": "password",
-    "key.ignore": "true",
-    "schema.ignore": "true",
-    "type.name": "_doc",
-    "index.write.wait_for_active_shards": "1"
-  }
-}
-```
-
-## Single Message Transforms (SMTs)
-
-### Transform 1: Mask Sensitive Fields
-
-**Use Case**: Hide email/phone in Kafka topics
-
-**Configuration**:
-```json
-{
-  "transforms": "maskEmail",
-  "transforms.maskEmail.type": "org.apache.kafka.connect.transforms.MaskField$Value",
-  "transforms.maskEmail.fields": "email,phone"
-}
-```
-
-**Before**:
-```json
-{"id": 1, "name": "John", "email": "john@example.com", "phone": "555-1234"}
-```
-
-**After**:
-```json
-{"id": 1, "name": "John", "email": null, "phone": null}
-```
-
-### Transform 2: Add Timestamp
-
-**Use Case**: Add processing timestamp to all messages
-
-**Configuration**:
-```json
-{
-  "transforms": "insertTimestamp",
-  "transforms.insertTimestamp.type": "org.apache.kafka.connect.transforms.InsertField$Value",
-  "transforms.insertTimestamp.timestamp.field": "processed_at"
-}
-```
-
-### Transform 3: Route by Field Value
-
-**Use Case**: Route high-value orders to separate topic
-
-**Configuration**:
-```json
-{
-  "transforms": "routeByValue",
-  "transforms.routeByValue.type": "org.apache.kafka.connect.transforms.RegexRouter",
-  "transforms.routeByValue.regex": "(.*)",
-  "transforms.routeByValue.replacement": "$1-high-value",
-  "transforms.routeByValue.predicate": "isHighValue",
-  "predicates": "isHighValue",
-  "predicates.isHighValue.type": "org.apache.kafka.connect.transforms.predicates.TopicNameMatches",
-  "predicates.isHighValue.pattern": "orders"
-}
-```
-
-### Transform 4: Flatten Nested JSON
-
-**Use Case**: Flatten nested structures for JDBC sink
-
-**Configuration**:
 ```json
 {
   "transforms": "flatten",
@@ -280,36 +107,73 @@ s3://my-kafka-archive/
   "transforms.flatten.delimiter": "_"
 }
 ```
+Result: `{"user": {"profile": {"name": "John"}}}` becomes `{"user_profile_name": "John"}`
 
-**Before**:
+### Route by Topic with Predicate
+
 ```json
 {
-  "user": {
-    "id": 1,
-    "profile": {
-      "name": "John",
-      "email": "john@example.com"
-    }
-  }
+  "transforms": "routeHighValue",
+  "transforms.routeHighValue.type": "org.apache.kafka.connect.transforms.RegexRouter",
+  "transforms.routeHighValue.regex": "(.*)",
+  "transforms.routeHighValue.replacement": "$1-priority",
+  "transforms.routeHighValue.predicate": "isPriority",
+  "predicates": "isPriority",
+  "predicates.isPriority.type": "org.apache.kafka.connect.transforms.predicates.TopicNameMatches",
+  "predicates.isPriority.pattern": "orders"
 }
 ```
 
-**After**:
+### Chaining Multiple SMTs
+
 ```json
 {
-  "user_id": 1,
-  "user_profile_name": "John",
-  "user_profile_email": "john@example.com"
+  "transforms": "maskPII,addTimestamp,flatten",
+  "transforms.maskPII.type": "org.apache.kafka.connect.transforms.MaskField$Value",
+  "transforms.maskPII.fields": "email,phone",
+  "transforms.addTimestamp.type": "org.apache.kafka.connect.transforms.InsertField$Value",
+  "transforms.addTimestamp.timestamp.field": "processed_at",
+  "transforms.flatten.type": "org.apache.kafka.connect.transforms.Flatten$Value",
+  "transforms.flatten.delimiter": "_"
 }
 ```
 
-## Best Practices
+## Dead Letter Queue Configuration
 
-### 1. Use Idempotent Connectors
-
-✅ **DO**:
 ```json
-// JDBC Sink with upsert mode
+{
+  "errors.tolerance": "all",
+  "errors.log.enable": "true",
+  "errors.log.include.messages": "true",
+  "errors.deadletterqueue.topic.name": "dlq-connector-name",
+  "errors.deadletterqueue.topic.replication.factor": "3",
+  "errors.deadletterqueue.context.headers.enable": "true"
+}
+```
+
+Headers added to DLQ messages:
+- `__connect.errors.topic` - original topic
+- `__connect.errors.partition` - original partition
+- `__connect.errors.offset` - original offset
+- `__connect.errors.exception.class` - error class
+- `__connect.errors.exception.message` - error message
+
+## Converter Configuration (Schema Registry)
+
+```json
+{
+  "key.converter": "io.confluent.connect.avro.AvroConverter",
+  "key.converter.schema.registry.url": "http://schema-registry:8081",
+  "value.converter": "io.confluent.connect.avro.AvroConverter",
+  "value.converter.schema.registry.url": "http://schema-registry:8081"
+}
+```
+
+## Connector Idempotency
+
+Always use upsert mode for sink connectors to handle restarts:
+
+```json
 {
   "insert.mode": "upsert",
   "pk.mode": "record_value",
@@ -317,136 +181,4 @@ s3://my-kafka-archive/
 }
 ```
 
-❌ **DON'T**:
-```json
-// WRONG: insert mode (duplicates on restart!)
-{
-  "insert.mode": "insert"
-}
-```
-
-### 2. Monitor Connector Status
-
-```bash
-# Check connector status
-curl http://localhost:8083/connectors/jdbc-source-users/status
-
-# Check task status
-curl http://localhost:8083/connectors/jdbc-source-users/tasks/0/status
-```
-
-### 3. Use Schema Registry
-
-✅ **DO**:
-```json
-{
-  "value.converter": "io.confluent.connect.avro.AvroConverter",
-  "value.converter.schema.registry.url": "http://localhost:8081"
-}
-```
-
-### 4. Configure Error Handling
-
-```json
-{
-  "errors.tolerance": "all",
-  "errors.log.enable": "true",
-  "errors.log.include.messages": "true",
-  "errors.deadletterqueue.topic.name": "dlq-jdbc-sink",
-  "errors.deadletterqueue.context.headers.enable": "true"
-}
-```
-
-## Connector Management
-
-### Deploy Connector
-
-```bash
-# Create connector via REST API
-curl -X POST http://localhost:8083/connectors \
-  -H "Content-Type: application/json" \
-  -d @jdbc-source.json
-
-# Update connector
-curl -X PUT http://localhost:8083/connectors/jdbc-source-users/config \
-  -H "Content-Type: application/json" \
-  -d @jdbc-source.json
-```
-
-### Monitor Connectors
-
-```bash
-# List all connectors
-curl http://localhost:8083/connectors
-
-# Get connector info
-curl http://localhost:8083/connectors/jdbc-source-users
-
-# Get connector status
-curl http://localhost:8083/connectors/jdbc-source-users/status
-
-# Get connector tasks
-curl http://localhost:8083/connectors/jdbc-source-users/tasks
-```
-
-### Pause/Resume Connectors
-
-```bash
-# Pause connector
-curl -X PUT http://localhost:8083/connectors/jdbc-source-users/pause
-
-# Resume connector
-curl -X PUT http://localhost:8083/connectors/jdbc-source-users/resume
-
-# Restart connector
-curl -X POST http://localhost:8083/connectors/jdbc-source-users/restart
-
-# Restart task
-curl -X POST http://localhost:8083/connectors/jdbc-source-users/tasks/0/restart
-```
-
-## Common Issues & Solutions
-
-### Issue 1: Connector Task Failed
-
-**Symptoms**: Task state = FAILED
-
-**Solutions**:
-1. Check connector logs: `docker logs connect-worker`
-2. Validate configuration: `curl http://localhost:8083/connector-plugins/<class>/config/validate`
-3. Restart task: `curl -X POST .../tasks/0/restart`
-
-### Issue 2: Schema Evolution Error
-
-**Error**: `Incompatible schema detected`
-
-**Solution**: Enable auto-evolution:
-```json
-{
-  "auto.create": "true",
-  "auto.evolve": "true"
-}
-```
-
-### Issue 3: JDBC Connection Pool Exhausted
-
-**Error**: `Could not get JDBC connection`
-
-**Solution**: Increase pool size:
-```json
-{
-  "connection.attempts": "3",
-  "connection.backoff.ms": "10000"
-}
-```
-
-## References
-
-- Kafka Connect Documentation: https://kafka.apache.org/documentation/#connect
-- Confluent Hub: https://www.confluent.io/hub/
-- Debezium Documentation: https://debezium.io/documentation/
-- Transform Reference: https://kafka.apache.org/documentation/#connect_transforms
-
----
-
-**Invoke me when you need Kafka Connect, connectors, CDC, or data pipeline expertise!**
+Never use `"insert.mode": "insert"` -- causes duplicates on restart.

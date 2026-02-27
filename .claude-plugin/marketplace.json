@@ -8,112 +8,91 @@
   "plugins": [
     {
       "name": "frontend",
-      "description": "Frontend development — React, Vue, Angular, Next.js, design systems, i18n, Figma",
+      "description": "Frontend development — React 19, Next.js, design, Figma, i18n",
       "source": "./plugins/frontend",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "development"
     },
     {
       "name": "backend",
-      "description": "Backend development — Node.js, Python, Go, Rust, .NET, Java Spring, GraphQL, DB optimization",
+      "description": "Backend development — Java Spring, Rust",
       "source": "./plugins/backend",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "development"
     },
     {
       "name": "testing",
-      "description": "Testing — unit tests, E2E, accessibility, performance, mutation testing, QA",
+      "description": "Testing — accessibility, performance, mutation testing",
       "source": "./plugins/testing",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "development"
     },
     {
       "name": "mobile",
       "description": "Mobile development — React Native, Expo, Flutter, SwiftUI, Jetpack Compose, app store",
       "source": "./plugins/mobile",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "development"
     },
     {
       "name": "infra",
-      "description": "Infrastructure — AWS, Azure, GCP, Terraform, DevOps, DevSecOps, GitHub Actions, observability",
+      "description": "Infrastructure — AWS CDK, Azure Bicep, GCP, DevSecOps, GitHub Actions, OpenTelemetry, secrets management",
       "source": "./plugins/infra",
-      "version": "2.1.0",
-      "category": "infrastructure"
-    },
-    {
-      "name": "k8s",
-      "description": "Kubernetes — manifests, Helm charts, GitOps, cluster security",
-      "source": "./plugins/k8s",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "infrastructure"
     },
     {
       "name": "ml",
-      "description": "Machine learning — data science, MLOps, RAG, LangChain, Hugging Face, fine-tuning, edge ML",
+      "description": "Machine learning — RAG, LangChain, Hugging Face, fine-tuning, edge ML",
       "source": "./plugins/ml",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "development"
     },
     {
       "name": "kafka",
-      "description": "Apache Kafka — architecture, operations, Kafka Streams, n8n workflow automation",
+      "description": "Apache Kafka — Kafka Streams topology, n8n workflow automation",
       "source": "./plugins/kafka",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "infrastructure"
     },
     {
       "name": "confluent",
       "description": "Confluent platform — Kafka Connect, ksqlDB, Schema Registry",
       "source": "./plugins/confluent",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "infrastructure"
     },
     {
       "name": "payments",
-      "description": "Payment integration — Stripe, billing, subscriptions, PCI compliance, webhooks",
+      "description": "Payment integration — billing, subscriptions, PCI compliance",
       "source": "./plugins/payments",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "development"
-    },
-    {
-      "name": "docs",
-      "description": "Documentation — Docusaurus, technical writing, brainstorming, doc generation",
-      "source": "./plugins/docs",
-      "version": "2.1.0",
-      "category": "development"
-    },
-    {
-      "name": "cost",
-      "description": "Cloud cost optimization — AWS, Azure, GCP pricing analysis and resource optimization",
-      "source": "./plugins/cost",
-      "version": "2.1.0",
-      "category": "infrastructure"
     },
     {
       "name": "security",
-      "description": "Security — vulnerability assessment, security patterns, code simplification",
+      "description": "Security — real-time vulnerability pattern detection",
       "source": "./plugins/security",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "development"
     },
     {
       "name": "skills",
       "description": "Skill discovery — find and install the right skills for your project",
       "source": "./plugins/skills",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "utility"
     },
     {
       "name": "blockchain",
-      "description": "Blockchain and Web3 — Solidity, Hardhat, Foundry, smart contract security",
+      "description": "Blockchain and Web3 — Solidity, Foundry, smart contract security, gas optimization",
       "source": "./plugins/blockchain",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "development"
     }
   ],
   "metadata": {
-    "version": "2.1.0",
+    "version": "2.2.0",
     "description": "Universal AI skills library — domain expertise for any AI coding tool"
   }
 }

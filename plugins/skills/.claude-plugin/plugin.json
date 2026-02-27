@@ -1,7 +1,7 @@
 {
   "name": "skills",
   "description": "Skill discovery and installation assistant — find and install the right skills for your project",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "author": {
     "name": "Anton Abyzov",
     "email": "anton.abyzov@gmail.com",

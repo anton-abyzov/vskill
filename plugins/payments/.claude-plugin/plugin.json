@@ -1,7 +1,7 @@
 {
   "name": "payments",
-  "description": "Payment integration skills for Stripe, billing, subscriptions, PCI compliance, and webhooks",
-  "version": "2.1.0",
+  "description": "Payment integration skills for billing, subscriptions, and PCI compliance",
+  "version": "2.2.0",
   "author": {
     "name": "Anton Abyzov",
     "email": "anton.abyzov@gmail.com",
@@ -10,5 +10,5 @@
   "homepage": "https://github.com/anton-abyzov/vskill",
   "repository": "https://github.com/anton-abyzov/vskill",
   "license": "MIT",
-  "keywords": ["payments", "stripe", "billing", "pci", "subscriptions", "webhooks"]
+  "keywords": ["payments", "billing", "pci", "subscriptions"]
 }

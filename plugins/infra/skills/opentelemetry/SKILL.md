@@ -1,272 +1,13 @@
 ---
-description: OpenTelemetry expert for full-stack observability including distributed tracing, metrics, and log correlation. Covers OTel Collector configuration, auto-instrumentation for Node.js/Python/Java/.NET/Go, sampling strategies, backend integration (Grafana, Jaeger, Datadog), and cost optimization. Activates for: OpenTelemetry, OTel, distributed tracing, tracing, spans, metrics, observability, Jaeger, Grafana Tempo, OTLP.
+description: OpenTelemetry expert for Collector pipeline configuration, auto-instrumentation per language, and sampling strategies.
 allowed-tools: Read, Write, Edit, Bash
 model: opus
 context: fork
 ---
 
-# OpenTelemetry Observability Expert
+# OpenTelemetry Implementation
 
-## Purpose
-
-Design and implement comprehensive observability using OpenTelemetry (OTel). Provide expert guidance on instrumentation, collector deployment, backend selection, and cost-effective telemetry pipelines across all major languages and platforms.
-
-## When to Use
-
-- Setting up distributed tracing across microservices
-- Configuring OpenTelemetry Collector pipelines
-- Adding auto-instrumentation to applications
-- Custom span and metric creation
-- Correlating logs with traces
-- Sampling strategy decisions
-- Migrating from proprietary APM to OTel
-- Kubernetes observability setup
-- Cost optimization for telemetry data
-
-## Scope Boundaries
-
-This skill covers **OTEL IMPLEMENTATION**: Collector configuration, auto-instrumentation, sampling strategies.
-
-- For high-level observability strategy and SLOs → use `/infra-observability`
-
-## OTel Architecture Overview
-
-```
-┌──────────────────────────────────────────────────────┐
-│                   Application                         │
-│  ┌─────────┐  ┌──────────┐  ┌────────────────────┐  │
-│  │ OTel API │  │ OTel SDK │  │ Auto-Instrumentation│  │
-│  └────┬─────┘  └────┬─────┘  └────────┬───────────┘  │
-│       └──────────────┴────────────────┘               │
-│                      │ OTLP                           │
-└──────────────────────┼────────────────────────────────┘
-                       ▼
-          ┌────────────────────────┐
-          │   OTel Collector       │
-          │  ┌──────────────────┐  │
-          │  │ Receivers        │  │  ← OTLP, Prometheus, Jaeger
-          │  ├──────────────────┤  │
-          │  │ Processors       │  │  ← batch, filter, attributes
-          │  ├──────────────────┤  │
-          │  │ Exporters        │  │  ← OTLP, Prometheus, backends
-          │  └──────────────────┘  │
-          └──────────┬─────────────┘
-                     ▼
-     ┌───────────────────────────────────┐
-     │  Backends                          │
-     │  Traces: Tempo, Jaeger, Datadog   │
-     │  Metrics: Prometheus, Grafana     │
-     │  Logs: Loki, Elasticsearch        │
-     └───────────────────────────────────┘
-```
-
-## Distributed Tracing
-
-### Core Concepts
-
-| Concept | Description |
-|---------|-------------|
-| **Trace** | End-to-end request journey across services |
-| **Span** | Single unit of work within a trace |
-| **SpanContext** | Trace ID + Span ID + flags, propagated across boundaries |
-| **Attributes** | Key-value metadata on spans |
-| **Events** | Timestamped annotations within a span |
-| **Links** | References to related spans in other traces |
-| **Status** | OK, ERROR, or UNSET |
-
-### Span Best Practices
-
-```
-Naming: <component>.<operation>  (e.g., http.request, db.query, cache.get)
-Attributes: Follow semantic conventions (http.method, db.system, etc.)
-Granularity: One span per meaningful unit of work, not per function call
-```
-
-### Custom Spans (Node.js)
-
-```typescript
-import { trace, SpanStatusCode, SpanKind } from '@opentelemetry/api';
-
-const tracer = trace.getTracer('order-service', '1.0.0');
-
-async function processOrder(orderId: string) {
-  return tracer.startActiveSpan('order.process', {
-    kind: SpanKind.INTERNAL,
-    attributes: {
-      'order.id': orderId,
-    },
-  }, async (span) => {
-    try {
-      // Nested span for validation
-      const validated = await tracer.startActiveSpan('order.validate', async (validationSpan) => {
-        const result = await validateOrder(orderId);
-        validationSpan.setAttribute('order.item_count', result.items.length);
-        validationSpan.end();
-        return result;
-      });
-
-      // Add event for significant milestones
-      span.addEvent('order.validated', {
-        'order.total': validated.total,
-      });
-
-      await chargePayment(validated);
-      span.setStatus({ code: SpanStatusCode.OK });
-      return validated;
-    } catch (error) {
-      span.setStatus({
-        code: SpanStatusCode.ERROR,
-        message: error.message,
-      });
-      span.recordException(error);
-      throw error;
-    } finally {
-      span.end();
-    }
-  });
-}
-```
-
-### Custom Spans (Python)
-
-```python
-from opentelemetry import trace
-from opentelemetry.trace import SpanKind, StatusCode
-
-tracer = trace.get_tracer("order-service", "1.0.0")
-
-async def process_order(order_id: str):
-    with tracer.start_as_current_span(
-        "order.process",
-        kind=SpanKind.INTERNAL,
-        attributes={"order.id": order_id},
-    ) as span:
-        try:
-            result = await validate_order(order_id)
-            span.add_event("order.validated", {"order.total": result.total})
-            await charge_payment(result)
-            span.set_status(StatusCode.OK)
-            return result
-        except Exception as e:
-            span.set_status(StatusCode.ERROR, str(e))
-            span.record_exception(e)
-            raise
-```
-
-## Metrics
-
-### Metric Instruments
-
-| Instrument | Use Case | Example |
-|-----------|----------|---------|
-| **Counter** | Monotonically increasing values | `http.requests.total` |
-| **UpDownCounter** | Values that go up and down | `queue.depth` |
-| **Histogram** | Distribution of values | `http.request.duration` |
-| **Gauge** | Point-in-time values | `cpu.utilization` |
-| **Observable** (async) | Callback-based collection | `jvm.memory.used` |
-
-### Recording Metrics (Node.js)
-
-```typescript
-import { metrics } from '@opentelemetry/api';
-
-const meter = metrics.getMeter('order-service', '1.0.0');
-
-// Counter
-const orderCounter = meter.createCounter('orders.processed', {
-  description: 'Total orders processed',
-  unit: '{orders}',
-});
-
-// Histogram
-const orderDuration = meter.createHistogram('orders.duration', {
-  description: 'Order processing duration',
-  unit: 'ms',
-  advice: {
-    explicitBucketBoundaries: [10, 50, 100, 250, 500, 1000, 2500, 5000],
-  },
-});
-
-// UpDownCounter
-const activeOrders = meter.createUpDownCounter('orders.active', {
-  description: 'Currently processing orders',
-});
-
-function processOrder(order: Order) {
-  activeOrders.add(1, { 'order.type': order.type });
-  const start = performance.now();
-
-  try {
-    // ... process
-    orderCounter.add(1, {
-      'order.type': order.type,
-      'order.status': 'success',
-    });
-  } catch (error) {
-    orderCounter.add(1, {
-      'order.type': order.type,
-      'order.status': 'error',
-    });
-  } finally {
-    orderDuration.record(performance.now() - start, {
-      'order.type': order.type,
-    });
-    activeOrders.add(-1, { 'order.type': order.type });
-  }
-}
-```
-
-## Logs and Log Correlation
-
-### Correlating Logs with Traces
-
-```typescript
-import { trace, context } from '@opentelemetry/api';
-
-function getLogContext() {
-  const span = trace.getSpan(context.active());
-  if (!span) return {};
-
-  const spanContext = span.spanContext();
-  return {
-    trace_id: spanContext.traceId,
-    span_id: spanContext.spanId,
-    trace_flags: spanContext.traceFlags,
-  };
-}
-
-// Usage with any logger (pino, winston, etc.)
-const logger = pino({
-  mixin() {
-    return getLogContext();
-  },
-});
-
-// Log output includes trace context automatically:
-// {"level":30,"trace_id":"abc123","span_id":"def456","msg":"Order processed"}
-```
-
-### OTel Log Bridge (Node.js)
-
-```typescript
-import { logs, SeverityNumber } from '@opentelemetry/api-logs';
-
-const logger = logs.getLogger('order-service', '1.0.0');
-
-logger.emit({
-  severityNumber: SeverityNumber.INFO,
-  severityText: 'INFO',
-  body: 'Order processed successfully',
-  attributes: {
-    'order.id': orderId,
-    'order.total': total,
-  },
-});
-```
-
-## OTel Collector Configuration
-
-### Full Pipeline Example
+## OTel Collector Pipeline Configuration
 
 ```yaml
 # otel-collector-config.yaml
@@ -378,7 +119,7 @@ service:
       address: 0.0.0.0:8888
 ```
 
-## Auto-Instrumentation
+## Auto-Instrumentation Setup
 
 ### Node.js
 
@@ -427,12 +168,14 @@ process.on('SIGTERM', () => sdk.shutdown());
 
 ### Python
 
-```python
-# Auto-instrumentation via CLI (zero-code)
-# pip install opentelemetry-distro opentelemetry-exporter-otlp
-# opentelemetry-bootstrap -a install
-# opentelemetry-instrument python app.py
+```bash
+# Zero-code auto-instrumentation via CLI
+pip install opentelemetry-distro opentelemetry-exporter-otlp
+opentelemetry-bootstrap -a install
+opentelemetry-instrument python app.py
+```
 
+```python
 # Or programmatic setup:
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -454,7 +197,6 @@ provider.add_span_processor(
 )
 trace.set_tracer_provider(provider)
 
-# Auto-instrument frameworks
 FlaskInstrumentor().instrument()
 SQLAlchemyInstrumentor().instrument(engine=db_engine)
 ```
@@ -462,11 +204,9 @@ SQLAlchemyInstrumentor().instrument(engine=db_engine)
 ### Java (Agent)
 
 ```bash
-# Download the Java agent
 curl -Lo opentelemetry-javaagent.jar \
   https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/latest/download/opentelemetry-javaagent.jar
 
-# Run with agent
 java -javaagent:opentelemetry-javaagent.jar \
   -Dotel.service.name=order-service \
   -Dotel.exporter.otlp.endpoint=http://otel-collector:4317 \
@@ -475,92 +215,19 @@ java -javaagent:opentelemetry-javaagent.jar \
   -jar app.jar
 ```
 
-### Go (Manual Instrumentation)
+### .NET
 
-```go
-package main
-
-import (
-    "context"
-    "go.opentelemetry.io/otel"
-    "go.opentelemetry.io/otel/attribute"
-    "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-    "go.opentelemetry.io/otel/sdk/resource"
-    sdktrace "go.opentelemetry.io/otel/sdk/trace"
-    semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
-    "go.opentelemetry.io/otel/trace"
-)
-
-func initTracer(ctx context.Context) (*sdktrace.TracerProvider, error) {
-    exporter, err := otlptracegrpc.New(ctx,
-        otlptracegrpc.WithEndpoint("otel-collector:4317"),
-        otlptracegrpc.WithInsecure(),
-    )
-    if err != nil {
-        return nil, err
-    }
-
-    tp := sdktrace.NewTracerProvider(
-        sdktrace.WithBatcher(exporter),
-        sdktrace.WithResource(resource.NewWithAttributes(
-            semconv.SchemaURL,
-            semconv.ServiceNameKey.String("order-service"),
-            semconv.ServiceVersionKey.String("1.2.0"),
-        )),
-    )
-    otel.SetTracerProvider(tp)
-    return tp, nil
-}
-
-var tracer = otel.Tracer("order-service")
-
-func processOrder(ctx context.Context, orderID string) error {
-    ctx, span := tracer.Start(ctx, "order.process",
-        trace.WithAttributes(attribute.String("order.id", orderID)),
-    )
-    defer span.End()
-
-    // Nested span
-    ctx, valSpan := tracer.Start(ctx, "order.validate")
-    err := validateOrder(ctx, orderID)
-    valSpan.End()
-
-    if err != nil {
-        span.RecordError(err)
-        return err
-    }
-    return nil
-}
-```
-
-## Context Propagation
-
-### W3C TraceContext (Default)
-
-```
-# HTTP header format
-traceparent: 00-<trace-id>-<span-id>-<trace-flags>
-tracestate: vendor1=value1,vendor2=value2
-
-# Example
-traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
-```
-
-### Baggage (Cross-Service Metadata)
-
-```typescript
-import { propagation, context, ROOT_CONTEXT } from '@opentelemetry/api';
-
-// Set baggage (upstream service)
-const baggage = propagation.createBaggage({
-  'user.id': { value: 'u-12345' },
-  'tenant.id': { value: 't-67890' },
-});
-const ctx = propagation.setBaggage(context.active(), baggage);
-
-// Read baggage (downstream service)
-const bag = propagation.getBaggage(context.active());
-const userId = bag?.getEntry('user.id')?.value;
+```bash
+# Zero-code via startup hook
+dotnet add package OpenTelemetry.AutoInstrumentation
+# Set env vars:
+OTEL_DOTNET_AUTO_HOME=/opt/otel-dotnet
+OTEL_SERVICE_NAME=order-service
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+CORECLR_ENABLE_PROFILING=1
+CORECLR_PROFILER={918728DD-259F-4A6A-AC2B-B85E1B658318}
+CORECLR_PROFILER_PATH=${OTEL_DOTNET_AUTO_HOME}/linux-x64/OpenTelemetry.AutoInstrumentation.Native.so
+DOTNET_STARTUP_HOOKS=${OTEL_DOTNET_AUTO_HOME}/net/OpenTelemetry.AutoInstrumentation.StartupHook.dll
 ```
 
 ## Sampling Strategies
@@ -572,78 +239,16 @@ const userId = bag?.getEntry('user.id')?.value;
 | **TraceIdRatio** | SDK (head) | Uniform sampling | `parentbased_traceidratio` + `arg=0.1` |
 | **Tail Sampling** | Collector | Error/latency-based | `tail_sampling` processor |
 
-### Decision Framework
+### Traffic-Based Decision Framework
 
 ```
-Traffic < 100 RPS → AlwaysOn (keep everything)
-Traffic 100-1000 RPS → Head-based 50% + tail sampling for errors
-Traffic 1000-10000 RPS → Head-based 10% + tail sampling
-Traffic > 10000 RPS → Head-based 1% + tail sampling for errors/slow
+Traffic < 100 RPS     -> AlwaysOn (keep everything)
+Traffic 100-1000 RPS  -> Head-based 50% + tail sampling for errors
+Traffic 1000-10000 RPS -> Head-based 10% + tail sampling
+Traffic > 10000 RPS   -> Head-based 1% + tail sampling for errors/slow
 ```
 
-## Kubernetes Deployment
-
-### DaemonSet Collector (Recommended for Production)
-
-```yaml
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: otel-collector
-  namespace: monitoring
-spec:
-  selector:
-    matchLabels:
-      app: otel-collector
-  template:
-    metadata:
-      labels:
-        app: otel-collector
-    spec:
-      containers:
-        - name: collector
-          image: otel/opentelemetry-collector-contrib:0.96.0
-          ports:
-            - containerPort: 4317  # OTLP gRPC
-            - containerPort: 4318  # OTLP HTTP
-            - containerPort: 8888  # Collector metrics
-          resources:
-            requests:
-              cpu: 200m
-              memory: 256Mi
-            limits:
-              cpu: 1000m
-              memory: 2Gi
-          volumeMounts:
-            - name: config
-              mountPath: /etc/otelcol-contrib
-      volumes:
-        - name: config
-          configMap:
-            name: otel-collector-config
-```
-
-### Application Pods Configuration
-
-```yaml
-env:
-  - name: OTEL_EXPORTER_OTLP_ENDPOINT
-    value: "http://$(NODE_NAME):4317"  # Talk to local DaemonSet pod
-  - name: OTEL_SERVICE_NAME
-    valueFrom:
-      fieldRef:
-        fieldPath: metadata.labels['app']
-  - name: OTEL_RESOURCE_ATTRIBUTES
-    value: "k8s.namespace.name=$(NAMESPACE),k8s.pod.name=$(POD_NAME)"
-  - name: NODE_NAME
-    valueFrom:
-      fieldRef:
-        fieldPath: spec.nodeName
-```
-
-## Cost Optimization
-
-### Cardinality Control
+### Cardinality Control (Cost Optimization)
 
 ```
 HIGH CARDINALITY (AVOID as metric attributes):
@@ -657,76 +262,3 @@ LOW CARDINALITY (GOOD for metric attributes):
   - service.name, environment
   - http.route template (/users/{id})
 ```
-
-### Attribute Filtering in Collector
-
-```yaml
-processors:
-  attributes:
-    actions:
-      # Remove high-cardinality attributes before export
-      - key: http.url
-        action: delete
-      - key: user.id
-        action: delete
-      # Keep route template instead of full URL
-      - key: http.target
-        action: delete
-```
-
-### Volume Reduction Strategies
-
-1. **Filter health checks** in collector (not in SDK) to keep local debugging
-2. **Use tail sampling** to keep errors at 100% while sampling success at 1-10%
-3. **Reduce metric export interval** from 15s to 60s for non-critical metrics
-4. **Drop unused attributes** in the collector before exporting
-5. **Use delta temporality** for counters to reduce storage (backend-dependent)
-
-## Backend Selection Guide
-
-| Backend | Traces | Metrics | Logs | Cost Model |
-|---------|--------|---------|------|------------|
-| Grafana Cloud | Tempo | Mimir | Loki | Per-usage |
-| Datadog | Yes | Yes | Yes | Per-host + ingestion |
-| New Relic | Yes | Yes | Yes | Per-GB ingested |
-| Jaeger | Yes | No | No | Self-hosted |
-| Elastic APM | Yes | Yes | Yes | Per-node or cloud |
-| AWS X-Ray | Yes | CloudWatch | CloudWatch | Per-trace |
-
-### Recommended Stack (Self-Hosted)
-
-```
-Traces  → Grafana Tempo (S3/GCS/Azure backend, low cost)
-Metrics → Prometheus/Mimir (battle-tested, PromQL)
-Logs    → Grafana Loki (label-based, S3 storage)
-UI      → Grafana (unified dashboards, trace-metric-log correlation)
-```
-
-## Naming Conventions
-
-### Spans
-
-```
-Format: <component>.<operation>
-Examples:
-  http.request
-  db.query
-  cache.get
-  queue.publish
-  order.process
-  payment.charge
-```
-
-### Metrics
-
-```
-Format: <domain>.<target>.<measurement>
-Examples:
-  http.server.request.duration     (histogram)
-  http.server.active_requests      (updowncounter)
-  db.client.connections.usage      (updowncounter)
-  messaging.process.duration       (histogram)
-  order.processed.total            (counter)
-```
-
-Follow [OTel Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/) for standard attributes and metric names.

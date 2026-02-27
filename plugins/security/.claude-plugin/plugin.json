@@ -1,7 +1,7 @@
 {
   "name": "security",
-  "description": "Security skills for vulnerability assessment, security patterns, and code simplification",
-  "version": "2.1.0",
+  "description": "Security skills for real-time vulnerability pattern detection",
+  "version": "2.2.0",
   "author": {
     "name": "Anton Abyzov",
     "email": "anton.abyzov@gmail.com",
@@ -10,5 +10,5 @@
   "homepage": "https://github.com/anton-abyzov/vskill",
   "repository": "https://github.com/anton-abyzov/vskill",
   "license": "MIT",
-  "keywords": ["security", "owasp", "vulnerability", "penetration-testing", "secure-code"]
+  "keywords": ["security", "vulnerability-detection", "github-actions-injection", "pattern-detection"]
 }

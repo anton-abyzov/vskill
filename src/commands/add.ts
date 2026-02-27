@@ -723,19 +723,7 @@ async function installOneGitHubSkill(
   agents: Array<{ id: string; displayName: string; localSkillsDir: string; globalSkillsDir: string }>,
   projectRoot: string,
 ): Promise<SkillInstallResult> {
-  // Fetch content (non-exiting for multi-skill support)
-  let content: string;
-  try {
-    const res = await fetch(rawUrl);
-    if (!res.ok) {
-      return { skillName, installed: false, verdict: "FETCH_FAILED" };
-    }
-    content = await res.text();
-  } catch {
-    return { skillName, installed: false, verdict: "FETCH_FAILED" };
-  }
-
-  // Blocklist + rejection check
+  // Blocklist + rejection check BEFORE fetching (prevents misleading 404)
   const safety = await checkInstallSafety(skillName);
   if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
@@ -749,6 +737,18 @@ async function installOneGitHubSkill(
   }
   if (safety.tainted) {
     printTaintedWarning(skillName, safety.taintReason);
+  }
+
+  // Fetch content (non-exiting for multi-skill support)
+  let content: string;
+  try {
+    const res = await fetch(rawUrl);
+    if (!res.ok) {
+      return { skillName, installed: false, verdict: "FETCH_FAILED" };
+    }
+    content = await res.text();
+  } catch {
+    return { skillName, installed: false, verdict: "FETCH_FAILED" };
   }
 
   // Platform security check
@@ -935,6 +935,22 @@ async function installRepoPlugin(
   const pluginVersion = getPluginVersion(pluginName, manifestContent) || "0.0.0";
   const pluginPath = pluginSource.replace(/^\.\//, "");
 
+  // Blocklist + rejection check BEFORE fetching content
+  const safety = await checkInstallSafety(pluginName);
+  if (safety.blocked && !opts.force) {
+    printBlockedError(safety.entry!);
+    throw new Error(`Plugin "${pluginName}" is on the blocklist`);
+  }
+  if (safety.blocked && opts.force) {
+    printBlockedWarning(safety.entry!);
+  }
+  if (safety.rejected) {
+    printRejectedWarning(safety.rejection!);
+  }
+  if (safety.tainted) {
+    printTaintedWarning(pluginName, safety.taintReason);
+  }
+
   // Discover skills via GitHub Contents API
   const discoverSpin = spinner(`Discovering skills in ${pluginName}`);
   interface GHEntry { name: string; type: string; download_url?: string }
@@ -993,22 +1009,6 @@ async function installRepoPlugin(
         allContent.push(content);
       }
     } catch { /* skip unavailable */ }
-  }
-
-  // Blocklist + rejection check
-  const safety = await checkInstallSafety(pluginName);
-  if (safety.blocked && !opts.force) {
-    printBlockedError(safety.entry!);
-    throw new Error(`Plugin "${pluginName}" is on the blocklist`);
-  }
-  if (safety.blocked && opts.force) {
-    printBlockedWarning(safety.entry!);
-  }
-  if (safety.rejected) {
-    printRejectedWarning(safety.rejection!);
-  }
-  if (safety.tainted) {
-    printTaintedWarning(pluginName, safety.taintReason);
   }
 
   // Tier 1 scan on all content combined
@@ -1393,6 +1393,12 @@ async function installFromRegistry(
     }
   } catch {
     spin.stop();
+    // Skill not in registry — check blocklist before showing generic "not found"
+    const safety = await checkInstallSafety(skillName);
+    if (safety.blocked) {
+      printBlockedError(safety.entry!);
+      process.exit(1);
+    }
     console.error(
       red(`Skill "${skillName}" not found in registry.\n`) +
         dim(`Use ${cyan("owner/repo")} for GitHub installs, or `) +
@@ -1552,14 +1558,7 @@ async function installSingleSkillLegacy(
   skill: string | undefined,
   opts: AddOptions,
 ): Promise<void> {
-  const branch = await getDefaultBranch(owner, repo);
-  const skillSubpath = skill ? `skills/${skill}/SKILL.md` : "SKILL.md";
-  const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${skillSubpath}`;
-
-  // Fetch SKILL.md
-  const content = await fetchSkillContent(url);
-
-  // Blocklist + rejection check (before scanning)
+  // Blocklist + rejection check BEFORE fetching (prevents misleading 404)
   const skillName = skill || repo;
   const safety = await checkInstallSafety(skillName);
   if (safety.blocked && !opts.force) {
@@ -1575,6 +1574,13 @@ async function installSingleSkillLegacy(
   if (safety.tainted) {
     printTaintedWarning(skillName, safety.taintReason);
   }
+
+  const branch = await getDefaultBranch(owner, repo);
+  const skillSubpath = skill ? `skills/${skill}/SKILL.md` : "SKILL.md";
+  const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${skillSubpath}`;
+
+  // Fetch SKILL.md
+  const content = await fetchSkillContent(url);
 
   // Platform security check (best-effort, non-blocking on network error)
   const platformSecurity = await checkPlatformSecurity(skillName);

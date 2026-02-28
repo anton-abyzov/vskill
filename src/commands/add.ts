@@ -215,13 +215,31 @@ async function installMarketplaceRepo(
       selectedPlugins = plugins;
       console.log(dim(`Auto-selecting all ${plugins.length} plugins (--yes/--all)`));
     }
+  } else if (plugins.length === 1) {
+    // Single plugin — skip multi-select, just proceed
+    const p = plugins[0];
+    const isInstalled = installedSet.has(p.name);
+    if (isInstalled) {
+      const prompter = createPrompter();
+      const reinstall = await prompter.promptConfirm(
+        `${bold(p.name)} is already installed. Reinstall?`,
+        true,
+      );
+      if (!reinstall) {
+        console.log(dim("Aborted."));
+        return;
+      }
+    } else {
+      console.log(`  ${green("+")} ${bold(p.name)}${p.description ? dim(` — ${p.description}`) : ""}`);
+    }
+    selectedPlugins = plugins;
   } else {
     const prompter = createPrompter();
     const indices = await prompter.promptCheckboxList(
       plugins.map((p) => ({
         label: p.name + (installedSet.has(p.name) ? dim(" (installed)") : ""),
         description: p.description,
-        checked: preSelected ? preSelected.includes(p.name) : false,
+        checked: preSelected ? preSelected.includes(p.name) : installedSet.has(p.name),
       })),
       { title: "Select plugins to install" },
     );

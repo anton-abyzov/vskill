@@ -34,6 +34,18 @@ function stripEscapeSequences(line: string): string {
   return line.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").trim();
 }
 
+/** Strip all ANSI escape sequences for visible-width measurement */
+function stripAnsi(s: string): string {
+  return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").replace(/\x1b\]8;;[^\x07]*\x07/g, "");
+}
+
+/** Truncate plain text to maxLen, adding ellipsis if needed */
+function truncateText(s: string, maxLen: number): string {
+  if (s.length <= maxLen) return s;
+  if (maxLen <= 1) return "\u2026";
+  return s.slice(0, maxLen - 1) + "\u2026";
+}
+
 /**
  * Returns true if the line consists entirely of ANSI escape sequences
  * (no real typed content). Used to detect stray arrow-key input.
@@ -165,12 +177,22 @@ function createInteractivePrompter(): Prompter {
         }
 
         // Visible window
+        const termCols = out.columns || 80;
         const end = Math.min(scrollOffset + maxVisible, items.length);
         for (let i = scrollOffset; i < end; i++) {
           const mark = checked[i] ? "x" : " ";
           const pointer = i === cursor ? ">" : " ";
-          const desc = items[i].description ? ` \x1b[2m— ${items[i].description}\x1b[0m` : "";
-          lines.push(`${CLEAR_LINE}  ${pointer} [${mark}] ${items[i].label}${desc}`);
+          const prefix = `  ${pointer} [${mark}] ${items[i].label}`;
+          const prefixWidth = stripAnsi(prefix).length;
+          let desc = "";
+          if (items[i].description) {
+            const sep = " \u2014 ";
+            const available = termCols - prefixWidth - sep.length;
+            if (available > 10) {
+              desc = ` \x1b[2m\u2014 ${truncateText(items[i].description!, available)}\x1b[0m`;
+            }
+          }
+          lines.push(`${CLEAR_LINE}${prefix}${desc}`);
         }
 
         // Scroll indicator: below

@@ -195,15 +195,19 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
       );
     }
 
-    // Install hints
+    // Install hints — show copy-pasteable commands
     const hasInstallable = results.some((r) => !r.isBlocked);
     if (!opts?.noHint && hasInstallable) {
-      const hints = ["↑↓ navigate", "i install"];
       if (hasMarketplaceGroups) {
-        hints.push("m install marketplace");
+        const firstMp = marketplaceKeys[0];
+        console.log(dim(`\nInstall marketplace: `) + cyan(`npx vskill i ${firstMp}`));
+      } else {
+        const firstResult = results.find((r) => !r.isBlocked);
+        const repo = firstResult ? extractBaseRepo(firstResult.repoUrl) : null;
+        if (repo) {
+          console.log(dim(`\nInstall: `) + cyan(`npx vskill i ${repo}`));
+        }
       }
-      hints.push("q quit");
-      console.log(dim(`\n${hints.join("  ")}`));
     }
 
     return;

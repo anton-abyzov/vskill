@@ -4,7 +4,6 @@
 
 import {
   mkdirSync,
-  mkdtempSync,
   writeFileSync,
   readFileSync,
   existsSync,
@@ -237,30 +236,17 @@ async function installMarketplaceRepo(
   // Attempt native Claude Code install
   const hasClaude = !opts.copy && isClaudeCliAvailable();
 
-  let tmpDir: string | null = null;
   let marketplaceRegistered = false;
 
   if (hasClaude) {
-    // Shallow clone for native install
-    const cloneSpin = spinner(`Cloning ${owner}/${repo}`);
-    try {
-      tmpDir = mkdtempSync(join(os.tmpdir(), "vskill-marketplace-"));
-      execSync(
-        `git clone --depth 1 https://github.com/${owner}/${repo}.git "${tmpDir}"`,
-        { stdio: "ignore", timeout: 60_000 },
-      );
-      cloneSpin.stop();
-
-      // Register marketplace
-      const regSpin = spinner("Registering marketplace with Claude Code");
-      marketplaceRegistered = registerMarketplace(tmpDir);
-      regSpin.stop();
-      if (!marketplaceRegistered) {
-        console.log(yellow("  Failed to register marketplace — will use extraction fallback."));
-      }
-    } catch {
-      cloneSpin.stop();
-      console.log(yellow("  Clone failed — will use extraction fallback."));
+    // Register marketplace via git URL — Claude Code clones to its own
+    // persistent location, avoiding the stale-temp-dir bug.
+    const gitUrl = `https://github.com/${owner}/${repo}`;
+    const regSpin = spinner("Registering marketplace with Claude Code");
+    marketplaceRegistered = registerMarketplace(gitUrl);
+    regSpin.stop();
+    if (!marketplaceRegistered) {
+      console.log(yellow("  Failed to register marketplace — will use extraction fallback."));
     }
   }
 
@@ -297,13 +283,6 @@ async function installMarketplaceRepo(
         results.push({ name: plugin.name, installed: false, method: "failed" });
       }
     }
-  }
-
-  // Cleanup temp directory
-  if (tmpDir) {
-    try {
-      rmSync(tmpDir, { recursive: true, force: true });
-    } catch { /* ignore */ }
   }
 
   // Update lockfile
@@ -432,6 +411,7 @@ async function tryNativeClaudeInstall(
   marketplaceContent: string,
   pluginName: string,
   opts: AddOptions,
+  gitUrl?: string,
 ): Promise<boolean> {
   if (opts.copy) return false;
   if (!isClaudeCliAvailable()) return false;
@@ -452,9 +432,10 @@ async function tryNativeClaudeInstall(
     if (choice !== 0) return false;
   }
 
-  // Register marketplace
+  // Register marketplace — prefer git URL (persistent) over local path
+  // (which may be a temp dir that gets deleted after install).
   const regSpin = spinner("Registering marketplace with Claude Code");
-  const registered = registerMarketplace(marketplacePath);
+  const registered = registerMarketplace(gitUrl || marketplacePath);
   if (!registered) {
     regSpin.stop();
     console.log(yellow("  Failed to register marketplace — falling back to extraction."));
@@ -902,11 +883,20 @@ async function installPluginDir(
   let claudeNativeSuccess = false;
 
   if (hasClaude) {
+    // Try to extract git remote URL for persistent marketplace registration.
+    // Falls back to the local path if the dir is not a git repo.
+    let gitUrl: string | undefined;
+    try {
+      gitUrl = execSync("git remote get-url origin", { cwd: resolve(basePath), stdio: ["pipe", "pipe", "ignore"], timeout: 5_000 })
+        .toString().trim() || undefined;
+    } catch { /* not a git repo or no remote — use local path */ }
+
     claudeNativeSuccess = await tryNativeClaudeInstall(
       resolve(basePath),
       mktContent,
       pluginName,
       opts,
+      gitUrl,
     );
   }
 

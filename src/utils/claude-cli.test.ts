@@ -65,6 +65,24 @@ describe("registerMarketplace", () => {
       expect.any(Object),
     );
   });
+
+  it("accepts GitHub HTTPS URL as source", () => {
+    mockExecSync.mockReturnValue(Buffer.from(""));
+    expect(registerMarketplace("https://github.com/owner/repo")).toBe(true);
+    expect(mockExecSync).toHaveBeenCalledWith(
+      'claude plugin marketplace add "https://github.com/owner/repo"',
+      { stdio: "ignore", timeout: 15_000 },
+    );
+  });
+
+  it("accepts GitHub owner/repo shorthand as source", () => {
+    mockExecSync.mockReturnValue(Buffer.from(""));
+    expect(registerMarketplace("owner/repo")).toBe(true);
+    expect(mockExecSync).toHaveBeenCalledWith(
+      'claude plugin marketplace add "owner/repo"',
+      { stdio: "ignore", timeout: 15_000 },
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

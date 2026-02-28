@@ -2587,8 +2587,8 @@ describe("addCommand marketplace integration", () => {
 
     // Should NOT call discoverSkills
     expect(mockDiscoverSkills).not.toHaveBeenCalled();
-    // Should call registerMarketplace and installNativePlugin
-    expect(mockRegisterMarketplace).toHaveBeenCalled();
+    // Should call registerMarketplace with git URL (not temp dir path)
+    expect(mockRegisterMarketplace).toHaveBeenCalledWith("https://github.com/owner/repo");
     expect(mockInstallNativePlugin).toHaveBeenCalledTimes(3);
     // Should write lockfile with marketplace source
     expect(mockWriteLockfile).toHaveBeenCalled();
@@ -2676,7 +2676,7 @@ describe("addCommand marketplace integration", () => {
     expect(lockArg.skills["plugin-c"]).toBeDefined();
   });
 
-  it("TC-014: temp directory is cleaned up after install", async () => {
+  it("TC-014: no temp directory created — uses git URL for registration", async () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
@@ -2693,11 +2693,9 @@ describe("addCommand marketplace integration", () => {
 
     await addCommand("owner/repo", { yes: true });
 
-    // rmSync should have been called to clean up the temp dir
-    expect(mockRmSync).toHaveBeenCalledWith(
-      "/tmp/vskill-marketplace-abc123",
-      { recursive: true, force: true },
-    );
+    // No temp dir should be created or cleaned up — git URL is used directly
+    expect(mockMkdtempSync).not.toHaveBeenCalled();
+    expect(mockRmSync).not.toHaveBeenCalled();
   });
 
   it("TC-015: lockfile records marketplace source format", async () => {

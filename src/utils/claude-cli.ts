@@ -13,14 +13,18 @@ export function isClaudeCliAvailable(): boolean {
 }
 
 /**
- * Register a local directory as a Claude Code plugin marketplace.
+ * Register a Claude Code plugin marketplace.
  *
- * @param marketplacePath - Absolute path to the repo root containing .claude-plugin/marketplace.json
+ * Accepts either a git URL (preferred — Claude Code clones to a persistent
+ * location) or an absolute local path. Using a git URL avoids the stale-path
+ * bug where a temp directory is deleted after registration.
+ *
+ * @param source - Git URL (e.g. "https://github.com/owner/repo") or absolute path
  * @returns true on success, false on failure
  */
-export function registerMarketplace(marketplacePath: string): boolean {
+export function registerMarketplace(source: string): boolean {
   try {
-    execSync(`claude plugin marketplace add "${marketplacePath}"`, {
+    execSync(`claude plugin marketplace add "${source}"`, {
       stdio: "ignore",
       timeout: 15_000,
     });

@@ -103,9 +103,20 @@ const ESC = "\x1b[";
 const HIDE_CURSOR = `${ESC}?25l`;
 const SHOW_CURSOR = `${ESC}?25h`;
 const CLEAR_LINE = `${ESC}2K`;
+const CLEAR_BELOW = `${ESC}J`;
 
 function moveUp(n: number): string {
   return n > 0 ? `${ESC}${n}A` : "";
+}
+
+/**
+ * Count how many physical terminal rows a string occupies,
+ * accounting for line wrapping at the given column width.
+ */
+function physicalRows(line: string, cols: number): number {
+  const visible = stripAnsi(line).length;
+  if (visible === 0) return 1;
+  return Math.ceil(visible / cols);
 }
 
 // ---------------------------------------------------------------------------
@@ -160,9 +171,12 @@ function createInteractivePrompter(): Prompter {
       }
 
       function render() {
-        // Move up to overwrite previous render
+        const termCols = out.columns || 80;
+
+        // Move up to overwrite previous render, then wipe everything below
+        // to prevent ghost lines from wrapped or longer previous renders
         if (renderedLines > 0) {
-          write(moveUp(renderedLines) + "\r");
+          write(moveUp(renderedLines) + "\r" + CLEAR_BELOW);
         }
 
         // Keep cursor within viewport
@@ -173,21 +187,22 @@ function createInteractivePrompter(): Prompter {
 
         // Scroll indicator: above
         if (scrollOffset > 0) {
-          lines.push(`${CLEAR_LINE}  \x1b[2m  ↑ ${scrollOffset} more above\x1b[0m`);
+          lines.push(`${CLEAR_LINE}  \x1b[2m  \u2191 ${scrollOffset} more above\x1b[0m`);
         }
 
         // Visible window
-        const termCols = out.columns || 80;
         const end = Math.min(scrollOffset + maxVisible, items.length);
         for (let i = scrollOffset; i < end; i++) {
-          const mark = checked[i] ? "x" : " ";
-          const pointer = i === cursor ? ">" : " ";
-          const prefix = `  ${pointer} [${mark}] ${items[i].label}`;
+          const isFocused = i === cursor;
+          const isChecked = checked[i];
+          const dot = isChecked ? "\x1b[32m\u25cf\x1b[39m" : "\x1b[2m\u25cb\x1b[22m";
+          const pointer = isFocused ? "\x1b[36m>\x1b[39m" : " ";
+          const labelText = isFocused ? `\x1b[1m${items[i].label}\x1b[22m` : items[i].label;
+          const prefix = `  ${pointer} ${dot} ${labelText}`;
           const prefixWidth = stripAnsi(prefix).length;
           let desc = "";
           if (items[i].description) {
-            const sep = " \u2014 ";
-            const available = termCols - prefixWidth - sep.length;
+            const available = termCols - prefixWidth - 3; // 3 = " — "
             if (available > 10) {
               desc = ` \x1b[2m\u2014 ${truncateText(items[i].description!, available)}\x1b[0m`;
             }
@@ -198,14 +213,20 @@ function createInteractivePrompter(): Prompter {
         // Scroll indicator: below
         const remaining = items.length - end;
         if (remaining > 0) {
-          lines.push(`${CLEAR_LINE}  \x1b[2m  ↓ ${remaining} more below\x1b[0m`);
+          lines.push(`${CLEAR_LINE}  \x1b[2m  \u2193 ${remaining} more below\x1b[0m`);
         }
 
-        // Footer with counts and controls
-        lines.push(`${CLEAR_LINE}  \x1b[2m${selectedCount()}/${items.length} selected · ↑/↓ move · space toggle · a all · enter done\x1b[0m`);
+        // Footer
+        lines.push(`${CLEAR_LINE}  \x1b[2m${selectedCount()}/${items.length} selected \u00b7 \u2191/\u2193 move \u00b7 space toggle \u00b7 a all \u00b7 enter done\x1b[0m`);
 
         write(lines.join("\n") + "\n");
-        renderedLines = lines.length;
+
+        // Track physical rows (not logical lines) for accurate cursor repositioning
+        let rows = 0;
+        for (const line of lines) {
+          rows += physicalRows(line, termCols);
+        }
+        renderedLines = rows;
       }
 
       // Print title
@@ -265,21 +286,28 @@ function createInteractivePrompter(): Prompter {
       let renderedLines = 0;
 
       function render() {
+        const termCols = out.columns || 80;
         if (renderedLines > 0) {
-          write(moveUp(renderedLines) + "\r");
+          write(moveUp(renderedLines) + "\r" + CLEAR_BELOW);
         }
 
         const lines: string[] = [];
         for (let i = 0; i < choices.length; i++) {
-          const pointer = i === cursor ? ">" : " ";
-          const dot = i === cursor ? "●" : "○";
+          const isFocused = i === cursor;
+          const pointer = isFocused ? "\x1b[36m>\x1b[39m" : " ";
+          const dot = isFocused ? "\x1b[36m\u25cf\x1b[39m" : "\x1b[2m\u25cb\x1b[22m";
+          const label = isFocused ? `\x1b[1m${choices[i].label}\x1b[22m` : choices[i].label;
           const hint = choices[i].hint ? ` \x1b[2m(${choices[i].hint})\x1b[0m` : "";
-          lines.push(`${CLEAR_LINE}  ${pointer} ${dot} ${choices[i].label}${hint}`);
+          lines.push(`${CLEAR_LINE}  ${pointer} ${dot} ${label}${hint}`);
         }
-        lines.push(`${CLEAR_LINE}  \x1b[2m↑/↓ move · enter select\x1b[0m`);
+        lines.push(`${CLEAR_LINE}  \x1b[2m\u2191/\u2193 move \u00b7 enter select\x1b[0m`);
 
         write(lines.join("\n") + "\n");
-        renderedLines = lines.length;
+        let rows = 0;
+        for (const line of lines) {
+          rows += physicalRows(line, termCols);
+        }
+        renderedLines = rows;
       }
 
       write(`\n${question}\n`);

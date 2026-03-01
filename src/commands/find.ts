@@ -9,6 +9,7 @@ import { bold, green, yellow, dim, cyan, red, link, table } from "../utils/outpu
 interface FindOptions {
   json?: boolean;
   noHint?: boolean;
+  limit?: number;
 }
 
 /**
@@ -92,9 +93,11 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
   console.log(dim(`Searching for "${query}"...\n`));
 
   let results;
+  let hasMore = false;
   try {
-    const response = await searchSkills(query);
-    results = Array.isArray(response) ? response : [];
+    const response = await searchSkills(query, { limit: opts?.limit });
+    results = response.results;
+    hasMore = response.hasMore;
   } catch (err) {
     console.error(
       red("Failed to search registry: ") +
@@ -183,8 +186,9 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
       }
     }
 
+    const countText = `${results.length} result${results.length === 1 ? "" : "s"} found`;
     console.log(
-      dim(`\n${results.length} result${results.length === 1 ? "" : "s"} found`)
+      dim(`\n${countText}${hasMore ? " (more available — browse at verified-skill.com)" : ""}`)
     );
 
     if (blockedCount > 0) {
@@ -216,8 +220,9 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
   // ---------- Non-TTY (piped) display — flat table --------------------------
   const rows = results.map((r) => buildRow(r));
   console.log(table(headers, rows));
+  const pipeCountText = `${results.length} result${results.length === 1 ? "" : "s"} found`;
   console.log(
-    dim(`\n${results.length} result${results.length === 1 ? "" : "s"} found`)
+    dim(`\n${pipeCountText}${hasMore ? " (more available)" : ""}`)
   );
 
   if (blockedCount > 0) {

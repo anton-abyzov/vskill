@@ -80,21 +80,29 @@ async function apiRequest<T>(
   return res.json() as Promise<T>;
 }
 
+export interface SearchResponse {
+  results: SkillSearchResult[];
+  hasMore: boolean;
+}
+
 /**
  * Search for skills in the registry.
  * Uses the edge-first search endpoint which is resilient to DB load.
  */
 export async function searchSkills(
-  query: string
-): Promise<SkillSearchResult[]> {
+  query: string,
+  options?: { limit?: number },
+): Promise<SearchResponse> {
   const encoded = encodeURIComponent(query);
+  const limit = options?.limit ?? 50;
   const data = await apiRequest<{
     results: Array<Record<string, unknown>>;
+    pagination?: { hasMore?: boolean };
     // Legacy fallback shape
     skills?: Array<Record<string, unknown>>;
-  }>(`/api/v1/skills/search?q=${encoded}`);
+  }>(`/api/v1/skills/search?q=${encoded}&limit=${limit}`);
   const items = data.results || data.skills || [];
-  return items.map((s) => ({
+  const results = items.map((s) => ({
     name: String(s.name || ""),
     author: String(s.author || ""),
     repoUrl: s.repoUrl ? String(s.repoUrl) : undefined,
@@ -108,6 +116,7 @@ export async function searchSkills(
     threatType: s.threatType ? String(s.threatType) : undefined,
     severity: s.severity ? String(s.severity) : undefined,
   }));
+  return { results, hasMore: data.pagination?.hasMore ?? false };
 }
 
 /**

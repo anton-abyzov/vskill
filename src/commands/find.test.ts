@@ -23,9 +23,12 @@ describe("findCommand hints", () => {
       logs.push(args.map(String).join(" "));
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
-    mockSearchSkills.mockResolvedValue([
-      { name: "test-skill", author: "test", repoUrl: "https://github.com/test/test-skill", tier: "VERIFIED", score: 90 },
-    ]);
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "test-skill", author: "test", repoUrl: "https://github.com/test/test-skill", tier: "VERIFIED", score: 90 },
+      ],
+      hasMore: false,
+    });
   });
 
   it("TC-030: non-TTY output includes hint line", async () => {

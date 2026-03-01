@@ -66,10 +66,10 @@ describe("searchSkills", () => {
     };
     mockFetch.mockResolvedValue(jsonResponse(apiData));
 
-    const results = await searchSkills("hello world");
+    const response = await searchSkills("hello world");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      `${BASE_URL}/api/v1/skills/search?q=hello%20world`,
+      `${BASE_URL}/api/v1/skills/search?q=hello%20world&limit=50`,
       expect.objectContaining({
         headers: expect.objectContaining({
           "Content-Type": "application/json",
@@ -78,7 +78,7 @@ describe("searchSkills", () => {
       })
     );
 
-    expect(results).toEqual([
+    expect(response.results).toEqual([
       {
         name: "my-skill",
         author: "alice",
@@ -94,21 +94,40 @@ describe("searchSkills", () => {
         severity: undefined,
       },
     ]);
+    expect(response.hasMore).toBe(false);
   });
 
-  it("returns empty array when results field is missing", async () => {
+  it("returns empty results when results field is missing", async () => {
     mockFetch.mockResolvedValue(jsonResponse({}));
 
-    const results = await searchSkills("nothing");
+    const response = await searchSkills("nothing");
 
-    expect(results).toEqual([]);
+    expect(response.results).toEqual([]);
+    expect(response.hasMore).toBe(false);
+  });
+
+  it("passes hasMore from pagination", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ results: [{ name: "s" }], pagination: { hasMore: true } })
+    );
+    const response = await searchSkills("test");
+    expect(response.hasMore).toBe(true);
+  });
+
+  it("respects custom limit option", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ results: [] }));
+    await searchSkills("test", { limit: 20 });
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE_URL}/api/v1/skills/search?q=test&limit=20`,
+      expect.any(Object)
+    );
   });
 
   it("falls back to 'tier' when 'certTier' is missing", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({ results: [{ name: "s", tier: "VERIFIED" }] })
     );
-    const results = await searchSkills("test");
+    const { results } = await searchSkills("test");
     expect(results[0].tier).toBe("VERIFIED");
   });
 
@@ -116,7 +135,7 @@ describe("searchSkills", () => {
     mockFetch.mockResolvedValue(
       jsonResponse({ results: [{ name: "s" }] })
     );
-    const results = await searchSkills("test");
+    const { results } = await searchSkills("test");
     expect(results[0].tier).toBe("VERIFIED");
   });
 
@@ -124,7 +143,7 @@ describe("searchSkills", () => {
     mockFetch.mockResolvedValue(
       jsonResponse({ results: [{ name: "s", trustScore: 80 }] })
     );
-    const results = await searchSkills("test");
+    const { results } = await searchSkills("test");
     expect(results[0].score).toBe(80);
   });
 
@@ -132,7 +151,7 @@ describe("searchSkills", () => {
     mockFetch.mockResolvedValue(
       jsonResponse({ results: [{ name: "s", certScore: 75 }] })
     );
-    const results = await searchSkills("test");
+    const { results } = await searchSkills("test");
     expect(results[0].score).toBe(75);
   });
 
@@ -140,7 +159,7 @@ describe("searchSkills", () => {
     mockFetch.mockResolvedValue(
       jsonResponse({ results: [{ name: "s", score: 60 }] })
     );
-    const results = await searchSkills("test");
+    const { results } = await searchSkills("test");
     expect(results[0].score).toBe(60);
   });
 
@@ -148,7 +167,7 @@ describe("searchSkills", () => {
     mockFetch.mockResolvedValue(
       jsonResponse({ results: [{ name: "s" }] })
     );
-    const results = await searchSkills("test");
+    const { results } = await searchSkills("test");
     expect(results[0].score).toBe(0);
   });
 });

@@ -80,9 +80,11 @@ program
   .command("find <query>")
   .alias("search")
   .description("Search the verified-skill.com registry")
-  .action(async (query: string) => {
+  .option("--limit <n>", "Max results to return (default 50, max 50)", parseInt)
+  .option("--json", "Output raw JSON")
+  .action(async (query: string, opts: { limit?: number; json?: boolean }) => {
     const { findCommand } = await import("./commands/find.js");
-    await findCommand(query);
+    await findCommand(query, { limit: opts.limit, json: opts.json });
   });
 
 program

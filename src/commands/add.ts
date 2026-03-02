@@ -275,7 +275,7 @@ async function installMarketplaceRepo(
     if (hasClaude && marketplaceRegistered && marketplaceName) {
       // Native install
       const installSpin = spinner(`Installing ${bold(plugin.name)} via Claude Code plugin system`);
-      const ok = installNativePlugin(plugin.name, marketplaceName);
+      const ok = installNativePlugin(plugin.name, marketplaceName, opts.global ? "user" : "project");
       installSpin.stop();
 
       if (ok) {
@@ -466,7 +466,7 @@ async function tryNativeClaudeInstall(
 
   // Install plugin
   const installSpin = spinner(`Installing ${pluginName} via Claude Code plugin system`);
-  const installed = installNativePlugin(pluginName, marketplaceName);
+  const installed = installNativePlugin(pluginName, marketplaceName, opts.global ? "user" : "project");
   if (!installed) {
     installSpin.stop();
     console.log(yellow("  Native install failed — falling back to extraction."));

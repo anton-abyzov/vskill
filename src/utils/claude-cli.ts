@@ -39,12 +39,18 @@ export function registerMarketplace(source: string): boolean {
  *
  * @param pluginName - Plugin name (e.g. "frontend")
  * @param marketplaceName - Marketplace name from marketplace.json (e.g. "vskill")
+ * @param scope - Installation scope: "user" (global) or "project" (per-project, default)
  * @returns true on success, false on failure
  */
-export function installNativePlugin(pluginName: string, marketplaceName: string): boolean {
+export function installNativePlugin(
+  pluginName: string,
+  marketplaceName: string,
+  scope: "user" | "project" = "project",
+): boolean {
   const pluginKey = `${pluginName}@${marketplaceName}`;
+  const scopeFlag = scope === "user" ? "" : ` --scope ${scope}`;
   try {
-    execSync(`claude plugin install "${pluginKey}"`, {
+    execSync(`claude plugin install "${pluginKey}"${scopeFlag}`, {
       stdio: "ignore",
       timeout: 30_000,
     });

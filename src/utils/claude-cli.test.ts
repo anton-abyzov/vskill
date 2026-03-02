@@ -89,11 +89,29 @@ describe("registerMarketplace", () => {
 // installNativePlugin
 // ---------------------------------------------------------------------------
 describe("installNativePlugin", () => {
-  it("calls claude plugin install with plugin@marketplace format", () => {
+  it("defaults to project scope", () => {
     mockExecSync.mockReturnValue(Buffer.from(""));
     expect(installNativePlugin("frontend", "vskill")).toBe(true);
     expect(mockExecSync).toHaveBeenCalledWith(
-      'claude plugin install "frontend@vskill"',
+      'claude plugin install "frontend@vskill" --scope project',
+      { stdio: "ignore", timeout: 30_000 },
+    );
+  });
+
+  it("passes --scope project explicitly", () => {
+    mockExecSync.mockReturnValue(Buffer.from(""));
+    expect(installNativePlugin("frontend", "vskill", "project")).toBe(true);
+    expect(mockExecSync).toHaveBeenCalledWith(
+      'claude plugin install "frontend@vskill" --scope project',
+      { stdio: "ignore", timeout: 30_000 },
+    );
+  });
+
+  it("omits scope flag for user scope", () => {
+    mockExecSync.mockReturnValue(Buffer.from(""));
+    expect(installNativePlugin("sw", "specweave", "user")).toBe(true);
+    expect(mockExecSync).toHaveBeenCalledWith(
+      'claude plugin install "sw@specweave"',
       { stdio: "ignore", timeout: 30_000 },
     );
   });

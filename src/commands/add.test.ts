@@ -1836,7 +1836,7 @@ describe("addCommand native Claude Code plugin install", () => {
     await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
 
     expect(mockRegisterMarketplace).toHaveBeenCalled();
-    expect(mockInstallNativePlugin).toHaveBeenCalledWith("sw-test", "test-mkt");
+    expect(mockInstallNativePlugin).toHaveBeenCalledWith("sw-test", "test-mkt", "project");
   });
 
   it("falls back to extraction when marketplace registration fails", async () => {

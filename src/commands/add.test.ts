@@ -125,6 +125,7 @@ const mockGetSkill = vi.fn();
 vi.mock("../api/client.js", () => ({
   getSkill: (...args: unknown[]) => mockGetSkill(...args),
   reportInstall: vi.fn().mockResolvedValue(undefined),
+  reportInstallBatch: vi.fn().mockResolvedValue(undefined),
 }));
 
 // ---------------------------------------------------------------------------

@@ -68,20 +68,37 @@ export function createRelativeSymlink(target: string, linkPath: string): boolean
 const COPY_FALLBACK_AGENTS = new Set(["claude-code"]);
 
 /**
+ * Write agent files (agents/*.md) alongside SKILL.md in a target directory.
+ * Keys are relative paths (e.g., "agents/frontend.md"), values are file contents.
+ */
+function writeAgentFiles(targetDir: string, agentFiles: Record<string, string>): void {
+  for (const [relPath, fileContent] of Object.entries(agentFiles)) {
+    const fullPath = join(targetDir, relPath);
+    mkdirSync(dirname(fullPath), { recursive: true });
+    writeFileSync(fullPath, fileContent);
+  }
+}
+
+/**
  * Install a skill using the canonical symlink approach:
  * 1. Write SKILL.md to .agents/skills/{name}/ (canonical source of truth)
  * 2. Create relative symlinks from each agent dir to the canonical dir
  * 3. For agents with known symlink issues, fall back to direct copy
+ *
+ * Optional agentFiles: additional files (e.g., agents/*.md) to install alongside SKILL.md.
+ * Keys are relative paths within the skill directory.
  */
 export function installSymlink(
   skillName: string,
   content: string,
   agents: AgentDefinition[],
   opts: InstallOptions,
+  agentFiles?: Record<string, string>,
 ): string[] {
   const canonicalSkillDir = join(ensureCanonicalDir(opts.projectRoot, opts.global), skillName);
   mkdirSync(canonicalSkillDir, { recursive: true });
   writeFileSync(join(canonicalSkillDir, "SKILL.md"), content);
+  if (agentFiles) writeAgentFiles(canonicalSkillDir, agentFiles);
 
   const installed: string[] = [];
 
@@ -95,6 +112,7 @@ export function installSymlink(
     if (COPY_FALLBACK_AGENTS.has(agent.id)) {
       mkdirSync(linkPath, { recursive: true });
       writeFileSync(join(linkPath, "SKILL.md"), content);
+      if (agentFiles) writeAgentFiles(linkPath, agentFiles);
       installed.push(linkPath);
       continue;
     }
@@ -107,6 +125,7 @@ export function installSymlink(
       // Fallback to copy on symlink failure
       mkdirSync(linkPath, { recursive: true });
       writeFileSync(join(linkPath, "SKILL.md"), content);
+      if (agentFiles) writeAgentFiles(linkPath, agentFiles);
       installed.push(linkPath);
     }
   }
@@ -116,12 +135,15 @@ export function installSymlink(
 
 /**
  * Install a skill by copying SKILL.md directly to each agent directory.
+ *
+ * Optional agentFiles: additional files (e.g., agents/*.md) to install alongside SKILL.md.
  */
 export function installCopy(
   skillName: string,
   content: string,
   agents: AgentDefinition[],
   opts: InstallOptions,
+  agentFiles?: Record<string, string>,
 ): string[] {
   const installed: string[] = [];
 
@@ -130,6 +152,7 @@ export function installCopy(
     const skillDir = join(agentSkillsDir, skillName);
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(join(skillDir, "SKILL.md"), content);
+    if (agentFiles) writeAgentFiles(skillDir, agentFiles);
     installed.push(skillDir);
   }
 

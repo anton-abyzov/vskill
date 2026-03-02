@@ -369,7 +369,11 @@ function shouldSkipFromCommands(relPath: string): boolean {
   const internalRootDirs = new Set(["knowledge-base", "lib", "templates", "scripts", "hooks"]);
   if (parts.length > 1 && internalRootDirs.has(parts[0])) return true;
 
-  if (parts[0] === "skills" && parts.length > 2 && filename !== "SKILL.md") return true;
+  if (parts[0] === "skills" && parts.length > 2 && filename !== "SKILL.md") {
+    // Allow agents/*.md files inside skill directories
+    if (parts.includes("agents") && filename.endsWith(".md")) return false;
+    return true;
+  }
 
   return false;
 }

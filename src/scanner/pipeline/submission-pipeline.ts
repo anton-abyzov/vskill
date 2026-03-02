@@ -191,9 +191,10 @@ export const TRUSTED_ORGS: readonly string[] = [
   'openai',
   'google',
   'google-gemini',
-  'vercel-labs',
-  'supabase',
   'microsoft',
+  'vercel',
+  'cloudflare',
+  'github',
 ];
 
 /**

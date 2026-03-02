@@ -435,6 +435,34 @@ describe("discovery scope guard", () => {
     expect(result).toEqual([]);
   });
 
+  // TC-027: discovers agents/*.md inside skill directories
+  it("discovers agents/*.md and attaches agentRawUrls to parent skill", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse([
+          "skills/team-lead/SKILL.md",
+          "skills/team-lead/agents/frontend.md",
+          "skills/team-lead/agents/backend.md",
+          "skills/other/SKILL.md",
+          "README.md",
+        ]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+
+    expect(result).toHaveLength(2);
+    const teamLead = result.find((s) => s.name === "team-lead");
+    const other = result.find((s) => s.name === "other");
+
+    expect(teamLead?.agentRawUrls).toEqual({
+      "agents/frontend.md": "https://raw.githubusercontent.com/owner/repo/main/skills/team-lead/agents/frontend.md",
+      "agents/backend.md": "https://raw.githubusercontent.com/owner/repo/main/skills/team-lead/agents/backend.md",
+    });
+    // Skill without agents/ has no agentRawUrls
+    expect(other?.agentRawUrls).toBeUndefined();
+  });
+
   // TC-026: skills/pm/SKILL.md IS matched (positive control)
   it("skills/pm/SKILL.md IS matched (positive control)", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({

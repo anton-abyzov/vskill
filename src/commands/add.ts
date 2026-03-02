@@ -354,7 +354,7 @@ async function installMarketplaceRepo(
  * file they find recursively as a slash command, so plugin-internal files
  * must be excluded.
  */
-function shouldSkipFromCommands(relPath: string): boolean {
+export function shouldSkipFromCommands(relPath: string): boolean {
   const normalized = relPath.replace(/\\/g, "/");
   const parts = normalized.split("/");
   const filename = parts[parts.length - 1];
@@ -370,8 +370,8 @@ function shouldSkipFromCommands(relPath: string): boolean {
   if (parts.length > 1 && internalRootDirs.has(parts[0])) return true;
 
   if (parts[0] === "skills" && parts.length > 2 && filename !== "SKILL.md") {
-    // Allow agents/*.md files inside skill directories
-    if (parts.includes("agents") && filename.endsWith(".md")) return false;
+    // Allow agents/*.md files inside skill directories (skills/{name}/agents/*.md)
+    if (parts[2] === "agents" && filename.endsWith(".md")) return false;
     return true;
   }
 
@@ -1033,6 +1033,7 @@ async function installOneGitHubSkill(
   opts: AddOptions,
   agents: Array<{ id: string; displayName: string; localSkillsDir: string; globalSkillsDir: string }>,
   projectRoot: string,
+  agentRawUrls?: Record<string, string>,
 ): Promise<SkillInstallResult> {
   // Blocklist + rejection check BEFORE fetching (prevents misleading 404)
   const safety = await checkInstallSafety(skillName);
@@ -1104,15 +1105,29 @@ async function installOneGitHubSkill(
     return { skillName, installed: false, verdict: scanResult.verdict, score: scanResult.score };
   }
 
+  // Fetch agent files (agents/*.md) if discovered
+  let agentFiles: Record<string, string> | undefined;
+  if (agentRawUrls && Object.keys(agentRawUrls).length > 0) {
+    agentFiles = {};
+    const fetches = Object.entries(agentRawUrls).map(async ([relPath, url]) => {
+      try {
+        const res = await fetch(url);
+        if (res.ok) agentFiles![relPath] = await res.text();
+      } catch { /* skip failed agent file fetches */ }
+    });
+    await Promise.allSettled(fetches);
+    if (Object.keys(agentFiles).length === 0) agentFiles = undefined;
+  }
+
   // Install to each agent using canonical installer
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
   const installOpts = { global: !!opts.global, projectRoot };
 
   try {
     if (opts.copy) {
-      installCopy(skillName, content, agents as AgentDefinition[], installOpts);
+      installCopy(skillName, content, agents as AgentDefinition[], installOpts, agentFiles);
     } else {
-      installSymlink(skillName, content, agents as AgentDefinition[], installOpts);
+      installSymlink(skillName, content, agents as AgentDefinition[], installOpts, agentFiles);
     }
   } catch (err) {
     console.error(red(`  Failed to install skill "${skillName}": ${(err as Error).message}`));
@@ -1621,7 +1636,7 @@ export async function addCommand(
   for (const skill of selectedSkills) {
     console.log(dim(`\nInstalling skill: ${bold(skill.name)}...`));
     try {
-      const result = await installOneGitHubSkill(owner, repo, skill.name, skill.rawUrl, opts, selectedAgents, projectRoot);
+      const result = await installOneGitHubSkill(owner, repo, skill.name, skill.rawUrl, opts, selectedAgents, projectRoot, skill.agentRawUrls);
       results.push(result);
     } catch (err) {
       console.error(red(`  Unexpected error installing "${skill.name}": ${(err as Error).message}`));
@@ -1918,6 +1933,30 @@ async function installSingleSkillLegacy(
   // Fetch SKILL.md
   const content = await fetchSkillContent(url);
 
+  // Fetch agents/*.md if skill is in a subdirectory (skills/{name}/)
+  let legacyAgentFiles: Record<string, string> | undefined;
+  if (skill) {
+    try {
+      const agentsDirUrl = `https://api.github.com/repos/${owner}/${repo}/contents/skills/${skill}/agents`;
+      const dirRes = await fetch(agentsDirUrl, { headers: { Accept: "application/vnd.github.v3+json" } });
+      if (dirRes.ok) {
+        const entries = (await dirRes.json()) as Array<{ name: string; download_url?: string }>;
+        const mdEntries = entries.filter((e) => e.name.endsWith(".md") && e.download_url);
+        if (mdEntries.length > 0) {
+          legacyAgentFiles = {};
+          const fetches = mdEntries.map(async (entry) => {
+            try {
+              const res = await fetch(entry.download_url!);
+              if (res.ok) legacyAgentFiles![`agents/${entry.name}`] = await res.text();
+            } catch { /* skip */ }
+          });
+          await Promise.allSettled(fetches);
+          if (Object.keys(legacyAgentFiles).length === 0) legacyAgentFiles = undefined;
+        }
+      }
+    } catch { /* agents/ dir doesn't exist or API error — fine */ }
+  }
+
   // Platform security check (best-effort, non-blocking on network error)
   const platformSecurity = await checkPlatformSecurity(skillName);
   if (!platformSecurity) {
@@ -2024,8 +2063,8 @@ async function installSingleSkillLegacy(
   const installOpts = { global: !!opts.global, projectRoot };
 
   const locations = opts.copy
-    ? installCopy(skillName, content, selectedAgents, installOpts)
-    : installSymlink(skillName, content, selectedAgents, installOpts);
+    ? installCopy(skillName, content, selectedAgents, installOpts, legacyAgentFiles)
+    : installSymlink(skillName, content, selectedAgents, installOpts, legacyAgentFiles);
 
   // Update lockfile (global → ~/.agents/, project → project root)
   const lockDir = lockfileRoot(opts);

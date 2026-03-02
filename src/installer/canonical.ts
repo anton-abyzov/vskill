@@ -72,8 +72,10 @@ const COPY_FALLBACK_AGENTS = new Set(["claude-code"]);
  * Keys are relative paths (e.g., "agents/frontend.md"), values are file contents.
  */
 function writeAgentFiles(targetDir: string, agentFiles: Record<string, string>): void {
+  const resolvedTarget = join(targetDir, "."); // normalize
   for (const [relPath, fileContent] of Object.entries(agentFiles)) {
-    const fullPath = join(targetDir, relPath);
+    const fullPath = join(resolvedTarget, relPath);
+    if (!fullPath.startsWith(resolvedTarget)) continue; // path traversal guard
     mkdirSync(dirname(fullPath), { recursive: true });
     writeFileSync(fullPath, fileContent);
   }

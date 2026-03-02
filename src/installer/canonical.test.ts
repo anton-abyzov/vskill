@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, readFileSync, lstatSync, readlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, lstatSync, readlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
@@ -130,6 +130,37 @@ describe("canonical installer", () => {
       expect(result).toHaveLength(2);
     });
 
+    it("installs agent files in canonical dir and copy-fallback agents", () => {
+      const agents = [
+        makeAgent({ id: "claude-code", localSkillsDir: ".claude/skills" }),
+        makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" }),
+      ];
+
+      const agentFiles = {
+        "agents/frontend.md": "# Frontend Agent",
+        "agents/testing.md": "# Testing Agent",
+      };
+
+      installSymlink("team-lead", "# Team Lead", agents, {
+        global: false,
+        projectRoot: tempDir,
+      }, agentFiles);
+
+      // Canonical dir gets agent files
+      const canonicalAgentsDir = join(tempDir, ".agents", "skills", "team-lead", "agents");
+      expect(readFileSync(join(canonicalAgentsDir, "frontend.md"), "utf-8")).toBe("# Frontend Agent");
+      expect(readFileSync(join(canonicalAgentsDir, "testing.md"), "utf-8")).toBe("# Testing Agent");
+
+      // Claude Code (copy fallback) gets agent files directly
+      const claudeAgentsDir = join(tempDir, ".claude", "skills", "team-lead", "agents");
+      expect(readFileSync(join(claudeAgentsDir, "frontend.md"), "utf-8")).toBe("# Frontend Agent");
+      expect(readFileSync(join(claudeAgentsDir, "testing.md"), "utf-8")).toBe("# Testing Agent");
+
+      // Cursor (symlinked) resolves agents via symlink to canonical
+      const cursorAgentFile = join(tempDir, ".cursor", "skills", "team-lead", "agents", "frontend.md");
+      expect(readFileSync(cursorAgentFile, "utf-8")).toBe("# Frontend Agent");
+    });
+
     it("overwrites existing symlink or directory at target", () => {
       const agents = [makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" })];
 
@@ -171,6 +202,45 @@ describe("canonical installer", () => {
       expect(() => lstatSync(canonicalDir)).toThrow();
 
       expect(result).toHaveLength(2);
+    });
+
+    it("installs agent files alongside SKILL.md in each agent directory", () => {
+      const agents = [
+        makeAgent({ id: "claude-code", localSkillsDir: ".claude/commands" }),
+        makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" }),
+      ];
+
+      const agentFiles = {
+        "agents/frontend.md": "# Frontend Agent\nYou are the FRONTEND agent.",
+        "agents/backend.md": "# Backend Agent\nYou are the BACKEND agent.",
+      };
+
+      installCopy("team-lead", "# Team Lead", agents, {
+        global: false,
+        projectRoot: tempDir,
+      }, agentFiles);
+
+      // Each agent dir gets agents/*.md files
+      for (const dir of [".claude/commands", ".cursor/skills"]) {
+        const frontendPath = join(tempDir, dir, "team-lead", "agents", "frontend.md");
+        const backendPath = join(tempDir, dir, "team-lead", "agents", "backend.md");
+        expect(readFileSync(frontendPath, "utf-8")).toBe("# Frontend Agent\nYou are the FRONTEND agent.");
+        expect(readFileSync(backendPath, "utf-8")).toBe("# Backend Agent\nYou are the BACKEND agent.");
+      }
+    });
+
+    it("works correctly without agentFiles (backward compatible)", () => {
+      const agents = [makeAgent({ id: "claude-code", localSkillsDir: ".claude/commands" })];
+
+      installCopy("simple-skill", "# Simple", agents, {
+        global: false,
+        projectRoot: tempDir,
+      });
+
+      const skillPath = join(tempDir, ".claude", "commands", "simple-skill", "SKILL.md");
+      expect(readFileSync(skillPath, "utf-8")).toBe("# Simple");
+      // No agents/ directory created
+      expect(existsSync(join(tempDir, ".claude", "commands", "simple-skill", "agents"))).toBe(false);
     });
 
     it("installs to explicit projectRoot, not a parent directory", () => {

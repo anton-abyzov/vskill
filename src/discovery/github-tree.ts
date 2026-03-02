@@ -66,6 +66,8 @@ export interface DiscoveredSkill {
   path: string;
   rawUrl: string;
   description?: string;
+  /** Raw URLs of agents/*.md files inside this skill directory. */
+  agentRawUrls?: Record<string, string>;
 }
 
 /**
@@ -143,6 +145,8 @@ export async function discoverSkills(
   }
 
   const skills: DiscoveredSkill[] = [];
+  // Collect agents/*.md paths per skill for a second pass
+  const agentFilesBySkill = new Map<string, Record<string, string>>();
 
   for (const entry of tree) {
     if (entry.type !== "blob") continue;
@@ -167,7 +171,27 @@ export async function discoverSkills(
         path: entry.path,
         rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${entry.path}`,
       });
+      continue;
     }
+
+    // skills/{name}/agents/*.md — collect for attachment to parent skill
+    const agentMatch = entry.path.match(/^skills\/([^/]+)\/agents\/([^/]+\.md)$/);
+    if (agentMatch) {
+      const skillName = agentMatch[1];
+      const agentFilename = agentMatch[2];
+      let map = agentFilesBySkill.get(skillName);
+      if (!map) {
+        map = {};
+        agentFilesBySkill.set(skillName, map);
+      }
+      map[`agents/${agentFilename}`] = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${entry.path}`;
+    }
+  }
+
+  // Attach agent raw URLs to their parent skills
+  for (const skill of skills) {
+    const urls = agentFilesBySkill.get(skill.name);
+    if (urls) skill.agentRawUrls = urls;
   }
 
   // Fetch descriptions in parallel with a 3s timeout per skill

@@ -41,9 +41,6 @@ The process:
 # Install Stryker for a TypeScript/JavaScript project
 npm install --save-dev @stryker-mutator/core @stryker-mutator/typescript-checker @stryker-mutator/vitest-runner
 
-# For Jest projects
-npm install --save-dev @stryker-mutator/core @stryker-mutator/typescript-checker @stryker-mutator/jest-runner
-
 # Initialize configuration (interactive)
 npx stryker init
 ```
@@ -74,50 +71,6 @@ export default {
     low: 60,
     break: null,  // Set to a number to fail CI below this score
   },
-};
-```
-
-**Jest configuration:**
-
-```javascript
-// stryker.config.mjs
-/** @type {import('@stryker-mutator/api/core').PartialStrykerOptions} */
-export default {
-  mutate: [
-    'src/**/*.ts',
-    '!src/**/*.test.ts',
-    '!src/**/*.spec.ts',
-  ],
-  testRunner: 'jest',
-  jest: {
-    configFile: 'jest.config.ts',
-  },
-  checkers: ['typescript'],
-  reporters: ['html', 'clear-text', 'progress'],
-  coverageAnalysis: 'perTest',
-};
-```
-
-**Targeted configuration for critical modules only:**
-
-```javascript
-// stryker.config.mjs
-export default {
-  mutate: [
-    // Only mutate business-critical code
-    'src/services/payment/**/*.ts',
-    'src/services/auth/**/*.ts',
-    'src/utils/validators/**/*.ts',
-    'src/core/parser/**/*.ts',
-    '!src/**/*.test.ts',
-    '!src/**/*.d.ts',
-  ],
-  testRunner: 'vitest',
-  checkers: ['typescript'],
-  reporters: ['html', 'clear-text', 'progress'],
-  coverageAnalysis: 'perTest',
-  timeoutMS: 120000,
-  concurrency: 4,  // Limit parallel workers
 };
 ```
 
@@ -165,73 +118,21 @@ Add `.stryker-cache/` and `.stryker-tmp/` to `.gitignore`.
 
 Stryker applies these mutation operators to your source code:
 
-### Arithmetic Mutations
-| Original | Mutant |
-|----------|--------|
-| `a + b` | `a - b` |
-| `a - b` | `a + b` |
-| `a * b` | `a / b` |
-| `a / b` | `a * b` |
-| `a % b` | `a * b` |
-
-### Conditional Mutations
-| Original | Mutant |
-|----------|--------|
-| `a > b` | `a >= b`, `a < b` |
-| `a < b` | `a <= b`, `a > b` |
-| `a >= b` | `a > b`, `a <= b` |
-| `a <= b` | `a < b`, `a >= b` |
-| `a === b` | `a !== b` |
-| `a !== b` | `a === b` |
-
-### Logical Mutations
-| Original | Mutant |
-|----------|--------|
-| `a && b` | `a \|\| b` |
-| `a \|\| b` | `a && b` |
-| `!a` | `a` |
-
-### String Mutations
-| Original | Mutant |
-|----------|--------|
-| `"foo"` | `""` |
-| `""` | `"Stryker was here!"` |
-| `` `template ${x}` `` | `` `template` `` |
-
-### Array Mutations
-| Original | Mutant |
-|----------|--------|
-| `[].push(x)` | removed |
-| `[].pop()` | removed |
-| `[].sort()` | removed |
-| `[].filter(fn)` | `[]` |
-| `[].map(fn)` | `[]` |
-
-### Unary Mutations
-| Original | Mutant |
-|----------|--------|
-| `+a` | `-a` |
-| `-a` | `+a` |
-| `~a` | `a` |
-
-### Block Statement Mutations
-| Original | Mutant |
-|----------|--------|
-| `if (cond) { block }` | `if (cond) { }` |
-| `function() { body }` | `function() { }` |
-
-### Boolean Mutations
-| Original | Mutant |
-|----------|--------|
-| `true` | `false` |
-| `false` | `true` |
-
-### Optional Chaining
-| Original | Mutant |
-|----------|--------|
-| `a?.b` | `a.b` |
-| `a?.[b]` | `a[b]` |
-| `a?.()` | `a()` |
+| Category | Original | Mutant |
+|----------|----------|--------|
+| **Arithmetic** | `a + b` | `a - b` |
+| | `a - b` | `a + b` |
+| | `a * b` | `a / b` |
+| | `a / b` | `a * b` |
+| | `a % b` | `a * b` |
+| **Conditional** | `a > b` | `a >= b`, `a < b` |
+| | `a < b` | `a <= b`, `a > b` |
+| | `a >= b` | `a > b`, `a <= b` |
+| | `a === b` | `a !== b` |
+| | `a !== b` | `a === b` |
+| **Logical** | `a && b` | `a \|\| b` |
+| | `a \|\| b` | `a && b` |
+| | `!a` | `a` |
 
 ## Mutation Score Analysis
 
@@ -256,71 +157,19 @@ After running Stryker, examine the HTML report at `reports/mutation/html/index.h
 When a mutant survives, ask these questions in order:
 
 **1. Is it an equivalent mutant?**
-An equivalent mutant changes the code but produces identical behavior. It cannot be
-killed because no observable difference exists.
-
-```typescript
-// Original
-function getIndex(arr: string[], item: string): number {
-  return arr.indexOf(item);
-}
-
-// Equivalent mutant: changing >= 0 to > 0 in a caller
-// If indexOf never returns 0 in practice, these are equivalent
-if (getIndex(items, 'x') >= 0) { ... }
-if (getIndex(items, 'x') > 0) { ... }  // equivalent if 'x' is never first
-```
-
-Mark equivalent mutants in Stryker config to exclude them from the score:
-
-```javascript
-// stryker.config.mjs
-export default {
-  mutate: [
-    'src/**/*.ts',
-    // Exclude known equivalent mutant locations
-    '!src/utils/constants.ts',
-  ],
-};
-```
+An equivalent mutant changes the code but produces identical behavior -- no test can kill it
+because no observable difference exists. Example: `indexOf(x) >= 0` vs `indexOf(x) > 0`
+when `x` is never the first element. Exclude the file from `mutate` globs or accept the
+lower score.
 
 **2. Is the assertion weak?**
-The most common cause of survived mutants. The test runs the code but does not assert
-on the affected value.
-
-```typescript
-// Survived mutant: `price * quantity` -> `price / quantity`
-function calculateTotal(price: number, quantity: number): number {
-  return price * quantity;
-}
-
-// WEAK test -- does not catch arithmetic mutation
-it('should calculate total', () => {
-  const result = calculateTotal(10, 1);  // 10 * 1 === 10 / 1
-  expect(result).toBe(10);
-});
-
-// STRONG test -- catches the mutation
-it('should calculate total', () => {
-  const result = calculateTotal(10, 3);  // 10 * 3 = 30, 10 / 3 = 3.33
-  expect(result).toBe(30);
-});
-```
+The most common cause. The test runs the code but does not assert on the affected value.
+Use inputs where the mutation would produce a different result (e.g. test `calculateTotal(10, 3)`
+not `calculateTotal(10, 1)` -- multiplying by 1 and dividing by 1 give the same output).
 
 **3. Is the boundary untested?**
-
-```typescript
-// Survived mutant: `age >= 18` -> `age > 18`
-function canVote(age: number): boolean {
-  return age >= 18;
-}
-
-// Missing boundary test
-it('should allow voting at 18', () => {
-  expect(canVote(18)).toBe(true);   // Kills >= -> > mutant
-  expect(canVote(17)).toBe(false);  // Kills >= -> <= mutant
-});
-```
+For a survived `age >= 18` -> `age > 18` mutant, add `expect(canVote(18)).toBe(true)` --
+the exact boundary value is what distinguishes `>=` from `>`.
 
 **4. Is the code actually untestable or dead?**
 If no test can reach the mutated code, you have dead code. Remove it.
@@ -331,24 +180,12 @@ If no test can reach the mutated code, you have dead code. Remove it.
 These indicate completely untested code. Write tests that at minimum execute these paths.
 
 **Priority 2: Strengthen weak assertions**
-Look for tests that execute the code but use loose assertions:
-```typescript
-// Weak: only checks truthiness
-expect(result).toBeTruthy();
-
-// Strong: checks exact value
-expect(result).toEqual({ total: 30, tax: 2.70 });
-```
+Replace `expect(result).toBeTruthy()` with exact value checks like
+`expect(result).toEqual({ total: 30, tax: 2.70 })`.
 
 **Priority 3: Add boundary tests**
-For every comparison operator, test the exact boundary value:
-```typescript
-describe('isAdult', () => {
-  it('should return true at exactly 18', () => expect(isAdult(18)).toBe(true));
-  it('should return false at 17', () => expect(isAdult(17)).toBe(false));
-  it('should return true above 18', () => expect(isAdult(25)).toBe(true));
-});
-```
+For every comparison operator, test the exact boundary value (e.g., `isAdult(18)` not just
+`isAdult(25)` and `isAdult(10)`).
 
 **Priority 4: Test negation and logical paths**
 Ensure both branches of every `if/else` and `&&/||` are tested.
@@ -427,34 +264,6 @@ For faster CI, only mutate files changed in the PR:
           npx stryker run --mutate "${{ steps.changed.outputs.files }}"
 ```
 
-### Report Formats
-
-Configure multiple reporters in `stryker.config.mjs`:
-
-```javascript
-export default {
-  reporters: [
-    'html',           // Detailed HTML report in reports/mutation/html/
-    'clear-text',     // Terminal summary
-    'progress',       // Progress bar during execution
-    'json',           // Machine-readable JSON in reports/mutation/mutation.json
-    'dashboard',      // Stryker dashboard (stryker-mutator.io/dashboard)
-  ],
-  htmlReporter: {
-    fileName: 'reports/mutation/html/index.html',
-  },
-  jsonReporter: {
-    fileName: 'reports/mutation/mutation.json',
-  },
-  // Dashboard reporter config (requires STRYKER_DASHBOARD_API_KEY)
-  dashboard: {
-    project: 'github.com/your-org/your-repo',
-    version: 'main',
-    module: 'core',
-  },
-};
-```
-
 ### Setting a CI Quality Gate
 
 Fail the build if mutation score drops below a threshold:
@@ -468,20 +277,6 @@ export default {
     break: 60,    // FAIL CI if score drops below this
   },
 };
-```
-
-### Integration with Existing Test Scripts
-
-```json
-{
-  "scripts": {
-    "test": "vitest run",
-    "test:mutation": "stryker run",
-    "test:mutation:incremental": "stryker run --incremental",
-    "test:mutation:changed": "stryker run --incremental --since main",
-    "test:all": "npm run test && npm run test:mutation:incremental"
-  }
-}
 ```
 
 ## Strategy and Best Practices
@@ -513,58 +308,12 @@ export default {
 
 ### Balancing Quality vs Execution Time
 
-Mutation testing is CPU-intensive. A full run on a large codebase can take 30+ minutes.
-
-**Strategies for speed:**
-
-1. **Incremental mode** (always use in development):
-   ```bash
-   npx stryker run --incremental
-   ```
-
-2. **Target critical modules only** -- do not mutate everything:
-   ```javascript
-   mutate: [
-     'src/core/**/*.ts',
-     'src/services/payment/**/*.ts',
-     '!src/**/*.test.ts',
-   ],
-   ```
-
-3. **Limit concurrency** to avoid OOM on CI:
-   ```javascript
-   concurrency: Math.max(1, require('os').cpus().length - 1),
-   ```
-
-4. **Use `perTest` coverage analysis** -- Stryker only runs tests that cover each mutant:
-   ```javascript
-   coverageAnalysis: 'perTest',
-   ```
-
-5. **Increase timeout for slow test suites**:
-   ```javascript
-   timeoutMS: 120000,
-   timeoutFactor: 2.5,
-   ```
-
-6. **Schedule full runs nightly, use incremental on PRs.**
-
-### Prioritizing Which Modules to Mutate
-
-Use this decision matrix:
-
-| Factor | Weight | Assessment |
-|--------|--------|------------|
-| Business criticality | High | Payment, auth, data integrity |
-| Bug history | High | Files with frequent bug fixes |
-| Complexity (cyclomatic) | Medium | High-complexity functions |
-| Change frequency | Medium | Frequently modified files |
-| Coverage gap | Medium | High line coverage but untested logic |
-| User-facing impact | High | Features affecting end users directly |
-
-Start with the intersection of "high business criticality" and "high code coverage" --
-these are the modules where mutation testing adds the most value (you think they are
-well-tested but may not be).
+Mutation testing is CPU-intensive. Strategies for speed:
+- Use incremental mode for development and PR runs; reserve full runs for nightly/weekly CI
+- Target critical modules only -- do not mutate everything at once
+- Use `coverageAnalysis: 'perTest'` so Stryker only runs tests that cover each mutant
+- Limit `concurrency` to avoid OOM on CI
+- Set `timeoutMS`/`timeoutFactor` appropriately for slow test suites
 
 ### Common Pitfalls
 
@@ -599,159 +348,6 @@ export default {
 };
 ```
 
-Available mutator group names:
-- `ArithmeticOperator`, `ArrayDeclaration`, `AssignmentOperator`
-- `BlockStatement`, `BooleanLiteral`, `ConditionalExpression`
-- `EqualityOperator`, `LogicalOperator`, `MethodExpression`
-- `ObjectLiteral`, `OptionalChaining`, `Regex`
-- `StringLiteral`, `UnaryOperator`, `UpdateOperator`
-
-## Interpreting Results: Worked Example
-
-Given this source file:
-
-```typescript
-// src/services/discount.ts
-export function applyDiscount(price: number, discountPct: number): number {
-  if (discountPct < 0 || discountPct > 100) {
-    throw new Error('Invalid discount percentage');
-  }
-  if (discountPct === 0) {
-    return price;
-  }
-  return price - (price * discountPct) / 100;
-}
-```
-
-And this test:
-
-```typescript
-it('should apply 20% discount', () => {
-  expect(applyDiscount(100, 20)).toBe(80);
-});
-
-it('should reject negative discount', () => {
-  expect(() => applyDiscount(100, -5)).toThrow();
-});
-```
-
-**Stryker results:**
-- `discountPct < 0` -> `discountPct <= 0`: **SURVIVED** (no test for `discountPct === 0` boundary)
-- `discountPct > 100` -> `discountPct >= 100`: **SURVIVED** (no test for `discountPct === 100`)
-- `price * discountPct` -> `price / discountPct`: **KILLED** by the 20% test
-- `price - (...)` -> `price + (...)`: **KILLED** by the 20% test
-- `discountPct === 0` -> `discountPct !== 0`: **SURVIVED** (no test for zero discount)
-
-**Tests to add:**
-
-```typescript
-it('should return full price for 0% discount', () => {
-  expect(applyDiscount(100, 0)).toBe(100);
-});
-
-it('should apply 100% discount', () => {
-  expect(applyDiscount(100, 100)).toBe(0);
-});
-
-it('should reject discount over 100', () => {
-  expect(() => applyDiscount(100, 101)).toThrow();
-});
-
-it('should reject exactly 0 boundary correctly', () => {
-  // This is valid -- 0% discount should NOT throw
-  expect(applyDiscount(50, 0)).toBe(50);
-});
-```
-
-## Beyond Stryker: Other Ecosystems
-
-### Java: PIT (pitest)
-
-```xml
-<!-- pom.xml -->
-<plugin>
-  <groupId>org.pitest</groupId>
-  <artifactId>pitest-maven</artifactId>
-  <version>1.15.0</version>
-  <configuration>
-    <targetClasses>
-      <param>com.example.service.*</param>
-    </targetClasses>
-    <mutationThreshold>70</mutationThreshold>
-  </configuration>
-</plugin>
-```
-
-```bash
-mvn org.pitest:pitest-maven:mutationCoverage
-```
-
-### Python: mutmut
-
-```bash
-pip install mutmut
-
-# Run mutation testing
-mutmut run --paths-to-mutate=src/
-
-# View results
-mutmut results
-mutmut html  # Generate HTML report
-```
-
-### Rust: cargo-mutants
-
-```bash
-cargo install cargo-mutants
-
-# Run mutation testing
-cargo mutants
-
-# Target specific modules
-cargo mutants -- --package my-crate -f src/parser.rs
-
-# Skip slow tests
-cargo mutants --timeout 60
-```
-
-### When to Use Framework-Specific Tools
-
-| Language | Tool | Best For |
-|----------|------|----------|
-| TypeScript/JavaScript | Stryker | Full ecosystem, Vitest/Jest/Mocha support |
-| Java/Kotlin | PIT (pitest) | Maven/Gradle integration, fast bytecode mutation |
-| Python | mutmut | Simple setup, good defaults |
-| Rust | cargo-mutants | Cargo integration, type-system-aware mutations |
-| C# | Stryker.NET | .NET ecosystem, NUnit/xUnit/MSTest |
-| Scala | Stryker4s | sbt integration |
-
-**General rule**: Use the tool native to your build ecosystem. Stryker covers JS/TS/.NET/Scala.
-PIT dominates Java. mutmut and cargo-mutants are the pragmatic choices for Python and Rust.
-
-## Quick Reference
-
-### Setup Checklist
-
-- [ ] Install Stryker and test-runner plugin
-- [ ] Create `stryker.config.mjs` with targeted `mutate` globs
-- [ ] Enable `coverageAnalysis: 'perTest'`
-- [ ] Enable `incremental: true` for development
-- [ ] Add `.stryker-cache/` and `.stryker-tmp/` to `.gitignore`
-- [ ] Add `test:mutation` script to package.json
-- [ ] Configure CI workflow (incremental on PRs, full weekly)
-- [ ] Set `thresholds.break` for CI quality gate
-
-### Commands Cheat Sheet
-
-```bash
-npx stryker init                           # Interactive setup
-npx stryker run                            # Full run
-npx stryker run --incremental              # Incremental (fast)
-npx stryker run --mutate 'src/core/**'     # Target specific files
-npx stryker run --logLevel debug           # Debug output
-npx stryker run --concurrency 2            # Limit parallelism
-```
-
 ### Score Targets
 
 | Context | Target Score |
@@ -761,9 +357,3 @@ npx stryker run --concurrency 2            # Limit parallelism
 | Utility libraries | 60%+ |
 | General application code | 50%+ |
 | Initial adoption (baseline) | Any improvement |
-
-## Related Skills
-
-- `unit-testing` - Write and improve the unit tests that mutation testing evaluates
-- `qa-engineer` - Overall test strategy and quality metrics
-- `e2e-testing` - E2E and visual regression tests

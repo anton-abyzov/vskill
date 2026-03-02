@@ -24,23 +24,7 @@ Expert knowledge of integrating Apache Kafka with n8n workflow automation platfo
 - Compression (gzip, snappy, lz4)
 - Batch sending
 
-**Configuration**:
-```json
-{
-  "credentials": {
-    "kafkaApi": {
-      "brokers": "localhost:9092",
-      "clientId": "n8n-workflow",
-      "ssl": false,
-      "sasl": {
-        "mechanism": "plain",
-        "username": "{{$env.KAFKA_USER}}",
-        "password": "{{$env.KAFKA_PASSWORD}}"
-      }
-    }
-  }
-}
-```
+**Configuration**: Use environment variables — `{{$env.KAFKA_BROKERS}}`, `{{$env.KAFKA_USER}}`, `{{$env.KAFKA_PASSWORD}}` — never hardcode credentials in workflows.
 
 ## When to Use This Skill
 
@@ -220,51 +204,10 @@ Consumer Group: (empty)
 [Kafka Trigger] → [HTTP Request] → [Database]
 ```
 
-### 3. Use Environment Variables for Credentials
-
-✅ **DO**:
-```
-Kafka Brokers: {{$env.KAFKA_BROKERS}}
-SASL Username: {{$env.KAFKA_USER}}
-SASL Password: {{$env.KAFKA_PASSWORD}}
-```
-
-❌ **DON'T**:
-```
-// WRONG: Hardcoded credentials in workflow!
-Kafka Brokers: "localhost:9092"
-SASL Username: "admin"
-SASL Password: "admin-secret"
-```
-
-### 4. Set Explicit Partitioning Keys
-
-✅ **DO**:
-```
-Kafka Producer:
-  Topic: orders
-  Key: {{$json.customerId}}  // Partition by customer
-  Message: {{$json}}
-```
-
-❌ **DON'T**:
-```
-// WRONG: No key (random partitioning!)
-Kafka Producer:
-  Topic: orders
-  Message: {{$json}}
-```
-
-### 5. Monitor Consumer Lag
-
-**Setup Prometheus metrics export**:
-```
-[Cron Trigger] → [Kafka Admin] → [Get Consumer Lag] → [Prometheus]
-     ↓               ↓                   ↓
-  Every 30s    List consumer groups   Calculate lag
-                                           ↓
-                                   Push to Pushgateway
-```
+### Other Best Practices (brief)
+- **Credentials**: Always use `{{$env.VAR}}` — never hardcode brokers, usernames, or passwords
+- **Partitioning**: Set a message key (e.g. `{{$json.customerId}}`) to ensure ordering per entity; omitting the key causes random partitioning
+- **Consumer lag**: Monitor with Prometheus/Grafana; increase consumer group size or enable batching when lag builds up
 
 ## Error Handling Strategies
 
@@ -339,7 +282,7 @@ return { skip: false };
 
 ## Performance Optimization
 
-### 1. Batch Processing
+### Batch Processing
 
 **Enable batching in Kafka Trigger**:
 ```
@@ -361,135 +304,24 @@ const transformed = events.map(event => ({
 return transformed;
 ```
 
-### 2. Parallel Processing with Split in Batches
-
-```
-[Kafka Trigger] → [Split in Batches] → [HTTP Request] → [Aggregate]
-     ↓                  ↓                     ↓
-  1000 events      100 at a time       Parallel API calls
-                                            ↓
-                                      Combine results
-```
-
-### 3. Use Compression
-
-**Kafka Producer**:
+**Kafka Producer compression**:
 ```
 Compression: lz4  // Or gzip, snappy
 Batch Size: 1000  // Larger batches = better compression
 ```
 
-## Integration Patterns
+## Troubleshooting
 
-### Pattern 1: Kafka + HTTP API Enrichment
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| Consumer lag building | Processing slower than arrival | Increase consumer group size, enable batching, use Split in Batches |
+| Duplicate messages | At-least-once delivery | Add idempotency check (Strategy 3 above) |
+| Workflow timeout | Long-running HTTP requests | Use async webhook callback pattern |
 
-```
-[Kafka Trigger] → [HTTP Request] → [Transform] → [Kafka Producer]
-     ↓                 ↓                ↓
-  Raw events      Enrich from API   Combine data
-                                         ↓
-                                  Publish enriched
-```
+## Testing
 
-### Pattern 2: Kafka + Database Sync
-
-```
-[Kafka Trigger] → [PostgreSQL Upsert] → [Kafka Producer]
-     ↓                   ↓                    ↓
-  CDC events      Update database    Publish success/failure
-```
-
-### Pattern 3: Kafka + Email Notifications
-
-```
-[Kafka Trigger] → [If Critical] → [Send Email] → [Kafka Producer]
-     ↓                ↓                ↓
-  Alerts        severity=critical  Notify admin
-                                        ↓
-                                   Publish alert sent
-```
-
-### Pattern 4: Kafka + Slack Alerts
-
-```
-[Kafka Trigger] → [Transform] → [Slack] → [Kafka Producer]
-     ↓               ↓            ↓
-  Errors        Format message  Send to #alerts
-                                     ↓
-                                Publish notification
-```
-
-## Testing n8n Workflows
-
-### Manual Testing
-
-1. **Test with Sample Data**:
-   - Right-click node → "Add Sample Data"
-   - Execute workflow
-   - Check outputs
-
-2. **Test Kafka Producer**:
-   ```bash
-   # Consume test topic
-   kcat -C -b localhost:9092 -t test-output -o beginning
-   ```
-
-3. **Test Kafka Trigger**:
-   ```bash
-   # Produce test message
-   echo '{"test": "data"}' | kcat -P -b localhost:9092 -t test-input
-   ```
-
-### Automated Testing
-
-**n8n CLI**:
-```bash
-# Execute workflow with input
-n8n execute workflow --file workflow.json --input data.json
-
-# Export workflow
-n8n export:workflow --id=123 --output=workflow.json
-```
-
-## Common Issues & Solutions
-
-### Issue 1: Consumer Lag Building Up
-
-**Symptoms**: Processing slower than message arrival
-
-**Solutions**:
-1. Increase consumer group size (parallel processing)
-2. Enable batching (process 100 messages at once)
-3. Optimize HTTP requests (use connection pooling)
-4. Use Split in Batches for parallel processing
-
-### Issue 2: Duplicate Messages
-
-**Cause**: At-least-once delivery, no deduplication
-
-**Solution**: Add idempotency check:
-```javascript
-// Check if message already processed
-const messageId = $json.headers?.['message-id'];
-const exists = await $('Redis').exists(messageId);
-
-if (exists) {
-  return { skip: true };
-}
-```
-
-### Issue 3: Workflow Execution Timeout
-
-**Cause**: Long-running HTTP requests
-
-**Solution**: Use async patterns:
-```
-[Kafka Trigger] → [Webhook] → [Wait for Webhook] → [Process Response]
-     ↓               ↓
-  Trigger job    Async callback
-                     ↓
-                 Continue workflow
-```
+1. **Test with Sample Data**: Right-click node → "Add Sample Data" → Execute workflow → Check outputs
+2. **Manual Kafka test**: Produce a test message to the trigger topic and observe workflow execution in n8n UI
 
 ## References
 

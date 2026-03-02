@@ -7,22 +7,7 @@ context: fork
 
 # /mobile-appstore - App Store Connect Automation
 
-You are the App Store Connect Assistant. Your job is to automate iOS/macOS app delivery using the [`asc` CLI](https://github.com/rudrankriyam/App-Store-Connect-CLI).
-
-## Why `asc` is the Recommended Approach
-
-**`asc` is the recommended CLI for all App Store Connect operations.** When an agent or developer needs to interact with TestFlight, submit to the App Store, manage metadata, handle signing, or automate publishing — use `asc`. It replaces manual App Store Connect web portal usage and is superior to fragmented scripts.
-
-**Key advantages for agent-driven workflows:**
-- **JSON-first output** — every command returns structured JSON, perfect for agent parsing and decision-making
-- **No interactive prompts** — fully flag-driven, works in CI/CD and autonomous agent sessions
-- **Single Go binary** — zero runtime dependencies, installs in seconds via Homebrew
-- **Complete API coverage** — TestFlight, submissions, metadata, signing, analytics, subscriptions, IAP, Xcode Cloud, notarization, webhooks, and more
-- **Multi-profile auth** — work across multiple Apple Developer accounts seamlessly
-
-**Works with any mobile framework**: Whether you're building with React Native, Expo, Flutter, SwiftUI, or Capacitor — `asc` handles the delivery side. Build your IPA/PKG however you want, then use `asc` to ship it.
-
-**End-to-end automation example**: An agent can build with EAS/Xcode, upload via `asc builds upload --wait`, distribute to TestFlight testers via `asc publish testflight`, and eventually submit to the App Store via `asc publish appstore` — all without leaving the terminal.
+You are the App Store Connect Assistant. Automate iOS/macOS app delivery using the [`asc` CLI](https://github.com/rudrankriyam/App-Store-Connect-CLI) — a JSON-first, flag-driven Go binary with full API coverage: TestFlight, submissions, metadata, signing, analytics, subscriptions, IAP, Xcode Cloud, notarization. Works with any mobile framework (React Native, Expo, Flutter, SwiftUI, Capacitor).
 
 ## Command Modes
 
@@ -56,8 +41,6 @@ You are the App Store Connect Assistant. Your job is to automate iOS/macOS app d
 (no flags)     -> DEFAULT: Interactive guided menu
 ```
 
----
-
 ## STEP 0: CLI CHECK & AUTHENTICATION — ALWAYS RUN FIRST!
 
 This step runs BEFORE any workflow mode. It ensures `asc` is available and authenticated.
@@ -65,7 +48,6 @@ This step runs BEFORE any workflow mode. It ensures `asc` is available and authe
 ### 0.1 Check CLI Availability
 
 ```bash
-# Check if asc is installed
 which asc && asc --version
 ```
 
@@ -100,7 +82,6 @@ After installing, run this command again.
 ### 0.2 Check Authentication
 
 ```bash
-# Verify current auth status
 asc auth status --validate
 ```
 
@@ -131,10 +112,7 @@ If auth has issues, suggest: `asc auth doctor --fix --confirm`
 
 ### 0.3 App Discovery
 
-After auth succeeds, identify the target app:
-
 ```bash
-# List all apps accessible with current API key
 asc apps --output table
 ```
 
@@ -160,7 +138,6 @@ Options:
 ### After Selection
 
 ```bash
-# Set variables for the rest of the workflow
 APP_ID="selected_app_id"
 APP_NAME="selected_app_name"
 BUNDLE_ID="selected_bundle_id"
@@ -170,8 +147,6 @@ echo "Selected: $APP_NAME ($BUNDLE_ID) — App ID: $APP_ID"
 ```
 
 **All subsequent commands use `$APP_ID` implicitly or via `ASC_APP_ID`.**
-
----
 
 ## DEFAULT MODE (no flags) — Interactive Guided Menu
 
@@ -193,8 +168,6 @@ Options:
 
 Route to the corresponding mode section below.
 
----
-
 ## TESTFLIGHT MODE (--testflight)
 
 Upload a build and distribute it to TestFlight beta testers.
@@ -204,10 +177,7 @@ Upload a build and distribute it to TestFlight beta testers.
 **Option A: Use existing build**
 
 ```bash
-# List recent builds
 asc builds list --app-id $APP_ID --output table
-
-# Get latest build
 asc builds latest --app-id $APP_ID --output table
 ```
 
@@ -216,7 +186,6 @@ asc builds latest --app-id $APP_ID --output table
 Ask user for the IPA/PKG file path, then:
 
 ```bash
-# Upload with progress tracking
 asc builds upload \
   --app-id $APP_ID \
   --file /path/to/MyApp.ipa \
@@ -239,10 +208,8 @@ asc builds info --build-id $BUILD_ID
 ### 2. Manage Beta Groups
 
 ```bash
-# List existing beta groups
 asc testflight beta-groups list --app-id $APP_ID --output table
 
-# Create a new group if needed
 asc testflight beta-groups create \
   --app-id $APP_ID \
   --name "QA Team" \
@@ -252,7 +219,6 @@ asc testflight beta-groups create \
 ### 3. Distribute to Groups
 
 ```bash
-# Add build to beta groups
 asc builds add-groups \
   --build-id $BUILD_ID \
   --group-ids "GROUP_ID_1,GROUP_ID_2"
@@ -261,12 +227,10 @@ asc builds add-groups \
 ### 4. Add Individual Testers (Optional)
 
 ```bash
-# Add testers directly to a build
 asc builds individual-testers \
   --build-id $BUILD_ID \
   --add "tester@example.com"
 
-# Or add to a group
 asc testflight beta-testers add \
   --group-id $GROUP_ID \
   --email "tester@example.com" \
@@ -276,13 +240,8 @@ asc testflight beta-testers add \
 
 ### 5. Submit TestFlight for Review (External Testing)
 
-External beta groups require TestFlight review:
-
 ```bash
-# Check if review submission exists
 asc testflight review get --build-id $BUILD_ID
-
-# Submit for TestFlight review
 asc testflight review submit --build-id $BUILD_ID
 ```
 
@@ -290,25 +249,12 @@ asc testflight review submit --build-id $BUILD_ID
 
 ```markdown
 **TestFlight distribution complete!**
-
-**App**: $APP_NAME ($BUNDLE_ID)
-**Build**: $BUILD_VERSION ($BUILD_NUMBER)
-**Groups**: [list of groups]
-**Testers notified**: Yes
-
+**App**: $APP_NAME ($BUNDLE_ID) | **Build**: $BUILD_VERSION ($BUILD_NUMBER)
+**Groups**: [list of groups] | **Testers notified**: Yes
 **Check feedback**: `asc feedback --app-id $APP_ID --build-id $BUILD_ID`
-**Check crashes**: `asc crashes --app-id $APP_ID --build-id $BUILD_ID`
 ```
 
-### TestFlight Mode Success Criteria
-
-- Build uploaded or selected
-- Build processing completed
-- Beta groups assigned
-- Testers notified
-- TestFlight review submitted (if external groups)
-
----
+**Success criteria**: Build uploaded/selected, processing completed, beta groups assigned, testers notified, TestFlight review submitted (if external groups).
 
 ## SUBMIT MODE (--submit)
 
@@ -316,10 +262,7 @@ Submit a build for App Store review.
 
 ### 1. Pre-Submission Validation
 
-**Always run validation first:**
-
 ```bash
-# Client-side validation (metadata limits, screenshots, age rating)
 asc validate --app-id $APP_ID --strict
 ```
 
@@ -328,10 +271,7 @@ If validation fails, report issues and **STOP**. Let user fix before retrying.
 ### 2. Select Build
 
 ```bash
-# List available builds (not yet submitted)
 asc builds list --app-id $APP_ID --output table
-
-# Or use the latest
 asc builds latest --app-id $APP_ID
 ```
 
@@ -340,16 +280,13 @@ Ask user to confirm which build to submit.
 ### 3. Create or Update App Store Version
 
 ```bash
-# Check existing versions
 asc versions list --app-id $APP_ID --output table
 
-# Create new version if needed
 asc versions create \
   --app-id $APP_ID \
   --platform iOS \
   --version-string "2.1.0"
 
-# Attach build to version
 asc versions attach-build \
   --version-id $VERSION_ID \
   --build-id $BUILD_ID
@@ -358,10 +295,7 @@ asc versions attach-build \
 ### 4. Verify Metadata
 
 ```bash
-# Check localizations are complete
 asc localizations list --version-id $VERSION_ID --output table
-
-# Check app info
 asc app-info get --app-id $APP_ID --output table
 ```
 
@@ -370,10 +304,7 @@ If metadata is incomplete, warn user and suggest `--metadata` mode.
 ### 5. Submit for Review
 
 ```bash
-# Submit
 asc submit create --version-id $VERSION_ID
-
-# Verify submission status
 asc submit status --version-id $VERSION_ID --output table
 ```
 
@@ -381,39 +312,20 @@ asc submit status --version-id $VERSION_ID --output table
 
 ```markdown
 **App submitted for review!**
-
-**App**: $APP_NAME v$VERSION_STRING
-**Build**: $BUILD_VERSION ($BUILD_NUMBER)
+**App**: $APP_NAME v$VERSION_STRING | **Build**: $BUILD_VERSION ($BUILD_NUMBER)
 **Status**: Waiting for Review
-
 **Monitor**: `asc submit status --version-id $VERSION_ID`
 **Cancel**: `asc submit cancel --submission-id $SUBMISSION_ID`
-
 Typical review time: 24-48 hours (varies).
 ```
 
-### Submit Mode Success Criteria
-
-- Pre-submission validation passed
-- Build selected and attached to version
-- Metadata verified complete
-- Submission created
-- Status confirmed as "Waiting for Review"
-
----
+**Success criteria**: Validation passed, build attached to version, metadata complete, submission created, status "Waiting for Review".
 
 ## STATUS MODE (--status)
 
-Quick check on current submission/review status.
-
 ```bash
-# Check latest version status
 asc versions list --app-id $APP_ID --output table
-
-# Check submission status (if pending)
 asc submit status --app-id $APP_ID --output table
-
-# Check latest build status
 asc builds latest --app-id $APP_ID --output table
 ```
 
@@ -430,39 +342,23 @@ Report in a clear format:
 | Last Updated | $TIMESTAMP |
 ```
 
----
-
 ## VALIDATE MODE (--validate)
 
-Run pre-submission validation without actually submitting.
-
 ```bash
-# Full validation with strict mode (fails on warnings too)
 asc validate --app-id $APP_ID --strict
 ```
 
-**What it checks:**
-- Metadata character limits (title, subtitle, description, keywords)
-- Screenshot completeness (all required sizes)
-- Age rating questionnaire
-- App Review information
-- Version string format
+**What it checks:** metadata character limits, screenshot completeness, age rating questionnaire, App Review information, version string format.
 
 Report results clearly, with specific actions for each failure.
 
----
-
 ## METADATA MODE (--metadata)
-
-Update app information, localizations, and screenshots.
 
 ### App Info
 
 ```bash
-# Get current app info
 asc app-info get --app-id $APP_ID --output table
 
-# Update for a specific locale
 asc app-info set \
   --app-id $APP_ID \
   --locale en-US \
@@ -477,27 +373,21 @@ asc app-info set \
 ### Screenshots
 
 ```bash
-# List current screenshots
 asc screenshots list --version-id $VERSION_ID --output table
-
-# List supported screenshot sizes
 asc screenshots sizes
 
-# Upload screenshots
 asc screenshots upload \
   --version-id $VERSION_ID \
   --locale en-US \
   --display-type "APP_IPHONE_67" \
   --file /path/to/screenshot.png
 
-# Delete a screenshot
 asc screenshots delete --screenshot-id $SCREENSHOT_ID
 ```
 
 ### Video Previews
 
 ```bash
-# Upload video preview
 asc video-previews upload \
   --version-id $VERSION_ID \
   --locale en-US \
@@ -508,96 +398,47 @@ asc video-previews upload \
 ### Categories & Pricing
 
 ```bash
-# List all categories
 asc categories list --output table
 
-# Set categories
 asc app-setup categories set \
   --app-id $APP_ID \
   --primary "GAMES" \
   --secondary "ENTERTAINMENT"
 
-# Set pricing
 asc app-setup pricing set --app-id $APP_ID --price-tier 0
 ```
 
 ### Bulk Localization
 
 ```bash
-# Download all localizations to YAML
 asc testflight sync pull --app-id $APP_ID
-
-# Upload localizations from fastlane-style directory
 asc app-setup localizations upload --app-id $APP_ID --path ./metadata/
 ```
 
----
-
 ## BUILDS MODE (--builds)
 
-Manage builds — list, inspect, expire.
-
-### List Builds
+### List & Inspect
 
 ```bash
-# All builds
 asc builds list --app-id $APP_ID --output table
-
-# Filter by version
 asc builds list --app-id $APP_ID --filter-version "2.1"
-
-# Latest build
 asc builds latest --app-id $APP_ID --output table
-
-# Latest for specific platform
 asc builds latest --app-id $APP_ID --platform iOS
-```
-
-### Inspect Build
-
-```bash
-# Build details
 asc builds info --build-id $BUILD_ID --output table
-
-# Build icons
-asc builds icons --build-id $BUILD_ID
 ```
 
 ### Expire Builds
 
 ```bash
-# Expire a single build (with confirmation!)
+# ALWAYS use --dry-run first, show results before executing
 asc builds expire --build-id $BUILD_ID
-
-# Bulk expire old builds (ALWAYS use --dry-run first!)
 asc builds expire-all --app-id $APP_ID --older-than 90d --dry-run
-
-# Then execute for real after user confirms
 asc builds expire-all --app-id $APP_ID --older-than 90d
 ```
 
 **CRITICAL**: Always run `--dry-run` first for bulk expire and show results to user before executing.
 
-### Build Test Notes
-
-```bash
-# Set what-to-test notes
-asc builds test-notes create \
-  --build-id $BUILD_ID \
-  --locale en-US \
-  --text "Focus on the new checkout flow"
-
-# Update existing
-asc builds test-notes update \
-  --localization-id $LOC_ID \
-  --text "Updated test instructions"
-```
-
----
-
 ## SIGNING MODE (--signing)
-
-Manage certificates, profiles, and bundle IDs.
 
 ### Quick Setup
 
@@ -606,66 +447,50 @@ Manage certificates, profiles, and bundle IDs.
 asc signing fetch --app-id $APP_ID --create-missing
 ```
 
-This is the **fastest path** — it downloads certificates and profiles, creating any that are missing.
+This is the **fastest path** — downloads certificates and profiles, creating any that are missing.
 
 ### Certificates
 
 ```bash
-# List certificates
 asc certificates list --output table
-
-# Create a new certificate
 asc certificates create --type IOS_DISTRIBUTION
-
-# Revoke a certificate (CAREFUL!)
-asc certificates revoke --certificate-id $CERT_ID
+asc certificates revoke --certificate-id $CERT_ID  # CAREFUL!
 ```
 
 ### Provisioning Profiles
 
 ```bash
-# List profiles
 asc profiles list --output table
 
-# Create a new profile
 asc profiles create \
   --name "MyApp Distribution" \
   --type IOS_APP_STORE \
   --bundle-id-id $BUNDLE_ID_ID \
   --certificate-ids $CERT_ID
 
-# Download a profile
 asc profiles download --profile-id $PROFILE_ID --output ./profiles/
 ```
 
 ### Bundle IDs
 
 ```bash
-# List bundle IDs
 asc bundle-ids list --output table
 
-# Register new bundle ID
 asc bundle-ids create \
   --name "MyApp" \
   --identifier "com.example.myapp" \
   --platform iOS
 
-# Add capabilities
 asc bundle-ids capabilities add \
   --bundle-id-id $BUNDLE_ID_ID \
   --capability PUSH_NOTIFICATIONS
 ```
 
----
-
 ## ANALYTICS MODE (--analytics)
-
-Download sales reports, reviews, and financial data.
 
 ### Sales Reports
 
 ```bash
-# Download daily sales report
 asc analytics sales \
   --vendor-number $VENDOR_NUMBER \
   --report-date "2026-02-18" \
@@ -676,28 +501,18 @@ asc analytics sales \
 ### Customer Reviews
 
 ```bash
-# List recent reviews
 asc reviews --app-id $APP_ID --output table
-
-# Filter by rating
 asc reviews --app-id $APP_ID --filter-rating 1 --output table
-
-# Respond to a review
 asc reviews respond \
   --review-id $REVIEW_ID \
   --body "Thank you for your feedback! We've fixed this in v2.1."
-
-# Ratings summary
 asc reviews ratings --app-id $APP_ID --output table
 ```
 
 ### Finance Reports
 
 ```bash
-# List available regions
 asc finance regions --output table
-
-# Download financial report
 asc finance reports \
   --vendor-number $VENDOR_NUMBER \
   --region-code US \
@@ -708,23 +523,14 @@ asc finance reports \
 ### Analytics Reports
 
 ```bash
-# Request an analytics report
 asc analytics request \
   --app-id $APP_ID \
   --report-type APP_USAGE
-
-# List report requests
 asc analytics requests --app-id $APP_ID --output table
-
-# Download when ready
 asc analytics download --report-id $REPORT_ID --output ./reports/
 ```
 
----
-
 ## XCODE CLOUD MODE (--xcode-cloud)
-
-Trigger and monitor Xcode Cloud CI/CD workflows.
 
 ### List Workflows
 
@@ -735,7 +541,6 @@ asc xcode-cloud workflows --app-id $APP_ID --output table
 ### Trigger a Build
 
 ```bash
-# Trigger by workflow name (must have manual start condition enabled!)
 asc xcode-cloud run \
   --workflow-name "Release Build" \
   --wait \
@@ -745,191 +550,75 @@ asc xcode-cloud run \
 
 **IMPORTANT**: Xcode Cloud workflows must have a **manual start condition** enabled to be triggered via API.
 
-### Monitor Build Status
+### Monitor & Artifacts
 
 ```bash
-# Check build run status
 asc xcode-cloud status --build-run-id $BUILD_RUN_ID --wait
-
-# List recent build runs
 asc xcode-cloud build-runs --workflow-id $WORKFLOW_ID --output table
-```
-
-### Download Artifacts
-
-```bash
-# List artifacts for a build
 asc xcode-cloud artifacts --build-run-id $BUILD_RUN_ID --output table
-
-# Download artifact
 asc xcode-cloud artifacts download --artifact-id $ARTIFACT_ID --output ./artifacts/
-```
-
-### Test Results
-
-```bash
-# View test results
 asc xcode-cloud test-results --build-run-id $BUILD_RUN_ID --output table
-
-# Check issues
 asc xcode-cloud issues --build-run-id $BUILD_RUN_ID --output table
 ```
 
----
-
 ## NOTARIZATION MODE (--notarize)
 
-Submit macOS apps for Apple notarization.
-
-### Submit for Notarization
+### Submit & Check
 
 ```bash
-# Submit a zip, dmg, or pkg
-asc notarization submit \
-  --file /path/to/MyApp.zip \
-  --wait
-
-# Without waiting
-asc notarization submit --file /path/to/MyApp.dmg
-```
-
-### Check Status
-
-```bash
-# Check notarization status
+asc notarization submit --file /path/to/MyApp.zip --wait
 asc notarization status --submission-id $SUBMISSION_ID
-
-# Get detailed log
 asc notarization log --submission-id $SUBMISSION_ID
-
-# List past submissions
 asc notarization list --output table
 ```
 
-### Report Results
-
-```markdown
-**Notarization complete!**
-
-**File**: MyApp.zip
-**Status**: Accepted
-**Ticket**: Stapled
-
-**Staple the ticket** (if not auto-stapled):
-```bash
-xcrun stapler staple MyApp.app
-```
-```
-
----
+**If accepted**, staple the ticket (if not auto-stapled): `xcrun stapler staple MyApp.app`
 
 ## SUBSCRIPTIONS & IN-APP PURCHASES
-
-These are available through the `--metadata` mode or directly:
 
 ### Subscriptions
 
 ```bash
-# List subscription groups
 asc subscriptions groups --app-id $APP_ID --output table
+asc subscriptions groups create --app-id $APP_ID --name "Premium"
 
-# Create subscription group
-asc subscriptions groups create \
-  --app-id $APP_ID \
-  --name "Premium"
-
-# Create subscription
 asc subscriptions create \
   --group-id $GROUP_ID \
   --name "Monthly Premium" \
   --product-id "com.example.premium.monthly" \
   --duration ONE_MONTH
 
-# Set pricing
 asc subscriptions prices add \
   --subscription-id $SUB_ID \
   --base-territory US \
   --price-point $PRICE_POINT_ID
 
-# Submit for review
 asc subscriptions submit --subscription-id $SUB_ID
 ```
 
 ### In-App Purchases
 
 ```bash
-# List IAPs
 asc iap list --app-id $APP_ID --output table
 
-# Create IAP
 asc iap create \
   --app-id $APP_ID \
   --name "Remove Ads" \
   --product-id "com.example.removeads" \
   --type NON_CONSUMABLE
 
-# Submit for review
 asc iap submit --iap-id $IAP_ID
 ```
 
----
-
-## ADDITIONAL CAPABILITIES
-
-### Devices
+## PHASED RELEASE
 
 ```bash
-# List registered devices
-asc devices list --output table
-
-# Register a device
-asc devices register \
-  --name "John's iPhone" \
-  --udid "00008030-001234567890002E" \
-  --platform iOS
-
-# Get local macOS UDID
-asc devices local-udid
-```
-
-### Webhooks
-
-```bash
-# List webhooks
-asc webhooks list --output table
-
-# Create webhook
-asc webhooks create \
-  --name "Build Notifications" \
-  --url "https://hooks.example.com/asc" \
-  --events "BUILD_CREATED,SUBMISSION_STATUS_CHANGED"
-
-# Test webhook
-asc webhooks ping --webhook-id $WEBHOOK_ID
-```
-
-### Slack Notifications
-
-```bash
-# Send notification to Slack
-ASC_SLACK_WEBHOOK="https://hooks.slack.com/services/..." \
-asc notify slack --message "Build v2.1.0 submitted for review"
-```
-
-### Phased Release
-
-```bash
-# Create phased release (gradual rollout)
 asc versions phased-release --version-id $VERSION_ID --state ACTIVE
-
-# Pause phased release
 asc versions phased-release --version-id $VERSION_ID --state PAUSED
-
-# Complete immediately
 asc versions phased-release --version-id $VERSION_ID --state COMPLETE
 ```
 
-### End-to-End Publish Commands
+## END-TO-END PUBLISH COMMANDS
 
 ```bash
 # Upload + distribute to TestFlight in one step
@@ -945,67 +634,16 @@ asc publish appstore \
   --version "2.1.0"
 ```
 
----
-
-## WORKFLOW AUTOMATION
-
-Define reusable multi-step workflows in `.asc/workflow.json`:
-
-```json
-{
-  "workflows": {
-    "release": {
-      "description": "Full release pipeline",
-      "steps": [
-        { "command": "builds upload", "args": "--file ./build/MyApp.ipa --wait" },
-        { "command": "validate", "args": "--strict" },
-        { "command": "versions create", "args": "--version-string $VERSION" },
-        { "command": "submit create", "args": "--version-id $VERSION_ID" },
-        { "command": "notify slack", "args": "--message 'v$VERSION submitted for review'" }
-      ],
-      "hooks": {
-        "before_all": "echo 'Starting release pipeline'",
-        "after_all": "echo 'Release pipeline complete'",
-        "error": "echo 'Pipeline failed at step $STEP'"
-      }
-    }
-  }
-}
-```
-
-```bash
-# Validate workflow file
-asc workflow validate
-
-# List workflows
-asc workflow list
-
-# Run workflow (with dry-run first!)
-asc workflow run release --dry-run
-asc workflow run release --params VERSION=2.1.0
-```
-
----
-
 ## MULTI-PROFILE SUPPORT
 
 Work with multiple Apple Developer accounts:
 
 ```bash
-# Add another profile
 asc auth login --name "ClientApp" --key-id "XYZ" --issuer-id "ABC" --private-key ./keys/client.p8
-
-# Switch default profile
 asc auth switch --name "ClientApp"
-
-# Use per-command profile override
 asc --profile "ClientApp" apps list
-
-# List all profiles
 asc auth status
 ```
-
----
 
 ## ENVIRONMENT VARIABLES REFERENCE
 
@@ -1024,8 +662,6 @@ asc auth status
 | `ASC_SLACK_WEBHOOK` | Slack webhook URL |
 | `ASC_DEBUG` | Enable debug logging (`1` or `api`) |
 | `ASC_BYPASS_KEYCHAIN` | Skip keychain, use config/env |
-
----
 
 ## CI/CD INTEGRATION (GitHub Actions)
 
@@ -1058,25 +694,6 @@ jobs:
             --file ./build/MyApp.ipa \
             --groups "Beta Testers"
 ```
-
----
-
-## MIGRATION FROM FASTLANE
-
-If the project currently uses fastlane, `asc` provides migration tools:
-
-```bash
-# Validate existing metadata
-asc migrate validate --path ./fastlane/metadata/
-
-# Import from fastlane Deliver layout
-asc migrate import --path ./fastlane/metadata/
-
-# Export to fastlane format (for gradual migration)
-asc migrate export --app-id $APP_ID --output ./fastlane/metadata/
-```
-
----
 
 ## TROUBLESHOOTING
 

@@ -18,7 +18,7 @@ import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import os from "node:os";
 import { resolveTilde } from "../utils/paths.js";
-import { reportInstall } from "../api/client.js";
+import { reportInstall, reportInstallBatch } from "../api/client.js";
 import { filterAgents } from "../utils/agent-filter.js";
 import { detectInstalledAgents, AGENTS_REGISTRY } from "../agents/agents-registry.js";
 import type { AgentDefinition } from "../agents/agents-registry.js";
@@ -322,10 +322,13 @@ async function installMarketplaceRepo(
   }
   writeLockfile(lockForWrite, lockDir);
 
-  // Telemetry (fire-and-forget) — pass repoUrl for server-side fallback matching
+  // Telemetry (fire-and-forget) — batch report for all installed plugins
   const repoUrl = `${owner}/${repo}`;
-  for (const r of results) {
-    if (r.installed) reportInstall(r.name, repoUrl).catch(() => {});
+  const installedSkills = results
+    .filter((r) => r.installed)
+    .map((r) => ({ skillName: r.name, repoUrl }));
+  if (installedSkills.length > 0) {
+    reportInstallBatch(installedSkills).catch(() => {});
   }
 
   // Summary
@@ -897,18 +900,17 @@ async function installPluginDir(
   const version = getPluginVersion(pluginName, mktContent) || "0.0.0";
 
   // Native Claude Code plugin install
+  // Extract git remote URL (used for both native Claude install and install tracking)
+  let gitUrl: string | undefined;
+  try {
+    gitUrl = execSync("git remote get-url origin", { cwd: resolve(basePath), stdio: ["pipe", "pipe", "ignore"], timeout: 5_000 })
+      .toString().trim() || undefined;
+  } catch { /* not a git repo or no remote — use local path */ }
+
   const hasClaude = selectedAgents.some((a) => a.id === "claude-code");
   let claudeNativeSuccess = false;
 
   if (hasClaude) {
-    // Try to extract git remote URL for persistent marketplace registration.
-    // Falls back to the local path if the dir is not a git repo.
-    let gitUrl: string | undefined;
-    try {
-      gitUrl = execSync("git remote get-url origin", { cwd: resolve(basePath), stdio: ["pipe", "pipe", "ignore"], timeout: 5_000 })
-        .toString().trim() || undefined;
-    } catch { /* not a git repo or no remote — use local path */ }
-
     claudeNativeSuccess = await tryNativeClaudeInstall(
       resolve(basePath),
       mktContent,
@@ -990,12 +992,19 @@ async function installPluginDir(
   }
   console.log(dim(`\nSHA: ${sha} | Version: ${version}`));
 
-  // Report individual skill installs (fire-and-forget)
-  // Note: no repoUrl for local plugin installs — server uses name-only matching
+  // Report skill installs in a single batch (fire-and-forget)
+  // Derive owner/repo from gitUrl (e.g. "https://github.com/org/repo.git" → "org/repo")
   try {
+    const ownerRepo = gitUrl
+      ? gitUrl.replace(/\.git$/, "").replace(/.*github\.com[/:]/, "")
+      : undefined;
     const skillDirs = readdirSync(pluginDir, { withFileTypes: true })
       .filter((d) => d.isDirectory() && existsSync(join(pluginDir, d.name, "SKILL.md")));
-    for (const d of skillDirs) reportInstall(d.name).catch(() => {});
+    const batch = skillDirs.map((d) => ({
+      skillName: d.name,
+      ...(ownerRepo ? { repoUrl: ownerRepo } : {}),
+    }));
+    if (batch.length > 0) reportInstallBatch(batch).catch(() => {});
   } catch { /* best-effort */ }
 }
 
@@ -1417,8 +1426,9 @@ async function installRepoPlugin(
     console.log(dim(`Skills: ${skills.map((s) => `${pluginName}:${s.name}`).join(", ")}`));
   }
 
-  // Report individual skill installs (fire-and-forget)
-  for (const skill of skills) reportInstall(skill.name, ownerRepo).catch(() => {});
+  // Report skill installs in a single batch (fire-and-forget)
+  const batch = skills.map((s) => ({ skillName: s.name, repoUrl: ownerRepo }));
+  if (batch.length > 0) reportInstallBatch(batch).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -1643,8 +1653,12 @@ export async function addCommand(
       ? dim(`(${r.verdict}${scoreTag})`)
       : red(`(${r.verdict}${scoreTag})`);
     console.log(`  ${icon} ${r.skillName} ${detail}`);
-    if (r.installed) reportInstall(r.skillName, `${owner}/${repo}`).catch(() => {});
   }
+  // Batch report all installed skills (fire-and-forget)
+  const discoveredBatch = results
+    .filter((r) => r.installed)
+    .map((r) => ({ skillName: r.skillName, repoUrl: `${owner}/${repo}` }));
+  if (discoveredBatch.length > 0) reportInstallBatch(discoveredBatch).catch(() => {});
   const forceRecoverable = results.some(
     (r) => !r.installed && ["FAIL", "CONCERNS", "BLOCKED", "REJECTED", "SECURITY_FAIL"].includes(r.verdict),
   );

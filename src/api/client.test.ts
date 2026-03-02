@@ -5,6 +5,7 @@ import {
   submitSkill,
   getSubmission,
   reportInstall,
+  reportInstallBatch,
 } from "./client.js";
 import type { SubmissionRequest } from "./client.js";
 
@@ -422,17 +423,113 @@ describe("reportInstall", () => {
     await expect(reportInstall("my-skill")).resolves.toBeUndefined();
   });
 
-  it("swallows non-ok responses silently", async () => {
-    mockFetch.mockResolvedValue(errorResponse(500, "Internal Server Error"));
+  it("retries once on server error", async () => {
+    mockFetch
+      .mockResolvedValueOnce(errorResponse(500, "Internal Server Error"))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
 
-    // Should not throw (reportInstall doesn't use apiRequest)
+    await reportInstall("my-skill");
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries once on network error then succeeds", async () => {
+    mockFetch
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+    await reportInstall("my-skill");
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after second failure", async () => {
+    mockFetch
+      .mockResolvedValueOnce(errorResponse(500, "Internal Server Error"))
+      .mockResolvedValueOnce(errorResponse(500, "Internal Server Error"));
+
+    // Should not throw
     await expect(reportInstall("my-skill")).resolves.toBeUndefined();
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
   it("passes an AbortSignal for timeout", async () => {
     mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
 
     await reportInstall("my-skill");
+
+    const callArgs = mockFetch.mock.calls[0];
+    const options = callArgs[1];
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe("reportInstallBatch", () => {
+  it("sends POST to batch endpoint with skills array", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ ok: true, results: [] }));
+
+    await reportInstallBatch([
+      { skillName: "pm", repoUrl: "anton-abyzov/specweave" },
+      { skillName: "do", repoUrl: "anton-abyzov/specweave" },
+    ]);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE_URL}/api/v1/skills/installs`,
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "User-Agent": "vskill-cli",
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify({
+          skills: [
+            { skillName: "pm", repoUrl: "anton-abyzov/specweave" },
+            { skillName: "do", repoUrl: "anton-abyzov/specweave" },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("respects VSKILL_NO_TELEMETRY=1", async () => {
+    const orig = process.env.VSKILL_NO_TELEMETRY;
+    process.env.VSKILL_NO_TELEMETRY = "1";
+    try {
+      await reportInstallBatch([{ skillName: "pm" }]);
+      expect(mockFetch).not.toHaveBeenCalled();
+    } finally {
+      if (orig === undefined) delete process.env.VSKILL_NO_TELEMETRY;
+      else process.env.VSKILL_NO_TELEMETRY = orig;
+    }
+  });
+
+  it("skips empty skills array", async () => {
+    await reportInstallBatch([]);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("retries once on server error", async () => {
+    mockFetch
+      .mockResolvedValueOnce(errorResponse(500, "Internal Server Error"))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, results: [] }));
+
+    await reportInstallBatch([{ skillName: "pm" }]);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("swallows errors silently", async () => {
+    mockFetch.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await expect(
+      reportInstallBatch([{ skillName: "pm" }])
+    ).resolves.toBeUndefined();
+  });
+
+  it("passes an AbortSignal for timeout", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ ok: true, results: [] }));
+
+    await reportInstallBatch([{ skillName: "pm" }]);
 
     const callArgs = mockFetch.mock.calls[0];
     const options = callArgs[1];

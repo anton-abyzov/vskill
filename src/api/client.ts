@@ -171,7 +171,7 @@ export async function getSubmission(
 }
 
 /**
- * Report a skill install to the platform (fire-and-forget).
+ * Report a skill install to the platform with retry.
  * Respects VSKILL_NO_TELEMETRY=1 env var for opt-out.
  * Never throws — all errors are silently swallowed.
  *
@@ -185,26 +185,89 @@ export async function reportInstall(
   try {
     if (process.env.VSKILL_NO_TELEMETRY === "1") return;
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2000);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
 
-    try {
-      await fetch(
-        `${BASE_URL}/api/v1/skills/${encodeURIComponent(skillName)}/installs`,
-        {
-          method: "POST",
-          headers: {
-            "User-Agent": "vskill-cli",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            ...(repoUrl ? { repoUrl } : {}),
-          }),
-          signal: controller.signal,
-        },
-      );
-    } finally {
-      clearTimeout(timeout);
+        try {
+          const res = await fetch(
+            `${BASE_URL}/api/v1/skills/${encodeURIComponent(skillName)}/installs`,
+            {
+              method: "POST",
+              headers: {
+                "User-Agent": "vskill-cli",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                ...(repoUrl ? { repoUrl } : {}),
+              }),
+              signal: controller.signal,
+            },
+          );
+          if (res.ok) return; // Success — done
+          // Server error — retry once
+          if (attempt === 0 && res.status >= 500) continue;
+          return; // Client error or second attempt — give up
+        } finally {
+          clearTimeout(timeout);
+        }
+      } catch {
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 500));
+          continue; // Retry after 500ms
+        }
+      }
+    }
+  } catch {
+    // Silent — install tracking must never block CLI
+  }
+}
+
+/**
+ * Report multiple skill installs in a single batch request.
+ * More reliable than individual reportInstall calls for plugin installs.
+ * Never throws — all errors are silently swallowed.
+ *
+ * @param skills - Array of { skillName, repoUrl? } to report
+ */
+export async function reportInstallBatch(
+  skills: Array<{ skillName: string; repoUrl?: string }>,
+): Promise<void> {
+  try {
+    if (process.env.VSKILL_NO_TELEMETRY === "1") return;
+    if (skills.length === 0) return;
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
+
+        try {
+          const res = await fetch(
+            `${BASE_URL}/api/v1/skills/installs`,
+            {
+              method: "POST",
+              headers: {
+                "User-Agent": "vskill-cli",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ skills }),
+              signal: controller.signal,
+            },
+          );
+          if (res.ok) return;
+          if (attempt === 0 && res.status >= 500) continue;
+          return;
+        } finally {
+          clearTimeout(timeout);
+        }
+      } catch {
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 500));
+          continue;
+        }
+      }
     }
   } catch {
     // Silent — install tracking must never block CLI

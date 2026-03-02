@@ -9,20 +9,6 @@ context: fork
 
 You are a frontend design expert that creates **polished, production-ready user interfaces** with distinctive visual characteristics. Rather than generic AI-styled designs, you produce interfaces with **bold aesthetic choices, carefully selected typography, distinctive color schemes, and thoughtful animations**.
 
-## Design Philosophy
-
-### Reject Generic AI Aesthetics
-- No bland gradients with teal-to-purple
-- No generic rounded corners on everything
-- No sterile white backgrounds with gray text
-- No cookie-cutter card layouts
-
-### Embrace Bold Choices
-- Strong visual hierarchy with purposeful contrast
-- Distinctive color palettes that match brand personality
-- Typography that communicates tone (playful, professional, elegant)
-- Animations that enhance UX, not distract
-
 ## Design Principles
 
 ### 1. Visual Hierarchy
@@ -83,20 +69,7 @@ Tertiary Content  → Subtle, discovered on exploration
 --accent-primary: #4f46e5;    /* Deeper indigo */
 ```
 
-### 4. Spacing System (8px Grid)
-```css
---space-1: 0.25rem;  /* 4px - tight */
---space-2: 0.5rem;   /* 8px - base */
---space-3: 0.75rem;  /* 12px */
---space-4: 1rem;     /* 16px - comfortable */
---space-6: 1.5rem;   /* 24px */
---space-8: 2rem;     /* 32px - section */
---space-12: 3rem;    /* 48px */
---space-16: 4rem;    /* 64px - major section */
---space-24: 6rem;    /* 96px - hero */
-```
-
-### 5. Animation Principles
+### 4. Animation Principles
 
 **Micro-interactions**
 ```css
@@ -156,119 +129,6 @@ Tertiary Content  → Subtle, discovered on exploration
 @keyframes shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
-}
-```
-
-## Component Patterns
-
-### Hero Section (Landing Page)
-```tsx
-<section className="relative min-h-screen flex items-center justify-center overflow-hidden">
-  {/* Background gradient */}
-  <div className="absolute inset-0 bg-gradient-to-b from-indigo-950/50 to-black" />
-
-  {/* Animated gradient orbs */}
-  <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500/20 rounded-full blur-3xl animate-pulse" />
-  <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/20 rounded-full blur-3xl animate-pulse delay-1000" />
-
-  {/* Content */}
-  <div className="relative z-10 text-center max-w-4xl px-4">
-    <h1 className="text-5xl md:text-7xl font-bold tracking-tight">
-      <span className="bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
-        Build something
-      </span>
-      <br />
-      <span className="bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-        remarkable
-      </span>
-    </h1>
-    <p className="mt-6 text-xl text-gray-400 max-w-2xl mx-auto">
-      Ship faster with tools that understand your workflow.
-    </p>
-    <div className="mt-10 flex gap-4 justify-center">
-      <button className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 rounded-lg font-medium transition-all hover:scale-105">
-        Get Started
-      </button>
-      <button className="px-8 py-3 border border-gray-700 hover:border-gray-600 rounded-lg font-medium transition-all">
-        Learn More
-      </button>
-    </div>
-  </div>
-</section>
-```
-
-### Card Component (Elevated)
-```tsx
-<div className="group relative bg-gray-900/50 backdrop-blur-sm border border-gray-800 rounded-2xl p-6 hover:border-gray-700 transition-all duration-300">
-  {/* Hover glow effect */}
-  <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-indigo-500/10 to-purple-500/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-
-  <div className="relative">
-    <div className="w-12 h-12 bg-indigo-500/20 rounded-xl flex items-center justify-center mb-4">
-      <Icon className="w-6 h-6 text-indigo-400" />
-    </div>
-    <h3 className="text-lg font-semibold text-white mb-2">Feature Title</h3>
-    <p className="text-gray-400 text-sm leading-relaxed">
-      Description that explains the value proposition clearly.
-    </p>
-  </div>
-</div>
-```
-
-### Dashboard Layout
-```tsx
-<div className="min-h-screen bg-gray-950">
-  {/* Sidebar */}
-  <aside className="fixed inset-y-0 left-0 w-64 bg-gray-900/50 border-r border-gray-800 backdrop-blur-xl">
-    <nav className="p-4 space-y-1">
-      <NavItem icon={HomeIcon} label="Dashboard" active />
-      <NavItem icon={ChartIcon} label="Analytics" />
-      <NavItem icon={UsersIcon} label="Customers" />
-    </nav>
-  </aside>
-
-  {/* Main content */}
-  <main className="pl-64">
-    <header className="sticky top-0 h-16 border-b border-gray-800 bg-gray-950/80 backdrop-blur-sm flex items-center px-6">
-      <h1 className="text-lg font-semibold">Dashboard</h1>
-    </header>
-    <div className="p-6">
-      {/* Grid of stat cards */}
-      <div className="grid grid-cols-4 gap-4 mb-8">
-        <StatCard label="Revenue" value="$45,231" change="+12%" />
-        <StatCard label="Users" value="2,350" change="+8%" />
-        <StatCard label="Orders" value="1,247" change="+23%" />
-        <StatCard label="Conversion" value="3.2%" change="-2%" />
-      </div>
-    </div>
-  </main>
-</div>
-```
-
-## Responsive Design
-
-```css
-/* Mobile-first breakpoints */
-/* Default: Mobile (< 640px) */
-/* sm: Tablet portrait (≥ 640px) */
-/* md: Tablet landscape (≥ 768px) */
-/* lg: Desktop (≥ 1024px) */
-/* xl: Wide desktop (≥ 1280px) */
-/* 2xl: Ultra-wide (≥ 1536px) */
-
-/* Example responsive typography */
-.hero-title {
-  font-size: 2.5rem;   /* Mobile */
-}
-@media (min-width: 768px) {
-  .hero-title {
-    font-size: 4rem;   /* Tablet+ */
-  }
-}
-@media (min-width: 1024px) {
-  .hero-title {
-    font-size: 5rem;   /* Desktop+ */
-  }
 }
 ```
 

@@ -501,6 +501,8 @@ interface AddOptions {
   select?: boolean;
   /** @internal Registry target skill name — auto-select from discovery */
   _targetSkill?: string;
+  /** Filter which skills to install from a plugin (comma-separated names) */
+  onlySkills?: string;
 }
 
 /**
@@ -1307,6 +1309,18 @@ async function installRepoPlugin(
 
   if (skillEntries.length === 0 && cmdEntries.length === 0) {
     throw new Error(`No skills or commands found in plugin "${pluginName}"`);
+  }
+
+  // Filter skills by --only-skills if provided
+  if (opts.onlySkills) {
+    const allowed = new Set(opts.onlySkills.split(",").map((s) => s.trim().toLowerCase()));
+    const before = skillEntries.length;
+    skillEntries = skillEntries.filter((e) => allowed.has(e.name.toLowerCase()));
+    if (skillEntries.length < before) {
+      console.log(
+        dim(`  Filtered skills: ${before} → ${skillEntries.length} (--only-skills: ${opts.onlySkills})`)
+      );
+    }
   }
 
   // Fetch all skill and command content

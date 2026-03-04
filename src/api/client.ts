@@ -182,6 +182,7 @@ export async function reportInstall(
   skillName: string,
   repoUrl?: string,
 ): Promise<void> {
+  const verbose = process.env.VSKILL_DEBUG === "1";
   try {
     if (process.env.VSKILL_NO_TELEMETRY === "1") return;
 
@@ -206,13 +207,15 @@ export async function reportInstall(
             },
           );
           if (res.ok) return; // Success — done
+          if (verbose) process.stderr.write(`[vskill] install tracking failed: HTTP ${res.status} for ${skillName}\n`);
           // Server error — retry once
           if (attempt === 0 && res.status >= 500) continue;
           return; // Client error or second attempt — give up
         } finally {
           clearTimeout(timeout);
         }
-      } catch {
+      } catch (err) {
+        if (verbose) process.stderr.write(`[vskill] install tracking error for ${skillName}: ${err}\n`);
         if (attempt === 0) {
           await new Promise((r) => setTimeout(r, 500));
           continue; // Retry after 500ms
@@ -234,6 +237,7 @@ export async function reportInstall(
 export async function reportInstallBatch(
   skills: Array<{ skillName: string; repoUrl?: string }>,
 ): Promise<void> {
+  const verbose = process.env.VSKILL_DEBUG === "1";
   try {
     if (process.env.VSKILL_NO_TELEMETRY === "1") return;
     if (skills.length === 0) return;
@@ -257,12 +261,14 @@ export async function reportInstallBatch(
             },
           );
           if (res.ok) return;
+          if (verbose) process.stderr.write(`[vskill] batch install tracking failed: HTTP ${res.status} for ${skills.length} skills\n`);
           if (attempt === 0 && res.status >= 500) continue;
           return;
         } finally {
           clearTimeout(timeout);
         }
-      } catch {
+      } catch (err) {
+        if (verbose) process.stderr.write(`[vskill] batch install tracking error: ${err}\n`);
         if (attempt === 0) {
           await new Promise((r) => setTimeout(r, 500));
           continue;

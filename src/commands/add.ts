@@ -322,13 +322,13 @@ async function installMarketplaceRepo(
   }
   writeLockfile(lockForWrite, lockDir);
 
-  // Telemetry (fire-and-forget) — batch report for all installed plugins
+  // Telemetry — batch report for all installed plugins (awaited to prevent process exit race)
   const repoUrl = `${owner}/${repo}`;
   const installedSkills = results
     .filter((r) => r.installed)
     .map((r) => ({ skillName: r.name, repoUrl }));
   if (installedSkills.length > 0) {
-    reportInstallBatch(installedSkills).catch(() => {});
+    await reportInstallBatch(installedSkills).catch(() => {});
   }
 
   // Summary
@@ -1010,7 +1010,7 @@ async function installPluginDir(
       skillName: d.name,
       ...(ownerRepo ? { repoUrl: ownerRepo } : {}),
     }));
-    if (batch.length > 0) reportInstallBatch(batch).catch(() => {});
+    if (batch.length > 0) await reportInstallBatch(batch).catch(() => {});
   } catch { /* best-effort */ }
 }
 
@@ -1459,9 +1459,9 @@ async function installRepoPlugin(
     console.log(dim(`Skills: ${skills.map((s) => `${pluginName}:${s.name}`).join(", ")}`));
   }
 
-  // Report skill installs in a single batch (fire-and-forget)
+  // Report skill installs in a single batch (awaited to prevent process exit race)
   const batch = skills.map((s) => ({ skillName: s.name, repoUrl: ownerRepo }));
-  if (batch.length > 0) reportInstallBatch(batch).catch(() => {});
+  if (batch.length > 0) await reportInstallBatch(batch).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -1687,11 +1687,11 @@ export async function addCommand(
       : red(`(${r.verdict}${scoreTag})`);
     console.log(`  ${icon} ${r.skillName} ${detail}`);
   }
-  // Batch report all installed skills (fire-and-forget)
+  // Batch report all installed skills (awaited to prevent process exit race)
   const discoveredBatch = results
     .filter((r) => r.installed)
     .map((r) => ({ skillName: r.skillName, repoUrl: `${owner}/${repo}` }));
-  if (discoveredBatch.length > 0) reportInstallBatch(discoveredBatch).catch(() => {});
+  if (discoveredBatch.length > 0) await reportInstallBatch(discoveredBatch).catch(() => {});
   const forceRecoverable = results.some(
     (r) => !r.installed && ["FAIL", "CONCERNS", "BLOCKED", "REJECTED", "SECURITY_FAIL"].includes(r.verdict),
   );
@@ -1910,7 +1910,7 @@ async function installFromRegistry(
     console.log(`  ${dim(">")} ${loc}`);
   }
   console.log(dim(`\nSHA: ${sha} | Version: ${detail.version || "0.0.0"}`));
-  reportInstall(detail.name || skillName, detail.repoUrl).catch(() => {});
+  await reportInstall(detail.name || skillName, detail.repoUrl).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -2094,8 +2094,8 @@ async function installSingleSkillLegacy(
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock, lockDir);
 
-  // Phone home (fire-and-forget)
-  reportInstall(skillName, `${owner}/${repo}`).catch(() => {});
+  // Phone home (awaited to prevent process exit race)
+  await reportInstall(skillName, `${owner}/${repo}`).catch(() => {});
 
   // Print summary
   const method = opts.copy ? "copied" : "symlinked";

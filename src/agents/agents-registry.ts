@@ -617,21 +617,17 @@ export async function detectInstalledAgents(): Promise<AgentDefinition[]> {
       }
 
       // Tier 2: Config directory detection
-      // Check if the agent's global skills dir itself exists (not just the parent).
-      // This avoids false positives from stale config dirs that no longer have skills support.
-      // e.g. "~/.cursor/skills" → check if ~/.cursor/skills exists
-      //       OR fall back to parent dir check: ~/.cursor exists
+      // Only check if the agent's global skills dir itself exists.
+      // Checking the parent config dir (e.g. ~/.cursor/) caused massive false positives —
+      // many tools leave config dirs behind even when not actively used,
+      // leading to unwanted local skill directories being created for every detected agent.
       try {
         const globalDir = expandHome(agent.globalSkillsDir);
-        const configDir = dirname(globalDir);
         const home = process.env.HOME || process.env.USERPROFILE || '';
+        const configDir = dirname(globalDir);
         // Guard: don't match on generic dirs like $HOME or $HOME/.config
         if (configDir !== home && configDir !== `${home}/.config`) {
-          // Prefer exact skills dir check (strongest signal)
           if (existsSync(globalDir)) {
-            results.push(agent);
-          } else if (existsSync(configDir)) {
-            // Parent config dir exists — agent likely installed but skills not yet used
             results.push(agent);
           }
         }

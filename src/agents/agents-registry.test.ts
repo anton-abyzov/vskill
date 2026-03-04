@@ -254,6 +254,35 @@ describe("detectInstalledAgents", () => {
     const result = await detectInstalledAgents();
     expect(result.length).toBe(TOTAL_AGENTS);
   });
+
+  it("does NOT detect agent when only parent config dir exists (no false positives)", async () => {
+    // No CLI binary found
+    mockExec.mockRejectedValue(new Error("not found"));
+    // Parent dir ~/.cursor exists, but ~/.cursor/skills does NOT
+    const home = process.env.HOME || process.env.USERPROFILE || "";
+    mockExistsSync.mockImplementation((p: string) => {
+      if (p === `${home}/.cursor`) return true; // parent config dir
+      return false; // skills dir does not exist
+    });
+
+    const result = await detectInstalledAgents();
+    const ids = result.map((a) => a.id);
+    expect(ids).not.toContain("cursor");
+  });
+
+  it("detects agent when exact global skills dir exists", async () => {
+    // No CLI binary found
+    mockExec.mockRejectedValue(new Error("not found"));
+    const home = process.env.HOME || process.env.USERPROFILE || "";
+    mockExistsSync.mockImplementation((p: string) => {
+      if (p === `${home}/.cursor/skills`) return true; // exact skills dir
+      return false;
+    });
+
+    const result = await detectInstalledAgents();
+    const ids = result.map((a) => a.id);
+    expect(ids).toContain("cursor");
+  });
 });
 
 // ---------------------------------------------------------------------------

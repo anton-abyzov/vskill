@@ -92,6 +92,7 @@ program
   .command("update [skill]")
   .description("Update installed skills from the registry")
   .option("--all", "Update all installed skills")
+  .option("--agent <id>", "Update only for specific agent (repeatable)", collect, [])
   .action(async (skill: string | undefined, opts) => {
     const { updateCommand } = await import("./commands/update.js");
     await updateCommand(skill, opts);

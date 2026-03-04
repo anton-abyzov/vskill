@@ -35,14 +35,17 @@ export async function initCommand(): Promise<void> {
   }
 
   // Create or update lockfile
+  // Merge detected agents into existing list (don't overwrite — preserves
+  // pruned lists from --agent-filtered installs)
+  const detectedIds = agents.map((a) => a.id);
   const existing = readLockfile();
   if (existing) {
-    existing.agents = agents.map((a) => a.id);
+    existing.agents = [...new Set([...(existing.agents || []), ...detectedIds])];
     writeLockfile(existing);
     console.log(dim("Updated existing vskill.lock"));
   } else {
     const lock = ensureLockfile();
-    lock.agents = agents.map((a) => a.id);
+    lock.agents = detectedIds;
     writeLockfile(lock);
     console.log(green("Created vskill.lock"));
   }

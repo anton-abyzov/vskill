@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { readLockfile, writeLockfile } from "../lockfile/index.js";
 import { getSkill } from "../api/client.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
+import { filterAgents } from "../utils/agent-filter.js";
 import { runTier1Scan } from "../scanner/index.js";
 import {
   bold,
@@ -21,6 +22,7 @@ import {
 
 interface UpdateOptions {
   all?: boolean;
+  agent?: string | string[];
 }
 
 export async function updateCommand(
@@ -63,9 +65,17 @@ export async function updateCommand(
     return;
   }
 
-  const agents = await detectInstalledAgents();
+  let agents = await detectInstalledAgents();
   if (agents.length === 0) {
     console.error(red("No agents detected. Cannot update."));
+    process.exit(1);
+    return;
+  }
+  // Apply --agent filter (same as install command)
+  try {
+    agents = filterAgents(agents, opts.agent);
+  } catch (e) {
+    console.error(red((e as Error).message));
     process.exit(1);
     return;
   }

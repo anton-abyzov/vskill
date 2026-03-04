@@ -378,9 +378,14 @@ describe("reportInstall", () => {
           "User-Agent": "vskill-cli",
           "Content-Type": "application/json",
         }),
-        body: JSON.stringify({}),
+        body: expect.any(String),
       }),
     );
+    // Body should include metadata fields
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.source).toBe("cli");
+    expect(body.platform).toBe(process.platform);
+    expect(body.cliVersion).toBeDefined();
   });
 
   it("sends repoUrl in body when provided", async () => {
@@ -391,6 +396,7 @@ describe("reportInstall", () => {
     const callArgs = mockFetch.mock.calls[0];
     const body = JSON.parse(callArgs[1].body);
     expect(body.repoUrl).toBe("anton-abyzov/specweave");
+    expect(body.source).toBe("cli");
   });
 
   it("encodes special characters in skill name", async () => {
@@ -481,14 +487,17 @@ describe("reportInstallBatch", () => {
           "User-Agent": "vskill-cli",
           "Content-Type": "application/json",
         }),
-        body: JSON.stringify({
-          skills: [
-            { skillName: "pm", repoUrl: "anton-abyzov/specweave" },
-            { skillName: "do", repoUrl: "anton-abyzov/specweave" },
-          ],
-        }),
+        body: expect.any(String),
       }),
     );
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.skills).toEqual([
+      { skillName: "pm", repoUrl: "anton-abyzov/specweave" },
+      { skillName: "do", repoUrl: "anton-abyzov/specweave" },
+    ]);
+    expect(body.source).toBe("cli");
+    expect(body.platform).toBe(process.platform);
+    expect(body.cliVersion).toBeDefined();
   });
 
   it("respects VSKILL_NO_TELEMETRY=1", async () => {

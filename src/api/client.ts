@@ -2,7 +2,17 @@
 // HTTP client for verified-skill.com API
 // ---------------------------------------------------------------------------
 
+import { createRequire } from "node:module";
+
 const BASE_URL = "https://verified-skill.com";
+const VERSION: string = (() => {
+  try {
+    const require = createRequire(import.meta.url);
+    return require("../../package.json").version as string;
+  } catch {
+    return "unknown";
+  }
+})();
 
 export interface SkillSearchResult {
   name: string;
@@ -202,6 +212,9 @@ export async function reportInstall(
               },
               body: JSON.stringify({
                 ...(repoUrl ? { repoUrl } : {}),
+                source: "cli",
+                platform: process.platform,
+                cliVersion: VERSION,
               }),
               signal: controller.signal,
             },
@@ -256,7 +269,12 @@ export async function reportInstallBatch(
                 "User-Agent": "vskill-cli",
                 "Content-Type": "application/json",
               },
-              body: JSON.stringify({ skills }),
+              body: JSON.stringify({
+                skills,
+                source: "cli",
+                platform: process.platform,
+                cliVersion: VERSION,
+              }),
               signal: controller.signal,
             },
           );

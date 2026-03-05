@@ -22,7 +22,7 @@ import { reportInstall, reportInstallBatch, submitSkill } from "../api/client.js
 import { filterAgents } from "../utils/agent-filter.js";
 import { detectInstalledAgents, AGENTS_REGISTRY } from "../agents/agents-registry.js";
 import type { AgentDefinition } from "../agents/agents-registry.js";
-import { ensureLockfile, writeLockfile, readLockfile } from "../lockfile/index.js";
+import { ensureLockfile, writeLockfile, readLockfile, removeSkillFromLock } from "../lockfile/index.js";
 import { runTier1Scan } from "../scanner/index.js";
 import { getAvailablePlugins, getPluginSource, getPluginVersion, hasPlugin, discoverUnregisteredPlugins } from "../marketplace/index.js";
 import type { UnregisteredPlugin } from "../marketplace/index.js";
@@ -54,6 +54,7 @@ import {
   registerMarketplace,
   deregisterMarketplace,
   installNativePlugin,
+  uninstallNativePlugin,
 } from "../utils/claude-cli.js";
 import { getMarketplaceName } from "../marketplace/index.js";
 
@@ -224,6 +225,7 @@ async function installMarketplaceRepo(
   // Select plugins
   let selectedPlugins: typeof plugins;
   let selectedUnregistered: UnregisteredPlugin[] = [];
+  let usedInteractiveCheckbox = false;
 
   if (!isTTY() && !opts.yes && !opts.all) {
     // Non-TTY: list plugins and exit with guidance
@@ -328,6 +330,48 @@ async function installMarketplaceRepo(
         selectedUnregistered.push(unregistered[i - plugins.length]);
       }
     }
+    usedInteractiveCheckbox = true;
+  }
+
+  // Attempt native Claude Code install
+  const hasClaude = !opts.copy && isClaudeCliAvailable();
+
+  // Uninstall plugins that were previously installed but now unchecked
+  const selectedNames = new Set(selectedPlugins.map((p) => p.name));
+  const toUninstall = usedInteractiveCheckbox
+    ? [...installedSet].filter((name) => !selectedNames.has(name))
+    : [];
+
+  if (toUninstall.length > 0) {
+    console.log(dim(`\nUninstalling ${toUninstall.length} deselected plugin${toUninstall.length === 1 ? "" : "s"}...\n`));
+    const agents = await detectInstalledAgents();
+
+    for (const skillName of toUninstall) {
+      // Remove skill directories from all agents
+      let removedCount = 0;
+      for (const agent of agents) {
+        const localDir = join(process.cwd(), agent.localSkillsDir, skillName);
+        const globalDir = resolveTilde(join(agent.globalSkillsDir, skillName));
+        for (const dir of [localDir, globalDir]) {
+          if (existsSync(dir)) {
+            try {
+              rmSync(dir, { recursive: true, force: true });
+              removedCount++;
+            } catch { /* ignore removal errors */ }
+          }
+        }
+      }
+
+      // Uninstall from Claude Code native plugin system
+      if (hasClaude && marketplaceName) {
+        uninstallNativePlugin(skillName, marketplaceName);
+      }
+
+      // Remove from lockfile
+      removeSkillFromLock(skillName, lockDir);
+
+      console.log(red(`  ✗ ${bold(skillName)} uninstalled`) + (removedCount > 0 ? dim(` (${removedCount} location${removedCount === 1 ? "" : "s"})`) : ""));
+    }
   }
 
   // Gate: unregistered plugins require --force
@@ -353,9 +397,6 @@ async function installMarketplaceRepo(
     // Clear unregistered selection — only install registered plugins
     selectedUnregistered = [];
   }
-
-  // Attempt native Claude Code install
-  const hasClaude = !opts.copy && isClaudeCliAvailable();
 
   let marketplaceRegistered = false;
 
@@ -461,11 +502,21 @@ async function installMarketplaceRepo(
   // Summary
   const installed = results.filter((r) => r.installed);
   const failed = results.filter((r) => !r.installed);
-  console.log(
-    `\n${green(bold(`${installed.length} installed`))}` +
-      (failed.length > 0 ? `, ${red(bold(`${failed.length} failed`))}` : "") +
-      ` of ${results.length} plugins`,
-  );
+  const parts: string[] = [];
+  if (installed.length > 0 || results.length > 0) {
+    parts.push(`${green(bold(`${installed.length} installed`))}`);
+  }
+  if (failed.length > 0) {
+    parts.push(`${red(bold(`${failed.length} failed`))}`);
+  }
+  if (toUninstall.length > 0) {
+    parts.push(`${red(bold(`${toUninstall.length} uninstalled`))}`);
+  }
+  if (parts.length > 0) {
+    console.log(`\n${parts.join(", ")} of ${results.length + toUninstall.length} plugins`);
+  } else {
+    console.log(dim("\nNo changes made."));
+  }
   if (hasClaude && marketplaceRegistered && marketplaceName) {
     console.log(dim(`\nManage: claude plugin list | claude plugin uninstall "<plugin>@${marketplaceName}"`));
   }

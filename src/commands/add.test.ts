@@ -86,10 +86,12 @@ vi.mock("../agents/agents-registry.js", () => ({
 const mockEnsureLockfile = vi.fn();
 const mockWriteLockfile = vi.fn();
 const mockReadLockfile = vi.fn().mockReturnValue(null);
+const mockRemoveSkillFromLock = vi.fn();
 vi.mock("../lockfile/index.js", () => ({
   ensureLockfile: (...args: unknown[]) => mockEnsureLockfile(...args),
   writeLockfile: (...args: unknown[]) => mockWriteLockfile(...args),
   readLockfile: (...args: unknown[]) => mockReadLockfile(...args),
+  removeSkillFromLock: (...args: unknown[]) => mockRemoveSkillFromLock(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -155,6 +157,22 @@ vi.mock("../utils/agent-filter.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock utils/prompts (interactive prompts)
+// ---------------------------------------------------------------------------
+const mockIsTTY = vi.fn().mockReturnValue(false);
+const mockPromptCheckboxList = vi.fn();
+const mockPromptConfirm = vi.fn();
+const mockPromptChoice = vi.fn();
+vi.mock("../utils/prompts.js", () => ({
+  isTTY: (...args: unknown[]) => mockIsTTY(...args),
+  createPrompter: () => ({
+    promptCheckboxList: (...args: unknown[]) => mockPromptCheckboxList(...args),
+    promptConfirm: (...args: unknown[]) => mockPromptConfirm(...args),
+    promptChoice: (...args: unknown[]) => mockPromptChoice(...args),
+  }),
+}));
+
+// ---------------------------------------------------------------------------
 // Mock utils/output (suppress console output in tests)
 // ---------------------------------------------------------------------------
 vi.mock("../utils/output.js", () => ({
@@ -184,12 +202,13 @@ const mockIsClaudeCliAvailable = vi.fn().mockReturnValue(false);
 const mockRegisterMarketplace = vi.fn().mockReturnValue({ success: false });
 const mockDeregisterMarketplace = vi.fn().mockReturnValue(false);
 const mockInstallNativePlugin = vi.fn().mockReturnValue(false);
+const mockUninstallNativePlugin = vi.fn().mockReturnValue(false);
 vi.mock("../utils/claude-cli.js", () => ({
   isClaudeCliAvailable: (...args: unknown[]) => mockIsClaudeCliAvailable(...args),
   registerMarketplace: (...args: unknown[]) => mockRegisterMarketplace(...args),
   deregisterMarketplace: (...args: unknown[]) => mockDeregisterMarketplace(...args),
   installNativePlugin: (...args: unknown[]) => mockInstallNativePlugin(...args),
-  uninstallNativePlugin: vi.fn().mockReturnValue(false),
+  uninstallNativePlugin: (...args: unknown[]) => mockUninstallNativePlugin(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -2725,6 +2744,98 @@ describe("addCommand marketplace integration", () => {
     expect(lockArg.skills["plugin-a"].pluginDir).toBe(true);
     expect(lockArg.skills["plugin-a"].version).toBe("1.0.0");
     expect(lockArg.skills["plugin-b"].version).toBe("2.0.0");
+  });
+
+  it("TC-017: unchecking installed plugins in interactive mode uninstalls them", async () => {
+    // Set up lockfile with 2 previously installed plugins
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {
+        "plugin-a": { version: "1.0.0", source: "marketplace:owner/repo#plugin-a" },
+        "plugin-b": { version: "2.0.0", source: "marketplace:owner/repo#plugin-b" },
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    // Marketplace detection succeeds
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => SAMPLE_MARKETPLACE_JSON,
+      }) as unknown as typeof fetch;
+
+    // Enable interactive mode
+    mockIsTTY.mockReturnValue(true);
+    // User selects only plugin-c (index 2), unchecking plugin-a and plugin-b
+    mockPromptCheckboxList.mockResolvedValue([2]);
+
+    // Claude CLI available
+    mockIsClaudeCliAvailable.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue({ success: true });
+    mockInstallNativePlugin.mockReturnValue(true);
+
+    // Agents for uninstall directory removal
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    // Skill directories exist
+    mockExistsSync.mockReturnValue(true);
+
+    await addCommand("owner/repo", {});
+
+    // Should uninstall plugin-a and plugin-b
+    expect(mockRemoveSkillFromLock).toHaveBeenCalledTimes(2);
+    expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("plugin-a", expect.any(String));
+    expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("plugin-b", expect.any(String));
+
+    // Should uninstall from native Claude Code
+    expect(mockUninstallNativePlugin).toHaveBeenCalledWith("plugin-a", "test-marketplace");
+    expect(mockUninstallNativePlugin).toHaveBeenCalledWith("plugin-b", "test-marketplace");
+
+    // Should remove skill directories
+    expect(mockRmSync).toHaveBeenCalled();
+
+    // Should install plugin-c
+    expect(mockInstallNativePlugin).toHaveBeenCalledWith("plugin-c", "test-marketplace", "project");
+  });
+
+  it("TC-018: --yes mode does NOT uninstall previously installed plugins", async () => {
+    // Set up lockfile with 2 previously installed plugins
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {
+        "plugin-a": { version: "1.0.0", source: "marketplace:owner/repo#plugin-a" },
+        "plugin-b": { version: "2.0.0", source: "marketplace:owner/repo#plugin-b" },
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    // Marketplace detection succeeds
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => SAMPLE_MARKETPLACE_JSON,
+      }) as unknown as typeof fetch;
+
+    mockIsClaudeCliAvailable.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue({ success: true });
+    mockInstallNativePlugin.mockReturnValue(true);
+
+    // --yes auto-selects all — should NOT uninstall anything
+    await addCommand("owner/repo", { yes: true });
+
+    expect(mockRemoveSkillFromLock).not.toHaveBeenCalled();
+    expect(mockUninstallNativePlugin).not.toHaveBeenCalled();
   });
 
   it("TC-012: falls back to extraction when claude CLI is unavailable", async () => {

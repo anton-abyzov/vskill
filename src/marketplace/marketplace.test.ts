@@ -10,6 +10,7 @@ const {
   getPluginVersion,
   getMarketplaceName,
   hasPlugin,
+  validateMarketplace,
 } = await import("./index.js");
 
 // ---------------------------------------------------------------------------
@@ -169,6 +170,63 @@ describe("marketplace.json parser", () => {
 
     it("returns false for invalid JSON", () => {
       expect(hasPlugin("sw", "broken json")).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // validateMarketplace
+  // ---------------------------------------------------------------------------
+  describe("validateMarketplace", () => {
+    it("returns valid for well-formed marketplace.json", () => {
+      const content = makeMarketplaceJson();
+      const result = validateMarketplace(content);
+      expect(result.valid).toBe(true);
+      expect(result.pluginCount).toBe(2);
+      expect(result.name).toBe("specweave");
+      expect(result.error).toBeUndefined();
+    });
+
+    it("returns invalid for missing name field", () => {
+      const content = JSON.stringify({ plugins: [{ name: "a", source: "./a" }] });
+      const result = validateMarketplace(content);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain("name");
+    });
+
+    it("returns invalid for missing plugins array", () => {
+      const content = JSON.stringify({ name: "test" });
+      const result = validateMarketplace(content);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain("plugins");
+    });
+
+    it("returns invalid for empty plugins array", () => {
+      const content = JSON.stringify({ name: "test", plugins: [] });
+      const result = validateMarketplace(content);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain("No plugins");
+      expect(result.name).toBe("test");
+    });
+
+    it("returns invalid for plugin entry missing source", () => {
+      const content = JSON.stringify({ name: "test", plugins: [{ name: "a" }] });
+      const result = validateMarketplace(content);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain("missing name or source");
+    });
+
+    it("returns invalid for plugin entry missing name", () => {
+      const content = JSON.stringify({ name: "test", plugins: [{ source: "./a" }] });
+      const result = validateMarketplace(content);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain("missing name or source");
+    });
+
+    it("returns invalid for broken JSON", () => {
+      const result = validateMarketplace("not json {{{");
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain("Invalid JSON");
+      expect(result.pluginCount).toBe(0);
     });
   });
 });

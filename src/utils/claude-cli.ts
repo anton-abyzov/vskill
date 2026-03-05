@@ -12,6 +12,15 @@ export function isClaudeCliAvailable(): boolean {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Marketplace registration
+// ---------------------------------------------------------------------------
+
+export interface RegisterResult {
+  success: boolean;
+  stderr?: string;
+}
+
 /**
  * Register a Claude Code plugin marketplace.
  *
@@ -20,17 +29,51 @@ export function isClaudeCliAvailable(): boolean {
  * bug where a temp directory is deleted after registration.
  *
  * @param source - Git URL (e.g. "https://github.com/owner/repo") or absolute path
- * @returns true on success, false on failure
+ * @returns RegisterResult with success flag and optional stderr on failure
  */
-export function registerMarketplace(source: string): boolean {
+export function registerMarketplace(source: string): RegisterResult {
   try {
     execSync(`claude plugin marketplace add "${source}"`, {
-      stdio: "ignore",
+      stdio: ["pipe", "pipe", "pipe"],
       timeout: 15_000,
+    });
+    return { success: true };
+  } catch (err) {
+    const stderr = (err as { stderr?: Buffer })?.stderr?.toString().trim();
+    return { success: false, stderr: stderr || (err as Error).message };
+  }
+}
+
+/**
+ * Deregister a Claude Code plugin marketplace.
+ * Used to clean up stale registrations before retrying.
+ */
+export function deregisterMarketplace(source: string): boolean {
+  try {
+    execSync(`claude plugin marketplace remove "${source}"`, {
+      stdio: "ignore",
+      timeout: 10_000,
     });
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * List registered Claude Code plugin marketplaces.
+ * Returns marketplace source paths/URLs, or empty array on failure.
+ */
+export function listMarketplaces(): string[] {
+  try {
+    const output = execSync("claude plugin marketplace list", {
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 10_000,
+    }).toString().trim();
+    if (!output) return [];
+    return output.split("\n").map((l) => l.trim()).filter(Boolean);
+  } catch {
+    return [];
   }
 }
 

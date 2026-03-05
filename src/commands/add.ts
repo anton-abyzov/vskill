@@ -51,6 +51,7 @@ import { installSymlink, installCopy } from "../installer/canonical.js";
 import {
   isClaudeCliAvailable,
   registerMarketplace,
+  deregisterMarketplace,
   installNativePlugin,
 } from "../utils/claude-cli.js";
 import { getMarketplaceName } from "../marketplace/index.js";
@@ -216,9 +217,14 @@ async function installMarketplaceRepo(
       console.log(dim(`Auto-selecting all ${plugins.length} plugins (--yes/--all)`));
     }
   } else if (plugins.length === 1) {
-    // Single plugin — skip multi-select, just proceed
+    // Single plugin — show details and ask for confirmation
     const p = plugins[0];
     const isInstalled = installedSet.has(p.name);
+    const versionTag = p.version ? ` v${p.version}` : "";
+    const descTag = p.description ? dim(` — ${p.description}`) : "";
+
+    console.log(`\n  Plugin: ${bold(p.name)}${versionTag}${descTag}`);
+
     if (isInstalled) {
       const prompter = createPrompter();
       const reinstall = await prompter.promptConfirm(
@@ -230,7 +236,15 @@ async function installMarketplaceRepo(
         return;
       }
     } else {
-      console.log(`  ${green("+")} ${bold(p.name)}${p.description ? dim(` — ${p.description}`) : ""}`);
+      const prompter = createPrompter();
+      const proceed = await prompter.promptConfirm(
+        `Install ${bold(p.name)}${versionTag}?`,
+        true,
+      );
+      if (!proceed) {
+        console.log(dim("Aborted."));
+        return;
+      }
     }
     selectedPlugins = plugins;
   } else {
@@ -261,10 +275,21 @@ async function installMarketplaceRepo(
     // persistent location, avoiding the stale-temp-dir bug.
     const gitUrl = `https://github.com/${owner}/${repo}`;
     const regSpin = spinner("Registering marketplace with Claude Code");
-    marketplaceRegistered = registerMarketplace(gitUrl);
+    let regResult = registerMarketplace(gitUrl);
+
+    // Retry once after deregistering stale entry
+    if (!regResult.success) {
+      deregisterMarketplace(gitUrl);
+      regResult = registerMarketplace(gitUrl);
+    }
+
+    marketplaceRegistered = regResult.success;
     regSpin.stop();
     if (!marketplaceRegistered) {
       console.log(yellow("  Failed to register marketplace — will use extraction fallback."));
+      if (regResult.stderr) {
+        console.log(dim(`  Reason: ${regResult.stderr}`));
+      }
     }
   }
 
@@ -420,6 +445,15 @@ function cleanPluginCache(pluginName: string, marketplace: string): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * Check if a path is inside the OS temp directory (e.g. /var/folders/.../T/).
+ * Temp dirs get cleaned up, making registered marketplace paths stale.
+ */
+function isTempPath(p: string): boolean {
+  const tmpDir = os.tmpdir();
+  return p.startsWith(tmpDir);
+}
+
+/**
  * Attempt to install a plugin via Claude Code's native plugin system.
  *
  * Returns true if native install succeeded (Claude Code should be excluded
@@ -444,6 +478,12 @@ async function tryNativeClaudeInstall(
   const marketplaceName = getMarketplaceName(marketplaceContent);
   if (!marketplaceName) return false;
 
+  // Guard: refuse to register temp dirs (they get deleted after install)
+  if (!gitUrl && isTempPath(marketplacePath)) {
+    console.log(yellow("  Cannot register temp directory as marketplace — falling back to extraction."));
+    return false;
+  }
+
   // Prompt user unless --yes
   if (isTTY() && !opts.yes) {
     const prompter = createPrompter();
@@ -458,12 +498,22 @@ async function tryNativeClaudeInstall(
   }
 
   // Register marketplace — prefer git URL (persistent) over local path
-  // (which may be a temp dir that gets deleted after install).
+  const registrationSource = gitUrl || marketplacePath;
   const regSpin = spinner("Registering marketplace with Claude Code");
-  const registered = registerMarketplace(gitUrl || marketplacePath);
-  if (!registered) {
+  let regResult = registerMarketplace(registrationSource);
+
+  // Retry once after deregistering stale entry
+  if (!regResult.success) {
+    deregisterMarketplace(registrationSource);
+    regResult = registerMarketplace(registrationSource);
+  }
+
+  if (!regResult.success) {
     regSpin.stop();
     console.log(yellow("  Failed to register marketplace — falling back to extraction."));
+    if (regResult.stderr) {
+      console.log(dim(`  Reason: ${regResult.stderr}`));
+    }
     return false;
   }
   regSpin.stop();
@@ -804,9 +854,19 @@ async function installPluginDir(
   // Resolve the plugin subdirectory from marketplace.json
   const pluginDir = resolvePluginDir(basePath, pluginName);
   if (!pluginDir) {
+    const mktPath = join(basePath, ".claude-plugin", "marketplace.json");
+    let available = "";
+    if (existsSync(mktPath)) {
+      const mktJson = readFileSync(mktPath, "utf-8");
+      const allPlugins = getAvailablePlugins(mktJson);
+      if (allPlugins.length > 0) {
+        available = `\nAvailable plugins: ${allPlugins.map((p) => bold(p.name)).join(", ")}`;
+      }
+    }
     console.error(
       red(`Plugin "${pluginName}" not found in marketplace.json\n`) +
-        dim(`Checked: ${join(basePath, ".claude-plugin", "marketplace.json")}`)
+        dim(`Checked: ${mktPath}`) +
+        available
     );
     process.exit(1);
   }
@@ -827,8 +887,15 @@ async function installPluginDir(
     printTaintedWarning(pluginName, safety.taintReason);
   }
 
+  // Pre-install overview
+  console.log(`\n${bold("Install Preview")}`);
+  console.log(dim("  ─────────────────────────────────────────────────"));
+  console.log(`  Plugin: ${bold(pluginName)}`);
+  console.log(`  Source: ${dim(pluginDir)}`);
+  console.log(dim("  ─────────────────────────────────────────────────\n"));
+
   // Collect all file content for scanning
-  console.log(dim("\nCollecting plugin files for security scan..."));
+  console.log(dim("Collecting plugin files for security scan..."));
   const content = collectPluginContent(pluginDir);
 
   // Run tier1 scan on all plugin content

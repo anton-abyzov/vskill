@@ -181,11 +181,13 @@ vi.mock("../installer/canonical.js", () => ({
 // Mock claude-cli (native Claude Code plugin install)
 // ---------------------------------------------------------------------------
 const mockIsClaudeCliAvailable = vi.fn().mockReturnValue(false);
-const mockRegisterMarketplace = vi.fn().mockReturnValue(false);
+const mockRegisterMarketplace = vi.fn().mockReturnValue({ success: false });
+const mockDeregisterMarketplace = vi.fn().mockReturnValue(false);
 const mockInstallNativePlugin = vi.fn().mockReturnValue(false);
 vi.mock("../utils/claude-cli.js", () => ({
   isClaudeCliAvailable: (...args: unknown[]) => mockIsClaudeCliAvailable(...args),
   registerMarketplace: (...args: unknown[]) => mockRegisterMarketplace(...args),
+  deregisterMarketplace: (...args: unknown[]) => mockDeregisterMarketplace(...args),
   installNativePlugin: (...args: unknown[]) => mockInstallNativePlugin(...args),
   uninstallNativePlugin: vi.fn().mockReturnValue(false),
 }));
@@ -1775,7 +1777,8 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
 // Native Claude Code plugin install (via installPluginDir)
 // ---------------------------------------------------------------------------
 describe("addCommand native Claude Code plugin install", () => {
-  const pluginDir = "/tmp/test-plugin";
+  // Use a non-temp path — temp paths are now correctly blocked by isTempPath() guard
+  const pluginDir = "/home/test-user/projects/test-plugin";
   const marketplaceJson = JSON.stringify({
     name: "test-mkt",
     version: "1.0.0",
@@ -1831,7 +1834,7 @@ describe("addCommand native Claude Code plugin install", () => {
   it("calls registerMarketplace and installNativePlugin when claude CLI available", async () => {
     mockIsClaudeCliAvailable.mockReturnValue(true);
     mockGetMarketplaceName.mockReturnValue("test-mkt");
-    mockRegisterMarketplace.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue({ success: true });
     mockInstallNativePlugin.mockReturnValue(true);
 
     await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
@@ -1843,7 +1846,7 @@ describe("addCommand native Claude Code plugin install", () => {
   it("falls back to extraction when marketplace registration fails", async () => {
     mockIsClaudeCliAvailable.mockReturnValue(true);
     mockGetMarketplaceName.mockReturnValue("test-mkt");
-    mockRegisterMarketplace.mockReturnValue(false);
+    mockRegisterMarketplace.mockReturnValue({ success: false, stderr: "registration failed" });
 
     await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
 
@@ -1854,7 +1857,7 @@ describe("addCommand native Claude Code plugin install", () => {
   it("falls back to extraction when native install command fails", async () => {
     mockIsClaudeCliAvailable.mockReturnValue(true);
     mockGetMarketplaceName.mockReturnValue("test-mkt");
-    mockRegisterMarketplace.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue({ success: true });
     mockInstallNativePlugin.mockReturnValue(false);
 
     await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
@@ -2580,7 +2583,7 @@ describe("addCommand marketplace integration", () => {
 
     // Claude CLI available + native install succeeds
     mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockRegisterMarketplace.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue({ success: true });
     mockInstallNativePlugin.mockReturnValue(true);
 
     // --yes to auto-select all
@@ -2660,7 +2663,7 @@ describe("addCommand marketplace integration", () => {
       }) as unknown as typeof fetch;
 
     mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockRegisterMarketplace.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue({ success: true });
     // plugin-a succeeds, plugin-b fails, plugin-c succeeds
     mockInstallNativePlugin
       .mockReturnValueOnce(true)
@@ -2689,7 +2692,7 @@ describe("addCommand marketplace integration", () => {
       }) as unknown as typeof fetch;
 
     mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockRegisterMarketplace.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue({ success: true });
     mockInstallNativePlugin.mockReturnValue(true);
 
     await addCommand("owner/repo", { yes: true });
@@ -2711,7 +2714,7 @@ describe("addCommand marketplace integration", () => {
       }) as unknown as typeof fetch;
 
     mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockRegisterMarketplace.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue({ success: true });
     mockInstallNativePlugin.mockReturnValue(true);
 
     await addCommand("owner/repo", { yes: true });

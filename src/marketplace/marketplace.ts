@@ -107,3 +107,49 @@ export function getMarketplaceName(content: string): string | null {
     return null;
   }
 }
+
+// ---- Validation -----------------------------------------------------------
+
+export interface MarketplaceValidation {
+  valid: boolean;
+  error?: string;
+  pluginCount: number;
+  name?: string;
+}
+
+/**
+ * Validate marketplace.json content with structured error diagnostics.
+ *
+ * Unlike `getAvailablePlugins()` (which silently returns []), this function
+ * returns specific error reasons for troubleshooting.
+ *
+ * @param content - Raw JSON string from marketplace.json
+ * @returns Validation result with error details
+ */
+export function validateMarketplace(content: string): MarketplaceValidation {
+  try {
+    const manifest: MarketplaceManifest = JSON.parse(content);
+    if (!manifest.name) {
+      return { valid: false, error: "Missing 'name' field", pluginCount: 0 };
+    }
+    if (!Array.isArray(manifest.plugins)) {
+      return { valid: false, error: "Missing or invalid 'plugins' array", pluginCount: 0, name: manifest.name };
+    }
+    if (manifest.plugins.length === 0) {
+      return { valid: false, error: "No plugins defined in marketplace.json", pluginCount: 0, name: manifest.name };
+    }
+    for (const p of manifest.plugins) {
+      if (!p.name || !p.source) {
+        return {
+          valid: false,
+          error: `Plugin entry missing name or source: ${JSON.stringify(p)}`,
+          pluginCount: manifest.plugins.length,
+          name: manifest.name,
+        };
+      }
+    }
+    return { valid: true, pluginCount: manifest.plugins.length, name: manifest.name };
+  } catch (err) {
+    return { valid: false, error: `Invalid JSON: ${(err as Error).message}`, pluginCount: 0 };
+  }
+}

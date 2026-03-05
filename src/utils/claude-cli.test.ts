@@ -8,6 +8,8 @@ vi.mock("node:child_process", () => ({
 const {
   isClaudeCliAvailable,
   registerMarketplace,
+  deregisterMarketplace,
+  listMarketplaces,
   installNativePlugin,
   uninstallNativePlugin,
 } = await import("./claude-cli.js");
@@ -41,20 +43,30 @@ describe("isClaudeCliAvailable", () => {
 // registerMarketplace
 // ---------------------------------------------------------------------------
 describe("registerMarketplace", () => {
-  it("calls claude plugin marketplace add with correct path", () => {
+  it("returns success result with correct path", () => {
     mockExecSync.mockReturnValue(Buffer.from(""));
-    expect(registerMarketplace("/path/to/repo")).toBe(true);
+    const result = registerMarketplace("/path/to/repo");
+    expect(result).toEqual({ success: true });
     expect(mockExecSync).toHaveBeenCalledWith(
       'claude plugin marketplace add "/path/to/repo"',
-      { stdio: "ignore", timeout: 15_000 },
+      { stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 },
     );
   });
 
-  it("returns false when command fails", () => {
+  it("returns failure result with stderr on error", () => {
+    const err = new Error("failed") as Error & { stderr: Buffer };
+    err.stderr = Buffer.from("marketplace not found");
+    mockExecSync.mockImplementation(() => { throw err; });
+    const result = registerMarketplace("/path/to/repo");
+    expect(result).toEqual({ success: false, stderr: "marketplace not found" });
+  });
+
+  it("returns failure with error message when no stderr", () => {
     mockExecSync.mockImplementation(() => {
-      throw new Error("failed");
+      throw new Error("command failed");
     });
-    expect(registerMarketplace("/path/to/repo")).toBe(false);
+    const result = registerMarketplace("/path/to/repo");
+    expect(result).toEqual({ success: false, stderr: "command failed" });
   });
 
   it("quotes paths with spaces", () => {
@@ -68,20 +80,61 @@ describe("registerMarketplace", () => {
 
   it("accepts GitHub HTTPS URL as source", () => {
     mockExecSync.mockReturnValue(Buffer.from(""));
-    expect(registerMarketplace("https://github.com/owner/repo")).toBe(true);
+    const result = registerMarketplace("https://github.com/owner/repo");
+    expect(result).toEqual({ success: true });
     expect(mockExecSync).toHaveBeenCalledWith(
       'claude plugin marketplace add "https://github.com/owner/repo"',
-      { stdio: "ignore", timeout: 15_000 },
+      { stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 },
     );
   });
 
   it("accepts GitHub owner/repo shorthand as source", () => {
     mockExecSync.mockReturnValue(Buffer.from(""));
-    expect(registerMarketplace("owner/repo")).toBe(true);
+    const result = registerMarketplace("owner/repo");
+    expect(result).toEqual({ success: true });
     expect(mockExecSync).toHaveBeenCalledWith(
       'claude plugin marketplace add "owner/repo"',
-      { stdio: "ignore", timeout: 15_000 },
+      { stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 },
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deregisterMarketplace
+// ---------------------------------------------------------------------------
+describe("deregisterMarketplace", () => {
+  it("calls claude plugin marketplace remove", () => {
+    mockExecSync.mockReturnValue(Buffer.from(""));
+    expect(deregisterMarketplace("https://github.com/owner/repo")).toBe(true);
+    expect(mockExecSync).toHaveBeenCalledWith(
+      'claude plugin marketplace remove "https://github.com/owner/repo"',
+      { stdio: "ignore", timeout: 10_000 },
+    );
+  });
+
+  it("returns false on failure", () => {
+    mockExecSync.mockImplementation(() => { throw new Error("fail"); });
+    expect(deregisterMarketplace("https://github.com/owner/repo")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listMarketplaces
+// ---------------------------------------------------------------------------
+describe("listMarketplaces", () => {
+  it("parses marketplace list output", () => {
+    mockExecSync.mockReturnValue(Buffer.from("https://github.com/a/b\nhttps://github.com/c/d\n"));
+    expect(listMarketplaces()).toEqual(["https://github.com/a/b", "https://github.com/c/d"]);
+  });
+
+  it("returns empty array on failure", () => {
+    mockExecSync.mockImplementation(() => { throw new Error("fail"); });
+    expect(listMarketplaces()).toEqual([]);
+  });
+
+  it("returns empty array for empty output", () => {
+    mockExecSync.mockReturnValue(Buffer.from(""));
+    expect(listMarketplaces()).toEqual([]);
   });
 });
 

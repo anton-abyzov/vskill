@@ -18,13 +18,14 @@ import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import os from "node:os";
 import { resolveTilde } from "../utils/paths.js";
-import { reportInstall, reportInstallBatch } from "../api/client.js";
+import { reportInstall, reportInstallBatch, submitSkill } from "../api/client.js";
 import { filterAgents } from "../utils/agent-filter.js";
 import { detectInstalledAgents, AGENTS_REGISTRY } from "../agents/agents-registry.js";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { ensureLockfile, writeLockfile, readLockfile } from "../lockfile/index.js";
 import { runTier1Scan } from "../scanner/index.js";
-import { getAvailablePlugins, getPluginSource, getPluginVersion, hasPlugin } from "../marketplace/index.js";
+import { getAvailablePlugins, getPluginSource, getPluginVersion, hasPlugin, discoverUnregisteredPlugins } from "../marketplace/index.js";
+import type { UnregisteredPlugin } from "../marketplace/index.js";
 import { checkInstallSafety } from "../blocklist/blocklist.js";
 import type { BlocklistEntry, RejectionInfo } from "../blocklist/types.js";
 import { getSkill } from "../api/client.js";
@@ -153,6 +154,24 @@ export async function detectMarketplaceRepo(
 }
 
 /**
+ * Offer to submit a marketplace repo for re-scanning on the platform.
+ * Uses the existing submitSkill() API. Non-throwing — prints fallback URL on failure.
+ */
+async function triggerResubmission(owner: string, repo: string): Promise<void> {
+  const repoUrl = `https://github.com/${owner}/${repo}`;
+  try {
+    const result = await submitSkill({ repoUrl });
+    console.log(green("  Submitted for re-scanning!"));
+    if (result.trackingUrl) {
+      console.log(dim(`  Track progress: ${result.trackingUrl}`));
+    }
+  } catch {
+    console.log(yellow("  Could not submit automatically."));
+    console.log(dim(`  Submit manually: https://verified-skill.com/submit?repo=${owner}/${repo}`));
+  }
+}
+
+/**
  * Install plugins from a Claude Code plugin marketplace repo.
  *
  * Shows a checkbox list of available plugins (all unchecked by default),
@@ -174,10 +193,21 @@ async function installMarketplaceRepo(
     process.exit(1);
   }
 
-  console.log(
-    `\n${bold("Claude Code Plugin Marketplace")} detected: ${cyan(`${owner}/${repo}`)}\n` +
-      dim(`Marketplace: ${marketplaceName || "unknown"} — ${plugins.length} plugin${plugins.length === 1 ? "" : "s"} available\n`),
-  );
+  // Discover plugin directories not yet in marketplace.json
+  const unregistered = await discoverUnregisteredPlugins(owner, repo, manifestContent);
+
+  const headerParts = [
+    `\n${bold("Claude Code Plugin Marketplace")} detected: ${cyan(`${owner}/${repo}`)}\n`,
+    dim(`Marketplace: ${marketplaceName || "unknown"} — ${plugins.length} registered plugin${plugins.length === 1 ? "" : "s"}`),
+  ];
+  if (unregistered.length > 0) {
+    headerParts.push(dim(`, ${unregistered.length} unregistered`));
+  }
+  headerParts.push("\n");
+  if (unregistered.length > 0) {
+    headerParts.push(yellow(`  ${unregistered.length} new plugin${unregistered.length === 1 ? "" : "s"} not yet in marketplace.json\n`));
+  }
+  console.log(headerParts.join(""));
 
   // Check lockfile for already-installed plugins
   const lockDir = lockfileRoot(opts);
@@ -193,6 +223,7 @@ async function installMarketplaceRepo(
 
   // Select plugins
   let selectedPlugins: typeof plugins;
+  let selectedUnregistered: UnregisteredPlugin[] = [];
 
   if (!isTTY() && !opts.yes && !opts.all) {
     // Non-TTY: list plugins and exit with guidance
@@ -200,6 +231,13 @@ async function installMarketplaceRepo(
     for (const p of plugins) {
       const installed = installedSet.has(p.name) ? dim(" (installed)") : "";
       console.log(`  ${bold(p.name)}${installed}${p.description ? dim(` — ${p.description}`) : ""}`);
+    }
+    if (unregistered.length > 0) {
+      console.log("\nUnregistered plugins (not in marketplace.json):\n");
+      for (const u of unregistered) {
+        console.log(`  ${yellow(u.name)} ${dim("(new — not in marketplace.json)")}`);
+      }
+      console.log(dim("\nUse --force --plugin <name> to install unregistered plugins."));
     }
     console.error(red("\nNon-interactive mode. Use --plugin <name> or --yes to select all."));
     process.exit(1);
@@ -216,8 +254,15 @@ async function installMarketplaceRepo(
       selectedPlugins = plugins;
       console.log(dim(`Auto-selecting all ${plugins.length} plugins (--yes/--all)`));
     }
-  } else if (plugins.length === 1) {
-    // Single plugin — show details and ask for confirmation
+    if (unregistered.length > 0) {
+      console.log(
+        dim(`  Skipping ${unregistered.length} unregistered plugin${unregistered.length === 1 ? "" : "s"}: `) +
+          dim(unregistered.map((u) => u.name).join(", ")) +
+          dim(" (use --force to include)"),
+      );
+    }
+  } else if (plugins.length === 1 && unregistered.length === 0) {
+    // Single plugin, no unregistered — show details and ask for confirmation
     const p = plugins[0];
     const isInstalled = installedSet.has(p.name);
     const versionTag = p.version ? ` v${p.version}` : "";
@@ -248,13 +293,23 @@ async function installMarketplaceRepo(
     }
     selectedPlugins = plugins;
   } else {
-    const prompter = createPrompter();
-    const indices = await prompter.promptCheckboxList(
-      plugins.map((p) => ({
+    // Build combined picker: registered plugins first, then unregistered
+    const combinedItems = [
+      ...plugins.map((p) => ({
         label: p.name + (installedSet.has(p.name) ? dim(" (installed)") : ""),
         description: p.description,
         checked: preSelected ? preSelected.includes(p.name) : installedSet.has(p.name),
       })),
+      ...unregistered.map((u) => ({
+        label: u.name + yellow(" (new — not in marketplace.json)"),
+        description: undefined as string | undefined,
+        checked: false,
+      })),
+    ];
+
+    const prompter = createPrompter();
+    const indices = await prompter.promptCheckboxList(
+      combinedItems,
       { title: "Select plugins to install" },
     );
 
@@ -262,7 +317,41 @@ async function installMarketplaceRepo(
       console.log(dim("No plugins selected. Aborting."));
       return;
     }
-    selectedPlugins = indices.map((i) => plugins[i]);
+
+    // Partition selections into registered and unregistered
+    selectedPlugins = [];
+    selectedUnregistered = [];
+    for (const i of indices) {
+      if (i < plugins.length) {
+        selectedPlugins.push(plugins[i]);
+      } else {
+        selectedUnregistered.push(unregistered[i - plugins.length]);
+      }
+    }
+  }
+
+  // Gate: unregistered plugins require --force
+  if (selectedUnregistered.length > 0 && !opts.force) {
+    console.log(
+      yellow(`\n  ${selectedUnregistered.length} unregistered plugin${selectedUnregistered.length === 1 ? "" : "s"} selected but --force not set.`) + "\n" +
+        dim("  Unregistered plugins have not been scanned or verified.") + "\n" +
+        dim("  Use --force to install them anyway, or submit the repo for re-scanning.") + "\n",
+    );
+    // Offer resubmission in interactive mode
+    if (isTTY()) {
+      const prompter = createPrompter();
+      const resubmit = await prompter.promptConfirm(
+        `Submit ${bold(`${owner}/${repo}`)} for re-scanning?`,
+        true,
+      );
+      if (resubmit) {
+        await triggerResubmission(owner, repo);
+      }
+    } else {
+      console.log(dim(`  Submit manually: https://verified-skill.com/submit?repo=${owner}/${repo}`));
+    }
+    // Clear unregistered selection — only install registered plugins
+    selectedUnregistered = [];
   }
 
   // Attempt native Claude Code install
@@ -293,7 +382,7 @@ async function installMarketplaceRepo(
     }
   }
 
-  // Install each plugin
+  // Install registered plugins
   const results: { name: string; installed: boolean; method: string }[] = [];
 
   for (const plugin of selectedPlugins) {
@@ -328,15 +417,28 @@ async function installMarketplaceRepo(
     }
   }
 
+  // Install unregistered plugins via extraction (--force only)
+  for (const unreg of selectedUnregistered) {
+    console.log(yellow(`  Installing unregistered plugin: ${bold(unreg.name)} (--force)`));
+    try {
+      await installRepoPlugin(`${owner}/${repo}`, unreg.name, opts, unreg.source);
+      results.push({ name: unreg.name, installed: true, method: "extraction-unregistered" });
+    } catch (err) {
+      console.error(red(`  ✗ ${unreg.name}: ${(err as Error).message}`));
+      results.push({ name: unreg.name, installed: false, method: "failed" });
+    }
+  }
+
   // Update lockfile
   const lockForWrite = ensureLockfile(lockDir);
   for (const r of results) {
     if (r.installed) {
-      const pluginVersion = getPluginVersion(r.name, manifestContent) || "0.0.0";
+      const isUnregistered = r.method === "extraction-unregistered";
+      const pluginVersion = isUnregistered ? "0.0.0" : (getPluginVersion(r.name, manifestContent) || "0.0.0");
       lockForWrite.skills[r.name] = {
         version: pluginVersion,
         sha: "",
-        tier: "VERIFIED",
+        tier: isUnregistered ? "UNSCANNED" : "VERIFIED",
         installedAt: new Date().toISOString(),
         source: `marketplace:${owner}/${repo}#${r.name}`,
         marketplace: marketplaceName || undefined,
@@ -1290,6 +1392,7 @@ async function installRepoPlugin(
   ownerRepo: string,
   pluginName: string,
   opts: AddOptions,
+  overrideSource?: string,
 ): Promise<void> {
   const [owner, repo] = ownerRepo.split("/");
   if (!owner || !repo) {
@@ -1318,8 +1421,8 @@ async function installRepoPlugin(
     throw new Error(`Network error: ${(err as Error).message}`);
   }
 
-  // Find the plugin in the marketplace
-  const pluginSource = getPluginSource(pluginName, manifestContent);
+  // Find the plugin in the marketplace (or use override for unregistered plugins)
+  const pluginSource = overrideSource || getPluginSource(pluginName, manifestContent);
   if (!pluginSource) {
     const available = getAvailablePlugins(manifestContent).map((p) => p.name);
     throw new Error(
@@ -1327,7 +1430,7 @@ async function installRepoPlugin(
         `Available plugins: ${available.join(", ")}`
     );
   }
-  const pluginVersion = getPluginVersion(pluginName, manifestContent) || "0.0.0";
+  const pluginVersion = overrideSource ? "0.0.0" : (getPluginVersion(pluginName, manifestContent) || "0.0.0");
   const pluginPath = pluginSource.replace(/^\.\//, "");
 
   // Blocklist + rejection check BEFORE fetching content

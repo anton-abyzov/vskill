@@ -117,6 +117,61 @@ export interface MarketplaceValidation {
   name?: string;
 }
 
+// ---- Discovery --------------------------------------------------------------
+
+export interface UnregisteredPlugin {
+  name: string;
+  /** Inferred source path, e.g. "./plugins/marketing" */
+  source: string;
+}
+
+/**
+ * Discover plugin directories in a GitHub repo's plugins/ folder
+ * that are NOT listed in marketplace.json.
+ *
+ * Uses the GitHub Contents API to list immediate children of plugins/.
+ * Returns empty array on any API error (best-effort, non-blocking).
+ */
+export async function discoverUnregisteredPlugins(
+  owner: string,
+  repo: string,
+  manifestContent: string,
+): Promise<UnregisteredPlugin[]> {
+  const registered = new Set(
+    getAvailablePlugins(manifestContent).map((p) => p.name),
+  );
+  // Also exclude dirs that are registered under a different name but same source path
+  const registeredDirs = new Set(
+    getAvailablePlugins(manifestContent)
+      .map((p) => p.source.replace(/^\.\//, "").replace(/^plugins\//, ""))
+      .filter(Boolean),
+  );
+
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/plugins`,
+      {
+        headers: {
+          Accept: "application/vnd.github.v3+json",
+          "User-Agent": "vskill-cli",
+        },
+        signal: AbortSignal.timeout(10000),
+      },
+    );
+    if (!res.ok) return [];
+
+    const entries = (await res.json()) as Array<{ name: string; type: string }>;
+    return entries
+      .filter((e) => e.type === "dir" && !registered.has(e.name) && !registeredDirs.has(e.name))
+      .map((e) => ({
+        name: e.name,
+        source: `./plugins/${e.name}`,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Validate marketplace.json content with structured error diagnostics.
  *

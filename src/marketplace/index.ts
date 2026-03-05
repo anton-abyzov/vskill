@@ -1,4 +1,4 @@
-export type { MarketplacePlugin, MarketplaceManifest, MarketplaceValidation } from "./marketplace.js";
+export type { MarketplacePlugin, MarketplaceManifest, MarketplaceValidation, UnregisteredPlugin } from "./marketplace.js";
 export {
   getAvailablePlugins,
   getPluginSource,
@@ -6,4 +6,5 @@ export {
   getMarketplaceName,
   hasPlugin,
   validateMarketplace,
+  discoverUnregisteredPlugins,
 } from "./marketplace.js";

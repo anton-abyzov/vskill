@@ -131,16 +131,48 @@ const KEY_ENTER_LF = "\n";
 const KEY_CTRL_C = "\x03";
 
 /**
+ * Queue-based keypress reader that prevents race conditions.
+ * A persistent listener buffers incoming data, so no keystrokes
+ * are lost between reads (e.g. during render cycles).
+ */
+const keyQueue: string[] = [];
+const keyWaiters: Array<(key: string) => void> = [];
+let keyListenerAttached = false;
+
+function ensureKeyListener(): void {
+  if (keyListenerAttached) return;
+  keyListenerAttached = true;
+  process.stdin.on("data", (data: Buffer) => {
+    const key = data.toString();
+    const waiter = keyWaiters.shift();
+    if (waiter) {
+      waiter(key);
+    } else {
+      keyQueue.push(key);
+    }
+  });
+}
+
+function detachKeyListener(): void {
+  if (!keyListenerAttached) return;
+  process.stdin.removeAllListeners("data");
+  keyListenerAttached = false;
+  keyQueue.length = 0;
+  keyWaiters.length = 0;
+}
+
+/**
  * Read a single keypress from stdin in raw mode.
  * Returns the raw key string (may be multi-byte for arrow keys).
  */
 function readKey(): Promise<string> {
+  ensureKeyListener();
+  const buffered = keyQueue.shift();
+  if (buffered !== undefined) {
+    return Promise.resolve(buffered);
+  }
   return new Promise((resolve) => {
-    function onData(data: Buffer) {
-      process.stdin.removeListener("data", onData);
-      resolve(data.toString());
-    }
-    process.stdin.on("data", onData);
+    keyWaiters.push(resolve);
   });
 }
 
@@ -270,6 +302,7 @@ function createInteractivePrompter(): Prompter {
           }
         }
       } finally {
+        detachKeyListener();
         process.stdin.setRawMode(false);
         process.stdin.pause();
         write(SHOW_CURSOR);
@@ -336,6 +369,7 @@ function createInteractivePrompter(): Prompter {
           }
         }
       } finally {
+        detachKeyListener();
         process.stdin.setRawMode(false);
         process.stdin.pause();
         write(SHOW_CURSOR);
@@ -373,6 +407,7 @@ function createInteractivePrompter(): Prompter {
           }
         }
       } finally {
+        detachKeyListener();
         process.stdin.setRawMode(false);
         process.stdin.pause();
       }

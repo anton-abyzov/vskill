@@ -4,7 +4,7 @@
 
 import type { SkillSearchResult } from "../api/client.js";
 import { searchSkills } from "../api/client.js";
-import { bold, green, yellow, dim, cyan, red, link, table } from "../utils/output.js";
+import { bold, dim, cyan, red, link, formatInstalls } from "../utils/output.js";
 
 interface FindOptions {
   json?: boolean;
@@ -13,28 +13,7 @@ interface FindOptions {
 }
 
 /**
- * Extract owner/repo from a URL and wrap it in a clickable OSC 8 hyperlink.
- * Falls back to author name if no URL is available.
- */
-function formatRepo(repoUrl: string | undefined, author: string): string {
-  if (!repoUrl) return author || "-";
-  try {
-    const ownerRepo = new URL(repoUrl).pathname
-      .replace(/^\//, "")
-      .replace(/\.git$/, "")
-      .replace(/\/$/, "");
-    return link(repoUrl, ownerRepo);
-  } catch {
-    return repoUrl;
-  }
-}
-
-/**
  * Extract the base `owner/repo` slug from a repoUrl.
- * Handles URLs like:
- *   https://github.com/owner/repo
- *   https://github.com/owner/repo/tree/main/path
- *   https://github.com/owner/repo.git
  */
 function extractBaseRepo(repoUrl: string | undefined): string | null {
   if (!repoUrl) return null;
@@ -43,56 +22,24 @@ function extractBaseRepo(repoUrl: string | undefined): string | null {
 }
 
 /**
- * Build a display row for a single skill result.
+ * Format as `owner/repo@skill-name`.
  */
-function buildRow(r: SkillSearchResult): string[] {
-  let displayTier: string;
-  let tierColor: typeof red;
-  let scoreCol: string;
-
-  if (r.isBlocked) {
-    displayTier = "BLOCKED";
-    tierColor = red;
-    const parts = [r.severity, r.threatType].filter(Boolean);
-    scoreCol = parts.length > 0 ? parts.join(" | ") : "blocked";
-  } else if (r.isTainted) {
-    displayTier = "TAINTED";
-    tierColor = red;
-    scoreCol = String(r.score ?? "-");
-  } else {
-    displayTier = r.tier || "VERIFIED";
-    tierColor =
-      r.tier === "CERTIFIED"
-        ? yellow
-        : r.tier === "VERIFIED"
-          ? green
-          : dim;
-    scoreCol = String(r.score ?? "-");
-  }
-
-  const repo = formatRepo(r.repoUrl, r.author);
-  return [
-    r.isBlocked ? red(bold(r.name)) : bold(r.name),
-    repo,
-    tierColor(displayTier),
-    r.isBlocked ? red(scoreCol) : scoreCol,
-  ];
+function formatRepoSkill(repoUrl: string | undefined, skillName: string): string {
+  const base = extractBaseRepo(repoUrl);
+  return base ? `${base}@${skillName}` : skillName;
 }
 
 /**
- * Indent every line of a block of text by a given prefix.
+ * Get the verified-skill.com URL for a skill.
  */
-function indent(text: string, prefix: string): string {
-  return text
-    .split("\n")
-    .map((line) => prefix + line)
-    .join("\n");
+function getSkillUrl(skillName: string): string {
+  return `https://verified-skill.com/skills/${encodeURIComponent(skillName)}`;
 }
 
 export async function findCommand(query: string, opts?: FindOptions): Promise<void> {
   console.log(dim(`Searching for "${query}"...\n`));
 
-  let results;
+  let results: SkillSearchResult[];
   let hasMore = false;
   try {
     const response = await searchSkills(query, { limit: opts?.limit });
@@ -115,101 +62,66 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     return;
   }
 
-  // Sort: non-blocked by score descending, blocked at the end
+  // Sort: non-blocked by installs descending, score as tiebreaker, blocked at end
   results.sort((a, b) => {
     if (a.isBlocked && !b.isBlocked) return 1;
     if (!a.isBlocked && b.isBlocked) return -1;
+    const installDiff = (b.installs ?? 0) - (a.installs ?? 0);
+    if (installDiff !== 0) return installDiff;
     return (b.score ?? 0) - (a.score ?? 0);
   });
 
-  // JSON output mode — no table, no hints, flat array
+  // JSON output mode
   if (opts?.json) {
     console.log(JSON.stringify(results, null, 2));
     return;
   }
 
   const blockedCount = results.filter((r) => r.isBlocked).length;
-  const headers = ["Name", "Repository", "Tier", "Score"];
 
-  // ---------- Grouped TTY display -------------------------------------------
+  // ---------- TTY display: flat two-line entries ----------------------------
   if (process.stdout.isTTY) {
-    // Group results by base repo
-    const groupOrder: string[] = [];
-    const groups = new Map<string, SkillSearchResult[]>();
-
     for (const r of results) {
-      const base = extractBaseRepo(r.repoUrl) ?? "__ungrouped__";
-      if (!groups.has(base)) {
-        groups.set(base, []);
-        groupOrder.push(base);
+      const label = formatRepoSkill(r.repoUrl, r.name);
+      const url = getSkillUrl(r.name);
+
+      if (r.isBlocked) {
+        const parts = [r.severity, r.threatType].filter(Boolean);
+        const threatInfo = parts.length > 0 ? parts.join(" | ") : "blocked";
+        console.log(`${red(bold(label))}  ${red(threatInfo)}`);
+      } else {
+        const installStr = `${formatInstalls(r.installs)} installs`;
+        console.log(`${bold(label)}  ${dim(installStr)}`);
       }
-      groups.get(base)!.push(r);
-    }
 
-    // Separate marketplace groups (2+ skills) from singletons
-    const marketplaceKeys = groupOrder.filter(
-      (k) => k !== "__ungrouped__" && groups.get(k)!.length >= 2
-    );
-    const singletonResults: SkillSearchResult[] = [];
-    for (const key of groupOrder) {
-      const items = groups.get(key)!;
-      if (key === "__ungrouped__" || items.length < 2) {
-        singletonResults.push(...items);
-      }
-    }
-
-    const hasMarketplaceGroups = marketplaceKeys.length > 0;
-
-    // Render marketplace groups
-    for (const baseRepo of marketplaceKeys) {
-      const items = groups.get(baseRepo)!;
-      console.log(
-        bold(`Plugin Marketplace: ${baseRepo} (${items.length} skills)`) +
-          "  " +
-          dim(`Install: npx vskill install ${baseRepo}`)
-      );
-      const rows = items.map((r) => buildRow(r));
-      console.log(indent(table(headers, rows), "  "));
+      console.log(dim(`  \u2514 ${link(url, url)}`));
       console.log();
     }
 
-    // Render singletons / ungrouped
-    if (singletonResults.length > 0) {
-      if (hasMarketplaceGroups) {
-        console.log(bold("Other results"));
-      }
-      const rows = singletonResults.map((r) => buildRow(r));
-      if (hasMarketplaceGroups) {
-        console.log(indent(table(headers, rows), "  "));
-      } else {
-        console.log(table(headers, rows));
-      }
+    // Footer
+    if (hasMore) {
+      const currentLimit = opts?.limit ?? 15;
+      const suggestedLimit = Math.min(currentLimit * 2, 50);
+      console.log(dim(`Showing ${results.length} results. Use --limit ${suggestedLimit} for more.`));
+    } else {
+      console.log(dim(`${results.length} result${results.length === 1 ? "" : "s"} found.`));
     }
-
-    const countText = `${results.length} result${results.length === 1 ? "" : "s"} found`;
-    console.log(
-      dim(`\n${countText}${hasMore ? " (more available — browse at verified-skill.com)" : ""}`)
-    );
 
     if (blockedCount > 0) {
       console.log(
         red(
-          `\n  ${blockedCount} BLOCKED skill${blockedCount === 1 ? "" : "s"} — known malicious, installation will be refused`
+          `\n  ${blockedCount} BLOCKED skill${blockedCount === 1 ? "" : "s"} \u2014 known malicious, installation will be refused`
         )
       );
     }
 
-    // Install hints — show copy-pasteable commands
-    const hasInstallable = results.some((r) => !r.isBlocked);
-    if (!opts?.noHint && hasInstallable) {
-      if (hasMarketplaceGroups) {
-        const firstMp = marketplaceKeys[0];
-        console.log(dim(`\nInstall marketplace: `) + cyan(`npx vskill i ${firstMp}`));
-      } else {
-        const firstResult = results.find((r) => !r.isBlocked);
-        const repo = firstResult ? extractBaseRepo(firstResult.repoUrl) : null;
+    // Install hint
+    if (!opts?.noHint) {
+      const firstInstallable = results.find((r) => !r.isBlocked);
+      if (firstInstallable) {
+        const repo = extractBaseRepo(firstInstallable.repoUrl);
         if (repo) {
-          console.log(dim(`\nInstall: `) + cyan(`npx vskill i ${repo}`));
+          console.log(dim("\nInstall: ") + cyan(`npx vskill i ${repo}`));
         }
       }
     }
@@ -217,26 +129,32 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     return;
   }
 
-  // ---------- Non-TTY (piped) display — flat table --------------------------
-  const rows = results.map((r) => buildRow(r));
-  console.log(table(headers, rows));
+  // ---------- Non-TTY (piped) — tab-separated flat lines --------------------
+  for (const r of results) {
+    const label = formatRepoSkill(r.repoUrl, r.name);
+    if (r.isBlocked) {
+      console.log(`${label}\tBLOCKED\t${r.threatType ?? ""}`);
+    } else {
+      console.log(`${label}\t${r.installs}\t${r.tier}`);
+    }
+  }
+
   const pipeCountText = `${results.length} result${results.length === 1 ? "" : "s"} found`;
-  console.log(
-    dim(`\n${pipeCountText}${hasMore ? " (more available)" : ""}`)
-  );
+  console.log(`\n${pipeCountText}${hasMore ? " (more available)" : ""}`);
 
   if (blockedCount > 0) {
     console.log(
-      red(
-        `\n  ${blockedCount} BLOCKED skill${blockedCount === 1 ? "" : "s"} — known malicious, installation will be refused`
-      )
+      `\n  ${blockedCount} BLOCKED skill${blockedCount === 1 ? "" : "s"} \u2014 known malicious, installation will be refused`
     );
   }
 
-  const hasInstallable = results.some((r) => !r.isBlocked);
-  if (!opts?.noHint && hasInstallable) {
+  if (!opts?.noHint) {
     const firstInstallable = results.find((r) => !r.isBlocked);
-    const firstName = firstInstallable?.name ?? "<name>";
-    console.log(dim(`\nTo install: npx skills add ${firstName}`));
+    if (firstInstallable) {
+      const repo = extractBaseRepo(firstInstallable.repoUrl);
+      if (repo) {
+        console.log(`\nInstall: npx vskill i ${repo}`);
+      }
+    }
   }
 }

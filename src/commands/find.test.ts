@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
-// Tests for find command (T-009)
+// Tests for find command
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockSearchSkills = vi.hoisted(() => vi.fn());
 
@@ -10,61 +10,110 @@ vi.mock("../api/client.js", () => ({
   searchSkills: mockSearchSkills,
 }));
 
-// Capture console.log output
 const logs: string[] = [];
-const originalLog = console.log;
+let origIsTTY: boolean | undefined;
 
 import { findCommand } from "./find.js";
 
-describe("findCommand hints", () => {
+describe("findCommand", () => {
   beforeEach(() => {
     logs.length = 0;
     vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
       logs.push(args.map(String).join(" "));
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
+    origIsTTY = process.stdout.isTTY;
     mockSearchSkills.mockResolvedValue({
       results: [
-        { name: "test-skill", author: "test", repoUrl: "https://github.com/test/test-skill", tier: "VERIFIED", score: 90 },
+        { name: "test-skill", author: "test", repoUrl: "https://github.com/test/test-skill", tier: "VERIFIED", score: 90, installs: 1250 },
       ],
       hasMore: false,
     });
   });
 
-  it("TC-030: non-TTY output includes hint line", async () => {
-    // Simulate non-TTY
-    const origIsTTY = process.stdout.isTTY;
-    Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
-
-    await findCommand("test", { json: false, noHint: false });
-
-    const output = logs.join("\n");
-    expect(output).toContain("To install: npx skills add");
-
+  afterEach(() => {
     Object.defineProperty(process.stdout, "isTTY", { value: origIsTTY, configurable: true });
+  });
+
+  it("TC-030: non-TTY output includes tab-separated result", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+    await findCommand("test", { json: false, noHint: false });
+    const output = logs.join("\n");
+    expect(output).toContain("test/test-skill@test-skill");
+    expect(output).toContain("1250");
   });
 
   it("TC-031: hint is suppressed with --json flag", async () => {
-    const origIsTTY = process.stdout.isTTY;
     Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
-
     await findCommand("test", { json: true, noHint: false });
-
     const output = logs.join("\n");
-    expect(output).not.toContain("To install: npx skills add");
-
-    Object.defineProperty(process.stdout, "isTTY", { value: origIsTTY, configurable: true });
+    expect(output).not.toContain("Install:");
   });
 
   it("TC-032: hint is suppressed with --no-hint flag", async () => {
-    const origIsTTY = process.stdout.isTTY;
     Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
-
     await findCommand("test", { json: false, noHint: true });
-
     const output = logs.join("\n");
-    expect(output).not.toContain("To install: npx skills add");
+    expect(output).not.toContain("Install:");
+  });
 
-    Object.defineProperty(process.stdout, "isTTY", { value: origIsTTY, configurable: true });
+  it("displays install counts in TTY mode", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    await findCommand("test");
+    const output = logs.join("\n");
+    expect(output).toContain("1.3K installs");
+    expect(output).toContain("test/test-skill@test-skill");
+  });
+
+  it("sorts results by installs descending", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "low-installs", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 10 },
+        { name: "high-installs", author: "b", repoUrl: "https://github.com/b/c", tier: "VERIFIED", score: 50, installs: 5000 },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    const highIdx = output.indexOf("high-installs");
+    const lowIdx = output.indexOf("low-installs");
+    expect(highIdx).toBeLessThan(lowIdx);
+  });
+
+  it("shows --limit hint when truncated", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "skill-1", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 100 },
+      ],
+      hasMore: true,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    expect(output).toContain("Use --limit");
+  });
+
+  it("shows blocked skills with threat info", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "bad-skill", author: "evil", repoUrl: "https://github.com/evil/bad", tier: "BLOCKED", score: 0, installs: 0, isBlocked: true, threatType: "credential-theft", severity: "critical" },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    expect(output).toContain("credential-theft");
+  });
+
+  it("JSON output includes installs field", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+    await findCommand("test", { json: true });
+    // Skip the "Searching..." line — JSON starts at the second log entry
+    const jsonLine = logs.find((l) => l.trimStart().startsWith("["));
+    expect(jsonLine).toBeDefined();
+    const parsed = JSON.parse(jsonLine!);
+    expect(parsed[0].installs).toBe(1250);
   });
 });

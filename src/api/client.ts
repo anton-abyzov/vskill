@@ -21,6 +21,7 @@ export interface SkillSearchResult {
   tier: string;
   score: number;
   description: string;
+  installs: number;
   command?: string | null;
   pluginName?: string | null;
   isTainted?: boolean;
@@ -104,7 +105,7 @@ export async function searchSkills(
   options?: { limit?: number },
 ): Promise<SearchResponse> {
   const encoded = encodeURIComponent(query);
-  const limit = options?.limit ?? 50;
+  const limit = options?.limit ?? 15;
   const data = await apiRequest<{
     results: Array<Record<string, unknown>>;
     pagination?: { hasMore?: boolean };
@@ -119,6 +120,7 @@ export async function searchSkills(
     tier: String(s.certTier || s.tier || "VERIFIED"),
     score: Number(s.trustScore ?? s.certScore ?? s.score ?? 0),
     description: String(s.description || ""),
+    installs: Number(s.vskillInstalls ?? 0),
     command: s.command ? String(s.command) : null,
     pluginName: s.pluginName ? String(s.pluginName) : null,
     isTainted: !!s.isTainted,

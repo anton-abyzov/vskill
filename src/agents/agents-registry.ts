@@ -166,8 +166,8 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
   {
     id: 'openclaw',
     displayName: 'OpenClaw',
-    localSkillsDir: 'skills',
-    globalSkillsDir: '~/skills',
+    localSkillsDir: '.openclaw/skills',
+    globalSkillsDir: '~/.openclaw/skills',
     isUniversal: false,
     detectInstalled: 'which openclaw',
     parentCompany: 'Community',

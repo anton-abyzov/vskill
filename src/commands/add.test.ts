@@ -2589,7 +2589,7 @@ describe("addCommand marketplace integration", () => {
   });
 
   it("TC-004: routes to marketplace flow when repo is a marketplace", async () => {
-    // Marketplace detection succeeds
+    // Marketplace detection succeeds + fallback for skill discovery/download
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
@@ -2598,12 +2598,18 @@ describe("addCommand marketplace integration", () => {
       .mockResolvedValueOnce({
         ok: true,
         text: async () => SAMPLE_MARKETPLACE_JSON,
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [{ name: "test-skill", type: "dir" }],
+        text: async () => "# Skill Content",
       }) as unknown as typeof fetch;
 
     // Claude CLI available + native install succeeds
     mockIsClaudeCliAvailable.mockReturnValue(true);
     mockRegisterMarketplace.mockReturnValue({ success: true });
     mockInstallNativePlugin.mockReturnValue(true);
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
 
     // --yes to auto-select all
     await addCommand("owner/repo", { yes: true });
@@ -2679,23 +2685,29 @@ describe("addCommand marketplace integration", () => {
       .mockResolvedValueOnce({
         ok: true,
         text: async () => SAMPLE_MARKETPLACE_JSON,
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [{ name: "test-skill", type: "dir" }],
+        text: async () => "# Skill Content",
       }) as unknown as typeof fetch;
 
     mockIsClaudeCliAvailable.mockReturnValue(true);
     mockRegisterMarketplace.mockReturnValue({ success: true });
-    // plugin-a succeeds, plugin-b fails, plugin-c succeeds
+    // plugin-a succeeds, plugin-b fails, plugin-c succeeds (native)
     mockInstallNativePlugin
       .mockReturnValueOnce(true)
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(true);
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
 
     await addCommand("owner/repo", { yes: true });
 
-    // Should write lockfile with 2 installed plugins (not the failed one)
+    // All plugins now install skill files to agents regardless of native status
     expect(mockWriteLockfile).toHaveBeenCalled();
     const lockArg = mockWriteLockfile.mock.calls[0][0];
     expect(lockArg.skills["plugin-a"]).toBeDefined();
-    expect(lockArg.skills["plugin-b"]).toBeUndefined();
+    expect(lockArg.skills["plugin-b"]).toBeDefined();
     expect(lockArg.skills["plugin-c"]).toBeDefined();
   });
 
@@ -2730,11 +2742,17 @@ describe("addCommand marketplace integration", () => {
       .mockResolvedValueOnce({
         ok: true,
         text: async () => SAMPLE_MARKETPLACE_JSON,
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [{ name: "test-skill", type: "dir" }],
+        text: async () => "# Skill Content",
       }) as unknown as typeof fetch;
 
     mockIsClaudeCliAvailable.mockReturnValue(true);
     mockRegisterMarketplace.mockReturnValue({ success: true });
     mockInstallNativePlugin.mockReturnValue(true);
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
 
     await addCommand("owner/repo", { yes: true });
 
@@ -2759,7 +2777,7 @@ describe("addCommand marketplace integration", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    // Marketplace detection succeeds
+    // Marketplace detection succeeds + fallback for skill discovery/download
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
@@ -2768,19 +2786,29 @@ describe("addCommand marketplace integration", () => {
       .mockResolvedValueOnce({
         ok: true,
         text: async () => SAMPLE_MARKETPLACE_JSON,
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [{ name: "test-skill", type: "dir" }],
+        text: async () => "# Skill Content",
       }) as unknown as typeof fetch;
 
     // Enable interactive mode
     mockIsTTY.mockReturnValue(true);
-    // User selects only plugin-c (index 2), unchecking plugin-a and plugin-b
-    mockPromptCheckboxList.mockResolvedValue([2]);
+    // First checkbox: user selects only plugin-c (index 2)
+    // Second checkbox: agent selection — select first agent (index 0)
+    mockPromptCheckboxList
+      .mockResolvedValueOnce([2])
+      .mockResolvedValueOnce([0]);
+    // "Install as Claude Code plugins?" → yes
+    mockPromptConfirm.mockResolvedValue(true);
 
     // Claude CLI available
     mockIsClaudeCliAvailable.mockReturnValue(true);
     mockRegisterMarketplace.mockReturnValue({ success: true });
     mockInstallNativePlugin.mockReturnValue(true);
 
-    // Agents for uninstall directory removal
+    // Agents for uninstall directory removal + skill install
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
     // Skill directories exist
     mockExistsSync.mockReturnValue(true);
@@ -2799,7 +2827,7 @@ describe("addCommand marketplace integration", () => {
     // Should remove skill directories
     expect(mockRmSync).toHaveBeenCalled();
 
-    // Should install plugin-c
+    // Should install plugin-c via native Claude plugin
     expect(mockInstallNativePlugin).toHaveBeenCalledWith("plugin-c", "test-marketplace", "project");
   });
 

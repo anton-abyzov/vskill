@@ -432,121 +432,120 @@ async function installMarketplaceRepo(
     }
   }
 
+  // ── Step 1: Optional Claude Code native plugin install ──────────────
   let marketplaceRegistered = false;
-
-  if (hasClaude) {
-    // Register marketplace via git URL — Claude Code clones to its own
-    // persistent location, avoiding the stale-temp-dir bug.
-    const gitUrl = `https://github.com/${owner}/${repo}`;
-    const regSpin = spinner("Registering marketplace with Claude Code");
-    let regResult = registerMarketplace(gitUrl);
-
-    // Retry once after deregistering stale entry
-    if (!regResult.success) {
-      deregisterMarketplace(gitUrl);
-      regResult = registerMarketplace(gitUrl);
-    }
-
-    marketplaceRegistered = regResult.success;
-    regSpin.stop();
-    if (!marketplaceRegistered) {
-      console.log(yellow("  Failed to register marketplace — will use extraction fallback."));
-      if (regResult.stderr) {
-        console.log(dim(`  Reason: ${regResult.stderr}`));
-      }
-    }
-  }
-
-  // Install registered plugins
   const results: { name: string; installed: boolean; method: string }[] = [];
 
-  for (const plugin of selectedPlugins) {
-    if (hasClaude && marketplaceRegistered && marketplaceName) {
-      // Native install
-      const installSpin = spinner(`Installing ${bold(plugin.name)} via Claude Code plugin system`);
-      const ok = installNativePlugin(plugin.name, marketplaceName, opts.global ? "user" : "project");
-      installSpin.stop();
-
-      if (ok) {
-        console.log(green(`  ✓ ${bold(plugin.name)}`) + dim(` (${marketplaceName}:${plugin.name})`));
-        results.push({ name: plugin.name, installed: true, method: "native" });
-      } else {
-        console.log(red(`  ✗ ${bold(plugin.name)}`) + dim(" — native install failed, trying extraction..."));
-        // Fallback to extraction
-        try {
-          await installRepoPlugin(`${owner}/${repo}`, plugin.name, opts);
-          results.push({ name: plugin.name, installed: true, method: "extraction" });
-        } catch {
-          results.push({ name: plugin.name, installed: false, method: "failed" });
-        }
-      }
+  if (hasClaude && selectedPlugins.length > 0) {
+    let wantNative = false;
+    if (isTTY() && !opts.yes) {
+      const prompter = createPrompter();
+      wantNative = await prompter.promptConfirm(
+        "Claude Code detected. Install selected plugins as native Claude Code plugins?",
+        true,
+      );
     } else {
-      // No Claude CLI — extraction fallback
-      try {
-        await installRepoPlugin(`${owner}/${repo}`, plugin.name, opts);
-        results.push({ name: plugin.name, installed: true, method: "extraction" });
-      } catch (err) {
-        console.error(red(`  ✗ ${plugin.name}: ${(err as Error).message}`));
-        results.push({ name: plugin.name, installed: false, method: "failed" });
+      // Non-interactive or --yes: install as native plugin by default
+      wantNative = true;
+    }
+
+    if (wantNative && marketplaceName) {
+      const gitUrl = `https://github.com/${owner}/${repo}`;
+      const regSpin = spinner("Registering marketplace with Claude Code");
+      let regResult = registerMarketplace(gitUrl);
+      if (!regResult.success) {
+        deregisterMarketplace(gitUrl);
+        regResult = registerMarketplace(gitUrl);
+      }
+      marketplaceRegistered = regResult.success;
+      regSpin.stop();
+
+      if (marketplaceRegistered) {
+        for (const plugin of selectedPlugins) {
+          const installSpin = spinner(`Installing ${bold(plugin.name)} via Claude Code plugin system`);
+          const ok = installNativePlugin(plugin.name, marketplaceName, opts.global ? "user" : "project");
+          installSpin.stop();
+          if (ok) {
+            console.log(green(`  ✓ ${bold(plugin.name)}`) + dim(` (${marketplaceName}:${plugin.name})`));
+          } else {
+            console.log(yellow(`  ⚠ ${bold(plugin.name)}`) + dim(" — native install failed"));
+          }
+        }
+      } else {
+        console.log(yellow("  Failed to register marketplace — skipping native install."));
       }
     }
   }
 
-  // Install unregistered plugins — fetch skills and copy directly (no nesting)
-  if (selectedUnregistered.length > 0) {
-    const branch = await getDefaultBranch(owner, repo);
-    let agents = await detectInstalledAgents();
-    const selections = await promptInstallOptions(agents, opts);
-    agents = selections.agents;
-    if (selections.global) opts.global = true;
-    if (!selections.symlink) opts.copy = true;
+  // ── Step 2: Agent selection + skill file install (ALWAYS) ──────────
+  const branch = await getDefaultBranch(owner, repo);
+  let agents = await detectInstalledAgents();
+  const selections = await promptInstallOptions(agents, opts);
+  agents = selections.agents;
+  if (selections.global) opts.global = true;
+  if (!selections.symlink) opts.copy = true;
 
-    for (const unreg of selectedUnregistered) {
-      const pluginPath = unreg.source.replace(/^\.\//, "");
-      const installSpin = spinner(`Installing unverified plugin: ${bold(unreg.name)}`);
+  // Combine all selected plugins (registered + unregistered) for skill file install
+  const allPluginsToInstall: Array<{ name: string; source: string; isUnregistered: boolean }> = [
+    ...selectedPlugins.map((p) => ({
+      name: p.name,
+      source: getPluginSource(p.name, manifestContent || "") || "",
+      isUnregistered: false,
+    })),
+    ...selectedUnregistered.map((u) => ({
+      name: u.name,
+      source: u.source,
+      isUnregistered: true,
+    })),
+  ];
 
-      try {
-        // Discover skills inside the plugin directory
-        const skillsUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${pluginPath}/skills`;
-        const skillsRes = await fetch(skillsUrl, { headers: { "User-Agent": "vskill-cli" } });
-        if (!skillsRes.ok) throw new Error(`No skills found in ${pluginPath}/skills`);
-        const skillDirs = ((await skillsRes.json()) as Array<{ name: string; type: string }>)
-          .filter((e) => e.type === "dir");
+  for (const plugin of allPluginsToInstall) {
+    const pluginPath = plugin.source.replace(/^\.\//, "");
+    if (!pluginPath) {
+      results.push({ name: plugin.name, installed: false, method: "failed" });
+      continue;
+    }
+    const installSpin = spinner(`Installing skills: ${bold(plugin.name)}`);
 
-        if (skillDirs.length === 0) throw new Error(`No skill directories in ${pluginPath}/skills`);
+    try {
+      const skillsUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${pluginPath}/skills`;
+      const skillsRes = await fetch(skillsUrl, { headers: { "User-Agent": "vskill-cli" } });
+      if (!skillsRes.ok) throw new Error(`No skills found in ${pluginPath}/skills`);
+      const skillDirs = ((await skillsRes.json()) as Array<{ name: string; type: string }>)
+        .filter((e) => e.type === "dir");
 
-        // Fetch each skill's SKILL.md and install directly to agent dirs
-        let installedSkillNames: string[] = [];
-        for (const sd of skillDirs) {
-          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/skills/${sd.name}/SKILL.md`;
-          const contentRes = await fetch(rawUrl);
-          if (!contentRes.ok) continue;
-          const content = await contentRes.text();
+      if (skillDirs.length === 0) throw new Error(`No skill directories in ${pluginPath}/skills`);
 
-          // Write to each agent's skills dir: {agent-dir}/{skillName}/SKILL.md
-          for (const agent of agents) {
-            const baseDir = resolveInstallBase(opts, agent);
-            const skillDir = join(baseDir, sd.name);
-            mkdirSync(skillDir, { recursive: true });
-            writeFileSync(join(skillDir, "SKILL.md"), content, "utf-8");
-          }
+      const installedSkillNames: string[] = [];
+      for (const sd of skillDirs) {
+        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/skills/${sd.name}/SKILL.md`;
+        const contentRes = await fetch(rawUrl);
+        if (!contentRes.ok) continue;
+        const content = await contentRes.text();
 
-          installedSkillNames.push(sd.name);
+        for (const agent of agents) {
+          const baseDir = resolveInstallBase(opts, agent);
+          const skillDir = join(baseDir, sd.name);
+          mkdirSync(skillDir, { recursive: true });
+          writeFileSync(join(skillDir, "SKILL.md"), content, "utf-8");
         }
 
-        installSpin.stop();
-        if (installedSkillNames.length > 0) {
-          console.log(green(`  ✓ ${bold(unreg.name)}`) + dim(` (${installedSkillNames.join(", ")})`));
-          results.push({ name: unreg.name, installed: true, method: "extraction-unregistered" });
-        } else {
-          console.log(red(`  ✗ ${bold(unreg.name)}`) + dim(" — no skills found"));
-          results.push({ name: unreg.name, installed: false, method: "failed" });
-        }
-      } catch (err) {
-        installSpin.stop();
-        console.error(red(`  ✗ ${unreg.name}: ${(err as Error).message}`));
-        results.push({ name: unreg.name, installed: false, method: "failed" });
+        installedSkillNames.push(sd.name);
       }
+
+      installSpin.stop();
+      if (installedSkillNames.length > 0) {
+        const tier = plugin.isUnregistered ? "unverified" : "verified";
+        console.log(green(`  ✓ ${bold(plugin.name)}`) + dim(` (${installedSkillNames.join(", ")}) [${tier}]`));
+        results.push({ name: plugin.name, installed: true, method: plugin.isUnregistered ? "extraction-unregistered" : "extraction" });
+      } else {
+        console.log(red(`  ✗ ${bold(plugin.name)}`) + dim(" — no skills found"));
+        results.push({ name: plugin.name, installed: false, method: "failed" });
+      }
+    } catch (err) {
+      installSpin.stop();
+      console.error(red(`  ✗ ${plugin.name}: ${(err as Error).message}`));
+      results.push({ name: plugin.name, installed: false, method: "failed" });
     }
   }
 

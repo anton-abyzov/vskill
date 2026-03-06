@@ -233,6 +233,65 @@ Install both? Duplicates. They diverge? Inconsistencies. vskill gives you one in
 
 <br/>
 
+## Skill Evals
+
+Every skill can include evaluations — standardized test cases that verify the skill actually improves LLM output. Skills with evals get quality scores on [verified-skill.com](https://verified-skill.com) and regression tracking across versions.
+
+### Directory structure
+
+```
+your-skill/
+├── SKILL.md              # The skill definition
+└── evals/
+    └── evals.json        # Test cases + assertions
+```
+
+### evals.json format
+
+```json
+{
+  "skill_name": "your-skill",
+  "evals": [
+    {
+      "id": 1,
+      "name": "Descriptive test name",
+      "prompt": "Realistic user prompt that tests the skill",
+      "expected_output": "Reference output (not graded, for human context)",
+      "files": [],
+      "assertions": [
+        { "id": "a1", "text": "Output includes specific technique X", "type": "boolean" },
+        { "id": "a2", "text": "Code example compiles without errors", "type": "boolean" }
+      ]
+    }
+  ]
+}
+```
+
+### Writing good evals
+
+- **Prompts** should be realistic user requests, not synthetic test inputs
+- **Assertions** must be objectively verifiable — avoid subjective criteria like "well-written"
+- Each eval case should test a distinct capability of the skill
+- 3-5 eval cases with 2-4 assertions each is a good starting point
+
+### CLI commands
+
+```bash
+npx vskill eval init <skill-dir>          # Scaffold evals.json from SKILL.md via LLM
+npx vskill eval run <skill-dir>           # Run evals and grade assertions
+npx vskill eval coverage                  # Show eval status for all skills
+npx vskill eval generate-all              # Batch-generate for all skills
+```
+
+### Platform integration
+
+Skills with `evals/evals.json` get:
+- Quality evaluation results displayed at `/skills/[name]/evals`
+- Admin editing at `/admin/evals` (admin-only)
+- Regression tracking across eval runs
+
+<br/>
+
 ## Registry
 
 Browse and search verified skills at **[verified-skill.com](https://verified-skill.com)**.

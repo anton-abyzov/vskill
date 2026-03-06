@@ -404,7 +404,7 @@ async function installMarketplaceRepo(
 
         for (const skill of skillsToSubmit) {
           try {
-            const sub = await submitSkill({ repoUrl, skillName: skill.name, skillPath: skill.path });
+            const sub = await submitSkill({ repoUrl, skillName: skill.name, skillPath: skill.path, source: "cli-auto" });
             if (sub.alreadyVerified) {
               const skillUrl = `https://verified-skill.com/skills/${encodeURIComponent(skill.name)}`;
               console.log(green(`  ${bold(skill.name)} is already verified.`));

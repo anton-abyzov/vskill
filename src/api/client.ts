@@ -79,6 +79,7 @@ export interface SubmissionRequest {
   skillName?: string;
   skillPath?: string;
   email?: string;
+  source?: string;
 }
 
 async function apiRequest<T>(

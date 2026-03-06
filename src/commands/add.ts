@@ -474,7 +474,11 @@ async function installMarketplaceRepo(
   // Install unregistered plugins — fetch skills and copy directly (no nesting)
   if (selectedUnregistered.length > 0) {
     const branch = await getDefaultBranch(owner, repo);
-    const agents = await detectInstalledAgents();
+    let agents = await detectInstalledAgents();
+    const selections = await promptInstallOptions(agents, opts);
+    agents = selections.agents;
+    if (selections.global) opts.global = true;
+    if (!selections.symlink) opts.copy = true;
 
     for (const unreg of selectedUnregistered) {
       const pluginPath = unreg.source.replace(/^\.\//, "");

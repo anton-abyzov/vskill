@@ -10,8 +10,13 @@ vi.mock("../api/client.js", () => ({
   searchSkills: mockSearchSkills,
 }));
 
+vi.mock("../discovery/github-tree.js", () => ({
+  warnRateLimitOnce: vi.fn(),
+}));
+
 const logs: string[] = [];
 let origIsTTY: boolean | undefined;
+let origFetch: typeof globalThis.fetch;
 
 import { findCommand } from "./find.js";
 
@@ -23,6 +28,18 @@ describe("findCommand", () => {
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
     origIsTTY = process.stdout.isTTY;
+    origFetch = globalThis.fetch;
+    // Mock GitHub API to return stars
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("api.github.com/repos/")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ stargazers_count: 1300 }),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    }) as unknown as typeof fetch;
     mockSearchSkills.mockResolvedValue({
       results: [
         { name: "test-skill", author: "test", repoUrl: "https://github.com/test/test-skill", tier: "VERIFIED", score: 90, installs: 1250 },
@@ -33,14 +50,15 @@ describe("findCommand", () => {
 
   afterEach(() => {
     Object.defineProperty(process.stdout, "isTTY", { value: origIsTTY, configurable: true });
+    globalThis.fetch = origFetch;
   });
 
-  it("TC-030: non-TTY output includes tab-separated result", async () => {
+  it("TC-030: non-TTY output includes tab-separated result with stars", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
     await findCommand("test", { json: false, noHint: false });
     const output = logs.join("\n");
-    expect(output).toContain("test/test-skill@test-skill");
-    expect(output).toContain("1250");
+    expect(output).toContain("test/test-skill/test-skill");
+    expect(output).toContain("1300");
   });
 
   it("TC-031: hint is suppressed with --json flag", async () => {
@@ -57,27 +75,32 @@ describe("findCommand", () => {
     expect(output).not.toContain("Install:");
   });
 
-  it("displays install counts in TTY mode", async () => {
+  it("displays GitHub stars in TTY mode", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     await findCommand("test");
     const output = logs.join("\n");
-    expect(output).toContain("1.3K installs");
-    expect(output).toContain("test/test-skill@test-skill");
+    expect(output).toContain("\u2605 1.3K");
+    expect(output).toContain("test/test-skill/test-skill");
   });
 
-  it("sorts results by installs descending", async () => {
+  it("sorts results by stars descending", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
+      if (url.includes("a/b")) return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ stargazers_count: 10 }) });
+      if (url.includes("b/c")) return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ stargazers_count: 5000 }) });
+      return Promise.resolve({ ok: false, status: 404 });
+    });
     mockSearchSkills.mockResolvedValue({
       results: [
-        { name: "low-installs", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 10 },
-        { name: "high-installs", author: "b", repoUrl: "https://github.com/b/c", tier: "VERIFIED", score: 50, installs: 5000 },
+        { name: "low-stars", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 10 },
+        { name: "high-stars", author: "b", repoUrl: "https://github.com/b/c", tier: "VERIFIED", score: 50, installs: 5000 },
       ],
       hasMore: false,
     });
     await findCommand("test");
     const output = logs.join("\n");
-    const highIdx = output.indexOf("high-installs");
-    const lowIdx = output.indexOf("low-installs");
+    const highIdx = output.indexOf("high-stars");
+    const lowIdx = output.indexOf("low-stars");
     expect(highIdx).toBeLessThan(lowIdx);
   });
 
@@ -107,13 +130,12 @@ describe("findCommand", () => {
     expect(output).toContain("credential-theft");
   });
 
-  it("JSON output includes installs field", async () => {
+  it("JSON output includes stars field", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
     await findCommand("test", { json: true });
-    // Skip the "Searching..." line — JSON starts at the second log entry
     const jsonLine = logs.find((l) => l.trimStart().startsWith("["));
     expect(jsonLine).toBeDefined();
     const parsed = JSON.parse(jsonLine!);
-    expect(parsed[0].installs).toBe(1250);
+    expect(parsed[0].stars).toBe(1300);
   });
 });

@@ -389,9 +389,8 @@ async function installMarketplaceRepo(
           const skillFilePath = `${pluginPath}/skills/${sd.name}/SKILL.md`;
           try {
             const sub = await submitSkill({ repoUrl, skillName: sd.name, skillPath: skillFilePath });
-            const skillSlug = encodeURIComponent(`${owner}/${repo}/${sd.name}`);
             if (sub.alreadyVerified) {
-              const skillUrl = `https://verified-skill.com/skills/${skillSlug}`;
+              const skillUrl = `https://verified-skill.com/skills/${sd.name}`;
               console.log(green(`  ${bold(sd.name)} is already verified.`));
               console.log(dim("  View: ") + link(skillUrl, skillUrl));
             } else if (sub.blocked) {
@@ -893,7 +892,7 @@ async function promptInstallOptions(
       description: detectedIds.has(a.id)
         ? a.parentCompany
         : `${a.parentCompany} — not detected`,
-      checked: detectedIds.has(a.id),
+      checked: false,
     }));
 
     if (allAgents.length > 1) {
@@ -988,7 +987,7 @@ function printBlockedError(entry: BlocklistEntry): void {
   console.error(red(`  Skill: "${entry.skillName}"`));
   console.error(red(`  Threat: ${entry.threatType} (${entry.severity})`));
   console.error(red(`  Reason: ${entry.reason}`));
-  console.error(dim(`  Details: https://verified-skill.com/skills/${encodeURIComponent(entry.skillName)}`));
+  console.error(dim(`  Details: https://verified-skill.com/skills/${entry.skillName}`));
   console.error(dim("\n  Use --force to override (NOT recommended)"));
 }
 
@@ -997,7 +996,7 @@ function printBlockedWarning(entry: BlocklistEntry): void {
   console.error(yellow(`  Skill: "${entry.skillName}"`));
   console.error(yellow(`  Threat: ${entry.threatType} (${entry.severity})`));
   console.error(yellow(`  Reason: ${entry.reason}`));
-  console.error(dim(`  Details: https://verified-skill.com/skills/${encodeURIComponent(entry.skillName)}`));
+  console.error(dim(`  Details: https://verified-skill.com/skills/${entry.skillName}`));
   console.error("");
 }
 
@@ -1008,7 +1007,7 @@ function printRejectedWarning(rejection: RejectionInfo): void {
     console.error(yellow(`  Score: ${rejection.score}/100`));
   }
   console.error(yellow(`  Reason: ${rejection.reason}`));
-  console.error(dim(`  Details: https://verified-skill.com/skills/${encodeURIComponent(rejection.skillName)}`));
+  console.error(dim(`  Details: https://verified-skill.com/skills/${rejection.skillName}`));
   console.error("");
 }
 
@@ -1016,7 +1015,7 @@ function printTaintedWarning(skillName: string, reason?: string): void {
   console.error(yellow(bold("\n  TAINTED: Author has blocked skills")));
   console.error(yellow(`  Another skill from this author was blocked for malicious behavior.`));
   if (reason) console.error(yellow(`  Reason: ${reason}`));
-  console.error(dim(`  Details: https://verified-skill.com/skills/${encodeURIComponent(skillName)}`));
+  console.error(dim(`  Details: https://verified-skill.com/skills/${skillName}`));
   console.error(dim("  Exercise caution — review the source code before using."));
   console.error("");
 }

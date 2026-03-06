@@ -22,6 +22,8 @@ export interface SkillSearchResult {
   score: number;
   description: string;
   installs: number;
+  /** GitHub stars (returned by search API) */
+  githubStars: number;
   command?: string | null;
   pluginName?: string | null;
   isTainted?: boolean;
@@ -133,6 +135,7 @@ export async function searchSkills(
     score: Number(s.trustScore ?? s.certScore ?? s.score ?? 0),
     description: String(s.description || ""),
     installs: Number(s.vskillInstalls ?? 0),
+    githubStars: Number(s.githubStars ?? 0),
     command: s.command ? String(s.command) : null,
     pluginName: s.pluginName ? String(s.pluginName) : null,
     isTainted: !!s.isTainted,

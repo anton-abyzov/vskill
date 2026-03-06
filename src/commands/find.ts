@@ -4,8 +4,7 @@
 
 import type { SkillSearchResult } from "../api/client.js";
 import { searchSkills } from "../api/client.js";
-import { bold, dim, cyan, red, link, formatInstalls } from "../utils/output.js";
-import { warnRateLimitOnce } from "../discovery/github-tree.js";
+import { bold, dim, cyan, yellow, red, link, formatInstalls } from "../utils/output.js";
 
 interface FindOptions {
   json?: boolean;
@@ -31,38 +30,11 @@ function formatRepoSkill(repoUrl: string | undefined, skillName: string): string
 }
 
 /**
- * Get the verified-skill.com URL for a skill.
- * Skills are uniquely identified as owner/repo/skill.
+ * Build the verified-skill.com URL for a skill.
+ * The platform stores skills by their flat name (e.g. "social-media-posting").
  */
-function getSkillUrl(repoUrl: string | undefined, skillName: string): string {
-  const base = extractBaseRepo(repoUrl);
-  const slug = base ? `${base}/${skillName}` : skillName;
-  return `https://verified-skill.com/skills/${encodeURIComponent(slug)}`;
-}
-
-/**
- * Fetch GitHub stars for a set of owner/repo slugs in parallel.
- * Returns a map of slug → star count. Silently returns 0 on failure.
- */
-async function fetchGitHubStars(slugs: string[]): Promise<Map<string, number>> {
-  const stars = new Map<string, number>();
-  const unique = [...new Set(slugs)];
-  const results = await Promise.allSettled(
-    unique.map(async (slug) => {
-      const res = await fetch(`https://api.github.com/repos/${slug}`, {
-        headers: { "User-Agent": "vskill-cli", Accept: "application/vnd.github.v3+json" },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (res.status === 403) warnRateLimitOnce(res);
-      if (!res.ok) return { slug, count: 0 };
-      const data = (await res.json()) as { stargazers_count?: number };
-      return { slug, count: data.stargazers_count ?? 0 };
-    }),
-  );
-  for (const r of results) {
-    if (r.status === "fulfilled") stars.set(r.value.slug, r.value.count);
-  }
-  return stars;
+function getSkillUrl(skillName: string): string {
+  return `https://verified-skill.com/skills/${encodeURIComponent(skillName)}`;
 }
 
 export async function findCommand(query: string, opts?: FindOptions): Promise<void> {
@@ -91,19 +63,11 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     return;
   }
 
-  // Fetch GitHub stars for all unique repos
-  const repoSlugs = results
-    .map((r) => extractBaseRepo(r.repoUrl))
-    .filter((s): s is string => s !== null);
-  const starsMap = await fetchGitHubStars(repoSlugs);
-
   // Sort: non-blocked by stars descending, score as tiebreaker, blocked at end
   results.sort((a, b) => {
     if (a.isBlocked && !b.isBlocked) return 1;
     if (!a.isBlocked && b.isBlocked) return -1;
-    const aStars = starsMap.get(extractBaseRepo(a.repoUrl) ?? "") ?? 0;
-    const bStars = starsMap.get(extractBaseRepo(b.repoUrl) ?? "") ?? 0;
-    const starDiff = bStars - aStars;
+    const starDiff = (b.githubStars ?? 0) - (a.githubStars ?? 0);
     if (starDiff !== 0) return starDiff;
     return (b.score ?? 0) - (a.score ?? 0);
   });
@@ -112,7 +76,7 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
   if (opts?.json) {
     const enriched = results.map((r) => ({
       ...r,
-      stars: starsMap.get(extractBaseRepo(r.repoUrl) ?? "") ?? 0,
+      stars: r.githubStars ?? 0,
     }));
     console.log(JSON.stringify(enriched, null, 2));
     return;
@@ -124,16 +88,16 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
   if (process.stdout.isTTY) {
     for (const r of results) {
       const label = formatRepoSkill(r.repoUrl, r.name);
-      const url = getSkillUrl(r.repoUrl, r.name);
-      const stars = starsMap.get(extractBaseRepo(r.repoUrl) ?? "") ?? 0;
+      const url = getSkillUrl(r.name);
+      const stars = r.githubStars ?? 0;
 
       if (r.isBlocked) {
         const parts = [r.severity, r.threatType].filter(Boolean);
         const threatInfo = parts.length > 0 ? parts.join(" | ") : "blocked";
         console.log(`${red(bold(label))}  ${red(threatInfo)}`);
       } else {
-        const starStr = stars > 0 ? `\u2605 ${formatInstalls(stars)}` : "";
-        console.log(`${bold(label)}${starStr ? "  " + dim(starStr) : ""}`);
+        const starStr = stars > 0 ? yellow(`\u2605 ${formatInstalls(stars)}`) : "";
+        console.log(`${bold(label)}${starStr ? "  " + starStr : ""}`);
       }
 
       console.log(dim(`  \u2514 ${link(url, url)}`));
@@ -174,7 +138,7 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
   // ---------- Non-TTY (piped) — tab-separated flat lines --------------------
   for (const r of results) {
     const label = formatRepoSkill(r.repoUrl, r.name);
-    const stars = starsMap.get(extractBaseRepo(r.repoUrl) ?? "") ?? 0;
+    const stars = r.githubStars ?? 0;
     if (r.isBlocked) {
       console.log(`${label}\tBLOCKED\t${r.threatType ?? ""}`);
     } else {

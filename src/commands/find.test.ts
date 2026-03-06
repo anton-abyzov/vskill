@@ -10,13 +10,8 @@ vi.mock("../api/client.js", () => ({
   searchSkills: mockSearchSkills,
 }));
 
-vi.mock("../discovery/github-tree.js", () => ({
-  warnRateLimitOnce: vi.fn(),
-}));
-
 const logs: string[] = [];
 let origIsTTY: boolean | undefined;
-let origFetch: typeof globalThis.fetch;
 
 import { findCommand } from "./find.js";
 
@@ -28,21 +23,9 @@ describe("findCommand", () => {
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
     origIsTTY = process.stdout.isTTY;
-    origFetch = globalThis.fetch;
-    // Mock GitHub API to return stars
-    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
-      if (typeof url === "string" && url.includes("api.github.com/repos/")) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ stargazers_count: 1300 }),
-        });
-      }
-      return Promise.resolve({ ok: false, status: 404 });
-    }) as unknown as typeof fetch;
     mockSearchSkills.mockResolvedValue({
       results: [
-        { name: "test-skill", author: "test", repoUrl: "https://github.com/test/test-skill", tier: "VERIFIED", score: 90, installs: 1250 },
+        { name: "test-skill", author: "test", repoUrl: "https://github.com/test/test-skill", tier: "VERIFIED", score: 90, installs: 1250, githubStars: 1300 },
       ],
       hasMore: false,
     });
@@ -50,7 +33,6 @@ describe("findCommand", () => {
 
   afterEach(() => {
     Object.defineProperty(process.stdout, "isTTY", { value: origIsTTY, configurable: true });
-    globalThis.fetch = origFetch;
   });
 
   it("TC-030: non-TTY output includes tab-separated result with stars", async () => {
@@ -85,15 +67,10 @@ describe("findCommand", () => {
 
   it("sorts results by stars descending", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
-      if (url.includes("a/b")) return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ stargazers_count: 10 }) });
-      if (url.includes("b/c")) return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ stargazers_count: 5000 }) });
-      return Promise.resolve({ ok: false, status: 404 });
-    });
     mockSearchSkills.mockResolvedValue({
       results: [
-        { name: "low-stars", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 10 },
-        { name: "high-stars", author: "b", repoUrl: "https://github.com/b/c", tier: "VERIFIED", score: 50, installs: 5000 },
+        { name: "low-stars", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 10, githubStars: 10 },
+        { name: "high-stars", author: "b", repoUrl: "https://github.com/b/c", tier: "VERIFIED", score: 50, installs: 5000, githubStars: 5000 },
       ],
       hasMore: false,
     });
@@ -108,7 +85,7 @@ describe("findCommand", () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     mockSearchSkills.mockResolvedValue({
       results: [
-        { name: "skill-1", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 100 },
+        { name: "skill-1", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 100, githubStars: 100 },
       ],
       hasMore: true,
     });
@@ -121,7 +98,7 @@ describe("findCommand", () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     mockSearchSkills.mockResolvedValue({
       results: [
-        { name: "bad-skill", author: "evil", repoUrl: "https://github.com/evil/bad", tier: "BLOCKED", score: 0, installs: 0, isBlocked: true, threatType: "credential-theft", severity: "critical" },
+        { name: "bad-skill", author: "evil", repoUrl: "https://github.com/evil/bad", tier: "BLOCKED", score: 0, installs: 0, githubStars: 0, isBlocked: true, threatType: "credential-theft", severity: "critical" },
       ],
       hasMore: false,
     });
@@ -137,5 +114,13 @@ describe("findCommand", () => {
     expect(jsonLine).toBeDefined();
     const parsed = JSON.parse(jsonLine!);
     expect(parsed[0].stars).toBe(1300);
+  });
+
+  it("skill URL uses flat name, not owner/repo/skill", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    await findCommand("test");
+    const output = logs.join("\n");
+    expect(output).toContain("verified-skill.com/skills/test-skill");
+    expect(output).not.toContain("verified-skill.com/skills/test%2Ftest-skill%2Ftest-skill");
   });
 });

@@ -389,9 +389,23 @@ async function installMarketplaceRepo(
           const skillFilePath = `${pluginPath}/skills/${sd.name}/SKILL.md`;
           try {
             const sub = await submitSkill({ repoUrl, skillName: sd.name, skillPath: skillFilePath });
-            const trackUrl = `https://verified-skill.com/submit/${sub.id}`;
-            console.log(green(`  Submitted ${bold(sd.name)} for scanning.`));
-            console.log(dim("  Track: ") + link(trackUrl, trackUrl));
+            const skillSlug = encodeURIComponent(`${owner}/${repo}/${sd.name}`);
+            if (sub.alreadyVerified) {
+              const skillUrl = `https://verified-skill.com/skills/${skillSlug}`;
+              console.log(green(`  ${bold(sd.name)} is already verified.`));
+              console.log(dim("  View: ") + link(skillUrl, skillUrl));
+            } else if (sub.blocked) {
+              console.log(red(`  ${bold(sd.name)} is blocked.`));
+            } else {
+              const subId = sub.id ?? sub.submissionId;
+              const trackUrl = `https://verified-skill.com/submit/${subId}`;
+              if (sub.duplicate) {
+                console.log(yellow(`  ${bold(sd.name)} is already in the queue.`));
+              } else {
+                console.log(green(`  Submitted ${bold(sd.name)} for scanning.`));
+              }
+              console.log(dim("  Track: ") + link(trackUrl, trackUrl));
+            }
           } catch {
             const submitUrl = `https://verified-skill.com/submit`;
             console.log(yellow(`  Could not submit ${sd.name} automatically.`));

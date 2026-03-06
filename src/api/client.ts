@@ -56,9 +56,20 @@ export interface SkillDetail {
 }
 
 export interface SubmissionResponse {
-  id: string;
-  state: string;
-  trackingUrl?: string;
+  /** Submission ID (present for new + duplicate submissions) */
+  id?: string;
+  state?: string;
+  createdAt?: string;
+  /** True when an identical pending submission already exists */
+  duplicate?: boolean;
+  /** Skill ID (present when skill is already verified) */
+  skillId?: string;
+  skillName?: string;
+  /** True when skill already passed verification */
+  alreadyVerified?: boolean;
+  /** True when skill/submission is blocked */
+  blocked?: boolean;
+  submissionId?: string;
 }
 
 export interface SubmissionRequest {

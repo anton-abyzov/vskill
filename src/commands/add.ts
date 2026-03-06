@@ -374,28 +374,33 @@ async function installMarketplaceRepo(
     }
   }
 
-  // Gate: unregistered plugins require --force
+  // Gate: unregistered plugins — warn and ask for confirmation
   if (selectedUnregistered.length > 0 && !opts.force) {
+    // Auto-submit for re-scanning in the background
+    triggerResubmission(owner, repo).catch(() => {});
+
+    const names = selectedUnregistered.map((p) => p.name).join(", ");
     console.log(
-      yellow(`\n  ${selectedUnregistered.length} unregistered plugin${selectedUnregistered.length === 1 ? "" : "s"} selected but --force not set.`) + "\n" +
-        dim("  Unregistered plugins have not been scanned or verified.") + "\n" +
-        dim("  Use --force to install them anyway, or submit the repo for re-scanning.") + "\n",
+      yellow(`\n  ⚠ ${selectedUnregistered.length} unverified plugin${selectedUnregistered.length === 1 ? "" : "s"}: ${bold(names)}`) + "\n" +
+        dim("  These plugins have not been scanned or verified by vskill.") + "\n" +
+        dim("  The repo has been submitted for scanning automatically.") + "\n",
     );
-    // Offer resubmission in interactive mode
+
     if (isTTY()) {
       const prompter = createPrompter();
-      const resubmit = await prompter.promptConfirm(
-        `Submit ${bold(`${owner}/${repo}`)} for re-scanning?`,
-        true,
+      const proceed = await prompter.promptConfirm(
+        "Install unverified plugin(s) anyway? (may be insecure)",
+        false,
       );
-      if (resubmit) {
-        await triggerResubmission(owner, repo);
+      if (!proceed) {
+        console.log(dim("  Skipping unverified plugins."));
+        selectedUnregistered = [];
       }
     } else {
-      console.log(dim(`  Submit manually: https://verified-skill.com/submit?repo=${owner}/${repo}`));
+      // Non-interactive: require --force for unverified plugins
+      console.log(dim("  Use --force to install unverified plugins in non-interactive mode."));
+      selectedUnregistered = [];
     }
-    // Clear unregistered selection — only install registered plugins
-    selectedUnregistered = [];
   }
 
   let marketplaceRegistered = false;

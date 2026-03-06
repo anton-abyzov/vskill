@@ -70,7 +70,7 @@ describe("searchSkills", () => {
     const response = await searchSkills("hello world");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      `${BASE_URL}/api/v1/skills/search?q=hello%20world&limit=15`,
+      `${BASE_URL}/api/v1/skills/search?q=hello%20world&limit=10`,
       expect.objectContaining({
         headers: expect.objectContaining({
           "Content-Type": "application/json",
@@ -88,6 +88,7 @@ describe("searchSkills", () => {
         score: 95,
         description: "A great skill",
         installs: 0,
+        githubStars: 0,
         command: null,
         pluginName: null,
         isTainted: false,

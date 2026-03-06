@@ -119,7 +119,7 @@ export async function searchSkills(
   options?: { limit?: number },
 ): Promise<SearchResponse> {
   const encoded = encodeURIComponent(query);
-  const limit = options?.limit ?? 15;
+  const limit = options?.limit ?? 10;
   const data = await apiRequest<{
     results: Array<Record<string, unknown>>;
     pagination?: { hasMore?: boolean };

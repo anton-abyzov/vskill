@@ -96,17 +96,19 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
         const threatInfo = parts.length > 0 ? parts.join(" | ") : "blocked";
         console.log(`${red(bold(label))}  ${red(threatInfo)}`);
       } else {
-        const starStr = stars > 0 ? yellow(`\u2605 ${formatInstalls(stars)}`) : "";
+        const starStr = stars > 0
+          ? yellow(bold(`\u2605 ${formatInstalls(stars)}`)) + dim(" GitHub stars")
+          : "";
         console.log(`${bold(label)}${starStr ? "  " + starStr : ""}`);
       }
 
-      console.log(dim(`  \u2514 ${link(url, url)}`));
+      console.log(`  ${dim("\u2514")} ${link(url, cyan(url))}`);
       console.log();
     }
 
     // Footer
     if (hasMore) {
-      const currentLimit = opts?.limit ?? 15;
+      const currentLimit = opts?.limit ?? 10;
       const suggestedLimit = Math.min(currentLimit * 2, 50);
       console.log(dim(`Showing ${results.length} results. Use --limit ${suggestedLimit} for more.`));
     } else {

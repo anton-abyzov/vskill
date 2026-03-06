@@ -57,11 +57,12 @@ describe("findCommand", () => {
     expect(output).not.toContain("Install:");
   });
 
-  it("displays GitHub stars in TTY mode", async () => {
+  it("displays GitHub stars with label in TTY mode", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     await findCommand("test");
     const output = logs.join("\n");
     expect(output).toContain("\u2605 1.3K");
+    expect(output).toContain("GitHub stars");
     expect(output).toContain("test/test-skill/test-skill");
   });
 

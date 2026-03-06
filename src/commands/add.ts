@@ -378,36 +378,43 @@ async function installMarketplaceRepo(
     for (const unreg of selectedUnregistered) {
       const pluginPath = unreg.source.replace(/^\.\//, "");
       try {
-        // Discover skills in this plugin to submit each one
+        // Discover skills: try nested {pluginPath}/skills/ first, fall back to flat {pluginPath}/SKILL.md
+        const skillsToSubmit: Array<{ name: string; path: string }> = [];
         const skillsUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${pluginPath}/skills`;
         const skillsRes = await fetch(skillsUrl, { headers: { "User-Agent": "vskill-cli" } });
-        if (!skillsRes.ok) continue;
-        const skillDirs = ((await skillsRes.json()) as Array<{ name: string; type: string }>)
-          .filter((e) => e.type === "dir");
+        if (skillsRes.ok) {
+          const skillDirs = ((await skillsRes.json()) as Array<{ name: string; type: string }>)
+            .filter((e) => e.type === "dir");
+          for (const sd of skillDirs) {
+            skillsToSubmit.push({ name: sd.name, path: `${pluginPath}/skills/${sd.name}/SKILL.md` });
+          }
+        } else {
+          // Flat layout: SKILL.md at plugin root
+          skillsToSubmit.push({ name: unreg.name, path: `${pluginPath}/SKILL.md` });
+        }
 
-        for (const sd of skillDirs) {
-          const skillFilePath = `${pluginPath}/skills/${sd.name}/SKILL.md`;
+        for (const skill of skillsToSubmit) {
           try {
-            const sub = await submitSkill({ repoUrl, skillName: sd.name, skillPath: skillFilePath });
+            const sub = await submitSkill({ repoUrl, skillName: skill.name, skillPath: skill.path });
             if (sub.alreadyVerified) {
-              const skillUrl = `https://verified-skill.com/skills/${sd.name}`;
-              console.log(green(`  ${bold(sd.name)} is already verified.`));
+              const skillUrl = `https://verified-skill.com/skills/${encodeURIComponent(skill.name)}`;
+              console.log(green(`  ${bold(skill.name)} is already verified.`));
               console.log(dim("  View: ") + link(skillUrl, skillUrl));
             } else if (sub.blocked) {
-              console.log(red(`  ${bold(sd.name)} is blocked.`));
+              console.log(red(`  ${bold(skill.name)} is blocked.`));
             } else {
               const subId = sub.id ?? sub.submissionId;
               const trackUrl = `https://verified-skill.com/submit/${subId}`;
               if (sub.duplicate) {
-                console.log(yellow(`  ${bold(sd.name)} is already in the queue.`));
+                console.log(yellow(`  ${bold(skill.name)} is already in the queue.`));
               } else {
-                console.log(green(`  Submitted ${bold(sd.name)} for scanning.`));
+                console.log(green(`  Submitted ${bold(skill.name)} for scanning.`));
               }
               console.log(dim("  Track: ") + link(trackUrl, trackUrl));
             }
           } catch {
             const submitUrl = `https://verified-skill.com/submit`;
-            console.log(yellow(`  Could not submit ${sd.name} automatically.`));
+            console.log(yellow(`  Could not submit ${skill.name} automatically.`));
             console.log(dim("  Submit manually: ") + link(submitUrl, submitUrl));
           }
         }
@@ -508,29 +515,42 @@ async function installMarketplaceRepo(
     const installSpin = spinner(`Installing skills: ${bold(plugin.name)}`);
 
     try {
+      // Discover skills: try {pluginPath}/skills/ first, then fall back to {pluginPath}/SKILL.md
+      const installedSkillNames: string[] = [];
       const skillsUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${pluginPath}/skills`;
       const skillsRes = await fetch(skillsUrl, { headers: { "User-Agent": "vskill-cli" } });
-      if (!skillsRes.ok) throw new Error(`No skills found in ${pluginPath}/skills`);
-      const skillDirs = ((await skillsRes.json()) as Array<{ name: string; type: string }>)
-        .filter((e) => e.type === "dir");
 
-      if (skillDirs.length === 0) throw new Error(`No skill directories in ${pluginPath}/skills`);
-
-      const installedSkillNames: string[] = [];
-      for (const sd of skillDirs) {
-        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/skills/${sd.name}/SKILL.md`;
-        const contentRes = await fetch(rawUrl);
-        if (!contentRes.ok) continue;
-        const content = await contentRes.text();
-
-        for (const agent of agents) {
-          const baseDir = resolveInstallBase(opts, agent);
-          const skillDir = join(baseDir, sd.name);
-          mkdirSync(skillDir, { recursive: true });
-          writeFileSync(join(skillDir, "SKILL.md"), content, "utf-8");
+      if (skillsRes.ok) {
+        // Nested layout: {pluginPath}/skills/{skillName}/SKILL.md
+        const skillDirs = ((await skillsRes.json()) as Array<{ name: string; type: string }>)
+          .filter((e) => e.type === "dir");
+        for (const sd of skillDirs) {
+          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/skills/${sd.name}/SKILL.md`;
+          const contentRes = await fetch(rawUrl);
+          if (!contentRes.ok) continue;
+          const content = await contentRes.text();
+          for (const agent of agents) {
+            const baseDir = resolveInstallBase(opts, agent);
+            const skillDir = join(baseDir, sd.name);
+            mkdirSync(skillDir, { recursive: true });
+            writeFileSync(join(skillDir, "SKILL.md"), content, "utf-8");
+          }
+          installedSkillNames.push(sd.name);
         }
-
-        installedSkillNames.push(sd.name);
+      } else {
+        // Flat layout: {pluginPath}/SKILL.md directly in the plugin root
+        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/SKILL.md`;
+        const contentRes = await fetch(rawUrl);
+        if (contentRes.ok) {
+          const content = await contentRes.text();
+          for (const agent of agents) {
+            const baseDir = resolveInstallBase(opts, agent);
+            const skillDir = join(baseDir, plugin.name);
+            mkdirSync(skillDir, { recursive: true });
+            writeFileSync(join(skillDir, "SKILL.md"), content, "utf-8");
+          }
+          installedSkillNames.push(plugin.name);
+        }
       }
 
       installSpin.stop();
@@ -539,7 +559,7 @@ async function installMarketplaceRepo(
         console.log(green(`  ✓ ${bold(plugin.name)}`) + dim(` (${installedSkillNames.join(", ")}) [${tier}]`));
         results.push({ name: plugin.name, installed: true, method: plugin.isUnregistered ? "extraction-unregistered" : "extraction" });
       } else {
-        console.log(red(`  ✗ ${bold(plugin.name)}`) + dim(" — no skills found"));
+        console.log(red(`  ✗ ${bold(plugin.name)}`) + dim(" — no SKILL.md found"));
         results.push({ name: plugin.name, installed: false, method: "failed" });
       }
     } catch (err) {
@@ -1584,6 +1604,7 @@ async function installRepoPlugin(
   interface GHEntry { name: string; type: string; download_url?: string }
 
   let skillEntries: GHEntry[] = [];
+  let flatLayout = false;
   try {
     const res = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${pluginPath}/skills`,
@@ -1593,6 +1614,19 @@ async function installRepoPlugin(
       skillEntries = ((await res.json()) as GHEntry[]).filter((e) => e.type === "dir");
     }
   } catch { /* skills dir might not exist */ }
+
+  // Flat layout fallback: check for SKILL.md directly at plugin root
+  if (skillEntries.length === 0) {
+    try {
+      const res = await fetch(
+        `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/SKILL.md`,
+      );
+      if (res.ok) {
+        flatLayout = true;
+        skillEntries = [{ name: pluginName, type: "dir" }];
+      }
+    } catch { /* flat layout not available */ }
+  }
 
   let cmdEntries: GHEntry[] = [];
   try {
@@ -1627,7 +1661,9 @@ async function installRepoPlugin(
   const allContent: string[] = [];
   const skills: Array<{ name: string; content: string }> = [];
   for (const entry of skillEntries) {
-    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/skills/${entry.name}/SKILL.md`;
+    const rawUrl = flatLayout
+      ? `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/SKILL.md`
+      : `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/skills/${entry.name}/SKILL.md`;
     try {
       const res = await fetch(rawUrl);
       if (res.ok) {

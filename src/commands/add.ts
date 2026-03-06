@@ -506,11 +506,6 @@ async function installMarketplaceRepo(
             writeFileSync(join(skillDir, "SKILL.md"), content, "utf-8");
           }
 
-          // Native Claude Code plugin install for global scope
-          if (hasClaude && marketplaceRegistered && marketplaceName) {
-            installNativePlugin(unreg.name, marketplaceName, opts.global ? "user" : "project");
-          }
-
           installedSkillNames.push(sd.name);
         }
 

@@ -257,11 +257,16 @@ async function installMarketplaceRepo(
       console.log(dim(`Auto-selecting all ${plugins.length} plugins (--yes/--all)`));
     }
     if (unregistered.length > 0) {
-      console.log(
-        dim(`  Skipping ${unregistered.length} unregistered plugin${unregistered.length === 1 ? "" : "s"}: `) +
-          dim(unregistered.map((u) => u.name).join(", ")) +
-          dim(" (use --force to include)"),
-      );
+      if (opts.force) {
+        selectedUnregistered = unregistered;
+        console.log(dim(`  Including ${unregistered.length} unregistered plugin${unregistered.length === 1 ? "" : "s"} (--force): ${unregistered.map((u) => u.name).join(", ")}`));
+      } else {
+        console.log(
+          dim(`  Skipping ${unregistered.length} unregistered plugin${unregistered.length === 1 ? "" : "s"}: `) +
+            dim(unregistered.map((u) => u.name).join(", ")) +
+            dim(" (use --force to include)"),
+        );
+      }
     }
   } else if (plugins.length === 1 && unregistered.length === 0) {
     // Single plugin, no unregistered — show details and ask for confirmation
@@ -463,9 +468,9 @@ async function installMarketplaceRepo(
     }
   }
 
-  // Install unregistered plugins via extraction (--force only)
+  // Install unregistered plugins via extraction (confirmed or --force)
   for (const unreg of selectedUnregistered) {
-    console.log(yellow(`  Installing unregistered plugin: ${bold(unreg.name)} (--force)`));
+    console.log(yellow(`  Installing unverified plugin: ${bold(unreg.name)}`));
     try {
       await installRepoPlugin(`${owner}/${repo}`, unreg.name, opts, unreg.source);
       results.push({ name: unreg.name, installed: true, method: "extraction-unregistered" });

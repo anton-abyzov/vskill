@@ -373,15 +373,30 @@ async function installMarketplaceRepo(
         dim("  These plugins have not been scanned or verified by vskill."),
     );
 
-    // Submit for scanning and show tracking link
+    // Submit each skill for scanning and show tracking links
     const repoUrl = `https://github.com/${owner}/${repo}`;
-    try {
-      const submission = await submitSkill({ repoUrl });
-      const trackUrl = submission.trackingUrl || `https://verified-skill.com/submissions/${submission.id}`;
-      console.log(green("  Submitted for scanning.") + " " + dim("Track: ") + link(trackUrl, trackUrl));
-    } catch {
-      const fallbackUrl = `https://verified-skill.com/submit?repo=${owner}/${repo}`;
-      console.log(yellow("  Could not submit automatically.") + " " + dim("Submit: ") + link(fallbackUrl, fallbackUrl));
+    for (const unreg of selectedUnregistered) {
+      const pluginPath = unreg.source.replace(/^\.\//, "");
+      try {
+        // Discover skills in this plugin to submit each one
+        const skillsUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${pluginPath}/skills`;
+        const skillsRes = await fetch(skillsUrl, { headers: { "User-Agent": "vskill-cli" } });
+        if (!skillsRes.ok) continue;
+        const skillDirs = ((await skillsRes.json()) as Array<{ name: string; type: string }>)
+          .filter((e) => e.type === "dir");
+
+        for (const sd of skillDirs) {
+          const skillFilePath = `${pluginPath}/skills/${sd.name}/SKILL.md`;
+          try {
+            const sub = await submitSkill({ repoUrl, skillName: sd.name, skillPath: skillFilePath });
+            const trackUrl = `https://verified-skill.com/skills/${encodeURIComponent(sd.name)}`;
+            console.log(green(`  Submitted ${bold(sd.name)} for scanning.`) + " " + link(trackUrl, trackUrl));
+          } catch {
+            const fallbackUrl = `https://verified-skill.com/submit?repo=${owner}/${repo}`;
+            console.log(yellow(`  Could not submit ${sd.name}.`) + " " + dim("Submit: ") + link(fallbackUrl, fallbackUrl));
+          }
+        }
+      } catch { /* skip discovery errors */ }
     }
     console.log();
 

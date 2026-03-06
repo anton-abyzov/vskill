@@ -57,13 +57,14 @@ export interface SkillDetail {
 
 export interface SubmissionResponse {
   id: string;
-  status: string;
-  trackingUrl: string;
+  state: string;
+  trackingUrl?: string;
 }
 
 export interface SubmissionRequest {
   repoUrl: string;
   skillName?: string;
+  skillPath?: string;
   email?: string;
 }
 

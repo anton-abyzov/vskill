@@ -389,11 +389,13 @@ async function installMarketplaceRepo(
           const skillFilePath = `${pluginPath}/skills/${sd.name}/SKILL.md`;
           try {
             const sub = await submitSkill({ repoUrl, skillName: sd.name, skillPath: skillFilePath });
-            const trackUrl = `https://verified-skill.com/skills/${encodeURIComponent(sd.name)}`;
-            console.log(green(`  Submitted ${bold(sd.name)} for scanning.`) + " " + link(trackUrl, trackUrl));
+            const trackUrl = `https://verified-skill.com/submit/${sub.id}`;
+            console.log(green(`  Submitted ${bold(sd.name)} for scanning.`));
+            console.log(dim("  Track: ") + link(trackUrl, trackUrl));
           } catch {
-            const fallbackUrl = `https://verified-skill.com/submit?repo=${owner}/${repo}`;
-            console.log(yellow(`  Could not submit ${sd.name}.`) + " " + dim("Submit: ") + link(fallbackUrl, fallbackUrl));
+            const submitUrl = `https://verified-skill.com/submit`;
+            console.log(yellow(`  Could not submit ${sd.name} automatically.`));
+            console.log(dim("  Submit manually: ") + link(submitUrl, submitUrl));
           }
         }
       } catch { /* skip discovery errors */ }

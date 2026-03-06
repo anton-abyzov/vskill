@@ -32,9 +32,12 @@ function formatRepoSkill(repoUrl: string | undefined, skillName: string): string
 
 /**
  * Get the verified-skill.com URL for a skill.
+ * Skills are uniquely identified as owner/repo/skill.
  */
-function getSkillUrl(skillName: string): string {
-  return `https://verified-skill.com/skills/${encodeURIComponent(skillName)}`;
+function getSkillUrl(repoUrl: string | undefined, skillName: string): string {
+  const base = extractBaseRepo(repoUrl);
+  const slug = base ? `${base}/${skillName}` : skillName;
+  return `https://verified-skill.com/skills/${encodeURIComponent(slug)}`;
 }
 
 /**
@@ -121,7 +124,7 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
   if (process.stdout.isTTY) {
     for (const r of results) {
       const label = formatRepoSkill(r.repoUrl, r.name);
-      const url = getSkillUrl(r.name);
+      const url = getSkillUrl(r.repoUrl, r.name);
       const stars = starsMap.get(extractBaseRepo(r.repoUrl) ?? "") ?? 0;
 
       if (r.isBlocked) {

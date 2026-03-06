@@ -210,7 +210,26 @@ async function installMarketplaceRepo(
   let selectedUnregistered: UnregisteredPlugin[] = [];
   let usedInteractiveCheckbox = false;
 
-  if (!isTTY() && !opts.yes && !opts.all) {
+  // When a specific plugin is named (preSelected), skip the checkbox entirely
+  if (preSelected && preSelected.length > 0) {
+    const matched = plugins.filter((p) => preSelected.includes(p.name));
+    if (matched.length > 0) {
+      selectedPlugins = matched;
+      console.log(dim(`Installing ${matched.length} plugin${matched.length === 1 ? "" : "s"}: ${matched.map((p) => p.name).join(", ")}`));
+    } else {
+      // Named plugin not in marketplace — try unregistered
+      const matchedUnreg = unregistered.filter((u) => preSelected.includes(u.name));
+      if (matchedUnreg.length > 0) {
+        selectedPlugins = [];
+        selectedUnregistered = matchedUnreg;
+        console.log(dim(`Installing ${matchedUnreg.length} unregistered plugin${matchedUnreg.length === 1 ? "" : "s"}: ${matchedUnreg.map((u) => u.name).join(", ")}`));
+      } else {
+        console.error(red(`Plugin "${preSelected[0]}" not found in marketplace or repo.`));
+        process.exit(1);
+        return;
+      }
+    }
+  } else if (!isTTY() && !opts.yes && !opts.all) {
     // Non-TTY: list plugins and exit with guidance
     console.log("Available plugins:\n");
     for (const p of plugins) {
@@ -227,18 +246,8 @@ async function installMarketplaceRepo(
     console.error(red("\nNon-interactive mode. Use --plugin <name> or --yes to select all."));
     process.exit(1);
   } else if (opts.yes || opts.all) {
-    if (preSelected && preSelected.length > 0) {
-      const matched = plugins.filter((p) => preSelected.includes(p.name));
-      selectedPlugins = matched.length > 0 ? matched : plugins;
-      if (matched.length > 0) {
-        console.log(dim(`Auto-selecting ${matched.length} plugin${matched.length === 1 ? "" : "s"}: ${matched.map((p) => p.name).join(", ")}`));
-      } else {
-        console.log(dim(`Auto-selecting all ${plugins.length} plugins (--yes/--all)`));
-      }
-    } else {
-      selectedPlugins = plugins;
-      console.log(dim(`Auto-selecting all ${plugins.length} plugins (--yes/--all)`));
-    }
+    selectedPlugins = plugins;
+    console.log(dim(`Auto-selecting all ${plugins.length} plugins (--yes/--all)`));
     if (unregistered.length > 0) {
       if (opts.force) {
         selectedUnregistered = unregistered;
@@ -283,17 +292,17 @@ async function installMarketplaceRepo(
     }
     selectedPlugins = plugins;
   } else {
-    // Build combined picker: registered plugins first, then unregistered
+    // Build combined picker: registered plugins first, then unregistered (nothing pre-checked)
     const combinedItems = [
       ...plugins.map((p) => ({
         label: p.name + (installedSet.has(p.name) ? dim(" (installed)") : ""),
         description: p.description,
-        checked: preSelected ? preSelected.includes(p.name) : installedSet.has(p.name),
+        checked: false,
       })),
       ...unregistered.map((u) => ({
         label: u.name + (installedSet.has(u.name) ? dim(" (installed)") : yellow(" (new — not in marketplace.json)")),
         description: undefined as string | undefined,
-        checked: installedSet.has(u.name),
+        checked: false,
       })),
     ];
 

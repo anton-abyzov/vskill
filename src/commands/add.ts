@@ -46,6 +46,7 @@ import {
   dim,
   cyan,
   spinner,
+  link,
 } from "../utils/output.js";
 import { isTTY, createPrompter } from "../utils/prompts.js";
 import { installSymlink, installCopy } from "../installer/canonical.js";
@@ -152,24 +153,6 @@ export async function detectMarketplaceRepo(
   }
 
   return { isMarketplace: false };
-}
-
-/**
- * Offer to submit a marketplace repo for re-scanning on the platform.
- * Uses the existing submitSkill() API. Non-throwing — prints fallback URL on failure.
- */
-async function triggerResubmission(owner: string, repo: string): Promise<void> {
-  const repoUrl = `https://github.com/${owner}/${repo}`;
-  try {
-    const result = await submitSkill({ repoUrl });
-    console.log(green("  Submitted for re-scanning!"));
-    if (result.trackingUrl) {
-      console.log(dim(`  Track progress: ${result.trackingUrl}`));
-    }
-  } catch {
-    console.log(yellow("  Could not submit automatically."));
-    console.log(dim(`  Submit manually: https://verified-skill.com/submit?repo=${owner}/${repo}`));
-  }
 }
 
 /**
@@ -382,17 +365,25 @@ async function installMarketplaceRepo(
     }
   }
 
-  // Gate: unregistered plugins — warn and ask for confirmation
+  // Gate: unregistered plugins — submit for scanning, warn, ask for confirmation
   if (selectedUnregistered.length > 0 && !opts.force) {
-    // Auto-submit for re-scanning in the background
-    triggerResubmission(owner, repo).catch(() => {});
-
     const names = selectedUnregistered.map((p) => p.name).join(", ");
     console.log(
       yellow(`\n  ⚠ ${selectedUnregistered.length} unverified plugin${selectedUnregistered.length === 1 ? "" : "s"}: ${bold(names)}`) + "\n" +
-        dim("  These plugins have not been scanned or verified by vskill.") + "\n" +
-        dim("  The repo has been submitted for scanning automatically.") + "\n",
+        dim("  These plugins have not been scanned or verified by vskill."),
     );
+
+    // Submit for scanning and show tracking link
+    const repoUrl = `https://github.com/${owner}/${repo}`;
+    try {
+      const submission = await submitSkill({ repoUrl });
+      const trackUrl = submission.trackingUrl || `https://verified-skill.com/submissions/${submission.id}`;
+      console.log(green("  Submitted for scanning.") + " " + dim("Track: ") + link(trackUrl, trackUrl));
+    } catch {
+      const fallbackUrl = `https://verified-skill.com/submit?repo=${owner}/${repo}`;
+      console.log(yellow("  Could not submit automatically.") + " " + dim("Submit: ") + link(fallbackUrl, fallbackUrl));
+    }
+    console.log();
 
     if (isTTY()) {
       const prompter = createPrompter();

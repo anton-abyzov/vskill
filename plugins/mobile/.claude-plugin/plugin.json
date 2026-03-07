@@ -1,6 +1,6 @@
 {
   "name": "mobile",
-  "description": "Mobile development skills for App Store Connect automation via asc CLI",
+  "description": "iOS/macOS app deployment via asc CLI — a lightweight fastlane alternative for TestFlight, App Store submission, signing, metadata, and analytics",
   "version": "2.3.0",
   "author": {
     "name": "Anton Abyzov",
@@ -10,5 +10,5 @@
   "homepage": "https://github.com/anton-abyzov/vskill",
   "repository": "https://github.com/anton-abyzov/vskill",
   "license": "MIT",
-  "keywords": ["mobile", "ios", "app-store-connect", "asc", "testflight"]
+  "keywords": ["mobile", "ios", "macos", "app-store-connect", "asc", "testflight", "deploy", "submission", "signing", "fastlane-alternative"]
 }

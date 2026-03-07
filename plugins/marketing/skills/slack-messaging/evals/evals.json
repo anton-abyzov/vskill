@@ -1,0 +1,68 @@
+{
+  "skill_name": "slack-messaging",
+  "evals": [
+    {
+      "id": 1,
+      "name": "Read channel and summarize",
+      "prompt": "Can you check the #engineering channel on Slack and give me a summary of what people have been talking about today?",
+      "expected_output": "The skill resolves #engineering to a channel_id via slack_search_channels, reads recent messages with slack_read_channel using a date filter, and presents a structured summary of the conversations with who said what.",
+      "files": [],
+      "assertions": [
+        { "id": "a1", "text": "Uses slack_search_channels to resolve the channel name to a channel_id before reading", "type": "boolean" },
+        { "id": "a2", "text": "Uses slack_read_channel with the resolved channel_id to fetch messages", "type": "boolean" },
+        { "id": "a3", "text": "Presents a human-readable summary of the messages, not raw API output", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Reply in a thread with context",
+      "prompt": "There's a thread in #product about the new onboarding flow — someone asked about the drop-off rate at step 3. Can you read that thread and draft a reply mentioning that we reduced it by 15% last sprint?",
+      "expected_output": "The skill finds the channel, searches for or reads the thread about onboarding, reads the full thread for context via slack_read_thread, drafts a contextual reply referencing earlier messages, shows it for approval, and sends using thread_ts to keep it in the thread.",
+      "files": [],
+      "assertions": [
+        { "id": "a1", "text": "Reads the full thread with slack_read_thread before drafting a reply", "type": "boolean" },
+        { "id": "a2", "text": "Draft reply references context from the thread (not generic/disconnected)", "type": "boolean" },
+        { "id": "a3", "text": "Uses slack_send_message with thread_ts parameter to reply in-thread", "type": "boolean" },
+        { "id": "a4", "text": "Shows the draft to the user and waits for approval before sending", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "New channel message triggers session boundary",
+      "prompt": "I got two unrelated messages in #support — one from Alice about a billing bug and one from Bob about a feature request. Can you respond to both?",
+      "expected_output": "The skill reads the channel, identifies both messages, and either tells the user to handle each in a separate Claude Code session or spawns separate subagents. It does NOT mix context between the two conversations.",
+      "files": [],
+      "assertions": [
+        { "id": "a1", "text": "Identifies that these are two separate top-level conversations requiring context isolation", "type": "boolean" },
+        { "id": "a2", "text": "Either recommends separate sessions or uses subagents — does NOT handle both inline with mixed context", "type": "boolean" },
+        { "id": "a3", "text": "Does not leak details from Alice's billing bug into Bob's feature request response or vice versa", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Schedule a message for later",
+      "prompt": "Schedule a message in #announcements for tomorrow at 9am saying 'Reminder: all-hands meeting at 2pm today. Agenda in the pinned doc.'",
+      "expected_output": "The skill resolves #announcements to a channel_id, calculates the Unix timestamp for tomorrow 9am, shows the draft for approval, then calls slack_schedule_message with the correct post_at value.",
+      "files": [],
+      "assertions": [
+        { "id": "a1", "text": "Resolves #announcements channel name to a channel_id", "type": "boolean" },
+        { "id": "a2", "text": "Calculates a Unix timestamp for 9am tomorrow that is at least 2 minutes in the future", "type": "boolean" },
+        { "id": "a3", "text": "Uses slack_schedule_message (not slack_send_message) to schedule the message", "type": "boolean" },
+        { "id": "a4", "text": "Shows the message content and scheduled time to the user before confirming", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Send a DM to a colleague",
+      "prompt": "Can you DM Sarah Chen on Slack and ask if she's available for a quick sync about the API migration this afternoon?",
+      "expected_output": "The skill uses slack_search_users to find Sarah Chen's user_id, drafts a friendly message, shows it for approval, then sends via slack_send_message using the user_id as the channel_id.",
+      "files": [],
+      "assertions": [
+        { "id": "a1", "text": "Uses slack_search_users to find Sarah Chen's user_id", "type": "boolean" },
+        { "id": "a2", "text": "Uses the user_id as the channel_id parameter in slack_send_message", "type": "boolean" },
+        { "id": "a3", "text": "Shows the draft message for user approval before sending", "type": "boolean" },
+        { "id": "a4", "text": "Message uses Slack mrkdwn formatting (single *bold*, _italic_), not standard markdown", "type": "boolean" }
+      ]
+    }
+  ]
+}

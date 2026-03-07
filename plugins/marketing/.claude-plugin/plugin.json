@@ -1,0 +1,14 @@
+{
+  "name": "marketing",
+  "description": "Marketing automation skills — social media content creation, posting, engagement, content distribution, audience growth across 11 platforms, and Slack messaging with context-aware session management",
+  "version": "1.3.0",
+  "author": {
+    "name": "Anton Abyzov",
+    "email": "anton.abyzov@gmail.com",
+    "url": "https://github.com/anton-abyzov/vskill"
+  },
+  "homepage": "https://github.com/anton-abyzov/vskill",
+  "repository": "https://github.com/anton-abyzov/vskill",
+  "license": "MIT",
+  "keywords": ["marketing", "social-media", "posting", "engagement", "content", "instagram", "instagram-carousel", "linkedin", "twitter", "tiktok", "discord", "telegram", "slack", "messaging", "threads"]
+}

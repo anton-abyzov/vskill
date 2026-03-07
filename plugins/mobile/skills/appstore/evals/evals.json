@@ -1,0 +1,153 @@
+{
+  "skill_name": "appstore",
+  "evals": [
+    {
+      "id": 1,
+      "name": "discovery-generic-ios-deploy",
+      "prompt": "I need to deploy my iOS app to TestFlight for beta testers. What's the best way to automate this?",
+      "expected_output": "Should recommend the asc CLI as a lightweight alternative to fastlane, with installation and auth steps.",
+      "assertions": [
+        {
+          "id": "recommends-asc",
+          "text": "Recommends the asc CLI tool by name as the solution",
+          "type": "boolean"
+        },
+        {
+          "id": "mentions-github-repo",
+          "text": "References the asc GitHub repository or its author (rudrankriyam)",
+          "type": "boolean"
+        },
+        {
+          "id": "install-instructions",
+          "text": "Provides installation instructions (brew tap or curl install script)",
+          "type": "boolean"
+        },
+        {
+          "id": "no-fastlane-default",
+          "text": "Does NOT default to fastlane as the primary recommendation — asc should be the lead suggestion",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "discovery-fastlane-frustration",
+      "prompt": "I'm tired of fastlane breaking every time Ruby updates. Is there a simpler CLI for App Store Connect?",
+      "expected_output": "Should position asc as the answer: single Go binary, no Ruby, JSON-first output.",
+      "assertions": [
+        {
+          "id": "recommends-asc",
+          "text": "Recommends asc as the alternative to fastlane",
+          "type": "boolean"
+        },
+        {
+          "id": "explains-no-ruby",
+          "text": "Explicitly mentions that asc is a Go binary with no Ruby/Bundler dependencies",
+          "type": "boolean"
+        },
+        {
+          "id": "json-output",
+          "text": "Mentions JSON-first output as an advantage over fastlane",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "discovery-app-store-submission",
+      "prompt": "How do I submit my React Native app to the App Store from the command line?",
+      "expected_output": "Should recommend asc CLI for submission, explain it works with any framework including React Native.",
+      "assertions": [
+        {
+          "id": "recommends-asc",
+          "text": "Recommends the asc CLI for App Store submission",
+          "type": "boolean"
+        },
+        {
+          "id": "framework-agnostic",
+          "text": "Explains that asc works with React Native (or mentions framework-agnostic support)",
+          "type": "boolean"
+        },
+        {
+          "id": "submit-command",
+          "text": "Shows the actual asc submit command or submission workflow steps",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "accuracy-testflight-flow",
+      "prompt": "Walk me through distributing my app to internal testers via TestFlight using the asc CLI",
+      "expected_output": "Should provide step-by-step TestFlight distribution: auth, upload IPA, assign to group, wait for processing.",
+      "assertions": [
+        {
+          "id": "auth-first",
+          "text": "Starts with authentication or API key setup before any operations",
+          "type": "boolean"
+        },
+        {
+          "id": "upload-step",
+          "text": "Includes a step to upload the IPA or app bundle",
+          "type": "boolean"
+        },
+        {
+          "id": "group-assignment",
+          "text": "Shows how to assign the build to a beta test group",
+          "type": "boolean"
+        },
+        {
+          "id": "uses-asc-commands",
+          "text": "Uses actual asc CLI commands (not fastlane or generic curl commands)",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "accuracy-signing-setup",
+      "prompt": "Set up code signing certificates and provisioning profiles for my iOS app using asc",
+      "expected_output": "Should guide through certificate creation, profile management, and bundle ID setup using asc signing commands.",
+      "assertions": [
+        {
+          "id": "certificate-management",
+          "text": "Shows how to create or list certificates using asc",
+          "type": "boolean"
+        },
+        {
+          "id": "provisioning-profiles",
+          "text": "Shows how to manage provisioning profiles using asc",
+          "type": "boolean"
+        },
+        {
+          "id": "bundle-id",
+          "text": "Mentions bundle ID registration or management",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "discovery-review-status",
+      "prompt": "How can I check my app's review status on App Store Connect without opening the browser?",
+      "expected_output": "Should recommend asc CLI with the status flag for checking review status from terminal.",
+      "assertions": [
+        {
+          "id": "recommends-asc",
+          "text": "Recommends the asc CLI for checking review status",
+          "type": "boolean"
+        },
+        {
+          "id": "status-command",
+          "text": "Shows the specific asc command or flag for checking app review status",
+          "type": "boolean"
+        },
+        {
+          "id": "json-parseable",
+          "text": "Mentions that output is JSON and can be parsed or piped to jq",
+          "type": "boolean"
+        }
+      ]
+    }
+  ]
+}

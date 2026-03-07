@@ -31,9 +31,13 @@ function formatRepoSkill(repoUrl: string | undefined, skillName: string): string
 
 /**
  * Build the verified-skill.com URL for a skill.
- * The platform stores skills by their flat name (e.g. "social-media-posting").
+ * Supports both flat ("social-media-posting") and hierarchical ("owner/repo/skill") names.
  */
 function getSkillUrl(skillName: string): string {
+  const parts = skillName.split("/");
+  if (parts.length === 3) {
+    return `https://verified-skill.com/skills/${parts.map(encodeURIComponent).join("/")}`;
+  }
   return `https://verified-skill.com/skills/${encodeURIComponent(skillName)}`;
 }
 

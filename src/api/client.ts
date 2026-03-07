@@ -148,11 +148,21 @@ export async function searchSkills(
 }
 
 /**
+ * Build an API path for a skill, supporting hierarchical names (owner/repo/skill).
+ */
+function skillApiPath(name: string): string {
+  const parts = name.split("/");
+  return parts.length === 3
+    ? `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}`
+    : `/api/v1/skills/${encodeURIComponent(name)}`;
+}
+
+/**
  * Get a single skill by name.
+ * Supports both flat ("architect") and hierarchical ("owner/repo/architect") names.
  */
 export async function getSkill(name: string): Promise<SkillDetail> {
-  const encoded = encodeURIComponent(name);
-  const data = await apiRequest<Record<string, unknown>>(`/api/v1/skills/${encoded}`);
+  const data = await apiRequest<Record<string, unknown>>(skillApiPath(name));
 
   // API wraps the skill object under a "skill" key
   const raw = (data.skill as Record<string, unknown>) ?? data;
@@ -221,7 +231,7 @@ export async function reportInstall(
 
         try {
           const res = await fetch(
-            `${BASE_URL}/api/v1/skills/${encodeURIComponent(skillName)}/installs`,
+            `${BASE_URL}${skillApiPath(skillName)}/installs`,
             {
               method: "POST",
               headers: {

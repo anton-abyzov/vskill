@@ -46,6 +46,12 @@ function getSkillUrl(r: SkillSearchResult): string {
   if (parts.length === 3) {
     return `https://verified-skill.com/skills/${parts.map(encodeURIComponent).join("/")}`;
   }
+  // Fallback: derive owner/repo from repoUrl + use flat name as skill slug
+  const base = extractBaseRepo(r.repoUrl);
+  if (base) {
+    const skillName = r.name.split("/").pop() || r.name;
+    return `https://verified-skill.com/skills/${base.split("/").map(encodeURIComponent).join("/")}/${encodeURIComponent(skillName)}`;
+  }
   return `https://verified-skill.com/skills/${encodeURIComponent(r.name)}`;
 }
 

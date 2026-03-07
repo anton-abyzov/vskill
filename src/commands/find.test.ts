@@ -295,7 +295,7 @@ describe("findCommand", () => {
     expect(output).toContain("verified-skill.com/skills/test/test-skill/test-skill");
   });
 
-  it("skill URL falls back to flat name when slugs missing", async () => {
+  it("skill URL derives owner/repo from repoUrl when slugs missing", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     mockSearchSkills.mockResolvedValue({
       results: [
@@ -305,6 +305,6 @@ describe("findCommand", () => {
     });
     await findCommand("test");
     const output = logs.join("\n");
-    expect(output).toContain("verified-skill.com/skills/legacy-skill");
+    expect(output).toContain("verified-skill.com/skills/test/legacy/legacy-skill");
   });
 });

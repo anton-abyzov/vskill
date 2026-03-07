@@ -22,7 +22,7 @@ function extractBaseRepo(repoUrl: string | undefined): string | null {
 }
 
 /**
- * Format skill display: `owner/repo@skill-name`.
+ * Format skill display: `owner/repo/skill-name`.
  * Uses slug fields when available, falls back to extracting from repoUrl/name.
  */
 function formatSkillId(r: SkillSearchResult): string {
@@ -30,7 +30,7 @@ function formatSkillId(r: SkillSearchResult): string {
   const publisher = r.ownerSlug && r.repoSlug
     ? `${r.ownerSlug}/${r.repoSlug}`
     : extractBaseRepo(r.repoUrl);
-  return publisher ? `${publisher}@${displayName}` : displayName;
+  return publisher ? `${publisher}/${displayName}` : displayName;
 }
 
 /**
@@ -88,12 +88,12 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     return;
   }
 
-  // Sort: non-blocked by vskillInstalls descending, score as tiebreaker, blocked at end
+  // Sort: non-blocked by githubStars descending, score as tiebreaker, blocked at end
   results.sort((a, b) => {
     if (a.isBlocked && !b.isBlocked) return 1;
     if (!a.isBlocked && b.isBlocked) return -1;
-    const installDiff = (b.vskillInstalls ?? 0) - (a.vskillInstalls ?? 0);
-    if (installDiff !== 0) return installDiff;
+    const starDiff = (b.githubStars ?? 0) - (a.githubStars ?? 0);
+    if (starDiff !== 0) return starDiff;
     return (b.score ?? 0) - (a.score ?? 0);
   });
 
@@ -120,10 +120,10 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
         const threatInfo = parts.length > 0 ? parts.join(" | ") : "blocked";
         console.log(`${red(bold(label))}  ${red("BLOCKED")}  ${red(threatInfo)}`);
       } else {
-        const installs = r.vskillInstalls ?? 0;
-        const installStr = `${formatInstalls(installs)} installs`;
+        const stars = r.githubStars ?? 0;
+        const starsStr = `\u2605 ${formatInstalls(stars)}`;
         const badge = getTrustBadge(r.trustTier);
-        console.log(`${bold(label)}  ${dim(installStr)}${badge ? "  " + badge : ""}`);
+        console.log(`${bold(label)}  ${dim(starsStr)}${badge ? "  " + badge : ""}`);
       }
 
       console.log(`  ${link(url, cyan(url))}`);
@@ -166,7 +166,7 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     if (r.isBlocked) {
       console.log(`${name}\t${repo}\tBLOCKED`);
     } else {
-      console.log(`${name}\t${repo}\t${r.vskillInstalls ?? 0}\t${r.trustTier ?? ""}`);
+      console.log(`${name}\t${repo}\t${r.githubStars ?? 0}\t${r.trustTier ?? ""}`);
     }
   }
 

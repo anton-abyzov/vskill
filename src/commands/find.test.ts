@@ -35,11 +35,11 @@ describe("findCommand", () => {
     Object.defineProperty(process.stdout, "isTTY", { value: origIsTTY, configurable: true });
   });
 
-  it("non-TTY output includes tab-separated result with installs", async () => {
+  it("non-TTY output includes tab-separated result with stars", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
     await findCommand("test", { json: false, noHint: false });
     const output = logs.join("\n");
-    expect(output).toContain("test-skill\ttest/test-skill\t1250");
+    expect(output).toContain("test-skill\ttest/test-skill\t1300");
   });
 
   it("hint is suppressed with --json flag", async () => {
@@ -56,31 +56,31 @@ describe("findCommand", () => {
     expect(output).not.toContain("Install:");
   });
 
-  it("displays install count in TTY mode", async () => {
+  it("displays GitHub stars in TTY mode", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     await findCommand("test");
     const output = logs.join("\n");
-    expect(output).toContain("1.3K installs");
-    expect(output).toContain("test/test-skill@test-skill");
+    expect(output).toContain("\u2605 1.3K");
+    expect(output).toContain("test/test-skill/test-skill");
   });
 
-  it("sorts results by vskillInstalls descending", async () => {
+  it("sorts results by githubStars descending", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     mockSearchSkills.mockResolvedValue({
       results: [
-        { name: "low-installs", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 10, githubStars: 10, vskillInstalls: 10 },
-        { name: "high-installs", author: "b", repoUrl: "https://github.com/b/c", tier: "VERIFIED", score: 50, installs: 5000, githubStars: 100, vskillInstalls: 5000 },
+        { name: "low-stars", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 10, githubStars: 10, vskillInstalls: 10 },
+        { name: "high-stars", author: "b", repoUrl: "https://github.com/b/c", tier: "VERIFIED", score: 50, installs: 5000, githubStars: 5000, vskillInstalls: 100 },
       ],
       hasMore: false,
     });
     await findCommand("test");
     const output = logs.join("\n");
-    const highIdx = output.indexOf("high-installs");
-    const lowIdx = output.indexOf("low-installs");
+    const highIdx = output.indexOf("high-stars");
+    const lowIdx = output.indexOf("low-stars");
     expect(highIdx).toBeLessThan(lowIdx);
   });
 
-  it("uses relevance score as tiebreaker for equal installs", async () => {
+  it("uses relevance score as tiebreaker for equal stars", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     mockSearchSkills.mockResolvedValue({
       results: [
@@ -136,24 +136,24 @@ describe("findCommand", () => {
     expect(output).toContain("critical | credential-theft");
   });
 
-  it("renders owner/repo@skill-name format in TTY", async () => {
+  it("renders owner/repo/skill-name format in TTY", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     await findCommand("test");
     const output = logs.join("\n");
-    expect(output).toContain("test/test-skill@test-skill");
+    expect(output).toContain("test/test-skill/test-skill");
   });
 
-  it("renders install count in human format in TTY", async () => {
+  it("renders GitHub stars in human format in TTY", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     mockSearchSkills.mockResolvedValue({
       results: [
-        { name: "popular", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 1200, githubStars: 10, vskillInstalls: 1200 },
+        { name: "popular", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 1200, githubStars: 1200, vskillInstalls: 10 },
       ],
       hasMore: false,
     });
     await findCommand("test");
     const output = logs.join("\n");
-    expect(output).toContain("1.2K installs");
+    expect(output).toContain("\u2605 1.2K");
   });
 
   it("JSON output includes vskillInstalls field", async () => {
@@ -186,7 +186,7 @@ describe("findCommand", () => {
     expect(parsed[0].vskillInstalls).toBe(0);
   });
 
-  it("non-TTY output uses tab-separated name, repo, installs", async () => {
+  it("non-TTY output uses tab-separated name, repo, stars", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
     mockSearchSkills.mockResolvedValue({
       results: [
@@ -197,7 +197,7 @@ describe("findCommand", () => {
     await findCommand("test", { noHint: true });
     const dataLines = logs.filter((l) => l.includes("\t"));
     expect(dataLines.length).toBe(1);
-    expect(dataLines[0]).toBe("my-skill\towner/repo\t500\t");
+    expect(dataLines[0]).toBe("my-skill\towner/repo\t10\t");
   });
 
   it("non-TTY output includes trustTier when present", async () => {
@@ -210,7 +210,7 @@ describe("findCommand", () => {
     });
     await findCommand("test", { noHint: true });
     const dataLines = logs.filter((l) => l.includes("\t"));
-    expect(dataLines[0]).toBe("my-skill\towner/repo\t500\tT3");
+    expect(dataLines[0]).toBe("my-skill\towner/repo\t10\tT3");
   });
 
   it("non-TTY blocked output uses BLOCKED as third column", async () => {

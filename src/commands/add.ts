@@ -378,16 +378,19 @@ async function installMarketplaceRepo(
     }
   }
 
-  // Gate: unregistered plugins — submit for scanning, warn, ask for confirmation
+  // Gate: unregistered plugins — check verification, submit for scanning, warn if needed
   if (selectedUnregistered.length > 0 && !opts.force) {
     const names = selectedUnregistered.map((p) => p.name).join(", ");
     console.log(
-      yellow(`\n  ⚠ ${selectedUnregistered.length} unverified plugin${selectedUnregistered.length === 1 ? "" : "s"}: ${bold(names)}`) + "\n" +
-        dim("  These plugins have not been scanned or verified by vskill."),
+      yellow(`\n  ⚠ ${selectedUnregistered.length} plugin${selectedUnregistered.length === 1 ? "" : "s"} not in marketplace.json: ${bold(names)}`) + "\n" +
+        dim("  Checking verification status..."),
     );
 
-    // Submit each skill for scanning and show tracking links
+    // Submit each skill for scanning and collect verification results
     const repoUrl = `https://github.com/${owner}/${repo}`;
+    let verifiedCount = 0;
+    let unverifiedCount = 0;
+    let blockedCount = 0;
     for (const unreg of selectedUnregistered) {
       const pluginPath = unreg.source.replace(/^\.\//, "");
       try {
@@ -410,12 +413,15 @@ async function installMarketplaceRepo(
           try {
             const sub = await submitSkill({ repoUrl, skillName: skill.name, skillPath: skill.path, source: "cli-auto" });
             if (sub.alreadyVerified) {
+              verifiedCount++;
               const skillUrl = `https://verified-skill.com/skills/${skill.name}`;
               console.log(green(`  ${bold(skill.name)} is already verified.`));
               console.log(dim("  View: ") + link(skillUrl, skillUrl));
             } else if (sub.blocked) {
+              blockedCount++;
               console.log(red(`  ${bold(skill.name)} is blocked.`));
             } else {
+              unverifiedCount++;
               const subId = sub.id ?? sub.submissionId;
               const trackUrl = `https://verified-skill.com/submit/${subId}`;
               if (sub.duplicate) {
@@ -426,6 +432,7 @@ async function installMarketplaceRepo(
               console.log(dim("  Track: ") + link(trackUrl, trackUrl));
             }
           } catch {
+            unverifiedCount++;
             const submitUrl = `https://verified-skill.com/submit`;
             console.log(yellow(`  Could not submit ${skill.name} automatically.`));
             console.log(dim("  Submit manually: ") + link(submitUrl, submitUrl));
@@ -435,10 +442,17 @@ async function installMarketplaceRepo(
     }
     console.log();
 
-    if (isTTY()) {
+    // If all skills are already verified, skip the confirmation prompt
+    if (unverifiedCount === 0 && blockedCount === 0 && verifiedCount > 0) {
+      console.log(green(`  All ${verifiedCount} skill${verifiedCount === 1 ? "" : "s"} already verified — no confirmation needed.\n`));
+    } else if (blockedCount > 0) {
+      // Blocked skills — refuse installation
+      console.log(red(`  ${blockedCount} blocked skill${blockedCount === 1 ? "" : "s"} — cannot install.\n`));
+      selectedUnregistered = [];
+    } else if (isTTY()) {
       const prompter = createPrompter();
       const proceed = await prompter.promptConfirm(
-        "Install unverified plugin(s) anyway? (may be insecure)",
+        `Install ${unverifiedCount} unverified skill${unverifiedCount === 1 ? "" : "s"}? (may be insecure)`,
         false,
       );
       if (!proceed) {

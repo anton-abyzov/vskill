@@ -129,7 +129,8 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
         const stars = r.githubStars ?? 0;
         const starsStr = `\u2605 ${formatInstalls(stars)}`;
         const badge = getTrustBadge(r.trustTier);
-        console.log(`${bold(label)}  ${dim(starsStr)}${badge ? "  " + badge : ""}`);
+        const pluginBadge = r.pluginName ? dim(` [${r.pluginName}]`) : "";
+        console.log(`${bold(label)}${pluginBadge}  ${dim(starsStr)}${badge ? "  " + badge : ""}`);
       }
 
       console.log(`  ${link(url, cyan(url))}`);
@@ -172,7 +173,7 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     if (r.isBlocked) {
       console.log(`${name}\t${repo}\tBLOCKED`);
     } else {
-      console.log(`${name}\t${repo}\t${r.githubStars ?? 0}\t${r.trustTier ?? ""}`);
+      console.log(`${name}\t${repo}\t${r.githubStars ?? 0}\t${r.trustTier ?? ""}\t${r.pluginName ?? ""}`);
     }
   }
 

@@ -197,7 +197,7 @@ describe("findCommand", () => {
     await findCommand("test", { noHint: true });
     const dataLines = logs.filter((l) => l.includes("\t"));
     expect(dataLines.length).toBe(1);
-    expect(dataLines[0]).toBe("my-skill\towner/repo\t10\t");
+    expect(dataLines[0]).toBe("my-skill\towner/repo\t10\t\t");
   });
 
   it("non-TTY output includes trustTier when present", async () => {
@@ -210,7 +210,7 @@ describe("findCommand", () => {
     });
     await findCommand("test", { noHint: true });
     const dataLines = logs.filter((l) => l.includes("\t"));
-    expect(dataLines[0]).toBe("my-skill\towner/repo\t10\tT3");
+    expect(dataLines[0]).toBe("my-skill\towner/repo\t10\tT3\t");
   });
 
   it("non-TTY blocked output uses BLOCKED as third column", async () => {

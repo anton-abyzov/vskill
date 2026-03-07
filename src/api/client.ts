@@ -27,12 +27,22 @@ export interface SkillSearchResult {
   command?: string | null;
   pluginName?: string | null;
   isTainted?: boolean;
+  /** Trust tier (T0-T4) */
+  trustTier?: string;
   /** True when the skill is on the blocklist (known malicious) */
   isBlocked?: boolean;
   /** Threat classification (e.g. "credential-theft", "prompt-injection") */
   threatType?: string;
   /** Severity level (e.g. "critical", "high") */
   severity?: string;
+  /** Install count from the vskill registry */
+  vskillInstalls?: number;
+  /** GitHub owner slug (e.g., "openclaw") */
+  ownerSlug?: string;
+  /** GitHub repo slug (e.g., "openclaw") */
+  repoSlug?: string;
+  /** Skill folder name (e.g., "gog") */
+  skillSlug?: string;
 }
 
 export interface SkillDetail {
@@ -120,7 +130,7 @@ export async function searchSkills(
   options?: { limit?: number },
 ): Promise<SearchResponse> {
   const encoded = encodeURIComponent(query);
-  const limit = options?.limit ?? 10;
+  const limit = options?.limit ?? 15;
   const data = await apiRequest<{
     results: Array<Record<string, unknown>>;
     pagination?: { hasMore?: boolean };
@@ -140,9 +150,14 @@ export async function searchSkills(
     command: s.command ? String(s.command) : null,
     pluginName: s.pluginName ? String(s.pluginName) : null,
     isTainted: !!s.isTainted,
+    trustTier: s.trustTier ? String(s.trustTier) : undefined,
     isBlocked: !!s.isBlocked,
     threatType: s.threatType ? String(s.threatType) : undefined,
     severity: s.severity ? String(s.severity) : undefined,
+    vskillInstalls: s.vskillInstalls != null ? Number(s.vskillInstalls) : undefined,
+    ownerSlug: s.ownerSlug ? String(s.ownerSlug) : undefined,
+    repoSlug: s.repoSlug ? String(s.repoSlug) : undefined,
+    skillSlug: s.skillSlug ? String(s.skillSlug) : undefined,
   }));
   return { results, hasMore: data.pagination?.hasMore ?? false };
 }

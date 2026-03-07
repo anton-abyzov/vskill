@@ -4,7 +4,7 @@
 
 import type { SkillSearchResult } from "../api/client.js";
 import { searchSkills } from "../api/client.js";
-import { bold, dim, cyan, yellow, red, link, formatInstalls } from "../utils/output.js";
+import { bold, dim, cyan, yellow, green, red, link, formatInstalls } from "../utils/output.js";
 
 interface FindOptions {
   json?: boolean;
@@ -13,7 +13,7 @@ interface FindOptions {
 }
 
 /**
- * Extract the base `owner/repo` slug from a repoUrl.
+ * Extract `owner/repo` from a GitHub URL.
  */
 function extractBaseRepo(repoUrl: string | undefined): string | null {
   if (!repoUrl) return null;
@@ -22,11 +22,15 @@ function extractBaseRepo(repoUrl: string | undefined): string | null {
 }
 
 /**
- * Format as `owner/repo/skill-name`.
+ * Format skill display: `owner/repo@skill-name`.
+ * Uses slug fields when available, falls back to extracting from repoUrl/name.
  */
-function formatRepoSkill(repoUrl: string | undefined, skillName: string): string {
-  const base = extractBaseRepo(repoUrl);
-  return base ? `${base}/${skillName}` : skillName;
+function formatSkillId(r: SkillSearchResult): string {
+  const displayName = r.skillSlug || r.name.split("/").pop() || r.name;
+  const publisher = r.ownerSlug && r.repoSlug
+    ? `${r.ownerSlug}/${r.repoSlug}`
+    : extractBaseRepo(r.repoUrl);
+  return publisher ? `${publisher}@${displayName}` : displayName;
 }
 
 /**
@@ -39,6 +43,19 @@ function getSkillUrl(skillName: string): string {
     return `https://verified-skill.com/skills/${parts.map(encodeURIComponent).join("/")}`;
   }
   return `https://verified-skill.com/skills/${encodeURIComponent(skillName)}`;
+}
+
+/**
+ * Return a colored trust badge string based on the trust tier.
+ */
+function getTrustBadge(trustTier: string | undefined): string {
+  switch (trustTier) {
+    case "T4": return green("\u2713 certified");
+    case "T3": return cyan("\u2713 verified");
+    case "T2": return yellow("? maybe");
+    case "T1": return dim("? maybe");
+    default: return "";
+  }
 }
 
 export async function findCommand(query: string, opts?: FindOptions): Promise<void> {
@@ -67,12 +84,12 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     return;
   }
 
-  // Sort: non-blocked by stars descending, score as tiebreaker, blocked at end
+  // Sort: non-blocked by vskillInstalls descending, score as tiebreaker, blocked at end
   results.sort((a, b) => {
     if (a.isBlocked && !b.isBlocked) return 1;
     if (!a.isBlocked && b.isBlocked) return -1;
-    const starDiff = (b.githubStars ?? 0) - (a.githubStars ?? 0);
-    if (starDiff !== 0) return starDiff;
+    const installDiff = (b.vskillInstalls ?? 0) - (a.vskillInstalls ?? 0);
+    if (installDiff !== 0) return installDiff;
     return (b.score ?? 0) - (a.score ?? 0);
   });
 
@@ -80,7 +97,7 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
   if (opts?.json) {
     const enriched = results.map((r) => ({
       ...r,
-      stars: r.githubStars ?? 0,
+      vskillInstalls: r.vskillInstalls ?? 0,
     }));
     console.log(JSON.stringify(enriched, null, 2));
     return;
@@ -91,30 +108,27 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
   // ---------- TTY display: flat two-line entries ----------------------------
   if (process.stdout.isTTY) {
     for (const r of results) {
-      const label = formatRepoSkill(r.repoUrl, r.name);
+      const label = formatSkillId(r);
       const url = getSkillUrl(r.name);
-      const stars = r.githubStars ?? 0;
 
       if (r.isBlocked) {
         const parts = [r.severity, r.threatType].filter(Boolean);
         const threatInfo = parts.length > 0 ? parts.join(" | ") : "blocked";
-        console.log(`${red(bold(label))}  ${red(threatInfo)}`);
+        console.log(`${red(bold(label))}  ${red("BLOCKED")}  ${red(threatInfo)}`);
       } else {
-        const starStr = stars > 0
-          ? yellow(bold(`\u2605 ${formatInstalls(stars)}`)) + dim(" GitHub stars")
-          : "";
-        console.log(`${bold(label)}${starStr ? "  " + starStr : ""}`);
+        const installs = r.vskillInstalls ?? 0;
+        const installStr = `${formatInstalls(installs)} installs`;
+        const badge = getTrustBadge(r.trustTier);
+        console.log(`${bold(label)}  ${dim(installStr)}${badge ? "  " + badge : ""}`);
       }
 
-      console.log(`  ${dim("\u2514")} ${link(url, cyan(url))}`);
+      console.log(`  ${link(url, cyan(url))}`);
       console.log();
     }
 
     // Footer
     if (hasMore) {
-      const currentLimit = opts?.limit ?? 10;
-      const suggestedLimit = Math.min(currentLimit * 2, 50);
-      console.log(dim(`Showing ${results.length} results. Use --limit ${suggestedLimit} for more.`));
+      console.log(dim(`Use --limit N for more`));
     } else {
       console.log(dim(`${results.length} result${results.length === 1 ? "" : "s"} found.`));
     }
@@ -143,12 +157,12 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
 
   // ---------- Non-TTY (piped) — tab-separated flat lines --------------------
   for (const r of results) {
-    const label = formatRepoSkill(r.repoUrl, r.name);
-    const stars = r.githubStars ?? 0;
+    const name = r.name;
+    const repo = extractBaseRepo(r.repoUrl) ?? "";
     if (r.isBlocked) {
-      console.log(`${label}\tBLOCKED\t${r.threatType ?? ""}`);
+      console.log(`${name}\t${repo}\tBLOCKED`);
     } else {
-      console.log(`${label}\t${stars}\t${r.tier}`);
+      console.log(`${name}\t${repo}\t${r.vskillInstalls ?? 0}\t${r.trustTier ?? ""}`);
     }
   }
 

@@ -178,7 +178,8 @@ async function installMarketplaceRepo(
   }
 
   // Discover plugin directories not yet in marketplace.json
-  const unregistered = await discoverUnregisteredPlugins(owner, repo, manifestContent);
+  const discoveryResult = await discoverUnregisteredPlugins(owner, repo, manifestContent, warnRateLimitOnce);
+  const unregistered = discoveryResult.plugins;
 
   const headerParts = [
     `\n${bold("Claude Code Plugin Marketplace")} detected: ${cyan(`${owner}/${repo}`)}\n`,
@@ -190,6 +191,9 @@ async function installMarketplaceRepo(
   headerParts.push("\n");
   if (unregistered.length > 0) {
     headerParts.push(yellow(`  ${unregistered.length} new plugin${unregistered.length === 1 ? "" : "s"} not yet in marketplace.json\n`));
+  }
+  if (discoveryResult.failed && unregistered.length === 0) {
+    headerParts.push(yellow("  Plugin list may be incomplete — could not fetch latest from GitHub\n"));
   }
   console.log(headerParts.join(""));
 

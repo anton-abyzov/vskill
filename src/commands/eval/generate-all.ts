@@ -58,6 +58,9 @@ export async function runEvalGenerateAll(
 
       generated++;
       console.log(green(`  Generated: ${skill.plugin}/${skill.skill}`));
+
+      // Rate limit: 2s delay between LLM calls to avoid API throttling
+      await new Promise((r) => setTimeout(r, 2000));
     } catch (err) {
       failed++;
       failedPaths.push(`${skill.plugin}/${skill.skill}`);

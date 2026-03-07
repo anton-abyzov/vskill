@@ -138,6 +138,7 @@ const mockGetDefaultBranch = vi.fn().mockResolvedValue("main");
 vi.mock("../discovery/github-tree.js", () => ({
   discoverSkills: (...args: unknown[]) => mockDiscoverSkills(...args),
   getDefaultBranch: (...args: unknown[]) => mockGetDefaultBranch(...args),
+  warnRateLimitOnce: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------

@@ -132,11 +132,18 @@ export interface UnregisteredPlugin {
  * Uses the GitHub Contents API to list immediate children of plugins/.
  * Returns empty array on any API error (best-effort, non-blocking).
  */
+export interface UnregisteredPluginResult {
+  plugins: UnregisteredPlugin[];
+  /** True when the GitHub API call failed (rate limit, network error, etc.) */
+  failed: boolean;
+}
+
 export async function discoverUnregisteredPlugins(
   owner: string,
   repo: string,
   manifestContent: string,
-): Promise<UnregisteredPlugin[]> {
+  onResponse?: (res: Response) => void,
+): Promise<UnregisteredPluginResult> {
   const registered = new Set(
     getAvailablePlugins(manifestContent).map((p) => p.name),
   );
@@ -158,17 +165,23 @@ export async function discoverUnregisteredPlugins(
         signal: AbortSignal.timeout(10000),
       },
     );
-    if (!res.ok) return [];
+    if (!res.ok) {
+      onResponse?.(res);
+      return { plugins: [], failed: true };
+    }
 
     const entries = (await res.json()) as Array<{ name: string; type: string }>;
-    return entries
-      .filter((e) => e.type === "dir" && !registered.has(e.name) && !registeredDirs.has(e.name))
-      .map((e) => ({
-        name: e.name,
-        source: `./plugins/${e.name}`,
-      }));
+    return {
+      plugins: entries
+        .filter((e) => e.type === "dir" && !registered.has(e.name) && !registeredDirs.has(e.name))
+        .map((e) => ({
+          name: e.name,
+          source: `./plugins/${e.name}`,
+        })),
+      failed: false,
+    };
   } catch {
-    return [];
+    return { plugins: [], failed: true };
   }
 }
 

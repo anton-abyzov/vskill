@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Import module under test
@@ -11,6 +11,7 @@ const {
   getMarketplaceName,
   hasPlugin,
   validateMarketplace,
+  discoverUnregisteredPlugins,
 } = await import("./index.js");
 
 // ---------------------------------------------------------------------------
@@ -228,5 +229,84 @@ describe("marketplace.json parser", () => {
       expect(result.error).toContain("Invalid JSON");
       expect(result.pluginCount).toBe(0);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// discoverUnregisteredPlugins
+// ---------------------------------------------------------------------------
+
+describe("discoverUnregisteredPlugins", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("returns unregistered directories correctly", async () => {
+    const manifest = makeMarketplaceJson(); // has "sw" (source: ./plugins/specweave) and "frontend"
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { name: "specweave", type: "dir" },  // registered (source dir matches)
+        { name: "frontend", type: "dir" },   // registered by name
+        { name: "marketing", type: "dir" },  // unregistered
+        { name: "backend", type: "dir" },    // unregistered
+      ],
+    }) as unknown as typeof fetch;
+
+    const result = await discoverUnregisteredPlugins("owner", "repo", manifest);
+
+    expect(result.failed).toBe(false);
+    expect(result.plugins).toEqual([
+      { name: "marketing", source: "./plugins/marketing" },
+      { name: "backend", source: "./plugins/backend" },
+    ]);
+  });
+
+  it("returns empty plugins and failed=true on API error", async () => {
+    const manifest = makeMarketplaceJson();
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+    }) as unknown as typeof fetch;
+
+    const result = await discoverUnregisteredPlugins("owner", "repo", manifest);
+
+    expect(result.failed).toBe(true);
+    expect(result.plugins).toEqual([]);
+  });
+
+  it("ignores files, only returns directories", async () => {
+    const manifest = makeMarketplaceJson();
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { name: "new-plugin", type: "dir" },
+        { name: "README.md", type: "file" },
+        { name: ".gitkeep", type: "file" },
+      ],
+    }) as unknown as typeof fetch;
+
+    const result = await discoverUnregisteredPlugins("owner", "repo", manifest);
+
+    expect(result.failed).toBe(false);
+    expect(result.plugins).toEqual([
+      { name: "new-plugin", source: "./plugins/new-plugin" },
+    ]);
+  });
+
+  it("returns empty plugins and failed=true on network error", async () => {
+    const manifest = makeMarketplaceJson();
+
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network error")) as unknown as typeof fetch;
+
+    const result = await discoverUnregisteredPlugins("owner", "repo", manifest);
+
+    expect(result.failed).toBe(true);
+    expect(result.plugins).toEqual([]);
   });
 });

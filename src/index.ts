@@ -81,7 +81,7 @@ program
   .command("find <query>")
   .alias("search")
   .description("Search the verified-skill.com registry")
-  .option("--limit <n>", "Max results to return (default 10, max 50)", parseInt)
+  .option("--limit <n>", "Max results to return (default 15)", parseInt)
   .option("--json", "Output raw JSON")
   .action(async (query: string, opts: { limit?: number; json?: boolean }) => {
     const { findCommand } = await import("./commands/find.js");

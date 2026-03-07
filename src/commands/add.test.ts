@@ -213,14 +213,16 @@ vi.mock("../utils/claude-cli.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Mock getMarketplaceName (preserve real marketplace functions)
+// Mock getMarketplaceName + discoverUnregisteredPlugins (preserve real marketplace functions)
 // ---------------------------------------------------------------------------
 const mockGetMarketplaceName = vi.fn().mockReturnValue(null);
+const mockDiscoverUnregisteredPlugins = vi.fn().mockResolvedValue({ plugins: [], failed: false });
 vi.mock("../marketplace/index.js", async () => {
   const actual = await vi.importActual<typeof import("../marketplace/index.js")>("../marketplace/index.js");
   return {
     ...actual,
     getMarketplaceName: (...args: unknown[]) => mockGetMarketplaceName(...args),
+    discoverUnregisteredPlugins: (...args: unknown[]) => mockDiscoverUnregisteredPlugins(...args),
   };
 });
 
@@ -2890,5 +2892,153 @@ describe("addCommand marketplace integration", () => {
     // Should NOT call registerMarketplace or installNativePlugin
     expect(mockRegisterMarketplace).not.toHaveBeenCalled();
     expect(mockInstallNativePlugin).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unregistered plugin discovery integration (increment 0433)
+// ---------------------------------------------------------------------------
+
+describe("addCommand unregistered plugin discovery", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
+    mockCheckPlatformSecurity.mockResolvedValue(null);
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockMkdtempSync.mockReturnValue("/tmp/vskill-marketplace-abc123");
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("--yes without --force skips unregistered plugins", async () => {
+    // Marketplace detection succeeds
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => SAMPLE_MARKETPLACE_JSON,
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [{ name: "test-skill", type: "dir" }],
+        text: async () => "# Skill Content",
+      }) as unknown as typeof fetch;
+
+    // Discovery returns unregistered plugins
+    mockDiscoverUnregisteredPlugins.mockResolvedValue({
+      plugins: [
+        { name: "new-plugin", source: "./plugins/new-plugin" },
+      ],
+      failed: false,
+    });
+
+    mockIsClaudeCliAvailable.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue({ success: true });
+    mockInstallNativePlugin.mockReturnValue(true);
+
+    await addCommand("owner/repo", { yes: true });
+
+    // Should install only registered plugins (3 from SAMPLE_MARKETPLACE_JSON), not unregistered
+    expect(mockInstallNativePlugin).toHaveBeenCalledTimes(3);
+    const installedNames = mockInstallNativePlugin.mock.calls.map((c: unknown[]) => c[0]);
+    expect(installedNames).not.toContain("new-plugin");
+
+    // Console output should mention skipping unregistered
+    const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(logOutput).toContain("Skipping");
+    expect(logOutput).toContain("new-plugin");
+  });
+
+  it("--yes --force includes unregistered plugins", async () => {
+    // Marketplace detection succeeds
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => SAMPLE_MARKETPLACE_JSON,
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [{ name: "test-skill", type: "dir" }],
+        text: async () => "# Skill Content",
+      }) as unknown as typeof fetch;
+
+    // Discovery returns unregistered plugins
+    mockDiscoverUnregisteredPlugins.mockResolvedValue({
+      plugins: [
+        { name: "new-plugin", source: "./plugins/new-plugin" },
+      ],
+      failed: false,
+    });
+
+    mockIsClaudeCliAvailable.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue({ success: true });
+    mockInstallNativePlugin.mockReturnValue(true);
+
+    await addCommand("owner/repo", { yes: true, force: true });
+
+    // Console output should mention including unregistered
+    const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(logOutput).toContain("Including");
+    expect(logOutput).toContain("new-plugin");
+  });
+
+  it("shows incomplete warning when discovery API fails", async () => {
+    // Marketplace detection succeeds
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => SAMPLE_MARKETPLACE_JSON,
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [{ name: "test-skill", type: "dir" }],
+        text: async () => "# Skill Content",
+      }) as unknown as typeof fetch;
+
+    // Discovery fails (API error)
+    mockDiscoverUnregisteredPlugins.mockResolvedValue({
+      plugins: [],
+      failed: true,
+    });
+
+    mockIsClaudeCliAvailable.mockReturnValue(true);
+    mockRegisterMarketplace.mockReturnValue({ success: true });
+    mockInstallNativePlugin.mockReturnValue(true);
+
+    await addCommand("owner/repo", { yes: true });
+
+    // Should show warning about incomplete plugin list
+    const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(logOutput).toContain("incomplete");
+
+    // Should still install registered plugins normally
+    expect(mockInstallNativePlugin).toHaveBeenCalledTimes(3);
   });
 });

@@ -70,7 +70,7 @@ describe("searchSkills", () => {
     const response = await searchSkills("hello world");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      `${BASE_URL}/api/v1/skills/search?q=hello%20world&limit=10`,
+      `${BASE_URL}/api/v1/skills/search?q=hello%20world&limit=15`,
       expect.objectContaining({
         headers: expect.objectContaining({
           "Content-Type": "application/json",
@@ -95,6 +95,7 @@ describe("searchSkills", () => {
         isBlocked: false,
         threatType: undefined,
         severity: undefined,
+        vskillInstalls: undefined,
       },
     ]);
     expect(response.hasMore).toBe(false);
@@ -172,6 +173,22 @@ describe("searchSkills", () => {
     );
     const { results } = await searchSkills("test");
     expect(results[0].score).toBe(0);
+  });
+
+  it("maps vskillInstalls from API response", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ results: [{ name: "s", vskillInstalls: 500 }] })
+    );
+    const { results } = await searchSkills("test");
+    expect(results[0].vskillInstalls).toBe(500);
+  });
+
+  it("handles missing vskillInstalls as undefined", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ results: [{ name: "s" }] })
+    );
+    const { results } = await searchSkills("test");
+    expect(results[0].vskillInstalls).toBeUndefined();
   });
 });
 

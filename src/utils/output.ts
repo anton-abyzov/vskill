@@ -90,14 +90,20 @@ function padRight(str: string, width: number, gap: number): string {
 
 /**
  * Format install count as human-readable string.
- * 0 → "0", 999 → "999", 1000 → "1.0K", 1250 → "1.2K",
- * 10000 → "10K", 999999 → "999K", 1000000 → "1.0M"
+ * 0 → "0", 999 → "999", 1000 → "1K", 1200 → "1.2K",
+ * 10000 → "10K", 999999 → "999K", 1000000 → "1M", 3400000 → "3.4M"
  */
 export function formatInstalls(n: number): string {
   if (n < 1_000) return String(n);
-  if (n < 10_000) return `${(n / 1_000).toFixed(1)}K`;
+  if (n < 10_000) {
+    const val = (n / 1_000).toFixed(1);
+    return val.endsWith(".0") ? `${parseInt(val, 10)}K` : `${val}K`;
+  }
   if (n < 1_000_000) return `${Math.floor(n / 1_000)}K`;
-  if (n < 10_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n < 10_000_000) {
+    const val = (n / 1_000_000).toFixed(1);
+    return val.endsWith(".0") ? `${parseInt(val, 10)}M` : `${val}M`;
+  }
   return `${Math.floor(n / 1_000_000)}M`;
 }
 

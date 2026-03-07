@@ -35,14 +35,18 @@ function formatSkillId(r: SkillSearchResult): string {
 
 /**
  * Build the verified-skill.com URL for a skill.
- * Supports both flat ("social-media-posting") and hierarchical ("owner/repo/skill") names.
+ * Uses hierarchical slug fields (owner/repo/skill) when available,
+ * falls back to flat name.
  */
-function getSkillUrl(skillName: string): string {
-  const parts = skillName.split("/");
+function getSkillUrl(r: SkillSearchResult): string {
+  if (r.ownerSlug && r.repoSlug && r.skillSlug) {
+    return `https://verified-skill.com/skills/${encodeURIComponent(r.ownerSlug)}/${encodeURIComponent(r.repoSlug)}/${encodeURIComponent(r.skillSlug)}`;
+  }
+  const parts = r.name.split("/");
   if (parts.length === 3) {
     return `https://verified-skill.com/skills/${parts.map(encodeURIComponent).join("/")}`;
   }
-  return `https://verified-skill.com/skills/${encodeURIComponent(skillName)}`;
+  return `https://verified-skill.com/skills/${encodeURIComponent(r.name)}`;
 }
 
 /**
@@ -109,7 +113,7 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
   if (process.stdout.isTTY) {
     for (const r of results) {
       const label = formatSkillId(r);
-      const url = getSkillUrl(r.name);
+      const url = getSkillUrl(r);
 
       if (r.isBlocked) {
         const parts = [r.severity, r.threatType].filter(Boolean);

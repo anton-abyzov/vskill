@@ -1,14 +1,20 @@
 // ---------------------------------------------------------------------------
-// LLM client for eval commands — supports Anthropic API, Claude CLI, and Ollama
+// LLM client for eval commands — supports Claude CLI, Anthropic API, and Ollama
 //
 // Provider selection via VSKILL_EVAL_PROVIDER env var:
-//   "anthropic"  — Anthropic API (requires ANTHROPIC_API_KEY)
 //   "claude-cli" — Claude Code CLI (uses your Max/Pro plan, no API key)
+//   "anthropic"  — Anthropic API (requires ANTHROPIC_API_KEY)
 //   "ollama"     — Local Ollama server (free, requires ollama running)
 //
 // Auto-detection when VSKILL_EVAL_PROVIDER is not set:
-//   1. ANTHROPIC_API_KEY present → anthropic
-//   2. Otherwise → ollama (works everywhere, no API key needed)
+//   1. Inside Claude Code session (CLAUDECODE env) → ollama
+//   2. ANTHROPIC_API_KEY present → anthropic
+//   3. Otherwise → claude-cli (default for plain terminal)
+//
+// Model selection via VSKILL_EVAL_MODEL env var:
+//   claude-cli:  "sonnet" | "opus" | "haiku" (default: sonnet)
+//   anthropic:   full model ID (default: claude-sonnet-4-20250514)
+//   ollama:      model name (default: llama3.1:8b)
 // ---------------------------------------------------------------------------
 
 import { execFile } from "node:child_process";
@@ -24,8 +30,9 @@ export interface LlmClient {
 type ProviderName = "anthropic" | "claude-cli" | "ollama";
 
 function detectProvider(): ProviderName {
+  if (process.env.CLAUDECODE) return "ollama";
   if (process.env.ANTHROPIC_API_KEY) return "anthropic";
-  return "ollama";
+  return "claude-cli";
 }
 
 export function createLlmClient(): LlmClient {
@@ -40,7 +47,7 @@ export function createLlmClient(): LlmClient {
       return createOllamaClient();
     default:
       throw new Error(
-        `Unknown VSKILL_EVAL_PROVIDER: "${provider}". Use "anthropic", "claude-cli", or "ollama".`,
+        `Unknown VSKILL_EVAL_PROVIDER: "${provider}". Use "claude-cli", "anthropic", or "ollama".`,
       );
   }
 }
@@ -93,36 +100,36 @@ function createAnthropicClient(): LlmClient {
 
 // ---------------------------------------------------------------------------
 // Provider: Claude CLI (uses your Max/Pro subscription — no API key needed)
+//
+// From a plain terminal: npx vskill eval run mobile/appstore
+// Select model:          VSKILL_EVAL_MODEL=opus npx vskill eval run mobile/appstore
 // ---------------------------------------------------------------------------
 function createClaudeCliClient(): LlmClient {
   if (process.env.CLAUDECODE) {
     throw new Error(
-      "Cannot use claude-cli provider inside a Claude Code session.\n\nUse a different provider:\n  export VSKILL_EVAL_PROVIDER=ollama      # local Ollama (free)\n  export VSKILL_EVAL_PROVIDER=anthropic   # Anthropic API (requires key)",
+      "Cannot use claude-cli provider inside a Claude Code session.\nRun from a plain terminal, or use a different provider:\n  export VSKILL_EVAL_PROVIDER=ollama",
     );
   }
 
-  const model = process.env.VSKILL_EVAL_MODEL || "claude-cli";
+  const model = process.env.VSKILL_EVAL_MODEL || "sonnet";
 
   return {
-    model,
+    model: `claude-${model}`,
     async generate(systemPrompt: string, userPrompt: string): Promise<string> {
       const combinedPrompt = `${systemPrompt}\n\n${userPrompt}`;
+      const args = ["-p", combinedPrompt, "--model", model, "--no-input"];
 
       try {
-        const { stdout } = await execFileAsync(
-          "claude",
-          ["-p", combinedPrompt, "--no-input"],
-          {
-            timeout: 120_000,
-            maxBuffer: 1024 * 1024,
-            ...(process.platform === "win32" ? { shell: true } : {}),
-          },
-        );
+        const { stdout } = await execFileAsync("claude", args, {
+          timeout: 120_000,
+          maxBuffer: 1024 * 1024,
+          ...(process.platform === "win32" ? { shell: true } : {}),
+        });
         return stdout.trim();
       } catch (err: any) {
         if (err.code === "ENOENT") {
           throw new Error(
-            "Claude CLI not found. Install it:\n  npm install -g @anthropic-ai/claude-code\n\nOr use a different provider:\n  export VSKILL_EVAL_PROVIDER=anthropic\n  export VSKILL_EVAL_PROVIDER=ollama",
+            "Claude CLI not found. Install it:\n  npm install -g @anthropic-ai/claude-code\n\nOr use a different provider:\n  export VSKILL_EVAL_PROVIDER=ollama",
           );
         }
         throw new Error(`Claude CLI failed: ${err.message}`);

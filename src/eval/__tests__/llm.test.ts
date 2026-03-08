@@ -51,7 +51,13 @@ describe("createLlmClient", () => {
   // Auto-detection
   // -------------------------------------------------------------------------
 
-  it("defaults to ollama when no env is set", () => {
+  it("defaults to claude-cli from a plain terminal", () => {
+    const client = createLlmClient();
+    expect(client.model).toBe("claude-sonnet");
+  });
+
+  it("auto-detects ollama inside Claude Code session", () => {
+    process.env.CLAUDECODE = "1";
     const client = createLlmClient();
     expect(client.model).toBe("llama3.1:8b");
   });
@@ -60,6 +66,13 @@ describe("createLlmClient", () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
     const client = createLlmClient();
     expect(client.model).toBe("claude-sonnet-4-20250514");
+  });
+
+  it("CLAUDECODE takes priority over ANTHROPIC_API_KEY for auto-detection", () => {
+    process.env.CLAUDECODE = "1";
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    const client = createLlmClient();
+    expect(client.model).toBe("llama3.1:8b");
   });
 
   it("explicit VSKILL_EVAL_PROVIDER overrides auto-detection", () => {
@@ -167,7 +180,7 @@ describe("createLlmClient", () => {
       process.env.VSKILL_EVAL_PROVIDER = "claude-cli";
     });
 
-    it("calls claude CLI with combined prompt", async () => {
+    it("calls claude CLI with --model flag", async () => {
       mockExecFile.mockResolvedValue({ stdout: "CLI response\n" });
 
       const client = createLlmClient();
@@ -176,8 +189,28 @@ describe("createLlmClient", () => {
       expect(result).toBe("CLI response");
       expect(mockExecFile).toHaveBeenCalledWith(
         "claude",
-        ["-p", "system prompt\n\nuser prompt", "--no-input"],
+        ["-p", "system prompt\n\nuser prompt", "--model", "sonnet", "--no-input"],
         expect.objectContaining({ timeout: 120_000 }),
+      );
+    });
+
+    it("defaults to sonnet model", () => {
+      const client = createLlmClient();
+      expect(client.model).toBe("claude-sonnet");
+    });
+
+    it("passes custom model from VSKILL_EVAL_MODEL", async () => {
+      process.env.VSKILL_EVAL_MODEL = "opus";
+      mockExecFile.mockResolvedValue({ stdout: "ok\n" });
+
+      const client = createLlmClient();
+      expect(client.model).toBe("claude-opus");
+      await client.generate("sys", "usr");
+
+      expect(mockExecFile).toHaveBeenCalledWith(
+        "claude",
+        expect.arrayContaining(["--model", "opus"]),
+        expect.anything(),
       );
     });
 

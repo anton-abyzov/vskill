@@ -2,6 +2,8 @@
 // vskill eval run -- execute eval cases and grade assertions
 // ---------------------------------------------------------------------------
 
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { loadAndValidateEvals, EvalValidationError } from "../../eval/schema.js";
 import { createLlmClient } from "../../eval/llm.js";
 import { judgeAssertion } from "../../eval/judge.js";
@@ -29,10 +31,24 @@ export async function runEvalRun(skillDir: string): Promise<void> {
     return;
   }
 
+  // Load SKILL.md content for the system prompt
+  const skillMdPath = join(skillDir, "SKILL.md");
+  let skillContent = "";
+  if (existsSync(skillMdPath)) {
+    skillContent = readFileSync(skillMdPath, "utf-8");
+  } else {
+    console.error(yellow(`Warning: No SKILL.md found at ${skillMdPath} — running evals without skill content`));
+  }
+
+  const systemPrompt = skillContent
+    ? `You are an AI assistant with the following skill loaded. Use this skill's knowledge to answer the user's question.\n\n---\n${skillContent}\n---`
+    : "You are an AI assistant. Answer the user's question.";
+
   const client = createLlmClient();
   const model = client.model;
   const total = evalsFile.evals.length;
-  console.log(dim(`Provider: ${model} | ${total} eval case${total !== 1 ? "s" : ""}\n`));
+  console.log(dim(`Provider: ${model} | ${total} eval case${total !== 1 ? "s" : ""}`));
+  console.log(dim(`Skill: ${skillContent ? skillMdPath : "(none)"}\n`));
 
   const benchmarkCases: BenchmarkCase[] = [];
   const tableRows: string[][] = [];
@@ -42,10 +58,7 @@ export async function runEvalRun(skillDir: string): Promise<void> {
     try {
       // Step 1: Send prompt to LLM
       process.stdout.write(dim(`[${i + 1}/${total}] ${evalCase.name} — generating...`));
-      const output = await client.generate(
-        "You are an AI skill being evaluated. Respond to the prompt as the skill would.",
-        evalCase.prompt,
-      );
+      const output = await client.generate(systemPrompt, evalCase.prompt);
       process.stdout.write(dim(` judging ${evalCase.assertions.length} assertions...`));
 
       // Step 2: Judge each assertion

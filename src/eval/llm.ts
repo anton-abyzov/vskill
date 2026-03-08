@@ -8,8 +8,7 @@
 //
 // Auto-detection when VSKILL_EVAL_PROVIDER is not set:
 //   1. ANTHROPIC_API_KEY present → anthropic
-//   2. Inside Claude Code session → ollama (claude-cli can't nest)
-//   3. Otherwise → claude-cli
+//   2. Otherwise → ollama (works everywhere, no API key needed)
 // ---------------------------------------------------------------------------
 
 import { execFile } from "node:child_process";
@@ -26,8 +25,7 @@ type ProviderName = "anthropic" | "claude-cli" | "ollama";
 
 function detectProvider(): ProviderName {
   if (process.env.ANTHROPIC_API_KEY) return "anthropic";
-  if (process.env.CLAUDECODE) return "ollama";
-  return "claude-cli";
+  return "ollama";
 }
 
 export function createLlmClient(): LlmClient {

@@ -70,9 +70,14 @@ const VALID_EVALS = {
 describe("runEvalRun", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    // Default: evals.json exists with valid content
+    // Default: evals.json and SKILL.md both exist
     mocks.existsSync.mockReturnValue(true);
-    mocks.readFileSync.mockReturnValue(JSON.stringify(VALID_EVALS));
+    mocks.readFileSync.mockImplementation((path: string) => {
+      if (typeof path === "string" && path.endsWith("SKILL.md")) {
+        return "# Test Skill\nYou are a test skill.";
+      }
+      return JSON.stringify(VALID_EVALS);
+    });
   });
 
   it("prints results table on success", async () => {

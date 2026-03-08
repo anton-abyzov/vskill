@@ -51,26 +51,13 @@ describe("createLlmClient", () => {
   // Auto-detection
   // -------------------------------------------------------------------------
 
-  it("defaults to claude-cli when no env is set", () => {
-    const client = createLlmClient();
-    expect(client.model).toBe("claude-cli");
-  });
-
-  it("auto-detects anthropic when ANTHROPIC_API_KEY is set", () => {
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    const client = createLlmClient();
-    expect(client.model).toBe("claude-sonnet-4-20250514");
-  });
-
-  it("auto-detects ollama when inside Claude Code session", () => {
-    process.env.CLAUDECODE = "1";
+  it("defaults to ollama when no env is set", () => {
     const client = createLlmClient();
     expect(client.model).toBe("llama3.1:8b");
   });
 
-  it("prefers ANTHROPIC_API_KEY over CLAUDECODE for auto-detection", () => {
+  it("auto-detects anthropic when ANTHROPIC_API_KEY is set", () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
-    process.env.CLAUDECODE = "1";
     const client = createLlmClient();
     expect(client.model).toBe("claude-sonnet-4-20250514");
   });

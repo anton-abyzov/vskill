@@ -1,0 +1,68 @@
+{
+  "skill_name": "gws",
+  "evals": [
+    {
+      "id": 1,
+      "name": "List Google Drive files",
+      "prompt": "Can you list my recent Google Drive files using gws?",
+      "expected_output": "The skill checks gws auth status first, then runs gws drive files list with appropriate params and presents the results in a readable format.",
+      "files": [],
+      "assertions": [
+        { "id": "a1", "text": "Checks gws auth status before executing any command", "type": "boolean" },
+        { "id": "a2", "text": "Uses gws drive files list command with --params for pageSize", "type": "boolean" },
+        { "id": "a3", "text": "Presents file names and metadata in a readable format, not raw JSON dump", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Read and update a Google Sheet",
+      "prompt": "Read the values from my spreadsheet 'Q1 Budget' and add a new row with: Marketing, $15000, Approved",
+      "expected_output": "The skill searches Drive for the spreadsheet by name, reads current values, then appends the new row using gws sheets spreadsheets.values append.",
+      "files": [],
+      "assertions": [
+        { "id": "a1", "text": "Searches Google Drive to find the spreadsheet ID by name", "type": "boolean" },
+        { "id": "a2", "text": "Reads existing values with gws sheets spreadsheets.values get before appending", "type": "boolean" },
+        { "id": "a3", "text": "Uses gws sheets spreadsheets.values append with valueInputOption and proper requestBody", "type": "boolean" },
+        { "id": "a4", "text": "Confirms the append succeeded by showing the updated range", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Set up gws MCP server",
+      "prompt": "I want to add gws as an MCP server in my Claude Code setup for Drive and Sheets access.",
+      "expected_output": "The skill provides the correct JSON configuration for adding gws MCP to Claude settings, using compact tool mode and service filtering for drive and sheets only.",
+      "files": [],
+      "assertions": [
+        { "id": "a1", "text": "Provides mcpServers JSON config with command npx and @googleworkspace/cli args", "type": "boolean" },
+        { "id": "a2", "text": "Uses --tool-mode compact to minimize context window usage", "type": "boolean" },
+        { "id": "a3", "text": "Filters services with -s flag to only expose drive,sheets (not all)", "type": "boolean" },
+        { "id": "a4", "text": "Mentions that gws auth login must be completed first", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Handle auth failure gracefully",
+      "prompt": "List my Drive files with gws",
+      "expected_output": "If gws auth status shows unauthenticated, the skill guides the user through gws auth setup and gws auth login before retrying the command. Does not attempt Drive API calls without valid auth.",
+      "files": [],
+      "assertions": [
+        { "id": "a1", "text": "Runs gws auth status as the first step", "type": "boolean" },
+        { "id": "a2", "text": "If unauthenticated, guides user through gws auth login (not gws auth setup for existing projects)", "type": "boolean" },
+        { "id": "a3", "text": "Does not attempt API calls when auth check fails", "type": "boolean" },
+        { "id": "a4", "text": "Retries the original command after successful authentication", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Prefer native MCP over gws for Gmail",
+      "prompt": "Can you read my latest emails?",
+      "expected_output": "The skill recognizes that native claude_ai_Gmail MCP is already available and uses that instead of gws. Only suggests gws if native integration is insufficient or user explicitly requests gws.",
+      "files": [],
+      "assertions": [
+        { "id": "a1", "text": "Uses native claude_ai_Gmail tools (gmail_search_messages, gmail_read_message) instead of gws", "type": "boolean" },
+        { "id": "a2", "text": "Does NOT invoke gws gmail commands when native MCP covers the use case", "type": "boolean" },
+        { "id": "a3", "text": "Would only suggest gws if the user explicitly asks for it or needs features not in native integration", "type": "boolean" }
+      ]
+    }
+  ]
+}

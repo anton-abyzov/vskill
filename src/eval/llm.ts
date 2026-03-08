@@ -3,10 +3,13 @@
 //
 // Provider selection via VSKILL_EVAL_PROVIDER env var:
 //   "anthropic"  — Anthropic API (requires ANTHROPIC_API_KEY)
-//   "claude-cli"  — Claude Code CLI (uses your Max/Pro plan, no API key)
+//   "claude-cli" — Claude Code CLI (uses your Max/Pro plan, no API key)
 //   "ollama"     — Local Ollama server (free, requires ollama running)
 //
-// Defaults to "claude-cli" if no provider is set (zero-config local usage).
+// Auto-detection when VSKILL_EVAL_PROVIDER is not set:
+//   1. ANTHROPIC_API_KEY present → anthropic
+//   2. Inside Claude Code session → ollama (claude-cli can't nest)
+//   3. Otherwise → claude-cli
 // ---------------------------------------------------------------------------
 
 import { execFile } from "node:child_process";
@@ -21,8 +24,14 @@ export interface LlmClient {
 
 type ProviderName = "anthropic" | "claude-cli" | "ollama";
 
+function detectProvider(): ProviderName {
+  if (process.env.ANTHROPIC_API_KEY) return "anthropic";
+  if (process.env.CLAUDECODE) return "ollama";
+  return "claude-cli";
+}
+
 export function createLlmClient(): LlmClient {
-  const provider = (process.env.VSKILL_EVAL_PROVIDER || "claude-cli") as ProviderName;
+  const provider = (process.env.VSKILL_EVAL_PROVIDER || detectProvider()) as ProviderName;
 
   switch (provider) {
     case "anthropic":
@@ -88,6 +97,12 @@ function createAnthropicClient(): LlmClient {
 // Provider: Claude CLI (uses your Max/Pro subscription — no API key needed)
 // ---------------------------------------------------------------------------
 function createClaudeCliClient(): LlmClient {
+  if (process.env.CLAUDECODE) {
+    throw new Error(
+      "Cannot use claude-cli provider inside a Claude Code session.\n\nUse a different provider:\n  export VSKILL_EVAL_PROVIDER=ollama      # local Ollama (free)\n  export VSKILL_EVAL_PROVIDER=anthropic   # Anthropic API (requires key)",
+    );
+  }
+
   const model = process.env.VSKILL_EVAL_MODEL || "claude-cli";
 
   return {

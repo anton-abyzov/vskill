@@ -40,6 +40,7 @@ describe("createLlmClient", () => {
     delete process.env.VSKILL_EVAL_MODEL;
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OLLAMA_BASE_URL;
+    delete process.env.CLAUDECODE;
   });
 
   afterEach(() => {
@@ -47,23 +48,36 @@ describe("createLlmClient", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Provider selection
+  // Auto-detection
   // -------------------------------------------------------------------------
 
-  it("defaults to claude-cli provider when no env is set", () => {
+  it("defaults to claude-cli when no env is set", () => {
     const client = createLlmClient();
     expect(client.model).toBe("claude-cli");
   });
 
-  it("selects anthropic provider when VSKILL_EVAL_PROVIDER=anthropic", () => {
-    process.env.VSKILL_EVAL_PROVIDER = "anthropic";
+  it("auto-detects anthropic when ANTHROPIC_API_KEY is set", () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
     const client = createLlmClient();
     expect(client.model).toBe("claude-sonnet-4-20250514");
   });
 
-  it("selects ollama provider when VSKILL_EVAL_PROVIDER=ollama", () => {
+  it("auto-detects ollama when inside Claude Code session", () => {
+    process.env.CLAUDECODE = "1";
+    const client = createLlmClient();
+    expect(client.model).toBe("llama3.1:8b");
+  });
+
+  it("prefers ANTHROPIC_API_KEY over CLAUDECODE for auto-detection", () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    process.env.CLAUDECODE = "1";
+    const client = createLlmClient();
+    expect(client.model).toBe("claude-sonnet-4-20250514");
+  });
+
+  it("explicit VSKILL_EVAL_PROVIDER overrides auto-detection", () => {
     process.env.VSKILL_EVAL_PROVIDER = "ollama";
+    process.env.ANTHROPIC_API_KEY = "test-key";
     const client = createLlmClient();
     expect(client.model).toBe("llama3.1:8b");
   });
@@ -188,6 +202,13 @@ describe("createLlmClient", () => {
       const client = createLlmClient();
       await expect(client.generate("sys", "usr")).rejects.toThrow(
         "Claude CLI not found",
+      );
+    });
+
+    it("throws when explicitly selected inside Claude Code session", () => {
+      process.env.CLAUDECODE = "1";
+      expect(() => createLlmClient()).toThrow(
+        "Cannot use claude-cli provider inside a Claude Code session",
       );
     });
   });

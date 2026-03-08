@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // ---------------------------------------------------------------------------
 
 const mockCreate = vi.hoisted(() => vi.fn());
-const mockExecFile = vi.hoisted(() => vi.fn());
+const mockSpawn = vi.hoisted(() => vi.fn());
 
 vi.mock("@anthropic-ai/sdk", () => ({
   default: class MockAnthropic {
@@ -14,12 +14,30 @@ vi.mock("@anthropic-ai/sdk", () => ({
 }));
 
 vi.mock("node:child_process", () => ({
-  execFile: mockExecFile,
+  spawn: mockSpawn,
 }));
 
-vi.mock("node:util", () => ({
-  promisify: (fn: any) => fn,
-}));
+// ---------------------------------------------------------------------------
+// Spawn helper — creates a fake ChildProcess for testing
+// ---------------------------------------------------------------------------
+import { EventEmitter } from "node:events";
+
+function createFakeProc(stdoutData: string, exitCode = 0, stderrData = "") {
+  const proc = new EventEmitter() as any;
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.stdin = { end: vi.fn(), write: vi.fn() };
+  proc.kill = vi.fn();
+
+  // Emit stdout/stderr and close on next tick
+  setTimeout(() => {
+    if (stdoutData) proc.stdout.emit("data", Buffer.from(stdoutData));
+    if (stderrData) proc.stderr.emit("data", Buffer.from(stderrData));
+    proc.emit("close", exitCode);
+  }, 0);
+
+  return proc;
+}
 
 // ---------------------------------------------------------------------------
 // Import module under test AFTER mocks
@@ -180,18 +198,21 @@ describe("createLlmClient", () => {
       process.env.VSKILL_EVAL_PROVIDER = "claude-cli";
     });
 
-    it("calls claude CLI with --model flag", async () => {
-      mockExecFile.mockResolvedValue({ stdout: "CLI response\n" });
+    it("spawns claude CLI with -p and --model, pipes prompt via stdin", async () => {
+      mockSpawn.mockReturnValue(createFakeProc("CLI response\n"));
 
       const client = createLlmClient();
       const result = await client.generate("system prompt", "user prompt");
 
       expect(result).toBe("CLI response");
-      expect(mockExecFile).toHaveBeenCalledWith(
+      expect(mockSpawn).toHaveBeenCalledWith(
         "claude",
-        ["-p", "system prompt\n\nuser prompt", "--model", "sonnet", "--no-input"],
-        expect.objectContaining({ timeout: 120_000 }),
+        ["-p", "--model", "sonnet"],
+        expect.objectContaining({ stdio: ["pipe", "pipe", "pipe"] }),
       );
+      // Verify prompt was piped via stdin
+      const proc = mockSpawn.mock.results[0].value;
+      expect(proc.stdin.end).toHaveBeenCalledWith("system prompt\n\nuser prompt");
     });
 
     it("defaults to sonnet model", () => {
@@ -201,27 +222,46 @@ describe("createLlmClient", () => {
 
     it("passes custom model from VSKILL_EVAL_MODEL", async () => {
       process.env.VSKILL_EVAL_MODEL = "opus";
-      mockExecFile.mockResolvedValue({ stdout: "ok\n" });
+      mockSpawn.mockReturnValue(createFakeProc("ok\n"));
 
       const client = createLlmClient();
       expect(client.model).toBe("claude-opus");
       await client.generate("sys", "usr");
 
-      expect(mockExecFile).toHaveBeenCalledWith(
+      expect(mockSpawn).toHaveBeenCalledWith(
         "claude",
-        expect.arrayContaining(["--model", "opus"]),
+        ["-p", "--model", "opus"],
         expect.anything(),
       );
     });
 
     it("throws helpful error when claude CLI not found", async () => {
-      const err = new Error("ENOENT") as any;
-      err.code = "ENOENT";
-      mockExecFile.mockRejectedValue(err);
+      const proc = new EventEmitter() as any;
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.stdin = { end: vi.fn(), write: vi.fn() };
+      proc.kill = vi.fn();
+      mockSpawn.mockReturnValue(proc);
+
+      const client = createLlmClient();
+      const promise = client.generate("sys", "usr");
+
+      // Emit ENOENT error
+      setTimeout(() => {
+        const err = new Error("spawn claude ENOENT") as NodeJS.ErrnoException;
+        err.code = "ENOENT";
+        proc.emit("error", err);
+      }, 0);
+
+      await expect(promise).rejects.toThrow("Claude CLI not found");
+    });
+
+    it("throws with truncated error on non-zero exit", async () => {
+      mockSpawn.mockReturnValue(createFakeProc("", 1, "Something went wrong"));
 
       const client = createLlmClient();
       await expect(client.generate("sys", "usr")).rejects.toThrow(
-        "Claude CLI not found",
+        "Claude CLI exited with code 1: Something went wrong",
       );
     });
 

@@ -21,13 +21,31 @@ import { testActivation } from "../eval/activation-tester.js";
 import type { ActivationPrompt } from "../eval/activation-tester.js";
 
 function resolveSkillDir(root: string, plugin: string, skill: string): string {
-  return join(root, plugin, "skills", skill);
+  // Try plugin layout: {root}/{plugin}/skills/{skill}/
+  const pluginPath = join(root, plugin, "skills", skill);
+  if (existsSync(pluginPath)) return pluginPath;
+
+  // Fall back to root layout: {root}/skills/{skill}/
+  const rootPath = join(root, "skills", skill);
+  if (existsSync(rootPath)) return rootPath;
+
+  return pluginPath;
 }
 
 export function registerRoutes(router: Router, root: string): void {
   // Health check
   router.get("/api/health", (_req, res) => {
     sendJson(res, { ok: true });
+  });
+
+  // Config — expose current provider/model so the UI can display it
+  router.get("/api/config", (_req, res) => {
+    try {
+      const client = createLlmClient();
+      sendJson(res, { model: client.model });
+    } catch (err) {
+      sendJson(res, { model: "unknown", error: (err as Error).message });
+    }
   });
 
   // List all skills

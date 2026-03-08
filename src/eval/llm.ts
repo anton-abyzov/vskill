@@ -17,10 +17,7 @@
 //   ollama:      model name (default: llama3.1:8b)
 // ---------------------------------------------------------------------------
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
+import { spawn } from "node:child_process";
 
 export interface LlmClient {
   generate(systemPrompt: string, userPrompt: string): Promise<string>;
@@ -101,6 +98,8 @@ function createAnthropicClient(): LlmClient {
 // ---------------------------------------------------------------------------
 // Provider: Claude CLI (uses your Max/Pro subscription — no API key needed)
 //
+// Pipes prompt via stdin to avoid OS argument-length limits (ARG_MAX).
+//
 // From a plain terminal: npx vskill eval run mobile/appstore
 // Select model:          VSKILL_EVAL_MODEL=opus npx vskill eval run mobile/appstore
 // ---------------------------------------------------------------------------
@@ -117,23 +116,46 @@ function createClaudeCliClient(): LlmClient {
     model: `claude-${model}`,
     async generate(systemPrompt: string, userPrompt: string): Promise<string> {
       const combinedPrompt = `${systemPrompt}\n\n${userPrompt}`;
-      const args = ["-p", combinedPrompt, "--model", model, "--no-input"];
 
-      try {
-        const { stdout } = await execFileAsync("claude", args, {
-          timeout: 120_000,
-          maxBuffer: 1024 * 1024,
-          ...(process.platform === "win32" ? { shell: true } : {}),
+      return new Promise<string>((resolve, reject) => {
+        const proc = spawn("claude", ["-p", "--model", model], {
+          stdio: ["pipe", "pipe", "pipe"],
         });
-        return stdout.trim();
-      } catch (err: any) {
-        if (err.code === "ENOENT") {
-          throw new Error(
-            "Claude CLI not found. Install it:\n  npm install -g @anthropic-ai/claude-code\n\nOr use a different provider:\n  export VSKILL_EVAL_PROVIDER=ollama",
-          );
-        }
-        throw new Error(`Claude CLI failed: ${err.message}`);
-      }
+
+        let stdout = "";
+        let stderr = "";
+        proc.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
+        proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+
+        const timer = setTimeout(() => {
+          proc.kill("SIGTERM");
+          reject(new Error("Claude CLI timed out after 120s"));
+        }, 120_000);
+
+        proc.on("error", (err: NodeJS.ErrnoException) => {
+          clearTimeout(timer);
+          if (err.code === "ENOENT") {
+            reject(new Error(
+              "Claude CLI not found. Install it:\n  npm install -g @anthropic-ai/claude-code\n\nOr use a different provider:\n  export VSKILL_EVAL_PROVIDER=ollama",
+            ));
+          } else {
+            reject(new Error(`Claude CLI failed: ${err.message}`));
+          }
+        });
+
+        proc.on("close", (code) => {
+          clearTimeout(timer);
+          if (code === 0) {
+            resolve(stdout.trim());
+          } else {
+            const errMsg = (stderr || stdout).slice(0, 300);
+            reject(new Error(`Claude CLI exited with code ${code}${errMsg ? ": " + errMsg : ""}`));
+          }
+        });
+
+        // Pipe prompt via stdin — avoids ARG_MAX limits for large SKILL.md files
+        proc.stdin.end(combinedPrompt);
+      });
     },
   };
 }

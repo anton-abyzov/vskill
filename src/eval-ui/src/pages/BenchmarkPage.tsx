@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useSSE } from "../sse";
+import { api } from "../api";
 
 interface AssertionEvent {
   eval_id: number;
@@ -36,6 +37,11 @@ export function BenchmarkPage() {
   const { plugin, skill } = useParams<{ plugin: string; skill: string }>();
   const { events, running, done, error, start } = useSSE();
   const [expandedOutputs, setExpandedOutputs] = useState<Set<number>>(new Set());
+  const [model, setModel] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getConfig().then((c) => setModel(c.model)).catch(() => {});
+  }, []);
 
   function handleStart() {
     setExpandedOutputs(new Set());
@@ -105,6 +111,14 @@ export function BenchmarkPage() {
         <p className="text-[13px]" style={{ color: "var(--text-tertiary)" }}>
           Runs your skill against each eval case. An LLM judge grades every assertion against the actual output.
         </p>
+        {model && (
+          <div className="flex items-center gap-1.5 mt-1.5">
+            <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>Model:</span>
+            <span className="text-[11px] font-mono px-1.5 py-0.5 rounded" style={{ background: "var(--surface-3)", color: "var(--accent)" }}>
+              {model}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Run button */}
@@ -248,6 +262,7 @@ export function BenchmarkPage() {
                 {overallPct}%
               </div>
               <div className="text-[13px] mt-1" style={{ color: "var(--text-tertiary)" }}>Overall Pass Rate</div>
+              {model && <div className="text-[11px] mt-1 font-mono" style={{ color: "var(--text-tertiary)" }}>{model}</div>}
             </div>
           )}
         </div>

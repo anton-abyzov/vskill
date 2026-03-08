@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useSSE } from "../sse";
+import { api } from "../api";
 
 interface ComparisonOutputsEvent {
   eval_id: number;
@@ -26,6 +27,11 @@ export function ComparisonPage() {
   const { plugin, skill } = useParams<{ plugin: string; skill: string }>();
   const { events, running, done, error, start } = useSSE();
   const [expandedOutputs, setExpandedOutputs] = useState<Set<number>>(new Set());
+  const [model, setModel] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getConfig().then((c) => setModel(c.model)).catch(() => {});
+  }, []);
 
   function handleStart() {
     setExpandedOutputs(new Set());
@@ -73,6 +79,14 @@ export function ComparisonPage() {
         <p className="text-[13px]" style={{ color: "var(--text-tertiary)" }}>
           Runs each eval prompt twice: once WITH your skill, once WITHOUT. An LLM judge scores both outputs blindly on content and structure (1-5 each).
         </p>
+        {model && (
+          <div className="flex items-center gap-1.5 mt-1.5">
+            <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>Model:</span>
+            <span className="text-[11px] font-mono px-1.5 py-0.5 rounded" style={{ background: "var(--surface-3)", color: "var(--accent)" }}>
+              {model}
+            </span>
+          </div>
+        )}
       </div>
 
       <button onClick={handleStart} disabled={running} className="btn btn-purple mb-7">

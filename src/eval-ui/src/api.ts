@@ -13,6 +13,10 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getConfig(): Promise<{ model: string; error?: string }> {
+    return fetchJson("/api/config");
+  },
+
   getSkills(): Promise<SkillInfo[]> {
     return fetchJson("/api/skills");
   },

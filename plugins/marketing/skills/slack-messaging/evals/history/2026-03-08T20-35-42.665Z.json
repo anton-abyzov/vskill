@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-03-08T20:35:42.665Z",
+  "model": "claude-sonnet",
+  "skill_name": "slack-messaging",
+  "cases": [],
+  "type": "comparison",
+  "verdict": "DEGRADING",
+  "comparison": {
+    "skillPassRate": 0,
+    "baselinePassRate": 0,
+    "skillRubricAvg": 0,
+    "baselineRubricAvg": 0,
+    "delta": 0
+  }
+}

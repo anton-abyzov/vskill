@@ -176,7 +176,7 @@ describe("createLlmClient", () => {
       expect(mockExecFile).toHaveBeenCalledWith(
         "claude",
         ["-p", "system prompt\n\nuser prompt", "--no-input"],
-        expect.objectContaining({ timeout: 120_000, shell: true }),
+        expect.objectContaining({ timeout: 120_000 }),
       );
     });
 

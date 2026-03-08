@@ -31,16 +31,22 @@ export async function runEvalRun(skillDir: string): Promise<void> {
 
   const client = createLlmClient();
   const model = client.model;
+  const total = evalsFile.evals.length;
+  console.log(dim(`Provider: ${model} | ${total} eval case${total !== 1 ? "s" : ""}\n`));
+
   const benchmarkCases: BenchmarkCase[] = [];
   const tableRows: string[][] = [];
 
-  for (const evalCase of evalsFile.evals) {
+  for (let i = 0; i < evalsFile.evals.length; i++) {
+    const evalCase = evalsFile.evals[i];
     try {
       // Step 1: Send prompt to LLM
+      process.stdout.write(dim(`[${i + 1}/${total}] ${evalCase.name} — generating...`));
       const output = await client.generate(
         "You are an AI skill being evaluated. Respond to the prompt as the skill would.",
         evalCase.prompt,
       );
+      process.stdout.write(dim(` judging ${evalCase.assertions.length} assertions...`));
 
       // Step 2: Judge each assertion
       const assertionResults = [];
@@ -68,6 +74,7 @@ export async function runEvalRun(skillDir: string): Promise<void> {
         ? passCount / evalCase.assertions.length
         : 0;
       const allPassed = passCount === evalCase.assertions.length;
+      console.log(allPassed ? green(" done") : red(` ${passCount}/${evalCase.assertions.length} passed`));
 
       benchmarkCases.push({
         eval_id: evalCase.id,
@@ -78,7 +85,7 @@ export async function runEvalRun(skillDir: string): Promise<void> {
         assertions: assertionResults,
       });
     } catch (err) {
-      // Mark case as error, continue with remaining
+      console.log(yellow(" error"));
       benchmarkCases.push({
         eval_id: evalCase.id,
         eval_name: evalCase.name,

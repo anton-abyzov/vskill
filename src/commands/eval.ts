@@ -67,15 +67,18 @@ function resolveSkillDir(root: string, target: string): string {
     process.exit(1);
   }
 
-  // Try plugin layout first: {root}/{plugin}/skills/{skill}/
-  const pluginPath = join(root, parts[0], "skills", parts[1]);
-  if (existsSync(pluginPath)) return pluginPath;
+  // Try direct layout: {root}/{plugin}/skills/{skill}/
+  const directPath = join(root, parts[0], "skills", parts[1]);
+  if (existsSync(directPath)) return directPath;
 
-  // Fall back to root layout: {root}/skills/{skill}/
-  // (plugin part is just a label, skill lives at root)
+  // Try nested plugins/ layout: {root}/plugins/{plugin}/skills/{skill}/
+  const nestedPath = join(root, "plugins", parts[0], "skills", parts[1]);
+  if (existsSync(nestedPath)) return nestedPath;
+
+  // Try root layout: {root}/skills/{skill}/
   const rootPath = join(root, "skills", parts[1]);
   if (existsSync(rootPath)) return rootPath;
 
-  // Default to plugin layout (let downstream error on missing SKILL.md)
-  return pluginPath;
+  // Default to direct layout (let downstream error on missing SKILL.md)
+  return directPath;
 }

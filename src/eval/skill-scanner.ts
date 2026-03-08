@@ -1,9 +1,10 @@
 // ---------------------------------------------------------------------------
 // Filesystem scanner for plugin skills
 //
-// Supports two layouts:
-//   1. Plugin layout:  {root}/{plugin}/skills/{skill}/SKILL.md
-//   2. Root layout:    {root}/skills/{skill}/SKILL.md  (plugin = repo basename)
+// Supports three layouts (all scanned from root=cwd):
+//   1. Direct:   {root}/{plugin}/skills/{skill}/SKILL.md
+//   2. Nested:   {root}/plugins/{plugin}/skills/{skill}/SKILL.md
+//   3. Root:     {root}/skills/{skill}/SKILL.md  (plugin = repo basename)
 // ---------------------------------------------------------------------------
 
 import { readdirSync, existsSync } from "node:fs";
@@ -22,28 +23,37 @@ export async function scanSkills(root: string): Promise<SkillInfo[]> {
 
   if (!existsSync(root)) return skills;
 
-  // Layout 2: root-level skills/ directory → {root}/skills/{skill}/SKILL.md
-  scanSkillsDir(root, basename(root) || "default", join(root, "skills"), skills);
+  // Layout 3: root-level skills/ directory → {root}/skills/{skill}/SKILL.md
+  scanSkillsDir(basename(root) || "default", join(root, "skills"), skills);
 
-  // Layout 1: plugin subdirs → {root}/{plugin}/skills/{skill}/SKILL.md
-  let entries: string[];
-  try {
-    entries = readdirSync(root, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && d.name !== "skills")
-      .map((d) => d.name);
-  } catch {
-    return skills;
-  }
+  // Layout 1: direct plugin subdirs → {root}/{plugin}/skills/{skill}/SKILL.md
+  scanPluginDirs(root, skills);
 
-  for (const plugin of entries) {
-    scanSkillsDir(root, plugin, join(root, plugin, "skills"), skills);
+  // Layout 2: nested plugins/ dir → {root}/plugins/{plugin}/skills/{skill}/SKILL.md
+  const pluginsDir = join(root, "plugins");
+  if (existsSync(pluginsDir)) {
+    scanPluginDirs(pluginsDir, skills);
   }
 
   return skills;
 }
 
+function scanPluginDirs(dir: string, skills: SkillInfo[]): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && d.name !== "skills" && d.name !== "plugins")
+      .map((d) => d.name);
+  } catch {
+    return;
+  }
+
+  for (const plugin of entries) {
+    scanSkillsDir(plugin, join(dir, plugin, "skills"), skills);
+  }
+}
+
 function scanSkillsDir(
-  _root: string,
   plugin: string,
   skillsDir: string,
   skills: SkillInfo[],

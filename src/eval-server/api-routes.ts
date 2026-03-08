@@ -21,15 +21,19 @@ import { testActivation } from "../eval/activation-tester.js";
 import type { ActivationPrompt } from "../eval/activation-tester.js";
 
 function resolveSkillDir(root: string, plugin: string, skill: string): string {
-  // Try plugin layout: {root}/{plugin}/skills/{skill}/
-  const pluginPath = join(root, plugin, "skills", skill);
-  if (existsSync(pluginPath)) return pluginPath;
+  // Try direct layout: {root}/{plugin}/skills/{skill}/
+  const directPath = join(root, plugin, "skills", skill);
+  if (existsSync(directPath)) return directPath;
 
-  // Fall back to root layout: {root}/skills/{skill}/
+  // Try nested plugins/ layout: {root}/plugins/{plugin}/skills/{skill}/
+  const nestedPath = join(root, "plugins", plugin, "skills", skill);
+  if (existsSync(nestedPath)) return nestedPath;
+
+  // Try root layout: {root}/skills/{skill}/
   const rootPath = join(root, "skills", skill);
   if (existsSync(rootPath)) return rootPath;
 
-  return pluginPath;
+  return directPath;
 }
 
 export function registerRoutes(router: Router, root: string): void {

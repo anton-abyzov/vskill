@@ -10,13 +10,25 @@ import { scanSkills } from "../skill-scanner.js";
 
 let testDir: string;
 
-/** Create a skill in plugin layout: {root}/{plugin}/skills/{skill}/ */
+/** Create a skill in direct plugin layout: {root}/{plugin}/skills/{skill}/ */
 function createSkill(
   plugin: string,
   skill: string,
   opts: { evals?: boolean; benchmark?: boolean } = {},
 ): void {
   const skillDir = join(testDir, plugin, "skills", skill);
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(join(skillDir, "SKILL.md"), `# ${skill}`);
+  addEvalFiles(skillDir, opts);
+}
+
+/** Create a skill in nested plugins/ layout: {root}/plugins/{plugin}/skills/{skill}/ */
+function createNestedSkill(
+  plugin: string,
+  skill: string,
+  opts: { evals?: boolean; benchmark?: boolean } = {},
+): void {
+  const skillDir = join(testDir, "plugins", plugin, "skills", skill);
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(join(skillDir, "SKILL.md"), `# ${skill}`);
   addEvalFiles(skillDir, opts);
@@ -170,5 +182,39 @@ describe("scanSkills", () => {
 
     expect(skills[0].hasEvals).toBe(true);
     expect(skills[0].hasBenchmark).toBe(true);
+  });
+
+  // --- Nested plugins/ layout ---
+
+  it("discovers skills inside plugins/ subdirectory", async () => {
+    createNestedSkill("marketing", "social-media-posting");
+    createNestedSkill("mobile", "appstore");
+
+    const skills = await scanSkills(testDir);
+
+    expect(skills).toHaveLength(2);
+    const names = skills.map((s) => s.skill).sort();
+    expect(names).toEqual(["appstore", "social-media-posting"]);
+  });
+
+  it("discovers skills across all three layouts", async () => {
+    createRootSkill("root-skill");
+    createSkill("direct-plugin", "direct-skill");
+    createNestedSkill("nested-plugin", "nested-skill");
+
+    const skills = await scanSkills(testDir);
+
+    expect(skills).toHaveLength(3);
+    const names = skills.map((s) => s.skill).sort();
+    expect(names).toEqual(["direct-skill", "nested-skill", "root-skill"]);
+  });
+
+  it("nested plugins/ skills have correct plugin names", async () => {
+    createNestedSkill("marketing", "smp");
+
+    const skills = await scanSkills(testDir);
+
+    expect(skills[0].plugin).toBe("marketing");
+    expect(skills[0].skill).toBe("smp");
   });
 });

@@ -1,6 +1,6 @@
 # vskill Plugin Marketplace — Skills Showcase
 
-> **41 expert skills. 12 domain plugins. One command to install.**
+> **42 expert skills. 13 domain plugins. One command to install.**
 >
 > Each skill gives your AI agent deep, production-ready expertise in a specific domain. Not generic advice — battle-tested patterns, real CLI tooling, and actual code you can ship.
 
@@ -243,6 +243,32 @@ Tower middleware composition for Axum (layer ordering matters — bottom-to-top 
 ### `/blockchain:blockchain-core` — Solidity & Foundry
 
 Checks-Effects-Interactions (CEI) pattern for reentrancy prevention, Foundry fuzz and invariant testing (the agent writes property-based tests, not just happy-path assertions), gas optimization techniques (storage packing, calldata vs memory, unchecked arithmetic), and a comprehensive security audit checklist covering reentrancy, oracle manipulation, flash loans, MEV, and access control.
+
+---
+
+## Google Workspace — 1 Skill
+
+### `/google-workspace:gws` — Google Workspace CLI
+
+**The tool**: [`gws`](https://github.com/googleworkspace/cli) — a Rust CLI that wraps the entire Google Workspace API surface, dynamically generated from Google's Discovery Service.
+
+Your AI agent can:
+
+- **Manage Google Drive** — list, upload, download, share, and organize files and folders
+- **Read and write Google Sheets** — read ranges, append rows, update cells with structured JSON
+- **Create and edit Google Docs** — generate documents, append content, share with collaborators
+- **Manage Calendar events** — list upcoming events, create meetings, check availability
+- **Send and read Google Chat messages** — post to spaces, manage channels
+- **Admin operations** — list domain users, manage groups, organizational structure
+- **Access 40+ Google APIs** — any API in the Discovery Service, auto-discovered at runtime
+
+The CLI returns structured JSON from every command, so the agent parses responses and chains operations. The MCP server mode (`gws mcp`) exposes all of this as structured tools over stdio — add it to your Claude Code settings and the agent gets native Google Workspace access.
+
+**Compact mode** (`--tool-mode compact`) reduces 200-400 tools down to ~26, with a `gws_discover` meta-tool for on-demand API exploration — keeps context windows lean.
+
+**Smart deference**: when native Claude MCP integrations exist (Gmail, Calendar), the skill uses those instead. `gws` activates for services those don't cover — Drive, Sheets, Docs, Chat, Admin, and everything else.
+
+**Status**: Pre-v1.0 upstream — functional but expect breaking changes between minor versions.
 
 ---
 

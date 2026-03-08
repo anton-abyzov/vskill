@@ -9,8 +9,8 @@
   <a href="https://www.npmjs.com/package/vskill"><img src="https://img.shields.io/npm/v/vskill?color=cb3837&logo=npm" alt="npm" /></a>
   <a href="https://www.npmjs.com/package/vskill"><img src="https://img.shields.io/npm/dw/vskill?color=cb3837&logo=npm&label=downloads" alt="downloads" /></a>
   <img src="https://img.shields.io/badge/agents-49_platforms-0969DA" alt="49 agents" />
-  <img src="https://img.shields.io/badge/plugins-12-8B5CF6" alt="12 plugins" />
-  <img src="https://img.shields.io/badge/skills-41-10B981" alt="41 skills" />
+  <img src="https://img.shields.io/badge/plugins-13-8B5CF6" alt="13 plugins" />
+  <img src="https://img.shields.io/badge/skills-42-10B981" alt="42 skills" />
   <a href="https://verified-skill.com"><img src="https://img.shields.io/badge/registry-verified--skill.com-F59E0B" alt="registry" /></a>
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" />
 </p>
@@ -100,7 +100,7 @@ vskill auto-detects your installed agents and installs skills to all of them at 
 
 ## Plugin Marketplace
 
-vskill ships **41 expert skills** organized into **12 domain plugins**. Each plugin has its own namespace — install only what you need.
+vskill ships **42 expert skills** organized into **13 domain plugins**. Each plugin has its own namespace — install only what you need.
 
 ```bash
 npx vskill install --repo anton-abyzov/vskill --plugin frontend
@@ -155,6 +155,9 @@ Then invoke as `/plugin:skill` in your agent:
 
 **blockchain** — Solidity, Foundry, smart contracts
 - `blockchain-core`
+
+**google-workspace** — Google Workspace CLI (gws) for Drive, Sheets, Docs, Calendar, Chat, Admin
+- `gws`
 
 **skills** — Skill discovery and recommendations
 - `scout`

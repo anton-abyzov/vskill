@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { join, resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { red, dim } from "../utils/output.js";
 
 export async function evalCommand(
@@ -10,7 +11,7 @@ export async function evalCommand(
   target?: string,
   opts: { force?: boolean; root?: string; port?: string } = {},
 ): Promise<void> {
-  const root = opts.root ? resolve(opts.root) : resolve("plugins");
+  const root = opts.root ? resolve(opts.root) : resolve(".");
 
   switch (subcommand) {
     case "serve": {
@@ -65,5 +66,16 @@ function resolveSkillDir(root: string, target: string): string {
     );
     process.exit(1);
   }
-  return join(root, parts[0], "skills", parts[1]);
+
+  // Try plugin layout first: {root}/{plugin}/skills/{skill}/
+  const pluginPath = join(root, parts[0], "skills", parts[1]);
+  if (existsSync(pluginPath)) return pluginPath;
+
+  // Fall back to root layout: {root}/skills/{skill}/
+  // (plugin part is just a label, skill lives at root)
+  const rootPath = join(root, "skills", parts[1]);
+  if (existsSync(rootPath)) return rootPath;
+
+  // Default to plugin layout (let downstream error on missing SKILL.md)
+  return pluginPath;
 }

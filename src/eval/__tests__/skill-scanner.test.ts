@@ -10,6 +10,7 @@ import { scanSkills } from "../skill-scanner.js";
 
 let testDir: string;
 
+/** Create a skill in plugin layout: {root}/{plugin}/skills/{skill}/ */
 function createSkill(
   plugin: string,
   skill: string,
@@ -18,13 +19,30 @@ function createSkill(
   const skillDir = join(testDir, plugin, "skills", skill);
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(join(skillDir, "SKILL.md"), `# ${skill}`);
+  addEvalFiles(skillDir, opts);
+}
 
+/** Create a skill in root layout: {root}/skills/{skill}/ */
+function createRootSkill(
+  skill: string,
+  opts: { evals?: boolean; benchmark?: boolean } = {},
+): void {
+  const skillDir = join(testDir, "skills", skill);
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(join(skillDir, "SKILL.md"), `# ${skill}`);
+  addEvalFiles(skillDir, opts);
+}
+
+function addEvalFiles(
+  skillDir: string,
+  opts: { evals?: boolean; benchmark?: boolean },
+): void {
   if (opts.evals) {
     const evalsDir = join(skillDir, "evals");
     mkdirSync(evalsDir, { recursive: true });
     writeFileSync(
       join(evalsDir, "evals.json"),
-      JSON.stringify({ skill_name: skill, evals: [] }),
+      JSON.stringify({ skill_name: "test", evals: [] }),
     );
   }
 
@@ -51,6 +69,8 @@ describe("scanSkills", () => {
   afterEach(() => {
     rmSync(testDir, { recursive: true, force: true });
   });
+
+  // --- Plugin layout (existing) ---
 
   it("discovers skills in plugins directory", async () => {
     createSkill("marketing", "social-media-posting");
@@ -110,5 +130,45 @@ describe("scanSkills", () => {
   it("returns empty array for empty root", async () => {
     const skills = await scanSkills(testDir);
     expect(skills).toEqual([]);
+  });
+
+  // --- Root layout (new) ---
+
+  it("discovers root-level skills in skills/ directory", async () => {
+    createRootSkill("my-skill");
+
+    const skills = await scanSkills(testDir);
+
+    expect(skills).toHaveLength(1);
+    expect(skills[0].skill).toBe("my-skill");
+  });
+
+  it("uses root dirname as plugin name for root-level skills", async () => {
+    createRootSkill("my-skill");
+
+    const skills = await scanSkills(testDir);
+
+    // plugin name = basename of the root dir
+    expect(skills[0].plugin).toBe(testDir.split("/").pop());
+  });
+
+  it("discovers both plugin and root-level skills together", async () => {
+    createSkill("marketing", "social-media-posting");
+    createRootSkill("standalone-skill");
+
+    const skills = await scanSkills(testDir);
+
+    expect(skills).toHaveLength(2);
+    const names = skills.map((s) => s.skill).sort();
+    expect(names).toEqual(["social-media-posting", "standalone-skill"]);
+  });
+
+  it("handles root-level skills with evals", async () => {
+    createRootSkill("my-skill", { evals: true, benchmark: true });
+
+    const skills = await scanSkills(testDir);
+
+    expect(skills[0].hasEvals).toBe(true);
+    expect(skills[0].hasBenchmark).toBe(true);
   });
 });

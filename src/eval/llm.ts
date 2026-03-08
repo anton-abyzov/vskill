@@ -99,7 +99,7 @@ function createClaudeCliClient(): LlmClient {
         const { stdout } = await execFileAsync(
           "claude",
           ["-p", combinedPrompt, "--no-input"],
-          { timeout: 120_000, maxBuffer: 1024 * 1024 },
+          { timeout: 120_000, maxBuffer: 1024 * 1024, shell: true },
         );
         return stdout.trim();
       } catch (err: any) {

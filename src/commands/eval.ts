@@ -8,11 +8,17 @@ import { red, dim } from "../utils/output.js";
 export async function evalCommand(
   subcommand: string,
   target?: string,
-  opts: { force?: boolean; root?: string } = {},
+  opts: { force?: boolean; root?: string; port?: string } = {},
 ): Promise<void> {
   const root = opts.root ? resolve(opts.root) : resolve("plugins");
 
   switch (subcommand) {
+    case "serve": {
+      const port = opts.port ? parseInt(opts.port, 10) : 3077;
+      const { runEvalServe } = await import("./eval/serve.js");
+      return runEvalServe(root, port);
+    }
+
     case "init": {
       if (!target) {
         console.error(red("Usage: vskill eval init <plugin>/<skill>"));
@@ -46,7 +52,7 @@ export async function evalCommand(
     default:
       console.error(
         red(`Unknown subcommand: "${subcommand}"\n`) +
-          dim("Available: init, run, coverage, generate-all"),
+          dim("Available: serve, init, run, coverage, generate-all"),
       );
   }
 }

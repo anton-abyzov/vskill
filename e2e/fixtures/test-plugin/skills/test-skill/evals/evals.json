@@ -1,0 +1,43 @@
+{
+  "skill_name": "test-skill",
+  "evals": [
+    {
+      "id": 1,
+      "name": "basic-test-question",
+      "prompt": "How do I write a unit test for a function that adds two numbers?",
+      "expected_output": "Should recommend using a testing framework and show example assertions",
+      "files": [],
+      "assertions": [
+        {
+          "id": "mentions-framework",
+          "text": "Mentions a testing framework by name (jest, vitest, mocha, etc.)",
+          "type": "boolean"
+        },
+        {
+          "id": "shows-example",
+          "text": "Shows an example test with expect/assert statements",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "edge-case-testing",
+      "prompt": "What edge cases should I test for a string reversal function?",
+      "expected_output": "Should mention empty string, single character, unicode, and palindromes",
+      "files": [],
+      "assertions": [
+        {
+          "id": "empty-string",
+          "text": "Mentions testing with an empty string",
+          "type": "boolean"
+        },
+        {
+          "id": "unicode-chars",
+          "text": "Mentions unicode or special characters as edge cases",
+          "type": "boolean"
+        }
+      ]
+    }
+  ]
+}

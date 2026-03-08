@@ -10,11 +10,14 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc",
+    "build:eval-ui": "vite build --config src/eval-ui/vite.config.ts",
     "dev": "tsc --watch",
+    "dev:eval-ui": "vite dev --config src/eval-ui/vite.config.ts",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "clean": "rm -rf dist",
     "preuninstall": "node scripts/preuninstall.cjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build && npm run build:eval-ui"
   },
   "keywords": [
     "ai",
@@ -40,8 +43,18 @@
     "README.md"
   ],
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@tailwindcss/vite": "^4.2.1",
     "@types/node": "^25.2.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.13.1",
+    "tailwindcss": "^4.2.1",
     "typescript": "^5.7.0",
+    "vite": "^6.4.1",
     "vitest": "^3.0.0"
   },
   "engines": {

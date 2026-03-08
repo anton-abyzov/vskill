@@ -1,0 +1,155 @@
+// ---------------------------------------------------------------------------
+// comparator.ts -- blind A/B comparison (with/without skill)
+// ---------------------------------------------------------------------------
+
+import type { LlmClient } from "./llm.js";
+
+export interface ComparisonOutput {
+  skillOutput: string;
+  skillDurationMs: number;
+  baselineOutput: string;
+  baselineDurationMs: number;
+}
+
+export interface ComparisonScore {
+  contentScoreA: number;
+  structureScoreA: number;
+  contentScoreB: number;
+  structureScoreB: number;
+  winner: "first" | "second" | "tie";
+}
+
+export interface ComparisonResult {
+  prompt: string;
+  skillOutput: string;
+  skillDurationMs: number;
+  baselineOutput: string;
+  baselineDurationMs: number;
+  skillContentScore: number;
+  skillStructureScore: number;
+  baselineContentScore: number;
+  baselineStructureScore: number;
+  winner: "skill" | "baseline" | "tie";
+}
+
+const COMPARATOR_SYSTEM_PROMPT = `You are a blind quality evaluator. You will receive two AI assistant responses labeled "Response A" and "Response B". You do NOT know which response used a skill and which did not.
+
+Evaluate each response on two dimensions:
+1. **Content** (1-5): Correctness, completeness, accuracy, relevance to the prompt
+2. **Structure** (1-5): Organization, formatting, readability, logical flow
+
+Then decide which is better overall, or if they are tied.
+
+Respond with ONLY valid JSON:
+{
+  "content_score_a": <1-5>,
+  "structure_score_a": <1-5>,
+  "content_score_b": <1-5>,
+  "structure_score_b": <1-5>,
+  "winner": "first" | "second" | "tie",
+  "reasoning": "<brief explanation>"
+}`;
+
+export async function generateComparisonOutputs(
+  prompt: string,
+  skillContent: string,
+  client: LlmClient,
+): Promise<ComparisonOutput> {
+  const skillSystemPrompt = `You are an AI assistant enhanced with the following skill:\n\n${skillContent}`;
+  const baselineSystemPrompt = "You are a helpful AI assistant.";
+
+  // Run sequentially (claude-cli can only handle one at a time)
+  const skillStart = Date.now();
+  const skillOutput = await client.generate(skillSystemPrompt, prompt);
+  const skillDurationMs = Date.now() - skillStart;
+
+  const baselineStart = Date.now();
+  const baselineOutput = await client.generate(baselineSystemPrompt, prompt);
+  const baselineDurationMs = Date.now() - baselineStart;
+
+  return { skillOutput, skillDurationMs, baselineOutput, baselineDurationMs };
+}
+
+export async function scoreComparison(
+  outputA: string,
+  outputB: string,
+  prompt: string,
+  client: LlmClient,
+): Promise<ComparisonScore> {
+  const userPrompt = `## Original Prompt
+${prompt}
+
+## Response A
+${outputA}
+
+## Response B
+${outputB}
+
+Evaluate both responses.`;
+
+  const response = await client.generate(COMPARATOR_SYSTEM_PROMPT, userPrompt);
+
+  // Parse JSON from response (may be in code fence)
+  const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, response];
+  const json = JSON.parse(jsonMatch[1]!.trim());
+
+  return {
+    contentScoreA: clampScore(json.content_score_a),
+    structureScoreA: clampScore(json.structure_score_a),
+    contentScoreB: clampScore(json.content_score_b),
+    structureScoreB: clampScore(json.structure_score_b),
+    winner: json.winner === "first" || json.winner === "second" || json.winner === "tie"
+      ? json.winner
+      : "tie",
+  };
+}
+
+export async function runComparison(
+  prompt: string,
+  skillContent: string,
+  client: LlmClient,
+): Promise<ComparisonResult> {
+  const outputs = await generateComparisonOutputs(prompt, skillContent, client);
+
+  // Randomize order for blind comparison
+  const skillIsA = Math.random() < 0.5;
+  const outputA = skillIsA ? outputs.skillOutput : outputs.baselineOutput;
+  const outputB = skillIsA ? outputs.baselineOutput : outputs.skillOutput;
+
+  const scores = await scoreComparison(outputA, outputB, prompt, client);
+
+  // Map scores back to skill/baseline
+  const skillContentScore = skillIsA ? scores.contentScoreA : scores.contentScoreB;
+  const skillStructureScore = skillIsA ? scores.structureScoreA : scores.structureScoreB;
+  const baselineContentScore = skillIsA ? scores.contentScoreB : scores.contentScoreA;
+  const baselineStructureScore = skillIsA ? scores.structureScoreB : scores.structureScoreA;
+
+  // Map winner back
+  let winner: "skill" | "baseline" | "tie";
+  if (scores.winner === "tie") {
+    winner = "tie";
+  } else if (scores.winner === "first") {
+    winner = skillIsA ? "skill" : "baseline";
+  } else {
+    winner = skillIsA ? "baseline" : "skill";
+  }
+
+  return {
+    prompt,
+    skillOutput: outputs.skillOutput,
+    skillDurationMs: outputs.skillDurationMs,
+    baselineOutput: outputs.baselineOutput,
+    baselineDurationMs: outputs.baselineDurationMs,
+    skillContentScore,
+    skillStructureScore,
+    baselineContentScore,
+    baselineStructureScore,
+    winner,
+  };
+}
+
+function clampScore(val: unknown): number {
+  const n = Number(val);
+  if (isNaN(n)) return 3;
+  return Math.max(1, Math.min(5, Math.round(n)));
+}

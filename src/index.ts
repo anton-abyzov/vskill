@@ -150,9 +150,10 @@ program
 
 program
   .command("eval [subcommand] [target]")
-  .description("Eval commands: init, run, coverage, generate-all")
+  .description("Eval commands: serve, init, run, coverage, generate-all")
   .option("--force", "Overwrite existing evals.json")
   .option("--root <path>", "Root directory for skill plugins (default: plugins/)")
+  .option("--port <number>", "Port for eval UI server (default: 3077)")
   .action(async (subcommand?: string, target?: string, opts?: any) => {
     const { evalCommand } = await import("./commands/eval.js");
     await evalCommand(subcommand || "coverage", target, opts);

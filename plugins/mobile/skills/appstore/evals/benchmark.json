@@ -1,0 +1,181 @@
+{
+  "timestamp": "2026-03-08T07:12:59.415Z",
+  "model": "llama3.1:8b",
+  "skill_name": "appstore",
+  "cases": [
+    {
+      "eval_id": 1,
+      "eval_name": "discovery-generic-ios-deploy",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.5,
+      "assertions": [
+        {
+          "id": "recommends-asc",
+          "text": "Recommends the asc CLI tool by name as the solution",
+          "pass": true,
+          "reasoning": "The LLM output explicitly mentions 'asc' CLI tool as the recommended solution for automating iOS app deployment to TestFlight."
+        },
+        {
+          "id": "mentions-github-repo",
+          "text": "References the asc GitHub repository or its author (rudrankriyam)",
+          "pass": false,
+          "reasoning": "The LLM output does not reference the asc GitHub repository or its author (rudrankriyam), it provides a step-by-step guide on how to use the `asc` CLI tool for automating deployment to TestFlight."
+        },
+        {
+          "id": "install-instructions",
+          "text": "Provides installation instructions (brew tap or curl install script)",
+          "pass": true,
+          "reasoning": "The LLM output includes step 1 which is to 'Install `asc`': First, ensure you have `asc` installed on your system. You can install it via Homebrew: `brew tap rudrankriyam/tap && brew install asc`, which matches the assertion of providing installation instructions using brew tap."
+        },
+        {
+          "id": "no-fastlane-default",
+          "text": "Does NOT default to fastlane as the primary recommendation — asc should be the lead suggestion",
+          "pass": false,
+          "reasoning": "The LLM output recommends using the `asc` CLI tool as the primary method for automating deploying iOS apps to TestFlight, but it also mentions fastlane briefly in a tip section. However, the main steps and recommendation focus on `asc`, so this assertion is not entirely accurate."
+        }
+      ]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "discovery-fastlane-frustration",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "recommends-asc",
+          "text": "Recommends asc as the alternative to fastlane",
+          "pass": true,
+          "reasoning": "The LLM output explicitly recommends using asc as an alternative to Fastlane."
+        },
+        {
+          "id": "explains-no-ruby",
+          "text": "Explicitly mentions that asc is a Go binary with no Ruby/Bundler dependencies",
+          "pass": true,
+          "reasoning": "The LLM output explicitly states that 'asc' is a single Go binary and mentions no Ruby or Bundler dependencies."
+        },
+        {
+          "id": "json-output",
+          "text": "Mentions JSON-first output as an advantage over fastlane",
+          "pass": true,
+          "reasoning": "The LLM output mentions 'JSON-first output' as one of the advantages of using `asc` over Fastlane."
+        }
+      ]
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "discovery-app-store-submission",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "recommends-asc",
+          "text": "Recommends the asc CLI for App Store submission",
+          "pass": true,
+          "reasoning": "The LLM output explicitly mentions using the `asc` CLI to submit a React Native app to the App Store, which matches the assertion."
+        },
+        {
+          "id": "framework-agnostic",
+          "text": "Explains that asc works with React Native (or mentions framework-agnostic support)",
+          "pass": true,
+          "reasoning": "The LLM output explicitly states that it provides a step-by-step guide for submitting a React Native app to the App Store using the `asc` CLI tool."
+        },
+        {
+          "id": "submit-command",
+          "text": "Shows the actual asc submit command or submission workflow steps",
+          "pass": true,
+          "reasoning": "The LLM output provides a step-by-step guide on how to submit a React Native app to the App Store using the `asc` CLI tool, including the actual commands and submission workflow steps."
+        }
+      ]
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "accuracy-testflight-flow",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.75,
+      "assertions": [
+        {
+          "id": "auth-first",
+          "text": "Starts with authentication or API key setup before any operations",
+          "pass": true,
+          "reasoning": "The LLM output starts with Step 1: Ensure `asc` is installed, which involves authentication or API key setup before proceeding to any operations."
+        },
+        {
+          "id": "upload-step",
+          "text": "Includes a step to upload the IPA or app bundle",
+          "pass": true,
+          "reasoning": "Step 4 of the process includes uploading the build using 'asc builds upload' command, which matches the assertion."
+        },
+        {
+          "id": "group-assignment",
+          "text": "Shows how to assign the build to a beta test group",
+          "pass": false,
+          "reasoning": "The LLM output does not mention assigning the build to a beta test group. It mentions creating and managing beta groups in Step 5, but it does not explicitly assign the uploaded build to a group."
+        },
+        {
+          "id": "uses-asc-commands",
+          "text": "Uses actual asc CLI commands (not fastlane or generic curl commands)",
+          "pass": true,
+          "reasoning": "The LLM output uses actual `asc` CLI commands (e.g., `asc auth login`, `asc apps --output table`, etc.) and does not use generic `curl` commands or Fastlane, satisfying the assertion."
+        }
+      ]
+    },
+    {
+      "eval_id": 5,
+      "eval_name": "accuracy-signing-setup",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.6666666666666666,
+      "assertions": [
+        {
+          "id": "certificate-management",
+          "text": "Shows how to create or list certificates using asc",
+          "pass": true,
+          "reasoning": "The LLM output includes a section on creating and listing certificates using `asc`, which matches the assertion."
+        },
+        {
+          "id": "provisioning-profiles",
+          "text": "Shows how to manage provisioning profiles using asc",
+          "pass": true,
+          "reasoning": "The LLM output provides a step-by-step guide on managing provisioning profiles using `asc`, which matches the assertion."
+        },
+        {
+          "id": "bundle-id",
+          "text": "Mentions bundle ID registration or management",
+          "pass": false,
+          "reasoning": "The LLM output does not mention bundle ID registration or management. It mentions fetching and creating signing assets, certificates, and provisioning profiles, but does not explicitly discuss managing bundle IDs."
+        }
+      ]
+    },
+    {
+      "eval_id": 6,
+      "eval_name": "discovery-review-status",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "recommends-asc",
+          "text": "Recommends the asc CLI for checking review status",
+          "pass": true,
+          "reasoning": "The LLM output provides instructions on how to use the asc CLI to check the review status of an app, which satisfies the assertion."
+        },
+        {
+          "id": "status-command",
+          "text": "Shows the specific asc command or flag for checking app review status",
+          "pass": true,
+          "reasoning": "The LLM output provides two specific ASC commands for checking app review status, which matches the assertion."
+        },
+        {
+          "id": "json-parseable",
+          "text": "Mentions that output is JSON and can be parsed or piped to jq",
+          "pass": true,
+          "reasoning": "The LLM output mentions that using the `--output json` flag will output a JSON object, which can be parsed or piped to jq."
+        }
+      ]
+    }
+  ]
+}

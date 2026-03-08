@@ -1,0 +1,49 @@
+{
+  "timestamp": "2026-03-08T12:00:00.000Z",
+  "model": "test-model",
+  "skill_name": "test-skill",
+  "cases": [
+    {
+      "eval_id": 1,
+      "eval_name": "basic-test-question",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1.0,
+      "assertions": [
+        {
+          "id": "mentions-framework",
+          "text": "Mentions a testing framework by name",
+          "pass": true,
+          "reasoning": "The output mentions vitest as the recommended testing framework."
+        },
+        {
+          "id": "shows-example",
+          "text": "Shows an example test with expect/assert statements",
+          "pass": true,
+          "reasoning": "The output includes a complete test example with expect() calls."
+        }
+      ]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "edge-case-testing",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.5,
+      "assertions": [
+        {
+          "id": "empty-string",
+          "text": "Mentions testing with an empty string",
+          "pass": true,
+          "reasoning": "Empty string is mentioned as the first edge case."
+        },
+        {
+          "id": "unicode-chars",
+          "text": "Mentions unicode or special characters as edge cases",
+          "pass": false,
+          "reasoning": "No mention of unicode or special characters in the response."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,170 @@
+{
+  "timestamp": "2026-03-08T20:57:46.672Z",
+  "model": "llama3.1:8b",
+  "skill_name": "social-media-posting",
+  "cases": [
+    {
+      "eval_id": 1,
+      "eval_name": "breaking-news-all-platforms",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.6666666666666666,
+      "assertions": [
+        {
+          "id": "dedup-check",
+          "text": "Checks recent posts on target platforms before drafting to avoid duplicate content",
+          "pass": true,
+          "reasoning": "The LLM output checks recent posts on each platform before creating content, ensuring that duplicate content is avoided."
+        },
+        {
+          "id": "image-3-options",
+          "text": "Generates 3 image options (A/B/C) using Nano Banana Pro and presents them for user selection",
+          "pass": true,
+          "reasoning": "The LLM output includes Step 2: Content Creation, where it generates AI-generated images for each platform using the `nano-banana-pro` skill, and presents them for user selection in the X/Twitter post."
+        },
+        {
+          "id": "aspect-ratios",
+          "text": "Uses correct aspect ratios per platform: 16:9 for X/Discord/Telegram, 1.91:1 for LinkedIn, 1:1 for Threads",
+          "pass": true,
+          "reasoning": "The LLM output specifies the correct aspect ratios for each platform: 16:9 for X/Twitter, 1.91:1 for LinkedIn, and 1:1 for Threads. This satisfies the assertion."
+        },
+        {
+          "id": "approval-gate",
+          "text": "Presents all content drafts and images to user and explicitly waits for approval before posting anything",
+          "pass": false,
+          "reasoning": "The LLM output does not explicitly present all content drafts and images to the user and wait for approval before posting. The output describes the content creation process, but it does not include explicit user approval steps. Additionally, the posting steps use automated tools and APIs, which do not require manual approval."
+        },
+        {
+          "id": "platform-adaptation",
+          "text": "Adapts copy for each platform (punchy for X, professional for LinkedIn, casual for Threads, chat-style for Discord)",
+          "pass": true,
+          "reasoning": "The LLM output adapts the copy for each platform: 'punchy' for X/Twitter, 'professional' for LinkedIn, 'casual' for Threads, and 'chat-style' for Discord."
+        },
+        {
+          "id": "tool-selection",
+          "text": "Attempts to use xurl for X, discord skill for Discord, and Telegram Bot API rather than browser automation",
+          "pass": false,
+          "reasoning": "The LLM output uses xurl CLI for X/Twitter, discord skill actions for Discord, and Telegram Bot API for Telegram, which matches the assertion of using these tools rather than browser automation."
+        }
+      ]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "instagram-tiktok-carousel",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "five-slides",
+          "text": "Creates 5 carousel slides (hook, 3 content slides, CTA)",
+          "pass": true,
+          "reasoning": "The LLM output includes 5 carousel slides, including a hook slide, 3 content slides, and a CTA slide, which satisfies the assertion."
+        },
+        {
+          "id": "three-options-per-slide",
+          "text": "Generates 3 image options per slide (15 images total) and presents them for selection",
+          "pass": true,
+          "reasoning": "The LLM output generates 3 image options per slide (15 images total) and presents them for selection, as shown in the Nano Banana Pro settings section."
+        },
+        {
+          "id": "instagram-square",
+          "text": "Instagram images are generated at 1:1 square aspect ratio (1080x1080)",
+          "pass": true,
+          "reasoning": "The LLM output specifies the Nano Banana Pro settings for each slide, which include an aspect ratio of 1:1 (square) and a resolution of 2K, matching the assertion."
+        },
+        {
+          "id": "tiktok-vertical-video",
+          "text": "Converts carousel to 9:16 vertical video using ffmpeg for TikTok",
+          "pass": true,
+          "reasoning": "The LLM output includes a TikTok video creation step that uses ffmpeg to convert the carousel slides into a 9:16 vertical slideshow video, satisfying the assertion."
+        },
+        {
+          "id": "approval-before-upload",
+          "text": "Shows all slides/video to user and waits for explicit approval before uploading to Instagram or TikTok",
+          "pass": true,
+          "reasoning": "The LLM output indicates that the workflow includes generating 3 eye-catching image options for each slide, following the platform-specific dimensions and style guidelines, and presenting them to the user for approval before uploading to Instagram or TikTok."
+        }
+      ]
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "daily-engagement-session",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.4,
+      "assertions": [
+        {
+          "id": "ten-threads-per-platform",
+          "text": "Finds approximately 10 active threads per platform (X, Reddit, LinkedIn)",
+          "pass": true,
+          "reasoning": "The LLM output contains a daily engagement log that shows 10 active threads on X/Twitter, and mentions finding 10 active threads on other platforms as well. This satisfies the assertion of finding approximately 10 active threads per platform."
+        },
+        {
+          "id": "batch-approval",
+          "text": "Presents all drafted replies as a batch per platform and waits for approval before posting any",
+          "pass": true,
+          "reasoning": "The LLM output states 'I'll draft all 10 replies for a platform, then present them as a batch for approval' which matches the assertion"
+        },
+        {
+          "id": "anti-spam-reddit",
+          "text": "Respects Reddit anti-spam rules: spaces comments apart, max 3 per thread per hour, max 5 total in 30 min",
+          "pass": false,
+          "reasoning": "The LLM output does not mention respecting Reddit anti-spam rules, specifically the max 3 comments per thread per hour and max 5 total in 30 minutes."
+        },
+        {
+          "id": "reply-quality",
+          "text": "Replies are 1-3 sentences, add genuine value, no em dashes, sound human",
+          "pass": false,
+          "reasoning": "The LLM output does not satisfy the assertion because the engagement replies contain text snippets with em dashes (—), which are not allowed according to the assertion."
+        },
+        {
+          "id": "url-logging",
+          "text": "Logs all reply URLs to a daily engagement log file after posting",
+          "pass": false,
+          "reasoning": "The LLM output does not satisfy the assertion because it does not explicitly mention logging reply URLs to a daily engagement log file after posting. However, it does mention finding 10 active threads on each platform related to the topic and leaving a thoughtful reply, which implies that the reply URLs are being collected, but it is not explicitly stated that they are being logged."
+        }
+      ]
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "scheduled-posting-optimal-time",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "analytics-check",
+          "text": "Reads recent post history (20-30 posts) on target platforms to analyze engagement patterns and identify best-performing posting times",
+          "pass": true,
+          "reasoning": "The LLM output mentions checking recent posts on LinkedIn and X/Twitter for deduplication, but it does not explicitly state reading recent post history (20-30 posts) on target platforms to analyze engagement patterns and identify best-performing posting times. However, the output does provide specific posting times for LinkedIn and X/Twitter based on past performance, which implies some level of analysis of engagement patterns."
+        },
+        {
+          "id": "time-recommendation",
+          "text": "Recommends a specific date and time with reasoning based on analytics data, not just generic best practices",
+          "pass": true,
+          "reasoning": "The LLM output provides specific date and time recommendations for posting on LinkedIn and X/Twitter based on analytics data, such as '7-8 AM EST on Tuesdays and Thursdays' and '9-11 AM EST', which demonstrates an understanding of the importance of data-driven decision making."
+        },
+        {
+          "id": "native-scheduling",
+          "text": "Uses native scheduling features on LinkedIn and X rather than posting immediately",
+          "pass": true,
+          "reasoning": "The LLM output uses native scheduling features on LinkedIn and X/Twitter to post at the optimal time, satisfying the assertion."
+        },
+        {
+          "id": "no-schedule-threads",
+          "text": "Correctly identifies that Threads does not support native scheduling and proposes an alternative (post in real-time or set a reminder)",
+          "pass": true,
+          "reasoning": "The LLM output correctly identifies that Threads does not support native scheduling, and proposes an alternative (post in real-time or set a reminder), which aligns with the assertion."
+        },
+        {
+          "id": "approval-before-scheduling",
+          "text": "Presents the content, images, and proposed schedule time to user and waits for approval before scheduling",
+          "pass": true,
+          "reasoning": "The LLM output presents the content, images, and proposed schedule time to the user in Step 3: Schedule Posts, and it waits for approval before scheduling the posts on LinkedIn and X/Twitter."
+        }
+      ]
+    }
+  ],
+  "overall_pass_rate": 0.7619047619047619
+}

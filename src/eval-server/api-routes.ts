@@ -232,24 +232,22 @@ export function registerRoutes(router: Router, root: string): void {
         }
       }
 
+      const totalAssertions = cases.reduce((s, c) => s + c.assertions.length, 0);
+      const passedAssertions = cases.reduce(
+        (s, c) => s + c.assertions.filter((a) => a.pass).length,
+        0,
+      );
       const result: BenchmarkResult = {
         timestamp: new Date().toISOString(),
         model: client.model,
         skill_name: evals.skill_name,
         cases,
+        overall_pass_rate: totalAssertions > 0 ? passedAssertions / totalAssertions : 0,
       };
 
       if (!aborted) {
         await writeHistoryEntry(skillDir, result);
-        const totalAssertions = cases.reduce((s, c) => s + c.assertions.length, 0);
-        const passedAssertions = cases.reduce(
-          (s, c) => s + c.assertions.filter((a) => a.pass).length,
-          0,
-        );
-        sendSSEDone(res, {
-          ...result,
-          overall_pass_rate: totalAssertions > 0 ? passedAssertions / totalAssertions : 0,
-        });
+        sendSSEDone(res, result);
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -382,6 +380,7 @@ export function registerRoutes(router: Router, root: string): void {
           model: client.model,
           skill_name: evals.skill_name,
           cases,
+          overall_pass_rate: passRate,
           type: "comparison" as const,
           verdict,
           comparison: {
@@ -394,11 +393,7 @@ export function registerRoutes(router: Router, root: string): void {
         };
 
         await writeHistoryEntry(skillDir, historyResult);
-
-        sendSSEDone(res, {
-          ...historyResult,
-          overall_pass_rate: passRate,
-        });
+        sendSSEDone(res, historyResult);
       }
     } catch (err) {
       sendSSEDone(res, { error: err instanceof Error ? err.message : String(err) });

@@ -26,6 +26,7 @@ export interface BenchmarkResult {
   model: string;
   skill_name: string;
   cases: BenchmarkCase[];
+  overall_pass_rate?: number;
 }
 
 export async function writeBenchmark(

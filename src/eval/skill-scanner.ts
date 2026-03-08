@@ -27,22 +27,24 @@ export async function scanSkills(root: string): Promise<SkillInfo[]> {
   scanSkillsDir(basename(root) || "default", join(root, "skills"), skills);
 
   // Layout 1: direct plugin subdirs → {root}/{plugin}/skills/{skill}/SKILL.md
-  scanPluginDirs(root, skills);
+  // Exclude "skills" (Layout 3) and "plugins" (Layout 2) from being treated as plugins
+  scanPluginDirs(root, skills, ["skills", "plugins"]);
 
   // Layout 2: nested plugins/ dir → {root}/plugins/{plugin}/skills/{skill}/SKILL.md
+  // Only exclude "plugins" to prevent recursion; "skills" is a valid plugin name here
   const pluginsDir = join(root, "plugins");
   if (existsSync(pluginsDir)) {
-    scanPluginDirs(pluginsDir, skills);
+    scanPluginDirs(pluginsDir, skills, ["plugins"]);
   }
 
   return skills;
 }
 
-function scanPluginDirs(dir: string, skills: SkillInfo[]): void {
+function scanPluginDirs(dir: string, skills: SkillInfo[], exclude: string[]): void {
   let entries: string[];
   try {
     entries = readdirSync(dir, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && d.name !== "skills" && d.name !== "plugins")
+      .filter((d) => d.isDirectory() && !exclude.includes(d.name))
       .map((d) => d.name);
   } catch {
     return;

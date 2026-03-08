@@ -1,0 +1,166 @@
+{
+  "timestamp": "2026-03-08T20:51:47.638Z",
+  "model": "llama3.1:8b",
+  "skill_name": "slack-messaging",
+  "cases": [
+    {
+      "eval_id": 1,
+      "eval_name": "Read channel and summarize",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Uses slack_search_channels to resolve the channel name to a channel_id before reading",
+          "pass": true,
+          "reasoning": "The LLM output uses the `slack_read_channel` tool, which implies that it uses `slack_search_channels` to resolve the channel name to a channel_id before reading. The output also shows the channel ID being used, supporting this assertion."
+        },
+        {
+          "id": "a2",
+          "text": "Uses slack_read_channel with the resolved channel_id to fetch messages",
+          "pass": true,
+          "reasoning": "The LLM output indicates that the slack_read_channel tool was used with the resolved channel_id to fetch messages, as stated in the assertion."
+        },
+        {
+          "id": "a3",
+          "text": "Presents a human-readable summary of the messages, not raw API output",
+          "pass": true,
+          "reasoning": "The LLM output presents a human-readable summary of the messages, including the number of messages, topics discussed, and details of each message, rather than raw API output."
+        },
+        {
+          "id": "assert-1773002043217",
+          "text": "If the response is in MD format, it should be displayed properly. ",
+          "pass": true,
+          "reasoning": "The LLM output is in MD format and is displayed properly, with headers and bullet points."
+        }
+      ]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "Reply in a thread with context",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Reads the full thread with slack_read_thread before drafting a reply",
+          "pass": true,
+          "reasoning": "The LLM output shows that the full thread is read in Step 3: Read the Thread, before drafting a reply in Step 4: Draft a Reply."
+        },
+        {
+          "id": "a2",
+          "text": "Draft reply references context from the thread (not generic/disconnected)",
+          "pass": true,
+          "reasoning": "The LLM output specifically mentions the 15% reduction in drop-off rate at step 3, indicating that it references context from the thread."
+        },
+        {
+          "id": "a3",
+          "text": "Uses slack_send_message with thread_ts parameter to reply in-thread",
+          "pass": true,
+          "reasoning": "The LLM output uses slack_send_message with the thread_ts parameter to reply in-thread, as shown in Step 3: Read the Thread and Step 7: Send the Message."
+        },
+        {
+          "id": "a4",
+          "text": "Shows the draft to the user and waits for approval before sending",
+          "pass": true,
+          "reasoning": "The LLM output shows the draft to the user in Step 3: Present the draft to the user, and waits for approval in Step 6: Wait for Approval before sending the message in Step 7: Send the message."
+        }
+      ]
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "New channel message triggers session boundary",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.6666666666666666,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Identifies that these are two separate top-level conversations requiring context isolation",
+          "pass": true,
+          "reasoning": "The LLM output explicitly mentions starting new sessions for each conversation (Session 1 and Session 2), which ensures context isolation for each discussion."
+        },
+        {
+          "id": "a2",
+          "text": "Either recommends separate sessions or uses subagents — does NOT handle both inline with mixed context",
+          "pass": false,
+          "reasoning": "The LLM output recommends separate sessions for both Alice's Billing Bug and Bob's Feature Request, but it also uses subagents for isolation, which is not inline with mixed context handling as specified in the assertion."
+        },
+        {
+          "id": "a3",
+          "text": "Does not leak details from Alice's billing bug into Bob's feature request response or vice versa",
+          "pass": true,
+          "reasoning": "The LLM output ensures that each conversation is handled in a separate session, maintaining context boundaries and preventing leakage of details between sessions."
+        }
+      ]
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "Schedule a message for later",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Resolves #announcements channel name to a channel_id",
+          "pass": true,
+          "reasoning": "The LLM output uses slack_search_channels(query=\"#announcements\") to resolve the channel ID, which implies that the channel name is being resolved to a channel ID."
+        },
+        {
+          "id": "a2",
+          "text": "Calculates a Unix timestamp for 9am tomorrow that is at least 2 minutes in the future",
+          "pass": true,
+          "reasoning": "The LLM output calculates the Unix timestamp for 9am tomorrow using `datetime.datetime.now() + datetime.timedelta(days=1, hours=9)` which will be at least 2 minutes in the future due to the nature of datetime arithmetic."
+        },
+        {
+          "id": "a3",
+          "text": "Uses slack_schedule_message (not slack_send_message) to schedule the message",
+          "pass": true,
+          "reasoning": "The LLM output uses slack_schedule_message to schedule the message, which matches the assertion."
+        },
+        {
+          "id": "a4",
+          "text": "Shows the message content and scheduled time to the user before confirming",
+          "pass": true,
+          "reasoning": "The code prints the message content and scheduled time to the user before confirming, satisfying the assertion."
+        }
+      ]
+    },
+    {
+      "eval_id": 5,
+      "eval_name": "Send a DM to a colleague",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.5,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Uses slack_search_users to find Sarah Chen's user_id",
+          "pass": true,
+          "reasoning": "The LLM output shows that the user ID is obtained using slack_search_users with the query 'Sarah Chen', satisfying the assertion."
+        },
+        {
+          "id": "a2",
+          "text": "Uses the user_id as the channel_id parameter in slack_send_message",
+          "pass": true,
+          "reasoning": "The LLM output uses the user_id as the channel_id parameter in slack_send_message, satisfying the assertion."
+        },
+        {
+          "id": "a3",
+          "text": "Shows the draft message for user approval before sending",
+          "pass": false,
+          "reasoning": "The LLM output does not show a draft message for user approval before sending. It directly composes and sends the message."
+        },
+        {
+          "id": "a4",
+          "text": "Message uses Slack mrkdwn formatting (single *bold*, _italic_), not standard markdown",
+          "pass": false,
+          "reasoning": "The LLM output does not use Slack mrkdwn formatting, as it uses standard markdown formatting (double **bold**, __italic__) for the message."
+        }
+      ]
+    }
+  ]
+}

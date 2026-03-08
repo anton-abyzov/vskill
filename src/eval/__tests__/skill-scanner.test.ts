@@ -217,4 +217,14 @@ describe("scanSkills", () => {
     expect(skills[0].plugin).toBe("marketing");
     expect(skills[0].skill).toBe("smp");
   });
+
+  it("allows 'skills' as a plugin name inside plugins/ directory", async () => {
+    createNestedSkill("skills", "scout");
+
+    const skills = await scanSkills(testDir);
+
+    expect(skills).toHaveLength(1);
+    expect(skills[0].plugin).toBe("skills");
+    expect(skills[0].skill).toBe("scout");
+  });
 });

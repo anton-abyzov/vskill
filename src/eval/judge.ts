@@ -27,7 +27,7 @@ ${assertion.text}
 
 Does the LLM output satisfy this assertion? Respond with JSON only: { "pass": boolean, "reasoning": "..." }`;
 
-  const raw = await client.generate(JUDGE_SYSTEM, userPrompt);
+  const { text: raw } = await client.generate(JUDGE_SYSTEM, userPrompt);
 
   const parsed = parseJudgeResponse(raw);
 

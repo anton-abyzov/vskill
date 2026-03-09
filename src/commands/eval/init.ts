@@ -35,12 +35,12 @@ export async function runEvalInit(
 
   try {
     const client = createLlmClient();
-    const raw = await client.generate(
+    const genResult = await client.generate(
       "You generate eval test cases for AI skills. Output only valid JSON in a code fence.",
       prompt,
     );
 
-    const evalsFile = parseGeneratedEvals(raw);
+    const evalsFile = parseGeneratedEvals(genResult.text);
 
     mkdirSync(evalsDir, { recursive: true });
     writeFileSync(evalsPath, JSON.stringify(evalsFile, null, 2), "utf-8");

@@ -7,8 +7,10 @@ import type { LlmClient } from "./llm.js";
 export interface ComparisonOutput {
   skillOutput: string;
   skillDurationMs: number;
+  skillTokens: number | null;
   baselineOutput: string;
   baselineDurationMs: number;
+  baselineTokens: number | null;
 }
 
 export interface ComparisonScore {
@@ -23,8 +25,10 @@ export interface ComparisonResult {
   prompt: string;
   skillOutput: string;
   skillDurationMs: number;
+  skillTokens: number | null;
   baselineOutput: string;
   baselineDurationMs: number;
+  baselineTokens: number | null;
   skillContentScore: number;
   skillStructureScore: number;
   baselineContentScore: number;
@@ -59,15 +63,20 @@ export async function generateComparisonOutputs(
   const baselineSystemPrompt = "You are a helpful AI assistant.";
 
   // Run sequentially (claude-cli can only handle one at a time)
-  const skillStart = Date.now();
-  const skillOutput = await client.generate(skillSystemPrompt, prompt);
-  const skillDurationMs = Date.now() - skillStart;
+  const skillResult = await client.generate(skillSystemPrompt, prompt);
+  const baselineResult = await client.generate(baselineSystemPrompt, prompt);
 
-  const baselineStart = Date.now();
-  const baselineOutput = await client.generate(baselineSystemPrompt, prompt);
-  const baselineDurationMs = Date.now() - baselineStart;
+  const totalTokens = (r: typeof skillResult) =>
+    r.inputTokens != null && r.outputTokens != null ? r.inputTokens + r.outputTokens : null;
 
-  return { skillOutput, skillDurationMs, baselineOutput, baselineDurationMs };
+  return {
+    skillOutput: skillResult.text,
+    skillDurationMs: skillResult.durationMs,
+    skillTokens: totalTokens(skillResult),
+    baselineOutput: baselineResult.text,
+    baselineDurationMs: baselineResult.durationMs,
+    baselineTokens: totalTokens(baselineResult),
+  };
 }
 
 export async function scoreComparison(
@@ -87,7 +96,7 @@ ${outputB}
 
 Evaluate both responses.`;
 
-  const response = await client.generate(COMPARATOR_SYSTEM_PROMPT, userPrompt);
+  const { text: response } = await client.generate(COMPARATOR_SYSTEM_PROMPT, userPrompt);
 
   // Parse JSON from response (may be in code fence)
   const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, response];
@@ -138,8 +147,10 @@ export async function runComparison(
     prompt,
     skillOutput: outputs.skillOutput,
     skillDurationMs: outputs.skillDurationMs,
+    skillTokens: outputs.skillTokens,
     baselineOutput: outputs.baselineOutput,
     baselineDurationMs: outputs.baselineDurationMs,
+    baselineTokens: outputs.baselineTokens,
     skillContentScore,
     skillStructureScore,
     baselineContentScore,

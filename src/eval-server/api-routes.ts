@@ -297,19 +297,24 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         });
 
         try {
-          const output = await client.generate(systemPrompt, evalCase.prompt);
+          const genResult = await client.generate(systemPrompt, evalCase.prompt);
+          const totalTokens = genResult.inputTokens != null && genResult.outputTokens != null
+            ? genResult.inputTokens + genResult.outputTokens
+            : null;
 
           // Stream the actual LLM output so the UI can display it as proof
           sendSSE(res, "output_ready", {
             eval_id: evalCase.id,
-            output,
+            output: genResult.text,
+            durationMs: genResult.durationMs,
+            tokens: totalTokens,
           });
 
           const assertionResults: BenchmarkAssertionResult[] = [];
 
           for (const assertion of evalCase.assertions) {
             if (aborted) break;
-            const result = await judgeAssertion(output, assertion, client);
+            const result = await judgeAssertion(genResult.text, assertion, client);
             assertionResults.push(result);
             sendSSE(res, "assertion_result", {
               eval_id: evalCase.id,
@@ -332,6 +337,8 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
             status: status as "pass" | "fail",
             error_message: null,
             pass_rate: passRate,
+            durationMs: genResult.durationMs,
+            tokens: totalTokens,
             assertions: assertionResults,
           };
           cases.push(benchCase);
@@ -340,6 +347,8 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
             eval_id: evalCase.id,
             status,
             pass_rate: passRate,
+            durationMs: genResult.durationMs,
+            tokens: totalTokens,
           });
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
@@ -421,7 +430,11 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
             eval_name: evalCase.name,
             prompt: evalCase.prompt,
             skillOutput: comparison.skillOutput,
+            skillDurationMs: comparison.skillDurationMs,
+            skillTokens: comparison.skillTokens,
             baselineOutput: comparison.baselineOutput,
+            baselineDurationMs: comparison.baselineDurationMs,
+            baselineTokens: comparison.baselineTokens,
             skillContentScore: comparison.skillContentScore,
             skillStructureScore: comparison.skillStructureScore,
             baselineContentScore: comparison.baselineContentScore,

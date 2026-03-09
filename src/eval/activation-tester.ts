@@ -62,7 +62,7 @@ ${p.prompt}
 Would this user prompt trigger this skill?`;
 
     try {
-      const response = await client.generate(ACTIVATION_SYSTEM_PROMPT, userPrompt);
+      const { text: response } = await client.generate(ACTIVATION_SYSTEM_PROMPT, userPrompt);
       const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, response];
       const json = JSON.parse(jsonMatch[1]!.trim());
 

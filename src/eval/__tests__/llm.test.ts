@@ -152,12 +152,16 @@ describe("createLlmClient", () => {
     it("returns text content on successful generate call", async () => {
       mockCreate.mockResolvedValue({
         content: [{ type: "text", text: "Generated response" }],
+        usage: { input_tokens: 50, output_tokens: 100 },
       });
 
       const client = createLlmClient();
       const result = await client.generate("system prompt", "user prompt");
 
-      expect(result).toBe("Generated response");
+      expect(result.text).toBe("Generated response");
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
+      expect(result.inputTokens).toBe(50);
+      expect(result.outputTokens).toBe(100);
       expect(mockCreate).toHaveBeenCalledOnce();
     });
 
@@ -238,7 +242,7 @@ describe("createLlmClient", () => {
       const client = createLlmClient();
       const result = await client.generate("system prompt", "user prompt");
 
-      expect(result).toBe("CLI response");
+      expect(result.text).toBe("CLI response");
       expect(mockSpawn).toHaveBeenCalledWith(
         "claude",
         ["-p", "--model", "sonnet"],
@@ -335,7 +339,7 @@ describe("createLlmClient", () => {
       const client = createLlmClient();
       const result = await client.generate("system prompt", "user prompt");
 
-      expect(result).toBe("Ollama reply");
+      expect(result.text).toBe("Ollama reply");
       expect(mockFetch).toHaveBeenCalledWith(
         "http://localhost:11434/api/generate",
         expect.objectContaining({

@@ -19,8 +19,15 @@
 
 import { spawn } from "node:child_process";
 
+export interface GenerateResult {
+  text: string;
+  durationMs: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+}
+
 export interface LlmClient {
-  generate(systemPrompt: string, userPrompt: string): Promise<string>;
+  generate(systemPrompt: string, userPrompt: string): Promise<GenerateResult>;
   readonly model: string;
 }
 
@@ -74,7 +81,7 @@ function createAnthropicClient(modelOverride?: string): LlmClient {
 
   return {
     model,
-    async generate(systemPrompt: string, userPrompt: string): Promise<string> {
+    async generate(systemPrompt: string, userPrompt: string): Promise<GenerateResult> {
       if (!clientInstance) {
         const { default: Anthropic } = await import("@anthropic-ai/sdk");
         clientInstance = new Anthropic({ apiKey });
@@ -82,6 +89,7 @@ function createAnthropicClient(modelOverride?: string): LlmClient {
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 120_000);
+      const start = Date.now();
       try {
         const response = await clientInstance.messages.create(
           {
@@ -92,9 +100,16 @@ function createAnthropicClient(modelOverride?: string): LlmClient {
           },
           { signal: controller.signal },
         );
+        const durationMs = Date.now() - start;
 
         const textBlock = response.content.find((b: any) => b.type === "text");
-        return textBlock && "text" in textBlock ? textBlock.text : "";
+        const text = textBlock && "text" in textBlock ? textBlock.text : "";
+        return {
+          text,
+          durationMs,
+          inputTokens: response.usage?.input_tokens ?? null,
+          outputTokens: response.usage?.output_tokens ?? null,
+        };
       } finally {
         clearTimeout(timeout);
       }
@@ -121,10 +136,11 @@ function createClaudeCliClient(modelOverride?: string, forced = false): LlmClien
 
   return {
     model: `claude-${model}`,
-    async generate(systemPrompt: string, userPrompt: string): Promise<string> {
+    async generate(systemPrompt: string, userPrompt: string): Promise<GenerateResult> {
       const combinedPrompt = `${systemPrompt}\n\n${userPrompt}`;
+      const start = Date.now();
 
-      return new Promise<string>((resolve, reject) => {
+      const text = await new Promise<string>((resolve, reject) => {
         // Strip all CLAUDE* env vars so the child process doesn't detect nesting
         const cleanEnv: Record<string, string> = {};
         for (const [k, v] of Object.entries(process.env)) {
@@ -169,6 +185,8 @@ function createClaudeCliClient(modelOverride?: string, forced = false): LlmClien
         // Pipe prompt via stdin — avoids ARG_MAX limits for large SKILL.md files
         proc.stdin.end(combinedPrompt);
       });
+
+      return { text, durationMs: Date.now() - start, inputTokens: null, outputTokens: null };
     },
   };
 }
@@ -182,8 +200,9 @@ function createOllamaClient(modelOverride?: string): LlmClient {
 
   return {
     model,
-    async generate(systemPrompt: string, userPrompt: string): Promise<string> {
+    async generate(systemPrompt: string, userPrompt: string): Promise<GenerateResult> {
       const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+      const start = Date.now();
 
       const response = await fetch(`${baseUrl}/api/generate`, {
         method: "POST",
@@ -210,8 +229,17 @@ function createOllamaClient(modelOverride?: string): LlmClient {
         throw new Error(`Ollama request failed: ${error}`);
       }
 
-      const data = (await response.json()) as { response?: string };
-      return data.response || "";
+      const data = (await response.json()) as {
+        response?: string;
+        prompt_eval_count?: number;
+        eval_count?: number;
+      };
+      return {
+        text: data.response || "",
+        durationMs: Date.now() - start,
+        inputTokens: data.prompt_eval_count ?? null,
+        outputTokens: data.eval_count ?? null,
+      };
     },
   };
 }

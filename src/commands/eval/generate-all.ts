@@ -46,12 +46,12 @@ export async function runEvalGenerateAll(
       const skillContent = readFileSync(skillMdPath, "utf-8");
       const prompt = buildEvalInitPrompt(skillContent);
 
-      const raw = await client.generate(
+      const genResult = await client.generate(
         "You generate eval test cases for AI skills. Output only valid JSON in a code fence.",
         prompt,
       );
 
-      const evalsFile = parseGeneratedEvals(raw);
+      const evalsFile = parseGeneratedEvals(genResult.text);
 
       mkdirSync(join(skill.dir, "evals"), { recursive: true });
       writeFileSync(evalsPath, JSON.stringify(evalsFile, null, 2), "utf-8");

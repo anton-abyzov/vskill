@@ -7,8 +7,12 @@ import { judgeAssertion } from "../judge.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
+function mockResult(text: string) {
+  return { text, durationMs: 100, inputTokens: null, outputTokens: null };
+}
+
 function mockClient(response: string): LlmClient {
-  return { generate: vi.fn().mockResolvedValue(response), model: "test-model" };
+  return { generate: vi.fn().mockResolvedValue(mockResult(response)), model: "test-model" };
 }
 
 const ASSERTION: Assertion = {

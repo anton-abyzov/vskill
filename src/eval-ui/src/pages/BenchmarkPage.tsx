@@ -18,11 +18,15 @@ interface CaseCompleteEvent {
   status: string;
   pass_rate?: number;
   error_message?: string;
+  durationMs?: number;
+  tokens?: number | null;
 }
 
 interface OutputReadyEvent {
   eval_id: number;
   output: string;
+  durationMs?: number;
+  tokens?: number | null;
 }
 
 interface CaseData {
@@ -32,6 +36,8 @@ interface CaseData {
   status?: string;
   passRate?: number;
   errorMessage?: string;
+  durationMs?: number;
+  tokens?: number | null;
 }
 
 export function BenchmarkPage() {
@@ -78,6 +84,8 @@ export function BenchmarkPage() {
       const d = evt.data as OutputReadyEvent;
       const existing = currentResults.get(d.eval_id) || { assertions: [] };
       existing.output = d.output;
+      if (d.durationMs != null) existing.durationMs = d.durationMs;
+      if (d.tokens != null) existing.tokens = d.tokens;
       currentResults.set(d.eval_id, existing);
     }
     if (evt.event === "assertion_result") {
@@ -191,25 +199,39 @@ export function BenchmarkPage() {
                         {data.name || "Eval Case"}
                       </h4>
                     </div>
-                    {data.status ? (
-                      <span
-                        className="pill"
-                        style={{
-                          background: data.status === "pass" ? "var(--green-muted)" : data.status === "error" ? "var(--yellow-muted)" : "var(--red-muted)",
-                          color: data.status === "pass" ? "var(--green)" : data.status === "error" ? "var(--yellow)" : "var(--red)",
-                        }}
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full" style={{
-                          background: data.status === "pass" ? "var(--green)" : data.status === "error" ? "var(--yellow)" : "var(--red)"
-                        }} />
-                        {data.status} {data.passRate !== undefined ? `${Math.round(data.passRate * 100)}%` : ""}
-                      </span>
-                    ) : (
-                      <div className="flex items-center gap-2 text-[12px]" style={{ color: "var(--accent)" }}>
-                        <div className="spinner" style={{ width: 12, height: 12 }} />
-                        Evaluating...
-                      </div>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {/* Time & tokens */}
+                      {data.durationMs != null && (
+                        <span className="text-[11px] font-mono" style={{ color: "var(--text-tertiary)" }}>
+                          {(data.durationMs / 1000).toFixed(1)}s
+                        </span>
+                      )}
+                      {data.tokens != null && (
+                        <span className="text-[11px] font-mono" style={{ color: "var(--text-tertiary)" }}>
+                          {data.tokens.toLocaleString()} tok
+                        </span>
+                      )}
+                      {/* Status pill */}
+                      {data.status ? (
+                        <span
+                          className="pill"
+                          style={{
+                            background: data.status === "pass" ? "var(--green-muted)" : data.status === "error" ? "var(--yellow-muted)" : "var(--red-muted)",
+                            color: data.status === "pass" ? "var(--green)" : data.status === "error" ? "var(--yellow)" : "var(--red)",
+                          }}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full" style={{
+                            background: data.status === "pass" ? "var(--green)" : data.status === "error" ? "var(--yellow)" : "var(--red)"
+                          }} />
+                          {data.status} {data.passRate !== undefined ? `${Math.round(data.passRate * 100)}%` : ""}
+                        </span>
+                      ) : (
+                        <div className="flex items-center gap-2 text-[12px]" style={{ color: "var(--accent)" }}>
+                          <div className="spinner" style={{ width: 12, height: 12 }} />
+                          Evaluating...
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* Error message */}
@@ -287,22 +309,32 @@ export function BenchmarkPage() {
           })}
 
           {/* Overall result */}
-          {done && overallPct !== null && (
-            <div
-              className="glass-card p-6 text-center animate-fade-in-scale"
-              style={{ borderColor: overallPct >= 80 ? "var(--green)" : overallPct >= 50 ? "var(--yellow)" : "var(--red)", borderWidth: 2 }}
-            >
-              <div className="text-[36px] font-bold tracking-tight" style={{
-                color: overallPct >= 80 ? "var(--green)" : overallPct >= 50 ? "var(--yellow)" : "var(--red)",
-              }}>
-                {overallPct}%
+          {done && overallPct !== null && (() => {
+            const allData = Array.from(currentResults.values());
+            const totalMs = allData.reduce((s, d) => s + (d.durationMs ?? 0), 0);
+            const totalTok = allData.reduce((s, d) => s + (d.tokens ?? 0), 0);
+            const hasTokens = allData.some((d) => d.tokens != null);
+            return (
+              <div
+                className="glass-card p-6 text-center animate-fade-in-scale"
+                style={{ borderColor: overallPct >= 80 ? "var(--green)" : overallPct >= 50 ? "var(--yellow)" : "var(--red)", borderWidth: 2 }}
+              >
+                <div className="text-[36px] font-bold tracking-tight" style={{
+                  color: overallPct >= 80 ? "var(--green)" : overallPct >= 50 ? "var(--yellow)" : "var(--red)",
+                }}>
+                  {overallPct}%
+                </div>
+                <div className="text-[13px] mt-1" style={{ color: "var(--text-tertiary)" }}>
+                  {runScope === "all" ? "Overall Pass Rate" : "Pass Rate"}
+                </div>
+                <div className="flex items-center justify-center gap-4 mt-2 text-[11px] font-mono" style={{ color: "var(--text-tertiary)" }}>
+                  {model && <span>{model}</span>}
+                  {totalMs > 0 && <span>{(totalMs / 1000).toFixed(1)}s total</span>}
+                  {hasTokens && totalTok > 0 && <span>{totalTok.toLocaleString()} tokens</span>}
+                </div>
               </div>
-              <div className="text-[13px] mt-1" style={{ color: "var(--text-tertiary)" }}>
-                {runScope === "all" ? "Overall Pass Rate" : "Pass Rate"}
-              </div>
-              {model && <div className="text-[11px] mt-1 font-mono" style={{ color: "var(--text-tertiary)" }}>{model}</div>}
-            </div>
-          )}
+            );
+          })()}
         </div>
       )}
 

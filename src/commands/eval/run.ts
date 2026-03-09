@@ -58,7 +58,7 @@ export async function runEvalRun(skillDir: string): Promise<void> {
     try {
       // Step 1: Send prompt to LLM
       process.stdout.write(dim(`[${i + 1}/${total}] ${evalCase.name} — generating...`));
-      const output = await client.generate(systemPrompt, evalCase.prompt);
+      const genResult = await client.generate(systemPrompt, evalCase.prompt);
       process.stdout.write(dim(` judging ${evalCase.assertions.length} assertions...`));
 
       // Step 2: Judge each assertion
@@ -66,7 +66,7 @@ export async function runEvalRun(skillDir: string): Promise<void> {
       let passCount = 0;
 
       for (const assertion of evalCase.assertions) {
-        const result = await judgeAssertion(output, assertion, client);
+        const result = await judgeAssertion(genResult.text, assertion, client);
         assertionResults.push(result);
         if (result.pass) passCount++;
 

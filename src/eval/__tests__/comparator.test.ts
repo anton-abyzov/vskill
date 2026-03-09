@@ -10,7 +10,10 @@ function mockClient(responses: string[]): LlmClient {
   let callIndex = 0;
   return {
     model: "test-model",
-    generate: vi.fn(async () => responses[callIndex++] ?? ""),
+    generate: vi.fn(async () => {
+      const text = responses[callIndex++] ?? "";
+      return { text, durationMs: 100, inputTokens: 50, outputTokens: 100 };
+    }),
   };
 }
 

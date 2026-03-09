@@ -148,6 +148,29 @@ export interface CaseHistoryEntry {
   assertions: BenchmarkAssertionResult[];
 }
 
+export interface StatsResult {
+  totalRuns: number;
+  assertionStats: Array<{
+    id: string;
+    text: string;
+    passRate: number;
+    totalRuns: number;
+    evalId: number;
+    evalName: string;
+  }>;
+  modelStats: Array<{
+    model: string;
+    runs: number;
+    avgPassRate: number;
+    avgDurationMs: number;
+  }>;
+  trendPoints: Array<{
+    timestamp: string;
+    passRate: number;
+    model: string;
+  }>;
+}
+
 export interface ActivationResult {
   prompt: string;
   expected: "should_activate" | "should_not_activate";

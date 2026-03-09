@@ -15,7 +15,7 @@
         },
         {
           "id": "image-3-options",
-          "text": "Generates 3 image options (A/B/C) using Nano Banana Pro and presents them for user selection",
+          "text": "Generates 3 image options (A/B/C)  using Nano Banana Pro and presents them for user selectio",
           "type": "boolean"
         },
         {

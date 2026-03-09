@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useSSE } from "../sse";
 import type { EvalsFile, EvalCase, Assertion, BenchmarkResult } from "../types";
@@ -7,6 +7,8 @@ import { SkillContentViewer } from "../components/SkillContentViewer";
 import { SkillImprovePanel } from "../components/SkillImprovePanel";
 import { McpDependencies } from "../components/McpDependencies";
 import { ModelCompareModal } from "../components/ModelCompareModal";
+import { ProgressLog } from "../components/ProgressLog";
+import type { ProgressEntry } from "../components/ProgressLog";
 
 interface AssertionResult {
   assertion_id: string;
@@ -27,6 +29,7 @@ interface InlineResult {
 
 export function SkillDetailPage() {
   const { plugin, skill } = useParams<{ plugin: string; skill: string }>();
+  const navigate = useNavigate();
   const [evals, setEvals] = useState<EvalsFile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +45,7 @@ export function SkillDetailPage() {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [skillContent, setSkillContent] = useState("");
   const [compareTarget, setCompareTarget] = useState<EvalCase | null>(null);
+  const [progressLog, setProgressLog] = useState<ProgressEntry[]>([]);
 
   useEffect(() => {
     if (!plugin || !skill) return;
@@ -112,14 +116,16 @@ export function SkillDetailPage() {
     });
   }
 
-  function updateAssertion(caseId: number, assertionId: string, text: string) {
+  async function updateAssertionAndRerun(caseId: number, assertionId: string, text: string) {
     if (!evals) return;
     const evalCase = evals.evals.find((e) => e.id === caseId);
     if (!evalCase) return;
-    updateCase({
+    const updated = {
       ...evalCase,
       assertions: evalCase.assertions.map((a) => (a.id === assertionId ? { ...a, text } : a)),
-    });
+    };
+    await save({ ...evals, evals: evals.evals.map((e) => (e.id === updated.id ? updated : e)) });
+    runSingleBenchmark(caseId);
   }
 
   function deleteAssertion(caseId: number, assertionId: string) {
@@ -153,11 +159,25 @@ export function SkillDetailPage() {
     }
   }
 
-  // Process SSE events into inline results
+  // Process SSE events into inline results + progress log
   useEffect(() => {
     if (!runningEvalId) return;
     const result: InlineResult = { assertions: [] };
+    const log: ProgressEntry[] = [];
     for (const evt of events) {
+      if (evt.event === "progress") {
+        const d = evt.data as { eval_id: number; phase: string; message: string; current?: number; total?: number };
+        if (d.eval_id === runningEvalId) {
+          log.push({
+            timestamp: Date.now(),
+            evalId: d.eval_id,
+            phase: d.phase,
+            message: d.message,
+            current: d.current,
+            total: d.total,
+          });
+        }
+      }
       if (evt.event === "output_ready") {
         const d = evt.data as { eval_id: number; output: string; durationMs?: number; tokens?: number | null };
         if (d.eval_id === runningEvalId) {
@@ -181,6 +201,7 @@ export function SkillDetailPage() {
         }
       }
     }
+    setProgressLog(log);
     setInlineResults((prev) => new Map(prev).set(runningEvalId, result));
   }, [events, runningEvalId]);
 
@@ -191,6 +212,7 @@ export function SkillDetailPage() {
 
   function runSingleBenchmark(evalId: number) {
     setRunningEvalId(evalId);
+    setProgressLog([]);
     setExpandedInline((prev) => new Set(prev).add(evalId));
     sseStart(`/api/skills/${plugin}/${skill}/benchmark`, { eval_ids: [evalId] });
   }
@@ -360,13 +382,10 @@ export function SkillDetailPage() {
                   {evalCase.assertions.map((a) => (
                     <div key={a.id} className="flex items-center gap-2 group">
                       <span className="text-[11px] font-mono w-28 truncate flex-shrink-0" style={{ color: "var(--text-tertiary)" }}>{a.id}</span>
-                      <input
-                        className="input-field flex-1 text-[12px] py-1.5"
-                        style={{ background: "transparent", border: "1px solid transparent", borderRadius: "6px" }}
-                        value={a.text}
-                        onChange={(e) => updateAssertion(evalCase.id, a.id, e.target.value)}
-                        onFocus={(e) => { e.currentTarget.style.borderColor = "var(--border-default)"; e.currentTarget.style.background = "var(--surface-2)"; }}
-                        onBlur={(e) => { e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.background = "transparent"; }}
+                      <AssertionInput
+                        initialText={a.text}
+                        onCommit={(text) => updateAssertionAndRerun(evalCase.id, a.id, text)}
+                        disabled={sseRunning}
                       />
                       <button
                         onClick={() => deleteAssertion(evalCase.id, a.id)}
@@ -383,6 +402,11 @@ export function SkillDetailPage() {
                   Add assertion
                 </button>
               </div>
+
+              {/* Progress log for running eval */}
+              {runningEvalId === evalCase.id && progressLog.length > 0 && (
+                <ProgressLog entries={progressLog} isRunning={sseRunning} />
+              )}
 
               {/* Inline benchmark results */}
               {(() => {
@@ -427,6 +451,22 @@ export function SkillDetailPage() {
                         </div>
                       )}
                     </div>
+
+                    {/* View History link */}
+                    {ir.status && (
+                      <button
+                        onClick={() => navigate(`/skills/${plugin}/${skill}/history?tab=per-eval`)}
+                        className="text-[11px] font-medium mb-2 flex items-center gap-1 transition-colors duration-150"
+                        style={{ color: "var(--text-tertiary)" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-tertiary)"; }}
+                      >
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                        </svg>
+                        View History
+                      </button>
+                    )}
 
                     {ir.errorMessage && (
                       <div className="mb-2 p-2 rounded-lg text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)" }}>
@@ -586,6 +626,56 @@ export function SkillDetailPage() {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Blur-based assertion input with auto-rerun                         */
+/* ------------------------------------------------------------------ */
+function AssertionInput({
+  initialText,
+  onCommit,
+  disabled,
+}: {
+  initialText: string;
+  onCommit: (text: string) => void;
+  disabled?: boolean;
+}) {
+  const [text, setText] = useState(initialText);
+  const originalRef = useRef(initialText);
+
+  // Sync if parent changes (e.g. after save round-trip)
+  useEffect(() => {
+    setText(initialText);
+    originalRef.current = initialText;
+  }, [initialText]);
+
+  function handleBlur() {
+    const trimmed = text.trim();
+    if (trimmed && trimmed !== originalRef.current) {
+      originalRef.current = trimmed;
+      onCommit(trimmed);
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      (e.target as HTMLInputElement).blur();
+    }
+  }
+
+  return (
+    <input
+      className="input-field flex-1 text-[12px] py-1.5"
+      style={{ background: "transparent", border: "1px solid transparent", borderRadius: "6px" }}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={handleBlur}
+      onKeyDown={handleKeyDown}
+      onFocus={(e) => { e.currentTarget.style.borderColor = "var(--border-default)"; e.currentTarget.style.background = "var(--surface-2)"; }}
+      disabled={disabled}
+    />
+  );
+}
+
 function formatTimeAgo(date: Date): string {
   const s = Math.floor((Date.now() - date.getTime()) / 1000);
   if (s < 60) return "just now";
@@ -667,7 +757,7 @@ function EvalCaseFormModal({
     <div
       ref={overlayRef}
       onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-overlay-in"
+      className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4 animate-overlay-in"
       style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}
     >
       <form

@@ -14,7 +14,7 @@ import { loadAndValidateEvals, EvalValidationError } from "../eval/schema.js";
 import type { EvalsFile } from "../eval/schema.js";
 import { readBenchmark } from "../eval/benchmark.js";
 import type { BenchmarkResult, BenchmarkCase, BenchmarkAssertionResult } from "../eval/benchmark.js";
-import { writeHistoryEntry, listHistory, readHistoryEntry, computeRegressions, deleteHistoryEntry, getCaseHistory } from "../eval/benchmark-history.js";
+import { writeHistoryEntry, listHistory, readHistoryEntry, computeRegressions, deleteHistoryEntry, getCaseHistory, computeStats } from "../eval/benchmark-history.js";
 import type { HistoryFilter } from "../eval/benchmark-history.js";
 import { judgeAssertion } from "../eval/judge.js";
 import { createLlmClient } from "../eval/llm.js";
@@ -361,6 +361,12 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
           eval_name: evalCase.name,
         });
 
+        sendSSE(res, "progress", {
+          eval_id: evalCase.id,
+          phase: "comparing",
+          message: `Running skill vs baseline comparison for "${evalCase.name}"...`,
+        });
+
         try {
           const comparison = await runComparison(evalCase.prompt, skillContent, client);
           sendSSE(res, "outputs_ready", {
@@ -381,9 +387,24 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
           });
 
           // Also grade assertions against skill output
+          sendSSE(res, "progress", {
+            eval_id: evalCase.id,
+            phase: "judging",
+            message: `Evaluating ${evalCase.assertions.length} assertion${evalCase.assertions.length !== 1 ? "s" : ""}...`,
+            total: evalCase.assertions.length,
+          });
+
           const assertionResults: BenchmarkAssertionResult[] = [];
-          for (const assertion of evalCase.assertions) {
+          for (let ai = 0; ai < evalCase.assertions.length; ai++) {
+            const assertion = evalCase.assertions[ai];
             if (aborted) break;
+            sendSSE(res, "progress", {
+              eval_id: evalCase.id,
+              phase: "judging_assertion",
+              message: `Evaluating assertion ${ai + 1}/${evalCase.assertions.length}...`,
+              current: ai + 1,
+              total: evalCase.assertions.length,
+            });
             const result = await judgeAssertion(comparison.skillOutput, assertion, client);
             assertionResults.push(result);
           }
@@ -614,6 +635,13 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       return;
     }
     sendJson(res, { ok: true }, 200, req);
+  });
+
+  // Get aggregated stats
+  router.get("/api/skills/:plugin/:skill/stats", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    const stats = await computeStats(skillDir);
+    sendJson(res, stats, 200, req);
   });
 
   // Get latest benchmark

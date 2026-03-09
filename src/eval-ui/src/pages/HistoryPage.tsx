@@ -1,8 +1,12 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { TrendChart } from "../components/TrendChart";
+import { HistoryPerEval } from "../components/HistoryPerEval";
+import { StatsPanel } from "../components/StatsPanel";
 import type { HistorySummary, BenchmarkResult, HistoryCompareResult, HistoryFilter } from "../types";
+
+type HistoryTab = "timeline" | "per-eval" | "statistics";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -408,6 +412,9 @@ function SingleRunDetail({ run, plugin, skill, onDelete }: SingleRunDetailProps)
 
 export function HistoryPage() {
   const { plugin, skill } = useParams<{ plugin: string; skill: string }>();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = (searchParams.get("tab") as HistoryTab) || "timeline";
   const [history, setHistory] = useState<HistorySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<HistoryFilter>({});
@@ -559,6 +566,42 @@ export function HistoryPage() {
         <span className="font-medium" style={{ color: "var(--text-primary)" }}>History</span>
       </div>
 
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 mb-5 p-1 rounded-lg" style={{ background: "var(--surface-2)", display: "inline-flex" }}>
+        {(["timeline", "per-eval", "statistics"] as HistoryTab[]).map((tab) => {
+          const labels: Record<HistoryTab, string> = { timeline: "Timeline", "per-eval": "Per Eval", statistics: "Statistics" };
+          const isActive = activeTab === tab;
+          return (
+            <button
+              key={tab}
+              onClick={() => setSearchParams({ tab })}
+              className="px-4 py-1.5 rounded-md text-[12px] font-medium transition-all duration-150"
+              style={{
+                background: isActive ? "var(--surface-4)" : "transparent",
+                color: isActive ? "var(--text-primary)" : "var(--text-tertiary)",
+                boxShadow: isActive ? "0 1px 3px rgba(0,0,0,0.2)" : "none",
+              }}
+              onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = "var(--text-secondary)"; }}
+              onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = isActive ? "var(--text-primary)" : "var(--text-tertiary)"; }}
+            >
+              {labels[tab]}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Per-Eval tab */}
+      {activeTab === "per-eval" && plugin && skill && (
+        <HistoryPerEval plugin={plugin} skill={skill} />
+      )}
+
+      {/* Statistics tab */}
+      {activeTab === "statistics" && plugin && skill && (
+        <StatsPanel plugin={plugin} skill={skill} />
+      )}
+
+      {/* Timeline tab */}
+      {activeTab === "timeline" && <>
       {/* TrendChart */}
       {history.length >= 2 && (
         <div style={{ marginBottom: 16 }}>
@@ -721,11 +764,18 @@ export function HistoryPage() {
             <SingleRunDetail run={selectedRun} plugin={plugin} skill={skill} onDelete={handleDelete} />
           ) : (
             <div className="text-center py-20">
-              <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: "var(--surface-2)" }}>
+              <button
+                onClick={() => navigate(`/skills/${plugin}/${skill}`)}
+                className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 transition-all duration-150"
+                style={{ background: "var(--surface-2)" }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-3)"; e.currentTarget.style.transform = "scale(1.05)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "var(--surface-2)"; e.currentTarget.style.transform = "scale(1)"; }}
+                title="Back to skill"
+              >
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="15 18 9 12 15 6" />
                 </svg>
-              </div>
+              </button>
               <p className="text-[13px]" style={{ color: "var(--text-tertiary)" }}>
                 {compareMode ? "Check two runs and click Compare Selected" : "Select a run to view details"}
               </p>
@@ -733,6 +783,7 @@ export function HistoryPage() {
           )}
         </div>
       </div>
+      </>}
     </div>
   );
 }

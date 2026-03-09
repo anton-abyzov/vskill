@@ -1,5 +1,5 @@
 // API client for the eval server
-import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, DependenciesResponse } from "./types";
+import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, DependenciesResponse, StatsResult } from "./types";
 
 const BASE = "";
 
@@ -121,6 +121,10 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content }),
     });
+  },
+
+  getStats(plugin: string, skill: string): Promise<StatsResult> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/stats`);
   },
 
   getDependencies(plugin: string, skill: string): Promise<DependenciesResponse> {

@@ -76,7 +76,7 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
 
   return new Promise((resolve) => {
     server.listen(port, () => {
-      console.log(`\n  Skill Eval UI: http://localhost:${port}\n`);
+      console.log(`\n  Skill Builder: http://localhost:${port}\n`);
       resolve(server);
     });
   });

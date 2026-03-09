@@ -3,6 +3,8 @@ import { useParams, Link, useSearchParams, useNavigate } from "react-router-dom"
 import { useSSE } from "../sse";
 import { api } from "../api";
 import { GroupedBarChart } from "../components/GroupedBarChart";
+import { ProgressLog } from "../components/ProgressLog";
+import type { ProgressEntry } from "../components/ProgressLog";
 import type { EvalsFile, BenchmarkResult, CaseHistoryEntry } from "../types";
 
 interface AssertionEvent {
@@ -128,9 +130,21 @@ export function BenchmarkPage() {
     });
   }
 
-  // Process events into results
+  // Process events into results + progress log
   const currentResults = new Map<number, CaseData>();
+  const progressEntries: ProgressEntry[] = [];
   for (const evt of events) {
+    if (evt.event === "progress") {
+      const d = evt.data as { eval_id: number; phase: string; message: string; current?: number; total?: number };
+      progressEntries.push({
+        timestamp: Date.now(),
+        evalId: d.eval_id,
+        phase: d.phase,
+        message: d.message,
+        current: d.current,
+        total: d.total,
+      });
+    }
     if (evt.event === "case_start") {
       const d = evt.data as { eval_id: number; eval_name?: string };
       if (!currentResults.has(d.eval_id)) {
@@ -619,6 +633,13 @@ export function BenchmarkPage() {
         <div className="text-center py-16 animate-fade-in">
           <div className="spinner-lg mx-auto mb-4" />
           <p className="text-[14px]" style={{ color: "var(--text-secondary)" }}>Generating outputs and evaluating assertions...</p>
+        </div>
+      )}
+
+      {/* Progress log */}
+      {progressEntries.length > 0 && (
+        <div className="glass-card mt-3 overflow-hidden">
+          <ProgressLog entries={progressEntries} isRunning={running} />
         </div>
       )}
     </div>

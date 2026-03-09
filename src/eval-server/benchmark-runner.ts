@@ -45,6 +45,12 @@ export async function runBenchmarkSSE(opts: BenchmarkRunOptions): Promise<void> 
       total: evalCases.length,
     });
 
+    sendSSE(res, "progress", {
+      eval_id: evalCase.id,
+      phase: "generating",
+      message: `Generating LLM response for "${evalCase.name}"...`,
+    });
+
     try {
       const genResult = await client.generate(systemPrompt, evalCase.prompt);
       const totalTokens = genResult.inputTokens != null && genResult.outputTokens != null
@@ -58,9 +64,26 @@ export async function runBenchmarkSSE(opts: BenchmarkRunOptions): Promise<void> 
         tokens: totalTokens,
       });
 
+      sendSSE(res, "progress", {
+        eval_id: evalCase.id,
+        phase: "judging",
+        message: `Evaluating ${evalCase.assertions.length} assertion${evalCase.assertions.length !== 1 ? "s" : ""}...`,
+        total: evalCase.assertions.length,
+      });
+
       const assertionResults: BenchmarkAssertionResult[] = [];
 
-      for (const assertion of evalCase.assertions) {
+      for (let ai = 0; ai < evalCase.assertions.length; ai++) {
+        const assertion = evalCase.assertions[ai];
+
+        sendSSE(res, "progress", {
+          eval_id: evalCase.id,
+          phase: "judging_assertion",
+          message: `Evaluating assertion ${ai + 1}/${evalCase.assertions.length}: "${assertion.text.slice(0, 60)}${assertion.text.length > 60 ? "..." : ""}"`,
+          current: ai + 1,
+          total: evalCase.assertions.length,
+          assertion_id: assertion.id,
+        });
         if (isAborted()) break;
         const result = await judgeAssertion(genResult.text, assertion, client);
         assertionResults.push(result);

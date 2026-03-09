@@ -220,6 +220,118 @@ export async function getCaseHistory(
   return entries;
 }
 
+export interface StatsResult {
+  totalRuns: number;
+  assertionStats: Array<{
+    id: string;
+    text: string;
+    passRate: number;
+    totalRuns: number;
+    evalId: number;
+    evalName: string;
+  }>;
+  modelStats: Array<{
+    model: string;
+    runs: number;
+    avgPassRate: number;
+    avgDurationMs: number;
+  }>;
+  trendPoints: Array<{
+    timestamp: string;
+    passRate: number;
+    model: string;
+  }>;
+}
+
+export async function computeStats(skillDir: string): Promise<StatsResult> {
+  const historyDir = join(skillDir, "evals", "history");
+  let files: string[];
+  try {
+    files = await readdir(historyDir);
+  } catch {
+    return { totalRuns: 0, assertionStats: [], modelStats: [], trendPoints: [] };
+  }
+
+  const jsonFiles = files.filter((f) => f.endsWith(".json")).sort();
+
+  // Per-assertion tracking: key = "evalId:assertionId"
+  const assertionMap = new Map<string, { id: string; text: string; passes: number; total: number; evalId: number; evalName: string }>();
+  // Per-model tracking
+  const modelMap = new Map<string, { runs: number; totalPassRate: number; totalDurationMs: number }>();
+  // Trend points
+  const trendPoints: StatsResult["trendPoints"] = [];
+
+  for (const file of jsonFiles) {
+    try {
+      const content = await readFile(join(historyDir, file), "utf-8");
+      const data = JSON.parse(content) as BenchmarkResult & { type?: string };
+      const entryType = data.type || "benchmark";
+      if (entryType !== "benchmark") continue; // Only count benchmark runs for stats
+
+      const totalAssertions = data.cases.reduce((s, c) => s + c.assertions.length, 0);
+      const passedAssertions = data.cases.reduce((s, c) => s + c.assertions.filter((a) => a.pass).length, 0);
+      const passRate = totalAssertions > 0 ? passedAssertions / totalAssertions : 0;
+      const totalDurationMs = data.cases.reduce((s, c) => s + (c.durationMs ?? 0), 0);
+
+      // Trend
+      trendPoints.push({
+        timestamp: fromFilesafeTimestamp(file),
+        passRate,
+        model: data.model,
+      });
+
+      // Model stats
+      const existing = modelMap.get(data.model) || { runs: 0, totalPassRate: 0, totalDurationMs: 0 };
+      existing.runs++;
+      existing.totalPassRate += passRate;
+      existing.totalDurationMs += totalDurationMs;
+      modelMap.set(data.model, existing);
+
+      // Per-assertion stats
+      for (const c of data.cases) {
+        for (const a of c.assertions) {
+          const key = `${c.eval_id}:${a.id}`;
+          const stat = assertionMap.get(key) || { id: a.id, text: a.text, passes: 0, total: 0, evalId: c.eval_id, evalName: c.eval_name };
+          stat.total++;
+          if (a.pass) stat.passes++;
+          // Keep latest text
+          stat.text = a.text;
+          assertionMap.set(key, stat);
+        }
+      }
+    } catch {
+      // Skip malformed files
+    }
+  }
+
+  const assertionStats = Array.from(assertionMap.values())
+    .map((s) => ({
+      id: s.id,
+      text: s.text,
+      passRate: s.total > 0 ? s.passes / s.total : 0,
+      totalRuns: s.total,
+      evalId: s.evalId,
+      evalName: s.evalName,
+    }))
+    .sort((a, b) => a.passRate - b.passRate); // Worst-performing first
+
+  const modelStats = Array.from(modelMap.entries())
+    .map(([model, s]) => ({
+      model,
+      runs: s.runs,
+      avgPassRate: s.runs > 0 ? s.totalPassRate / s.runs : 0,
+      avgDurationMs: s.runs > 0 ? s.totalDurationMs / s.runs : 0,
+    }))
+    .sort((a, b) => b.avgPassRate - a.avgPassRate);
+
+  return {
+    totalRuns: trendPoints.length,
+    assertionStats,
+    modelStats,
+    trendPoints,
+  };
+}
+
 export function computeRegressions(
   current: BenchmarkResult,
   previous: BenchmarkResult,

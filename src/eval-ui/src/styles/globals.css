@@ -301,3 +301,10 @@ body {
 .score-ring .fill {
   transition: stroke-dashoffset 0.8s var(--ease-out-expo);
 }
+
+/* ------------------------------------------------------------------ */
+/* Divider color for dark theme                                       */
+/* ------------------------------------------------------------------ */
+.divide-y > * + * {
+  border-top-color: var(--border-subtle);
+}

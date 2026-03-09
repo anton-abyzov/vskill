@@ -39,6 +39,22 @@ export interface BenchmarkAssertionResult {
   reasoning: string;
 }
 
+export interface ComparisonCaseDetail {
+  skillDurationMs: number;
+  skillTokens: number | null;
+  skillInputTokens?: number | null;
+  skillOutputTokens?: number | null;
+  baselineDurationMs: number;
+  baselineTokens: number | null;
+  baselineInputTokens?: number | null;
+  baselineOutputTokens?: number | null;
+  skillContentScore: number;
+  skillStructureScore: number;
+  baselineContentScore: number;
+  baselineStructureScore: number;
+  winner: "skill" | "baseline" | "tie";
+}
+
 export interface BenchmarkCase {
   eval_id: number;
   eval_name: string;
@@ -47,7 +63,11 @@ export interface BenchmarkCase {
   pass_rate: number;
   durationMs?: number;
   tokens?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  output?: string;
   assertions: BenchmarkAssertionResult[];
+  comparisonDetail?: ComparisonCaseDetail;
 }
 
 export interface BenchmarkResult {
@@ -56,7 +76,11 @@ export interface BenchmarkResult {
   skill_name: string;
   cases: BenchmarkCase[];
   overall_pass_rate?: number;
-  type?: "benchmark" | "comparison";
+  type?: "benchmark" | "comparison" | "baseline";
+  provider?: string;
+  totalDurationMs?: number;
+  totalInputTokens?: number | null;
+  totalOutputTokens?: number | null;
   verdict?: string;
   comparison?: {
     skillPassRate: number;
@@ -73,7 +97,55 @@ export interface HistorySummary {
   model: string;
   skillName: string;
   passRate: number;
-  type: "benchmark" | "comparison";
+  type: "benchmark" | "comparison" | "baseline";
+  caseCount?: number;
+  totalDurationMs?: number;
+  totalTokens?: number | null;
+  provider?: string;
+  verdict?: string;
+}
+
+export interface HistoryFilter {
+  model?: string;
+  type?: "benchmark" | "comparison" | "baseline";
+  from?: string;
+  to?: string;
+}
+
+export interface HistoryCompareResult {
+  runA: { timestamp: string; model: string; passRate: number; type: string };
+  runB: { timestamp: string; model: string; passRate: number; type: string };
+  regressions: Array<{
+    assertionId: string;
+    evalId: number;
+    evalName: string;
+    change: "regression" | "improvement";
+  }>;
+  caseDiffs: Array<{
+    eval_id: number;
+    eval_name: string;
+    statusA: "pass" | "fail" | "error" | "missing";
+    statusB: "pass" | "fail" | "error" | "missing";
+    passRateA: number | null;
+    passRateB: number | null;
+    durationMsA?: number | null;
+    durationMsB?: number | null;
+    tokensA?: number | null;
+    tokensB?: number | null;
+  }>;
+}
+
+export interface CaseHistoryEntry {
+  timestamp: string;
+  model: string;
+  type: "benchmark" | "comparison" | "baseline";
+  provider?: string;
+  pass_rate: number;
+  durationMs?: number;
+  tokens?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  assertions: BenchmarkAssertionResult[];
 }
 
 export interface ActivationResult {

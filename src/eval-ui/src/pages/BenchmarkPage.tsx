@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { useParams, Link, useSearchParams, useNavigate } from "react-router-dom";
 import { useSSE } from "../sse";
 import { api } from "../api";
 import { GroupedBarChart } from "../components/GroupedBarChart";
-import type { EvalsFile, BenchmarkResult } from "../types";
+import type { EvalsFile, BenchmarkResult, CaseHistoryEntry } from "../types";
 
 interface AssertionEvent {
   eval_id: number;
@@ -43,12 +43,20 @@ interface CaseData {
 
 export function BenchmarkPage() {
   const { plugin, skill } = useParams<{ plugin: string; skill: string }>();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { events, running, done, error, start } = useSSE();
   const [expandedOutputs, setExpandedOutputs] = useState<Set<number>>(new Set());
   const [model, setModel] = useState<string | null>(null);
   const [evalCases, setEvalCases] = useState<EvalsFile | null>(null);
   const [runScope, setRunScope] = useState<"all" | number | null>(null);
   const [previousBenchmark, setPreviousBenchmark] = useState<BenchmarkResult | null>(null);
+  const [isBaselineMode, setIsBaselineMode] = useState(false);
+  const [expandedCaseHistory, setExpandedCaseHistory] = useState<number | null>(null);
+  const [caseHistoryData, setCaseHistoryData] = useState<CaseHistoryEntry[]>([]);
+  const [caseHistoryModelFilter, setCaseHistoryModelFilter] = useState<string>("");
+  const [caseHistoryLoading, setCaseHistoryLoading] = useState(false);
+  const autostartedRef = useRef(false);
 
   useEffect(() => {
     api.getConfig().then((c) => setModel(c.model)).catch(() => {});
@@ -58,12 +66,58 @@ export function BenchmarkPage() {
     }
   }, [plugin, skill]);
 
+  // Autostart support
+  useEffect(() => {
+    if (autostartedRef.current) return;
+    if (!plugin || !skill) return;
+    const autostart = searchParams.get("autostart");
+    const mode = searchParams.get("mode");
+    if (autostart === "true") {
+      autostartedRef.current = true;
+      if (mode === "baseline") {
+        handleStartBaseline();
+      } else {
+        handleStartBenchmark();
+      }
+    }
+  }, [plugin, skill, searchParams]);
+
   function handleStartBenchmark(evalIds?: number[]) {
     api.getConfig().then((c) => setModel(c.model)).catch(() => {});
     setExpandedOutputs(new Set());
+    setIsBaselineMode(false);
     setRunScope(evalIds?.length === 1 ? evalIds[0] : "all");
     const body = evalIds ? { eval_ids: evalIds } : undefined;
     start(`/api/skills/${plugin}/${skill}/benchmark`, body);
+  }
+
+  function handleStartBaseline() {
+    api.getConfig().then((c) => setModel(c.model)).catch(() => {});
+    setExpandedOutputs(new Set());
+    setIsBaselineMode(true);
+    setRunScope("all");
+    start(`/api/skills/${plugin}/${skill}/baseline`);
+  }
+
+  function toggleCaseHistory(evalId: number) {
+    if (expandedCaseHistory === evalId) {
+      setExpandedCaseHistory(null);
+      setCaseHistoryData([]);
+      setCaseHistoryModelFilter("");
+      return;
+    }
+    setExpandedCaseHistory(evalId);
+    setCaseHistoryModelFilter("");
+    loadCaseHistory(evalId);
+  }
+
+  function loadCaseHistory(evalId: number, modelFilter?: string) {
+    if (!plugin || !skill) return;
+    setCaseHistoryLoading(true);
+    api.getCaseHistory(plugin, skill, evalId, modelFilter || undefined)
+      .then(setCaseHistoryData)
+      .catch(() => setCaseHistoryData([]))
+      .finally(() => setCaseHistoryLoading(false));
   }
 
   function toggleExpand(evalId: number) {
@@ -124,7 +178,7 @@ export function BenchmarkPage() {
           {skill}
         </Link>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
-        <span className="font-medium" style={{ color: "var(--text-primary)" }}>Benchmark</span>
+        <span className="font-medium" style={{ color: "var(--text-primary)" }}>{isBaselineMode ? "Baseline (no skill)" : "Benchmark"}</span>
       </div>
 
       <div className="mb-3">
@@ -133,14 +187,27 @@ export function BenchmarkPage() {
         </p>
       </div>
 
-      {/* Run All button */}
-      <button onClick={() => handleStartBenchmark()} disabled={running} className="btn btn-primary mb-7">
-        {running && runScope === "all" ? (
-          <><div className="spinner" style={{ borderTopColor: "#fff", borderColor: "rgba(255,255,255,0.2)", width: 14, height: 14 }} /> Running All...</>
-        ) : (
-          <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg> Run All ({evalCases?.evals.length ?? 0} cases)</>
-        )}
-      </button>
+      {/* Run buttons */}
+      <div className="flex items-center gap-2 mb-7">
+        <button onClick={() => handleStartBenchmark()} disabled={running} className="btn btn-primary">
+          {running && runScope === "all" && !isBaselineMode ? (
+            <><div className="spinner" style={{ borderTopColor: "#fff", borderColor: "rgba(255,255,255,0.2)", width: 14, height: 14 }} /> Running All...</>
+          ) : (
+            <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg> Run All ({evalCases?.evals.length ?? 0} cases)</>
+          )}
+        </button>
+        <button onClick={() => handleStartBaseline()} disabled={running} className="btn btn-ghost" style={{ color: "#f97316" }}>
+          {running && isBaselineMode ? (
+            <><div className="spinner" style={{ borderTopColor: "#f97316", borderColor: "rgba(249,115,22,0.2)", width: 14, height: 14 }} /> Running Baseline...</>
+          ) : (
+            <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" /></svg> Run Baseline</>
+          )}
+        </button>
+        <button onClick={() => navigate(`/skills/${plugin}/${skill}/compare`)} className="btn btn-purple">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>
+          Run A/B
+        </button>
+      </div>
 
       {error && (
         <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
@@ -237,10 +304,16 @@ export function BenchmarkPage() {
         <div className="space-y-3 stagger-children">
           {Array.from(currentResults.entries()).map(([evalId, data]) => {
             const isExpanded = expandedOutputs.has(evalId);
+            const isCompleted = !!data.status;
+            const isHistoryOpen = expandedCaseHistory === evalId;
 
             return (
               <div key={evalId} className="glass-card overflow-hidden">
-                <div className="p-5">
+                <div
+                  className="p-5"
+                  style={{ cursor: isCompleted ? "pointer" : "default" }}
+                  onClick={() => { if (isCompleted) toggleCaseHistory(evalId); }}
+                >
                   {/* Header row */}
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
@@ -283,6 +356,15 @@ export function BenchmarkPage() {
                           Evaluating...
                         </div>
                       )}
+                      {/* History expand indicator */}
+                      {isCompleted && (
+                        <svg
+                          width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2.5"
+                          style={{ transform: isHistoryOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s ease", flexShrink: 0 }}
+                        >
+                          <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                      )}
                     </div>
                   </div>
 
@@ -318,11 +400,127 @@ export function BenchmarkPage() {
                   </div>
                 </div>
 
+                {/* Per-case history panel */}
+                {isHistoryOpen && (
+                  <div className="px-5 py-4 animate-fade-in" style={{ borderTop: "1px solid var(--border-subtle)", background: "var(--surface-1)" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-tertiary)" }}>
+                        Case History
+                      </div>
+                      {/* Model filter */}
+                      <select
+                        value={caseHistoryModelFilter}
+                        onChange={(e) => {
+                          setCaseHistoryModelFilter(e.target.value);
+                          loadCaseHistory(evalId, e.target.value);
+                        }}
+                        className="text-[11px] px-2 py-1 rounded"
+                        style={{ background: "var(--surface-2)", color: "var(--text-secondary)", border: "1px solid var(--border-subtle)" }}
+                      >
+                        <option value="">All models</option>
+                        {[...new Set(caseHistoryData.map((h) => h.model))].map((m) => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {caseHistoryLoading ? (
+                      <div className="flex items-center justify-center py-4">
+                        <div className="spinner" style={{ width: 16, height: 16 }} />
+                      </div>
+                    ) : caseHistoryData.length === 0 ? (
+                      <div className="text-[12px] py-3 text-center" style={{ color: "var(--text-tertiary)" }}>
+                        No history found for this case.
+                      </div>
+                    ) : (
+                      <>
+                        {/* Mini trend line */}
+                        {caseHistoryData.length >= 2 && (() => {
+                          const points = caseHistoryData.slice().reverse();
+                          const w = 200;
+                          const h = 40;
+                          const pad = 4;
+                          const maxRate = 1;
+                          const stepX = (w - pad * 2) / (points.length - 1);
+                          return (
+                            <div className="mb-3">
+                              <svg width={w} height={h} style={{ display: "block" }}>
+                                <polyline
+                                  points={points.map((p, i) => {
+                                    const x = pad + i * stepX;
+                                    const y = h - pad - ((p.pass_rate / maxRate) * (h - pad * 2));
+                                    return `${x.toFixed(1)},${y.toFixed(1)}`;
+                                  }).join(" ")}
+                                  fill="none"
+                                  stroke="var(--accent)"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                                {points.map((p, i) => {
+                                  const x = pad + i * stepX;
+                                  const y = h - pad - ((p.pass_rate / maxRate) * (h - pad * 2));
+                                  return <circle key={i} cx={x} cy={y} r="2.5" fill="var(--accent)" />;
+                                })}
+                              </svg>
+                            </div>
+                          );
+                        })()}
+                        {/* History entries */}
+                        <div className="space-y-1.5">
+                          {caseHistoryData.map((entry, i) => {
+                            const pct = Math.round(entry.pass_rate * 100);
+                            const when = new Date(entry.timestamp);
+                            return (
+                              <div
+                                key={i}
+                                className="flex items-center gap-3 px-3 py-2 rounded-lg text-[12px]"
+                                style={{ background: "var(--surface-2)" }}
+                              >
+                                <span className="text-[11px] flex-shrink-0" style={{ color: "var(--text-tertiary)" }}>
+                                  {when.toLocaleDateString()} {when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                                <span
+                                  className="pill flex-shrink-0"
+                                  style={{ background: "var(--surface-3)", color: "var(--text-secondary)", fontSize: "10px" }}
+                                >
+                                  {entry.model}
+                                </span>
+                                <span
+                                  className="pill flex-shrink-0"
+                                  style={{
+                                    background: pct >= 80 ? "var(--green-muted)" : pct >= 50 ? "var(--yellow-muted)" : "var(--red-muted)",
+                                    color: pct >= 80 ? "var(--green)" : pct >= 50 ? "var(--yellow)" : "var(--red)",
+                                    fontSize: "10px",
+                                  }}
+                                >
+                                  {pct}%
+                                </span>
+                                {entry.durationMs != null && (
+                                  <span className="text-[11px] font-mono" style={{ color: "var(--text-tertiary)" }}>
+                                    {(entry.durationMs / 1000).toFixed(1)}s
+                                  </span>
+                                )}
+                                {entry.tokens != null && (
+                                  <span className="text-[11px] font-mono" style={{ color: "var(--text-tertiary)" }}>
+                                    {entry.tokens.toLocaleString()} tok
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
                 {/* Expand/collapse LLM output */}
                 {data.output && (
                   <>
                     <button
-                      onClick={() => toggleExpand(evalId)}
+                      onClick={(e) => { e.stopPropagation(); toggleExpand(evalId); }}
                       className="w-full px-5 py-2.5 flex items-center justify-center gap-2 text-[12px] font-medium transition-all duration-150"
                       style={{
                         background: "var(--surface-2)",

@@ -2,7 +2,7 @@
 // benchmark-history.ts -- timestamped benchmark history with regression diffing
 // ---------------------------------------------------------------------------
 
-import { readdir, readFile, mkdir, writeFile } from "node:fs/promises";
+import { readdir, readFile, mkdir, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { BenchmarkResult, BenchmarkAssertionResult } from "./benchmark.js";
 import { writeBenchmark } from "./benchmark.js";
@@ -13,7 +13,32 @@ export interface HistorySummary {
   model: string;
   skillName: string;
   passRate: number;
-  type: "benchmark" | "comparison";
+  type: "benchmark" | "comparison" | "baseline";
+  caseCount: number;
+  totalDurationMs: number;
+  totalTokens: number | null;
+  provider?: string;
+  verdict?: string;
+}
+
+export interface HistoryFilter {
+  model?: string;
+  type?: "benchmark" | "comparison" | "baseline";
+  from?: string; // ISO timestamp
+  to?: string;   // ISO timestamp
+}
+
+export interface CaseHistoryEntry {
+  timestamp: string;
+  model: string;
+  type: "benchmark" | "comparison" | "baseline";
+  provider?: string;
+  pass_rate: number;
+  durationMs?: number;
+  tokens?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  assertions: BenchmarkAssertionResult[];
 }
 
 export interface RegressionEntry {
@@ -38,7 +63,7 @@ function fromFilesafeTimestamp(filename: string): string {
 
 export async function writeHistoryEntry(
   skillDir: string,
-  result: BenchmarkResult & { type?: "benchmark" | "comparison" },
+  result: BenchmarkResult & { type?: "benchmark" | "comparison" | "baseline" },
 ): Promise<string> {
   const historyDir = join(skillDir, "evals", "history");
   await mkdir(historyDir, { recursive: true });
@@ -55,8 +80,23 @@ export async function writeHistoryEntry(
   return filename;
 }
 
+export async function deleteHistoryEntry(
+  skillDir: string,
+  timestamp: string,
+): Promise<boolean> {
+  const historyDir = join(skillDir, "evals", "history");
+  const filename = `${toFilesafeTimestamp(timestamp)}.json`;
+  try {
+    await unlink(join(historyDir, filename));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function listHistory(
   skillDir: string,
+  filter?: HistoryFilter,
 ): Promise<HistorySummary[]> {
   const historyDir = join(skillDir, "evals", "history");
   let files: string[];
@@ -66,23 +106,55 @@ export async function listHistory(
     return [];
   }
 
+  let jsonFiles = files.filter((f) => f.endsWith(".json")).sort().reverse();
+
+  // Pre-filter by date range using filename timestamps (fast, no JSON parse)
+  if (filter?.from || filter?.to) {
+    const fromSafe = filter.from ? toFilesafeTimestamp(filter.from) : undefined;
+    const toSafe = filter.to ? toFilesafeTimestamp(filter.to) : undefined;
+    jsonFiles = jsonFiles.filter((f) => {
+      const ts = f.replace(/\.json$/, "");
+      if (fromSafe && ts < fromSafe) return false;
+      if (toSafe && ts > toSafe) return false;
+      return true;
+    });
+  }
+
   const entries: HistorySummary[] = [];
-  for (const file of files.filter((f) => f.endsWith(".json")).sort().reverse()) {
+  for (const file of jsonFiles) {
     try {
       const content = await readFile(join(historyDir, file), "utf-8");
       const data = JSON.parse(content) as BenchmarkResult & { type?: string };
+
+      const entryType = (data.type as HistorySummary["type"]) || "benchmark";
+
+      // Post-filter by model and type
+      if (filter?.model && data.model !== filter.model) continue;
+      if (filter?.type && entryType !== filter.type) continue;
+
       const totalAssertions = data.cases.reduce((sum, c) => sum + c.assertions.length, 0);
       const passedAssertions = data.cases.reduce(
         (sum, c) => sum + c.assertions.filter((a) => a.pass).length,
         0,
       );
+      const totalDurationMs = data.cases.reduce((s, c) => s + (c.durationMs ?? 0), 0);
+      const hasTokens = data.cases.some((c) => c.tokens != null);
+      const totalTokens = hasTokens
+        ? data.cases.reduce((s, c) => s + (c.tokens ?? 0), 0)
+        : null;
+
       entries.push({
         timestamp: fromFilesafeTimestamp(file),
         filename: file,
         model: data.model,
         skillName: data.skill_name,
         passRate: totalAssertions > 0 ? passedAssertions / totalAssertions : 0,
-        type: (data.type as "benchmark" | "comparison") || "benchmark",
+        type: entryType,
+        caseCount: data.cases.length,
+        totalDurationMs,
+        totalTokens,
+        provider: data.provider,
+        verdict: data.verdict,
       });
     } catch {
       // Skip malformed files
@@ -103,6 +175,49 @@ export async function readHistoryEntry(
   } catch {
     return null;
   }
+}
+
+export async function getCaseHistory(
+  skillDir: string,
+  evalId: number,
+  filter?: { model?: string },
+): Promise<CaseHistoryEntry[]> {
+  const historyDir = join(skillDir, "evals", "history");
+  let files: string[];
+  try {
+    files = await readdir(historyDir);
+  } catch {
+    return [];
+  }
+
+  const entries: CaseHistoryEntry[] = [];
+  for (const file of files.filter((f) => f.endsWith(".json")).sort().reverse()) {
+    try {
+      const content = await readFile(join(historyDir, file), "utf-8");
+      const data = JSON.parse(content) as BenchmarkResult & { type?: string };
+
+      if (filter?.model && data.model !== filter.model) continue;
+
+      const matchingCase = data.cases.find((c) => c.eval_id === evalId);
+      if (!matchingCase) continue;
+
+      entries.push({
+        timestamp: fromFilesafeTimestamp(file),
+        model: data.model,
+        type: (data.type as CaseHistoryEntry["type"]) || "benchmark",
+        provider: data.provider,
+        pass_rate: matchingCase.pass_rate,
+        durationMs: matchingCase.durationMs,
+        tokens: matchingCase.tokens,
+        inputTokens: matchingCase.inputTokens,
+        outputTokens: matchingCase.outputTokens,
+        assertions: matchingCase.assertions,
+      });
+    } catch {
+      // Skip malformed files
+    }
+  }
+  return entries;
 }
 
 export function computeRegressions(

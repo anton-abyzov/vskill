@@ -1,5 +1,5 @@
 // API client for the eval server
-import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary } from "./types";
+import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry } from "./types";
 
 const BASE = "";
 
@@ -66,15 +66,44 @@ export const api = {
     });
   },
 
+  generateEvals(plugin: string, skill: string): Promise<EvalsFile> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/generate-evals`, {
+      method: "POST",
+    });
+  },
+
   getLatestBenchmark(plugin: string, skill: string): Promise<BenchmarkResult> {
     return fetchJson(`/api/skills/${plugin}/${skill}/benchmark/latest`);
   },
 
-  getHistory(plugin: string, skill: string): Promise<HistorySummary[]> {
-    return fetchJson(`/api/skills/${plugin}/${skill}/history`);
+  getHistory(plugin: string, skill: string, filters?: HistoryFilter): Promise<HistorySummary[]> {
+    const params = new URLSearchParams();
+    if (filters?.model) params.set("model", filters.model);
+    if (filters?.type) params.set("type", filters.type);
+    if (filters?.from) params.set("from", filters.from);
+    if (filters?.to) params.set("to", filters.to);
+    const qs = params.toString();
+    return fetchJson(`/api/skills/${plugin}/${skill}/history${qs ? "?" + qs : ""}`);
   },
 
   getHistoryEntry(plugin: string, skill: string, timestamp: string): Promise<BenchmarkResult> {
     return fetchJson(`/api/skills/${plugin}/${skill}/history/${encodeURIComponent(timestamp)}`);
+  },
+
+  compareRuns(plugin: string, skill: string, a: string, b: string): Promise<HistoryCompareResult> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/history-compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
+  },
+
+  getCaseHistory(plugin: string, skill: string, evalId: number, model?: string): Promise<CaseHistoryEntry[]> {
+    const params = new URLSearchParams();
+    if (model) params.set("model", model);
+    const qs = params.toString();
+    return fetchJson(`/api/skills/${plugin}/${skill}/history/case/${evalId}${qs ? "?" + qs : ""}`);
+  },
+
+  deleteHistoryEntry(plugin: string, skill: string, timestamp: string): Promise<{ ok: boolean }> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/history/${encodeURIComponent(timestamp)}`, {
+      method: "DELETE",
+    });
   },
 };

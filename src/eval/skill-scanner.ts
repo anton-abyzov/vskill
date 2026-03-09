@@ -1,14 +1,15 @@
 // ---------------------------------------------------------------------------
 // Filesystem scanner for plugin skills
 //
-// Supports three layouts (all scanned from root=cwd):
+// Supports four layouts (all scanned from root=cwd):
 //   1. Direct:   {root}/{plugin}/skills/{skill}/SKILL.md
 //   2. Nested:   {root}/plugins/{plugin}/skills/{skill}/SKILL.md
 //   3. Root:     {root}/skills/{skill}/SKILL.md  (plugin = repo basename)
+//   4. Self:     {root}/SKILL.md  (root IS the skill directory itself)
 // ---------------------------------------------------------------------------
 
 import { readdirSync, existsSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
 
 export interface SkillInfo {
   plugin: string;
@@ -22,6 +23,22 @@ export async function scanSkills(root: string): Promise<SkillInfo[]> {
   const skills: SkillInfo[] = [];
 
   if (!existsSync(root)) return skills;
+
+  // Layout 4: root IS the skill directory itself → {root}/SKILL.md
+  if (existsSync(join(root, "SKILL.md"))) {
+    const skillName = basename(root);
+    const parentName = basename(dirname(root));
+    const hasEvals = existsSync(join(root, "evals", "evals.json"));
+    const hasBenchmark = existsSync(join(root, "evals", "benchmark.json"));
+    skills.push({
+      plugin: parentName || "default",
+      skill: skillName,
+      dir: root,
+      hasEvals,
+      hasBenchmark,
+    });
+    return skills;
+  }
 
   // Layout 3: root-level skills/ directory → {root}/skills/{skill}/SKILL.md
   scanSkillsDir(basename(root) || "default", join(root, "skills"), skills);

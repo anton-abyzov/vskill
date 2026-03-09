@@ -7,17 +7,20 @@ import { join } from "node:path";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import { initSSE, sendSSE, sendSSEDone } from "./sse-helpers.js";
+import { runBenchmarkSSE } from "./benchmark-runner.js";
 import { scanSkills } from "../eval/skill-scanner.js";
 import { loadAndValidateEvals, EvalValidationError } from "../eval/schema.js";
 import type { EvalsFile } from "../eval/schema.js";
 import { readBenchmark } from "../eval/benchmark.js";
 import type { BenchmarkResult, BenchmarkCase, BenchmarkAssertionResult } from "../eval/benchmark.js";
-import { writeHistoryEntry, listHistory, readHistoryEntry, computeRegressions } from "../eval/benchmark-history.js";
+import { writeHistoryEntry, listHistory, readHistoryEntry, computeRegressions, deleteHistoryEntry, getCaseHistory } from "../eval/benchmark-history.js";
+import type { HistoryFilter } from "../eval/benchmark-history.js";
 import { judgeAssertion } from "../eval/judge.js";
 import { createLlmClient } from "../eval/llm.js";
 import type { ProviderName, LlmOverrides } from "../eval/llm.js";
 import { runComparison } from "../eval/comparator.js";
 import { computeVerdict } from "../eval/verdict.js";
+import { buildEvalInitPrompt, parseGeneratedEvals } from "../eval/prompt-builder.js";
 import { testActivation } from "../eval/activation-tester.js";
 import type { ActivationPrompt } from "../eval/activation-tester.js";
 
@@ -260,13 +263,37 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     sendJson(res, body, 200, req);
   });
 
+  // Generate evals using AI — reads SKILL.md and returns generated EvalsFile
+  router.post("/api/skills/:plugin/:skill/generate-evals", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    const skillMdPath = join(skillDir, "SKILL.md");
+
+    if (!existsSync(skillMdPath)) {
+      sendJson(res, { error: "SKILL.md not found — cannot generate evals without skill content" }, 400, req);
+      return;
+    }
+
+    try {
+      const skillContent = readFileSync(skillMdPath, "utf-8");
+      const prompt = buildEvalInitPrompt(skillContent);
+      const client = getClient();
+      const genResult = await client.generate(
+        "You generate eval test cases for AI skills. Output only valid JSON in a code fence.",
+        prompt,
+      );
+      const evalsFile = parseGeneratedEvals(genResult.text);
+      sendJson(res, evalsFile, 200, req);
+    } catch (err) {
+      sendJson(res, { error: `Eval generation failed: ${(err as Error).message}` }, 500, req);
+    }
+  });
+
   // Run benchmark (SSE) — optionally accepts { eval_ids: number[] } to run specific cases
   router.post("/api/skills/:plugin/:skill/benchmark", async (req, res, params) => {
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     let aborted = false;
     res.on("close", () => { aborted = true; });
 
-    // Read body before switching to SSE mode
     const body = await readBody(req).catch(() => ({})) as { eval_ids?: number[] };
     const filterIds = Array.isArray(body?.eval_ids) ? new Set(body.eval_ids) : null;
 
@@ -281,114 +308,38 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         ? `You are an AI assistant enhanced with the following skill:\n\n${skillContent}`
         : "You are a helpful AI assistant.";
 
-      // Filter to specific eval cases if requested
-      const evalCases = filterIds
-        ? evals.evals.filter((e) => filterIds.has(e.id))
-        : evals.evals;
+      await runBenchmarkSSE({
+        res, skillDir, skillName: evals.skill_name, systemPrompt,
+        runType: "benchmark", provider: currentOverrides.provider || "claude-cli",
+        evalCases: evals.evals, filterIds, client, isAborted: () => aborted,
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      sendSSEDone(res, { error: errorMsg });
+    }
+  });
 
-      const cases: BenchmarkCase[] = [];
+  // Run baseline (SSE) — same as benchmark but without skill content
+  router.post("/api/skills/:plugin/:skill/baseline", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    let aborted = false;
+    res.on("close", () => { aborted = true; });
 
-      for (const evalCase of evalCases) {
-        if (aborted) break;
+    const body = await readBody(req).catch(() => ({})) as { eval_ids?: number[] };
+    const filterIds = Array.isArray(body?.eval_ids) ? new Set(body.eval_ids) : null;
 
-        sendSSE(res, "case_start", {
-          eval_id: evalCase.id,
-          eval_name: evalCase.name,
-          total: evalCases.length,
-        });
+    initSSE(res, req);
 
-        try {
-          const genResult = await client.generate(systemPrompt, evalCase.prompt);
-          const totalTokens = genResult.inputTokens != null && genResult.outputTokens != null
-            ? genResult.inputTokens + genResult.outputTokens
-            : null;
+    try {
+      const evals = loadAndValidateEvals(skillDir);
+      const client = getClient();
 
-          // Stream the actual LLM output so the UI can display it as proof
-          sendSSE(res, "output_ready", {
-            eval_id: evalCase.id,
-            output: genResult.text,
-            durationMs: genResult.durationMs,
-            tokens: totalTokens,
-          });
-
-          const assertionResults: BenchmarkAssertionResult[] = [];
-
-          for (const assertion of evalCase.assertions) {
-            if (aborted) break;
-            const result = await judgeAssertion(genResult.text, assertion, client);
-            assertionResults.push(result);
-            sendSSE(res, "assertion_result", {
-              eval_id: evalCase.id,
-              assertion_id: result.id,
-              text: result.text,
-              pass: result.pass,
-              reasoning: result.reasoning,
-            });
-          }
-
-          const passRate =
-            assertionResults.length > 0
-              ? assertionResults.filter((a) => a.pass).length / assertionResults.length
-              : 0;
-          const status = assertionResults.every((a) => a.pass) ? "pass" : "fail";
-
-          const benchCase: BenchmarkCase = {
-            eval_id: evalCase.id,
-            eval_name: evalCase.name,
-            status: status as "pass" | "fail",
-            error_message: null,
-            pass_rate: passRate,
-            durationMs: genResult.durationMs,
-            tokens: totalTokens,
-            assertions: assertionResults,
-          };
-          cases.push(benchCase);
-
-          sendSSE(res, "case_complete", {
-            eval_id: evalCase.id,
-            status,
-            pass_rate: passRate,
-            durationMs: genResult.durationMs,
-            tokens: totalTokens,
-          });
-        } catch (err) {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          cases.push({
-            eval_id: evalCase.id,
-            eval_name: evalCase.name,
-            status: "error",
-            error_message: errorMsg,
-            pass_rate: 0,
-            assertions: [],
-          });
-          sendSSE(res, "case_complete", {
-            eval_id: evalCase.id,
-            status: "error",
-            error_message: errorMsg,
-          });
-        }
-      }
-
-      const totalAssertions = cases.reduce((s, c) => s + c.assertions.length, 0);
-      const passedAssertions = cases.reduce(
-        (s, c) => s + c.assertions.filter((a) => a.pass).length,
-        0,
-      );
-      const result: BenchmarkResult = {
-        timestamp: new Date().toISOString(),
-        model: client.model,
-        skill_name: evals.skill_name,
-        cases,
-        overall_pass_rate: totalAssertions > 0 ? passedAssertions / totalAssertions : 0,
-      };
-
-      if (!aborted) {
-        // Only save to history for full benchmark runs (not single-case)
-        if (!filterIds) {
-          await writeHistoryEntry(skillDir, result);
-        }
-        sendSSEDone(res, result);
-      }
+      await runBenchmarkSSE({
+        res, skillDir, skillName: evals.skill_name,
+        systemPrompt: "You are a helpful AI assistant.",
+        runType: "baseline", provider: currentOverrides.provider || "claude-cli",
+        evalCases: evals.evals, filterIds, client, isAborted: () => aborted,
+      });
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       sendSSEDone(res, { error: errorMsg });
@@ -516,7 +467,20 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
             r.assertionResults.length > 0
               ? r.assertionResults.filter((a) => a.pass).length / r.assertionResults.length
               : 0,
+          durationMs: r.comparison.skillDurationMs,
+          tokens: r.comparison.skillTokens,
           assertions: r.assertionResults,
+          comparisonDetail: {
+            skillDurationMs: r.comparison.skillDurationMs,
+            skillTokens: r.comparison.skillTokens,
+            baselineDurationMs: r.comparison.baselineDurationMs,
+            baselineTokens: r.comparison.baselineTokens,
+            skillContentScore: r.comparison.skillContentScore,
+            skillStructureScore: r.comparison.skillStructureScore,
+            baselineContentScore: r.comparison.baselineContentScore,
+            baselineStructureScore: r.comparison.baselineStructureScore,
+            winner: r.comparison.winner,
+          },
         }));
 
         const historyResult = {
@@ -526,6 +490,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
           cases,
           overall_pass_rate: passRate,
           type: "comparison" as const,
+          provider: currentOverrides.provider || "claude-cli",
           verdict,
           comparison: {
             skillPassRate: passRate,
@@ -544,11 +509,103 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     }
   });
 
-  // List benchmark history
+  // List benchmark history (with optional filters)
   router.get("/api/skills/:plugin/:skill/history", async (req, res, params) => {
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
-    const history = await listHistory(skillDir);
+    const url = new URL(req.url!, `http://localhost`);
+    const filter: HistoryFilter = {};
+    const modelParam = url.searchParams.get("model");
+    const typeParam = url.searchParams.get("type");
+    const fromParam = url.searchParams.get("from");
+    const toParam = url.searchParams.get("to");
+    if (modelParam) filter.model = modelParam;
+    if (typeParam && ["benchmark", "comparison", "baseline"].includes(typeParam)) {
+      filter.type = typeParam as HistoryFilter["type"];
+    }
+    if (fromParam) filter.from = fromParam;
+    if (toParam) filter.to = toParam;
+    const hasFilter = Object.keys(filter).length > 0;
+    const history = await listHistory(skillDir, hasFilter ? filter : undefined);
     sendJson(res, history, 200, req);
+  });
+
+  // Compare two history runs
+  router.get("/api/skills/:plugin/:skill/history-compare", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    const url = new URL(req.url!, `http://localhost`);
+    const tsA = url.searchParams.get("a");
+    const tsB = url.searchParams.get("b");
+    if (!tsA || !tsB) {
+      sendJson(res, { error: "Both 'a' and 'b' timestamps are required" }, 400, req);
+      return;
+    }
+
+    const [runA, runB] = await Promise.all([
+      readHistoryEntry(skillDir, tsA),
+      readHistoryEntry(skillDir, tsB),
+    ]);
+    if (!runA || !runB) {
+      sendJson(res, { error: "One or both history entries not found" }, 404, req);
+      return;
+    }
+
+    const regressions = computeRegressions(runB, runA);
+
+    // Build case diffs
+    const allEvalIds = new Set([
+      ...runA.cases.map((c) => c.eval_id),
+      ...runB.cases.map((c) => c.eval_id),
+    ]);
+    const caseDiffs = Array.from(allEvalIds).map((evalId) => {
+      const caseA = runA.cases.find((c) => c.eval_id === evalId);
+      const caseB = runB.cases.find((c) => c.eval_id === evalId);
+      return {
+        eval_id: evalId,
+        eval_name: caseA?.eval_name || caseB?.eval_name || `Eval #${evalId}`,
+        statusA: caseA?.status ?? "missing" as const,
+        statusB: caseB?.status ?? "missing" as const,
+        passRateA: caseA?.pass_rate ?? null,
+        passRateB: caseB?.pass_rate ?? null,
+        durationMsA: caseA?.durationMs ?? null,
+        durationMsB: caseB?.durationMs ?? null,
+        tokensA: caseA?.tokens ?? null,
+        tokensB: caseB?.tokens ?? null,
+      };
+    });
+
+    const totalA = runA.cases.reduce((s, c) => s + c.assertions.length, 0);
+    const passedA = runA.cases.reduce((s, c) => s + c.assertions.filter((a) => a.pass).length, 0);
+    const totalB = runB.cases.reduce((s, c) => s + c.assertions.length, 0);
+    const passedB = runB.cases.reduce((s, c) => s + c.assertions.filter((a) => a.pass).length, 0);
+
+    sendJson(res, {
+      runA: {
+        timestamp: runA.timestamp, model: runA.model,
+        passRate: totalA > 0 ? passedA / totalA : 0,
+        type: runA.type || "benchmark",
+      },
+      runB: {
+        timestamp: runB.timestamp, model: runB.model,
+        passRate: totalB > 0 ? passedB / totalB : 0,
+        type: runB.type || "benchmark",
+      },
+      regressions,
+      caseDiffs,
+    }, 200, req);
+  });
+
+  // Per-case history
+  router.get("/api/skills/:plugin/:skill/history/case/:evalId", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    const evalId = parseInt(params.evalId, 10);
+    if (isNaN(evalId)) {
+      sendJson(res, { error: "Invalid eval ID" }, 400, req);
+      return;
+    }
+    const url = new URL(req.url!, `http://localhost`);
+    const modelParam = url.searchParams.get("model") || undefined;
+    const entries = await getCaseHistory(skillDir, evalId, modelParam ? { model: modelParam } : undefined);
+    sendJson(res, entries, 200, req);
   });
 
   // Get specific history entry
@@ -560,6 +617,17 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       return;
     }
     sendJson(res, entry, 200, req);
+  });
+
+  // Delete history entry
+  router.delete("/api/skills/:plugin/:skill/history/:timestamp", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    const deleted = await deleteHistoryEntry(skillDir, params.timestamp);
+    if (!deleted) {
+      sendJson(res, { error: "History entry not found" }, 404, req);
+      return;
+    }
+    sendJson(res, { ok: true }, 200, req);
   });
 
   // Get latest benchmark

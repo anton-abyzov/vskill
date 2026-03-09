@@ -12,6 +12,22 @@ export interface BenchmarkAssertionResult {
   reasoning: string;
 }
 
+export interface ComparisonCaseDetail {
+  skillDurationMs: number;
+  skillTokens: number | null;
+  skillInputTokens?: number | null;
+  skillOutputTokens?: number | null;
+  baselineDurationMs: number;
+  baselineTokens: number | null;
+  baselineInputTokens?: number | null;
+  baselineOutputTokens?: number | null;
+  skillContentScore: number;
+  skillStructureScore: number;
+  baselineContentScore: number;
+  baselineStructureScore: number;
+  winner: "skill" | "baseline" | "tie";
+}
+
 export interface BenchmarkCase {
   eval_id: number;
   eval_name: string;
@@ -20,7 +36,11 @@ export interface BenchmarkCase {
   pass_rate: number;
   durationMs?: number;
   tokens?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  output?: string;
   assertions: BenchmarkAssertionResult[];
+  comparisonDetail?: ComparisonCaseDetail;
 }
 
 export interface BenchmarkResult {
@@ -29,6 +49,19 @@ export interface BenchmarkResult {
   skill_name: string;
   cases: BenchmarkCase[];
   overall_pass_rate?: number;
+  type?: "benchmark" | "comparison" | "baseline";
+  provider?: string;
+  totalDurationMs?: number;
+  totalInputTokens?: number | null;
+  totalOutputTokens?: number | null;
+  verdict?: string;
+  comparison?: {
+    skillPassRate: number;
+    baselinePassRate: number;
+    skillRubricAvg: number;
+    baselineRubricAvg: number;
+    delta: number;
+  };
 }
 
 export async function writeBenchmark(

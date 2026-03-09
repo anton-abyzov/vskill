@@ -1,0 +1,150 @@
+// ---------------------------------------------------------------------------
+// benchmark-runner.ts -- extracted SSE benchmark execution loop
+// Shared by /benchmark and /baseline endpoints
+// ---------------------------------------------------------------------------
+
+import type * as http from "node:http";
+import type { EvalCase } from "../eval/schema.js";
+import type { BenchmarkResult, BenchmarkCase, BenchmarkAssertionResult } from "../eval/benchmark.js";
+import type { LlmClient } from "../eval/llm.js";
+import { judgeAssertion } from "../eval/judge.js";
+import { writeHistoryEntry } from "../eval/benchmark-history.js";
+import { sendSSE, sendSSEDone } from "./sse-helpers.js";
+
+export interface BenchmarkRunOptions {
+  res: http.ServerResponse;
+  skillDir: string;
+  skillName: string;
+  systemPrompt: string;
+  runType: "benchmark" | "baseline";
+  provider: string;
+  evalCases: EvalCase[];
+  filterIds: Set<number> | null;
+  client: LlmClient;
+  isAborted: () => boolean;
+}
+
+export async function runBenchmarkSSE(opts: BenchmarkRunOptions): Promise<void> {
+  const {
+    res, skillDir, skillName, systemPrompt, runType, provider,
+    evalCases: allCases, filterIds, client, isAborted,
+  } = opts;
+
+  const evalCases = filterIds
+    ? allCases.filter((e) => filterIds.has(e.id))
+    : allCases;
+
+  const cases: BenchmarkCase[] = [];
+
+  for (const evalCase of evalCases) {
+    if (isAborted()) break;
+
+    sendSSE(res, "case_start", {
+      eval_id: evalCase.id,
+      eval_name: evalCase.name,
+      total: evalCases.length,
+    });
+
+    try {
+      const genResult = await client.generate(systemPrompt, evalCase.prompt);
+      const totalTokens = genResult.inputTokens != null && genResult.outputTokens != null
+        ? genResult.inputTokens + genResult.outputTokens
+        : null;
+
+      sendSSE(res, "output_ready", {
+        eval_id: evalCase.id,
+        output: genResult.text,
+        durationMs: genResult.durationMs,
+        tokens: totalTokens,
+      });
+
+      const assertionResults: BenchmarkAssertionResult[] = [];
+
+      for (const assertion of evalCase.assertions) {
+        if (isAborted()) break;
+        const result = await judgeAssertion(genResult.text, assertion, client);
+        assertionResults.push(result);
+        sendSSE(res, "assertion_result", {
+          eval_id: evalCase.id,
+          assertion_id: result.id,
+          text: result.text,
+          pass: result.pass,
+          reasoning: result.reasoning,
+        });
+      }
+
+      const passRate =
+        assertionResults.length > 0
+          ? assertionResults.filter((a) => a.pass).length / assertionResults.length
+          : 0;
+      const status = assertionResults.every((a) => a.pass) ? "pass" : "fail";
+
+      const benchCase: BenchmarkCase = {
+        eval_id: evalCase.id,
+        eval_name: evalCase.name,
+        status: status as "pass" | "fail",
+        error_message: null,
+        pass_rate: passRate,
+        durationMs: genResult.durationMs,
+        tokens: totalTokens,
+        inputTokens: genResult.inputTokens,
+        outputTokens: genResult.outputTokens,
+        output: genResult.text,
+        assertions: assertionResults,
+      };
+      cases.push(benchCase);
+
+      sendSSE(res, "case_complete", {
+        eval_id: evalCase.id,
+        status,
+        pass_rate: passRate,
+        durationMs: genResult.durationMs,
+        tokens: totalTokens,
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      cases.push({
+        eval_id: evalCase.id,
+        eval_name: evalCase.name,
+        status: "error",
+        error_message: errorMsg,
+        pass_rate: 0,
+        assertions: [],
+      });
+      sendSSE(res, "case_complete", {
+        eval_id: evalCase.id,
+        status: "error",
+        error_message: errorMsg,
+      });
+    }
+  }
+
+  const totalAssertions = cases.reduce((s, c) => s + c.assertions.length, 0);
+  const passedAssertions = cases.reduce(
+    (s, c) => s + c.assertions.filter((a) => a.pass).length,
+    0,
+  );
+  const totalDurationMs = cases.reduce((s, c) => s + (c.durationMs ?? 0), 0);
+  const hasTokens = cases.some((c) => c.inputTokens != null);
+
+  const result: BenchmarkResult = {
+    timestamp: new Date().toISOString(),
+    model: client.model,
+    skill_name: skillName,
+    cases,
+    overall_pass_rate: totalAssertions > 0 ? passedAssertions / totalAssertions : 0,
+    type: runType,
+    provider,
+    totalDurationMs,
+    totalInputTokens: hasTokens ? cases.reduce((s, c) => s + (c.inputTokens ?? 0), 0) : null,
+    totalOutputTokens: hasTokens ? cases.reduce((s, c) => s + (c.outputTokens ?? 0), 0) : null,
+  };
+
+  if (!isAborted()) {
+    // Only save to history for full runs (not single-case)
+    if (!filterIds) {
+      await writeHistoryEntry(skillDir, result);
+    }
+    sendSSEDone(res, result);
+  }
+}

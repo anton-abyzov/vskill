@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api";
 import { useSSE } from "../sse";
@@ -34,6 +34,8 @@ export function SkillDetailPage() {
   const [inlineResults, setInlineResults] = useState<Map<number, InlineResult>>(new Map());
   const [expandedInline, setExpandedInline] = useState<Set<number>>(new Set());
   const [lastBenchmark, setLastBenchmark] = useState<BenchmarkResult | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!plugin || !skill) return;
@@ -123,6 +125,22 @@ export function SkillDetailPage() {
     });
   }
 
+  async function generateWithAI() {
+    if (!plugin || !skill) return;
+    setGenerating(true);
+    setGenerateError(null);
+    try {
+      const generated = await api.generateEvals(plugin, skill);
+      const saved = await api.saveEvals(plugin, skill, generated);
+      setEvals(saved);
+      setError(null);
+    } catch (e) {
+      setGenerateError((e as Error).message);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   // Process SSE events into inline results
   useEffect(() => {
     if (!runningEvalId) return;
@@ -202,21 +220,23 @@ export function SkillDetailPage() {
         <span className="font-medium" style={{ color: "var(--text-primary)" }}>{skill}</span>
       </div>
 
-      {/* Action bar */}
-      <div className="flex items-center gap-2 mt-4 mb-7">
-        <Link to={`/skills/${plugin}/${skill}/benchmark`} className="btn btn-primary">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
-          Run Benchmark
-        </Link>
-        <Link to={`/skills/${plugin}/${skill}/compare`} className="btn btn-purple">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5" /><path d="M8 21H3v-5" /><path d="M21 3l-7 7" /><path d="M3 21l7-7" /></svg>
-          Compare A/B
-        </Link>
-        <Link to={`/skills/${plugin}/${skill}/history`} className="btn btn-secondary">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-          History
-        </Link>
-      </div>
+      {/* Action bar — only show when evals exist */}
+      {evals && (
+        <div className="flex items-center gap-2 mt-4 mb-7">
+          <Link to={`/skills/${plugin}/${skill}/benchmark`} className="btn btn-primary">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+            Run Benchmark
+          </Link>
+          <Link to={`/skills/${plugin}/${skill}/compare`} className="btn btn-purple">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5" /><path d="M8 21H3v-5" /><path d="M21 3l-7 7" /><path d="M3 21l7-7" /></svg>
+            Compare A/B
+          </Link>
+          <Link to={`/skills/${plugin}/${skill}/history`} className="btn btn-secondary">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+            History
+          </Link>
+        </div>
+      )}
 
       {/* Last benchmark summary */}
       {lastBenchmark && !sseRunning && (() => {
@@ -469,10 +489,40 @@ export function SkillDetailPage() {
       ) : (
         <div className="text-center py-16 animate-fade-in-scale">
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: "var(--surface-2)" }}>
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+            {generating ? (
+              <div className="spinner" style={{ width: 28, height: 28 }} />
+            ) : (
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+            )}
           </div>
-          <p className="text-[14px] font-medium" style={{ color: "var(--text-secondary)" }}>No evals.json found</p>
-          <button onClick={() => setShowForm(true)} className="btn btn-primary mt-3">Create evals.json</button>
+
+          {generating ? (
+            <>
+              <p className="text-[14px] font-medium" style={{ color: "var(--text-secondary)" }}>Generating eval cases...</p>
+              <p className="text-[12px] mt-1" style={{ color: "var(--text-tertiary)" }}>This may take 10–30 seconds</p>
+            </>
+          ) : (
+            <>
+              <p className="text-[14px] font-medium" style={{ color: "var(--text-secondary)" }}>No evals.json found</p>
+
+              {generateError && (
+                <div className="mt-3 mx-auto max-w-md px-4 py-3 rounded-lg text-[13px] text-left"
+                  style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
+                  {generateError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-center gap-2 mt-3">
+                <button onClick={generateWithAI} className="btn btn-primary">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
+                  </svg>
+                  Generate with AI
+                </button>
+                <button onClick={() => setShowForm(true)} className="btn btn-secondary">Create Manually</button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -533,6 +583,35 @@ function EvalCaseFormModal({
   const [assertions, setAssertions] = useState<Assertion[]>(
     evalCase?.assertions || [{ id: "assert-1", text: "", type: "boolean" }],
   );
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  // Lock body scroll while modal is open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  // Auto-focus the name field
+  useEffect(() => {
+    requestAnimationFrame(() => nameRef.current?.focus());
+  }, []);
+
+  // ESC to close
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onCancel();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  // Click backdrop to close
+  const handleBackdropClick = useCallback((e: React.MouseEvent) => {
+    if (e.target === overlayRef.current) onCancel();
+  }, [onCancel]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -548,60 +627,190 @@ function EvalCaseFormModal({
   }
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50 animate-overlay-in" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}>
+    <div
+      ref={overlayRef}
+      onClick={handleBackdropClick}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-overlay-in"
+      style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}
+    >
       <form
+        ref={formRef}
         onSubmit={handleSubmit}
-        className="glass-card p-6 w-full max-w-2xl max-h-[85vh] overflow-auto animate-modal-in"
-        style={{ background: "var(--surface-1)", border: "1px solid var(--border-default)" }}
+        className="w-full max-w-2xl animate-modal-in flex flex-col"
+        style={{
+          background: "var(--surface-1)",
+          border: "1px solid var(--border-default)",
+          borderRadius: "16px",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04)",
+          maxHeight: "min(85vh, 720px)",
+        }}
       >
-        <h3 className="text-[16px] font-semibold mb-5" style={{ color: "var(--text-primary)" }}>
-          {evalCase ? "Edit Eval Case" : "New Eval Case"}
-        </h3>
-
-        <label className="block mb-4">
-          <span className="text-[12px] font-medium mb-1.5 block" style={{ color: "var(--text-secondary)" }}>Name</span>
-          <input className="input-field" value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. basic-test-question" />
-        </label>
-
-        <label className="block mb-4">
-          <span className="text-[12px] font-medium mb-1.5 block" style={{ color: "var(--text-secondary)" }}>Prompt</span>
-          <textarea className="input-field h-24 resize-y" value={prompt} onChange={(e) => setPrompt(e.target.value)} required placeholder="The user prompt to test against..." />
-        </label>
-
-        <label className="block mb-4">
-          <span className="text-[12px] font-medium mb-1.5 block" style={{ color: "var(--text-secondary)" }}>Expected Output</span>
-          <textarea className="input-field h-20 resize-y" value={expectedOutput} onChange={(e) => setExpectedOutput(e.target.value)} placeholder="What a good answer should include..." />
-        </label>
-
-        <div className="mb-5">
-          <span className="text-[12px] font-medium mb-2 block" style={{ color: "var(--text-secondary)" }}>Assertions</span>
-          {assertions.map((a, i) => (
-            <div key={i} className="flex gap-2 mt-1.5">
-              <input
-                className="input-field w-32 text-[12px] font-mono"
-                value={a.id}
-                onChange={(e) => { const u = [...assertions]; u[i] = { ...u[i], id: e.target.value }; setAssertions(u); }}
-                placeholder="ID"
-              />
-              <input
-                className="input-field flex-1 text-[12px]"
-                value={a.text}
-                onChange={(e) => { const u = [...assertions]; u[i] = { ...u[i], text: e.target.value }; setAssertions(u); }}
-                placeholder="Assertion text"
-              />
-              <button type="button" onClick={() => setAssertions(assertions.filter((_, j) => j !== i))} className="btn btn-ghost p-1.5" style={{ color: "var(--red)" }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-              </button>
+        {/* Header — sticky */}
+        <div
+          className="flex items-center justify-between px-6 py-4 flex-shrink-0"
+          style={{ borderBottom: "1px solid var(--border-subtle)" }}
+        >
+          <div className="flex items-center gap-3">
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: "var(--accent-muted)" }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                {evalCase
+                  ? <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></>
+                  : <><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></>
+                }
+              </svg>
             </div>
-          ))}
-          <button type="button" onClick={() => setAssertions([...assertions, { id: `assert-${assertions.length + 1}`, text: "", type: "boolean" }])} className="btn btn-ghost text-[12px] mt-2" style={{ color: "var(--accent)" }}>
-            + Add assertion
+            <div>
+              <h3 className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                {evalCase ? "Edit Eval Case" : "New Eval Case"}
+              </h3>
+              {evalCase && (
+                <span className="text-[11px] font-mono" style={{ color: "var(--text-tertiary)" }}>
+                  #{evalCase.id}
+                </span>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-150"
+            style={{ color: "var(--text-tertiary)", background: "transparent" }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-3)"; e.currentTarget.style.color = "var(--text-primary)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-tertiary)"; }}
+            aria-label="Close"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
           </button>
         </div>
 
-        <div className="flex justify-end gap-2 pt-4" style={{ borderTop: "1px solid var(--border-subtle)" }}>
-          <button type="button" onClick={onCancel} className="btn btn-secondary">Cancel</button>
-          <button type="submit" className="btn btn-primary">Save</button>
+        {/* Scrollable body */}
+        <div className="overflow-y-auto flex-1 px-6 py-5" style={{ minHeight: 0 }}>
+          <label className="block mb-5">
+            <span className="text-[12px] font-medium mb-1.5 block" style={{ color: "var(--text-secondary)" }}>Name</span>
+            <input
+              ref={nameRef}
+              className="input-field"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              placeholder="e.g. basic-test-question"
+            />
+          </label>
+
+          <label className="block mb-5">
+            <span className="text-[12px] font-medium mb-1.5 block" style={{ color: "var(--text-secondary)" }}>Prompt</span>
+            <textarea
+              className="input-field resize-y"
+              style={{ minHeight: "96px" }}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              required
+              placeholder="The user prompt to test against..."
+            />
+          </label>
+
+          <label className="block mb-5">
+            <span className="text-[12px] font-medium mb-1.5 block" style={{ color: "var(--text-secondary)" }}>Expected Output</span>
+            <textarea
+              className="input-field resize-y"
+              style={{ minHeight: "80px" }}
+              value={expectedOutput}
+              onChange={(e) => setExpectedOutput(e.target.value)}
+              placeholder="What a good answer should include..."
+            />
+          </label>
+
+          {/* Assertions section */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Assertions</span>
+                <span
+                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                  style={{ background: "var(--surface-3)", color: "var(--text-tertiary)" }}
+                >
+                  {assertions.length}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAssertions([...assertions, { id: `assert-${assertions.length + 1}`, text: "", type: "boolean" }])}
+                className="btn btn-ghost text-[12px] py-1 px-2"
+                style={{ color: "var(--accent)" }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                Add
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {assertions.map((a, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-2 p-2.5 rounded-lg group transition-colors duration-150"
+                  style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+                >
+                  <input
+                    className="input-field text-[11px] font-mono py-1.5 px-2"
+                    style={{ background: "var(--surface-3)", width: "120px", flexShrink: 0 }}
+                    value={a.id}
+                    onChange={(e) => { const u = [...assertions]; u[i] = { ...u[i], id: e.target.value }; setAssertions(u); }}
+                    placeholder="ID"
+                  />
+                  <input
+                    className="input-field flex-1 text-[12px] py-1.5 px-2.5"
+                    style={{ background: "transparent", borderColor: "transparent" }}
+                    value={a.text}
+                    onChange={(e) => { const u = [...assertions]; u[i] = { ...u[i], text: e.target.value }; setAssertions(u); }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = "var(--border-default)"; e.currentTarget.style.background = "var(--surface-1)"; }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.background = "transparent"; }}
+                    placeholder="Assertion text"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setAssertions(assertions.filter((_, j) => j !== i))}
+                    className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all duration-150"
+                    style={{ color: "var(--red)", background: "transparent" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--red-muted)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {assertions.length === 0 && (
+              <div
+                className="text-center py-6 rounded-lg text-[12px]"
+                style={{ background: "var(--surface-2)", color: "var(--text-tertiary)", border: "1px dashed var(--border-default)" }}
+              >
+                No assertions yet. Add one to validate the eval output.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer — sticky */}
+        <div
+          className="flex items-center justify-between px-6 py-4 flex-shrink-0"
+          style={{ borderTop: "1px solid var(--border-subtle)" }}
+        >
+          <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+            Press <kbd className="px-1.5 py-0.5 rounded text-[10px] font-mono" style={{ background: "var(--surface-3)", border: "1px solid var(--border-subtle)" }}>Esc</kbd> to cancel
+          </span>
+          <div className="flex gap-2">
+            <button type="button" onClick={onCancel} className="btn btn-secondary">Cancel</button>
+            <button type="submit" className="btn btn-primary">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              {evalCase ? "Save Changes" : "Create Case"}
+            </button>
+          </div>
         </div>
       </form>
     </div>

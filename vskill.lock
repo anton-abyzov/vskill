@@ -286,8 +286,16 @@
       "marketplace": "specweave",
       "pluginDir": true,
       "scope": "project"
+    },
+    "mobile": {
+      "version": "2.2.0",
+      "sha": "6361f0b1c695",
+      "tier": "VERIFIED",
+      "installedAt": "2026-03-09T04:47:47.726Z",
+      "source": "github:anton-abyzov/vskill#plugin:mobile",
+      "scope": "project"
     }
   },
   "createdAt": "2026-02-25T06:38:01.595Z",
-  "updatedAt": "2026-02-27T19:36:15.033Z"
+  "updatedAt": "2026-03-09T04:47:47.727Z"
 }

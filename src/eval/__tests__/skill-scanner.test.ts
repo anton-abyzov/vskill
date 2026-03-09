@@ -218,6 +218,40 @@ describe("scanSkills", () => {
     expect(skills[0].skill).toBe("smp");
   });
 
+  // --- Self layout (root IS the skill dir) ---
+
+  it("discovers skill when root points directly at a skill directory", async () => {
+    const skillDir = join(testDir, "my-plugin", "skills", "my-skill");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), "# my-skill");
+    const evalsDir = join(skillDir, "evals");
+    mkdirSync(evalsDir, { recursive: true });
+    writeFileSync(
+      join(evalsDir, "evals.json"),
+      JSON.stringify({ skill_name: "my-skill", evals: [] }),
+    );
+
+    const skills = await scanSkills(skillDir);
+
+    expect(skills).toHaveLength(1);
+    expect(skills[0].skill).toBe("my-skill");
+    expect(skills[0].plugin).toBe("skills");
+    expect(skills[0].hasEvals).toBe(true);
+    expect(skills[0].dir).toBe(skillDir);
+  });
+
+  it("uses parent directory name as plugin for self layout", async () => {
+    const skillDir = join(testDir, "social-media-posting");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), "# smp");
+
+    const skills = await scanSkills(skillDir);
+
+    expect(skills).toHaveLength(1);
+    expect(skills[0].plugin).toBe(testDir.split("/").pop());
+    expect(skills[0].skill).toBe("social-media-posting");
+  });
+
   it("allows 'skills' as a plugin name inside plugins/ directory", async () => {
     createNestedSkill("skills", "scout");
 

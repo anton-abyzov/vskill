@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useSSE } from "../sse";
 import { api } from "../api";
 import { GroupedBarChart } from "../components/GroupedBarChart";
@@ -29,10 +29,21 @@ export function ComparisonPage() {
   const { events, running, done, error, start } = useSSE();
   const [expandedOutputs, setExpandedOutputs] = useState<Set<number>>(new Set());
   const [model, setModel] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  const autostartRef = useRef(false);
 
   useEffect(() => {
     api.getConfig().then((c) => setModel(c.model)).catch(() => {});
   }, []);
+
+  // Autostart support — triggered via ?autostart=true from HistoryPage rerun buttons
+  useEffect(() => {
+    if (searchParams.get("autostart") === "true" && !autostartRef.current && plugin && skill) {
+      autostartRef.current = true;
+      setExpandedOutputs(new Set());
+      start(`/api/skills/${plugin}/${skill}/compare`);
+    }
+  }, [searchParams, plugin, skill]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleStart() {
     setExpandedOutputs(new Set());

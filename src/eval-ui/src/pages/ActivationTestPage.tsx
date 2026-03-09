@@ -27,8 +27,10 @@ export function ActivationTestPage() {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [selectedSkill, setSelectedSkill] = useState<{ plugin: string; skill: string } | null>(null);
   const [skillDescription, setSkillDescription] = useState<string | null>(null);
+  const [rawContent, setRawContent] = useState<string | null>(null);
   const [promptsText, setPromptsText] = useState("");
   const [showDescription, setShowDescription] = useState(false);
+  const [descriptionView, setDescriptionView] = useState<"raw" | "preview">("preview");
   const { events, running, done, error, start } = useSSE();
 
   useEffect(() => {
@@ -39,12 +41,19 @@ export function ActivationTestPage() {
   useEffect(() => {
     if (!selectedSkill) {
       setSkillDescription(null);
+      setRawContent(null);
       return;
     }
     fetch(`/api/skills/${selectedSkill.plugin}/${selectedSkill.skill}/description`)
       .then((r) => r.json())
-      .then((d) => setSkillDescription(d.description))
-      .catch(() => setSkillDescription(null));
+      .then((d) => {
+        setSkillDescription(d.description);
+        setRawContent(d.rawContent || null);
+      })
+      .catch(() => {
+        setSkillDescription(null);
+        setRawContent(null);
+      });
   }, [selectedSkill]);
 
   function handleRun() {
@@ -150,10 +159,10 @@ export function ActivationTestPage() {
 
         {/* Right: skill description preview */}
         <div className="col-span-2">
-          <div className="glass-card h-full">
+          <div className="glass-card h-full flex flex-col">
             <button
               onClick={() => setShowDescription(!showDescription)}
-              className="w-full p-3 flex items-center justify-between text-left"
+              className="w-full p-3 flex items-center justify-between text-left flex-shrink-0"
               style={{ borderBottom: showDescription ? "1px solid var(--border-subtle)" : undefined }}
             >
               <span className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-tertiary)" }}>
@@ -167,16 +176,43 @@ export function ActivationTestPage() {
               </svg>
             </button>
             {showDescription && (
-              <div className="p-3 animate-fade-in">
-                {skillDescription ? (
-                  <div className="text-[12px] leading-relaxed whitespace-pre-wrap" style={{ color: "var(--text-secondary)" }}>
-                    {skillDescription}
+              <div className="flex-1 flex flex-col min-h-0 animate-fade-in">
+                {/* Raw / Preview tabs */}
+                {rawContent && (
+                  <div className="flex gap-0 border-b flex-shrink-0" style={{ borderColor: "var(--border-subtle)" }}>
+                    {(["preview", "raw"] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        onClick={() => setDescriptionView(tab)}
+                        className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors duration-150"
+                        style={{
+                          color: descriptionView === tab ? "var(--text-primary)" : "var(--text-tertiary)",
+                          borderBottom: descriptionView === tab ? "2px solid var(--accent)" : "2px solid transparent",
+                        }}
+                      >
+                        {tab === "raw" ? "Raw MD" : "Preview"}
+                      </button>
+                    ))}
                   </div>
-                ) : selectedSkill ? (
-                  <div className="text-[12px]" style={{ color: "var(--text-tertiary)" }}>Loading description...</div>
-                ) : (
-                  <div className="text-[12px]" style={{ color: "var(--text-tertiary)" }}>Select a skill to see its description</div>
                 )}
+                <div className="p-3 flex-1 overflow-auto" style={{ maxHeight: 320 }}>
+                  {!selectedSkill ? (
+                    <div className="text-[12px]" style={{ color: "var(--text-tertiary)" }}>Select a skill to see its description</div>
+                  ) : !skillDescription && !rawContent ? (
+                    <div className="text-[12px]" style={{ color: "var(--text-tertiary)" }}>Loading description...</div>
+                  ) : descriptionView === "raw" && rawContent ? (
+                    <pre
+                      className="text-[11px] leading-relaxed whitespace-pre-wrap break-words font-mono"
+                      style={{ color: "var(--text-secondary)", margin: 0 }}
+                    >{rawContent}</pre>
+                  ) : (
+                    <div
+                      className="text-[12px] leading-relaxed skill-md-preview"
+                      style={{ color: "var(--text-secondary)" }}
+                      dangerouslySetInnerHTML={{ __html: renderSkillMarkdown(rawContent || skillDescription || "") }}
+                    />
+                  )}
+                </div>
               </div>
             )}
             {!showDescription && skillDescription && (
@@ -385,4 +421,122 @@ function ConfusionCell({ label, abbr, count, bg, color, description }: {
       <div className="text-[9px] mt-0.5" style={{ color: "var(--text-tertiary)" }}>{description}</div>
     </div>
   );
+}
+
+/** Lightweight markdown-to-HTML renderer for SKILL.md preview (no deps). */
+function renderSkillMarkdown(md: string): string {
+  // Strip frontmatter
+  const stripped = md.replace(/^---[\s\S]*?---\n?/, "");
+
+  const lines = stripped.split("\n");
+  const out: string[] = [];
+  let inCode = false;
+  let codeLines: string[] = [];
+  let inTable = false;
+  let tableRows: string[] = [];
+
+  function flushTable() {
+    if (!inTable || tableRows.length === 0) return;
+    inTable = false;
+    const rows = tableRows.map((row) => {
+      const cells = row.split("|").slice(1, -1).map((c) => c.trim());
+      return cells;
+    });
+    // Skip separator row (row[1] if it's ---/---)
+    const headerRow = rows[0];
+    const dataRows = rows.filter((_, i) => {
+      if (i === 0) return false;
+      if (i === 1 && rows[i].every((c) => /^[-:\s]+$/.test(c))) return false;
+      return true;
+    });
+    let html = `<table style="width:100%;border-collapse:collapse;font-size:11px;margin:8px 0">`;
+    if (headerRow) {
+      html += `<thead><tr>${headerRow.map((c) => `<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border-subtle);color:var(--text-secondary);font-weight:600">${escapeHtml(c)}</th>`).join("")}</tr></thead>`;
+    }
+    html += `<tbody>${dataRows.map((r) => `<tr>${r.map((c) => `<td style="padding:4px 8px;border-bottom:1px solid var(--border-subtle);color:var(--text-tertiary)">${escapeHtml(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    out.push(html);
+    tableRows = [];
+  }
+
+  for (const line of lines) {
+    // Code blocks
+    if (line.startsWith("```")) {
+      if (inCode) {
+        out.push(`<pre style="background:var(--surface-2);padding:8px 12px;border-radius:6px;font-size:11px;overflow-x:auto;margin:6px 0;color:var(--text-secondary)">${escapeHtml(codeLines.join("\n"))}</pre>`);
+        codeLines = [];
+        inCode = false;
+      } else {
+        flushTable();
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      codeLines.push(line);
+      continue;
+    }
+
+    // Table rows
+    if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+      if (!inTable) inTable = true;
+      tableRows.push(line.trim());
+      continue;
+    } else {
+      flushTable();
+    }
+
+    // Horizontal rule
+    if (/^---+$/.test(line.trim())) {
+      out.push(`<hr style="border:none;border-top:1px solid var(--border-subtle);margin:12px 0" />`);
+      continue;
+    }
+
+    // Headers
+    const h = line.match(/^(#{1,4})\s+(.+)$/);
+    if (h) {
+      const level = h[1].length;
+      const sizes = ["", "16px", "14px", "13px", "12px"];
+      const weights = ["", "700", "600", "600", "600"];
+      const margins = ["", "16px 0 8px", "12px 0 6px", "10px 0 4px", "8px 0 4px"];
+      out.push(`<div style="font-size:${sizes[level]};font-weight:${weights[level]};margin:${margins[level]};color:var(--text-primary)">${inlineFormat(escapeHtml(h[2]))}</div>`);
+      continue;
+    }
+
+    // Unordered list
+    if (/^[-*]\s+/.test(line.trim())) {
+      const text = line.trim().replace(/^[-*]\s+/, "");
+      out.push(`<div style="padding-left:16px;margin:2px 0;color:var(--text-secondary)"><span style="color:var(--text-tertiary);margin-right:6px">•</span>${inlineFormat(escapeHtml(text))}</div>`);
+      continue;
+    }
+
+    // Ordered list
+    const ol = line.trim().match(/^(\d+)\.\s+(.+)$/);
+    if (ol) {
+      out.push(`<div style="padding-left:16px;margin:2px 0;color:var(--text-secondary)"><span style="color:var(--text-tertiary);margin-right:6px">${ol[1]}.</span>${inlineFormat(escapeHtml(ol[2]))}</div>`);
+      continue;
+    }
+
+    // Empty line
+    if (!line.trim()) {
+      out.push(`<div style="height:6px"></div>`);
+      continue;
+    }
+
+    // Paragraph
+    out.push(`<div style="margin:2px 0;color:var(--text-secondary)">${inlineFormat(escapeHtml(line))}</div>`);
+  }
+
+  flushTable();
+  return out.join("\n");
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function inlineFormat(s: string): string {
+  return s
+    .replace(/\*\*(.+?)\*\*/g, `<strong style="color:var(--text-primary)">$1</strong>`)
+    .replace(/\*(.+?)\*/g, `<em>$1</em>`)
+    .replace(/`([^`]+)`/g, `<code style="background:var(--surface-2);padding:1px 4px;border-radius:3px;font-size:10px">$1</code>`);
 }

@@ -11,6 +11,7 @@ import { sendJson } from "./router.js";
 import { registerRoutes } from "./api-routes.js";
 import { registerImproveRoutes } from "./improve-routes.js";
 import { registerModelCompareRoutes } from "./model-compare-routes.js";
+import { registerSkillCreateRoutes } from "./skill-create-routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,6 +44,7 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
   registerRoutes(router, root, opts.projectName);
   registerImproveRoutes(router, root);
   registerModelCompareRoutes(router, root);
+  registerSkillCreateRoutes(router, root);
 
   // Static asset directory
   const staticDir = path.resolve(__dirname, "../eval-ui");

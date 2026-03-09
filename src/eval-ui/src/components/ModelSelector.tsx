@@ -87,17 +87,16 @@ export function ModelSelector() {
               <div key={provider.id}>
                 {/* Provider header */}
                 <div className="px-4 py-1.5 flex items-center gap-2">
+                  <span
+                    className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                    style={{ background: provider.available ? "var(--green)" : "var(--text-tertiary)", opacity: provider.available ? 1 : 0.3 }}
+                  />
                   <span className="text-[10px] font-semibold uppercase tracking-wider" style={{
-                    color: provider.available ? "var(--text-tertiary)" : "var(--text-tertiary)",
+                    color: "var(--text-tertiary)",
                     opacity: provider.available ? 1 : 0.5,
                   }}>
                     {provider.label}
                   </span>
-                  {!provider.available && (
-                    <span className="text-[9px] px-1 py-0.5 rounded" style={{ background: "var(--surface-3)", color: "var(--text-tertiary)" }}>
-                      unavailable
-                    </span>
-                  )}
                 </div>
 
                 {/* Model options */}
@@ -126,7 +125,7 @@ export function ModelSelector() {
                       >
                         {isActive && <div className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)" }} />}
                       </div>
-                      <span className="text-[12px]">{model.label}</span>
+                      <span className="text-[12px]" style={{ fontWeight: isActive ? 600 : 400 }} title={model.id}>{model.label}</span>
                     </button>
                   );
                 })}

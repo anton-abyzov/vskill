@@ -42,13 +42,29 @@ export function SkillListPage() {
   return (
     <div className="px-10 py-8 max-w-5xl">
       {/* Header */}
-      <div className="mb-8">
-        <h2 className="text-[22px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
-          Skills
-        </h2>
-        <p className="text-[13px] mt-1" style={{ color: "var(--text-tertiary)" }}>
-          {loading ? "Scanning plugins..." : `${skills.length} skill${skills.length !== 1 ? "s" : ""} across ${Object.keys(grouped).length} plugin${Object.keys(grouped).length !== 1 ? "s" : ""}`}
-        </p>
+      <div className="mb-8 flex items-start justify-between">
+        <div>
+          <h2 className="text-[22px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
+            Skills
+          </h2>
+          <p className="text-[13px] mt-1" style={{ color: "var(--text-tertiary)" }}>
+            {loading ? "Scanning plugins..." : `${skills.length} skill${skills.length !== 1 ? "s" : ""} across ${Object.keys(grouped).length} plugin${Object.keys(grouped).length !== 1 ? "s" : ""}`}
+          </p>
+        </div>
+        {!loading && (
+          <Link
+            to="/create"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium transition-all duration-150"
+            style={{ background: "var(--accent)", color: "#fff" }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.9"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            New Skill
+          </Link>
+        )}
       </div>
 
       {/* Error */}
@@ -146,9 +162,21 @@ export function SkillListPage() {
             </svg>
           </div>
           <p className="text-[14px] font-medium" style={{ color: "var(--text-secondary)" }}>No skills found</p>
-          <p className="text-[12px] mt-1" style={{ color: "var(--text-tertiary)" }}>
-            Check your <code className="px-1.5 py-0.5 rounded text-[11px]" style={{ background: "var(--surface-2)" }}>--root</code> directory
+          <p className="text-[12px] mt-1 mb-4" style={{ color: "var(--text-tertiary)" }}>
+            Check your <code className="px-1.5 py-0.5 rounded text-[11px]" style={{ background: "var(--surface-2)" }}>--root</code> directory, or create your first skill
           </p>
+          <Link
+            to="/create"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150"
+            style={{ background: "var(--accent)", color: "#fff" }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.9"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Create Your First Skill
+          </Link>
         </div>
       )}
     </div>

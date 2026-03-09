@@ -212,7 +212,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     } catch { /* no SKILL.md */ }
     const descMatch = skillContent.match(/^---[\s\S]*?description:\s*"([^"]+)"[\s\S]*?---/);
     const description = descMatch ? descMatch[1] : skillContent.slice(0, 500);
-    sendJson(res, { description }, 200, req);
+    sendJson(res, { description, rawContent: skillContent }, 200, req);
   });
 
   // Get evals.json

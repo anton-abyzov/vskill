@@ -216,3 +216,44 @@ export interface DependenciesResponse {
   skillDependencies: SkillDependencyInfo[];
 }
 
+// ---------------------------------------------------------------------------
+// Skill creation types
+// ---------------------------------------------------------------------------
+
+export interface DetectedLayout {
+  layout: 1 | 2 | 3 | 4;
+  label: string;
+  pathTemplate: string;
+  existingPlugins: string[];
+}
+
+export interface ProjectLayoutResponse {
+  root: string;
+  detectedLayouts: DetectedLayout[];
+  suggestedLayout: 1 | 2 | 3;
+  existingSkills: Array<{ plugin: string; skill: string }>;
+}
+
+export interface CreateSkillRequest {
+  name: string;
+  plugin: string;
+  layout: 1 | 2 | 3;
+  description: string;
+  model?: string;
+  allowedTools?: string;
+  body: string;
+}
+
+export interface CreateSkillResponse {
+  ok: boolean;
+  plugin: string;
+  skill: string;
+  dir: string;
+  skillMdPath: string;
+}
+
+export interface SkillCreatorStatus {
+  installed: boolean;
+  installCommand: string;
+}
+

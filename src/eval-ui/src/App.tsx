@@ -6,6 +6,7 @@ import { BenchmarkPage } from "./pages/BenchmarkPage";
 import { ComparisonPage } from "./pages/ComparisonPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { ActivationTestPage } from "./pages/ActivationTestPage";
+import { CreateSkillPage } from "./pages/CreateSkillPage";
 import { ModelSelector } from "./components/ModelSelector";
 import { api } from "./api";
 
@@ -32,8 +33,19 @@ function IconActivation({ active }: { active: boolean }) {
   );
 }
 
+function IconPlus({ active }: { active: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? "#fff" : "currentColor"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="8" x2="12" y2="16" />
+      <line x1="8" y1="12" x2="16" y2="12" />
+    </svg>
+  );
+}
+
 const NAV_ITEMS = [
   { path: "/", label: "Skills", Icon: IconSkills },
+  { path: "/create", label: "New Skill", Icon: IconPlus },
   { path: "/activation", label: "Activation Test", Icon: IconActivation },
 ];
 
@@ -121,6 +133,7 @@ export function App() {
         <div key={location.pathname} className="animate-fade-in">
           <Routes>
             <Route path="/" element={<SkillListPage />} />
+            <Route path="/create" element={<CreateSkillPage />} />
             <Route path="/skills/:plugin/:skill" element={<SkillDetailPage />} />
             <Route path="/skills/:plugin/:skill/benchmark" element={<BenchmarkPage />} />
             <Route path="/skills/:plugin/:skill/compare" element={<ComparisonPage />} />

@@ -74,23 +74,10 @@ describe("createLlmClient", () => {
     expect(client.model).toBe("claude-sonnet");
   });
 
-  it("auto-detects ollama inside Claude Code session", () => {
+  it("defaults to claude-cli even inside Claude Code session", () => {
     process.env.CLAUDECODE = "1";
     const client = createLlmClient();
-    expect(client.model).toBe("llama3.1:8b");
-  });
-
-  it("auto-detects anthropic when ANTHROPIC_API_KEY is set", () => {
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    const client = createLlmClient();
-    expect(client.model).toBe("claude-sonnet-4-20250514");
-  });
-
-  it("ANTHROPIC_API_KEY takes priority over CLAUDECODE for auto-detection", () => {
-    process.env.CLAUDECODE = "1";
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    const client = createLlmClient();
-    expect(client.model).toBe("claude-sonnet-4-20250514");
+    expect(client.model).toBe("claude-sonnet");
   });
 
   it("explicit VSKILL_EVAL_PROVIDER overrides auto-detection", () => {
@@ -132,9 +119,8 @@ describe("createLlmClient", () => {
     expect(client.model).toBe("qwen2.5:32b");
   });
 
-  it("override allows claude-cli even inside Claude Code when forced", () => {
+  it("override provider=claude-cli inside Claude Code session", () => {
     process.env.CLAUDECODE = "1";
-    // override should bypass the CLAUDECODE guard
     const client = createLlmClient({ provider: "claude-cli" });
     expect(client.model).toBe("claude-sonnet");
   });
@@ -303,11 +289,18 @@ describe("createLlmClient", () => {
       );
     });
 
-    it("throws when explicitly selected inside Claude Code session", () => {
+    it("works inside Claude Code session (strips CLAUDE* env vars)", async () => {
       process.env.CLAUDECODE = "1";
-      expect(() => createLlmClient()).toThrow(
-        "Cannot use claude-cli provider inside a Claude Code session",
-      );
+      mockSpawn.mockReturnValue(createFakeProc("response\n"));
+
+      const client = createLlmClient();
+      expect(client.model).toBe("claude-sonnet");
+      await client.generate("sys", "usr");
+
+      // Verify CLAUDE* env vars are stripped from spawned process
+      const spawnCall = mockSpawn.mock.calls[0];
+      const env = spawnCall[2].env;
+      expect(env.CLAUDECODE).toBeUndefined();
     });
   });
 

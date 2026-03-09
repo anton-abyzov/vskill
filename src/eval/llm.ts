@@ -125,8 +125,11 @@ function createClaudeCliClient(modelOverride?: string, forced = false): LlmClien
       const combinedPrompt = `${systemPrompt}\n\n${userPrompt}`;
 
       return new Promise<string>((resolve, reject) => {
+        // Strip CLAUDECODE env so the child process doesn't think it's nested
+        const { CLAUDECODE: _, ...cleanEnv } = process.env;
         const proc = spawn("claude", ["-p", "--model", model], {
           stdio: ["pipe", "pipe", "pipe"],
+          env: cleanEnv,
         });
 
         let stdout = "";

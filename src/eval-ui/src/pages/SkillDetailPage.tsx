@@ -1,7 +1,25 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api";
+import { useSSE } from "../sse";
 import type { EvalsFile, EvalCase, Assertion } from "../types";
+
+interface AssertionResult {
+  assertion_id: string;
+  text: string;
+  pass: boolean;
+  reasoning: string;
+}
+
+interface InlineResult {
+  status?: string;
+  passRate?: number;
+  errorMessage?: string;
+  durationMs?: number;
+  tokens?: number | null;
+  output?: string;
+  assertions: AssertionResult[];
+}
 
 export function SkillDetailPage() {
   const { plugin, skill } = useParams<{ plugin: string; skill: string }>();
@@ -11,6 +29,10 @@ export function SkillDetailPage() {
   const [saving, setSaving] = useState(false);
   const [editingCase, setEditingCase] = useState<EvalCase | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const { events, running: sseRunning, start: sseStart } = useSSE();
+  const [runningEvalId, setRunningEvalId] = useState<number | null>(null);
+  const [inlineResults, setInlineResults] = useState<Map<number, InlineResult>>(new Map());
+  const [expandedInline, setExpandedInline] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     if (!plugin || !skill) return;
@@ -75,6 +97,56 @@ export function SkillDetailPage() {
     updateCase({
       ...evalCase,
       assertions: evalCase.assertions.filter((a) => a.id !== assertionId),
+    });
+  }
+
+  // Process SSE events into inline results
+  useEffect(() => {
+    if (!runningEvalId) return;
+    const result: InlineResult = { assertions: [] };
+    for (const evt of events) {
+      if (evt.event === "output_ready") {
+        const d = evt.data as { eval_id: number; output: string; durationMs?: number; tokens?: number | null };
+        if (d.eval_id === runningEvalId) {
+          result.output = d.output;
+          if (d.durationMs != null) result.durationMs = d.durationMs;
+          if (d.tokens != null) result.tokens = d.tokens;
+        }
+      }
+      if (evt.event === "assertion_result") {
+        const d = evt.data as AssertionResult & { eval_id: number };
+        if (d.eval_id === runningEvalId && !result.assertions.find((a) => a.assertion_id === d.assertion_id)) {
+          result.assertions.push(d);
+        }
+      }
+      if (evt.event === "case_complete") {
+        const d = evt.data as { eval_id: number; status: string; pass_rate?: number; error_message?: string };
+        if (d.eval_id === runningEvalId) {
+          result.status = d.status;
+          result.passRate = d.pass_rate;
+          result.errorMessage = d.error_message || undefined;
+        }
+      }
+    }
+    setInlineResults((prev) => new Map(prev).set(runningEvalId, result));
+  }, [events, runningEvalId]);
+
+  // Clear running state when SSE finishes
+  useEffect(() => {
+    if (!sseRunning && runningEvalId) setRunningEvalId(null);
+  }, [sseRunning, runningEvalId]);
+
+  function runSingleBenchmark(evalId: number) {
+    setRunningEvalId(evalId);
+    setExpandedInline((prev) => new Set(prev).add(evalId));
+    sseStart(`/api/skills/${plugin}/${skill}/benchmark`, { eval_ids: [evalId] });
+  }
+
+  function toggleInlineExpand(evalId: number) {
+    setExpandedInline((prev) => {
+      const next = new Set(prev);
+      next.has(evalId) ? next.delete(evalId) : next.add(evalId);
+      return next;
     });
   }
 
@@ -146,6 +218,18 @@ export function SkillDetailPage() {
                   <p className="text-[12px] mt-1.5 line-clamp-2" style={{ color: "var(--text-tertiary)" }}>{evalCase.prompt}</p>
                 </div>
                 <div className="flex gap-1 ml-3">
+                  <button
+                    onClick={() => runSingleBenchmark(evalCase.id)}
+                    disabled={sseRunning}
+                    className="btn btn-ghost text-[12px] flex-shrink-0"
+                    style={{ color: "var(--accent)" }}
+                  >
+                    {runningEvalId === evalCase.id ? (
+                      <><div className="spinner" style={{ width: 12, height: 12 }} /> Running...</>
+                    ) : (
+                      <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg> Run</>
+                    )}
+                  </button>
                   <button onClick={() => { setEditingCase(evalCase); setShowForm(true); }} className="btn btn-ghost text-[12px]">Edit</button>
                   <button onClick={() => deleteCase(evalCase.id)} className="btn btn-danger text-[12px]">Delete</button>
                 </div>
@@ -188,6 +272,110 @@ export function SkillDetailPage() {
                   Add assertion
                 </button>
               </div>
+
+              {/* Inline benchmark results */}
+              {(() => {
+                const ir = inlineResults.get(evalCase.id);
+                if (!ir || (ir.assertions.length === 0 && !ir.status)) return null;
+                const isExpanded = expandedInline.has(evalCase.id);
+                return (
+                  <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--border-subtle)" }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-tertiary)" }}>
+                          Benchmark Result
+                        </span>
+                        {ir.durationMs != null && (
+                          <span className="text-[11px] font-mono" style={{ color: "var(--text-tertiary)" }}>
+                            {(ir.durationMs / 1000).toFixed(1)}s
+                          </span>
+                        )}
+                        {ir.tokens != null && (
+                          <span className="text-[11px] font-mono" style={{ color: "var(--text-tertiary)" }}>
+                            {ir.tokens.toLocaleString()} tok
+                          </span>
+                        )}
+                      </div>
+                      {ir.status ? (
+                        <span
+                          className="pill"
+                          style={{
+                            background: ir.status === "pass" ? "var(--green-muted)" : ir.status === "error" ? "var(--yellow-muted)" : "var(--red-muted)",
+                            color: ir.status === "pass" ? "var(--green)" : ir.status === "error" ? "var(--yellow)" : "var(--red)",
+                          }}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full" style={{
+                            background: ir.status === "pass" ? "var(--green)" : ir.status === "error" ? "var(--yellow)" : "var(--red)"
+                          }} />
+                          {ir.status} {ir.passRate !== undefined ? `${Math.round(ir.passRate * 100)}%` : ""}
+                        </span>
+                      ) : (
+                        <div className="flex items-center gap-2 text-[12px]" style={{ color: "var(--accent)" }}>
+                          <div className="spinner" style={{ width: 12, height: 12 }} />
+                          Evaluating...
+                        </div>
+                      )}
+                    </div>
+
+                    {ir.errorMessage && (
+                      <div className="mb-2 p-2 rounded-lg text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)" }}>
+                        {ir.errorMessage}
+                      </div>
+                    )}
+
+                    <div className="space-y-1.5">
+                      {ir.assertions.map((a) => (
+                        <div
+                          key={a.assertion_id}
+                          className="flex items-start gap-2 p-2 rounded-lg animate-fade-in"
+                          style={{ background: a.pass ? "var(--green-muted)" : "var(--red-muted)" }}
+                        >
+                          <div
+                            className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
+                            style={{ background: a.pass ? "var(--green)" : "var(--red)" }}
+                          >
+                            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              {a.pass ? <polyline points="20 6 9 17 4 12" /> : <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>}
+                            </svg>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{a.text || a.assertion_id}</div>
+                            <div className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>{a.reasoning}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {ir.output && (
+                      <>
+                        <button
+                          onClick={() => toggleInlineExpand(evalCase.id)}
+                          className="mt-2 flex items-center gap-1.5 text-[11px] font-medium transition-colors duration-150"
+                          style={{ color: "var(--text-tertiary)" }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-primary)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-tertiary)"; }}
+                        >
+                          <svg
+                            width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                            style={{ transform: isExpanded ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s ease" }}
+                          >
+                            <polyline points="6 9 12 15 18 9" />
+                          </svg>
+                          {isExpanded ? "Hide Output" : "Show LLM Output"}
+                        </button>
+                        {isExpanded && (
+                          <div
+                            className="mt-2 text-[11px] leading-relaxed p-3 rounded-lg max-h-48 overflow-y-auto whitespace-pre-wrap animate-fade-in"
+                            style={{ background: "var(--surface-1)", color: "var(--text-secondary)", fontFamily: "var(--font-mono, monospace)" }}
+                          >
+                            {ir.output}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           ))}
 

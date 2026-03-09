@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useSSE } from "../sse";
 import { api } from "../api";
+import { GroupedBarChart } from "../components/GroupedBarChart";
 
 interface ComparisonOutputsEvent {
   eval_id: number;
@@ -222,6 +223,24 @@ export function ComparisonPage() {
               </div>
             );
           })}
+
+          {/* Score comparison chart */}
+          {done && comparisons.length > 1 && (
+            <GroupedBarChart
+              title="Score Comparison — With Skill vs Without"
+              groups={comparisons.map((c) => ({
+                label: c.eval_name || `Eval #${c.eval_id}`,
+                values: [
+                  { value: (c.skillContentScore + c.skillStructureScore) / 2, label: `${c.skillContentScore + c.skillStructureScore}/10` },
+                  { value: (c.baselineContentScore + c.baselineStructureScore) / 2, label: `${c.baselineContentScore + c.baselineStructureScore}/10` },
+                ],
+              }))}
+              seriesColors={["#6383ff", "#a0a0a0"]}
+              seriesLabels={["With Skill", "Without Skill"]}
+              maxValue={5}
+              yLabel="Avg Score"
+            />
+          )}
 
           {/* Verdict */}
           {done && doneData?.verdict && (() => {

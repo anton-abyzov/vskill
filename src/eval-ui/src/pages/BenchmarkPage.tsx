@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useSSE } from "../sse";
 import { api } from "../api";
+import { GroupedBarChart } from "../components/GroupedBarChart";
 import type { EvalsFile } from "../types";
 
 interface AssertionEvent {
@@ -307,6 +308,32 @@ export function BenchmarkPage() {
               </div>
             );
           })}
+
+          {/* Pass rate chart */}
+          {done && currentResults.size > 1 && (() => {
+            const entries = Array.from(currentResults.entries());
+            const passColor = "#34d399";
+            const failColor = "#f87171";
+            return (
+              <GroupedBarChart
+                title="Benchmark Results — Pass Rate per Eval"
+                groups={entries.map(([id, data]) => {
+                  const passed = data.assertions.filter((a) => a.pass).length;
+                  const total = data.assertions.length;
+                  const rate = total > 0 ? passed / total : 0;
+                  return {
+                    label: data.name || `Eval #${id}`,
+                    values: [{ value: rate * 100, label: `${passed}/${total}` }],
+                  };
+                })}
+                seriesColors={[entries.every(([, d]) => d.status === "pass") ? passColor : "#6383ff"]}
+                seriesLabels={["Pass Rate"]}
+                maxValue={100}
+                formatValue={(v) => `${Math.round(v)}%`}
+                yLabel="Accuracy"
+              />
+            );
+          })()}
 
           {/* Overall result */}
           {done && overallPct !== null && (() => {

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import { api } from "../../api";
 import type { EvalCase, Assertion, EvalsFile, CaseHistoryEntry } from "../../types";
@@ -546,11 +546,22 @@ function OutputSection({ output, durationMs, tokens }: { output: string; duratio
 function CaseHistorySection({ evalId }: { evalId: number }) {
   const { state, dispatch } = useWorkspace();
   const { plugin, skill } = state;
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [loading, setLoading] = useState(false);
   const [cache, setCache] = useState<Record<number, CaseHistoryEntry[]>>({});
 
   const entries = cache[evalId] ?? null;
+
+  // Auto-fetch on mount when expanded by default
+  useEffect(() => {
+    if (expanded && !cache[evalId]) {
+      setLoading(true);
+      api.getCaseHistory(plugin, skill, evalId)
+        .then((data) => setCache((prev) => ({ ...prev, [evalId]: data })))
+        .catch(() => setCache((prev) => ({ ...prev, [evalId]: [] })))
+        .finally(() => setLoading(false));
+    }
+  }, [evalId, plugin, skill]);
 
   const handleToggle = useCallback(async () => {
     const next = !expanded;

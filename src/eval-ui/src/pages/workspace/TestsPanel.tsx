@@ -1,7 +1,9 @@
 import { useState, useCallback } from "react";
 import { useWorkspace } from "./WorkspaceContext";
-import type { EvalCase, Assertion, EvalsFile } from "../../types";
+import { api } from "../../api";
+import type { EvalCase, Assertion, EvalsFile, CaseHistoryEntry } from "../../types";
 import type { InlineResult } from "./workspaceTypes";
+import { passRateColor, shortDate, fmtDuration, MiniTrend } from "../../utils/historyUtils";
 
 export function TestsPanel() {
   const { state, dispatch, saveEvals, runBenchmark, generateEvals } = useWorkspace();
@@ -339,6 +341,9 @@ function CaseDetail({
 
       {/* LLM Output (collapsible) */}
       {result?.output && <OutputSection output={result.output} durationMs={result.durationMs} tokens={result.tokens} />}
+
+      {/* Execution History (collapsible) */}
+      <CaseHistorySection evalId={evalCase.id} />
     </div>
   );
 }
@@ -529,6 +534,153 @@ function OutputSection({ output, durationMs, tokens }: { output: string; duratio
         >
           {output}
         </pre>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Case History Section (collapsible, lazy-loaded)
+// ---------------------------------------------------------------------------
+
+function CaseHistorySection({ evalId }: { evalId: number }) {
+  const { state, dispatch } = useWorkspace();
+  const { plugin, skill } = state;
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [cache, setCache] = useState<Record<number, CaseHistoryEntry[]>>({});
+
+  const entries = cache[evalId] ?? null;
+
+  const handleToggle = useCallback(async () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && !cache[evalId]) {
+      setLoading(true);
+      try {
+        const data = await api.getCaseHistory(plugin, skill, evalId);
+        setCache((prev) => ({ ...prev, [evalId]: data }));
+      } catch {
+        setCache((prev) => ({ ...prev, [evalId]: [] }));
+      } finally {
+        setLoading(false);
+      }
+    }
+  }, [expanded, evalId, plugin, skill, cache]);
+
+  const displayEntries = entries ? entries.slice(0, 10) : [];
+
+  return (
+    <div className="mb-5">
+      <button
+        onClick={handleToggle}
+        className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider mb-2 transition-colors duration-150"
+        style={{ color: "var(--text-tertiary)" }}
+      >
+        <svg
+          width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          style={{ transform: expanded ? "rotate(90deg)" : "rotate(0)", transition: "transform 0.2s ease" }}
+        >
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+        Execution History
+        {entries && entries.length > 0 && <span style={{ fontWeight: 400 }}>({entries.length} run{entries.length !== 1 ? "s" : ""})</span>}
+      </button>
+
+      {expanded && (
+        <div className="animate-fade-in">
+          {loading ? (
+            <div className="flex items-center gap-2 py-3">
+              <div className="spinner" style={{ width: 14, height: 14, borderWidth: 1.5 }} />
+              <span className="text-[12px]" style={{ color: "var(--text-tertiary)" }}>Loading history...</span>
+            </div>
+          ) : !entries || entries.length === 0 ? (
+            <div className="text-[12px] py-3" style={{ color: "var(--text-tertiary)" }}>
+              No history for this case
+            </div>
+          ) : (
+            <div>
+              {/* Sparkline trend */}
+              {displayEntries.length >= 2 && (
+                <div className="mb-2">
+                  <MiniTrend entries={displayEntries} />
+                </div>
+              )}
+
+              {/* History entries */}
+              <div className="space-y-2">
+                {displayEntries.map((entry, idx) => (
+                  <div
+                    key={idx}
+                    className="rounded-lg px-3 py-2.5"
+                    style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+                  >
+                    {/* Run header */}
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>
+                        {shortDate(entry.timestamp)}
+                      </span>
+                      <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>{entry.model}</span>
+                      <span
+                        className="pill"
+                        style={{
+                          fontSize: 9, padding: "1px 6px",
+                          background: entry.type === "benchmark" ? "rgba(99,131,255,0.15)" : entry.type === "comparison" ? "var(--purple-muted)" : "rgba(251,146,60,0.15)",
+                          color: entry.type === "benchmark" ? "#6383ff" : entry.type === "comparison" ? "var(--purple)" : "#fb923c",
+                        }}
+                      >
+                        {entry.type}
+                      </span>
+                      <span className="text-[12px] font-semibold ml-auto" style={{ color: passRateColor(entry.pass_rate) }}>
+                        {Math.round(entry.pass_rate * 100)}%
+                      </span>
+                    </div>
+
+                    {/* Metrics */}
+                    <div className="flex items-center gap-4 mb-1.5 text-[10px]" style={{ fontFamily: "var(--font-mono, monospace)", color: "var(--text-tertiary)" }}>
+                      {entry.durationMs != null && <span>{fmtDuration(entry.durationMs)}</span>}
+                      {entry.tokens != null && <span>{entry.tokens >= 1000 ? `${(entry.tokens / 1000).toFixed(1)}k` : entry.tokens} tok</span>}
+                    </div>
+
+                    {/* Assertions */}
+                    <div className="space-y-0.5">
+                      {entry.assertions.map((a) => (
+                        <div key={a.id} className="flex items-start gap-1.5">
+                          <span
+                            className="mt-0.5 rounded-full flex-shrink-0"
+                            style={{
+                              width: 14, height: 14,
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              background: a.pass ? "var(--green-muted)" : "var(--red-muted)",
+                            }}
+                          >
+                            {a.pass ? (
+                              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
+                            ) : (
+                              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="var(--red)" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                            )}
+                          </span>
+                          <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{a.text}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* View full history link */}
+              <button
+                onClick={() => dispatch({ type: "SET_PANEL", panel: "history" })}
+                className="mt-2 text-[11px] font-medium transition-colors duration-150"
+                style={{ color: "var(--accent)" }}
+                onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
+              >
+                View full history →
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

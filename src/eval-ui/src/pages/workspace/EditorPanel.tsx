@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import { parseFrontmatter } from "../../utils/parseFrontmatter";
+import { renderMarkdown } from "../../utils/renderMarkdown";
 import { SkillImprovePanel } from "../../components/SkillImprovePanel";
 
 type ViewMode = "split" | "raw" | "preview";
@@ -158,23 +159,20 @@ export function EditorPanel() {
                 </div>
               )}
 
-              {/* Body */}
+              {/* Body — rendered markdown */}
               {body && (
-                <pre
-                  className="text-[12px] leading-relaxed p-4 rounded-lg overflow-x-auto"
+                <div
+                  className="text-[13px] leading-relaxed p-4 rounded-lg overflow-x-auto"
                   style={{
                     background: "var(--surface-1)",
                     color: "var(--text-secondary)",
                     border: "1px solid var(--border-subtle)",
                     maxHeight: "calc(100vh - 200px)",
                     overflowY: "auto",
-                    fontFamily: "var(--font-mono, ui-monospace, monospace)",
-                    whiteSpace: "pre-wrap",
                     wordBreak: "break-word",
                   }}
-                >
-                  {body}
-                </pre>
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
+                />
               )}
             </div>
           </div>

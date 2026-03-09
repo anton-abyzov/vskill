@@ -63,6 +63,35 @@ const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
   ],
 };
 
+// ---------------------------------------------------------------------------
+// Ollama detection cache — avoids 500ms+ probe on every /api/config request.
+// Without this, page load blocks on a 2s timeout when Ollama is not running.
+// ---------------------------------------------------------------------------
+let ollamaCache: { available: boolean; models: ModelOption[]; ts: number } | null = null;
+const OLLAMA_CACHE_TTL = 30_000; // re-probe every 30s
+
+async function probeOllama(): Promise<{ available: boolean; models: ModelOption[] }> {
+  const now = Date.now();
+  if (ollamaCache && now - ollamaCache.ts < OLLAMA_CACHE_TTL) {
+    return ollamaCache;
+  }
+  let models = PROVIDER_MODELS["ollama"];
+  let available = false;
+  try {
+    const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+    const resp = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(500) });
+    if (resp.ok) {
+      available = true;
+      const data = await resp.json() as { models?: Array<{ name: string }> };
+      if (data.models?.length) {
+        models = data.models.map((m) => ({ id: m.name, label: m.name }));
+      }
+    }
+  } catch { /* ollama not running */ }
+  ollamaCache = { available, models, ts: now };
+  return ollamaCache;
+}
+
 async function detectAvailableProviders(): Promise<Array<{
   id: ProviderName;
   label: string;
@@ -92,25 +121,13 @@ async function detectAvailableProviders(): Promise<Array<{
     models: PROVIDER_MODELS["anthropic"],
   });
 
-  // Ollama — probe the server for actually installed models
-  let ollamaModels = PROVIDER_MODELS["ollama"];
-  let ollamaAvailable = false;
-  try {
-    const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-    const resp = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(2000) });
-    if (resp.ok) {
-      ollamaAvailable = true;
-      const data = await resp.json() as { models?: Array<{ name: string }> };
-      if (data.models?.length) {
-        ollamaModels = data.models.map((m) => ({ id: m.name, label: m.name }));
-      }
-    }
-  } catch { /* ollama not running */ }
+  // Ollama — cached probe (500ms timeout, refreshes every 30s)
+  const ollama = await probeOllama();
   providers.push({
     id: "ollama",
     label: "Ollama (local, free)",
-    available: ollamaAvailable,
-    models: ollamaModels,
+    available: ollama.available,
+    models: ollama.models,
   });
 
   return providers;

@@ -70,7 +70,7 @@ describe("runEvalInit", () => {
       return false;
     });
     mocks.readFileSync.mockReturnValue("# My Skill\nDoes things.");
-    mocks.generate.mockResolvedValue(VALID_GENERATED);
+    mocks.generate.mockResolvedValue({ text: VALID_GENERATED });
   });
 
   it("creates evals.json when absent", async () => {

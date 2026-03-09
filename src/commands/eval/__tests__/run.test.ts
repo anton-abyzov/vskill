@@ -86,10 +86,10 @@ describe("runEvalRun", () => {
     mocks.generate.mockImplementation(async () => {
       callCount++;
       // First call per case = generate output, remaining = judge assertions
-      if (callCount === 1) return "AI is great";
-      if (callCount <= 3) return JSON.stringify({ pass: true, reasoning: "ok" });
-      if (callCount === 4) return "Edge case handled";
-      return JSON.stringify({ pass: false, reasoning: "not quite" });
+      if (callCount === 1) return { text: "AI is great" };
+      if (callCount <= 3) return { text: JSON.stringify({ pass: true, reasoning: "ok" }) };
+      if (callCount === 4) return { text: "Edge case handled" };
+      return { text: JSON.stringify({ pass: false, reasoning: "not quite" }) };
     });
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -105,8 +105,8 @@ describe("runEvalRun", () => {
 
   it("writes benchmark.json after run", async () => {
     mocks.generate.mockImplementation(async (_sys: string, prompt: string) => {
-      if (prompt.includes("Test prompt")) return "LLM output here";
-      return JSON.stringify({ pass: true, reasoning: "ok" });
+      if (prompt.includes("Test prompt")) return { text: "LLM output here" };
+      return { text: JSON.stringify({ pass: true, reasoning: "ok" }) };
     });
     vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -129,8 +129,8 @@ describe("runEvalRun", () => {
       // First case: output generation fails
       if (callCount === 1) throw new Error("API timeout");
       // Second case: works fine
-      if (callCount === 2) return "Edge case handled";
-      return JSON.stringify({ pass: true, reasoning: "ok" });
+      if (callCount === 2) return { text: "Edge case handled" };
+      return { text: JSON.stringify({ pass: true, reasoning: "ok" }) };
     });
     vi.spyOn(console, "log").mockImplementation(() => {});
 

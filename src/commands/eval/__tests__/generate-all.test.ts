@@ -84,7 +84,7 @@ describe("runEvalGenerateAll", () => {
     testDir = join(tmpdir(), `vskill-genall-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
     vi.resetAllMocks();
-    mockGenerate.mockResolvedValue(VALID_GENERATED);
+    mockGenerate.mockResolvedValue({ text: VALID_GENERATED });
   });
 
   afterEach(() => {
@@ -135,7 +135,7 @@ describe("runEvalGenerateAll", () => {
     mockGenerate.mockImplementation(async () => {
       callCount++;
       if (callCount <= 1) throw new Error("API error");
-      return VALID_GENERATED;
+      return { text: VALID_GENERATED };
     });
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});

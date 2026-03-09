@@ -13,7 +13,7 @@ test("health endpoint returns ok", async ({ request }) => {
 
 test("UI loads with sidebar and heading", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator("text=Skill Eval")).toBeVisible();
+  await expect(page.locator("text=Skill Builder")).toBeVisible();
 });
 
 // ---------------------------------------------------------------------------
@@ -159,4 +159,43 @@ test("skill list links navigate to detail page", async ({ page }) => {
   await link.click();
   // Should navigate to skill detail page
   await expect(page).toHaveURL(/#.*test-plugin.*test-skill/);
+});
+
+// ---------------------------------------------------------------------------
+// Performance: page load must be under 1 second
+// ---------------------------------------------------------------------------
+
+test("page loads in under 1 second", async ({ page }) => {
+  const start = Date.now();
+  await page.goto("/");
+  // Wait for meaningful content (skill list rendered, not just skeleton)
+  await expect(page.locator("text=test-skill")).toBeVisible();
+  const elapsed = Date.now() - start;
+  expect(elapsed).toBeLessThan(1000);
+});
+
+test("API /api/skills responds in under 200ms", async ({ request }) => {
+  const start = Date.now();
+  const res = await request.get("/api/skills");
+  const elapsed = Date.now() - start;
+  expect(res.ok()).toBe(true);
+  expect(elapsed).toBeLessThan(200);
+});
+
+test("API /api/config responds in under 1 second", async ({ request }) => {
+  const start = Date.now();
+  const res = await request.get("/api/config");
+  const elapsed = Date.now() - start;
+  expect(res.ok()).toBe(true);
+  // With Ollama caching, config should be fast (cached after first call)
+  expect(elapsed).toBeLessThan(1000);
+});
+
+test("skill detail page loads in under 1 second", async ({ page }) => {
+  const start = Date.now();
+  await page.goto("/#/skills/test-plugin/test-skill");
+  // Wait for skill workspace to render
+  await expect(page.locator("text=test-skill").first()).toBeVisible();
+  const elapsed = Date.now() - start;
+  expect(elapsed).toBeLessThan(1000);
 });

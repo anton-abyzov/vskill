@@ -164,8 +164,9 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       const providers = await detectAvailableProviders();
       sendJson(res, { provider: currentOverrides.provider || null, model: client.model, providers });
     } catch (err) {
-      // Revert on error
-      currentOverrides = {};
+      // Revert to safe default (not empty — empty triggers auto-detection which
+      // picks ollama inside Claude Code sessions instead of claude-cli)
+      currentOverrides = { provider: "claude-cli" };
       sendJson(res, { error: (err as Error).message }, 400, req);
     }
   });

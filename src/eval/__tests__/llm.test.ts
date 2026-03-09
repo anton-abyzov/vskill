@@ -86,11 +86,11 @@ describe("createLlmClient", () => {
     expect(client.model).toBe("claude-sonnet-4-20250514");
   });
 
-  it("CLAUDECODE takes priority over ANTHROPIC_API_KEY for auto-detection", () => {
+  it("ANTHROPIC_API_KEY takes priority over CLAUDECODE for auto-detection", () => {
     process.env.CLAUDECODE = "1";
     process.env.ANTHROPIC_API_KEY = "test-key";
     const client = createLlmClient();
-    expect(client.model).toBe("llama3.1:8b");
+    expect(client.model).toBe("claude-sonnet-4-20250514");
   });
 
   it("explicit VSKILL_EVAL_PROVIDER overrides auto-detection", () => {

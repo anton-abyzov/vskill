@@ -7,8 +7,8 @@
 //   "ollama"     — Local Ollama server (free, requires ollama running)
 //
 // Auto-detection when VSKILL_EVAL_PROVIDER is not set:
-//   1. Inside Claude Code session (CLAUDECODE env) → ollama
-//   2. ANTHROPIC_API_KEY present → anthropic
+//   1. ANTHROPIC_API_KEY present → anthropic
+//   2. Inside Claude Code session (CLAUDECODE env) → ollama
 //   3. Otherwise → claude-cli (default for plain terminal)
 //
 // Model selection via VSKILL_EVAL_MODEL env var:
@@ -34,8 +34,8 @@ export interface LlmClient {
 export type ProviderName = "anthropic" | "claude-cli" | "ollama";
 
 function detectProvider(): ProviderName {
-  if (process.env.CLAUDECODE) return "ollama";
   if (process.env.ANTHROPIC_API_KEY) return "anthropic";
+  if (process.env.CLAUDECODE) return "ollama";
   return "claude-cli";
 }
 

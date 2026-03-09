@@ -1,10 +1,7 @@
 import { useState, useEffect } from "react";
 import { Routes, Route, Link, useLocation } from "react-router-dom";
 import { SkillListPage } from "./pages/SkillListPage";
-import { SkillDetailPage } from "./pages/SkillDetailPage";
-import { BenchmarkPage } from "./pages/BenchmarkPage";
-import { ComparisonPage } from "./pages/ComparisonPage";
-import { HistoryPage } from "./pages/HistoryPage";
+import { SkillWorkspace } from "./pages/workspace";
 import { ActivationTestPage } from "./pages/ActivationTestPage";
 import { CreateSkillPage } from "./pages/CreateSkillPage";
 import { ModelSelector } from "./components/ModelSelector";
@@ -129,16 +126,13 @@ export function App() {
       </nav>
 
       {/* Main */}
-      <main className="flex-1 overflow-auto" style={{ background: "var(--surface-0)" }}>
-        <div key={location.pathname} className="animate-fade-in">
+      <main className="flex-1 overflow-hidden" style={{ background: "var(--surface-0)" }}>
+        <div key={location.pathname} className="h-full">
           <Routes>
-            <Route path="/" element={<SkillListPage />} />
-            <Route path="/create" element={<CreateSkillPage />} />
-            <Route path="/skills/:plugin/:skill" element={<SkillDetailPage />} />
-            <Route path="/skills/:plugin/:skill/benchmark" element={<BenchmarkPage />} />
-            <Route path="/skills/:plugin/:skill/compare" element={<ComparisonPage />} />
-            <Route path="/skills/:plugin/:skill/history" element={<HistoryPage />} />
-            <Route path="/activation" element={<ActivationTestPage />} />
+            <Route path="/" element={<div className="overflow-auto h-full animate-fade-in"><SkillListPage /></div>} />
+            <Route path="/create" element={<div className="overflow-auto h-full animate-fade-in"><CreateSkillPage /></div>} />
+            <Route path="/skills/:plugin/:skill" element={<SkillWorkspace />} />
+            <Route path="/activation" element={<div className="overflow-auto h-full animate-fade-in"><ActivationTestPage /></div>} />
           </Routes>
         </div>
       </main>

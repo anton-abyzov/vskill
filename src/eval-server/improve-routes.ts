@@ -25,6 +25,8 @@ export function registerImproveRoutes(router: Router, root: string): void {
     const body = (await readBody(req)) as {
       provider?: ProviderName;
       model?: string;
+      eval_id?: number;
+      notes?: string;
     };
 
     try {
@@ -34,9 +36,13 @@ export function registerImproveRoutes(router: Router, root: string): void {
       let failureContext = "";
       const benchmark = await readBenchmark(skillDir);
       if (benchmark) {
-        const failedCases = benchmark.cases
-          .filter((c) => c.status === "fail")
-          .slice(0, 10);
+        let failedCases = benchmark.cases.filter((c) => c.status === "fail");
+
+        // If eval_id specified, focus on that single case
+        if (body.eval_id != null) {
+          failedCases = failedCases.filter((c) => c.eval_id === body.eval_id);
+        }
+        failedCases = failedCases.slice(0, 10);
 
         if (failedCases.length > 0) {
           const failures = failedCases.map((c) => {
@@ -44,17 +50,25 @@ export function registerImproveRoutes(router: Router, root: string): void {
               .filter((a) => !a.pass)
               .map((a) => `  - ${a.text}: ${a.reasoning}`)
               .join("\n");
-            return `Case "${c.eval_name}":\n${failedAssertions}`;
+            return `Case "${c.eval_name}" (eval_id=${c.eval_id}):\n  Prompt: ${benchmark.cases.find((bc) => bc.eval_id === c.eval_id)?.eval_name || ""}\n${failedAssertions}`;
           });
-          failureContext = `\n\n## Recent Benchmark Failures (${failedCases.length} cases)\n${failures.join("\n\n")}`;
+          const label = body.eval_id != null
+            ? `Targeted Failure (eval #${body.eval_id})`
+            : `Recent Benchmark Failures (${failedCases.length} cases)`;
+          failureContext = `\n\n## ${label}\n${failures.join("\n\n")}`;
         }
       }
+
+      // Optional user notes for guiding the improvement
+      const notesSection = body.notes?.trim()
+        ? `\n\n## User Notes\n${body.notes.trim()}`
+        : "";
 
       const systemPrompt = `You are an expert AI skill engineer. Your task is to improve a SKILL.md file based on its current content and any benchmark failures provided. Return ONLY the improved SKILL.md content — no explanations, no code fences, no preamble. The output should be valid SKILL.md that can be written directly to disk.
 
 After the improved content, on a new line, write "---REASONING---" followed by a brief explanation of what you changed and why.`;
 
-      const userPrompt = `## Current SKILL.md\n${original}${failureContext}\n\nPlease improve this SKILL.md to address the failures and improve overall quality. Return the full improved content followed by ---REASONING--- and your explanation.`;
+      const userPrompt = `## Current SKILL.md\n${original}${failureContext}${notesSection}\n\nPlease improve this SKILL.md to address the failures and improve overall quality. Return the full improved content followed by ---REASONING--- and your explanation.`;
 
       const client = createLlmClient({
         provider: body.provider,

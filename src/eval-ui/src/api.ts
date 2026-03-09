@@ -107,7 +107,7 @@ export const api = {
     });
   },
 
-  improveSkill(plugin: string, skill: string, opts: { provider?: string; model?: string }): Promise<ImproveResult> {
+  improveSkill(plugin: string, skill: string, opts: { provider?: string; model?: string; eval_id?: number; notes?: string }): Promise<ImproveResult> {
     return fetchJson(`/api/skills/${plugin}/${skill}/improve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

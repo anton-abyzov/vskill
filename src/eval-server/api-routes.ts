@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
-import { initSSE, sendSSE, sendSSEDone } from "./sse-helpers.js";
+import { initSSE, sendSSE, sendSSEDone, withHeartbeat } from "./sse-helpers.js";
 import { runBenchmarkSSE } from "./benchmark-runner.js";
 import { resolveSkillDir } from "./skill-resolver.js";
 import { scanSkills } from "../eval/skill-scanner.js";
@@ -368,7 +368,11 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         });
 
         try {
-          const comparison = await runComparison(evalCase.prompt, skillContent, client);
+          const comparison = await withHeartbeat(
+            res, evalCase.id, "comparing",
+            `Running skill vs baseline comparison for "${evalCase.name}"...`,
+            () => runComparison(evalCase.prompt, skillContent, client),
+          );
           sendSSE(res, "outputs_ready", {
             eval_id: evalCase.id,
             eval_name: evalCase.name,

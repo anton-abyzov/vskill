@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useSSE } from "../sse";
-import type { EvalsFile, EvalCase, Assertion, BenchmarkResult } from "../types";
+import type { EvalsFile, EvalCase, Assertion, BenchmarkResult, ImproveResult } from "../types";
 import { SkillContentViewer } from "../components/SkillContentViewer";
 import { SkillImprovePanel } from "../components/SkillImprovePanel";
 import { McpDependencies } from "../components/McpDependencies";
@@ -46,6 +46,10 @@ export function SkillDetailPage() {
   const [skillContent, setSkillContent] = useState("");
   const [compareTarget, setCompareTarget] = useState<EvalCase | null>(null);
   const [progressLog, setProgressLog] = useState<ProgressEntry[]>([]);
+  const [improvingEvalId, setImprovingEvalId] = useState<number | null>(null);
+  const [improveResult, setImproveResult] = useState<{ evalId: number; result: ImproveResult } | null>(null);
+  const [improveNotesFor, setImproveNotesFor] = useState<number | null>(null);
+  const [improveNotes, setImproveNotes] = useState("");
 
   useEffect(() => {
     if (!plugin || !skill) return;
@@ -215,6 +219,37 @@ export function SkillDetailPage() {
     setProgressLog([]);
     setExpandedInline((prev) => new Set(prev).add(evalId));
     sseStart(`/api/skills/${plugin}/${skill}/benchmark`, { eval_ids: [evalId] });
+  }
+
+  async function improveForCase(evalId: number, notes?: string) {
+    if (!plugin || !skill) return;
+    setImprovingEvalId(evalId);
+    setImproveResult(null);
+    setImproveNotesFor(null);
+    try {
+      const result = await api.improveSkill(plugin, skill, {
+        eval_id: evalId,
+        notes: notes || undefined,
+      });
+      setImproveResult({ evalId, result });
+    } catch {
+      // ignore - user can retry
+    } finally {
+      setImprovingEvalId(null);
+    }
+  }
+
+  async function applyImproveAndRerun(evalId: number) {
+    if (!plugin || !skill || !improveResult) return;
+    try {
+      await api.applyImprovement(plugin, skill, improveResult.result.improved);
+      setSkillContent(improveResult.result.improved);
+      setImproveResult(null);
+      // Rerun the case with the improved skill
+      runSingleBenchmark(evalId);
+    } catch {
+      // ignore
+    }
   }
 
   function toggleInlineExpand(evalId: number) {
@@ -452,20 +487,108 @@ export function SkillDetailPage() {
                       )}
                     </div>
 
-                    {/* View History link */}
+                    {/* Action links */}
                     {ir.status && (
-                      <button
-                        onClick={() => navigate(`/skills/${plugin}/${skill}/history?tab=per-eval`)}
-                        className="text-[11px] font-medium mb-2 flex items-center gap-1 transition-colors duration-150"
-                        style={{ color: "var(--text-tertiary)" }}
-                        onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-tertiary)"; }}
-                      >
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-                        </svg>
-                        View History
-                      </button>
+                      <div className="flex items-center gap-3 mb-2">
+                        <button
+                          onClick={() => navigate(`/skills/${plugin}/${skill}/history?tab=per-eval`)}
+                          className="text-[11px] font-medium flex items-center gap-1 transition-colors duration-150"
+                          style={{ color: "var(--text-tertiary)" }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-tertiary)"; }}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                          </svg>
+                          View History
+                        </button>
+                        {ir.status === "fail" && (
+                          <>
+                            <button
+                              onClick={() => improveForCase(evalCase.id)}
+                              disabled={improvingEvalId != null}
+                              className="text-[11px] font-medium flex items-center gap-1 transition-colors duration-150"
+                              style={{ color: "var(--text-tertiary)" }}
+                              onMouseEnter={(e) => { if (improvingEvalId == null) e.currentTarget.style.color = "#a855f7"; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-tertiary)"; }}
+                            >
+                              {improvingEvalId === evalCase.id ? (
+                                <><div className="spinner" style={{ width: 10, height: 10 }} /> Improving...</>
+                              ) : (
+                                <>
+                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
+                                  </svg>
+                                  Fix with AI
+                                </>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => { setImproveNotesFor(improveNotesFor === evalCase.id ? null : evalCase.id); setImproveNotes(""); }}
+                              disabled={improvingEvalId != null}
+                              className="text-[11px] font-medium flex items-center gap-1 transition-colors duration-150"
+                              style={{ color: "var(--text-tertiary)" }}
+                              onMouseEnter={(e) => { e.currentTarget.style.color = "#a855f7"; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-tertiary)"; }}
+                            >
+                              Fix with notes
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Notes input for guided improvement */}
+                    {improveNotesFor === evalCase.id && (
+                      <div className="mb-2 flex items-center gap-2 animate-fade-in">
+                        <input
+                          className="input-field flex-1 text-[12px] py-1.5"
+                          placeholder="How should it be improved? (optional)"
+                          value={improveNotes}
+                          onChange={(e) => setImproveNotes(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              improveForCase(evalCase.id, improveNotes);
+                            }
+                          }}
+                          autoFocus
+                        />
+                        <button
+                          onClick={() => improveForCase(evalCase.id, improveNotes)}
+                          disabled={improvingEvalId != null}
+                          className="btn btn-primary text-[11px] flex-shrink-0"
+                          style={{ padding: "4px 12px" }}
+                        >
+                          Improve
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Per-case improve result */}
+                    {improveResult?.evalId === evalCase.id && (
+                      <div className="mb-2 p-3 rounded-lg animate-fade-in" style={{ background: "rgba(168,85,247,0.08)", border: "1px solid rgba(168,85,247,0.2)" }}>
+                        <div className="text-[11px] mb-2" style={{ color: "var(--text-secondary)" }}>
+                          <span className="font-semibold" style={{ color: "#a855f7" }}>AI suggestion: </span>
+                          {improveResult.result.reasoning}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => applyImproveAndRerun(evalCase.id)}
+                            className="btn btn-primary text-[11px]"
+                            style={{ padding: "3px 10px" }}
+                          >
+                            Apply &amp; Rerun
+                          </button>
+                          <button
+                            onClick={() => setImproveResult(null)}
+                            className="btn btn-ghost text-[11px]"
+                            style={{ padding: "3px 10px" }}
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
                     )}
 
                     {ir.errorMessage && (

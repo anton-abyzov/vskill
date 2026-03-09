@@ -1,0 +1,356 @@
+import { useState, useEffect, useCallback } from "react";
+import { useWorkspace } from "./WorkspaceContext";
+import { api } from "../../api";
+import { TrendChart } from "../../components/TrendChart";
+import { StatsPanel } from "../../components/StatsPanel";
+import { HistoryPerEval } from "../../components/HistoryPerEval";
+import type { HistorySummary, HistoryCompareResult, BenchmarkResult } from "../../types";
+
+type Tab = "timeline" | "per-eval" | "statistics";
+
+export function HistoryPanel() {
+  const { state, dispatch } = useWorkspace();
+  const { plugin, skill } = state;
+  const [tab, setTab] = useState<Tab>("timeline");
+  const [history, setHistory] = useState<HistorySummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filterModel, setFilterModel] = useState("");
+  const [filterType, setFilterType] = useState<"" | "benchmark" | "comparison" | "baseline">("");
+
+  // Compare mode
+  const [compareMode, setCompareMode] = useState(false);
+  const [selectedRuns, setSelectedRuns] = useState<string[]>([]);
+  const [compareResult, setCompareResult] = useState<HistoryCompareResult | null>(null);
+  const [comparing, setComparing] = useState(false);
+
+  // Detail view
+  const [detailRun, setDetailRun] = useState<BenchmarkResult | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    api.getHistory(plugin, skill, {
+      model: filterModel || undefined,
+      type: (filterType || undefined) as "benchmark" | "comparison" | "baseline" | undefined,
+    }).then((h) => {
+      setHistory(h);
+
+      // Detect regressions from last 2 runs
+      if (h.length >= 2) {
+        api.compareRuns(plugin, skill, h[0].timestamp, h[1].timestamp)
+          .then((cr) => {
+            const regressions = cr.regressions.filter((r) => r.change === "regression");
+            dispatch({ type: "SET_REGRESSIONS", regressions });
+          })
+          .catch(() => {});
+      }
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, [plugin, skill, filterModel, filterType]);
+
+  const handleRunClick = useCallback(async (timestamp: string) => {
+    if (compareMode) {
+      setSelectedRuns((prev) => {
+        if (prev.includes(timestamp)) return prev.filter((t) => t !== timestamp);
+        if (prev.length >= 2) return [prev[1], timestamp];
+        return [...prev, timestamp];
+      });
+      return;
+    }
+    setDetailLoading(true);
+    try {
+      const entry = await api.getHistoryEntry(plugin, skill, timestamp);
+      setDetailRun(entry);
+    } catch {} finally {
+      setDetailLoading(false);
+    }
+  }, [plugin, skill, compareMode]);
+
+  const handleCompare = useCallback(async () => {
+    if (selectedRuns.length !== 2) return;
+    setComparing(true);
+    try {
+      const result = await api.compareRuns(plugin, skill, selectedRuns[0], selectedRuns[1]);
+      setCompareResult(result);
+    } catch {} finally {
+      setComparing(false);
+    }
+  }, [plugin, skill, selectedRuns]);
+
+  const models = [...new Set(history.map((h) => h.model))];
+
+  if (loading) {
+    return (
+      <div className="p-5">
+        <div className="skeleton h-5 w-32 mb-4" />
+        <div className="skeleton h-48 rounded-xl mb-4" />
+        <div className="space-y-2">
+          <div className="skeleton h-12 rounded-lg" />
+          <div className="skeleton h-12 rounded-lg" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-5">
+      {/* Tabs */}
+      <div className="flex items-center gap-1 mb-4">
+        {(["timeline", "per-eval", "statistics"] as Tab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className="px-4 py-2 rounded-lg text-[12px] font-medium transition-all duration-150"
+            style={{
+              background: tab === t ? "var(--accent-muted)" : "transparent",
+              color: tab === t ? "var(--accent)" : "var(--text-tertiary)",
+            }}
+          >
+            {t === "timeline" ? "Timeline" : t === "per-eval" ? "Per Eval" : "Statistics"}
+          </button>
+        ))}
+      </div>
+
+      {/* Timeline tab */}
+      {tab === "timeline" && (
+        <div>
+          {/* Trend chart */}
+          {history.length > 0 && (
+            <div className="mb-5 rounded-xl p-4" style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)" }}>
+              <TrendChart entries={history} />
+            </div>
+          )}
+
+          {/* Filters */}
+          <div className="flex items-center gap-2 mb-3">
+            <select
+              value={filterModel}
+              onChange={(e) => setFilterModel(e.target.value)}
+              className="input-field text-[12px]"
+              style={{ width: 150 }}
+            >
+              <option value="">All Models</option>
+              {models.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+
+            <select
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value as typeof filterType)}
+              className="input-field text-[12px]"
+              style={{ width: 150 }}
+            >
+              <option value="">All Types</option>
+              <option value="benchmark">Benchmark</option>
+              <option value="comparison">Comparison</option>
+              <option value="baseline">Baseline</option>
+            </select>
+
+            <div className="flex-1" />
+
+            <button
+              onClick={() => { setCompareMode(!compareMode); setSelectedRuns([]); setCompareResult(null); }}
+              className={`btn text-[12px] ${compareMode ? "btn-primary" : "btn-secondary"}`}
+            >
+              {compareMode ? "Exit Compare" : "Compare Runs"}
+            </button>
+
+            {compareMode && selectedRuns.length === 2 && (
+              <button onClick={handleCompare} disabled={comparing} className="btn btn-primary text-[12px]">
+                {comparing ? "Comparing..." : "Compare"}
+              </button>
+            )}
+          </div>
+
+          {/* Run list */}
+          <div className="space-y-2">
+            {history.length === 0 ? (
+              <div className="text-center py-8 text-[13px]" style={{ color: "var(--text-tertiary)" }}>
+                No benchmark runs yet
+              </div>
+            ) : (
+              history.map((h) => {
+                const selected = selectedRuns.includes(h.timestamp);
+                return (
+                  <button
+                    key={h.timestamp}
+                    onClick={() => handleRunClick(h.timestamp)}
+                    className="w-full text-left rounded-lg px-4 py-3 transition-all duration-150"
+                    style={{
+                      background: selected ? "var(--accent-muted)" : "var(--surface-1)",
+                      border: selected ? "1px solid var(--accent)" : "1px solid var(--border-subtle)",
+                    }}
+                    onMouseEnter={(e) => { if (!selected) e.currentTarget.style.borderColor = "var(--border-hover)"; }}
+                    onMouseLeave={(e) => { if (!selected) e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {compareMode && (
+                          <span
+                            className="w-4 h-4 rounded border flex items-center justify-center"
+                            style={{
+                              borderColor: selected ? "var(--accent)" : "var(--border-default)",
+                              background: selected ? "var(--accent)" : "transparent",
+                            }}
+                          >
+                            {selected && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>}
+                          </span>
+                        )}
+                        <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>
+                          {new Date(h.timestamp).toLocaleString()}
+                        </span>
+                        <span className="pill text-[9px]" style={{
+                          background: h.type === "comparison" ? "var(--purple-muted)" : h.type === "baseline" ? "var(--surface-3)" : "var(--accent-muted)",
+                          color: h.type === "comparison" ? "var(--purple)" : h.type === "baseline" ? "var(--text-tertiary)" : "var(--accent)",
+                        }}>
+                          {h.type}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>{h.model}</span>
+                        <span
+                          className="text-[12px] font-semibold"
+                          style={{ color: h.passRate >= 0.8 ? "var(--green)" : h.passRate >= 0.5 ? "var(--yellow)" : "var(--red)" }}
+                        >
+                          {Math.round(h.passRate * 100)}%
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          {/* Compare result */}
+          {compareResult && (
+            <CompareResultView result={compareResult} />
+          )}
+
+          {/* Detail view */}
+          {detailRun && !compareMode && (
+            <DetailView run={detailRun} onClose={() => setDetailRun(null)} />
+          )}
+        </div>
+      )}
+
+      {/* Per-eval tab */}
+      {tab === "per-eval" && (
+        <HistoryPerEval plugin={plugin} skill={skill} />
+      )}
+
+      {/* Statistics tab */}
+      {tab === "statistics" && (
+        <StatsPanel plugin={plugin} skill={skill} />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Compare result
+// ---------------------------------------------------------------------------
+
+function CompareResultView({ result }: { result: HistoryCompareResult }) {
+  const regressions = result.regressions.filter((r) => r.change === "regression");
+  const improvements = result.regressions.filter((r) => r.change === "improvement");
+
+  return (
+    <div className="mt-4 rounded-xl p-4" style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)" }}>
+      <div className="text-[13px] font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
+        Comparison: {new Date(result.runA.timestamp).toLocaleDateString()} vs {new Date(result.runB.timestamp).toLocaleDateString()}
+      </div>
+
+      {regressions.length > 0 && (
+        <div className="mb-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--red)" }}>
+            Regressions ({regressions.length})
+          </div>
+          {regressions.map((r) => (
+            <div key={`${r.evalId}-${r.assertionId}`} className="text-[12px] py-1" style={{ color: "var(--text-secondary)" }}>
+              #{r.evalId} {r.evalName}: <span style={{ color: "var(--red)" }}>{r.assertionId}</span> (was passing, now failing)
+            </div>
+          ))}
+        </div>
+      )}
+
+      {improvements.length > 0 && (
+        <div className="mb-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--green)" }}>
+            Improvements ({improvements.length})
+          </div>
+          {improvements.map((r) => (
+            <div key={`${r.evalId}-${r.assertionId}`} className="text-[12px] py-1" style={{ color: "var(--text-secondary)" }}>
+              #{r.evalId} {r.evalName}: <span style={{ color: "var(--green)" }}>{r.assertionId}</span> (was failing, now passing)
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Case diffs table */}
+      <div className="text-[11px] font-semibold uppercase tracking-wider mb-2 mt-3" style={{ color: "var(--text-tertiary)" }}>
+        Case Diffs
+      </div>
+      <div className="rounded-lg overflow-hidden" style={{ border: "1px solid var(--border-subtle)" }}>
+        <table className="w-full text-[12px]">
+          <thead>
+            <tr style={{ background: "var(--surface-2)" }}>
+              <th className="text-left px-3 py-2 font-medium" style={{ color: "var(--text-tertiary)" }}>Case</th>
+              <th className="text-right px-3 py-2 font-medium" style={{ color: "var(--text-tertiary)" }}>Run A</th>
+              <th className="text-right px-3 py-2 font-medium" style={{ color: "var(--text-tertiary)" }}>Run B</th>
+            </tr>
+          </thead>
+          <tbody>
+            {result.caseDiffs.map((d) => (
+              <tr key={d.eval_id} style={{ borderTop: "1px solid var(--border-subtle)" }}>
+                <td className="px-3 py-2" style={{ color: "var(--text-secondary)" }}>#{d.eval_id} {d.eval_name}</td>
+                <td className="text-right px-3 py-2" style={{
+                  color: d.passRateA != null ? (d.passRateA >= 0.8 ? "var(--green)" : d.passRateA >= 0.5 ? "var(--yellow)" : "var(--red)") : "var(--text-tertiary)",
+                }}>
+                  {d.passRateA != null ? `${Math.round(d.passRateA * 100)}%` : d.statusA}
+                </td>
+                <td className="text-right px-3 py-2" style={{
+                  color: d.passRateB != null ? (d.passRateB >= 0.8 ? "var(--green)" : d.passRateB >= 0.5 ? "var(--yellow)" : "var(--red)") : "var(--text-tertiary)",
+                }}>
+                  {d.passRateB != null ? `${Math.round(d.passRateB * 100)}%` : d.statusB}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Detail view
+// ---------------------------------------------------------------------------
+
+function DetailView({ run, onClose }: { run: BenchmarkResult; onClose: () => void }) {
+  return (
+    <div className="mt-4 rounded-xl p-4" style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)" }}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
+          Run: {new Date(run.timestamp).toLocaleString()}
+        </span>
+        <button onClick={onClose} className="btn btn-ghost text-[11px]">Close</button>
+      </div>
+      <div className="text-[11px] mb-3" style={{ color: "var(--text-tertiary)" }}>
+        Model: {run.model} | Cases: {run.cases.length} | Pass Rate: {run.overall_pass_rate != null ? `${Math.round(run.overall_pass_rate * 100)}%` : "--"}
+      </div>
+      <div className="space-y-2">
+        {run.cases.map((c) => (
+          <div key={c.eval_id} className="rounded-lg px-3 py-2" style={{ background: "var(--surface-2)" }}>
+            <div className="flex items-center justify-between">
+              <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>#{c.eval_id} {c.eval_name}</span>
+              <span className="text-[11px] font-semibold" style={{
+                color: c.status === "pass" ? "var(--green)" : "var(--red)",
+              }}>
+                {c.pass_rate != null ? `${Math.round(c.pass_rate * 100)}%` : c.status}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

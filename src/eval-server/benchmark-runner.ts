@@ -9,7 +9,7 @@ import type { BenchmarkResult, BenchmarkCase, BenchmarkAssertionResult } from ".
 import type { LlmClient } from "../eval/llm.js";
 import { judgeAssertion } from "../eval/judge.js";
 import { writeHistoryEntry } from "../eval/benchmark-history.js";
-import { sendSSE, sendSSEDone } from "./sse-helpers.js";
+import { sendSSE, sendSSEDone, withHeartbeat } from "./sse-helpers.js";
 
 export interface BenchmarkRunOptions {
   res: http.ServerResponse;
@@ -52,7 +52,11 @@ export async function runBenchmarkSSE(opts: BenchmarkRunOptions): Promise<void> 
     });
 
     try {
-      const genResult = await client.generate(systemPrompt, evalCase.prompt);
+      const genResult = await withHeartbeat(
+        res, evalCase.id, "generating",
+        `Generating LLM response for "${evalCase.name}"...`,
+        () => client.generate(systemPrompt, evalCase.prompt),
+      );
       const totalTokens = genResult.inputTokens != null && genResult.outputTokens != null
         ? genResult.inputTokens + genResult.outputTokens
         : null;

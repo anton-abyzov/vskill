@@ -1,0 +1,48 @@
+{
+  "timestamp": "2026-03-09T01:01:13.821Z",
+  "model": "claude-opus",
+  "skill_name": "slack-messaging",
+  "cases": [
+    {
+      "eval_id": 1,
+      "eval_name": "Read channel and summarize",
+      "status": "error",
+      "error_message": "Claude CLI exited with code 1: Error: Claude Code cannot be launched inside another Claude Code session.\nNested sessions share runtime resources and will crash all active sessions.\nTo bypass this check, unset the CLAUDECODE environment variable.\n",
+      "pass_rate": 0,
+      "assertions": []
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "Reply in a thread with context",
+      "status": "error",
+      "error_message": "Claude CLI exited with code 1: Error: Claude Code cannot be launched inside another Claude Code session.\nNested sessions share runtime resources and will crash all active sessions.\nTo bypass this check, unset the CLAUDECODE environment variable.\n",
+      "pass_rate": 0,
+      "assertions": []
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "New channel message triggers session boundary",
+      "status": "error",
+      "error_message": "Claude CLI exited with code 1: Error: Claude Code cannot be launched inside another Claude Code session.\nNested sessions share runtime resources and will crash all active sessions.\nTo bypass this check, unset the CLAUDECODE environment variable.\n",
+      "pass_rate": 0,
+      "assertions": []
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "Schedule a message for later",
+      "status": "error",
+      "error_message": "Claude CLI exited with code 1: Error: Claude Code cannot be launched inside another Claude Code session.\nNested sessions share runtime resources and will crash all active sessions.\nTo bypass this check, unset the CLAUDECODE environment variable.\n",
+      "pass_rate": 0,
+      "assertions": []
+    },
+    {
+      "eval_id": 5,
+      "eval_name": "Send a DM to a colleague",
+      "status": "error",
+      "error_message": "Claude CLI exited with code 1: Error: Claude Code cannot be launched inside another Claude Code session.\nNested sessions share runtime resources and will crash all active sessions.\nTo bypass this check, unset the CLAUDECODE environment variable.\n",
+      "pass_rate": 0,
+      "assertions": []
+    }
+  ],
+  "overall_pass_rate": 0
+}

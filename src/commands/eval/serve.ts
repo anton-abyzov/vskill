@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { startEvalServer } from "../../eval-server/eval-server.js";
 import { yellow, dim, red, cyan, bold } from "../../utils/output.js";
+import { createPrompter } from "../../utils/prompts.js";
 
 /**
  * Deterministic port for a project path.
@@ -98,63 +99,90 @@ function findProcessOnPort(port: number): { pid: number; command: string } | nul
   }
 }
 
-/** Kill a process and wait for port release. */
-async function killAndWait(pid: number): Promise<void> {
+/** Kill a process and wait for the port to actually free up. */
+async function killAndWait(pid: number, port: number): Promise<void> {
   try { process.kill(pid, "SIGTERM"); } catch { return; }
-  const deadline = Date.now() + 3000;
-  while (Date.now() < deadline) {
-    try { process.kill(pid, 0); } catch { return; } // gone
+
+  // Wait for process to exit
+  const procDeadline = Date.now() + 3000;
+  while (Date.now() < procDeadline) {
+    try { process.kill(pid, 0); } catch { break; } // gone
     await new Promise((r) => setTimeout(r, 100));
   }
-  try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
-  await new Promise((r) => setTimeout(r, 200));
+  // Force-kill if still alive
+  try { process.kill(pid, 0); process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
+
+  // Wait for port to actually free up (OS may hold it briefly after process exits)
+  const portDeadline = Date.now() + 5000;
+  while (Date.now() < portDeadline) {
+    if (!(await isPortInUse(port))) return;
+    await new Promise((r) => setTimeout(r, 200));
+  }
 }
 
 /**
- * Handle port conflict:
- * - Same project → auto-kill and restart
- * - Different project or unknown → show diagnostics and exit
+ * Handle port conflict — show what's running and ask user to confirm kill.
  */
 async function handlePortConflict(port: number, resolvedRoot: string): Promise<void> {
   const existing = await probeVskillServer(port);
+  const proc = findProcessOnPort(port);
+  const prompter = createPrompter();
 
   if (existing) {
-    if (existing.root === resolvedRoot) {
-      // Same project — auto-restart
-      console.log(dim(`\n  Port ${port} already running eval for this project. Restarting...\n`));
-      const proc = findProcessOnPort(port);
-      if (proc) await killAndWait(proc.pid);
-      return;
-    }
+    const sameProject = existing.root === resolvedRoot;
 
-    // Different project
-    console.error(
-      red(`\n  Port ${port} is in use by another eval server:\n`) +
-      `\n  ${bold("Project:")}  ${cyan(existing.projectName || "unknown")}` +
+    console.log(
+      `\n  ${bold("Port")} ${cyan(String(port))} ${bold("is already in use:")}` +
+      `\n  ${bold("Project:")}  ${cyan(existing.projectName || "unknown")}${sameProject ? dim(" (same project)") : ""}` +
       `\n  ${bold("Root:")}     ${dim(existing.root)}` +
       `\n  ${bold("Model:")}    ${dim(existing.model)}` +
-      `\n\n  ${dim("Either stop it first, or use a different port:")}` +
-      `\n  ${cyan(`vskill eval serve --port ${port + 1}`)}\n`,
+      (proc ? `\n  ${bold("PID:")}      ${dim(String(proc.pid))}` : "") +
+      "\n",
     );
-    process.exit(1);
+
+    const confirmed = await prompter.promptConfirm(
+      `  Kill it and restart?`,
+      sameProject, // default Y for same project, N for different
+    );
+
+    if (!confirmed) {
+      console.log(dim(`\n  Aborted. Use ${cyan(`vskill eval serve --port ${port + 1}`)} for a different port.\n`));
+      process.exit(0);
+    }
+
+    if (proc) {
+      console.log(dim(`  Stopping process ${proc.pid}...`));
+      await killAndWait(proc.pid, port);
+    }
+    return;
   }
 
-  // Not a vskill server
-  const proc = findProcessOnPort(port);
+  // Not a vskill server — unknown process
   if (proc) {
-    console.error(
-      red(`\n  Port ${port} is in use by another process:\n`) +
+    console.log(
+      `\n  ${bold("Port")} ${cyan(String(port))} ${bold("is in use by another process:")}` +
       `\n  ${bold("PID:")}      ${proc.pid}` +
       `\n  ${bold("Command:")}  ${dim(proc.command)}` +
-      `\n\n  ${dim("Either kill it, or use a different port:")}` +
-      `\n  ${cyan(`kill ${proc.pid}`)}  ${dim("or")}  ${cyan(`vskill eval serve --port ${port + 1}`)}\n`,
+      "\n",
     );
-  } else {
-    console.error(
-      red(`\n  Port ${port} is in use.\n`) +
-      `  ${dim("Try:")} ${cyan(`vskill eval serve --port ${port + 1}`)}\n`,
-    );
+
+    const confirmed = await prompter.promptConfirm(`  Kill it and proceed?`, false);
+
+    if (!confirmed) {
+      console.log(dim(`\n  Aborted. Use ${cyan(`vskill eval serve --port ${port + 1}`)} for a different port.\n`));
+      process.exit(0);
+    }
+
+    console.log(dim(`  Stopping process ${proc.pid}...`));
+    await killAndWait(proc.pid, port);
+    return;
   }
+
+  // Port in use but can't identify the process
+  console.error(
+    red(`\n  Port ${port} is in use but the process could not be identified.\n`) +
+    `  ${dim("Try:")} ${cyan(`vskill eval serve --port ${port + 1}`)}\n`,
+  );
   process.exit(1);
 }
 

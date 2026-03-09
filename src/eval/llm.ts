@@ -12,7 +12,7 @@
 //
 // Model selection via VSKILL_EVAL_MODEL env var:
 //   claude-cli:  "sonnet" | "opus" | "haiku" (default: sonnet)
-//   anthropic:   full model ID (default: claude-sonnet-4-20250514)
+//   anthropic:   full model ID (default: claude-sonnet-4-6)
 //   ollama:      model name (default: llama3.1:8b)
 // ---------------------------------------------------------------------------
 
@@ -62,7 +62,7 @@ export function createLlmClient(overrides?: LlmOverrides): LlmClient {
 // Provider: Anthropic API
 // ---------------------------------------------------------------------------
 function createAnthropicClient(modelOverride?: string): LlmClient {
-  const DEFAULT_MODEL = "claude-sonnet-4-20250514";
+  const DEFAULT_MODEL = "claude-sonnet-4-6";
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {

@@ -324,6 +324,33 @@ npx vskill eval generate-all              # Batch-generate for all skills
 
 Previous benchmark results are displayed on the skill detail page without re-running. Per-case pass/fail status, time, and token usage are shown inline.
 
+### Model configuration
+
+The eval system supports multiple LLM providers. Switch between them in the eval UI dropdown or via environment variables.
+
+| Provider | Models | Requirements |
+|:---------|:-------|:-------------|
+| **Claude CLI** | Sonnet, Opus, Haiku | Claude Max/Pro subscription + `claude` CLI installed |
+| **Anthropic API** | Claude Sonnet 4.6, Opus 4.6, Haiku 4.5 | `ANTHROPIC_API_KEY` env var |
+| **Ollama** | Any locally installed model | Ollama running at `localhost:11434` |
+
+```bash
+# Use Anthropic API with Opus
+VSKILL_EVAL_PROVIDER=anthropic VSKILL_EVAL_MODEL=claude-opus-4-6 npx vskill eval run my-skill
+
+# Use Ollama with a local model
+VSKILL_EVAL_PROVIDER=ollama VSKILL_EVAL_MODEL=qwen2.5:32b npx vskill eval run my-skill
+
+# Custom Ollama server
+OLLAMA_BASE_URL=http://gpu-server:11434 VSKILL_EVAL_PROVIDER=ollama npx vskill eval run my-skill
+```
+
+**Which model for what?**
+
+- **Skill creation/improvement**: Claude (Sonnet or Opus) produces the best SKILL.md refinements. Other models like Gemini and Codex can create skills too — they understand the SKILL.md format — but output quality may vary. See Anthropic's [Skill Creator](https://github.com/anthropics/skills/tree/main/skills/skill-creator) for the reference methodology.
+- **Benchmarks & A/B comparisons**: Use any model. Cross-model testing reveals whether your skill helps weaker models, and whether base model improvements have made a capability uplift skill unnecessary.
+- **Ollama**: Free, local, no API key. Useful for rapid iteration and validating cross-model portability.
+
 ### Platform integration
 
 Skills with `evals/evals.json` get:

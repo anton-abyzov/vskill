@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { Router } from "./router.js";
 import { sendJson } from "./router.js";
 import { registerRoutes } from "./api-routes.js";
+import { registerImproveRoutes } from "./improve-routes.js";
+import { registerModelCompareRoutes } from "./model-compare-routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,6 +41,8 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
 
   // Register API routes
   registerRoutes(router, root, opts.projectName);
+  registerImproveRoutes(router, root);
+  registerModelCompareRoutes(router, root);
 
   // Static asset directory
   const staticDir = path.resolve(__dirname, "../eval-ui");

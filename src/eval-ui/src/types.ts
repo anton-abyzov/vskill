@@ -168,3 +168,28 @@ export interface ActivationSummary {
   fp: number;
   fn: number;
 }
+
+export interface ImproveResult {
+  original: string;
+  improved: string;
+  reasoning: string;
+}
+
+export interface McpDependency {
+  server: string;
+  url: string;
+  transport: "http" | "stdio";
+  matchedTools: string[];
+  configSnippet: string;
+}
+
+export interface SkillDependencyInfo {
+  name: string;
+  source: "body-reference" | "frontmatter";
+}
+
+export interface DependenciesResponse {
+  mcpDependencies: McpDependency[];
+  skillDependencies: SkillDependencyInfo[];
+}
+

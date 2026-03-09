@@ -3,6 +3,10 @@ import { useParams, Link } from "react-router-dom";
 import { api } from "../api";
 import { useSSE } from "../sse";
 import type { EvalsFile, EvalCase, Assertion, BenchmarkResult } from "../types";
+import { SkillContentViewer } from "../components/SkillContentViewer";
+import { SkillImprovePanel } from "../components/SkillImprovePanel";
+import { McpDependencies } from "../components/McpDependencies";
+import { ModelCompareModal } from "../components/ModelCompareModal";
 
 interface AssertionResult {
   assertion_id: string;
@@ -36,10 +40,13 @@ export function SkillDetailPage() {
   const [lastBenchmark, setLastBenchmark] = useState<BenchmarkResult | null>(null);
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [skillContent, setSkillContent] = useState("");
+  const [compareTarget, setCompareTarget] = useState<EvalCase | null>(null);
 
   useEffect(() => {
     if (!plugin || !skill) return;
     api.getEvals(plugin, skill).then(setEvals).catch((e) => setError(e.message)).finally(() => setLoading(false));
+    api.getSkillDetail(plugin, skill).then((d) => setSkillContent(d.skillContent)).catch(() => {});
     // Load previous benchmark results
     api.getLatestBenchmark(plugin, skill).then((b) => {
       setLastBenchmark(b);
@@ -123,6 +130,11 @@ export function SkillDetailPage() {
       ...evalCase,
       assertions: evalCase.assertions.filter((a) => a.id !== assertionId),
     });
+  }
+
+  function refreshSkillContent() {
+    if (!plugin || !skill) return;
+    api.getSkillDetail(plugin, skill).then((d) => setSkillContent(d.skillContent)).catch(() => {});
   }
 
   async function generateWithAI() {
@@ -220,6 +232,17 @@ export function SkillDetailPage() {
         <span className="font-medium" style={{ color: "var(--text-primary)" }}>{skill}</span>
       </div>
 
+      {/* Skill Definition Viewer */}
+      <SkillContentViewer content={skillContent} />
+
+      {/* AI Improve Panel */}
+      {plugin && skill && (
+        <SkillImprovePanel plugin={plugin} skill={skill} skillContent={skillContent} onApplied={(newContent) => { setSkillContent(newContent); }} />
+      )}
+
+      {/* Dependencies */}
+      {plugin && skill && <McpDependencies plugin={plugin} skill={skill} />}
+
       {/* Action bar — only show when evals exist */}
       {evals && (
         <div className="flex items-center gap-2 mt-4 mb-7">
@@ -313,6 +336,10 @@ export function SkillDetailPage() {
                     ) : (
                       <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg> Run</>
                     )}
+                  </button>
+                  <button onClick={() => setCompareTarget(evalCase)} disabled={sseRunning} className="btn btn-ghost text-[12px]" style={{ color: "var(--accent)" }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5" /><path d="M8 21H3v-5" /><path d="M21 3l-7 7" /><path d="M3 21l7-7" /></svg>
+                    A/B
                   </button>
                   <button onClick={() => { setEditingCase(evalCase); setShowForm(true); }} className="btn btn-ghost text-[12px]">Edit</button>
                   <button onClick={() => deleteCase(evalCase.id)} className="btn btn-danger text-[12px]">Delete</button>
@@ -534,6 +561,16 @@ export function SkillDetailPage() {
           existingIds={evals?.evals.map((e) => e.id) || []}
           onSave={(c) => editingCase ? updateCase(c) : addCase(c)}
           onCancel={() => { setShowForm(false); setEditingCase(null); }}
+        />
+      )}
+
+      {/* Model Compare Modal */}
+      {compareTarget && plugin && skill && (
+        <ModelCompareModal
+          plugin={plugin}
+          skill={skill}
+          evalCase={compareTarget}
+          onClose={() => setCompareTarget(null)}
         />
       )}
 

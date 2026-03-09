@@ -100,13 +100,13 @@ describe("createLlmClient", () => {
     process.env.VSKILL_EVAL_PROVIDER = "ollama";
     process.env.ANTHROPIC_API_KEY = "test-key";
     const client = createLlmClient({ provider: "anthropic" });
-    expect(client.model).toBe("claude-sonnet-4-20250514");
+    expect(client.model).toBe("claude-sonnet-4-6");
   });
 
   it("override model takes precedence over env var", () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
-    const client = createLlmClient({ provider: "anthropic", model: "claude-opus-4-20250514" });
-    expect(client.model).toBe("claude-opus-4-20250514");
+    const client = createLlmClient({ provider: "anthropic", model: "claude-opus-4-6" });
+    expect(client.model).toBe("claude-opus-4-6");
   });
 
   it("override provider=claude-cli with custom model", () => {
@@ -151,7 +151,7 @@ describe("createLlmClient", () => {
       expect(mockCreate).toHaveBeenCalledOnce();
     });
 
-    it("uses default model claude-sonnet-4-20250514", async () => {
+    it("uses default model claude-sonnet-4-6", async () => {
       mockCreate.mockResolvedValue({
         content: [{ type: "text", text: "ok" }],
       });
@@ -160,13 +160,13 @@ describe("createLlmClient", () => {
       await client.generate("sys", "usr");
 
       expect(mockCreate).toHaveBeenCalledWith(
-        expect.objectContaining({ model: "claude-sonnet-4-20250514" }),
+        expect.objectContaining({ model: "claude-sonnet-4-6" }),
         expect.anything(),
       );
     });
 
     it("uses custom model from VSKILL_EVAL_MODEL", async () => {
-      process.env.VSKILL_EVAL_MODEL = "claude-opus-4-20250514";
+      process.env.VSKILL_EVAL_MODEL = "claude-opus-4-6";
       mockCreate.mockResolvedValue({
         content: [{ type: "text", text: "ok" }],
       });
@@ -175,7 +175,7 @@ describe("createLlmClient", () => {
       await client.generate("sys", "usr");
 
       expect(mockCreate).toHaveBeenCalledWith(
-        expect.objectContaining({ model: "claude-opus-4-20250514" }),
+        expect.objectContaining({ model: "claude-opus-4-6" }),
         expect.anything(),
       );
     });

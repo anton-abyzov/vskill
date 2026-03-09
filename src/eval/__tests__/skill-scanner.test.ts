@@ -235,7 +235,8 @@ describe("scanSkills", () => {
 
     expect(skills).toHaveLength(1);
     expect(skills[0].skill).toBe("my-skill");
-    expect(skills[0].plugin).toBe("skills");
+    // Parent of "skills" dir is "my-plugin" — scanner walks up past "skills" to find plugin name
+    expect(skills[0].plugin).toBe("my-plugin");
     expect(skills[0].hasEvals).toBe(true);
     expect(skills[0].dir).toBe(skillDir);
   });

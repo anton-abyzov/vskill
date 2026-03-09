@@ -25,13 +25,24 @@ export async function scanSkills(root: string): Promise<SkillInfo[]> {
   if (!existsSync(root)) return skills;
 
   // Layout 4: root IS the skill directory itself → {root}/SKILL.md
+  // Walk up from the skill dir to find the plugin name:
+  //   .../plugins/{plugin}/skills/{skill}/  →  plugin = grandparent of skill
+  //   .../skills/{skill}/                   →  plugin = parent above "skills"
+  // Fallback to immediate parent if structure is unknown.
   if (existsSync(join(root, "SKILL.md"))) {
     const skillName = basename(root);
-    const parentName = basename(dirname(root));
+    const parent = basename(dirname(root)); // e.g. "skills"
+    let pluginName: string;
+    if (parent === "skills") {
+      // Standard layout: .../plugins/{plugin}/skills/{skill}/ or .../{plugin}/skills/{skill}/
+      pluginName = basename(dirname(dirname(root))) || "default";
+    } else {
+      pluginName = parent || "default";
+    }
     const hasEvals = existsSync(join(root, "evals", "evals.json"));
     const hasBenchmark = existsSync(join(root, "evals", "benchmark.json"));
     skills.push({
-      plugin: parentName || "default",
+      plugin: pluginName,
       skill: skillName,
       dir: root,
       hasEvals,

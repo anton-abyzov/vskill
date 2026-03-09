@@ -13,7 +13,7 @@ let testDir: string;
 
 const SAMPLE_BENCHMARK: BenchmarkResult = {
   timestamp: "2026-03-01T00:00:00.000Z",
-  model: "claude-sonnet-4-20250514",
+  model: "claude-sonnet-4-6",
   skill_name: "test-skill",
   cases: [
     {
@@ -54,7 +54,7 @@ describe("benchmark", () => {
     const result = await readBenchmark(testDir);
     expect(result).not.toBeNull();
     expect(result!.timestamp).toBe("2026-03-01T00:00:00.000Z");
-    expect(result!.model).toBe("claude-sonnet-4-20250514");
+    expect(result!.model).toBe("claude-sonnet-4-6");
     expect(result!.skill_name).toBe("test-skill");
     expect(result!.cases).toHaveLength(1);
     expect(result!.cases[0].assertions).toHaveLength(1);

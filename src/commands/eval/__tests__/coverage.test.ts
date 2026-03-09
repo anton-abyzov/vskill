@@ -54,7 +54,7 @@ const VALID_EVALS = {
 
 const PASS_BENCHMARK = {
   timestamp: "2026-03-01T00:00:00Z",
-  model: "claude-sonnet-4-20250514",
+  model: "claude-sonnet-4-6",
   skill_name: "test-skill",
   cases: [
     {

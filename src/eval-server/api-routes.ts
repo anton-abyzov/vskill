@@ -8,6 +8,7 @@ import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import { initSSE, sendSSE, sendSSEDone } from "./sse-helpers.js";
 import { runBenchmarkSSE } from "./benchmark-runner.js";
+import { resolveSkillDir } from "./skill-resolver.js";
 import { scanSkills } from "../eval/skill-scanner.js";
 import { loadAndValidateEvals, EvalValidationError } from "../eval/schema.js";
 import type { EvalsFile } from "../eval/schema.js";
@@ -23,22 +24,7 @@ import { computeVerdict } from "../eval/verdict.js";
 import { buildEvalInitPrompt, parseGeneratedEvals } from "../eval/prompt-builder.js";
 import { testActivation } from "../eval/activation-tester.js";
 import type { ActivationPrompt } from "../eval/activation-tester.js";
-
-function resolveSkillDir(root: string, plugin: string, skill: string): string {
-  // Try direct layout: {root}/{plugin}/skills/{skill}/
-  const directPath = join(root, plugin, "skills", skill);
-  if (existsSync(directPath)) return directPath;
-
-  // Try nested plugins/ layout: {root}/plugins/{plugin}/skills/{skill}/
-  const nestedPath = join(root, "plugins", plugin, "skills", skill);
-  if (existsSync(nestedPath)) return nestedPath;
-
-  // Try root layout: {root}/skills/{skill}/
-  const rootPath = join(root, "skills", skill);
-  if (existsSync(rootPath)) return rootPath;
-
-  return directPath;
-}
+import { detectMcpDependencies, detectSkillDependencies } from "../eval/mcp-detector.js";
 
 // ---------------------------------------------------------------------------
 // In-memory config state — UI can change provider/model at runtime.
@@ -65,9 +51,9 @@ const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
     { id: "haiku", label: "Claude Haiku" },
   ],
   "anthropic": [
-    { id: "claude-sonnet-4-20250514", label: "Claude Sonnet 4 (API)" },
-    { id: "claude-opus-4-20250514", label: "Claude Opus 4 (API)" },
-    { id: "claude-haiku-4-20250414", label: "Claude Haiku 4 (API)" },
+    { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (API)" },
+    { id: "claude-opus-4-6", label: "Claude Opus 4.6 (API)" },
+    { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (API)" },
   ],
   "ollama": [
     { id: "llama3.1:8b", label: "Llama 3.1 8B" },
@@ -671,6 +657,20 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     } catch (err) {
       sendSSEDone(res, { error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  // Get skill dependencies (MCP + skill-to-skill)
+  router.get("/api/skills/:plugin/:skill/dependencies", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    const skillMdPath = join(skillDir, "SKILL.md");
+    if (!existsSync(skillMdPath)) {
+      sendJson(res, { error: "SKILL.md not found" }, 404, req);
+      return;
+    }
+    const content = readFileSync(skillMdPath, "utf-8");
+    const mcpDependencies = detectMcpDependencies(content);
+    const skillDependencies = detectSkillDependencies(content);
+    sendJson(res, { mcpDependencies, skillDependencies }, 200, req);
   });
 
   // Handle CORS preflight

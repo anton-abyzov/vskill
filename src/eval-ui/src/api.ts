@@ -1,5 +1,5 @@
 // API client for the eval server
-import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry } from "./types";
+import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, DependenciesResponse } from "./types";
 
 const BASE = "";
 
@@ -105,5 +105,25 @@ export const api = {
     return fetchJson(`/api/skills/${plugin}/${skill}/history/${encodeURIComponent(timestamp)}`, {
       method: "DELETE",
     });
+  },
+
+  improveSkill(plugin: string, skill: string, opts: { provider?: string; model?: string }): Promise<ImproveResult> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/improve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts),
+    });
+  },
+
+  applyImprovement(plugin: string, skill: string, content: string): Promise<{ ok: boolean }> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/apply-improvement`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+  },
+
+  getDependencies(plugin: string, skill: string): Promise<DependenciesResponse> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/dependencies`);
   },
 };

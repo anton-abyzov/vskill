@@ -42,11 +42,11 @@ function checkSkillCreator(): void {
         dim("  methodology (grading, blind A/B comparison, analysis).\n") +
         dim("  The eval UI uses the same methodology natively, but for best\n") +
         dim("  results, install the Skill-Creator skill:\n\n") +
-        "  1. In Claude Code, run:  " +
-        "/skill-creator:skill-creator" +
+        "  1. Install via vskill:    " +
+        "vskill install anthropics/skills/skill-creator" +
         "\n" +
-        "  2. Or install via vskill: " +
-        "vskill install --repo claude-plugins-official/skill-creator" +
+        "  2. Or browse the source:  " +
+        "https://github.com/anthropics/skills/tree/main/skills/skill-creator" +
         "\n" +
         "  3. Then reload plugins:   " +
         "Restart Claude Code or run a new session" +
@@ -197,6 +197,16 @@ export async function runEvalServe(
   checkSkillCreator();
 
   const resolvedRoot = resolve(root);
+
+  if (!existsSync(resolvedRoot)) {
+    console.error(
+      red(`\n  Directory not found: ${resolvedRoot}\n`) +
+      dim("  Check the --root path. If running from the umbrella root, use the full path:\n") +
+      dim(`  vskill eval serve --root repositories/org/vskill/plugins/...\n`),
+    );
+    process.exit(1);
+  }
+
   const effectivePort = port ?? projectPort(resolvedRoot);
   const name = basename(resolvedRoot);
 

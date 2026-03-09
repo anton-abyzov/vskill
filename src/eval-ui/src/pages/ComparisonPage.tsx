@@ -47,18 +47,31 @@ export function ComparisonPage() {
   }
 
   const comparisons: ComparisonOutputsEvent[] = [];
+  const caseErrors: Array<{ eval_id: number; error: string }> = [];
+  const activeCases: Array<{ eval_id: number; eval_name: string }> = [];
   for (const evt of events) {
     if (evt.event === "outputs_ready") {
       const d = evt.data as ComparisonOutputsEvent;
       if (!comparisons.find((c) => c.eval_id === d.eval_id)) comparisons.push(d);
+    } else if (evt.event === "case_error") {
+      const d = evt.data as { eval_id: number; error: string };
+      if (!caseErrors.find((c) => c.eval_id === d.eval_id)) caseErrors.push(d);
+    } else if (evt.event === "case_start") {
+      const d = evt.data as { eval_id: number; eval_name: string };
+      if (!activeCases.find((c) => c.eval_id === d.eval_id)) activeCases.push(d);
     }
   }
+
+  // The latest case being processed (for progress display)
+  const completedIds = new Set([...comparisons.map(c => c.eval_id), ...caseErrors.map(c => c.eval_id)]);
+  const currentCase = activeCases.filter(c => !completedIds.has(c.eval_id)).pop();
 
   const doneEvent = events.find((e) => e.event === "done");
   const doneData = doneEvent?.data as {
     verdict?: string;
     overall_pass_rate?: number;
     comparison?: { skillRubricAvg: number; baselineRubricAvg: number; delta: number };
+    error?: string;
   } | undefined;
 
   return (
@@ -100,6 +113,24 @@ export function ComparisonPage() {
       {error && (
         <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
           {error}
+        </div>
+      )}
+
+      {/* Done-level error (e.g. failed to load evals) */}
+      {doneData?.error && (
+        <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
+          <span className="font-semibold">Error:</span> {doneData.error}
+        </div>
+      )}
+
+      {/* Per-case errors */}
+      {caseErrors.length > 0 && (
+        <div className="space-y-2 mb-5">
+          {caseErrors.map((ce) => (
+            <div key={ce.eval_id} className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
+              <span className="font-semibold">Eval #{ce.eval_id} failed:</span> {ce.error}
+            </div>
+          ))}
         </div>
       )}
 
@@ -224,11 +255,15 @@ export function ComparisonPage() {
         </div>
       )}
 
-      {running && comparisons.length === 0 && (
+      {running && comparisons.length === 0 && caseErrors.length === 0 && (
         <div className="text-center py-16 animate-fade-in">
           <div className="spinner-lg mx-auto mb-4" />
           <p className="text-[14px]" style={{ color: "var(--text-secondary)" }}>Generating WITH and WITHOUT outputs...</p>
-          <p className="text-[12px] mt-1" style={{ color: "var(--text-tertiary)" }}>Then blind-scoring both responses</p>
+          <p className="text-[12px] mt-1" style={{ color: "var(--text-tertiary)" }}>
+            {currentCase
+              ? `Processing: ${currentCase.eval_name || `Eval #${currentCase.eval_id}`}`
+              : "Then blind-scoring both responses"}
+          </p>
         </div>
       )}
     </div>

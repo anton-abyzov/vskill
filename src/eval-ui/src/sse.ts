@@ -37,6 +37,7 @@ export function useSSE<T = unknown>() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let currentEvent = "";
 
       while (true) {
         const { done: readerDone, value } = await reader.read();
@@ -46,7 +47,6 @@ export function useSSE<T = unknown>() {
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
-        let currentEvent = "";
         for (const line of lines) {
           if (line.startsWith("event: ")) {
             currentEvent = line.slice(7).trim();

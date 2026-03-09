@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useSSE } from "../sse";
 import { api } from "../api";
+import type { EvalsFile } from "../types";
 
 interface AssertionEvent {
   eval_id: number;
@@ -38,15 +39,22 @@ export function BenchmarkPage() {
   const { events, running, done, error, start } = useSSE();
   const [expandedOutputs, setExpandedOutputs] = useState<Set<number>>(new Set());
   const [model, setModel] = useState<string | null>(null);
+  const [evalCases, setEvalCases] = useState<EvalsFile | null>(null);
+  const [runScope, setRunScope] = useState<"all" | number | null>(null);
 
   useEffect(() => {
     api.getConfig().then((c) => setModel(c.model)).catch(() => {});
-  }, []);
+    if (plugin && skill) {
+      api.getEvals(plugin, skill).then(setEvalCases).catch(() => {});
+    }
+  }, [plugin, skill]);
 
-  function handleStartBenchmark() {
+  function handleStartBenchmark(evalIds?: number[]) {
     api.getConfig().then((c) => setModel(c.model)).catch(() => {});
     setExpandedOutputs(new Set());
-    start(`/api/skills/${plugin}/${skill}/benchmark`);
+    setRunScope(evalIds?.length === 1 ? evalIds[0] : "all");
+    const body = evalIds ? { eval_ids: evalIds } : undefined;
+    start(`/api/skills/${plugin}/${skill}/benchmark`, body);
   }
 
   function toggleExpand(evalId: number) {
@@ -114,18 +122,53 @@ export function BenchmarkPage() {
         </p>
       </div>
 
-      {/* Run button */}
-      <button onClick={handleStartBenchmark} disabled={running} className="btn btn-primary mb-7">
-        {running ? (
-          <><div className="spinner" style={{ borderTopColor: "#fff", borderColor: "rgba(255,255,255,0.2)", width: 14, height: 14 }} /> Running...</>
+      {/* Run All button */}
+      <button onClick={() => handleStartBenchmark()} disabled={running} className="btn btn-primary mb-7">
+        {running && runScope === "all" ? (
+          <><div className="spinner" style={{ borderTopColor: "#fff", borderColor: "rgba(255,255,255,0.2)", width: 14, height: 14 }} /> Running All...</>
         ) : (
-          <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg> Run Benchmark</>
+          <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg> Run All ({evalCases?.evals.length ?? 0} cases)</>
         )}
       </button>
 
       {error && (
         <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
           {error}
+        </div>
+      )}
+
+      {/* Eval case list with per-case Run buttons (shown when not running and no results yet) */}
+      {!running && currentResults.size === 0 && evalCases && evalCases.evals.length > 0 && (
+        <div className="space-y-2 mb-6">
+          <div className="text-[11px] font-semibold uppercase tracking-widest mb-2" style={{ color: "var(--text-tertiary)" }}>
+            Eval Cases
+          </div>
+          {evalCases.evals.map((ec) => (
+            <div
+              key={ec.id}
+              className="flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-100"
+              style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+            >
+              <span className="text-[11px] font-mono px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: "var(--surface-3)", color: "var(--text-tertiary)" }}>
+                #{ec.id}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-medium truncate" style={{ color: "var(--text-primary)" }}>{ec.name}</div>
+                <div className="text-[11px] truncate mt-0.5" style={{ color: "var(--text-tertiary)" }}>
+                  {ec.assertions.length} assertion{ec.assertions.length !== 1 ? "s" : ""}
+                </div>
+              </div>
+              <button
+                onClick={() => handleStartBenchmark([ec.id])}
+                disabled={running}
+                className="btn btn-ghost text-[12px] flex-shrink-0"
+                style={{ color: "var(--accent)" }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                Run
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
@@ -254,7 +297,9 @@ export function BenchmarkPage() {
               }}>
                 {overallPct}%
               </div>
-              <div className="text-[13px] mt-1" style={{ color: "var(--text-tertiary)" }}>Overall Pass Rate</div>
+              <div className="text-[13px] mt-1" style={{ color: "var(--text-tertiary)" }}>
+                {runScope === "all" ? "Overall Pass Rate" : "Pass Rate"}
+              </div>
               {model && <div className="text-[11px] mt-1 font-mono" style={{ color: "var(--text-tertiary)" }}>{model}</div>}
             </div>
           )}

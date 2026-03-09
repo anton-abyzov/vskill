@@ -259,11 +259,15 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     sendJson(res, body, 200, req);
   });
 
-  // Run benchmark (SSE)
+  // Run benchmark (SSE) — optionally accepts { eval_ids: number[] } to run specific cases
   router.post("/api/skills/:plugin/:skill/benchmark", async (req, res, params) => {
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     let aborted = false;
     res.on("close", () => { aborted = true; });
+
+    // Read body before switching to SSE mode
+    const body = await readBody(req).catch(() => ({})) as { eval_ids?: number[] };
+    const filterIds = Array.isArray(body?.eval_ids) ? new Set(body.eval_ids) : null;
 
     initSSE(res, req);
 
@@ -276,15 +280,20 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         ? `You are an AI assistant enhanced with the following skill:\n\n${skillContent}`
         : "You are a helpful AI assistant.";
 
+      // Filter to specific eval cases if requested
+      const evalCases = filterIds
+        ? evals.evals.filter((e) => filterIds.has(e.id))
+        : evals.evals;
+
       const cases: BenchmarkCase[] = [];
 
-      for (const evalCase of evals.evals) {
+      for (const evalCase of evalCases) {
         if (aborted) break;
 
         sendSSE(res, "case_start", {
           eval_id: evalCase.id,
           eval_name: evalCase.name,
-          total: evals.evals.length,
+          total: evalCases.length,
         });
 
         try {
@@ -364,7 +373,10 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       };
 
       if (!aborted) {
-        await writeHistoryEntry(skillDir, result);
+        // Only save to history for full benchmark runs (not single-case)
+        if (!filterIds) {
+          await writeHistoryEntry(skillDir, result);
+        }
         sendSSEDone(res, result);
       }
     } catch (err) {

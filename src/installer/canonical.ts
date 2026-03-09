@@ -29,7 +29,7 @@ export function resolveAgentSkillsDir(agent: AgentDefinition, opts: InstallOptio
   }
   const resolved = join(opts.projectRoot, agent.localSkillsDir);
   const normalizedRoot = join(opts.projectRoot, ".");
-  if (!resolved.startsWith(normalizedRoot)) {
+  if (resolved !== normalizedRoot && !resolved.startsWith(normalizedRoot + "/")) {
     throw new Error(
       `Path traversal detected: ${agent.localSkillsDir} resolves above project root ${opts.projectRoot}`,
     );

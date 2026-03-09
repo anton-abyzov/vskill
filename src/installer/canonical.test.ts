@@ -86,6 +86,17 @@ describe("canonical installer", () => {
       ).toThrow("Path traversal");
     });
 
+    it("rejects sibling directory escape via prefix confusion", () => {
+      // /tmp/a + ../ab = /tmp/ab — looks like it starts with /tmp/a but escapes
+      const agent = makeAgent({ localSkillsDir: "../" + tempDir.split("/").pop() + "b" });
+      expect(() =>
+        resolveAgentSkillsDir(agent, {
+          global: false,
+          projectRoot: tempDir,
+        }),
+      ).toThrow("Path traversal");
+    });
+
     it("allows normal dotfolder paths", () => {
       const agent = makeAgent({ localSkillsDir: ".aider/skills" });
       expect(() =>

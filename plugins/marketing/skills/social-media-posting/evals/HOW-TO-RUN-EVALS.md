@@ -1,67 +1,58 @@
 # How to Run Evals for the Social Media Posting Skill
 
-This guide explains how to add your own test cases, run them, and visually compare the quality difference between "with skill" and "without skill."
+This guide explains how to add test cases, run benchmarks, and measure whether your skill actually improves LLM output.
 
-## What Are Evals?
+## How Evals Work
 
-Evals are test cases that prove the skill works. Each one has:
-- A **prompt** — something you'd actually say (e.g., "Post about our new feature on X and LinkedIn")
-- **Assertions** — specific things the skill should make Claude do (e.g., "generates 3 image options", "waits for approval")
+**Evals test the skill's plan, not its execution.** The system doesn't actually post to social media, generate images with Nano Banana, or call any external APIs.
 
-We run each prompt twice: once with the skill loaded, once without. Then we grade both outputs against the assertions. The difference in scores tells you exactly how much value the skill adds.
+Here's what happens:
 
-## File Structure
+1. Your **SKILL.md** is loaded as the LLM's system prompt
+2. The **eval prompt** (e.g., "Post about Claude 5 on X and LinkedIn") is sent to the LLM
+3. The LLM generates a **text response** describing what it would do
+4. An **LLM judge** reads that response and grades each assertion
 
-```
-social-media-posting/
-  evals/
-    evals.json          <-- Your test cases live here
-    HOW-TO-RUN-EVALS.md <-- This file
+For example, the `aspect-ratios` assertion checks: does the LLM's response mention using 16:9 for X, 1.91:1 for LinkedIn, and 1:1 for Threads? If your SKILL.md clearly documents these ratios, the LLM will include them. If it's vague, the assertion fails — telling you exactly what to improve in your skill description.
 
-social-media-posting-workspace/     <-- Created during eval runs
-  iteration-1/
-    eval-1-breaking-news/
-      with_skill/
-        outputs/workflow.md    <-- What Claude did WITH the skill
-        grading.json           <-- Pass/fail for each assertion
-        timing.json            <-- How long it took, tokens used
-      without_skill/
-        outputs/workflow.md    <-- What Claude did WITHOUT the skill
-        grading.json
-        timing.json
-    benchmark.json             <-- Aggregated scores
+Think of it like testing a recipe book: you don't cook the food, you check whether someone reading your recipe would know the right steps.
+
+## Quick Start
+
+```bash
+# Launch the visual eval UI
+npx vskill eval serve --root plugins/marketing/skills/social-media-posting
 ```
 
-## Step 1: Add Your Own Test Case
+Open the URL it prints. You'll see your eval cases with previous benchmark results (if any). Click **Run** on any individual case, or go to the Benchmark page to run all at once.
 
-Open `evals/evals.json` and add a new entry to the `evals` array:
+## Adding a Test Case
+
+Open `evals.json` and add a new entry:
 
 ```json
 {
   "id": 5,
   "name": "your-test-name",
-  "prompt": "Write exactly what you would say to Claude. Be specific and realistic. Include details like platform names, topic, any files, etc.",
-  "expected_output": "Describe what a good result looks like (this is for your reference, not used by the grader).",
+  "prompt": "Write exactly what you would say to Claude. Be specific and realistic.",
+  "expected_output": "Describe what a good result looks like (for your reference, not graded).",
   "files": [],
   "assertions": [
     {
       "id": "short-id",
       "text": "A specific, checkable thing the skill should make Claude do",
       "type": "boolean"
-    },
-    {
-      "id": "another-check",
-      "text": "Another thing to verify",
-      "type": "boolean"
     }
   ]
 }
 ```
 
+Or use the UI — click **+ Add Eval Case** on the skill detail page.
+
 ### Tips for Good Test Cases
 
 **Good prompts** are realistic and detailed:
-- "Post about our Series A funding on LinkedIn, X, and Threads. We raised $12M led by Sequoia. Here's the press release: [link]"
+- "Post about our Series A funding on LinkedIn, X, and Threads. We raised $12M led by Sequoia."
 - "I need to post a product demo video to Instagram Reels and TikTok. The video is at /tmp/demo.mp4"
 - "Go reply to some AI threads on Reddit today, but be careful — my account got a warning last week"
 
@@ -72,73 +63,52 @@ Open `evals/evals.json` and add a new entry to the `evals` array:
 **Good assertions** are specific and objectively checkable:
 - "Generates 3 image options using Nano Banana Pro"
 - "Waits for explicit user approval before posting"
-- "Converts video to 30fps before Instagram upload"
+- "Respects Reddit anti-spam rules: max 3 comments per thread per hour"
 
-**Bad assertions** are subjective or vague:
+**Bad assertions** are subjective:
 - "Output is good" (what does good mean?)
 - "Works correctly" (too broad)
 
-## Step 2: Run the Evals
+## Three Ways to Evaluate
 
-Ask Claude to run the evals. You can say something like:
+### 1. Benchmark (pass/fail per assertion)
 
-> "Run eval 5 from my social-media-posting evals — both with-skill and without-skill."
+Tests your skill against each eval case. Shows pass rate, time, and tokens per case.
 
-Or run all of them:
-
-> "Rerun all social-media-posting evals."
-
-Claude will:
-1. Spawn agents to run each prompt (with and without the skill)
-2. Grade each output against your assertions
-3. Build a benchmark comparing the two
-4. Open a visual viewer in your browser
-
-## Step 3: Review in the Visual Viewer
-
-The viewer has two tabs:
-
-### "Outputs" Tab
-- Shows one test case at a time
-- You see the prompt, the full output from the with-skill run, and a text box for your feedback
-- Use arrow keys or prev/next buttons to flip through test cases
-- Type feedback in the text box (it auto-saves)
-- When done, click "Submit All Reviews"
-
-### "Benchmark" Tab
-- Shows the numbers: pass rates, token usage, timing
-- Compares with-skill vs without-skill side by side
-- Shows which specific assertions passed or failed
-
-## Step 4: Iterate
-
-After reviewing, tell Claude what to fix:
-
-> "The replies in eval 3 are too formal for Reddit. Make them more casual."
-
-Claude will update the skill, rerun the evals, and show you new results with the previous iteration's output for comparison.
-
-## Quick Reference: Running Evals Manually
-
-If you want to run evals yourself without asking Claude:
+In the UI: Click **Run Benchmark** or use per-case **Run** buttons.
 
 ```bash
-# The viewer script (launched by Claude during evals):
-python3 /path/to/skill-creator/eval-viewer/generate_review.py \
-  /path/to/workspace/iteration-N \
-  --skill-name "social-media-posting" \
-  --benchmark /path/to/workspace/iteration-N/benchmark.json
-
-# For iteration 2+, add comparison to previous:
-  --previous-workspace /path/to/workspace/iteration-(N-1)
+# CLI alternative
+npx vskill eval run plugins/marketing/skills/social-media-posting
 ```
 
-## Example: Full Eval Cycle
+### 2. A/B Comparison (with skill vs without)
 
-1. You edit `evals.json` — add a test: "Post a meme to just Reddit and Discord"
-2. You tell Claude: "Run eval 5"
-3. Claude spawns 2 agents (with-skill, without-skill), grades them, opens viewer
-4. You review in browser, type feedback: "The Discord message used markdown tables, skill says not to"
-5. Claude fixes the skill, reruns, opens viewer with before/after comparison
-6. You review again — looks good, you say "ship it"
-7. Done
+Runs each prompt **twice**: once WITH your skill loaded, once WITHOUT (vanilla LLM). A blind LLM judge scores both outputs on content (1-5) and structure (1-5). The outputs are randomly shuffled so the judge can't tell which used the skill.
+
+Results include grouped bar charts comparing scores across all eval cases, plus a verdict: EFFECTIVE, MARGINAL, INEFFECTIVE, or DEGRADING.
+
+In the UI: Click **Compare A/B** on the skill detail page.
+
+### 3. Activation Testing
+
+Tests whether the skill correctly triggers on relevant prompts and stays quiet on irrelevant ones. Measures precision, recall, and reliability.
+
+## Iterating on Your Skill
+
+The workflow:
+
+1. **Run benchmark** — see which assertions fail
+2. **Read the judge's reasoning** — expand each assertion to understand why it failed
+3. **Improve SKILL.md** — add missing details, clarify ambiguous sections
+4. **Re-run** — check if pass rate improved
+5. **Run A/B comparison** — confirm the skill adds value vs vanilla LLM
+
+Previous results are saved automatically. The skill detail page shows your last benchmark results inline without re-running. Use the **History** page to compare across runs.
+
+## Viewing Results
+
+Results persist between sessions. When you open the eval UI:
+- **Skill detail page** — shows last benchmark results inline (pass/fail per assertion, time, tokens)
+- **Benchmark page** — shows previous results with per-case status pills
+- **History page** — lists all previous benchmark and comparison runs with timestamps

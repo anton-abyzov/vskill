@@ -45,6 +45,8 @@ export interface BenchmarkCase {
   status: "pass" | "fail" | "error";
   error_message: string | null;
   pass_rate: number;
+  durationMs?: number;
+  tokens?: number | null;
   assertions: BenchmarkAssertionResult[];
 }
 

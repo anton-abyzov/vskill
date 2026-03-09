@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api";
 import { useSSE } from "../sse";
-import type { EvalsFile, EvalCase, Assertion } from "../types";
+import type { EvalsFile, EvalCase, Assertion, BenchmarkResult } from "../types";
 
 interface AssertionResult {
   assertion_id: string;
@@ -33,10 +33,33 @@ export function SkillDetailPage() {
   const [runningEvalId, setRunningEvalId] = useState<number | null>(null);
   const [inlineResults, setInlineResults] = useState<Map<number, InlineResult>>(new Map());
   const [expandedInline, setExpandedInline] = useState<Set<number>>(new Set());
+  const [lastBenchmark, setLastBenchmark] = useState<BenchmarkResult | null>(null);
 
   useEffect(() => {
     if (!plugin || !skill) return;
     api.getEvals(plugin, skill).then(setEvals).catch((e) => setError(e.message)).finally(() => setLoading(false));
+    // Load previous benchmark results
+    api.getLatestBenchmark(plugin, skill).then((b) => {
+      setLastBenchmark(b);
+      // Populate inline results from saved benchmark
+      const map = new Map<number, InlineResult>();
+      for (const c of b.cases) {
+        map.set(c.eval_id, {
+          status: c.status,
+          passRate: c.pass_rate,
+          errorMessage: c.error_message || undefined,
+          durationMs: c.durationMs,
+          tokens: c.tokens,
+          assertions: c.assertions.map((a) => ({
+            assertion_id: a.id,
+            text: a.text,
+            pass: a.pass,
+            reasoning: a.reasoning,
+          })),
+        });
+      }
+      setInlineResults(map);
+    }).catch(() => {});
   }, [plugin, skill]);
 
   async function save(updated: EvalsFile) {
@@ -194,6 +217,47 @@ export function SkillDetailPage() {
           History
         </Link>
       </div>
+
+      {/* Last benchmark summary */}
+      {lastBenchmark && !sseRunning && (() => {
+        const passed = lastBenchmark.cases.filter((c) => c.status === "pass").length;
+        const total = lastBenchmark.cases.length;
+        const pct = lastBenchmark.overall_pass_rate !== undefined
+          ? Math.round(lastBenchmark.overall_pass_rate * 100)
+          : total > 0 ? Math.round((passed / total) * 100) : 0;
+        const totalMs = lastBenchmark.cases.reduce((s, c) => s + (c.durationMs ?? 0), 0);
+        const when = new Date(lastBenchmark.timestamp);
+        const timeAgo = formatTimeAgo(when);
+        return (
+          <div className="mb-5 px-4 py-3 rounded-lg flex items-center justify-between" style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}>
+            <div className="flex items-center gap-3">
+              <span
+                className="text-[20px] font-bold"
+                style={{ color: pct >= 80 ? "var(--green)" : pct >= 50 ? "var(--yellow)" : "var(--red)" }}
+              >
+                {pct}%
+              </span>
+              <div>
+                <div className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>
+                  Last Benchmark — {passed}/{total} passed
+                </div>
+                <div className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+                  {lastBenchmark.model} · {timeAgo}{totalMs > 0 ? ` · ${(totalMs / 1000).toFixed(1)}s` : ""}
+                </div>
+              </div>
+            </div>
+            <span
+              className="pill"
+              style={{
+                background: pct >= 80 ? "var(--green-muted)" : pct >= 50 ? "var(--yellow-muted)" : "var(--red-muted)",
+                color: pct >= 80 ? "var(--green)" : pct >= 50 ? "var(--yellow)" : "var(--red)",
+              }}
+            >
+              {pct >= 80 ? "Healthy" : pct >= 50 ? "Needs Work" : "Failing"}
+            </span>
+          </div>
+        );
+      })()}
 
       {/* Error */}
       {error && (
@@ -433,6 +497,18 @@ export function SkillDetailPage() {
       )}
     </div>
   );
+}
+
+function formatTimeAgo(date: Date): string {
+  const s = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d ago`;
+  return date.toLocaleDateString();
 }
 
 /* ------------------------------------------------------------------ */

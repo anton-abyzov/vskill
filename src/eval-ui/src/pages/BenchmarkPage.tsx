@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useSSE } from "../sse";
 import { api } from "../api";
 import { GroupedBarChart } from "../components/GroupedBarChart";
-import type { EvalsFile } from "../types";
+import type { EvalsFile, BenchmarkResult } from "../types";
 
 interface AssertionEvent {
   eval_id: number;
@@ -48,11 +48,13 @@ export function BenchmarkPage() {
   const [model, setModel] = useState<string | null>(null);
   const [evalCases, setEvalCases] = useState<EvalsFile | null>(null);
   const [runScope, setRunScope] = useState<"all" | number | null>(null);
+  const [previousBenchmark, setPreviousBenchmark] = useState<BenchmarkResult | null>(null);
 
   useEffect(() => {
     api.getConfig().then((c) => setModel(c.model)).catch(() => {});
     if (plugin && skill) {
       api.getEvals(plugin, skill).then(setEvalCases).catch(() => {});
+      api.getLatestBenchmark(plugin, skill).then(setPreviousBenchmark).catch(() => {});
     }
   }, [plugin, skill]);
 
@@ -146,38 +148,87 @@ export function BenchmarkPage() {
         </div>
       )}
 
-      {/* Eval case list with per-case Run buttons (shown when not running and no results yet) */}
+      {/* Previous benchmark summary bar */}
+      {!running && currentResults.size === 0 && previousBenchmark && (() => {
+        const passed = previousBenchmark.cases.filter((c) => c.status === "pass").length;
+        const total = previousBenchmark.cases.length;
+        const pct = previousBenchmark.overall_pass_rate !== undefined
+          ? Math.round(previousBenchmark.overall_pass_rate * 100)
+          : total > 0 ? Math.round((passed / total) * 100) : 0;
+        const totalMs = previousBenchmark.cases.reduce((s, c) => s + (c.durationMs ?? 0), 0);
+        const when = new Date(previousBenchmark.timestamp);
+        return (
+          <div className="mb-5 px-4 py-3 rounded-lg flex items-center justify-between" style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}>
+            <div className="flex items-center gap-3">
+              <span className="text-[20px] font-bold" style={{ color: pct >= 80 ? "var(--green)" : pct >= 50 ? "var(--yellow)" : "var(--red)" }}>{pct}%</span>
+              <div>
+                <div className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>Last Benchmark — {passed}/{total} passed</div>
+                <div className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+                  {previousBenchmark.model} · {when.toLocaleString()}{totalMs > 0 ? ` · ${(totalMs / 1000).toFixed(1)}s` : ""}
+                </div>
+              </div>
+            </div>
+            <span className="pill" style={{
+              background: pct >= 80 ? "var(--green-muted)" : pct >= 50 ? "var(--yellow-muted)" : "var(--red-muted)",
+              color: pct >= 80 ? "var(--green)" : pct >= 50 ? "var(--yellow)" : "var(--red)",
+            }}>
+              {pct >= 80 ? "Healthy" : pct >= 50 ? "Needs Work" : "Failing"}
+            </span>
+          </div>
+        );
+      })()}
+
+      {/* Eval case list with per-case Run buttons and previous results (shown when not running and no current results) */}
       {!running && currentResults.size === 0 && evalCases && evalCases.evals.length > 0 && (
         <div className="space-y-2 mb-6">
           <div className="text-[11px] font-semibold uppercase tracking-widest mb-2" style={{ color: "var(--text-tertiary)" }}>
             Eval Cases
           </div>
-          {evalCases.evals.map((ec) => (
-            <div
-              key={ec.id}
-              className="flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-100"
-              style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
-            >
-              <span className="text-[11px] font-mono px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: "var(--surface-3)", color: "var(--text-tertiary)" }}>
-                #{ec.id}
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[13px] font-medium truncate" style={{ color: "var(--text-primary)" }}>{ec.name}</div>
-                <div className="text-[11px] truncate mt-0.5" style={{ color: "var(--text-tertiary)" }}>
-                  {ec.assertions.length} assertion{ec.assertions.length !== 1 ? "s" : ""}
-                </div>
-              </div>
-              <button
-                onClick={() => handleStartBenchmark([ec.id])}
-                disabled={running}
-                className="btn btn-ghost text-[12px] flex-shrink-0"
-                style={{ color: "var(--accent)" }}
+          {evalCases.evals.map((ec) => {
+            const prev = previousBenchmark?.cases.find((c) => c.eval_id === ec.id);
+            return (
+              <div
+                key={ec.id}
+                className="flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-100"
+                style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
-                Run
-              </button>
-            </div>
-          ))}
+                <span className="text-[11px] font-mono px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: "var(--surface-3)", color: "var(--text-tertiary)" }}>
+                  #{ec.id}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] font-medium truncate" style={{ color: "var(--text-primary)" }}>{ec.name}</div>
+                  <div className="text-[11px] truncate mt-0.5" style={{ color: "var(--text-tertiary)" }}>
+                    {ec.assertions.length} assertion{ec.assertions.length !== 1 ? "s" : ""}
+                  </div>
+                </div>
+                {/* Previous result pill */}
+                {prev && (
+                  <span
+                    className="pill flex-shrink-0"
+                    style={{
+                      background: prev.status === "pass" ? "var(--green-muted)" : prev.status === "error" ? "var(--yellow-muted)" : "var(--red-muted)",
+                      color: prev.status === "pass" ? "var(--green)" : prev.status === "error" ? "var(--yellow)" : "var(--red)",
+                    }}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full" style={{
+                      background: prev.status === "pass" ? "var(--green)" : prev.status === "error" ? "var(--yellow)" : "var(--red)"
+                    }} />
+                    {prev.status} {Math.round(prev.pass_rate * 100)}%
+                    {prev.durationMs != null && <span className="ml-1 opacity-70">{(prev.durationMs / 1000).toFixed(1)}s</span>}
+                  </span>
+                )}
+                <button
+                  onClick={() => handleStartBenchmark([ec.id])}
+                  disabled={running}
+                  className="btn btn-ghost text-[12px] flex-shrink-0"
+                  style={{ color: "var(--accent)" }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                  Run
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 

@@ -240,13 +240,39 @@ Install both? Duplicates. They diverge? Inconsistencies. vskill gives you one in
 
 Every skill can include evaluations — standardized test cases that verify the skill actually improves LLM output. Skills with evals get quality scores on [verified-skill.com](https://verified-skill.com) and regression tracking across versions.
 
+### How it works
+
+**The eval system tests the skill's plan, not its execution.** It doesn't post to social media, generate images, or call external APIs. Instead, it measures whether your SKILL.md successfully teaches an LLM the correct behavior.
+
+The algorithm:
+
+1. Your **SKILL.md** is loaded as a system prompt
+2. The **eval prompt** (a realistic user request) is sent to the LLM
+3. The LLM generates a **text response** describing what it would do
+4. An **LLM judge** grades each assertion against that response
+
+For example, a social media posting skill's eval might check: does the LLM mention checking for duplicate posts? Does it use the correct aspect ratios per platform? Does it wait for user approval? If the skill description is clear about these behaviors, the LLM will demonstrate them in its response. If it's vague, assertions fail — telling you exactly what to improve.
+
+Think of it like testing a recipe book: you don't cook the food, you check whether someone reading your recipe would know the right steps, quantities, and order.
+
+### Three evaluation modes
+
+| Mode | What it does | When to use |
+|------|-------------|-------------|
+| **Benchmark** | Runs prompts WITH skill, grades assertions | Measure pass rate after edits |
+| **A/B Comparison** | Runs each prompt WITH and WITHOUT skill, blind-judges both | Prove the skill adds value |
+| **Activation Test** | Tests whether the skill correctly triggers on relevant prompts | Reduce false positives/negatives |
+
+The **A/B comparison** randomly shuffles outputs as "Response A" and "Response B" before scoring, so the judge can't tell which used the skill. Each response is scored on content (1-5) and structure (1-5). The delta between skill and baseline averages produces a verdict: EFFECTIVE, MARGINAL, INEFFECTIVE, or DEGRADING.
+
 ### Directory structure
 
 ```
 your-skill/
 ├── SKILL.md              # The skill definition
 └── evals/
-    └── evals.json        # Test cases + assertions
+    ├── evals.json        # Test cases + assertions
+    └── benchmark.json    # Latest benchmark results (auto-generated)
 ```
 
 ### evals.json format
@@ -280,11 +306,23 @@ your-skill/
 ### CLI commands
 
 ```bash
+npx vskill eval serve                     # Open visual eval UI (benchmark, compare, history)
 npx vskill eval init <skill-dir>          # Scaffold evals.json from SKILL.md via LLM
-npx vskill eval run <skill-dir>           # Run evals and grade assertions
+npx vskill eval run <skill-dir>           # Run evals and grade assertions (CLI output)
 npx vskill eval coverage                  # Show eval status for all skills
 npx vskill eval generate-all              # Batch-generate for all skills
 ```
+
+### Visual eval UI
+
+`vskill eval serve` launches a local web UI where you can:
+- **Run benchmarks** — all cases or individually, with real-time streaming results
+- **Compare A/B** — side-by-side with/without skill scoring and grouped bar charts
+- **View history** — previous benchmark results load automatically
+- **Edit evals** — add/remove assertions, create new eval cases
+- **Switch models** — dropdown to change provider (Claude CLI, Anthropic API, Ollama) and model
+
+Previous benchmark results are displayed on the skill detail page without re-running. Per-case pass/fail status, time, and token usage are shown inline.
 
 ### Platform integration
 

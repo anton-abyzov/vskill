@@ -37,40 +37,73 @@ function resolveSkillDir(root: string, plugin: string, skill: string): string {
   return directPath;
 }
 
-// In-memory config state — UI can change provider/model at runtime
-let currentOverrides: LlmOverrides = {};
+// ---------------------------------------------------------------------------
+// In-memory config state — UI can change provider/model at runtime.
+//
+// Default: claude-cli (Sonnet). The eval server is always run from a separate
+// terminal, so claude-cli is always safe — even if CLAUDECODE env is set
+// (which only matters for the `vskill eval run` CLI command).
+// ---------------------------------------------------------------------------
+let currentOverrides: LlmOverrides = { provider: "claude-cli" };
 
 function getClient(): ReturnType<typeof createLlmClient> {
-  return createLlmClient(Object.keys(currentOverrides).length > 0 ? currentOverrides : undefined);
+  return createLlmClient(currentOverrides);
 }
 
-const PROVIDER_MODELS: Record<ProviderName, string[]> = {
-  "claude-cli": ["sonnet", "opus", "haiku"],
-  "anthropic": ["claude-sonnet-4-20250514", "claude-opus-4-20250514", "claude-haiku-4-20250414"],
-  "ollama": ["llama3.1:8b", "qwen2.5:32b", "gemma2:9b", "mistral:7b"],
+interface ModelOption {
+  id: string;       // raw model id passed to the provider
+  label: string;    // human-readable display name
+}
+
+const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
+  "claude-cli": [
+    { id: "sonnet", label: "Claude Sonnet" },
+    { id: "opus", label: "Claude Opus" },
+    { id: "haiku", label: "Claude Haiku" },
+  ],
+  "anthropic": [
+    { id: "claude-sonnet-4-20250514", label: "Claude Sonnet 4 (API)" },
+    { id: "claude-opus-4-20250514", label: "Claude Opus 4 (API)" },
+    { id: "claude-haiku-4-20250414", label: "Claude Haiku 4 (API)" },
+  ],
+  "ollama": [
+    { id: "llama3.1:8b", label: "Llama 3.1 8B" },
+    { id: "qwen2.5:32b", label: "Qwen 2.5 32B" },
+    { id: "gemma2:9b", label: "Gemma 2 9B" },
+    { id: "mistral:7b", label: "Mistral 7B" },
+  ],
 };
 
-async function detectAvailableProviders(): Promise<Array<{ id: ProviderName; label: string; available: boolean; models: string[] }>> {
-  const providers: Array<{ id: ProviderName; label: string; available: boolean; models: string[] }> = [];
+async function detectAvailableProviders(): Promise<Array<{
+  id: ProviderName;
+  label: string;
+  available: boolean;
+  models: ModelOption[];
+}>> {
+  const providers: Array<{
+    id: ProviderName;
+    label: string;
+    available: boolean;
+    models: ModelOption[];
+  }> = [];
 
-  // Claude CLI — available if not inside Claude Code or if forced via override
-  const insideClaudeCode = !!process.env.CLAUDECODE;
+  // Claude CLI — always available for the eval server (runs in a separate terminal)
   providers.push({
     id: "claude-cli",
-    label: "Claude CLI (Max/Pro)",
-    available: !insideClaudeCode || !!currentOverrides.provider,
+    label: "Claude (Max/Pro subscription)",
+    available: true,
     models: PROVIDER_MODELS["claude-cli"],
   });
 
   // Anthropic API — available if ANTHROPIC_API_KEY is set
   providers.push({
     id: "anthropic",
-    label: "Anthropic API",
+    label: "Anthropic API (requires key)",
     available: !!process.env.ANTHROPIC_API_KEY,
     models: PROVIDER_MODELS["anthropic"],
   });
 
-  // Ollama — probe the server
+  // Ollama — probe the server for actually installed models
   let ollamaModels = PROVIDER_MODELS["ollama"];
   let ollamaAvailable = false;
   try {
@@ -80,13 +113,13 @@ async function detectAvailableProviders(): Promise<Array<{ id: ProviderName; lab
       ollamaAvailable = true;
       const data = await resp.json() as { models?: Array<{ name: string }> };
       if (data.models?.length) {
-        ollamaModels = data.models.map((m) => m.name);
+        ollamaModels = data.models.map((m) => ({ id: m.name, label: m.name }));
       }
     }
   } catch { /* ollama not running */ }
   providers.push({
     id: "ollama",
-    label: "Ollama (local)",
+    label: "Ollama (local, free)",
     available: ollamaAvailable,
     models: ollamaModels,
   });

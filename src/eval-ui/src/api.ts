@@ -12,11 +12,16 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export interface ModelOption {
+  id: string;
+  label: string;
+}
+
 export interface ProviderInfo {
   id: "claude-cli" | "anthropic" | "ollama";
   label: string;
   available: boolean;
-  models: string[];
+  models: ModelOption[];
 }
 
 export interface ConfigResponse {

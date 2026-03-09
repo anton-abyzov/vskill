@@ -1461,10 +1461,42 @@ describe("addCommand smart project root resolution", () => {
     globalThis.fetch = originalFetch;
   });
 
-  // TC-012: Project scope always uses process.cwd()
-  it("installs skill relative to process.cwd() regardless of parent project markers", async () => {
+  // TC-012: Project scope uses findProjectRoot result when available
+  it("installs skill relative to project root found by findProjectRoot", async () => {
+    const cwd = "/home/user/project/subdir";
+    const projectRoot = "/home/user/project";
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    mockFindProjectRoot.mockReturnValue(projectRoot);
+
+    await addCommand("owner/safe-repo", {});
+
+    expect(mockInstallSymlink).toHaveBeenCalled();
+    const callArgs = mockInstallSymlink.mock.calls[0];
+    expect(callArgs[3].projectRoot).toBe(projectRoot);
+
+    cwdSpy.mockRestore();
+  });
+
+  // TC-013: --cwd flag bypasses findProjectRoot entirely
+  it("installs relative to process.cwd() when --cwd flag is used", async () => {
     const cwd = "/home/user/project/subdir";
     const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    mockFindProjectRoot.mockReturnValue("/home/user/project");
+
+    await addCommand("owner/safe-repo", { cwd: true });
+
+    expect(mockInstallSymlink).toHaveBeenCalled();
+    const callArgs = mockInstallSymlink.mock.calls[0];
+    expect(callArgs[3].projectRoot).toBe(cwd);
+
+    cwdSpy.mockRestore();
+  });
+
+  // TC-012b: Falls back to process.cwd() when findProjectRoot returns null
+  it("falls back to process.cwd() when findProjectRoot returns null", async () => {
+    const cwd = "/some/random/path";
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    mockFindProjectRoot.mockReturnValue(null);
 
     await addCommand("owner/safe-repo", {});
 
@@ -1475,12 +1507,13 @@ describe("addCommand smart project root resolution", () => {
     cwdSpy.mockRestore();
   });
 
-  // TC-013: --cwd flag also uses process.cwd() directly
-  it("installs relative to process.cwd() when --cwd flag is used", async () => {
-    const cwd = "/home/user/project/subdir";
+  // TC-012c: HOME directory guard — falls back when findProjectRoot returns homedir
+  it("falls back to process.cwd() when findProjectRoot returns home directory", async () => {
+    const cwd = "/home/testuser/some-dir";
     const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    mockFindProjectRoot.mockReturnValue("/home/testuser");
 
-    await addCommand("owner/safe-repo", { cwd: true });
+    await addCommand("owner/safe-repo", {});
 
     expect(mockInstallSymlink).toHaveBeenCalled();
     const callArgs = mockInstallSymlink.mock.calls[0];
@@ -1597,6 +1630,7 @@ describe("addCommand nested directory fix (TC-016)", () => {
     // Simulate running `vskill install` from inside ~/.openclaw/
     const agentBaseDir = "/home/user/.openclaw";
     const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(agentBaseDir);
+    mockFindProjectRoot.mockReturnValue(agentBaseDir);
 
     const openclaw = makeAgent({
       id: "openclaw",
@@ -2079,9 +2113,10 @@ describe("addCommand project root consistency", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("passes cwd to ensureLockfile and writeLockfile in discovery flow", async () => {
+  it("passes project root to ensureLockfile and writeLockfile in discovery flow", async () => {
     const cwd = "/home/user/my-project";
     const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    mockFindProjectRoot.mockReturnValue(cwd);
     mockDiscoverSkills.mockResolvedValue([
       { name: "skill-a", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/o/r/main/SKILL.md" },
     ]);
@@ -2094,9 +2129,10 @@ describe("addCommand project root consistency", () => {
     cwdSpy.mockRestore();
   });
 
-  it("passes cwd to ensureLockfile and writeLockfile in single-skill legacy flow", async () => {
+  it("passes project root to ensureLockfile and writeLockfile in single-skill legacy flow", async () => {
     const cwd = "/home/user/my-project";
     const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    mockFindProjectRoot.mockReturnValue(cwd);
 
     await addCommand("owner/repo/my-skill", {});
 
@@ -2106,9 +2142,10 @@ describe("addCommand project root consistency", () => {
     cwdSpy.mockRestore();
   });
 
-  it("passes cwd to ensureLockfile and writeLockfile in registry flow with content", async () => {
+  it("passes project root to ensureLockfile and writeLockfile in registry flow with content", async () => {
     const cwd = "/home/user/my-project";
     const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    mockFindProjectRoot.mockReturnValue(cwd);
     mockGetSkill.mockResolvedValue({
       name: "my-skill",
       author: "alice",
@@ -2126,9 +2163,10 @@ describe("addCommand project root consistency", () => {
     cwdSpy.mockRestore();
   });
 
-  it("canonical installer and lockfile both use same cwd in discovery flow", async () => {
+  it("canonical installer and lockfile both use same project root in discovery flow", async () => {
     const cwd = "/home/user/deep/project";
     const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
+    mockFindProjectRoot.mockReturnValue(cwd);
     mockDiscoverSkills.mockResolvedValue([
       { name: "alpha", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/o/r/main/SKILL.md" },
     ]);

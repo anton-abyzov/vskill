@@ -23,11 +23,18 @@ function expandTilde(p: string): string {
  * Global: uses agent.globalSkillsDir (e.g. ~/.claude/skills)
  * Local:  uses projectRoot + agent.localSkillsDir (e.g. ./project/.claude/skills)
  */
-function resolveAgentSkillsDir(agent: AgentDefinition, opts: InstallOptions): string {
+export function resolveAgentSkillsDir(agent: AgentDefinition, opts: InstallOptions): string {
   if (opts.global) {
     return expandTilde(agent.globalSkillsDir);
   }
-  return join(opts.projectRoot, agent.localSkillsDir);
+  const resolved = join(opts.projectRoot, agent.localSkillsDir);
+  const normalizedRoot = join(opts.projectRoot, ".");
+  if (!resolved.startsWith(normalizedRoot)) {
+    throw new Error(
+      `Path traversal detected: ${agent.localSkillsDir} resolves above project root ${opts.projectRoot}`,
+    );
+  }
+  return resolved;
 }
 
 export function ensureCanonicalDir(base: string, global: boolean): string {
@@ -35,6 +42,11 @@ export function ensureCanonicalDir(base: string, global: boolean): string {
     const dir = join(os.homedir(), ".agents", "skills");
     mkdirSync(dir, { recursive: true });
     return dir;
+  }
+  if (base === os.homedir()) {
+    throw new Error(
+      "Refusing to create .agents/ directory in home directory for project-scoped install",
+    );
   }
   const dir = join(base, ".agents", "skills");
   mkdirSync(dir, { recursive: true });

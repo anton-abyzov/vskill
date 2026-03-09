@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, readFileSync, lstatSync, readlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import os, { tmpdir } from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import {
   installSymlink,
   installCopy,
   createRelativeSymlink,
   ensureCanonicalDir,
+  resolveAgentSkillsDir,
 } from "./canonical.js";
 
 function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
@@ -50,6 +51,49 @@ describe("canonical installer", () => {
     it("is idempotent - does not throw if dir exists", () => {
       ensureCanonicalDir(tempDir, false);
       expect(() => ensureCanonicalDir(tempDir, false)).not.toThrow();
+    });
+
+    it("throws when base is home directory for non-global install", () => {
+      const homedir = os.homedir();
+      expect(() => ensureCanonicalDir(homedir, false)).toThrow(
+        "home directory",
+      );
+    });
+
+    it("allows home directory for global install", () => {
+      // Global install ignores base — always uses ~/.agents/skills
+      expect(() => ensureCanonicalDir(os.homedir(), true)).not.toThrow();
+    });
+  });
+
+  describe("resolveAgentSkillsDir", () => {
+    it("returns projectRoot + localSkillsDir for local installs", () => {
+      const agent = makeAgent({ localSkillsDir: ".cursor/skills" });
+      const result = resolveAgentSkillsDir(agent, {
+        global: false,
+        projectRoot: tempDir,
+      });
+      expect(result).toBe(join(tempDir, ".cursor", "skills"));
+    });
+
+    it("throws on path traversal in localSkillsDir", () => {
+      const agent = makeAgent({ localSkillsDir: "../../.evil/skills" });
+      expect(() =>
+        resolveAgentSkillsDir(agent, {
+          global: false,
+          projectRoot: tempDir,
+        }),
+      ).toThrow("Path traversal");
+    });
+
+    it("allows normal dotfolder paths", () => {
+      const agent = makeAgent({ localSkillsDir: ".aider/skills" });
+      expect(() =>
+        resolveAgentSkillsDir(agent, {
+          global: false,
+          projectRoot: tempDir,
+        }),
+      ).not.toThrow();
     });
   });
 
@@ -241,6 +285,19 @@ describe("canonical installer", () => {
       expect(readFileSync(skillPath, "utf-8")).toBe("# Simple");
       // No agents/ directory created
       expect(existsSync(join(tempDir, ".claude", "commands", "simple-skill", "agents"))).toBe(false);
+    });
+
+    it("rejects localSkillsDir with path traversal", () => {
+      const agents = [
+        makeAgent({ id: "evil", localSkillsDir: "../../.evil/skills" }),
+      ];
+
+      expect(() =>
+        installCopy("test-skill", "# Content", agents, {
+          global: false,
+          projectRoot: tempDir,
+        }),
+      ).toThrow("Path traversal");
     });
 
     it("installs to explicit projectRoot, not a parent directory", () => {

@@ -12,9 +12,33 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export interface ProviderInfo {
+  id: "claude-cli" | "anthropic" | "ollama";
+  label: string;
+  available: boolean;
+  models: string[];
+}
+
+export interface ConfigResponse {
+  provider: string | null;
+  model: string;
+  providers: ProviderInfo[];
+  projectName: string | null;
+  root: string;
+  error?: string;
+}
+
 export const api = {
-  getConfig(): Promise<{ model: string; error?: string }> {
+  getConfig(): Promise<ConfigResponse> {
     return fetchJson("/api/config");
+  },
+
+  setConfig(provider: string, model?: string): Promise<ConfigResponse> {
+    return fetchJson("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, model }),
+    });
   },
 
   getSkills(): Promise<SkillInfo[]> {

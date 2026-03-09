@@ -106,6 +106,40 @@ describe("createLlmClient", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Override params
+  // -------------------------------------------------------------------------
+
+  it("override provider takes precedence over env var", () => {
+    process.env.VSKILL_EVAL_PROVIDER = "ollama";
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    const client = createLlmClient({ provider: "anthropic" });
+    expect(client.model).toBe("claude-sonnet-4-20250514");
+  });
+
+  it("override model takes precedence over env var", () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    const client = createLlmClient({ provider: "anthropic", model: "claude-opus-4-20250514" });
+    expect(client.model).toBe("claude-opus-4-20250514");
+  });
+
+  it("override provider=claude-cli with custom model", () => {
+    const client = createLlmClient({ provider: "claude-cli", model: "opus" });
+    expect(client.model).toBe("claude-opus");
+  });
+
+  it("override provider=ollama with custom model", () => {
+    const client = createLlmClient({ provider: "ollama", model: "qwen2.5:32b" });
+    expect(client.model).toBe("qwen2.5:32b");
+  });
+
+  it("override allows claude-cli even inside Claude Code when forced", () => {
+    process.env.CLAUDECODE = "1";
+    // override should bypass the CLAUDECODE guard
+    const client = createLlmClient({ provider: "claude-cli" });
+    expect(client.model).toBe("claude-sonnet");
+  });
+
+  // -------------------------------------------------------------------------
   // Anthropic provider
   // -------------------------------------------------------------------------
 

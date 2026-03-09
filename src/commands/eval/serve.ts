@@ -2,12 +2,24 @@
 // vskill eval serve -- start the eval UI web server
 // ---------------------------------------------------------------------------
 
-import { resolve } from "node:path";
+import { resolve, basename } from "node:path";
 import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { startEvalServer } from "../../eval-server/eval-server.js";
 import { yellow, dim } from "../../utils/output.js";
+
+/**
+ * Deterministic port for a project path.
+ * Maps the absolute path to a port in range 3077-3177 using a hash.
+ * Same project always gets the same port — bookmarkable, no collisions.
+ */
+export function projectPort(rootPath: string): number {
+  const hash = createHash("md5").update(rootPath).digest();
+  const offset = hash.readUInt16BE(0) % 101; // 0-100
+  return 3077 + offset;
+}
 
 function checkSkillCreator(): void {
   // Check common skill-creator installation locations
@@ -43,12 +55,14 @@ function checkSkillCreator(): void {
 
 export async function runEvalServe(
   root: string,
-  port: number,
+  port: number | null,
 ): Promise<void> {
   checkSkillCreator();
 
   const resolvedRoot = resolve(root);
-  const server = await startEvalServer({ port, root: resolvedRoot });
+  const effectivePort = port ?? projectPort(resolvedRoot);
+  const name = basename(resolvedRoot);
+  const server = await startEvalServer({ port: effectivePort, root: resolvedRoot, projectName: name });
 
   // Graceful shutdown
   const shutdown = () => {

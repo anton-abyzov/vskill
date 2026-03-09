@@ -15,6 +15,7 @@ import type { BenchmarkResult, BenchmarkCase, BenchmarkAssertionResult } from ".
 import { writeHistoryEntry, listHistory, readHistoryEntry, computeRegressions } from "../eval/benchmark-history.js";
 import { judgeAssertion } from "../eval/judge.js";
 import { createLlmClient } from "../eval/llm.js";
+import type { ProviderName, LlmOverrides } from "../eval/llm.js";
 import { runComparison } from "../eval/comparator.js";
 import { computeVerdict } from "../eval/verdict.js";
 import { testActivation } from "../eval/activation-tester.js";
@@ -36,19 +37,103 @@ function resolveSkillDir(root: string, plugin: string, skill: string): string {
   return directPath;
 }
 
-export function registerRoutes(router: Router, root: string): void {
+// In-memory config state — UI can change provider/model at runtime
+let currentOverrides: LlmOverrides = {};
+
+function getClient(): ReturnType<typeof createLlmClient> {
+  return createLlmClient(Object.keys(currentOverrides).length > 0 ? currentOverrides : undefined);
+}
+
+const PROVIDER_MODELS: Record<ProviderName, string[]> = {
+  "claude-cli": ["sonnet", "opus", "haiku"],
+  "anthropic": ["claude-sonnet-4-20250514", "claude-opus-4-20250514", "claude-haiku-4-20250414"],
+  "ollama": ["llama3.1:8b", "qwen2.5:32b", "gemma2:9b", "mistral:7b"],
+};
+
+async function detectAvailableProviders(): Promise<Array<{ id: ProviderName; label: string; available: boolean; models: string[] }>> {
+  const providers: Array<{ id: ProviderName; label: string; available: boolean; models: string[] }> = [];
+
+  // Claude CLI — available if not inside Claude Code or if forced via override
+  const insideClaudeCode = !!process.env.CLAUDECODE;
+  providers.push({
+    id: "claude-cli",
+    label: "Claude CLI (Max/Pro)",
+    available: !insideClaudeCode || !!currentOverrides.provider,
+    models: PROVIDER_MODELS["claude-cli"],
+  });
+
+  // Anthropic API — available if ANTHROPIC_API_KEY is set
+  providers.push({
+    id: "anthropic",
+    label: "Anthropic API",
+    available: !!process.env.ANTHROPIC_API_KEY,
+    models: PROVIDER_MODELS["anthropic"],
+  });
+
+  // Ollama — probe the server
+  let ollamaModels = PROVIDER_MODELS["ollama"];
+  let ollamaAvailable = false;
+  try {
+    const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+    const resp = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(2000) });
+    if (resp.ok) {
+      ollamaAvailable = true;
+      const data = await resp.json() as { models?: Array<{ name: string }> };
+      if (data.models?.length) {
+        ollamaModels = data.models.map((m) => m.name);
+      }
+    }
+  } catch { /* ollama not running */ }
+  providers.push({
+    id: "ollama",
+    label: "Ollama (local)",
+    available: ollamaAvailable,
+    models: ollamaModels,
+  });
+
+  return providers;
+}
+
+export function registerRoutes(router: Router, root: string, projectName?: string): void {
   // Health check
   router.get("/api/health", (_req, res) => {
     sendJson(res, { ok: true });
   });
 
-  // Config — expose current provider/model so the UI can display it
-  router.get("/api/config", (_req, res) => {
+  // Config — expose current provider/model + available providers + project
+  router.get("/api/config", async (_req, res) => {
     try {
-      const client = createLlmClient();
-      sendJson(res, { model: client.model });
+      const client = getClient();
+      const providers = await detectAvailableProviders();
+      sendJson(res, {
+        provider: currentOverrides.provider || null,
+        model: client.model,
+        providers,
+        projectName: projectName || null,
+        root,
+      });
     } catch (err) {
-      sendJson(res, { model: "unknown", error: (err as Error).message });
+      const providers = await detectAvailableProviders();
+      sendJson(res, { provider: null, model: "unknown", error: (err as Error).message, providers, projectName: projectName || null, root });
+    }
+  });
+
+  // Update config — change provider/model at runtime
+  router.post("/api/config", async (req, res) => {
+    const body = (await readBody(req)) as { provider?: ProviderName; model?: string };
+    if (body.provider) currentOverrides.provider = body.provider;
+    if (body.model) currentOverrides.model = body.model;
+    // If provider changed but no model, clear model override so it uses the provider default
+    if (body.provider && !body.model) delete currentOverrides.model;
+
+    try {
+      const client = getClient();
+      const providers = await detectAvailableProviders();
+      sendJson(res, { provider: currentOverrides.provider || null, model: client.model, providers });
+    } catch (err) {
+      // Revert on error
+      currentOverrides = {};
+      sendJson(res, { error: (err as Error).message }, 400, req);
     }
   });
 
@@ -153,7 +238,7 @@ export function registerRoutes(router: Router, root: string): void {
       const evals = loadAndValidateEvals(skillDir);
       const skillMdPath = join(skillDir, "SKILL.md");
       const skillContent = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
-      const client = createLlmClient();
+      const client = getClient();
       const systemPrompt = skillContent
         ? `You are an AI assistant enhanced with the following skill:\n\n${skillContent}`
         : "You are a helpful AI assistant.";
@@ -267,7 +352,7 @@ export function registerRoutes(router: Router, root: string): void {
       const evals = loadAndValidateEvals(skillDir);
       const skillMdPath = join(skillDir, "SKILL.md");
       const skillContent = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
-      const client = createLlmClient();
+      const client = getClient();
 
       const comparisonResults: Array<{
         eval_id: number;
@@ -446,7 +531,7 @@ export function registerRoutes(router: Router, root: string): void {
       const descMatch = skillContent.match(/^---[\s\S]*?description:\s*"([^"]+)"[\s\S]*?---/);
       const description = descMatch ? descMatch[1] : skillContent.slice(0, 500);
 
-      const client = createLlmClient();
+      const client = getClient();
       const summary = await testActivation(description, body.prompts, client, (result) => {
         if (!aborted) {
           sendSSE(res, "prompt_result", result);

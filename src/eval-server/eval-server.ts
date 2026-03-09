@@ -30,6 +30,7 @@ const MIME_TYPES: Record<string, string> = {
 export interface EvalServerOptions {
   port: number;
   root: string;
+  projectName?: string;
 }
 
 export async function startEvalServer(opts: EvalServerOptions): Promise<http.Server> {
@@ -37,7 +38,7 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
   const { port, root } = opts;
 
   // Register API routes
-  registerRoutes(router, root);
+  registerRoutes(router, root, opts.projectName);
 
   // Static asset directory
   const staticDir = path.resolve(__dirname, "../eval-ui");

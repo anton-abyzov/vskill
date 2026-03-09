@@ -43,7 +43,8 @@ export function BenchmarkPage() {
     api.getConfig().then((c) => setModel(c.model)).catch(() => {});
   }, []);
 
-  function handleStart() {
+  function handleStartBenchmark() {
+    api.getConfig().then((c) => setModel(c.model)).catch(() => {});
     setExpandedOutputs(new Set());
     start(`/api/skills/${plugin}/${skill}/benchmark`);
   }
@@ -111,18 +112,10 @@ export function BenchmarkPage() {
         <p className="text-[13px]" style={{ color: "var(--text-tertiary)" }}>
           Runs your skill against each eval case. An LLM judge grades every assertion against the actual output.
         </p>
-        {model && (
-          <div className="flex items-center gap-1.5 mt-1.5">
-            <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>Model:</span>
-            <span className="text-[11px] font-mono px-1.5 py-0.5 rounded" style={{ background: "var(--surface-3)", color: "var(--accent)" }}>
-              {model}
-            </span>
-          </div>
-        )}
       </div>
 
       {/* Run button */}
-      <button onClick={handleStart} disabled={running} className="btn btn-primary mb-7">
+      <button onClick={handleStartBenchmark} disabled={running} className="btn btn-primary mb-7">
         {running ? (
           <><div className="spinner" style={{ borderTopColor: "#fff", borderColor: "rgba(255,255,255,0.2)", width: 14, height: 14 }} /> Running...</>
         ) : (

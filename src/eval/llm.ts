@@ -24,7 +24,7 @@ export interface LlmClient {
   readonly model: string;
 }
 
-type ProviderName = "anthropic" | "claude-cli" | "ollama";
+export type ProviderName = "anthropic" | "claude-cli" | "ollama";
 
 function detectProvider(): ProviderName {
   if (process.env.CLAUDECODE) return "ollama";
@@ -32,16 +32,23 @@ function detectProvider(): ProviderName {
   return "claude-cli";
 }
 
-export function createLlmClient(): LlmClient {
-  const provider = (process.env.VSKILL_EVAL_PROVIDER || detectProvider()) as ProviderName;
+export interface LlmOverrides {
+  provider?: ProviderName;
+  model?: string;
+}
+
+export function createLlmClient(overrides?: LlmOverrides): LlmClient {
+  const provider = (overrides?.provider || process.env.VSKILL_EVAL_PROVIDER || detectProvider()) as ProviderName;
+  const modelOverride = overrides?.model;
+  const forced = !!overrides?.provider;
 
   switch (provider) {
     case "anthropic":
-      return createAnthropicClient();
+      return createAnthropicClient(modelOverride);
     case "claude-cli":
-      return createClaudeCliClient();
+      return createClaudeCliClient(modelOverride, forced);
     case "ollama":
-      return createOllamaClient();
+      return createOllamaClient(modelOverride);
     default:
       throw new Error(
         `Unknown VSKILL_EVAL_PROVIDER: "${provider}". Use "claude-cli", "anthropic", or "ollama".`,
@@ -52,7 +59,7 @@ export function createLlmClient(): LlmClient {
 // ---------------------------------------------------------------------------
 // Provider: Anthropic API
 // ---------------------------------------------------------------------------
-function createAnthropicClient(): LlmClient {
+function createAnthropicClient(modelOverride?: string): LlmClient {
   const DEFAULT_MODEL = "claude-sonnet-4-20250514";
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -62,7 +69,7 @@ function createAnthropicClient(): LlmClient {
     );
   }
 
-  const model = process.env.VSKILL_EVAL_MODEL || DEFAULT_MODEL;
+  const model = modelOverride || process.env.VSKILL_EVAL_MODEL || DEFAULT_MODEL;
   let clientInstance: any = null;
 
   return {
@@ -103,14 +110,14 @@ function createAnthropicClient(): LlmClient {
 // From a plain terminal: npx vskill eval run mobile/appstore
 // Select model:          VSKILL_EVAL_MODEL=opus npx vskill eval run mobile/appstore
 // ---------------------------------------------------------------------------
-function createClaudeCliClient(): LlmClient {
-  if (process.env.CLAUDECODE) {
+function createClaudeCliClient(modelOverride?: string, forced = false): LlmClient {
+  if (process.env.CLAUDECODE && !forced) {
     throw new Error(
       "Cannot use claude-cli provider inside a Claude Code session.\nRun from a plain terminal, or use a different provider:\n  export VSKILL_EVAL_PROVIDER=ollama",
     );
   }
 
-  const model = process.env.VSKILL_EVAL_MODEL || "sonnet";
+  const model = modelOverride || process.env.VSKILL_EVAL_MODEL || "sonnet";
 
   return {
     model: `claude-${model}`,
@@ -163,9 +170,9 @@ function createClaudeCliClient(): LlmClient {
 // ---------------------------------------------------------------------------
 // Provider: Ollama (local models — free, no API key)
 // ---------------------------------------------------------------------------
-function createOllamaClient(): LlmClient {
+function createOllamaClient(modelOverride?: string): LlmClient {
   const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-  const model = process.env.VSKILL_EVAL_MODEL || "llama3.1:8b";
+  const model = modelOverride || process.env.VSKILL_EVAL_MODEL || "llama3.1:8b";
 
   return {
     model,

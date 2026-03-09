@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Routes, Route, Link, useLocation } from "react-router-dom";
 import { SkillListPage } from "./pages/SkillListPage";
 import { SkillDetailPage } from "./pages/SkillDetailPage";
@@ -5,6 +6,8 @@ import { BenchmarkPage } from "./pages/BenchmarkPage";
 import { ComparisonPage } from "./pages/ComparisonPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { ActivationTestPage } from "./pages/ActivationTestPage";
+import { ModelSelector } from "./components/ModelSelector";
+import { api } from "./api";
 
 /* ------------------------------------------------------------------ */
 /* SVG Icons (inline, zero deps)                                      */
@@ -36,6 +39,11 @@ const NAV_ITEMS = [
 
 export function App() {
   const location = useLocation();
+  const [projectName, setProjectName] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getConfig().then((c) => setProjectName(c.projectName)).catch(() => {});
+  }, []);
 
   return (
     <div className="flex h-screen">
@@ -56,7 +64,9 @@ export function App() {
               <div className="text-[14px] font-semibold" style={{ color: "var(--text-primary)", letterSpacing: "-0.01em" }}>
                 Skill Eval
               </div>
-              <div className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>vskill</div>
+              <div className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+                {projectName || "vskill"}
+              </div>
             </div>
           </div>
         </div>
@@ -97,11 +107,12 @@ export function App() {
           })}
         </div>
 
-        {/* Footer */}
-        <div className="px-5 py-4" style={{ borderTop: "1px solid var(--border-subtle)" }}>
-          <div className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
-            localhost:3077
+        {/* Model selector */}
+        <div className="px-3 py-3" style={{ borderTop: "1px solid var(--border-subtle)" }}>
+          <div className="text-[10px] font-semibold uppercase tracking-widest px-2 mb-2" style={{ color: "var(--text-tertiary)" }}>
+            Model
           </div>
+          <ModelSelector />
         </div>
       </nav>
 

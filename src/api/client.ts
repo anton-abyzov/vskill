@@ -43,6 +43,8 @@ export interface SkillSearchResult {
   repoSlug?: string;
   /** Skill folder name (e.g., "gog") */
   skillSlug?: string;
+  /** Alternate repos containing the same skill from the same org */
+  alternateRepos?: Array<{ ownerSlug: string; repoSlug: string; repoUrl: string }>;
 }
 
 export interface SkillDetail {
@@ -158,6 +160,11 @@ export async function searchSkills(
     ownerSlug: s.ownerSlug ? String(s.ownerSlug) : undefined,
     repoSlug: s.repoSlug ? String(s.repoSlug) : undefined,
     skillSlug: s.skillSlug ? String(s.skillSlug) : undefined,
+    alternateRepos: Array.isArray(s.alternateRepos) ? (s.alternateRepos as Array<Record<string, unknown>>).map((a) => ({
+      ownerSlug: String(a.ownerSlug || ""),
+      repoSlug: String(a.repoSlug || ""),
+      repoUrl: String(a.repoUrl || ""),
+    })) : undefined,
   }));
   return { results, hasMore: data.pagination?.hasMore ?? false };
 }

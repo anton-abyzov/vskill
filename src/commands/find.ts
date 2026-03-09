@@ -134,6 +134,10 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
       }
 
       console.log(`  ${link(url, cyan(url))}`);
+      if (r.alternateRepos) {
+        const altLabels = r.alternateRepos.map((a) => `${a.ownerSlug}/${a.repoSlug}`).join(", ");
+        console.log(`  ${dim("also: " + altLabels)}`);
+      }
       console.log();
     }
 
@@ -173,7 +177,8 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     if (r.isBlocked) {
       console.log(`${name}\t${repo}\tBLOCKED`);
     } else {
-      console.log(`${name}\t${repo}\t${r.githubStars ?? 0}\t${r.trustTier ?? ""}\t${r.pluginName ?? ""}`);
+      const altRepos = r.alternateRepos?.map((a) => `${a.ownerSlug}/${a.repoSlug}`).join(",") ?? "";
+      console.log(`${name}\t${repo}\t${r.githubStars ?? 0}\t${r.trustTier ?? ""}\t${r.pluginName ?? ""}\t${altRepos}`);
     }
   }
 

@@ -197,7 +197,7 @@ describe("findCommand", () => {
     await findCommand("test", { noHint: true });
     const dataLines = logs.filter((l) => l.includes("\t"));
     expect(dataLines.length).toBe(1);
-    expect(dataLines[0]).toBe("my-skill\towner/repo\t10\t\t");
+    expect(dataLines[0]).toBe("my-skill\towner/repo\t10\t\t\t");
   });
 
   it("non-TTY output includes trustTier when present", async () => {
@@ -210,7 +210,7 @@ describe("findCommand", () => {
     });
     await findCommand("test", { noHint: true });
     const dataLines = logs.filter((l) => l.includes("\t"));
-    expect(dataLines[0]).toBe("my-skill\towner/repo\t10\tT3\t");
+    expect(dataLines[0]).toBe("my-skill\towner/repo\t10\tT3\t\t");
   });
 
   it("non-TTY blocked output uses BLOCKED as third column", async () => {
@@ -306,5 +306,93 @@ describe("findCommand", () => {
     await findCommand("test");
     const output = logs.join("\n");
     expect(output).toContain("verified-skill.com/skills/test/legacy/legacy-skill");
+  });
+
+  it("TTY output shows alternate repos when present", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        {
+          name: "anthropics/claude-code/frontend-design",
+          author: "anthropics",
+          repoUrl: "https://github.com/anthropics/claude-code",
+          tier: "CERTIFIED",
+          score: 95,
+          installs: 0,
+          githubStars: 1200,
+          vskillInstalls: 0,
+          trustTier: "T4",
+          ownerSlug: "anthropics",
+          repoSlug: "claude-code",
+          skillSlug: "frontend-design",
+          alternateRepos: [{ ownerSlug: "anthropics", repoSlug: "skills", repoUrl: "https://github.com/anthropics/skills" }],
+        },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    expect(output).toContain("also: anthropics/skills");
+  });
+
+  it("JSON output includes alternateRepos array", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        {
+          name: "org/repo/skill",
+          author: "org",
+          repoUrl: "https://github.com/org/repo",
+          tier: "VERIFIED",
+          score: 90,
+          installs: 0,
+          githubStars: 100,
+          vskillInstalls: 0,
+          alternateRepos: [{ ownerSlug: "org", repoSlug: "other-repo", repoUrl: "https://github.com/org/other-repo" }],
+        },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test", { json: true });
+    const jsonLine = logs.find((l) => l.trimStart().startsWith("["));
+    expect(jsonLine).toBeDefined();
+    const parsed = JSON.parse(jsonLine!);
+    expect(parsed[0].alternateRepos).toEqual([{ ownerSlug: "org", repoSlug: "other-repo", repoUrl: "https://github.com/org/other-repo" }]);
+  });
+
+  it("piped output appends alternate repos as tab-separated field", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        {
+          name: "my-skill",
+          author: "a",
+          repoUrl: "https://github.com/owner/repo",
+          tier: "VERIFIED",
+          score: 90,
+          installs: 0,
+          githubStars: 10,
+          vskillInstalls: 0,
+          alternateRepos: [{ ownerSlug: "owner", repoSlug: "other", repoUrl: "https://github.com/owner/other" }],
+        },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test", { noHint: true });
+    const dataLines = logs.filter((l) => l.includes("\t"));
+    expect(dataLines[0]).toContain("owner/other");
+  });
+
+  it("no alternateRepos renders identically to current behavior", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "simple-skill", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 100, githubStars: 10, vskillInstalls: 100 },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    expect(output).not.toContain("also:");
   });
 });

@@ -12,6 +12,7 @@ import { loadAndValidateEvals } from "../eval/schema.js";
 import { createLlmClient } from "../eval/llm.js";
 import type { ProviderName } from "../eval/llm.js";
 import { judgeAssertion } from "../eval/judge.js";
+import { buildEvalSystemPrompt } from "../eval/prompt-builder.js";
 
 interface ModelSpec {
   provider: ProviderName;
@@ -45,9 +46,7 @@ export function registerModelCompareRoutes(router: Router, root: string): void {
       // Read SKILL.md for system prompt
       const skillMdPath = join(skillDir, "SKILL.md");
       const skillContent = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
-      const systemPrompt = skillContent
-        ? `You are an AI assistant enhanced with the following skill:\n\n${skillContent}`
-        : "You are a helpful AI assistant.";
+      const systemPrompt = buildEvalSystemPrompt(skillContent);
 
       // Run Model A
       if (aborted) return;

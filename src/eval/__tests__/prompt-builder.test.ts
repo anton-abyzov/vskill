@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   buildEvalInitPrompt,
+  buildEvalSystemPrompt,
+  buildBaselineSystemPrompt,
   parseGeneratedEvals,
 } from "../prompt-builder.js";
 
@@ -32,6 +34,67 @@ describe("buildEvalInitPrompt", () => {
     const prompt = buildEvalInitPrompt(skillContent);
     expect(prompt).toContain("Best Practices");
     expect(prompt).toContain("objectively verifiable");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildEvalSystemPrompt (MCP-aware)
+// ---------------------------------------------------------------------------
+
+describe("buildEvalSystemPrompt", () => {
+  it("returns standard prompt for non-MCP skills", () => {
+    const result = buildEvalSystemPrompt("# My Skill\nDoes text processing.");
+    expect(result).toContain("You are an AI assistant enhanced with the following skill");
+    expect(result).toContain("# My Skill");
+    expect(result).not.toContain("Evaluation Mode");
+  });
+
+  it("returns simulation prompt for Slack MCP skill", () => {
+    const slackSkill = "Use slack_send_message and slack_read_channel to interact with Slack.";
+    const result = buildEvalSystemPrompt(slackSkill);
+    expect(result).toContain("Evaluation Mode");
+    expect(result).toContain("slack_send_message");
+    expect(result).toContain("slack_read_channel");
+    expect(result).toContain("Slack");
+    expect(result).toContain("Do NOT");
+  });
+
+  it("returns simulation prompt for GitHub MCP skill", () => {
+    const githubSkill = "Use github_create_pr to create pull requests.";
+    const result = buildEvalSystemPrompt(githubSkill);
+    expect(result).toContain("Evaluation Mode");
+    expect(result).toContain("github_create_pr");
+    expect(result).toContain("GitHub");
+  });
+
+  it("lists multiple MCP servers when skill uses several", () => {
+    const multiSkill = "Use slack_send_message for chat and github_create_pr for PRs and drive_list_files for docs.";
+    const result = buildEvalSystemPrompt(multiSkill);
+    expect(result).toContain("Slack");
+    expect(result).toContain("GitHub");
+    expect(result).toContain("Google Workspace");
+  });
+
+  it("returns baseline prompt for empty content", () => {
+    expect(buildEvalSystemPrompt("")).toBe("You are a helpful AI assistant.");
+  });
+
+  it("includes simulation instructions that prevent tool-unavailable responses", () => {
+    const skill = "Use slack_send_message to send messages.";
+    const result = buildEvalSystemPrompt(skill);
+    expect(result).toContain("Do NOT");
+    expect(result).toContain("tools are unavailable");
+    expect(result).toContain("Walk through each tool call step by step");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildBaselineSystemPrompt
+// ---------------------------------------------------------------------------
+
+describe("buildBaselineSystemPrompt", () => {
+  it("returns baseline prompt", () => {
+    expect(buildBaselineSystemPrompt()).toBe("You are a helpful AI assistant.");
   });
 });
 

@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type { EvalsFile } from "./schema.js";
+import { detectMcpDependencies } from "./mcp-detector.js";
 
 // ---------------------------------------------------------------------------
 // Schema reference (embedded)
@@ -82,7 +83,36 @@ const BEST_PRACTICES = `
 `;
 
 // ---------------------------------------------------------------------------
-// Prompt builder
+// Eval execution system prompts (MCP-aware)
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the system prompt for eval execution. If the skill references MCP tools
+ * (Slack, GitHub, Linear, etc.), appends simulation instructions so the LLM
+ * demonstrates the workflow instead of reporting "tools unavailable".
+ */
+export function buildEvalSystemPrompt(skillContent: string): string {
+  if (!skillContent) return "You are a helpful AI assistant.";
+
+  const mcpDeps = detectMcpDependencies(skillContent);
+
+  if (mcpDeps.length === 0) {
+    return `You are an AI assistant enhanced with the following skill:\n\n${skillContent}`;
+  }
+
+  const toolList = mcpDeps
+    .map((d) => `- **${d.server}**: ${d.matchedTools.join(", ")}`)
+    .join("\n");
+
+  return `You are an AI assistant enhanced with the following skill:\n\n${skillContent}\n\n---\n\n## Evaluation Mode\n\nThis is an evaluation run. The MCP tools referenced in this skill are not connected in this environment, but you MUST demonstrate the complete workflow as if they were available.\n\n**Tools this skill uses:**\n${toolList}\n\n**Rules:**\n1. Walk through each tool call step by step — name the tool and its parameters\n2. Show a realistic simulated response for each tool call (use realistic IDs, timestamps, content)\n3. Continue the full workflow using the simulated data\n4. Produce the final user-facing output exactly as you would with real tools\n\n**Do NOT:**\n- Say tools are unavailable or not connected\n- Offer to help set up the integration\n- Skip any workflow steps\n- Give abstract descriptions instead of demonstrating the actual workflow`;
+}
+
+export function buildBaselineSystemPrompt(): string {
+  return "You are a helpful AI assistant.";
+}
+
+// ---------------------------------------------------------------------------
+// Eval generation prompt (for creating evals.json from SKILL.md)
 // ---------------------------------------------------------------------------
 
 export function buildEvalInitPrompt(skillContent: string): string {

@@ -13,7 +13,7 @@ test("health endpoint returns ok", async ({ request }) => {
 
 test("UI loads with sidebar and heading", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator("text=Skill Builder")).toBeVisible();
+  await expect(page.locator("text=Skill Studio")).toBeVisible();
 });
 
 // ---------------------------------------------------------------------------

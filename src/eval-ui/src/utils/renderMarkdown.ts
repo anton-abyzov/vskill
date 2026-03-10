@@ -1,5 +1,5 @@
 /**
- * Lightweight markdown-to-HTML renderer for the Skill Builder preview.
+ * Lightweight markdown-to-HTML renderer for the Skill Studio preview.
  * Returns an HTML string for use with dangerouslySetInnerHTML.
  *
  * Handles: headers, bold, italic, inline code, fenced code blocks,

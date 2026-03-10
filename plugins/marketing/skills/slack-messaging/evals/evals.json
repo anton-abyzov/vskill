@@ -140,6 +140,88 @@
           "type": "boolean"
         }
       ]
+    },
+    {
+      "id": 6,
+      "name": "Slack mrkdwn formatting correctness",
+      "prompt": "Send a message to #engineering with a summary of the sprint results. Include a bold header, a bulleted list of completed items, a link to the sprint board at https://jira.company.com/board/42, and mention @david for the next sprint lead.",
+      "expected_output": "The skill drafts a message using Slack mrkdwn syntax: single *bold* for emphasis, bullet points with plain dashes, <url|text> pipe syntax for links, and <@USER_ID> for mentions. Does not use standard markdown like **bold** or ## headers.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Uses single *asterisks* for bold text, not double **asterisks**",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Uses Slack link syntax <https://jira.company.com/board/42|text> with pipe separator, not standard markdown [text](url)",
+          "type": "boolean"
+        },
+        {
+          "id": "a3",
+          "text": "Does not use ## headers or --- horizontal rules which do not render in Slack",
+          "type": "boolean"
+        },
+        {
+          "id": "a4",
+          "text": "Uses <@USER_ID> format for mentioning david, after resolving via slack_search_users",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Error handling — channel not found",
+      "prompt": "Send a quick update to #alpha-secret-project on Slack saying the prototype is ready for review.",
+      "expected_output": "The skill attempts to resolve #alpha-secret-project via slack_search_channels. If the channel is not found or not accessible, it informs the user and suggests alternatives (check spelling, verify access, ask to be invited).",
+      "files": [],
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Attempts to resolve the channel name via slack_search_channels before sending",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Handles the scenario where channel resolution fails or returns no results",
+          "type": "boolean"
+        },
+        {
+          "id": "a3",
+          "text": "Does not attempt to send a message to an unresolved or invalid channel_id",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Search messages with modifiers",
+      "prompt": "Search Slack for messages from @maria in #engineering about the database migration from last week.",
+      "expected_output": "The skill uses slack_search_public with query modifiers: from:@maria, in:#engineering, and date filters for last week. Presents results with context.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Uses slack_search_public or slack_search_public_and_private to search messages",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Builds a search query with from:@maria and in:#engineering modifiers",
+          "type": "boolean"
+        },
+        {
+          "id": "a3",
+          "text": "Includes date-based filtering (before:/after:/on: or oldest/latest) to narrow to last week",
+          "type": "boolean"
+        },
+        {
+          "id": "a4",
+          "text": "Presents search results with message content, author, and timestamp context",
+          "type": "boolean"
+        }
+      ]
     }
   ]
 }

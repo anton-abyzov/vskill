@@ -265,14 +265,81 @@ Think of it like testing a recipe book: you don't cook the food, you check wheth
 
 The **A/B comparison** randomly shuffles outputs as "Response A" and "Response B" before scoring, so the judge can't tell which used the skill. Each response is scored on content (1-5) and structure (1-5). The delta between skill and baseline averages produces a verdict: EFFECTIVE, MARGINAL, INEFFECTIVE, or DEGRADING.
 
+### Unit testing vs integration testing
+
+Skill evals are **unit tests** — they verify the skill's teaching quality in isolation, without calling external tools or APIs. This is a deliberate design choice:
+
+| | Unit Tests (current) | Integration Tests |
+|:---|:---|:---|
+| **What** | Does the SKILL.md teach the right workflow? | Does the end-to-end tool execution work? |
+| **Speed** | ~30s per case | ~3min per case |
+| **Infrastructure** | None — any LLM provider | Real MCP servers, auth tokens, test data |
+| **CI/CD** | Runs anywhere | Needs secrets, test workspaces |
+| **Flakiness** | Low (deterministic text) | High (external APIs, rate limits) |
+| **Coverage** | Workflow, tool selection, formatting, parameters | API compatibility, auth, error recovery |
+
+**Why unit tests are sufficient for most skills:** The eval doesn't test whether Slack's API works — it tests whether your SKILL.md correctly teaches an LLM to use `slack_search_channels` before `slack_read_channel`, to use `thread_ts` for replies, and to format messages with `*bold*` instead of `**bold**`. If the teaching is correct, the execution follows.
+
+#### MCP-dependent skills (Slack, GitHub, Linear, etc.)
+
+Skills that reference MCP tools automatically get **simulation mode** during evals. The eval system detects MCP tool references in your SKILL.md and instructs the LLM to demonstrate the complete workflow with simulated tool responses. This means your assertions can test tool selection, parameter correctness, and workflow order — even without a real MCP connection.
+
+```
+Standard skill eval:               MCP skill eval (automatic):
+┌──────────┐                        ┌──────────┐
+│ SKILL.md │ → system prompt        │ SKILL.md │ → system prompt
+└──────────┘                        └──────────┘   + simulation instructions
+     ↓                                    ↓
+┌──────────┐                        ┌──────────┐
+│ LLM      │ → text response        │ LLM      │ → simulated workflow
+└──────────┘                        └──────────┘   (tool calls + mock responses)
+     ↓                                    ↓
+┌──────────┐                        ┌──────────┐
+│ Judge    │ → pass/fail            │ Judge    │ → pass/fail
+└──────────┘                        └──────────┘
+```
+
+No configuration needed — if your SKILL.md mentions `slack_*`, `github_*`, `linear_*`, or `gws_*` tools, simulation mode activates automatically.
+
+#### Activation testing
+
+Skills can also include trigger accuracy tests in `evals/activation-prompts.json`:
+
+```json
+{
+  "prompts": [
+    { "prompt": "check what's new in #engineering", "expected": "should_activate" },
+    { "prompt": "send an email to the team", "expected": "should_not_activate" }
+  ]
+}
+```
+
+This tests whether your skill's `description` field in SKILL.md causes the skill to trigger on the right prompts (precision) and not miss relevant ones (recall). Results show TP/TN/FP/FN classification with precision, recall, and reliability metrics.
+
+#### Cross-model testing
+
+The eval system supports Claude (CLI or API), Anthropic API, and Ollama. Testing across models reveals:
+- Whether your skill helps **weaker models** (Llama, Qwen) follow complex workflows
+- Whether base model improvements have made a skill **unnecessary**
+- Whether your simulation instructions are **clear enough** for smaller models
+
+```bash
+# Test with Opus (high-end)
+VSKILL_EVAL_MODEL=opus npx vskill eval run my-skill
+
+# Test with Ollama (open-source)
+VSKILL_EVAL_PROVIDER=ollama VSKILL_EVAL_MODEL=llama3.1:8b npx vskill eval run my-skill
+```
+
 ### Directory structure
 
 ```
 your-skill/
-├── SKILL.md              # The skill definition
+├── SKILL.md                          # The skill definition
 └── evals/
-    ├── evals.json        # Test cases + assertions
-    └── benchmark.json    # Latest benchmark results (auto-generated)
+    ├── evals.json                    # Test cases + assertions
+    ├── activation-prompts.json       # Trigger accuracy tests (optional)
+    └── benchmark.json                # Latest benchmark results (auto-generated)
 ```
 
 ### evals.json format

@@ -18,6 +18,7 @@ import type { BenchmarkResult, BenchmarkCase, BenchmarkAssertionResult } from ".
 import { writeHistoryEntry, listHistory, readHistoryEntry, computeRegressions, deleteHistoryEntry, getCaseHistory, computeStats } from "../eval/benchmark-history.js";
 import type { HistoryFilter } from "../eval/benchmark-history.js";
 import { judgeAssertion } from "../eval/judge.js";
+import { buildEvalSystemPrompt, buildBaselineSystemPrompt } from "../eval/prompt-builder.js";
 import { createLlmClient } from "../eval/llm.js";
 import type { ProviderName, LlmOverrides } from "../eval/llm.js";
 import { runComparison } from "../eval/comparator.js";
@@ -308,9 +309,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       const skillMdPath = join(skillDir, "SKILL.md");
       const skillContent = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
       const client = getClient();
-      const systemPrompt = skillContent
-        ? `You are an AI assistant enhanced with the following skill:\n\n${skillContent}`
-        : "You are a helpful AI assistant.";
+      const systemPrompt = buildEvalSystemPrompt(skillContent);
 
       await runBenchmarkSSE({
         res, skillDir, skillName: evals.skill_name, systemPrompt,
@@ -379,10 +378,8 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       const skillContent = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
       const client = getClient();
       const systemPrompt = isBaseline
-        ? "You are a helpful AI assistant."
-        : skillContent
-          ? `You are an AI assistant enhanced with the following skill:\n\n${skillContent}`
-          : "You are a helpful AI assistant.";
+        ? buildBaselineSystemPrompt()
+        : buildEvalSystemPrompt(skillContent);
 
       await sem.acquire();
 

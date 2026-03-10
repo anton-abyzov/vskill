@@ -10,6 +10,7 @@ import { judgeAssertion } from "../../eval/judge.js";
 import { writeBenchmark } from "../../eval/benchmark.js";
 import type { BenchmarkCase, BenchmarkResult } from "../../eval/benchmark.js";
 import { green, red, yellow, bold, dim, table } from "../../utils/output.js";
+import { buildEvalSystemPrompt } from "../../eval/prompt-builder.js";
 
 export async function runEvalRun(skillDir: string): Promise<void> {
   // Load and validate evals.json
@@ -40,9 +41,7 @@ export async function runEvalRun(skillDir: string): Promise<void> {
     console.error(yellow(`Warning: No SKILL.md found at ${skillMdPath} — running evals without skill content`));
   }
 
-  const systemPrompt = skillContent
-    ? `You are an AI assistant with the following skill loaded. Use this skill's knowledge to answer the user's question.\n\n---\n${skillContent}\n---`
-    : "You are an AI assistant. Answer the user's question.";
+  const systemPrompt = buildEvalSystemPrompt(skillContent);
 
   const client = createLlmClient();
   const model = client.model;

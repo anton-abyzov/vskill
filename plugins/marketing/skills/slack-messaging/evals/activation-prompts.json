@@ -1,0 +1,84 @@
+{
+  "prompts": [
+    {
+      "prompt": "hey can u check what sarah said in #engineering this morning? i think she mentioned something about the API deprecation",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "i need to reply to that thread in #product about the onboarding flow — just say we'll have the fix by friday",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "schedule a message in #announcements for monday 9am — 'Sprint retro moved to 3pm'",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "DM jake and ask if he can cover the on-call shift tonight",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "search slack for anything from:@maria about the deployment last week",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "what's been going on in #incidents? i've been out for a few days",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "draft a message for #general congratulating the team on the launch but don't send it yet",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "can you respond to both messages in #support — one from alice about billing and one from bob about a feature req",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "post in #random that the office snacks have been restocked lol",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "catch up on slack and tell me if anything urgent came in while i was in my meeting",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "send an email to sarah.chen@company.com about the API migration timeline",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "post a comment on the GitHub PR #342 saying the tests look good",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "can you check our Discord server and see if anyone reported bugs in #bugs",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "write a Teams message to the engineering group about tomorrow's standup",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "read the messages in my iMessage conversation with Jake",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "create a Jira ticket for the billing bug Alice reported",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "set up a webhook that posts GitHub CI results to our chat",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "draft an announcement for the company newsletter about the product launch",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "search the codebase for references to the Slack API client",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "schedule a calendar invite for the team sync tomorrow at 2pm",
+      "expected": "should_not_activate"
+    }
+  ]
+}

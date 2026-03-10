@@ -71,7 +71,7 @@ export function App() {
             </div>
             <div>
               <div className="text-[14px] font-semibold" style={{ color: "var(--text-primary)", letterSpacing: "-0.01em" }}>
-                Skill Builder
+                Skill Studio
               </div>
               <div className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
                 {projectName || "vskill"}

@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type { LlmClient } from "./llm.js";
+import { buildEvalSystemPrompt, buildBaselineSystemPrompt } from "./prompt-builder.js";
 
 export interface ComparisonOutput {
   skillOutput: string;
@@ -59,8 +60,8 @@ export async function generateComparisonOutputs(
   skillContent: string,
   client: LlmClient,
 ): Promise<ComparisonOutput> {
-  const skillSystemPrompt = `You are an AI assistant enhanced with the following skill:\n\n${skillContent}`;
-  const baselineSystemPrompt = "You are a helpful AI assistant.";
+  const skillSystemPrompt = buildEvalSystemPrompt(skillContent);
+  const baselineSystemPrompt = buildBaselineSystemPrompt();
 
   // Run sequentially (claude-cli can only handle one at a time)
   const skillResult = await client.generate(skillSystemPrompt, prompt);

@@ -49,14 +49,14 @@ export function RunPanel() {
               Cancel All
             </button>
           )}
-          <button onClick={() => runAll("benchmark")} disabled={cases.length === 0 || isAnyRunning} className="btn btn-primary text-[12px]">
-            Run All
+          <button onClick={() => runAll("comparison")} disabled={cases.length === 0 || isAnyRunning} className="btn btn-primary text-[12px]">
+            Compare All
+          </button>
+          <button onClick={() => runAll("benchmark")} disabled={cases.length === 0 || isAnyRunning} className="btn btn-secondary text-[12px]">
+            Skill Only
           </button>
           <button onClick={() => runAll("baseline")} disabled={cases.length === 0 || isAnyRunning} className="btn btn-secondary text-[12px]">
-            Baseline All
-          </button>
-          <button onClick={() => runAll("comparison")} disabled={cases.length === 0 || isAnyRunning} className="btn btn-purple text-[12px]">
-            A/B All
+            Baseline Only
           </button>
         </div>
       </div>
@@ -210,9 +210,9 @@ function RunCaseCard({ name, evalId, result, caseStatus, onRun, onBaseline, onCo
             </button>
           ) : (
             <>
-              <button onClick={() => onRun(evalId)} className="btn btn-primary text-[10px] px-2 py-1">Run</button>
+              <button onClick={() => onCompare(evalId)} className="btn btn-primary text-[10px] px-2 py-1">Compare</button>
+              <button onClick={() => onRun(evalId)} className="btn btn-secondary text-[10px] px-2 py-1">Skill</button>
               <button onClick={() => onBaseline(evalId)} className="btn btn-secondary text-[10px] px-2 py-1">Base</button>
-              <button onClick={() => onCompare(evalId)} className="btn btn-purple text-[10px] px-2 py-1">A/B</button>
             </>
           )}
           {result && result.status != null && (

@@ -237,6 +237,11 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // Get evals.json
   router.get("/api/skills/:plugin/:skill/evals", async (req, res, params) => {
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    const evalsPath = join(skillDir, "evals", "evals.json");
+    if (!existsSync(evalsPath)) {
+      sendJson(res, { error: "No evals.json found" }, 404, req);
+      return;
+    }
     try {
       const evals = loadAndValidateEvals(skillDir);
       sendJson(res, evals, 200, req);
@@ -244,7 +249,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       if (err instanceof EvalValidationError) {
         sendJson(res, { error: err.message, errors: err.errors }, 400, req);
       } else {
-        sendJson(res, { error: "No evals.json found" }, 404, req);
+        sendJson(res, { error: String((err as Error).message) }, 500, req);
       }
     }
   });

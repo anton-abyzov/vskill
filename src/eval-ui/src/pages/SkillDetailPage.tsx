@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import { useSSE } from "../sse";
 import type { EvalsFile, EvalCase, Assertion, BenchmarkResult, ImproveResult } from "../types";
 import { SkillContentViewer } from "../components/SkillContentViewer";
@@ -53,7 +53,11 @@ export function SkillDetailPage() {
 
   useEffect(() => {
     if (!plugin || !skill) return;
-    api.getEvals(plugin, skill).then(setEvals).catch((e) => setError(e.message)).finally(() => setLoading(false));
+    api.getEvals(plugin, skill).then(setEvals).catch((e) => {
+      // 404 = no evals.json yet — show empty state, not error
+      if (e instanceof ApiError && e.status === 404) return;
+      setError(e.message);
+    }).finally(() => setLoading(false));
     api.getSkillDetail(plugin, skill).then((d) => setSkillContent(d.skillContent)).catch(() => {});
     // Load previous benchmark results
     api.getLatestBenchmark(plugin, skill).then((b) => {

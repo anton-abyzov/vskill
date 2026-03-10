@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-03-10T07:55:55.157Z",
+  "model": "claude-sonnet",
+  "skill_name": "social-posts",
+  "cases": [
+    {
+      "eval_id": 1,
+      "eval_name": "topic-to-all-platforms",
+      "status": "error",
+      "error_message": "Invalid judge output: expected JSON with { pass, reasoning }, got: ",
+      "pass_rate": 0,
+      "assertions": []
+    }
+  ],
+  "overall_pass_rate": 0,
+  "type": "benchmark",
+  "provider": "claude-cli",
+  "totalDurationMs": 0,
+  "totalInputTokens": null,
+  "totalOutputTokens": null,
+  "scope": "single"
+}

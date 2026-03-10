@@ -66,11 +66,61 @@ export function registerImproveRoutes(router: Router, root: string): void {
         ? `\n\n## User Notes\n${body.notes.trim()}`
         : "";
 
-      const systemPrompt = `You are an expert AI skill engineer. Your task is to improve a SKILL.md file based on its current content and any benchmark failures provided. Return ONLY the improved SKILL.md content — no explanations, no code fences, no preamble. The output should be valid SKILL.md that can be written directly to disk.
+      const systemPrompt = `You are an expert AI skill engineer following the Skill Builder methodology. Your task is to improve a SKILL.md file based on its current content, benchmark failures, and the skill-builder best practices below.
 
-After the improved content, on a new line, write "---REASONING---" followed by a brief explanation of what you changed and why.`;
+## Skill Builder Best Practices
 
-      const userPrompt = `## Current SKILL.md\n${original}${failureContext}${notesSection}\n\nPlease improve this SKILL.md to address the failures and improve overall quality. Return the full improved content followed by ---REASONING--- and your explanation.`;
+### SKILL.md Structure
+Every skill has a required SKILL.md with YAML frontmatter (name, description) and markdown body instructions, plus optional bundled resources (scripts/, references/, assets/).
+
+### Description Quality (Frontmatter)
+- Use third-person format: "This skill should be used when the user asks to..."
+- Include specific trigger phrases users would say (e.g., "create X", "configure Y", "fix Z")
+- Be concrete and specific, not vague or generic
+- BAD: "Provides guidance for working with X" (vague, no triggers)
+- GOOD: "This skill should be used when the user asks to \\"create X\\", \\"configure Y\\", or \\"troubleshoot Z\\""
+
+### Writing Style
+- Use imperative/infinitive form (verb-first instructions), NOT second person
+- Use objective, instructional language: "To accomplish X, do Y" not "You should do X"
+- BAD: "You should start by reading the file" / "You need to validate"
+- GOOD: "Start by reading the file" / "Validate the input before processing"
+
+### Progressive Disclosure
+- Keep SKILL.md lean: 1,500-2,000 words ideal, under 3,000 max for body
+- Move detailed patterns, advanced techniques, API docs to references/ files
+- SKILL.md should reference these: "For detailed patterns, consult references/patterns.md"
+
+### Content Quality
+- Focus on procedural knowledge non-obvious to an AI assistant
+- Include information that helps another AI instance execute tasks effectively
+- Core concepts and essential procedures in SKILL.md body
+- Detailed docs, edge cases, migration guides in references/
+
+### Common Mistakes to Avoid
+- Weak trigger descriptions (vague, no specific phrases)
+- Too much content in SKILL.md (>3,000 words without references/)
+- Second-person writing style anywhere
+- Missing resource references (references/, examples/ exist but not mentioned in SKILL.md)
+- Broken or incomplete examples
+
+### Validation Checklist
+- Frontmatter has name and description
+- Description uses third person with specific trigger phrases
+- Body uses imperative/infinitive form
+- Body is lean with detailed content in references/
+- All referenced files are mentioned
+- Examples are complete and working
+
+## Output Format
+
+Return ONLY the improved SKILL.md content — no explanations, no code fences, no preamble. The output should be valid SKILL.md that can be written directly to disk.
+
+When benchmark failures are provided, focus on fixing the skill instructions to address those specific failures. When no failures are provided (or failures are about general quality), apply the skill-builder best practices above to improve structure, writing style, description quality, and progressive disclosure.
+
+After the improved content, on a new line, write "---REASONING---" followed by a brief explanation of what you changed and why, referencing which skill-builder rules were applied.`;
+
+      const userPrompt = `## Current SKILL.md\n${original}${failureContext}${notesSection}\n\nImprove this SKILL.md following the Skill Builder methodology. ${failureContext ? "Focus primarily on addressing the benchmark failures, but also apply skill-builder best practices where they help." : "Apply skill-builder best practices: check description quality, writing style, progressive disclosure, and content organization."} Return the full improved content followed by ---REASONING--- and your explanation.`;
 
       const client = createLlmClient({
         provider: body.provider,

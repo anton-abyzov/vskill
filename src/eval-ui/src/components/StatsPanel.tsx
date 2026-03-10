@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import type { StatsResult } from "../types";
 
@@ -67,7 +66,6 @@ function TrendLine({ points }: { points: Array<{ passRate: number }> }) {
 }
 
 export function StatsPanel({ plugin, skill }: StatsPanelProps) {
-  const navigate = useNavigate();
   const [stats, setStats] = useState<StatsResult | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -211,7 +209,7 @@ export function StatsPanel({ plugin, skill }: StatsPanelProps) {
                 style={{ background: "transparent" }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-2)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                onClick={() => navigate(`/skills/${plugin}/${skill}/history?tab=per-eval`)}
+                onClick={() => { /* Already on history panel — no navigation needed */ }}
               >
                 <div className="flex items-center gap-2 mb-0.5">
                   <span

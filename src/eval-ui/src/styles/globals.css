@@ -308,3 +308,22 @@ body {
 .divide-y > * + * {
   border-top-color: var(--border-subtle);
 }
+
+/* ------------------------------------------------------------------ */
+/* Studio Grid Responsive                                             */
+/* ------------------------------------------------------------------ */
+@media (max-width: 1024px) and (min-width: 768px) {
+  .studio-grid {
+    grid-template-columns: 240px 1px 1fr !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .studio-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .studio-grid > :nth-child(2),
+  .studio-grid > :nth-child(3) {
+    display: none;
+  }
+}

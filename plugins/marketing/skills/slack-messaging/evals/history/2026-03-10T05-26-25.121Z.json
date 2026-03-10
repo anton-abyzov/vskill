@@ -1,0 +1,52 @@
+{
+  "timestamp": "2026-03-10T05:26:25.121Z",
+  "model": "claude-sonnet",
+  "skill_name": "slack-messaging",
+  "cases": [
+    {
+      "eval_id": 1,
+      "eval_name": "Read channel and summarize",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.25,
+      "durationMs": 17778,
+      "tokens": null,
+      "inputTokens": null,
+      "outputTokens": null,
+      "output": "The Slack MCP tools aren't available in this environment — no `mcp__slack__*` tools were found.\n\nTo use this skill, you'll need the Slack MCP server configured. Here's how to set it up:\n\n1. **Add the Slack MCP server** to your Claude Code config (`~/.claude/claude_desktop_config.json` or MCP settings):\n   ```json\n   {\n     \"mcpServers\": {\n       \"slack\": {\n         \"command\": \"npx\",\n         \"args\": [\"-y\", \"@modelcontextprotocol/server-slack\"],\n         \"env\": {\n           \"SLACK_BOT_TOKEN\": \"xoxb-your-token\",\n           \"SLACK_TEAM_ID\": \"your-team-id\"\n         }\n       }\n     }\n   }\n   ```\n\n2. **Create a Slack app** with these OAuth scopes:\n   - `channels:read`, `channels:history`\n   - `groups:read`, `groups:history`\n   - `chat:write`, `chat:write.customize`\n   - `search:read`\n   - `users:read`\n\n3. **Restart Claude Code** after adding the config.\n\nOnce the Slack MCP server is connected, I can search the `#engineering` channel, summarize today's messages, and handle replies.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Uses slack_search_channels to resolve the channel name to a channel_id before reading",
+          "pass": false,
+          "reasoning": "The LLM output does not use slack_search_channels or any Slack tool at all. It only explains how to set up the Slack MCP server, indicating the tools are unavailable. No channel resolution or message reading was attempted."
+        },
+        {
+          "id": "a2",
+          "text": "Uses slack_read_channel with the resolved channel_id to fetch messages",
+          "pass": false,
+          "reasoning": "The LLM output does not use slack_read_channel with a resolved channel_id. Instead, it explains that Slack MCP tools are unavailable and provides setup instructions. No actual tool call or channel reading was performed."
+        },
+        {
+          "id": "a3",
+          "text": "Presents a human-readable summary of the messages, not raw API output",
+          "pass": false,
+          "reasoning": "The LLM output does not present any summary of Slack messages at all. Instead, it explains that the Slack MCP tools are unavailable and provides setup instructions. There are no messages (raw or summarized) presented."
+        },
+        {
+          "id": "a4",
+          "text": "If the response is in MD format, it should be displayed properly.",
+          "pass": true,
+          "reasoning": "The response is in proper GitHub-flavored Markdown format with correct use of headers (##), bold text (**), numbered lists, code blocks (```json), and inline code backticks. All markdown elements are properly formatted and would render correctly in a markdown-aware display."
+        }
+      ]
+    }
+  ],
+  "overall_pass_rate": 0.25,
+  "type": "benchmark",
+  "provider": "claude-cli",
+  "totalDurationMs": 17778,
+  "totalInputTokens": null,
+  "totalOutputTokens": null,
+  "scope": "single"
+}

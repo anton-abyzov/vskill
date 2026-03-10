@@ -12,9 +12,9 @@ const CLASSIFICATION_STYLES: Record<string, { bg: string; text: string }> = {
 
 const PROMPT_TEMPLATES = [
   { label: "Should activate", prompts: [
-    "How do I use this feature?",
-    "Show me best practices for this",
-    "What's the recommended approach?",
+    "+How do I use this feature?",
+    "+Show me best practices for this",
+    "+What's the recommended approach?",
   ]},
   { label: "Should NOT activate", prompts: [
     "!What's the weather today?",
@@ -94,20 +94,24 @@ export function ActivationPanel() {
             className="input-field h-32 resize-y font-mono text-[12px]"
             value={promptsText}
             onChange={(e) => setPromptsText(e.target.value)}
-            placeholder={"How do I write a unit test?\nWhat edge cases should I test?\n!What's the weather like today?\n!Write me a poem about flowers"}
+            placeholder={"How do I write a unit test?\nWhat edge cases should I test?\n+Deploy this to production\n!What's the weather like today?\n!Write me a poem about flowers"}
           />
           <div className="flex items-center gap-4 mt-1.5 text-[11px]" style={{ color: "var(--text-tertiary)" }}>
             <span>One prompt per line</span>
+            <span>No prefix = auto-classify</span>
             <span className="flex items-center gap-1">
-              <code className="px-1 rounded" style={{ background: "var(--surface-2)" }}>!</code> prefix = should NOT activate
+              <code className="px-1 rounded" style={{ background: "var(--surface-2)" }}>+</code> = must activate
+            </span>
+            <span className="flex items-center gap-1">
+              <code className="px-1 rounded" style={{ background: "var(--surface-2)" }}>!</code> = must NOT activate
             </span>
             <span>{promptsText.trim().split("\n").filter(Boolean).length} prompt{promptsText.trim().split("\n").filter(Boolean).length !== 1 ? "s" : ""}</span>
           </div>
         </div>
 
         {/* Description preview */}
-        <div className="col-span-2">
-          <div className="glass-card h-full flex flex-col">
+        <div className="col-span-2 flex flex-col">
+          <div className={`glass-card flex flex-col ${showDescription ? "flex-1" : ""}`}>
             <button
               onClick={() => setShowDescription(!showDescription)}
               className="w-full p-3 flex items-center justify-between text-left flex-shrink-0"
@@ -134,8 +138,8 @@ export function ActivationPanel() {
             )}
             {!showDescription && skillDescription && (
               <div className="px-3 pb-3 pt-1">
-                <div className="text-[11px] truncate" style={{ color: "var(--text-tertiary)" }}>
-                  {skillDescription.slice(0, 100)}{skillDescription.length > 100 ? "..." : ""}
+                <div className="text-[11px] line-clamp-2 leading-relaxed" style={{ color: "var(--text-tertiary)" }}>
+                  {skillDescription.replace(/^---[\s\S]*?---\s*/, "").trim().slice(0, 150)}
                 </div>
               </div>
             )}
@@ -199,9 +203,14 @@ export function ActivationPanel() {
       {/* Summary metrics */}
       {activationSummary && (
         <div className="glass-card p-6 animate-fade-in-scale" style={{ borderColor: "var(--border-active)", borderWidth: 2 }}>
-          <div className="text-[10px] font-semibold uppercase tracking-widest mb-4" style={{ color: "var(--text-tertiary)" }}>
+          <div className="text-[10px] font-semibold uppercase tracking-widest mb-2" style={{ color: "var(--text-tertiary)" }}>
             Summary
           </div>
+          {activationSummary.autoClassifiedCount != null && activationSummary.autoClassifiedCount > 0 && (
+            <div className="text-[11px] mb-3" style={{ color: "var(--text-tertiary)" }}>
+              {activationSummary.autoClassifiedCount} of {activationSummary.total} prompts auto-classified from skill name and tags
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-6 mb-5">
             <MetricCard label="Precision" value={activationSummary.precision} description="Of all activations, how many were correct?" detail={`${activationSummary.tp} true / ${activationSummary.tp + activationSummary.fp} total activations`} />
             <MetricCard label="Recall" value={activationSummary.recall} description="Of expected activations, how many fired?" detail={`${activationSummary.tp} activated / ${activationSummary.tp + activationSummary.fn} expected`} />
@@ -260,6 +269,9 @@ function ResultRow({ result }: { result: ActivationResult }) {
           <span style={{ color: result.activate ? "var(--green)" : "var(--text-tertiary)" }}>{result.activate ? "Activated" : "Silent"}</span>
           <span style={{ color: "var(--text-tertiary)" }}>Expected: {result.expected === "should_activate" ? "activate" : "stay silent"}</span>
           <span style={{ color: "var(--text-tertiary)" }}>{result.confidence} confidence</span>
+          {result.autoClassified && (
+            <span className="pill" style={{ background: "rgba(139,92,246,0.1)", color: "rgba(139,92,246,0.8)", fontSize: "9px", padding: "1px 5px" }}>auto</span>
+          )}
         </div>
         {result.reasoning && (
           <div className="text-[11px] mt-1.5" style={{ color: "var(--text-tertiary)" }}>{result.reasoning}</div>

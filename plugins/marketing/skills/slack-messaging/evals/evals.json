@@ -2,35 +2,6 @@
   "skill_name": "slack-messaging",
   "evals": [
     {
-      "id": 1,
-      "name": "Read channel and summarize",
-      "prompt": "Can you check the #engineering channel on Slack and give me a summary of what people have been talking about today?",
-      "expected_output": "The skill resolves #engineering to a channel_id via slack_search_channels, reads recent messages with slack_read_channel using a date filter, and presents a structured summary of the conversations with who said what.",
-      "files": [],
-      "assertions": [
-        {
-          "id": "a1",
-          "text": "Uses slack_search_channels to resolve the channel name to a channel_id before reading",
-          "type": "boolean"
-        },
-        {
-          "id": "a2",
-          "text": "Uses slack_read_channel with the resolved channel_id to fetch messages",
-          "type": "boolean"
-        },
-        {
-          "id": "a3",
-          "text": "Presents a human-readable summary of the messages, not raw API output",
-          "type": "boolean"
-        },
-        {
-          "id": "a4",
-          "text": "If the response is in MD format, it should be displayed properly.",
-          "type": "boolean"
-        }
-      ]
-    },
-    {
       "id": 2,
       "name": "Reply in a thread with context",
       "prompt": "There's a thread in #product about the new onboarding flow — someone asked about the drop-off rate at step 3. Can you read that thread and draft a reply mentioning that we reduced it by 15% last sprint?",

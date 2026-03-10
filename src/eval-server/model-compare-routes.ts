@@ -13,6 +13,8 @@ import { createLlmClient } from "../eval/llm.js";
 import type { ProviderName } from "../eval/llm.js";
 import { judgeAssertion } from "../eval/judge.js";
 import { buildEvalSystemPrompt } from "../eval/prompt-builder.js";
+import { writeHistoryEntry } from "../eval/benchmark-history.js";
+import type { BenchmarkResult } from "../eval/benchmark.js";
 
 interface ModelSpec {
   provider: ProviderName;
@@ -108,7 +110,53 @@ export function registerModelCompareRoutes(router: Router, root: string): void {
           : 0,
       });
 
-      // Done — results are ephemeral (not saved to history)
+      // Save to history as model-compare entry
+      const historyResult: BenchmarkResult = {
+        timestamp: new Date().toISOString(),
+        model: `${clientA.model} vs ${clientB.model}`,
+        skill_name: evals.skill_name,
+        cases: [
+          {
+            eval_id: evalCase.id,
+            eval_name: `${evalCase.name} (${clientA.model})`,
+            output: resultA.text,
+            status: assertionsA.every((a) => a.pass) ? "pass" : "fail",
+            error_message: null,
+            pass_rate: assertionsA.length > 0
+              ? assertionsA.filter((a) => a.pass).length / assertionsA.length
+              : 0,
+            assertions: assertionsA,
+            durationMs: resultA.durationMs,
+            tokens: totalTokensA,
+            inputTokens: resultA.inputTokens ?? null,
+            outputTokens: resultA.outputTokens ?? null,
+          },
+          {
+            eval_id: evalCase.id,
+            eval_name: `${evalCase.name} (${clientB.model})`,
+            output: resultB.text,
+            status: assertionsB.every((a) => a.pass) ? "pass" : "fail",
+            error_message: null,
+            pass_rate: assertionsB.length > 0
+              ? assertionsB.filter((a) => a.pass).length / assertionsB.length
+              : 0,
+            assertions: assertionsB,
+            durationMs: resultB.durationMs,
+            tokens: totalTokensB,
+            inputTokens: resultB.inputTokens ?? null,
+            outputTokens: resultB.outputTokens ?? null,
+          },
+        ],
+        overall_pass_rate: (() => {
+          const all = [...assertionsA, ...assertionsB];
+          return all.length > 0 ? all.filter((a) => a.pass).length / all.length : 0;
+        })(),
+        type: "model-compare",
+        provider: body.modelA.provider,
+        scope: "single",
+      };
+      await writeHistoryEntry(skillDir, historyResult);
+
       sendSSEDone(res, {
         eval_id: body.eval_id,
         eval_name: evalCase.name,

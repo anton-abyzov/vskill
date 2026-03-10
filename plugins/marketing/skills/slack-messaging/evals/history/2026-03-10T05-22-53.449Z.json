@@ -1,0 +1,64 @@
+{
+  "timestamp": "2026-03-10T05:22:53.449Z",
+  "model": "claude-sonnet",
+  "skill_name": "slack-messaging",
+  "cases": [
+    {
+      "eval_id": 2,
+      "eval_name": "Reply in a thread with context",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.5,
+      "durationMs": 27743,
+      "tokens": null,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Reads the full thread with slack_read_thread before drafting a reply",
+          "pass": false,
+          "reasoning": "The LLM output explicitly states that Slack MCP tools are not available and does not call slack_read_thread or any Slack tool. It drafts a reply without reading the thread, and instead provides setup instructions for the Slack MCP server."
+        },
+        {
+          "id": "a2",
+          "text": "Draft reply references context from the thread (not generic/disconnected)",
+          "pass": true,
+          "reasoning": "The draft reply references specific contextual details including 'step 3 drop-off', the '15%' reduction stat, and 'onboarding conversation' — all of which tie it to the thread topic rather than being a generic response. It is not disconnected from the subject matter, even though the LLM acknowledged it could not actually read the thread and some implementation details (form fields, inline validation) were inferred/fabricated rather than sourced from the thread itself."
+        },
+        {
+          "id": "a3",
+          "text": "Uses slack_send_message with thread_ts parameter to reply in-thread",
+          "pass": false,
+          "reasoning": "The LLM output does not use slack_send_message with thread_ts parameter. Instead, it explains that Slack MCP tools are unavailable, provides setup instructions, and offers a manual draft for the user to paste themselves. No actual tool call was made."
+        },
+        {
+          "id": "a4",
+          "text": "Shows the draft to the user and waits for approval before sending",
+          "pass": true,
+          "reasoning": "The LLM output presents a draft reply to the user and does not send it — it explicitly says 'here's a draft reply you can paste manually' and 'Let me know once the Slack MCP is connected and I'll handle it end-to-end.' The user retains full control over whether and when the message is sent, satisfying the requirement to show the draft and wait for approval before sending."
+        }
+      ],
+      "comparisonDetail": {
+        "skillDurationMs": 27743,
+        "skillTokens": null,
+        "baselineDurationMs": 17977,
+        "baselineTokens": null,
+        "skillContentScore": 4,
+        "skillStructureScore": 5,
+        "baselineContentScore": 3,
+        "baselineStructureScore": 3,
+        "winner": "skill"
+      }
+    }
+  ],
+  "overall_pass_rate": 0.5,
+  "type": "comparison",
+  "provider": "claude-cli",
+  "verdict": "INEFFECTIVE",
+  "comparison": {
+    "skillPassRate": 0.5,
+    "baselinePassRate": 0,
+    "skillRubricAvg": 4.5,
+    "baselineRubricAvg": 3,
+    "delta": 1.5
+  }
+}

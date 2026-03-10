@@ -10,6 +10,8 @@ import { resolveSkillDir } from "./skill-resolver.js";
 import { readBenchmark } from "../eval/benchmark.js";
 import { createLlmClient } from "../eval/llm.js";
 import type { ProviderName } from "../eval/llm.js";
+import { writeHistoryEntry } from "../eval/benchmark-history.js";
+import { loadAndValidateEvals } from "../eval/schema.js";
 
 export function registerImproveRoutes(router: Router, root: string): void {
   // POST /api/skills/:plugin/:skill/improve
@@ -81,6 +83,24 @@ After the improved content, on a new line, write "---REASONING---" followed by a
       const parts = result.text.split("---REASONING---");
       const improved = parts[0].trim();
       const reasoning = parts.length > 1 ? parts[1].trim() : "Improvements applied.";
+
+      // Record to history
+      let skillName = "unknown";
+      try {
+        const evals = loadAndValidateEvals(skillDir);
+        skillName = evals.skill_name;
+      } catch { /* use fallback */ }
+      await writeHistoryEntry(skillDir, {
+        timestamp: new Date().toISOString(),
+        model: client.model,
+        skill_name: skillName,
+        cases: [],
+        overall_pass_rate: undefined,
+        type: "improve",
+        provider: body.provider || "claude-cli",
+        verdict: reasoning,
+        improve: { original, improved, reasoning },
+      });
 
       sendJson(res, { original, improved, reasoning }, 200, req);
     } catch (err) {

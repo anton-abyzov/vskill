@@ -28,6 +28,7 @@ const MIME_TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
   ".ttf": "font/ttf",
   ".map": "application/json",
+  ".webp": "image/webp",
 };
 
 export interface EvalServerOptions {

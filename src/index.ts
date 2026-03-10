@@ -159,4 +159,17 @@ program
     await evalCommand(subcommand || "coverage", target, opts);
   });
 
+program
+  .command("studio")
+  .description("Launch the Skill Studio UI for local skill development")
+  .option("--root <path>", "Root directory (default: current dir)")
+  .option("--port <number>", "Port for Skill Studio server")
+  .action(async (opts: { root?: string; port?: string }) => {
+    const { resolve } = await import("node:path");
+    const { runEvalServe } = await import("./commands/eval/serve.js");
+    const root = opts.root ? resolve(opts.root) : resolve(".");
+    const port = opts.port ? parseInt(opts.port, 10) : null;
+    await runEvalServe(root, port);
+  });
+
 program.parse();

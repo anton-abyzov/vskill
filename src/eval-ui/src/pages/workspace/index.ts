@@ -1,1 +1,2 @@
-export { SkillWorkspace } from "./SkillWorkspace";
+export { SkillWorkspaceInner } from "./SkillWorkspace";
+export { WorkspaceProvider } from "./WorkspaceContext";

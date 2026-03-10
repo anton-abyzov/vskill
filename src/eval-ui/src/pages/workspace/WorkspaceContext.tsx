@@ -1,5 +1,4 @@
 import { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
 import { api } from "../../api";
 import { useMultiSSE, useSSE } from "../../sse";
 import type { SSEEvent } from "../../sse";
@@ -23,7 +22,6 @@ interface Props {
 }
 
 export function WorkspaceProvider({ plugin, skill, children }: Props) {
-  const [searchParams, setSearchParams] = useSearchParams();
   const [state, dispatch] = useReducer(workspaceReducer, {
     ...initialWorkspaceState,
     plugin,
@@ -120,26 +118,11 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
   });
 
   // ---------------------------------------------------------------------------
-  // Sync panel from URL
+  // Cleanup SSE connections on unmount (prevents orphaned streams on skill switch)
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    const panelParam = searchParams.get("panel") as PanelId | null;
-    if (panelParam && ["editor", "tests", "run", "activation", "history", "deps"].includes(panelParam)) {
-      dispatch({ type: "SET_PANEL", panel: panelParam });
-    }
-  }, []); // only on mount
-
-  // Sync panel TO url
-  useEffect(() => {
-    const current = searchParams.get("panel");
-    if (current !== state.activePanel) {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set("panel", state.activePanel);
-        return next;
-      }, { replace: true });
-    }
-  }, [state.activePanel]);
+    return () => { sseStopAll(); };
+  }, [sseStopAll]);
 
   // ---------------------------------------------------------------------------
   // Initial data fetch
@@ -296,6 +279,11 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
   // ---------------------------------------------------------------------------
   const activationSSE = useSSE();
 
+  // Cleanup activation SSE on unmount
+  useEffect(() => {
+    return () => { activationSSE.stop(); };
+  }, [activationSSE.stop]);
+
   // Process activation SSE events
   useEffect(() => {
     if (!activationSSE.events.length) return;
@@ -318,11 +306,13 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
   const runActivationTest = useCallback((promptsText: string) => {
     const lines = promptsText.trim().split("\n").filter(Boolean);
     const prompts = lines.map((line) => {
-      const shouldNot = line.startsWith("!");
-      return {
-        prompt: shouldNot ? line.slice(1).trim() : line.trim(),
-        expected: shouldNot ? "should_not_activate" as const : "should_activate" as const,
-      };
+      if (line.startsWith("!")) {
+        return { prompt: line.slice(1).trim(), expected: "should_not_activate" as const };
+      }
+      if (line.startsWith("+")) {
+        return { prompt: line.slice(1).trim(), expected: "should_activate" as const };
+      }
+      return { prompt: line.trim(), expected: "auto" as const };
     });
     dispatch({ type: "ACTIVATION_START" });
     activationSSE.start(`/api/skills/${plugin}/${skill}/activation-test`, { prompts });

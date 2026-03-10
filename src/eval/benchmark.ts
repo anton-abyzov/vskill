@@ -49,7 +49,7 @@ export interface BenchmarkResult {
   skill_name: string;
   cases: BenchmarkCase[];
   overall_pass_rate?: number;
-  type?: "benchmark" | "comparison" | "baseline";
+  type?: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve";
   provider?: string;
   totalDurationMs?: number;
   totalInputTokens?: number | null;
@@ -62,6 +62,11 @@ export interface BenchmarkResult {
     skillRubricAvg: number;
     baselineRubricAvg: number;
     delta: number;
+  };
+  improve?: {
+    original: string;
+    improved: string;
+    reasoning: string;
   };
 }
 

@@ -25,7 +25,7 @@ import { runComparison } from "../eval/comparator.js";
 import { computeVerdict } from "../eval/verdict.js";
 import { buildEvalInitPrompt, parseGeneratedEvals } from "../eval/prompt-builder.js";
 import { testActivation } from "../eval/activation-tester.js";
-import type { ActivationPrompt } from "../eval/activation-tester.js";
+import type { ActivationPrompt, SkillMeta } from "../eval/activation-tester.js";
 import { detectMcpDependencies, detectSkillDependencies } from "../eval/mcp-detector.js";
 
 // ---------------------------------------------------------------------------
@@ -634,7 +634,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     const fromParam = url.searchParams.get("from");
     const toParam = url.searchParams.get("to");
     if (modelParam) filter.model = modelParam;
-    if (typeParam && ["benchmark", "comparison", "baseline"].includes(typeParam)) {
+    if (typeParam && ["benchmark", "comparison", "baseline", "model-compare", "improve"].includes(typeParam)) {
       filter.type = typeParam as HistoryFilter["type"];
     }
     if (fromParam) filter.from = fromParam;
@@ -776,16 +776,22 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       const skillMdPath = join(skillDir, "SKILL.md");
       const skillContent = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
 
-      // Extract description from frontmatter
+      // Extract description, name, and tags from frontmatter
       const descMatch = skillContent.match(/^---[\s\S]*?description:\s*"([^"]+)"[\s\S]*?---/);
       const description = descMatch ? descMatch[1] : skillContent.slice(0, 500);
+      const nameMatch = skillContent.match(/^---[\s\S]*?name:\s*(\S+)[\s\S]*?---/);
+      const tagsMatch = skillContent.match(/^---[\s\S]*?tags:\s*(.+)[\s\S]*?---/m);
+      const meta: SkillMeta = {
+        name: nameMatch ? nameMatch[1] : params.skill,
+        tags: tagsMatch ? tagsMatch[1].split(",").map((t: string) => t.trim()).filter(Boolean) : [],
+      };
 
       const client = getClient();
       const summary = await testActivation(description, body.prompts, client, (result) => {
         if (!aborted) {
           sendSSE(res, "prompt_result", result);
         }
-      });
+      }, meta);
 
       if (!aborted) {
         sendSSEDone(res, { ...summary, description });

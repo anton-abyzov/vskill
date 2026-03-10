@@ -4,6 +4,8 @@ import { api } from "../api";
 import { TrendChart } from "../components/TrendChart";
 import { HistoryPerEval } from "../components/HistoryPerEval";
 import { StatsPanel } from "../components/StatsPanel";
+import { computeDiff } from "../utils/diff";
+import type { DiffLine } from "../utils/diff";
 import type { HistorySummary, BenchmarkResult, HistoryCompareResult, HistoryFilter } from "../types";
 
 type HistoryTab = "timeline" | "per-eval" | "statistics";
@@ -46,6 +48,8 @@ const TYPE_PILL: Record<string, { bg: string; fg: string; label: string }> = {
   benchmark: { bg: "rgba(99,131,255,0.15)", fg: "#6383ff", label: "Benchmark" },
   comparison: { bg: "var(--purple-muted)", fg: "var(--purple)", label: "A/B" },
   baseline: { bg: "rgba(251,146,60,0.15)", fg: "#fb923c", label: "Baseline" },
+  "model-compare": { bg: "rgba(56,189,248,0.15)", fg: "#38bdf8", label: "Model Compare" },
+  improve: { bg: "rgba(168,85,247,0.15)", fg: "#a855f7", label: "AI Improve" },
 };
 
 function verdictColor(v: string | undefined): string {
@@ -106,6 +110,8 @@ function FilterBar({ models, filters, onChange }: FilterBarProps) {
         <option value="benchmark">Benchmark</option>
         <option value="comparison">Comparison</option>
         <option value="baseline">Baseline</option>
+        <option value="model-compare">Model Compare</option>
+        <option value="improve">AI Improve</option>
       </select>
 
       {/* From */}
@@ -285,6 +291,11 @@ interface SingleRunDetailProps {
 function SingleRunDetail({ run, plugin, skill, onDelete }: SingleRunDetailProps) {
   const navigate = useNavigate();
 
+  // Improve entries get a dedicated diff view
+  if (run.type === "improve" && run.improve) {
+    return <ImproveDetailView run={run} onDelete={onDelete} />;
+  }
+
   return (
     <div className="space-y-3 animate-slide-in-right">
       {/* Header */}
@@ -402,6 +413,158 @@ function SingleRunDetail({ run, plugin, skill, onDelete }: SingleRunDetailProps)
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Improve detail — git-style diff view
+// ---------------------------------------------------------------------------
+
+function ImproveDetailView({ run, onDelete }: { run: BenchmarkResult; onDelete: (ts: string) => void }) {
+  const diff = useMemo<DiffLine[]>(
+    () => run.improve ? computeDiff(run.improve.original, run.improve.improved) : [],
+    [run.improve],
+  );
+
+  const stats = useMemo(() => {
+    const added = diff.filter((l) => l.type === "added").length;
+    const removed = diff.filter((l) => l.type === "removed").length;
+    return { added, removed };
+  }, [diff]);
+
+  const numberedLines = useMemo(() => {
+    let origLine = 0;
+    let newLine = 0;
+    return diff.map((line) => {
+      if (line.type === "removed") { origLine++; return { ...line, origNum: origLine, newNum: null }; }
+      if (line.type === "added") { newLine++; return { ...line, origNum: null, newNum: newLine }; }
+      origLine++; newLine++;
+      return { ...line, origNum: origLine, newNum: newLine };
+    });
+  }, [diff]);
+
+  return (
+    <div className="space-y-3 animate-slide-in-right">
+      {/* Header card */}
+      <div className="glass-card p-5">
+        <div className="flex items-center gap-3 mb-3">
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ background: "rgba(168,85,247,0.15)" }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <div className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>
+              AI Skill Improvement
+            </div>
+            <div className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+              {new Date(run.timestamp).toLocaleString()} &middot; {run.model}
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-mono" style={{ background: "var(--surface-2)" }}>
+              <span style={{ color: "var(--green)", fontWeight: 600 }}>+{stats.added}</span>
+              <span style={{ color: "var(--red)", fontWeight: 600 }}>-{stats.removed}</span>
+            </div>
+            <button
+              className="btn btn-ghost"
+              style={{ fontSize: 11, padding: "3px 10px", color: "var(--red)" }}
+              onClick={() => { if (confirm("Delete this run?")) onDelete(run.timestamp); }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+
+        {/* AI reasoning */}
+        {run.improve?.reasoning && (
+          <div
+            className="px-4 py-3 rounded-lg text-[12px]"
+            style={{
+              background: "rgba(168,85,247,0.06)",
+              border: "1px solid rgba(168,85,247,0.15)",
+              color: "var(--text-secondary)",
+              lineHeight: 1.6,
+            }}
+          >
+            <span className="font-semibold" style={{ color: "#a855f7" }}>Reasoning: </span>
+            {run.improve.reasoning}
+          </div>
+        )}
+      </div>
+
+      {/* Diff card */}
+      <div className="glass-card overflow-hidden" style={{ padding: 0 }}>
+        {/* Diff file header */}
+        <div
+          className="flex items-center gap-2 px-4 py-2.5"
+          style={{ background: "var(--surface-2)", borderBottom: "1px solid var(--border-subtle)" }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" />
+          </svg>
+          <span className="text-[12px] font-mono font-medium" style={{ color: "var(--text-secondary)" }}>
+            SKILL.md
+          </span>
+        </div>
+
+        {/* Diff body */}
+        <div style={{ maxHeight: 600, overflowY: "auto" }}>
+          <table className="w-full" style={{ borderCollapse: "collapse", fontFamily: "var(--font-mono, monospace)" }}>
+            <tbody>
+              {numberedLines.map((line, i) => (
+                <tr
+                  key={i}
+                  style={{
+                    background:
+                      line.type === "added" ? "rgba(34,197,94,0.07)" :
+                      line.type === "removed" ? "rgba(239,68,68,0.07)" :
+                      "transparent",
+                  }}
+                >
+                  <td
+                    className="text-right select-none"
+                    style={{
+                      width: 44, padding: "0 6px", fontSize: 10, lineHeight: "22px",
+                      color: line.type === "removed" ? "rgba(239,68,68,0.45)" : "var(--text-tertiary)",
+                      opacity: line.origNum ? 0.7 : 0.2,
+                      borderRight: "1px solid var(--border-subtle)",
+                    }}
+                  >{line.origNum ?? ""}</td>
+                  <td
+                    className="text-right select-none"
+                    style={{
+                      width: 44, padding: "0 6px", fontSize: 10, lineHeight: "22px",
+                      color: line.type === "added" ? "rgba(34,197,94,0.45)" : "var(--text-tertiary)",
+                      opacity: line.newNum ? 0.7 : 0.2,
+                      borderRight: "1px solid var(--border-subtle)",
+                    }}
+                  >{line.newNum ?? ""}</td>
+                  <td
+                    className="select-none text-center"
+                    style={{
+                      width: 22, fontSize: 11, fontWeight: 700, lineHeight: "22px",
+                      color: line.type === "added" ? "var(--green)" : line.type === "removed" ? "var(--red)" : "transparent",
+                      borderRight: line.type === "added" ? "2px solid var(--green)" : line.type === "removed" ? "2px solid var(--red)" : "2px solid transparent",
+                    }}
+                  >{line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}</td>
+                  <td
+                    className="whitespace-pre-wrap"
+                    style={{
+                      padding: "0 12px", fontSize: 11, lineHeight: "22px",
+                      color: line.type === "added" ? "var(--green)" : line.type === "removed" ? "var(--red)" : "var(--text-secondary)",
+                    }}
+                  >{line.content || "\u200B"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

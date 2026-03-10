@@ -76,7 +76,7 @@ export interface BenchmarkResult {
   skill_name: string;
   cases: BenchmarkCase[];
   overall_pass_rate?: number;
-  type?: "benchmark" | "comparison" | "baseline";
+  type?: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve";
   provider?: string;
   totalDurationMs?: number;
   totalInputTokens?: number | null;
@@ -89,6 +89,11 @@ export interface BenchmarkResult {
     baselineRubricAvg: number;
     delta: number;
   };
+  improve?: {
+    original: string;
+    improved: string;
+    reasoning: string;
+  };
 }
 
 export interface HistorySummary {
@@ -97,7 +102,7 @@ export interface HistorySummary {
   model: string;
   skillName: string;
   passRate: number;
-  type: "benchmark" | "comparison" | "baseline";
+  type: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve";
   caseCount?: number;
   totalDurationMs?: number;
   totalTokens?: number | null;
@@ -107,7 +112,7 @@ export interface HistorySummary {
 
 export interface HistoryFilter {
   model?: string;
-  type?: "benchmark" | "comparison" | "baseline";
+  type?: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve";
   from?: string;
   to?: string;
 }
@@ -178,6 +183,7 @@ export interface ActivationResult {
   confidence: "high" | "medium" | "low";
   reasoning: string;
   classification: "TP" | "TN" | "FP" | "FN";
+  autoClassified?: boolean;
 }
 
 export interface ActivationSummary {
@@ -190,6 +196,7 @@ export interface ActivationSummary {
   tn: number;
   fp: number;
   fn: number;
+  autoClassifiedCount?: number;
 }
 
 export interface ImproveResult {

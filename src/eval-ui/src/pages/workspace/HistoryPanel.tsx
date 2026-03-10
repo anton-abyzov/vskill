@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import { api } from "../../api";
 import { TrendChart } from "../../components/TrendChart";
 import { StatsPanel } from "../../components/StatsPanel";
 import { HistoryPerEval } from "../../components/HistoryPerEval";
+import { computeDiff } from "../../utils/diff";
+import type { DiffLine } from "../../utils/diff";
 import type { HistorySummary, HistoryCompareResult, BenchmarkResult } from "../../types";
 
 type Tab = "timeline" | "per-eval" | "statistics";
@@ -15,7 +17,7 @@ export function HistoryPanel() {
   const [history, setHistory] = useState<HistorySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterModel, setFilterModel] = useState("");
-  const [filterType, setFilterType] = useState<"" | "benchmark" | "comparison" | "baseline">("");
+  const [filterType, setFilterType] = useState<"" | "benchmark" | "comparison" | "baseline" | "model-compare" | "improve">("");
 
   // Compare mode
   const [compareMode, setCompareMode] = useState(false);
@@ -31,7 +33,7 @@ export function HistoryPanel() {
     setLoading(true);
     api.getHistory(plugin, skill, {
       model: filterModel || undefined,
-      type: (filterType || undefined) as "benchmark" | "comparison" | "baseline" | undefined,
+      type: (filterType || undefined) as "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | undefined,
     }).then((h) => {
       setHistory(h);
 
@@ -142,6 +144,8 @@ export function HistoryPanel() {
               <option value="benchmark">Benchmark</option>
               <option value="comparison">Comparison</option>
               <option value="baseline">Baseline</option>
+              <option value="model-compare">Model Compare</option>
+              <option value="improve">AI Improve</option>
             </select>
 
             <div className="flex-1" />
@@ -198,10 +202,18 @@ export function HistoryPanel() {
                           {new Date(h.timestamp).toLocaleString()}
                         </span>
                         <span className="pill text-[9px]" style={{
-                          background: h.type === "comparison" ? "var(--purple-muted)" : h.type === "baseline" ? "var(--surface-3)" : "var(--accent-muted)",
-                          color: h.type === "comparison" ? "var(--purple)" : h.type === "baseline" ? "var(--text-tertiary)" : "var(--accent)",
+                          background: h.type === "comparison" ? "var(--purple-muted)"
+                            : h.type === "baseline" ? "var(--surface-3)"
+                            : h.type === "model-compare" ? "rgba(56,189,248,0.15)"
+                            : h.type === "improve" ? "rgba(168,85,247,0.15)"
+                            : "var(--accent-muted)",
+                          color: h.type === "comparison" ? "var(--purple)"
+                            : h.type === "baseline" ? "var(--text-tertiary)"
+                            : h.type === "model-compare" ? "#38bdf8"
+                            : h.type === "improve" ? "#a855f7"
+                            : "var(--accent)",
                         }}>
-                          {h.type}
+                          {h.type === "model-compare" ? "model compare" : h.type === "improve" ? "ai improve" : h.type}
                         </span>
                       </div>
                       <div className="flex items-center gap-3">
@@ -326,6 +338,11 @@ function CompareResultView({ result }: { result: HistoryCompareResult }) {
 // ---------------------------------------------------------------------------
 
 function DetailView({ run, onClose }: { run: BenchmarkResult; onClose: () => void }) {
+  // Improve entries get a diff view
+  if (run.type === "improve" && run.improve) {
+    return <ImproveDiffView run={run} onClose={onClose} />;
+  }
+
   return (
     <div className="mt-4 rounded-xl p-4" style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)" }}>
       <div className="flex items-center justify-between mb-3">
@@ -350,6 +367,188 @@ function DetailView({ run, onClose }: { run: BenchmarkResult; onClose: () => voi
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Improve diff view — git-style SKILL.md diff
+// ---------------------------------------------------------------------------
+
+function ImproveDiffView({ run, onClose }: { run: BenchmarkResult; onClose: () => void }) {
+  const diff = useMemo<DiffLine[]>(
+    () => run.improve ? computeDiff(run.improve.original, run.improve.improved) : [],
+    [run.improve],
+  );
+
+  const stats = useMemo(() => {
+    const added = diff.filter((l) => l.type === "added").length;
+    const removed = diff.filter((l) => l.type === "removed").length;
+    return { added, removed };
+  }, [diff]);
+
+  // Line numbers for original and improved
+  const numberedLines = useMemo(() => {
+    let origLine = 0;
+    let newLine = 0;
+    return diff.map((line) => {
+      if (line.type === "removed") {
+        origLine++;
+        return { ...line, origNum: origLine, newNum: null };
+      } else if (line.type === "added") {
+        newLine++;
+        return { ...line, origNum: null, newNum: newLine };
+      } else {
+        origLine++;
+        newLine++;
+        return { ...line, origNum: origLine, newNum: newLine };
+      }
+    });
+  }, [diff]);
+
+  return (
+    <div
+      className="mt-4 rounded-xl overflow-hidden animate-fade-in"
+      style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)" }}
+    >
+      {/* Header */}
+      <div
+        className="flex items-center justify-between px-5 py-3.5"
+        style={{ background: "var(--surface-2)", borderBottom: "1px solid var(--border-subtle)" }}
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className="w-8 h-8 rounded-lg flex items-center justify-center"
+            style={{ background: "rgba(168,85,247,0.15)" }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
+            </svg>
+          </div>
+          <div>
+            <div className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
+              SKILL.md Changes
+            </div>
+            <div className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
+              {new Date(run.timestamp).toLocaleString()} &middot; {run.model}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-[11px]">
+            <span style={{ color: "var(--green)" }}>+{stats.added}</span>
+            <span style={{ color: "var(--red)" }}>-{stats.removed}</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors duration-150"
+            style={{ color: "var(--text-tertiary)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-3)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* AI Reasoning */}
+      {run.improve?.reasoning && (
+        <div
+          className="mx-4 mt-4 px-4 py-3 rounded-lg text-[12px]"
+          style={{
+            background: "rgba(168,85,247,0.06)",
+            border: "1px solid rgba(168,85,247,0.15)",
+            color: "var(--text-secondary)",
+          }}
+        >
+          <span className="font-semibold" style={{ color: "#a855f7" }}>AI Reasoning: </span>
+          {run.improve.reasoning}
+        </div>
+      )}
+
+      {/* Diff body */}
+      <div
+        className="mx-4 my-4 rounded-lg overflow-hidden"
+        style={{ border: "1px solid var(--border-subtle)", maxHeight: 480, overflowY: "auto" }}
+      >
+        <table className="w-full" style={{ borderCollapse: "collapse", fontFamily: "var(--font-mono, monospace)" }}>
+          <tbody>
+            {numberedLines.map((line, i) => (
+              <tr
+                key={i}
+                style={{
+                  background:
+                    line.type === "added" ? "rgba(34,197,94,0.08)" :
+                    line.type === "removed" ? "rgba(239,68,68,0.08)" :
+                    "transparent",
+                }}
+              >
+                {/* Old line number */}
+                <td
+                  className="text-right select-none px-2"
+                  style={{
+                    width: 40,
+                    fontSize: 10,
+                    color: line.type === "removed" ? "rgba(239,68,68,0.5)" : "var(--text-tertiary)",
+                    opacity: line.origNum ? 0.6 : 0.2,
+                    borderRight: "1px solid var(--border-subtle)",
+                  }}
+                >
+                  {line.origNum ?? ""}
+                </td>
+                {/* New line number */}
+                <td
+                  className="text-right select-none px-2"
+                  style={{
+                    width: 40,
+                    fontSize: 10,
+                    color: line.type === "added" ? "rgba(34,197,94,0.5)" : "var(--text-tertiary)",
+                    opacity: line.newNum ? 0.6 : 0.2,
+                    borderRight: "1px solid var(--border-subtle)",
+                  }}
+                >
+                  {line.newNum ?? ""}
+                </td>
+                {/* Gutter */}
+                <td
+                  className="select-none text-center"
+                  style={{
+                    width: 20,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color:
+                      line.type === "added" ? "var(--green)" :
+                      line.type === "removed" ? "var(--red)" :
+                      "transparent",
+                    borderRight:
+                      line.type === "added" ? "2px solid var(--green)" :
+                      line.type === "removed" ? "2px solid var(--red)" :
+                      "2px solid transparent",
+                  }}
+                >
+                  {line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}
+                </td>
+                {/* Content */}
+                <td
+                  className="px-3 py-px whitespace-pre-wrap"
+                  style={{
+                    fontSize: 11,
+                    lineHeight: 1.6,
+                    color:
+                      line.type === "added" ? "var(--green)" :
+                      line.type === "removed" ? "var(--red)" :
+                      "var(--text-secondary)",
+                  }}
+                >
+                  {line.content || "\u200B"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

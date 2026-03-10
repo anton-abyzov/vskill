@@ -243,7 +243,7 @@ export function ModelCompareModal({ plugin, skill, evalCase, onClose }: Props) {
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-4" style={{ borderTop: "1px solid var(--border-subtle)" }}>
           <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
-            Results are ephemeral — not saved to benchmark history
+            Results are saved to benchmark history
           </span>
           <div className="flex gap-2">
             {compareState === "idle" && (

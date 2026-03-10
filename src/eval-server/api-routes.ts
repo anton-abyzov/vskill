@@ -63,6 +63,14 @@ const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
     { id: "gemma2:9b", label: "Gemma 2 9B" },
     { id: "mistral:7b", label: "Mistral 7B" },
   ],
+  "gemini-cli": [
+    { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+    { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+  ],
+  "codex-cli": [
+    { id: "o3", label: "OpenAI o3" },
+    { id: "o4-mini", label: "OpenAI o4-mini" },
+  ],
 };
 
 // ---------------------------------------------------------------------------

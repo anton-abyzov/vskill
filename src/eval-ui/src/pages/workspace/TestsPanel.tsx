@@ -6,7 +6,7 @@ import type { InlineResult } from "./workspaceTypes";
 import { passRateColor, shortDate, fmtDuration, MiniTrend } from "../../utils/historyUtils";
 
 export function TestsPanel() {
-  const { state, dispatch, saveEvals, runBenchmark, generateEvals } = useWorkspace();
+  const { state, dispatch, saveEvals, runBenchmark, cancelRun, generateEvals } = useWorkspace();
   const { evals, selectedCaseId, inlineResults, isRunning } = state;
   const [showForm, setShowForm] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -119,6 +119,7 @@ export function TestsPanel() {
             onSaveEvals={saveEvals}
             onRun={(evalId) => runBenchmark("benchmark", { caseId: evalId })}
             onCompare={(evalId) => runBenchmark("comparison", { caseId: evalId })}
+            onCancel={cancelRun}
             onImprove={(evalId) => dispatch({ type: "OPEN_IMPROVE", evalId })}
           />
         ) : (
@@ -145,7 +146,7 @@ export function TestsPanel() {
 // ---------------------------------------------------------------------------
 
 function CaseDetail({
-  evalCase, result, evals, isRunning, onSaveEvals, onRun, onCompare, onImprove,
+  evalCase, result, evals, isRunning, onSaveEvals, onRun, onCompare, onCancel, onImprove,
 }: {
   evalCase: EvalCase;
   result: InlineResult | undefined;
@@ -154,6 +155,7 @@ function CaseDetail({
   onSaveEvals: (updated: EvalsFile) => Promise<void>;
   onRun: (evalId: number) => void;
   onCompare: (evalId: number) => void;
+  onCancel: () => void;
   onImprove: (evalId: number) => void;
 }) {
   const [editingPrompt, setEditingPrompt] = useState(false);
@@ -218,20 +220,31 @@ function CaseDetail({
           <StatusPill result={result} />
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => onRun(evalCase.id)} disabled={isRunning} className="btn btn-primary text-[12px]">
-            {isRunning ? "Running..." : "Run"}
-          </button>
-          <button onClick={() => onCompare(evalCase.id)} disabled={isRunning} className="btn btn-purple text-[12px]">
-            A/B Compare
-          </button>
-          {hasFails && (
+          {isRunning ? (
+            <button onClick={onCancel} className="btn text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(239,68,68,0.3)" }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4 }}><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
+              Cancel
+            </button>
+          ) : (
+            <>
+              <button onClick={() => onRun(evalCase.id)} className="btn btn-primary text-[12px]">
+                Run
+              </button>
+              <button onClick={() => onCompare(evalCase.id)} className="btn btn-purple text-[12px]">
+                A/B Compare
+              </button>
+            </>
+          )}
+          {hasFails && !isRunning && (
             <button onClick={() => onImprove(evalCase.id)} className="btn btn-secondary text-[12px]">
               Fix with AI
             </button>
           )}
-          <button onClick={deleteCase} className="btn btn-ghost text-[12px]" style={{ color: "var(--red)" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
-          </button>
+          {!isRunning && (
+            <button onClick={deleteCase} className="btn btn-ghost text-[12px]" style={{ color: "var(--red)" }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+            </button>
+          )}
         </div>
       </div>
 

@@ -5,7 +5,7 @@ import { GroupedBarChart } from "../../components/GroupedBarChart";
 import type { RunMode, RunScope, InlineResult } from "./workspaceTypes";
 
 export function RunPanel() {
-  const { state, runBenchmark } = useWorkspace();
+  const { state, runBenchmark, cancelRun } = useWorkspace();
   const { evals, isRunning, runMode, runScope, latestBenchmark, inlineResults, selectedCaseId } = state;
   const [scopeMode, setScopeMode] = useState<"all" | "selected">("all");
 
@@ -56,15 +56,24 @@ export function RunPanel() {
         </div>
 
         <div className="flex items-center gap-2">
-          <button onClick={() => handleRun("benchmark")} disabled={isRunning || cases.length === 0} className="btn btn-primary text-[12px]">
-            {isRunning && runMode === "benchmark" ? <><span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> Running...</> : "Run Benchmark"}
-          </button>
-          <button onClick={() => handleRun("baseline")} disabled={isRunning || cases.length === 0} className="btn btn-secondary text-[12px]">
-            {isRunning && runMode === "baseline" ? <><span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> Running...</> : "Run Baseline"}
-          </button>
-          <button onClick={() => handleRun("comparison")} disabled={isRunning || cases.length === 0} className="btn btn-purple text-[12px]">
-            {isRunning && runMode === "comparison" ? <><span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> Running...</> : "A/B Compare"}
-          </button>
+          {isRunning ? (
+            <button onClick={cancelRun} className="btn text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(239,68,68,0.3)" }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4 }}><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
+              Cancel
+            </button>
+          ) : (
+            <>
+              <button onClick={() => handleRun("benchmark")} disabled={cases.length === 0} className="btn btn-primary text-[12px]">
+                Run Benchmark
+              </button>
+              <button onClick={() => handleRun("baseline")} disabled={cases.length === 0} className="btn btn-secondary text-[12px]">
+                Run Baseline
+              </button>
+              <button onClick={() => handleRun("comparison")} disabled={cases.length === 0} className="btn btn-purple text-[12px]">
+                A/B Compare
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -95,7 +104,7 @@ export function RunPanel() {
       <div className="space-y-3 stagger-children">
         {cases.map((c) => {
           const r = inlineResults.get(c.id);
-          return <RunCaseCard key={c.id} name={c.name} evalId={c.id} result={r} isRunning={isRunning} />;
+          return <RunCaseCard key={c.id} name={c.name} evalId={c.id} result={r} isRunning={isRunning} onRun={(id) => runBenchmark("benchmark", { caseId: id })} onCompare={(id) => runBenchmark("comparison", { caseId: id })} />;
         })}
       </div>
 
@@ -160,7 +169,10 @@ export function RunPanel() {
 // Run case card
 // ---------------------------------------------------------------------------
 
-function RunCaseCard({ name, evalId, result, isRunning }: { name: string; evalId: number; result?: InlineResult; isRunning: boolean }) {
+function RunCaseCard({ name, evalId, result, isRunning, onRun, onCompare }: {
+  name: string; evalId: number; result?: InlineResult; isRunning: boolean;
+  onRun: (evalId: number) => void; onCompare: (evalId: number) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const isDone = result && result.status != null;
   const isActive = isRunning && !isDone;
@@ -181,20 +193,28 @@ function RunCaseCard({ name, evalId, result, isRunning }: { name: string; evalId
             #{evalId} {name}
           </span>
         </div>
-        {isDone && (
-          <span
-            className="pill text-[10px]"
-            style={{
-              background: result.status === "pass" ? "var(--green-muted)" : "var(--red-muted)",
-              color: result.status === "pass" ? "var(--green)" : "var(--red)",
-            }}
-          >
-            {result.passRate != null ? `${Math.round(result.passRate * 100)}%` : result.status}
-          </span>
-        )}
-        {!isDone && !isActive && (
-          <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>queued</span>
-        )}
+        <div className="flex items-center gap-2">
+          {!isRunning && (
+            <>
+              <button onClick={() => onRun(evalId)} className="btn btn-primary text-[10px] px-2 py-1">Run</button>
+              <button onClick={() => onCompare(evalId)} className="btn btn-purple text-[10px] px-2 py-1">A/B</button>
+            </>
+          )}
+          {isDone && (
+            <span
+              className="pill text-[10px]"
+              style={{
+                background: result.status === "pass" ? "var(--green-muted)" : "var(--red-muted)",
+                color: result.status === "pass" ? "var(--green)" : "var(--red)",
+              }}
+            >
+              {result.passRate != null ? `${Math.round(result.passRate * 100)}%` : result.status}
+            </span>
+          )}
+          {!isDone && !isActive && isRunning && (
+            <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>queued</span>
+          )}
+        </div>
       </div>
 
       {/* Assertions */}

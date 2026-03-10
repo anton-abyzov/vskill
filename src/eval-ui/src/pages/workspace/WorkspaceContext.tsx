@@ -28,7 +28,7 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     skill,
   });
 
-  const { events, running: sseRunning, start: sseStart } = useSSE();
+  const { events, running: sseRunning, start: sseStart, stop: sseStop } = useSSE();
 
   // ---------------------------------------------------------------------------
   // Sync panel from URL
@@ -182,6 +182,11 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     sseStart(url, body);
   }, [plugin, skill, state.isRunning, sseStart]);
 
+  const cancelRun = useCallback(() => {
+    sseStop();
+    dispatch({ type: "RUN_COMPLETE", benchmark: state.latestBenchmark! });
+  }, [sseStop, state.latestBenchmark]);
+
   const improveForCase = useCallback(async (evalId: number, notes?: string) => {
     dispatch({ type: "OPEN_IMPROVE", evalId });
     // The actual improve call happens in the EditorPanel via SkillImprovePanel
@@ -224,11 +229,12 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     saveContent,
     saveEvals,
     runBenchmark,
+    cancelRun,
     improveForCase,
     applyImproveAndRerun,
     refreshSkillContent,
     generateEvals,
-  }), [state, saveContent, saveEvals, runBenchmark, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals]);
+  }), [state, saveContent, saveEvals, runBenchmark, cancelRun, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals]);
 
   return (
     <WorkspaceCtx.Provider value={value}>

@@ -120,6 +120,7 @@ export interface WorkspaceContextValue {
   saveContent: () => Promise<void>;
   saveEvals: (updated: EvalsFile) => Promise<void>;
   runBenchmark: (mode: RunMode, scope: RunScope) => void;
+  cancelRun: () => void;
   improveForCase: (evalId: number, notes?: string) => Promise<void>;
   applyImproveAndRerun: (evalId: number, improved: string) => Promise<void>;
   refreshSkillContent: () => Promise<void>;

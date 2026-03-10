@@ -1,9 +1,9 @@
-import { createContext, useContext, useReducer, useCallback, useEffect, useMemo } from "react";
+import { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../../api";
-import { useSSE } from "../../sse";
+import { useMultiSSE } from "../../sse";
 import type { EvalsFile, BenchmarkResult } from "../../types";
-import type { WorkspaceContextValue, PanelId, RunMode, RunScope, InlineResult, AssertionResultInline } from "./workspaceTypes";
+import type { WorkspaceContextValue, PanelId, RunMode, InlineResult, AssertionResultInline } from "./workspaceTypes";
 import { workspaceReducer, initialWorkspaceState } from "./workspaceReducer";
 
 const WorkspaceCtx = createContext<WorkspaceContextValue | null>(null);
@@ -28,7 +28,10 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     skill,
   });
 
-  const { events, running: sseRunning, start: sseStart, stop: sseStop } = useSSE();
+  const { streams, startCase: sseStartCase, stopCase: sseStopCase, stopAll: sseStopAll, isAnyCaseRunning } = useMultiSSE();
+
+  // Track bulk run completion
+  const bulkPendingRef = useRef<Set<number>>(new Set());
 
   // ---------------------------------------------------------------------------
   // Sync panel from URL
@@ -84,60 +87,69 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
   }, [plugin, skill]);
 
   // ---------------------------------------------------------------------------
-  // SSE event processing (benchmark streaming)
+  // Process per-case SSE streams → dispatch inline results
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (!state.isRunning || !state.runScope) return;
+    for (const [caseId, stream] of streams) {
+      // Build inline result from events
+      const r: InlineResult = { assertions: [] };
 
-    // Track per-case inline results from SSE
-    const caseResults = new Map<number, InlineResult>();
+      for (const evt of stream.events) {
+        const data = evt.data as Record<string, unknown>;
 
-    for (const evt of events) {
-      const data = evt.data as Record<string, unknown>;
-      const evalId = data.eval_id as number;
+        if (evt.event === "output_ready") {
+          r.output = data.output as string;
+          if (data.durationMs != null) r.durationMs = data.durationMs as number;
+          if (data.tokens != null) r.tokens = data.tokens as number | null;
+        }
 
-      if (!caseResults.has(evalId)) {
-        caseResults.set(evalId, { assertions: [] });
-      }
-      const r = caseResults.get(evalId)!;
+        if (evt.event === "assertion_result") {
+          const ar: AssertionResultInline = {
+            assertion_id: data.assertion_id as string,
+            text: data.text as string,
+            pass: data.pass as boolean,
+            reasoning: data.reasoning as string,
+          };
+          if (!r.assertions.find((a) => a.assertion_id === ar.assertion_id)) {
+            r.assertions.push(ar);
+          }
+        }
 
-      if (evt.event === "output_ready") {
-        r.output = data.output as string;
-        if (data.durationMs != null) r.durationMs = data.durationMs as number;
-        if (data.tokens != null) r.tokens = data.tokens as number | null;
-      }
-
-      if (evt.event === "assertion_result") {
-        const ar: AssertionResultInline = {
-          assertion_id: data.assertion_id as string,
-          text: data.text as string,
-          pass: data.pass as boolean,
-          reasoning: data.reasoning as string,
-        };
-        if (!r.assertions.find((a) => a.assertion_id === ar.assertion_id)) {
-          r.assertions.push(ar);
+        if (evt.event === "case_complete") {
+          r.status = data.status as string;
+          r.passRate = data.pass_rate as number | undefined;
+          r.errorMessage = (data.error_message as string) || undefined;
         }
       }
 
-      if (evt.event === "case_complete") {
-        r.status = data.status as string;
-        r.passRate = data.pass_rate as number | undefined;
-        r.errorMessage = (data.error_message as string) || undefined;
+      dispatch({ type: "UPDATE_INLINE_RESULT", evalId: caseId, result: { ...r } });
+
+      // If stream finished, update case run state
+      if (!stream.running && stream.done) {
+        dispatch({ type: "CASE_RUN_COMPLETE", caseId, result: { ...r } });
+        // Track bulk completion
+        if (bulkPendingRef.current.has(caseId)) {
+          bulkPendingRef.current.delete(caseId);
+          if (bulkPendingRef.current.size === 0) {
+            // All bulk cases done — fetch latest benchmark and complete
+            api.getLatestBenchmark(plugin, skill)
+              .then((b) => dispatch({ type: "BULK_RUN_COMPLETE", benchmark: b }))
+              .catch(() => dispatch({ type: "BULK_RUN_COMPLETE", benchmark: null }));
+          }
+        }
+      } else if (!stream.running && stream.error) {
+        dispatch({ type: "CASE_RUN_ERROR", caseId, error: stream.error });
+        if (bulkPendingRef.current.has(caseId)) {
+          bulkPendingRef.current.delete(caseId);
+          if (bulkPendingRef.current.size === 0) {
+            api.getLatestBenchmark(plugin, skill)
+              .then((b) => dispatch({ type: "BULK_RUN_COMPLETE", benchmark: b }))
+              .catch(() => dispatch({ type: "BULK_RUN_COMPLETE", benchmark: null }));
+          }
+        }
       }
-
-      dispatch({ type: "UPDATE_INLINE_RESULT", evalId, result: { ...r } });
     }
-  }, [events, state.isRunning, state.runScope]);
-
-  // Handle SSE done
-  useEffect(() => {
-    if (!sseRunning && state.isRunning) {
-      // Fetch final benchmark result
-      api.getLatestBenchmark(plugin, skill)
-        .then((b) => dispatch({ type: "RUN_COMPLETE", benchmark: b }))
-        .catch(() => dispatch({ type: "RUN_COMPLETE", benchmark: state.latestBenchmark! }));
-    }
-  }, [sseRunning]);
+  }, [streams, plugin, skill]);
 
   // ---------------------------------------------------------------------------
   // Async actions
@@ -160,36 +172,61 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     }
   }, [plugin, skill]);
 
-  const runBenchmark = useCallback((mode: RunMode, scope: RunScope) => {
-    if (state.isRunning) return; // prevent concurrent runs
+  // -- Per-case run --
+  const runCase = useCallback((caseId: number, mode: RunMode = "benchmark") => {
+    const caseState = state.caseRunStates.get(caseId);
+    if (caseState?.status === "running") return; // already running
 
-    dispatch({ type: "RUN_START", mode, scope });
+    dispatch({ type: "CASE_RUN_START", caseId, mode });
 
-    const evalIds = scope === "all"
-      ? undefined
-      : [scope.caseId];
+    if (mode === "comparison") {
+      // Comparison uses the bulk endpoint with eval_ids filter (different flow)
+      const url = `/api/skills/${plugin}/${skill}/compare`;
+      sseStartCase(caseId, url, { eval_ids: [caseId] });
+    } else {
+      const url = `/api/skills/${plugin}/${skill}/benchmark/case/${caseId}`;
+      const body = mode === "baseline" ? { baseline_only: true } : undefined;
+      sseStartCase(caseId, url, body);
+    }
+  }, [plugin, skill, state.caseRunStates, sseStartCase]);
 
-    const url = mode === "comparison"
-      ? `/api/skills/${plugin}/${skill}/compare`
-      : mode === "baseline"
-        ? `/api/skills/${plugin}/${skill}/benchmark`
-        : `/api/skills/${plugin}/${skill}/benchmark`;
+  // -- Run all cases in parallel --
+  const runAll = useCallback((mode: RunMode = "benchmark") => {
+    const cases = state.evals?.evals ?? [];
+    if (cases.length === 0) return;
 
-    const body = mode === "baseline"
-      ? { eval_ids: evalIds, baseline_only: true }
-      : { eval_ids: evalIds };
+    const caseIds = cases.map((c) => c.id);
+    dispatch({ type: "BULK_RUN_START", caseIds, mode });
 
-    sseStart(url, body);
-  }, [plugin, skill, state.isRunning, sseStart]);
+    bulkPendingRef.current = new Set(caseIds);
 
-  const cancelRun = useCallback(() => {
-    sseStop();
-    dispatch({ type: "RUN_COMPLETE", benchmark: state.latestBenchmark! });
-  }, [sseStop, state.latestBenchmark]);
+    for (const id of caseIds) {
+      if (mode === "comparison") {
+        sseStartCase(id, `/api/skills/${plugin}/${skill}/compare`, { eval_ids: [id] });
+      } else {
+        const url = `/api/skills/${plugin}/${skill}/benchmark/case/${id}`;
+        const body = mode === "baseline" ? { baseline_only: true } : undefined;
+        sseStartCase(id, url, body);
+      }
+    }
+  }, [plugin, skill, state.evals, sseStartCase]);
+
+  // -- Cancel per-case --
+  const cancelCase = useCallback((caseId: number) => {
+    sseStopCase(caseId);
+    dispatch({ type: "CASE_RUN_CANCEL", caseId });
+    bulkPendingRef.current.delete(caseId);
+  }, [sseStopCase]);
+
+  // -- Cancel all --
+  const cancelAll = useCallback(() => {
+    sseStopAll();
+    dispatch({ type: "CANCEL_ALL" });
+    bulkPendingRef.current.clear();
+  }, [sseStopAll]);
 
   const improveForCase = useCallback(async (evalId: number, notes?: string) => {
     dispatch({ type: "OPEN_IMPROVE", evalId });
-    // The actual improve call happens in the EditorPanel via SkillImprovePanel
   }, []);
 
   const applyImproveAndRerun = useCallback(async (evalId: number, improved: string) => {
@@ -198,12 +235,11 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
       dispatch({ type: "SET_CONTENT", content: improved });
       dispatch({ type: "CONTENT_SAVED" });
       dispatch({ type: "CLOSE_IMPROVE" });
-      // Rerun the case
-      runBenchmark("benchmark", { caseId: evalId });
+      runCase(evalId, "benchmark");
     } catch (e) {
       dispatch({ type: "SET_ERROR", error: (e as Error).message });
     }
-  }, [plugin, skill, runBenchmark]);
+  }, [plugin, skill, runCase]);
 
   const refreshSkillContent = useCallback(async () => {
     try {
@@ -228,13 +264,15 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     dispatch,
     saveContent,
     saveEvals,
-    runBenchmark,
-    cancelRun,
+    runCase,
+    runAll,
+    cancelCase,
+    cancelAll,
     improveForCase,
     applyImproveAndRerun,
     refreshSkillContent,
     generateEvals,
-  }), [state, saveContent, saveEvals, runBenchmark, cancelRun, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals]);
+  }), [state, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals]);
 
   return (
     <WorkspaceCtx.Provider value={value}>

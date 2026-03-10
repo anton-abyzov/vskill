@@ -61,6 +61,22 @@ Body.`;
     expect(metadata["allowed-tools"]).toBeUndefined();
   });
 
+  it("parses nested metadata block (one-level nesting)", () => {
+    const content = `---
+name: test-skill
+metadata:
+  version: 1.0.0
+  tags: a, b, c
+---
+Body.`;
+
+    const { metadata } = parseFrontmatter(content);
+    expect(metadata.name).toBe("test-skill");
+    const nested = metadata.metadata as Record<string, string | string[]>;
+    expect(nested.version).toBe("1.0.0");
+    expect(nested.tags).toBe("a, b, c");
+  });
+
   it("strips quotes from values", () => {
     const content = `---
 description: "Quoted value"

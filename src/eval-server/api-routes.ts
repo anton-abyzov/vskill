@@ -7,7 +7,8 @@ import { join } from "node:path";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import { initSSE, sendSSE, sendSSEDone, withHeartbeat } from "./sse-helpers.js";
-import { runBenchmarkSSE } from "./benchmark-runner.js";
+import { runBenchmarkSSE, runSingleCaseSSE, assembleBulkResult } from "./benchmark-runner.js";
+import { getSkillSemaphore } from "./concurrency.js";
 import { resolveSkillDir } from "./skill-resolver.js";
 import { scanSkills } from "../eval/skill-scanner.js";
 import { loadAndValidateEvals, EvalValidationError } from "../eval/schema.js";
@@ -349,6 +350,89 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     }
   });
 
+  // Run single case (SSE) — per-case endpoint with semaphore
+  router.post("/api/skills/:plugin/:skill/benchmark/case/:evalId", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    const evalId = parseInt(params.evalId, 10);
+    if (isNaN(evalId)) { sendJson(res, { error: "Invalid evalId" }, 400, req); return; }
+
+    const body = await readBody(req).catch(() => ({})) as { mode?: string; bulk?: boolean };
+    const isBaseline = body?.mode === "baseline";
+    const isBulkChild = body?.bulk === true;
+
+    let aborted = false;
+    let released = false;
+    res.on("close", () => {
+      aborted = true;
+      if (!released) { released = true; sem.release(); }
+    });
+
+    const sem = getSkillSemaphore(`${params.plugin}/${params.skill}`);
+    initSSE(res, req);
+
+    try {
+      const evals = loadAndValidateEvals(skillDir);
+      const evalCase = evals.evals.find((e) => e.id === evalId);
+      if (!evalCase) { sendSSEDone(res, { error: `Case ${evalId} not found` }); return; }
+
+      const skillMdPath = join(skillDir, "SKILL.md");
+      const skillContent = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
+      const client = getClient();
+      const systemPrompt = isBaseline
+        ? "You are a helpful AI assistant."
+        : skillContent
+          ? `You are an AI assistant enhanced with the following skill:\n\n${skillContent}`
+          : "You are a helpful AI assistant.";
+
+      await sem.acquire();
+
+      const benchCase = await runSingleCaseSSE({
+        res, evalCase, systemPrompt, client, isAborted: () => aborted,
+      });
+
+      if (!released) { released = true; sem.release(); }
+
+      if (!aborted) {
+        // Write per-case history unless this is part of a bulk run (bulk-save handles it)
+        if (!isBulkChild) {
+          const result: BenchmarkResult = {
+            timestamp: new Date().toISOString(),
+            model: client.model,
+            skill_name: evals.skill_name,
+            cases: [benchCase],
+            overall_pass_rate: benchCase.pass_rate,
+            type: isBaseline ? "baseline" : "benchmark",
+            provider: currentOverrides.provider || "claude-cli",
+            totalDurationMs: benchCase.durationMs ?? 0,
+            totalInputTokens: benchCase.inputTokens ?? null,
+            totalOutputTokens: benchCase.outputTokens ?? null,
+            scope: "single",
+          };
+          await writeHistoryEntry(skillDir, result);
+        }
+        sendSSEDone(res, benchCase);
+      }
+    } catch (err) {
+      if (!released) { released = true; sem.release(); }
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      sendSSEDone(res, { error: errorMsg });
+    }
+  });
+
+  // Bulk save — client assembles result from per-case runs and saves as one history entry
+  router.post("/api/skills/:plugin/:skill/benchmark/bulk-save", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    try {
+      const body = await readBody(req) as { result: BenchmarkResult };
+      if (!body?.result) { sendJson(res, { error: "Missing result" }, 400, req); return; }
+      const result = { ...body.result, scope: "bulk" as const };
+      await writeHistoryEntry(skillDir, result);
+      sendJson(res, { ok: true }, 200, req);
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 500, req);
+    }
+  });
+
   // Run comparison (SSE)
   router.post("/api/skills/:plugin/:skill/compare", async (req, res, params) => {
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
@@ -359,9 +443,15 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
     try {
       const evals = loadAndValidateEvals(skillDir);
+      const body = await readBody(req).catch(() => ({})) as { eval_ids?: number[] };
+      const filterIds = Array.isArray(body?.eval_ids) ? new Set(body.eval_ids) : null;
       const skillMdPath = join(skillDir, "SKILL.md");
       const skillContent = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
       const client = getClient();
+
+      const casesToRun = filterIds
+        ? evals.evals.filter((e) => filterIds.has(e.id))
+        : evals.evals;
 
       const comparisonResults: Array<{
         eval_id: number;
@@ -370,7 +460,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         assertionResults: BenchmarkAssertionResult[];
       }> = [];
 
-      for (const evalCase of evals.evals) {
+      for (const evalCase of casesToRun) {
         if (aborted) break;
 
         sendSSE(res, "case_start", {

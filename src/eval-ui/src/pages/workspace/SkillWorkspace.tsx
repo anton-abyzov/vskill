@@ -78,7 +78,7 @@ function WorkspaceInner() {
           activePanel={state.activePanel}
           onPanelChange={(p) => dispatch({ type: "SET_PANEL", panel: p })}
           isDirty={state.isDirty}
-          isRunning={state.isRunning}
+          isRunning={Array.from(state.caseRunStates.values()).some((s) => s.status === "running" || s.status === "queued")}
           hasRegressions={state.regressions.length > 0}
         />
       </div>

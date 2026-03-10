@@ -1,4 +1,4 @@
-import type { WorkspaceState, WorkspaceAction, InlineResult } from "./workspaceTypes";
+import type { WorkspaceState, WorkspaceAction, InlineResult, CaseRunState } from "./workspaceTypes";
 
 export const initialWorkspaceState: WorkspaceState = {
   plugin: "",
@@ -9,9 +9,9 @@ export const initialWorkspaceState: WorkspaceState = {
   evals: null,
   activePanel: "tests",
   selectedCaseId: null,
-  isRunning: false,
+  caseRunStates: new Map(),
+  bulkRunActive: false,
   runMode: null,
-  runScope: null,
   latestBenchmark: null,
   inlineResults: new Map(),
   improveTarget: null,
@@ -49,7 +49,6 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           });
         }
       }
-      // Auto-select first case
       const firstCaseId = action.evals?.evals[0]?.id ?? null;
       return {
         ...state,
@@ -88,40 +87,78 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     case "SELECT_CASE":
       return { ...state, selectedCaseId: action.caseId };
 
-    case "RUN_START":
+    // -- Per-case run lifecycle --
+
+    case "CASE_RUN_START": {
+      const caseRunStates = new Map(state.caseRunStates);
+      caseRunStates.set(action.caseId, { status: "running", startedAt: Date.now() });
       return {
         ...state,
-        isRunning: true,
+        caseRunStates,
         runMode: action.mode,
-        runScope: action.scope,
         activePanel: "run",
       };
+    }
 
-    case "RUN_COMPLETE": {
+    case "CASE_RUN_COMPLETE": {
+      const caseRunStates = new Map(state.caseRunStates);
+      caseRunStates.set(action.caseId, { status: "complete" });
       const inlineResults = new Map(state.inlineResults);
-      for (const c of action.benchmark.cases) {
-        inlineResults.set(c.eval_id, {
-          status: c.status,
-          passRate: c.pass_rate,
-          errorMessage: c.error_message || undefined,
-          durationMs: c.durationMs,
-          tokens: c.tokens,
-          output: c.output,
-          assertions: c.assertions.map((a) => ({
-            assertion_id: a.id,
-            text: a.text,
-            pass: a.pass,
-            reasoning: a.reasoning,
-          })),
-        });
+      inlineResults.set(action.caseId, action.result);
+      return { ...state, caseRunStates, inlineResults };
+    }
+
+    case "CASE_RUN_ERROR": {
+      const caseRunStates = new Map(state.caseRunStates);
+      caseRunStates.set(action.caseId, { status: "error" });
+      const inlineResults = new Map(state.inlineResults);
+      inlineResults.set(action.caseId, {
+        status: "error",
+        errorMessage: action.error,
+        assertions: [],
+      });
+      return { ...state, caseRunStates, inlineResults };
+    }
+
+    case "CASE_RUN_CANCEL": {
+      const caseRunStates = new Map(state.caseRunStates);
+      caseRunStates.set(action.caseId, { status: "cancelled" });
+      return { ...state, caseRunStates };
+    }
+
+    // -- Bulk run lifecycle --
+
+    case "BULK_RUN_START": {
+      const caseRunStates = new Map(state.caseRunStates);
+      for (const id of action.caseIds) {
+        caseRunStates.set(id, { status: "queued" });
       }
       return {
         ...state,
-        isRunning: false,
-        latestBenchmark: action.benchmark,
-        inlineResults,
+        caseRunStates,
+        bulkRunActive: true,
+        runMode: action.mode,
+        activePanel: "run",
+      };
+    }
+
+    case "BULK_RUN_COMPLETE": {
+      return {
+        ...state,
+        bulkRunActive: false,
+        latestBenchmark: action.benchmark ?? state.latestBenchmark,
         iterationCount: state.iterationCount + 1,
       };
+    }
+
+    case "CANCEL_ALL": {
+      const caseRunStates = new Map(state.caseRunStates);
+      for (const [id, s] of caseRunStates) {
+        if (s.status === "running" || s.status === "queued") {
+          caseRunStates.set(id, { status: "cancelled" });
+        }
+      }
+      return { ...state, caseRunStates, bulkRunActive: false };
     }
 
     case "UPDATE_INLINE_RESULT": {

@@ -54,6 +54,7 @@ export interface BenchmarkResult {
   totalDurationMs?: number;
   totalInputTokens?: number | null;
   totalOutputTokens?: number | null;
+  scope?: "single" | "bulk";
   verdict?: string;
   comparison?: {
     skillPassRate: number;

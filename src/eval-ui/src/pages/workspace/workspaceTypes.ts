@@ -32,7 +32,17 @@ export interface InlineResult {
 // ---------------------------------------------------------------------------
 
 export type RunMode = "benchmark" | "baseline" | "comparison";
-export type RunScope = "all" | { caseId: number };
+
+// ---------------------------------------------------------------------------
+// Per-case run state
+// ---------------------------------------------------------------------------
+
+export type CaseRunStatus = "idle" | "queued" | "running" | "complete" | "error" | "cancelled";
+
+export interface CaseRunState {
+  status: CaseRunStatus;
+  startedAt?: number;
+}
 
 // ---------------------------------------------------------------------------
 // Regression info
@@ -66,10 +76,10 @@ export interface WorkspaceState {
   activePanel: PanelId;
   selectedCaseId: number | null;
 
-  // Run state
-  isRunning: boolean;
+  // Per-case run state
+  caseRunStates: Map<number, CaseRunState>;
+  bulkRunActive: boolean;
   runMode: RunMode | null;
-  runScope: RunScope | null;
   latestBenchmark: BenchmarkResult | null;
   inlineResults: Map<number, InlineResult>;
 
@@ -100,8 +110,13 @@ export type WorkspaceAction =
   | { type: "CONTENT_SAVED" }
   | { type: "SET_EVALS"; evals: EvalsFile }
   | { type: "SELECT_CASE"; caseId: number | null }
-  | { type: "RUN_START"; mode: RunMode; scope: RunScope }
-  | { type: "RUN_COMPLETE"; benchmark: BenchmarkResult }
+  | { type: "CASE_RUN_START"; caseId: number; mode: RunMode }
+  | { type: "CASE_RUN_COMPLETE"; caseId: number; result: InlineResult }
+  | { type: "CASE_RUN_ERROR"; caseId: number; error: string }
+  | { type: "CASE_RUN_CANCEL"; caseId: number }
+  | { type: "BULK_RUN_START"; caseIds: number[]; mode: RunMode }
+  | { type: "BULK_RUN_COMPLETE"; benchmark: BenchmarkResult | null }
+  | { type: "CANCEL_ALL" }
   | { type: "UPDATE_INLINE_RESULT"; evalId: number; result: InlineResult }
   | { type: "OPEN_IMPROVE"; evalId: number }
   | { type: "CLOSE_IMPROVE" }
@@ -119,8 +134,10 @@ export interface WorkspaceContextValue {
   // Async actions
   saveContent: () => Promise<void>;
   saveEvals: (updated: EvalsFile) => Promise<void>;
-  runBenchmark: (mode: RunMode, scope: RunScope) => void;
-  cancelRun: () => void;
+  runCase: (caseId: number, mode?: RunMode) => void;
+  runAll: (mode?: RunMode) => void;
+  cancelCase: (caseId: number) => void;
+  cancelAll: () => void;
   improveForCase: (evalId: number, notes?: string) => Promise<void>;
   applyImproveAndRerun: (evalId: number, improved: string) => Promise<void>;
   refreshSkillContent: () => Promise<void>;

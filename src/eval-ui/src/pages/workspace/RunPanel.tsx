@@ -1,28 +1,29 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useWorkspace } from "./WorkspaceContext";
-import { ProgressLog } from "../../components/ProgressLog";
-import { GroupedBarChart } from "../../components/GroupedBarChart";
-import type { RunMode, RunScope, InlineResult } from "./workspaceTypes";
+import type { RunMode, InlineResult, CaseRunStatus } from "./workspaceTypes";
 
 export function RunPanel() {
-  const { state, runBenchmark, cancelRun } = useWorkspace();
-  const { evals, isRunning, runMode, runScope, latestBenchmark, inlineResults, selectedCaseId } = state;
-  const [scopeMode, setScopeMode] = useState<"all" | "selected">("all");
+  const { state, runCase, runAll, cancelCase, cancelAll } = useWorkspace();
+  const { evals, caseRunStates, bulkRunActive, runMode, latestBenchmark, inlineResults } = state;
 
   const cases = evals?.evals ?? [];
-  const hasSelection = selectedCaseId != null;
 
-  const handleRun = (mode: RunMode) => {
-    const scope: RunScope = scopeMode === "selected" && hasSelection
-      ? { caseId: selectedCaseId! }
-      : "all";
-    runBenchmark(mode, scope);
-  };
+  const isAnyRunning = useMemo(() => {
+    for (const s of caseRunStates.values()) {
+      if (s.status === "running" || s.status === "queued") return true;
+    }
+    return false;
+  }, [caseRunStates]);
 
   // Progress tracking
   const completedCases = cases.filter((c) => {
-    const r = inlineResults.get(c.id);
-    return r && r.status != null;
+    const s = caseRunStates.get(c.id);
+    return s && (s.status === "complete" || s.status === "error" || s.status === "cancelled");
+  }).length;
+
+  const runningCases = cases.filter((c) => {
+    const s = caseRunStates.get(c.id);
+    return s && (s.status === "running" || s.status === "queued");
   }).length;
 
   return (
@@ -34,51 +35,34 @@ export function RunPanel() {
       >
         <div className="flex items-center justify-between mb-3">
           <span className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Benchmark</span>
-
-          {/* Scope selector */}
-          <div className="flex items-center gap-1">
-            {(["all", "selected"] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setScopeMode(s)}
-                disabled={s === "selected" && !hasSelection}
-                className="px-3 py-1.5 rounded-md text-[11px] font-medium transition-all duration-150"
-                style={{
-                  background: scopeMode === s ? "var(--accent-muted)" : "transparent",
-                  color: scopeMode === s ? "var(--accent)" : "var(--text-tertiary)",
-                  opacity: s === "selected" && !hasSelection ? 0.4 : 1,
-                }}
-              >
-                {s === "all" ? "All Cases" : "Selected Case"}
-              </button>
-            ))}
-          </div>
+          {isAnyRunning && (
+            <span className="text-[11px] font-medium" style={{ color: "var(--accent)" }}>
+              {runningCases} running
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
-          {isRunning ? (
-            <button onClick={cancelRun} className="btn text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(239,68,68,0.3)" }}>
+          {isAnyRunning && (
+            <button onClick={cancelAll} className="btn text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(239,68,68,0.3)" }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4 }}><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
-              Cancel
+              Cancel All
             </button>
-          ) : (
-            <>
-              <button onClick={() => handleRun("benchmark")} disabled={cases.length === 0} className="btn btn-primary text-[12px]">
-                Run Benchmark
-              </button>
-              <button onClick={() => handleRun("baseline")} disabled={cases.length === 0} className="btn btn-secondary text-[12px]">
-                Run Baseline
-              </button>
-              <button onClick={() => handleRun("comparison")} disabled={cases.length === 0} className="btn btn-purple text-[12px]">
-                A/B Compare
-              </button>
-            </>
           )}
+          <button onClick={() => runAll("benchmark")} disabled={cases.length === 0 || isAnyRunning} className="btn btn-primary text-[12px]">
+            Run All
+          </button>
+          <button onClick={() => runAll("baseline")} disabled={cases.length === 0 || isAnyRunning} className="btn btn-secondary text-[12px]">
+            Baseline All
+          </button>
+          <button onClick={() => runAll("comparison")} disabled={cases.length === 0 || isAnyRunning} className="btn btn-purple text-[12px]">
+            A/B All
+          </button>
         </div>
       </div>
 
       {/* Progress */}
-      {isRunning && cases.length > 0 && (
+      {isAnyRunning && cases.length > 0 && (
         <div className="mb-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>
@@ -104,12 +88,25 @@ export function RunPanel() {
       <div className="space-y-3 stagger-children">
         {cases.map((c) => {
           const r = inlineResults.get(c.id);
-          return <RunCaseCard key={c.id} name={c.name} evalId={c.id} result={r} isRunning={isRunning} onRun={(id) => runBenchmark("benchmark", { caseId: id })} onCompare={(id) => runBenchmark("comparison", { caseId: id })} />;
+          const caseStatus = caseRunStates.get(c.id)?.status ?? "idle";
+          return (
+            <RunCaseCard
+              key={c.id}
+              name={c.name}
+              evalId={c.id}
+              result={r}
+              caseStatus={caseStatus}
+              onRun={(id) => runCase(id, "benchmark")}
+              onBaseline={(id) => runCase(id, "baseline")}
+              onCompare={(id) => runCase(id, "comparison")}
+              onCancel={(id) => cancelCase(id)}
+            />
+          );
         })}
       </div>
 
       {/* Summary on completion */}
-      {!isRunning && latestBenchmark && latestBenchmark.cases.length > 0 && (
+      {!isAnyRunning && latestBenchmark && latestBenchmark.cases.length > 0 && (
         <div className="mt-5">
           <div
             className="rounded-xl p-4 mb-4"
@@ -166,16 +163,22 @@ export function RunPanel() {
 }
 
 // ---------------------------------------------------------------------------
-// Run case card
+// Run case card — independent per-case controls
 // ---------------------------------------------------------------------------
 
-function RunCaseCard({ name, evalId, result, isRunning, onRun, onCompare }: {
-  name: string; evalId: number; result?: InlineResult; isRunning: boolean;
-  onRun: (evalId: number) => void; onCompare: (evalId: number) => void;
+function RunCaseCard({ name, evalId, result, caseStatus, onRun, onBaseline, onCompare, onCancel }: {
+  name: string;
+  evalId: number;
+  result?: InlineResult;
+  caseStatus: CaseRunStatus;
+  onRun: (evalId: number) => void;
+  onBaseline: (evalId: number) => void;
+  onCompare: (evalId: number) => void;
+  onCancel: (evalId: number) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const isDone = result && result.status != null;
-  const isActive = isRunning && !isDone;
+  const isActive = caseStatus === "running" || caseStatus === "queued";
+  const isDone = caseStatus === "complete" || caseStatus === "error";
 
   return (
     <div
@@ -188,31 +191,45 @@ function RunCaseCard({ name, evalId, result, isRunning, onRun, onCompare }: {
     >
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2">
-          {isActive && <span className="spinner" style={{ width: 14, height: 14, borderWidth: 1.5 }} />}
+          {caseStatus === "running" && <span className="spinner" style={{ width: 14, height: 14, borderWidth: 1.5 }} />}
+          {caseStatus === "queued" && (
+            <span className="text-[10px] font-medium" style={{ color: "var(--text-tertiary)" }}>queued</span>
+          )}
           <span className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>
             #{evalId} {name}
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {!isRunning && (
+          {isActive ? (
+            <button
+              onClick={() => onCancel(evalId)}
+              className="btn text-[10px] px-2 py-1"
+              style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(239,68,68,0.3)" }}
+            >
+              Cancel
+            </button>
+          ) : (
             <>
               <button onClick={() => onRun(evalId)} className="btn btn-primary text-[10px] px-2 py-1">Run</button>
+              <button onClick={() => onBaseline(evalId)} className="btn btn-secondary text-[10px] px-2 py-1">Base</button>
               <button onClick={() => onCompare(evalId)} className="btn btn-purple text-[10px] px-2 py-1">A/B</button>
             </>
           )}
-          {isDone && (
+          {result && result.status != null && (
             <span
               className="pill text-[10px]"
               style={{
-                background: result.status === "pass" ? "var(--green-muted)" : "var(--red-muted)",
+                background: result.status === "pass" ? "var(--green-muted)" : result.status === "error" ? "var(--red-muted)" : "var(--red-muted)",
                 color: result.status === "pass" ? "var(--green)" : "var(--red)",
               }}
             >
               {result.passRate != null ? `${Math.round(result.passRate * 100)}%` : result.status}
             </span>
           )}
-          {!isDone && !isActive && isRunning && (
-            <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>queued</span>
+          {caseStatus === "cancelled" && (
+            <span className="pill text-[10px]" style={{ background: "var(--surface-3)", color: "var(--text-tertiary)" }}>
+              cancelled
+            </span>
           )}
         </div>
       </div>
@@ -255,6 +272,15 @@ function RunCaseCard({ name, evalId, result, isRunning, onRun, onCompare }: {
               {result.output}
             </pre>
           )}
+        </div>
+      )}
+
+      {/* Error message */}
+      {result && result.errorMessage && (
+        <div className="px-4 pb-3">
+          <div className="text-[11px] p-2 rounded-lg" style={{ background: "var(--red-muted)", color: "var(--red)" }}>
+            {result.errorMessage}
+          </div>
         </div>
       )}
     </div>

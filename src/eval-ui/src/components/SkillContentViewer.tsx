@@ -14,7 +14,7 @@ export function SkillContentViewer({ content, defaultExpanded = true }: Props) {
 
   const hasMetadata = Object.keys(metadata).length > 0;
   const allowedTools = metadata["allowed-tools"];
-  const toolsList = Array.isArray(allowedTools) ? allowedTools : allowedTools ? [allowedTools] : [];
+  const toolsList = Array.isArray(allowedTools) ? allowedTools : typeof allowedTools === "string" ? [allowedTools] : [];
 
   // Fields to show as metadata cards (exclude allowed-tools, shown separately)
   const metaFields = Object.entries(metadata).filter(
@@ -69,20 +69,27 @@ export function SkillContentViewer({ content, defaultExpanded = true }: Props) {
           {/* Metadata cards */}
           {hasMetadata && (
             <div className="grid grid-cols-2 gap-3 mb-4">
-              {metaFields.map(([key, value]) => (
-                <div
-                  key={key}
-                  className="px-3 py-2.5 rounded-lg"
-                  style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
-                >
-                  <div className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-tertiary)" }}>
-                    {key}
+              {metaFields.map(([key, value]) => {
+                const display = Array.isArray(value)
+                  ? value.join(", ")
+                  : typeof value === "object"
+                    ? Object.entries(value).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`).join(" | ")
+                    : value;
+                return (
+                  <div
+                    key={key}
+                    className="px-3 py-2.5 rounded-lg"
+                    style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+                  >
+                    <div className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-tertiary)" }}>
+                      {key}
+                    </div>
+                    <div className="text-[12px]" style={{ color: "var(--text-primary)" }}>
+                      {display}
+                    </div>
                   </div>
-                  <div className="text-[12px]" style={{ color: "var(--text-primary)" }}>
-                    {Array.isArray(value) ? value.join(", ") : value}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

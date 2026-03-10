@@ -1,10 +1,40 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import { parseFrontmatter } from "../../utils/parseFrontmatter";
 import { renderMarkdown } from "../../utils/renderMarkdown";
 import { SkillImprovePanel } from "../../components/SkillImprovePanel";
 
 type ViewMode = "split" | "raw" | "preview";
+
+/* ------------------------------------------------------------------ */
+/* Icon components — compact SVGs for the view toggle                 */
+/* ------------------------------------------------------------------ */
+function IconEditor({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="16 18 22 12 16 6" />
+      <polyline points="8 6 2 12 8 18" />
+    </svg>
+  );
+}
+
+function IconSplit({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="3" />
+      <line x1="12" y1="3" x2="12" y2="21" />
+    </svg>
+  );
+}
+
+function IconPreview({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
 
 export function EditorPanel() {
   const { state, dispatch, saveContent } = useWorkspace();
@@ -14,10 +44,34 @@ export function EditorPanel() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { metadata, body } = parseFrontmatter(skillContent);
-  const allowedTools = Array.isArray(metadata["allowed-tools"])
-    ? metadata["allowed-tools"]
-    : metadata["allowed-tools"] ? [metadata["allowed-tools"]] : [];
-  const metaFields = Object.entries(metadata).filter(([k]) => k !== "allowed-tools");
+  const rawAllowed = metadata["allowed-tools"];
+  const allowedTools: string[] = Array.isArray(rawAllowed)
+    ? rawAllowed
+    : typeof rawAllowed === "string" ? [rawAllowed] : [];
+
+  // Separate metadata into structured groups
+  const name = metadata["name"] as string | undefined;
+  const description = metadata["description"] as string | undefined;
+  const nestedMeta = metadata["metadata"];
+  const metadataObj = (typeof nestedMeta === "object" && !Array.isArray(nestedMeta))
+    ? nestedMeta as Record<string, string | string[]>
+    : null;
+
+  // Version: top-level or nested under metadata
+  const version = (metadata["version"] as string | undefined)
+    || (metadataObj?.["version"] as string | undefined);
+
+  // Tags: top-level, nested under metadata, or comma-separated string
+  const rawTags = metadata["tags"] || metadataObj?.["tags"];
+  const tagList = Array.isArray(rawTags)
+    ? rawTags
+    : typeof rawTags === "string"
+      ? rawTags.split(",").map(t => t.trim()).filter(Boolean)
+      : [];
+
+  // Remaining fields that aren't handled specially
+  const specialKeys = new Set(["name", "description", "metadata", "allowed-tools", "version", "tags"]);
+  const extraFields = Object.entries(metadata).filter(([k]) => !specialKeys.has(k));
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -25,7 +79,6 @@ export function EditorPanel() {
     setSaving(false);
   }, [saveContent]);
 
-  // Ctrl+S in textarea
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "s") {
       e.preventDefault();
@@ -34,36 +87,58 @@ export function EditorPanel() {
     }
   }, [isDirty, handleSave]);
 
+  const viewModes: { mode: ViewMode; icon: React.ReactNode; label: string }[] = [
+    { mode: "raw", icon: <IconEditor />, label: "Editor" },
+    { mode: "split", icon: <IconSplit />, label: "Split" },
+    { mode: "preview", icon: <IconPreview />, label: "Preview" },
+  ];
+
   return (
     <div className="flex flex-col h-full">
-      {/* Toolbar */}
+      {/* ── Toolbar ─────────────────────────────────────── */}
       <div
-        className="flex items-center justify-between px-4 py-2"
+        className="flex items-center justify-between px-3 py-1.5"
         style={{ borderBottom: "1px solid var(--border-subtle)", background: "var(--surface-1)" }}
       >
-        {/* View mode toggles */}
-        <div className="flex items-center gap-1">
-          {(["raw", "split", "preview"] as ViewMode[]).map((mode) => (
+        {/* Segmented view toggle */}
+        <div
+          className="flex items-center"
+          style={{
+            background: "var(--surface-2)",
+            borderRadius: 8,
+            padding: 2,
+            gap: 1,
+          }}
+        >
+          {viewModes.map(({ mode, icon, label }) => (
             <button
               key={mode}
               onClick={() => setViewMode(mode)}
-              className="px-3 py-1.5 rounded-md text-[12px] font-medium transition-all duration-150"
+              title={label}
+              className="flex items-center gap-1.5 rounded-md transition-all duration-150"
               style={{
-                background: viewMode === mode ? "var(--accent-muted)" : "transparent",
-                color: viewMode === mode ? "var(--accent)" : "var(--text-tertiary)",
+                padding: "5px 10px",
+                background: viewMode === mode ? "var(--surface-4)" : "transparent",
+                color: viewMode === mode ? "var(--text-primary)" : "var(--text-tertiary)",
+                fontSize: 11,
+                fontWeight: viewMode === mode ? 600 : 400,
+                border: "none",
+                cursor: "pointer",
               }}
             >
-              {mode === "raw" ? "Raw" : mode === "split" ? "Side-by-Side" : "Preview"}
+              {icon}
+              <span style={{ letterSpacing: "0.01em" }}>{label}</span>
             </button>
           ))}
         </div>
 
-        {/* Actions */}
+        {/* Save actions */}
         <div className="flex items-center gap-2">
           {isDirty && (
             <button
               onClick={() => dispatch({ type: "SET_CONTENT", content: state.savedContent })}
-              className="btn btn-ghost text-[12px]"
+              className="btn btn-ghost text-[11px]"
+              style={{ padding: "4px 8px" }}
             >
               Discard
             </button>
@@ -71,86 +146,166 @@ export function EditorPanel() {
           <button
             onClick={handleSave}
             disabled={!isDirty || saving}
-            className="btn btn-primary text-[12px]"
+            className="btn btn-primary text-[11px]"
+            style={{ padding: "5px 14px" }}
           >
-            {saving ? <><span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> Saving...</> : "Save"}
+            {saving ? <><span className="spinner" style={{ width: 11, height: 11, borderWidth: 1.5 }} /> Saving...</> : "Save"}
           </button>
         </div>
       </div>
 
-      {/* Editor body */}
+      {/* ── Editor Body ─────────────────────────────────── */}
       <div
         className="flex-1 overflow-hidden"
         style={{
           display: "grid",
-          gridTemplateColumns: viewMode === "raw" ? "1fr" : viewMode === "preview" ? "1fr" : "1fr 1fr",
+          gridTemplateColumns:
+            viewMode === "raw" ? "1fr" :
+            viewMode === "preview" ? "1fr" :
+            "1fr 1fr",
         }}
       >
-        {/* Raw editor */}
+        {/* ── Raw Editor Pane ──────────────────────────── */}
         {viewMode !== "preview" && (
-          <div className="flex flex-col overflow-hidden" style={{ borderRight: viewMode === "split" ? "1px solid var(--border-subtle)" : "none" }}>
-            <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-tertiary)", background: "var(--surface-2)", borderBottom: "1px solid var(--border-subtle)" }}>
-              SKILL.md
-            </div>
+          <div
+            className="flex flex-col overflow-hidden"
+            style={{
+              borderRight: viewMode === "split" ? "1px solid var(--border-subtle)" : "none",
+            }}
+          >
             <textarea
               ref={textareaRef}
               value={skillContent}
               onChange={(e) => dispatch({ type: "SET_CONTENT", content: e.target.value })}
               onKeyDown={handleKeyDown}
               spellCheck={false}
-              className="flex-1 w-full resize-none outline-none p-4"
+              className="flex-1 w-full resize-none outline-none"
               style={{
                 background: "var(--surface-0)",
                 color: "var(--text-primary)",
-                fontFamily: "var(--font-mono, ui-monospace, monospace)",
-                fontSize: 13,
-                lineHeight: 1.6,
+                fontFamily: "var(--font-mono, 'JetBrains Mono', ui-monospace, monospace)",
+                fontSize: 12.5,
+                lineHeight: 1.7,
                 tabSize: 2,
                 border: "none",
+                padding: "16px 20px",
               }}
             />
           </div>
         )}
 
-        {/* Preview */}
+        {/* ── Preview Pane ─────────────────────────────── */}
         {viewMode !== "raw" && (
-          <div className="overflow-auto">
-            <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-tertiary)", background: "var(--surface-2)", borderBottom: "1px solid var(--border-subtle)" }}>
-              Preview
-            </div>
-            <div className="p-4 animate-fade-in">
-              {/* Frontmatter cards */}
-              {metaFields.length > 0 && (
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  {metaFields.map(([key, value]) => (
-                    <div
-                      key={key}
-                      className="px-3 py-2.5 rounded-lg"
-                      style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+          <div
+            className="overflow-auto"
+            style={{ background: "var(--surface-0)" }}
+          >
+            <div className="animate-fade-in" style={{ padding: "20px 24px", maxWidth: 720 }}>
+              {/* ─ Compact Metadata Header ───────────── */}
+              {(name || version || description) && (
+                <div style={{ marginBottom: 20 }}>
+                  {/* Name + version inline */}
+                  <div className="flex items-baseline gap-3" style={{ marginBottom: 8 }}>
+                    {name && (
+                      <h2
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 700,
+                          color: "var(--text-primary)",
+                          letterSpacing: "-0.02em",
+                          lineHeight: 1.2,
+                          margin: 0,
+                        }}
+                      >
+                        {name}
+                      </h2>
+                    )}
+                    {version && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          color: "var(--accent)",
+                          background: "var(--accent-muted)",
+                          padding: "2px 7px",
+                          borderRadius: 4,
+                          letterSpacing: "0.03em",
+                          fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                        }}
+                      >
+                        v{version}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Description as lead text with left accent */}
+                  {description && (
+                    <p
+                      style={{
+                        fontSize: 12.5,
+                        lineHeight: 1.65,
+                        color: "var(--text-secondary)",
+                        margin: 0,
+                        paddingLeft: 12,
+                        borderLeft: "2px solid var(--accent)",
+                        maxWidth: 600,
+                      }}
                     >
-                      <div className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-tertiary)" }}>
-                        {key}
-                      </div>
-                      <div className="text-[12px]" style={{ color: "var(--text-primary)" }}>
-                        {Array.isArray(value) ? value.join(", ") : value}
-                      </div>
-                    </div>
+                      {description}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* ─ Tags ─────────────────────────────── */}
+              {tagList.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5" style={{ marginBottom: 16 }}>
+                  {tagList.map((tag) => (
+                    <span
+                      key={tag}
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 500,
+                        color: "var(--text-tertiary)",
+                        background: "var(--surface-2)",
+                        padding: "3px 8px",
+                        borderRadius: 4,
+                        letterSpacing: "0.02em",
+                      }}
+                    >
+                      {tag}
+                    </span>
                   ))}
                 </div>
               )}
 
-              {/* Allowed tools pills */}
+              {/* ─ Allowed Tools ─────────────────────── */}
               {allowedTools.length > 0 && (
-                <div className="mb-4">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-tertiary)" }}>
-                    Allowed Tools
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
+                <div style={{ marginBottom: 16 }}>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                        color: "var(--text-tertiary)",
+                        marginRight: 4,
+                      }}
+                    >
+                      Tools
+                    </span>
                     {allowedTools.map((tool) => (
                       <span
                         key={tool}
-                        className="px-2 py-1 rounded-md text-[11px] font-mono"
-                        style={{ background: "var(--accent-muted)", color: "var(--accent)" }}
+                        style={{
+                          fontSize: 10.5,
+                          fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                          color: "var(--accent)",
+                          background: "var(--accent-muted)",
+                          padding: "2px 7px",
+                          borderRadius: 4,
+                        }}
                       >
                         {tool}
                       </span>
@@ -159,16 +314,71 @@ export function EditorPanel() {
                 </div>
               )}
 
-              {/* Body — rendered markdown */}
+              {/* ─ Extra Metadata (compact rows) ────── */}
+              {extraFields.length > 0 && (
+                <div
+                  style={{
+                    marginBottom: 16,
+                    padding: "8px 0",
+                    borderTop: "1px solid var(--border-subtle)",
+                    borderBottom: "1px solid var(--border-subtle)",
+                  }}
+                >
+                  {extraFields.map(([key, value], i) => {
+                    const display = Array.isArray(value)
+                      ? value.join(", ")
+                      : typeof value === "object"
+                        ? Object.entries(value).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`).join(" | ")
+                        : value;
+                    return (
+                      <div
+                        key={key}
+                        className="flex items-baseline gap-3"
+                        style={{
+                          padding: "4px 0",
+                          borderTop: i > 0 ? "1px solid var(--border-subtle)" : "none",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 600,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.06em",
+                            color: "var(--text-tertiary)",
+                            minWidth: 80,
+                            flexShrink: 0,
+                          }}
+                        >
+                          {key}
+                        </span>
+                        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                          {display}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* ─ Divider between metadata and body ── */}
+              {(name || description || tagList.length > 0 || allowedTools.length > 0 || extraFields.length > 0) && body && (
+                <div
+                  style={{
+                    height: 1,
+                    background: "linear-gradient(90deg, var(--accent) 0%, var(--border-subtle) 40%, transparent 100%)",
+                    marginBottom: 20,
+                    opacity: 0.5,
+                  }}
+                />
+              )}
+
+              {/* ─ Body (rendered markdown) ───────────── */}
               {body && (
                 <div
-                  className="text-[13px] leading-relaxed p-4 rounded-lg overflow-x-auto"
+                  className="text-[13px] leading-relaxed overflow-x-auto"
                   style={{
-                    background: "var(--surface-1)",
                     color: "var(--text-secondary)",
-                    border: "1px solid var(--border-subtle)",
-                    maxHeight: "calc(100vh - 200px)",
-                    overflowY: "auto",
                     wordBreak: "break-word",
                   }}
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
@@ -179,7 +389,7 @@ export function EditorPanel() {
         )}
       </div>
 
-      {/* AI Improve panel — shown when improveTarget is set */}
+      {/* ── AI Improve Panel ──────────────────────────── */}
       {improveTarget !== null && plugin && skill && (
         <div style={{ borderTop: "1px solid var(--border-subtle)" }}>
           <SkillImprovePanel

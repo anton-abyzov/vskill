@@ -1,13 +1,13 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import { api } from "../../api";
 import type { EvalCase, Assertion, EvalsFile, CaseHistoryEntry } from "../../types";
-import type { InlineResult } from "./workspaceTypes";
+import type { InlineResult, CaseRunStatus } from "./workspaceTypes";
 import { passRateColor, shortDate, fmtDuration, MiniTrend } from "../../utils/historyUtils";
 
 export function TestsPanel() {
-  const { state, dispatch, saveEvals, runBenchmark, cancelRun, generateEvals } = useWorkspace();
-  const { evals, selectedCaseId, inlineResults, isRunning } = state;
+  const { state, dispatch, saveEvals, runCase, cancelCase, generateEvals } = useWorkspace();
+  const { evals, selectedCaseId, inlineResults, caseRunStates } = state;
   const [showForm, setShowForm] = useState(false);
   const [generating, setGenerating] = useState(false);
 
@@ -115,11 +115,11 @@ export function TestsPanel() {
             evalCase={selectedCase}
             result={inlineResults.get(selectedCase.id)}
             evals={evals}
-            isRunning={isRunning}
+            caseStatus={caseRunStates.get(selectedCase.id)?.status ?? "idle"}
             onSaveEvals={saveEvals}
-            onRun={(evalId) => runBenchmark("benchmark", { caseId: evalId })}
-            onCompare={(evalId) => runBenchmark("comparison", { caseId: evalId })}
-            onCancel={cancelRun}
+            onRun={(evalId) => runCase(evalId, "benchmark")}
+            onCompare={(evalId) => runCase(evalId, "comparison")}
+            onCancel={(evalId) => cancelCase(evalId)}
             onImprove={(evalId) => dispatch({ type: "OPEN_IMPROVE", evalId })}
           />
         ) : (
@@ -146,16 +146,16 @@ export function TestsPanel() {
 // ---------------------------------------------------------------------------
 
 function CaseDetail({
-  evalCase, result, evals, isRunning, onSaveEvals, onRun, onCompare, onCancel, onImprove,
+  evalCase, result, evals, caseStatus, onSaveEvals, onRun, onCompare, onCancel, onImprove,
 }: {
   evalCase: EvalCase;
   result: InlineResult | undefined;
   evals: EvalsFile;
-  isRunning: boolean;
+  caseStatus: CaseRunStatus;
   onSaveEvals: (updated: EvalsFile) => Promise<void>;
   onRun: (evalId: number) => void;
   onCompare: (evalId: number) => void;
-  onCancel: () => void;
+  onCancel: (evalId: number) => void;
   onImprove: (evalId: number) => void;
 }) {
   const [editingPrompt, setEditingPrompt] = useState(false);
@@ -220,8 +220,8 @@ function CaseDetail({
           <StatusPill result={result} />
         </div>
         <div className="flex items-center gap-2">
-          {isRunning ? (
-            <button onClick={onCancel} className="btn text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(239,68,68,0.3)" }}>
+          {caseStatus === "running" || caseStatus === "queued" ? (
+            <button onClick={() => onCancel(evalCase.id)} className="btn text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(239,68,68,0.3)" }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4 }}><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
               Cancel
             </button>
@@ -235,12 +235,12 @@ function CaseDetail({
               </button>
             </>
           )}
-          {hasFails && !isRunning && (
+          {hasFails && caseStatus !== "running" && caseStatus !== "queued" && (
             <button onClick={() => onImprove(evalCase.id)} className="btn btn-secondary text-[12px]">
               Fix with AI
             </button>
           )}
-          {!isRunning && (
+          {caseStatus !== "running" && caseStatus !== "queued" && (
             <button onClick={deleteCase} className="btn btn-ghost text-[12px]" style={{ color: "var(--red)" }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
             </button>

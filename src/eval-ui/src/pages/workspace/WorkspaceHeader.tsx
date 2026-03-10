@@ -6,7 +6,8 @@ interface Props {
 }
 
 export function WorkspaceHeader({ state }: Props) {
-  const { plugin, skill, evals, latestBenchmark, isDirty, isRunning, regressions, iterationCount } = state;
+  const { plugin, skill, evals, latestBenchmark, isDirty, caseRunStates, regressions, iterationCount } = state;
+  const isRunning = Array.from(caseRunStates.values()).some((s) => s.status === "running" || s.status === "queued");
 
   // Compute overall pass rate from latest benchmark
   const passRate = latestBenchmark?.overall_pass_rate;

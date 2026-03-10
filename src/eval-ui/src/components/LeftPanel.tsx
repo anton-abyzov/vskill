@@ -15,7 +15,7 @@ export function LeftPanel() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Brand header */}
+      {/* Brand header + model selector */}
       <div className="px-4 py-4 flex-shrink-0" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
         <div className="flex items-center gap-2.5">
           <div
@@ -26,7 +26,7 @@ export function LeftPanel() {
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
             </svg>
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="text-[14px] font-semibold truncate" style={{ color: "var(--text-primary)", letterSpacing: "-0.01em" }}>
               Skill Studio
             </div>
@@ -34,6 +34,9 @@ export function LeftPanel() {
               {projectName || "vskill"}
             </div>
           </div>
+        </div>
+        <div className="mt-3">
+          <ModelSelector />
         </div>
       </div>
 
@@ -75,14 +78,6 @@ export function LeftPanel() {
       {/* Skill list */}
       <div className="flex-1 overflow-y-auto" style={{ borderTop: "1px solid var(--border-subtle)" }}>
         <SkillGroupList />
-      </div>
-
-      {/* Model selector */}
-      <div className="px-3 py-3 flex-shrink-0" style={{ borderTop: "1px solid var(--border-subtle)" }}>
-        <div className="text-[10px] font-semibold uppercase tracking-widest px-1 mb-2" style={{ color: "var(--text-tertiary)" }}>
-          Model
-        </div>
-        <ModelSelector />
       </div>
     </div>
   );

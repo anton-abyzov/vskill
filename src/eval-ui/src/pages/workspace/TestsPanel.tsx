@@ -11,7 +11,9 @@ export function TestsPanel() {
   const [showForm, setShowForm] = useState(false);
   const [generating, setGenerating] = useState(false);
 
-  const cases = evals?.evals ?? [];
+  const defaultEvals: EvalsFile = { skill_name: state.skill, evals: [] };
+  const effectiveEvals = evals ?? defaultEvals;
+  const cases = effectiveEvals.evals;
   const selectedCase = cases.find((c) => c.id === selectedCaseId) ?? null;
 
   const handleGenerateEvals = useCallback(async () => {
@@ -40,9 +42,9 @@ export function TestsPanel() {
             {generating ? <><span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> Generating...</> : "Generate with AI"}
           </button>
         </div>
-        {showForm && evals && (
+        {showForm && (
           <NewCaseForm
-            evals={evals}
+            evals={effectiveEvals}
             onSave={(updated) => { saveEvals(updated); setShowForm(false); }}
             onCancel={() => setShowForm(false)}
           />
@@ -130,9 +132,9 @@ export function TestsPanel() {
       </div>
 
       {/* New case modal */}
-      {showForm && evals && (
+      {showForm && (
         <NewCaseForm
-          evals={evals}
+          evals={effectiveEvals}
           onSave={(updated) => { saveEvals(updated); setShowForm(false); }}
           onCancel={() => setShowForm(false)}
         />

@@ -6,14 +6,36 @@ interface Props {
   isDirty: boolean;
   isRunning: boolean;
   hasRegressions: boolean;
+  isActivationRunning: boolean;
 }
 
-const PANELS: { id: PanelId; label: string; shortcut: string }[] = [
-  { id: "editor", label: "Editor", shortcut: "1" },
-  { id: "tests", label: "Tests", shortcut: "2" },
-  { id: "run", label: "Run", shortcut: "3" },
-  { id: "history", label: "History", shortcut: "4" },
-  { id: "deps", label: "Deps", shortcut: "5" },
+interface PanelGroup {
+  label: string;
+  panels: { id: PanelId; label: string; shortcut: string }[];
+}
+
+const PANEL_GROUPS: PanelGroup[] = [
+  {
+    label: "Build",
+    panels: [
+      { id: "editor", label: "Editor", shortcut: "1" },
+      { id: "tests", label: "Tests", shortcut: "2" },
+    ],
+  },
+  {
+    label: "Evaluate",
+    panels: [
+      { id: "run", label: "Run", shortcut: "3" },
+      { id: "activation", label: "Activation", shortcut: "4" },
+    ],
+  },
+  {
+    label: "Insights",
+    panels: [
+      { id: "history", label: "History", shortcut: "5" },
+      { id: "deps", label: "Deps", shortcut: "6" },
+    ],
+  },
 ];
 
 function PanelIcon({ id, active }: { id: PanelId; active: boolean }) {
@@ -41,6 +63,14 @@ function PanelIcon({ id, active }: { id: PanelId; active: boolean }) {
           <polygon points="5 3 19 12 5 21 5 3" />
         </svg>
       );
+    case "activation":
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="10" />
+          <circle cx="12" cy="12" r="6" />
+          <circle cx="12" cy="12" r="2" />
+        </svg>
+      );
     case "history":
       return (
         <svg {...props}>
@@ -58,61 +88,88 @@ function PanelIcon({ id, active }: { id: PanelId; active: boolean }) {
   }
 }
 
-export function LeftRail({ activePanel, onPanelChange, isDirty, isRunning, hasRegressions }: Props) {
+export function LeftRail({ activePanel, onPanelChange, isDirty, isRunning, hasRegressions, isActivationRunning }: Props) {
   return (
     <div
-      className="flex flex-col gap-1 py-2 px-1"
+      className="flex flex-col py-2 px-1"
       style={{
         background: "var(--surface-1)",
         borderRight: "1px solid var(--border-subtle)",
         width: 48,
       }}
     >
-      {PANELS.map((p) => {
-        const active = activePanel === p.id;
-        const showDot = (p.id === "editor" && isDirty) ||
-          (p.id === "run" && isRunning) ||
-          (p.id === "history" && hasRegressions);
-
-        return (
-          <button
-            key={p.id}
-            onClick={() => onPanelChange(p.id)}
-            title={`${p.label} (Ctrl+${p.shortcut})`}
-            className="relative flex items-center justify-center rounded-lg transition-all duration-150"
+      {PANEL_GROUPS.map((group, gi) => (
+        <div key={group.label}>
+          {gi > 0 && (
+            <div style={{ height: 1, background: "var(--border-subtle)", margin: "4px 6px" }} />
+          )}
+          <div
             style={{
-              width: 40,
-              height: 40,
-              background: active ? "var(--accent)" : "transparent",
-              color: active ? "#fff" : "var(--text-tertiary)",
-            }}
-            onMouseEnter={(e) => {
-              if (!active) {
-                e.currentTarget.style.background = "var(--surface-3)";
-                e.currentTarget.style.color = "var(--text-primary)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!active) {
-                e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.color = "var(--text-tertiary)";
-              }
+              fontSize: 8,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "var(--text-tertiary)",
+              textAlign: "center",
+              padding: "5px 0 3px",
             }}
           >
-            <PanelIcon id={p.id} active={active} />
-            {showDot && (
-              <span
-                className="absolute top-1 right-1 rounded-full"
-                style={{
-                  width: 6,
-                  height: 6,
-                  background: p.id === "run" ? "var(--accent)" : p.id === "history" ? "var(--red)" : "var(--yellow)",
-                }}
-              />
-            )}
-          </button>
-        );
-      })}
+            {group.label}
+          </div>
+          <div className="flex flex-col gap-1">
+            {group.panels.map((p) => {
+              const active = activePanel === p.id;
+              const showDot = (p.id === "editor" && isDirty) ||
+                (p.id === "run" && isRunning) ||
+                (p.id === "activation" && isActivationRunning) ||
+                (p.id === "history" && hasRegressions);
+
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => onPanelChange(p.id)}
+                  title={`${p.label} (Ctrl+${p.shortcut})`}
+                  className="relative flex items-center justify-center rounded-lg transition-all duration-150"
+                  style={{
+                    width: 40,
+                    height: 40,
+                    margin: "0 auto",
+                    background: active ? "var(--accent)" : "transparent",
+                    color: active ? "#fff" : "var(--text-tertiary)",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!active) {
+                      e.currentTarget.style.background = "var(--surface-3)";
+                      e.currentTarget.style.color = "var(--text-primary)";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!active) {
+                      e.currentTarget.style.background = "transparent";
+                      e.currentTarget.style.color = "var(--text-tertiary)";
+                    }
+                  }}
+                >
+                  <PanelIcon id={p.id} active={active} />
+                  {showDot && (
+                    <span
+                      className="absolute top-1 right-1 rounded-full"
+                      style={{
+                        width: 6,
+                        height: 6,
+                        background: p.id === "run" ? "var(--accent)"
+                          : p.id === "activation" ? "var(--accent)"
+                          : p.id === "history" ? "var(--red)"
+                          : "var(--yellow)",
+                      }}
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

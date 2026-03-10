@@ -17,6 +17,11 @@ export const initialWorkspaceState: WorkspaceState = {
   improveTarget: null,
   regressions: [],
   iterationCount: 0,
+  activationPrompts: "",
+  activationResults: [],
+  activationSummary: null,
+  activationRunning: false,
+  activationError: null,
   loading: true,
   error: null,
 };
@@ -182,6 +187,26 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 
     case "INCREMENT_ITERATION":
       return { ...state, iterationCount: state.iterationCount + 1 };
+
+    // -- Activation test lifecycle --
+
+    case "SET_ACTIVATION_PROMPTS":
+      return { ...state, activationPrompts: action.prompts };
+
+    case "ACTIVATION_START":
+      return { ...state, activationRunning: true, activationResults: [], activationSummary: null, activationError: null };
+
+    case "ACTIVATION_RESULT":
+      return { ...state, activationResults: [...state.activationResults, action.result] };
+
+    case "ACTIVATION_DONE":
+      return { ...state, activationRunning: false, activationSummary: action.summary };
+
+    case "ACTIVATION_ERROR":
+      return { ...state, activationRunning: false, activationError: action.error };
+
+    case "ACTIVATION_RESET":
+      return { ...state, activationResults: [], activationSummary: null, activationError: null };
 
     default:
       return state;

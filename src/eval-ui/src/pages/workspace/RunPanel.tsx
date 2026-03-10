@@ -96,6 +96,7 @@ export function RunPanel() {
               evalId={c.id}
               result={r}
               caseStatus={caseStatus}
+              runMode={runMode}
               onRun={(id) => runCase(id, "benchmark")}
               onBaseline={(id) => runCase(id, "baseline")}
               onCompare={(id) => runCase(id, "comparison")}
@@ -166,11 +167,18 @@ export function RunPanel() {
 // Run case card — independent per-case controls
 // ---------------------------------------------------------------------------
 
-function RunCaseCard({ name, evalId, result, caseStatus, onRun, onBaseline, onCompare, onCancel }: {
+const MODE_BADGE: Record<string, { label: string; bg: string; color: string }> = {
+  benchmark: { label: "Skill", bg: "var(--accent-muted)", color: "var(--accent)" },
+  baseline: { label: "Baseline", bg: "var(--surface-3)", color: "var(--text-tertiary)" },
+  comparison: { label: "Compare", bg: "rgba(168,85,247,0.12)", color: "rgb(168,85,247)" },
+};
+
+function RunCaseCard({ name, evalId, result, caseStatus, runMode, onRun, onBaseline, onCompare, onCancel }: {
   name: string;
   evalId: number;
   result?: InlineResult;
   caseStatus: CaseRunStatus;
+  runMode: RunMode | null;
   onRun: (evalId: number) => void;
   onBaseline: (evalId: number) => void;
   onCompare: (evalId: number) => void;
@@ -198,6 +206,14 @@ function RunCaseCard({ name, evalId, result, caseStatus, onRun, onBaseline, onCo
           <span className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>
             #{evalId} {name}
           </span>
+          {runMode && (isActive || isDone) && (() => {
+            const badge = MODE_BADGE[runMode];
+            return badge ? (
+              <span className="pill text-[9px] font-semibold" style={{ background: badge.bg, color: badge.color, padding: "1px 6px" }}>
+                {badge.label}
+              </span>
+            ) : null;
+          })()}
         </div>
         <div className="flex items-center gap-2">
           {isActive ? (

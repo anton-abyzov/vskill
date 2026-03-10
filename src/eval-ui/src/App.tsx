@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Routes, Route, Link, useLocation } from "react-router-dom";
 import { SkillListPage } from "./pages/SkillListPage";
 import { SkillWorkspace } from "./pages/workspace";
-import { ActivationTestPage } from "./pages/ActivationTestPage";
+
 import { CreateSkillPage } from "./pages/CreateSkillPage";
 import { ModelSelector } from "./components/ModelSelector";
 import { api } from "./api";
@@ -20,16 +20,6 @@ function IconSkills({ active }: { active: boolean }) {
   );
 }
 
-function IconActivation({ active }: { active: boolean }) {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? "#fff" : "currentColor"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <circle cx="12" cy="12" r="6" />
-      <circle cx="12" cy="12" r="2" />
-    </svg>
-  );
-}
-
 function IconPlus({ active }: { active: boolean }) {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? "#fff" : "currentColor"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -43,7 +33,6 @@ function IconPlus({ active }: { active: boolean }) {
 const NAV_ITEMS = [
   { path: "/", label: "Skills", Icon: IconSkills },
   { path: "/create", label: "New Skill", Icon: IconPlus },
-  { path: "/activation", label: "Activation Test", Icon: IconActivation },
 ];
 
 export function App() {
@@ -132,7 +121,6 @@ export function App() {
             <Route path="/" element={<div className="overflow-auto h-full animate-fade-in"><SkillListPage /></div>} />
             <Route path="/create" element={<div className="overflow-auto h-full animate-fade-in"><CreateSkillPage /></div>} />
             <Route path="/skills/:plugin/:skill" element={<SkillWorkspace />} />
-            <Route path="/activation" element={<div className="overflow-auto h-full animate-fade-in"><ActivationTestPage /></div>} />
           </Routes>
         </div>
       </main>

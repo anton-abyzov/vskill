@@ -6,6 +6,7 @@ import { LeftRail } from "./LeftRail";
 import { EditorPanel } from "./EditorPanel";
 import { TestsPanel } from "./TestsPanel";
 import { RunPanel } from "./RunPanel";
+import { ActivationPanel } from "./ActivationPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { DepsPanel } from "./DepsPanel";
 import type { PanelId } from "./workspaceTypes";
@@ -20,9 +21,9 @@ function WorkspaceInner() {
     const meta = e.ctrlKey || e.metaKey;
 
     // Ctrl+1..5 — panel switching
-    if (meta && e.key >= "1" && e.key <= "5") {
+    if (meta && e.key >= "1" && e.key <= "6") {
       e.preventDefault();
-      const panels: PanelId[] = ["editor", "tests", "run", "history", "deps"];
+      const panels: PanelId[] = ["editor", "tests", "run", "activation", "history", "deps"];
       dispatch({ type: "SET_PANEL", panel: panels[parseInt(e.key) - 1] });
       return;
     }
@@ -80,6 +81,7 @@ function WorkspaceInner() {
           isDirty={state.isDirty}
           isRunning={Array.from(state.caseRunStates.values()).some((s) => s.status === "running" || s.status === "queued")}
           hasRegressions={state.regressions.length > 0}
+          isActivationRunning={state.activationRunning}
         />
       </div>
 
@@ -89,6 +91,7 @@ function WorkspaceInner() {
           {state.activePanel === "editor" && <EditorPanel />}
           {state.activePanel === "tests" && <TestsPanel />}
           {state.activePanel === "run" && <RunPanel />}
+          {state.activePanel === "activation" && <ActivationPanel />}
           {state.activePanel === "history" && <HistoryPanel />}
           {state.activePanel === "deps" && <DepsPanel />}
         </div>

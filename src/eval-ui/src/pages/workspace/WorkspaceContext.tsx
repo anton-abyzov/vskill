@@ -1,8 +1,9 @@
 import { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../../api";
-import { useMultiSSE } from "../../sse";
+import { useMultiSSE, useSSE } from "../../sse";
 import type { SSEEvent } from "../../sse";
+import type { ActivationResult, ActivationSummary } from "../../types";
 import type { EvalsFile, BenchmarkResult } from "../../types";
 import type { WorkspaceContextValue, PanelId, RunMode, InlineResult, AssertionResultInline } from "./workspaceTypes";
 import { workspaceReducer, initialWorkspaceState } from "./workspaceReducer";
@@ -123,7 +124,7 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
   // ---------------------------------------------------------------------------
   useEffect(() => {
     const panelParam = searchParams.get("panel") as PanelId | null;
-    if (panelParam && ["editor", "tests", "run", "history", "deps"].includes(panelParam)) {
+    if (panelParam && ["editor", "tests", "run", "activation", "history", "deps"].includes(panelParam)) {
       dispatch({ type: "SET_PANEL", panel: panelParam });
     }
   }, []); // only on mount
@@ -290,6 +291,43 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     }
   }, [plugin, skill]);
 
+  // ---------------------------------------------------------------------------
+  // Activation test SSE
+  // ---------------------------------------------------------------------------
+  const activationSSE = useSSE();
+
+  // Process activation SSE events
+  useEffect(() => {
+    if (!activationSSE.events.length) return;
+    for (const evt of activationSSE.events) {
+      if (evt.event === "prompt_result") {
+        dispatch({ type: "ACTIVATION_RESULT", result: evt.data as ActivationResult });
+      }
+      if (evt.event === "done") {
+        dispatch({ type: "ACTIVATION_DONE", summary: evt.data as ActivationSummary & { description?: string } });
+      }
+    }
+  }, [activationSSE.events]);
+
+  useEffect(() => {
+    if (activationSSE.error) {
+      dispatch({ type: "ACTIVATION_ERROR", error: activationSSE.error });
+    }
+  }, [activationSSE.error]);
+
+  const runActivationTest = useCallback((promptsText: string) => {
+    const lines = promptsText.trim().split("\n").filter(Boolean);
+    const prompts = lines.map((line) => {
+      const shouldNot = line.startsWith("!");
+      return {
+        prompt: shouldNot ? line.slice(1).trim() : line.trim(),
+        expected: shouldNot ? "should_not_activate" as const : "should_activate" as const,
+      };
+    });
+    dispatch({ type: "ACTIVATION_START" });
+    activationSSE.start(`/api/skills/${plugin}/${skill}/activation-test`, { prompts });
+  }, [plugin, skill, activationSSE]);
+
   const value = useMemo<WorkspaceContextValue>(() => ({
     state,
     dispatch,
@@ -303,7 +341,8 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     applyImproveAndRerun,
     refreshSkillContent,
     generateEvals,
-  }), [state, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals]);
+    runActivationTest,
+  }), [state, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest]);
 
   return (
     <WorkspaceCtx.Provider value={value}>

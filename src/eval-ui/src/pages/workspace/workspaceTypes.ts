@@ -1,10 +1,10 @@
-import type { EvalsFile, BenchmarkResult, StatsResult } from "../../types";
+import type { EvalsFile, BenchmarkResult, StatsResult, ActivationResult, ActivationSummary } from "../../types";
 
 // ---------------------------------------------------------------------------
 // Panel IDs
 // ---------------------------------------------------------------------------
 
-export type PanelId = "editor" | "tests" | "run" | "history" | "deps";
+export type PanelId = "editor" | "tests" | "run" | "activation" | "history" | "deps";
 
 // ---------------------------------------------------------------------------
 // Inline result (per-case benchmark result for cross-panel display)
@@ -92,6 +92,13 @@ export interface WorkspaceState {
   // Iteration tracking
   iterationCount: number;
 
+  // Activation test state
+  activationPrompts: string;
+  activationResults: ActivationResult[];
+  activationSummary: (ActivationSummary & { description?: string }) | null;
+  activationRunning: boolean;
+  activationError: string | null;
+
   // Loading
   loading: boolean;
   error: string | null;
@@ -121,7 +128,13 @@ export type WorkspaceAction =
   | { type: "OPEN_IMPROVE"; evalId: number }
   | { type: "CLOSE_IMPROVE" }
   | { type: "SET_REGRESSIONS"; regressions: RegressionInfo[] }
-  | { type: "INCREMENT_ITERATION" };
+  | { type: "INCREMENT_ITERATION" }
+  | { type: "SET_ACTIVATION_PROMPTS"; prompts: string }
+  | { type: "ACTIVATION_START" }
+  | { type: "ACTIVATION_RESULT"; result: ActivationResult }
+  | { type: "ACTIVATION_DONE"; summary: ActivationSummary & { description?: string } }
+  | { type: "ACTIVATION_ERROR"; error: string }
+  | { type: "ACTIVATION_RESET" };
 
 // ---------------------------------------------------------------------------
 // Context value
@@ -142,4 +155,5 @@ export interface WorkspaceContextValue {
   applyImproveAndRerun: (evalId: number, improved: string) => Promise<void>;
   refreshSkillContent: () => Promise<void>;
   generateEvals: () => Promise<void>;
+  runActivationTest: (prompts: string) => void;
 }

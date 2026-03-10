@@ -85,28 +85,26 @@ export function useSSE<T = unknown>() {
 }
 
 // ---------------------------------------------------------------------------
-// Multi-stream SSE hook — one independent stream per case
+// Multi-stream SSE hook — callback-based, zero accumulation
+//
+// Events are NOT stored in React state. Instead, the caller provides
+// callbacks (onEvent, onDone, onError) that fire exactly once per SSE event.
+// Only the running-state Set lives in React state (for re-render triggers).
 // ---------------------------------------------------------------------------
 
-export interface CaseStream {
-  events: SSEEvent[];
-  running: boolean;
-  done: boolean;
-  error: string | null;
+export interface MultiSSECallbacks {
+  onEvent: (caseId: number, evt: SSEEvent) => void;
+  onDone: (caseId: number) => void;
+  onError: (caseId: number, error: string) => void;
 }
 
-export function useMultiSSE() {
-  const [streams, setStreams] = useState<Map<number, CaseStream>>(new Map());
-  const abortRefs = useRef<Map<number, AbortController>>(new Map());
+export function useMultiSSE(callbacks: MultiSSECallbacks) {
+  // Stable ref for callbacks — avoids recreating streams when callbacks change
+  const cbRef = useRef(callbacks);
+  cbRef.current = callbacks;
 
-  const updateStream = useCallback((caseId: number, updater: (prev: CaseStream) => CaseStream) => {
-    setStreams((prev) => {
-      const next = new Map(prev);
-      const current = next.get(caseId) ?? { events: [], running: false, done: false, error: null };
-      next.set(caseId, updater(current));
-      return next;
-    });
-  }, []);
+  const [runningSet, setRunningSet] = useState<Set<number>>(new Set());
+  const abortRefs = useRef<Map<number, AbortController>>(new Map());
 
   const startCase = useCallback(async (caseId: number, url: string, body?: unknown) => {
     // Abort existing stream for this case if any
@@ -115,7 +113,11 @@ export function useMultiSSE() {
     const controller = new AbortController();
     abortRefs.current.set(caseId, controller);
 
-    updateStream(caseId, () => ({ events: [], running: true, done: false, error: null }));
+    setRunningSet((prev) => {
+      const next = new Set(prev);
+      next.add(caseId);
+      return next;
+    });
 
     try {
       const res = await fetch(url, {
@@ -149,18 +151,7 @@ export function useMultiSSE() {
             try {
               const data = JSON.parse(line.slice(6));
               const evt: SSEEvent = { event: currentEvent, data };
-              if (currentEvent === "done") {
-                updateStream(caseId, (s) => ({
-                  ...s,
-                  events: [...s.events, evt],
-                  done: true,
-                }));
-              } else {
-                updateStream(caseId, (s) => ({
-                  ...s,
-                  events: [...s.events, evt],
-                }));
-              }
+              cbRef.current.onEvent(caseId, evt);
             } catch {
               // skip malformed data
             }
@@ -168,15 +159,22 @@ export function useMultiSSE() {
           }
         }
       }
+
+      // Stream ended cleanly — notify done
+      cbRef.current.onDone(caseId);
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
-        updateStream(caseId, (s) => ({ ...s, error: (err as Error).message }));
+        cbRef.current.onError(caseId, (err as Error).message);
       }
     } finally {
-      updateStream(caseId, (s) => ({ ...s, running: false }));
+      setRunningSet((prev) => {
+        const next = new Set(prev);
+        next.delete(caseId);
+        return next;
+      });
       abortRefs.current.delete(caseId);
     }
-  }, [updateStream]);
+  }, []);
 
   const stopCase = useCallback((caseId: number) => {
     abortRefs.current.get(caseId)?.abort();
@@ -188,12 +186,7 @@ export function useMultiSSE() {
     }
   }, []);
 
-  const isAnyCaseRunning = useMemo(() => {
-    for (const s of streams.values()) {
-      if (s.running) return true;
-    }
-    return false;
-  }, [streams]);
+  const isAnyCaseRunning = runningSet.size > 0;
 
-  return { streams, startCase, stopCase, stopAll, isAnyCaseRunning };
+  return { runningSet, startCase, stopCase, stopAll, isAnyCaseRunning };
 }

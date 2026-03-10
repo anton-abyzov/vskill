@@ -84,8 +84,8 @@ function WorkspaceInner() {
       </div>
 
       {/* Panel content */}
-      <div style={{ gridRow: 2, overflow: "auto", background: "var(--surface-0)" }}>
-        <div className="animate-fade-in" key={state.activePanel}>
+      <div style={{ gridRow: 2, overflow: "hidden", background: "var(--surface-0)" }}>
+        <div className="animate-fade-in" key={state.activePanel} style={{ height: "100%", overflow: "auto" }}>
           {state.activePanel === "editor" && <EditorPanel />}
           {state.activePanel === "tests" && <TestsPanel />}
           {state.activePanel === "run" && <RunPanel />}

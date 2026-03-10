@@ -2,6 +2,7 @@ import { createContext, useContext, useReducer, useCallback, useEffect, useMemo,
 import { useSearchParams } from "react-router-dom";
 import { api } from "../../api";
 import { useMultiSSE } from "../../sse";
+import type { SSEEvent } from "../../sse";
 import type { EvalsFile, BenchmarkResult } from "../../types";
 import type { WorkspaceContextValue, PanelId, RunMode, InlineResult, AssertionResultInline } from "./workspaceTypes";
 import { workspaceReducer, initialWorkspaceState } from "./workspaceReducer";
@@ -28,10 +29,94 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     skill,
   });
 
-  const { streams, startCase: sseStartCase, stopCase: sseStopCase, stopAll: sseStopAll, isAnyCaseRunning } = useMultiSSE();
-
-  // Track bulk run completion
+  // Track bulk run completion — mutable ref, no re-renders
   const bulkPendingRef = useRef<Set<number>>(new Set());
+  const completedCasesRef = useRef<Set<number>>(new Set());
+
+  // Per-case accumulated inline results — mutable ref, dispatched incrementally
+  const inlineAccRef = useRef<Map<number, InlineResult>>(new Map());
+
+  // ---------------------------------------------------------------------------
+  // SSE callbacks — fire exactly once per event, no accumulation
+  // ---------------------------------------------------------------------------
+  const handleSSEEvent = useCallback((caseId: number, evt: SSEEvent) => {
+    const data = evt.data as Record<string, unknown>;
+
+    // Get or create mutable accumulator for this case
+    let r = inlineAccRef.current.get(caseId);
+    if (!r) {
+      r = { assertions: [] };
+      inlineAccRef.current.set(caseId, r);
+    }
+
+    if (evt.event === "output_ready") {
+      r.output = data.output as string;
+      if (data.durationMs != null) r.durationMs = data.durationMs as number;
+      if (data.tokens != null) r.tokens = data.tokens as number | null;
+    }
+
+    if (evt.event === "assertion_result") {
+      const ar: AssertionResultInline = {
+        assertion_id: data.assertion_id as string,
+        text: data.text as string,
+        pass: data.pass as boolean,
+        reasoning: data.reasoning as string,
+      };
+      if (!r.assertions.find((a) => a.assertion_id === ar.assertion_id)) {
+        r.assertions.push(ar);
+      }
+    }
+
+    if (evt.event === "case_complete") {
+      r.status = data.status as string;
+      r.passRate = data.pass_rate as number | undefined;
+      r.errorMessage = (data.error_message as string) || undefined;
+    }
+
+    // Dispatch a snapshot (shallow copy) for React
+    dispatch({ type: "UPDATE_INLINE_RESULT", evalId: caseId, result: { ...r, assertions: [...r.assertions] } });
+  }, []);
+
+  const handleSSEDone = useCallback((caseId: number) => {
+    // Guard against duplicate completion
+    if (completedCasesRef.current.has(caseId)) return;
+    completedCasesRef.current.add(caseId);
+
+    const r = inlineAccRef.current.get(caseId) ?? { assertions: [] };
+    dispatch({ type: "CASE_RUN_COMPLETE", caseId, result: { ...r, assertions: [...r.assertions] } });
+
+    // Track bulk completion
+    if (bulkPendingRef.current.has(caseId)) {
+      bulkPendingRef.current.delete(caseId);
+      if (bulkPendingRef.current.size === 0) {
+        api.getLatestBenchmark(plugin, skill)
+          .then((b) => dispatch({ type: "BULK_RUN_COMPLETE", benchmark: b }))
+          .catch(() => dispatch({ type: "BULK_RUN_COMPLETE", benchmark: null }));
+      }
+    }
+  }, [plugin, skill]);
+
+  const handleSSEError = useCallback((caseId: number, error: string) => {
+    if (completedCasesRef.current.has(caseId)) return;
+    completedCasesRef.current.add(caseId);
+
+    dispatch({ type: "CASE_RUN_ERROR", caseId, error });
+
+    if (bulkPendingRef.current.has(caseId)) {
+      bulkPendingRef.current.delete(caseId);
+      if (bulkPendingRef.current.size === 0) {
+        api.getLatestBenchmark(plugin, skill)
+          .then((b) => dispatch({ type: "BULK_RUN_COMPLETE", benchmark: b }))
+          .catch(() => dispatch({ type: "BULK_RUN_COMPLETE", benchmark: null }));
+      }
+    }
+  }, [plugin, skill]);
+
+  const { startCase: sseStartCase, stopCase: sseStopCase, stopAll: sseStopAll } = useMultiSSE({
+    onEvent: handleSSEEvent,
+    onDone: handleSSEDone,
+    onError: handleSSEError,
+  });
 
   // ---------------------------------------------------------------------------
   // Sync panel from URL
@@ -87,71 +172,6 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
   }, [plugin, skill]);
 
   // ---------------------------------------------------------------------------
-  // Process per-case SSE streams → dispatch inline results
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    for (const [caseId, stream] of streams) {
-      // Build inline result from events
-      const r: InlineResult = { assertions: [] };
-
-      for (const evt of stream.events) {
-        const data = evt.data as Record<string, unknown>;
-
-        if (evt.event === "output_ready") {
-          r.output = data.output as string;
-          if (data.durationMs != null) r.durationMs = data.durationMs as number;
-          if (data.tokens != null) r.tokens = data.tokens as number | null;
-        }
-
-        if (evt.event === "assertion_result") {
-          const ar: AssertionResultInline = {
-            assertion_id: data.assertion_id as string,
-            text: data.text as string,
-            pass: data.pass as boolean,
-            reasoning: data.reasoning as string,
-          };
-          if (!r.assertions.find((a) => a.assertion_id === ar.assertion_id)) {
-            r.assertions.push(ar);
-          }
-        }
-
-        if (evt.event === "case_complete") {
-          r.status = data.status as string;
-          r.passRate = data.pass_rate as number | undefined;
-          r.errorMessage = (data.error_message as string) || undefined;
-        }
-      }
-
-      dispatch({ type: "UPDATE_INLINE_RESULT", evalId: caseId, result: { ...r } });
-
-      // If stream finished, update case run state
-      if (!stream.running && stream.done) {
-        dispatch({ type: "CASE_RUN_COMPLETE", caseId, result: { ...r } });
-        // Track bulk completion
-        if (bulkPendingRef.current.has(caseId)) {
-          bulkPendingRef.current.delete(caseId);
-          if (bulkPendingRef.current.size === 0) {
-            // All bulk cases done — fetch latest benchmark and complete
-            api.getLatestBenchmark(plugin, skill)
-              .then((b) => dispatch({ type: "BULK_RUN_COMPLETE", benchmark: b }))
-              .catch(() => dispatch({ type: "BULK_RUN_COMPLETE", benchmark: null }));
-          }
-        }
-      } else if (!stream.running && stream.error) {
-        dispatch({ type: "CASE_RUN_ERROR", caseId, error: stream.error });
-        if (bulkPendingRef.current.has(caseId)) {
-          bulkPendingRef.current.delete(caseId);
-          if (bulkPendingRef.current.size === 0) {
-            api.getLatestBenchmark(plugin, skill)
-              .then((b) => dispatch({ type: "BULK_RUN_COMPLETE", benchmark: b }))
-              .catch(() => dispatch({ type: "BULK_RUN_COMPLETE", benchmark: null }));
-          }
-        }
-      }
-    }
-  }, [streams, plugin, skill]);
-
-  // ---------------------------------------------------------------------------
   // Async actions
   // ---------------------------------------------------------------------------
   const saveContent = useCallback(async () => {
@@ -177,6 +197,10 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     const caseState = state.caseRunStates.get(caseId);
     if (caseState?.status === "running") return; // already running
 
+    // Reset accumulators for this case
+    inlineAccRef.current.delete(caseId);
+    completedCasesRef.current.delete(caseId);
+
     dispatch({ type: "CASE_RUN_START", caseId, mode });
 
     if (mode === "comparison") {
@@ -196,8 +220,14 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     if (cases.length === 0) return;
 
     const caseIds = cases.map((c) => c.id);
-    dispatch({ type: "BULK_RUN_START", caseIds, mode });
 
+    // Reset all accumulators
+    for (const id of caseIds) {
+      inlineAccRef.current.delete(id);
+      completedCasesRef.current.delete(id);
+    }
+
+    dispatch({ type: "BULK_RUN_START", caseIds, mode });
     bulkPendingRef.current = new Set(caseIds);
 
     for (const id of caseIds) {
@@ -216,6 +246,7 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     sseStopCase(caseId);
     dispatch({ type: "CASE_RUN_CANCEL", caseId });
     bulkPendingRef.current.delete(caseId);
+    completedCasesRef.current.add(caseId); // prevent late callbacks
   }, [sseStopCase]);
 
   // -- Cancel all --

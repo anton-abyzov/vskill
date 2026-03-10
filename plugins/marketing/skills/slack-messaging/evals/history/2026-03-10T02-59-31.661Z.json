@@ -1,0 +1,52 @@
+{
+  "timestamp": "2026-03-10T02:59:31.661Z",
+  "model": "claude-sonnet",
+  "skill_name": "slack-messaging",
+  "cases": [
+    {
+      "eval_id": 4,
+      "eval_name": "Schedule a message for later",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0,
+      "durationMs": 19501,
+      "tokens": null,
+      "inputTokens": null,
+      "outputTokens": null,
+      "output": "The Slack MCP tools (`slack_search_channels`, `slack_schedule_message`, etc.) are not available in this environment — they weren't returned by either tool search.\n\nTo schedule that message, you'll need:\n\n1. **A Slack MCP server configured** — the skill relies on Slack MCP tools that must be set up in your Claude Code environment.\n2. **Or use Slack directly** — go to #announcements, compose the message, click the send arrow dropdown, and choose \"Schedule message\" → set for tomorrow at 9am.\n\n**To set up Slack MCP**, add a Slack MCP server to your Claude Code config (e.g., `mcp__slack` via `claude mcp add`). Once configured, I can handle the full workflow: resolve the channel ID, draft the message, and schedule it for you.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Resolves #announcements channel name to a channel_id",
+          "pass": false,
+          "reasoning": "The LLM output does not resolve #announcements to a channel_id. It explicitly states that Slack MCP tools are not available and does not perform any channel ID resolution, instead explaining setup requirements and manual alternatives."
+        },
+        {
+          "id": "a2",
+          "text": "Calculates a Unix timestamp for 9am tomorrow that is at least 2 minutes in the future",
+          "pass": false,
+          "reasoning": "The LLM output does not calculate any Unix timestamp at all. It only explains that Slack MCP tools are unavailable and suggests alternatives for scheduling the message manually or setting up Slack MCP."
+        },
+        {
+          "id": "a3",
+          "text": "Uses slack_schedule_message (not slack_send_message) to schedule the message",
+          "pass": false,
+          "reasoning": "The LLM output does not use slack_schedule_message to schedule the message. Instead, it explains that Slack MCP tools are not available and provides manual instructions for scheduling the message directly in Slack, along with guidance on setting up Slack MCP. No actual tool call to slack_schedule_message was made."
+        },
+        {
+          "id": "a4",
+          "text": "Shows the message content and scheduled time to the user before confirming",
+          "pass": false,
+          "reasoning": "The LLM output does not show the message content or scheduled time to the user before confirming. It explains that Slack MCP tools are unavailable and provides alternative options, but never displays what the message would say or confirms the scheduled time with the user."
+        }
+      ]
+    }
+  ],
+  "overall_pass_rate": 0,
+  "type": "benchmark",
+  "provider": "claude-cli",
+  "totalDurationMs": 19501,
+  "totalInputTokens": null,
+  "totalOutputTokens": null,
+  "scope": "single"
+}

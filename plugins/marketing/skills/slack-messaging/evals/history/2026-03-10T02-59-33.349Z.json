@@ -1,0 +1,52 @@
+{
+  "timestamp": "2026-03-10T02:59:33.349Z",
+  "model": "claude-sonnet",
+  "skill_name": "slack-messaging",
+  "cases": [
+    {
+      "eval_id": 5,
+      "eval_name": "Send a DM to a colleague",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0,
+      "durationMs": 23629,
+      "tokens": null,
+      "inputTokens": null,
+      "outputTokens": null,
+      "output": "I don't have Slack MCP tools available in this environment. The Slack integration isn't configured here, so I can't search for Sarah Chen's user ID or send the DM directly.\n\nTo send this message yourself, you can:\n\n1. Find Sarah Chen in Slack's search (`Cmd+K` or `Ctrl+K`, type her name)\n2. Open a DM and send something like:\n\n> Hey Sarah, are you available for a quick sync about the API migration this afternoon?\n\nIf you'd like me to help set up the Slack MCP integration so I can send messages on your behalf in the future, let me know.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Uses slack_search_users to find Sarah Chen's user_id",
+          "pass": false,
+          "reasoning": "The LLM output explicitly states it does not have Slack MCP tools available and did not use slack_search_users to find Sarah Chen's user ID. Instead, it provided manual instructions for the user to find Sarah Chen themselves."
+        },
+        {
+          "id": "a2",
+          "text": "Uses the user_id as the channel_id parameter in slack_send_message",
+          "pass": false,
+          "reasoning": "The LLM output does not use any user_id as a channel_id parameter in slack_send_message. The LLM explicitly states it doesn't have Slack MCP tools available and cannot send the message, providing manual instructions instead. No slack_send_message tool call was made at all."
+        },
+        {
+          "id": "a3",
+          "text": "Shows the draft message for user approval before sending",
+          "pass": false,
+          "reasoning": "The LLM output does not show a draft message for user approval before sending. Instead, it explains it cannot send the message and provides manual instructions for the user to send it themselves. While it does include a suggested message text, it's presented as an example for the user to copy, not as a draft awaiting user approval for the AI to send."
+        },
+        {
+          "id": "a4",
+          "text": "Message uses Slack mrkdwn formatting (single *bold*, _italic_), not standard markdown",
+          "pass": false,
+          "reasoning": "The LLM output does not use Slack mrkdwn formatting. It uses standard markdown formatting (backtick for code, > for blockquote) and does not contain any Slack-specific mrkdwn formatting like single *bold* or _italic_ text."
+        }
+      ]
+    }
+  ],
+  "overall_pass_rate": 0,
+  "type": "benchmark",
+  "provider": "claude-cli",
+  "totalDurationMs": 23629,
+  "totalInputTokens": null,
+  "totalOutputTokens": null,
+  "scope": "single"
+}

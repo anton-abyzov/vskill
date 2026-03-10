@@ -24,8 +24,8 @@
           "type": "boolean"
         },
         {
-          "id": "assert-1773002043217",
-          "text": "If the response is in MD format, it should be displayed properly. ",
+          "id": "a4",
+          "text": "If the response is in MD format, it should be displayed properly.",
           "type": "boolean"
         }
       ]

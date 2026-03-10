@@ -139,7 +139,7 @@ Generate a complete evals.json for this skill. Output ONLY the JSON inside a \`\
 
 export function parseGeneratedEvals(raw: string): EvalsFile {
   // Extract JSON from ```json ... ``` code fence
-  const match = raw.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+  const match = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (!match) {
     throw new Error(
       "No JSON code block found in LLM response. Expected ```json ... ``` fence.",

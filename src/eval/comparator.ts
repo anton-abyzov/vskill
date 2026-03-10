@@ -99,9 +99,15 @@ Evaluate both responses.`;
 
   const { text: response } = await client.generate(COMPARATOR_SYSTEM_PROMPT, userPrompt);
 
-  // Parse JSON from response (may be in code fence)
-  const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, response];
-  const json = JSON.parse(jsonMatch[1]!.trim());
+  // Parse JSON from response (may be in code fence or plain)
+  let json: Record<string, unknown>;
+  try {
+    const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const jsonStr = jsonMatch ? jsonMatch[1] : response;
+    json = JSON.parse(jsonStr.trim());
+  } catch {
+    throw new Error(`Failed to parse comparison response as JSON: ${response.slice(0, 200)}`);
+  }
 
   return {
     contentScoreA: clampScore(json.content_score_a),

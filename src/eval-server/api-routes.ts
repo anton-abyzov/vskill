@@ -154,7 +154,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         root,
       });
     } catch (err) {
-      const providers = await detectAvailableProviders();
+      const providers = await detectAvailableProviders().catch(() => []);
       sendJson(res, { provider: null, model: "unknown", error: (err as Error).message, providers, projectName: projectName || null, root });
     }
   });

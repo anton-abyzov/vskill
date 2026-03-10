@@ -1,17 +1,21 @@
 // ---------------------------------------------------------------------------
-// LLM client for eval commands — supports Claude CLI, Anthropic API, and Ollama
+// LLM client for eval commands — supports multiple CLI tools and API providers
 //
 // Provider selection via VSKILL_EVAL_PROVIDER env var:
 //   "claude-cli" — Claude Code CLI (uses your Max/Pro plan, no API key)
+//   "codex-cli"  — OpenAI Codex CLI (uses ChatGPT subscription or CODEX_API_KEY)
+//   "gemini-cli" — Google Gemini CLI (free tier or GOOGLE_API_KEY)
 //   "anthropic"  — Anthropic API (requires ANTHROPIC_API_KEY)
 //   "ollama"     — Local Ollama server (free, requires ollama running)
 //
 // Auto-detection when VSKILL_EVAL_PROVIDER is not set:
 //   1. claude-cli (default — works everywhere, even inside Claude Code sessions)
-//   Ollama/Anthropic only used when explicitly set via VSKILL_EVAL_PROVIDER
+//   Other providers only used when explicitly set via VSKILL_EVAL_PROVIDER
 //
 // Model selection via VSKILL_EVAL_MODEL env var:
 //   claude-cli:  "sonnet" | "opus" | "haiku" (default: sonnet)
+//   codex-cli:   "o4-mini" | "codex-1" | "gpt-5.3-codex" (default: o4-mini)
+//   gemini-cli:  "gemini-2.5-pro" | "gemini-2.5-flash" (default: gemini-2.5-pro)
 //   anthropic:   full model ID (default: claude-sonnet-4-6)
 //   ollama:      model name (default: llama3.1:8b)
 // ---------------------------------------------------------------------------
@@ -30,7 +34,7 @@ export interface LlmClient {
   readonly model: string;
 }
 
-export type ProviderName = "anthropic" | "claude-cli" | "ollama";
+export type ProviderName = "anthropic" | "claude-cli" | "codex-cli" | "gemini-cli" | "ollama";
 
 function detectProvider(): ProviderName {
   return "claude-cli";
@@ -49,11 +53,15 @@ export function createLlmClient(overrides?: LlmOverrides): LlmClient {
       return createAnthropicClient(modelOverride);
     case "claude-cli":
       return createClaudeCliClient(modelOverride);
+    case "codex-cli":
+      return createCodexCliClient(modelOverride);
+    case "gemini-cli":
+      return createGeminiCliClient(modelOverride);
     case "ollama":
       return createOllamaClient(modelOverride);
     default:
       throw new Error(
-        `Unknown VSKILL_EVAL_PROVIDER: "${provider}". Use "claude-cli", "anthropic", or "ollama".`,
+        `Unknown VSKILL_EVAL_PROVIDER: "${provider}". Use "claude-cli", "codex-cli", "gemini-cli", "anthropic", or "ollama".`,
       );
   }
 }
@@ -113,31 +121,40 @@ function createAnthropicClient(modelOverride?: string): LlmClient {
 }
 
 // ---------------------------------------------------------------------------
-// Provider: Claude CLI (uses your Max/Pro subscription — no API key needed)
-//
-// Pipes prompt via stdin to avoid OS argument-length limits (ARG_MAX).
-//
-// From a plain terminal: npx vskill eval run mobile/appstore
-// Select model:          VSKILL_EVAL_MODEL=opus npx vskill eval run mobile/appstore
+// Shared CLI spawn helper — all CLI providers use the same pattern:
+//   1. Spawn binary with args
+//   2. Pipe combined prompt via stdin (avoids ARG_MAX for large SKILL.md files)
+//   3. Collect stdout, handle ENOENT/non-zero exit/timeout
 // ---------------------------------------------------------------------------
-function createClaudeCliClient(modelOverride?: string): LlmClient {
-  const model = modelOverride || process.env.VSKILL_EVAL_MODEL || "sonnet";
+interface CliConfig {
+  binary: string;
+  name: string; // Human-readable name for error messages (e.g. "Claude", "Codex")
+  args: string[];
+  displayModel: string;
+  notFoundMsg: string;
+  stripEnvPrefix?: string; // e.g. "CLAUDE" — strips env vars starting with this prefix
+}
 
+function createCliClient(config: CliConfig): LlmClient {
   return {
-    model: `claude-${model}`,
+    model: config.displayModel,
     async generate(systemPrompt: string, userPrompt: string): Promise<GenerateResult> {
       const combinedPrompt = `${systemPrompt}\n\n${userPrompt}`;
       const start = Date.now();
 
       const text = await new Promise<string>((resolve, reject) => {
-        // Strip all CLAUDE* env vars so the child process doesn't detect nesting
-        const cleanEnv: Record<string, string> = {};
-        for (const [k, v] of Object.entries(process.env)) {
-          if (v !== undefined && !k.startsWith("CLAUDE")) cleanEnv[k] = v;
+        let env: Record<string, string> | undefined;
+        if (config.stripEnvPrefix) {
+          env = {};
+          const prefix = config.stripEnvPrefix;
+          for (const [k, v] of Object.entries(process.env)) {
+            if (v !== undefined && !k.startsWith(prefix)) env[k] = v;
+          }
         }
-        const proc = spawn("claude", ["-p", "--model", model], {
+
+        const proc = spawn(config.binary, config.args, {
           stdio: ["pipe", "pipe", "pipe"],
-          env: cleanEnv,
+          ...(env ? { env } : {}),
         });
 
         let stdout = "";
@@ -147,17 +164,15 @@ function createClaudeCliClient(modelOverride?: string): LlmClient {
 
         const timer = setTimeout(() => {
           proc.kill("SIGTERM");
-          reject(new Error("Claude CLI timed out after 120s"));
+          reject(new Error(`${config.name} CLI timed out after 120s`));
         }, 120_000);
 
         proc.on("error", (err: NodeJS.ErrnoException) => {
           clearTimeout(timer);
           if (err.code === "ENOENT") {
-            reject(new Error(
-              "Claude CLI not found. Install it:\n  npm install -g @anthropic-ai/claude-code\n\nOr use a different provider:\n  export VSKILL_EVAL_PROVIDER=ollama",
-            ));
+            reject(new Error(config.notFoundMsg));
           } else {
-            reject(new Error(`Claude CLI failed: ${err.message}`));
+            reject(new Error(`${config.name} CLI failed: ${err.message}`));
           }
         });
 
@@ -167,17 +182,66 @@ function createClaudeCliClient(modelOverride?: string): LlmClient {
             resolve(stdout.trim());
           } else {
             const errMsg = (stderr || stdout).slice(0, 300);
-            reject(new Error(`Claude CLI exited with code ${code}${errMsg ? ": " + errMsg : ""}`));
+            reject(new Error(
+              `${config.name} CLI exited with code ${code}${errMsg ? ": " + errMsg : ""}`,
+            ));
           }
         });
 
-        // Pipe prompt via stdin — avoids ARG_MAX limits for large SKILL.md files
         proc.stdin.end(combinedPrompt);
       });
 
       return { text, durationMs: Date.now() - start, inputTokens: null, outputTokens: null };
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Provider: Claude CLI (uses your Max/Pro subscription — no API key needed)
+// Strips CLAUDE* env vars so the child process doesn't detect nesting.
+// ---------------------------------------------------------------------------
+function createClaudeCliClient(modelOverride?: string): LlmClient {
+  const model = modelOverride || process.env.VSKILL_EVAL_MODEL || "sonnet";
+  return createCliClient({
+    binary: "claude",
+    name: "Claude",
+    args: ["-p", "--model", model],
+    displayModel: `claude-${model}`,
+    stripEnvPrefix: "CLAUDE",
+    notFoundMsg:
+      "Claude CLI not found. Install it:\n  npm install -g @anthropic-ai/claude-code\n\nOr use a different provider:\n  export VSKILL_EVAL_PROVIDER=ollama",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Provider: Codex CLI (uses your ChatGPT subscription — or CODEX_API_KEY for CI)
+// ---------------------------------------------------------------------------
+function createCodexCliClient(modelOverride?: string): LlmClient {
+  const model = modelOverride || process.env.VSKILL_EVAL_MODEL || "o4-mini";
+  return createCliClient({
+    binary: "codex",
+    name: "Codex",
+    args: ["exec", "--model", model],
+    displayModel: `codex-${model}`,
+    notFoundMsg:
+      "Codex CLI not found. Install it:\n  npm install -g @openai/codex\n\nOr use a different provider:\n  export VSKILL_EVAL_PROVIDER=claude-cli",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Provider: Gemini CLI (free tier — 60 req/min, 1000 req/day, or GOOGLE_API_KEY)
+// NOTE: Gemini CLI headless flags are provisional — verify against actual binary.
+// ---------------------------------------------------------------------------
+function createGeminiCliClient(modelOverride?: string): LlmClient {
+  const model = modelOverride || process.env.VSKILL_EVAL_MODEL || "gemini-2.5-pro";
+  return createCliClient({
+    binary: "gemini",
+    name: "Gemini",
+    args: ["-p", "--model", model],
+    displayModel: model,
+    notFoundMsg:
+      "Gemini CLI not found. Install it:\n  npm install -g @google/gemini-cli\n\nOr use a different provider:\n  export VSKILL_EVAL_PROVIDER=claude-cli",
+  });
 }
 
 // ---------------------------------------------------------------------------

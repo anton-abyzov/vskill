@@ -44,6 +44,7 @@ function createFakeProc(stdoutData: string, exitCode = 0, stderrData = "") {
 // ---------------------------------------------------------------------------
 
 const { createLlmClient } = await import("../llm.js");
+import type { ProviderName } from "../llm.js";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -59,6 +60,8 @@ describe("createLlmClient", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OLLAMA_BASE_URL;
     delete process.env.CLAUDECODE;
+    delete process.env.CODEX_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
   });
 
   afterEach(() => {
@@ -92,6 +95,18 @@ describe("createLlmClient", () => {
     expect(() => createLlmClient()).toThrow('Unknown VSKILL_EVAL_PROVIDER: "gpt-magic"');
   });
 
+  it("selects codex-cli provider from env", () => {
+    process.env.VSKILL_EVAL_PROVIDER = "codex-cli";
+    const client = createLlmClient();
+    expect(client.model).toBe("codex-o4-mini");
+  });
+
+  it("selects gemini-cli provider from env", () => {
+    process.env.VSKILL_EVAL_PROVIDER = "gemini-cli";
+    const client = createLlmClient();
+    expect(client.model).toBe("gemini-2.5-pro");
+  });
+
   // -------------------------------------------------------------------------
   // Override params
   // -------------------------------------------------------------------------
@@ -123,6 +138,16 @@ describe("createLlmClient", () => {
     process.env.CLAUDECODE = "1";
     const client = createLlmClient({ provider: "claude-cli" });
     expect(client.model).toBe("claude-sonnet");
+  });
+
+  it("override provider=codex-cli with custom model", () => {
+    const client = createLlmClient({ provider: "codex-cli", model: "codex-1" });
+    expect(client.model).toBe("codex-codex-1");
+  });
+
+  it("override provider=gemini-cli with custom model", () => {
+    const client = createLlmClient({ provider: "gemini-cli", model: "gemini-2.5-flash" });
+    expect(client.model).toBe("gemini-2.5-flash");
   });
 
   // -------------------------------------------------------------------------
@@ -301,6 +326,348 @@ describe("createLlmClient", () => {
       const spawnCall = mockSpawn.mock.calls[0];
       const env = spawnCall[2].env;
       expect(env.CLAUDECODE).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Codex CLI provider
+  // -------------------------------------------------------------------------
+
+  describe("codex-cli provider", () => {
+    beforeEach(() => {
+      process.env.VSKILL_EVAL_PROVIDER = "codex-cli";
+    });
+
+    it("spawns codex CLI with exec and --model, pipes prompt via stdin", async () => {
+      mockSpawn.mockReturnValue(createFakeProc("Codex response\n"));
+
+      const client = createLlmClient();
+      const result = await client.generate("system prompt", "user prompt");
+
+      expect(result.text).toBe("Codex response");
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "codex",
+        ["exec", "--model", "o4-mini"],
+        expect.objectContaining({ stdio: ["pipe", "pipe", "pipe"] }),
+      );
+      // Verify prompt was piped via stdin
+      const proc = mockSpawn.mock.results[0].value;
+      expect(proc.stdin.end).toHaveBeenCalledWith("system prompt\n\nuser prompt");
+    });
+
+    it("defaults to o4-mini model", () => {
+      const client = createLlmClient();
+      expect(client.model).toBe("codex-o4-mini");
+    });
+
+    it("passes custom model from VSKILL_EVAL_MODEL", async () => {
+      process.env.VSKILL_EVAL_MODEL = "codex-1";
+      mockSpawn.mockReturnValue(createFakeProc("ok\n"));
+
+      const client = createLlmClient();
+      expect(client.model).toBe("codex-codex-1");
+      await client.generate("sys", "usr");
+
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "codex",
+        ["exec", "--model", "codex-1"],
+        expect.anything(),
+      );
+    });
+
+    it("passes gpt-5.3-codex model", async () => {
+      process.env.VSKILL_EVAL_MODEL = "gpt-5.3-codex";
+      mockSpawn.mockReturnValue(createFakeProc("ok\n"));
+
+      const client = createLlmClient();
+      expect(client.model).toBe("codex-gpt-5.3-codex");
+      await client.generate("sys", "usr");
+
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "codex",
+        ["exec", "--model", "gpt-5.3-codex"],
+        expect.anything(),
+      );
+    });
+
+    it("throws helpful error when codex CLI not found", async () => {
+      const proc = new EventEmitter() as any;
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.stdin = { end: vi.fn(), write: vi.fn() };
+      proc.kill = vi.fn();
+      mockSpawn.mockReturnValue(proc);
+
+      const client = createLlmClient();
+      const promise = client.generate("sys", "usr");
+
+      // Emit ENOENT error
+      setTimeout(() => {
+        const err = new Error("spawn codex ENOENT") as NodeJS.ErrnoException;
+        err.code = "ENOENT";
+        proc.emit("error", err);
+      }, 0);
+
+      await expect(promise).rejects.toThrow("Codex CLI not found");
+    });
+
+    it("error message suggests install command and fallback provider", async () => {
+      const proc = new EventEmitter() as any;
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.stdin = { end: vi.fn(), write: vi.fn() };
+      proc.kill = vi.fn();
+      mockSpawn.mockReturnValue(proc);
+
+      const client = createLlmClient();
+      const promise = client.generate("sys", "usr");
+
+      setTimeout(() => {
+        const err = new Error("spawn codex ENOENT") as NodeJS.ErrnoException;
+        err.code = "ENOENT";
+        proc.emit("error", err);
+      }, 0);
+
+      await expect(promise).rejects.toThrow("npm install -g @openai/codex");
+      // Also suggests claude-cli as fallback
+    });
+
+    it("throws with truncated error on non-zero exit", async () => {
+      mockSpawn.mockReturnValue(createFakeProc("", 1, "Authentication failed"));
+
+      const client = createLlmClient();
+      await expect(client.generate("sys", "usr")).rejects.toThrow(
+        "Codex CLI exited with code 1: Authentication failed",
+      );
+    });
+
+    it("returns null for token counts (CLI does not report them)", async () => {
+      mockSpawn.mockReturnValue(createFakeProc("response\n"));
+
+      const client = createLlmClient();
+      const result = await client.generate("sys", "usr");
+
+      expect(result.inputTokens).toBeNull();
+      expect(result.outputTokens).toBeNull();
+    });
+
+    it("measures duration", async () => {
+      mockSpawn.mockReturnValue(createFakeProc("response\n"));
+
+      const client = createLlmClient();
+      const result = await client.generate("sys", "usr");
+
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("does not strip env vars (no nesting detection like Claude)", async () => {
+      mockSpawn.mockReturnValue(createFakeProc("response\n"));
+
+      const client = createLlmClient();
+      await client.generate("sys", "usr");
+
+      // Codex CLI doesn't use CLAUDE* env vars, no stripping needed
+      const spawnCall = mockSpawn.mock.calls[0];
+      // Should NOT pass a custom env (uses default process.env inheritance)
+      expect(spawnCall[2].env).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Gemini CLI provider
+  // -------------------------------------------------------------------------
+
+  describe("gemini-cli provider", () => {
+    beforeEach(() => {
+      process.env.VSKILL_EVAL_PROVIDER = "gemini-cli";
+    });
+
+    it("spawns gemini CLI with -p and --model, pipes prompt via stdin", async () => {
+      mockSpawn.mockReturnValue(createFakeProc("Gemini response\n"));
+
+      const client = createLlmClient();
+      const result = await client.generate("system prompt", "user prompt");
+
+      expect(result.text).toBe("Gemini response");
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "gemini",
+        ["-p", "--model", "gemini-2.5-pro"],
+        expect.objectContaining({ stdio: ["pipe", "pipe", "pipe"] }),
+      );
+      // Verify prompt was piped via stdin
+      const proc = mockSpawn.mock.results[0].value;
+      expect(proc.stdin.end).toHaveBeenCalledWith("system prompt\n\nuser prompt");
+    });
+
+    it("defaults to gemini-2.5-pro model", () => {
+      const client = createLlmClient();
+      expect(client.model).toBe("gemini-2.5-pro");
+    });
+
+    it("passes custom model from VSKILL_EVAL_MODEL", async () => {
+      process.env.VSKILL_EVAL_MODEL = "gemini-2.5-flash";
+      mockSpawn.mockReturnValue(createFakeProc("ok\n"));
+
+      const client = createLlmClient();
+      expect(client.model).toBe("gemini-2.5-flash");
+      await client.generate("sys", "usr");
+
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "gemini",
+        ["-p", "--model", "gemini-2.5-flash"],
+        expect.anything(),
+      );
+    });
+
+    it("uses model name directly without prefix (already has gemini- prefix)", () => {
+      const client = createLlmClient();
+      // Unlike claude-cli (claude-{model}) or codex-cli (codex-{model}),
+      // gemini models already have the gemini- prefix in their names
+      expect(client.model).toBe("gemini-2.5-pro");
+    });
+
+    it("throws helpful error when gemini CLI not found", async () => {
+      const proc = new EventEmitter() as any;
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.stdin = { end: vi.fn(), write: vi.fn() };
+      proc.kill = vi.fn();
+      mockSpawn.mockReturnValue(proc);
+
+      const client = createLlmClient();
+      const promise = client.generate("sys", "usr");
+
+      // Emit ENOENT error
+      setTimeout(() => {
+        const err = new Error("spawn gemini ENOENT") as NodeJS.ErrnoException;
+        err.code = "ENOENT";
+        proc.emit("error", err);
+      }, 0);
+
+      await expect(promise).rejects.toThrow("Gemini CLI not found");
+    });
+
+    it("error message suggests install via npm", async () => {
+      const proc = new EventEmitter() as any;
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.stdin = { end: vi.fn(), write: vi.fn() };
+      proc.kill = vi.fn();
+      mockSpawn.mockReturnValue(proc);
+
+      const client = createLlmClient();
+      const promise = client.generate("sys", "usr");
+
+      setTimeout(() => {
+        const err = new Error("spawn gemini ENOENT") as NodeJS.ErrnoException;
+        err.code = "ENOENT";
+        proc.emit("error", err);
+      }, 0);
+
+      await expect(promise).rejects.toThrow("npm install -g @google/gemini-cli");
+    });
+
+    it("throws with truncated error on non-zero exit", async () => {
+      mockSpawn.mockReturnValue(createFakeProc("", 1, "Rate limit exceeded"));
+
+      const client = createLlmClient();
+      await expect(client.generate("sys", "usr")).rejects.toThrow(
+        "Gemini CLI exited with code 1: Rate limit exceeded",
+      );
+    });
+
+    it("returns null for token counts (CLI does not report them)", async () => {
+      mockSpawn.mockReturnValue(createFakeProc("response\n"));
+
+      const client = createLlmClient();
+      const result = await client.generate("sys", "usr");
+
+      expect(result.inputTokens).toBeNull();
+      expect(result.outputTokens).toBeNull();
+    });
+
+    it("measures duration", async () => {
+      mockSpawn.mockReturnValue(createFakeProc("response\n"));
+
+      const client = createLlmClient();
+      const result = await client.generate("sys", "usr");
+
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("does not strip env vars", async () => {
+      mockSpawn.mockReturnValue(createFakeProc("response\n"));
+
+      const client = createLlmClient();
+      await client.generate("sys", "usr");
+
+      const spawnCall = mockSpawn.mock.calls[0];
+      expect(spawnCall[2].env).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Cross-provider consistency
+  // -------------------------------------------------------------------------
+
+  describe("cross-provider consistency", () => {
+    it("all CLI providers use stdin piping for prompts", async () => {
+      const providers = [
+        { provider: "claude-cli" as const, binary: "claude" },
+        { provider: "codex-cli" as const, binary: "codex" },
+        { provider: "gemini-cli" as const, binary: "gemini" },
+      ];
+
+      for (const { provider, binary } of providers) {
+        mockSpawn.mockReturnValue(createFakeProc("ok\n"));
+        process.env.VSKILL_EVAL_PROVIDER = provider;
+
+        const client = createLlmClient();
+        await client.generate("sys", "usr");
+
+        const proc = mockSpawn.mock.results[mockSpawn.mock.results.length - 1].value;
+        expect(proc.stdin.end).toHaveBeenCalledWith("sys\n\nusr");
+        vi.resetAllMocks();
+      }
+    });
+
+    it("all CLI providers use pipe stdio", async () => {
+      const providers: Array<{ provider: ProviderName }> = [
+        { provider: "claude-cli" },
+        { provider: "codex-cli" },
+        { provider: "gemini-cli" },
+      ];
+
+      for (const { provider } of providers) {
+        mockSpawn.mockReturnValue(createFakeProc("ok\n"));
+        process.env.VSKILL_EVAL_PROVIDER = provider;
+
+        const client = createLlmClient();
+        await client.generate("sys", "usr");
+
+        const spawnCall = mockSpawn.mock.calls[mockSpawn.mock.calls.length - 1];
+        expect(spawnCall[2].stdio).toEqual(["pipe", "pipe", "pipe"]);
+        vi.resetAllMocks();
+      }
+    });
+
+    it("all providers implement the LlmClient interface", () => {
+      const configs: Array<{ provider: ProviderName; setup: () => void }> = [
+        { provider: "claude-cli", setup: () => {} },
+        { provider: "codex-cli", setup: () => {} },
+        { provider: "gemini-cli", setup: () => {} },
+        { provider: "anthropic", setup: () => { process.env.ANTHROPIC_API_KEY = "test"; } },
+        { provider: "ollama", setup: () => {} },
+      ];
+
+      for (const { provider, setup } of configs) {
+        setup();
+        const client = createLlmClient({ provider });
+        expect(client).toHaveProperty("model");
+        expect(client).toHaveProperty("generate");
+        expect(typeof client.generate).toBe("function");
+        expect(typeof client.model).toBe("string");
+      }
     });
   });
 

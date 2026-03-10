@@ -552,32 +552,32 @@ function CaseHistorySection({ evalId }: { evalId: number }) {
 
   const entries = cache[evalId] ?? null;
 
+  const fetchIfNeeded = useCallback(async (id: number) => {
+    setLoading(true);
+    try {
+      const data = await api.getCaseHistory(plugin, skill, id);
+      setCache((prev) => ({ ...prev, [id]: data }));
+    } catch {
+      setCache((prev) => ({ ...prev, [id]: [] }));
+    } finally {
+      setLoading(false);
+    }
+  }, [plugin, skill]);
+
   // Auto-fetch on mount when expanded by default
   useEffect(() => {
     if (expanded && !cache[evalId]) {
-      setLoading(true);
-      api.getCaseHistory(plugin, skill, evalId)
-        .then((data) => setCache((prev) => ({ ...prev, [evalId]: data })))
-        .catch(() => setCache((prev) => ({ ...prev, [evalId]: [] })))
-        .finally(() => setLoading(false));
+      fetchIfNeeded(evalId);
     }
   }, [evalId, plugin, skill]);
 
-  const handleToggle = useCallback(async () => {
+  const handleToggle = useCallback(() => {
     const next = !expanded;
     setExpanded(next);
     if (next && !cache[evalId]) {
-      setLoading(true);
-      try {
-        const data = await api.getCaseHistory(plugin, skill, evalId);
-        setCache((prev) => ({ ...prev, [evalId]: data }));
-      } catch {
-        setCache((prev) => ({ ...prev, [evalId]: [] }));
-      } finally {
-        setLoading(false);
-      }
+      fetchIfNeeded(evalId);
     }
-  }, [expanded, evalId, plugin, skill, cache]);
+  }, [expanded, evalId, cache, fetchIfNeeded]);
 
   const displayEntries = entries ? entries.slice(0, 10) : [];
 

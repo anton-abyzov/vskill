@@ -7,6 +7,7 @@ import {
   listHistory,
   readHistoryEntry,
   computeRegressions,
+  getCaseHistory,
 } from "../benchmark-history.js";
 import type { BenchmarkResult } from "../benchmark.js";
 
@@ -221,6 +222,146 @@ describe("benchmark-history", () => {
 
       const regressions = computeRegressions(curr, prev);
       expect(regressions).toEqual([]);
+    });
+  });
+
+  describe("listHistory with filters", () => {
+    beforeEach(async () => {
+      const r1 = mkResult({
+        timestamp: "2026-03-01T10:00:00.000Z",
+        model: "gpt-4o",
+        type: "benchmark",
+      });
+      const r2 = mkResult({
+        timestamp: "2026-03-05T10:00:00.000Z",
+        model: "sonnet",
+        type: "baseline",
+      });
+      const r3 = mkResult({
+        timestamp: "2026-03-08T10:00:00.000Z",
+        model: "gpt-4o",
+        type: "comparison",
+      });
+      await writeHistoryEntry(testDir, r1);
+      await writeHistoryEntry(testDir, r2);
+      await writeHistoryEntry(testDir, r3);
+    });
+
+    it("filters by model", async () => {
+      const list = await listHistory(testDir, { model: "gpt-4o" });
+      expect(list).toHaveLength(2);
+      expect(list.every((e) => e.model === "gpt-4o")).toBe(true);
+    });
+
+    it("filters by type", async () => {
+      const list = await listHistory(testDir, { type: "baseline" });
+      expect(list).toHaveLength(1);
+      expect(list[0].type).toBe("baseline");
+      expect(list[0].model).toBe("sonnet");
+    });
+
+    it("filters by date range", async () => {
+      const list = await listHistory(testDir, {
+        from: "2026-03-04T00:00:00.000Z",
+        to: "2026-03-06T00:00:00.000Z",
+      });
+      expect(list).toHaveLength(1);
+      expect(list[0].timestamp).toBe("2026-03-05T10:00:00.000Z");
+    });
+
+    it("returns all when no filters", async () => {
+      const list = await listHistory(testDir);
+      expect(list).toHaveLength(3);
+    });
+
+    it("combines model and type filters", async () => {
+      const list = await listHistory(testDir, { model: "gpt-4o", type: "benchmark" });
+      expect(list).toHaveLength(1);
+      expect(list[0].model).toBe("gpt-4o");
+      expect(list[0].type).toBe("benchmark");
+      expect(list[0].timestamp).toBe("2026-03-01T10:00:00.000Z");
+    });
+  });
+
+  describe("getCaseHistory", () => {
+    beforeEach(async () => {
+      const r1 = mkResult({
+        timestamp: "2026-03-01T10:00:00.000Z",
+        model: "gpt-4o",
+        cases: [
+          {
+            eval_id: 1,
+            eval_name: "test-case",
+            status: "pass",
+            error_message: null,
+            pass_rate: 1.0,
+            assertions: [
+              { id: "a1", text: "Check 1", pass: true, reasoning: "OK" },
+            ],
+          },
+        ],
+      });
+      const r2 = mkResult({
+        timestamp: "2026-03-05T10:00:00.000Z",
+        model: "sonnet",
+        cases: [
+          {
+            eval_id: 1,
+            eval_name: "test-case",
+            status: "fail",
+            error_message: null,
+            pass_rate: 0.5,
+            assertions: [
+              { id: "a1", text: "Check 1", pass: true, reasoning: "OK" },
+              { id: "a2", text: "Check 2", pass: false, reasoning: "Fail" },
+            ],
+          },
+        ],
+      });
+      const r3 = mkResult({
+        timestamp: "2026-03-08T10:00:00.000Z",
+        model: "gpt-4o",
+        cases: [
+          {
+            eval_id: 1,
+            eval_name: "test-case",
+            status: "pass",
+            error_message: null,
+            pass_rate: 1.0,
+            assertions: [
+              { id: "a1", text: "Check 1", pass: true, reasoning: "OK" },
+              { id: "a2", text: "Check 2", pass: true, reasoning: "OK" },
+            ],
+          },
+        ],
+      });
+      await writeHistoryEntry(testDir, r1);
+      await writeHistoryEntry(testDir, r2);
+      await writeHistoryEntry(testDir, r3);
+    });
+
+    it("returns cases from all files sorted newest-first", async () => {
+      const history = await getCaseHistory(testDir, 1);
+      expect(history).toHaveLength(3);
+      expect(history[0].timestamp).toBe("2026-03-08T10:00:00.000Z");
+      expect(history[1].timestamp).toBe("2026-03-05T10:00:00.000Z");
+      expect(history[2].timestamp).toBe("2026-03-01T10:00:00.000Z");
+    });
+
+    it("filters by model", async () => {
+      const history = await getCaseHistory(testDir, 1, { model: "gpt-4o" });
+      expect(history).toHaveLength(2);
+      expect(history.every((e) => e.model === "gpt-4o")).toBe(true);
+    });
+
+    it("returns empty array for missing eval_id", async () => {
+      const history = await getCaseHistory(testDir, 999);
+      expect(history).toEqual([]);
+    });
+
+    it("returns empty for nonexistent skill dir", async () => {
+      const history = await getCaseHistory(join(testDir, "nonexistent"), 1);
+      expect(history).toEqual([]);
     });
   });
 });

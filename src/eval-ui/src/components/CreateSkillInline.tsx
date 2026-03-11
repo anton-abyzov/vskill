@@ -1,7 +1,15 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { api } from "../api";
 import type { ConfigResponse } from "../api";
-import type { ProjectLayoutResponse, DetectedLayout, SkillCreatorStatus } from "../types";
+import type { ProjectLayoutResponse, DetectedLayout, GeneratedEval } from "../types";
+import { ProgressLog } from "./ProgressLog";
+import type { ProgressEntry } from "./ProgressLog";
+import { ErrorCard } from "./ErrorCard";
+import type { ClassifiedError } from "./ErrorCard";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function toKebab(s: string, trim = true): string {
   let r = s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -19,17 +27,45 @@ function resolvePathPreview(root: string, layout: 1 | 2 | 3, plugin: string, nam
   }
 }
 
+const inputStyle = {
+  background: "var(--surface-3)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border-subtle)",
+};
+
+// ---------------------------------------------------------------------------
+// Sparkle icon for AI mode
+// ---------------------------------------------------------------------------
+
+function SparkleIcon({ size = 14, color = "currentColor" }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 interface Props {
   onCreated: (plugin: string, skill: string) => void;
   onCancel: () => void;
 }
 
 export function CreateSkillInline({ onCreated, onCancel }: Props) {
+  // Mode toggle
+  const [mode, setMode] = useState<"manual" | "ai">("manual");
+
+  // Layout detection
   const [layout, setLayout] = useState<ProjectLayoutResponse | null>(null);
   const [layoutLoading, setLayoutLoading] = useState(true);
-  const [creatorStatus, setCreatorStatus] = useState<SkillCreatorStatus | null>(null);
+
+  // Config (providers/models)
   const [config, setConfig] = useState<ConfigResponse | null>(null);
 
+  // Form state
   const [name, setName] = useState("");
   const [selectedLayout, setSelectedLayout] = useState<1 | 2 | 3>(3);
   const [plugin, setPlugin] = useState("");
@@ -38,10 +74,23 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
   const [model, setModel] = useState("");
   const [allowedTools, setAllowedTools] = useState("");
   const [body, setBody] = useState("");
+  const [pendingEvals, setPendingEvals] = useState<GeneratedEval[] | null>(null);
 
+  // Submission
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // AI generation state
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [aiReasoning, setAiReasoning] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiClassifiedError, setAiClassifiedError] = useState<ClassifiedError | null>(null);
+  const [aiProgress, setAiProgress] = useState<ProgressEntry[]>([]);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Load layout + config on mount
   useEffect(() => {
     api.getProjectLayout()
       .then((l) => {
@@ -54,9 +103,19 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
       .finally(() => setLayoutLoading(false));
 
     api.getConfig().then(setConfig).catch(() => {});
-    api.getSkillCreatorStatus().then(setCreatorStatus).catch(() => {});
   }, []);
 
+  // Auto-focus prompt when switching to AI mode
+  useEffect(() => {
+    if (mode === "ai") promptRef.current?.focus();
+  }, [mode]);
+
+  // Cleanup SSE on unmount
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
+
+  // Computed values
   const availablePlugins = useMemo(() => {
     if (!layout) return [];
     return layout.detectedLayouts.find((d) => d.layout === selectedLayout)?.existingPlugins || [];
@@ -73,7 +132,113 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
     return layout.detectedLayouts.filter((d): d is DetectedLayout & { layout: 1 | 2 | 3 } => d.layout !== 4);
   }, [layout]);
 
-  const showCreatorBanner = config?.provider === "claude-cli" && creatorStatus !== null;
+  // Current model label for the generate button
+  const currentModelLabel = useMemo(() => {
+    if (!config) return null;
+    for (const provider of config.providers) {
+      for (const m of provider.models) {
+        const isActive = provider.id === config.provider &&
+          (provider.id === "claude-cli" ? config.model === `claude-${m.id}` : config.model === m.id);
+        if (isActive) return m.label;
+      }
+    }
+    return config.model || null;
+  }, [config]);
+
+  // Resolve provider/model for generation request
+  const resolveAiConfig = useCallback(() => {
+    if (!config) return { provider: "claude-cli", model: "sonnet" };
+    const provider = config.provider || "claude-cli";
+    // Extract model ID from config.model (e.g. "claude-sonnet" -> "sonnet")
+    let modelId = config.model || "sonnet";
+    if (provider === "claude-cli" && modelId.startsWith("claude-")) {
+      modelId = modelId.replace("claude-", "");
+    }
+    return { provider, model: modelId };
+  }, [config]);
+
+  // ---------------------------------------------------------------------------
+  // Handlers
+  // ---------------------------------------------------------------------------
+
+  const handleCancelGenerate = useCallback(() => {
+    abortRef.current?.abort();
+    setGenerating(false);
+  }, []);
+
+  async function handleGenerate() {
+    setAiError(null);
+    setAiClassifiedError(null);
+    setAiReasoning(null);
+    setAiProgress([]);
+    if (!aiPrompt.trim()) { setAiError("Describe what your skill should do"); return; }
+
+    setGenerating(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const { provider, model: aiModel } = resolveAiConfig();
+
+    try {
+      const res = await fetch(`/api/skills/generate?sse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: aiPrompt.trim(), provider, model: aiModel }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let currentEvent = "";
+
+      while (true) {
+        const { done: readerDone, value } = await reader.read();
+        if (readerDone) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === "progress") {
+                setAiProgress((prev) => [...prev, { phase: data.phase, message: data.message, timestamp: Date.now() }]);
+              } else if (currentEvent === "done" || currentEvent === "complete") {
+                setName(data.name);
+                setDescription(data.description);
+                setModel(data.model || "");
+                setAllowedTools(data.allowedTools || "");
+                setBody(data.body);
+                setPendingEvals(data.evals?.length ? data.evals : null);
+                setAiReasoning(data.reasoning);
+                setMode("manual");
+              } else if (currentEvent === "error") {
+                setAiError(data.message || data.description || "Unknown error");
+                if (data.category) setAiClassifiedError(data as ClassifiedError);
+              }
+            } catch {
+              // skip malformed data
+            }
+            currentEvent = "";
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        setAiError((err as Error).message);
+      }
+    } finally {
+      setGenerating(false);
+      abortRef.current = null;
+    }
+  }
 
   async function handleCreate() {
     setError(null);
@@ -91,6 +256,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
         model: model || undefined,
         allowedTools: allowedTools || undefined,
         body,
+        evals: pendingEvals || undefined,
       });
       onCreated(result.plugin, result.skill);
     } catch (err) {
@@ -100,48 +266,230 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
   return (
     <div className="px-8 py-6 max-w-4xl animate-fade-in overflow-auto h-full">
+      {/* Header with mode toggle */}
       <div className="mb-5">
         <h2 className="text-[20px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
           Create a New Skill
         </h2>
-        <p className="text-[13px] mt-1" style={{ color: "var(--text-tertiary)" }}>
-          Define your skill's metadata, content, and placement
-        </p>
+        <div className="flex items-center justify-between mt-2">
+          <div
+            className="inline-flex rounded-lg p-0.5"
+            style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+          >
+            <button
+              onClick={() => setMode("manual")}
+              className="px-3 py-1.5 rounded-md text-[12px] font-medium transition-all duration-200"
+              style={{
+                background: mode === "manual" ? "var(--surface-4, var(--surface-3))" : "transparent",
+                color: mode === "manual" ? "var(--text-primary)" : "var(--text-tertiary)",
+                boxShadow: mode === "manual" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                cursor: "pointer",
+                border: "none",
+              }}
+            >
+              Manual
+            </button>
+            <button
+              onClick={() => setMode("ai")}
+              className="px-3 py-1.5 rounded-md text-[12px] font-medium transition-all duration-200"
+              style={{
+                background: mode === "ai" ? "rgba(168,85,247,0.15)" : "transparent",
+                color: mode === "ai" ? "#a855f7" : "var(--text-tertiary)",
+                boxShadow: mode === "ai" ? "0 1px 3px rgba(168,85,247,0.15)" : "none",
+                cursor: "pointer",
+                border: "none",
+              }}
+            >
+              <span className="flex items-center gap-1.5">
+                <SparkleIcon size={12} />
+                AI-Assisted
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
 
-      {showCreatorBanner && (
-        <div
-          className="mb-5 px-4 py-3 rounded-lg text-[13px]"
-          style={{
-            background: creatorStatus!.installed ? "var(--accent-muted)" : "var(--surface-2)",
-            border: creatorStatus!.installed ? "1px solid var(--accent)" : "1px solid var(--border-subtle)",
-            color: "var(--text-primary)",
-          }}
-        >
-          {creatorStatus!.installed ? (
-            <span>
-              <span className="font-medium">AI-Assisted Authoring Available</span>
-              <span className="ml-1" style={{ color: "var(--text-secondary)" }}>
-                — Run <code className="px-1.5 py-0.5 rounded text-[11px]" style={{ background: "var(--surface-3)" }}>/skill-creator</code> in Claude Code for guided creation.
-              </span>
-            </span>
-          ) : (
-            <span style={{ color: "var(--text-secondary)" }}>
-              Tip: Install the Skill Creator — <code className="px-1.5 py-0.5 rounded text-[11px]" style={{ background: "var(--surface-3)" }}>{creatorStatus!.installCommand}</code>
-            </span>
-          )}
-        </div>
-      )}
-
-      {layoutLoading ? (
+      {/* Loading skeleton */}
+      {layoutLoading && (
         <div className="space-y-3">
           <div className="skeleton h-10 w-full rounded-lg" />
           <div className="skeleton h-10 w-full rounded-lg" />
         </div>
-      ) : layout ? (
-        <div className="space-y-4">
+      )}
+
+      {/* ================================================================= */}
+      {/* AI-ASSISTED MODE                                                  */}
+      {/* ================================================================= */}
+      {!layoutLoading && layout && mode === "ai" && (
+        <div className="space-y-4 animate-fade-in">
+          {/* Describe your skill */}
+          <div className="glass-card p-4">
+            <h3 className="text-[13px] font-semibold mb-3 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
+              <div
+                className="w-5 h-5 rounded-md flex items-center justify-center"
+                style={{ background: "rgba(168,85,247,0.15)" }}
+              >
+                <SparkleIcon size={11} color="#a855f7" />
+              </div>
+              Describe Your Skill
+            </h3>
+            <textarea
+              ref={promptRef}
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              placeholder={"e.g., A skill that helps format SQL queries, optimize them for performance, and explain query execution plans.\n\nInclude any specific behaviors, constraints, or output formats you want."}
+              rows={5}
+              disabled={generating}
+              className="w-full px-3 py-2.5 rounded-lg text-[13px] resize-y"
+              style={{ ...inputStyle, minHeight: "120px" }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  handleGenerate();
+                }
+              }}
+            />
+            <p className="text-[11px] mt-2" style={{ color: "var(--text-tertiary)" }}>
+              Describe what the skill should do. The AI will generate the name, description, system prompt, and test cases.
+              <span className="ml-1" style={{ color: "var(--text-quaternary, var(--text-tertiary))" }}>Cmd+Enter to generate</span>
+            </p>
+          </div>
+
+          {/* Progress log during generation */}
+          {generating && aiProgress.length > 0 && (
+            <ProgressLog entries={aiProgress} isRunning={true} />
+          )}
+
+          {/* Error display */}
+          {aiError && (
+            <div>
+              {aiClassifiedError ? (
+                <ErrorCard
+                  error={aiClassifiedError}
+                  onRetry={handleGenerate}
+                  onDismiss={() => { setAiError(null); setAiClassifiedError(null); }}
+                />
+              ) : (
+                <div>
+                  <div className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
+                    {aiError}
+                  </div>
+                  <button
+                    onClick={handleGenerate}
+                    className="mt-2 text-[12px] font-medium"
+                    style={{ color: "#a855f7", background: "none", border: "none", cursor: "pointer" }}
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Generate / Cancel buttons */}
+          <div className="flex items-center gap-3">
+            {generating ? (
+              <button
+                onClick={handleCancelGenerate}
+                className="px-5 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 flex items-center gap-2"
+                style={{ background: "var(--surface-3)", color: "var(--text-secondary)", border: "none", cursor: "pointer" }}
+              >
+                Cancel Generation
+              </button>
+            ) : (
+              <button
+                onClick={handleGenerate}
+                disabled={!aiPrompt.trim()}
+                className="px-5 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 flex items-center gap-2"
+                style={{
+                  background: !aiPrompt.trim() ? "var(--surface-3)" : "#a855f7",
+                  color: !aiPrompt.trim() ? "var(--text-tertiary)" : "#fff",
+                  cursor: !aiPrompt.trim() ? "not-allowed" : "pointer",
+                  border: "none",
+                }}
+              >
+                <SparkleIcon size={14} />
+                {currentModelLabel ? `Generate with ${currentModelLabel}` : "Generate Skill"}
+              </button>
+            )}
+            <button
+              onClick={onCancel}
+              className="px-4 py-2.5 rounded-lg text-[13px] font-medium"
+              style={{ color: "var(--text-secondary)", background: "none", border: "none", cursor: "pointer" }}
+            >
+              Cancel
+            </button>
+            {!generating && (
+              <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+                or fill in the form manually
+                <button
+                  onClick={() => setMode("manual")}
+                  className="ml-1 font-medium"
+                  style={{ color: "var(--accent)", background: "none", border: "none", cursor: "pointer" }}
+                >
+                  below
+                </button>
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================= */}
+      {/* MANUAL MODE                                                       */}
+      {/* ================================================================= */}
+      {!layoutLoading && layout && mode === "manual" && (
+        <div className="space-y-4 animate-fade-in">
+          {/* AI reasoning banner (shown after generation populates the form) */}
+          {aiReasoning && (
+            <div
+              className="px-4 py-3 rounded-lg text-[12px] animate-fade-in"
+              style={{
+                background: "rgba(168,85,247,0.08)",
+                color: "var(--text-secondary)",
+                border: "1px solid rgba(168,85,247,0.2)",
+              }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <div
+                    className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5"
+                    style={{ background: "rgba(168,85,247,0.15)" }}
+                  >
+                    <SparkleIcon size={11} color="#a855f7" />
+                  </div>
+                  <div>
+                    <span className="font-semibold" style={{ color: "#a855f7" }}>AI Generated</span>
+                    <span className="mx-1.5" style={{ color: "var(--text-tertiary)" }}>&mdash;</span>
+                    <span>{aiReasoning}</span>
+                    {pendingEvals && pendingEvals.length > 0 && (
+                      <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: "rgba(168,85,247,0.12)", color: "#a855f7" }}>
+                        +{pendingEvals.length} test cases
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setAiReasoning(null); setPendingEvals(null); }}
+                  className="flex-shrink-0 w-5 h-5 rounded flex items-center justify-center transition-colors duration-150"
+                  style={{ color: "var(--text-tertiary)", background: "none", border: "none", cursor: "pointer" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-3)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Location */}
           <div className="glass-card p-4">
             <h3 className="text-[13px] font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Location</h3>
@@ -174,7 +522,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                   value={plugin}
                   onChange={(e) => { setPlugin(e.target.value); setNewPlugin(""); }}
                   className="w-full px-3 py-2 rounded-lg text-[13px]"
-                  style={{ background: "var(--surface-3)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)" }}
+                  style={inputStyle}
                 >
                   {availablePlugins.map((p) => <option key={p} value={p}>{p}</option>)}
                   <option value="__new__">+ New plugin...</option>
@@ -182,7 +530,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                 {plugin === "__new__" && (
                   <input type="text" value={newPlugin} onChange={(e) => setNewPlugin(toKebab(e.target.value))} placeholder="my-plugin"
                     className="w-full mt-2 px-3 py-2 rounded-lg text-[13px]"
-                    style={{ background: "var(--surface-3)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)" }}
+                    style={inputStyle}
                   />
                 )}
               </div>
@@ -199,14 +547,14 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
               <label className="text-[11px] font-medium uppercase tracking-wider mb-1 block" style={{ color: "var(--text-tertiary)" }}>Name <span style={{ color: "var(--red)" }}>*</span></label>
               <input type="text" value={name} onChange={(e) => setName(toKebab(e.target.value, false))} placeholder="my-skill"
                 className="w-full px-3 py-2 rounded-lg text-[13px]"
-                style={{ background: "var(--surface-3)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)" }}
+                style={inputStyle}
               />
             </div>
             <div className="mb-3">
               <label className="text-[11px] font-medium uppercase tracking-wider mb-1 block" style={{ color: "var(--text-tertiary)" }}>Description <span style={{ color: "var(--red)" }}>*</span></label>
               <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Brief description" rows={2}
                 className="w-full px-3 py-2 rounded-lg text-[13px] resize-none"
-                style={{ background: "var(--surface-3)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)" }}
+                style={inputStyle}
               />
             </div>
             <div className="flex gap-3">
@@ -214,7 +562,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                 <label className="text-[11px] font-medium uppercase tracking-wider mb-1 block" style={{ color: "var(--text-tertiary)" }}>Model</label>
                 <select value={model} onChange={(e) => setModel(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg text-[13px]"
-                  style={{ background: "var(--surface-3)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)" }}
+                  style={inputStyle}
                 >
                   <option value="">Any</option>
                   <option value="opus">Opus</option>
@@ -226,7 +574,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                 <label className="text-[11px] font-medium uppercase tracking-wider mb-1 block" style={{ color: "var(--text-tertiary)" }}>Allowed Tools</label>
                 <input type="text" value={allowedTools} onChange={(e) => setAllowedTools(e.target.value)} placeholder="Read, Write, Edit..."
                   className="w-full px-3 py-2 rounded-lg text-[13px]"
-                  style={{ background: "var(--surface-3)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)" }}
+                  style={inputStyle}
                 />
               </div>
             </div>
@@ -239,9 +587,49 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
               placeholder={"# /my-skill\n\nYou are an expert at...\n"}
               rows={8}
               className="w-full px-3 py-2 rounded-lg text-[13px] font-mono resize-y"
-              style={{ background: "var(--surface-3)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)", minHeight: "150px" }}
+              style={{ ...inputStyle, minHeight: "150px" }}
             />
           </div>
+
+          {/* Generated test cases preview */}
+          {pendingEvals && pendingEvals.length > 0 && (
+            <div className="glass-card p-4">
+              <h3 className="text-[13px] font-semibold mb-3 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
+                <SparkleIcon size={13} color="#a855f7" />
+                Generated Test Cases
+                <span className="text-[11px] font-normal" style={{ color: "var(--text-tertiary)" }}>
+                  ({pendingEvals.length} evals will be saved with the skill)
+                </span>
+              </h3>
+              <div className="space-y-2">
+                {pendingEvals.map((ev) => (
+                  <div
+                    key={ev.id}
+                    className="px-3 py-2 rounded-lg text-[12px]"
+                    style={{ background: "var(--surface-0)", border: "1px solid var(--border-subtle)" }}
+                  >
+                    <div className="font-medium mb-1" style={{ color: "var(--text-primary)" }}>
+                      {ev.name}
+                    </div>
+                    <div className="text-[11px] mb-1" style={{ color: "var(--text-tertiary)" }}>
+                      Prompt: {ev.prompt.length > 120 ? ev.prompt.slice(0, 120) + "..." : ev.prompt}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {ev.assertions.map((a) => (
+                        <span
+                          key={a.id}
+                          className="px-1.5 py-0.5 rounded text-[10px]"
+                          style={{ background: "rgba(168,85,247,0.1)", color: "#a855f7" }}
+                        >
+                          {a.text.length > 50 ? a.text.slice(0, 50) + "..." : a.text}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
@@ -272,7 +660,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
             </button>
           </div>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

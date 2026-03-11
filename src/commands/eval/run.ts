@@ -5,12 +5,15 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { loadAndValidateEvals, EvalValidationError } from "../../eval/schema.js";
-import { createLlmClient } from "../../eval/llm.js";
+import { createLlmClient, estimateDurationSec } from "../../eval/llm.js";
+import type { ProviderName } from "../../eval/llm.js";
 import { judgeAssertion } from "../../eval/judge.js";
 import { writeBenchmark } from "../../eval/benchmark.js";
 import type { BenchmarkCase, BenchmarkResult } from "../../eval/benchmark.js";
 import { green, red, yellow, bold, dim, table } from "../../utils/output.js";
 import { buildEvalSystemPrompt } from "../../eval/prompt-builder.js";
+import { classifyError } from "../../eval-server/error-classifier.js";
+import { ProgressLog } from "../../eval/progress-log.js";
 
 export async function runEvalRun(skillDir: string): Promise<void> {
   // Load and validate evals.json
@@ -45,19 +48,44 @@ export async function runEvalRun(skillDir: string): Promise<void> {
 
   const client = createLlmClient();
   const model = client.model;
+  const provider = (process.env.VSKILL_EVAL_PROVIDER || "claude-cli") as ProviderName;
   const total = evalsFile.evals.length;
-  console.log(dim(`Provider: ${model} | ${total} eval case${total !== 1 ? "s" : ""}`));
-  console.log(dim(`Skill: ${skillContent ? skillMdPath : "(none)"}\n`));
+  const totalAssertions = evalsFile.evals.reduce((s, e) => s + e.assertions.length, 0);
+
+  console.log(dim(`Provider: ${model} | ${total} eval case${total !== 1 ? "s" : ""} | ${totalAssertions} assertions`));
+  console.log(dim(`Skill: ${skillContent ? skillMdPath : "(none)"}`));
+
+  // Duration estimate
+  const estimate = estimateDurationSec(provider, total, totalAssertions);
+  console.log(dim(`Estimated duration: ${estimate.label}`));
+  console.log(dim(`Progress file: ${join(skillDir, "evals", ".eval-progress.json")}\n`));
+
+  // Start progress log
+  const progress = new ProgressLog(skillDir, provider, model, total, estimate.maxSec);
 
   const benchmarkCases: BenchmarkCase[] = [];
   const tableRows: string[][] = [];
+  const runStart = Date.now();
 
   for (let i = 0; i < evalsFile.evals.length; i++) {
     const evalCase = evalsFile.evals[i];
+    const caseStart = Date.now();
+
+    progress.update({
+      currentCase: evalCase.name,
+      phase: "generating",
+      completedCases: i,
+    });
+
     try {
       // Step 1: Send prompt to LLM
       process.stdout.write(dim(`[${i + 1}/${total}] ${evalCase.name} — generating...`));
       const genResult = await client.generate(systemPrompt, evalCase.prompt);
+      const genSec = ((Date.now() - caseStart) / 1000).toFixed(1);
+      process.stdout.write(dim(` ${genSec}s`));
+
+      progress.update({ phase: "judging" });
+
       process.stdout.write(dim(` judging ${evalCase.assertions.length} assertions...`));
 
       // Step 2: Judge each assertion
@@ -86,7 +114,12 @@ export async function runEvalRun(skillDir: string): Promise<void> {
         ? passCount / evalCase.assertions.length
         : 0;
       const allPassed = passCount === evalCase.assertions.length;
-      console.log(allPassed ? green(" done") : red(` ${passCount}/${evalCase.assertions.length} passed`));
+      const totalSec = ((Date.now() - caseStart) / 1000).toFixed(1);
+      console.log(
+        allPassed
+          ? green(` done`) + dim(` (${totalSec}s)`)
+          : red(` ${passCount}/${evalCase.assertions.length} passed`) + dim(` (${totalSec}s)`),
+      );
 
       benchmarkCases.push({
         eval_id: evalCase.id,
@@ -97,7 +130,13 @@ export async function runEvalRun(skillDir: string): Promise<void> {
         assertions: assertionResults,
       });
     } catch (err) {
+      const classified = classifyError(err, provider);
       console.log(yellow(" error"));
+      console.log(yellow(`  ${classified.title}: ${classified.description}`));
+      console.log(dim(`  ${classified.hint}`));
+
+      progress.update({ lastError: classified.title });
+
       benchmarkCases.push({
         eval_id: evalCase.id,
         eval_name: evalCase.name,
@@ -110,11 +149,23 @@ export async function runEvalRun(skillDir: string): Promise<void> {
       tableRows.push([
         evalCase.name,
         "-",
-        dim("Error: " + (err as Error).message.slice(0, 50)),
+        dim(`${classified.title}`),
         yellow("ERROR"),
       ]);
+
+      // For auth errors, all subsequent cases will fail too — abort early
+      if (classified.category === "auth" || classified.category === "provider_unavailable") {
+        console.log(red(`\nAborting remaining cases — ${classified.category} error is not recoverable.`));
+        console.log(dim(`  ${classified.hint}\n`));
+        break;
+      }
     }
   }
+
+  // Complete progress tracking
+  progress.complete();
+
+  const totalElapsed = ((Date.now() - runStart) / 1000).toFixed(1);
 
   // Print results table
   const headers = ["EVAL", "ASSERTION", "TEXT", "STATUS"];
@@ -126,7 +177,7 @@ export async function runEvalRun(skillDir: string): Promise<void> {
   const failed = benchmarkCases.filter((c) => c.status === "fail").length;
   const errors = benchmarkCases.filter((c) => c.status === "error").length;
   console.log(
-    `\n${green(`${passed} passed`)} ${failed > 0 ? red(`${failed} failed`) : ""} ${errors > 0 ? yellow(`${errors} errors`) : ""}`.trim(),
+    `\n${green(`${passed} passed`)} ${failed > 0 ? red(`${failed} failed`) : ""} ${errors > 0 ? yellow(`${errors} errors`) : ""} ${dim(`(${totalElapsed}s)`)}`.trim(),
   );
 
   // Write benchmark.json

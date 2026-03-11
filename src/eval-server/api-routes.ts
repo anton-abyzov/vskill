@@ -438,6 +438,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
       const benchCase = await runSingleCaseSSE({
         res, evalCase, systemPrompt, client, isAborted: () => aborted,
+        provider: currentOverrides.provider || "claude-cli",
       });
 
       if (!released) { released = true; sem.release(); }

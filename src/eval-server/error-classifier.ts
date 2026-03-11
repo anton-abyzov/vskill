@@ -122,15 +122,22 @@ export function classifyError(err: unknown, provider?: string): ClassifiedError 
 
   // Auth
   if (matchesAny(msg, AUTH_PATTERNS)) {
+    const hint = provider === "anthropic"
+      ? "Set ANTHROPIC_API_KEY: export ANTHROPIC_API_KEY=sk-ant-..."
+      : provider === "claude-cli"
+        ? "Run `claude login` to authenticate, or switch to a different provider (Ollama, Anthropic API)."
+        : provider === "codex-cli"
+          ? "Run `codex login` to authenticate, or switch to a different provider."
+          : provider === "gemini-cli"
+            ? "Run `gemini login` to authenticate, or switch to a different provider."
+            : provider === "ollama"
+              ? "Check that Ollama is running: ollama serve"
+              : "Verify your provider is configured correctly.";
     return {
       category: "auth",
       title: "Authentication Failed",
       description: "The AI provider rejected the request due to missing or invalid credentials.",
-      hint: provider === "anthropic"
-        ? "Set ANTHROPIC_API_KEY: export ANTHROPIC_API_KEY=sk-ant-..."
-        : provider === "ollama"
-          ? "Check that Ollama is running: ollama serve"
-          : "Verify your provider is configured correctly.",
+      hint,
       retryable: false,
     };
   }

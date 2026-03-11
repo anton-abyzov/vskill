@@ -23,6 +23,7 @@ export interface InlineResult {
   status?: string;
   passRate?: number;
   errorMessage?: string;
+  classifiedError?: ClassifiedError;
   durationMs?: number;
   tokens?: number | null;
   output?: string;

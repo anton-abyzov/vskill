@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   writeFileSync: vi.fn(),
   existsSync: vi.fn(),
   mkdirSync: vi.fn(),
+  unlinkSync: vi.fn(),
   generate: vi.fn(),
 }));
 
@@ -17,6 +18,7 @@ vi.mock("node:fs", () => ({
   writeFileSync: mocks.writeFileSync,
   existsSync: mocks.existsSync,
   mkdirSync: mocks.mkdirSync,
+  unlinkSync: mocks.unlinkSync,
 }));
 
 vi.mock("../../../eval/llm.js", () => ({
@@ -24,6 +26,25 @@ vi.mock("../../../eval/llm.js", () => ({
     generate: mocks.generate,
     model: "test-model",
   }),
+  estimateDurationSec: () => ({ minSec: 30, maxSec: 60, label: "30s\u201360s" }),
+}));
+
+vi.mock("../../../eval-server/error-classifier.js", () => ({
+  classifyError: (err: unknown) => ({
+    category: "unknown",
+    title: "Operation Failed",
+    description: err instanceof Error ? err.message : String(err),
+    hint: "Try again.",
+    retryable: true,
+  }),
+}));
+
+vi.mock("../../../eval/progress-log.js", () => ({
+  ProgressLog: class {
+    update() {}
+    complete() {}
+    error() {}
+  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -103,6 +124,21 @@ describe("runEvalRun", () => {
     consoleSpy.mockRestore();
   });
 
+  it("prints duration estimate before running", async () => {
+    mocks.generate.mockImplementation(async () => {
+      return { text: JSON.stringify({ pass: true, reasoning: "ok" }) };
+    });
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runEvalRun("/skills/test-skill");
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("Estimated duration");
+    expect(output).toContain("Progress file");
+    consoleSpy.mockRestore();
+  });
+
   it("writes benchmark.json after run", async () => {
     mocks.generate.mockImplementation(async (_sys: string, prompt: string) => {
       if (prompt.includes("Test prompt")) return { text: "LLM output here" };
@@ -112,10 +148,12 @@ describe("runEvalRun", () => {
 
     await runEvalRun("/skills/test-skill");
 
-    expect(mocks.writeFileSync).toHaveBeenCalled();
-    const writtenPath = mocks.writeFileSync.mock.calls[0][0];
-    expect(writtenPath).toContain("benchmark.json");
-    const writtenContent = JSON.parse(mocks.writeFileSync.mock.calls[0][1]);
+    // Find the benchmark.json write (skip progress log writes)
+    const benchmarkWrite = mocks.writeFileSync.mock.calls.find(
+      (c: unknown[]) => typeof c[0] === "string" && (c[0] as string).includes("benchmark.json"),
+    );
+    expect(benchmarkWrite).toBeDefined();
+    const writtenContent = JSON.parse(benchmarkWrite![1] as string);
     expect(writtenContent.skill_name).toBe("test-skill");
     expect(writtenContent.cases).toHaveLength(2);
 
@@ -136,7 +174,11 @@ describe("runEvalRun", () => {
 
     await runEvalRun("/skills/test-skill");
 
-    const writtenContent = JSON.parse(mocks.writeFileSync.mock.calls[0][1]);
+    const benchmarkWrite = mocks.writeFileSync.mock.calls.find(
+      (c: unknown[]) => typeof c[0] === "string" && (c[0] as string).includes("benchmark.json"),
+    );
+    expect(benchmarkWrite).toBeDefined();
+    const writtenContent = JSON.parse(benchmarkWrite![1] as string);
     expect(writtenContent.cases[0].status).toBe("error");
     expect(writtenContent.cases[0].error_message).toContain("API timeout");
     expect(writtenContent.cases[1].status).toBe("pass");

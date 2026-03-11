@@ -5,10 +5,12 @@
 import type * as http from "node:http";
 import type { EvalCase } from "../eval/schema.js";
 import type { BenchmarkResult, BenchmarkCase, BenchmarkAssertionResult } from "../eval/benchmark.js";
-import type { LlmClient } from "../eval/llm.js";
+import type { LlmClient, ProviderName } from "../eval/llm.js";
+import { estimateDurationSec } from "../eval/llm.js";
 import { judgeAssertion } from "../eval/judge.js";
 import { writeHistoryEntry } from "../eval/benchmark-history.js";
 import { sendSSE, sendSSEDone, withHeartbeat } from "./sse-helpers.js";
+import { classifyError } from "./error-classifier.js";
 
 // ---------------------------------------------------------------------------
 // Single-case execution (used by per-case endpoint and bulk runner)
@@ -21,10 +23,11 @@ export interface SingleCaseRunOptions {
   client: LlmClient;
   isAborted: () => boolean;
   totalCases?: number; // for progress display
+  provider?: string;   // for error classification hints
 }
 
 export async function runSingleCaseSSE(opts: SingleCaseRunOptions): Promise<BenchmarkCase> {
-  const { res, evalCase, systemPrompt, client, isAborted, totalCases = 1 } = opts;
+  const { res, evalCase, systemPrompt, client, isAborted, totalCases = 1, provider } = opts;
 
   sendSSE(res, "case_start", {
     eval_id: evalCase.id,
@@ -118,6 +121,7 @@ export async function runSingleCaseSSE(opts: SingleCaseRunOptions): Promise<Benc
     return benchCase;
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
+    const classified = classifyError(err, provider);
     const errorCase: BenchmarkCase = {
       eval_id: evalCase.id,
       eval_name: evalCase.name,
@@ -130,6 +134,7 @@ export async function runSingleCaseSSE(opts: SingleCaseRunOptions): Promise<Benc
       eval_id: evalCase.id,
       status: "error",
       error_message: errorMsg,
+      classified_error: classified,
     });
     return errorCase;
   }
@@ -193,6 +198,17 @@ export async function runBenchmarkSSE(opts: BenchmarkRunOptions): Promise<void> 
     ? allCases.filter((e) => filterIds.has(e.id))
     : allCases;
 
+  // Emit duration estimate so the UI can warn about long runs
+  const totalAssertions = evalCases.reduce((s, e) => s + e.assertions.length, 0);
+  const estimate = estimateDurationSec(provider as ProviderName, evalCases.length, totalAssertions);
+  sendSSE(res, "estimate", {
+    totalCases: evalCases.length,
+    totalAssertions,
+    estimatedMinSec: estimate.minSec,
+    estimatedMaxSec: estimate.maxSec,
+    estimatedLabel: estimate.label,
+  });
+
   const cases: BenchmarkCase[] = [];
 
   for (const evalCase of evalCases) {
@@ -205,6 +221,7 @@ export async function runBenchmarkSSE(opts: BenchmarkRunOptions): Promise<void> 
       client,
       isAborted,
       totalCases: evalCases.length,
+      provider,
     });
     cases.push(benchCase);
   }

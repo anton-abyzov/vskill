@@ -59,6 +59,33 @@ export interface LlmOverrides {
   model?: string;
 }
 
+/**
+ * Estimate total eval duration in seconds based on provider and workload.
+ * Each case requires 1 generate call + N judge calls (one per assertion).
+ */
+export function estimateDurationSec(
+  provider: ProviderName,
+  totalCases: number,
+  totalAssertions: number,
+): { minSec: number; maxSec: number; label: string } {
+  // Approximate seconds per LLM call by provider
+  const perCall: Record<ProviderName, [number, number]> = {
+    "claude-cli":  [12, 30],
+    "anthropic":   [4, 12],
+    "codex-cli":   [8, 20],
+    "gemini-cli":  [8, 20],
+    "ollama":      [5, 30],
+  };
+  const [lo, hi] = perCall[provider] ?? [5, 20];
+  const totalCalls = totalCases + totalAssertions; // 1 generate + N judges
+  const minSec = Math.round(totalCalls * lo);
+  const maxSec = Math.round(totalCalls * hi);
+
+  const fmt = (s: number) => s >= 60 ? `${Math.round(s / 60)}m` : `${s}s`;
+  const label = minSec === maxSec ? fmt(minSec) : `${fmt(minSec)}–${fmt(maxSec)}`;
+  return { minSec, maxSec, label };
+}
+
 export function createLlmClient(overrides?: LlmOverrides): LlmClient {
   const provider = (overrides?.provider || process.env.VSKILL_EVAL_PROVIDER || detectProvider()) as ProviderName;
   const modelOverride = overrides?.model;
@@ -178,9 +205,13 @@ function createCliClient(config: CliConfig): LlmClient {
           env = { ...process.env as Record<string, string>, PATH: enhancedPath() };
         }
 
+        // On Windows, .cmd/.bat files require shell:true to execute via spawn
+        const needsShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(resolvedBinary);
+
         const proc = spawn(resolvedBinary, config.args, {
           stdio: ["pipe", "pipe", "pipe"],
           env,
+          ...(needsShell ? { shell: true } : {}),
         });
 
         let stdout = "";

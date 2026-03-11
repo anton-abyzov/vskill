@@ -1,6 +1,17 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import type { RunMode, InlineResult, CaseRunStatus } from "./workspaceTypes";
+import type { ClassifiedError } from "../../components/ErrorCard";
+
+/** Estimate duration label based on case/assertion count (client-side heuristic) */
+function estimateLabel(totalCases: number, totalAssertions: number): string {
+  // ~15-25s per LLM call (conservative for CLI providers)
+  const totalCalls = totalCases + totalAssertions;
+  const minSec = totalCalls * 10;
+  const maxSec = totalCalls * 25;
+  const fmt = (s: number) => s >= 60 ? `${Math.round(s / 60)}m` : `${s}s`;
+  return `${fmt(minSec)}\u2013${fmt(maxSec)}`;
+}
 
 export function RunPanel() {
   const { state, runCase, runAll, cancelCase, cancelAll } = useWorkspace();
@@ -25,6 +36,30 @@ export function RunPanel() {
     const s = caseRunStates.get(c.id);
     return s && (s.status === "running" || s.status === "queued");
   }).length;
+
+  // Elapsed timer — ticks every second while cases are running
+  const runStartRef = useRef<number | null>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
+
+  useEffect(() => {
+    if (isAnyRunning && !runStartRef.current) {
+      runStartRef.current = Date.now();
+    }
+    if (!isAnyRunning) {
+      runStartRef.current = null;
+      setElapsedSec(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      if (runStartRef.current) {
+        setElapsedSec(Math.round((Date.now() - runStartRef.current) / 1000));
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isAnyRunning]);
+
+  const totalAssertions = cases.reduce((s, c) => s + c.assertions.length, 0);
+  const durationEstimate = useMemo(() => estimateLabel(cases.length, totalAssertions), [cases.length, totalAssertions]);
 
   return (
     <div className="p-5">
@@ -80,6 +115,14 @@ export function RunPanel() {
                 background: "var(--accent)",
               }}
             />
+          </div>
+          <div className="flex items-center justify-between mt-1.5">
+            <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
+              Elapsed: {elapsedSec >= 60 ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s` : `${elapsedSec}s`}
+            </span>
+            <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
+              Est. total: {durationEstimate}
+            </span>
           </div>
         </div>
       )}
@@ -313,12 +356,74 @@ function RunCaseCard({ name, evalId, result, caseStatus, runMode, onRun, onBasel
 
       {/* Error message */}
       {result && result.errorMessage && (
-        <div className="px-4 pb-3">
-          <div className="text-[11px] p-2 rounded-lg" style={{ background: "var(--red-muted)", color: "var(--red)" }}>
-            {result.errorMessage}
-          </div>
-        </div>
+        <CaseError errorMessage={result.errorMessage} classifiedError={result.classifiedError} />
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Collapsible error display — shows friendly summary, click to reveal raw details
+// ---------------------------------------------------------------------------
+
+const ERROR_ICONS: Record<string, string> = {
+  rate_limit: "\u23F1",
+  context_window: "\u26A0",
+  auth: "\uD83D\uDD12",
+  timeout: "\u231B",
+  provider_unavailable: "\u26A1",
+  parse_error: "\u2753",
+  unknown: "\u274C",
+};
+
+function CaseError({ errorMessage, classifiedError }: { errorMessage: string; classifiedError?: ClassifiedError }) {
+  const [showRaw, setShowRaw] = useState(false);
+  const title = classifiedError?.title ?? "Error";
+  const hint = classifiedError?.hint;
+  const icon = classifiedError ? (ERROR_ICONS[classifiedError.category] ?? ERROR_ICONS.unknown) : ERROR_ICONS.unknown;
+
+  return (
+    <div className="px-4 pb-3">
+      <div className="rounded-lg overflow-hidden" style={{ background: "var(--red-muted)", border: "1px solid rgba(239,68,68,0.2)" }}>
+        {/* Summary row — always visible */}
+        <div className="flex items-center gap-2 px-3 py-2">
+          <span style={{ fontSize: 12 }}>{icon}</span>
+          <span className="text-[11.5px] font-semibold flex-1" style={{ color: "var(--red)" }}>
+            {title}
+          </span>
+          <button
+            onClick={() => setShowRaw(!showRaw)}
+            className="text-[10px] px-1.5 py-0.5 rounded transition-colors duration-150"
+            style={{ color: "var(--text-tertiary)", background: "transparent" }}
+          >
+            {showRaw ? "Hide details" : "Details"}
+          </button>
+        </div>
+
+        {/* Hint */}
+        {hint && (
+          <div className="px-3 pb-2 text-[10.5px]" style={{ color: "var(--text-secondary)" }}>
+            {hint}
+          </div>
+        )}
+
+        {/* Raw error — collapsible */}
+        {showRaw && (
+          <pre
+            className="text-[10px] px-3 pb-2.5 overflow-auto"
+            style={{
+              color: "var(--text-tertiary)",
+              maxHeight: 120,
+              fontFamily: "var(--font-mono, ui-monospace, monospace)",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-all",
+              margin: 0,
+            }}
+          >
+            {errorMessage}
+          </pre>
+        )}
+      </div>
     </div>
   );
 }

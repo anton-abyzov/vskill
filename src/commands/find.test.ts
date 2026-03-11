@@ -383,6 +383,58 @@ describe("findCommand", () => {
     expect(dataLines[0]).toContain("owner/other");
   });
 
+  it("TTY mode with pluginName shows dim bracketed suffix", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "release-skill", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 100, githubStars: 10, vskillInstalls: 100, pluginName: "specweave-release" },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    expect(output).toContain("[specweave-release]");
+  });
+
+  it("TTY mode without pluginName shows no bracketed suffix", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "plain-skill", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 100, githubStars: 10, vskillInstalls: 100 },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    expect(output).not.toMatch(/\[.*\]/);
+  });
+
+  it("piped mode with pluginName includes it as tab-separated field", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "release-skill", author: "a", repoUrl: "https://github.com/owner/repo", tier: "VERIFIED", score: 90, installs: 100, githubStars: 10, vskillInstalls: 100, pluginName: "specweave-release" },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test", { noHint: true });
+    const dataLines = logs.filter((l) => l.includes("\t"));
+    expect(dataLines[0]).toBe("release-skill\towner/repo\t10\t\tspecweave-release\t");
+  });
+
+  it("piped mode without pluginName has no extra field", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "plain-skill", author: "a", repoUrl: "https://github.com/owner/repo", tier: "VERIFIED", score: 90, installs: 100, githubStars: 10, vskillInstalls: 100 },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test", { noHint: true });
+    const dataLines = logs.filter((l) => l.includes("\t"));
+    expect(dataLines[0]).toBe("plain-skill\towner/repo\t10\t\t\t");
+  });
+
   it("no alternateRepos renders identically to current behavior", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     mockSearchSkills.mockResolvedValue({

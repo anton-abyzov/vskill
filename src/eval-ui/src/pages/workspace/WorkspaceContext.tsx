@@ -71,6 +71,7 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
       r.status = data.status as string;
       r.passRate = data.pass_rate as number | undefined;
       r.errorMessage = (data.error_message as string) || undefined;
+      r.classifiedError = (data.classified_error as InlineResult["classifiedError"]) || undefined;
     }
 
     // Dispatch a snapshot (shallow copy) for React

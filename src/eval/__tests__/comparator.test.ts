@@ -5,6 +5,7 @@ import {
   runComparison,
 } from "../comparator.js";
 import type { LlmClient } from "../llm.js";
+import type { McpDependency } from "../mcp-detector.js";
 
 function mockClient(responses: string[]): LlmClient {
   let callIndex = 0;
@@ -159,6 +160,101 @@ describe("runComparison", () => {
     expect(result.baselineContentScore).toBe(2);
     // winner "second" = B = skill
     expect(result.winner).toBe("skill");
+
+    vi.restoreAllMocks();
+  });
+});
+
+describe("scoreComparison with MCP deps", () => {
+  it("uses standard prompt when no MCP deps", async () => {
+    const client = mockClient([
+      JSON.stringify({
+        content_score_a: 3,
+        structure_score_a: 3,
+        content_score_b: 3,
+        structure_score_b: 3,
+        winner: "tie",
+      }),
+    ]);
+
+    await scoreComparison("A", "B", "prompt", client);
+
+    const systemPrompt = (client.generate as any).mock.calls[0][0];
+    expect(systemPrompt).not.toContain("SIMULATED MCP");
+  });
+
+  it("augments prompt when MCP deps present", async () => {
+    const client = mockClient([
+      JSON.stringify({
+        content_score_a: 3,
+        structure_score_a: 3,
+        content_score_b: 3,
+        structure_score_b: 3,
+        winner: "tie",
+      }),
+    ]);
+
+    const mcpDeps: McpDependency[] = [
+      {
+        server: "Slack",
+        url: "https://mcp.slack.com/mcp",
+        transport: "http",
+        matchedTools: ["slack_send_message"],
+        configSnippet: "{}",
+      },
+    ];
+
+    await scoreComparison("A", "B", "prompt", client, mcpDeps);
+
+    const systemPrompt = (client.generate as any).mock.calls[0][0];
+    expect(systemPrompt).toContain("SIMULATED MCP");
+    expect(systemPrompt).toContain("Slack");
+  });
+});
+
+describe("runComparison with MCP auto-detection", () => {
+  it("auto-detects MCP deps from skill content and augments comparison", async () => {
+    const client = mockClient([
+      "skill output",
+      "baseline output",
+      JSON.stringify({
+        content_score_a: 3,
+        structure_score_a: 3,
+        content_score_b: 3,
+        structure_score_b: 3,
+        winner: "tie",
+      }),
+    ]);
+    vi.spyOn(Math, "random").mockReturnValue(0.3);
+
+    await runComparison("prompt", "Use slack_send_message to send messages.", client);
+
+    // The third call is the scoring call - check its system prompt
+    const scoringCall = (client.generate as any).mock.calls[2];
+    expect(scoringCall[0]).toContain("SIMULATED MCP");
+    expect(scoringCall[0]).toContain("Slack");
+
+    vi.restoreAllMocks();
+  });
+
+  it("does not augment comparison for non-MCP skills", async () => {
+    const client = mockClient([
+      "skill output",
+      "baseline output",
+      JSON.stringify({
+        content_score_a: 3,
+        structure_score_a: 3,
+        content_score_b: 3,
+        structure_score_b: 3,
+        winner: "tie",
+      }),
+    ]);
+    vi.spyOn(Math, "random").mockReturnValue(0.3);
+
+    await runComparison("prompt", "Plain text skill without MCP.", client);
+
+    const scoringCall = (client.generate as any).mock.calls[2];
+    expect(scoringCall[0]).not.toContain("SIMULATED MCP");
 
     vi.restoreAllMocks();
   });

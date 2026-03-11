@@ -77,4 +77,41 @@ describe("benchmark", () => {
     const result = await readBenchmark(testDir);
     expect(result).toBeNull();
   });
+
+  it("writes and reads BenchmarkResult with mcpSimulation", async () => {
+    const benchmarkWithMcp: BenchmarkResult = {
+      ...SAMPLE_BENCHMARK,
+      mcpSimulation: {
+        active: true,
+        servers: ["Slack", "GitHub"],
+      },
+    };
+
+    await writeBenchmark(testDir, benchmarkWithMcp);
+    const result = await readBenchmark(testDir);
+
+    expect(result).not.toBeNull();
+    expect(result!.mcpSimulation).toBeDefined();
+    expect(result!.mcpSimulation!.active).toBe(true);
+    expect(result!.mcpSimulation!.servers).toEqual(["Slack", "GitHub"]);
+  });
+
+  it("reads BenchmarkResult without mcpSimulation (backward compat)", async () => {
+    // Write a benchmark without mcpSimulation field
+    const rawBenchmark = {
+      timestamp: "2026-03-01T00:00:00.000Z",
+      model: "claude-sonnet-4-6",
+      skill_name: "old-skill",
+      cases: [],
+    };
+    writeFileSync(
+      join(testDir, "evals", "benchmark.json"),
+      JSON.stringify(rawBenchmark),
+    );
+
+    const result = await readBenchmark(testDir);
+    expect(result).not.toBeNull();
+    expect(result!.mcpSimulation).toBeUndefined();
+    expect(result!.skill_name).toBe("old-skill");
+  });
 });

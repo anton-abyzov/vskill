@@ -47,6 +47,36 @@ const MCP_REGISTRY: McpRegistryEntry[] = [
     url: "https://mcp.google.com/mcp",
     transport: "http",
   },
+  {
+    server: "Notion",
+    prefixes: ["notion_"],
+    url: "https://mcp.notion.com/mcp",
+    transport: "http",
+  },
+  {
+    server: "Jira",
+    prefixes: ["jira_"],
+    url: "https://mcp.atlassian.com/jira/mcp",
+    transport: "http",
+  },
+  {
+    server: "Confluence",
+    prefixes: ["confluence_"],
+    url: "https://mcp.atlassian.com/confluence/mcp",
+    transport: "http",
+  },
+  {
+    server: "Figma",
+    prefixes: ["figma_"],
+    url: "https://mcp.figma.com/mcp",
+    transport: "http",
+  },
+  {
+    server: "Sentry",
+    prefixes: ["sentry_"],
+    url: "https://mcp.sentry.dev/mcp",
+    transport: "http",
+  },
 ];
 
 function buildConfigSnippet(serverKey: string, url: string): string {

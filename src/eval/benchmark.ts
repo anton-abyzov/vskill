@@ -83,6 +83,10 @@ export interface BenchmarkResult {
     result: string;
   };
   actionItems?: ActionItems;
+  mcpSimulation?: {
+    active: boolean;
+    servers: string[];
+  };
 }
 
 export async function writeBenchmark(

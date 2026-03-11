@@ -75,6 +75,67 @@ This skill does basic text processing.`;
     expect(parsed.mcpServers.slack.url).toBe("https://mcp.slack.com/mcp");
   });
 
+  it("detects Notion tool patterns", () => {
+    const content = `Use notion_create_page and notion_search to manage Notion workspace.`;
+    const deps = detectMcpDependencies(content);
+    expect(deps).toHaveLength(1);
+    expect(deps[0].server).toBe("Notion");
+    expect(deps[0].url).toBe("https://mcp.notion.com/mcp");
+    expect(deps[0].transport).toBe("http");
+    expect(deps[0].matchedTools).toContain("notion_create_page");
+    expect(deps[0].matchedTools).toContain("notion_search");
+  });
+
+  it("detects Jira tool patterns", () => {
+    const content = `Use jira_create_issue to file bugs in Jira.`;
+    const deps = detectMcpDependencies(content);
+    expect(deps).toHaveLength(1);
+    expect(deps[0].server).toBe("Jira");
+    expect(deps[0].url).toBe("https://mcp.atlassian.com/jira/mcp");
+    expect(deps[0].transport).toBe("http");
+    expect(deps[0].matchedTools).toContain("jira_create_issue");
+  });
+
+  it("detects Confluence tool patterns", () => {
+    const content = `Use confluence_create_page to write documentation.`;
+    const deps = detectMcpDependencies(content);
+    expect(deps).toHaveLength(1);
+    expect(deps[0].server).toBe("Confluence");
+    expect(deps[0].url).toBe("https://mcp.atlassian.com/confluence/mcp");
+    expect(deps[0].transport).toBe("http");
+    expect(deps[0].matchedTools).toContain("confluence_create_page");
+  });
+
+  it("detects Figma tool patterns", () => {
+    const content = `Use figma_get_file to inspect design files.`;
+    const deps = detectMcpDependencies(content);
+    expect(deps).toHaveLength(1);
+    expect(deps[0].server).toBe("Figma");
+    expect(deps[0].url).toBe("https://mcp.figma.com/mcp");
+    expect(deps[0].transport).toBe("http");
+    expect(deps[0].matchedTools).toContain("figma_get_file");
+  });
+
+  it("detects Sentry tool patterns", () => {
+    const content = `Use sentry_list_issues to monitor errors.`;
+    const deps = detectMcpDependencies(content);
+    expect(deps).toHaveLength(1);
+    expect(deps[0].server).toBe("Sentry");
+    expect(deps[0].url).toBe("https://mcp.sentry.dev/mcp");
+    expect(deps[0].transport).toBe("http");
+    expect(deps[0].matchedTools).toContain("sentry_list_issues");
+  });
+
+  it("detects multiple new servers simultaneously", () => {
+    const content = `Use notion_create_page for docs, jira_create_issue for bugs, and figma_get_file for design.`;
+    const deps = detectMcpDependencies(content);
+    expect(deps).toHaveLength(3);
+    const servers = deps.map((d) => d.server);
+    expect(servers).toContain("Notion");
+    expect(servers).toContain("Jira");
+    expect(servers).toContain("Figma");
+  });
+
   it("deduplicates tools from frontmatter and body", () => {
     const content = `---
 allowed-tools: [slack_send_message]

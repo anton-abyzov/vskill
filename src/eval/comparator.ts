@@ -4,6 +4,7 @@
 
 import type { LlmClient } from "./llm.js";
 import { buildEvalSystemPrompt, buildBaselineSystemPrompt } from "./prompt-builder.js";
+import { detectMcpDependencies, type McpDependency } from "./mcp-detector.js";
 
 export type ComparisonProgressCallback = (phase: string, message: string) => void;
 
@@ -90,7 +91,15 @@ export async function scoreComparison(
   outputB: string,
   prompt: string,
   client: LlmClient,
+  mcpDeps?: McpDependency[],
 ): Promise<ComparisonScore> {
+  let systemPrompt = COMPARATOR_SYSTEM_PROMPT;
+
+  if (mcpDeps && mcpDeps.length > 0) {
+    const serverList = mcpDeps.map((d) => d.server).join(", ");
+    systemPrompt += `\n\nNOTE: One or both responses may contain SIMULATED MCP tool interactions (tools: ${serverList}).\nSimulated tool calls are valid demonstrations. Evaluate the quality and realism of the\nsimulation (correct tool names, realistic parameters, plausible responses) rather than\npenalizing simulated output vs. real output.`;
+  }
+
   const userPrompt = `## Original Prompt
 ${prompt}
 
@@ -102,7 +111,7 @@ ${outputB}
 
 Evaluate both responses.`;
 
-  const { text: response } = await client.generate(COMPARATOR_SYSTEM_PROMPT, userPrompt);
+  const { text: response } = await client.generate(systemPrompt, userPrompt);
 
   // Parse JSON from response (may be in code fence or plain)
   let json: Record<string, unknown>;
@@ -138,8 +147,10 @@ export async function runComparison(
   const outputA = skillIsA ? outputs.skillOutput : outputs.baselineOutput;
   const outputB = skillIsA ? outputs.baselineOutput : outputs.skillOutput;
 
+  const mcpDeps = detectMcpDependencies(skillContent);
+
   onProgress?.("scoring", "Scoring comparison...");
-  const scores = await scoreComparison(outputA, outputB, prompt, client);
+  const scores = await scoreComparison(outputA, outputB, prompt, client, mcpDeps.length > 0 ? mcpDeps : undefined);
 
   // Map scores back to skill/baseline
   const skillContentScore = skillIsA ? scores.contentScoreA : scores.contentScoreB;

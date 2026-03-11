@@ -116,6 +116,30 @@ export function buildBaselineSystemPrompt(): string {
 // ---------------------------------------------------------------------------
 
 export function buildEvalInitPrompt(skillContent: string): string {
+  const mcpDeps = detectMcpDependencies(skillContent);
+
+  let mcpSection = "";
+  if (mcpDeps.length > 0) {
+    const toolList = mcpDeps
+      .map((d) => `- **${d.server}**: ${d.matchedTools.join(", ")}`)
+      .join("\n");
+
+    mcpSection = `
+
+## MCP Simulation Context
+
+This skill uses MCP tools that will be SIMULATED during evaluation (not connected to real services).
+Tools detected:
+${toolList}
+
+When generating assertions:
+- Assert that the output demonstrates the correct tool call workflow (tool name, parameters)
+- Assert that simulated responses are realistic and complete
+- Do NOT assert on real API artifacts (actual URLs, real IDs, live data)
+- Use assertions like "demonstrates calling slack_send_message with channel and message params"
+`;
+  }
+
   return `You are an expert eval generator for AI skills. Your task is to create an evals.json file for the skill described below.
 
 ## Skill Content (SKILL.md)
@@ -127,7 +151,7 @@ ${SCHEMA_REFERENCE}
 ${EXAMPLE_EVALS}
 
 ${BEST_PRACTICES}
-
+${mcpSection}
 ## Instructions
 
 Generate a complete evals.json for this skill. Output ONLY the JSON inside a \`\`\`json code fence. Generate 2-3 eval cases with realistic, specific prompts and objectively verifiable assertions. Each case must have at least 2 assertions.`;

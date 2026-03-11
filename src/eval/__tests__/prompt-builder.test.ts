@@ -35,6 +35,27 @@ describe("buildEvalInitPrompt", () => {
     expect(prompt).toContain("Best Practices");
     expect(prompt).toContain("objectively verifiable");
   });
+
+  it("includes MCP context for Slack skill", () => {
+    const slackSkill = "Use slack_send_message to post messages to Slack channels.";
+    const prompt = buildEvalInitPrompt(slackSkill);
+    expect(prompt).toContain("MCP Simulation Context");
+    expect(prompt).toContain("Slack");
+  });
+
+  it("is unchanged for non-MCP skill", () => {
+    const plainSkill = "# My Skill\nThis skill does text processing.";
+    const prompt = buildEvalInitPrompt(plainSkill);
+    expect(prompt).not.toContain("MCP Simulation Context");
+  });
+
+  it("lists all detected MCP servers", () => {
+    const multiSkill = "Use slack_send_message for chat and github_create_pr for PRs.";
+    const prompt = buildEvalInitPrompt(multiSkill);
+    expect(prompt).toContain("Slack");
+    expect(prompt).toContain("GitHub");
+    expect(prompt).toContain("MCP Simulation Context");
+  });
 });
 
 // ---------------------------------------------------------------------------

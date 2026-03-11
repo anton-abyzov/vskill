@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Assertion } from "../schema.js";
 import type { LlmClient } from "../llm.js";
-import { judgeAssertion } from "../judge.js";
+import { judgeAssertion, buildJudgeSystemPrompt } from "../judge.js";
+import type { McpDependency } from "../mcp-detector.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -72,5 +73,97 @@ describe("judgeAssertion", () => {
 
     const result = await judgeAssertion("some output", ASSERTION, client);
     expect(result.pass).toBe(true);
+  });
+
+  it("uses standard prompt when mcpDeps not provided", async () => {
+    const client = mockClient(
+      JSON.stringify({ pass: true, reasoning: "ok" }),
+    );
+
+    await judgeAssertion("output", ASSERTION, client);
+
+    const systemPrompt = (client.generate as any).mock.calls[0][0];
+    expect(systemPrompt).toContain("binary assertion evaluator");
+    expect(systemPrompt).not.toContain("SIMULATION MODE");
+  });
+
+  it("uses MCP-augmented prompt when mcpDeps provided", async () => {
+    const client = mockClient(
+      JSON.stringify({ pass: true, reasoning: "simulation valid" }),
+    );
+
+    const mcpDeps: McpDependency[] = [
+      {
+        server: "Slack",
+        url: "https://mcp.slack.com/mcp",
+        transport: "http",
+        matchedTools: ["slack_send_message"],
+        configSnippet: "{}",
+      },
+    ];
+
+    await judgeAssertion("output", ASSERTION, client, mcpDeps);
+
+    const systemPrompt = (client.generate as any).mock.calls[0][0];
+    expect(systemPrompt).toContain("SIMULATION MODE");
+    expect(systemPrompt).toContain("Slack");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildJudgeSystemPrompt
+// ---------------------------------------------------------------------------
+
+describe("buildJudgeSystemPrompt", () => {
+  it("returns standard prompt when no MCP deps", () => {
+    const prompt = buildJudgeSystemPrompt();
+    expect(prompt).toContain("binary assertion evaluator");
+    expect(prompt).not.toContain("SIMULATION MODE");
+  });
+
+  it("returns standard prompt when mcpDeps is empty", () => {
+    const prompt = buildJudgeSystemPrompt([]);
+    expect(prompt).toContain("binary assertion evaluator");
+    expect(prompt).not.toContain("SIMULATION MODE");
+  });
+
+  it("returns augmented prompt with MCP deps", () => {
+    const mcpDeps: McpDependency[] = [
+      {
+        server: "Slack",
+        url: "https://mcp.slack.com/mcp",
+        transport: "http",
+        matchedTools: ["slack_send_message"],
+        configSnippet: "{}",
+      },
+    ];
+
+    const prompt = buildJudgeSystemPrompt(mcpDeps);
+    expect(prompt).toContain("SIMULATION MODE");
+    expect(prompt).toContain("Slack");
+    expect(prompt).toContain("binary assertion evaluator");
+  });
+
+  it("lists all simulated servers", () => {
+    const mcpDeps: McpDependency[] = [
+      {
+        server: "Slack",
+        url: "https://mcp.slack.com/mcp",
+        transport: "http",
+        matchedTools: ["slack_send_message"],
+        configSnippet: "{}",
+      },
+      {
+        server: "GitHub",
+        url: "https://api.githubcopilot.com/mcp/",
+        transport: "http",
+        matchedTools: ["github_create_pr"],
+        configSnippet: "{}",
+      },
+    ];
+
+    const prompt = buildJudgeSystemPrompt(mcpDeps);
+    expect(prompt).toContain("Slack");
+    expect(prompt).toContain("GitHub");
   });
 });

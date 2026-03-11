@@ -4,6 +4,7 @@
 
 import type { Assertion } from "./schema.js";
 import type { LlmClient } from "./llm.js";
+import type { McpDependency } from "./mcp-detector.js";
 
 export interface AssertionResult {
   id: string;
@@ -14,11 +15,32 @@ export interface AssertionResult {
 
 const JUDGE_SYSTEM = `You are a binary assertion evaluator. Given an LLM output and an assertion, determine if the output satisfies the assertion. Respond with ONLY a JSON object: { "pass": boolean, "reasoning": "brief explanation" }`;
 
+export function buildJudgeSystemPrompt(mcpDeps?: McpDependency[]): string {
+  if (!mcpDeps || mcpDeps.length === 0) {
+    return JUDGE_SYSTEM;
+  }
+
+  const serverList = mcpDeps.map((d) => d.server).join(", ");
+
+  return `You are a binary assertion evaluator. Given an LLM output and an assertion, determine if the output satisfies the assertion.
+
+IMPORTANT: This output was generated in MCP SIMULATION MODE. The following tools were simulated (not connected to real services): ${serverList}.
+When evaluating assertions:
+- A simulated tool call is valid if it names the correct tool and provides realistic parameters
+- A simulated response is valid if it contains plausible data (realistic IDs, timestamps, content)
+- Do NOT fail assertions just because data is simulated rather than real
+
+Respond with ONLY a JSON object: { "pass": boolean, "reasoning": "brief explanation" }`;
+}
+
 export async function judgeAssertion(
   output: string,
   assertion: Assertion,
   client: LlmClient,
+  mcpDeps?: McpDependency[],
 ): Promise<AssertionResult> {
+  const systemPrompt = buildJudgeSystemPrompt(mcpDeps);
+
   const userPrompt = `## LLM Output
 ${output}
 
@@ -27,7 +49,7 @@ ${assertion.text}
 
 Does the LLM output satisfy this assertion? Respond with JSON only: { "pass": boolean, "reasoning": "..." }`;
 
-  const { text: raw } = await client.generate(JUDGE_SYSTEM, userPrompt);
+  const { text: raw } = await client.generate(systemPrompt, userPrompt);
 
   const parsed = parseJudgeResponse(raw);
 

@@ -1,0 +1,48 @@
+{
+  "version": "1.0",
+  "incrementId": "0486-smart-ai-edit",
+  "timestamp": "2026-03-11T12:00:00.000Z",
+  "verdict": "FAIL",
+  "shipReadiness": "NOT READY",
+  "summary": {
+    "totalFindings": 3,
+    "critical": 1,
+    "high": 2,
+    "medium": 0
+  },
+  "findings": [
+    {
+      "title": "No unit tests for mergeEvalChanges, reducer eval actions, or UI components",
+      "severity": "critical",
+      "confidence": 95,
+      "category": "correctness",
+      "file": "src/eval-ui/src/utils/mergeEvalChanges.ts",
+      "issue": "Tasks.md specifies comprehensive test plans (T-003, T-004, T-006, T-009) with 90-95% coverage targets. Zero test files exist for the new code.",
+      "suggestion": "Write test files as specified in tasks.md. mergeEvalChanges is pure and trivially testable.",
+      "impact": "Core merge logic has no automated verification. Regressions would silently corrupt user eval data.",
+      "status": "open"
+    },
+    {
+      "title": "LLM eval change validation doesn't check expected_output field",
+      "severity": "high",
+      "confidence": 82,
+      "category": "correctness",
+      "file": "src/eval-server/improve-routes.ts:272",
+      "issue": "Validation checks name, prompt, assertions but not expected_output (required by EvalCase type). LLM may omit it.",
+      "suggestion": "Normalize expected_output to empty string if not a string. FIXED: Added normalization.",
+      "impact": "Eval changes without expected_output pass validation but fail on save.",
+      "status": "fixed"
+    },
+    {
+      "title": "LLM eval changes may lack files array",
+      "severity": "high",
+      "confidence": 70,
+      "category": "edge-case",
+      "file": "src/eval-server/improve-routes.ts:272",
+      "issue": "EvalCase requires files: string[]. LLM may omit it, causing undefined propagation.",
+      "suggestion": "Normalize files to empty array if not present. FIXED: Added normalization in both server validation and client merge.",
+      "impact": "Missing files field could cause rendering errors or save failures.",
+      "status": "fixed"
+    }
+  ]
+}

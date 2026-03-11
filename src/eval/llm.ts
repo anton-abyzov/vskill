@@ -12,6 +12,9 @@
 //   1. claude-cli (default — works everywhere, even inside Claude Code sessions)
 //   Other providers only used when explicitly set via VSKILL_EVAL_PROVIDER
 //
+// Timeout via VSKILL_EVAL_TIMEOUT env var (seconds, default: 300):
+//   export VSKILL_EVAL_TIMEOUT=600   # 10 minutes for complex cases
+//
 // Model selection via VSKILL_EVAL_MODEL env var:
 //   claude-cli:  "sonnet" | "opus" | "haiku" (default: sonnet)
 //   codex-cli:   "o4-mini" | "codex-1" | "gpt-5.3-codex" (default: o4-mini)
@@ -38,6 +41,16 @@ export type ProviderName = "anthropic" | "claude-cli" | "codex-cli" | "gemini-cl
 
 function detectProvider(): ProviderName {
   return "claude-cli";
+}
+
+/** Timeout in ms — configurable via VSKILL_EVAL_TIMEOUT (seconds). Default: 300s */
+function getTimeoutMs(): number {
+  const envVal = process.env.VSKILL_EVAL_TIMEOUT;
+  if (envVal) {
+    const seconds = parseInt(envVal, 10);
+    if (!isNaN(seconds) && seconds > 0) return seconds * 1000;
+  }
+  return 300_000;
 }
 
 export interface LlmOverrides {
@@ -91,7 +104,7 @@ function createAnthropicClient(modelOverride?: string): LlmClient {
       }
 
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 120_000);
+      const timeout = setTimeout(() => controller.abort(), getTimeoutMs());
       const start = Date.now();
       try {
         const response = await clientInstance.messages.create(
@@ -162,10 +175,11 @@ function createCliClient(config: CliConfig): LlmClient {
         proc.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
         proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
 
+        const timeoutMs = getTimeoutMs();
         const timer = setTimeout(() => {
           proc.kill("SIGTERM");
-          reject(new Error(`${config.name} CLI timed out after 120s`));
-        }, 120_000);
+          reject(new Error(`${config.name} CLI timed out after ${timeoutMs / 1000}s`));
+        }, timeoutMs);
 
         proc.on("error", (err: NodeJS.ErrnoException) => {
           clearTimeout(timer);
@@ -269,7 +283,7 @@ function createOllamaClient(modelOverride?: string): LlmClient {
             temperature: 0.3,
           },
         }),
-        signal: AbortSignal.timeout(120_000),
+        signal: AbortSignal.timeout(getTimeoutMs()),
       });
 
       if (!response.ok) {

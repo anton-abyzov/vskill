@@ -35,6 +35,9 @@ export function mergeEvalChanges(
 
   let evals = [...current.evals];
 
+  // Compute nextId from pre-remove array to avoid reusing deleted eval IDs
+  let nextId = current.evals.length > 0 ? Math.max(...current.evals.map((e) => e.id)) + 1 : 1;
+
   // 1. Removes
   const removeIds = new Set(removes.map((c) => c.evalId).filter((id): id is number => id != null));
   if (removeIds.size > 0) {
@@ -50,7 +53,6 @@ export function mergeEvalChanges(
   }
 
   // 3. Adds
-  let nextId = evals.length > 0 ? Math.max(...evals.map((e) => e.id)) + 1 : 1;
   for (const change of adds) {
     if (!change.eval) continue;
     evals.push(normalizeEval({ ...change.eval, id: nextId++ }));

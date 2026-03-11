@@ -107,10 +107,10 @@ function AddDetail({ evalCase }: { evalCase: EvalCase }) {
       <Field label="Expected" value={evalCase.expected_output} />
       <div>
         <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>
-          Assertions ({evalCase.assertions.length})
+          Assertions ({evalCase.assertions?.length ?? 0})
         </span>
         <div className="mt-1 space-y-1">
-          {evalCase.assertions.map((a) => (
+          {(evalCase.assertions ?? []).map((a) => (
             <div key={a.id} className="text-[11px] flex items-start gap-1.5" style={{ color: "var(--text-secondary)" }}>
               <span style={{ color: "var(--green)" }}>+</span> {a.text}
             </div>
@@ -134,10 +134,12 @@ function ModifyDetail({ original, proposed }: { original: EvalCase; proposed: Ev
     diffs.push({ label: "Expected", old: original.expected_output, new: proposed.expected_output });
   }
 
-  const oldAssertions = new Set(original.assertions.map((a) => a.text));
-  const newAssertions = new Set(proposed.assertions.map((a) => a.text));
-  const added = proposed.assertions.filter((a) => !oldAssertions.has(a.text));
-  const removed = original.assertions.filter((a) => !newAssertions.has(a.text));
+  const origAssertions = original.assertions ?? [];
+  const propAssertions = proposed.assertions ?? [];
+  const oldAssertions = new Set(origAssertions.map((a) => a.text));
+  const newAssertions = new Set(propAssertions.map((a) => a.text));
+  const added = propAssertions.filter((a) => !oldAssertions.has(a.text));
+  const removed = origAssertions.filter((a) => !newAssertions.has(a.text));
 
   return (
     <div className="pt-2.5 space-y-2">
@@ -180,10 +182,10 @@ function RemoveDetail({ evalCase }: { evalCase: EvalCase }) {
       <Field label="Prompt" value={evalCase.prompt} />
       <div>
         <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>
-          Assertions ({evalCase.assertions.length})
+          Assertions ({evalCase.assertions?.length ?? 0})
         </span>
         <div className="mt-1 space-y-0.5">
-          {evalCase.assertions.map((a) => (
+          {(evalCase.assertions ?? []).map((a) => (
             <div key={a.id} className="text-[11px]" style={{ color: "var(--red)", textDecoration: "line-through" }}>
               {a.text}
             </div>

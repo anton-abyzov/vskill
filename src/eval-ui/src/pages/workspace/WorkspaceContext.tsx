@@ -377,6 +377,7 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     try {
       const saved = await api.saveEvals(plugin, skill, merged);
       dispatch({ type: "SET_EVALS", evals: saved });
+      dispatch({ type: "SET_ERROR", error: null });
       dispatch({ type: "CLOSE_AI_EDIT" });
     } catch (e) {
       dispatch({ type: "SET_ERROR", error: `Retry failed: ${(e as Error).message}` });

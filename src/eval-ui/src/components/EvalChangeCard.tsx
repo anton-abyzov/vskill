@@ -124,6 +124,9 @@ function AddDetail({ evalCase }: { evalCase: EvalCase }) {
 function ModifyDetail({ original, proposed }: { original: EvalCase; proposed: EvalCase }) {
   const diffs: Array<{ label: string; old: string; new: string }> = [];
 
+  if (original.name !== proposed.name) {
+    diffs.push({ label: "Name", old: original.name, new: proposed.name });
+  }
   if (original.prompt !== proposed.prompt) {
     diffs.push({ label: "Prompt", old: original.prompt, new: proposed.prompt });
   }

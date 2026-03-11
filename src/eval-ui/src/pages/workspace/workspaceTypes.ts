@@ -149,8 +149,13 @@ export type WorkspaceAction =
   | { type: "OPEN_AI_EDIT" }
   | { type: "CLOSE_AI_EDIT" }
   | { type: "AI_EDIT_LOADING" }
+  | { type: "AI_EDIT_PROGRESS"; entry: ProgressEntry }
   | { type: "AI_EDIT_RESULT"; improved: string; reasoning: string; evalChanges: EvalChange[] }
-  | { type: "AI_EDIT_ERROR"; message: string }
+  | { type: "AI_EDIT_ERROR"; message: string; classified?: ClassifiedError }
+  | { type: "GENERATE_EVALS_START" }
+  | { type: "GENERATE_EVALS_PROGRESS"; entry: ProgressEntry }
+  | { type: "GENERATE_EVALS_DONE"; evals: EvalsFile }
+  | { type: "GENERATE_EVALS_ERROR"; classified: ClassifiedError }
   | { type: "TOGGLE_EVAL_CHANGE"; index: number }
   | { type: "SELECT_ALL_EVAL_CHANGES" }
   | { type: "DESELECT_ALL_EVAL_CHANGES" }
@@ -184,7 +189,8 @@ export interface WorkspaceContextValue {
   refreshSkillContent: () => Promise<void>;
   generateEvals: () => Promise<void>;
   runActivationTest: (prompts: string) => void;
-  submitAiEdit: (instruction: string, provider?: string, model?: string) => Promise<void>;
+  submitAiEdit: (instruction: string, provider?: string, model?: string) => void;
+  cancelAiEdit: () => void;
   applyAiEdit: () => Promise<void>;
   discardAiEdit: () => void;
   toggleEvalChange: (index: number) => void;

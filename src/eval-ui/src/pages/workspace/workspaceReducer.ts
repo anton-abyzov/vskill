@@ -19,9 +19,14 @@ export const initialWorkspaceState: WorkspaceState = {
   aiEditLoading: false,
   aiEditResult: null,
   aiEditError: null,
+  aiEditClassifiedError: null,
+  aiEditProgress: [],
   aiEditEvalChanges: [],
   aiEditEvalSelections: new Map(),
   aiEditEvalsRetry: null,
+  generateEvalsLoading: false,
+  generateEvalsProgress: [],
+  generateEvalsError: null,
   regressions: [],
   iterationCount: 0,
   activationPrompts: "",
@@ -195,13 +200,16 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     // -- AI Edit lifecycle --
 
     case "OPEN_AI_EDIT":
-      return { ...state, aiEditOpen: true, aiEditResult: null, aiEditError: null, aiEditEvalChanges: [], aiEditEvalSelections: new Map(), aiEditEvalsRetry: null };
+      return { ...state, aiEditOpen: true, aiEditResult: null, aiEditError: null, aiEditClassifiedError: null, aiEditProgress: [], aiEditEvalChanges: [], aiEditEvalSelections: new Map(), aiEditEvalsRetry: null };
 
     case "CLOSE_AI_EDIT":
-      return { ...state, aiEditOpen: false, aiEditLoading: false, aiEditResult: null, aiEditError: null, aiEditEvalChanges: [], aiEditEvalSelections: new Map(), aiEditEvalsRetry: null };
+      return { ...state, aiEditOpen: false, aiEditLoading: false, aiEditResult: null, aiEditError: null, aiEditClassifiedError: null, aiEditProgress: [], aiEditEvalChanges: [], aiEditEvalSelections: new Map(), aiEditEvalsRetry: null };
 
     case "AI_EDIT_LOADING":
-      return { ...state, aiEditLoading: true, aiEditError: null };
+      return { ...state, aiEditLoading: true, aiEditError: null, aiEditClassifiedError: null, aiEditProgress: [] };
+
+    case "AI_EDIT_PROGRESS":
+      return { ...state, aiEditProgress: [...state.aiEditProgress, action.entry] };
 
     case "AI_EDIT_RESULT": {
       const evalChanges = action.evalChanges ?? [];
@@ -217,7 +225,21 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     }
 
     case "AI_EDIT_ERROR":
-      return { ...state, aiEditLoading: false, aiEditError: action.message };
+      return { ...state, aiEditLoading: false, aiEditError: action.message, aiEditClassifiedError: action.classified ?? null };
+
+    // -- Generate evals lifecycle --
+
+    case "GENERATE_EVALS_START":
+      return { ...state, generateEvalsLoading: true, generateEvalsProgress: [], generateEvalsError: null };
+
+    case "GENERATE_EVALS_PROGRESS":
+      return { ...state, generateEvalsProgress: [...state.generateEvalsProgress, action.entry] };
+
+    case "GENERATE_EVALS_DONE":
+      return { ...state, generateEvalsLoading: false, evals: action.evals };
+
+    case "GENERATE_EVALS_ERROR":
+      return { ...state, generateEvalsLoading: false, generateEvalsError: action.classified };
 
     case "TOGGLE_EVAL_CHANGE": {
       const selections = new Map(state.aiEditEvalSelections);

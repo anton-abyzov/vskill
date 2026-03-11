@@ -255,7 +255,7 @@ After the improved content, on a new line, write "---REASONING---" followed by a
       let reasoning = parts.length > 1 ? parts[1].trim() : "Improvements applied.";
 
       // Extract eval changes from reasoning section
-      let evalChanges: unknown[] = [];
+      let evalChanges: Array<Record<string, unknown>> = [];
       if (mode === "instruct") {
         const evalParts = reasoning.split("---EVAL_CHANGES---");
         reasoning = evalParts[0].trim();
@@ -267,7 +267,7 @@ After the improved content, on a new line, write "---REASONING---" followed by a
             const jsonStr = jsonMatch ? jsonMatch[1].trim() : raw;
             const parsed = JSON.parse(jsonStr);
             if (Array.isArray(parsed)) {
-              // Validate each change conforms to expected shape
+              // Validate and normalize each change
               evalChanges = parsed.filter((c: Record<string, unknown>) => {
                 if (!c || typeof c !== "object") return false;
                 if (!["add", "modify", "remove"].includes(c.action as string)) return false;
@@ -279,6 +279,9 @@ After the improved content, on a new line, write "---REASONING---" followed by a
                 if (typeof ev.name !== "string" || typeof ev.prompt !== "string") return false;
                 if (!Array.isArray(ev.assertions)) return false;
                 if (c.action === "modify" && typeof c.evalId !== "number") return false;
+                // Normalize optional fields the LLM may omit
+                if (typeof ev.expected_output !== "string") ev.expected_output = "";
+                if (!Array.isArray(ev.files)) ev.files = [];
                 return true;
               });
             }

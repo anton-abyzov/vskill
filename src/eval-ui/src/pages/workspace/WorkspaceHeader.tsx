@@ -6,11 +6,14 @@ interface Props {
 }
 
 export function WorkspaceHeader({ state }: Props) {
-  const { plugin, skill, evals, latestBenchmark, isDirty, caseRunStates, regressions, iterationCount } = state;
+  const { plugin, skill, evals, latestBenchmark, isDirty, caseRunStates, regressions, iterationCount, inlineResults } = state;
   const isRunning = Array.from(caseRunStates.values()).some((s) => s.status === "running" || s.status === "queued");
 
   // Compute overall pass rate from latest benchmark
-  const passRate = latestBenchmark?.overall_pass_rate;
+  // If benchmark exists but no inline results match current evals, it's stale — show "--"
+  const evalIds = new Set(evals?.evals.map((e) => e.id) ?? []);
+  const hasMatchingResults = evalIds.size > 0 && Array.from(evalIds).some((id) => inlineResults.has(id));
+  const passRate = hasMatchingResults ? latestBenchmark?.overall_pass_rate : undefined;
   const totalAssertions = evals?.evals.reduce((sum, e) => sum + e.assertions.length, 0) ?? 0;
   const totalCases = evals?.evals.length ?? 0;
 

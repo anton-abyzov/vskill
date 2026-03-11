@@ -44,7 +44,7 @@ export function sendSSEDone(
  */
 export async function withHeartbeat<T>(
   res: http.ServerResponse,
-  evalId: number,
+  evalId: number | undefined,
   phase: string,
   messagePrefix: string,
   fn: () => Promise<T>,
@@ -53,11 +53,13 @@ export async function withHeartbeat<T>(
   const start = Date.now();
   const timer = setInterval(() => {
     const elapsed = Math.round((Date.now() - start) / 1000);
-    sendSSE(res, "progress", {
-      eval_id: evalId,
+    const data: Record<string, unknown> = {
       phase,
       message: `${messagePrefix} (${elapsed}s)`,
-    });
+      elapsed_ms: Date.now() - start,
+    };
+    if (evalId != null) data.eval_id = evalId;
+    sendSSE(res, "progress", data);
   }, intervalMs);
 
   try {

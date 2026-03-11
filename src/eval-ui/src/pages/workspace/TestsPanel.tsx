@@ -4,22 +4,21 @@ import { api } from "../../api";
 import type { EvalCase, Assertion, EvalsFile, CaseHistoryEntry } from "../../types";
 import type { InlineResult, CaseRunStatus } from "./workspaceTypes";
 import { passRateColor, shortDate, fmtDuration, MiniTrend } from "../../utils/historyUtils";
+import { ProgressLog } from "../../components/ProgressLog";
+import { ErrorCard } from "../../components/ErrorCard";
 
 export function TestsPanel() {
   const { state, dispatch, saveEvals, runCase, cancelCase, generateEvals } = useWorkspace();
-  const { evals, selectedCaseId, inlineResults, caseRunStates } = state;
+  const { evals, selectedCaseId, inlineResults, caseRunStates, generateEvalsLoading, generateEvalsProgress, generateEvalsError } = state;
   const [showForm, setShowForm] = useState(false);
-  const [generating, setGenerating] = useState(false);
 
   const defaultEvals: EvalsFile = { skill_name: state.skill, evals: [] };
   const effectiveEvals = evals ?? defaultEvals;
   const cases = effectiveEvals.evals;
   const selectedCase = cases.find((c) => c.id === selectedCaseId) ?? null;
 
-  const handleGenerateEvals = useCallback(async () => {
-    setGenerating(true);
-    await generateEvals();
-    setGenerating(false);
+  const handleGenerateEvals = useCallback(() => {
+    generateEvals();
   }, [generateEvals]);
 
   // Empty state
@@ -38,10 +37,28 @@ export function TestsPanel() {
         </div>
         <div className="flex gap-2">
           <button onClick={() => setShowForm(true)} className="btn btn-primary text-[12px]">Create Test Case</button>
-          <button onClick={handleGenerateEvals} disabled={generating} className="btn btn-secondary text-[12px]">
-            {generating ? <><span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> Generating...</> : "Generate with AI"}
+          <button onClick={handleGenerateEvals} disabled={generateEvalsLoading} className="btn btn-secondary text-[12px]">
+            {generateEvalsLoading ? <><span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> Generating...</> : "Generate with AI"}
           </button>
         </div>
+
+        {/* Progress log during generation */}
+        {generateEvalsLoading && generateEvalsProgress.length > 0 && (
+          <div className="w-full max-w-md mt-3">
+            <ProgressLog entries={generateEvalsProgress} isRunning={true} />
+          </div>
+        )}
+
+        {/* Error from generation */}
+        {generateEvalsError && (
+          <div className="w-full max-w-md mt-3">
+            <ErrorCard
+              error={generateEvalsError}
+              onRetry={handleGenerateEvals}
+            />
+          </div>
+        )}
+
         {showForm && (
           <NewCaseForm
             evals={effectiveEvals}

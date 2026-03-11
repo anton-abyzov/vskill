@@ -3,7 +3,8 @@ import { api } from "../../api";
 import { useMultiSSE, useSSE } from "../../sse";
 import type { SSEEvent } from "../../sse";
 import type { ActivationResult, ActivationSummary } from "../../types";
-import type { EvalsFile, BenchmarkResult } from "../../types";
+import type { EvalsFile, BenchmarkResult, EvalChange } from "../../types";
+import type { ClassifiedError } from "../../components/ErrorCard";
 import type { WorkspaceContextValue, PanelId, RunMode, InlineResult, AssertionResultInline } from "./workspaceTypes";
 import { workspaceReducer, initialWorkspaceState } from "./workspaceReducer";
 
@@ -256,27 +257,70 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     }
   }, [plugin, skill, runCase]);
 
-  // -- AI Edit --
+  // -- AI Edit (SSE-backed) --
+  const aiEditSSE = useSSE();
+  const aiEditAbortRef = useRef<(() => void) | null>(null);
+
+  // Process AI Edit SSE events
+  useEffect(() => {
+    if (!aiEditSSE.events.length) return;
+    for (const evt of aiEditSSE.events) {
+      const data = evt.data as Record<string, unknown>;
+      if (evt.event === "progress") {
+        dispatch({
+          type: "AI_EDIT_PROGRESS",
+          entry: {
+            timestamp: Date.now(),
+            phase: data.phase as string,
+            message: data.message as string,
+          },
+        });
+      }
+      if (evt.event === "done") {
+        const improved = data.improved as string;
+        const reasoning = data.reasoning as string;
+        const evalChanges = (data.evalChanges as EvalChange[]) ?? [];
+        dispatch({ type: "AI_EDIT_RESULT", improved, reasoning, evalChanges });
+      }
+      if (evt.event === "error") {
+        const classified = data as unknown as ClassifiedError;
+        dispatch({
+          type: "AI_EDIT_ERROR",
+          message: classified.description || "Unknown error",
+          classified,
+        });
+      }
+    }
+  }, [aiEditSSE.events]);
+
+  useEffect(() => {
+    if (aiEditSSE.error) {
+      dispatch({ type: "AI_EDIT_ERROR", message: aiEditSSE.error });
+    }
+  }, [aiEditSSE.error]);
+
+  // Cleanup AI Edit SSE on unmount
+  useEffect(() => {
+    return () => { aiEditSSE.stop(); };
+  }, [aiEditSSE.stop]);
+
   const submitAiEdit = useCallback(async (instruction: string, provider?: string, model?: string) => {
     dispatch({ type: "AI_EDIT_LOADING" });
-    try {
-      const result = await api.instructEdit(plugin, skill, {
-        instruction,
-        content: state.skillContent,
-        evals: state.evals ?? { skill_name: skill, evals: [] },
-        provider,
-        model,
-      });
-      dispatch({
-        type: "AI_EDIT_RESULT",
-        improved: result.improved,
-        reasoning: result.reasoning,
-        evalChanges: result.evalChanges ?? [],
-      });
-    } catch (e) {
-      dispatch({ type: "AI_EDIT_ERROR", message: (e as Error).message });
-    }
-  }, [plugin, skill, state.skillContent, state.evals]);
+    aiEditAbortRef.current = aiEditSSE.stop;
+    aiEditSSE.start(`/api/skills/${plugin}/${skill}/improve?sse`, {
+      mode: "instruct",
+      instruction,
+      content: state.skillContent,
+      evals: state.evals ?? { skill_name: skill, evals: [] },
+      provider,
+      model,
+    });
+  }, [plugin, skill, state.skillContent, state.evals, aiEditSSE]);
+
+  const cancelAiEdit = useCallback(() => {
+    aiEditSSE.stop();
+    dispatch({ type: "AI_EDIT_ERROR", message: "Cancelled" });
+  }, [aiEditSSE]);
 
   const applyAiEdit = useCallback(async () => {
     const result = state.aiEditResult;
@@ -347,15 +391,51 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     } catch {}
   }, [plugin, skill]);
 
-  const generateEvals = useCallback(async () => {
-    try {
-      const generated = await api.generateEvals(plugin, skill);
-      const saved = await api.saveEvals(plugin, skill, generated);
-      dispatch({ type: "SET_EVALS", evals: saved });
-    } catch (e) {
-      dispatch({ type: "SET_ERROR", error: (e as Error).message });
+  // -- Generate Evals (SSE-backed) --
+  const genEvalsSSE = useSSE();
+
+  // Process Generate Evals SSE events
+  useEffect(() => {
+    if (!genEvalsSSE.events.length) return;
+    for (const evt of genEvalsSSE.events) {
+      const data = evt.data as Record<string, unknown>;
+      if (evt.event === "progress") {
+        dispatch({
+          type: "GENERATE_EVALS_PROGRESS",
+          entry: {
+            timestamp: Date.now(),
+            phase: data.phase as string,
+            message: data.message as string,
+          },
+        });
+      }
+      if (evt.event === "done") {
+        // Save the generated evals to disk, then update state
+        const evalsFile = data as unknown as EvalsFile;
+        api.saveEvals(plugin, skill, evalsFile)
+          .then((saved) => dispatch({ type: "GENERATE_EVALS_DONE", evals: saved }))
+          .catch((e) => dispatch({ type: "SET_ERROR", error: (e as Error).message }));
+      }
+      if (evt.event === "error") {
+        dispatch({ type: "GENERATE_EVALS_ERROR", classified: data as unknown as ClassifiedError });
+      }
     }
-  }, [plugin, skill]);
+  }, [genEvalsSSE.events, plugin, skill]);
+
+  useEffect(() => {
+    if (genEvalsSSE.error) {
+      dispatch({ type: "SET_ERROR", error: genEvalsSSE.error });
+    }
+  }, [genEvalsSSE.error]);
+
+  useEffect(() => {
+    return () => { genEvalsSSE.stop(); };
+  }, [genEvalsSSE.stop]);
+
+  const generateEvals = useCallback(async () => {
+    dispatch({ type: "GENERATE_EVALS_START" });
+    genEvalsSSE.start(`/api/skills/${plugin}/${skill}/generate-evals?sse`);
+  }, [plugin, skill, genEvalsSSE]);
 
   // ---------------------------------------------------------------------------
   // Activation test SSE
@@ -416,13 +496,14 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     generateEvals,
     runActivationTest,
     submitAiEdit,
+    cancelAiEdit,
     applyAiEdit,
     discardAiEdit,
     toggleEvalChange,
     selectAllEvalChanges,
     deselectAllEvalChanges,
     retryEvalsSave,
-  }), [state, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, submitAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave]);
+  }), [state, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, submitAiEdit, cancelAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave]);
 
   return (
     <WorkspaceCtx.Provider value={value}>

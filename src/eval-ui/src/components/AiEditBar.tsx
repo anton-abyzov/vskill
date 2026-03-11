@@ -5,10 +5,12 @@ import type { ConfigResponse, ProviderInfo } from "../api";
 import { computeDiff } from "../utils/diff";
 import type { DiffLine } from "../utils/diff";
 import { EvalChangesPanel } from "./EvalChangesPanel";
+import { ProgressLog } from "./ProgressLog";
+import { ErrorCard } from "./ErrorCard";
 
 export function AiEditBar() {
-  const { state, dispatch, submitAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave } = useWorkspace();
-  const { aiEditLoading, aiEditResult, aiEditError, aiEditEvalChanges, aiEditEvalSelections, aiEditEvalsRetry } = state;
+  const { state, dispatch, submitAiEdit, applyAiEdit, discardAiEdit, cancelAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave } = useWorkspace();
+  const { aiEditLoading, aiEditResult, aiEditError, aiEditClassifiedError, aiEditProgress, aiEditEvalChanges, aiEditEvalSelections, aiEditEvalsRetry } = state;
 
   const [instruction, setInstruction] = useState("");
   const [config, setConfig] = useState<ConfigResponse | null>(null);
@@ -48,9 +50,13 @@ export function AiEditBar() {
     }
     if (e.key === "Escape") {
       e.preventDefault();
-      discardAiEdit();
+      if (aiEditLoading) {
+        cancelAiEdit();
+      } else {
+        discardAiEdit();
+      }
     }
-  }, [handleSubmit, discardAiEdit]);
+  }, [handleSubmit, aiEditLoading, cancelAiEdit, discardAiEdit]);
 
   const handleTryAgain = useCallback(() => {
     // Reset result but keep bar open for re-submit
@@ -109,7 +115,7 @@ export function AiEditBar() {
 
       <div className="px-4 py-3">
         {/* Instruction input + model picker + submit */}
-        {!aiEditResult && (
+        {!aiEditResult && (<>
           <div className="flex items-end gap-2.5">
             <div className="flex-1">
               <textarea
@@ -172,25 +178,48 @@ export function AiEditBar() {
                 ))}
               </select>
             </div>
-            <button
-              onClick={handleSubmit}
-              disabled={aiEditLoading || !instruction.trim()}
-              className="btn btn-primary flex-shrink-0 text-[11px]"
-              style={{ padding: "6px 14px" }}
-            >
-              {aiEditLoading ? (
-                <><div className="spinner" style={{ width: 11, height: 11, borderWidth: 1.5 }} /> Editing...</>
-              ) : (
-                "Submit"
-              )}
-            </button>
+            {aiEditLoading ? (
+              <button
+                onClick={cancelAiEdit}
+                className="btn btn-secondary flex-shrink-0 text-[11px]"
+                style={{ padding: "6px 14px" }}
+              >
+                Cancel
+              </button>
+            ) : (
+              <button
+                onClick={handleSubmit}
+                disabled={!instruction.trim()}
+                className="btn btn-primary flex-shrink-0 text-[11px]"
+                style={{ padding: "6px 14px" }}
+              >
+                Submit
+              </button>
+            )}
           </div>
-        )}
+
+          {/* Progress log during generation */}
+          {aiEditLoading && aiEditProgress.length > 0 && (
+            <div className="mt-2.5">
+              <ProgressLog entries={aiEditProgress} isRunning={true} />
+            </div>
+          )}
+        </>)}
 
         {/* Error */}
         {aiEditError && (
-          <div className="mt-3 px-3 py-2.5 rounded-lg text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)" }}>
-            {aiEditError}
+          <div className="mt-3">
+            {aiEditClassifiedError ? (
+              <ErrorCard
+                error={aiEditClassifiedError}
+                onRetry={handleTryAgain}
+                onDismiss={discardAiEdit}
+              />
+            ) : (
+              <div className="px-3 py-2.5 rounded-lg text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)" }}>
+                {aiEditError}
+              </div>
+            )}
           </div>
         )}
 

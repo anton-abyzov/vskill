@@ -1,8 +1,12 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import type { ConfigResponse } from "../api";
 import type { ProjectLayoutResponse, DetectedLayout, SkillCreatorStatus, GeneratedEval } from "../types";
+import { ProgressLog } from "../components/ProgressLog";
+import type { ProgressEntry } from "../components/ProgressLog";
+import { ErrorCard } from "../components/ErrorCard";
+import type { ClassifiedError } from "../components/ErrorCard";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -86,7 +90,10 @@ export function CreateSkillPage() {
   const [generating, setGenerating] = useState(false);
   const [aiReasoning, setAiReasoning] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [aiClassifiedError, setAiClassifiedError] = useState<ClassifiedError | null>(null);
+  const [aiProgress, setAiProgress] = useState<ProgressEntry[]>([]);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Load layout + config on mount
   useEffect(() => {
@@ -116,6 +123,11 @@ export function CreateSkillPage() {
   useEffect(() => {
     if (mode === "ai") promptRef.current?.focus();
   }, [mode]);
+
+  // Cleanup SSE on unmount
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
 
   // Available plugins for selected layout
   const availablePlugins = useMemo(() => {
@@ -164,32 +176,80 @@ export function CreateSkillPage() {
   // Handlers
   // ---------------------------------------------------------------------------
 
+  const handleCancelGenerate = useCallback(() => {
+    abortRef.current?.abort();
+    setGenerating(false);
+  }, []);
+
   async function handleGenerate() {
     setAiError(null);
+    setAiClassifiedError(null);
     setAiReasoning(null);
+    setAiProgress([]);
     if (!aiPrompt.trim()) { setAiError("Describe what your skill should do"); return; }
 
     setGenerating(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
-      const result = await api.generateSkill({
-        prompt: aiPrompt.trim(),
-        provider: aiProvider,
-        model: aiModel,
+      const res = await fetch(`/api/skills/generate?sse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: aiPrompt.trim(), provider: aiProvider, model: aiModel }),
+        signal: controller.signal,
       });
-      // Populate form fields with AI output
-      setName(result.name);
-      setDescription(result.description);
-      setModel(result.model);
-      setAllowedTools(result.allowedTools);
-      setBody(result.body);
-      setPendingEvals(result.evals?.length ? result.evals : null);
-      setAiReasoning(result.reasoning);
-      // Switch to manual mode so user can review/edit
-      setMode("manual");
+
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let currentEvent = "";
+
+      while (true) {
+        const { done: readerDone, value } = await reader.read();
+        if (readerDone) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === "progress") {
+                setAiProgress((prev) => [...prev, { phase: data.phase, message: data.message, timestamp: Date.now() }]);
+              } else if (currentEvent === "done" || currentEvent === "complete") {
+                setName(data.name);
+                setDescription(data.description);
+                setModel(data.model || "");
+                setAllowedTools(data.allowedTools || "");
+                setBody(data.body);
+                setPendingEvals(data.evals?.length ? data.evals : null);
+                setAiReasoning(data.reasoning);
+                setMode("manual");
+              } else if (currentEvent === "error") {
+                setAiError(data.message || data.description || "Unknown error");
+                if (data.category) setAiClassifiedError(data as ClassifiedError);
+              }
+            } catch {
+              // skip malformed data
+            }
+            currentEvent = "";
+          }
+        }
+      }
     } catch (err) {
-      setAiError((err as Error).message);
+      if ((err as Error).name !== "AbortError") {
+        setAiError((err as Error).message);
+      }
     } finally {
       setGenerating(false);
+      abortRef.current = null;
     }
   }
 
@@ -374,32 +434,54 @@ export function CreateSkillPage() {
               </div>
             </div>
 
+            {/* Progress log during generation */}
+            {generating && aiProgress.length > 0 && (
+              <div>
+                <ProgressLog entries={aiProgress} isRunning={true} />
+              </div>
+            )}
+
             {/* Error */}
             {aiError && (
-              <div className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
-                {aiError}
+              <div>
+                {aiClassifiedError ? (
+                  <ErrorCard
+                    error={aiClassifiedError}
+                    onRetry={handleGenerate}
+                    onDismiss={() => { setAiError(null); setAiClassifiedError(null); }}
+                  />
+                ) : (
+                  <div className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
+                    {aiError}
+                  </div>
+                )}
               </div>
             )}
 
             {/* Generate button */}
             <div className="flex items-center gap-3">
-              <button
-                onClick={handleGenerate}
-                disabled={generating || !aiPrompt.trim()}
-                className="px-6 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 flex items-center gap-2"
-                style={{
-                  background: generating || !aiPrompt.trim() ? "var(--surface-3)" : "#a855f7",
-                  color: generating || !aiPrompt.trim() ? "var(--text-tertiary)" : "#fff",
-                  cursor: generating || !aiPrompt.trim() ? "not-allowed" : "pointer",
-                  opacity: generating ? 0.8 : 1,
-                }}
-              >
-                {generating ? (
-                  <><div className="spinner" style={{ borderTopColor: "#fff", borderColor: "rgba(255,255,255,0.2)", width: 14, height: 14, borderWidth: 1.5 }} /> Generating...</>
-                ) : (
-                  <><SparkleIcon size={14} /> Generate Skill</>
-                )}
-              </button>
+              {generating ? (
+                <button
+                  onClick={handleCancelGenerate}
+                  className="px-6 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 flex items-center gap-2"
+                  style={{ background: "var(--surface-3)", color: "var(--text-secondary)" }}
+                >
+                  Cancel Generation
+                </button>
+              ) : (
+                <button
+                  onClick={handleGenerate}
+                  disabled={!aiPrompt.trim()}
+                  className="px-6 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 flex items-center gap-2"
+                  style={{
+                    background: !aiPrompt.trim() ? "var(--surface-3)" : "#a855f7",
+                    color: !aiPrompt.trim() ? "var(--text-tertiary)" : "#fff",
+                    cursor: !aiPrompt.trim() ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <SparkleIcon size={14} /> Generate Skill
+                </button>
+              )}
               <Link
                 to="/"
                 className="px-4 py-2.5 rounded-lg text-[13px] font-medium"

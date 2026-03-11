@@ -1,8 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "../api";
 import type { ConfigResponse, ProviderInfo } from "../api";
 import { computeDiff } from "../utils/diff";
 import type { DiffLine } from "../utils/diff";
+import { ProgressLog } from "./ProgressLog";
+import type { ProgressEntry } from "./ProgressLog";
+import { ErrorCard } from "./ErrorCard";
+import type { ClassifiedError } from "./ErrorCard";
 
 interface Props {
   plugin: string;
@@ -22,7 +26,10 @@ export function SkillImprovePanel({ plugin, skill, skillContent, onApplied }: Pr
   const [improved, setImproved] = useState("");
   const [reasoning, setReasoning] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [classifiedError, setClassifiedError] = useState<ClassifiedError | null>(null);
+  const [progress, setProgress] = useState<ProgressEntry[]>([]);
   const [applying, setApplying] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     api.getConfig().then((c) => {
@@ -36,25 +43,86 @@ export function SkillImprovePanel({ plugin, skill, skillContent, onApplied }: Pr
     }).catch(() => {});
   }, []);
 
+  // Cleanup SSE on unmount
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
+
   function getAvailableModels(): ProviderInfo | undefined {
     return config?.providers.find((p) => p.id === selectedProvider && p.available);
   }
 
+  const handleCancel = useCallback(() => {
+    abortRef.current?.abort();
+    setState("open");
+  }, []);
+
   async function handleImprove() {
     setState("loading");
     setError(null);
+    setClassifiedError(null);
+    setProgress([]);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
-      const result = await api.improveSkill(plugin, skill, {
-        provider: selectedProvider,
-        model: selectedModel,
+      const res = await fetch(`/api/skills/${encodeURIComponent(plugin)}/${encodeURIComponent(skill)}/improve?sse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: selectedProvider, model: selectedModel }),
+        signal: controller.signal,
       });
-      setImproved(result.improved);
-      setReasoning(result.reasoning);
-      setDiffLines(computeDiff(result.original, result.improved));
-      setState("diff_shown");
+
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let currentEvent = "";
+
+      while (true) {
+        const { done: readerDone, value } = await reader.read();
+        if (readerDone) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === "progress") {
+                setProgress((prev) => [...prev, { phase: data.phase, message: data.message, timestamp: Date.now() }]);
+              } else if (currentEvent === "done" || currentEvent === "complete") {
+                setImproved(data.improved);
+                setReasoning(data.reasoning || "");
+                setDiffLines(computeDiff(data.original || skillContent, data.improved));
+                setState("diff_shown");
+              } else if (currentEvent === "error") {
+                setError(data.message || data.description || "Unknown error");
+                if (data.category) {
+                  setClassifiedError(data as ClassifiedError);
+                }
+                setState("open");
+              }
+            } catch {
+              // skip malformed data
+            }
+            currentEvent = "";
+          }
+        }
+      }
     } catch (err) {
-      setError((err as Error).message);
-      setState("open");
+      if ((err as Error).name !== "AbortError") {
+        setError((err as Error).message);
+        setState("open");
+      }
+    } finally {
+      abortRef.current = null;
     }
   }
 
@@ -131,7 +199,7 @@ export function SkillImprovePanel({ plugin, skill, skillContent, onApplied }: Pr
 
       <div className="px-5 py-4">
         {/* Model picker */}
-        {(state === "open" || state === "loading") && (
+        {(state === "open" || state === "loading") && (<>
           <div className="flex items-end gap-3 mb-4">
             <div className="flex-1">
               <label className="text-[11px] font-medium mb-1 block" style={{ color: "var(--text-tertiary)" }}>Provider</label>
@@ -163,24 +231,45 @@ export function SkillImprovePanel({ plugin, skill, skillContent, onApplied }: Pr
                 ))}
               </select>
             </div>
-            <button
-              onClick={handleImprove}
-              disabled={state === "loading"}
-              className="btn btn-primary flex-shrink-0"
-            >
-              {state === "loading" ? (
-                <><div className="spinner" style={{ width: 12, height: 12 }} /> Improving...</>
-              ) : (
-                "Improve"
-              )}
-            </button>
+            {state === "loading" ? (
+              <button
+                onClick={handleCancel}
+                className="btn btn-secondary flex-shrink-0"
+              >
+                Cancel
+              </button>
+            ) : (
+              <button
+                onClick={handleImprove}
+                className="btn btn-primary flex-shrink-0"
+              >
+                Improve
+              </button>
+            )}
           </div>
-        )}
+
+          {/* Progress log during generation */}
+          {state === "loading" && progress.length > 0 && (
+            <div className="mt-3">
+              <ProgressLog entries={progress} isRunning={true} />
+            </div>
+          )}
+        </>)}
 
         {/* Error */}
         {error && (
-          <div className="mb-4 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)" }}>
-            {error}
+          <div className="mb-4">
+            {classifiedError ? (
+              <ErrorCard
+                error={classifiedError}
+                onRetry={handleImprove}
+                onDismiss={() => { setError(null); setClassifiedError(null); }}
+              />
+            ) : (
+              <div className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)" }}>
+                {error}
+              </div>
+            )}
           </div>
         )}
 

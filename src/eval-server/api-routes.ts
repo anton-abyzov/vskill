@@ -7,6 +7,7 @@ import { join } from "node:path";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import { initSSE, sendSSE, sendSSEDone, withHeartbeat } from "./sse-helpers.js";
+import { classifyError } from "./error-classifier.js";
 import { runBenchmarkSSE, runSingleCaseSSE, assembleBulkResult } from "./benchmark-runner.js";
 import { getSkillSemaphore } from "./concurrency.js";
 import { resolveSkillDir } from "./skill-resolver.js";
@@ -302,18 +303,46 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       return;
     }
 
+    const wantsSSE = req.headers.accept?.includes("text/event-stream") ||
+      (req.url ? new URL(req.url, "http://localhost").searchParams.has("sse") : false);
+
+    let aborted = false;
+    res.on("close", () => { aborted = true; });
+
+    if (wantsSSE) initSSE(res, req);
+
     try {
+      if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "preparing", message: "Reading skill content..." });
+
       const skillContent = readFileSync(skillMdPath, "utf-8");
       const prompt = buildEvalInitPrompt(skillContent);
       const client = getClient();
-      const genResult = await client.generate(
-        "You generate eval test cases for AI skills. Output only valid JSON in a code fence.",
-        prompt,
-      );
+
+      if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "generating", message: "Generating test cases..." });
+
+      const genResult = wantsSSE
+        ? await withHeartbeat(res, undefined, "generating", "Generating test cases", () =>
+            client.generate("You generate eval test cases for AI skills. Output only valid JSON in a code fence.", prompt))
+        : await client.generate("You generate eval test cases for AI skills. Output only valid JSON in a code fence.", prompt);
+
+      if (aborted) return;
+
+      if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "parsing", message: "Parsing generated evals..." });
+
       const evalsFile = parseGeneratedEvals(genResult.text);
-      sendJson(res, evalsFile, 200, req);
+
+      if (wantsSSE && !aborted) {
+        sendSSEDone(res, evalsFile);
+      } else {
+        sendJson(res, evalsFile, 200, req);
+      }
     } catch (err) {
-      sendJson(res, { error: `Eval generation failed: ${(err as Error).message}` }, 500, req);
+      if (wantsSSE && !aborted) {
+        sendSSE(res, "error", classifyError(err, currentOverrides.provider || "claude-cli"));
+        res.end();
+      } else {
+        sendJson(res, { error: `Eval generation failed: ${(err as Error).message}` }, 500, req);
+      }
     }
   });
 

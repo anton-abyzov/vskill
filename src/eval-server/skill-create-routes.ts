@@ -9,6 +9,8 @@ import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import { createLlmClient } from "../eval/llm.js";
 import type { ProviderName } from "../eval/llm.js";
+import { initSSE, sendSSE, sendSSEDone, withHeartbeat } from "./sse-helpers.js";
+import { classifyError } from "./error-classifier.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -435,22 +437,52 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
       return;
     }
 
+    const wantsSSE = req.headers.accept?.includes("text/event-stream") ||
+      (req.url ? new URL(req.url, "http://localhost").searchParams.has("sse") : false);
+
+    let aborted = false;
+    res.on("close", () => { aborted = true; });
+
+    if (wantsSSE) initSSE(res, req);
+
+    const providerName = body.provider || "claude-cli";
+
     try {
+      if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "preparing", message: "Building prompt..." });
+
       const client = createLlmClient({
         provider: body.provider,
         model: body.model,
       });
 
+      if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "generating", message: "Generating skill..." });
+
       const userPrompt = `Generate a complete skill definition for:\n\n${body.prompt.trim()}\n\nApply the Skill Builder methodology. Return the JSON object followed by ---REASONING--- and your explanation.`;
 
-      const result = await client.generate(GENERATE_SYSTEM_PROMPT, userPrompt);
+      const result = wantsSSE
+        ? await withHeartbeat(res, undefined, "generating", "Generating skill", () => client.generate(GENERATE_SYSTEM_PROMPT, userPrompt))
+        : await client.generate(GENERATE_SYSTEM_PROMPT, userPrompt);
+
+      if (aborted) return;
+
+      if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "parsing", message: "Parsing result..." });
+
       const parsed = parseGenerateResponse(result.text);
 
-      sendJson(res, parsed, 200, req);
+      if (wantsSSE && !aborted) {
+        sendSSEDone(res, parsed);
+      } else {
+        sendJson(res, parsed, 200, req);
+      }
     } catch (err) {
-      const msg = (err as Error).message;
-      const status = msg.includes("not valid JSON") ? 422 : 500;
-      sendJson(res, { error: msg }, status, req);
+      if (wantsSSE && !aborted) {
+        sendSSE(res, "error", classifyError(err, providerName));
+        res.end();
+      } else {
+        const msg = (err as Error).message;
+        const status = msg.includes("not valid JSON") ? 422 : 500;
+        sendJson(res, { error: msg }, status, req);
+      }
     }
   });
 }

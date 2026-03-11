@@ -1,11 +1,13 @@
 import { execSync } from "node:child_process";
+import { resolveCliBinary } from "./resolve-binary.js";
 
 /**
- * Check if `claude` CLI binary is available in PATH.
+ * Check if `claude` CLI binary is available (searches beyond current PATH).
  */
 export function isClaudeCliAvailable(): boolean {
   try {
-    execSync("claude --version", { stdio: "ignore", timeout: 5_000 });
+    const binary = resolveCliBinary("claude");
+    execSync(`"${binary}" --version`, { stdio: "ignore", timeout: 5_000 });
     return true;
   } catch {
     return false;
@@ -32,8 +34,9 @@ export interface RegisterResult {
  * @returns RegisterResult with success flag and optional stderr on failure
  */
 export function registerMarketplace(source: string): RegisterResult {
+  const binary = resolveCliBinary("claude");
   try {
-    execSync(`claude plugin marketplace add "${source}"`, {
+    execSync(`"${binary}" plugin marketplace add "${source}"`, {
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 15_000,
     });
@@ -49,8 +52,9 @@ export function registerMarketplace(source: string): RegisterResult {
  * Used to clean up stale registrations before retrying.
  */
 export function deregisterMarketplace(source: string): boolean {
+  const binary = resolveCliBinary("claude");
   try {
-    execSync(`claude plugin marketplace remove "${source}"`, {
+    execSync(`"${binary}" plugin marketplace remove "${source}"`, {
       stdio: "ignore",
       timeout: 10_000,
     });
@@ -65,8 +69,9 @@ export function deregisterMarketplace(source: string): boolean {
  * Returns marketplace source paths/URLs, or empty array on failure.
  */
 export function listMarketplaces(): string[] {
+  const binary = resolveCliBinary("claude");
   try {
-    const output = execSync("claude plugin marketplace list", {
+    const output = execSync(`"${binary}" plugin marketplace list`, {
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 10_000,
     }).toString().trim();
@@ -90,10 +95,11 @@ export function installNativePlugin(
   marketplaceName: string,
   scope: "user" | "project" = "project",
 ): boolean {
+  const binary = resolveCliBinary("claude");
   const pluginKey = `${pluginName}@${marketplaceName}`;
   const scopeFlag = scope === "user" ? "" : ` --scope ${scope}`;
   try {
-    execSync(`claude plugin install "${pluginKey}"${scopeFlag}`, {
+    execSync(`"${binary}" plugin install "${pluginKey}"${scopeFlag}`, {
       stdio: "ignore",
       timeout: 30_000,
     });
@@ -107,9 +113,10 @@ export function installNativePlugin(
  * Uninstall a plugin from Claude Code's native system.
  */
 export function uninstallNativePlugin(pluginName: string, marketplaceName: string): boolean {
+  const binary = resolveCliBinary("claude");
   const pluginKey = `${pluginName}@${marketplaceName}`;
   try {
-    execSync(`claude plugin uninstall "${pluginKey}"`, {
+    execSync(`"${binary}" plugin uninstall "${pluginKey}"`, {
       stdio: "ignore",
       timeout: 10_000,
     });

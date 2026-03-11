@@ -24,6 +24,7 @@
 // ---------------------------------------------------------------------------
 
 import { spawn } from "node:child_process";
+import { resolveCliBinary, enhancedPath } from "../utils/resolve-binary.js";
 
 export interface GenerateResult {
   text: string;
@@ -149,6 +150,9 @@ interface CliConfig {
 }
 
 function createCliClient(config: CliConfig): LlmClient {
+  // Resolve binary path once at client creation time (cached internally)
+  const resolvedBinary = resolveCliBinary(config.binary);
+
   return {
     model: config.displayModel,
     async generate(systemPrompt: string, userPrompt: string): Promise<GenerateResult> {
@@ -156,6 +160,7 @@ function createCliClient(config: CliConfig): LlmClient {
       const start = Date.now();
 
       const text = await new Promise<string>((resolve, reject) => {
+        // Build env: strip prefix vars if needed, always enhance PATH
         let env: Record<string, string> | undefined;
         if (config.stripEnvPrefix) {
           env = {};
@@ -165,9 +170,17 @@ function createCliClient(config: CliConfig): LlmClient {
           }
         }
 
-        const proc = spawn(config.binary, config.args, {
+        // Enhance PATH in the child process env so any sub-processes also
+        // have access to common binary directories (macOS, Linux, Windows)
+        if (env) {
+          env.PATH = enhancedPath(env.PATH);
+        } else {
+          env = { ...process.env as Record<string, string>, PATH: enhancedPath() };
+        }
+
+        const proc = spawn(resolvedBinary, config.args, {
           stdio: ["pipe", "pipe", "pipe"],
-          ...(env ? { env } : {}),
+          env,
         });
 
         let stdout = "";

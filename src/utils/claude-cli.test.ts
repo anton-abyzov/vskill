@@ -5,6 +5,11 @@ vi.mock("node:child_process", () => ({
   execSync: (...args: unknown[]) => mockExecSync(...args),
 }));
 
+// Mock resolveCliBinary to always return "claude" (bare name) for tests
+vi.mock("./resolve-binary.js", () => ({
+  resolveCliBinary: () => "claude",
+}));
+
 const {
   isClaudeCliAvailable,
   registerMarketplace,
@@ -25,7 +30,7 @@ describe("isClaudeCliAvailable", () => {
   it("returns true when claude binary exists", () => {
     mockExecSync.mockReturnValue(Buffer.from("1.0.0"));
     expect(isClaudeCliAvailable()).toBe(true);
-    expect(mockExecSync).toHaveBeenCalledWith("claude --version", {
+    expect(mockExecSync).toHaveBeenCalledWith('"claude" --version', {
       stdio: "ignore",
       timeout: 5_000,
     });
@@ -48,7 +53,7 @@ describe("registerMarketplace", () => {
     const result = registerMarketplace("/path/to/repo");
     expect(result).toEqual({ success: true });
     expect(mockExecSync).toHaveBeenCalledWith(
-      'claude plugin marketplace add "/path/to/repo"',
+      '"claude" plugin marketplace add "/path/to/repo"',
       { stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 },
     );
   });
@@ -73,7 +78,7 @@ describe("registerMarketplace", () => {
     mockExecSync.mockReturnValue(Buffer.from(""));
     registerMarketplace("/path/with spaces/repo");
     expect(mockExecSync).toHaveBeenCalledWith(
-      'claude plugin marketplace add "/path/with spaces/repo"',
+      '"claude" plugin marketplace add "/path/with spaces/repo"',
       expect.any(Object),
     );
   });
@@ -83,7 +88,7 @@ describe("registerMarketplace", () => {
     const result = registerMarketplace("https://github.com/owner/repo");
     expect(result).toEqual({ success: true });
     expect(mockExecSync).toHaveBeenCalledWith(
-      'claude plugin marketplace add "https://github.com/owner/repo"',
+      '"claude" plugin marketplace add "https://github.com/owner/repo"',
       { stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 },
     );
   });
@@ -93,7 +98,7 @@ describe("registerMarketplace", () => {
     const result = registerMarketplace("owner/repo");
     expect(result).toEqual({ success: true });
     expect(mockExecSync).toHaveBeenCalledWith(
-      'claude plugin marketplace add "owner/repo"',
+      '"claude" plugin marketplace add "owner/repo"',
       { stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 },
     );
   });
@@ -107,7 +112,7 @@ describe("deregisterMarketplace", () => {
     mockExecSync.mockReturnValue(Buffer.from(""));
     expect(deregisterMarketplace("https://github.com/owner/repo")).toBe(true);
     expect(mockExecSync).toHaveBeenCalledWith(
-      'claude plugin marketplace remove "https://github.com/owner/repo"',
+      '"claude" plugin marketplace remove "https://github.com/owner/repo"',
       { stdio: "ignore", timeout: 10_000 },
     );
   });
@@ -146,7 +151,7 @@ describe("installNativePlugin", () => {
     mockExecSync.mockReturnValue(Buffer.from(""));
     expect(installNativePlugin("frontend", "vskill")).toBe(true);
     expect(mockExecSync).toHaveBeenCalledWith(
-      'claude plugin install "frontend@vskill" --scope project',
+      '"claude" plugin install "frontend@vskill" --scope project',
       { stdio: "ignore", timeout: 30_000 },
     );
   });
@@ -155,7 +160,7 @@ describe("installNativePlugin", () => {
     mockExecSync.mockReturnValue(Buffer.from(""));
     expect(installNativePlugin("frontend", "vskill", "project")).toBe(true);
     expect(mockExecSync).toHaveBeenCalledWith(
-      'claude plugin install "frontend@vskill" --scope project',
+      '"claude" plugin install "frontend@vskill" --scope project',
       { stdio: "ignore", timeout: 30_000 },
     );
   });
@@ -164,7 +169,7 @@ describe("installNativePlugin", () => {
     mockExecSync.mockReturnValue(Buffer.from(""));
     expect(installNativePlugin("sw", "specweave", "user")).toBe(true);
     expect(mockExecSync).toHaveBeenCalledWith(
-      'claude plugin install "sw@specweave"',
+      '"claude" plugin install "sw@specweave"',
       { stdio: "ignore", timeout: 30_000 },
     );
   });
@@ -185,7 +190,7 @@ describe("uninstallNativePlugin", () => {
     mockExecSync.mockReturnValue(Buffer.from(""));
     expect(uninstallNativePlugin("frontend", "vskill")).toBe(true);
     expect(mockExecSync).toHaveBeenCalledWith(
-      'claude plugin uninstall "frontend@vskill"',
+      '"claude" plugin uninstall "frontend@vskill"',
       { stdio: "ignore", timeout: 10_000 },
     );
   });

@@ -6,6 +6,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockCreate = vi.hoisted(() => vi.fn());
 const mockSpawn = vi.hoisted(() => vi.fn());
+const mockResolveCliBinary = vi.hoisted(() => vi.fn((name: string) => name));
+const mockEnhancedPath = vi.hoisted(() => vi.fn((p?: string) => p || process.env.PATH || ""));
 
 vi.mock("@anthropic-ai/sdk", () => ({
   default: class MockAnthropic {
@@ -15,6 +17,11 @@ vi.mock("@anthropic-ai/sdk", () => ({
 
 vi.mock("node:child_process", () => ({
   spawn: mockSpawn,
+}));
+
+vi.mock("../../utils/resolve-binary.js", () => ({
+  resolveCliBinary: mockResolveCliBinary,
+  enhancedPath: mockEnhancedPath,
 }));
 
 // ---------------------------------------------------------------------------
@@ -461,15 +468,17 @@ describe("createLlmClient", () => {
     });
 
     it("does not strip env vars (no nesting detection like Claude)", async () => {
+      process.env.CLAUDECODE = "1";
       mockSpawn.mockReturnValue(createFakeProc("response\n"));
 
       const client = createLlmClient();
       await client.generate("sys", "usr");
 
-      // Codex CLI doesn't use CLAUDE* env vars, no stripping needed
+      // Codex CLI doesn't strip CLAUDE* env vars — they should be preserved
       const spawnCall = mockSpawn.mock.calls[0];
-      // Should NOT pass a custom env (uses default process.env inheritance)
-      expect(spawnCall[2].env).toBeUndefined();
+      const env = spawnCall[2].env;
+      expect(env).toBeDefined();
+      expect(env.CLAUDECODE).toBe("1"); // preserved, unlike claude-cli provider
     });
   });
 
@@ -596,13 +605,17 @@ describe("createLlmClient", () => {
     });
 
     it("does not strip env vars", async () => {
+      process.env.GOOGLE_API_KEY = "test-key";
       mockSpawn.mockReturnValue(createFakeProc("response\n"));
 
       const client = createLlmClient();
       await client.generate("sys", "usr");
 
+      // Gemini CLI doesn't strip any env vars — all should be preserved
       const spawnCall = mockSpawn.mock.calls[0];
-      expect(spawnCall[2].env).toBeUndefined();
+      const env = spawnCall[2].env;
+      expect(env).toBeDefined();
+      expect(env.GOOGLE_API_KEY).toBe("test-key"); // preserved
     });
   });
 

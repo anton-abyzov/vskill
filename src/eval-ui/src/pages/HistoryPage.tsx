@@ -112,6 +112,7 @@ function FilterBar({ models, filters, onChange }: FilterBarProps) {
         <option value="baseline">Baseline</option>
         <option value="model-compare">Model Compare</option>
         <option value="improve">AI Improve</option>
+        <option value="instruct">AI Edit</option>
       </select>
 
       {/* From */}
@@ -292,7 +293,7 @@ function SingleRunDetail({ run, plugin, skill, onDelete }: SingleRunDetailProps)
   const navigate = useNavigate();
 
   // Improve entries get a dedicated diff view
-  if (run.type === "improve" && run.improve) {
+  if ((run.type === "improve" || run.type === "instruct") && run.improve) {
     return <ImproveDetailView run={run} onDelete={onDelete} />;
   }
 

@@ -86,6 +86,12 @@ export interface WorkspaceState {
   // Improve state
   improveTarget: number | null; // eval_id to improve for
 
+  // AI Edit state (freeform instruction-based editing)
+  aiEditOpen: boolean;
+  aiEditLoading: boolean;
+  aiEditResult: { improved: string; reasoning: string } | null;
+  aiEditError: string | null;
+
   // History
   regressions: RegressionInfo[];
 
@@ -127,6 +133,11 @@ export type WorkspaceAction =
   | { type: "UPDATE_INLINE_RESULT"; evalId: number; result: InlineResult }
   | { type: "OPEN_IMPROVE"; evalId: number }
   | { type: "CLOSE_IMPROVE" }
+  | { type: "OPEN_AI_EDIT" }
+  | { type: "CLOSE_AI_EDIT" }
+  | { type: "AI_EDIT_LOADING" }
+  | { type: "AI_EDIT_RESULT"; improved: string; reasoning: string }
+  | { type: "AI_EDIT_ERROR"; message: string }
   | { type: "SET_REGRESSIONS"; regressions: RegressionInfo[] }
   | { type: "INCREMENT_ITERATION" }
   | { type: "SET_ACTIVATION_PROMPTS"; prompts: string }
@@ -156,4 +167,7 @@ export interface WorkspaceContextValue {
   refreshSkillContent: () => Promise<void>;
   generateEvals: () => Promise<void>;
   runActivationTest: (prompts: string) => void;
+  submitAiEdit: (instruction: string) => Promise<void>;
+  applyAiEdit: () => Promise<void>;
+  discardAiEdit: () => void;
 }

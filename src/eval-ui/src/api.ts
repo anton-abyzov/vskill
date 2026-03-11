@@ -124,6 +124,14 @@ export const api = {
     });
   },
 
+  instructEdit(plugin: string, skill: string, opts: { instruction: string; content: string; provider?: string; model?: string }): Promise<ImproveResult> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/improve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "instruct", ...opts }),
+    });
+  },
+
   applyImprovement(plugin: string, skill: string, content: string): Promise<{ ok: boolean }> {
     return fetchJson(`/api/skills/${plugin}/${skill}/apply-improvement`, {
       method: "POST",

@@ -3,6 +3,7 @@ import { useWorkspace } from "./WorkspaceContext";
 import { parseFrontmatter } from "../../utils/parseFrontmatter";
 import { renderMarkdown } from "../../utils/renderMarkdown";
 import { SkillImprovePanel } from "../../components/SkillImprovePanel";
+import { AiEditBar } from "../../components/AiEditBar";
 
 type ViewMode = "split" | "raw" | "preview";
 
@@ -36,9 +37,20 @@ function IconPreview({ size = 15 }: { size?: number }) {
   );
 }
 
+function IconWand({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15 4V2" /><path d="M15 16v-2" /><path d="M8 9h2" /><path d="M20 9h2" />
+      <path d="M17.8 11.8L19 13" /><path d="M15 9h.01" />
+      <path d="M17.8 6.2L19 5" /><path d="M11 6.2L9.7 5" />
+      <path d="M3 21l9-9" />
+    </svg>
+  );
+}
+
 export function EditorPanel() {
   const { state, dispatch, saveContent } = useWorkspace();
-  const { plugin, skill, skillContent, isDirty, improveTarget } = state;
+  const { plugin, skill, skillContent, isDirty, improveTarget, aiEditOpen } = state;
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [saving, setSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -85,7 +97,12 @@ export function EditorPanel() {
       e.stopPropagation();
       if (isDirty) handleSave();
     }
-  }, [isDirty, handleSave]);
+    if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+      e.preventDefault();
+      e.stopPropagation();
+      dispatch({ type: aiEditOpen ? "CLOSE_AI_EDIT" : "OPEN_AI_EDIT" });
+    }
+  }, [isDirty, handleSave, aiEditOpen, dispatch]);
 
   const viewModes: { mode: ViewMode; icon: React.ReactNode; label: string }[] = [
     { mode: "raw", icon: <IconEditor />, label: "Editor" },
@@ -94,7 +111,7 @@ export function EditorPanel() {
   ];
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" onKeyDown={handleKeyDown} tabIndex={-1}>
       {/* ── Toolbar ─────────────────────────────────────── */}
       <div
         className="flex items-center justify-between px-3 py-1.5"
@@ -134,6 +151,24 @@ export function EditorPanel() {
 
         {/* Save actions */}
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => dispatch({ type: aiEditOpen ? "CLOSE_AI_EDIT" : "OPEN_AI_EDIT" })}
+            title="Edit with AI (Ctrl+K)"
+            className="flex items-center gap-1.5 rounded-md transition-all duration-150"
+            style={{
+              padding: "4px 10px",
+              fontSize: 11,
+              fontWeight: aiEditOpen ? 600 : 400,
+              border: "none",
+              cursor: "pointer",
+              color: aiEditOpen ? "#a855f7" : "var(--text-tertiary)",
+              background: aiEditOpen ? "rgba(168,85,247,0.12)" : "transparent",
+            }}
+          >
+            <IconWand size={13} />
+            <span>AI Edit</span>
+          </button>
+          <div style={{ width: 1, height: 16, background: "var(--border-subtle)" }} />
           {isDirty && (
             <button
               onClick={() => dispatch({ type: "SET_CONTENT", content: state.savedContent })}
@@ -388,6 +423,11 @@ export function EditorPanel() {
           </div>
         )}
       </div>
+
+      {/* ── AI Edit Bar ──────────────────────────────── */}
+      {aiEditOpen && (
+        <AiEditBar />
+      )}
 
       {/* ── AI Improve Panel ──────────────────────────── */}
       {improveTarget !== null && plugin && skill && (

@@ -256,6 +256,37 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     }
   }, [plugin, skill, runCase]);
 
+  // -- AI Edit --
+  const submitAiEdit = useCallback(async (instruction: string) => {
+    dispatch({ type: "AI_EDIT_LOADING" });
+    try {
+      const result = await api.instructEdit(plugin, skill, {
+        instruction,
+        content: state.skillContent,
+      });
+      dispatch({ type: "AI_EDIT_RESULT", improved: result.improved, reasoning: result.reasoning });
+    } catch (e) {
+      dispatch({ type: "AI_EDIT_ERROR", message: (e as Error).message });
+    }
+  }, [plugin, skill, state.skillContent]);
+
+  const applyAiEdit = useCallback(async () => {
+    const improved = state.aiEditResult?.improved;
+    if (!improved) return;
+    try {
+      await api.applyImprovement(plugin, skill, improved);
+      dispatch({ type: "SET_CONTENT", content: improved });
+      dispatch({ type: "CONTENT_SAVED" });
+      dispatch({ type: "CLOSE_AI_EDIT" });
+    } catch (e) {
+      dispatch({ type: "SET_ERROR", error: (e as Error).message });
+    }
+  }, [plugin, skill, state.aiEditResult]);
+
+  const discardAiEdit = useCallback(() => {
+    dispatch({ type: "CLOSE_AI_EDIT" });
+  }, []);
+
   const refreshSkillContent = useCallback(async () => {
     try {
       const d = await api.getSkillDetail(plugin, skill);
@@ -332,7 +363,10 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     refreshSkillContent,
     generateEvals,
     runActivationTest,
-  }), [state, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest]);
+    submitAiEdit,
+    applyAiEdit,
+    discardAiEdit,
+  }), [state, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, submitAiEdit, applyAiEdit, discardAiEdit]);
 
   return (
     <WorkspaceCtx.Provider value={value}>

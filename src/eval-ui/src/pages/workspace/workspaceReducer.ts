@@ -15,6 +15,10 @@ export const initialWorkspaceState: WorkspaceState = {
   latestBenchmark: null,
   inlineResults: new Map(),
   improveTarget: null,
+  aiEditOpen: false,
+  aiEditLoading: false,
+  aiEditResult: null,
+  aiEditError: null,
   regressions: [],
   iterationCount: 0,
   activationPrompts: "",
@@ -181,6 +185,23 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 
     case "CLOSE_IMPROVE":
       return { ...state, improveTarget: null };
+
+    // -- AI Edit lifecycle --
+
+    case "OPEN_AI_EDIT":
+      return { ...state, aiEditOpen: true, aiEditResult: null, aiEditError: null };
+
+    case "CLOSE_AI_EDIT":
+      return { ...state, aiEditOpen: false, aiEditLoading: false, aiEditResult: null, aiEditError: null };
+
+    case "AI_EDIT_LOADING":
+      return { ...state, aiEditLoading: true, aiEditError: null };
+
+    case "AI_EDIT_RESULT":
+      return { ...state, aiEditLoading: false, aiEditResult: { improved: action.improved, reasoning: action.reasoning } };
+
+    case "AI_EDIT_ERROR":
+      return { ...state, aiEditLoading: false, aiEditError: action.message };
 
     case "SET_REGRESSIONS":
       return { ...state, regressions: action.regressions };

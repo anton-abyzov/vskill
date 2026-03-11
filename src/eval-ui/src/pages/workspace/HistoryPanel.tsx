@@ -205,15 +205,15 @@ export function HistoryPanel() {
                           background: h.type === "comparison" ? "var(--purple-muted)"
                             : h.type === "baseline" ? "var(--surface-3)"
                             : h.type === "model-compare" ? "rgba(56,189,248,0.15)"
-                            : h.type === "improve" ? "rgba(168,85,247,0.15)"
+                            : (h.type === "improve" || h.type === "instruct") ? "rgba(168,85,247,0.15)"
                             : "var(--accent-muted)",
                           color: h.type === "comparison" ? "var(--purple)"
                             : h.type === "baseline" ? "var(--text-tertiary)"
                             : h.type === "model-compare" ? "#38bdf8"
-                            : h.type === "improve" ? "#a855f7"
+                            : (h.type === "improve" || h.type === "instruct") ? "#a855f7"
                             : "var(--accent)",
                         }}>
-                          {h.type === "model-compare" ? "model compare" : h.type === "improve" ? "ai improve" : h.type}
+                          {h.type === "model-compare" ? "model compare" : h.type === "improve" ? "ai improve" : h.type === "instruct" ? "ai edit" : h.type}
                         </span>
                       </div>
                       <div className="flex items-center gap-3">
@@ -339,7 +339,7 @@ function CompareResultView({ result }: { result: HistoryCompareResult }) {
 
 function DetailView({ run, onClose }: { run: BenchmarkResult; onClose: () => void }) {
   // Improve entries get a diff view
-  if (run.type === "improve" && run.improve) {
+  if ((run.type === "improve" || run.type === "instruct") && run.improve) {
     return <ImproveDiffView run={run} onClose={onClose} />;
   }
 

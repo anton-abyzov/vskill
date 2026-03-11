@@ -29,44 +29,87 @@ export function registerImproveRoutes(router: Router, root: string): void {
       model?: string;
       eval_id?: number;
       notes?: string;
+      mode?: "auto" | "instruct";
+      instruction?: string;
+      content?: string;
     };
 
-    try {
-      const original = readFileSync(skillMdPath, "utf-8");
+    const mode = body.mode || "auto";
 
-      // Gather recent failures from latest benchmark
-      let failureContext = "";
-      const benchmark = await readBenchmark(skillDir);
-      if (benchmark) {
-        let failedCases = benchmark.cases.filter((c) => c.status === "fail");
-
-        // If eval_id specified, focus on that single case
-        if (body.eval_id != null) {
-          failedCases = failedCases.filter((c) => c.eval_id === body.eval_id);
-        }
-        failedCases = failedCases.slice(0, 10);
-
-        if (failedCases.length > 0) {
-          const failures = failedCases.map((c) => {
-            const failedAssertions = c.assertions
-              .filter((a) => !a.pass)
-              .map((a) => `  - ${a.text}: ${a.reasoning}`)
-              .join("\n");
-            return `Case "${c.eval_name}" (eval_id=${c.eval_id}):\n  Prompt: ${benchmark.cases.find((bc) => bc.eval_id === c.eval_id)?.eval_name || ""}\n${failedAssertions}`;
-          });
-          const label = body.eval_id != null
-            ? `Targeted Failure (eval #${body.eval_id})`
-            : `Recent Benchmark Failures (${failedCases.length} cases)`;
-          failureContext = `\n\n## ${label}\n${failures.join("\n\n")}`;
-        }
+    // Validate instruct mode
+    if (mode === "instruct") {
+      if (!body.instruction || !body.instruction.trim()) {
+        sendJson(res, { error: "instruction is required when mode is 'instruct'" }, 400, req);
+        return;
       }
+      if (!body.content || !body.content.trim()) {
+        sendJson(res, { error: "content is required when mode is 'instruct'" }, 400, req);
+        return;
+      }
+    }
 
-      // Optional user notes for guiding the improvement
-      const notesSection = body.notes?.trim()
-        ? `\n\n## User Notes\n${body.notes.trim()}`
-        : "";
+    try {
+      let original: string;
+      let systemPrompt: string;
+      let userPrompt: string;
 
-      const systemPrompt = `You are an expert AI skill engineer following the Skill Builder methodology. Your task is to improve a SKILL.md file based on its current content, benchmark failures, and the skill-builder best practices below.
+      if (mode === "instruct") {
+        // ── Instruct mode: freeform user instruction ──
+        original = body.content!;
+
+        systemPrompt = `You are an expert AI skill engineer. The user wants to modify a SKILL.md file according to their specific instruction.
+
+## Rules
+- Apply the user's instruction precisely and completely
+- Preserve all content that the instruction does not address — do not remove or reorganize unrelated sections
+- Maintain valid YAML frontmatter (name, description fields must remain)
+- Keep markdown formatting consistent with the original document
+- Do not add unsolicited improvements, refactoring, or style changes beyond what the user asked for
+- If the instruction is ambiguous, make a reasonable interpretation and explain it in the reasoning
+
+## Output Format
+Return ONLY the modified SKILL.md content — no explanations, no code fences, no preamble. The output must be a complete, valid SKILL.md that can be written directly to disk.
+
+After the modified content, on a new line, write "---REASONING---" followed by a brief explanation of what you changed and why.`;
+
+        userPrompt = `## Current SKILL.md\n${original}\n\n## Instruction\n${body.instruction!.trim()}\n\nApply this instruction to the SKILL.md above. Return the full modified content followed by ---REASONING--- and your explanation.`;
+      } else {
+        // ── Auto mode: existing best-practices improvement ──
+        original = readFileSync(skillMdPath, "utf-8");
+
+        // Gather recent failures from latest benchmark
+        let failureContext = "";
+        const benchmark = await readBenchmark(skillDir);
+        if (benchmark) {
+          let failedCases = benchmark.cases.filter((c) => c.status === "fail");
+
+          // If eval_id specified, focus on that single case
+          if (body.eval_id != null) {
+            failedCases = failedCases.filter((c) => c.eval_id === body.eval_id);
+          }
+          failedCases = failedCases.slice(0, 10);
+
+          if (failedCases.length > 0) {
+            const failures = failedCases.map((c) => {
+              const failedAssertions = c.assertions
+                .filter((a) => !a.pass)
+                .map((a) => `  - ${a.text}: ${a.reasoning}`)
+                .join("\n");
+              return `Case "${c.eval_name}" (eval_id=${c.eval_id}):\n  Prompt: ${benchmark.cases.find((bc) => bc.eval_id === c.eval_id)?.eval_name || ""}\n${failedAssertions}`;
+            });
+            const label = body.eval_id != null
+              ? `Targeted Failure (eval #${body.eval_id})`
+              : `Recent Benchmark Failures (${failedCases.length} cases)`;
+            failureContext = `\n\n## ${label}\n${failures.join("\n\n")}`;
+          }
+        }
+
+        // Optional user notes for guiding the improvement
+        const notesSection = body.notes?.trim()
+          ? `\n\n## User Notes\n${body.notes.trim()}`
+          : "";
+
+        systemPrompt = `You are an expert AI skill engineer following the Skill Builder methodology. Your task is to improve a SKILL.md file based on its current content, benchmark failures, and the skill-builder best practices below.
 
 ## Skill Builder Best Practices
 
@@ -120,7 +163,8 @@ When benchmark failures are provided, focus on fixing the skill instructions to 
 
 After the improved content, on a new line, write "---REASONING---" followed by a brief explanation of what you changed and why, referencing which skill-builder rules were applied.`;
 
-      const userPrompt = `## Current SKILL.md\n${original}${failureContext}${notesSection}\n\nImprove this SKILL.md following the Skill Builder methodology. ${failureContext ? "Focus primarily on addressing the benchmark failures, but also apply skill-builder best practices where they help." : "Apply skill-builder best practices: check description quality, writing style, progressive disclosure, and content organization."} Return the full improved content followed by ---REASONING--- and your explanation.`;
+        userPrompt = `## Current SKILL.md\n${original}${failureContext}${notesSection}\n\nImprove this SKILL.md following the Skill Builder methodology. ${failureContext ? "Focus primarily on addressing the benchmark failures, but also apply skill-builder best practices where they help." : "Apply skill-builder best practices: check description quality, writing style, progressive disclosure, and content organization."} Return the full improved content followed by ---REASONING--- and your explanation.`;
+      }
 
       const client = createLlmClient({
         provider: body.provider,
@@ -146,7 +190,7 @@ After the improved content, on a new line, write "---REASONING---" followed by a
         skill_name: skillName,
         cases: [],
         overall_pass_rate: undefined,
-        type: "improve",
+        type: mode === "instruct" ? "instruct" : "improve",
         provider: body.provider || "claude-cli",
         verdict: reasoning,
         improve: { original, improved, reasoning },

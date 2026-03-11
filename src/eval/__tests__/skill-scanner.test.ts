@@ -262,4 +262,71 @@ describe("scanSkills", () => {
     expect(skills[0].plugin).toBe("skills");
     expect(skills[0].skill).toBe("scout");
   });
+
+  // --- Flat layout (skills as direct children of root) ---
+
+  it("discovers flat layout: {root}/{skill}/SKILL.md", async () => {
+    const s1 = join(testDir, "easychamp-promoter");
+    const s2 = join(testDir, "tournament-import");
+    mkdirSync(s1, { recursive: true });
+    mkdirSync(s2, { recursive: true });
+    writeFileSync(join(s1, "SKILL.md"), "# easychamp-promoter");
+    writeFileSync(join(s2, "SKILL.md"), "# tournament-import");
+
+    const skills = await scanSkills(testDir);
+
+    expect(skills).toHaveLength(2);
+    const names = skills.map((s) => s.skill).sort();
+    expect(names).toEqual(["easychamp-promoter", "tournament-import"]);
+  });
+
+  it("flat layout uses root dirname as plugin name", async () => {
+    const s1 = join(testDir, "my-skill");
+    mkdirSync(s1, { recursive: true });
+    writeFileSync(join(s1, "SKILL.md"), "# my-skill");
+
+    const skills = await scanSkills(testDir);
+
+    expect(skills[0].plugin).toBe(testDir.split("/").pop());
+    expect(skills[0].skill).toBe("my-skill");
+  });
+
+  it("flat layout detects evals and benchmarks", async () => {
+    const s1 = join(testDir, "my-skill");
+    mkdirSync(s1, { recursive: true });
+    writeFileSync(join(s1, "SKILL.md"), "# my-skill");
+    const evalsDir = join(s1, "evals");
+    mkdirSync(evalsDir, { recursive: true });
+    writeFileSync(
+      join(evalsDir, "evals.json"),
+      JSON.stringify({ skill_name: "my-skill", evals: [] }),
+    );
+    writeFileSync(
+      join(evalsDir, "benchmark.json"),
+      JSON.stringify({ timestamp: "2026-03-01T00:00:00Z" }),
+    );
+
+    const skills = await scanSkills(testDir);
+
+    expect(skills[0].hasEvals).toBe(true);
+    expect(skills[0].hasBenchmark).toBe(true);
+  });
+
+  it("prefers structured layouts over flat layout", async () => {
+    // If standard layouts find skills, flat layout should NOT fire
+    createSkill("marketing", "social-media-posting");
+    // Also add a dir with SKILL.md at root level
+    const flatDir = join(testDir, "stray-skill");
+    mkdirSync(flatDir, { recursive: true });
+    writeFileSync(join(flatDir, "SKILL.md"), "# stray");
+
+    const skills = await scanSkills(testDir);
+
+    // Only the standard layout skill should be found (flat is a fallback)
+    // Note: stray-skill has SKILL.md but marketing/skills/ exists so layouts 1-3 fire.
+    // However scanPluginDirs for "stray-skill" looks for stray-skill/skills/* — no match.
+    // Flat layout only fires when skills.length === 0, so stray-skill is excluded.
+    expect(skills).toHaveLength(1);
+    expect(skills[0].skill).toBe("social-media-posting");
+  });
 });

@@ -5,7 +5,7 @@
       "id": 1,
       "name": "breaking-news-all-platforms",
       "prompt": "Hey, Anthropic just released Claude 5 with native computer use. Post about it on X, LinkedIn, Threads, Discord, and Telegram. Here's the blog post link: https://anthropic.com/news/claude-5",
-      "expected_output": "Should check last 10 posts for duplicates, generate 3 image options with correct aspect ratios per platform (16:9 for X/Discord/Telegram, 1.91:1 for LinkedIn, 1:1 for Threads), present all drafts + images for approval before posting, adapt copy per platform tone, use xurl for X if available, discord skill for Discord, Bot API for Telegram, and log all URLs after posting.",
+      "expected_output": "Should read product context if available, think strategically about hook and angle, check last 10 posts for duplicates, generate 3 image options with correct aspect ratios per platform (16:9 for X/Discord/Telegram, 1.91:1 for LinkedIn, 1:1 for Threads), create a proof screenshot for X and Threads (e.g. screenshot of the announcement page or key metrics), present all drafts + images for approval before posting, adapt copy per platform tone, use xurl for X if available, discord skill for Discord, Bot API for Telegram, save copy files, and log all URLs after posting.",
       "files": [],
       "assertions": [
         {
@@ -15,7 +15,7 @@
         },
         {
           "id": "image-3-options",
-          "text": "Generates 3 image options (A/B/C)  using Nano Banana Pro and presents them for user selectio",
+          "text": "Generates 3 image options (A/B/C) using Nano Banana Pro and presents them for user selection",
           "type": "boolean"
         },
         {
@@ -37,6 +37,11 @@
           "id": "tool-selection",
           "text": "Attempts to use xurl for X, discord skill for Discord, and Telegram Bot API rather than browser automation",
           "type": "boolean"
+        },
+        {
+          "id": "proof-screenshot-x-threads",
+          "text": "For X/Twitter and Threads, attempts to use or create a proof screenshot (announcement page, key metrics, evidence) as the first image rather than generic AI art",
+          "type": "boolean"
         }
       ]
     },
@@ -44,7 +49,7 @@
       "id": 2,
       "name": "instagram-tiktok-carousel",
       "prompt": "Create an Instagram carousel about the top 5 AI coding tools in 2026. Also post it to TikTok as a video. Make the slides really eye-catching with Nano Banana Pro.",
-      "expected_output": "Should generate 5 carousel slides, each with 3 options (15 images total) at 1:1 square for Instagram. Present the grid for mix-and-match selection. After approval, convert selected slides to 9:16 vertical video via ffmpeg for TikTok. Wait for approval before uploading to either platform.",
+      "expected_output": "Should generate 5 carousel slides, each with 3 options (15 images total) at 1:1 square for Instagram. Present the grid for mix-and-match selection. After approval, create 9:16 vertical video for TikTok using Veo 3.1 AI video generation or ffmpeg slideshow conversion as fallback. Wait for approval before uploading to either platform.",
       "files": [],
       "assertions": [
         {
@@ -64,7 +69,7 @@
         },
         {
           "id": "tiktok-vertical-video",
-          "text": "Converts carousel to 9:16 vertical video using ffmpeg for TikTok",
+          "text": "Creates 9:16 vertical video for TikTok using Veo 3.1 AI video generation or ffmpeg slideshow conversion as fallback",
           "type": "boolean"
         },
         {
@@ -138,6 +143,152 @@
         {
           "id": "approval-before-scheduling",
           "text": "Presents the content, images, and proposed schedule time to user and waits for approval before scheduling",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "topic-to-all-platforms",
+      "prompt": "Post about how AI coding agents are changing the way startups ship software. I have a blog post about this at dev.to. Make it punchy and opinionated.",
+      "expected_output": "Should read product-marketing-context.md if available, think strategically about hook and angle, write platform-adapted copy for all active platforms, generate images with Nano Banana Pro at correct aspect ratios per platform, create proof screenshot for X and Threads, save copy files to generated-assets/copy/, present everything with full absolute paths, use automated posting tools per priority order or Chrome-open as fallback.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "reads-context",
+          "text": "Attempts to read product-marketing-context.md or asks user for brand context before writing copy",
+          "type": "boolean"
+        },
+        {
+          "id": "strategic-thinking",
+          "text": "Explicitly considers hook formula, psychological angle, or content pillar before writing copy",
+          "type": "boolean"
+        },
+        {
+          "id": "platform-adapted-copy",
+          "text": "Writes different copy for each platform (LinkedIn professional, Twitter punchy, Instagram visual-first) rather than copy-pasting",
+          "type": "boolean"
+        },
+        {
+          "id": "saves-copy-files",
+          "text": "Saves platform-specific copy to individual .txt files in generated-assets/copy/",
+          "type": "boolean"
+        },
+        {
+          "id": "generates-images",
+          "text": "Uses Nano Banana Pro skill to generate images with correct aspect ratios per platform (16:9 for LinkedIn/Twitter, 1:1 for Instagram, 9:16 for TikTok/Stories)",
+          "type": "boolean"
+        },
+        {
+          "id": "full-absolute-paths",
+          "text": "Presents generated image paths as full absolute paths (not relative) and specifies which platform each image is for",
+          "type": "boolean"
+        },
+        {
+          "id": "posts-or-opens-browser",
+          "text": "Uses automated posting tools (xurl, Puppeteer, API) per the tool priority order, or opens Chrome with configured profile as a fallback for manual posting",
+          "type": "boolean"
+        },
+        {
+          "id": "approval-gate",
+          "text": "Presents all content for review and waits for approval before posting or opening browser",
+          "type": "boolean"
+        },
+        {
+          "id": "proof-screenshot-x-threads",
+          "text": "For X/Twitter and Threads, attempts to use or create a proof screenshot (terminal output, metrics, evidence) as the first image rather than generic AI art",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "product-launch-post",
+      "prompt": "We just hit 20,000 monthly npm downloads. Create a celebratory post for LinkedIn and Twitter. Keep it authentic, not braggy.",
+      "expected_output": "Should read product context for brand voice, craft a milestone-as-lesson angle (not just bragging), adapt for LinkedIn (professional depth) vs Twitter (punchy), generate images, present with full paths, guide the user through posting.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "brand-voice",
+          "text": "Adapts tone to match brand voice from product context (or asks for brand voice if no context file)",
+          "type": "boolean"
+        },
+        {
+          "id": "authentic-not-braggy",
+          "text": "Frames the milestone as a lesson learned or behind-the-scenes story rather than pure self-congratulation",
+          "type": "boolean"
+        },
+        {
+          "id": "linkedin-vs-twitter",
+          "text": "LinkedIn version is longer and more reflective; Twitter version is concise and punchy",
+          "type": "boolean"
+        },
+        {
+          "id": "image-generation",
+          "text": "Generates at least one image per platform using Nano Banana Pro with correct dimensions",
+          "type": "boolean"
+        },
+        {
+          "id": "posting-guide",
+          "text": "Provides per-platform posting instructions with full paths to copy files and images",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "no-context-file-graceful",
+      "prompt": "Post about the importance of code review in AI-generated code. Post to LinkedIn, Twitter, and Instagram.",
+      "expected_output": "Should attempt to find product-marketing-context.md, gracefully handle its absence (ask user for brief brand context or proceed with generic professional tone), still generate platform-adapted copy and images.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "checks-for-context",
+          "text": "Attempts to read product-marketing-context.md before writing",
+          "type": "boolean"
+        },
+        {
+          "id": "graceful-without-context",
+          "text": "If no context file found, either asks user for brand info or proceeds with sensible defaults rather than failing",
+          "type": "boolean"
+        },
+        {
+          "id": "still-generates-copy",
+          "text": "Produces platform-adapted copy for all three platforms regardless of context file presence",
+          "type": "boolean"
+        },
+        {
+          "id": "still-generates-images",
+          "text": "Generates images (or attempts to) even without a context file",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "repurpose-article",
+      "prompt": "I just published an article on dev.to called 'Why Your AI Coding Agent Gets Exponentially More Expensive.' Turn it into social posts for all platforms.",
+      "expected_output": "Should check published articles list in product context, extract key insights from the article, create platform-adapted posts that deliver standalone value (not just 'read my article'), generate images, and include the article link in first comments (not post body for LinkedIn).",
+      "files": [],
+      "assertions": [
+        {
+          "id": "extracts-insights",
+          "text": "Extracts 2-3 key insights or data points from the article to use as standalone social content",
+          "type": "boolean"
+        },
+        {
+          "id": "standalone-value",
+          "text": "Posts deliver value on their own rather than being empty teasers like 'check out my new article'",
+          "type": "boolean"
+        },
+        {
+          "id": "link-placement",
+          "text": "Places the article link in first comment for LinkedIn (not post body), and appropriately for other platforms",
+          "type": "boolean"
+        },
+        {
+          "id": "all-platforms-adapted",
+          "text": "Creates distinct copy for each active platform, not identical text",
           "type": "boolean"
         }
       ]

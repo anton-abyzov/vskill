@@ -1,11 +1,12 @@
 // ---------------------------------------------------------------------------
 // Filesystem scanner for plugin skills
 //
-// Supports four layouts (all scanned from root=cwd):
+// Supports five layouts (all scanned from root=cwd):
 //   1. Direct:   {root}/{plugin}/skills/{skill}/SKILL.md
 //   2. Nested:   {root}/plugins/{plugin}/skills/{skill}/SKILL.md
 //   3. Root:     {root}/skills/{skill}/SKILL.md  (plugin = repo basename)
 //   4. Self:     {root}/SKILL.md  (root IS the skill directory itself)
+//   5. Flat:     {root}/{skill}/SKILL.md  (skills as direct children of root)
 // ---------------------------------------------------------------------------
 
 import { readdirSync, existsSync } from "node:fs";
@@ -63,6 +64,13 @@ export async function scanSkills(root: string): Promise<SkillInfo[]> {
   const pluginsDir = join(root, "plugins");
   if (existsSync(pluginsDir)) {
     scanPluginDirs(pluginsDir, skills, ["plugins"]);
+  }
+
+  // Layout 5: flat → {root}/{skill}/SKILL.md (skills as direct children of root)
+  // Only pick up directories not already matched by layouts 1-3.
+  if (skills.length === 0) {
+    const defaultPlugin = basename(root) || "default";
+    scanSkillsDir(defaultPlugin, root, skills);
   }
 
   return skills;

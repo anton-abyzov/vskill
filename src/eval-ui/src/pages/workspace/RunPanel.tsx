@@ -4,7 +4,7 @@ import type { RunMode, InlineResult, CaseRunStatus } from "./workspaceTypes";
 
 export function RunPanel() {
   const { state, runCase, runAll, cancelCase, cancelAll } = useWorkspace();
-  const { evals, caseRunStates, bulkRunActive, runMode, latestBenchmark, inlineResults } = state;
+  const { evals, caseRunStates, bulkRunActive, latestBenchmark, inlineResults } = state;
 
   const cases = evals?.evals ?? [];
 
@@ -88,7 +88,8 @@ export function RunPanel() {
       <div className="space-y-3 stagger-children">
         {cases.map((c) => {
           const r = inlineResults.get(c.id);
-          const caseStatus = caseRunStates.get(c.id)?.status ?? "idle";
+          const caseRunState = caseRunStates.get(c.id);
+          const caseStatus = caseRunState?.status ?? "idle";
           return (
             <RunCaseCard
               key={c.id}
@@ -96,7 +97,7 @@ export function RunPanel() {
               evalId={c.id}
               result={r}
               caseStatus={caseStatus}
-              runMode={runMode}
+              runMode={caseRunState?.mode ?? null}
               onRun={(id) => runCase(id, "benchmark")}
               onBaseline={(id) => runCase(id, "baseline")}
               onCompare={(id) => runCase(id, "comparison")}

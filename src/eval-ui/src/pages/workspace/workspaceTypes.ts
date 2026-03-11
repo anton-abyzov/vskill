@@ -42,6 +42,7 @@ export type CaseRunStatus = "idle" | "queued" | "running" | "complete" | "error"
 export interface CaseRunState {
   status: CaseRunStatus;
   startedAt?: number;
+  mode?: RunMode;
 }
 
 // ---------------------------------------------------------------------------

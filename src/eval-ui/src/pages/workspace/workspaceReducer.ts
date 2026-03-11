@@ -100,7 +100,7 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 
     case "CASE_RUN_START": {
       const caseRunStates = new Map(state.caseRunStates);
-      caseRunStates.set(action.caseId, { status: "running", startedAt: Date.now() });
+      caseRunStates.set(action.caseId, { status: "running", startedAt: Date.now(), mode: action.mode });
       return {
         ...state,
         caseRunStates,
@@ -140,7 +140,7 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     case "BULK_RUN_START": {
       const caseRunStates = new Map(state.caseRunStates);
       for (const id of action.caseIds) {
-        caseRunStates.set(id, { status: "queued" });
+        caseRunStates.set(id, { status: "queued", mode: action.mode });
       }
       return {
         ...state,

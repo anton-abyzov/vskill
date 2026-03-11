@@ -21,5 +21,9 @@ export function resolveSkillDir(root: string, plugin: string, skill: string): st
   const rootPath = join(root, "skills", skill);
   if (existsSync(rootPath)) return rootPath;
 
+  // Try flat layout: {root}/{skill}/ (skills as direct children)
+  const flatPath = join(root, skill);
+  if (existsSync(join(flatPath, "SKILL.md"))) return flatPath;
+
   return directPath;
 }

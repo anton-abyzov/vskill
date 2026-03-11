@@ -3,8 +3,10 @@ import { api } from "../api";
 import type { ConfigResponse } from "../api";
 import type { ProjectLayoutResponse, DetectedLayout, SkillCreatorStatus } from "../types";
 
-function toKebab(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+function toKebab(s: string, trim = true): string {
+  let r = s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  if (trim) r = r.replace(/^-+|-+$/g, "");
+  return r;
 }
 
 function resolvePathPreview(root: string, layout: 1 | 2 | 3, plugin: string, name: string): string {
@@ -195,7 +197,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
             <h3 className="text-[13px] font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Skill Details</h3>
             <div className="mb-3">
               <label className="text-[11px] font-medium uppercase tracking-wider mb-1 block" style={{ color: "var(--text-tertiary)" }}>Name <span style={{ color: "var(--red)" }}>*</span></label>
-              <input type="text" value={name} onChange={(e) => setName(toKebab(e.target.value))} placeholder="my-skill"
+              <input type="text" value={name} onChange={(e) => setName(toKebab(e.target.value, false))} placeholder="my-skill"
                 className="w-full px-3 py-2 rounded-lg text-[13px]"
                 style={{ background: "var(--surface-3)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)" }}
               />

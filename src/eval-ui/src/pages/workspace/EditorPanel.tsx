@@ -1,9 +1,15 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useWorkspace } from "./WorkspaceContext";
+import { api } from "../../api";
+import type { ConfigResponse } from "../../api";
 import { parseFrontmatter } from "../../utils/parseFrontmatter";
 import { renderMarkdown } from "../../utils/renderMarkdown";
+import { computeDiff } from "../../utils/diff";
+import type { DiffLine } from "../../utils/diff";
 import { SkillImprovePanel } from "../../components/SkillImprovePanel";
 import { AiEditBar } from "../../components/AiEditBar";
+import { ProgressLog } from "../../components/ProgressLog";
+import type { ProgressEntry } from "../../components/ProgressLog";
 
 type ViewMode = "split" | "raw" | "preview";
 
@@ -48,12 +54,39 @@ function IconWand({ size = 15 }: { size?: number }) {
   );
 }
 
+function IconSparkle({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z" />
+    </svg>
+  );
+}
+
 export function EditorPanel() {
   const { state, dispatch, saveContent } = useWorkspace();
   const { plugin, skill, skillContent, isDirty, improveTarget, aiEditOpen } = state;
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [saving, setSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Regenerate state
+  const [regenOpen, setRegenOpen] = useState(false);
+  const [regenPrompt, setRegenPrompt] = useState("");
+  const [regenLoading, setRegenLoading] = useState(false);
+  const [regenResult, setRegenResult] = useState<string | null>(null);
+  const [regenDiff, setRegenDiff] = useState<DiffLine[]>([]);
+  const [regenProgress, setRegenProgress] = useState<ProgressEntry[]>([]);
+  const [regenError, setRegenError] = useState<string | null>(null);
+  const regenAbortRef = useRef<AbortController | null>(null);
+  const [config, setConfig] = useState<ConfigResponse | null>(null);
+
+  useEffect(() => {
+    api.getConfig().then(setConfig).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    return () => { regenAbortRef.current?.abort(); };
+  }, []);
 
   const { metadata, body } = parseFrontmatter(skillContent);
   const rawAllowed = metadata["allowed-tools"];
@@ -104,6 +137,117 @@ export function EditorPanel() {
     }
   }, [isDirty, handleSave, aiEditOpen, dispatch]);
 
+  const handleRegenSubmit = useCallback(async () => {
+    if (!regenPrompt.trim()) return;
+    // Abort any existing stream
+    regenAbortRef.current?.abort();
+    const controller = new AbortController();
+    regenAbortRef.current = controller;
+
+    setRegenLoading(true);
+    setRegenError(null);
+    setRegenProgress([]);
+    setRegenResult(null);
+    setRegenDiff([]);
+
+    try {
+      const provider = config?.provider || "claude-cli";
+      const model = config?.model || "sonnet";
+
+      const res = await fetch("/api/skills/generate?sse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: regenPrompt, provider, model }),
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let currentEvent = "";
+
+      while (true) {
+        const { done: readerDone, value } = await reader.read();
+        if (readerDone) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === "progress") {
+                setRegenProgress((prev) => [...prev, { phase: data.phase, message: data.message, timestamp: Date.now() }]);
+              } else if (currentEvent === "done" || currentEvent === "complete") {
+                // Build full SKILL.md content from generated fields
+                const parts: string[] = ["---"];
+                if (data.name) parts.push(`name: ${data.name}`);
+                if (data.description) parts.push(`description: "${data.description.replace(/"/g, '\\"')}"`);
+                if (data.model) parts.push(`model: ${data.model}`);
+                if (data.allowedTools?.trim()) {
+                  parts.push(`allowed-tools: ${data.allowedTools.trim()}`);
+                }
+                parts.push("---", "", data.body || "");
+                const generated = parts.join("\n");
+                setRegenResult(generated);
+                setRegenDiff(computeDiff(skillContent, generated));
+                setRegenLoading(false);
+              } else if (currentEvent === "error") {
+                setRegenError(data.message || data.description || "Generation failed");
+                setRegenLoading(false);
+              }
+            } catch {
+              // skip malformed
+            }
+            currentEvent = "";
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        setRegenError((err as Error).message);
+      }
+    } finally {
+      setRegenLoading(false);
+      regenAbortRef.current = null;
+    }
+  }, [regenPrompt, config, skillContent]);
+
+  const handleRegenApply = useCallback(() => {
+    if (regenResult) {
+      dispatch({ type: "SET_CONTENT", content: regenResult });
+    }
+    setRegenOpen(false);
+    setRegenResult(null);
+    setRegenDiff([]);
+    setRegenPrompt("");
+    setRegenProgress([]);
+  }, [regenResult, dispatch]);
+
+  const handleRegenDiscard = useCallback(() => {
+    setRegenOpen(false);
+    setRegenResult(null);
+    setRegenDiff([]);
+    setRegenPrompt("");
+    setRegenProgress([]);
+    setRegenError(null);
+  }, []);
+
+  const handleRegenToggle = useCallback(() => {
+    if (regenOpen) {
+      regenAbortRef.current?.abort();
+      handleRegenDiscard();
+    } else {
+      // Close AI Edit if open (mutual exclusion)
+      if (aiEditOpen) dispatch({ type: "CLOSE_AI_EDIT" });
+      setRegenOpen(true);
+    }
+  }, [regenOpen, aiEditOpen, dispatch, handleRegenDiscard]);
+
   const viewModes: { mode: ViewMode; icon: React.ReactNode; label: string }[] = [
     { mode: "raw", icon: <IconEditor />, label: "Editor" },
     { mode: "split", icon: <IconSplit />, label: "Split" },
@@ -152,7 +296,14 @@ export function EditorPanel() {
         {/* Save actions */}
         <div className="flex items-center gap-2">
           <button
-            onClick={() => dispatch({ type: aiEditOpen ? "CLOSE_AI_EDIT" : "OPEN_AI_EDIT" })}
+            onClick={() => {
+              if (aiEditOpen) {
+                dispatch({ type: "CLOSE_AI_EDIT" });
+              } else {
+                if (regenOpen) handleRegenDiscard();
+                dispatch({ type: "OPEN_AI_EDIT" });
+              }
+            }}
             title="Edit with AI (Ctrl+K)"
             className="flex items-center gap-1.5 rounded-md transition-all duration-150"
             style={{
@@ -167,6 +318,23 @@ export function EditorPanel() {
           >
             <IconWand size={13} />
             <span>AI Edit</span>
+          </button>
+          <button
+            onClick={handleRegenToggle}
+            title="Regenerate skill from prompt"
+            className="flex items-center gap-1.5 rounded-md transition-all duration-150"
+            style={{
+              padding: "4px 10px",
+              fontSize: 11,
+              fontWeight: regenOpen ? 600 : 400,
+              border: "none",
+              cursor: "pointer",
+              color: regenOpen ? "#a855f7" : "var(--text-tertiary)",
+              background: regenOpen ? "rgba(168,85,247,0.12)" : "transparent",
+            }}
+          >
+            <IconSparkle size={13} />
+            <span>Regenerate</span>
           </button>
           <div style={{ width: 1, height: 16, background: "var(--border-subtle)" }} />
           {isDirty && (
@@ -427,6 +595,130 @@ export function EditorPanel() {
       {/* ── AI Edit Bar ──────────────────────────────── */}
       {aiEditOpen && (
         <AiEditBar />
+      )}
+
+      {/* ── Regenerate Panel ─────────────────────────── */}
+      {regenOpen && (
+        <div
+          className="animate-fade-in"
+          style={{ borderTop: "1px solid var(--border-subtle)", background: "var(--surface-1)" }}
+        >
+          <div className="px-4 py-3">
+            {!regenResult && (
+              <>
+                <div className="flex items-center gap-2 mb-2">
+                  <IconSparkle size={14} />
+                  <span className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                    Regenerate Skill
+                  </span>
+                </div>
+                <div className="flex gap-2 mb-2">
+                  <textarea
+                    value={regenPrompt}
+                    onChange={(e) => setRegenPrompt(e.target.value)}
+                    placeholder="Describe what this skill should do..."
+                    rows={2}
+                    disabled={regenLoading}
+                    className="flex-1 px-3 py-2 rounded-lg text-[12px] resize-none"
+                    style={{
+                      background: "var(--surface-0)",
+                      color: "var(--text-primary)",
+                      border: "1px solid var(--border-subtle)",
+                      outline: "none",
+                      opacity: regenLoading ? 0.5 : 1,
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && regenPrompt.trim() && !regenLoading) {
+                        e.preventDefault();
+                        handleRegenSubmit();
+                      }
+                    }}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  {regenLoading ? (
+                    <button onClick={() => { regenAbortRef.current?.abort(); setRegenLoading(false); }} className="btn btn-secondary text-[11px]" style={{ padding: "4px 12px" }}>
+                      Cancel
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleRegenSubmit}
+                      disabled={!regenPrompt.trim()}
+                      className="btn btn-primary text-[11px]"
+                      style={{ padding: "4px 12px" }}
+                    >
+                      Generate
+                    </button>
+                  )}
+                  <button onClick={handleRegenDiscard} className="btn btn-ghost text-[11px]" style={{ padding: "4px 8px" }}>
+                    Close
+                  </button>
+                </div>
+                {regenLoading && regenProgress.length > 0 && (
+                  <div className="mt-2">
+                    <ProgressLog entries={regenProgress} isRunning={true} />
+                  </div>
+                )}
+                {regenError && (
+                  <div className="mt-2 px-3 py-2 rounded-lg text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)" }}>
+                    {regenError}
+                    <button onClick={handleRegenSubmit} className="ml-2 underline" style={{ color: "var(--red)" }}>Retry</button>
+                  </div>
+                )}
+              </>
+            )}
+
+            {regenResult && (
+              <>
+                <div className="flex items-center gap-2 mb-2">
+                  <IconSparkle size={14} />
+                  <span className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                    Regenerated — Review Changes
+                  </span>
+                </div>
+                <div
+                  className="rounded-lg overflow-hidden mb-3"
+                  style={{ border: "1px solid var(--border-subtle)", maxHeight: "300px", overflowY: "auto" }}
+                >
+                  {regenDiff.map((line, i) => (
+                    <div
+                      key={i}
+                      className="px-3 py-0.5 text-[11px] font-mono"
+                      style={{
+                        background:
+                          line.type === "added" ? "rgba(34,197,94,0.1)" :
+                          line.type === "removed" ? "rgba(239,68,68,0.1)" :
+                          "transparent",
+                        color:
+                          line.type === "added" ? "var(--green)" :
+                          line.type === "removed" ? "var(--red)" :
+                          "var(--text-secondary)",
+                        borderLeft:
+                          line.type === "added" ? "3px solid var(--green)" :
+                          line.type === "removed" ? "3px solid var(--red)" :
+                          "3px solid transparent",
+                      }}
+                    >
+                      <span style={{ userSelect: "none", opacity: 0.5, marginRight: 8 }}>
+                        {line.type === "added" ? "+" : line.type === "removed" ? "-" : " "}
+                      </span>
+                      {line.content}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={handleRegenApply} className="btn btn-primary text-[11px]" style={{ padding: "4px 12px" }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                    Apply
+                  </button>
+                  <button onClick={handleRegenDiscard} className="btn btn-secondary text-[11px]" style={{ padding: "4px 12px" }}>
+                    Discard
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {/* ── AI Improve Panel ──────────────────────────── */}

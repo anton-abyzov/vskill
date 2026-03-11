@@ -7,6 +7,7 @@ import { ProgressLog } from "../components/ProgressLog";
 import type { ProgressEntry } from "../components/ProgressLog";
 import { ErrorCard } from "../components/ErrorCard";
 import type { ClassifiedError } from "../components/ErrorCard";
+import { renderMarkdown } from "../utils/renderMarkdown";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -78,6 +79,9 @@ export function CreateSkillPage() {
   const [allowedTools, setAllowedTools] = useState("");
   const [body, setBody] = useState("");
   const [pendingEvals, setPendingEvals] = useState<GeneratedEval[] | null>(null);
+
+  // Body preview toggle
+  const [bodyViewMode, setBodyViewMode] = useState<"write" | "preview">("write");
 
   // Submission
   const [creating, setCreating] = useState(false);
@@ -689,9 +693,9 @@ export function CreateSkillPage() {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Brief description — used for auto-activation keywords"
-                    rows={2}
-                    className="w-full px-3 py-2 rounded-lg text-[13px] resize-none"
-                    style={inputStyle}
+                    rows={3}
+                    className="w-full px-3 py-2 rounded-lg text-[13px] resize-y"
+                    style={{ ...inputStyle, minHeight: "72px" }}
                   />
                   <p className="text-[11px] mt-1" style={{ color: "var(--text-tertiary)" }}>
                     This text is used by Claude to decide when to activate the skill
@@ -732,22 +736,85 @@ export function CreateSkillPage() {
                 </div>
               </div>
 
-              {/* System prompt body */}
+              {/* SKILL.md body */}
               <div className="glass-card p-5">
-                <h3 className="text-[13px] font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
-                  System Prompt
-                </h3>
-                <textarea
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  placeholder={"# /my-skill\n\nYou are an expert at...\n\n## Workflow\n\n1. First, understand the request\n2. Then, implement the solution\n3. Finally, verify the result"}
-                  rows={12}
-                  className="w-full px-3 py-2 rounded-lg text-[13px] font-mono resize-y"
-                  style={{
-                    ...inputStyle,
-                    minHeight: "200px",
-                  }}
-                />
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className="w-7 h-7 rounded-lg flex items-center justify-center"
+                      style={{ background: "var(--accent-muted)" }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="16" y1="13" x2="8" y2="13" />
+                        <line x1="16" y1="17" x2="8" y2="17" />
+                      </svg>
+                    </div>
+                    <div>
+                      <span className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>SKILL.md</span>
+                      <span className="text-[11px] ml-2" style={{ color: "var(--text-tertiary)" }}>Skill Definition</span>
+                    </div>
+                  </div>
+                  {/* Write / Preview toggle */}
+                  <div
+                    className="flex items-center"
+                    style={{ background: "var(--surface-2)", borderRadius: 8, padding: 2, gap: 1 }}
+                  >
+                    {(["write", "preview"] as const).map((m) => (
+                      <button
+                        key={m}
+                        onClick={() => setBodyViewMode(m)}
+                        className="flex items-center gap-1 rounded-md transition-all duration-150"
+                        style={{
+                          padding: "4px 10px",
+                          background: bodyViewMode === m ? "var(--surface-4)" : "transparent",
+                          color: bodyViewMode === m ? "var(--text-primary)" : "var(--text-tertiary)",
+                          fontSize: 11, fontWeight: bodyViewMode === m ? 600 : 400,
+                          border: "none", cursor: "pointer",
+                        }}
+                      >
+                        {m === "write" ? (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
+                          </svg>
+                        ) : (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+                          </svg>
+                        )}
+                        <span>{m === "write" ? "Write" : "Preview"}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {bodyViewMode === "write" ? (
+                  <textarea
+                    value={body}
+                    onChange={(e) => setBody(e.target.value)}
+                    placeholder={"# /my-skill\n\nYou are an expert at...\n\n## Workflow\n\n1. First, understand the request\n2. Then, implement the solution\n3. Finally, verify the result"}
+                    rows={12}
+                    className="w-full px-3 py-2 rounded-lg text-[13px] font-mono resize-y"
+                    style={{ ...inputStyle, minHeight: "200px" }}
+                  />
+                ) : (
+                  <div
+                    className="text-[13px] leading-relaxed overflow-x-auto rounded-lg px-4 py-3"
+                    style={{
+                      background: "var(--surface-0)",
+                      color: "var(--text-secondary)",
+                      border: "1px solid var(--border-subtle)",
+                      minHeight: "200px",
+                      maxHeight: "400px",
+                      overflowY: "auto",
+                    }}
+                    dangerouslySetInnerHTML={body.trim() ? { __html: renderMarkdown(body) } : undefined}
+                  >
+                    {!body.trim() && (
+                      <span style={{ color: "var(--text-tertiary)" }}>Start writing to see preview</span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Generated test cases preview */}

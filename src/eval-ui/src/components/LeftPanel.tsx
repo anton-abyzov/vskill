@@ -8,9 +8,12 @@ import { api } from "../api";
 export function LeftPanel() {
   const { state, setMode } = useStudio();
   const [projectName, setProjectName] = useState<string | null>(null);
+  const [creatorStatus, setCreatorStatus] = useState<{ installed: boolean; installCommand: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     api.getConfig().then((c) => setProjectName(c.projectName)).catch(() => {});
+    api.getSkillCreatorStatus().then(setCreatorStatus).catch(() => {});
   }, []);
 
   return (
@@ -74,6 +77,47 @@ export function LeftPanel() {
           New Skill
         </button>
       </div>
+
+      {/* Skill-Creator status */}
+      {creatorStatus && (
+        <div className="px-3 pb-2 flex-shrink-0">
+          {creatorStatus.installed ? (
+            <div className="flex items-center gap-2 px-3 py-1.5 text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "var(--green)" }} />
+              Skill Creator installed
+            </div>
+          ) : (
+            <div
+              className="px-3 py-2 rounded-lg text-[11px]"
+              style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+            >
+              <div className="flex items-center gap-2 mb-1.5" style={{ color: "var(--yellow)" }}>
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "var(--yellow)" }} />
+                <span className="font-medium">Skill Creator not installed</span>
+              </div>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(creatorStatus.installCommand).then(() => {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }).catch(() => {});
+                }}
+                className="w-full text-left px-2 py-1 rounded text-[10px] font-mono cursor-pointer transition-colors duration-150"
+                style={{
+                  background: "var(--surface-0)",
+                  color: "var(--text-secondary)",
+                  border: "1px solid var(--border-subtle)",
+                }}
+                title="Click to copy"
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
+              >
+                {copied ? "Copied!" : creatorStatus.installCommand}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Skill list */}
       <div className="flex-1 overflow-y-auto" style={{ borderTop: "1px solid var(--border-subtle)" }}>

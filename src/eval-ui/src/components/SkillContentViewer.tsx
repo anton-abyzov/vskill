@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { parseFrontmatter } from "../utils/parseFrontmatter";
+import { renderMarkdown } from "../utils/renderMarkdown";
 
 interface Props {
   content: string;
@@ -113,9 +114,9 @@ export function SkillContentViewer({ content, defaultExpanded = true }: Props) {
             </div>
           )}
 
-          {/* Body content */}
+          {/* Body content (markdown) */}
           {body && (
-            <pre
+            <div
               className="text-[12px] leading-relaxed p-4 rounded-lg overflow-x-auto"
               style={{
                 background: "var(--surface-0)",
@@ -123,13 +124,9 @@ export function SkillContentViewer({ content, defaultExpanded = true }: Props) {
                 border: "1px solid var(--border-subtle)",
                 maxHeight: "400px",
                 overflowY: "auto",
-                fontFamily: "var(--font-mono, ui-monospace, monospace)",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
               }}
-            >
-              {body}
-            </pre>
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
+            />
           )}
         </div>
       )}

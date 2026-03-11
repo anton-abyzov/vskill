@@ -111,7 +111,8 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 
     case "CASE_RUN_COMPLETE": {
       const caseRunStates = new Map(state.caseRunStates);
-      caseRunStates.set(action.caseId, { status: "complete" });
+      const prev = caseRunStates.get(action.caseId);
+      caseRunStates.set(action.caseId, { status: "complete", mode: prev?.mode });
       const inlineResults = new Map(state.inlineResults);
       inlineResults.set(action.caseId, action.result);
       return { ...state, caseRunStates, inlineResults };
@@ -119,7 +120,8 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 
     case "CASE_RUN_ERROR": {
       const caseRunStates = new Map(state.caseRunStates);
-      caseRunStates.set(action.caseId, { status: "error" });
+      const prev = caseRunStates.get(action.caseId);
+      caseRunStates.set(action.caseId, { status: "error", mode: prev?.mode });
       const inlineResults = new Map(state.inlineResults);
       inlineResults.set(action.caseId, {
         status: "error",
@@ -131,7 +133,8 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 
     case "CASE_RUN_CANCEL": {
       const caseRunStates = new Map(state.caseRunStates);
-      caseRunStates.set(action.caseId, { status: "cancelled" });
+      const prev = caseRunStates.get(action.caseId);
+      caseRunStates.set(action.caseId, { status: "cancelled", mode: prev?.mode });
       return { ...state, caseRunStates };
     }
 

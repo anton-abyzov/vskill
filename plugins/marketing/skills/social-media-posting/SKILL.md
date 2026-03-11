@@ -554,8 +554,10 @@ Don't copy-paste the same text everywhere. Adapt for each platform:
 - **TikTok**: Convert carousel slides to video (see Video Generation). Caption is secondary to visuals.
 - **Reddit**: Match the subreddit's tone. Informative, no self-promo smell. Check flair requirements.
 - **dev.to**: Full article format with markdown. Technical depth.
+- **Facebook**: Conversational, longer-form OK. Links in post body (not penalized like LinkedIn). Use images.
 - **Discord**: Short, punchy, chat-style. No markdown tables (Discord renders them ugly). Use **bold** for emphasis, not headers.
 - **Telegram**: Clean, formatted message. Use markdown formatting.
+- **YouTube**: Community post style -- short, conversational, pose a question to drive comments. Link to full videos or articles in text.
 
 ### Per-Platform Copy File Output
 

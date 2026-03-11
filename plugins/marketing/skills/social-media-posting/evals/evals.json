@@ -176,7 +176,7 @@
         },
         {
           "id": "generates-images",
-          "text": "Uses Nano Banana Pro skill to generate images with correct aspect ratios per platform (16:9 for LinkedIn/Twitter, 1:1 for Instagram, 9:16 for TikTok/Stories)",
+          "text": "Uses Nano Banana Pro skill to generate images with correct aspect ratios per platform (16:9 for X/Twitter, 1.91:1 for LinkedIn, 1:1 for Instagram, 9:16 for TikTok/Stories)",
           "type": "boolean"
         },
         {

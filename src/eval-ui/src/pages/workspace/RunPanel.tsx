@@ -135,6 +135,25 @@ export function RunPanel() {
                 {latestBenchmark.model && ` | Model: ${latestBenchmark.model}`}
               </div>
             )}
+
+            {/* Celebration CTA — 100% pass rate, no existing comparison */}
+            {latestBenchmark.overall_pass_rate === 1 && !latestBenchmark.comparison && (
+              <button
+                onClick={() => runAll("comparison")}
+                disabled={cases.length === 0}
+                className="text-[13px] font-semibold mt-3 w-full rounded-lg transition-opacity duration-150"
+                style={{
+                  padding: "10px 0",
+                  background: "var(--green, #22c55e)",
+                  color: "#fff",
+                  border: "none",
+                  cursor: "pointer",
+                  opacity: cases.length === 0 ? 0.5 : 1,
+                }}
+              >
+                Run Final A/B Comparison
+              </button>
+            )}
           </div>
 
           {/* Comparison scores */}

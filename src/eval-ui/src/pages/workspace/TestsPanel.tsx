@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import { api } from "../../api";
 import type { EvalCase, Assertion, EvalsFile, CaseHistoryEntry } from "../../types";
@@ -6,6 +6,98 @@ import type { InlineResult, CaseRunStatus } from "./workspaceTypes";
 import { passRateColor, shortDate, fmtDuration, MiniTrend } from "../../utils/historyUtils";
 import { ProgressLog } from "../../components/ProgressLog";
 import { ErrorCard } from "../../components/ErrorCard";
+
+// ---------------------------------------------------------------------------
+// Assertion quality badge types
+// ---------------------------------------------------------------------------
+
+interface AssertionBadges {
+  flaky: boolean;          // 30-70% pass rate across recent history
+  nonDiscriminating: boolean; // passes on both skill and baseline runs
+  regression: boolean;     // was passing in previous run, now failing
+}
+
+// ---------------------------------------------------------------------------
+// Hook: shared case history fetcher (used by badges + history section)
+// ---------------------------------------------------------------------------
+
+function useCaseHistory(plugin: string, skill: string, evalId: number) {
+  const [entries, setEntries] = useState<CaseHistoryEntry[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const prevIdRef = useRef<string>("");
+
+  useEffect(() => {
+    const key = `${plugin}/${skill}/${evalId}`;
+    if (prevIdRef.current === key) return;
+    prevIdRef.current = key;
+
+    setLoading(true);
+    api.getCaseHistory(plugin, skill, evalId)
+      .then((data) => setEntries(data))
+      .catch(() => setEntries([]))
+      .finally(() => setLoading(false));
+  }, [plugin, skill, evalId]);
+
+  const refetch = useCallback(() => {
+    setLoading(true);
+    prevIdRef.current = ""; // force refetch
+    api.getCaseHistory(plugin, skill, evalId)
+      .then((data) => setEntries(data))
+      .catch(() => setEntries([]))
+      .finally(() => setLoading(false));
+  }, [plugin, skill, evalId]);
+
+  return { entries, loading, refetch };
+}
+
+// ---------------------------------------------------------------------------
+// Compute assertion quality badges from history + current result
+// ---------------------------------------------------------------------------
+
+function computeAssertionBadges(
+  assertionId: string,
+  currentResult: { pass: boolean } | undefined,
+  historyEntries: CaseHistoryEntry[] | null,
+): AssertionBadges {
+  const badges: AssertionBadges = { flaky: false, nonDiscriminating: false, regression: false };
+  if (!historyEntries || historyEntries.length === 0) return badges;
+
+  // --- Flaky: 30-70% pass rate across recent runs (up to 10) ---
+  const recentRuns = historyEntries.slice(0, 10);
+  const matchingAssertions = recentRuns
+    .map((e) => e.assertions.find((a) => a.id === assertionId))
+    .filter(Boolean);
+  if (matchingAssertions.length >= 2) {
+    const passCount = matchingAssertions.filter((a) => a!.pass).length;
+    const passRate = passCount / matchingAssertions.length;
+    if (passRate >= 0.3 && passRate <= 0.7) {
+      badges.flaky = true;
+    }
+  }
+
+  // --- Non-Discriminating: passes on both skill (benchmark) and baseline runs ---
+  const latestBenchmark = historyEntries.find((e) => e.type === "benchmark");
+  const latestBaseline = historyEntries.find((e) => e.type === "baseline");
+  if (latestBenchmark && latestBaseline) {
+    const benchmarkAssertion = latestBenchmark.assertions.find((a) => a.id === assertionId);
+    const baselineAssertion = latestBaseline.assertions.find((a) => a.id === assertionId);
+    if (benchmarkAssertion?.pass && baselineAssertion?.pass) {
+      badges.nonDiscriminating = true;
+    }
+  }
+
+  // --- Regression: was passing in previous run, now failing ---
+  if (currentResult && !currentResult.pass && historyEntries.length >= 1) {
+    // The first history entry is the most recent previous run
+    const prevRun = historyEntries[0];
+    const prevAssertion = prevRun.assertions.find((a) => a.id === assertionId);
+    if (prevAssertion?.pass) {
+      badges.regression = true;
+    }
+  }
+
+  return badges;
+}
 
 export function TestsPanel() {
   const { state, dispatch, saveEvals, runCase, runAll, cancelCase, cancelAll, generateEvals } = useWorkspace();
@@ -206,6 +298,10 @@ function CaseDetail({
   onCancel: (evalId: number) => void;
   onImprove: (evalId: number) => void;
 }) {
+  const { state } = useWorkspace();
+  const { plugin, skill } = state;
+  const { entries: historyEntries, loading: historyLoading } = useCaseHistory(plugin, skill, evalCase.id);
+
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [promptText, setPromptText] = useState(evalCase.prompt);
   const [editingExpected, setEditingExpected] = useState(false);
@@ -390,11 +486,13 @@ function CaseDetail({
           <div className="space-y-2">
             {evalCase.assertions.map((a) => {
               const r = result?.assertions.find((ar) => ar.assertion_id === a.id);
+              const badges = computeAssertionBadges(a.id, r, historyEntries);
               return (
                 <AssertionRow
                   key={a.id}
                   assertion={a}
                   result={r}
+                  badges={badges}
                   onUpdate={(text) => updateAssertion(a.id, text)}
                   onDelete={() => deleteAssertion(a.id)}
                 />
@@ -408,7 +506,7 @@ function CaseDetail({
       {result?.output && <OutputSection output={result.output} durationMs={result.durationMs} tokens={result.tokens} />}
 
       {/* Execution History (collapsible) */}
-      <CaseHistorySection evalId={evalCase.id} />
+      <CaseHistorySection evalId={evalCase.id} sharedEntries={historyEntries} sharedLoading={historyLoading} />
     </div>
   );
 }
@@ -418,10 +516,11 @@ function CaseDetail({
 // ---------------------------------------------------------------------------
 
 function AssertionRow({
-  assertion, result, onUpdate, onDelete,
+  assertion, result, badges, onUpdate, onDelete,
 }: {
   assertion: Assertion;
   result?: { pass: boolean; reasoning: string };
+  badges?: AssertionBadges;
   onUpdate: (text: string) => void;
   onDelete: () => void;
 }) {
@@ -465,10 +564,68 @@ function AssertionRow({
           />
         )}
 
+        {/* Regression marker (red downward arrow) */}
+        {badges?.regression && (
+          <span
+            className="mt-0.5 flex-shrink-0"
+            title="Regression: was passing, now failing"
+            style={{
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              width: 16, height: 18,
+              color: "var(--red)",
+              fontSize: 14,
+              fontWeight: 700,
+              lineHeight: 1,
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--red)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <polyline points="19 12 12 19 5 12" />
+            </svg>
+          </span>
+        )}
+
         {/* ID + text */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-0.5">
             <span className="text-[10px] font-mono font-semibold" style={{ color: "var(--text-tertiary)" }}>{assertion.id}</span>
+            {/* Quality badges */}
+            {badges?.flaky && (
+              <span
+                title="Flaky: 30-70% pass rate across recent runs"
+                style={{
+                  display: "inline-block",
+                  fontSize: 9,
+                  fontWeight: 600,
+                  lineHeight: 1,
+                  padding: "2px 6px",
+                  borderRadius: 9999,
+                  background: "rgba(234, 179, 8, 0.15)",
+                  color: "#ca8a04",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Flaky
+              </span>
+            )}
+            {badges?.nonDiscriminating && (
+              <span
+                title="Non-discriminating: passes on both skill and baseline runs"
+                style={{
+                  display: "inline-block",
+                  fontSize: 9,
+                  fontWeight: 600,
+                  lineHeight: 1,
+                  padding: "2px 6px",
+                  borderRadius: 9999,
+                  background: "var(--surface-3)",
+                  color: "var(--text-tertiary)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Non-Discrim.
+              </span>
+            )}
           </div>
           {editing ? (
             <div className="flex gap-2">
@@ -616,41 +773,22 @@ function OutputSection({ output, durationMs, tokens }: { output: string; duratio
 // Case History Section (collapsible, lazy-loaded)
 // ---------------------------------------------------------------------------
 
-function CaseHistorySection({ evalId }: { evalId: number }) {
+function CaseHistorySection({ evalId, sharedEntries, sharedLoading }: {
+  evalId: number;
+  sharedEntries?: CaseHistoryEntry[] | null;
+  sharedLoading?: boolean;
+}) {
   const { state, dispatch } = useWorkspace();
   const { plugin, skill } = state;
   const [expanded, setExpanded] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [cache, setCache] = useState<Record<number, CaseHistoryEntry[]>>({});
 
-  const entries = cache[evalId] ?? null;
-
-  const fetchIfNeeded = useCallback(async (id: number) => {
-    setLoading(true);
-    try {
-      const data = await api.getCaseHistory(plugin, skill, id);
-      setCache((prev) => ({ ...prev, [id]: data }));
-    } catch {
-      setCache((prev) => ({ ...prev, [id]: [] }));
-    } finally {
-      setLoading(false);
-    }
-  }, [plugin, skill]);
-
-  // Auto-fetch on mount when expanded by default
-  useEffect(() => {
-    if (expanded && !cache[evalId]) {
-      fetchIfNeeded(evalId);
-    }
-  }, [evalId, plugin, skill]);
+  // Use shared data from parent (useCaseHistory hook in CaseDetail) to avoid duplicate fetches
+  const entries = sharedEntries ?? null;
+  const loading = sharedLoading ?? false;
 
   const handleToggle = useCallback(() => {
-    const next = !expanded;
-    setExpanded(next);
-    if (next && !cache[evalId]) {
-      fetchIfNeeded(evalId);
-    }
-  }, [expanded, evalId, cache, fetchIfNeeded]);
+    setExpanded(!expanded);
+  }, [expanded]);
 
   const displayEntries = entries ? entries.slice(0, 10) : [];
 

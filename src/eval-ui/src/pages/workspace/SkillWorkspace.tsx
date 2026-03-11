@@ -10,8 +10,35 @@ import { HistoryPanel } from "./HistoryPanel";
 import { DepsPanel } from "./DepsPanel";
 import type { PanelId } from "./workspaceTypes";
 
+const VALID_PANELS: PanelId[] = ["editor", "tests", "run", "activation", "history", "deps"];
+
+function isValidPanel(value: string | null): value is PanelId {
+  return value != null && (VALID_PANELS as string[]).includes(value);
+}
+
 export function SkillWorkspaceInner() {
   const { state, dispatch, saveContent } = useWorkspace();
+
+  // ---------------------------------------------------------------------------
+  // URL query param deep-linking: sync activePanel <-> ?panel=
+  // ---------------------------------------------------------------------------
+  // On mount, read ?panel= from URL and set active panel
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const panel = params.get("panel");
+    if (isValidPanel(panel) && panel !== state.activePanel) {
+      dispatch({ type: "SET_PANEL", panel });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount
+
+  // On panel change, update URL with replaceState
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("panel", state.activePanel);
+    const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
+    history.replaceState(null, "", newUrl);
+  }, [state.activePanel]);
 
   // ---------------------------------------------------------------------------
   // Keyboard shortcuts

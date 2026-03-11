@@ -7,6 +7,8 @@ import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
+import { createLlmClient } from "../eval/llm.js";
+import type { ProviderName } from "../eval/llm.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,6 +36,13 @@ interface CreateSkillRequest {
   model?: string;
   allowedTools?: string;
   body: string;
+  evals?: Array<{
+    id: number;
+    name: string;
+    prompt: string;
+    expected_output: string;
+    assertions: Array<{ id: string; text: string; type: string }>;
+  }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +212,132 @@ function checkSkillCreatorInstalled(): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// AI skill generation
+// ---------------------------------------------------------------------------
+
+const GENERATE_SYSTEM_PROMPT = `You are an expert AI skill engineer following the Skill Builder methodology. Given a user's description of what a skill should do, generate a complete, production-quality skill definition.
+
+## Skill Builder Methodology
+
+### SKILL.md Anatomy
+Every skill has YAML frontmatter (description required, name/model/allowed-tools optional) and a markdown body with instructions.
+
+### Description Quality (Frontmatter) — CRITICAL
+The description is the PRIMARY triggering mechanism. It must be "pushy" to combat undertriggering:
+- Use third-person format: "This skill should be used when the user asks to..."
+- Include specific trigger phrases users would say (e.g., "create X", "configure Y", "fix Z")
+- Include explicit activation phrases: "Make sure to use this skill whenever the user mentions..."
+- Be concrete and specific, not vague or generic
+- BAD: "Provides guidance for working with X" (vague, no triggers)
+- GOOD: "This skill should be used when the user asks to \\"create X\\", \\"configure Y\\", or \\"troubleshoot Z\\". Activate whenever the user mentions X-related tasks."
+
+### Writing Style
+- Use imperative/infinitive form (verb-first instructions), NOT second person
+- Use objective, instructional language: "To accomplish X, do Y" not "You should do X"
+- BAD: "You should start by reading the file" / "You need to validate"
+- GOOD: "Start by reading the file" / "Validate the input before processing"
+- Explain the WHY behind rules — LLMs respond better to reasoning than rigid MUST/NEVER
+
+### Progressive Disclosure
+- Keep SKILL.md lean: 500-2000 words ideal for body, under 500 lines total
+- Core concepts and essential procedures in the body
+- Structure with ## sections: Workflow, Rules, Output Format, Examples
+
+### Content Quality
+- Focus on procedural knowledge non-obvious to an AI assistant
+- Include information that helps another AI instance execute tasks effectively
+- Include concrete examples where helpful
+- Include a clear Workflow section with numbered steps
+
+### Common Mistakes to Avoid
+- Weak trigger descriptions (vague, no specific phrases)
+- Too much content without structure
+- Second-person writing style
+- Missing workflow section
+- Overly generic instructions that don't add value
+
+## Output Format
+Return a JSON object with these fields:
+{
+  "name": "kebab-case-name",
+  "description": "Third-person trigger description with specific activation phrases",
+  "model": "",
+  "allowedTools": "",
+  "body": "# /skill-name\\n\\nFull system prompt with ## sections",
+  "evals": [
+    {
+      "id": 1,
+      "name": "test case name",
+      "prompt": "realistic user prompt",
+      "expected_output": "description of correct behavior",
+      "assertions": [
+        { "id": "a1", "text": "objectively verifiable assertion", "type": "boolean" }
+      ]
+    }
+  ]
+}
+
+Field rules:
+- name: kebab-case, concise, descriptive (e.g., "sql-formatter", "api-docs-generator")
+- description: 1-3 sentences with trigger phrases. Must pass the "would Claude trigger on this?" test
+- model: "" (any) unless task clearly requires opus-level reasoning or is trivially haiku-suitable
+- allowedTools: comma-separated list (e.g., "Read, Write, Edit, Bash") or "" for unrestricted. Only restrict when the skill genuinely shouldn't use certain tools
+- body: Complete markdown starting with # /skill-name, structured with ## sections, 500-2000 words
+- evals: 2-3 realistic test cases with objectively verifiable assertions. Prompts should be what real users would say, not abstract test inputs
+
+Return ONLY the JSON object — no code fences, no preamble.
+
+After the JSON, on a new line, write "---REASONING---" followed by a brief explanation of your design choices (why this name, why these trigger phrases, what methodology rules you applied).`;
+
+interface GenerateSkillRequest {
+  prompt: string;
+  provider?: ProviderName;
+  model?: string;
+}
+
+interface GenerateSkillResult {
+  name: string;
+  description: string;
+  model: string;
+  allowedTools: string;
+  body: string;
+  evals: Array<{
+    id: number;
+    name: string;
+    prompt: string;
+    expected_output: string;
+    assertions: Array<{ id: string; text: string; type: string }>;
+  }>;
+  reasoning: string;
+}
+
+function parseGenerateResponse(raw: string): GenerateSkillResult {
+  const parts = raw.split("---REASONING---");
+  const jsonPart = parts[0].trim();
+  const reasoning = parts.length > 1 ? parts[1].trim() : "Skill generated using Skill Builder methodology.";
+
+  // Strip code fences if present
+  const cleaned = jsonPart.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "");
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new Error("AI response was not valid JSON. Try again or use manual mode.");
+  }
+
+  return {
+    name: String(parsed.name || "").replace(/[^a-z0-9-]/g, ""),
+    description: String(parsed.description || ""),
+    model: String(parsed.model || ""),
+    allowedTools: String(parsed.allowedTools || ""),
+    body: String(parsed.body || ""),
+    evals: Array.isArray(parsed.evals) ? parsed.evals as GenerateSkillResult["evals"] : [],
+    reasoning,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Route registration
 // ---------------------------------------------------------------------------
 
@@ -257,6 +392,19 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
       const skillMdPath = join(targetDir, "SKILL.md");
       writeFileSync(skillMdPath, content, "utf-8");
 
+      // Write evals.json if provided (from AI generation)
+      if (body.evals && body.evals.length > 0) {
+        const evalsData = {
+          skill_name: body.name,
+          evals: body.evals,
+        };
+        writeFileSync(
+          join(targetDir, "evals", "evals.json"),
+          JSON.stringify(evalsData, null, 2) + "\n",
+          "utf-8",
+        );
+      }
+
       sendJson(res, {
         ok: true,
         plugin: body.layout === 3 ? (basename(root) || "default") : body.plugin,
@@ -276,5 +424,33 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
       installed,
       installCommand: "vskill install skill-creator:skill-creator",
     }, 200, _req);
+  });
+
+  // POST /api/skills/generate — AI-assisted skill generation
+  router.post("/api/skills/generate", async (req, res) => {
+    const body = (await readBody(req)) as GenerateSkillRequest;
+
+    if (!body.prompt || !body.prompt.trim()) {
+      sendJson(res, { error: "Describe what your skill should do" }, 400, req);
+      return;
+    }
+
+    try {
+      const client = createLlmClient({
+        provider: body.provider,
+        model: body.model,
+      });
+
+      const userPrompt = `Generate a complete skill definition for:\n\n${body.prompt.trim()}\n\nApply the Skill Builder methodology. Return the JSON object followed by ---REASONING--- and your explanation.`;
+
+      const result = await client.generate(GENERATE_SYSTEM_PROMPT, userPrompt);
+      const parsed = parseGenerateResponse(result.text);
+
+      sendJson(res, parsed, 200, req);
+    } catch (err) {
+      const msg = (err as Error).message;
+      const status = msg.includes("not valid JSON") ? 422 : 500;
+      sendJson(res, { error: msg }, status, req);
+    }
   });
 }

@@ -241,6 +241,20 @@ export interface ProjectLayoutResponse {
   existingSkills: Array<{ plugin: string; skill: string }>;
 }
 
+export interface EvalAssertion {
+  id: string;
+  text: string;
+  type: string;
+}
+
+export interface GeneratedEval {
+  id: number;
+  name: string;
+  prompt: string;
+  expected_output: string;
+  assertions: EvalAssertion[];
+}
+
 export interface CreateSkillRequest {
   name: string;
   plugin: string;
@@ -249,6 +263,7 @@ export interface CreateSkillRequest {
   model?: string;
   allowedTools?: string;
   body: string;
+  evals?: GeneratedEval[];
 }
 
 export interface CreateSkillResponse {
@@ -262,5 +277,15 @@ export interface CreateSkillResponse {
 export interface SkillCreatorStatus {
   installed: boolean;
   installCommand: string;
+}
+
+export interface GenerateSkillResponse {
+  name: string;
+  description: string;
+  model: string;
+  allowedTools: string;
+  body: string;
+  evals: GeneratedEval[];
+  reasoning: string;
 }
 

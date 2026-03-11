@@ -70,13 +70,23 @@ export interface BenchmarkCase {
   comparisonDetail?: ComparisonCaseDetail;
 }
 
+export type ActionRecommendation = "keep" | "improve" | "rewrite" | "remove";
+
+export interface ActionItems {
+  recommendation: ActionRecommendation;
+  summary: string;
+  weaknesses: string[];
+  strengths: string[];
+  suggestedFocus: string;
+}
+
 export interface BenchmarkResult {
   timestamp: string;
   model: string;
   skill_name: string;
   cases: BenchmarkCase[];
   overall_pass_rate?: number;
-  type?: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct";
+  type?: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct" | "ai-generate" | "eval-generate";
   provider?: string;
   totalDurationMs?: number;
   totalInputTokens?: number | null;
@@ -94,6 +104,11 @@ export interface BenchmarkResult {
     improved: string;
     reasoning: string;
   };
+  generate?: {
+    prompt: string;
+    result: string;
+  };
+  actionItems?: ActionItems;
 }
 
 export interface HistorySummary {
@@ -102,7 +117,7 @@ export interface HistorySummary {
   model: string;
   skillName: string;
   passRate: number;
-  type: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct";
+  type: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct" | "ai-generate" | "eval-generate";
   caseCount?: number;
   totalDurationMs?: number;
   totalTokens?: number | null;
@@ -112,7 +127,7 @@ export interface HistorySummary {
 
 export interface HistoryFilter {
   model?: string;
-  type?: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct";
+  type?: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct" | "ai-generate" | "eval-generate";
   from?: string;
   to?: string;
 }
@@ -143,7 +158,7 @@ export interface HistoryCompareResult {
 export interface CaseHistoryEntry {
   timestamp: string;
   model: string;
-  type: "benchmark" | "comparison" | "baseline";
+  type: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct" | "ai-generate" | "eval-generate";
   provider?: string;
   pass_rate: number;
   durationMs?: number;

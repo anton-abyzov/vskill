@@ -43,13 +43,23 @@ export interface BenchmarkCase {
   comparisonDetail?: ComparisonCaseDetail;
 }
 
+export type ActionRecommendation = "keep" | "improve" | "rewrite" | "remove";
+
+export interface ActionItems {
+  recommendation: ActionRecommendation;
+  summary: string;
+  weaknesses: string[];
+  strengths: string[];
+  suggestedFocus: string;
+}
+
 export interface BenchmarkResult {
   timestamp: string;
   model: string;
   skill_name: string;
   cases: BenchmarkCase[];
   overall_pass_rate?: number;
-  type?: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct";
+  type?: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct" | "ai-generate" | "eval-generate";
   provider?: string;
   totalDurationMs?: number;
   totalInputTokens?: number | null;
@@ -68,6 +78,11 @@ export interface BenchmarkResult {
     improved: string;
     reasoning: string;
   };
+  generate?: {
+    prompt: string;
+    result: string;
+  };
+  actionItems?: ActionItems;
 }
 
 export async function writeBenchmark(

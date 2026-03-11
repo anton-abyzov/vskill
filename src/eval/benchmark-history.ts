@@ -13,7 +13,7 @@ export interface HistorySummary {
   model: string;
   skillName: string;
   passRate: number;
-  type: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct";
+  type: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct" | "ai-generate" | "eval-generate";
   caseCount: number;
   totalDurationMs: number;
   totalTokens: number | null;
@@ -23,7 +23,7 @@ export interface HistorySummary {
 
 export interface HistoryFilter {
   model?: string;
-  type?: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct";
+  type?: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct" | "ai-generate" | "eval-generate";
   from?: string; // ISO timestamp
   to?: string;   // ISO timestamp
 }
@@ -31,7 +31,7 @@ export interface HistoryFilter {
 export interface CaseHistoryEntry {
   timestamp: string;
   model: string;
-  type: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct";
+  type: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct" | "ai-generate" | "eval-generate";
   provider?: string;
   pass_rate: number;
   durationMs?: number;
@@ -63,7 +63,7 @@ function fromFilesafeTimestamp(filename: string): string {
 
 export async function writeHistoryEntry(
   skillDir: string,
-  result: BenchmarkResult & { type?: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct" },
+  result: BenchmarkResult & { type?: "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct" | "ai-generate" | "eval-generate" },
 ): Promise<string> {
   const historyDir = join(skillDir, "evals", "history");
   await mkdir(historyDir, { recursive: true });

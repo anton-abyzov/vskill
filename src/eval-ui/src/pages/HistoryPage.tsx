@@ -50,6 +50,9 @@ const TYPE_PILL: Record<string, { bg: string; fg: string; label: string }> = {
   baseline: { bg: "rgba(251,146,60,0.15)", fg: "#fb923c", label: "Baseline" },
   "model-compare": { bg: "rgba(56,189,248,0.15)", fg: "#38bdf8", label: "Model Compare" },
   improve: { bg: "rgba(168,85,247,0.15)", fg: "#a855f7", label: "AI Improve" },
+  instruct: { bg: "rgba(168,85,247,0.15)", fg: "#a855f7", label: "AI Edit" },
+  "ai-generate": { bg: "rgba(34,197,94,0.15)", fg: "#22c55e", label: "AI Generate" },
+  "eval-generate": { bg: "rgba(251,146,60,0.15)", fg: "#fb923c", label: "Eval Generate" },
 };
 
 function verdictColor(v: string | undefined): string {
@@ -113,6 +116,8 @@ function FilterBar({ models, filters, onChange }: FilterBarProps) {
         <option value="model-compare">Model Compare</option>
         <option value="improve">AI Improve</option>
         <option value="instruct">AI Edit</option>
+        <option value="ai-generate">AI Generate</option>
+        <option value="eval-generate">Eval Generate</option>
       </select>
 
       {/* From */}

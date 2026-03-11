@@ -17,7 +17,7 @@ export function HistoryPanel() {
   const [history, setHistory] = useState<HistorySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterModel, setFilterModel] = useState("");
-  const [filterType, setFilterType] = useState<"" | "benchmark" | "comparison" | "baseline" | "model-compare" | "improve">("");
+  const [filterType, setFilterType] = useState<"" | "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct" | "ai-generate" | "eval-generate">("");
 
   // Compare mode
   const [compareMode, setCompareMode] = useState(false);
@@ -33,7 +33,7 @@ export function HistoryPanel() {
     setLoading(true);
     api.getHistory(plugin, skill, {
       model: filterModel || undefined,
-      type: (filterType || undefined) as "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | undefined,
+      type: (filterType || undefined) as HistorySummary["type"] | undefined,
     }).then((h) => {
       setHistory(h);
 
@@ -146,6 +146,9 @@ export function HistoryPanel() {
               <option value="baseline">Baseline</option>
               <option value="model-compare">Model Compare</option>
               <option value="improve">AI Improve</option>
+              <option value="instruct">AI Edit</option>
+              <option value="ai-generate">AI Generate</option>
+              <option value="eval-generate">Eval Generate</option>
             </select>
 
             <div className="flex-1" />
@@ -206,14 +209,18 @@ export function HistoryPanel() {
                             : h.type === "baseline" ? "var(--surface-3)"
                             : h.type === "model-compare" ? "rgba(56,189,248,0.15)"
                             : (h.type === "improve" || h.type === "instruct") ? "rgba(168,85,247,0.15)"
+                            : h.type === "ai-generate" ? "rgba(34,197,94,0.15)"
+                            : h.type === "eval-generate" ? "rgba(251,146,60,0.15)"
                             : "var(--accent-muted)",
                           color: h.type === "comparison" ? "var(--purple)"
                             : h.type === "baseline" ? "var(--text-tertiary)"
                             : h.type === "model-compare" ? "#38bdf8"
                             : (h.type === "improve" || h.type === "instruct") ? "#a855f7"
+                            : h.type === "ai-generate" ? "#22c55e"
+                            : h.type === "eval-generate" ? "#fb923c"
                             : "var(--accent)",
                         }}>
-                          {h.type === "model-compare" ? "model compare" : h.type === "improve" ? "ai improve" : h.type === "instruct" ? "ai edit" : h.type}
+                          {h.type === "model-compare" ? "model compare" : h.type === "improve" ? "ai improve" : h.type === "instruct" ? "ai edit" : h.type === "ai-generate" ? "ai generate" : h.type === "eval-generate" ? "eval generate" : h.type}
                         </span>
                       </div>
                       <div className="flex items-center gap-3">

@@ -24,6 +24,7 @@ import { createLlmClient } from "../eval/llm.js";
 import type { ProviderName, LlmOverrides } from "../eval/llm.js";
 import { runComparison } from "../eval/comparator.js";
 import { computeVerdict } from "../eval/verdict.js";
+import { generateActionItems } from "../eval/action-items.js";
 import { buildEvalInitPrompt, parseGeneratedEvals } from "../eval/prompt-builder.js";
 import { testActivation } from "../eval/activation-tester.js";
 import type { ActivationPrompt, SkillMeta } from "../eval/activation-tester.js";
@@ -331,6 +332,21 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
       const evalsFile = parseGeneratedEvals(genResult.text);
 
+      // Record history entry for eval generation
+      try {
+        const client = getClient();
+        await writeHistoryEntry(skillDir, {
+          timestamp: new Date().toISOString(),
+          model: client.model,
+          skill_name: evalsFile.skill_name || params.skill,
+          cases: [],
+          overall_pass_rate: undefined,
+          type: "eval-generate",
+          provider: currentOverrides.provider || "claude-cli",
+          generate: { prompt: prompt, result: JSON.stringify(evalsFile) },
+        });
+      } catch { /* history write failure should not break the main response */ }
+
       if (wantsSSE && !aborted) {
         sendSSEDone(res, evalsFile);
       } else {
@@ -626,6 +642,32 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
         const verdict = computeVerdict(passRate, skillRubricAvg, baselineRubricAvg);
 
+        // Generate action items (one LLM call with comparison context)
+        let actionItems;
+        try {
+          const actionCases = comparisonResults.map((r) => ({
+            eval_id: r.eval_id,
+            eval_name: r.eval_name,
+            winner: r.comparison.winner,
+            skillContentScore: r.comparison.skillContentScore,
+            skillStructureScore: r.comparison.skillStructureScore,
+            baselineContentScore: r.comparison.baselineContentScore,
+            baselineStructureScore: r.comparison.baselineStructureScore,
+            assertionResults: r.assertionResults,
+          }));
+          actionItems = await withHeartbeat(
+            res, undefined, "action_items", "Generating recommendations",
+            () => generateActionItems(
+              client, verdict,
+              { passRate, skillRubricAvg, baselineRubricAvg, delta: skillRubricAvg - baselineRubricAvg },
+              actionCases, skillContent,
+            ),
+          );
+        } catch {
+          // Non-fatal — comparison still valid without action items
+          actionItems = undefined;
+        }
+
         // Build benchmark-compatible result for history
         const cases: BenchmarkCase[] = comparisonResults.map((r) => ({
           eval_id: r.eval_id,
@@ -668,6 +710,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
             baselineRubricAvg,
             delta: skillRubricAvg - baselineRubricAvg,
           },
+          ...(actionItems ? { actionItems } : {}),
         };
 
         await writeHistoryEntry(skillDir, historyResult);
@@ -688,7 +731,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     const fromParam = url.searchParams.get("from");
     const toParam = url.searchParams.get("to");
     if (modelParam) filter.model = modelParam;
-    if (typeParam && ["benchmark", "comparison", "baseline", "model-compare", "improve"].includes(typeParam)) {
+    if (typeParam && ["benchmark", "comparison", "baseline", "model-compare", "improve", "instruct", "ai-generate", "eval-generate"].includes(typeParam)) {
       filter.type = typeParam as HistoryFilter["type"];
     }
     if (fromParam) filter.from = fromParam;

@@ -11,6 +11,7 @@ import { createLlmClient } from "../eval/llm.js";
 import type { ProviderName } from "../eval/llm.js";
 import { initSSE, sendSSE, sendSSEDone, withHeartbeat } from "./sse-helpers.js";
 import { classifyError } from "./error-classifier.js";
+import { writeHistoryEntry } from "../eval/benchmark-history.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -412,6 +413,20 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
           JSON.stringify(evalsData, null, 2) + "\n",
           "utf-8",
         );
+
+        // Record history entry for AI-generated skill
+        try {
+          await writeHistoryEntry(targetDir, {
+            timestamp: new Date().toISOString(),
+            model: "unknown",
+            skill_name: body.name,
+            cases: [],
+            overall_pass_rate: undefined,
+            type: "ai-generate",
+            provider: "unknown",
+            generate: { prompt: body.description, result: content },
+          });
+        } catch { /* history write failure should not break the main response */ }
       }
 
       sendJson(res, {

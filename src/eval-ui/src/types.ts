@@ -28,7 +28,7 @@ export interface SkillInfo {
   hasBenchmark: boolean;
   evalCount: number;
   assertionCount: number;
-  benchmarkStatus: "pass" | "fail" | "pending" | "missing";
+  benchmarkStatus: "pass" | "fail" | "pending" | "stale" | "missing";
   lastBenchmark: string | null;
 }
 
@@ -203,6 +203,21 @@ export interface ImproveResult {
   original: string;
   improved: string;
   reasoning: string;
+}
+
+// ---------------------------------------------------------------------------
+// Smart AI Edit: eval change suggestions
+// ---------------------------------------------------------------------------
+
+export interface EvalChange {
+  action: "add" | "modify" | "remove";
+  reason: string;
+  evalId?: number;
+  eval?: EvalCase;
+}
+
+export interface SmartEditResult extends ImproveResult {
+  evalChanges: EvalChange[];
 }
 
 export interface McpDependency {

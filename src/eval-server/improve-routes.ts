@@ -32,6 +32,7 @@ export function registerImproveRoutes(router: Router, root: string): void {
       mode?: "auto" | "instruct";
       instruction?: string;
       content?: string;
+      evals?: { skill_name: string; evals: Array<{ id: number; name: string; prompt: string; expected_output: string; files: string[]; assertions: Array<{ id: string; text: string; type: string }> }> };
     };
 
     const mode = body.mode || "auto";
@@ -57,6 +58,38 @@ export function registerImproveRoutes(router: Router, root: string): void {
         // ── Instruct mode: freeform user instruction ──
         original = body.content!;
 
+        const hasEvals = body.evals && Array.isArray(body.evals.evals);
+        const evalsJson = hasEvals
+          ? JSON.stringify(body.evals!.evals.map((e) => ({
+              id: e.id, name: e.name, prompt: e.prompt,
+              expected_output: e.expected_output,
+              assertions: e.assertions.map((a) => ({ id: a.id, text: a.text })),
+            })), null, 2)
+          : "[]";
+
+        const evalRules = hasEvals ? `
+
+## Test Case Analysis
+The skill has existing test cases (evals). After applying the instruction, analyze whether the test cases need updating:
+- If the instruction adds new behavior, suggest new test cases that cover it
+- If the instruction modifies existing behavior, suggest modifications to affected test cases
+- If the instruction removes behavior, suggest removing test cases that are no longer relevant
+- If the instruction does not affect test coverage, return an empty eval changes array
+
+## Eval Change Output Format
+After the reasoning section, on a new line write "---EVAL_CHANGES---" followed by a JSON array of suggested changes:
+
+\`\`\`
+[
+  { "action": "add", "reason": "why this test is needed", "eval": { "id": 0, "name": "test-name", "prompt": "user prompt", "expected_output": "description", "files": [], "assertions": [{ "id": "assert-1", "text": "verifiable assertion", "type": "boolean" }] } },
+  { "action": "modify", "reason": "what changed and why", "evalId": 1, "eval": { "id": 1, "name": "updated-name", "prompt": "updated prompt", "expected_output": "updated description", "files": [], "assertions": [{ "id": "assert-1", "text": "updated assertion", "type": "boolean" }] } },
+  { "action": "remove", "reason": "why this test is no longer relevant", "evalId": 2 }
+]
+\`\`\`
+
+Only suggest eval changes that are directly related to the instruction. If the instruction does not affect test coverage, write "---EVAL_CHANGES---" followed by \`[]\`.
+Each assertion must be objectively verifiable (clear yes/no). Generate 2-4 assertions per test case.` : "";
+
         systemPrompt = `You are an expert AI skill engineer. The user wants to modify a SKILL.md file according to their specific instruction.
 
 ## Rules
@@ -70,9 +103,13 @@ export function registerImproveRoutes(router: Router, root: string): void {
 ## Output Format
 Return ONLY the modified SKILL.md content — no explanations, no code fences, no preamble. The output must be a complete, valid SKILL.md that can be written directly to disk.
 
-After the modified content, on a new line, write "---REASONING---" followed by a brief explanation of what you changed and why.`;
+After the modified content, on a new line, write "---REASONING---" followed by a brief explanation of what you changed and why.${evalRules}`;
 
-        userPrompt = `## Current SKILL.md\n${original}\n\n## Instruction\n${body.instruction!.trim()}\n\nApply this instruction to the SKILL.md above. Return the full modified content followed by ---REASONING--- and your explanation.`;
+        const evalsSection = hasEvals
+          ? `\n\n## Current Test Cases (evals)\n\`\`\`json\n${evalsJson}\n\`\`\``
+          : "";
+
+        userPrompt = `## Current SKILL.md\n${original}${evalsSection}\n\n## Instruction\n${body.instruction!.trim()}\n\nApply this instruction to the SKILL.md above. Return the full modified content followed by ---REASONING--- and your explanation.${hasEvals ? " Then write ---EVAL_CHANGES--- followed by a JSON array of suggested test case changes (or [] if none needed)." : ""}`;
       } else {
         // ── Auto mode: existing best-practices improvement ──
         original = readFileSync(skillMdPath, "utf-8");
@@ -173,10 +210,27 @@ After the improved content, on a new line, write "---REASONING---" followed by a
 
       const result = await client.generate(systemPrompt, userPrompt);
 
-      // Parse improved content and reasoning
+      // Parse improved content, reasoning, and optional eval changes
       const parts = result.text.split("---REASONING---");
       const improved = parts[0].trim();
-      const reasoning = parts.length > 1 ? parts[1].trim() : "Improvements applied.";
+      let reasoning = parts.length > 1 ? parts[1].trim() : "Improvements applied.";
+
+      // Extract eval changes from reasoning section
+      let evalChanges: unknown[] = [];
+      if (mode === "instruct") {
+        const evalParts = reasoning.split("---EVAL_CHANGES---");
+        reasoning = evalParts[0].trim();
+        if (evalParts.length > 1) {
+          try {
+            const raw = evalParts[1].trim();
+            // Handle both raw JSON and code-fenced JSON
+            const jsonMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+            const jsonStr = jsonMatch ? jsonMatch[1].trim() : raw;
+            const parsed = JSON.parse(jsonStr);
+            if (Array.isArray(parsed)) evalChanges = parsed;
+          } catch { /* graceful degradation: evalChanges stays [] */ }
+        }
+      }
 
       // Record to history
       let skillName = "unknown";
@@ -196,7 +250,7 @@ After the improved content, on a new line, write "---REASONING---" followed by a
         improve: { original, improved, reasoning },
       });
 
-      sendJson(res, { original, improved, reasoning }, 200, req);
+      sendJson(res, { original, improved, reasoning, evalChanges }, 200, req);
     } catch (err) {
       sendJson(
         res,

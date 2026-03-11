@@ -263,29 +263,79 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
       const result = await api.instructEdit(plugin, skill, {
         instruction,
         content: state.skillContent,
+        evals: state.evals ?? undefined,
       });
-      dispatch({ type: "AI_EDIT_RESULT", improved: result.improved, reasoning: result.reasoning });
+      dispatch({
+        type: "AI_EDIT_RESULT",
+        improved: result.improved,
+        reasoning: result.reasoning,
+        evalChanges: result.evalChanges ?? [],
+      });
     } catch (e) {
       dispatch({ type: "AI_EDIT_ERROR", message: (e as Error).message });
     }
-  }, [plugin, skill, state.skillContent]);
+  }, [plugin, skill, state.skillContent, state.evals]);
 
   const applyAiEdit = useCallback(async () => {
-    const improved = state.aiEditResult?.improved;
-    if (!improved) return;
+    const result = state.aiEditResult;
+    if (!result?.improved) return;
     try {
-      await api.applyImprovement(plugin, skill, improved);
-      dispatch({ type: "SET_CONTENT", content: improved });
+      // Phase 1: save SKILL.md
+      await api.applyImprovement(plugin, skill, result.improved);
+      dispatch({ type: "SET_CONTENT", content: result.improved });
       dispatch({ type: "CONTENT_SAVED" });
+
+      // Phase 2: apply selected eval changes
+      const hasSelectedChanges = state.aiEditEvalChanges.length > 0
+        && Array.from(state.aiEditEvalSelections.values()).some(Boolean);
+      if (hasSelectedChanges) {
+        const { mergeEvalChanges } = await import("../../utils/mergeEvalChanges");
+        const currentEvals = state.evals ?? { skill_name: state.skill, evals: [] };
+        const merged = mergeEvalChanges(currentEvals, state.aiEditEvalChanges, state.aiEditEvalSelections);
+        try {
+          const saved = await api.saveEvals(plugin, skill, merged);
+          dispatch({ type: "SET_EVALS", evals: saved });
+        } catch (e) {
+          // SKILL.md saved, but evals failed — store for retry
+          dispatch({ type: "SET_EVALS_RETRY", evalsFile: merged });
+          dispatch({ type: "SET_ERROR", error: `SKILL.md saved, but test cases failed to save: ${(e as Error).message}. You can retry from the AI Edit panel.` });
+          return; // don't close — allow retry
+        }
+      }
+
       dispatch({ type: "CLOSE_AI_EDIT" });
     } catch (e) {
       dispatch({ type: "SET_ERROR", error: (e as Error).message });
     }
-  }, [plugin, skill, state.aiEditResult]);
+  }, [plugin, skill, state.aiEditResult, state.evals, state.aiEditEvalChanges, state.aiEditEvalSelections]);
 
   const discardAiEdit = useCallback(() => {
     dispatch({ type: "CLOSE_AI_EDIT" });
   }, []);
+
+  const toggleEvalChange = useCallback((index: number) => {
+    dispatch({ type: "TOGGLE_EVAL_CHANGE", index });
+  }, []);
+
+  const selectAllEvalChanges = useCallback(() => {
+    dispatch({ type: "SELECT_ALL_EVAL_CHANGES" });
+  }, []);
+
+  const deselectAllEvalChanges = useCallback(() => {
+    dispatch({ type: "DESELECT_ALL_EVAL_CHANGES" });
+  }, []);
+
+  const retryEvalsSave = useCallback(async () => {
+    const merged = state.aiEditEvalsRetry;
+    if (!merged) return;
+    try {
+      const saved = await api.saveEvals(plugin, skill, merged);
+      dispatch({ type: "SET_EVALS", evals: saved });
+      dispatch({ type: "CLOSE_AI_EDIT" });
+    } catch (e) {
+      dispatch({ type: "SET_ERROR", error: `Retry failed: ${(e as Error).message}` });
+    }
+  }, [plugin, skill, state.aiEditEvalsRetry]);
 
   const refreshSkillContent = useCallback(async () => {
     try {
@@ -366,7 +416,11 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     submitAiEdit,
     applyAiEdit,
     discardAiEdit,
-  }), [state, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, submitAiEdit, applyAiEdit, discardAiEdit]);
+    toggleEvalChange,
+    selectAllEvalChanges,
+    deselectAllEvalChanges,
+    retryEvalsSave,
+  }), [state, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, submitAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave]);
 
   return (
     <WorkspaceCtx.Provider value={value}>

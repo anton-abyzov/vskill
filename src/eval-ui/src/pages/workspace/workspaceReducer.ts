@@ -19,6 +19,9 @@ export const initialWorkspaceState: WorkspaceState = {
   aiEditLoading: false,
   aiEditResult: null,
   aiEditError: null,
+  aiEditEvalChanges: [],
+  aiEditEvalSelections: new Map(),
+  aiEditEvalsRetry: null,
   regressions: [],
   iterationCount: 0,
   activationPrompts: "",
@@ -192,19 +195,50 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     // -- AI Edit lifecycle --
 
     case "OPEN_AI_EDIT":
-      return { ...state, aiEditOpen: true, aiEditResult: null, aiEditError: null };
+      return { ...state, aiEditOpen: true, aiEditResult: null, aiEditError: null, aiEditEvalChanges: [], aiEditEvalSelections: new Map(), aiEditEvalsRetry: null };
 
     case "CLOSE_AI_EDIT":
-      return { ...state, aiEditOpen: false, aiEditLoading: false, aiEditResult: null, aiEditError: null };
+      return { ...state, aiEditOpen: false, aiEditLoading: false, aiEditResult: null, aiEditError: null, aiEditEvalChanges: [], aiEditEvalSelections: new Map(), aiEditEvalsRetry: null };
 
     case "AI_EDIT_LOADING":
       return { ...state, aiEditLoading: true, aiEditError: null };
 
-    case "AI_EDIT_RESULT":
-      return { ...state, aiEditLoading: false, aiEditResult: { improved: action.improved, reasoning: action.reasoning } };
+    case "AI_EDIT_RESULT": {
+      const evalChanges = action.evalChanges ?? [];
+      const selections = new Map<number, boolean>();
+      for (let i = 0; i < evalChanges.length; i++) selections.set(i, true);
+      return {
+        ...state,
+        aiEditLoading: false,
+        aiEditResult: { improved: action.improved, reasoning: action.reasoning, evalChanges },
+        aiEditEvalChanges: evalChanges,
+        aiEditEvalSelections: selections,
+      };
+    }
 
     case "AI_EDIT_ERROR":
       return { ...state, aiEditLoading: false, aiEditError: action.message };
+
+    case "TOGGLE_EVAL_CHANGE": {
+      const selections = new Map(state.aiEditEvalSelections);
+      selections.set(action.index, !selections.get(action.index));
+      return { ...state, aiEditEvalSelections: selections };
+    }
+
+    case "SELECT_ALL_EVAL_CHANGES": {
+      const selections = new Map(state.aiEditEvalSelections);
+      for (const key of selections.keys()) selections.set(key, true);
+      return { ...state, aiEditEvalSelections: selections };
+    }
+
+    case "DESELECT_ALL_EVAL_CHANGES": {
+      const selections = new Map(state.aiEditEvalSelections);
+      for (const key of selections.keys()) selections.set(key, false);
+      return { ...state, aiEditEvalSelections: selections };
+    }
+
+    case "SET_EVALS_RETRY":
+      return { ...state, aiEditEvalsRetry: action.evalsFile };
 
     case "SET_REGRESSIONS":
       return { ...state, regressions: action.regressions };

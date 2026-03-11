@@ -4,10 +4,11 @@ import { api } from "../api";
 import type { ConfigResponse, ProviderInfo } from "../api";
 import { computeDiff } from "../utils/diff";
 import type { DiffLine } from "../utils/diff";
+import { EvalChangesPanel } from "./EvalChangesPanel";
 
 export function AiEditBar() {
-  const { state, dispatch, submitAiEdit, applyAiEdit, discardAiEdit } = useWorkspace();
-  const { aiEditLoading, aiEditResult, aiEditError } = state;
+  const { state, dispatch, submitAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave } = useWorkspace();
+  const { aiEditLoading, aiEditResult, aiEditError, aiEditEvalChanges, aiEditEvalSelections, aiEditEvalsRetry } = state;
 
   const [instruction, setInstruction] = useState("");
   const [config, setConfig] = useState<ConfigResponse | null>(null);
@@ -61,6 +62,8 @@ export function AiEditBar() {
   const diffLines: DiffLine[] = aiEditResult
     ? computeDiff(state.skillContent, aiEditResult.improved)
     : [];
+
+  const currentEvals = state.evals?.evals ?? [];
 
   return (
     <div
@@ -209,7 +212,12 @@ export function AiEditBar() {
               </div>
             )}
 
-            {/* Diff lines */}
+            {/* SKILL.md diff */}
+            <div className="mb-1">
+              <span className="text-[11px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                SKILL.md Changes
+              </span>
+            </div>
             <div
               className="rounded-lg overflow-hidden mb-3"
               style={{ border: "1px solid var(--border-subtle)", maxHeight: 300, overflowY: "auto" }}
@@ -241,8 +249,31 @@ export function AiEditBar() {
               ))}
             </div>
 
+            {/* Eval changes panel (hidden when empty) */}
+            <EvalChangesPanel
+              changes={aiEditEvalChanges}
+              selections={aiEditEvalSelections}
+              currentEvals={currentEvals}
+              onToggle={toggleEvalChange}
+              onSelectAll={selectAllEvalChanges}
+              onDeselectAll={deselectAllEvalChanges}
+            />
+
+            {/* Retry banner for failed evals save */}
+            {aiEditEvalsRetry && (
+              <div
+                className="mt-3 px-3 py-2.5 rounded-lg text-[12px] flex items-center justify-between"
+                style={{ background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.3)", color: "#fbbf24" }}
+              >
+                <span>Test case save failed. SKILL.md was saved successfully.</span>
+                <button onClick={retryEvalsSave} className="btn text-[11px]" style={{ background: "rgba(251,191,36,0.2)", color: "#fbbf24", padding: "3px 10px" }}>
+                  Retry Save
+                </button>
+              </div>
+            )}
+
             {/* Actions */}
-            <div className="flex gap-2">
+            <div className="flex gap-2 mt-3">
               <button
                 onClick={applyAiEdit}
                 className="btn btn-primary text-[11px]"

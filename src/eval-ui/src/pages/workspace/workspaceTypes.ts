@@ -1,4 +1,4 @@
-import type { EvalsFile, BenchmarkResult, StatsResult, ActivationResult, ActivationSummary } from "../../types";
+import type { EvalsFile, BenchmarkResult, StatsResult, ActivationResult, ActivationSummary, EvalChange } from "../../types";
 
 // ---------------------------------------------------------------------------
 // Panel IDs
@@ -90,8 +90,11 @@ export interface WorkspaceState {
   // AI Edit state (freeform instruction-based editing)
   aiEditOpen: boolean;
   aiEditLoading: boolean;
-  aiEditResult: { improved: string; reasoning: string } | null;
+  aiEditResult: { improved: string; reasoning: string; evalChanges: EvalChange[] } | null;
   aiEditError: string | null;
+  aiEditEvalChanges: EvalChange[];
+  aiEditEvalSelections: Map<number, boolean>;
+  aiEditEvalsRetry: EvalsFile | null;
 
   // History
   regressions: RegressionInfo[];
@@ -137,8 +140,12 @@ export type WorkspaceAction =
   | { type: "OPEN_AI_EDIT" }
   | { type: "CLOSE_AI_EDIT" }
   | { type: "AI_EDIT_LOADING" }
-  | { type: "AI_EDIT_RESULT"; improved: string; reasoning: string }
+  | { type: "AI_EDIT_RESULT"; improved: string; reasoning: string; evalChanges: EvalChange[] }
   | { type: "AI_EDIT_ERROR"; message: string }
+  | { type: "TOGGLE_EVAL_CHANGE"; index: number }
+  | { type: "SELECT_ALL_EVAL_CHANGES" }
+  | { type: "DESELECT_ALL_EVAL_CHANGES" }
+  | { type: "SET_EVALS_RETRY"; evalsFile: EvalsFile }
   | { type: "SET_REGRESSIONS"; regressions: RegressionInfo[] }
   | { type: "INCREMENT_ITERATION" }
   | { type: "SET_ACTIVATION_PROMPTS"; prompts: string }
@@ -171,4 +178,8 @@ export interface WorkspaceContextValue {
   submitAiEdit: (instruction: string) => Promise<void>;
   applyAiEdit: () => Promise<void>;
   discardAiEdit: () => void;
+  toggleEvalChange: (index: number) => void;
+  selectAllEvalChanges: () => void;
+  deselectAllEvalChanges: () => void;
+  retryEvalsSave: () => Promise<void>;
 }

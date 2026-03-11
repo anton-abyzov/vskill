@@ -91,7 +91,7 @@ export async function runSingleCaseSSE(opts: SingleCaseRunOptions): Promise<Benc
       assertionResults.length > 0
         ? assertionResults.filter((a) => a.pass).length / assertionResults.length
         : 0;
-    const status = assertionResults.every((a) => a.pass) ? "pass" : "fail";
+    const status = assertionResults.length > 0 && assertionResults.every((a) => a.pass) ? "pass" : "fail";
 
     const benchCase: BenchmarkCase = {
       eval_id: evalCase.id,

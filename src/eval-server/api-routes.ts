@@ -41,6 +41,21 @@ function getClient(): ReturnType<typeof createLlmClient> {
   return createLlmClient(currentOverrides);
 }
 
+/** Derive sidebar badge status from benchmark + current eval IDs. */
+function computeBenchmarkStatus(
+  benchmark: BenchmarkResult | null,
+  evalIds: Set<number>,
+  hasEvals: boolean,
+): "pass" | "fail" | "pending" | "stale" | "missing" {
+  if (!benchmark) return hasEvals ? "pending" : "missing";
+  if (benchmark.cases.length === 0) return "pending";
+  // Stale: benchmark references case IDs that no longer exist in evals
+  const isStale = evalIds.size > 0 && !benchmark.cases.every((c) => evalIds.has(c.eval_id));
+  if (isStale) return "stale";
+  // Use overall_pass_rate as single source of truth
+  return (benchmark.overall_pass_rate ?? 0) >= 1 ? "pass" : "fail";
+}
+
 interface ModelOption {
   id: string;       // raw model id passed to the provider
   label: string;    // human-readable display name
@@ -194,23 +209,19 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       skills.map(async (s) => {
         let evalCount = 0;
         let assertionCount = 0;
+        let evalIds: Set<number> = new Set();
         try {
           const evals = loadAndValidateEvals(s.dir);
           evalCount = evals.evals.length;
           assertionCount = evals.evals.reduce((sum, e) => sum + e.assertions.length, 0);
+          evalIds = new Set(evals.evals.map((e) => e.id));
         } catch { /* no evals */ }
         const benchmark = await readBenchmark(s.dir);
         return {
           ...s,
           evalCount,
           assertionCount,
-          benchmarkStatus: benchmark
-            ? benchmark.cases.every((c) => c.status === "pass")
-              ? "pass"
-              : "fail"
-            : s.hasEvals
-              ? "pending"
-              : "missing",
+          benchmarkStatus: computeBenchmarkStatus(benchmark, evalIds, s.hasEvals),
           lastBenchmark: benchmark?.timestamp ?? null,
         };
       }),

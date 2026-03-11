@@ -4,6 +4,7 @@ const STATUS_CONFIG: Record<string, { bg: string; text: string; dot: string; lab
   pass:    { bg: "var(--green-muted)", text: "var(--green)",  dot: "var(--green)",  label: "Passing" },
   fail:    { bg: "var(--red-muted)",   text: "var(--red)",    dot: "var(--red)",    label: "Failing" },
   pending: { bg: "var(--yellow-muted)", text: "var(--yellow)", dot: "var(--yellow)", label: "Pending" },
+  stale:   { bg: "var(--orange-muted)", text: "var(--orange)", dot: "var(--orange)", label: "Stale" },
   missing: { bg: "var(--surface-3)",   text: "var(--text-tertiary)", dot: "var(--text-tertiary)", label: "No evals" },
 };
 

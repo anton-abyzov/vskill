@@ -284,6 +284,8 @@ function CaseDetail({
               fontFamily: "var(--font-mono, ui-monospace, monospace)",
               whiteSpace: "pre-wrap",
               border: "1px solid var(--border-subtle)",
+              maxHeight: 200,
+              overflowY: "auto",
             }}
             onClick={() => setEditingPrompt(true)}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--border-hover)"; }}
@@ -320,6 +322,8 @@ function CaseDetail({
               fontFamily: "var(--font-mono, ui-monospace, monospace)",
               whiteSpace: "pre-wrap",
               border: "1px solid var(--border-subtle)",
+              maxHeight: 200,
+              overflowY: "auto",
             }}
             onClick={() => setEditingExpected(true)}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--border-hover)"; }}
@@ -404,7 +408,15 @@ function AssertionRow({
             )}
           </span>
         ) : (
-          <span className="mt-0.5 w-[18px] h-[18px] rounded-full flex-shrink-0" style={{ background: "var(--surface-4)" }} />
+          <span
+            className="mt-0.5 rounded-full flex-shrink-0"
+            style={{
+              width: 18, height: 18,
+              border: "1.5px dashed var(--text-tertiary)",
+              background: "transparent",
+            }}
+            title="Not run yet"
+          />
         )}
 
         {/* ID + text */}

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useStudio } from "../StudioContext";
 
 interface Props {
@@ -6,21 +7,41 @@ interface Props {
   onRetry?: () => void;
 }
 
+function FallbackIcon() {
+  return (
+    <div
+      className="w-16 h-16 rounded-2xl flex items-center justify-center"
+      style={{ background: "var(--surface-2)" }}
+    >
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+        <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+        <line x1="12" y1="22.08" x2="12" y2="12" />
+      </svg>
+    </div>
+  );
+}
+
 export function EmptyState({ variant, message, onRetry }: Props) {
   const { setMode, setSearch } = useStudio();
+  const [imgError, setImgError] = useState(false);
 
   if (variant === "no-selection") {
     return (
       <div className="flex flex-col items-center justify-center h-full px-8 animate-fade-in">
-        <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center mb-5"
-          style={{ background: "var(--surface-2)" }}
-        >
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-            <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-            <line x1="12" y1="22.08" x2="12" y2="12" />
-          </svg>
+        <div className="mb-5">
+          {!imgError ? (
+            <img
+              src="/images/empty-studio.webp"
+              width={128}
+              height={128}
+              alt=""
+              onError={() => setImgError(true)}
+              style={{ objectFit: "contain" }}
+            />
+          ) : (
+            <FallbackIcon />
+          )}
         </div>
         <p className="text-[14px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>
           Select a skill to view details

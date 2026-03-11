@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useStudio } from "../StudioContext";
 import { SkillCard } from "./SkillCard";
 
@@ -46,16 +46,7 @@ export function SkillGroupList() {
       {entries.map(([plugin, pluginSkills]) => (
         <div key={plugin}>
           {/* Group header */}
-          <div className="flex items-center gap-2 px-3 py-2">
-            <div className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)" }} />
-            <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-tertiary)" }}>
-              {plugin}
-            </span>
-            <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
-              ({pluginSkills.length})
-            </span>
-            <div className="flex-1 h-px" style={{ background: "var(--border-subtle)" }} />
-          </div>
+          <PluginGroupHeader plugin={plugin} count={pluginSkills.length} />
 
           {/* Cards */}
           {pluginSkills.map((s) => {
@@ -71,6 +62,37 @@ export function SkillGroupList() {
           })}
         </div>
       ))}
+    </div>
+  );
+}
+
+function PluginGroupHeader({ plugin, count }: { plugin: string; count: number }) {
+  const [imgError, setImgError] = useState(false);
+  const iconUrl = `/images/icons/${plugin}.webp`;
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-2">
+      {!imgError ? (
+        <img
+          src={iconUrl}
+          width={16}
+          height={16}
+          alt=""
+          onError={() => setImgError(true)}
+          style={{ objectFit: "contain" }}
+        />
+      ) : (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+        </svg>
+      )}
+      <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-tertiary)" }}>
+        {plugin}
+      </span>
+      <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
+        ({count})
+      </span>
+      <div className="flex-1 h-px" style={{ background: "var(--border-subtle)" }} />
     </div>
   );
 }

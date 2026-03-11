@@ -37,6 +37,59 @@ export function sendSSEDone(
   res.end();
 }
 
+export interface DynamicHeartbeat {
+  update(phase: string, message: string): void;
+  stop(): void;
+}
+
+/**
+ * Start a dynamic heartbeat that can switch phase/message on the fly.
+ * Unlike `withHeartbeat`, this is imperative: call `update()` to change
+ * what the next tick emits, and `stop()` when done.
+ */
+export function startDynamicHeartbeat(
+  res: http.ServerResponse,
+  evalId: number | undefined,
+  initialPhase: string,
+  initialMessage: string,
+  intervalMs = 3000,
+): DynamicHeartbeat {
+  const start = Date.now();
+  let currentPhase = initialPhase;
+  let currentMessage = initialMessage;
+  let timer: ReturnType<typeof setInterval> | null = setInterval(() => {
+    const elapsed = Math.round((Date.now() - start) / 1000);
+    const data: Record<string, unknown> = {
+      phase: currentPhase,
+      message: `${currentMessage} (${elapsed}s)`,
+      elapsed_ms: Date.now() - start,
+    };
+    if (evalId != null) data.eval_id = evalId;
+    sendSSE(res, "progress", data);
+  }, intervalMs);
+
+  return {
+    update(phase: string, message: string) {
+      currentPhase = phase;
+      currentMessage = message;
+      const elapsed = Math.round((Date.now() - start) / 1000);
+      const data: Record<string, unknown> = {
+        phase,
+        message: `${message} (${elapsed}s)`,
+        elapsed_ms: Date.now() - start,
+      };
+      if (evalId != null) data.eval_id = evalId;
+      sendSSE(res, "progress", data);
+    },
+    stop() {
+      if (timer != null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    },
+  };
+}
+
 /**
  * Wrap an async operation with periodic heartbeat SSE events.
  * Emits a progress event every `intervalMs` with elapsed time so the

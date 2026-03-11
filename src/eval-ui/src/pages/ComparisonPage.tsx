@@ -3,6 +3,8 @@ import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useSSE } from "../sse";
 import { api } from "../api";
 import { GroupedBarChart } from "../components/GroupedBarChart";
+import { ProgressLog } from "../components/ProgressLog";
+import type { ProgressEntry } from "../components/ProgressLog";
 
 interface ComparisonOutputsEvent {
   eval_id: number;
@@ -61,6 +63,7 @@ export function ComparisonPage() {
   const comparisons: ComparisonOutputsEvent[] = [];
   const caseErrors: Array<{ eval_id: number; error: string }> = [];
   const activeCases: Array<{ eval_id: number; eval_name: string }> = [];
+  const progressEntries: ProgressEntry[] = [];
   for (const evt of events) {
     if (evt.event === "outputs_ready") {
       const d = evt.data as ComparisonOutputsEvent;
@@ -71,6 +74,16 @@ export function ComparisonPage() {
     } else if (evt.event === "case_start") {
       const d = evt.data as { eval_id: number; eval_name: string };
       if (!activeCases.find((c) => c.eval_id === d.eval_id)) activeCases.push(d);
+    } else if (evt.event === "progress") {
+      const d = evt.data as { eval_id?: number; phase: string; message: string; current?: number; total?: number };
+      progressEntries.push({
+        timestamp: Date.now(),
+        evalId: d.eval_id,
+        phase: d.phase,
+        message: d.message,
+        current: d.current,
+        total: d.total,
+      });
     }
   }
 
@@ -294,6 +307,12 @@ export function ComparisonPage() {
               ? `Processing: ${currentCase.eval_name || `Eval #${currentCase.eval_id}`}`
               : "Then blind-scoring both responses"}
           </p>
+        </div>
+      )}
+
+      {progressEntries.length > 0 && (
+        <div className="glass-card mt-3 overflow-hidden">
+          <ProgressLog entries={progressEntries} isRunning={running} />
         </div>
       )}
     </div>

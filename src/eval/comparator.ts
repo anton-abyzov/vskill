@@ -5,6 +5,8 @@
 import type { LlmClient } from "./llm.js";
 import { buildEvalSystemPrompt, buildBaselineSystemPrompt } from "./prompt-builder.js";
 
+export type ComparisonProgressCallback = (phase: string, message: string) => void;
+
 export interface ComparisonOutput {
   skillOutput: string;
   skillDurationMs: number;
@@ -59,12 +61,15 @@ export async function generateComparisonOutputs(
   prompt: string,
   skillContent: string,
   client: LlmClient,
+  onProgress?: ComparisonProgressCallback,
 ): Promise<ComparisonOutput> {
   const skillSystemPrompt = buildEvalSystemPrompt(skillContent);
   const baselineSystemPrompt = buildBaselineSystemPrompt();
 
   // Run sequentially (claude-cli can only handle one at a time)
+  onProgress?.("generating_skill", "Generating skill output...");
   const skillResult = await client.generate(skillSystemPrompt, prompt);
+  onProgress?.("generating_baseline", "Generating baseline output...");
   const baselineResult = await client.generate(baselineSystemPrompt, prompt);
 
   const totalTokens = (r: typeof skillResult) =>
@@ -124,14 +129,16 @@ export async function runComparison(
   prompt: string,
   skillContent: string,
   client: LlmClient,
+  onProgress?: ComparisonProgressCallback,
 ): Promise<ComparisonResult> {
-  const outputs = await generateComparisonOutputs(prompt, skillContent, client);
+  const outputs = await generateComparisonOutputs(prompt, skillContent, client, onProgress);
 
   // Randomize order for blind comparison
   const skillIsA = Math.random() < 0.5;
   const outputA = skillIsA ? outputs.skillOutput : outputs.baselineOutput;
   const outputB = skillIsA ? outputs.baselineOutput : outputs.skillOutput;
 
+  onProgress?.("scoring", "Scoring comparison...");
   const scores = await scoreComparison(outputA, outputB, prompt, client);
 
   // Map scores back to skill/baseline

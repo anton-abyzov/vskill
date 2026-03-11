@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
-import { initSSE, sendSSE, sendSSEDone, withHeartbeat } from "./sse-helpers.js";
+import { initSSE, sendSSE, sendSSEDone, withHeartbeat, startDynamicHeartbeat } from "./sse-helpers.js";
 import { classifyError } from "./error-classifier.js";
 import { runBenchmarkSSE, runSingleCaseSSE, assembleBulkResult } from "./benchmark-runner.js";
 import { getSkillSemaphore } from "./concurrency.js";
@@ -519,18 +519,17 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
           eval_name: evalCase.name,
         });
 
-        sendSSE(res, "progress", {
-          eval_id: evalCase.id,
-          phase: "comparing",
-          message: `Running skill vs baseline comparison for "${evalCase.name}"...`,
-        });
+        const heartbeat = startDynamicHeartbeat(
+          res, evalCase.id, "generating_skill",
+          `Generating skill output for "${evalCase.name}"...`,
+        );
 
         try {
-          const comparison = await withHeartbeat(
-            res, evalCase.id, "comparing",
-            `Running skill vs baseline comparison for "${evalCase.name}"...`,
-            () => runComparison(evalCase.prompt, skillContent, client),
+          const comparison = await runComparison(
+            evalCase.prompt, skillContent, client,
+            (phase, msg) => heartbeat.update(phase, msg),
           );
+          heartbeat.stop();
           sendSSE(res, "outputs_ready", {
             eval_id: evalCase.id,
             eval_name: evalCase.name,
@@ -587,6 +586,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
             baselineStructureScore: comparison.baselineStructureScore,
           });
         } catch (err) {
+          heartbeat.stop();
           sendSSE(res, "case_error", {
             eval_id: evalCase.id,
             error: err instanceof Error ? err.message : String(err),

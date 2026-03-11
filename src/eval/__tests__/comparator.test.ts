@@ -163,3 +163,86 @@ describe("runComparison", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("generateComparisonOutputs with onProgress", () => {
+  it("calls onProgress with generating_skill before first LLM call", async () => {
+    const client = mockClient(["skill response", "baseline response"]);
+    const onProgress = vi.fn();
+
+    await generateComparisonOutputs("test prompt", "# Skill", client, onProgress);
+
+    expect(onProgress).toHaveBeenNthCalledWith(1, "generating_skill", "Generating skill output...");
+  });
+
+  it("calls onProgress with generating_baseline before second LLM call", async () => {
+    const client = mockClient(["skill response", "baseline response"]);
+    const onProgress = vi.fn();
+
+    await generateComparisonOutputs("test prompt", "# Skill", client, onProgress);
+
+    expect(onProgress).toHaveBeenNthCalledWith(2, "generating_baseline", "Generating baseline output...");
+  });
+
+  it("calls onProgress exactly 2 times", async () => {
+    const client = mockClient(["skill response", "baseline response"]);
+    const onProgress = vi.fn();
+
+    await generateComparisonOutputs("test prompt", "# Skill", client, onProgress);
+
+    expect(onProgress).toHaveBeenCalledTimes(2);
+  });
+
+  it("works without onProgress (backward compatible)", async () => {
+    const client = mockClient(["skill response", "baseline response"]);
+
+    const result = await generateComparisonOutputs("test prompt", "# Skill", client);
+
+    expect(result.skillOutput).toBe("skill response");
+    expect(result.baselineOutput).toBe("baseline response");
+  });
+});
+
+describe("runComparison with onProgress", () => {
+  it("calls onProgress for all 3 phases in order", async () => {
+    const client = mockClient([
+      "skill output",
+      "baseline output",
+      JSON.stringify({
+        content_score_a: 3, structure_score_a: 3,
+        content_score_b: 3, structure_score_b: 3,
+        winner: "tie",
+      }),
+    ]);
+    vi.spyOn(Math, "random").mockReturnValue(0.3);
+    const onProgress = vi.fn();
+
+    await runComparison("prompt", "skill content", client, onProgress);
+
+    expect(onProgress).toHaveBeenCalledTimes(3);
+    expect(onProgress.mock.calls[0][0]).toBe("generating_skill");
+    expect(onProgress.mock.calls[1][0]).toBe("generating_baseline");
+    expect(onProgress.mock.calls[2][0]).toBe("scoring");
+
+    vi.restoreAllMocks();
+  });
+
+  it("completes without error when onProgress is omitted", async () => {
+    const client = mockClient([
+      "skill",
+      "baseline",
+      JSON.stringify({
+        content_score_a: 3, structure_score_a: 3,
+        content_score_b: 3, structure_score_b: 3,
+        winner: "tie",
+      }),
+    ]);
+    vi.spyOn(Math, "random").mockReturnValue(0.3);
+
+    const result = await runComparison("prompt", "skill", client);
+
+    expect(result.winner).toBe("tie");
+    expect(result.skillOutput).toBe("skill");
+
+    vi.restoreAllMocks();
+  });
+});

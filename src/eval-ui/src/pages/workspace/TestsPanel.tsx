@@ -8,8 +8,15 @@ import { ProgressLog } from "../../components/ProgressLog";
 import { ErrorCard } from "../../components/ErrorCard";
 
 export function TestsPanel() {
-  const { state, dispatch, saveEvals, runCase, cancelCase, generateEvals } = useWorkspace();
+  const { state, dispatch, saveEvals, runCase, runAll, cancelCase, cancelAll, generateEvals } = useWorkspace();
   const { evals, selectedCaseId, inlineResults, caseRunStates, generateEvalsLoading, generateEvalsProgress, generateEvalsError } = state;
+
+  const isAnyRunning = useMemo(() => {
+    for (const s of caseRunStates.values()) {
+      if (s.status === "running" || s.status === "queued") return true;
+    }
+    return false;
+  }, [caseRunStates]);
   const [showForm, setShowForm] = useState(false);
 
   const defaultEvals: EvalsFile = { skill_name: state.skill, evals: [] };
@@ -74,8 +81,30 @@ export function TestsPanel() {
     <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", height: "100%", overflow: "hidden" }}>
       {/* Left: Case list */}
       <div className="overflow-auto" style={{ borderRight: "1px solid var(--border-subtle)", background: "var(--surface-1)" }}>
-        <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-tertiary)", borderBottom: "1px solid var(--border-subtle)" }}>
-          Test Cases ({cases.length})
+        <div className="px-3 py-2 flex items-center justify-between" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+          <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>
+            Test Cases ({cases.length})
+          </span>
+          <div className="flex items-center gap-1.5">
+            {isAnyRunning ? (
+              <button
+                onClick={cancelAll}
+                className="btn text-[10px] px-2 py-0.5"
+                style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(239,68,68,0.3)" }}
+              >
+                Cancel All
+              </button>
+            ) : (
+              <>
+                <button onClick={() => runAll("benchmark")} disabled={cases.length === 0} className="btn btn-primary text-[10px] px-2 py-0.5">
+                  Run All
+                </button>
+                <button onClick={() => runAll("comparison")} disabled={cases.length === 0} className="btn btn-purple text-[10px] px-2 py-0.5">
+                  Compare All
+                </button>
+              </>
+            )}
+          </div>
         </div>
         <div className="py-1">
           {cases.map((c) => {

@@ -1,4 +1,6 @@
 import type { EvalsFile, BenchmarkResult, StatsResult, ActivationResult, ActivationSummary, EvalChange } from "../../types";
+import type { ProgressEntry } from "../../components/ProgressLog";
+import type { ClassifiedError } from "../../components/ErrorCard";
 
 // ---------------------------------------------------------------------------
 // Panel IDs
@@ -92,9 +94,16 @@ export interface WorkspaceState {
   aiEditLoading: boolean;
   aiEditResult: { improved: string; reasoning: string; evalChanges: EvalChange[] } | null;
   aiEditError: string | null;
+  aiEditClassifiedError: ClassifiedError | null;
+  aiEditProgress: ProgressEntry[];
   aiEditEvalChanges: EvalChange[];
   aiEditEvalSelections: Map<number, boolean>;
   aiEditEvalsRetry: EvalsFile | null;
+
+  // Generate evals state
+  generateEvalsLoading: boolean;
+  generateEvalsProgress: ProgressEntry[];
+  generateEvalsError: ClassifiedError | null;
 
   // History
   regressions: RegressionInfo[];
@@ -175,7 +184,7 @@ export interface WorkspaceContextValue {
   refreshSkillContent: () => Promise<void>;
   generateEvals: () => Promise<void>;
   runActivationTest: (prompts: string) => void;
-  submitAiEdit: (instruction: string) => Promise<void>;
+  submitAiEdit: (instruction: string, provider?: string, model?: string) => Promise<void>;
   applyAiEdit: () => Promise<void>;
   discardAiEdit: () => void;
   toggleEvalChange: (index: number) => void;

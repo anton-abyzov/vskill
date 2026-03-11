@@ -257,13 +257,15 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
   }, [plugin, skill, runCase]);
 
   // -- AI Edit --
-  const submitAiEdit = useCallback(async (instruction: string) => {
+  const submitAiEdit = useCallback(async (instruction: string, provider?: string, model?: string) => {
     dispatch({ type: "AI_EDIT_LOADING" });
     try {
       const result = await api.instructEdit(plugin, skill, {
         instruction,
         content: state.skillContent,
-        evals: state.evals ?? undefined,
+        evals: state.evals ?? { skill_name: skill, evals: [] },
+        provider,
+        model,
       });
       dispatch({
         type: "AI_EDIT_RESULT",
@@ -290,7 +292,7 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
         && Array.from(state.aiEditEvalSelections.values()).some(Boolean);
       if (hasSelectedChanges) {
         const { mergeEvalChanges } = await import("../../utils/mergeEvalChanges");
-        const currentEvals = state.evals ?? { skill_name: state.skill, evals: [] };
+        const currentEvals = state.evals ?? { skill_name: skill, evals: [] };
         const merged = mergeEvalChanges(currentEvals, state.aiEditEvalChanges, state.aiEditEvalSelections);
         try {
           const saved = await api.saveEvals(plugin, skill, merged);

@@ -38,8 +38,8 @@ export function AiEditBar() {
   const handleSubmit = useCallback(() => {
     const trimmed = instruction.trim();
     if (!trimmed || aiEditLoading) return;
-    submitAiEdit(trimmed);
-  }, [instruction, aiEditLoading, submitAiEdit]);
+    submitAiEdit(trimmed, selectedProvider, selectedModel);
+  }, [instruction, aiEditLoading, submitAiEdit, selectedProvider, selectedModel]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {

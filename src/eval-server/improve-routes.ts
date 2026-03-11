@@ -12,6 +12,8 @@ import { createLlmClient } from "../eval/llm.js";
 import type { ProviderName } from "../eval/llm.js";
 import { writeHistoryEntry } from "../eval/benchmark-history.js";
 import { loadAndValidateEvals } from "../eval/schema.js";
+import { initSSE, sendSSE, sendSSEDone, withHeartbeat } from "./sse-helpers.js";
+import { classifyError } from "./error-classifier.js";
 
 export function registerImproveRoutes(router: Router, root: string): void {
   // POST /api/skills/:plugin/:skill/improve
@@ -49,6 +51,33 @@ export function registerImproveRoutes(router: Router, root: string): void {
       }
     }
 
+    // Detect if client wants SSE (POST with Accept: text/event-stream or query param)
+    const wantsSSE = req.headers.accept?.includes("text/event-stream") ||
+      (req.url && new URL(req.url, "http://localhost").searchParams.has("sse"));
+
+    let aborted = false;
+    res.on("close", () => { aborted = true; });
+
+    if (wantsSSE) {
+      initSSE(res, req);
+    }
+
+    const providerName = body.provider || "claude-cli";
+
+    function emitProgress(phase: string, message: string): void {
+      if (wantsSSE && !aborted) sendSSE(res, "progress", { phase, message });
+    }
+
+    function emitError(err: unknown): void {
+      const classified = classifyError(err, providerName);
+      if (wantsSSE && !aborted) {
+        sendSSE(res, "error", classified);
+        res.end();
+      } else {
+        sendJson(res, { error: classified.description, classified }, 500, req);
+      }
+    }
+
     try {
       let original: string;
       let systemPrompt: string;
@@ -63,7 +92,7 @@ export function registerImproveRoutes(router: Router, root: string): void {
           ? JSON.stringify(body.evals!.evals.map((e) => ({
               id: e.id, name: e.name, prompt: e.prompt,
               expected_output: e.expected_output,
-              assertions: e.assertions.map((a) => ({ id: a.id, text: a.text })),
+              assertions: (e.assertions ?? []).map((a) => ({ id: a.id, text: a.text })),
             })), null, 2)
           : "[]";
 
@@ -203,12 +232,22 @@ After the improved content, on a new line, write "---REASONING---" followed by a
         userPrompt = `## Current SKILL.md\n${original}${failureContext}${notesSection}\n\nImprove this SKILL.md following the Skill Builder methodology. ${failureContext ? "Focus primarily on addressing the benchmark failures, but also apply skill-builder best practices where they help." : "Apply skill-builder best practices: check description quality, writing style, progressive disclosure, and content organization."} Return the full improved content followed by ---REASONING--- and your explanation.`;
       }
 
+      emitProgress("preparing", "Building prompt...");
+
       const client = createLlmClient({
         provider: body.provider,
         model: body.model,
       });
 
-      const result = await client.generate(systemPrompt, userPrompt);
+      emitProgress("generating", "Calling LLM...");
+
+      const result = wantsSSE
+        ? await withHeartbeat(res, undefined, "generating", "Generating response", () => client.generate(systemPrompt, userPrompt))
+        : await client.generate(systemPrompt, userPrompt);
+
+      if (aborted) return;
+
+      emitProgress("parsing", "Extracting result...");
 
       // Parse improved content, reasoning, and optional eval changes
       const parts = result.text.split("---REASONING---");
@@ -227,7 +266,22 @@ After the improved content, on a new line, write "---REASONING---" followed by a
             const jsonMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
             const jsonStr = jsonMatch ? jsonMatch[1].trim() : raw;
             const parsed = JSON.parse(jsonStr);
-            if (Array.isArray(parsed)) evalChanges = parsed;
+            if (Array.isArray(parsed)) {
+              // Validate each change conforms to expected shape
+              evalChanges = parsed.filter((c: Record<string, unknown>) => {
+                if (!c || typeof c !== "object") return false;
+                if (!["add", "modify", "remove"].includes(c.action as string)) return false;
+                if (typeof c.reason !== "string") return false;
+                if (c.action === "remove") return typeof c.evalId === "number";
+                // add/modify must have a valid eval object
+                const ev = c.eval as Record<string, unknown> | undefined;
+                if (!ev || typeof ev !== "object") return false;
+                if (typeof ev.name !== "string" || typeof ev.prompt !== "string") return false;
+                if (!Array.isArray(ev.assertions)) return false;
+                if (c.action === "modify" && typeof c.evalId !== "number") return false;
+                return true;
+              });
+            }
           } catch { /* graceful degradation: evalChanges stays [] */ }
         }
       }
@@ -250,14 +304,14 @@ After the improved content, on a new line, write "---REASONING---" followed by a
         improve: { original, improved, reasoning },
       });
 
-      sendJson(res, { original, improved, reasoning, evalChanges }, 200, req);
+      const payload = { original, improved, reasoning, evalChanges };
+      if (wantsSSE && !aborted) {
+        sendSSEDone(res, payload);
+      } else {
+        sendJson(res, payload, 200, req);
+      }
     } catch (err) {
-      sendJson(
-        res,
-        { error: `Improvement failed: ${(err as Error).message}` },
-        500,
-        req,
-      );
+      emitError(err);
     }
   });
 

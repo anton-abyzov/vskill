@@ -217,9 +217,9 @@ function checkSkillCreatorInstalled(): boolean {
 // AI skill generation
 // ---------------------------------------------------------------------------
 
-const GENERATE_SYSTEM_PROMPT = `You are an expert AI skill engineer following the Skill Builder methodology. Given a user's description of what a skill should do, generate a complete, production-quality skill definition.
+const GENERATE_SYSTEM_PROMPT = `You are an expert AI skill engineer in Skill Studio. Given a user's description of what a skill should do, generate a complete, production-quality skill definition.
 
-## Skill Builder Methodology
+## Skill Studio Best Practices
 
 ### SKILL.md Anatomy
 Every skill has YAML frontmatter (description required, name/model/allowed-tools optional) and a markdown body with instructions.
@@ -289,7 +289,7 @@ Field rules:
 
 Return ONLY the JSON object — no code fences, no preamble.
 
-After the JSON, on a new line, write "---REASONING---" followed by a brief explanation of your design choices (why this name, why these trigger phrases, what methodology rules you applied).`;
+After the JSON, on a new line, write "---REASONING---" followed by a brief explanation of your design choices (why this name, why these trigger phrases, what Skill Studio rules you applied).`;
 
 interface GenerateSkillRequest {
   prompt: string;
@@ -316,7 +316,7 @@ interface GenerateSkillResult {
 function parseGenerateResponse(raw: string): GenerateSkillResult {
   const parts = raw.split("---REASONING---");
   const jsonPart = parts[0].trim();
-  const reasoning = parts.length > 1 ? parts[1].trim() : "Skill generated using Skill Builder methodology.";
+  const reasoning = parts.length > 1 ? parts[1].trim() : "Skill generated using Skill Studio best practices.";
 
   // Strip code fences if present
   const cleaned = jsonPart.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "");
@@ -328,13 +328,16 @@ function parseGenerateResponse(raw: string): GenerateSkillResult {
     throw new Error("AI response was not valid JSON. Try again or use manual mode.");
   }
 
+  const name = String(parsed.name || "").replace(/[^a-z0-9-]/g, "").replace(/^-+|-+$/g, "");
+  if (!name) throw new Error("AI returned an invalid skill name. Try again or use manual mode.");
+
   return {
-    name: String(parsed.name || "").replace(/[^a-z0-9-]/g, ""),
+    name,
     description: String(parsed.description || ""),
     model: String(parsed.model || ""),
     allowedTools: String(parsed.allowedTools || ""),
     body: String(parsed.body || ""),
-    evals: Array.isArray(parsed.evals) ? parsed.evals as GenerateSkillResult["evals"] : [],
+    evals: Array.isArray(parsed.evals) ? (parsed.evals as GenerateSkillResult["evals"]).slice(0, 10) : [],
     reasoning,
   };
 }
@@ -373,6 +376,10 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
     }
     if (body.layout !== 3 && !body.plugin?.trim()) {
       sendJson(res, { error: "Plugin name is required for this layout" }, 400, req);
+      return;
+    }
+    if (body.plugin && !/^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/i.test(body.plugin)) {
+      sendJson(res, { error: "Plugin name contains invalid characters" }, 400, req);
       return;
     }
 
@@ -437,6 +444,11 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
       return;
     }
 
+    if (body.prompt.length > 10000) {
+      sendJson(res, { error: "Prompt is too long (max 10,000 characters)" }, 400, req);
+      return;
+    }
+
     const wantsSSE = req.headers.accept?.includes("text/event-stream") ||
       (req.url ? new URL(req.url, "http://localhost").searchParams.has("sse") : false);
 
@@ -457,7 +469,7 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
 
       if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "generating", message: "Generating skill..." });
 
-      const userPrompt = `Generate a complete skill definition for:\n\n${body.prompt.trim()}\n\nApply the Skill Builder methodology. Return the JSON object followed by ---REASONING--- and your explanation.`;
+      const userPrompt = `Generate a complete skill definition for:\n\n${body.prompt.trim()}\n\nApply Skill Studio best practices. Return the JSON object followed by ---REASONING--- and your explanation.`;
 
       const result = wantsSSE
         ? await withHeartbeat(res, undefined, "generating", "Generating skill", () => client.generate(GENERATE_SYSTEM_PROMPT, userPrompt))

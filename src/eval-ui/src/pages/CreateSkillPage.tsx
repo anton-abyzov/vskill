@@ -384,7 +384,7 @@ export function CreateSkillPage() {
               />
               <p className="text-[11px] mt-2" style={{ color: "var(--text-tertiary)" }}>
                 Describe what the skill should do, who it's for, and any specific behaviors.
-                The AI will generate the name, description, system prompt, and test cases following the Skill Builder methodology.
+                The AI will generate the name, description, system prompt, and test cases using Skill Studio best practices.
                 <span className="ml-1" style={{ color: "var(--text-quaternary, var(--text-tertiary))" }}>Cmd+Enter to generate</span>
               </p>
             </div>

@@ -75,6 +75,7 @@ export interface WorkspaceState {
 
   // Evals
   evals: EvalsFile | null;
+  evalsError: string | null; // set when evals.json exists but fails validation
 
   // Panel
   activePanel: PanelId;
@@ -131,7 +132,7 @@ export interface WorkspaceState {
 export type WorkspaceAction =
   | { type: "SET_LOADING"; loading: boolean }
   | { type: "SET_ERROR"; error: string | null }
-  | { type: "INIT_DATA"; skillContent: string; evals: EvalsFile | null; benchmark: BenchmarkResult | null }
+  | { type: "INIT_DATA"; skillContent: string; evals: EvalsFile | null; evalsError?: string | null; benchmark: BenchmarkResult | null }
   | { type: "SET_PANEL"; panel: PanelId }
   | { type: "SET_CONTENT"; content: string }
   | { type: "CONTENT_SAVED" }

@@ -101,7 +101,7 @@ function computeAssertionBadges(
 
 export function TestsPanel() {
   const { state, dispatch, saveEvals, runCase, runAll, cancelCase, cancelAll, generateEvals, isReadOnly } = useWorkspace();
-  const { evals, selectedCaseId, inlineResults, caseRunStates, generateEvalsLoading, generateEvalsProgress, generateEvalsError } = state;
+  const { evals, evalsError, selectedCaseId, inlineResults, caseRunStates, generateEvalsLoading, generateEvalsProgress, generateEvalsError } = state;
 
   const isAnyRunning = useMemo(() => {
     for (const s of caseRunStates.values()) {
@@ -120,19 +120,35 @@ export function TestsPanel() {
     generateEvals();
   }, [generateEvals]);
 
-  // Empty state
+  // Empty state (or validation error)
   if (!evals || cases.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 px-8">
-        <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: "var(--accent-muted)" }}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 11l3 3L22 4" />
-            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-          </svg>
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: evalsError ? "var(--error-muted, #3f1a1a)" : "var(--accent-muted)" }}>
+          {evalsError ? (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--error, #f87171)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+          ) : (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 11l3 3L22 4" />
+              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+            </svg>
+          )}
         </div>
         <div className="text-center">
-          <div className="text-[14px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>No test cases yet</div>
-          <div className="text-[12px]" style={{ color: "var(--text-tertiary)" }}>Create test cases to start evaluating your skill</div>
+          {evalsError ? (
+            <>
+              <div className="text-[14px] font-medium mb-1" style={{ color: "var(--error, #f87171)" }}>Invalid evals.json</div>
+              <div className="text-[11px] font-mono px-3 py-2 rounded mt-1 max-w-sm text-left break-words" style={{ color: "var(--text-secondary)", background: "var(--surface-2)" }}>{evalsError}</div>
+              <div className="text-[12px] mt-2" style={{ color: "var(--text-tertiary)" }}>Fix the evals.json file and reload, or regenerate test cases with AI</div>
+            </>
+          ) : (
+            <>
+              <div className="text-[14px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>No test cases yet</div>
+              <div className="text-[12px]" style={{ color: "var(--text-tertiary)" }}>Create test cases to start evaluating your skill</div>
+            </>
+          )}
         </div>
         <div className="flex gap-2">
           <button onClick={() => setShowForm(true)} disabled={isReadOnly} className="btn btn-primary text-[12px]">Create Test Case</button>

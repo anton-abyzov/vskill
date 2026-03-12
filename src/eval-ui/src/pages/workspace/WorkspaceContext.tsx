@@ -144,10 +144,23 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
 
         if (cancelled) return;
 
+        // For evals: 404 = no file (silent), 400 = invalid file (show error)
+        let evalsValue: EvalsFile | null = null;
+        let evalsError: string | null = null;
+        if (evals.status === "fulfilled") {
+          evalsValue = evals.value;
+        } else {
+          const err = evals.reason as Error & { status?: number };
+          if (err?.status !== 404) {
+            evalsError = err?.message ?? "Failed to load test cases";
+          }
+        }
+
         dispatch({
           type: "INIT_DATA",
           skillContent: detail.status === "fulfilled" ? detail.value.skillContent : "",
-          evals: evals.status === "fulfilled" ? evals.value : null,
+          evals: evalsValue,
+          evalsError,
           benchmark: benchmark.status === "fulfilled" ? benchmark.value : null,
         });
       } catch (e) {

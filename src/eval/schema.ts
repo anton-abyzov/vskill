@@ -113,6 +113,15 @@ export function loadAndValidateEvals(skillDir: string): EvalsFile {
       });
     }
 
+    // Migration: accept legacy "expectations" (string[]) as a fallback for "assertions"
+    if (!Array.isArray(evalCase.assertions) && Array.isArray(evalCase.expectations)) {
+      evalCase.assertions = (evalCase.expectations as string[]).map((text: string, i: number) => ({
+        id: `assert-${i + 1}`,
+        text,
+        type: "boolean",
+      }));
+    }
+
     if (!Array.isArray(evalCase.assertions)) {
       errors.push({
         path: `${prefix}.assertions`,

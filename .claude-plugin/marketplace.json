@@ -19,6 +19,27 @@
       "source": "./plugins/skills",
       "version": "2.2.0",
       "category": "utility"
+    },
+    {
+      "name": "marketing",
+      "description": "Marketing automation — social media content creation, posting, and engagement across 11 platforms, plus Slack messaging",
+      "source": "./plugins/marketing",
+      "version": "1.3.0",
+      "category": "marketing"
+    },
+    {
+      "name": "productivity",
+      "description": "Personal productivity automation — expert network survey completion and paid expertise sharing",
+      "source": "./plugins/productivity",
+      "version": "1.0.0",
+      "category": "productivity"
+    },
+    {
+      "name": "google-workspace",
+      "description": "Google Workspace CLI (gws) — unified access to Gmail, Drive, Sheets, Docs, Calendar, Chat, Admin, and 40+ Google APIs",
+      "source": "./plugins/google-workspace",
+      "version": "0.1.0",
+      "category": "utility"
     }
   ],
   "metadata": {

@@ -2098,18 +2098,18 @@ function formatSearchResultId(r: SkillSearchResult): string {
 
 function formatSearchUrl(r: SkillSearchResult): string {
   if (r.ownerSlug && r.repoSlug && r.skillSlug) {
-    return `https://verified-skill.com/skills/${r.ownerSlug}/${r.repoSlug}/${r.skillSlug}`;
+    return `https://verified-skill.com/skills/${encodeURIComponent(r.ownerSlug)}/${encodeURIComponent(r.repoSlug)}/${encodeURIComponent(r.skillSlug)}`;
   }
   const parts = r.name.split("/");
   if (parts.length === 3) {
-    return `https://verified-skill.com/skills/${parts.join("/")}`;
+    return `https://verified-skill.com/skills/${parts.map(encodeURIComponent).join("/")}`;
   }
   const base = extractSearchBaseRepo(r.repoUrl);
   if (base) {
     const sn = r.name.split("/").pop() || r.name;
-    return `https://verified-skill.com/skills/${base}/${sn}`;
+    return `https://verified-skill.com/skills/${base.split("/").map(encodeURIComponent).join("/")}/${encodeURIComponent(sn)}`;
   }
-  return `https://verified-skill.com/skills/${r.name}`;
+  return `https://verified-skill.com/skills/${encodeURIComponent(r.name)}`;
 }
 
 function formatSearchBadge(certTier: string | undefined, trustTier: string | undefined): string {

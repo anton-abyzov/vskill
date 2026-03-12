@@ -1,0 +1,73 @@
+{
+  "timestamp": "2026-03-12T04:42:01.385Z",
+  "model": "claude-sonnet",
+  "skill_name": "youtube-poster",
+  "cases": [
+    {
+      "eval_id": 2,
+      "eval_name": "Create a YouTube community post",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0,
+      "durationMs": 27708,
+      "tokens": null,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Navigates to https://studio.youtube.com/community specifically, not the generic Studio homepage",
+          "pass": false,
+          "reasoning": "The LLM output mentions 'YouTube Studio Community tab' but never specifies navigating to the exact URL https://studio.youtube.com/community. It only describes high-level steps while requesting Bash access, without confirming it will target that specific URL rather than the generic Studio homepage."
+        },
+        {
+          "id": "a2",
+          "text": "Includes the post text 'New video dropping Friday!' in the automation or instructions",
+          "pass": false,
+          "reasoning": "The LLM output describes the automation workflow and asks for Bash access, but does not include or reference the specific post text 'New video dropping Friday!' anywhere in its response."
+        },
+        {
+          "id": "a3",
+          "text": "Includes a step to confirm the post was submitted successfully",
+          "pass": false,
+          "reasoning": "The LLM output describes a workflow plan for Chrome profile discovery and AppleScript automation, but does not include any step to confirm that the post was submitted successfully. The three listed steps cover listing profiles, launching Chrome, and using AppleScript to interact/post, but there is no verification or confirmation step for successful submission."
+        }
+      ],
+      "comparisonDetail": {
+        "skillDurationMs": 27708,
+        "skillTokens": null,
+        "baselineDurationMs": 25494,
+        "baselineTokens": null,
+        "skillContentScore": 2,
+        "skillStructureScore": 3,
+        "baselineContentScore": 5,
+        "baselineStructureScore": 5,
+        "winner": "baseline"
+      }
+    }
+  ],
+  "overall_pass_rate": 0,
+  "type": "comparison",
+  "provider": "claude-cli",
+  "verdict": "DEGRADING",
+  "comparison": {
+    "skillPassRate": 0,
+    "baselinePassRate": 0,
+    "skillRubricAvg": 2.5,
+    "baselineRubricAvg": 5,
+    "delta": -2.5
+  },
+  "actionItems": {
+    "recommendation": "rewrite",
+    "summary": "The skill actively degrades output quality — baseline scores perfect 5/5 while skill-guided responses score 2-3/5, failing all 3 assertions. The skill causes the AI to request tool access and describe workflow plans instead of actually executing the task with the required specifics.",
+    "weaknesses": [
+      "Skill triggers a 'request Bash access' pattern instead of immediately executing — the eval shows the AI described a workflow plan rather than acting, causing all 3 assertions to fail",
+      "The specific target URL https://studio.youtube.com/community is never used — skill only references the generic https://studio.youtube.com, causing the URL navigation assertion to fail",
+      "Post content is never included in the output — the skill focuses on browser/profile mechanics but provides no template or instruction to inject the actual post text into the automation",
+      "No success confirmation step is prescribed in the workflow — the 3-step structure (discover, launch, interact) omits verification, causing the third assertion to fail systematically"
+    ],
+    "strengths": [
+      "The Chrome profile discovery approach (dynamic listing, not hardcoded) is technically sound and reusable",
+      "The skill correctly identifies AppleScript as the right tool for macOS UI automation of a browser"
+    ],
+    "suggestedFocus": "Replace the high-level workflow description with a complete, executable script that (1) navigates directly to https://studio.youtube.com/community, (2) injects the user's post text, and (3) includes an explicit confirmation step — so the AI runs the full automation rather than describing it."
+  }
+}

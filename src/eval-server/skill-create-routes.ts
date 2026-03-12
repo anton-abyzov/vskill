@@ -2,7 +2,7 @@
 // skill-create-routes.ts -- Skill creation & project layout detection
 // ---------------------------------------------------------------------------
 
-import { existsSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { AGENTS_REGISTRY } from "../agents/agents-registry.js";
@@ -32,6 +32,13 @@ interface ProjectLayoutResponse {
   existingSkills: Array<{ plugin: string; skill: string }>;
 }
 
+interface AiGenerationMeta {
+  prompt: string;
+  provider: string;
+  model: string;
+  reasoning: string;
+}
+
 interface CreateSkillRequest {
   name: string;
   plugin: string;
@@ -47,6 +54,11 @@ interface CreateSkillRequest {
     expected_output: string;
     assertions: Array<{ id: string; text: string; type: string }>;
   }>;
+  aiMeta?: AiGenerationMeta;
+}
+
+interface SaveDraftRequest extends CreateSkillRequest {
+  aiMeta: AiGenerationMeta;
 }
 
 // ---------------------------------------------------------------------------
@@ -265,12 +277,21 @@ The description is the PRIMARY triggering mechanism. It must be "pushy" to comba
 - Include concrete examples where helpful
 - Include a clear Workflow section with numbered steps
 
-### Common Mistakes to Avoid
-- Weak trigger descriptions (vague, no specific phrases)
-- Too much content without structure
-- Second-person writing style
-- Missing workflow section
-- Overly generic instructions that don't add value
+### Action-First Skills (Bash/tool-execution)
+When a skill includes allowed-tools: Bash (or Read, Write, Edit), the skill body MUST:
+- Open with an explicit execution directive: "Execute each step immediately. Run Bash commands directly — do not ask for permission or describe plans."
+- Use "Step N — [action verb]. Run this immediately:" headers, not "Step N: [noun] Discovery"
+- Every step must end with a concrete, complete, copy-pasteable code block — not prose describing what the code would do
+- Include any variable values (paths, URLs, flags) directly in the code block, not as placeholders
+
+### Eval Assertions for Action-Oriented Skills (CRITICAL)
+The eval evaluates the LLM text response — it cannot run Bash or call tools. Assertions must check for code/commands present IN the response, not whether they were executed.
+- BAD: "Runs a bash command to discover profiles" (implies execution — will always fail)
+- GOOD: "Response includes a bash code block that lists Chrome profile directories"
+- BAD: "Opens https://studio.youtube.com as the target URL"
+- GOOD: "Response includes studio.youtube.com as the target URL in a code block or command"
+- BAD: "Checks that the file exists before uploading"
+- GOOD: "Response includes a bash command checking whether the file exists (e.g., using test -f or ls)"
 
 ## Output Format
 Return a JSON object with these fields:
@@ -399,8 +420,9 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
 
     const targetDir = computeSkillDir(root, body.layout, body.plugin || "", body.name);
 
-    // Check if already exists
-    if (existsSync(join(targetDir, "SKILL.md"))) {
+    // Check if already exists (allow overwriting drafts — draft.json indicates auto-saved draft)
+    const isDraftFinalize = existsSync(join(targetDir, "draft.json"));
+    if (existsSync(join(targetDir, "SKILL.md")) && !isDraftFinalize) {
       sendJson(res, { error: `Skill already exists at ${targetDir}` }, 409, req);
       return;
     }
@@ -427,19 +449,28 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
           "utf-8",
         );
 
-        // Record history entry for AI-generated skill
-        try {
-          await writeHistoryEntry(targetDir, {
-            timestamp: new Date().toISOString(),
-            model: "unknown",
-            skill_name: body.name,
-            cases: [],
-            overall_pass_rate: undefined,
-            type: "ai-generate",
-            provider: "unknown",
-            generate: { prompt: body.description, result: content },
-          });
-        } catch { /* history write failure should not break the main response */ }
+        // Record history entry for AI-generated skill (skip if draft finalization — already written by save-draft)
+        if (!isDraftFinalize) {
+          const aiMeta = body.aiMeta;
+          try {
+            await writeHistoryEntry(targetDir, {
+              timestamp: new Date().toISOString(),
+              model: aiMeta?.model || "unknown",
+              skill_name: body.name,
+              cases: [],
+              overall_pass_rate: undefined,
+              type: "ai-generate",
+              provider: aiMeta?.provider || "unknown",
+              generate: { prompt: aiMeta?.prompt || body.description, result: content },
+            });
+          } catch { /* history write failure should not break the main response */ }
+        }
+      }
+
+      // Finalize: remove draft.json if it exists (draft → final)
+      const draftPath = join(targetDir, "draft.json");
+      if (existsSync(draftPath)) {
+        try { unlinkSync(draftPath); } catch { /* ignore */ }
       }
 
       sendJson(res, {
@@ -451,6 +482,92 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
       }, 201, req);
     } catch (err) {
       sendJson(res, { error: `Failed to create skill: ${(err as Error).message}` }, 500, req);
+    }
+  });
+
+  // POST /api/skills/save-draft — auto-save AI-generated skill as draft
+  router.post("/api/skills/save-draft", async (req, res) => {
+    const body = (await readBody(req)) as SaveDraftRequest;
+
+    if (!body.name || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(body.name)) {
+      sendJson(res, { error: "Name must be kebab-case" }, 400, req);
+      return;
+    }
+    if (!body.description?.trim()) {
+      sendJson(res, { error: "Description is required" }, 400, req);
+      return;
+    }
+    if (!body.layout || ![1, 2, 3].includes(body.layout)) {
+      sendJson(res, { error: "Layout must be 1, 2, or 3" }, 400, req);
+      return;
+    }
+
+    const targetDir = computeSkillDir(root, body.layout, body.plugin || "", body.name);
+    const files: string[] = [];
+
+    try {
+      // Create directories (overwrites allowed for re-generation)
+      mkdirSync(targetDir, { recursive: true });
+      mkdirSync(join(targetDir, "evals"), { recursive: true });
+      mkdirSync(join(targetDir, "evals", "history"), { recursive: true });
+
+      // Write SKILL.md
+      const content = buildSkillMd(body);
+      const skillMdPath = join(targetDir, "SKILL.md");
+      writeFileSync(skillMdPath, content, "utf-8");
+      files.push("SKILL.md");
+
+      // Write evals.json if provided
+      if (body.evals && body.evals.length > 0) {
+        const evalsData = { skill_name: body.name, evals: body.evals };
+        writeFileSync(
+          join(targetDir, "evals", "evals.json"),
+          JSON.stringify(evalsData, null, 2) + "\n",
+          "utf-8",
+        );
+        files.push("evals/evals.json");
+      }
+
+      // Write draft.json metadata
+      const draftMeta = {
+        draft: true,
+        createdAt: new Date().toISOString(),
+        aiPrompt: body.aiMeta.prompt,
+        aiProvider: body.aiMeta.provider,
+        aiModel: body.aiMeta.model,
+        aiReasoning: body.aiMeta.reasoning,
+      };
+      writeFileSync(
+        join(targetDir, "draft.json"),
+        JSON.stringify(draftMeta, null, 2) + "\n",
+        "utf-8",
+      );
+      files.push("draft.json");
+
+      // Record AI generation history
+      try {
+        await writeHistoryEntry(targetDir, {
+          timestamp: new Date().toISOString(),
+          model: body.aiMeta.model,
+          skill_name: body.name,
+          cases: [],
+          overall_pass_rate: undefined,
+          type: "ai-generate",
+          provider: body.aiMeta.provider,
+          generate: { prompt: body.aiMeta.prompt, result: content },
+        });
+      } catch { /* history write failure should not break the main response */ }
+
+      sendJson(res, {
+        ok: true,
+        plugin: body.layout === 3 ? (basename(root) || "default") : body.plugin,
+        skill: body.name,
+        dir: targetDir,
+        skillMdPath,
+        files,
+      }, 201, req);
+    } catch (err) {
+      sendJson(res, { error: `Failed to save draft: ${(err as Error).message}` }, 500, req);
     }
   });
 

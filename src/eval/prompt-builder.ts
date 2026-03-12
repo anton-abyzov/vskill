@@ -80,6 +80,14 @@ const BEST_PRACTICES = `
 4. **Skip assertions for purely subjective qualities**: Don't assert on tone, creativity, or style unless there's an objective proxy (e.g., "uses formal language" instead of "sounds professional").
 
 5. **Generate 2-3 test cases**: Each representing a different realistic usage scenario for this skill. Cover the primary use case and at least one edge case or variation.
+
+6. **Action-oriented skills (Bash/tool-execution): assert on RESPONSE CONTENT, not execution**. The eval evaluates the LLM's text response — it cannot actually run Bash commands or call tools. Assertions must check what code/commands appear IN the response, not whether they were run.
+   - BAD: "Runs a bash command to discover Chrome profiles" (implies actual execution)
+   - GOOD: "Response includes a bash code block that lists or reads Chrome profile directories"
+   - BAD: "Checks that ~/Desktop/file.mp4 exists before uploading"
+   - GOOD: "Response includes a bash command checking whether the file exists (e.g., using [ -f ... ] or ls)"
+   - BAD: "Opens https://studio.youtube.com as the target URL"
+   - GOOD: "Response includes studio.youtube.com as the target URL in a code block or command"
 `;
 
 // ---------------------------------------------------------------------------
@@ -91,20 +99,42 @@ const BEST_PRACTICES = `
  * (Slack, GitHub, Linear, etc.), appends simulation instructions so the LLM
  * demonstrates the workflow instead of reporting "tools unavailable".
  */
+function detectBashTools(skillContent: string): boolean {
+  // Check frontmatter for allowed-tools containing Bash (or Read/Write/Edit)
+  const frontmatterMatch = skillContent.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (!frontmatterMatch) return false;
+  const frontmatter = frontmatterMatch[1];
+  const allowedToolsMatch = frontmatter.match(/allowed-tools\s*:\s*(.+)/i);
+  if (!allowedToolsMatch) return false;
+  const tools = allowedToolsMatch[1].toLowerCase();
+  return tools.includes("bash") || tools.includes("read") || tools.includes("write") || tools.includes("edit");
+}
+
 export function buildEvalSystemPrompt(skillContent: string): string {
   if (!skillContent) return "You are a helpful AI assistant.";
 
   const mcpDeps = detectMcpDependencies(skillContent);
+  const hasBashTools = detectBashTools(skillContent);
 
-  if (mcpDeps.length === 0) {
+  if (mcpDeps.length === 0 && !hasBashTools) {
     return `You are an AI assistant enhanced with the following skill:\n\n${skillContent}`;
   }
 
-  const toolList = mcpDeps
-    .map((d) => `- **${d.server}**: ${d.matchedTools.join(", ")}`)
-    .join("\n");
+  let executionSection = "";
 
-  return `You are an AI assistant enhanced with the following skill:\n\n${skillContent}\n\n---\n\n## Evaluation Mode\n\nThis is an evaluation run. The MCP tools referenced in this skill are not connected in this environment, but you MUST demonstrate the complete workflow as if they were available.\n\n**Tools this skill uses:**\n${toolList}\n\n**Rules:**\n1. Walk through each tool call step by step — name the tool and its parameters\n2. Show a realistic simulated response for each tool call (use realistic IDs, timestamps, content)\n3. Continue the full workflow using the simulated data\n4. Produce the final user-facing output exactly as you would with real tools\n\n**Do NOT:**\n- Say tools are unavailable or not connected\n- Offer to help set up the integration\n- Skip any workflow steps\n- Give abstract descriptions instead of demonstrating the actual workflow`;
+  if (mcpDeps.length > 0) {
+    const toolList = mcpDeps
+      .map((d) => `- **${d.server}**: ${d.matchedTools.join(", ")}`)
+      .join("\n");
+
+    executionSection += `\n\n## MCP Evaluation Mode\n\nThe MCP tools referenced in this skill are not connected in this environment, but you MUST demonstrate the complete workflow as if they were available.\n\n**Tools this skill uses:**\n${toolList}\n\n**Rules:**\n1. Walk through each tool call step by step — name the tool and its parameters\n2. Show a realistic simulated response for each tool call (use realistic IDs, timestamps, content)\n3. Continue the full workflow using the simulated data\n4. Produce the final user-facing output exactly as you would with real tools\n\n**Do NOT:**\n- Say tools are unavailable or not connected\n- Offer to help set up the integration\n- Skip any workflow steps\n- Give abstract descriptions instead of demonstrating the actual workflow`;
+  }
+
+  if (hasBashTools) {
+    executionSection += `\n\n## Bash/Tool Execution Mode\n\nThis skill uses Bash and file tools. In this evaluation, you cannot actually execute commands — but you MUST produce complete, ready-to-run code in your response as if you were about to execute them.\n\n**Rules:**\n1. Provide the exact bash commands, AppleScript blocks, or code you would run — complete and copy-pasteable\n2. Do NOT ask for permission before showing code. Execute the workflow immediately in your response\n3. Do NOT say "I would run..." or "I'll check..." — show the actual command in a code block\n4. Do NOT narrate a plan. Produce the executable output directly\n5. Include every concrete detail: exact file paths, exact flags, exact URLs from the skill's instructions\n\n**Do NOT:**\n- Ask "Should I proceed?" or "Do you want me to run this?"\n- Describe steps you would take without showing the code\n- Produce a checklist or planning narrative instead of executable code blocks`;
+  }
+
+  return `You are an AI assistant enhanced with the following skill:\n\n${skillContent}\n\n---${executionSection}`;
 }
 
 export function buildBaselineSystemPrompt(): string {

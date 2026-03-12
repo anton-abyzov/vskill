@@ -788,6 +788,11 @@ Wait for approval before posting any replies.
 | Instagram API `Transcode not finished` | Wait 30s after video upload before calling `configure_to_clips` |
 | Instagram API `cover_photo_upload_error` | Upload cover photo via `rupload_igphoto` with same upload_id before configure |
 | Instagram `sessionid` cookie expired | User must re-login in Chrome profile; re-extract cookies |
+| CDP insertText on X or Threads | Text corrupts in React editor (garbled, repeated fragments) | Use Python subprocess pbcopy + AppleScript Cmd+V |
+| Shell printf pipes to pbcopy | UTF-8 garbled — em dashes → ‚Äî, emoji → broken bytes | ALWAYS use Python subprocess: `subprocess.Popen(['pbcopy']).communicate(text.encode('utf-8'))` |
+| Threads clicks "Add to thread" instead of "Post" | JS querySelector finds wrong button — DOM order puts "Add to thread" first | Use Playwright snapshot refs=aria to get exact Post button ref, then `browser act click ref=<ref>` |
+| Threads: cliclick hits wrong "Post" button | getBoundingClientRect finds "Post" in main feed header, not compose dialog | Playwright snapshot + aria ref is the only reliable method |
+| X video upload: media missing from post | Post sent before upload completed | Wait 45s after `DOM.setFileInputFiles` before clicking Post |
 | TikTok page crashes after upload | Override `navigator.webdriver` BEFORE page load; zero CDP calls during upload |
 | TikTok DraftJS rejects caption | Skip caption in upload, edit via TikTok app after publish |
 | AppleScript file picker fails | Check Accessibility permissions; increase delays; verify file path exists |

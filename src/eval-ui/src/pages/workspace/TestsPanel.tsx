@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef, Fragment } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import { api } from "../../api";
 import type { EvalCase, Assertion, EvalsFile, CaseHistoryEntry } from "../../types";
@@ -988,22 +988,22 @@ function CaseHistorySection({ evalId, sharedEntries, sharedLoading }: {
                   }
                   if (lane === "left") {
                     return (
-                      <>
-                        <div key={idx} style={{ gridColumn: "1" }}>
+                      <Fragment key={idx}>
+                        <div style={{ gridColumn: "1" }}>
                           <HistoryEntryCard entry={entry} />
                         </div>
-                        <div key={`${idx}-spacer`} style={{ gridColumn: "2" }} />
-                      </>
+                        <div style={{ gridColumn: "2" }} />
+                      </Fragment>
                     );
                   }
                   // lane === "right"
                   return (
-                    <>
-                      <div key={`${idx}-spacer`} style={{ gridColumn: "1" }} />
-                      <div key={idx} style={{ gridColumn: "2" }}>
+                    <Fragment key={idx}>
+                      <div style={{ gridColumn: "1" }} />
+                      <div style={{ gridColumn: "2" }}>
                         <HistoryEntryCard entry={entry} />
                       </div>
-                    </>
+                    </Fragment>
                   );
                 })}
               </div>

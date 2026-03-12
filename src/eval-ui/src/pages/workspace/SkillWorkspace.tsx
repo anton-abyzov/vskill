@@ -17,7 +17,7 @@ function isValidPanel(value: string | null): value is PanelId {
 }
 
 export function SkillWorkspaceInner() {
-  const { state, dispatch, saveContent } = useWorkspace();
+  const { state, dispatch, saveContent, isReadOnly } = useWorkspace();
 
   // ---------------------------------------------------------------------------
   // URL query param deep-linking: sync activePanel <-> ?panel=
@@ -89,7 +89,7 @@ export function SkillWorkspaceInner() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Detail header */}
-      <DetailHeader state={state} />
+      <DetailHeader state={state} isReadOnly={isReadOnly} />
 
       {/* Tab bar */}
       <TabBar

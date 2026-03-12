@@ -30,6 +30,7 @@ export interface SkillInfo {
   assertionCount: number;
   benchmarkStatus: "pass" | "fail" | "pending" | "stale" | "missing";
   lastBenchmark: string | null;
+  origin: "source" | "installed";
 }
 
 export interface BenchmarkAssertionResult {

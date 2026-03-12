@@ -63,7 +63,7 @@ function IconSparkle({ size = 15 }: { size?: number }) {
 }
 
 export function EditorPanel() {
-  const { state, dispatch, saveContent } = useWorkspace();
+  const { state, dispatch, saveContent, isReadOnly } = useWorkspace();
   const { plugin, skill, skillContent, isDirty, improveTarget, aiEditOpen } = state;
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [saving, setSaving] = useState(false);
@@ -293,68 +293,80 @@ export function EditorPanel() {
           ))}
         </div>
 
-        {/* Save actions */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              if (aiEditOpen) {
-                dispatch({ type: "CLOSE_AI_EDIT" });
-              } else {
-                if (regenOpen) handleRegenDiscard();
-                dispatch({ type: "OPEN_AI_EDIT" });
-              }
-            }}
-            title="Edit with AI (Ctrl+K)"
-            className="flex items-center gap-1.5 rounded-md transition-all duration-150"
-            style={{
-              padding: "4px 10px",
-              fontSize: 11,
-              fontWeight: aiEditOpen ? 600 : 400,
-              border: "none",
-              cursor: "pointer",
-              color: aiEditOpen ? "#a855f7" : "var(--text-tertiary)",
-              background: aiEditOpen ? "rgba(168,85,247,0.12)" : "transparent",
-            }}
-          >
-            <IconWand size={13} />
-            <span>AI Edit</span>
-          </button>
-          <button
-            onClick={handleRegenToggle}
-            title="Regenerate skill from prompt"
-            className="flex items-center gap-1.5 rounded-md transition-all duration-150"
-            style={{
-              padding: "4px 10px",
-              fontSize: 11,
-              fontWeight: regenOpen ? 600 : 400,
-              border: "none",
-              cursor: "pointer",
-              color: regenOpen ? "#a855f7" : "var(--text-tertiary)",
-              background: regenOpen ? "rgba(168,85,247,0.12)" : "transparent",
-            }}
-          >
-            <IconSparkle size={13} />
-            <span>Regenerate</span>
-          </button>
-          <div style={{ width: 1, height: 16, background: "var(--border-subtle)" }} />
-          {isDirty && (
+        {/* Save actions — hidden for installed (read-only) skills */}
+        {isReadOnly ? (
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+              Read-only
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => dispatch({ type: "SET_CONTENT", content: state.savedContent })}
-              className="btn btn-ghost text-[11px]"
-              style={{ padding: "4px 8px" }}
+              onClick={() => {
+                if (aiEditOpen) {
+                  dispatch({ type: "CLOSE_AI_EDIT" });
+                } else {
+                  if (regenOpen) handleRegenDiscard();
+                  dispatch({ type: "OPEN_AI_EDIT" });
+                }
+              }}
+              title="Edit with AI (Ctrl+K)"
+              className="flex items-center gap-1.5 rounded-md transition-all duration-150"
+              style={{
+                padding: "4px 10px",
+                fontSize: 11,
+                fontWeight: aiEditOpen ? 600 : 400,
+                border: "none",
+                cursor: "pointer",
+                color: aiEditOpen ? "#a855f7" : "var(--text-tertiary)",
+                background: aiEditOpen ? "rgba(168,85,247,0.12)" : "transparent",
+              }}
             >
-              Discard
+              <IconWand size={13} />
+              <span>AI Edit</span>
             </button>
-          )}
-          <button
-            onClick={handleSave}
-            disabled={!isDirty || saving}
-            className="btn btn-primary text-[11px]"
-            style={{ padding: "5px 14px" }}
-          >
-            {saving ? <><span className="spinner" style={{ width: 11, height: 11, borderWidth: 1.5 }} /> Saving...</> : "Save"}
-          </button>
-        </div>
+            <button
+              onClick={handleRegenToggle}
+              title="Regenerate skill from prompt"
+              className="flex items-center gap-1.5 rounded-md transition-all duration-150"
+              style={{
+                padding: "4px 10px",
+                fontSize: 11,
+                fontWeight: regenOpen ? 600 : 400,
+                border: "none",
+                cursor: "pointer",
+                color: regenOpen ? "#a855f7" : "var(--text-tertiary)",
+                background: regenOpen ? "rgba(168,85,247,0.12)" : "transparent",
+              }}
+            >
+              <IconSparkle size={13} />
+              <span>Regenerate</span>
+            </button>
+            <div style={{ width: 1, height: 16, background: "var(--border-subtle)" }} />
+            {isDirty && (
+              <button
+                onClick={() => dispatch({ type: "SET_CONTENT", content: state.savedContent })}
+                className="btn btn-ghost text-[11px]"
+                style={{ padding: "4px 8px" }}
+              >
+                Discard
+              </button>
+            )}
+            <button
+              onClick={handleSave}
+              disabled={!isDirty || saving}
+              className="btn btn-primary text-[11px]"
+              style={{ padding: "5px 14px" }}
+            >
+              {saving ? <><span className="spinner" style={{ width: 11, height: 11, borderWidth: 1.5 }} /> Saving...</> : "Save"}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── Editor Body ─────────────────────────────────── */}
@@ -379,9 +391,10 @@ export function EditorPanel() {
             <textarea
               ref={textareaRef}
               value={skillContent}
-              onChange={(e) => dispatch({ type: "SET_CONTENT", content: e.target.value })}
+              onChange={(e) => { if (!isReadOnly) dispatch({ type: "SET_CONTENT", content: e.target.value }); }}
               onKeyDown={handleKeyDown}
               spellCheck={false}
+              readOnly={isReadOnly}
               className="flex-1 w-full resize-none outline-none"
               style={{
                 background: "var(--surface-0)",
@@ -392,6 +405,7 @@ export function EditorPanel() {
                 tabSize: 2,
                 border: "none",
                 padding: "16px 20px",
+                opacity: isReadOnly ? 0.7 : 1,
               }}
             />
           </div>

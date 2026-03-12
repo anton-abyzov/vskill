@@ -15,12 +15,12 @@ interface ProgressLogProps {
 }
 
 function phaseIcon(phase: string, isLatest: boolean): React.JSX.Element {
-  const spinnerPhases = new Set(["generating", "comparing", "judging", "judging_assertion", "preparing", "parsing", "generating_skill", "generating_baseline", "scoring"]);
+  const spinnerPhases = new Set(["generating", "comparing", "judging", "judging_assertion", "preparing", "parsing", "generating_skill", "generating_baseline", "scoring", "action_items"]);
   if (isLatest && spinnerPhases.has(phase)) {
     return <div className="spinner" style={{ width: 10, height: 10, flexShrink: 0 }} />;
   }
   // Completed phase
-  const accentPhases = new Set(["generating", "comparing", "preparing", "generating_skill", "generating_baseline", "scoring"]);
+  const accentPhases = new Set(["generating", "comparing", "preparing", "generating_skill", "generating_baseline", "scoring", "action_items"]);
   return (
     <div
       className="w-2.5 h-2.5 rounded-full flex-shrink-0"

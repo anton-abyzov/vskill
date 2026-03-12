@@ -10,6 +10,7 @@ import { useMediaQuery } from "./hooks/useMediaQuery";
 export interface SelectedSkill {
   plugin: string;
   skill: string;
+  origin: "source" | "installed";
 }
 
 export interface StudioState {

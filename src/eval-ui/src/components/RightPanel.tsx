@@ -40,7 +40,7 @@ export function RightPanel() {
           onCreated={(plugin, skill) => {
             setMode("browse");
             refreshSkills();
-            selectSkill({ plugin, skill });
+            selectSkill({ plugin, skill, origin: "source" });
           }}
           onCancel={() => setMode("browse")}
         />
@@ -60,12 +60,12 @@ export function RightPanel() {
   }
 
   // Skill selected — key-based remount ensures clean SSE on skill switch
-  const { plugin, skill } = state.selectedSkill;
+  const { plugin, skill, origin } = state.selectedSkill;
   return (
     <div className="flex flex-col h-full">
       <MobileBackButton />
       <div className="flex-1 overflow-hidden">
-        <WorkspaceProvider key={`${plugin}/${skill}`} plugin={plugin} skill={skill}>
+        <WorkspaceProvider key={`${plugin}/${skill}`} plugin={plugin} skill={skill} origin={origin}>
           <SkillWorkspaceInner />
         </WorkspaceProvider>
       </div>

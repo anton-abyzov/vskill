@@ -14,7 +14,7 @@ function estimateLabel(totalCases: number, totalAssertions: number): string {
 }
 
 export function RunPanel() {
-  const { state, runCase, runAll, cancelCase, cancelAll } = useWorkspace();
+  const { state, runCase, runAll, cancelCase, cancelAll, isReadOnly } = useWorkspace();
   const { evals, caseRunStates, bulkRunActive, latestBenchmark, inlineResults } = state;
 
   const cases = evals?.evals ?? [];
@@ -63,6 +63,19 @@ export function RunPanel() {
 
   return (
     <div className="p-5">
+      {/* Read-only notice */}
+      {isReadOnly && (
+        <div
+          className="flex items-center gap-2 px-3 py-2 rounded-lg mb-4 text-[11px]"
+          style={{ background: "var(--surface-2)", color: "var(--text-tertiary)", border: "1px solid var(--border-subtle)" }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          Installed skill — benchmarking is disabled. Edit the source skill to run benchmarks.
+        </div>
+      )}
       {/* Controls */}
       <div
         className="rounded-xl p-4 mb-5"
@@ -84,13 +97,13 @@ export function RunPanel() {
               Cancel All
             </button>
           )}
-          <button onClick={() => runAll("comparison")} disabled={cases.length === 0 || isAnyRunning} className="btn btn-primary text-[12px]">
+          <button onClick={() => runAll("comparison")} disabled={cases.length === 0 || isAnyRunning || isReadOnly} className="btn btn-primary text-[12px]">
             Compare All
           </button>
-          <button onClick={() => runAll("benchmark")} disabled={cases.length === 0 || isAnyRunning} className="btn btn-secondary text-[12px]">
+          <button onClick={() => runAll("benchmark")} disabled={cases.length === 0 || isAnyRunning || isReadOnly} className="btn btn-secondary text-[12px]">
             Skill Only
           </button>
-          <button onClick={() => runAll("baseline")} disabled={cases.length === 0 || isAnyRunning} className="btn btn-secondary text-[12px]">
+          <button onClick={() => runAll("baseline")} disabled={cases.length === 0 || isAnyRunning || isReadOnly} className="btn btn-secondary text-[12px]">
             Baseline Only
           </button>
         </div>
@@ -141,6 +154,7 @@ export function RunPanel() {
               result={r}
               caseStatus={caseStatus}
               runMode={caseRunState?.mode ?? null}
+              isReadOnly={isReadOnly}
               onRun={(id) => runCase(id, "benchmark")}
               onBaseline={(id) => runCase(id, "baseline")}
               onCompare={(id) => runCase(id, "comparison")}
@@ -183,7 +197,7 @@ export function RunPanel() {
             {latestBenchmark.overall_pass_rate === 1 && !latestBenchmark.comparison && (
               <button
                 onClick={() => runAll("comparison")}
-                disabled={cases.length === 0}
+                disabled={cases.length === 0 || isReadOnly}
                 className="text-[13px] font-semibold mt-3 w-full rounded-lg transition-opacity duration-150"
                 style={{
                   padding: "10px 0",
@@ -236,12 +250,13 @@ const MODE_BADGE: Record<string, { label: string; bg: string; color: string }> =
   comparison: { label: "Compare", bg: "rgba(168,85,247,0.12)", color: "rgb(168,85,247)" },
 };
 
-function RunCaseCard({ name, evalId, result, caseStatus, runMode, onRun, onBaseline, onCompare, onCancel }: {
+function RunCaseCard({ name, evalId, result, caseStatus, runMode, isReadOnly, onRun, onBaseline, onCompare, onCancel }: {
   name: string;
   evalId: number;
   result?: InlineResult;
   caseStatus: CaseRunStatus;
   runMode: RunMode | null;
+  isReadOnly?: boolean;
   onRun: (evalId: number) => void;
   onBaseline: (evalId: number) => void;
   onCompare: (evalId: number) => void;
@@ -289,9 +304,9 @@ function RunCaseCard({ name, evalId, result, caseStatus, runMode, onRun, onBasel
             </button>
           ) : (
             <>
-              <button onClick={() => onCompare(evalId)} className="btn btn-primary text-[10px] px-2 py-1">Compare</button>
-              <button onClick={() => onRun(evalId)} className="btn btn-secondary text-[10px] px-2 py-1">Skill</button>
-              <button onClick={() => onBaseline(evalId)} className="btn btn-secondary text-[10px] px-2 py-1">Base</button>
+              <button onClick={() => onCompare(evalId)} disabled={isReadOnly} className="btn btn-primary text-[10px] px-2 py-1">Compare</button>
+              <button onClick={() => onRun(evalId)} disabled={isReadOnly} className="btn btn-secondary text-[10px] px-2 py-1">Skill</button>
+              <button onClick={() => onBaseline(evalId)} disabled={isReadOnly} className="btn btn-secondary text-[10px] px-2 py-1">Base</button>
             </>
           )}
           {result && result.status != null && (

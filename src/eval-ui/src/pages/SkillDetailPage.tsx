@@ -61,6 +61,7 @@ export function SkillDetailPage() {
     api.getSkillDetail(plugin, skill).then((d) => setSkillContent(d.skillContent)).catch(() => {});
     // Load previous benchmark results
     api.getLatestBenchmark(plugin, skill).then((b) => {
+      if (!b) return;
       setLastBenchmark(b);
       // Populate inline results from saved benchmark
       const map = new Map<number, InlineResult>();

@@ -177,6 +177,7 @@ export type WorkspaceAction =
 export interface WorkspaceContextValue {
   state: WorkspaceState;
   dispatch: React.Dispatch<WorkspaceAction>;
+  isReadOnly: boolean;
 
   // Async actions
   saveContent: () => Promise<void>;

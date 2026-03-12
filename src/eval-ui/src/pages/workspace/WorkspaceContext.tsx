@@ -19,10 +19,12 @@ export function useWorkspace(): WorkspaceContextValue {
 interface Props {
   plugin: string;
   skill: string;
+  origin: "source" | "installed";
   children: React.ReactNode;
 }
 
-export function WorkspaceProvider({ plugin, skill, children }: Props) {
+export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
+  const isReadOnly = origin === "installed";
   const [state, dispatch] = useReducer(workspaceReducer, {
     ...initialWorkspaceState,
     plugin,
@@ -161,25 +163,28 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
   // Async actions
   // ---------------------------------------------------------------------------
   const saveContent = useCallback(async () => {
+    if (isReadOnly) return;
     try {
       await api.applyImprovement(plugin, skill, state.skillContent);
       dispatch({ type: "CONTENT_SAVED" });
     } catch (e) {
       dispatch({ type: "SET_ERROR", error: (e as Error).message });
     }
-  }, [plugin, skill, state.skillContent]);
+  }, [isReadOnly, plugin, skill, state.skillContent]);
 
   const saveEvals = useCallback(async (updated: EvalsFile) => {
+    if (isReadOnly) return;
     try {
       const saved = await api.saveEvals(plugin, skill, updated);
       dispatch({ type: "SET_EVALS", evals: saved });
     } catch (e) {
       dispatch({ type: "SET_ERROR", error: (e as Error).message });
     }
-  }, [plugin, skill]);
+  }, [isReadOnly, plugin, skill]);
 
   // -- Per-case run --
   const runCase = useCallback((caseId: number, mode: RunMode = "benchmark") => {
+    if (isReadOnly) return;
     const caseState = state.caseRunStates.get(caseId);
     if (caseState?.status === "running") return; // already running
 
@@ -198,10 +203,11 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
       const body = mode === "baseline" ? { baseline_only: true } : undefined;
       sseStartCase(caseId, url, body);
     }
-  }, [plugin, skill, state.caseRunStates, sseStartCase]);
+  }, [isReadOnly, plugin, skill, state.caseRunStates, sseStartCase]);
 
   // -- Run all cases in parallel --
   const runAll = useCallback((mode: RunMode = "benchmark") => {
+    if (isReadOnly) return;
     const cases = state.evals?.evals ?? [];
     if (cases.length === 0) return;
 
@@ -225,7 +231,7 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
         sseStartCase(id, url, body);
       }
     }
-  }, [plugin, skill, state.evals, sseStartCase]);
+  }, [isReadOnly, plugin, skill, state.evals, sseStartCase]);
 
   // -- Cancel per-case --
   const cancelCase = useCallback((caseId: number) => {
@@ -306,6 +312,7 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
   }, [aiEditSSE.stop]);
 
   const submitAiEdit = useCallback(async (instruction: string, provider?: string, model?: string) => {
+    if (isReadOnly) return;
     dispatch({ type: "AI_EDIT_LOADING" });
     aiEditAbortRef.current = aiEditSSE.stop;
     aiEditSSE.start(`/api/skills/${plugin}/${skill}/improve?sse`, {
@@ -316,7 +323,7 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
       provider,
       model,
     });
-  }, [plugin, skill, state.skillContent, state.evals, aiEditSSE]);
+  }, [isReadOnly, plugin, skill, state.skillContent, state.evals, aiEditSSE]);
 
   const cancelAiEdit = useCallback(() => {
     aiEditSSE.stop();
@@ -435,9 +442,10 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
   }, [genEvalsSSE.stop]);
 
   const generateEvals = useCallback(async () => {
+    if (isReadOnly) return;
     dispatch({ type: "GENERATE_EVALS_START" });
     genEvalsSSE.start(`/api/skills/${plugin}/${skill}/generate-evals?sse`);
-  }, [plugin, skill, genEvalsSSE]);
+  }, [isReadOnly, plugin, skill, genEvalsSSE]);
 
   // ---------------------------------------------------------------------------
   // Activation test SSE
@@ -486,6 +494,7 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
   const value = useMemo<WorkspaceContextValue>(() => ({
     state,
     dispatch,
+    isReadOnly,
     saveContent,
     saveEvals,
     runCase,
@@ -505,7 +514,7 @@ export function WorkspaceProvider({ plugin, skill, children }: Props) {
     selectAllEvalChanges,
     deselectAllEvalChanges,
     retryEvalsSave,
-  }), [state, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, submitAiEdit, cancelAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave]);
+  }), [state, isReadOnly, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, submitAiEdit, cancelAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave]);
 
   return (
     <WorkspaceCtx.Provider value={value}>

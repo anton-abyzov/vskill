@@ -16,6 +16,7 @@ interface Props {
 
 export function SkillCard({ skill, isSelected, onSelect }: Props) {
   const status = STATUS_CONFIG[skill.benchmarkStatus] || STATUS_CONFIG.missing;
+  const isInstalled = skill.origin === "installed";
 
   return (
     <button
@@ -29,6 +30,7 @@ export function SkillCard({ skill, isSelected, onSelect }: Props) {
         borderBottom: "1px solid var(--border-subtle)",
         borderLeft: isSelected ? "2px solid var(--accent)" : "2px solid transparent",
         display: "block",
+        opacity: isInstalled ? 0.7 : 1,
       }}
       onMouseEnter={(e) => {
         if (!isSelected) e.currentTarget.style.background = "var(--surface-2)";
@@ -38,7 +40,13 @@ export function SkillCard({ skill, isSelected, onSelect }: Props) {
       }}
     >
       <div className="flex items-center justify-between mb-1">
-        <span className="text-[13px] font-medium truncate" style={{ color: "var(--text-primary)" }}>
+        <span className="flex items-center gap-1.5 text-[13px] font-medium truncate" style={{ color: "var(--text-primary)" }}>
+          {isInstalled && (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+          )}
           {skill.skill}
         </span>
         <span

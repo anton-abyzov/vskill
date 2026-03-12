@@ -193,12 +193,14 @@ Multiple tools may be available for posting. Always prefer dedicated CLI/API too
 | X/Twitter | `xurl` CLI (if installed) | Puppeteer/browser | Peekaboo | Chrome-open |
 | Discord | `discord` skill actions | Webhook API (`curl`) | Browser automation | Chrome-open |
 | Telegram | Telegram Bot API (`curl`) | N/A | N/A | N/A |
-| Instagram | Puppeteer + Chrome profile | Peekaboo | Chrome-open | - |
+| Instagram Carousel | API (`rupload_igphoto` + `configure_sidecar`) | Puppeteer + Chrome profile | Peekaboo | Chrome-open |
+| Instagram Reel | API (`rupload_igvideo` + `configure_to_clips`) | Puppeteer + Chrome profile | Peekaboo | Chrome-open |
 | LinkedIn | Puppeteer + Chrome profile | Peekaboo | Chrome-open | - |
 | Threads | Puppeteer + Chrome profile | Peekaboo | Chrome-open | - |
-| YouTube | Puppeteer + system clipboard | Peekaboo | Chrome-open | - |
+| YouTube Community | Puppeteer + system clipboard | Peekaboo | Chrome-open | - |
+| YouTube Video Upload | AppleScript + browser automation | Peekaboo | Chrome-open | - |
 | Reddit | Puppeteer (old.reddit.com) | Peekaboo | Chrome-open | - |
-| TikTok | Puppeteer + ffmpeg video | Peekaboo | Chrome-open | - |
+| TikTok | Anti-bot override + AppleScript + cliclick | Peekaboo | Chrome-open | - |
 | dev.to | Puppeteer + Chrome profile | Peekaboo | Chrome-open | - |
 | Facebook | Puppeteer + Chrome profile | Peekaboo | Chrome-open | - |
 
@@ -533,10 +535,12 @@ Each platform has quirks. Read `references/platform-posting.md` for the detailed
 |----------|-------------|------------|----------|---------------|
 | X/Twitter | Text + image | 280 (free) / 25K (premium) | 1-3 | Yes |
 | LinkedIn | Text + image | 3,000 | 3-5 | Yes |
-| Instagram | Carousel / Reel | 2,200 caption | Up to 30 | Required |
+| Instagram Carousel | Carousel (API) | 2,200 caption | Up to 30 | Required |
+| Instagram Reel | Reel (API) | 2,200 caption | Up to 30 | Video |
 | Threads | Text + image | 500 | 3-5 | Yes |
 | TikTok | Video (from carousel) | 2,200 caption | 3-5 | Video only |
-| YouTube | Community post | ~5,000 | N/A | Yes |
+| YouTube Community | Community post | ~5,000 | N/A | Yes |
+| YouTube Video | Video upload (Studio) | 5,000 title+desc | Up to 15 tags | Video |
 | Reddit | Text post | Unlimited | N/A | Optional |
 | dev.to | Article (markdown) | Unlimited | Max 4 tags | Optional |
 | Facebook | Text + image | 63,206 | 1-3 | Yes |
@@ -551,13 +555,14 @@ Don't copy-paste the same text everywhere. Adapt for each platform:
 - **LinkedIn**: Professional tone, insight-driven, mention implications for the industry. Links in first comment, not post body.
 - **Instagram**: Visual-first, caption supports the image. Use line breaks for readability.
 - **Threads**: Casual, conversational, like talking to a friend.
-- **TikTok**: Convert carousel slides to video (see Video Generation). Caption is secondary to visuals.
+- **TikTok**: Upload via TikTok Studio with anti-bot override + AppleScript file picker. Convert photo carousels to video with ffmpeg first. Caption is secondary to visuals. See `references/platform-posting.md` TikTok section for the full anti-bot workflow.
 - **Reddit**: Match the subreddit's tone. Informative, no self-promo smell. Check flair requirements.
 - **dev.to**: Full article format with markdown. Technical depth.
 - **Facebook**: Conversational, longer-form OK. Links in post body (not penalized like LinkedIn). Use images.
 - **Discord**: Short, punchy, chat-style. No markdown tables (Discord renders them ugly). Use **bold** for emphasis, not headers.
 - **Telegram**: Clean, formatted message. Use markdown formatting.
-- **YouTube**: Community post style -- short, conversational, pose a question to drive comments. Link to full videos or articles in text.
+- **YouTube Community**: Community post style -- short, conversational, pose a question to drive comments. Link to full videos or articles in text.
+- **YouTube Video**: Upload via Studio with hybrid AppleScript + browser automation. See `references/youtube-studio-upload.md` for the complete workflow. Set video language to English for auto-generated captions and auto-translate support.
 
 ### Per-Platform Copy File Output
 
@@ -644,6 +649,31 @@ Several platforms support scheduling posts to go live at a specific future time.
 3. After approval, set up scheduling on platforms that support it
 4. For platforms without scheduling (Reddit, Threads, Discord, dev.to), note the target time and remind the user, or set a system reminder
 5. Verify scheduled posts are queued (navigate to scheduled posts section on each platform)
+
+### Cross-Platform Video Rollout Strategy
+
+When posting the same video across YouTube, TikTok, and Instagram Reels, **stagger the releases**. Same-day cross-posting can suppress reach on all platforms because each algorithm checks for originality.
+
+| Day | Platform | Rationale |
+|-----|----------|-----------|
+| Day 0 | YouTube (Shorts or long-form) | YouTube rewards original uploads — post here FIRST |
+| Day 2-3 | TikTok | Safe gap — YouTube's originality signal is indexed |
+| Day 3-4 | Instagram Reels | Another day buffer — IG also penalizes cross-posted content |
+
+The 2-3 day gap is the sweet spot. Adjust based on analytics — if a platform consistently underperforms, it can go later in the sequence.
+
+### YouTube Video Upload
+
+YouTube video upload requires a hybrid AppleScript + browser automation approach because CDP cannot set files on YouTube Studio's native file input.
+
+**Quick summary:**
+1. Navigate to `youtube.com/upload`
+2. Click "Select files" → opens native macOS file picker
+3. AppleScript drives the file picker (Cmd+Shift+G → type path → Enter)
+4. Fill metadata (title, description, tags, category, language) via JavaScript
+5. Navigate tabs → set Public → Publish
+
+**Full guide:** `references/youtube-studio-upload.md`
 
 ### Telegram Posting
 
@@ -755,6 +785,14 @@ Wait for approval before posting any replies.
 | No product context file | Ask user for basic brand/audience info, or proceed with generic tone |
 | CAPTCHA or rate limit | Stop immediately, report to user |
 | Post verification fails | Be honest, never report unverified posts as successful |
+| Instagram API `Transcode not finished` | Wait 30s after video upload before calling `configure_to_clips` |
+| Instagram API `cover_photo_upload_error` | Upload cover photo via `rupload_igphoto` with same upload_id before configure |
+| Instagram `sessionid` cookie expired | User must re-login in Chrome profile; re-extract cookies |
+| TikTok page crashes after upload | Override `navigator.webdriver` BEFORE page load; zero CDP calls during upload |
+| TikTok DraftJS rejects caption | Skip caption in upload, edit via TikTok app after publish |
+| AppleScript file picker fails | Check Accessibility permissions; increase delays; verify file path exists |
+| YouTube Studio metadata not saving | Dispatch `input` event after setting `textContent` on contenteditable divs |
+| Cross-platform video suppressed reach | Stagger releases: Day 0 YouTube, Day 2-3 TikTok, Day 3-4 Instagram Reels |
 
 ---
 
@@ -784,6 +822,7 @@ File: memory/YYYY-MM-DD-engagement-log.md
 ## Reference Files
 
 - `references/platform-posting.md` -- Detailed platform-specific technical guides (selectors, upload flows, encoding, workarounds, Chrome profile setup, Puppeteer patterns)
+- `references/youtube-studio-upload.md` -- YouTube Studio video upload workflow (hybrid AppleScript + browser automation, DOM selectors, metadata, subtitles, tags)
 - `references/engagement-playbook.md` -- Deep dive on engagement strategy, finding threads, crafting replies, platform-specific tone guides
 - `generated-assets/copy/` -- Per-platform copy files (generated per session)
 - `post-history/` -- Post logs by date (generated per session)

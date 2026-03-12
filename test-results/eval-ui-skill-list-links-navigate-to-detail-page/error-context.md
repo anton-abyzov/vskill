@@ -1,0 +1,45 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - img [ref=e9]
+        - generic [ref=e11]:
+          - generic [ref=e12]: Skill Studio
+          - generic [ref=e13]: fixtures
+      - button "Claude Sonnet" [ref=e16] [cursor=pointer]:
+        - generic [ref=e18]: Claude Sonnet
+        - img [ref=e19]
+    - generic [ref=e21]:
+      - generic [ref=e22]:
+        - img [ref=e23]
+        - textbox "Search skills..." [ref=e26]
+      - generic [ref=e27]: 1 skill across 1 plugin
+    - button "New Skill" [ref=e29] [cursor=pointer]:
+      - img [ref=e30]
+      - text: New Skill
+    - generic [ref=e32]:
+      - generic [ref=e35]: Skill Creator not installed
+      - button "vskill install skill-creator:skill-creator" [ref=e36] [cursor=pointer]
+    - generic [ref=e39]:
+      - generic [ref=e40]:
+        - img [ref=e41]
+        - generic [ref=e43]: test-plugin
+        - generic [ref=e44]: (1)
+      - button "test-skill Failing 2 evals | 4 asserts | 3/8/2026" [ref=e46] [cursor=pointer]:
+        - generic [ref=e47]:
+          - generic [ref=e48]: test-skill
+          - generic [ref=e49]: Failing
+        - generic [ref=e51]:
+          - generic [ref=e52]: 2 evals
+          - generic [ref=e53]: "|"
+          - generic [ref=e54]: 4 asserts
+          - generic [ref=e55]: "|"
+          - generic [ref=e56]: 3/8/2026
+  - generic [ref=e59]:
+    - img [ref=e62]
+    - paragraph [ref=e65]: Select a skill to view details
+    - paragraph [ref=e66]: Choose a skill from the list to edit, test, and evaluate
+```

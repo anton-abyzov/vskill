@@ -51,12 +51,24 @@ export function enhancedPath(currentPath?: string): string {
   const base = currentPath || process.env.PATH || "";
   const extra = getExtraPaths();
 
-  // Deduplicate: only add dirs not already in PATH
-  const existing = new Set(base.split(delimiter));
-  const additions = extra.filter((p) => !existing.has(p));
+  // Deduplicate the entire PATH: base entries + extra dirs
+  // Preserves first-occurrence order (important for PATH precedence)
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const dir of base.split(delimiter)) {
+    if (dir && !seen.has(dir)) {
+      seen.add(dir);
+      deduped.push(dir);
+    }
+  }
+  for (const dir of extra) {
+    if (!seen.has(dir)) {
+      seen.add(dir);
+      deduped.push(dir);
+    }
+  }
 
-  if (additions.length === 0) return base;
-  return base + delimiter + additions.join(delimiter);
+  return deduped.join(delimiter);
 }
 
 /** Clear the resolution cache (useful for testing) */
@@ -113,13 +125,21 @@ function tryLoginShellWhich(name: string): string | null {
   const shell = process.env.SHELL || "/bin/sh";
   try {
     // Use login (-l) to load full PATH from .zshrc/.bashrc/.profile
-    // Redirect stderr to /dev/null to suppress shell startup messages
+    // IMPORTANT: Pass minimal env with only HOME and USER so the login shell
+    // starts fresh and sources profile files from scratch. If we pass the
+    // parent's restricted PATH, the profile scripts may not work properly.
     const result = execSync(
       `${shell} -lc 'which ${name} 2>/dev/null'`,
       {
         stdio: ["pipe", "pipe", "pipe"],
         timeout: 5_000,
-        env: { ...process.env, PS1: "" }, // suppress prompt rendering
+        env: {
+          HOME: process.env.HOME || homedir(),
+          USER: process.env.USER || "",
+          SHELL: shell,
+          TERM: process.env.TERM || "xterm-256color",
+          PS1: "", // suppress prompt rendering
+        },
       },
     ).toString().trim();
     if (result && !result.includes("not found") && existsSync(result)) {

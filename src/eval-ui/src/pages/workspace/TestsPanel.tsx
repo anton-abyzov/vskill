@@ -100,7 +100,7 @@ function computeAssertionBadges(
 }
 
 export function TestsPanel() {
-  const { state, dispatch, saveEvals, runCase, runAll, cancelCase, cancelAll, generateEvals } = useWorkspace();
+  const { state, dispatch, saveEvals, runCase, runAll, cancelCase, cancelAll, generateEvals, isReadOnly } = useWorkspace();
   const { evals, selectedCaseId, inlineResults, caseRunStates, generateEvalsLoading, generateEvalsProgress, generateEvalsError } = state;
 
   const isAnyRunning = useMemo(() => {
@@ -135,8 +135,8 @@ export function TestsPanel() {
           <div className="text-[12px]" style={{ color: "var(--text-tertiary)" }}>Create test cases to start evaluating your skill</div>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setShowForm(true)} className="btn btn-primary text-[12px]">Create Test Case</button>
-          <button onClick={handleGenerateEvals} disabled={generateEvalsLoading} className="btn btn-secondary text-[12px]">
+          <button onClick={() => setShowForm(true)} disabled={isReadOnly} className="btn btn-primary text-[12px]">Create Test Case</button>
+          <button onClick={handleGenerateEvals} disabled={generateEvalsLoading || isReadOnly} className="btn btn-secondary text-[12px]">
             {generateEvalsLoading ? <><span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> Generating...</> : "Generate with AI"}
           </button>
         </div>
@@ -188,10 +188,10 @@ export function TestsPanel() {
               </button>
             ) : (
               <>
-                <button onClick={() => runAll("benchmark")} disabled={cases.length === 0} className="btn btn-primary text-[10px] px-2 py-0.5">
+                <button onClick={() => runAll("benchmark")} disabled={cases.length === 0 || isReadOnly} className="btn btn-primary text-[10px] px-2 py-0.5">
                   Run All
                 </button>
-                <button onClick={() => runAll("comparison")} disabled={cases.length === 0} className="btn btn-purple text-[10px] px-2 py-0.5">
+                <button onClick={() => runAll("comparison")} disabled={cases.length === 0 || isReadOnly} className="btn btn-purple text-[10px] px-2 py-0.5">
                   Compare All
                 </button>
               </>
@@ -232,19 +232,21 @@ export function TestsPanel() {
         </div>
         {/* Add case button */}
         <div className="px-3 py-2">
-          <button
-            onClick={() => setShowForm(true)}
-            className="w-full py-2 rounded-lg text-[12px] font-medium transition-all duration-150"
-            style={{
-              border: "1px dashed var(--border-default)",
-              color: "var(--text-tertiary)",
-              background: "transparent",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.color = "var(--accent)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-default)"; e.currentTarget.style.color = "var(--text-tertiary)"; }}
-          >
-            + Add Test Case
-          </button>
+          {!isReadOnly && (
+            <button
+              onClick={() => setShowForm(true)}
+              className="w-full py-2 rounded-lg text-[12px] font-medium transition-all duration-150"
+              style={{
+                border: "1px dashed var(--border-default)",
+                color: "var(--text-tertiary)",
+                background: "transparent",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.color = "var(--accent)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-default)"; e.currentTarget.style.color = "var(--text-tertiary)"; }}
+            >
+              + Add Test Case
+            </button>
+          )}
         </div>
       </div>
 
@@ -298,7 +300,7 @@ function CaseDetail({
   onCancel: (evalId: number) => void;
   onImprove: (evalId: number) => void;
 }) {
-  const { state } = useWorkspace();
+  const { state, isReadOnly } = useWorkspace();
   const { plugin, skill } = state;
   const { entries: historyEntries, loading: historyLoading } = useCaseHistory(plugin, skill, evalCase.id);
 
@@ -371,20 +373,20 @@ function CaseDetail({
             </button>
           ) : (
             <>
-              <button onClick={() => onRun(evalCase.id)} className="btn btn-primary text-[12px]">
+              <button onClick={() => onRun(evalCase.id)} disabled={isReadOnly} className="btn btn-primary text-[12px]">
                 Run
               </button>
-              <button onClick={() => onCompare(evalCase.id)} className="btn btn-purple text-[12px]">
+              <button onClick={() => onCompare(evalCase.id)} disabled={isReadOnly} className="btn btn-purple text-[12px]">
                 A/B Compare
               </button>
             </>
           )}
-          {hasFails && caseStatus !== "running" && caseStatus !== "queued" && (
+          {hasFails && !isReadOnly && caseStatus !== "running" && caseStatus !== "queued" && (
             <button onClick={() => onImprove(evalCase.id)} className="btn btn-secondary text-[12px]">
               Fix with AI
             </button>
           )}
-          {caseStatus !== "running" && caseStatus !== "queued" && (
+          {!isReadOnly && caseStatus !== "running" && caseStatus !== "queued" && (
             <button onClick={deleteCase} className="btn btn-ghost text-[12px]" style={{ color: "var(--red)" }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
             </button>
@@ -419,7 +421,7 @@ function CaseDetail({
           </div>
         ) : (
           <div
-            className="p-3 rounded-lg text-[12px] cursor-pointer transition-all duration-150"
+            className="p-3 rounded-lg text-[12px] transition-all duration-150"
             style={{
               background: "var(--surface-2)",
               color: "var(--text-secondary)",
@@ -428,12 +430,13 @@ function CaseDetail({
               border: "1px solid var(--border-subtle)",
               maxHeight: 200,
               overflowY: "auto",
+              cursor: isReadOnly ? "default" : "pointer",
             }}
-            onClick={() => setEditingPrompt(true)}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--border-hover)"; }}
+            onClick={() => { if (!isReadOnly) setEditingPrompt(true); }}
+            onMouseEnter={(e) => { if (!isReadOnly) e.currentTarget.style.borderColor = "var(--border-hover)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
           >
-            {evalCase.prompt || <span style={{ color: "var(--text-tertiary)", fontStyle: "italic" }}>Click to edit prompt...</span>}
+            {evalCase.prompt || <span style={{ color: "var(--text-tertiary)", fontStyle: "italic" }}>{isReadOnly ? "No prompt" : "Click to edit prompt..."}</span>}
           </div>
         )}
       </Section>
@@ -457,7 +460,7 @@ function CaseDetail({
           </div>
         ) : (
           <div
-            className="p-3 rounded-lg text-[12px] cursor-pointer transition-all duration-150"
+            className="p-3 rounded-lg text-[12px] transition-all duration-150"
             style={{
               background: "var(--surface-2)",
               color: "var(--text-tertiary)",
@@ -466,18 +469,19 @@ function CaseDetail({
               border: "1px solid var(--border-subtle)",
               maxHeight: 200,
               overflowY: "auto",
+              cursor: isReadOnly ? "default" : "pointer",
             }}
-            onClick={() => setEditingExpected(true)}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--border-hover)"; }}
+            onClick={() => { if (!isReadOnly) setEditingExpected(true); }}
+            onMouseEnter={(e) => { if (!isReadOnly) e.currentTarget.style.borderColor = "var(--border-hover)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
           >
-            {evalCase.expected_output || <span style={{ fontStyle: "italic" }}>Click to edit expected output...</span>}
+            {evalCase.expected_output || <span style={{ fontStyle: "italic" }}>{isReadOnly ? "No expected output" : "Click to edit expected output..."}</span>}
           </div>
         )}
       </Section>
 
       {/* Assertions */}
-      <Section title={`Assertions (${evalCase.assertions.length})`} action={<button onClick={addAssertion} className="btn btn-ghost text-[11px]">+ Add</button>}>
+      <Section title={`Assertions (${evalCase.assertions.length})`} action={!isReadOnly ? <button onClick={addAssertion} className="btn btn-ghost text-[11px]">+ Add</button> : undefined}>
         {evalCase.assertions.length === 0 ? (
           <div className="text-[12px] text-center py-4" style={{ color: "var(--text-tertiary)" }}>
             No assertions. Click "+ Add" to create one.
@@ -493,6 +497,7 @@ function CaseDetail({
                   assertion={a}
                   result={r}
                   badges={badges}
+                  isReadOnly={isReadOnly}
                   onUpdate={(text) => updateAssertion(a.id, text)}
                   onDelete={() => deleteAssertion(a.id)}
                 />
@@ -516,11 +521,12 @@ function CaseDetail({
 // ---------------------------------------------------------------------------
 
 function AssertionRow({
-  assertion, result, badges, onUpdate, onDelete,
+  assertion, result, badges, isReadOnly, onUpdate, onDelete,
 }: {
   assertion: Assertion;
   result?: { pass: boolean; reasoning: string };
   badges?: AssertionBadges;
+  isReadOnly?: boolean;
   onUpdate: (text: string) => void;
   onDelete: () => void;
 }) {
@@ -640,9 +646,9 @@ function AssertionRow({
             </div>
           ) : (
             <div
-              className="text-[12px] cursor-pointer"
-              style={{ color: "var(--text-secondary)" }}
-              onClick={() => { setText(assertion.text); setEditing(true); }}
+              className="text-[12px]"
+              style={{ color: "var(--text-secondary)", cursor: isReadOnly ? "default" : "pointer" }}
+              onClick={() => { if (!isReadOnly) { setText(assertion.text); setEditing(true); } }}
             >
               {assertion.text}
             </div>
@@ -666,15 +672,17 @@ function AssertionRow({
         </div>
 
         {/* Delete */}
-        <button
-          onClick={onDelete}
-          className="btn btn-ghost p-1 opacity-0 group-hover:opacity-100"
-          style={{ color: "var(--text-tertiary)" }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--red)"; e.currentTarget.style.opacity = "1"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-tertiary)"; e.currentTarget.style.opacity = ""; }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-        </button>
+        {!isReadOnly && (
+          <button
+            onClick={onDelete}
+            className="btn btn-ghost p-1 opacity-0 group-hover:opacity-100"
+            style={{ color: "var(--text-tertiary)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--red)"; e.currentTarget.style.opacity = "1"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-tertiary)"; e.currentTarget.style.opacity = ""; }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
+        )}
       </div>
     </div>
   );

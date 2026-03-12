@@ -179,6 +179,8 @@ interface CliConfig {
 function createCliClient(config: CliConfig): LlmClient {
   // Resolve binary path once at client creation time (cached internally)
   const resolvedBinary = resolveCliBinary(config.binary);
+  // Pre-compute enhanced PATH once — avoids repeated execSync per generate() call
+  const cachedEnhancedPath = enhancedPath();
 
   return {
     model: config.displayModel,
@@ -187,23 +189,18 @@ function createCliClient(config: CliConfig): LlmClient {
       const start = Date.now();
 
       const text = await new Promise<string>((resolve, reject) => {
-        // Build env: strip prefix vars if needed, always enhance PATH
-        let env: Record<string, string> | undefined;
+        // Build env: strip prefix vars if needed, always use enhanced PATH
+        let env: Record<string, string>;
         if (config.stripEnvPrefix) {
           env = {};
           const prefix = config.stripEnvPrefix;
           for (const [k, v] of Object.entries(process.env)) {
             if (v !== undefined && !k.startsWith(prefix)) env[k] = v;
           }
-        }
-
-        // Enhance PATH in the child process env so any sub-processes also
-        // have access to common binary directories (macOS, Linux, Windows)
-        if (env) {
-          env.PATH = enhancedPath(env.PATH);
         } else {
-          env = { ...process.env as Record<string, string>, PATH: enhancedPath() };
+          env = { ...process.env as Record<string, string> };
         }
+        env.PATH = cachedEnhancedPath;
 
         // On Windows, .cmd/.bat files require shell:true to execute via spawn
         const needsShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(resolvedBinary);

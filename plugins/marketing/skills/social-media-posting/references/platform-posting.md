@@ -169,7 +169,7 @@ ffmpeg -i input.mp4 \
 
 Key: `-r 30` (exact 30fps, NOT 29.97). Without this, the upload appears to succeed but the reel never appears on the profile.
 
-### Reel Upload Flow
+### Reel Upload Flow (Browser UI — Fragile)
 
 1. Navigate to `instagram.com`
 2. Click Create → Post (videos >60s auto-become Reels)
@@ -179,6 +179,164 @@ Key: `-r 30` (exact 30fps, NOT 29.97). Without this, the upload appears to succe
 6. Type caption in `[aria-label="Write a caption..."]` — this is a contentEditable div
 7. Click Share
 8. Wait ~50-85s for "reel has been shared" confirmation
+
+> ⚠️ **The browser UI flow is fragile for Reels.** CDP-based Chrome profiles can't reliably set files,
+> and Instagram's React modal doesn't always open a native file picker from programmatic clicks.
+> **Use the API approach below instead.**
+
+### Reel Upload via Instagram API (Recommended)
+
+The direct API approach is the only reliable method for programmatic Reel uploads. Same authentication as carousel uploads — requires an active Instagram session in the Chrome profile.
+
+**Step 1: Extract session cookies**
+
+The `sessionid` cookie is HttpOnly — it can't be read via `document.cookie`. You must decrypt it from Chrome's cookie database:
+
+```python
+import hashlib, subprocess, sqlite3, shutil
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+# Get Chrome's encryption key from macOS Keychain
+key_output = subprocess.check_output(
+    ['security', 'find-generic-password', '-ga', 'Chrome', '-w'],
+    stderr=subprocess.DEVNULL
+).strip()
+
+# Derive AES key (PBKDF2 with 'saltysalt', 1003 iterations)
+dk = hashlib.pbkdf2_hmac('sha1', key_output.encode('utf-8'), b'saltysalt', 1003, dklen=16)
+
+# Copy Chrome's Cookies DB (it's locked while Chrome is running)
+import tempfile, os
+cookies_db = os.path.expanduser('~/Library/Application Support/Google/Chrome/Default/Cookies')
+tmp_db = tempfile.mktemp(suffix='.db')
+shutil.copy2(cookies_db, tmp_db)
+
+conn = sqlite3.connect(tmp_db)
+row = conn.execute(
+    "SELECT encrypted_value FROM cookies WHERE host_key='.instagram.com' AND name='sessionid'"
+).fetchone()
+
+# Decrypt: strip 'v10' prefix (3 bytes), AES-CBC with IV = 16 spaces, PKCS7 padding
+encrypted = row[0][3:]  # strip v10
+cipher = Cipher(algorithms.AES(dk), modes.CBC(b' ' * 16))
+decryptor = cipher.decryptor()
+decrypted = decryptor.update(encrypted) + decryptor.finalize()
+# Remove PKCS7 padding
+pad_len = decrypted[-1]
+sessionid = decrypted[:-pad_len].decode('utf-8')
+```
+
+Other cookies (`csrftoken`, `ds_user_id`, `mid`) are accessible via CDP:
+```javascript
+const cookies = await send('Network.getCookies', { urls: ['https://www.instagram.com'] });
+const csrfToken = cookies.find(c => c.name === 'csrftoken')?.value;
+const userId = cookies.find(c => c.name === 'ds_user_id')?.value;
+const mid = cookies.find(c => c.name === 'mid')?.value;
+```
+
+**Step 2: Upload video to Instagram's Scotty upload service**
+
+```bash
+UPLOAD_ID="$(date +%s)000"
+FILESIZE=$(stat -f%z "/path/to/video.MOV")
+
+curl -X POST "https://i.instagram.com/rupload_igvideo/fb_uploader_${UPLOAD_ID}" \
+  -H "X-Instagram-Rupload-Params: {\"is_clips_video\":true,\"media_type\":2,\"upload_id\":\"${UPLOAD_ID}\",\"upload_media_height\":1920,\"upload_media_width\":1080,\"upload_media_duration_ms\":82000}" \
+  -H "X-Entity-Name: fb_uploader_${UPLOAD_ID}" \
+  -H "X-Entity-Length: $FILESIZE" \
+  -H "X-Entity-Type: video/quicktime" \
+  -H "Content-Type: application/octet-stream" \
+  -H "Offset: 0" \
+  -H "Cookie: sessionid=$SESSIONID; csrftoken=$CSRFTOKEN; ds_user_id=$USERID; mid=$MID" \
+  -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" \
+  -H "X-IG-App-ID: 936619743392459" \
+  --data-binary @"/path/to/video.MOV"
+```
+
+Key params in `X-Instagram-Rupload-Params`:
+- `is_clips_video: true` — **CRITICAL** — marks this as a Reel (not a regular video)
+- `media_type: 2` — video
+- `upload_media_duration_ms` — video duration in milliseconds
+
+Response: `{"media_id":"17873247924554714","status":"ok"}`
+
+**Step 3: Wait for transcoding (CRITICAL)**
+
+Instagram transcodes the video server-side. Calling configure immediately returns `"Transcode not finished yet."` (HTTP 202).
+
+```bash
+sleep 30  # Wait at least 30 seconds before configuring
+```
+
+**Step 4: Upload cover photo (required for Reels)**
+
+Without a cover photo, `configure_to_clips` returns `"media_needs_reupload"` + `"cover_photo_upload_error"`.
+
+```bash
+# Extract a frame from the video
+ffmpeg -y -i video.MOV -ss 5 -vframes 1 -vf "scale=1080:1920" /tmp/ig_thumb.jpg
+
+# Upload cover photo using the SAME upload_id
+curl -X POST "https://i.instagram.com/rupload_igphoto/fb_uploader_${UPLOAD_ID}" \
+  -H "X-Entity-Type: image/jpeg" \
+  -H "X-Entity-Name: fb_uploader_${UPLOAD_ID}" \
+  -H "X-Entity-Length: $(stat -f%z /tmp/ig_thumb.jpg)" \
+  -H "Content-Type: application/octet-stream" \
+  -H "Offset: 0" \
+  -H "Cookie: sessionid=$SESSIONID; csrftoken=$CSRFTOKEN; ds_user_id=$USERID; mid=$MID" \
+  -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" \
+  -H "X-IG-App-ID: 936619743392459" \
+  --data-binary @"/tmp/ig_thumb.jpg"
+```
+
+**Step 5: Configure as Reel and publish**
+
+```bash
+curl -X POST "https://www.instagram.com/api/v1/media/configure_to_clips/" \
+  -H "Cookie: sessionid=$SESSIONID; csrftoken=$CSRFTOKEN; ds_user_id=$USERID; mid=$MID" \
+  -H "X-CSRFToken: $CSRFTOKEN" \
+  -H "X-IG-App-ID: 936619743392459" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" \
+  --data-urlencode "upload_id=$UPLOAD_ID" \
+  --data-urlencode "caption=$CAPTION" \
+  --data-urlencode "source_type=4" \
+  --data-urlencode "clips_share_preview_to_feed=1"
+```
+
+Response includes `"code":"DVwl0FaDfDi"` → URL: `https://www.instagram.com/reel/DVwl0FaDfDi/`
+
+**Step 6: Post pinned comment (optional)**
+
+```bash
+curl -X POST "https://www.instagram.com/api/v1/web/comments/${MEDIA_ID}/add/" \
+  -H "Cookie: sessionid=$SESSIONID; csrftoken=$CSRFTOKEN; ds_user_id=$USERID; mid=$MID" \
+  -H "X-CSRFToken: $CSRFTOKEN" \
+  -H "X-IG-App-ID: 936619743392459" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "comment_text=$COMMENT_TEXT"
+```
+
+Note: Pinning comments (`/media/{id}/comment/{cid}/pin/`) returns 404 on web API — may require mobile API user-agent.
+
+### Instagram Reel API Endpoints Reference
+
+| Endpoint | Purpose |
+|----------|---------|
+| `i.instagram.com/rupload_igvideo/fb_uploader_{id}` | Upload video file |
+| `i.instagram.com/rupload_igphoto/fb_uploader_{id}` | Upload cover photo (same upload_id) |
+| `www.instagram.com/api/v1/media/configure_to_clips/` | Publish as Reel |
+| `www.instagram.com/api/v1/web/comments/{media_id}/add/` | Add comment |
+
+### What Doesn't Work for Reel Upload
+
+| Method | Problem |
+|--------|---------|
+| CDP file input via Chrome profile | `upload` action returns success but files array stays empty |
+| AppleScript + cliclick on Instagram modal | React modal doesn't open native file picker from programmatic clicks |
+| `configure_to_clips` without cover photo | Returns `media_needs_reupload` + `cover_photo_upload_error` |
+| `configure_to_clips` immediately after upload | Returns HTTP 202 `Transcode not finished yet` — must wait ~30s |
+| Missing `is_clips_video: true` in rupload params | Returns HTTP 500 `something went wrong` |
 
 ### People Tagging (Hidden DOM — CDP Accessibility Technique)
 
@@ -331,9 +489,18 @@ await page.keyboard.up('Meta');
 
 What does NOT work: `execCommand('insertText')`, `innerHTML` (TrustedHTML policy), `navigator.clipboard.writeText()`, `ClipboardEvent`, `page.keyboard.type()` with long text.
 
-### Video Upload
+### Video Upload (Hybrid AppleScript + Browser Automation)
 
-Upload via YouTube Studio: `studio.youtube.com`
+YouTube Studio's file input cannot be set via CDP — the native OS file picker must be driven with AppleScript. The full workflow:
+
+1. Navigate to `youtube.com/upload` or `studio.youtube.com`
+2. Click "Select files" button (`ytcp-uploads-file-picker button`) — opens native macOS file picker
+3. Use AppleScript with Cmd+Shift+G to type the file path and select
+4. Wait for upload to complete, then fill metadata (title, description, tags, category, language) via JavaScript
+5. Navigate tabs: Details → Video elements → Initial check → Visibility
+6. Set visibility to Public (`tp-yt-paper-radio-button[name="PUBLIC"]`) and click Publish (`#done-button`)
+
+**See `references/youtube-studio-upload.md` for the complete step-by-step guide with all selectors, AppleScript code, metadata filling, subtitles setup, and troubleshooting.**
 
 ### Description Editing
 
@@ -343,17 +510,182 @@ Navigate to `studio.youtube.com/video/{ID}/edit` → Select all + delete before 
 
 ## TikTok
 
-- TikTok Studio web (`tiktok.com/upload`) only accepts video — no photo carousel
-- Photo carousels are mobile-app only
-- Workaround: Convert carousel slides to slideshow video with ffmpeg, then upload as video
-- Video file input: `accept="video/*"`, `multiple=false`
+### Video Upload (Anti-Bot Override + AppleScript — Full Workflow)
+
+TikTok Studio web (`tiktok.com/tiktokstudio/upload`) only accepts video. Photo carousels are mobile-app only — convert to slideshow with ffmpeg first.
+
+> ⚠️ **TikTok has aggressive anti-bot detection.** Chrome with `--remote-debugging-port` sets
+> `navigator.webdriver = true`, which causes TikTok to crash the page 15-30 seconds after upload.
+> The anti-bot override below is **mandatory**.
+
+**Step 1: Override navigator.webdriver BEFORE loading TikTok**
+
+Must be injected via `Page.addScriptToEvaluateOnNewDocument` on a NEW tab before navigation:
+
+```python
+# Via CDP on a fresh tab — MUST run before page load
+send("Page.addScriptToEvaluateOnNewDocument", {
+    "source": """
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        window.chrome = {runtime: {}, loadTimes: function(){}, csi: function(){}};
+        delete window.__cdc_adoQpoasnfa76pfcZLmcfl_Array;
+        delete window.__cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+        delete window.__cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => (
+            parameters.name === 'notifications' ?
+            Promise.resolve({ state: Notification.permission }) :
+            originalQuery(parameters)
+        );
+    """
+})
+# THEN navigate
+send("Page.navigate", {"url": "https://www.tiktok.com/tiktokstudio/upload"})
+```
+
+Key rules:
+- Must use `addScriptToEvaluateOnNewDocument` (not `Runtime.evaluate`) — it runs before page JS
+- Must be a NEW tab (not navigate an existing one with TikTok already loaded)
+- The `__cdc_*` properties are Chrome DevTools fingerprints — TikTok checks for them
+
+**Step 2: Get "Select video" button screen coordinates**
+
+Before triggering the file picker, calculate the button's screen position for cliclick:
+
+```python
+# Calculate screen coordinates from CSS layout
+btn_rect = evaluate("document.querySelector('button with Select video text').getBoundingClientRect()")
+toolbar_height = evaluate("window.outerHeight - window.innerHeight")  # typically 87px
+menu_bar = 33  # macOS menu bar height
+
+screen_x = btn_rect['x'] + btn_rect['width'] / 2
+screen_y = menu_bar + toolbar_height + btn_rect['y'] + btn_rect['height'] / 2
+```
+
+Screen coordinate formula:
+```
+Desktop: 1728 x 1117 points (MacBook Pro, varies by resolution)
+Window AX position: (0, 33) — menu bar offset
+Toolbar height: outerHeight - innerHeight (typically 87px)
+Viewport origin: x=0, y=33+87=120
+Button screen pos: (css_x + width/2, 120 + css_y + height/2)
+```
+
+**Step 3: Click "Select video" with cliclick to open native file picker**
+
+```bash
+# Install cliclick if needed: brew install cliclick
+cliclick c:988,741  # Use calculated coordinates from Step 2
+```
+
+Verify the file picker opened:
+```bash
+osascript -e 'tell application "System Events" to tell process "Google Chrome" to count of sheets of window 1'
+# Should return 1 (file picker sheet is open)
+```
+
+**Step 4: Select file via AppleScript (same pattern as YouTube)**
+
+```applescript
+tell application "System Events"
+    -- Target the specific Chrome process (personal profile)
+    set p to first process whose unix id is CHROME_PID
+    tell p
+        keystroke "g" using {command down, shift down}  -- Cmd+Shift+G: Go to folder
+        delay 1
+        keystroke "a" using command down  -- Select all (clear previous path)
+        delay 0.1
+        keystroke "/full/path/to/video.MOV"
+        delay 0.5
+        key code 36  -- Enter (navigate to path)
+        delay 1
+        key code 36  -- Enter (select file)
+    end tell
+end tell
+```
+
+**Step 5: Wait for upload — ZERO CDP calls (CRITICAL)**
+
+```bash
+sleep 30  # Do NOT make ANY CDP/JS calls during upload!
+```
+
+**ANY CDP call during or after upload (evaluate, screenshot, DOM query) will crash the page.** TikTok's anti-bot detection monitors for automation signals during the upload flow. The upload must complete in a "hands-off" state.
+
+**Step 6: Set caption (optional — DraftJS editor is fragile)**
+
+TikTok uses DraftJS which may reject clipboard paste. Options in order of reliability:
+
+```bash
+# Option A: Single CDP call (risky — may crash page)
+# Only try this if you haven't made any CDP calls since upload
+send("Runtime.evaluate", {
+    "expression": "document.execCommand('insertText', false, 'Your caption')"
+})
+
+# Option B: cliclick + AppleScript clipboard paste
+echo "Your caption" | pbcopy
+cliclick t:500,400  # Click description field area
+osascript -e 'tell application "System Events" to keystroke "a" using command down'
+osascript -e 'tell application "System Events" to keystroke "v" using command down'
+
+# Option C: Skip caption, edit after publishing via TikTok app
+```
+
+**Step 7: Click Post**
+
+```bash
+# Scroll to Post button (may be below fold)
+osascript -e 'tell application "System Events" to key code 119'  # End key
+
+# Click Post via cliclick (use calculated coordinates)
+cliclick c:POST_X,POST_Y
+
+# Or: manual click by user (most reliable for now)
+```
+
+### Chrome Personal Profile Window Management
+
+When Chrome runs with a personal profile on a debug port, it's a separate process from the default Chrome:
+
+```bash
+# Find the personal Chrome process PID
+ps aux | grep "user-data.*personal" | grep -v helper | awk '{print $2}'
+
+# CDP tab activation changes the debug target but NOT the visible tab
+# To switch visible tab, use AppleScript:
+osascript -e 'tell application "System Events" to tell process "Google Chrome" to keystroke "l" using command down'
+# Then type the URL
+```
+
+Key details:
+- `tell application "Google Chrome"` targets the WRONG Chrome instance (returns 0 windows)
+- Must use `System Events` with `first process whose unix id is <PID>`
+- PID changes on restart — always re-detect
+- CDP `/json/activate/{id}` changes CDP target but not the visible browser tab
+
+### Photo Carousel → Video Conversion
+
+TikTok web doesn't support photo carousels. Convert slides to video:
 
 ```bash
 ffmpeg -framerate 1/4 -i slide-%d.png \
   -c:v libx264 -r 30 -pix_fmt yuv420p \
-  -vf "scale=1080:1080:force_original_aspect_ratio=decrease,pad=1080:1080:(ow-iw)/2:(oh-ih)/2" \
+  -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2" \
   output.mp4
 ```
+
+### What Doesn't Work for TikTok Upload
+
+| Method | Problem |
+|--------|---------|
+| CDP `DOM.setFileInputFiles` | File accepted but page crashes during content check |
+| CDP `upload` browser action | Returns success but file not actually set |
+| `cliclick` without tab activation | Clicks wrong Chrome window (personal vs default) |
+| `document.execCommand()` after upload | Triggers page crash (anti-bot) |
+| Keyboard Tab+Enter to Post button | Can't reliably navigate to the button |
+| JS `button.click()` on Post | Click registers but page crashes before API call completes |
+| Any CDP call during upload | Crashes the page — TikTok monitors for automation |
 
 ---
 
@@ -463,6 +795,91 @@ For group chats (not broadcast): web.telegram.org editor exists, ClipboardEvent 
 
 ## Common Automation Patterns
 
+### Anti-Bot Override for CDP (TikTok, etc.)
+
+Sites that detect `navigator.webdriver` (set by `--remote-debugging-port`) will block or crash automation. Override BEFORE page load:
+
+```python
+# Must be on a NEW tab, before navigation
+send("Page.addScriptToEvaluateOnNewDocument", {
+    "source": """
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        window.chrome = {runtime: {}, loadTimes: function(){}, csi: function(){}};
+        delete window.__cdc_adoQpoasnfa76pfcZLmcfl_Array;
+        delete window.__cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+        delete window.__cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+    """
+})
+```
+
+This works because `addScriptToEvaluateOnNewDocument` injects before ANY page JavaScript runs.
+
+### Chrome Cookie Extraction (for API Access)
+
+HttpOnly cookies (like Instagram's `sessionid`) can't be read via `document.cookie`. Extract from Chrome's encrypted cookie database:
+
+```bash
+# 1. Get Chrome's encryption password from macOS Keychain
+security find-generic-password -ga 'Chrome' -w 2>/dev/null
+
+# 2. Derive AES key: PBKDF2-SHA1 with salt='saltysalt', 1003 iterations, 16-byte key
+# 3. Copy Cookies DB (locked while Chrome runs): ~/Library/Application Support/Google/Chrome/{Profile}/Cookies
+# 4. Query: SELECT encrypted_value FROM cookies WHERE host_key='.example.com' AND name='cookie_name'
+# 5. Decrypt: strip 'v10' prefix (3 bytes), AES-CBC with IV = 16 spaces, PKCS7 unpadding
+```
+
+See the Instagram Reel API section for the full Python implementation.
+
+Non-HttpOnly cookies can be extracted via CDP:
+```javascript
+const {cookies} = await send('Network.getCookies', { urls: ['https://www.example.com'] });
+```
+
+### Screen Coordinate Calculation (for cliclick)
+
+When using `cliclick` for native macOS clicks (file pickers, anti-bot-sensitive sites):
+
+```
+macOS menu bar height: 33 points
+Chrome toolbar height: window.outerHeight - window.innerHeight (typically 87px)
+Viewport origin (screen): x=window_x, y=33 + toolbar_height
+
+Button screen position:
+  screen_x = window_x + css_rect.x + css_rect.width / 2
+  screen_y = 33 + toolbar_height + css_rect.y + css_rect.height / 2
+```
+
+Install: `brew install cliclick`. Usage: `cliclick c:X,Y` (click at screen coordinates).
+
+### AppleScript File Picker Pattern (YouTube, TikTok, etc.)
+
+When CDP can't set files on `<input type="file">`, use AppleScript to drive the native macOS file picker:
+
+```applescript
+tell application "System Events"
+    -- For personal Chrome profiles, target by PID:
+    -- set p to first process whose unix id is CHROME_PID
+    tell process "Google Chrome"
+        delay 1
+        keystroke "g" using {shift down, command down}  -- Cmd+Shift+G: Go to folder
+        delay 1
+        keystroke "a" using command down  -- Select all (clear previous)
+        delay 0.1
+        keystroke "/full/absolute/path/to/file.ext"
+        delay 0.5
+        key code 36  -- Enter (navigate to path)
+        delay 1
+        key code 36  -- Enter (select file)
+    end tell
+end tell
+```
+
+Prerequisites:
+- System Events must have Accessibility permissions in System Settings
+- Use **full absolute paths** — relative paths don't work in the Go To dialog
+- Increase delays if the picker is slow (SSD vs HDD, large directories)
+- Verify picker opened: `osascript -e 'tell app "System Events" to tell process "Google Chrome" to count of sheets of window 1'` → should be 1
+
 ### Reliable Element Clicking
 
 ```javascript
@@ -523,6 +940,9 @@ for (let i = 0; i < 30; i++) {
 | Video upload silently fails | Instagram | Re-encode at exact 30fps (not 29.97) |
 | Share button clicks but nothing happens | Instagram | Video >60s auto-becomes Reel, wait longer |
 | Caption not saving | Instagram | Use contentEditable div, not textarea selector |
+| `Transcode not finished yet` (HTTP 202) | Instagram API | Wait 30s before calling `configure_to_clips` |
+| `media_needs_reupload` / `cover_photo_upload_error` | Instagram API | Upload cover photo (`rupload_igphoto`) before configure |
+| Missing `is_clips_video` → HTTP 500 | Instagram API | Add `"is_clips_video":true` to rupload params |
 | `fill` action fails on editor | LinkedIn | Use `page.keyboard.type()` — Quill editor |
 | Tag search input invisible | Instagram | Tab navigation + CDP clicks (hidden DOM) |
 | Thread creation fails | X/Twitter | Post main tweet first, then reply separately |
@@ -532,6 +952,11 @@ for (let i = 0; i < 30; i++) {
 | Broadcast channel no editor | Telegram | Use Bot API, not web.telegram.org |
 | Text paste fails | Discord | Use ClipboardEvent('paste'), not innerHTML |
 | System clipboard garbles UTF-8 | YouTube | Use `printf` or ensure UTF-8 encoding |
+| Page crashes after TikTok upload | TikTok | Must override `navigator.webdriver` BEFORE page load |
+| CDP calls crash TikTok page | TikTok | NO CDP calls during/after upload — use `sleep` + cliclick only |
+| cliclick hits wrong Chrome window | TikTok | Target by PID: `first process whose unix id is <PID>` |
+| AppleScript "Go to folder" doesn't open | All (file picker) | Grant Accessibility permissions to System Events |
+| File picker closes without selecting | All (file picker) | Increase AppleScript delays (1s → 2s) |
 
 ### macOS File Upload Bug
 

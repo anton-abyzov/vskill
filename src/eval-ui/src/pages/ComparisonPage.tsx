@@ -5,6 +5,8 @@ import { api } from "../api";
 import { GroupedBarChart } from "../components/GroupedBarChart";
 import { ProgressLog } from "../components/ProgressLog";
 import type { ProgressEntry } from "../components/ProgressLog";
+import { ActionItemsPanel } from "../components/ActionItemsPanel";
+import type { ActionItems } from "../types";
 
 interface ComparisonOutputsEvent {
   eval_id: number;
@@ -96,6 +98,7 @@ export function ComparisonPage() {
     verdict?: string;
     overall_pass_rate?: number;
     comparison?: { skillRubricAvg: number; baselineRubricAvg: number; delta: number };
+    actionItems?: ActionItems;
     error?: string;
   } | undefined;
 
@@ -295,6 +298,11 @@ export function ComparisonPage() {
               </div>
             );
           })()}
+
+          {/* Action Items */}
+          {done && doneData?.actionItems && plugin && skill && (
+            <ActionItemsPanel actionItems={doneData.actionItems} plugin={plugin} skill={skill} />
+          )}
         </div>
       )}
 

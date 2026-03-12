@@ -2,9 +2,10 @@ import type { WorkspaceState } from "../pages/workspace/workspaceTypes";
 
 interface Props {
   state: WorkspaceState;
+  isReadOnly?: boolean;
 }
 
-export function DetailHeader({ state }: Props) {
+export function DetailHeader({ state, isReadOnly }: Props) {
   const { plugin, skill, evals, latestBenchmark, isDirty, caseRunStates, regressions, iterationCount } = state;
   const isRunning = Array.from(caseRunStates.values()).some((s) => s.status === "running" || s.status === "queued");
 
@@ -31,6 +32,18 @@ export function DetailHeader({ state }: Props) {
         <Chevron />
         <span className="font-medium" style={{ color: "var(--text-primary)" }}>{skill}</span>
 
+        {isReadOnly && (
+          <span
+            className="ml-2 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded"
+            style={{ background: "var(--surface-3)", color: "var(--text-tertiary)" }}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            installed
+          </span>
+        )}
         {isDirty && (
           <span
             className="ml-2 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded"

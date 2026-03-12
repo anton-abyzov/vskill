@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "../api";
-import type { ConfigResponse, ProviderInfo } from "../api";
+import { useConfig } from "../ConfigContext";
+import type { ProviderInfo } from "../api";
 import { computeDiff } from "../utils/diff";
 import type { DiffLine } from "../utils/diff";
 import { ProgressLog } from "./ProgressLog";
@@ -19,7 +20,7 @@ type PanelState = "closed" | "open" | "loading" | "diff_shown";
 
 export function SkillImprovePanel({ plugin, skill, skillContent, onApplied }: Props) {
   const [state, setState] = useState<PanelState>("closed");
-  const [config, setConfig] = useState<ConfigResponse | null>(null);
+  const { config } = useConfig();
   const [selectedProvider, setSelectedProvider] = useState<string>("claude-cli");
   const [selectedModel, setSelectedModel] = useState<string>("opus");
   const [diffLines, setDiffLines] = useState<DiffLine[]>([]);
@@ -31,17 +32,15 @@ export function SkillImprovePanel({ plugin, skill, skillContent, onApplied }: Pr
   const [applying, setApplying] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Initialize provider/model defaults from shared config
   useEffect(() => {
-    api.getConfig().then((c) => {
-      setConfig(c);
-      // Default to opus for improvements
-      const hasCli = c.providers.find((p) => p.id === "claude-cli" && p.available);
-      if (hasCli) {
-        setSelectedProvider("claude-cli");
-        setSelectedModel("opus");
-      }
-    }).catch(() => {});
-  }, []);
+    if (!config) return;
+    const hasCli = config.providers.find((p) => p.id === "claude-cli" && p.available);
+    if (hasCli) {
+      setSelectedProvider("claude-cli");
+      setSelectedModel("opus");
+    }
+  }, [config]);
 
   // Cleanup SSE on unmount
   useEffect(() => {

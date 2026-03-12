@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useWorkspace } from "../pages/workspace/WorkspaceContext";
-import { api } from "../api";
-import type { ConfigResponse, ProviderInfo } from "../api";
+import { useConfig } from "../ConfigContext";
 import { computeDiff } from "../utils/diff";
 import type { DiffLine } from "../utils/diff";
 import { EvalChangesPanel } from "./EvalChangesPanel";
@@ -13,7 +12,7 @@ export function AiEditBar() {
   const { aiEditLoading, aiEditResult, aiEditError, aiEditClassifiedError, aiEditProgress, aiEditEvalChanges, aiEditEvalSelections, aiEditEvalsRetry } = state;
 
   const [instruction, setInstruction] = useState("");
-  const [config, setConfig] = useState<ConfigResponse | null>(null);
+  const { config } = useConfig();
   const [selectedProvider, setSelectedProvider] = useState("claude-cli");
   const [selectedModel, setSelectedModel] = useState("opus");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -23,17 +22,15 @@ export function AiEditBar() {
     textareaRef.current?.focus();
   }, []);
 
-  // Load provider config
+  // Initialize provider/model defaults from shared config
   useEffect(() => {
-    api.getConfig().then((c) => {
-      setConfig(c);
-      const hasCli = c.providers.find((p) => p.id === "claude-cli" && p.available);
-      if (hasCli) {
-        setSelectedProvider("claude-cli");
-        setSelectedModel("opus");
-      }
-    }).catch(() => {});
-  }, []);
+    if (!config) return;
+    const hasCli = config.providers.find((p) => p.id === "claude-cli" && p.available);
+    if (hasCli) {
+      setSelectedProvider("claude-cli");
+      setSelectedModel("opus");
+    }
+  }, [config]);
 
   const provider = config?.providers.find((p) => p.id === selectedProvider && p.available);
 

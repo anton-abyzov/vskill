@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, Link, useSearchParams, useNavigate } from "react-router-dom";
 import { useSSE } from "../sse";
 import { api } from "../api";
+import { useConfig } from "../ConfigContext";
 import { GroupedBarChart } from "../components/GroupedBarChart";
 import { ProgressLog } from "../components/ProgressLog";
 import type { ProgressEntry } from "../components/ProgressLog";
@@ -48,8 +49,9 @@ export function BenchmarkPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { events, running, done, error, start } = useSSE();
+  const { config: globalConfig } = useConfig();
   const [expandedOutputs, setExpandedOutputs] = useState<Set<number>>(new Set());
-  const [model, setModel] = useState<string | null>(null);
+  const model = globalConfig?.model ?? null;
   const [evalCases, setEvalCases] = useState<EvalsFile | null>(null);
   const [runScope, setRunScope] = useState<"all" | number | null>(null);
   const [previousBenchmark, setPreviousBenchmark] = useState<BenchmarkResult | null>(null);
@@ -61,7 +63,6 @@ export function BenchmarkPage() {
   const autostartedRef = useRef(false);
 
   useEffect(() => {
-    api.getConfig().then((c) => setModel(c.model)).catch(() => {});
     if (plugin && skill) {
       api.getEvals(plugin, skill).then(setEvalCases).catch(() => {});
       api.getLatestBenchmark(plugin, skill).then(setPreviousBenchmark).catch(() => {});
@@ -85,7 +86,6 @@ export function BenchmarkPage() {
   }, [plugin, skill, searchParams]);
 
   function handleStartBenchmark(evalIds?: number[]) {
-    api.getConfig().then((c) => setModel(c.model)).catch(() => {});
     setExpandedOutputs(new Set());
     setIsBaselineMode(false);
     setRunScope(evalIds?.length === 1 ? evalIds[0] : "all");
@@ -94,7 +94,6 @@ export function BenchmarkPage() {
   }
 
   function handleStartBaseline() {
-    api.getConfig().then((c) => setModel(c.model)).catch(() => {});
     setExpandedOutputs(new Set());
     setIsBaselineMode(true);
     setRunScope("all");

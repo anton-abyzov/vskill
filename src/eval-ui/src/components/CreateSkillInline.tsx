@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { api } from "../api";
-import type { ConfigResponse } from "../api";
+import { useConfig } from "../ConfigContext";
 import type { ProjectLayoutResponse, DetectedLayout, GeneratedEval } from "../types";
 import { ProgressLog } from "./ProgressLog";
 import type { ProgressEntry } from "./ProgressLog";
@@ -63,8 +63,8 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
   const [layout, setLayout] = useState<ProjectLayoutResponse | null>(null);
   const [layoutLoading, setLayoutLoading] = useState(true);
 
-  // Config (providers/models)
-  const [config, setConfig] = useState<ConfigResponse | null>(null);
+  // Config (providers/models) — shared via context
+  const { config } = useConfig();
 
   // Form state
   const [name, setName] = useState("");
@@ -106,7 +106,6 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
       .catch(() => {})
       .finally(() => setLayoutLoading(false));
 
-    api.getConfig().then(setConfig).catch(() => {});
   }, []);
 
   // Auto-focus prompt when switching to AI mode

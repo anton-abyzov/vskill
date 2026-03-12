@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { api } from "../api";
 import { useSSE } from "../sse";
-import type { ConfigResponse, ProviderInfo } from "../api";
+import { useConfig } from "../ConfigContext";
+import type { ProviderInfo } from "../api";
 import type { EvalCase, BenchmarkAssertionResult } from "../types";
 
 interface ModelResult {
@@ -23,7 +23,7 @@ interface Props {
 type CompareState = "idle" | "running_a" | "running_b" | "complete";
 
 export function ModelCompareModal({ plugin, skill, evalCase, onClose }: Props) {
-  const [config, setConfig] = useState<ConfigResponse | null>(null);
+  const { config } = useConfig();
   const [providerA, setProviderA] = useState("claude-cli");
   const [modelA, setModelA] = useState("sonnet");
   const [providerB, setProviderB] = useState("claude-cli");
@@ -34,10 +34,6 @@ export function ModelCompareModal({ plugin, skill, evalCase, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const { events, running, start: sseStart, stop: sseStop } = useSSE();
   const overlayRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    api.getConfig().then(setConfig).catch(() => {});
-  }, []);
 
   // Lock body scroll
   useEffect(() => {

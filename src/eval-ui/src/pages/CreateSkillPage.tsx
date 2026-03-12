@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
-import type { ConfigResponse } from "../api";
+import { useConfig } from "../ConfigContext";
 import type { ProjectLayoutResponse, DetectedLayout, SkillCreatorStatus, GeneratedEval } from "../types";
 import { ProgressLog } from "../components/ProgressLog";
 import type { ProgressEntry } from "../components/ProgressLog";
@@ -66,8 +66,8 @@ export function CreateSkillPage() {
   const [layout, setLayout] = useState<ProjectLayoutResponse | null>(null);
   const [layoutLoading, setLayoutLoading] = useState(true);
 
-  // Config (providers/models)
-  const [config, setConfig] = useState<ConfigResponse | null>(null);
+  // Config (providers/models) — shared via context
+  const { config } = useConfig();
 
   // Form state
   const [name, setName] = useState("");
@@ -113,15 +113,17 @@ export function CreateSkillPage() {
       .catch(() => {})
       .finally(() => setLayoutLoading(false));
 
-    api.getConfig().then((c) => {
-      setConfig(c);
-      const hasCli = c.providers.find((p) => p.id === "claude-cli" && p.available);
-      if (hasCli) {
-        setAiProvider("claude-cli");
-        setAiModel("sonnet");
-      }
-    }).catch(() => {});
   }, []);
+
+  // Initialize AI provider/model defaults from shared config
+  useEffect(() => {
+    if (!config) return;
+    const hasCli = config.providers.find((p) => p.id === "claude-cli" && p.available);
+    if (hasCli) {
+      setAiProvider("claude-cli");
+      setAiModel("sonnet");
+    }
+  }, [config]);
 
   // Auto-focus prompt when switching to AI mode
   useEffect(() => {

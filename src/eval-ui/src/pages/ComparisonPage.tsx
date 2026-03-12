@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useSSE } from "../sse";
 import { api } from "../api";
+import { useConfig } from "../ConfigContext";
 import { GroupedBarChart } from "../components/GroupedBarChart";
 import { ProgressLog } from "../components/ProgressLog";
 import type { ProgressEntry } from "../components/ProgressLog";
@@ -31,14 +32,11 @@ const VERDICT_STYLES: Record<string, { bg: string; text: string; border: string;
 export function ComparisonPage() {
   const { plugin, skill } = useParams<{ plugin: string; skill: string }>();
   const { events, running, done, error, start } = useSSE();
+  const { config: globalConfig } = useConfig();
   const [expandedOutputs, setExpandedOutputs] = useState<Set<number>>(new Set());
-  const [model, setModel] = useState<string | null>(null);
+  const model = globalConfig?.model ?? null;
   const [searchParams] = useSearchParams();
   const autostartRef = useRef(false);
-
-  useEffect(() => {
-    api.getConfig().then((c) => setModel(c.model)).catch(() => {});
-  }, []);
 
   // Autostart support — triggered via ?autostart=true from HistoryPage rerun buttons
   useEffect(() => {

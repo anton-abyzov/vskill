@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useStudio } from "../StudioContext";
+import { useConfig } from "../ConfigContext";
 import { SkillSearch } from "./SkillSearch";
 import { SkillGroupList } from "./SkillGroupList";
 import { ModelSelector } from "./ModelSelector";
@@ -7,12 +8,11 @@ import { api } from "../api";
 
 export function LeftPanel() {
   const { state, setMode } = useStudio();
-  const [projectName, setProjectName] = useState<string | null>(null);
+  const { config } = useConfig();
   const [creatorStatus, setCreatorStatus] = useState<{ installed: boolean; installCommand: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    api.getConfig().then((c) => setProjectName(c.projectName)).catch(() => {});
     api.getSkillCreatorStatus().then(setCreatorStatus).catch(() => {});
   }, []);
 
@@ -34,7 +34,7 @@ export function LeftPanel() {
               Skill Studio
             </div>
             <div className="text-[11px] truncate" style={{ color: "var(--text-tertiary)" }}>
-              {projectName || "vskill"}
+              {config?.projectName || "vskill"}
             </div>
           </div>
         </div>

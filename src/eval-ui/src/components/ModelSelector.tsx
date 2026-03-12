@@ -1,16 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { api } from "../api";
-import type { ConfigResponse, ProviderInfo, ModelOption } from "../api";
+import type { ProviderInfo, ModelOption, ConfigResponse } from "../api";
+import { useConfig } from "../ConfigContext";
 
 export function ModelSelector() {
-  const [config, setConfig] = useState<ConfigResponse | null>(null);
+  const { config, updateConfig, refreshConfig } = useConfig();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    api.getConfig().then(setConfig).catch(() => {});
-  }, []);
 
   // Close on outside click
   useEffect(() => {
@@ -26,12 +22,10 @@ export function ModelSelector() {
   async function selectModel(provider: ProviderInfo, model: ModelOption) {
     setSaving(true);
     try {
-      const result = await api.setConfig(provider.id, model.id);
-      setConfig(result);
+      await updateConfig(provider.id, model.id);
       setOpen(false);
     } catch {
-      const current = await api.getConfig();
-      setConfig(current);
+      refreshConfig();
     } finally {
       setSaving(false);
     }

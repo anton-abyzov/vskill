@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useWorkspace } from "./WorkspaceContext";
-import { api } from "../../api";
-import type { ConfigResponse } from "../../api";
+import { useConfig } from "../../ConfigContext";
 import { parseFrontmatter } from "../../utils/parseFrontmatter";
 import { renderMarkdown } from "../../utils/renderMarkdown";
 import { computeDiff } from "../../utils/diff";
@@ -78,11 +77,7 @@ export function EditorPanel() {
   const [regenProgress, setRegenProgress] = useState<ProgressEntry[]>([]);
   const [regenError, setRegenError] = useState<string | null>(null);
   const regenAbortRef = useRef<AbortController | null>(null);
-  const [config, setConfig] = useState<ConfigResponse | null>(null);
-
-  useEffect(() => {
-    api.getConfig().then(setConfig).catch(() => {});
-  }, []);
+  const { config } = useConfig();
 
   useEffect(() => {
     return () => { regenAbortRef.current?.abort(); };

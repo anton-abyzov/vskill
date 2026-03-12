@@ -155,8 +155,7 @@ export async function detectMarketplaceRepo(
  * Install plugins from a Claude Code plugin marketplace repo.
  *
  * Shows a checkbox list of available plugins (all unchecked by default),
- * then installs each selected plugin via native `claude plugin` CLI.
- * Falls back to extraction-based install if Claude CLI is unavailable.
+ * then installs each selected plugin via file-system extraction to agent skill dirs.
  */
 async function installMarketplaceRepo(
   owner: string,
@@ -647,31 +646,16 @@ function copyPluginFiltered(sourceDir: string, targetDir: string, relBase = ""):
 // ---------------------------------------------------------------------------
 
 /**
- * Remove a plugin installed via Claude Code's plugin system.
- * The cache at ~/.claude/plugins/cache/ contains ALL files without filtering,
- * causing internal .md files to leak as ghost slash commands.
- *
- * Uses `claude plugin uninstall` CLI to properly remove the plugin through
- * Claude Code's own API rather than directly manipulating internal files.
+ * Remove stale plugin cache from ~/.claude/plugins/cache/.
+ * Previous native installs may have left cached files that leak as ghost slash commands.
  */
 function cleanPluginCache(pluginName: string, marketplace: string): void {
-  const pluginKey = `${pluginName}@${marketplace}`;
+  const cacheDir = join(resolveTilde("~/.claude/plugins/cache"), marketplace, pluginName);
   try {
-    execSync(`claude plugin uninstall "${pluginKey}"`, { stdio: "ignore", timeout: 10_000 });
-  } catch { /* ignore - plugin might not be installed via CLI */ }
-}
-
-// ---------------------------------------------------------------------------
-// Native Claude Code plugin install
-// ---------------------------------------------------------------------------
-
-/**
- * Check if a path is inside the OS temp directory (e.g. /var/folders/.../T/).
- * Temp dirs get cleaned up, making registered marketplace paths stale.
- */
-function isTempPath(p: string): boolean {
-  const tmpDir = os.tmpdir();
-  return p.startsWith(tmpDir);
+    if (existsSync(cacheDir)) {
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  } catch { /* ignore - cache dir might not exist */ }
 }
 
 // ---------------------------------------------------------------------------

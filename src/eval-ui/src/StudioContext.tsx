@@ -119,11 +119,23 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: "SET_MOBILE", isMobile });
   }, [isMobile]);
 
-  // Fetch skills on mount
+  // Fetch skills on mount; restore selection from URL hash if present
   const loadSkills = useCallback(() => {
     dispatch({ type: "SET_SKILLS_LOADING", loading: true });
     api.getSkills()
-      .then((skills) => dispatch({ type: "SET_SKILLS", skills }))
+      .then((skills) => {
+        dispatch({ type: "SET_SKILLS", skills });
+        // Restore selection from hash: #/skills/<plugin>/<skill>
+        const hash = window.location.hash;
+        const m = hash.match(/^#\/skills\/([^/]+)\/([^/?]+)/);
+        if (m) {
+          const [, plugin, skill] = m;
+          const found = skills.find((s) => s.plugin === plugin && s.skill === skill);
+          if (found) {
+            dispatch({ type: "SELECT_SKILL", skill: { plugin, skill, origin: found.origin } });
+          }
+        }
+      })
       .catch((e) => dispatch({ type: "SET_SKILLS_ERROR", error: e.message }));
   }, []);
 
@@ -131,10 +143,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
   const selectSkill = useCallback((skill: SelectedSkill) => {
     dispatch({ type: "SELECT_SKILL", skill });
+    window.location.hash = `/skills/${skill.plugin}/${skill.skill}`;
   }, []);
 
   const clearSelection = useCallback(() => {
     dispatch({ type: "CLEAR_SELECTION" });
+    if (window.location.hash.startsWith("#/skills/")) {
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
   }, []);
 
   const setMode = useCallback((mode: "browse" | "create") => {

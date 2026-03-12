@@ -153,8 +153,8 @@ test("GET /api/unknown-route returns 404", async ({ request }) => {
 
 test("skill list links navigate to detail page", async ({ page }) => {
   await page.goto("/");
-  // Find and click a link containing "test-skill"
-  const link = page.locator("a", { hasText: "test-skill" }).first();
+  // Find and click the skill button containing "test-skill"
+  const link = page.locator("button", { hasText: "test-skill" }).first();
   await expect(link).toBeVisible();
   await link.click();
   // Should navigate to skill detail page

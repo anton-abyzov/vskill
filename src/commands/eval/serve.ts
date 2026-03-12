@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { startEvalServer } from "../../eval-server/eval-server.js";
 import { yellow, dim, red, cyan, bold } from "../../utils/output.js";
 import { createPrompter } from "../../utils/prompts.js";
+import { AGENTS_REGISTRY } from "../../agents/agents-registry.js";
 
 /**
  * Deterministic port for a project path.
@@ -26,25 +27,17 @@ export function projectPort(rootPath: string): number {
 
 function checkSkillCreator(): void {
   const home = homedir();
-  const locations = [
-    // Canonical vskill path
-    join(home, ".agents", "skills", "skill-creator"),
-    // Common agent paths
-    join(home, ".claude", "skills", "skill-creator"),
-    join(home, ".cursor", "skills", "skill-creator"),
-    join(home, ".codeium", "windsurf", "skills", "skill-creator"),
-    join(home, ".cline", "skills", "skill-creator"),
-    join(home, ".copilot", "skills", "skill-creator"),
-    join(home, ".gemini", "skills", "skill-creator"),
-    join(home, ".codex", "skills", "skill-creator"),
-    join(home, ".continue", "skills", "skill-creator"),
-    join(home, ".config", "agents", "skills", "skill-creator"),
-    // Claude plugin cache (legacy)
-    join(home, ".claude", "plugins", "cache", "claude-plugins-official", "skill-creator"),
-    join(home, ".claude", "plugins", "cache", "specweave", "sw", "1.0.0", "skills", "skill-creator"),
-  ];
 
-  const found = locations.some((loc) => existsSync(loc));
+  // Check canonical vskill path first
+  let found = existsSync(join(home, ".agents", "skills", "skill-creator"));
+
+  // Check every registered agent's global skills directory
+  if (!found) {
+    found = AGENTS_REGISTRY.some((agent) => {
+      const resolved = agent.globalSkillsDir.replace("~", home);
+      return existsSync(join(resolved, "skill-creator"));
+    });
+  }
 
   if (!found) {
     console.log(

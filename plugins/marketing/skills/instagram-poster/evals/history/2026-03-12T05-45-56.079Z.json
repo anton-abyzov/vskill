@@ -1,0 +1,52 @@
+{
+  "timestamp": "2026-03-12T05:45:56.079Z",
+  "model": "claude-sonnet",
+  "skill_name": "instagram-poster",
+  "cases": [
+    {
+      "eval_id": 3,
+      "eval_name": "upload reel video",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "durationMs": 34728,
+      "tokens": null,
+      "inputTokens": null,
+      "outputTokens": null,
+      "output": "No `.env` credentials found. You need to set `INSTAGRAM_ACCESS_TOKEN` and `INSTAGRAM_ACCOUNT_ID` before running. Once you have them, run these commands in order:\n\n**Step 1 — Set credentials**\n```bash\nexport INSTAGRAM_ACCESS_TOKEN=\"your_long_lived_token_here\"\nexport INSTAGRAM_ACCOUNT_ID=\"your_numeric_account_id_here\"\n```\n\n**Step 2 — Create the Reel media container**\n```bash\nCONTAINER_ID=$(curl -s -X POST \\\n  \"https://graph.facebook.com/v19.0/${INSTAGRAM_ACCOUNT_ID}/media\" \\\n  -d \"media_type=REELS\" \\\n  -d \"video_url=https://storage.mysite.com/reel.mp4\" \\\n  -d \"caption=Day in my life ✨ #dayinmylife #vlog #reels\" \\\n  -d \"share_to_feed=true\" \\\n  -d \"access_token=${INSTAGRAM_ACCESS_TOKEN}\" | jq -r '.id')\necho \"Container ID: $CONTAINER_ID\"\n```\n\n**Step 3 — Poll until upload is FINISHED**\n```bash\nwhile true; do\n  STATUS=$(curl -s \"https://graph.facebook.com/v19.0/${CONTAINER_ID}?fields=status_code&access_token=${INSTAGRAM_ACCESS_TOKEN}\" | jq -r '.status_code')\n  echo \"Status: $STATUS\"\n  [ \"$STATUS\" = \"FINISHED\" ] && break\n  [ \"$STATUS\" = \"ERROR\" ] && echo 'Upload failed — check video format (MP4/MOV, H.264, AAC, 9:16)' && exit 1\n  sleep 5\ndone\n```\n\n**Step 4 — Publish**\n```bash\nPOST_ID=$(curl -s -X POST \\\n  \"https://graph.facebook.com/v19.0/${INSTAGRAM_ACCOUNT_ID}/media_publish\" \\\n  -d \"creation_id=${CONTAINER_ID}\" \\\n  -d \"access_token=${INSTAGRAM_ACCESS_TOKEN}\" | jq -r '.id')\necho \"Post ID: $POST_ID\"\n```\n\n**Step 5 — Get permalink**\n```bash\ncurl -s \"https://graph.facebook.com/v19.0/${POST_ID}?fields=permalink&access_token=${INSTAGRAM_ACCESS_TOKEN}\" | jq -r '.permalink'\n```\n\n---\n\n**To get your credentials:**\n- `INSTAGRAM_ACCESS_TOKEN`: Generate at [developers.facebook.com](https://developers.facebook.com) → your app → Graph API Explorer, with `instagram_content_publish` scope, then exchange for a long-lived token\n- `INSTAGRAM_ACCOUNT_ID`: Your account must be a Business or Creator account connected to a Facebook Page. Find the ID via: `curl -s \"https://graph.facebook.com/v19.0/me/accounts?access_token=TOKEN\" | jq`",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Response includes media_type=REELS in a code block",
+          "pass": true,
+          "reasoning": "The LLM output includes 'media_type=REELS' in a bash code block in Step 2, where it constructs the curl command to create the Reel media container."
+        },
+        {
+          "id": "a2",
+          "text": "Response includes video_url=https://storage.mysite.com/reel.mp4 in a code block",
+          "pass": true,
+          "reasoning": "The LLM output includes a curl command in a code block that contains 'video_url=https://storage.mysite.com/reel.mp4' as a parameter in Step 2."
+        },
+        {
+          "id": "a3",
+          "text": "Response includes a polling loop or check for status_code=FINISHED before publishing",
+          "pass": true,
+          "reasoning": "The response includes a polling loop in Step 3 that repeatedly checks the status_code field and explicitly waits until it equals 'FINISHED' before proceeding to publish in Step 4."
+        },
+        {
+          "id": "a4",
+          "text": "Response includes the /media_publish endpoint call with creation_id",
+          "pass": true,
+          "reasoning": "Step 4 in the output explicitly calls the /media_publish endpoint: `https://graph.facebook.com/v19.0/${INSTAGRAM_ACCOUNT_ID}/media_publish` with `-d \"creation_id=${CONTAINER_ID}\"`, satisfying the assertion."
+        }
+      ]
+    }
+  ],
+  "overall_pass_rate": 1,
+  "type": "benchmark",
+  "provider": "claude-cli",
+  "totalDurationMs": 34728,
+  "totalInputTokens": null,
+  "totalOutputTokens": null,
+  "scope": "single"
+}

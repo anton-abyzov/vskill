@@ -1,0 +1,79 @@
+{
+  "timestamp": "2026-03-12T06:19:24.678Z",
+  "model": "claude-sonnet",
+  "skill_name": "instagram-poster",
+  "cases": [
+    {
+      "eval_id": 1,
+      "eval_name": "post single image to Instagram",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "durationMs": 27581,
+      "tokens": null,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Response includes a curl command targeting graph.facebook.com with /media endpoint",
+          "pass": true,
+          "reasoning": "The LLM output includes a curl command in Step 2 that targets 'https://graph.facebook.com/v19.0/${INSTAGRAM_ACCOUNT_ID}/media', which is the graph.facebook.com domain with the /media endpoint."
+        },
+        {
+          "id": "a2",
+          "text": "Response includes image_url=https://mycdn.com/photo.jpg in a code block",
+          "pass": true,
+          "reasoning": "The LLM output includes a code block in Step 2 that contains 'image_url=https://mycdn.com/photo.jpg' as a parameter in the curl command."
+        },
+        {
+          "id": "a3",
+          "text": "Response includes a /media_publish endpoint call to finalize the post",
+          "pass": true,
+          "reasoning": "The output includes a curl POST call to 'https://graph.facebook.com/v19.0/${INSTAGRAM_ACCOUNT_ID}/media_publish' in Step 3, which is exactly the /media_publish endpoint call used to finalize/publish the Instagram post."
+        },
+        {
+          "id": "a4",
+          "text": "Response references INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_ACCOUNT_ID variables",
+          "pass": true,
+          "reasoning": "The LLM output explicitly references both INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_ACCOUNT_ID variables multiple times throughout the response, including in the export commands, curl API calls, and .env file instructions."
+        }
+      ],
+      "comparisonDetail": {
+        "skillDurationMs": 27581,
+        "skillTokens": null,
+        "baselineDurationMs": 25730,
+        "baselineTokens": null,
+        "skillContentScore": 4,
+        "skillStructureScore": 5,
+        "baselineContentScore": 3,
+        "baselineStructureScore": 3,
+        "winner": "skill"
+      }
+    }
+  ],
+  "overall_pass_rate": 1,
+  "type": "comparison",
+  "provider": "claude-cli",
+  "verdict": "EFFECTIVE",
+  "comparison": {
+    "skillPassRate": 1,
+    "baselinePassRate": 0,
+    "skillRubricAvg": 4.5,
+    "baselineRubricAvg": 3,
+    "delta": 1.5
+  },
+  "actionItems": {
+    "recommendation": "keep",
+    "summary": "The instagram-poster skill consistently outperforms baseline with a +1.5 delta and 100% assertion pass rate; it delivers well-structured, actionable Instagram publishing workflows. No changes are needed.",
+    "weaknesses": [
+      "Only one eval case was run ('post single image'), leaving carousel, video/reels, and scheduling scenarios untested — pass rate of 100% may not generalize.",
+      "The SKILL.md content is truncated in the report, so the Step 2+ workflow completeness cannot be fully assessed from this data."
+    ],
+    "strengths": [
+      "Perfect assertion pass rate (4/4) on the single tested case demonstrates accurate, spec-compliant output.",
+      "Structure score of 5/5 vs baseline 3/5 shows the skill produces significantly better-organized responses with clear step-by-step commands.",
+      "Content score of 4/5 vs baseline 3/5 confirms richer, more actionable guidance — not just cosmetic formatting improvement.",
+      "Delta of +1.5 comfortably clears the 'keep' threshold of >+1."
+    ],
+    "suggestedFocus": "Expand evals to cover carousel (multi-image) and Reels publishing cases to confirm the skill's 100% pass rate holds across all supported content types."
+  }
+}

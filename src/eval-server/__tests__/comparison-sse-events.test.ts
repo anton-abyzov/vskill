@@ -139,6 +139,7 @@ function makeEvalCase(overrides: Partial<EvalCase> = {}): EvalCase {
 
 function makeComparisonResult() {
   return {
+    prompt: "do something",
     skillOutput: "skill output",
     baselineOutput: "baseline output",
     skillDurationMs: 100,

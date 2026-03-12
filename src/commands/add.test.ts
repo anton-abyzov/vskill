@@ -197,22 +197,6 @@ vi.mock("../installer/canonical.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Mock claude-cli (native Claude Code plugin install)
-// ---------------------------------------------------------------------------
-const mockIsClaudeCliAvailable = vi.fn().mockReturnValue(false);
-const mockRegisterMarketplace = vi.fn().mockReturnValue({ success: false });
-const mockDeregisterMarketplace = vi.fn().mockReturnValue(false);
-const mockInstallNativePlugin = vi.fn().mockReturnValue(false);
-const mockUninstallNativePlugin = vi.fn().mockReturnValue(false);
-vi.mock("../utils/claude-cli.js", () => ({
-  isClaudeCliAvailable: (...args: unknown[]) => mockIsClaudeCliAvailable(...args),
-  registerMarketplace: (...args: unknown[]) => mockRegisterMarketplace(...args),
-  deregisterMarketplace: (...args: unknown[]) => mockDeregisterMarketplace(...args),
-  installNativePlugin: (...args: unknown[]) => mockInstallNativePlugin(...args),
-  uninstallNativePlugin: (...args: unknown[]) => mockUninstallNativePlugin(...args),
-}));
-
-// ---------------------------------------------------------------------------
 // Mock getMarketplaceName + discoverUnregisteredPlugins (preserve real marketplace functions)
 // ---------------------------------------------------------------------------
 const mockGetMarketplaceName = vi.fn().mockReturnValue(null);
@@ -1830,110 +1814,6 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Native Claude Code plugin install (via installPluginDir)
-// ---------------------------------------------------------------------------
-describe("addCommand native Claude Code plugin install", () => {
-  // Use a non-temp path — temp paths are now correctly blocked by isTempPath() guard
-  const pluginDir = "/home/test-user/projects/test-plugin";
-  const marketplaceJson = JSON.stringify({
-    name: "test-mkt",
-    version: "1.0.0",
-    plugins: [{ name: "sw-test", source: "./plugins/test", version: "1.0.0" }],
-  });
-
-  beforeEach(() => {
-    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
-    mockRunTier1Scan.mockReturnValue(makeScanResult());
-    mockEnsureLockfile.mockReturnValue({
-      version: 1,
-      agents: [],
-      skills: {},
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    });
-
-    // Plugin dir structure
-    mockExistsSync.mockImplementation((p: string) => {
-      if (p.includes("plugins/test")) return true;
-      if (p.includes(".claude-plugin/marketplace.json")) return true;
-      return false;
-    });
-    mockReadFileSync.mockReturnValue(marketplaceJson);
-    mockReaddirSync.mockReturnValue([]);
-    mockStatSync.mockReturnValue({ isDirectory: () => true, isFile: () => false });
-
-    // Claude Code agent with claude CLI available
-    const claudeAgent = makeAgent({ id: "claude-code", displayName: "Claude Code" });
-    mockDetectInstalledAgents.mockResolvedValue([claudeAgent]);
-  });
-
-  it("skips native install when claude CLI is not available", async () => {
-    mockIsClaudeCliAvailable.mockReturnValue(false);
-
-    await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
-
-    expect(mockIsClaudeCliAvailable).toHaveBeenCalled();
-    expect(mockRegisterMarketplace).not.toHaveBeenCalled();
-    expect(mockInstallNativePlugin).not.toHaveBeenCalled();
-  });
-
-  it("skips native install when --copy flag is set", async () => {
-    mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockGetMarketplaceName.mockReturnValue("test-mkt");
-
-    await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true, copy: true });
-
-    expect(mockRegisterMarketplace).not.toHaveBeenCalled();
-    expect(mockInstallNativePlugin).not.toHaveBeenCalled();
-  });
-
-  it("calls registerMarketplace and installNativePlugin when claude CLI available", async () => {
-    mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockGetMarketplaceName.mockReturnValue("test-mkt");
-    mockRegisterMarketplace.mockReturnValue({ success: true });
-    mockInstallNativePlugin.mockReturnValue(true);
-
-    await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
-
-    expect(mockRegisterMarketplace).toHaveBeenCalled();
-    expect(mockInstallNativePlugin).toHaveBeenCalledWith("sw-test", "test-mkt", "project");
-  });
-
-  it("falls back to extraction when marketplace registration fails", async () => {
-    mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockGetMarketplaceName.mockReturnValue("test-mkt");
-    mockRegisterMarketplace.mockReturnValue({ success: false, stderr: "registration failed" });
-
-    await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
-
-    expect(mockRegisterMarketplace).toHaveBeenCalled();
-    expect(mockInstallNativePlugin).not.toHaveBeenCalled();
-  });
-
-  it("falls back to extraction when native install command fails", async () => {
-    mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockGetMarketplaceName.mockReturnValue("test-mkt");
-    mockRegisterMarketplace.mockReturnValue({ success: true });
-    mockInstallNativePlugin.mockReturnValue(false);
-
-    await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
-
-    expect(mockRegisterMarketplace).toHaveBeenCalled();
-    expect(mockInstallNativePlugin).toHaveBeenCalled();
-    // Falls back to extraction — copyFileSync or mkdirSync should be called
-  });
-
-  it("skips native install when getMarketplaceName returns null", async () => {
-    mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockGetMarketplaceName.mockReturnValue(null);
-
-    await addCommand(pluginDir, { pluginDir, plugin: "sw-test", yes: true });
-
-    expect(mockRegisterMarketplace).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
 // --all flag tests (bulk repo install)
 // ---------------------------------------------------------------------------
 
@@ -2646,10 +2526,6 @@ describe("addCommand marketplace integration", () => {
         text: async () => "# Skill Content",
       }) as unknown as typeof fetch;
 
-    // Claude CLI available + native install succeeds
-    mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockRegisterMarketplace.mockReturnValue({ success: true });
-    mockInstallNativePlugin.mockReturnValue(true);
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
 
     // --yes to auto-select all
@@ -2657,9 +2533,6 @@ describe("addCommand marketplace integration", () => {
 
     // Should NOT call discoverSkills
     expect(mockDiscoverSkills).not.toHaveBeenCalled();
-    // Should call registerMarketplace with git URL (not temp dir path)
-    expect(mockRegisterMarketplace).toHaveBeenCalledWith("https://github.com/owner/repo");
-    expect(mockInstallNativePlugin).toHaveBeenCalledTimes(3);
     // Should write lockfile with marketplace source
     expect(mockWriteLockfile).toHaveBeenCalled();
     const lockArg = mockWriteLockfile.mock.calls[0][0];
@@ -2733,18 +2606,10 @@ describe("addCommand marketplace integration", () => {
         text: async () => "# Skill Content",
       }) as unknown as typeof fetch;
 
-    mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockRegisterMarketplace.mockReturnValue({ success: true });
-    // plugin-a succeeds, plugin-b fails, plugin-c succeeds (native)
-    mockInstallNativePlugin
-      .mockReturnValueOnce(true)
-      .mockReturnValueOnce(false)
-      .mockReturnValueOnce(true);
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
 
     await addCommand("owner/repo", { yes: true });
 
-    // All plugins now install skill files to agents regardless of native status
     expect(mockWriteLockfile).toHaveBeenCalled();
     const lockArg = mockWriteLockfile.mock.calls[0][0];
     expect(lockArg.skills["plugin-a"]).toBeDefined();
@@ -2752,7 +2617,7 @@ describe("addCommand marketplace integration", () => {
     expect(lockArg.skills["plugin-c"]).toBeDefined();
   });
 
-  it("TC-014: no temp directory created — uses git URL for registration", async () => {
+  it("TC-014: no temp directory created during marketplace install", async () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
@@ -2763,13 +2628,9 @@ describe("addCommand marketplace integration", () => {
         text: async () => SAMPLE_MARKETPLACE_JSON,
       }) as unknown as typeof fetch;
 
-    mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockRegisterMarketplace.mockReturnValue({ success: true });
-    mockInstallNativePlugin.mockReturnValue(true);
-
     await addCommand("owner/repo", { yes: true });
 
-    // No temp dir should be created or cleaned up — git URL is used directly
+    // No temp dir should be created or cleaned up — files extracted directly
     expect(mockMkdtempSync).not.toHaveBeenCalled();
     expect(mockRmSync).not.toHaveBeenCalled();
   });
@@ -2790,9 +2651,6 @@ describe("addCommand marketplace integration", () => {
         text: async () => "# Skill Content",
       }) as unknown as typeof fetch;
 
-    mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockRegisterMarketplace.mockReturnValue({ success: true });
-    mockInstallNativePlugin.mockReturnValue(true);
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
 
     await addCommand("owner/repo", { yes: true });
@@ -2841,13 +2699,6 @@ describe("addCommand marketplace integration", () => {
     mockPromptCheckboxList
       .mockResolvedValueOnce([2])
       .mockResolvedValueOnce([0]);
-    // "Install as Claude Code plugins?" → yes
-    mockPromptConfirm.mockResolvedValue(true);
-
-    // Claude CLI available
-    mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockRegisterMarketplace.mockReturnValue({ success: true });
-    mockInstallNativePlugin.mockReturnValue(true);
 
     // Agents for uninstall directory removal + skill install
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
@@ -2861,15 +2712,8 @@ describe("addCommand marketplace integration", () => {
     expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("plugin-a", expect.any(String));
     expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("plugin-b", expect.any(String));
 
-    // Should uninstall from native Claude Code
-    expect(mockUninstallNativePlugin).toHaveBeenCalledWith("plugin-a", "test-marketplace");
-    expect(mockUninstallNativePlugin).toHaveBeenCalledWith("plugin-b", "test-marketplace");
-
-    // Should remove skill directories
+    // Should remove skill directories from filesystem
     expect(mockRmSync).toHaveBeenCalled();
-
-    // Should install plugin-c via native Claude plugin
-    expect(mockInstallNativePlugin).toHaveBeenCalledWith("plugin-c", "test-marketplace", "project");
   });
 
   it("TC-018: --yes mode does NOT uninstall previously installed plugins", async () => {
@@ -2896,41 +2740,12 @@ describe("addCommand marketplace integration", () => {
         text: async () => SAMPLE_MARKETPLACE_JSON,
       }) as unknown as typeof fetch;
 
-    mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockRegisterMarketplace.mockReturnValue({ success: true });
-    mockInstallNativePlugin.mockReturnValue(true);
-
     // --yes auto-selects all — should NOT uninstall anything
     await addCommand("owner/repo", { yes: true });
 
     expect(mockRemoveSkillFromLock).not.toHaveBeenCalled();
-    expect(mockUninstallNativePlugin).not.toHaveBeenCalled();
   });
 
-  it("TC-012: falls back to extraction when claude CLI is unavailable", async () => {
-    globalThis.fetch = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: async () => JSON.stringify({
-          name: "test-mp",
-          owner: { name: "Test" },
-          plugins: [{ name: "solo-plugin", source: "./plugins/solo", version: "1.0.0", description: "Only plugin" }],
-        }),
-      }) as unknown as typeof fetch;
-
-    mockIsClaudeCliAvailable.mockReturnValue(false);
-
-    // installRepoPlugin will be called as fallback — it will fail but that's ok for this test
-    await addCommand("owner/repo", { yes: true }).catch(() => {});
-
-    // Should NOT call registerMarketplace or installNativePlugin
-    expect(mockRegisterMarketplace).not.toHaveBeenCalled();
-    expect(mockInstallNativePlugin).not.toHaveBeenCalled();
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2983,16 +2798,7 @@ describe("addCommand unregistered plugin discovery", () => {
       failed: false,
     });
 
-    mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockRegisterMarketplace.mockReturnValue({ success: true });
-    mockInstallNativePlugin.mockReturnValue(true);
-
     await addCommand("owner/repo", { yes: true });
-
-    // Should install only registered plugins (3 from SAMPLE_MARKETPLACE_JSON), not unregistered
-    expect(mockInstallNativePlugin).toHaveBeenCalledTimes(3);
-    const installedNames = mockInstallNativePlugin.mock.calls.map((c: unknown[]) => c[0]);
-    expect(installedNames).not.toContain("new-plugin");
 
     // Console output should mention skipping unregistered
     const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
@@ -3027,10 +2833,6 @@ describe("addCommand unregistered plugin discovery", () => {
       failed: false,
     });
 
-    mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockRegisterMarketplace.mockReturnValue({ success: true });
-    mockInstallNativePlugin.mockReturnValue(true);
-
     await addCommand("owner/repo", { yes: true, force: true });
 
     // Console output should mention including unregistered
@@ -3064,10 +2866,6 @@ describe("addCommand unregistered plugin discovery", () => {
       failed: true,
     });
 
-    mockIsClaudeCliAvailable.mockReturnValue(true);
-    mockRegisterMarketplace.mockReturnValue({ success: true });
-    mockInstallNativePlugin.mockReturnValue(true);
-
     await addCommand("owner/repo", { yes: true });
 
     // Should show warning about incomplete plugin list
@@ -3075,8 +2873,5 @@ describe("addCommand unregistered plugin discovery", () => {
       .map((c: unknown[]) => String(c[0]))
       .join("\n");
     expect(logOutput).toContain("incomplete");
-
-    // Should still install registered plugins normally
-    expect(mockInstallNativePlugin).toHaveBeenCalledTimes(3);
   });
 });

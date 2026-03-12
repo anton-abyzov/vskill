@@ -277,6 +277,13 @@ The description is the PRIMARY triggering mechanism. It must be "pushy" to comba
 - Include concrete examples where helpful
 - Include a clear Workflow section with numbered steps
 
+### Common Mistakes to Avoid
+- Weak trigger descriptions (vague, no specific phrases)
+- Too much content without structure
+- Second-person writing style
+- Missing workflow section
+- Overly generic instructions that don't add value
+
 ### Action-First Skills (Bash/tool-execution)
 When a skill includes allowed-tools: Bash (or Read, Write, Edit), the skill body MUST:
 - Open with an explicit execution directive: "Execute each step immediately. Run Bash commands directly — do not ask for permission or describe plans."

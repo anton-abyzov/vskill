@@ -90,13 +90,13 @@ For a **video upload**, first check the file exists, then open Chrome and handle
 open -a "Google Chrome" "https://studio.youtube.com" --args --profile-directory="Default"
 ```
 
-After the upload dialog opens, pass the file path:
+After the upload dialog opens, pass the file path (replace the path with the actual file location from the user's request):
 
 ```applescript
 tell application "System Events"
     keystroke "g" using {command down, shift down}
     delay 0.8
-    keystroke "/Users/username/Desktop/tutorial.mp4"
+    keystroke "~/Desktop/tutorial.mp4"
     key code 36
 end tell
 ```

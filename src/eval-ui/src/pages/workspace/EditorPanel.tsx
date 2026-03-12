@@ -9,6 +9,9 @@ import { SkillImprovePanel } from "../../components/SkillImprovePanel";
 import { AiEditBar } from "../../components/AiEditBar";
 import { ProgressLog } from "../../components/ProgressLog";
 import type { ProgressEntry } from "../../components/ProgressLog";
+import { useSkillFiles } from "./useSkillFiles";
+import { SkillFileBrowser } from "../../components/SkillFileBrowser";
+import { SecondaryFileViewer } from "../../components/SecondaryFileViewer";
 
 type ViewMode = "split" | "raw" | "preview";
 
@@ -78,6 +81,8 @@ export function EditorPanel() {
   const [regenError, setRegenError] = useState<string | null>(null);
   const regenAbortRef = useRef<AbortController | null>(null);
   const { config } = useConfig();
+
+  const { files, activeFile, secondaryContent, loading: filesLoading, error: filesError, selectFile, refresh: refreshFiles, isSkillMd } = useSkillFiles(plugin ?? "", skill ?? "");
 
   useEffect(() => {
     return () => { regenAbortRef.current?.abort(); };
@@ -292,8 +297,8 @@ export function EditorPanel() {
           ))}
         </div>
 
-        {/* Save actions — hidden for installed (read-only) skills */}
-        {isReadOnly ? (
+        {/* Save actions — hidden for installed (read-only) skills and secondary files */}
+        {!isSkillMd ? null : isReadOnly ? (
           <div className="flex items-center gap-2">
             <span className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--text-tertiary)" }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -368,8 +373,28 @@ export function EditorPanel() {
         )}
       </div>
 
+      {/* ── File Browser Strip ──────────────────────────── */}
+      {plugin && skill && (
+        <SkillFileBrowser
+          files={files}
+          activeFile={activeFile}
+          onSelect={selectFile}
+          onRefresh={refreshFiles}
+        />
+      )}
+
+      {/* ── Secondary File Viewer (non-SKILL.md files) ──── */}
+      {!isSkillMd && (
+        <SecondaryFileViewer
+          file={secondaryContent}
+          loading={filesLoading}
+          error={filesError}
+          viewMode={viewMode}
+        />
+      )}
+
       {/* ── Editor Body ─────────────────────────────────── */}
-      <div
+      {isSkillMd && <div
         className="flex-1 overflow-hidden"
         style={{
           display: "grid",
@@ -603,15 +628,15 @@ export function EditorPanel() {
             </div>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* ── AI Edit Bar ──────────────────────────────── */}
-      {aiEditOpen && (
+      {isSkillMd && aiEditOpen && (
         <AiEditBar />
       )}
 
       {/* ── Regenerate Panel ─────────────────────────── */}
-      {regenOpen && (
+      {isSkillMd && regenOpen && (
         <div
           className="animate-fade-in"
           style={{ borderTop: "1px solid var(--border-subtle)", background: "var(--surface-1)" }}
@@ -735,7 +760,7 @@ export function EditorPanel() {
       )}
 
       {/* ── AI Improve Panel ──────────────────────────── */}
-      {improveTarget !== null && plugin && skill && (
+      {isSkillMd && improveTarget !== null && plugin && skill && (
         <div style={{ borderTop: "1px solid var(--border-subtle)" }}>
           <SkillImprovePanel
             plugin={plugin}

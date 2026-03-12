@@ -2,7 +2,7 @@
 // api-routes.ts -- REST API route handlers for the eval UI
 // ---------------------------------------------------------------------------
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
@@ -240,6 +240,116 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       skillContent = readFileSync(skillMdPath, "utf-8");
     } catch { /* no SKILL.md */ }
     sendJson(res, { plugin: params.plugin, skill: params.skill, skillContent }, 200, req);
+  });
+
+  // List all files in a skill directory (recursive, flat list)
+  router.get("/api/skills/:plugin/:skill/files", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    if (!resolve(skillDir).startsWith(resolve(root))) {
+      sendJson(res, { error: "Invalid skill path" }, 400, req);
+      return;
+    }
+    if (!existsSync(skillDir)) {
+      sendJson(res, { error: "Skill directory not found" }, 404, req);
+      return;
+    }
+
+    const EXCLUDE = new Set([".git", "node_modules", ".DS_Store"]);
+    const MAX_ENTRIES = 200;
+    const MAX_DEPTH = 5;
+    const entries: Array<{ path: string; size: number; type: "file" | "dir" }> = [];
+
+    function walk(dir: string, prefix: string, depth: number): void {
+      if (depth > MAX_DEPTH || entries.length >= MAX_ENTRIES) return;
+      let items: import("node:fs").Dirent<string>[];
+      try {
+        items = readdirSync(dir, { withFileTypes: true, encoding: "utf-8" });
+      } catch { return; }
+      for (const item of items) {
+        if (EXCLUDE.has(item.name)) continue;
+        if (entries.length >= MAX_ENTRIES) break;
+        const relPath = prefix ? `${prefix}/${item.name}` : item.name;
+        if (item.isDirectory()) {
+          entries.push({ path: relPath, size: 0, type: "dir" });
+          walk(join(dir, item.name), relPath, depth + 1);
+        } else {
+          let size = 0;
+          try { size = statSync(join(dir, item.name)).size; } catch { /* ignore */ }
+          entries.push({ path: relPath, size, type: "file" });
+        }
+      }
+    }
+
+    walk(skillDir, "", 0);
+
+    // Sort: SKILL.md first, then dirs before files, then alphabetical
+    entries.sort((a, b) => {
+      if (a.path === "SKILL.md") return -1;
+      if (b.path === "SKILL.md") return 1;
+      if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+      return a.path.localeCompare(b.path);
+    });
+
+    sendJson(res, { files: entries }, 200, req);
+  });
+
+  // Read any file in a skill directory (with path traversal protection)
+  router.get("/api/skills/:plugin/:skill/file", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    if (!resolve(skillDir).startsWith(resolve(root))) {
+      sendJson(res, { error: "Invalid skill path" }, 400, req);
+      return;
+    }
+
+    const url = new URL(req.url ?? "", "http://localhost");
+    const filePath = url.searchParams.get("path") ?? "";
+    if (!filePath) {
+      sendJson(res, { error: "Missing path query parameter" }, 400, req);
+      return;
+    }
+
+    const fullPath = resolve(join(skillDir, filePath));
+    if (!fullPath.startsWith(resolve(skillDir))) {
+      sendJson(res, { error: "Path traversal not allowed" }, 400, req);
+      return;
+    }
+
+    if (!existsSync(fullPath)) {
+      sendJson(res, { error: "File not found" }, 404, req);
+      return;
+    }
+
+    let size = 0;
+    try { size = statSync(fullPath).size; } catch { /* ignore */ }
+
+    const MAX_SIZE = 1024 * 1024; // 1MB hard limit
+    const TRUNCATE_AT = 512 * 1024; // 500KB soft truncation
+
+    if (size > MAX_SIZE) {
+      sendJson(res, { path: filePath, binary: true, size }, 200, req);
+      return;
+    }
+
+    // Binary detection: check first 8KB for null bytes
+    let buf: Buffer;
+    try {
+      buf = readFileSync(fullPath);
+    } catch (err) {
+      sendJson(res, { error: `Unable to read file: ${(err as Error).message}` }, 500, req);
+      return;
+    }
+
+    const probe = buf.subarray(0, Math.min(8192, buf.length));
+    for (let i = 0; i < probe.length; i++) {
+      if (probe[i] === 0) {
+        sendJson(res, { path: filePath, binary: true, size }, 200, req);
+        return;
+      }
+    }
+
+    const truncated = buf.length > TRUNCATE_AT;
+    const content = (truncated ? buf.subarray(0, TRUNCATE_AT) : buf).toString("utf-8");
+    sendJson(res, { path: filePath, content, size, truncated: truncated || undefined }, 200, req);
   });
 
   // Delete a source skill (recursively removes its directory)

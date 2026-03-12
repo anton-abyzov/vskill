@@ -326,6 +326,20 @@ export interface SaveDraftResponse {
   files: string[];
 }
 
+export interface SkillFileEntry {
+  path: string;
+  size: number;
+  type: "file" | "dir";
+}
+
+export interface SkillFileContent {
+  path: string;
+  content?: string;
+  size: number;
+  binary?: boolean;
+  truncated?: boolean;
+}
+
 export interface SkillCreatorStatus {
   installed: boolean;
   installCommand: string;

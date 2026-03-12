@@ -253,7 +253,7 @@ describe("findCommand", () => {
     expect(output).toContain("\u2713 verified");
   });
 
-  it("displays unreviewed badge for T2 trust tier", async () => {
+  it("displays pending badge for T2 trust tier", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     mockSearchSkills.mockResolvedValue({
       results: [
@@ -263,7 +263,7 @@ describe("findCommand", () => {
     });
     await findCommand("test");
     const output = logs.join("\n");
-    expect(output).toContain("~ unreviewed");
+    expect(output).toContain("~ pending");
   });
 
   it("does not show trust badge for blocked skills", async () => {
@@ -279,7 +279,7 @@ describe("findCommand", () => {
     expect(output).toContain("BLOCKED");
     expect(output).not.toContain("\u2713 certified");
     expect(output).not.toContain("\u2713 verified");
-    expect(output).not.toContain("~ unreviewed");
+    expect(output).not.toContain("~ pending");
   });
 
   it("skill URL uses hierarchical slug fields when available", async () => {
@@ -433,6 +433,52 @@ describe("findCommand", () => {
     await findCommand("test", { noHint: true });
     const dataLines = logs.filter((l) => l.includes("\t"));
     expect(dataLines[0]).toBe("plain-skill\towner/repo\t10\t\t\t");
+  });
+
+  it("certTier VERIFIED shows verified badge even when trustTier is T2", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "cert-skill", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 40, installs: 100, githubStars: 10, vskillInstalls: 100, certTier: "VERIFIED", trustTier: "T2" },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    expect(output).toContain("\u2713 verified");
+    expect(output).not.toContain("~ pending");
+  });
+
+  it("certTier CERTIFIED shows certified badge even when trustTier is T3", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "cert-skill", author: "a", repoUrl: "https://github.com/a/b", tier: "CERTIFIED", score: 95, installs: 100, githubStars: 10, vskillInstalls: 100, certTier: "CERTIFIED", trustTier: "T3" },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    expect(output).toContain("\u2713 certified");
+  });
+
+  it("sorts CERTIFIED before VERIFIED before unranked", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "unranked", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 100, githubStars: 5000, vskillInstalls: 100, trustTier: "T2" },
+        { name: "verified-skill", author: "a", repoUrl: "https://github.com/a/c", tier: "VERIFIED", score: 90, installs: 100, githubStars: 3000, vskillInstalls: 100, certTier: "VERIFIED" },
+        { name: "certified-skill", author: "a", repoUrl: "https://github.com/a/d", tier: "CERTIFIED", score: 95, installs: 100, githubStars: 100, vskillInstalls: 100, certTier: "CERTIFIED" },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    const certIdx = output.indexOf("certified-skill");
+    const verIdx = output.indexOf("verified-skill");
+    const unrIdx = output.indexOf("unranked");
+    expect(certIdx).toBeLessThan(verIdx);
+    expect(verIdx).toBeLessThan(unrIdx);
   });
 
   it("no alternateRepos renders identically to current behavior", async () => {

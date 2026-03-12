@@ -99,10 +99,10 @@ program
   });
 
 program
-  .command("submit <source>")
+  .command("submit [source]")
   .description("Submit a skill for verification on verified-skill.com")
   .option("--skill <name>", "Skill name within a multi-skill repo")
-  .action(async (source: string, opts) => {
+  .action(async (source: string | undefined, opts) => {
     const { submitCommand } = await import("./commands/submit.js");
     await submitCommand(source, opts);
   });

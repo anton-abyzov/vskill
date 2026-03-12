@@ -70,7 +70,7 @@ describe("searchSkills", () => {
     const response = await searchSkills("hello world");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      `${BASE_URL}/api/v1/skills/search?q=hello%20world&limit=15`,
+      `${BASE_URL}/api/v1/skills/search?q=hello%20world&limit=7`,
       expect.objectContaining({
         headers: expect.objectContaining({
           "Content-Type": "application/json",
@@ -92,10 +92,16 @@ describe("searchSkills", () => {
         command: null,
         pluginName: null,
         isTainted: false,
+        trustTier: undefined,
+        certTier: "VERIFIED",
         isBlocked: false,
         threatType: undefined,
         severity: undefined,
         vskillInstalls: undefined,
+        ownerSlug: undefined,
+        repoSlug: undefined,
+        skillSlug: undefined,
+        alternateRepos: undefined,
       },
     ]);
     expect(response.hasMore).toBe(false);

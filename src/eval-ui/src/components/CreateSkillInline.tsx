@@ -135,19 +135,6 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
     return layout.detectedLayouts.filter((d): d is DetectedLayout & { layout: 1 | 2 | 3 } => d.layout !== 4);
   }, [layout]);
 
-  // Current model label for the generate button
-  const currentModelLabel = useMemo(() => {
-    if (!config) return null;
-    for (const provider of config.providers) {
-      for (const m of provider.models) {
-        const isActive = provider.id === config.provider &&
-          (provider.id === "claude-cli" ? config.model === `claude-${m.id}` : config.model === m.id);
-        if (isActive) return m.label;
-      }
-    }
-    return config.model || null;
-  }, [config]);
-
   // Resolve provider/model for generation request
   const resolveAiConfig = useCallback(() => {
     if (!config) return { provider: "claude-cli", model: "sonnet" };
@@ -422,7 +409,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                 }}
               >
                 <SparkleIcon size={14} />
-                {currentModelLabel ? `Generate with ${currentModelLabel}` : "Generate Skill"}
+                Generate
               </button>
             )}
             <button

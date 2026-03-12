@@ -11,19 +11,9 @@ interface SubmitOptions {
 }
 
 export async function submitCommand(
-  source: string,
+  source: string | undefined,
   opts: SubmitOptions
 ): Promise<void> {
-  const parsed = parseGitHubSource(source);
-  if (!parsed) {
-    console.error(
-      red("Invalid source. Use: ") + cyan("owner/repo") + dim(" or ") + cyan("https://github.com/owner/repo")
-    );
-    process.exit(1);
-  }
-
-  const { owner, repo } = parsed;
-
   if (opts.skill && !validateSkillName(opts.skill)) {
     console.error(
       red("Invalid skill name. ") + dim("Path traversal patterns are not allowed.")
@@ -32,13 +22,26 @@ export async function submitCommand(
   }
 
   const submitUrl = new URL("https://verified-skill.com/submit");
-  submitUrl.searchParams.set("repo", `${owner}/${repo}`);
+
+  if (source) {
+    const parsed = parseGitHubSource(source);
+    if (!parsed) {
+      console.error(
+        red("Invalid source. Use: ") + cyan("owner/repo") + dim(" or ") + cyan("https://github.com/owner/repo")
+      );
+      process.exit(1);
+    }
+    const { owner, repo } = parsed;
+    submitUrl.searchParams.set("repo", `${owner}/${repo}`);
+    console.log(dim(`Opening browser to submit ${bold(`${owner}/${repo}`)} for verification...\n`));
+  } else {
+    console.log(dim("Opening browser to submit a skill for verification...\n"));
+  }
+
   if (opts.skill) {
     submitUrl.searchParams.set("skill", opts.skill);
   }
   const url = submitUrl.toString();
-
-  console.log(dim(`Opening browser to submit ${bold(`${owner}/${repo}`)} for verification...\n`));
 
   try {
     await openBrowser(url);

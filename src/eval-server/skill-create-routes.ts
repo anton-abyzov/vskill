@@ -5,6 +5,7 @@
 import { existsSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
+import { AGENTS_REGISTRY } from "../agents/agents-registry.js";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import { createLlmClient } from "../eval/llm.js";
@@ -191,26 +192,32 @@ function computeSkillDir(root: string, layout: 1 | 2 | 3, plugin: string, name: 
   }
 }
 
-/** Check if skill-creator skill is installed */
+/** Check if skill-creator skill is installed in any agent's skill directory */
 function checkSkillCreatorInstalled(): boolean {
   const home = homedir();
-  const candidates = [
-    join(home, ".claude", "skills", "skill-creator"),
-    join(home, ".claude", "plugins", "cache", "skill-creator"),
-  ];
-  for (const dir of candidates) {
-    if (existsSync(dir)) return true;
-  }
-  // Also check for plugin with nested structure
-  try {
-    const pluginsCache = join(home, ".claude", "plugins", "cache");
-    if (existsSync(pluginsCache)) {
-      const entries = readdirSync(pluginsCache, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory() && entry.name.includes("skill-creator")) return true;
-      }
+
+  // Canonical vskill path (source of truth)
+  if (existsSync(join(home, ".agents", "skills", "skill-creator"))) return true;
+
+  // Check every registered agent's global skills directory
+  for (const agent of AGENTS_REGISTRY) {
+    const resolved = agent.globalSkillsDir.replace("~", home);
+    if (existsSync(join(resolved, "skill-creator"))) return true;
+
+    // Also check plugin cache dir if the agent has one (e.g. Claude)
+    if (agent.pluginCacheDir) {
+      const cacheDir = agent.pluginCacheDir.replace("~", home);
+      try {
+        if (existsSync(cacheDir)) {
+          const entries = readdirSync(cacheDir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (entry.isDirectory() && entry.name.includes("skill-creator")) return true;
+          }
+        }
+      } catch { /* ignore */ }
     }
-  } catch { /* ignore */ }
+  }
+
   return false;
 }
 
@@ -446,7 +453,7 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
     const installed = checkSkillCreatorInstalled();
     sendJson(res, {
       installed,
-      installCommand: "vskill install skill-creator:skill-creator",
+      installCommand: "npx vskill install skill-creator",
     }, 200, _req);
   });
 

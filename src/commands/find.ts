@@ -56,14 +56,20 @@ function getSkillUrl(r: SkillSearchResult): string {
 }
 
 /**
- * Return a colored trust badge string based on the trust tier.
+ * Return a colored trust badge string.
+ * Prefers certTier (formal certification status shown on website)
+ * over trustTier (computed trust score tier).
  */
-function getTrustBadge(trustTier: string | undefined): string {
+function getTrustBadge(certTier: string | undefined, trustTier: string | undefined): string {
+  // Prefer certTier — matches what the website displays
+  if (certTier === "CERTIFIED") return green("\u2713 certified");
+  if (certTier === "VERIFIED") return cyan("\u2713 verified");
+  // Fall back to trustTier
   switch (trustTier) {
     case "T4": return green("\u2713 certified");
     case "T3": return cyan("\u2713 verified");
-    case "T2": return yellow("~ unreviewed");
-    case "T1": return dim("~ unreviewed");
+    case "T2": return yellow("~ pending");
+    case "T1": return dim("~ pending");
     default: return "";
   }
 }
@@ -94,10 +100,13 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     return;
   }
 
-  // Sort: non-blocked by githubStars descending, score as tiebreaker, blocked at end
+  // Sort: blocked at end, then by cert tier (CERTIFIED > VERIFIED > other), then stars
   results.sort((a, b) => {
     if (a.isBlocked && !b.isBlocked) return 1;
     if (!a.isBlocked && b.isBlocked) return -1;
+    const certRank = (t: string | undefined) => t === "CERTIFIED" ? 0 : t === "VERIFIED" ? 1 : 2;
+    const certDiff = certRank(a.certTier) - certRank(b.certTier);
+    if (certDiff !== 0) return certDiff;
     const starDiff = (b.githubStars ?? 0) - (a.githubStars ?? 0);
     if (starDiff !== 0) return starDiff;
     return (b.score ?? 0) - (a.score ?? 0);
@@ -128,7 +137,7 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
       } else {
         const stars = r.githubStars ?? 0;
         const starsStr = `\u2605${formatInstalls(stars)}`;
-        const badge = getTrustBadge(r.trustTier);
+        const badge = getTrustBadge(r.certTier, r.trustTier);
         const pluginBadge = r.pluginName ? dim(` [${r.pluginName}]`) : "";
         console.log(`${bold(label)}${pluginBadge}  ${dim(starsStr)}${badge ? "  " + badge : ""}`);
       }

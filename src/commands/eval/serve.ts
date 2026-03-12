@@ -27,8 +27,20 @@ export function projectPort(rootPath: string): number {
 function checkSkillCreator(): void {
   const home = homedir();
   const locations = [
+    // Canonical vskill path
+    join(home, ".agents", "skills", "skill-creator"),
+    // Common agent paths
+    join(home, ".claude", "skills", "skill-creator"),
+    join(home, ".cursor", "skills", "skill-creator"),
+    join(home, ".codeium", "windsurf", "skills", "skill-creator"),
+    join(home, ".cline", "skills", "skill-creator"),
+    join(home, ".copilot", "skills", "skill-creator"),
+    join(home, ".gemini", "skills", "skill-creator"),
+    join(home, ".codex", "skills", "skill-creator"),
+    join(home, ".continue", "skills", "skill-creator"),
+    join(home, ".config", "agents", "skills", "skill-creator"),
+    // Claude plugin cache (legacy)
     join(home, ".claude", "plugins", "cache", "claude-plugins-official", "skill-creator"),
-    join(home, ".claude", "skills", "skill-creator.md"),
     join(home, ".claude", "plugins", "cache", "specweave", "sw", "1.0.0", "skills", "skill-creator"),
   ];
 
@@ -42,14 +54,14 @@ function checkSkillCreator(): void {
         dim("  methodology (grading, blind A/B comparison, analysis).\n") +
         dim("  The eval UI uses the same methodology natively, but for best\n") +
         dim("  results, install the Skill-Creator skill:\n\n") +
-        "  1. Install via vskill:    " +
-        "vskill install anthropics/skills/skill-creator" +
+        "  1. Install via npx:       " +
+        "npx vskill install skill-creator" +
         "\n" +
         "  2. Or browse the source:  " +
         "https://github.com/anthropics/skills/tree/main/skills/skill-creator" +
         "\n" +
         "  3. Then reload plugins:   " +
-        "Restart Claude Code or run a new session" +
+        "Restart your AI coding agent or start a new session" +
         "\n",
     );
   }

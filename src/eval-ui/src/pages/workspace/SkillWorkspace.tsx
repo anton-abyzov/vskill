@@ -1,5 +1,7 @@
 import { useEffect, useCallback } from "react";
 import { useWorkspace } from "./WorkspaceContext";
+import { useStudio } from "../../StudioContext";
+import { api } from "../../api";
 import { DetailHeader } from "../../components/DetailHeader";
 import { TabBar } from "../../components/TabBar";
 import { EditorPanel } from "./EditorPanel";
@@ -18,6 +20,17 @@ function isValidPanel(value: string | null): value is PanelId {
 
 export function SkillWorkspaceInner() {
   const { state, dispatch, saveContent, isReadOnly } = useWorkspace();
+  const { refreshSkills, clearSelection } = useStudio();
+
+  const handleDelete = useCallback(async () => {
+    try {
+      await api.deleteSkill(state.plugin, state.skill);
+      refreshSkills();
+      clearSelection();
+    } catch (err) {
+      console.error("Failed to delete skill:", err);
+    }
+  }, [state.plugin, state.skill, refreshSkills, clearSelection]);
 
   // ---------------------------------------------------------------------------
   // URL query param deep-linking: sync activePanel <-> ?panel=
@@ -89,7 +102,7 @@ export function SkillWorkspaceInner() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Detail header */}
-      <DetailHeader state={state} isReadOnly={isReadOnly} />
+      <DetailHeader state={state} isReadOnly={isReadOnly} onDelete={handleDelete} />
 
       {/* Tab bar */}
       <TabBar

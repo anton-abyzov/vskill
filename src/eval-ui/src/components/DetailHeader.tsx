@@ -3,9 +3,10 @@ import type { WorkspaceState } from "../pages/workspace/workspaceTypes";
 interface Props {
   state: WorkspaceState;
   isReadOnly?: boolean;
+  onDelete?: () => void;
 }
 
-export function DetailHeader({ state, isReadOnly }: Props) {
+export function DetailHeader({ state, isReadOnly, onDelete }: Props) {
   const { plugin, skill, evals, latestBenchmark, isDirty, caseRunStates, regressions, iterationCount } = state;
   const isRunning = Array.from(caseRunStates.values()).some((s) => s.status === "running" || s.status === "queued");
 
@@ -61,8 +62,38 @@ export function DetailHeader({ state, isReadOnly }: Props) {
         )}
       </div>
 
-      {/* Right: Stats pills */}
+      {/* Right: Stats pills + delete */}
       <div className="flex items-center gap-2">
+        {!isReadOnly && onDelete && (
+          <button
+            disabled={isRunning}
+            onClick={() => {
+              if (window.confirm(`Delete skill "${skill}"? This cannot be undone.`)) {
+                onDelete();
+              }
+            }}
+            title="Delete skill"
+            className="flex items-center justify-center transition-colors duration-150"
+            style={{
+              background: "none",
+              border: "none",
+              cursor: isRunning ? "not-allowed" : "pointer",
+              color: "var(--text-tertiary)",
+              padding: 4,
+              opacity: isRunning ? 0.4 : 1,
+              borderRadius: 4,
+            }}
+            onMouseEnter={(e) => {
+              if (!isRunning) e.currentTarget.style.color = "var(--red)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "var(--text-tertiary)";
+            }}
+          >
+            <TrashIcon />
+          </button>
+        )}
+
         {regressions.length > 0 && (
           <span className="pill" style={{ background: "var(--red-muted)", color: "var(--red)" }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -96,6 +127,17 @@ function Chevron() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2">
       <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
     </svg>
   );
 }

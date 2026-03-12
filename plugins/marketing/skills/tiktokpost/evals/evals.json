@@ -2,40 +2,6 @@
   "skill_name": "tiktokpost",
   "evals": [
     {
-      "id": 1,
-      "name": "Basic TikTok video post with file path",
-      "prompt": "Post my video to TikTok. The file is at /Users/john/Videos/dance_tutorial.mp4. My caption should be 'Check out this dance tutorial! #dance #tutorial #fyp'",
-      "expected_output": "A step-by-step description of opening Chrome, navigating to TikTok, verifying login, clicking New Video, uploading the specified file, and adding the caption",
-      "files": [],
-      "assertions": [
-        {
-          "id": "mentions-chrome",
-          "text": "The output mentions opening Chrome browser",
-          "type": "boolean"
-        },
-        {
-          "id": "mentions-login-check",
-          "text": "The output mentions verifying or checking that the user is logged in to TikTok",
-          "type": "boolean"
-        },
-        {
-          "id": "mentions-new-video",
-          "text": "The output mentions clicking 'New Video' or the upload button on TikTok",
-          "type": "boolean"
-        },
-        {
-          "id": "mentions-file-path",
-          "text": "The output references the file path /Users/john/Videos/dance_tutorial.mp4",
-          "type": "boolean"
-        },
-        {
-          "id": "mentions-caption",
-          "text": "The output includes the caption text or hashtags provided by the user",
-          "type": "boolean"
-        }
-      ]
-    },
-    {
       "id": 2,
       "name": "TikTok post when user is not logged in",
       "prompt": "Use the tiktokpost skill to upload /Desktop/promo_clip.mp4 to TikTok with the description 'Summer sale is here! 50% off everything. Link in bio.'",

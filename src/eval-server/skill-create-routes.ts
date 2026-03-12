@@ -205,13 +205,19 @@ function checkSkillCreatorInstalled(): boolean {
     if (existsSync(join(resolved, "skill-creator"))) return true;
 
     // Also check plugin cache dir if the agent has one (e.g. Claude)
+    // Plugins live at: cache/<marketplace>/<plugin-name>/<version>/
     if (agent.pluginCacheDir) {
       const cacheDir = agent.pluginCacheDir.replace("~", home);
       try {
         if (existsSync(cacheDir)) {
-          const entries = readdirSync(cacheDir, { withFileTypes: true });
-          for (const entry of entries) {
-            if (entry.isDirectory() && entry.name.includes("skill-creator")) return true;
+          const marketplaces = readdirSync(cacheDir, { withFileTypes: true });
+          for (const mkt of marketplaces) {
+            if (!mkt.isDirectory()) continue;
+            const mktPath = join(cacheDir, mkt.name);
+            const plugins = readdirSync(mktPath, { withFileTypes: true });
+            for (const plugin of plugins) {
+              if (plugin.isDirectory() && plugin.name.includes("skill-creator")) return true;
+            }
           }
         }
       } catch { /* ignore */ }
@@ -453,7 +459,7 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
     const installed = checkSkillCreatorInstalled();
     sendJson(res, {
       installed,
-      installCommand: "npx vskill install skill-creator",
+      installCommand: "npx vskill install anthropics/skills/skill-creator",
     }, 200, _req);
   });
 

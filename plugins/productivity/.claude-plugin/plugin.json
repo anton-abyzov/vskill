@@ -1,0 +1,14 @@
+{
+  "name": "productivity",
+  "description": "Personal productivity automation skills — expert network survey completion, time-saving automation for professional consultations and paid expertise sharing",
+  "version": "1.0.0",
+  "author": {
+    "name": "Anton Abyzov",
+    "email": "anton.abyzov@gmail.com",
+    "url": "https://github.com/anton-abyzov/vskill"
+  },
+  "homepage": "https://github.com/anton-abyzov/vskill",
+  "repository": "https://github.com/anton-abyzov/vskill",
+  "license": "MIT",
+  "keywords": ["productivity", "survey", "expert-network", "arbolus", "guidepoint", "glg", "canopy", "automation"]
+}

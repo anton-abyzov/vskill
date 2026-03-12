@@ -122,6 +122,10 @@ export const api = {
     });
   },
 
+  deleteSkill(plugin: string, skill: string): Promise<{ ok: boolean }> {
+    return fetchJson(`/api/skills/${plugin}/${skill}`, { method: "DELETE" });
+  },
+
   improveSkill(plugin: string, skill: string, opts: { provider?: string; model?: string; eval_id?: number; notes?: string }): Promise<ImproveResult> {
     return fetchJson(`/api/skills/${plugin}/${skill}/improve`, {
       method: "POST",

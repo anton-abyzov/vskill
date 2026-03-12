@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { resolve, basename } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import * as net from "node:net";
@@ -31,11 +31,27 @@ function checkSkillCreator(): void {
   // Check canonical vskill path first
   let found = existsSync(join(home, ".agents", "skills", "skill-creator"));
 
-  // Check every registered agent's global skills directory
+  // Check every registered agent's global skills directory and plugin cache
   if (!found) {
     found = AGENTS_REGISTRY.some((agent) => {
       const resolved = agent.globalSkillsDir.replace("~", home);
-      return existsSync(join(resolved, "skill-creator"));
+      if (existsSync(join(resolved, "skill-creator"))) return true;
+
+      // Check plugin cache: cache/<marketplace>/<plugin-name>/<version>/
+      if (agent.pluginCacheDir) {
+        const cacheDir = agent.pluginCacheDir.replace("~", home);
+        try {
+          if (existsSync(cacheDir)) {
+            for (const mkt of readdirSync(cacheDir, { withFileTypes: true })) {
+              if (!mkt.isDirectory()) continue;
+              for (const plugin of readdirSync(join(cacheDir, mkt.name), { withFileTypes: true })) {
+                if (plugin.isDirectory() && plugin.name.includes("skill-creator")) return true;
+              }
+            }
+          }
+        } catch { /* ignore */ }
+      }
+      return false;
     });
   }
 
@@ -48,7 +64,7 @@ function checkSkillCreator(): void {
         dim("  The eval UI uses the same methodology natively, but for best\n") +
         dim("  results, install the Skill-Creator skill:\n\n") +
         "  1. Install via npx:       " +
-        "npx vskill install skill-creator" +
+        "npx vskill install anthropics/skills/skill-creator" +
         "\n" +
         "  2. Or browse the source:  " +
         "https://github.com/anthropics/skills/tree/main/skills/skill-creator" +

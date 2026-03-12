@@ -2,7 +2,7 @@
 // api-routes.ts -- REST API route handlers for the eval UI
 // ---------------------------------------------------------------------------
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
@@ -11,7 +11,7 @@ import { classifyError } from "./error-classifier.js";
 import { runBenchmarkSSE, runSingleCaseSSE, assembleBulkResult } from "./benchmark-runner.js";
 import { getSkillSemaphore } from "./concurrency.js";
 import { resolveSkillDir } from "./skill-resolver.js";
-import { scanSkills } from "../eval/skill-scanner.js";
+import { scanSkills, classifyOrigin } from "../eval/skill-scanner.js";
 import { loadAndValidateEvals, EvalValidationError } from "../eval/schema.js";
 import type { EvalsFile } from "../eval/schema.js";
 import { readBenchmark } from "../eval/benchmark.js";
@@ -240,6 +240,26 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       skillContent = readFileSync(skillMdPath, "utf-8");
     } catch { /* no SKILL.md */ }
     sendJson(res, { plugin: params.plugin, skill: params.skill, skillContent }, 200, req);
+  });
+
+  // Delete a source skill (recursively removes its directory)
+  router.delete("/api/skills/:plugin/:skill", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    if (!existsSync(skillDir)) {
+      sendJson(res, { error: "Skill directory not found" }, 404, req);
+      return;
+    }
+    const origin = classifyOrigin(skillDir, root);
+    if (origin === "installed") {
+      sendJson(res, { error: "Cannot delete installed (read-only) skill" }, 403, req);
+      return;
+    }
+    try {
+      rmSync(skillDir, { recursive: true, force: true });
+      sendJson(res, { ok: true, deleted: `${params.plugin}/${params.skill}` }, 200, req);
+    } catch (err) {
+      sendJson(res, { error: `Failed to delete skill: ${(err as Error).message}` }, 500, req);
+    }
   });
 
   // Get skill description (for activation testing preview)

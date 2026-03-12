@@ -54,6 +54,7 @@ export function MiniTrend({ entries }: { entries: CaseHistoryEntry[] }) {
   const skillCoords = skillPts.length >= 2 ? toCoords(skillPts, w, h, pad) : [];
   const baseCoords = basePts.length >= 2 ? toCoords(basePts, w, h, pad) : [];
   const lastSkill = skillCoords[skillCoords.length - 1];
+  const lastBase = baseCoords[baseCoords.length - 1];
 
   return (
     <svg width={w} height={h} style={{ display: "block", flexShrink: 0 }}>
@@ -74,6 +75,14 @@ export function MiniTrend({ entries }: { entries: CaseHistoryEntry[] }) {
           stroke="var(--accent)"
           strokeWidth={1.5}
           strokeLinejoin="round"
+        />
+      )}
+      {lastBase && (
+        <circle
+          cx={parseFloat(lastBase.split(",")[0])}
+          cy={parseFloat(lastBase.split(",")[1])}
+          r={2.5}
+          fill="var(--text-tertiary)"
         />
       )}
       {lastSkill && (

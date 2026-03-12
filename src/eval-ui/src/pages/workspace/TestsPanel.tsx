@@ -903,13 +903,13 @@ function CaseHistorySection({ evalId, sharedEntries, sharedLoading }: {
   const loading = sharedLoading ?? false;
 
   const handleToggle = useCallback(() => {
-    setExpanded(!expanded);
-  }, [expanded]);
+    setExpanded((prev) => !prev);
+  }, []);
 
   const displayEntries = entries ? entries.slice(0, 10) : [];
 
-  const hasLeft = displayEntries.some((e) => getLane(e.type) === "left");
-  const hasRight = displayEntries.some((e) => getLane(e.type) === "right");
+  const hasLeft = displayEntries.some((e) => { const l = getLane(e.type); return l === "left" || l === "full"; });
+  const hasRight = displayEntries.some((e) => { const l = getLane(e.type); return l === "right" || l === "full"; });
 
   return (
     <div className="mb-5">

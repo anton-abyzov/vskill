@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import { initSSE, sendSSE, sendSSEDone, withHeartbeat, startDynamicHeartbeat } from "./sse-helpers.js";
@@ -245,6 +245,11 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // Delete a source skill (recursively removes its directory)
   router.delete("/api/skills/:plugin/:skill", async (req, res, params) => {
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    // Path containment guard — prevent path traversal via ".." in params
+    if (!resolve(skillDir).startsWith(resolve(root))) {
+      sendJson(res, { error: "Invalid skill path" }, 400, req);
+      return;
+    }
     if (!existsSync(skillDir)) {
       sendJson(res, { error: "Skill directory not found" }, 404, req);
       return;

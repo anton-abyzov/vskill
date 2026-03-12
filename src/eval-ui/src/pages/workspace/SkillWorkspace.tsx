@@ -28,9 +28,10 @@ export function SkillWorkspaceInner() {
       refreshSkills();
       clearSelection();
     } catch (err) {
-      console.error("Failed to delete skill:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      dispatch({ type: "SET_ERROR", error: `Failed to delete skill: ${msg}` });
     }
-  }, [state.plugin, state.skill, refreshSkills, clearSelection]);
+  }, [state.plugin, state.skill, refreshSkills, clearSelection, dispatch]);
 
   // ---------------------------------------------------------------------------
   // URL query param deep-linking: sync activePanel <-> ?panel=
@@ -102,7 +103,7 @@ export function SkillWorkspaceInner() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Detail header */}
-      <DetailHeader state={state} isReadOnly={isReadOnly} onDelete={handleDelete} />
+      <DetailHeader state={state} isReadOnly={isReadOnly} onDelete={isReadOnly ? undefined : handleDelete} />
 
       {/* Tab bar */}
       <TabBar

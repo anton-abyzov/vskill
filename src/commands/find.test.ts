@@ -60,7 +60,7 @@ describe("findCommand", () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     await findCommand("test");
     const output = logs.join("\n");
-    expect(output).toContain("\u2605 1.3K");
+    expect(output).toContain("\u26051.3K");
     expect(output).toContain("test/test-skill/test-skill");
   });
 
@@ -106,7 +106,7 @@ describe("findCommand", () => {
     });
     await findCommand("test");
     const output = logs.join("\n");
-    expect(output).toContain("Use --limit N for more");
+    expect(output).toContain("Use --limit N for more (up to 30)");
   });
 
   it("does not show --limit hint when hasMore is false", async () => {
@@ -153,7 +153,7 @@ describe("findCommand", () => {
     });
     await findCommand("test");
     const output = logs.join("\n");
-    expect(output).toContain("\u2605 1.2K");
+    expect(output).toContain("\u26051.2K");
   });
 
   it("JSON output includes vskillInstalls field", async () => {
@@ -253,7 +253,7 @@ describe("findCommand", () => {
     expect(output).toContain("\u2713 verified");
   });
 
-  it("displays maybe badge for T2 trust tier", async () => {
+  it("displays unreviewed badge for T2 trust tier", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     mockSearchSkills.mockResolvedValue({
       results: [
@@ -263,7 +263,7 @@ describe("findCommand", () => {
     });
     await findCommand("test");
     const output = logs.join("\n");
-    expect(output).toContain("? maybe");
+    expect(output).toContain("~ unreviewed");
   });
 
   it("does not show trust badge for blocked skills", async () => {
@@ -279,7 +279,7 @@ describe("findCommand", () => {
     expect(output).toContain("BLOCKED");
     expect(output).not.toContain("\u2713 certified");
     expect(output).not.toContain("\u2713 verified");
-    expect(output).not.toContain("? maybe");
+    expect(output).not.toContain("~ unreviewed");
   });
 
   it("skill URL uses hierarchical slug fields when available", async () => {

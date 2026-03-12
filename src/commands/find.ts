@@ -62,8 +62,8 @@ function getTrustBadge(trustTier: string | undefined): string {
   switch (trustTier) {
     case "T4": return green("\u2713 certified");
     case "T3": return cyan("\u2713 verified");
-    case "T2": return yellow("? maybe");
-    case "T1": return dim("? maybe");
+    case "T2": return yellow("~ unreviewed");
+    case "T1": return dim("~ unreviewed");
     default: return "";
   }
 }
@@ -127,7 +127,7 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
         console.log(`${red(bold(label))}  ${red("BLOCKED")}  ${red(threatInfo)}`);
       } else {
         const stars = r.githubStars ?? 0;
-        const starsStr = `\u2605 ${formatInstalls(stars)}`;
+        const starsStr = `\u2605${formatInstalls(stars)}`;
         const badge = getTrustBadge(r.trustTier);
         const pluginBadge = r.pluginName ? dim(` [${r.pluginName}]`) : "";
         console.log(`${bold(label)}${pluginBadge}  ${dim(starsStr)}${badge ? "  " + badge : ""}`);
@@ -143,7 +143,7 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
 
     // Footer
     if (hasMore) {
-      console.log(dim(`Use --limit N for more`));
+      console.log(dim(`Use --limit N for more (up to 30)`));
     } else {
       console.log(dim(`${results.length} result${results.length === 1 ? "" : "s"} found.`));
     }

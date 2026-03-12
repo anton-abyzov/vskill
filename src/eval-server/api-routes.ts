@@ -310,7 +310,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
     const fullPath = resolve(join(skillDir, filePath));
     if (!fullPath.startsWith(resolve(skillDir))) {
-      sendJson(res, { error: "Path traversal not allowed" }, 400, req);
+      sendJson(res, { error: "Access denied" }, 403, req);
       return;
     }
 
@@ -326,7 +326,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     const TRUNCATE_AT = 512 * 1024; // 500KB soft truncation
 
     if (size > MAX_SIZE) {
-      sendJson(res, { path: filePath, binary: true, size }, 200, req);
+      sendJson(res, { error: "File too large", path: filePath, size }, 413, req);
       return;
     }
 

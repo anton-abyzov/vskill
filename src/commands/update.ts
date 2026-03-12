@@ -10,6 +10,8 @@ import { getSkill } from "../api/client.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { filterAgents } from "../utils/agent-filter.js";
 import { runTier1Scan } from "../scanner/index.js";
+import { parseSource } from "../resolvers/source-resolver.js";
+import { fetchFromSource } from "../updater/source-fetcher.js";
 import {
   bold,
   green,
@@ -84,30 +86,63 @@ export async function updateCommand(
 
   for (const name of toUpdate) {
     const entry = lock.skills[name];
+    const parsed = parseSource(entry.source ?? "");
     const spin = spinner(`Checking ${name}`);
 
     try {
-      const remote = await getSkill(name);
+      // 1. Try source-aware fetch first
+      let result = await fetchFromSource(parsed, name, entry);
+
+      // 2. For local sources that returned null: skip (no registry fallback)
+      if (result === null && parsed.type === "local") {
+        spin.stop();
+        console.log(dim(`${name}: managed by specweave refresh-plugins — skipping`));
+        continue;
+      }
+
+      // 3. Fall back to registry for unknown/failed sources
+      if (result === null) {
+        try {
+          const remote = await getSkill(name);
+          if (remote.content) {
+            const sha = createHash("sha256")
+              .update(remote.content)
+              .digest("hex")
+              .slice(0, 12);
+            result = {
+              content: remote.content,
+              version: remote.version || entry.version,
+              sha,
+              tier: remote.tier || entry.tier,
+            };
+          }
+        } catch {
+          // Registry also failed
+        }
+      }
+
       spin.stop();
 
-      // Compare versions
-      if (remote.sha && remote.sha === entry.sha) {
+      if (!result) {
+        console.log(
+          yellow(`  ${name}: `) +
+            dim("could not fetch update from any source")
+        );
+        continue;
+      }
+
+      // 4. SHA comparison — skip if unchanged
+      if (result.sha === entry.sha) {
         console.log(dim(`${name}: already up to date`));
         continue;
       }
 
       console.log(
-        `${bold(name)}: ${dim(entry.sha?.slice(0, 8) || "unknown")} -> ${green(remote.sha?.slice(0, 8) || "new")}`
+        `${bold(name)}: ${dim(entry.sha?.slice(0, 8) || "unknown")} -> ${green(result.sha?.slice(0, 8) || "new")}`
       );
 
-      // Fetch new content
-      if (!remote.content) {
-        console.log(yellow(`  No content available from registry for ${name}. Skipping.`));
-        continue;
-      }
-
-      // Run scan on new version
-      const scanResult = runTier1Scan(remote.content);
+      // 5. Security scan
+      const scanResult = runTier1Scan(result.content);
       const verdictColor =
         scanResult.verdict === "PASS"
           ? green
@@ -123,12 +158,7 @@ export async function updateCommand(
         continue;
       }
 
-      // Install to each agent
-      const sha = createHash("sha256")
-        .update(remote.content)
-        .digest("hex")
-        .slice(0, 12);
-
+      // 6. Install to each agent
       for (const agent of agents) {
         const skillDir = join(
           process.cwd(),
@@ -139,7 +169,7 @@ export async function updateCommand(
           mkdirSync(skillDir, { recursive: true });
           writeFileSync(
             join(skillDir, "SKILL.md"),
-            remote.content,
+            result.content,
             "utf-8"
           );
         } catch {
@@ -147,12 +177,12 @@ export async function updateCommand(
         }
       }
 
-      // Update lockfile entry
+      // 7. Update lockfile entry — preserve source and all existing fields
       lock.skills[name] = {
         ...entry,
-        version: remote.version || entry.version,
-        sha,
-        tier: remote.tier || entry.tier,
+        version: result.version,
+        sha: result.sha,
+        tier: result.tier,
         installedAt: new Date().toISOString(),
       };
 
@@ -161,7 +191,7 @@ export async function updateCommand(
       spin.stop();
       console.log(
         yellow(`  ${name}: `) +
-          dim(`could not fetch from registry (${(err as Error).message})`)
+          dim(`update failed (${(err as Error).message})`)
       );
     }
   }

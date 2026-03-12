@@ -3,8 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ---------------------------------------------------------------------------
 // Mock node:fs
 // ---------------------------------------------------------------------------
-const mockMkdirSync = vi.fn();
-const mockWriteFileSync = vi.fn();
+const mockMkdirSync = vi.hoisted(() => vi.fn());
+const mockWriteFileSync = vi.hoisted(() => vi.fn());
 vi.mock("node:fs", () => ({
   mkdirSync: (...args: unknown[]) => mockMkdirSync(...args),
   writeFileSync: (...args: unknown[]) => mockWriteFileSync(...args),
@@ -13,25 +13,33 @@ vi.mock("node:fs", () => ({
 // ---------------------------------------------------------------------------
 // Mock lockfile
 // ---------------------------------------------------------------------------
-const mockReadLockfile = vi.fn();
-const mockWriteLockfile = vi.fn();
+const mockReadLockfile = vi.hoisted(() => vi.fn());
+const mockWriteLockfile = vi.hoisted(() => vi.fn());
 vi.mock("../lockfile/index.js", () => ({
   readLockfile: (...args: unknown[]) => mockReadLockfile(...args),
   writeLockfile: (...args: unknown[]) => mockWriteLockfile(...args),
 }));
 
 // ---------------------------------------------------------------------------
-// Mock API client
+// Mock API client (registry fallback)
 // ---------------------------------------------------------------------------
-const mockGetSkill = vi.fn();
+const mockGetSkill = vi.hoisted(() => vi.fn());
 vi.mock("../api/client.js", () => ({
   getSkill: (...args: unknown[]) => mockGetSkill(...args),
 }));
 
 // ---------------------------------------------------------------------------
+// Mock source-aware fetcher
+// ---------------------------------------------------------------------------
+const mockFetchFromSource = vi.hoisted(() => vi.fn());
+vi.mock("../updater/source-fetcher.js", () => ({
+  fetchFromSource: (...args: unknown[]) => mockFetchFromSource(...args),
+}));
+
+// ---------------------------------------------------------------------------
 // Mock agents registry
 // ---------------------------------------------------------------------------
-const mockDetectInstalledAgents = vi.fn();
+const mockDetectInstalledAgents = vi.hoisted(() => vi.fn());
 vi.mock("../agents/agents-registry.js", () => ({
   detectInstalledAgents: (...args: unknown[]) => mockDetectInstalledAgents(...args),
 }));
@@ -39,8 +47,11 @@ vi.mock("../agents/agents-registry.js", () => ({
 // ---------------------------------------------------------------------------
 // Mock scanner
 // ---------------------------------------------------------------------------
+const mockRunTier1Scan = vi.hoisted(() =>
+  vi.fn().mockReturnValue({ verdict: "PASS", score: 100, findings: [] }),
+);
 vi.mock("../scanner/index.js", () => ({
-  runTier1Scan: () => ({ verdict: "PASS", score: 100, findings: [] }),
+  runTier1Scan: (...args: unknown[]) => mockRunTier1Scan(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -79,6 +90,14 @@ const MOCK_AGENTS = [
   },
 ];
 
+const UPDATED_CONTENT = "# Updated Skill";
+const UPDATED_FETCH_RESULT = {
+  content: UPDATED_CONTENT,
+  version: "2.0.0",
+  sha: "new-sha-12345",
+  tier: "VERIFIED",
+};
+
 describe("updateCommand", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -98,9 +117,11 @@ describe("updateCommand", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
-    // Return updated content with different sha
+    // Source-aware fetcher returns updated result by default
+    mockFetchFromSource.mockResolvedValue(UPDATED_FETCH_RESULT);
+    // Registry fallback (used when fetchFromSource returns null)
     mockGetSkill.mockResolvedValue({
-      content: "# Updated Skill",
+      content: UPDATED_CONTENT,
       version: "2.0.0",
       sha: "new-sha-12345",
       tier: "VERIFIED",
@@ -145,5 +166,129 @@ describe("updateCommand", () => {
 
     expect(mockExit).toHaveBeenCalledWith(1);
     mockExit.mockRestore();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Source-aware routing tests
+  // ---------------------------------------------------------------------------
+
+  it("uses fetchFromSource instead of getSkill for non-registry sources", async () => {
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    expect(mockFetchFromSource).toHaveBeenCalled();
+    // getSkill should NOT be called because fetchFromSource returned a result
+    expect(mockGetSkill).not.toHaveBeenCalled();
+  });
+
+  it("falls back to getSkill when fetchFromSource returns null for unknown source", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: ["claude-code"],
+      skills: {
+        frontend: {
+          version: "1.0.0",
+          sha: "aaa111bbb222",
+          tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z",
+          source: "",  // empty → unknown type → fallback to registry
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockFetchFromSource.mockResolvedValue(null);
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    expect(mockGetSkill).toHaveBeenCalledWith("frontend");
+    expect(mockWriteFileSync).toHaveBeenCalled();
+  });
+
+  it("skips skill and does not call getSkill for local source when fetchFromSource returns null", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: ["claude-code"],
+      skills: {
+        sw: {
+          version: "1.0.0",
+          sha: "aaa111bbb222",
+          tier: "COMMUNITY",
+          installedAt: "2026-01-01T00:00:00.000Z",
+          source: "local:specweave",
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockFetchFromSource.mockResolvedValue(null);
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("sw", { all: false });
+
+    // local sources: no registry fallback, no file writes
+    expect(mockGetSkill).not.toHaveBeenCalled();
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+  });
+
+  it("skips skill when SHA is unchanged", async () => {
+    // fetchFromSource returns same SHA as lockfile
+    mockFetchFromSource.mockResolvedValue({
+      content: "# Same content",
+      version: "1.0.0",
+      sha: "aaa111bbb222",  // same as lockfile entry
+      tier: "VERIFIED",
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+    expect(mockWriteLockfile).toHaveBeenCalledTimes(1);  // still writes lockfile
+  });
+
+  it("runs tier1 scan on fetched content and skips on FAIL verdict", async () => {
+    mockRunTier1Scan.mockReturnValue({ verdict: "FAIL", score: 0, findings: ["malicious"] });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    expect(mockRunTier1Scan).toHaveBeenCalledWith(UPDATED_CONTENT);
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+  });
+
+  it("preserves source field in lockfile after update", async () => {
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    const writtenLock = mockWriteLockfile.mock.calls[0][0] as {
+      skills: Record<string, { source: string }>;
+    };
+    expect(writtenLock.skills["frontend"].source).toBe("github:test/repo");
+  });
+
+  it("writes lockfile exactly once after the loop", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: ["claude-code"],
+      skills: {
+        frontend: {
+          version: "1.0.0", sha: "aaa111bbb222", tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z", source: "github:test/repo",
+        },
+        backend: {
+          version: "1.0.0", sha: "bbb222ccc333", tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z", source: "registry:backend",
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand(undefined, { all: true });
+
+    expect(mockWriteLockfile).toHaveBeenCalledTimes(1);
   });
 });

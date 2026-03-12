@@ -69,7 +69,14 @@ async function syncCommand(opts: MarketplaceSyncOpts): Promise<void> {
   spin.stop();
 
   const manifestContent = readFileSync(marketplacePath, "utf-8") as string;
-  const result = syncMarketplace(manifestContent, localPlugins);
+  let result;
+  try {
+    result = syncMarketplace(manifestContent, localPlugins);
+  } catch {
+    console.error(`marketplace.json is malformed JSON at ${marketplacePath}`);
+    process.exit(1);
+    return;
+  }
 
   const rows: string[][] = [
     ...result.added.map((n) => [green("+ added"), n]),

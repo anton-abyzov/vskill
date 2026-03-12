@@ -250,6 +250,10 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       sendJson(res, { error: "Invalid skill path" }, 400, req);
       return;
     }
+    if (resolve(skillDir) === resolve(root)) {
+      sendJson(res, { error: "Cannot delete the root skill directory" }, 403, req);
+      return;
+    }
     if (!existsSync(skillDir)) {
       sendJson(res, { error: "Skill directory not found" }, 404, req);
       return;

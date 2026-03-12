@@ -234,6 +234,48 @@ describe("loadAndValidateEvals", () => {
     }
   });
 
+  it("migrates Anthropic standard 'expectations' format to assertions with scoped IDs", () => {
+    const anthropicFormat = {
+      skill_name: "my-skill",
+      evals: [
+        {
+          id: 2,
+          name: "Test prompt",
+          prompt: "do something",
+          expected_output: "output",
+          expectations: ["Output includes X", "Output is under 280 chars"],
+        },
+      ],
+    };
+    mocks.existsSync.mockReturnValue(true);
+    mocks.readFileSync.mockReturnValue(JSON.stringify(anthropicFormat));
+
+    const result = loadAndValidateEvals("/skills/my-skill");
+    expect(result.evals[0].assertions).toHaveLength(2);
+    expect(result.evals[0].assertions[0]).toEqual({ id: "2_1", text: "Output includes X", type: "boolean" });
+    expect(result.evals[0].assertions[1]).toEqual({ id: "2_2", text: "Output is under 280 chars", type: "boolean" });
+  });
+
+  it("auto-fills missing 'name' (Anthropic format) from eval id", () => {
+    const anthropicFormatNoName = {
+      skill_name: "my-skill",
+      evals: [
+        {
+          id: 5,
+          prompt: "do something",
+          expected_output: "output",
+          expectations: ["Output includes X"],
+        },
+      ],
+    };
+    mocks.existsSync.mockReturnValue(true);
+    mocks.readFileSync.mockReturnValue(JSON.stringify(anthropicFormatNoName));
+
+    const result = loadAndValidateEvals("/skills/my-skill");
+    expect(result.evals[0].name).toBe("case-5");
+    expect(result.evals[0].assertions[0].id).toBe("5_1");
+  });
+
   it("accepts evals with optional files field defaulting to empty array", () => {
     const valid = {
       skill_name: "test",

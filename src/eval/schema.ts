@@ -91,12 +91,18 @@ export function loadAndValidateEvals(skillDir: string): EvalsFile {
     if (typeof evalCase.id !== "number") {
       errors.push({ path: `${prefix}.id`, message: "required number field" });
     }
+
+    // Migration: Anthropic standard format omits "name" — derive from id
+    if ((typeof evalCase.name !== "string" || !evalCase.name) && typeof evalCase.id === "number") {
+      evalCase.name = `case-${evalCase.id}`;
+    }
     if (typeof evalCase.name !== "string" || !evalCase.name) {
       errors.push({
         path: `${prefix}.name`,
         message: "required string field",
       });
     }
+
     if (typeof evalCase.prompt !== "string" || !evalCase.prompt) {
       errors.push({
         path: `${prefix}.prompt`,
@@ -113,10 +119,12 @@ export function loadAndValidateEvals(skillDir: string): EvalsFile {
       });
     }
 
-    // Migration: accept legacy "expectations" (string[]) as a fallback for "assertions"
+    // Migration: accept Anthropic standard "expectations" (string[]) as a fallback for "assertions".
+    // IDs are scoped to the eval case: "{evalId}_{assertionIndex}" (e.g. "1_1", "1_2", "2_1").
     if (!Array.isArray(evalCase.assertions) && Array.isArray(evalCase.expectations)) {
-      evalCase.assertions = (evalCase.expectations as string[]).map((text: string, i: number) => ({
-        id: `assert-${i + 1}`,
+      const caseId = typeof evalCase.id === "number" ? evalCase.id : i + 1;
+      evalCase.assertions = (evalCase.expectations as string[]).map((text: string, j: number) => ({
+        id: `${caseId}_${j + 1}`,
         text,
         type: "boolean",
       }));
@@ -125,7 +133,7 @@ export function loadAndValidateEvals(skillDir: string): EvalsFile {
     if (!Array.isArray(evalCase.assertions)) {
       errors.push({
         path: `${prefix}.assertions`,
-        message: "required array field",
+        message: 'required array field — use "expectations": ["..."] (Anthropic format) or "assertions": [{"id":"...","text":"...","type":"boolean"}]',
       });
       continue;
     }

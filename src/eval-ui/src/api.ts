@@ -1,5 +1,5 @@
 // API client for the eval server
-import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SkillCreatorStatus, GenerateSkillResponse } from "./types";
+import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse } from "./types";
 
 const BASE = "";
 
@@ -164,6 +164,14 @@ export const api = {
 
   createSkill(data: CreateSkillRequest): Promise<CreateSkillResponse> {
     return fetchJson("/api/skills/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  },
+
+  saveDraft(data: SaveDraftRequest): Promise<SaveDraftResponse> {
+    return fetchJson("/api/skills/save-draft", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),

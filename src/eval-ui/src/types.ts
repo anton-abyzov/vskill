@@ -286,6 +286,13 @@ export interface GeneratedEval {
   assertions: EvalAssertion[];
 }
 
+export interface AiGenerationMeta {
+  prompt: string;
+  provider: string;
+  model: string;
+  reasoning: string;
+}
+
 export interface CreateSkillRequest {
   name: string;
   plugin: string;
@@ -295,6 +302,7 @@ export interface CreateSkillRequest {
   allowedTools?: string;
   body: string;
   evals?: GeneratedEval[];
+  aiMeta?: AiGenerationMeta;
 }
 
 export interface CreateSkillResponse {
@@ -303,6 +311,19 @@ export interface CreateSkillResponse {
   skill: string;
   dir: string;
   skillMdPath: string;
+}
+
+export interface SaveDraftRequest extends CreateSkillRequest {
+  aiMeta: AiGenerationMeta;
+}
+
+export interface SaveDraftResponse {
+  ok: boolean;
+  plugin: string;
+  skill: string;
+  dir: string;
+  skillMdPath: string;
+  files: string[];
 }
 
 export interface SkillCreatorStatus {

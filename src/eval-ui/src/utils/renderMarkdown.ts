@@ -8,11 +8,15 @@
 export function renderMarkdown(text: string): string {
   if (!text) return "";
 
-  // First, extract and render tables (multi-line constructs)
-  let result = renderTables(text);
+  try {
+    // Strip YAML frontmatter if present (--- ... ---)
+    let cleaned = text.replace(/^---\n[\s\S]*?\n---\n?/, "");
 
-  // Code blocks (``` ... ```) — must run before inline transforms
-  result = result.replace(
+    // First, extract and render tables (multi-line constructs)
+    let result = renderTables(cleaned);
+
+    // Code blocks (``` ... ```) — must run before inline transforms
+    result = result.replace(
     /```(\w*)\n([\s\S]*?)```/g,
     '<pre style="background:var(--surface-2);padding:0.75rem;border-radius:6px;overflow-x:auto;font-size:12px;line-height:1.5;margin:0.5rem 0;border:1px solid var(--border-subtle)"><code>$2</code></pre>',
   );
@@ -68,6 +72,11 @@ export function renderMarkdown(text: string): string {
   result = result.replace(/\n/g, "<br/>");
 
   return result;
+  } catch {
+    // Fallback: render as plain preformatted text on any parse error
+    const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `<pre style="white-space:pre-wrap;font-size:12px;line-height:1.5">${escaped}</pre>`;
+  }
 }
 
 /**

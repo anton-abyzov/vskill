@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { api } from "../api";
 import { useConfig } from "../ConfigContext";
-import type { ProjectLayoutResponse, DetectedLayout, GeneratedEval } from "../types";
+import type { ProjectLayoutResponse, DetectedLayout, GeneratedEval, SaveDraftRequest } from "../types";
 import { ProgressLog } from "./ProgressLog";
 import type { ProgressEntry } from "./ProgressLog";
 import { ErrorCard } from "./ErrorCard";
 import type { ClassifiedError } from "./ErrorCard";
 import { renderMarkdown } from "../utils/renderMarkdown";
+import { SkillFileTree } from "./SkillFileTree";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -87,13 +88,22 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
   // AI generation state
   const [aiPrompt, setAiPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
-  const [aiReasoning, setAiReasoning] = useState<string | null>(null);
-  const [reasoningExpanded, setReasoningExpanded] = useState(false);
+  const [aiGenerated, setAiGenerated] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiClassifiedError, setAiClassifiedError] = useState<ClassifiedError | null>(null);
   const [aiProgress, setAiProgress] = useState<ProgressEntry[]>([]);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // AI generation metadata (stored for history/persistence, not displayed)
+  const aiMetaRef = useRef<{ prompt: string; provider: string; model: string; reasoning: string } | null>(null);
+
+  // Draft persistence
+  const [draftSaved, setDraftSaved] = useState(false);
+  const [draftFiles, setDraftFiles] = useState<string[]>([]);
+
+  // Plugin recommendation (shown after AI generation when plugins are available)
+  const [showPluginRecommendation, setShowPluginRecommendation] = useState(false);
 
   // Load layout + config on mount
   useEffect(() => {
@@ -136,6 +146,17 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
     return layout.detectedLayouts.filter((d): d is DetectedLayout & { layout: 1 | 2 | 3 } => d.layout !== 4);
   }, [layout]);
 
+  // Detect if there are plugin-based layouts available for recommendation
+  const pluginLayoutInfo = useMemo(() => {
+    if (!layout) return null;
+    // Find a layout with existing plugins (prefer layout 2 > 1)
+    const l2 = layout.detectedLayouts.find((d) => d.layout === 2 && d.existingPlugins.length > 0);
+    const l1 = layout.detectedLayouts.find((d) => d.layout === 1 && d.existingPlugins.length > 0);
+    const best = l2 || l1;
+    if (!best) return null;
+    return { layout: best.layout as 1 | 2, plugins: best.existingPlugins };
+  }, [layout]);
+
   // Resolve provider/model for generation request
   const resolveAiConfig = useCallback(() => {
     if (!config) return { provider: "claude-cli", model: "sonnet" };
@@ -160,8 +181,8 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
   async function handleGenerate() {
     setAiError(null);
     setAiClassifiedError(null);
-    setAiReasoning(null);
     setAiProgress([]);
+    aiMetaRef.current = null;
     if (!aiPrompt.trim()) { setAiError("Describe what your skill should do"); return; }
 
     setGenerating(true);
@@ -206,14 +227,52 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
               if (currentEvent === "progress") {
                 setAiProgress((prev) => [...prev, { phase: data.phase, message: data.message, timestamp: Date.now() }]);
               } else if (currentEvent === "done" || currentEvent === "complete") {
-                setName(data.name);
-                setDescription(data.description);
-                setModel(data.model || "");
-                setAllowedTools(data.allowedTools || "");
-                setBody(data.body);
-                setPendingEvals(data.evals?.length ? data.evals : null);
-                setAiReasoning(data.reasoning);
+                const genName = data.name;
+                const genDescription = data.description;
+                const genModel = data.model || "";
+                const genAllowedTools = data.allowedTools || "";
+                const genBody = data.body;
+                const genEvals = data.evals?.length ? data.evals : null;
+                const meta = {
+                  prompt: aiPrompt.trim(),
+                  provider: resolveAiConfig().provider,
+                  model: resolveAiConfig().model,
+                  reasoning: data.reasoning || "",
+                };
+
+                setName(genName);
+                setDescription(genDescription);
+                setModel(genModel);
+                setAllowedTools(genAllowedTools);
+                setBody(genBody);
+                setPendingEvals(genEvals);
+                setAiGenerated(true);
+                aiMetaRef.current = meta;
                 setMode("manual");
+
+                // Show plugin recommendation if on layout 3 and plugins exist
+                if (selectedLayout === 3 && pluginLayoutInfo) {
+                  setShowPluginRecommendation(true);
+                }
+
+                // Auto-save draft to file system
+                const draftReq: SaveDraftRequest = {
+                  name: genName,
+                  plugin: effectivePlugin || "",
+                  layout: selectedLayout,
+                  description: genDescription,
+                  model: genModel || undefined,
+                  allowedTools: genAllowedTools || undefined,
+                  body: genBody,
+                  evals: genEvals || undefined,
+                  aiMeta: meta,
+                };
+                api.saveDraft(draftReq)
+                  .then((result) => {
+                    setDraftSaved(true);
+                    setDraftFiles(result.files);
+                  })
+                  .catch(() => { /* draft save failure is non-blocking */ });
               } else if (currentEvent === "error") {
                 setAiError(data.message || data.description || "Unknown error");
                 if (data.category) setAiClassifiedError(data as ClassifiedError);
@@ -252,6 +311,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
         allowedTools: allowedTools || undefined,
         body,
         evals: pendingEvals || undefined,
+        aiMeta: aiMetaRef.current || undefined,
       });
       onCreated(result.plugin, result.skill);
     } catch (err) {
@@ -441,67 +501,6 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
       {/* ================================================================= */}
       {!layoutLoading && layout && mode === "manual" && (
         <div className="space-y-4 animate-fade-in">
-          {/* AI reasoning banner (shown after generation populates the form) */}
-          {aiReasoning && (
-            <div
-              className="px-4 py-3 rounded-lg text-[12px] animate-fade-in"
-              style={{
-                background: "rgba(168,85,247,0.08)",
-                color: "var(--text-secondary)",
-                border: "1px solid rgba(168,85,247,0.2)",
-              }}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <button
-                  onClick={() => setReasoningExpanded((v) => !v)}
-                  className="flex items-center gap-2 text-left"
-                  style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
-                >
-                  <div
-                    className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
-                    style={{ background: "rgba(168,85,247,0.15)" }}
-                  >
-                    <SparkleIcon size={11} color="#a855f7" />
-                  </div>
-                  <span className="font-semibold" style={{ color: "#a855f7" }}>AI Generated</span>
-                  <svg
-                    width="11" height="11" viewBox="0 0 24 24" fill="none"
-                    stroke="var(--text-tertiary)" strokeWidth="2.5" strokeLinecap="round"
-                    style={{ transform: reasoningExpanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s ease", flexShrink: 0 }}
-                  >
-                    <polyline points="9 18 15 12 9 6" />
-                  </svg>
-                  {!reasoningExpanded && (
-                    <span style={{ color: "var(--text-tertiary)" }}>click to expand reasoning</span>
-                  )}
-                  {pendingEvals && pendingEvals.length > 0 && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: "rgba(168,85,247,0.12)", color: "#a855f7" }}>
-                      +{pendingEvals.length} test cases
-                    </span>
-                  )}
-                </button>
-                <button
-                  onClick={() => { setAiReasoning(null); setPendingEvals(null); setReasoningExpanded(false); }}
-                  className="flex-shrink-0 w-5 h-5 rounded flex items-center justify-center transition-colors duration-150"
-                  style={{ color: "var(--text-tertiary)", background: "none", border: "none", cursor: "pointer" }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-3)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              </div>
-              {reasoningExpanded && (
-                <div
-                  className="mt-2 pl-[27px] text-[12px] leading-relaxed overflow-y-auto"
-                  style={{ color: "var(--text-secondary)", maxHeight: "300px" }}
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(aiReasoning) }}
-                />
-              )}
-            </div>
-          )}
-
           {/* Location */}
           <div className="glass-card p-4">
             <h3 className="text-[13px] font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Location</h3>
@@ -551,6 +550,50 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
               {pathPreview}
             </div>
           </div>
+
+          {/* Plugin recommendation */}
+          {showPluginRecommendation && pluginLayoutInfo && selectedLayout === 3 && (
+            <div
+              className="px-4 py-3 rounded-lg text-[12px] animate-fade-in flex items-center justify-between gap-3"
+              style={{
+                background: "rgba(59,130,246,0.08)",
+                color: "var(--text-secondary)",
+                border: "1px solid rgba(59,130,246,0.2)",
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
+                <span>
+                  Plugins detected (<strong>{pluginLayoutInfo.plugins.slice(0, 3).join(", ")}</strong>).
+                  Add this skill to a plugin for better organization.
+                </span>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => {
+                    setSelectedLayout(pluginLayoutInfo.layout);
+                    setPlugin(pluginLayoutInfo.plugins[0]);
+                    setShowPluginRecommendation(false);
+                  }}
+                  className="px-3 py-1 rounded-md text-[11px] font-medium"
+                  style={{ background: "#3b82f6", color: "#fff", border: "none", cursor: "pointer" }}
+                >
+                  Use plugin
+                </button>
+                <button
+                  onClick={() => setShowPluginRecommendation(false)}
+                  className="w-5 h-5 rounded flex items-center justify-center"
+                  style={{ color: "var(--text-tertiary)", background: "none", border: "none", cursor: "pointer" }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Details */}
           <div className="glass-card p-4">
@@ -681,45 +724,12 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
             )}
           </div>
 
-          {/* Generated test cases preview */}
-          {pendingEvals && pendingEvals.length > 0 && (
-            <div className="glass-card p-4">
-              <h3 className="text-[13px] font-semibold mb-3 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
-                <SparkleIcon size={13} color="#a855f7" />
-                Generated Test Cases
-                <span className="text-[11px] font-normal" style={{ color: "var(--text-tertiary)" }}>
-                  ({pendingEvals.length} evals will be saved with the skill)
-                </span>
-              </h3>
-              <div className="space-y-2">
-                {pendingEvals.map((ev) => (
-                  <div
-                    key={ev.id}
-                    className="px-3 py-2 rounded-lg text-[12px]"
-                    style={{ background: "var(--surface-0)", border: "1px solid var(--border-subtle)" }}
-                  >
-                    <div className="font-medium mb-1" style={{ color: "var(--text-primary)" }}>
-                      {ev.name}
-                    </div>
-                    <div className="text-[11px] mb-1" style={{ color: "var(--text-tertiary)" }}>
-                      Prompt: {ev.prompt.length > 120 ? ev.prompt.slice(0, 120) + "..." : ev.prompt}
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      {ev.assertions.map((a) => (
-                        <span
-                          key={a.id}
-                          className="px-1.5 py-0.5 rounded text-[10px]"
-                          style={{ background: "rgba(168,85,247,0.1)", color: "#a855f7" }}
-                        >
-                          {a.text.length > 50 ? a.text.slice(0, 50) + "..." : a.text}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Skill folder structure visualization */}
+          <SkillFileTree
+            skillName={name || "{skill}"}
+            hasEvals={!!(pendingEvals && pendingEvals.length > 0)}
+            isDraft={draftSaved}
+          />
 
           {error && (
             <div className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
@@ -739,7 +749,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                 border: "none",
               }}
             >
-              {creating ? "Creating..." : "Create Skill"}
+              {creating ? "Saving..." : aiGenerated ? "Save" : "Create Skill"}
             </button>
             <button
               onClick={onCancel}

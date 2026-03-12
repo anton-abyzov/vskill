@@ -187,7 +187,8 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
       console.log(`${name}\t${repo}\tBLOCKED`);
     } else {
       const altRepos = r.alternateRepos?.map((a) => `${a.ownerSlug}/${a.repoSlug}`).join(",") ?? "";
-      console.log(`${name}\t${repo}\t${r.githubStars ?? 0}\t${r.trustTier ?? ""}\t${r.pluginName ?? ""}\t${altRepos}`);
+      const tierOut = r.certTier ?? r.trustTier ?? "";
+      console.log(`${name}\t${repo}\t${r.githubStars ?? 0}\t${tierOut}\t${r.pluginName ?? ""}\t${altRepos}`);
     }
   }
 

@@ -213,6 +213,19 @@ describe("findCommand", () => {
     expect(dataLines[0]).toBe("my-skill\towner/repo\t10\tT3\t\t");
   });
 
+  it("non-TTY output prefers certTier over trustTier", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "my-skill", author: "a", repoUrl: "https://github.com/owner/repo", tier: "VERIFIED", score: 90, installs: 500, githubStars: 10, vskillInstalls: 500, certTier: "VERIFIED", trustTier: "T2" },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test", { noHint: true });
+    const dataLines = logs.filter((l) => l.includes("\t"));
+    expect(dataLines[0]).toBe("my-skill\towner/repo\t10\tVERIFIED\t\t");
+  });
+
   it("non-TTY blocked output uses BLOCKED as third column", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
     mockSearchSkills.mockResolvedValue({
@@ -258,6 +271,19 @@ describe("findCommand", () => {
     mockSearchSkills.mockResolvedValue({
       results: [
         { name: "basic-skill", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 40, installs: 100, githubStars: 10, vskillInstalls: 100, trustTier: "T2" },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    expect(output).toContain("~ pending");
+  });
+
+  it("displays pending badge for T1 trust tier", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "new-skill", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 20, installs: 10, githubStars: 5, vskillInstalls: 10, trustTier: "T1" },
       ],
       hasMore: false,
     });

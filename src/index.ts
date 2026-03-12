@@ -172,4 +172,15 @@ program
     await runEvalServe(root, port);
   });
 
+program
+  .command("marketplace [subcommand]")
+  .alias("mp")
+  .description("Manage marketplace.json — sync plugins, list entries")
+  .option("--dry-run", "Preview changes without writing")
+  .option("--cwd <path>", "Root directory containing .claude-plugin/ (default: project root)")
+  .action(async (subcommand = "sync", opts) => {
+    const { marketplaceCommand } = await import("./commands/marketplace.js");
+    await marketplaceCommand(subcommand, opts);
+  });
+
 program.parse();

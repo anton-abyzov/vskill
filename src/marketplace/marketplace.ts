@@ -138,6 +138,72 @@ export interface UnregisteredPluginResult {
   failed: boolean;
 }
 
+// ---- Sync -----------------------------------------------------------------
+
+export interface LocalPlugin {
+  name: string;
+  description?: string;
+  version?: string;
+  category?: string;
+  author?: { name: string; email?: string; url?: string };
+}
+
+export interface SyncResult {
+  added: string[];
+  updated: string[];
+  unchanged: string[];
+  updatedManifest: MarketplaceManifest;
+}
+
+/**
+ * Sync marketplace.json against a list of local plugin metadata.
+ *
+ * Pure function — no filesystem I/O. The caller is responsible for reading
+ * marketplace.json and writing the result back.
+ *
+ * @param manifestContent - Raw JSON string from .claude-plugin/marketplace.json
+ * @param localPlugins    - Metadata read from each plugins/*\/.claude-plugin/plugin.json
+ * @returns SyncResult with added/updated/unchanged lists and the updated manifest object
+ */
+export function syncMarketplace(
+  manifestContent: string,
+  localPlugins: LocalPlugin[],
+): SyncResult {
+  const manifest: MarketplaceManifest = JSON.parse(manifestContent);
+  const result: SyncResult = {
+    added: [],
+    updated: [],
+    unchanged: [],
+    updatedManifest: manifest,
+  };
+  const existing = new Map(manifest.plugins.map((p) => [p.name, p]));
+
+  for (const local of localPlugins) {
+    const entry = existing.get(local.name);
+    if (!entry) {
+      manifest.plugins.push({
+        name: local.name,
+        source: `./plugins/${local.name}`,
+        ...(local.description ? { description: local.description } : {}),
+        ...(local.version ? { version: local.version } : {}),
+        ...(local.category ? { category: local.category } : {}),
+      });
+      result.added.push(local.name);
+    } else {
+      const versionDrift = local.version !== undefined && entry.version !== local.version;
+      const descDrift = local.description !== undefined && entry.description !== local.description;
+      if (versionDrift || descDrift) {
+        if (local.version !== undefined) entry.version = local.version;
+        if (local.description !== undefined) entry.description = local.description;
+        result.updated.push(local.name);
+      } else {
+        result.unchanged.push(local.name);
+      }
+    }
+  }
+  return result;
+}
+
 export async function discoverUnregisteredPlugins(
   owner: string,
   repo: string,

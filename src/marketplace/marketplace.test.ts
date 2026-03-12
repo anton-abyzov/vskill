@@ -12,6 +12,7 @@ const {
   hasPlugin,
   validateMarketplace,
   discoverUnregisteredPlugins,
+  syncMarketplace,
 } = await import("./index.js");
 
 // ---------------------------------------------------------------------------
@@ -308,5 +309,80 @@ describe("discoverUnregisteredPlugins", () => {
 
     expect(result.failed).toBe(true);
     expect(result.plugins).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// syncMarketplace
+// ---------------------------------------------------------------------------
+
+describe("syncMarketplace", () => {
+  it("adds a plugin not present in manifest", () => {
+    const manifest = makeMarketplaceJson(); // has "sw" and "frontend"
+    const result = syncMarketplace(manifest, [
+      { name: "newplugin", description: "New plugin", version: "1.0.0" },
+    ]);
+
+    expect(result.added).toEqual(["newplugin"]);
+    expect(result.updated).toEqual([]);
+    expect(result.unchanged).toEqual([]);
+    const names = result.updatedManifest.plugins.map((p) => p.name);
+    expect(names).toContain("newplugin");
+    const entry = result.updatedManifest.plugins.find((p) => p.name === "newplugin");
+    expect(entry?.source).toBe("./plugins/newplugin");
+    expect(entry?.version).toBe("1.0.0");
+    expect(entry?.description).toBe("New plugin");
+  });
+
+  it("updates an existing entry when version drifts", () => {
+    const manifest = makeMarketplaceJson(); // "sw" has version "1.0.225"
+    const result = syncMarketplace(manifest, [
+      { name: "sw", version: "2.0.0" },
+    ]);
+
+    expect(result.updated).toEqual(["sw"]);
+    expect(result.added).toEqual([]);
+    const entry = result.updatedManifest.plugins.find((p) => p.name === "sw");
+    expect(entry?.version).toBe("2.0.0");
+  });
+
+  it("updates an existing entry when description drifts", () => {
+    const manifest = makeMarketplaceJson();
+    const result = syncMarketplace(manifest, [
+      { name: "frontend", description: "New description for frontend" },
+    ]);
+
+    expect(result.updated).toEqual(["frontend"]);
+    expect(result.added).toEqual([]);
+    const entry = result.updatedManifest.plugins.find((p) => p.name === "frontend");
+    expect(entry?.description).toBe("New description for frontend");
+  });
+
+  it("marks entry unchanged when version and description match", () => {
+    const manifest = JSON.stringify({
+      name: "vskill",
+      owner: { name: "Test" },
+      plugins: [
+        { name: "mobile", source: "./plugins/mobile", version: "2.3.0", description: "Mobile dev" },
+      ],
+    });
+    const result = syncMarketplace(manifest, [
+      { name: "mobile", version: "2.3.0", description: "Mobile dev" },
+    ]);
+
+    expect(result.unchanged).toEqual(["mobile"]);
+    expect(result.added).toEqual([]);
+    expect(result.updated).toEqual([]);
+  });
+
+  it("handles empty localPlugins array — all existing plugins are unreported (empty result)", () => {
+    const manifest = makeMarketplaceJson();
+    const result = syncMarketplace(manifest, []);
+
+    expect(result.added).toEqual([]);
+    expect(result.updated).toEqual([]);
+    expect(result.unchanged).toEqual([]);
+    // existing plugins in manifest are untouched
+    expect(result.updatedManifest.plugins).toHaveLength(2);
   });
 });

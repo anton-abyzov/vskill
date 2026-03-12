@@ -50,39 +50,91 @@ describe("fmtDuration", () => {
   });
 });
 
-function makeEntry(pass_rate: number, timestamp = "2026-03-09T12:00:00Z"): CaseHistoryEntry {
-  return {
-    timestamp,
-    model: "sonnet",
-    type: "benchmark",
-    pass_rate,
-    assertions: [],
-  };
+function makeEntry(
+  pass_rate: number,
+  type: CaseHistoryEntry["type"] = "benchmark",
+  timestamp = "2026-03-09T12:00:00Z",
+  baselinePassRate?: number,
+): CaseHistoryEntry {
+  return { timestamp, model: "sonnet", type, pass_rate, assertions: [], baselinePassRate };
 }
 
 describe("MiniTrend", () => {
   it("returns null for empty entries", () => {
-    const result = MiniTrend({ entries: [] });
-    expect(result).toBeNull();
+    expect(MiniTrend({ entries: [] })).toBeNull();
   });
 
   it("returns null for one entry", () => {
-    const result = MiniTrend({ entries: [makeEntry(0.8)] });
-    expect(result).toBeNull();
+    expect(MiniTrend({ entries: [makeEntry(0.8)] })).toBeNull();
   });
 
-  it("returns SVG element for two entries", () => {
-    const entries = [makeEntry(0.8), makeEntry(0.6)];
-    const result = MiniTrend({ entries });
-    expect(result).not.toBeNull();
-    // JSX element has type "svg"
+  it("returns SVG element for two benchmark entries", () => {
+    const result = MiniTrend({ entries: [makeEntry(0.8), makeEntry(0.6)] });
     expect(result?.type).toBe("svg");
   });
 
   it("returns SVG element for many entries", () => {
     const entries = [makeEntry(0.9), makeEntry(0.7), makeEntry(0.8), makeEntry(0.6), makeEntry(1.0)];
-    const result = MiniTrend({ entries });
-    expect(result).not.toBeNull();
-    expect(result?.type).toBe("svg");
+    expect(MiniTrend({ entries })?.type).toBe("svg");
+  });
+
+  // Dual-line: type filtering
+  it("includes benchmark entries in skill line and excludes improve/instruct types", () => {
+    const entries = [
+      makeEntry(1.0, "benchmark"),
+      makeEntry(0.5, "improve"),
+      makeEntry(0.5, "instruct"),
+      makeEntry(0.5, "eval-generate"),
+    ];
+    // With only benchmark entries for skill line (others filtered), 1 point → null
+    // Need 2+ entries to render
+    const withTwoBenchmarks = [makeEntry(1.0, "benchmark"), makeEntry(0.8, "benchmark")];
+    expect(MiniTrend({ entries: withTwoBenchmarks })?.type).toBe("svg");
+  });
+
+  it("returns null when all entries are non-core types (improve/instruct/etc)", () => {
+    const entries = [
+      makeEntry(0.8, "improve"),
+      makeEntry(0.6, "instruct"),
+      makeEntry(0.4, "eval-generate"),
+    ];
+    expect(MiniTrend({ entries })).toBeNull();
+  });
+
+  it("renders baseline gray line when baseline entries exist", () => {
+    const entries = [
+      makeEntry(1.0, "benchmark"),
+      makeEntry(0.8, "benchmark"),
+      makeEntry(0.6, "baseline"),
+      makeEntry(0.5, "baseline"),
+    ];
+    const svg = MiniTrend({ entries });
+    expect(svg?.type).toBe("svg");
+    // Should have two polylines (skill + baseline)
+    const children = (svg?.props as { children: unknown[] }).children;
+    const polylines = (children as { type: string }[]).filter((c) => c?.type === "polyline");
+    expect(polylines.length).toBe(2);
+  });
+
+  it("comparison entry contributes to both skill and baseline lines", () => {
+    const entries = [
+      makeEntry(1.0, "comparison", "2026-03-09T12:00:00Z", 0.6),
+      makeEntry(0.8, "comparison", "2026-03-08T12:00:00Z", 0.5),
+    ];
+    const svg = MiniTrend({ entries });
+    expect(svg?.type).toBe("svg");
+    const children = (svg?.props as { children: unknown[] }).children;
+    const polylines = (children as { type: string }[]).filter((c) => c?.type === "polyline");
+    expect(polylines.length).toBe(2);
+  });
+
+  it("renders only skill line when no baseline data exists", () => {
+    const entries = [makeEntry(1.0, "benchmark"), makeEntry(0.8, "benchmark")];
+    const svg = MiniTrend({ entries });
+    expect(svg?.type).toBe("svg");
+    // Only one polyline (no baseline data)
+    const children = (svg?.props as { children: unknown[] }).children;
+    const polylines = (children as { type: string }[]).filter((c) => c?.type === "polyline");
+    expect(polylines.length).toBe(1);
   });
 });

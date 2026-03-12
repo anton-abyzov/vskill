@@ -723,7 +723,26 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
             });
             const result = await judgeAssertion(comparison.skillOutput, assertion, client);
             assertionResults.push(result);
+            sendSSE(res, "assertion_result", {
+              eval_id: evalCase.id,
+              assertion_id: result.id,
+              text: result.text,
+              pass: result.pass,
+              reasoning: result.reasoning,
+            });
           }
+
+          const casePassRate = assertionResults.length > 0
+            ? assertionResults.filter((a) => a.pass).length / assertionResults.length
+            : 0;
+          const caseStatus = assertionResults.length > 0 && assertionResults.every((a) => a.pass) ? "pass" : "fail";
+          sendSSE(res, "case_complete", {
+            eval_id: evalCase.id,
+            status: caseStatus,
+            pass_rate: casePassRate,
+            durationMs: comparison.skillDurationMs,
+            tokens: comparison.skillTokens,
+          });
 
           comparisonResults.push({
             eval_id: evalCase.id,

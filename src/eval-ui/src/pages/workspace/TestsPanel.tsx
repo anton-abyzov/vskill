@@ -794,7 +794,99 @@ function OutputSection({ output, durationMs, tokens }: { output: string; duratio
 }
 
 // ---------------------------------------------------------------------------
-// Case History Section (collapsible, lazy-loaded)
+// Lane assignment for split-lane history grid
+// ---------------------------------------------------------------------------
+
+export function getLane(type: string): "left" | "right" | "full" {
+  if (type === "baseline") return "right";
+  if (type === "comparison") return "full";
+  return "left";
+}
+
+// ---------------------------------------------------------------------------
+// History entry card (shared between flat and split-lane views)
+// ---------------------------------------------------------------------------
+
+function HistoryEntryCard({ entry }: { entry: CaseHistoryEntry }) {
+  return (
+    <div
+      className="rounded-lg px-3 py-2.5"
+      style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+    >
+      {/* Run header */}
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>
+          {shortDate(entry.timestamp)}
+        </span>
+        <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>{entry.model}</span>
+        <span
+          className="pill"
+          style={{
+            fontSize: 9, padding: "1px 6px",
+            background: entry.type === "benchmark" ? "rgba(99,131,255,0.15)" : entry.type === "comparison" ? "var(--purple-muted)" : "rgba(251,146,60,0.15)",
+            color: entry.type === "benchmark" ? "#6383ff" : entry.type === "comparison" ? "var(--purple)" : "#fb923c",
+          }}
+        >
+          {entry.type}
+        </span>
+        <span className="text-[12px] font-semibold ml-auto" style={{ color: passRateColor(entry.pass_rate) }}>
+          {Math.round(entry.pass_rate * 100)}%
+        </span>
+      </div>
+
+      {/* Metrics */}
+      <div className="flex items-center gap-4 mb-1.5 text-[10px]" style={{ fontFamily: "var(--font-mono, monospace)", color: "var(--text-tertiary)" }}>
+        {entry.durationMs != null && <span>{fmtDuration(entry.durationMs)}</span>}
+        {entry.tokens != null && <span>{entry.tokens >= 1000 ? `${(entry.tokens / 1000).toFixed(1)}k` : entry.tokens} tok</span>}
+      </div>
+
+      {/* Delta + verdict badge for comparison entries */}
+      {entry.type === "comparison" && entry.baselinePassRate != null && (() => {
+        const delta = entry.pass_rate - entry.baselinePassRate;
+        const verdict = delta > 0.001 ? "skill" : delta < -0.001 ? "baseline" : "tie";
+        const deltaSign = delta > 0 ? "+" : "";
+        const verdictColor = verdict === "skill" ? "var(--green)" : verdict === "baseline" ? "var(--red)" : "var(--text-tertiary)";
+        return (
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>vs baseline:</span>
+            <span className="text-[11px] font-semibold" style={{ color: delta >= 0 ? "var(--green)" : "var(--red)" }}>
+              {deltaSign}{(delta * 100).toFixed(1)}%
+            </span>
+            <span className="pill text-[9px]" style={{ padding: "1px 5px", background: "rgba(0,0,0,0.2)", color: verdictColor }}>
+              {verdict}
+            </span>
+          </div>
+        );
+      })()}
+
+      {/* Assertions */}
+      <div className="space-y-0.5">
+        {entry.assertions.map((a) => (
+          <div key={a.id} className="flex items-start gap-1.5">
+            <span
+              className="mt-0.5 rounded-full flex-shrink-0"
+              style={{
+                width: 14, height: 14,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: a.pass ? "var(--green-muted)" : "var(--red-muted)",
+              }}
+            >
+              {a.pass ? (
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
+              ) : (
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="var(--red)" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+              )}
+            </span>
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{a.text}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Case History Section (collapsible, split-lane grid layout)
 // ---------------------------------------------------------------------------
 
 function CaseHistorySection({ evalId, sharedEntries, sharedLoading }: {
@@ -815,6 +907,9 @@ function CaseHistorySection({ evalId, sharedEntries, sharedLoading }: {
   }, [expanded]);
 
   const displayEntries = entries ? entries.slice(0, 10) : [];
+
+  const hasLeft = displayEntries.some((e) => getLane(e.type) === "left");
+  const hasRight = displayEntries.some((e) => getLane(e.type) === "right");
 
   return (
     <div className="mb-5">
@@ -853,65 +948,64 @@ function CaseHistorySection({ evalId, sharedEntries, sharedLoading }: {
                 </div>
               )}
 
-              {/* History entries */}
-              <div className="space-y-2">
-                {displayEntries.map((entry, idx) => (
-                  <div
-                    key={idx}
-                    className="rounded-lg px-3 py-2.5"
-                    style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
-                  >
-                    {/* Run header */}
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>
-                        {shortDate(entry.timestamp)}
-                      </span>
-                      <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>{entry.model}</span>
-                      <span
-                        className="pill"
-                        style={{
-                          fontSize: 9, padding: "1px 6px",
-                          background: entry.type === "benchmark" ? "rgba(99,131,255,0.15)" : entry.type === "comparison" ? "var(--purple-muted)" : "rgba(251,146,60,0.15)",
-                          color: entry.type === "benchmark" ? "#6383ff" : entry.type === "comparison" ? "var(--purple)" : "#fb923c",
-                        }}
-                      >
-                        {entry.type}
-                      </span>
-                      <span className="text-[12px] font-semibold ml-auto" style={{ color: passRateColor(entry.pass_rate) }}>
-                        {Math.round(entry.pass_rate * 100)}%
-                      </span>
-                    </div>
+              {/* Split-lane grid */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {/* Column headers */}
+                <div
+                  className="text-[11px] font-semibold uppercase tracking-wider"
+                  style={{ color: "var(--text-tertiary)", gridColumn: "1" }}
+                >
+                  Skill
+                </div>
+                <div
+                  className="text-[11px] font-semibold uppercase tracking-wider"
+                  style={{ color: "var(--text-tertiary)", gridColumn: "2" }}
+                >
+                  Baseline
+                </div>
 
-                    {/* Metrics */}
-                    <div className="flex items-center gap-4 mb-1.5 text-[10px]" style={{ fontFamily: "var(--font-mono, monospace)", color: "var(--text-tertiary)" }}>
-                      {entry.durationMs != null && <span>{fmtDuration(entry.durationMs)}</span>}
-                      {entry.tokens != null && <span>{entry.tokens >= 1000 ? `${(entry.tokens / 1000).toFixed(1)}k` : entry.tokens} tok</span>}
-                    </div>
-
-                    {/* Assertions */}
-                    <div className="space-y-0.5">
-                      {entry.assertions.map((a) => (
-                        <div key={a.id} className="flex items-start gap-1.5">
-                          <span
-                            className="mt-0.5 rounded-full flex-shrink-0"
-                            style={{
-                              width: 14, height: 14,
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                              background: a.pass ? "var(--green-muted)" : "var(--red-muted)",
-                            }}
-                          >
-                            {a.pass ? (
-                              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
-                            ) : (
-                              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="var(--red)" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                            )}
-                          </span>
-                          <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{a.text}</span>
-                        </div>
-                      ))}
-                    </div>
+                {/* Empty column placeholders */}
+                {!hasLeft && (
+                  <div style={{ gridColumn: "1", fontSize: 12, color: "var(--text-tertiary)" }}>
+                    No skill runs
                   </div>
-                ))}
+                )}
+                {!hasRight && (
+                  <div style={{ gridColumn: "2", fontSize: 12, color: "var(--text-tertiary)" }}>
+                    No baseline runs
+                  </div>
+                )}
+
+                {/* Entries */}
+                {displayEntries.map((entry, idx) => {
+                  const lane = getLane(entry.type);
+                  if (lane === "full") {
+                    return (
+                      <div key={idx} style={{ gridColumn: "1 / -1" }}>
+                        <HistoryEntryCard entry={entry} />
+                      </div>
+                    );
+                  }
+                  if (lane === "left") {
+                    return (
+                      <>
+                        <div key={idx} style={{ gridColumn: "1" }}>
+                          <HistoryEntryCard entry={entry} />
+                        </div>
+                        <div key={`${idx}-spacer`} style={{ gridColumn: "2" }} />
+                      </>
+                    );
+                  }
+                  // lane === "right"
+                  return (
+                    <>
+                      <div key={`${idx}-spacer`} style={{ gridColumn: "1" }} />
+                      <div key={idx} style={{ gridColumn: "2" }}>
+                        <HistoryEntryCard entry={entry} />
+                      </div>
+                    </>
+                  );
+                })}
               </div>
 
               {/* View full history link */}

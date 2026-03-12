@@ -39,6 +39,7 @@ export interface CaseHistoryEntry {
   inputTokens?: number | null;
   outputTokens?: number | null;
   assertions: BenchmarkAssertionResult[];
+  baselinePassRate?: number;
 }
 
 export interface RegressionEntry {
@@ -201,6 +202,13 @@ export async function getCaseHistory(
       const matchingCase = data.cases.find((c) => c.eval_id === evalId);
       if (!matchingCase) continue;
 
+      const cd = matchingCase.comparisonDetail;
+      const baselinePassRate = cd &&
+        cd.baselineContentScore != null &&
+        cd.baselineStructureScore != null
+          ? (cd.baselineContentScore + cd.baselineStructureScore) / 200
+          : undefined;
+
       entries.push({
         timestamp: fromFilesafeTimestamp(file),
         model: data.model,
@@ -212,6 +220,7 @@ export async function getCaseHistory(
         inputTokens: matchingCase.inputTokens,
         outputTokens: matchingCase.outputTokens,
         assertions: matchingCase.assertions,
+        baselinePassRate,
       });
     } catch {
       // Skip malformed files

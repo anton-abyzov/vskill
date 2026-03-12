@@ -18,30 +18,68 @@ export function fmtDuration(ms: number | undefined): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 }
 
-/** Tiny inline SVG sparkline showing pass rate trend */
-export function MiniTrend({ entries }: { entries: CaseHistoryEntry[] }) {
-  if (entries.length < 2) return null;
-  const w = 80, h = 24, pad = 2;
-  const pts = entries.slice().reverse(); // oldest first
-  const n = pts.length;
-  const coords = pts.map((e, i) => {
-    const x = pad + (i / (n - 1)) * (w - pad * 2);
-    const y = pad + (h - pad * 2) - e.pass_rate * (h - pad * 2);
+const CORE_TYPES = new Set(["benchmark", "comparison", "baseline"]);
+
+function toCoords(pts: Array<{ rate: number; idx: number; total: number }>, w: number, h: number, pad: number) {
+  return pts.map(({ rate, idx, total }) => {
+    const x = pad + (idx / (total - 1)) * (w - pad * 2);
+    const y = pad + (h - pad * 2) - rate * (h - pad * 2);
     return `${x},${y}`;
   });
+}
+
+/** Dual-line inline SVG sparkline: blue=skill, gray=baseline */
+export function MiniTrend({ entries }: { entries: CaseHistoryEntry[] }) {
+  const core = entries.filter((e) => CORE_TYPES.has(e.type)).slice().reverse(); // oldest first
+
+  // Skill line: benchmark + comparison
+  const skillPts = core
+    .map((e, i, arr) => ({ rate: e.pass_rate, idx: i, total: arr.length }))
+    .filter((_, i) => {
+      const t = core[i].type;
+      return t === "benchmark" || t === "comparison";
+    });
+
+  // Baseline line: baseline + comparison (using baselinePassRate)
+  const basePts = core
+    .flatMap((e, i) => {
+      if (e.type === "baseline") return [{ rate: e.pass_rate, idx: i, total: core.length }];
+      if (e.type === "comparison" && e.baselinePassRate != null) return [{ rate: e.baselinePassRate, idx: i, total: core.length }];
+      return [];
+    });
+
+  if (skillPts.length < 2 && basePts.length < 2) return null;
+
+  const w = 80, h = 24, pad = 2;
+  const skillCoords = skillPts.length >= 2 ? toCoords(skillPts, w, h, pad) : [];
+  const baseCoords = basePts.length >= 2 ? toCoords(basePts, w, h, pad) : [];
+  const lastSkill = skillCoords[skillCoords.length - 1];
+
   return (
     <svg width={w} height={h} style={{ display: "block", flexShrink: 0 }}>
-      <polyline
-        points={coords.join(" ")}
-        fill="none"
-        stroke="var(--accent)"
-        strokeWidth={1.5}
-        strokeLinejoin="round"
-      />
-      {coords.length > 0 && (
+      {baseCoords.length > 0 && (
+        <polyline
+          points={baseCoords.join(" ")}
+          fill="none"
+          stroke="var(--text-tertiary)"
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+          strokeDasharray="3 2"
+        />
+      )}
+      {skillCoords.length > 0 && (
+        <polyline
+          points={skillCoords.join(" ")}
+          fill="none"
+          stroke="var(--accent)"
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+        />
+      )}
+      {lastSkill && (
         <circle
-          cx={parseFloat(coords[coords.length - 1].split(",")[0])}
-          cy={parseFloat(coords[coords.length - 1].split(",")[1])}
+          cx={parseFloat(lastSkill.split(",")[0])}
+          cy={parseFloat(lastSkill.split(",")[1])}
           r={2.5}
           fill="var(--accent)"
         />

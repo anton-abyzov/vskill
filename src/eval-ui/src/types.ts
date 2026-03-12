@@ -167,6 +167,7 @@ export interface CaseHistoryEntry {
   inputTokens?: number | null;
   outputTokens?: number | null;
   assertions: BenchmarkAssertionResult[];
+  baselinePassRate?: number;
 }
 
 export interface StatsResult {

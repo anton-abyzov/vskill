@@ -363,5 +363,105 @@ describe("benchmark-history", () => {
       const history = await getCaseHistory(join(testDir, "nonexistent"), 1);
       expect(history).toEqual([]);
     });
+
+    it("derives baselinePassRate from comparisonDetail rubric scores", async () => {
+      const compResult = mkResult({
+        timestamp: "2026-03-10T10:00:00.000Z",
+        type: "comparison" as const,
+        cases: [
+          {
+            eval_id: 1,
+            eval_name: "test-case",
+            status: "pass",
+            error_message: null,
+            pass_rate: 0.9,
+            assertions: [],
+            comparisonDetail: {
+              skillDurationMs: 100,
+              skillTokens: 50,
+              baselineDurationMs: 80,
+              baselineTokens: 40,
+              skillContentScore: 90,
+              skillStructureScore: 85,
+              baselineContentScore: 80,
+              baselineStructureScore: 60,
+              winner: "skill",
+            },
+          },
+        ],
+      });
+      await writeHistoryEntry(testDir, compResult);
+
+      const history = await getCaseHistory(testDir, 1);
+      const compEntry = history.find((e) => e.type === "comparison");
+      expect(compEntry).toBeDefined();
+      // (80 + 60) / 200 = 0.70
+      expect(compEntry!.baselinePassRate).toBeCloseTo(0.70, 5);
+    });
+
+    it("leaves baselinePassRate undefined for benchmark entries", async () => {
+      const history = await getCaseHistory(testDir, 1);
+      const benchEntry = history.find((e) => e.type === "benchmark" || e.type === undefined);
+      expect(benchEntry).toBeDefined();
+      expect(benchEntry!.baselinePassRate).toBeUndefined();
+    });
+
+    it("handles zero rubric scores correctly (baselinePassRate = 0)", async () => {
+      const zeroResult = mkResult({
+        timestamp: "2026-03-11T10:00:00.000Z",
+        type: "comparison" as const,
+        cases: [
+          {
+            eval_id: 1,
+            eval_name: "test-case",
+            status: "pass",
+            error_message: null,
+            pass_rate: 0,
+            assertions: [],
+            comparisonDetail: {
+              skillDurationMs: 100,
+              skillTokens: 50,
+              baselineDurationMs: 80,
+              baselineTokens: 40,
+              skillContentScore: 0,
+              skillStructureScore: 0,
+              baselineContentScore: 0,
+              baselineStructureScore: 0,
+              winner: "tie",
+            },
+          },
+        ],
+      });
+      await writeHistoryEntry(testDir, zeroResult);
+
+      const history = await getCaseHistory(testDir, 1);
+      const zeroEntry = history.find((e) => e.type === "comparison" && e.timestamp.startsWith("2026-03-11"));
+      expect(zeroEntry).toBeDefined();
+      expect(zeroEntry!.baselinePassRate).toBe(0);
+    });
+
+    it("leaves baselinePassRate undefined for comparison entry without comparisonDetail", async () => {
+      const noDetailResult = mkResult({
+        timestamp: "2026-03-12T10:00:00.000Z",
+        type: "comparison" as const,
+        cases: [
+          {
+            eval_id: 1,
+            eval_name: "test-case",
+            status: "pass",
+            error_message: null,
+            pass_rate: 0.5,
+            assertions: [],
+            // no comparisonDetail
+          },
+        ],
+      });
+      await writeHistoryEntry(testDir, noDetailResult);
+
+      const history = await getCaseHistory(testDir, 1);
+      const noDetailEntry = history.find((e) => e.type === "comparison" && e.timestamp.startsWith("2026-03-12"));
+      expect(noDetailEntry).toBeDefined();
+      expect(noDetailEntry!.baselinePassRate).toBeUndefined();
+    });
   });
 });

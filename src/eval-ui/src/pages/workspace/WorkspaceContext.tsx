@@ -8,6 +8,44 @@ import type { ClassifiedError } from "../../components/ErrorCard";
 import type { WorkspaceContextValue, PanelId, RunMode, InlineResult, AssertionResultInline } from "./workspaceTypes";
 import { workspaceReducer, initialWorkspaceState } from "./workspaceReducer";
 
+// ---------------------------------------------------------------------------
+// Pure accumulator mutation — extracted for testability
+// ---------------------------------------------------------------------------
+export function applySSEToAccumulator(r: InlineResult, evt: SSEEvent): void {
+  const data = evt.data as Record<string, unknown>;
+
+  if (evt.event === "output_ready") {
+    r.output = data.output as string;
+    if (data.durationMs != null) r.durationMs = data.durationMs as number;
+    if (data.tokens != null) r.tokens = data.tokens as number | null;
+  }
+
+  if (evt.event === "outputs_ready") {
+    r.output = data.skillOutput as string;
+    if (data.skillDurationMs != null) r.durationMs = data.skillDurationMs as number;
+    if (data.skillTokens != null) r.tokens = data.skillTokens as number | null;
+  }
+
+  if (evt.event === "assertion_result") {
+    const ar: AssertionResultInline = {
+      assertion_id: data.assertion_id as string,
+      text: data.text as string,
+      pass: data.pass as boolean,
+      reasoning: data.reasoning as string,
+    };
+    if (!r.assertions.find((a) => a.assertion_id === ar.assertion_id)) {
+      r.assertions.push(ar);
+    }
+  }
+
+  if (evt.event === "case_complete") {
+    r.status = data.status as string;
+    r.passRate = data.pass_rate as number | undefined;
+    r.errorMessage = (data.error_message as string) || undefined;
+    r.classifiedError = (data.classified_error as InlineResult["classifiedError"]) || undefined;
+  }
+}
+
 const WorkspaceCtx = createContext<WorkspaceContextValue | null>(null);
 
 export function useWorkspace(): WorkspaceContextValue {
@@ -42,8 +80,6 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
   // SSE callbacks — fire exactly once per event, no accumulation
   // ---------------------------------------------------------------------------
   const handleSSEEvent = useCallback((caseId: number, evt: SSEEvent) => {
-    const data = evt.data as Record<string, unknown>;
-
     // Get or create mutable accumulator for this case
     let r = inlineAccRef.current.get(caseId);
     if (!r) {
@@ -51,30 +87,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
       inlineAccRef.current.set(caseId, r);
     }
 
-    if (evt.event === "output_ready") {
-      r.output = data.output as string;
-      if (data.durationMs != null) r.durationMs = data.durationMs as number;
-      if (data.tokens != null) r.tokens = data.tokens as number | null;
-    }
-
-    if (evt.event === "assertion_result") {
-      const ar: AssertionResultInline = {
-        assertion_id: data.assertion_id as string,
-        text: data.text as string,
-        pass: data.pass as boolean,
-        reasoning: data.reasoning as string,
-      };
-      if (!r.assertions.find((a) => a.assertion_id === ar.assertion_id)) {
-        r.assertions.push(ar);
-      }
-    }
-
-    if (evt.event === "case_complete") {
-      r.status = data.status as string;
-      r.passRate = data.pass_rate as number | undefined;
-      r.errorMessage = (data.error_message as string) || undefined;
-      r.classifiedError = (data.classified_error as InlineResult["classifiedError"]) || undefined;
-    }
+    applySSEToAccumulator(r, evt);
 
     // Dispatch a snapshot (shallow copy) for React
     dispatch({ type: "UPDATE_INLINE_RESULT", evalId: caseId, result: { ...r, assertions: [...r.assertions] } });

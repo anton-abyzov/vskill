@@ -88,6 +88,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
   const [aiPrompt, setAiPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
   const [aiReasoning, setAiReasoning] = useState<string | null>(null);
+  const [reasoningExpanded, setReasoningExpanded] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiClassifiedError, setAiClassifiedError] = useState<ClassifiedError | null>(null);
   const [aiProgress, setAiProgress] = useState<ProgressEntry[]>([]);
@@ -450,27 +451,37 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                 border: "1px solid rgba(168,85,247,0.2)",
               }}
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  onClick={() => setReasoningExpanded((v) => !v)}
+                  className="flex items-center gap-2 text-left"
+                  style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                >
                   <div
-                    className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5"
+                    className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
                     style={{ background: "rgba(168,85,247,0.15)" }}
                   >
                     <SparkleIcon size={11} color="#a855f7" />
                   </div>
-                  <div>
-                    <span className="font-semibold" style={{ color: "#a855f7" }}>AI Generated</span>
-                    <span className="mx-1.5" style={{ color: "var(--text-tertiary)" }}>&mdash;</span>
-                    <span>{aiReasoning}</span>
-                    {pendingEvals && pendingEvals.length > 0 && (
-                      <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: "rgba(168,85,247,0.12)", color: "#a855f7" }}>
-                        +{pendingEvals.length} test cases
-                      </span>
-                    )}
-                  </div>
-                </div>
+                  <span className="font-semibold" style={{ color: "#a855f7" }}>AI Generated</span>
+                  <svg
+                    width="11" height="11" viewBox="0 0 24 24" fill="none"
+                    stroke="var(--text-tertiary)" strokeWidth="2.5" strokeLinecap="round"
+                    style={{ transform: reasoningExpanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s ease", flexShrink: 0 }}
+                  >
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                  {!reasoningExpanded && (
+                    <span style={{ color: "var(--text-tertiary)" }}>click to expand reasoning</span>
+                  )}
+                  {pendingEvals && pendingEvals.length > 0 && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: "rgba(168,85,247,0.12)", color: "#a855f7" }}>
+                      +{pendingEvals.length} test cases
+                    </span>
+                  )}
+                </button>
                 <button
-                  onClick={() => { setAiReasoning(null); setPendingEvals(null); }}
+                  onClick={() => { setAiReasoning(null); setPendingEvals(null); setReasoningExpanded(false); }}
                   className="flex-shrink-0 w-5 h-5 rounded flex items-center justify-center transition-colors duration-150"
                   style={{ color: "var(--text-tertiary)", background: "none", border: "none", cursor: "pointer" }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-3)"; }}
@@ -481,6 +492,13 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                   </svg>
                 </button>
               </div>
+              {reasoningExpanded && (
+                <div
+                  className="mt-2 pl-[27px] text-[12px] leading-relaxed overflow-y-auto"
+                  style={{ color: "var(--text-secondary)", maxHeight: "300px" }}
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(aiReasoning) }}
+                />
+              )}
             </div>
           )}
 
@@ -633,6 +651,19 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                 className="w-full px-3 py-2 rounded-lg text-[13px] font-mono resize-y"
                 style={{ ...inputStyle, minHeight: "150px" }}
               />
+            ) : body.trim() ? (
+              <div
+                className="text-[13px] leading-relaxed overflow-x-auto rounded-lg px-4 py-3"
+                style={{
+                  background: "var(--surface-0)",
+                  color: "var(--text-secondary)",
+                  border: "1px solid var(--border-subtle)",
+                  minHeight: "150px",
+                  maxHeight: "400px",
+                  overflowY: "auto",
+                }}
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
+              />
             ) : (
               <div
                 className="text-[13px] leading-relaxed overflow-x-auto rounded-lg px-4 py-3"
@@ -644,11 +675,8 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                   maxHeight: "400px",
                   overflowY: "auto",
                 }}
-                dangerouslySetInnerHTML={body.trim() ? { __html: renderMarkdown(body) } : undefined}
               >
-                {!body.trim() && (
-                  <span style={{ color: "var(--text-tertiary)" }}>Start writing to see preview</span>
-                )}
+                <span style={{ color: "var(--text-tertiary)" }}>Start writing to see preview</span>
               </div>
             )}
           </div>

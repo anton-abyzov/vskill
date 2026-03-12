@@ -29,7 +29,8 @@ import { getAvailablePlugins, getPluginSource, getPluginVersion, hasPlugin, disc
 import type { UnregisteredPlugin } from "../marketplace/index.js";
 import { checkInstallSafety } from "../blocklist/blocklist.js";
 import type { BlocklistEntry, RejectionInfo } from "../blocklist/types.js";
-import { getSkill } from "../api/client.js";
+import { getSkill, searchSkills } from "../api/client.js";
+import type { SkillSearchResult } from "../api/client.js";
 import { checkPlatformSecurity } from "../security/index.js";
 import { discoverSkills, getDefaultBranch, warnRateLimitOnce } from "../discovery/github-tree.js";
 import { parseGitHubSource, classifyIdentifier } from "../utils/validation.js";
@@ -48,6 +49,7 @@ import {
   cyan,
   spinner,
   link,
+  formatInstalls,
 } from "../utils/output.js";
 import { isTTY, createPrompter } from "../utils/prompts.js";
 import { installSymlink, installCopy } from "../installer/canonical.js";
@@ -2083,6 +2085,52 @@ function getTrustLabel(tier: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Search result display helpers (used by install recommendation fallback)
+// ---------------------------------------------------------------------------
+
+function formatSearchResultId(r: SkillSearchResult): string {
+  const displayName = r.skillSlug || r.name.split("/").pop() || r.name;
+  const publisher = r.ownerSlug && r.repoSlug
+    ? `${r.ownerSlug}/${r.repoSlug}`
+    : extractSearchBaseRepo(r.repoUrl);
+  return publisher ? `${publisher}/${displayName}` : displayName;
+}
+
+function formatSearchUrl(r: SkillSearchResult): string {
+  if (r.ownerSlug && r.repoSlug && r.skillSlug) {
+    return `https://verified-skill.com/skills/${r.ownerSlug}/${r.repoSlug}/${r.skillSlug}`;
+  }
+  const parts = r.name.split("/");
+  if (parts.length === 3) {
+    return `https://verified-skill.com/skills/${parts.join("/")}`;
+  }
+  const base = extractSearchBaseRepo(r.repoUrl);
+  if (base) {
+    const sn = r.name.split("/").pop() || r.name;
+    return `https://verified-skill.com/skills/${base}/${sn}`;
+  }
+  return `https://verified-skill.com/skills/${r.name}`;
+}
+
+function formatSearchBadge(certTier: string | undefined, trustTier: string | undefined): string {
+  if (certTier === "CERTIFIED") return green("\u2713 certified");
+  if (certTier === "VERIFIED") return cyan("\u2713 verified");
+  switch (trustTier) {
+    case "T4": return green("\u2713 certified");
+    case "T3": return cyan("\u2713 verified");
+    case "T2": return yellow("~ pending");
+    case "T1": return dim("~ unreviewed");
+    default: return dim("~ unreviewed");
+  }
+}
+
+function extractSearchBaseRepo(repoUrl: string | undefined): string | null {
+  if (!repoUrl) return null;
+  const match = repoUrl.match(/([^/]+\/[^/]+?)(?:\/tree\/|\.git|$)/);
+  return match ? match[1] : null;
+}
+
+// ---------------------------------------------------------------------------
 // Registry name install — look up skill by name, install from content
 // ---------------------------------------------------------------------------
 
@@ -2128,6 +2176,45 @@ async function installFromRegistry(
       printBlockedError(safety.entry!);
       process.exit(1);
     }
+
+    // Search for matching skills and show recommendations
+    try {
+      const response = await searchSkills(skillName, { limit: 5 });
+      const results = response.results
+        .filter((r) => !r.isBlocked)
+        .sort((a, b) => {
+          const certRank = (t: string | undefined) => t === "CERTIFIED" ? 0 : t === "VERIFIED" ? 1 : 2;
+          const certDiff = certRank(a.certTier) - certRank(b.certTier);
+          if (certDiff !== 0) return certDiff;
+          return (b.githubStars ?? 0) - (a.githubStars ?? 0);
+        });
+
+      if (results.length > 0) {
+        console.error(
+          red(`Skill "${skillName}" not found as an exact registry name.\n`)
+        );
+        console.log(bold("Did you mean:\n"));
+        for (const r of results) {
+          const skillId = formatSearchResultId(r);
+          const stars = r.githubStars ?? 0;
+          const starsStr = `\u2605${formatInstalls(stars)}`;
+          const badge = formatSearchBadge(r.certTier, r.trustTier);
+          console.log(`  ${bold(skillId)}  ${dim(starsStr)}${badge ? "  " + badge : ""}`);
+          const url = formatSearchUrl(r);
+          console.log(`  ${link(url, cyan(url))}`);
+          console.log();
+        }
+        const top = results[0];
+        const topId = formatSearchResultId(top);
+        console.log(dim("Install with exact name:"));
+        console.log(cyan(`  npx vskill install ${topId}\n`));
+        process.exit(1);
+        return;
+      }
+    } catch {
+      // Search also failed — fall through to generic error
+    }
+
     console.error(
       red(`Skill "${skillName}" not found in registry.\n`) +
         dim(`Use ${cyan("owner/repo")} for GitHub installs, or `) +

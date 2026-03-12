@@ -459,8 +459,8 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
       return;
     }
 
-    if (body.prompt.length > 10000) {
-      sendJson(res, { error: "Prompt is too long (max 10,000 characters)" }, 400, req);
+    if (body.prompt.length > 50000) {
+      sendJson(res, { error: "Prompt is too long (max 50,000 characters)" }, 400, req);
       return;
     }
 

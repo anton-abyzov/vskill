@@ -160,7 +160,11 @@ export function EditorPanel() {
         body: JSON.stringify({ prompt: regenPrompt, provider, model }),
         signal: controller.signal,
       });
-      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok || !res.body) {
+        let msg = `HTTP ${res.status}`;
+        try { const j = await res.json(); if (j.error) msg = j.error; } catch {}
+        throw new Error(msg);
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();

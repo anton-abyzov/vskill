@@ -678,15 +678,8 @@ interface AddOptions {
   onlySkills?: string;
 }
 
-/**
- * Resolve the project root for skill installation, with a HOME-directory guard.
- *
- * When `--cwd` is set, uses process.cwd() directly.
- * Otherwise walks up looking for project markers (.git, package.json, etc.).
- * If the resolved root IS the home directory (or none found), falls back to
- * process.cwd() to avoid polluting $HOME with skill files.
- */
-function safeProjectRoot(_opts: { cwd?: boolean }): string {
+/** Returns process.cwd() as the project root for skill installation. */
+function safeProjectRoot(): string {
   return process.cwd();
 }
 
@@ -694,13 +687,13 @@ function safeProjectRoot(_opts: { cwd?: boolean }): string {
  * Resolve the directory for the lockfile based on scope.
  *
  * Global scope  → ~/.agents/ (canonical global directory)
- * Project scope → safeProjectRoot(opts) (same as before)
+ * Project scope → safeProjectRoot() (same as before)
  */
 function lockfileRoot(opts: AddOptions): string {
   if (opts.global) {
     return join(os.homedir(), ".agents");
   }
-  return safeProjectRoot(opts);
+  return safeProjectRoot();
 }
 
 /**
@@ -724,8 +717,7 @@ function resolveSkillsPath(base: string, localSkillsDir: string): string {
  *
  * Priority:
  * 1. `--global` -> agent's globalSkillsDir
- * 2. `--cwd`   -> process.cwd() + agent's localSkillsDir
- * 3. default   -> process.cwd() + agent's localSkillsDir
+ * 2. default   -> process.cwd() + agent's localSkillsDir
  */
 function resolveInstallBase(
   opts: AddOptions,
@@ -734,7 +726,7 @@ function resolveInstallBase(
   if (opts.global) {
     return resolveTilde(agent.globalSkillsDir);
   }
-  return resolveSkillsPath(safeProjectRoot(opts), agent.localSkillsDir);
+  return resolveSkillsPath(safeProjectRoot(), agent.localSkillsDir);
 }
 
 // ---------------------------------------------------------------------------
@@ -748,13 +740,13 @@ interface InstallSelections {
 }
 
 /**
- * Prompt the user for agent selection and installation scope.
+ * Prompt the user for agent selection and install method.
  *
  * Interactive by default when TTY is available. Skipped when:
  * - `--yes` flag is passed
  * - Not a TTY (CI/piped)
  * - `--agent` flag narrows to specific agents (skip agent prompt only)
- * - `--global` or `--cwd` explicitly sets scope (skip scope prompt only)
+ * Scope is determined by `--global` flag (default: project = cwd).
  */
 async function promptInstallOptions(
   agents: AgentDefinition[],
@@ -827,7 +819,7 @@ async function promptInstallOptions(
   for (const agent of selectedAgents) {
     const base = useGlobal
       ? resolveTilde(agent.globalSkillsDir)
-      : resolveSkillsPath(safeProjectRoot(opts), agent.localSkillsDir);
+      : resolveSkillsPath(safeProjectRoot(), agent.localSkillsDir);
     console.log(dim(`    ${agent.displayName}: ${base}/`));
   }
   console.log(dim("  ─────────────────────────────────────────────────"));
@@ -1564,7 +1556,7 @@ async function installRepoPlugin(
   if (!selections.symlink) opts.copy = true;
 
   // Compute project root for consistent lockfile + skill locations
-  const projectRoot = safeProjectRoot(opts);
+  const projectRoot = safeProjectRoot();
 
   // Install skills and commands with namespace prefix
   const sha = createHash("sha256").update(combined).digest("hex").slice(0, 12);
@@ -1771,7 +1763,7 @@ export async function addCommand(
   if (!selections.symlink) opts.copy = true;
 
   // Compute project root ONCE for consistent lockfile + skill locations
-  const projectRoot = safeProjectRoot(opts);
+  const projectRoot = safeProjectRoot();
 
   // Skill selection (multi-skill repos, when interactive)
   let selectedSkills = discovered;
@@ -2120,7 +2112,7 @@ async function installFromRegistry(
   if (selections.global) opts.global = true;
 
   // Compute project root for consistent lockfile + skill locations
-  const projectRoot = safeProjectRoot(opts);
+  const projectRoot = safeProjectRoot();
 
   // Install to each agent
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
@@ -2323,7 +2315,7 @@ async function installSingleSkillLegacy(
 
   // Install to each agent using canonical installer
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
-  const projectRoot = safeProjectRoot(opts);
+  const projectRoot = safeProjectRoot();
   const installOpts = { global: !!opts.global, projectRoot };
 
   const locations = opts.copy

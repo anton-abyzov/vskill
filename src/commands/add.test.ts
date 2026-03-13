@@ -1459,51 +1459,6 @@ describe("addCommand smart project root resolution", () => {
 
     cwdSpy.mockRestore();
   });
-
-  // TC-013: --cwd flag bypasses findProjectRoot entirely
-  it("installs relative to process.cwd() when --cwd flag is used", async () => {
-    const cwd = "/home/user/project/subdir";
-    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
-    mockFindProjectRoot.mockReturnValue("/home/user/project");
-
-    await addCommand("owner/safe-repo", { cwd: true });
-
-    expect(mockInstallSymlink).toHaveBeenCalled();
-    const callArgs = mockInstallSymlink.mock.calls[0];
-    expect(callArgs[3].projectRoot).toBe(cwd);
-
-    cwdSpy.mockRestore();
-  });
-
-  // TC-012b: Falls back to process.cwd() when findProjectRoot returns null
-  it("falls back to process.cwd() when findProjectRoot returns null", async () => {
-    const cwd = "/some/random/path";
-    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
-    mockFindProjectRoot.mockReturnValue(null);
-
-    await addCommand("owner/safe-repo", {});
-
-    expect(mockInstallSymlink).toHaveBeenCalled();
-    const callArgs = mockInstallSymlink.mock.calls[0];
-    expect(callArgs[3].projectRoot).toBe(cwd);
-
-    cwdSpy.mockRestore();
-  });
-
-  // TC-012c: HOME directory guard — falls back when findProjectRoot returns homedir
-  it("falls back to process.cwd() when findProjectRoot returns home directory", async () => {
-    const cwd = "/home/testuser/some-dir";
-    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
-    mockFindProjectRoot.mockReturnValue("/home/testuser");
-
-    await addCommand("owner/safe-repo", {});
-
-    expect(mockInstallSymlink).toHaveBeenCalled();
-    const callArgs = mockInstallSymlink.mock.calls[0];
-    expect(callArgs[3].projectRoot).toBe(cwd);
-
-    cwdSpy.mockRestore();
-  });
 });
 
 describe("addCommand --agent filter", () => {
@@ -1650,7 +1605,7 @@ describe("addCommand nested directory fix (TC-016)", () => {
 
     await addCommand("owner/safe-repo", { cwd: true });
 
-    // With --cwd, projectRoot should be process.cwd() directly (no findProjectRoot)
+    // projectRoot should be process.cwd() directly
     expect(mockInstallSymlink).toHaveBeenCalled();
     const installOpts = mockInstallSymlink.mock.calls[0][3];
     expect(installOpts.projectRoot).toBe(agentBaseDir);

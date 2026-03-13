@@ -85,6 +85,20 @@ export function disablePlugin(
 }
 
 /**
+ * Remove a plugin entry entirely from settings.json (vs. setting to false).
+ */
+export function removePlugin(
+  pluginId: string,
+  opts: SettingsOptions,
+): void {
+  const settings = readSettings(opts);
+  if (settings.enabledPlugins) {
+    delete settings.enabledPlugins[pluginId];
+  }
+  writeSettings(settings, opts);
+}
+
+/**
  * Check if a plugin is enabled in settings.json.
  */
 export function isPluginEnabled(

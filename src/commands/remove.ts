@@ -4,10 +4,12 @@
 
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import { resolveTilde } from "../utils/paths.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { readLockfile, removeSkillFromLock } from "../lockfile/index.js";
+import { removePlugin } from "../settings/settings.js";
 import { bold, green, red, yellow, dim } from "../utils/output.js";
 
 interface RemoveOptions {
@@ -98,6 +100,26 @@ export async function removeCommand(
   // Update lockfile
   if (skillEntry) {
     removeSkillFromLock(skillName);
+  }
+
+  // Clean up plugin settings and cache if this was a marketplace plugin
+  if (skillEntry?.pluginDir && skillEntry.marketplace) {
+    const pluginId = `${skillName}@${skillEntry.marketplace}`;
+    const scope = skillEntry.scope ?? "user";
+    removePlugin(pluginId, { scope });
+
+    // Remove orphaned plugin cache
+    const cacheDir = resolveTilde(
+      join(homedir(), ".claude", "plugins", "cache", skillEntry.marketplace, skillName),
+    );
+    if (existsSync(cacheDir)) {
+      try {
+        rmSync(cacheDir, { recursive: true, force: true });
+        console.log(dim(`Plugin cache removed: ${cacheDir}`));
+      } catch {
+        // non-fatal
+      }
+    }
   }
 
   // Summary

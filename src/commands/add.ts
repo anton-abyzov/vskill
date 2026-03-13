@@ -18,7 +18,6 @@ import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import os from "node:os";
 import { resolveTilde } from "../utils/paths.js";
-import { findProjectRoot } from "../utils/project-root.js";
 import { reportInstall, reportInstallBatch, submitSkill } from "../api/client.js";
 import { filterAgents } from "../utils/agent-filter.js";
 import { detectInstalledAgents, AGENTS_REGISTRY } from "../agents/agents-registry.js";
@@ -687,11 +686,8 @@ interface AddOptions {
  * If the resolved root IS the home directory (or none found), falls back to
  * process.cwd() to avoid polluting $HOME with skill files.
  */
-function safeProjectRoot(opts: { cwd?: boolean }): string {
-  if (opts.cwd) return process.cwd();
-  const resolved = findProjectRoot(process.cwd());
-  if (resolved === null || resolved === os.homedir()) return process.cwd();
-  return resolved;
+function safeProjectRoot(_opts: { cwd?: boolean }): string {
+  return process.cwd();
 }
 
 /**
@@ -806,18 +802,8 @@ async function promptInstallOptions(
     }
   }
 
-  // Scope selection (skip if --global or --cwd explicitly set)
-  if (!opts.global && !opts.cwd) {
-    const projectRoot = safeProjectRoot(opts);
-    const prompter2 = createPrompter();
-    const scopeIdx = await prompter2.promptChoice("Installation scope:", [
-      { label: "Project", hint: `current folder (${projectRoot})` },
-      { label: "User", hint: "home directory (global)" },
-    ]);
-    useGlobal = scopeIdx === 1;
-  } else {
-    useGlobal = !!opts.global;
-  }
+  // Scope: --global flag → global install; default → project (cwd)
+  useGlobal = !!opts.global;
 
   // Installation method (skip if --copy explicitly set)
   let useSymlink = !opts.copy;

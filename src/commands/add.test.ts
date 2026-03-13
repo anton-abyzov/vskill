@@ -1445,18 +1445,17 @@ describe("addCommand smart project root resolution", () => {
     globalThis.fetch = originalFetch;
   });
 
-  // TC-012: Project scope uses findProjectRoot result when available
-  it("installs skill relative to project root found by findProjectRoot", async () => {
+  // TC-012: Project scope always uses process.cwd() — no walk-up
+  it("installs skill relative to process.cwd() regardless of findProjectRoot result", async () => {
     const cwd = "/home/user/project/subdir";
-    const projectRoot = "/home/user/project";
     const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
-    mockFindProjectRoot.mockReturnValue(projectRoot);
+    mockFindProjectRoot.mockReturnValue("/home/user/project");
 
     await addCommand("owner/safe-repo", {});
 
     expect(mockInstallSymlink).toHaveBeenCalled();
     const callArgs = mockInstallSymlink.mock.calls[0];
-    expect(callArgs[3].projectRoot).toBe(projectRoot);
+    expect(callArgs[3].projectRoot).toBe(cwd);
 
     cwdSpy.mockRestore();
   });

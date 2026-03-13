@@ -806,15 +806,8 @@ async function promptInstallOptions(
     }
   }
 
-  // Scope selection (skip if --global or --cwd already set)
-  if (!opts.global && !opts.cwd) {
-    const prompter2 = createPrompter();
-    const scopeIdx = await prompter2.promptChoice("Installation scope:", [
-      { label: "Project", hint: "install in current project root" },
-      { label: "Global", hint: "install in user home directory" },
-    ]);
-    useGlobal = scopeIdx === 1;
-  }
+  // Scope: always project unless --global flag was explicitly passed
+  useGlobal = !!opts.global;
 
   // Installation method (skip if --copy explicitly set)
   let useSymlink = !opts.copy;

@@ -739,37 +739,72 @@ sleep 30  # Do NOT make ANY CDP/JS calls during upload!
 
 **ANY CDP call during or after upload (evaluate, screenshot, DOM query) will crash the page.** TikTok's anti-bot detection monitors for automation signals during the upload flow. The upload must complete in a "hands-off" state.
 
-**Step 6: Set caption (optional — DraftJS editor is fragile)**
+**Step 6: Set caption via Playwright type (CRITICAL — paste does NOT work)**
 
-TikTok uses DraftJS which may reject clipboard paste. Options in order of reliability:
+TikTok uses a DraftJS contenteditable div. Clipboard paste (pbcopy + Cmd+V) is silently ignored — the field stays empty. Playwright's `type` action is the only reliable method.
 
-```bash
-# Option A: Single CDP call (risky — may crash page)
-# Only try this if you haven't made any CDP calls since upload
+```python
+# Click into the description field to focus it
+send("Input.dispatchMouseEvent", {"type": "mousePressed", "x": caption_x, "y": caption_y, "button": "left", "clickCount": 1})
+send("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": caption_x, "y": caption_y, "button": "left"})
+
+# Type via Playwright (NOT clipboard paste — paste is silently dropped by DraftJS)
+await page.keyboard.type(caption_text, delay=50)
+
+# If hashtags trigger autocomplete dropdown — press Escape to dismiss before continuing
+await page.keyboard.press('Escape')
+```
+
+**Hashtag caution**: Each `#hashtag` opens an autocomplete dropdown that can intercept subsequent keystrokes. After typing a hashtag, either press Escape to close it or skip hashtags entirely and add them after publish via the TikTok app.
+
+**Step 7: Click Post — expect Permission Denied (webmssdk anti-bot)**
+
+> ⚠️ **CRITICAL**: TikTok's `webmssdk` + `webmssdk_ex` SDKs detect CDP browsers at the API layer.
+> Even when `navigator.webdriver` is overridden to `undefined`, the publish API returns:
+> `{code: 7, statusMsg: "Permission Denied"}`. The upload completes, the description is set,
+> content checks pass — but the final publish API call is blocked by deeper fingerprinting
+> (CDP WebSocket debug endpoints, timing signatures). This is NOT fixable in CDP-attached browsers.
+
+**Best effort automated click:**
+
+```python
+# Step 7a: Scroll Post button into viewport (it's typically below the fold at y≈1293)
 send("Runtime.evaluate", {
-    "expression": "document.execCommand('insertText', false, 'Your caption')"
+    "expression": "document.querySelector('button[data-e2e=\"post_video_button\"]')?.scrollIntoView({block: 'center'})"
 })
+# Recalculate coordinates after scroll
+btn_rect = send("Runtime.evaluate", {
+    "expression": "document.querySelector('button[data-e2e=\"post_video_button\"]')?.getBoundingClientRect()"
+})
+toolbar_height = send("Runtime.evaluate", {"expression": "window.outerHeight - window.innerHeight"})
+screen_x = btn_rect['x'] + btn_rect['width'] / 2
+screen_y = 33 + toolbar_height + btn_rect['y'] + btn_rect['height'] / 2
+# e.g. screen_x ≈ 192, screen_y ≈ 1016 (33 menu + 87 toolbar + 896 viewport_y)
 
-# Option B: cliclick + AppleScript clipboard paste
-echo "Your caption" | pbcopy
-cliclick t:500,400  # Click description field area
-osascript -e 'tell application "System Events" to keystroke "a" using command down'
-osascript -e 'tell application "System Events" to keystroke "v" using command down'
-
-# Option C: Skip caption, edit after publishing via TikTok app
+# Step 7b: Click via cliclick (physical click lands, but API may still return Permission Denied)
+os.system(f"cliclick c:{int(screen_x)},{int(screen_y)}")
 ```
 
-**Step 7: Click Post**
+**Step 8: Verify in a SEPARATE tab (MANDATORY — upload page gives no success signal)**
 
-```bash
-# Scroll to Post button (may be below fold)
-osascript -e 'tell application "System Events" to key code 119'  # End key
+The TikTok upload page does NOT redirect or show a success message when publish fails silently. Without this verification step, you will re-click Post and create duplicate uploads.
 
-# Click Post via cliclick (use calculated coordinates)
-cliclick c:POST_X,POST_Y
+```python
+# Wait 10s for API response
+import time; time.sleep(10)
 
-# Or: manual click by user (most reliable for now)
+# Open tiktok.com/@username in a NEW separate tab
+# (Never reload the upload page — that will reset the form)
+send("Target.createTarget", {"url": "https://www.tiktok.com/@YOUR_USERNAME"})
+time.sleep(5)
+# Screenshot the profile page and check if the new video appears in the feed
 ```
+
+**If Permission Denied (code: 7):**
+- Inform the user that TikTok's anti-bot SDK blocked the publish call
+- Tell them: the video IS uploaded — they just need to click Post manually in the browser
+- Never re-upload without checking the profile first — duplicate uploads are a real risk
+- Manual click by the user (without CDP attached) will always succeed
 
 ### Chrome Personal Profile Window Management
 
@@ -811,8 +846,12 @@ ffmpeg -framerate 1/4 -i slide-%d.png \
 | `cliclick` without tab activation | Clicks wrong Chrome window (personal vs default) |
 | `document.execCommand()` after upload | Triggers page crash (anti-bot) |
 | Keyboard Tab+Enter to Post button | Can't reliably navigate to the button |
-| JS `button.click()` on Post | Click registers but page crashes before API call completes |
+| JS `button.click()` on Post | Click registers but API returns `{code: 7, statusMsg: "Permission Denied"}` |
 | Any CDP call during upload | Crashes the page — TikTok monitors for automation |
+| Clipboard paste for caption (pbcopy + Cmd+V) | DraftJS contenteditable silently ignores the paste — field stays empty |
+| `navigator.webdriver` override alone | Not enough — webmssdk uses deeper fingerprinting (CDP WebSocket, timing signatures) |
+| Post button click via CDP-attached browser | Upload works, description works, content checks pass — but publish API is always blocked |
+| Reloading the upload page to verify | Resets the form — use a SEPARATE new tab to check the profile instead |
 
 ---
 
@@ -1082,6 +1121,10 @@ for (let i = 0; i < 30; i++) {
 | Page crashes after TikTok upload | TikTok | Must override `navigator.webdriver` BEFORE page load |
 | CDP calls crash TikTok page | TikTok | NO CDP calls during/after upload — use `sleep` + cliclick only |
 | cliclick hits wrong Chrome window | TikTok | Target by PID: `first process whose unix id is <PID>` |
+| TikTok publish returns `{code: 7, statusMsg: "Permission Denied"}` | TikTok | webmssdk detects CDP browser — video IS uploaded, tell user to click Post manually |
+| TikTok caption field stays empty after paste | TikTok | DraftJS ignores clipboard paste — use Playwright `type` action instead |
+| TikTok Post button below viewport | TikTok | Call `scrollIntoView({block: 'center'})` then recalculate screen coordinates before cliclick |
+| Unsure if TikTok post actually published | TikTok | ALWAYS open `tiktok.com/@username` in a NEW separate tab (never reload upload page) |
 | AppleScript "Go to folder" doesn't open | All (file picker) | Grant Accessibility permissions to System Events |
 | File picker closes without selecting | All (file picker) | Increase AppleScript delays (1s → 2s) |
 

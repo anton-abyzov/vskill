@@ -7,6 +7,10 @@ metadata:
 
 # Social Media Posting & Engagement
 
+**Primary goal: go viral, grow followers, and promote the user's products and personal brand.**
+
+Every post is an opportunity to attract new followers, build brand authority, and drive awareness of the user's products. Content that delivers value or tells a compelling story while naturally weaving in the brand is the highest-leverage output. Engagement, reach, and follower growth are the metrics that matter — optimize for them, not just for "posting something".
+
 Post content across all major platforms with AI-generated visuals, strategic content planning, mandatory human approval, and daily engagement to grow your audience.
 
 ---
@@ -73,6 +77,17 @@ Navigate to the profile/page after publishing and confirm the post actually appe
 
 Before writing a single word, think strategically:
 
+### North Star
+
+Every post serves one or more of these goals — always be explicit about which ones apply:
+
+1. **Go viral** — high shareability, broad appeal, stops the scroll. Prioritize hooks, proof, and emotional resonance.
+2. **Grow followers** — content that makes people think "I want more of this." End with a clear follow CTA or a hook into the next post.
+3. **Promote the product** — weave the product in naturally as the tool that enabled the result, solved the problem, or made the story possible. Never feel like an ad.
+4. **Build personal brand** — establish the user as a credible, interesting voice in their space. Opinions, behind-the-scenes, and unique perspectives beat generic tips.
+
+Optimizing for all four simultaneously is possible — a viral behind-the-scenes post that mentions the product in passing is the gold standard. The worst outcome is content that does none of them (generic, forgettable, no CTA).
+
 ### Hook Formula
 
 The first line determines whether anyone reads the rest. Use one of these patterns:
@@ -134,8 +149,8 @@ Keep promotional under 5% of posts. If a product/brand context file exists:
 6. PROOF       -> For X/Twitter & Threads: create proof/evidence screenshot as first image
 7. VIDEO       -> If video content: Veo 3.1 AI video (or Ken Burns fallback)
 8. REVIEW      -> Present everything + timing recommendation to user, wait for approval
-9. POST        -> Publish or schedule to each platform using best available tool
-10. VERIFY     -> Confirm each post is live (or scheduled), collect URLs
+9. POST        -> Attach image FIRST, wait for preview thumbnail, THEN click Post (X/Twitter + Threads: mandatory verification)
+10. VERIFY     -> Navigate to published post URL, screenshot it, check text encoding + image/video present — see "Post-Publication Verification" section
 11. ENGAGE     -> Find 10 threads per platform, draft replies, get approval
 12. LOG        -> Write daily engagement log with all URLs + save copy files
 ```
@@ -273,6 +288,83 @@ This is particularly useful when:
 - File upload dialogs need native OS interaction
 - You need to interact with system dialogs (CAPTCHA, etc.)
 
+### AppleScript File Picker: Keyboard Language Issue
+
+**This is a silent failure.** When AppleScript uses `Cmd+Shift+G` to open the "Go to Folder" dialog in a macOS file picker, any keystrokes go through the currently active system keyboard input source. If the user has a non-Latin layout active (Russian, Japanese, Arabic, etc.), the typed path characters get converted — `/Users/anton/image.png` becomes garbage, the dialog finds nothing, and the file is never attached. No error is thrown.
+
+**Always switch the input source to English before typing any path, then restore it.**
+
+```python
+import subprocess, time
+
+def ensure_english_input_source():
+    """Switch to a Latin/English input source before typing paths in macOS dialogs.
+    Returns the name of the previous input source so it can be restored."""
+    script = '''
+tell application "System Events"
+    set currentName to name of current input source
+    set allSources to input sources
+    set englishNames to {"U.S.", "ABC", "U.S. Extended", "U.S. International - PC", "British", "Australian"}
+    set alreadyEnglish to false
+    repeat with n in englishNames
+        if currentName is n then
+            set alreadyEnglish to true
+            exit repeat
+        end if
+    end repeat
+    if alreadyEnglish then
+        return "already_english"
+    end if
+    repeat with src in allSources
+        if (name of src) is in englishNames then
+            set current input source to src
+            return currentName
+        end if
+    end repeat
+    return "no_english_source_found"
+end tell
+'''
+    result = subprocess.run(['osascript', '-e', script], capture_output=True, text=True)
+    return result.stdout.strip()
+
+def restore_input_source(original_name):
+    if original_name in ('already_english', 'no_english_source_found', ''):
+        return
+    script = f'''
+tell application "System Events"
+    repeat with src in input sources
+        if (name of src) is "{original_name}" then
+            set current input source to src
+            exit repeat
+        end if
+    end repeat
+end tell
+'''
+    subprocess.run(['osascript', '-e', script])
+
+# Usage pattern:
+original_lang = ensure_english_input_source()
+time.sleep(0.3)  # give the OS time to switch before typing
+
+# ... Cmd+Shift+G, type the path, press Enter ...
+
+restore_input_source(original_lang)
+```
+
+**Checklist when using any AppleScript file picker:**
+
+1. Call `ensure_english_input_source()` BEFORE triggering `Cmd+Shift+G`
+2. Add a 0.3s delay after switching — the OS needs a moment to apply the change
+3. Type the path
+4. Restore the original input source after pressing Enter
+5. If `no_english_source_found` is returned, warn the user: "Please temporarily switch your keyboard to English in System Settings → Keyboard → Input Sources, then retry"
+
+**Diagnosing silently failed path input:** If the file picker opened but nothing was selected, run:
+```bash
+osascript -e 'tell application "System Events" to return name of current input source'
+```
+If it returns anything other than a Latin layout name, the language mismatch was the cause.
+
 ### Chrome-Open (Last Resort)
 
 When all automation fails, open the platform's compose page in Chrome with the user's configured profile:
@@ -325,21 +417,162 @@ with urllib.request.urlopen(req, timeout=120) as resp:
 
 ### Platform-Specific Dimensions
 
-Each platform has an optimal aspect ratio. Include the target dimensions in your prompt so the model composes the image correctly, and use the right resolution setting.
+Each platform has strict aspect ratio requirements. **Always generate at the correct ratio from the start** — resizing after the fact loses quality. Include the target dimensions in your prompt so the model composes correctly.
 
-| Platform | Aspect Ratio | Pixels | Use Case | Resolution Flag |
-|----------|-------------|--------|----------|-----------------|
-| Instagram Feed/Carousel | 1:1 (square) | 1080x1080 | Carousel slides | `--resolution 2K` |
-| Instagram Story/Reel | 9:16 (vertical) | 1080x1920 | Stories, Reels | `--resolution 2K` |
-| TikTok | 9:16 (vertical) | 1080x1920 | Video frames | `--resolution 2K` |
-| X/Twitter | 16:9 (landscape) | 1200x675 | Tweet images | `--resolution 1K` |
-| LinkedIn | 1.91:1 (landscape) | 1200x628 | Post images | `--resolution 1K` |
-| Facebook | 1.91:1 (landscape) | 1200x628 | Post images | `--resolution 1K` |
-| YouTube Community | 16:9 (landscape) | 1280x720 | Community posts | `--resolution 1K` |
-| Threads | 1:1 (square) | 1080x1080 | Post images | `--resolution 1K` |
-| Discord | 16:9 (landscape) | 1280x720 | Embeds | `--resolution 1K` |
-| Telegram | 16:9 (landscape) | 1280x720 | Channel posts | `--resolution 1K` |
-| dev.to | 16:9 (landscape) | 1000x420 | Cover image | `--resolution 1K` |
+| Platform | Best Ratio | Pixels | Allowed Range | Max File Size | JPEG Quality | Resolution Flag |
+|----------|-----------|--------|---------------|---------------|--------------|-----------------|
+| Instagram Feed (portrait) | **4:5** | 1080x1350 | 0.8–1.91 | 8 MB | 95+ | `--resolution 2K` |
+| Instagram Feed (square) | 1:1 | 1080x1080 | 0.8–1.91 | 8 MB | 95+ | `--resolution 2K` |
+| Instagram Carousel | 1:1 or 4:5 | 1080x1080 or 1080x1350 | 0.8–1.91 (all slides same ratio) | 8 MB each | 95+ | `--resolution 2K` |
+| Instagram Story/Reel | 9:16 | 1080x1920 | 9:16 only | 8 MB | 95+ | `--resolution 2K` |
+| TikTok | 9:16 | 1080x1920 | 9:16 strongly preferred | 20 MB | 90+ | `--resolution 2K` |
+| X/Twitter | 16:9 | 1200x675 | any, but 16:9 crops best in preview | 5 MB | 85+ | `--resolution 1K` |
+| LinkedIn | 1.91:1 | 1200x628 | any | 8 MB | 90+ | `--resolution 1K` |
+| Facebook | 1.91:1 | 1200x628 | any | 8 MB | 90+ | `--resolution 1K` |
+| YouTube Community | 16:9 | 1280x720 | any | 8 MB | 90+ | `--resolution 1K` |
+| YouTube Thumbnail | 16:9 | 1280x720 | 16:9 only | 2 MB | 90+ | `--resolution 1K` |
+| Threads | 1:1 | 1080x1080 | 0.8–1.91 | 8 MB | 90+ | `--resolution 1K` |
+| Discord | 16:9 | 1280x720 | any | 8 MB | 85+ | `--resolution 1K` |
+| Telegram | 16:9 | 1280x720 | any | 10 MB | 85+ | `--resolution 1K` |
+| dev.to | 1000x420 | 1000x420 | any | 1 MB | 85+ | `--resolution 1K` |
+
+**Instagram 4:5 portrait is the recommended default** — it takes up the most vertical screen space in the feed, which increases impressions before the user scrolls past.
+
+### Image Aspect Ratio Enforcement
+
+**Always validate and fix aspect ratio BEFORE uploading.** Instagram (and TikTok) will hard-reject images outside their allowed range with an "uploaded image isn't in an allowed aspect ratio" error. This must be caught and fixed, not reported back to the user as a failure.
+
+**Two strategies — choose based on image type:**
+
+| Image Type | Strategy | Why |
+|------------|----------|-----|
+| AI-generated image | Regenerate with correct ratio in the prompt | Easiest — just add the ratio to the generation prompt |
+| User screenshot / proof image | **Pad, never crop** | Cropping cuts content; padding preserves everything |
+| Logo or icon | Pad with transparent/dark background | Keeps proportions exact |
+
+**Step 1: Check the aspect ratio before uploading**
+
+```python
+from PIL import Image
+
+def check_aspect_ratio(img_path, platform='instagram'):
+    """Check if image ratio is within platform's allowed range."""
+    img = Image.open(img_path)
+    w, h = img.size
+    ratio = w / h
+
+    limits = {
+        'instagram': (0.8, 1.91),   # 4:5 portrait to 1.91:1 landscape
+        'threads':   (0.8, 1.91),
+        'tiktok':    (0.5, 1.0),    # strongly prefer 9:16 = 0.5625
+        'twitter':   (0.33, 3.0),   # very permissive
+    }
+    lo, hi = limits.get(platform, (0.5, 2.0))
+
+    if ratio < lo:
+        return False, ratio, 'too_tall'
+    elif ratio > hi:
+        return False, ratio, 'too_wide'
+    return True, ratio, 'ok'
+```
+
+**Step 2: Fix it — pad, never crop (especially for screenshots)**
+
+```python
+from PIL import Image, ImageFilter
+
+def fit_to_ratio(input_path, output_path, target_w, target_h, background='blur'):
+    """
+    Fit image into target dimensions without cropping any content.
+
+    background='blur'  → blurred + darkened version of the image fills the padding (looks natural, no black bars)
+    background='dark'  → solid dark (#0f0f0f) padding (cleaner for screenshots with dark backgrounds)
+    background='white' → solid white padding (cleaner for screenshots with white backgrounds)
+    """
+    img = Image.open(input_path).convert('RGB')
+    src_w, src_h = img.size
+    src_ratio = src_w / src_h
+    tgt_ratio = target_w / target_h
+
+    # Build background canvas
+    if background == 'blur':
+        bg = img.resize((target_w, target_h), Image.LANCZOS)
+        bg = bg.filter(ImageFilter.GaussianBlur(radius=40))
+        # Darken so the content stands out
+        dark = Image.new('RGB', (target_w, target_h), (0, 0, 0))
+        bg = Image.blend(bg, dark, 0.45)
+    elif background == 'white':
+        bg = Image.new('RGB', (target_w, target_h), (255, 255, 255))
+    else:
+        bg = Image.new('RGB', (target_w, target_h), (15, 15, 15))
+
+    # Scale image to fit, preserving ALL content (letterbox/pillarbox)
+    if src_ratio > tgt_ratio:
+        new_w = target_w
+        new_h = int(target_w / src_ratio)
+    else:
+        new_h = target_h
+        new_w = int(target_h * src_ratio)
+
+    img_scaled = img.resize((new_w, new_h), Image.LANCZOS)
+
+    # Center on background
+    x = (target_w - new_w) // 2
+    y = (target_h - new_h) // 2
+    bg.paste(img_scaled, (x, y))
+
+    bg.save(output_path, 'JPEG', quality=95, optimize=True, progressive=True)
+    print(f"Saved {output_path} ({target_w}x{target_h}, original: {src_w}x{src_h})")
+    return output_path
+```
+
+**Step 3: Choose the right target for Instagram**
+
+```python
+def get_instagram_target(img_path):
+    """Return the best Instagram canvas size for this image."""
+    img = Image.open(img_path)
+    w, h = img.size
+    ratio = w / h
+
+    if ratio > 1.91:
+        # Way too wide (e.g., ultrawide screenshot) → fit into 4:5 canvas
+        return (1080, 1350)  # 4:5 portrait — max vertical real estate
+    elif ratio > 1.0:
+        # Landscape screenshot → fit into square (keeps it neutral)
+        return (1080, 1080)
+    elif ratio >= 0.8:
+        # Already in range → just resize to 1080 width, keep ratio
+        new_h = int(1080 / ratio)
+        return (1080, new_h)
+    else:
+        # Too tall → fit into 4:5
+        return (1080, 1350)
+```
+
+**Full workflow for any image before Instagram upload:**
+
+```python
+valid, ratio, status = check_aspect_ratio(img_path, platform='instagram')
+if not valid:
+    target_w, target_h = get_instagram_target(img_path)
+    # For screenshots: use 'blur' background (matches dark terminal themes)
+    # For logos/icons: use 'dark' background
+    # For light-background screenshots: use 'white' background
+    background = 'blur'  # default; adjust based on image content
+    img_path = fit_to_ratio(img_path, img_path.replace('.png', '-ig.jpg'), target_w, target_h, background)
+    print(f"Fixed aspect ratio: {ratio:.2f} → {target_w/target_h:.2f} ({target_w}x{target_h})")
+# Now safe to upload
+```
+
+**For AI-generated images:** don't resize — instead re-run generation with the correct ratio in the prompt. Resizing an AI image introduces quality loss. Only use `fit_to_ratio` for user-provided screenshots and assets.
+
+**Quality checklist before uploading any image:**
+- [ ] Aspect ratio is within platform's allowed range (checked programmatically)
+- [ ] Long edge is at least 1080px (Instagram rejects undersized images)
+- [ ] File size is under the platform limit (use `os.path.getsize()`)
+- [ ] JPEG quality is 95+ for Instagram, 90+ for others
+- [ ] For screenshots: padding strategy chosen to match the screenshot's background tone
 
 ### Generating 3 Options Per Image
 
@@ -408,6 +641,27 @@ img = Image.alpha_composite(img, overlay)
 ## Video Generation
 
 For content that benefits from video (especially TikTok and Instagram Reels), use **Veo 3.1** via the Gemini API for AI-generated cinematic video clips.
+
+### First Frame / Cover: The Most Important Asset
+
+**The first frame of a video (or first slide of a carousel) is the only thing that determines whether anyone watches the rest.** Algorithms surface this as the thumbnail in the feed — it must stop the scroll.
+
+**Rules for the first frame/slide:**
+
+1. **If the user provides a screenshot, proof image, or specific asset — it goes first.** Use it as Slide 1 or extract/composite it into the video's opening 1-2 seconds. This is the same principle as proof screenshots on X/Twitter: real evidence beats generated art every time.
+2. **If no user-provided image exists**, generate a dedicated cover image/frame — do NOT reuse a generic slide. The cover needs:
+   - A bold, high-contrast visual (proof screenshot, dramatic number, product shot, or striking scene)
+   - Readable text at a glance: the hook or the single biggest claim from the post
+   - For video: a scene that conveys motion/energy in a still frame (fire, speed, contrast)
+3. **Carousels (Instagram, TikTok photo mode)**: Slide 1 = hook image with the boldest headline. Slides 2-N can carry the detailed content. Never bury the most compelling visual in the middle.
+4. **Video (TikTok, Reels, Shorts)**: The first 1-2 seconds must not be a slow fade-in or black screen. Start on the strongest visual frame. If using ffmpeg, trim the opening to start on action.
+5. **Custom thumbnail for YouTube and TikTok**: Always generate a separate 1280x720 (YouTube) or 1080x1920 (TikTok) thumbnail image — do not rely on an auto-selected frame. The thumbnail is what drives clicks from search and suggested.
+
+**Cover image checklist before attaching:**
+- [ ] Is this the strongest, most attention-grabbing visual in the set?
+- [ ] Does it convey the hook or main claim in under 2 seconds?
+- [ ] If user provided a screenshot/image, is it this one?
+- [ ] For video: does it show action from the first second (not a fade or black)?
 
 ### Option A: AI Video with Veo 3.1 (Recommended)
 
@@ -529,6 +783,19 @@ If the user prefers to film themselves, provide a structured script:
 
 Each platform has quirks. Read `references/platform-posting.md` for the detailed technical guide (selectors, upload flows, encoding requirements, workarounds).
 
+### ⚠️ IMAGE ATTACHMENT: THE #1 FAILURE POINT
+
+**Image attachment fails silently more often than any other step.** This is especially true on X/Twitter and Threads. The post goes live but without the image — and the user has to redo it manually. Do not let this happen.
+
+**Rules before clicking Post on any platform:**
+
+1. **If the user's prompt includes a screenshot, image, or file path — that image is REQUIRED.** Capture it at the start, confirm the path exists, and treat attachment failure as a blocking error (not a warning).
+2. **After attaching any image, wait for the image preview to render** in the compose UI before clicking Post. If no preview appears within 10 seconds, the attachment failed — retry before proceeding.
+3. **Never post without verifying the image preview is visible.** "I attached the file" is not enough — confirm the UI shows the thumbnail.
+4. **If attachment repeatedly fails**, stop and report it instead of posting without the image. A text-only post is worse than no post when the user explicitly asked for an image.
+
+**Platform-specific image attachment flows are documented below for X/Twitter and Threads** — read them before posting to either platform.
+
 ### Supported Platforms
 
 | Platform | Content Type | Char Limit | Hashtags | Image Support |
@@ -553,9 +820,9 @@ Don't copy-paste the same text everywhere. Adapt for each platform:
 
 - **X/Twitter**: Punchy, concise, hook in first line. Thread for longer content.
 - **LinkedIn**: Professional tone, insight-driven, mention implications for the industry. Links in first comment, not post body.
-- **Instagram**: Visual-first, caption supports the image. Use line breaks for readability.
+- **Instagram**: Visual-first. Decide the post type explicitly before writing anything — see "Instagram: Image-Only vs Text+Image" section below.
 - **Threads**: Casual, conversational, like talking to a friend.
-- **TikTok**: Upload via TikTok Studio with anti-bot override + AppleScript file picker. Convert photo carousels to video with ffmpeg first. Caption is secondary to visuals. See `references/platform-posting.md` TikTok section for the full anti-bot workflow.
+- **TikTok**: Upload via TikTok Studio with anti-bot override + AppleScript file picker. Convert photo carousels to video with ffmpeg first (`-preset slow -crf 18 -movflags +faststart`, 1080x1920, 16s minimum). Caption via Playwright `type` only — clipboard paste is silently ignored by DraftJS. The publish API (`webmssdk`) blocks CDP-attached browsers with `{code: 7, Permission Denied}` — scroll Post button into view, cliclick it, then **verify in a separate tab** (`tiktok.com/@username`). If blocked, inform the user to click Post manually (video is already uploaded). Never re-upload without checking the profile first. See `references/platform-posting.md` TikTok section for the full workflow.
 - **Reddit**: Match the subreddit's tone. Informative, no self-promo smell. Check flair requirements.
 - **dev.to**: Full article format with markdown. Technical depth.
 - **Facebook**: Conversational, longer-form OK. Links in post body (not penalized like LinkedIn). Use images.
@@ -563,6 +830,172 @@ Don't copy-paste the same text everywhere. Adapt for each platform:
 - **Telegram**: Clean, formatted message. Use markdown formatting.
 - **YouTube Community**: Community post style -- short, conversational, pose a question to drive comments. Link to full videos or articles in text.
 - **YouTube Video**: Upload via Studio with hybrid AppleScript + browser automation. See `references/youtube-studio-upload.md` for the complete workflow. Set video language to English for auto-generated captions and auto-translate support.
+
+### Instagram: Image-Only vs Text+Image
+
+**This is the most common Instagram ambiguity.** When the user asks for "a post with both an image and text", they could mean several different things. Decide the post type explicitly and confirm it before posting.
+
+#### The Three Instagram Post Modes
+
+| Mode | When to use | Caption | Image |
+|------|------------|---------|-------|
+| **Image-only** | Aesthetic/art posts, images with text overlaid on the slide itself, photography, product shots where the visual is self-explanatory | Empty or minimal (1-3 emojis or a single line) | All content is in the image |
+| **Text + image** | Educational content, announcements, behind-the-scenes, posts where caption adds real context | Full caption (hook + body + CTA + hashtags) | Image supports/illustrates the text |
+| **Carousel + caption** | Multi-point content where slides carry the story | Short teaser caption ("Swipe to see all 5 →") + hashtags | Each slide is a self-contained point |
+| **Carousel image-only** | Visual storytelling, design portfolios, before/after sequences | Empty or minimal | Slides tell the complete story visually |
+
+**When the user asks for "both text and an image":**
+1. Write the full caption text
+2. Generate the image
+3. Ask the user: "For Instagram — should the caption text go in the post body, or should I bake the key points as text overlays directly onto the image/slides? (Caption posts = discoverable via search; image-only = cleaner aesthetic)"
+4. Wait for their preference before posting
+
+**Never silently drop the caption.** If the user asked for text, that text must appear somewhere — either in the caption field or as a text overlay on the image. Silently posting with an empty caption when the user wrote copy is a failure.
+
+#### Caption Must Not Be Dropped — Technical Safeguard
+
+The Instagram API's `caption` field is the most commonly dropped parameter. Always verify it explicitly:
+
+```python
+# When posting via Puppeteer/browser — caption field check
+def post_instagram_with_caption(image_paths, caption_text):
+    """Always verify caption is non-empty before posting."""
+    if not caption_text or not caption_text.strip():
+        raise ValueError("Caption is empty — user asked for text, this is a bug. Add caption before posting.")
+
+    # For API posting: caption goes in the configure call, not the upload call
+    # rupload_igphoto / rupload_igvideo → uploads the media (no caption here)
+    # configure_sidecar / configure_to_reel → this is where caption is set
+    payload = {
+        "caption": caption_text,  # REQUIRED — do not omit or leave empty
+        "media_type": "CAROUSEL",
+        "children_media_ids": [...],
+    }
+    # Verify caption made it into the payload before sending
+    assert payload["caption"], "Caption was cleared before API call — check for variable shadowing"
+```
+
+For browser automation (Puppeteer):
+```js
+// After opening the compose dialog, type the caption BEFORE attaching images
+// Instagram's compose flow: caption textarea → image attach → next → share
+// If you attach images first, the caption field sometimes loses focus and clears on mobile web
+
+// Verify caption is in the textarea before clicking Share
+const captionEl = await page.$('textarea[aria-label*="caption"], div[role="textbox"]');
+const captionValue = await captionEl.evaluate(el => el.value || el.textContent);
+if (!captionValue.trim() && userWantsCaption) {
+  throw new Error('Caption textarea is empty before posting — re-type caption and retry');
+}
+```
+
+#### Carousel: Slides with Text Overlays vs Caption-Driven
+
+**Slides carry the story (image-only mode):**
+- Each slide has text baked into the image via Pillow/ffmpeg
+- Caption = short hook + "Swipe →" + hashtags only
+- No duplication between slide text and caption
+
+**Caption carries the story (text+image mode):**
+- Slides are pure visuals (no text overlay) — let the image breathe
+- Caption = the full article/thread/story with line breaks
+- Slides serve as visual proof or aesthetic support
+
+**Never duplicate content between slide overlays and caption** — it looks amateurish and wastes reach (Instagram truncates long captions to "more" after 3 lines, so lead with the hook).
+
+### X/Twitter: Image Attachment Workflow
+
+X/Twitter is the most common platform where images silently drop. Use the right method for the tool in use.
+
+**Via `xurl` CLI (preferred):**
+
+```bash
+# Step 1: Upload media FIRST — get the media_id
+MEDIA_RESPONSE=$(xurl media upload /absolute/path/to/image.png)
+MEDIA_ID=$(echo "$MEDIA_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['media_id_string'])")
+
+# Step 2: Confirm MEDIA_ID is not empty before proceeding
+if [ -z "$MEDIA_ID" ]; then
+  echo "ERROR: media upload failed — do not post without image"
+  exit 1
+fi
+
+# Step 3: Post with media attached
+xurl post "Your tweet text" --media-id "$MEDIA_ID"
+
+# Step 4: Verify — navigate to the posted tweet URL and confirm the image renders
+```
+
+**Via Puppeteer / browser automation:**
+
+```js
+// Step 1: Get the file input element (Twitter uses a hidden <input type="file">)
+const fileInput = await page.$('input[data-testid="fileInput"]');
+if (!fileInput) throw new Error('File input not found — DOM may have changed');
+
+// Step 2: Set the file
+await fileInput.uploadFile('/absolute/path/to/image.png');
+
+// Step 3: WAIT for image preview — do not skip this wait
+await page.waitForSelector('[data-testid="attachments"] img', { timeout: 15000 })
+  .catch(() => { throw new Error('Image preview did not appear — attachment failed, aborting post'); });
+
+// Step 4: Only now click the Post button
+await page.click('[data-testid="tweetButtonInline"]');
+```
+
+**Image not attaching via CDP?** Twitter's React-controlled file input rejects programmatic `setFileInputFiles` on newer builds. Use `DOM.setFileInputFiles` via the CDP session directly on the node's backendNodeId instead of querySelector. If that also fails, use Peekaboo to click the image attach button and trigger the native macOS file picker, then AppleScript to type the path.
+
+### Threads: Image Attachment Workflow
+
+Threads is the second most common platform where images silently drop. The compose dialog has multiple "Post" buttons (feed header + dialog) and the image preview can fail to render.
+
+**Via Puppeteer / browser automation:**
+
+```js
+// Step 1: Open the Threads compose dialog and type the caption first
+// (typing before attaching avoids focus loss that can clear the file input)
+
+// Step 2: Click the image/media attach icon (paperclip or image icon in compose dialog)
+// Use Playwright snapshot to get the aria ref — querySelector is unreliable here
+// browser snapshot → find the attach-image button ref → browser act click ref=<ref>
+
+// Step 3: Trigger file selection via the hidden input
+const fileInput = await page.$('input[type="file"]');
+await fileInput.uploadFile('/absolute/path/to/image.png');
+
+// Step 4: WAIT for thumbnail preview in the compose dialog — mandatory
+// Look for an <img> inside the compose area (NOT the feed) with the uploaded image
+await page.waitForSelector('div[role="dialog"] img[src*="blob:"]', { timeout: 15000 })
+  .catch(() => { throw new Error('Threads: image preview not visible — do not post, attachment failed'); });
+
+// Step 5: Take a Playwright/Peekaboo screenshot to visually confirm the image is there
+// before clicking Post
+
+// Step 6: Click the correct "Post" button — must be inside the compose dialog
+// WRONG: page.click('button:has-text("Post")') — finds the feed header button first
+// RIGHT: use Playwright snapshot refs=aria, find the Post button scoped to the dialog
+// browser snapshot → locate 'Post' ref within dialog → browser act click ref=<ref>
+```
+
+**Clipboard paste alternative** (if file input fails):
+
+```python
+import subprocess
+
+# Copy image to clipboard as a file reference
+subprocess.run(['osascript', '-e', f'set the clipboard to (POSIX file "{abs_image_path}")'])
+
+# Click into the Threads compose area
+# Use peekaboo to click the media attach area
+# Then Cmd+V to paste the image from clipboard
+subprocess.run(['osascript', '-e', 'tell application "Google Chrome" to activate'])
+subprocess.run(['cliclick', 'kd:cmd', 't:v', 'ku:cmd'])
+
+# Then wait for preview to render before posting
+```
+
+**NEVER post to Threads without seeing the image thumbnail in the compose dialog.** If the thumbnail isn't there, the image will not appear in the published post.
 
 ### Per-Platform Copy File Output
 
@@ -677,7 +1110,9 @@ YouTube video upload requires a hybrid AppleScript + browser automation approach
 
 ### Telegram Posting
 
-Broadcast channels have NO input box in web.telegram.org. Use the Bot API:
+Two approaches depending on the context. Use Bot API for broadcast channels (most reliable). Use web client automation when Bot API isn't available or the user is posting to a personal chat/group.
+
+#### Option A: Bot API (Preferred — Broadcast Channels)
 
 ```bash
 # Photo with caption
@@ -686,7 +1121,153 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendPhoto" \
   -F "photo=@image.png" \
   -F "caption=Your caption" \
   -F "parse_mode=Markdown"
+
+# Scheduled post (Unix timestamp)
+curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendPhoto" \
+  -F "chat_id=$CHANNEL_ID" \
+  -F "photo=@image.png" \
+  -F "caption=Your caption" \
+  -F "schedule_date=1735689600"
 ```
+
+#### Option B: Web Client Automation (web.telegram.org)
+
+Use this when Bot API is unavailable or when posting to chats/groups as a user (not a bot). The web client flow has several non-obvious failure points — follow every step exactly.
+
+**Step 1: Open the chat and locate the attachment button**
+
+```js
+// The "Add an attachment" button (paperclip icon)
+// Use Playwright snapshot to find it — selector is unreliable across builds
+// browser snapshot → find button with aria-label or tooltip "Add an attachment"
+// browser act click ref=<ref>
+```
+
+**Step 2: Click "Photo or Video" from the dropdown**
+
+```js
+// The dropdown uses class .MenuItem
+// Find by text content — don't use index (menu order can change)
+const menuItems = document.querySelectorAll('.MenuItem');
+const photoItem = Array.from(menuItems).find(el => el.textContent?.includes('Photo or Video'));
+photoItem.click();
+// This triggers a native macOS file picker dialog
+```
+
+**⚠️ CRITICAL: Do NOT click in the wrong area before this step.** The emoji picker can open instead of the attachment menu if focus is in the wrong element. If the emoji picker opens: press Escape, then re-click the correct attachment icon.
+
+**Step 3: Handle the native file picker — keyboard language issue**
+
+The native macOS file picker opens in whatever language the system keyboard is set to. If the user has a non-Latin layout (Russian, etc.), Cmd+Shift+G + typing the path will produce garbage. **Always switch to English first.**
+
+```python
+import subprocess, time
+
+# Switch to English input source BEFORE the file picker opens
+original_lang = ensure_english_input_source()  # see AppleScript section
+time.sleep(0.3)
+
+# CDP approach (more reliable than AppleScript typing):
+# Find the hidden file input that the native picker backs
+# input[type='file'][accept*='image'] or input[type='file'][accept*='video']
+# await page.evaluate(() => {
+#   const input = document.querySelector("input[type='file'][accept*='image']");
+#   if (input) input.click();  // triggers native picker
+# });
+# Then use DOM.setFileInputFiles to set the file without native picker:
+# cdp.send('DOM.setFileInputFiles', { files: ['/abs/path/to/image.jpg'], nodeId: inputNodeId })
+```
+
+**AppleScript fallback** (when CDP file input isn't accessible):
+
+```applescript
+-- Needs generous delays — the file picker dialog takes time to fully render
+tell application "System Events"
+    tell process "Google Chrome"
+        delay 2
+        keystroke "g" using {command down, shift down}
+        delay 2
+        -- Type the FULL absolute path
+        keystroke "/absolute/path/to/image.jpg"
+        delay 1
+        key code 36  -- Enter (confirm path in Go To Folder)
+        delay 2
+        key code 36  -- Enter again (confirm file selection)
+    end tell
+end tell
+```
+
+After file selection, restore the original input source:
+```python
+restore_input_source(original_lang)
+```
+
+**Step 4: "Send Photo" dialog — caption field**
+
+After file selection, Telegram opens a "Send Photo" preview dialog with a caption field and a Send button.
+
+```js
+// The caption field is NOT a standard contenteditable="true" div
+// It's: div.form-control.allow-selection inside the modal
+// Standard .innerText = text or insertText CDP call will NOT work reliably
+
+// Approach 1: Focus + Paste (most reliable)
+const modal = document.querySelector('.send-photo-modal, [class*="SendPhoto"]');
+const captionField = modal?.querySelector('.form-control.allow-selection');
+captionField.click();
+captionField.focus();
+// Then use Python subprocess pbcopy + AppleScript Cmd+V to paste caption
+// (same pattern as for Twitter/Threads — avoids encoding issues)
+
+// Approach 2: CDP insertText after focus (if paste unavailable)
+// cdp.send('Input.insertText', { text: captionText })
+// Only use this for ASCII-only captions — emoji and non-Latin chars may garble
+```
+
+**Paste caption via Python (encoding-safe):**
+```python
+import subprocess
+
+caption_text = "Your caption text here"
+subprocess.Popen(['pbcopy']).communicate(caption_text.encode('utf-8'))
+time.sleep(0.2)
+subprocess.run(['osascript', '-e', 'tell application "Google Chrome" to activate'])
+subprocess.run(['cliclick', 'kd:cmd', 't:v', 'ku:cmd'])
+time.sleep(0.3)
+# Verify the text appeared in the caption field before sending
+```
+
+**⚠️ CRITICAL: Do NOT press Enter in the caption field.** Enter adds a newline, it does NOT send the message.
+
+**Step 5: Click Send**
+
+The Send button text is "Send" (capitalized, not "SEND"). The class pattern varies by Telegram build version.
+
+```js
+// Find by text content — more stable than class selector
+const modal = document.querySelector('.popup, [class*="SendPhoto"], [class*="Modal"]');
+const buttons = modal ? modal.querySelectorAll('button, [class*="Button"]') : [];
+const sendBtn = Array.from(buttons).find(el => el.textContent.trim() === 'Send');
+if (!sendBtn) throw new Error('Send button not found — modal may have closed or class changed');
+sendBtn.click();
+
+// Fallback if text search fails: look for the primary button
+// class pattern: Button <hash> smaller primary inline
+const primaryBtn = modal?.querySelector('[class*="Button"][class*="primary"]');
+primaryBtn?.click();
+```
+
+**Full Telegram web client gotcha list:**
+
+| Gotcha | What happens | Fix |
+|--------|-------------|-----|
+| Emoji picker opens | Clicked in message input area before attachment | Press Escape, re-click the paperclip icon |
+| Russian/non-Latin file picker | Path typed in wrong keyboard layout | `ensure_english_input_source()` before file picker opens |
+| Caption field rejects insertText | Not a standard contenteditable | Focus + Python pbcopy + Cmd+V paste |
+| Enter key doesn't send | Adds newline in caption | Click the Send button, never press Enter |
+| Send button not found | Class hash changed in new Telegram build | Search by `textContent === 'Send'` first |
+| File picker closes without selecting | Not enough delay after Cmd+Shift+G | Increase delay to 2s between each AppleScript step |
+| Modal closes unexpectedly | Escape was sent accidentally | Catch modal close event; re-open attach flow from Step 1 |
 
 ---
 
@@ -758,13 +1339,102 @@ Wait for approval before posting any replies.
 
 ---
 
+## Post-Publication Verification
+
+**This is mandatory, not optional.** Never report a post as done without completing this. Encoding artifacts and missing images are common silent failures that only show up in the published post.
+
+### Step 1: Navigate to the Post URL
+
+Immediately after publishing, collect the exact URL of the post (platform should return or display it). Navigate to that URL directly — do not stay on the compose page or assume the feed view matches the actual post.
+
+### Step 2: Screenshot the Published Post
+
+Use Peekaboo to take a screenshot of the published post as it actually appears:
+
+```bash
+# Navigate Chrome to the post URL first, then screenshot it
+peekaboo see --app "Google Chrome" --path /tmp/post-verify.png
+
+# Or via Puppeteer — navigate to the URL and screenshot
+# await page.goto(postUrl); await page.screenshot({ path: '/tmp/post-verify.png' });
+```
+
+Show the screenshot to the user using the Read tool so they can see the post without opening a browser.
+
+### Step 3: Check Text Encoding
+
+Extract the visible post text and scan for encoding artifacts. Common failure signatures:
+
+| Artifact | Cause | Looks like |
+|----------|-------|------------|
+| `‚Äî` | UTF-8 em dash decoded as Mac Roman | `word‚Äîword` instead of `word—word` |
+| `Ã©`, `Ã¨`, `Ã ` | UTF-8 accented chars decoded as Latin-1 | `caf‚Äö√†√†` |
+| `â€œ` / `â€` | Curly quotes garbled | `â€œquoteâ€` |
+| `ï»¿` | BOM at start of text | First char looks like a bullet |
+| Lone `?` replacing chars | Wrong encoding on clipboard paste | `word?word` |
+| Cyrillic/Hebrew/Arabic in a Latin post | Wrong keyboard input source active during typing | Random non-Latin chars mid-sentence |
+
+```python
+import re
+
+def check_encoding_artifacts(text):
+    """Detect common encoding corruption patterns in post text."""
+    patterns = [
+        (r'â€[œ"â]', 'Garbled curly quotes (UTF-8 → Latin-1 mismatch)'),
+        (r'‚Äî|‚Äù|‚Äú', 'Garbled em dash or curly quotes (Mac Roman mismatch)'),
+        (r'Ã[©¨ ¢£¤¥¦§]', 'Garbled accented characters'),
+        (r'ï»¿', 'BOM character at start'),
+        (r'[А-Яа-яЁё]{2,}', 'Cyrillic characters (possible keyboard language leak)'),
+    ]
+    issues = []
+    for pattern, description in patterns:
+        if re.search(pattern, text):
+            issues.append(description)
+    return issues
+
+# Usage: extract text from the DOM, then:
+# issues = check_encoding_artifacts(post_text)
+# if issues: report them and flag the post for correction
+```
+
+If artifacts are found: **report them immediately with the screenshot, do NOT mark the post as done.** The user needs to edit the post to fix the text.
+
+### Step 4: Check Image / Video Attachment
+
+Visually confirm in the screenshot:
+
+- **Image posts**: The image thumbnail is visible in the post body (not just in the composer)
+- **Video posts**: The video player/thumbnail is visible; click play if possible to confirm the video loads
+- **Carousels**: The first slide is visible and is the correct hook image (not a blank or wrong slide)
+- **Thread/Twitter with image**: The image appears inline below the tweet text, not as a broken link icon
+
+If the image or video is missing from the screenshot of the live post: **stop, report it, and do NOT mark the post as done.**
+
+### Step 5: Report to User
+
+After verification, present a clear summary:
+
+```
+✅ Post verified at: [URL]
+   Screenshot: [show inline via Read tool]
+   Text: OK / ⚠️ ENCODING ISSUE FOUND: [describe]
+   Image: Attached / ⚠️ MISSING — post needs to be corrected
+   Video: Attached / ⚠️ MISSING
+```
+
+If any check fails, provide the screenshot and specific fix instructions before marking the platform as done.
+
+---
+
 ## Post-Publishing Checklist
 
-- [ ] Verify the post is live
-- [ ] Check that the full caption/text saved correctly
-- [ ] Check tags/mentions persisted
-- [ ] Copy the exact published URL
-- [ ] Log the URL in the daily engagement file
+- [ ] **Image preview confirmed visible in compose dialog BEFORE clicking Post** (X/Twitter and Threads: mandatory)
+- [ ] **TikTok: After clicking Post, open `tiktok.com/@username` in a SEPARATE new tab to verify publish** (upload page gives no success signal — never re-upload without checking)
+- [ ] Navigated to the exact published post URL
+- [ ] Screenshot taken and shown to user (Peekaboo or Puppeteer)
+- [ ] Text encoding checked — no garbled characters (`‚Äî`, `Ã©`, Cyrillic in wrong context, etc.)
+- [ ] Image/video confirmed present in published post (not just in composer)
+- [ ] Exact URL collected and logged
 - [ ] Save post to `post-history/YYYY-MM-DD-topic.md` with content, platforms, and asset paths
 - [ ] Suggest follow-up: respond to comments within the first hour (this is when algorithms decide reach)
 - [ ] Check analytics in 24-48 hours
@@ -785,17 +1455,44 @@ Wait for approval before posting any replies.
 | No product context file | Ask user for basic brand/audience info, or proceed with generic tone |
 | CAPTCHA or rate limit | Stop immediately, report to user |
 | Post verification fails | Be honest, never report unverified posts as successful |
+| Published post has garbled text (`‚Äî`, `Ã©`, etc.) | UTF-8/Mac Roman encoding mismatch from clipboard | Use Python subprocess for pbcopy; edit the live post to fix text; report to user with screenshot |
+| Published post has Cyrillic or wrong-language characters mid-text | Non-Latin keyboard was active during typing | Switch input source to English before typing (see AppleScript keyboard language section); edit the post |
+| Image/video missing from live post (was visible in composer) | Silent attachment failure — post went live without media | Do not mark as done; report with screenshot; user must edit or repost with image |
+| Post URL not returned by platform | Browser automation didn't capture the redirect URL | Navigate to profile and find the newest post to get the URL |
+| Instagram: caption is empty in the published post but user asked for text | Caption was dropped — either not passed to `configure_sidecar`, or textarea cleared during browser automation | Caption goes in the `configure` API call, not the upload call; for browser: type caption BEFORE attaching images; verify textarea is non-empty before clicking Share |
+| Instagram: post went up image-only but user wanted text | Ambiguity in the request was resolved wrong | Always confirm image-only vs text+image mode when user asks for "both"; never silently drop copy |
+| Instagram: "uploaded image isn't in an allowed aspect ratio" | Image ratio is outside 0.8–1.91 range | Run `check_aspect_ratio()` → `fit_to_ratio()` with blur background; NEVER crop screenshots — pad them. See "Image Aspect Ratio Enforcement" section. |
+| Instagram: image rejected but ratio looks fine | Ratio is fine but file is under 320px on shortest side or over 8MB | Resize up to 1080px minimum; compress to under 8MB at quality=95 |
+| Instagram: all carousel slides rejected | Slides have different aspect ratios | All slides in a carousel MUST be the same ratio — normalize all to 1:1 or all to 4:5 |
 | Instagram API `Transcode not finished` | Wait 30s after video upload before calling `configure_to_clips` |
 | Instagram API `cover_photo_upload_error` | Upload cover photo via `rupload_igphoto` with same upload_id before configure |
 | Instagram `sessionid` cookie expired | User must re-login in Chrome profile; re-extract cookies |
+| X/Twitter: image missing from published post | Silent attachment failure — post went live without image | NEVER click Post without confirming the image preview thumbnail is visible in the compose dialog |
+| X/Twitter: `xurl media upload` returns no media_id | Upload silently failed or API returned error | Check response JSON for error field; confirm file path is absolute and file exists; retry once |
+| X/Twitter: image drops after clicking Post | Media_id not included in post request | Upload image FIRST, store media_id, then post — never upload and post in the same command without capturing the id |
+| Threads: image not in published post | File input set but preview never rendered | Wait for `img[src*="blob:"]` inside compose dialog before clicking Post; if no preview = don't post |
+| Threads: image preview appears then disappears | Focus event cleared the file input when typing caption | Type caption BEFORE attaching image, not after |
+| Threads: querySelector file input returns null | Threads DOM structure changed | Use Playwright snapshot to find current file input ref; don't hardcode selectors |
+| Threads: image attached but posted without it | Clicked wrong Post button (feed header, not dialog) | Always scope to dialog: Playwright snapshot + aria ref for the Post button inside compose dialog |
+| User provided a screenshot/image path and it wasn't attached | Skill proceeded without attaching user-provided image | A user-provided image is REQUIRED — treat missing attachment as a blocker, not a warning; stop and retry |
 | CDP insertText on X or Threads | Text corrupts in React editor (garbled, repeated fragments) | Use Python subprocess pbcopy + AppleScript Cmd+V |
 | Shell printf pipes to pbcopy | UTF-8 garbled — em dashes → ‚Äî, emoji → broken bytes | ALWAYS use Python subprocess: `subprocess.Popen(['pbcopy']).communicate(text.encode('utf-8'))` |
 | Threads clicks "Add to thread" instead of "Post" | JS querySelector finds wrong button — DOM order puts "Add to thread" first | Use Playwright snapshot refs=aria to get exact Post button ref, then `browser act click ref=<ref>` |
 | Threads: cliclick hits wrong "Post" button | getBoundingClientRect finds "Post" in main feed header, not compose dialog | Playwright snapshot + aria ref is the only reliable method |
 | X video upload: media missing from post | Post sent before upload completed | Wait 45s after `DOM.setFileInputFiles` before clicking Post |
 | TikTok page crashes after upload | Override `navigator.webdriver` BEFORE page load; zero CDP calls during upload |
-| TikTok DraftJS rejects caption | Skip caption in upload, edit via TikTok app after publish |
-| AppleScript file picker fails | Check Accessibility permissions; increase delays; verify file path exists |
+| TikTok publish returns `{code: 7, Permission Denied}` | webmssdk detects CDP via deeper fingerprinting (not just `navigator.webdriver`). Video IS uploaded. Tell user to click Post manually — their click (without CDP) will succeed. Never re-upload without checking `tiktok.com/@username` in a separate tab first. |
+| TikTok caption stays empty after paste | DraftJS contenteditable silently ignores clipboard paste (pbcopy + Cmd+V does nothing). Use Playwright `type` action instead — it works. |
+| TikTok Post button not found / not clicked | Button is often below the viewport fold. Call `scrollIntoView({block: 'center'})` first, recalculate screen coords, then cliclick. Coordinates example: screen_y = 33 + 87 + viewport_y. |
+| TikTok post status unknown after clicking Post | Upload page gives NO success/failure signal — never re-click without verifying. Open `tiktok.com/@username` in a SEPARATE new tab, wait 10s, check if video appears. |
+| AppleScript file picker opens but selects nothing / types garbage | Non-Latin keyboard input source active (e.g., Russian) — keystrokes get converted and the path becomes unreadable | Call `ensure_english_input_source()` BEFORE Cmd+Shift+G, wait 0.3s, type path, then restore. See "AppleScript File Picker: Keyboard Language Issue" section. |
+| AppleScript file picker fails (permissions) | Accessibility permissions not granted | Check System Settings → Privacy & Security → Accessibility; increase delays; verify file path is absolute |
+| Telegram web: emoji picker opens instead of attachment menu | Clicked in the message text area before clicking the paperclip | Press Escape to dismiss, then click the paperclip icon (not the message area) |
+| Telegram web: file picker types garbage path | Non-Latin keyboard active when AppleScript types the path | Call `ensure_english_input_source()` before triggering the picker; 2s delays between each AppleScript step |
+| Telegram web: caption field ignores insertText CDP call | Field is `.form-control.allow-selection`, not a standard contenteditable | Focus the field + Python `pbcopy` + AppleScript `Cmd+V` to paste |
+| Telegram web: Enter key in caption field doesn't send | Enter inserts newline in Telegram's composer | Click the Send button explicitly; never use Enter to send |
+| Telegram web: Send button not found | Class hash changed in new Telegram build | Search by `textContent.trim() === 'Send'` on all elements in the modal |
+| Telegram web: file picker closes without selecting | Insufficient delay after `Cmd+Shift+G` in AppleScript | Increase delays to 2s after each keystroke/key code step |
 | YouTube Studio metadata not saving | Dispatch `input` event after setting `textContent` on contenteditable divs |
 | Cross-platform video suppressed reach | Stagger releases: Day 0 YouTube, Day 2-3 TikTok, Day 3-4 Instagram Reels |
 

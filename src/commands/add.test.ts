@@ -121,13 +121,16 @@ vi.mock("../security/index.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Mock API client (registry lookup)
+// Mock API client (registry lookup + search)
 // ---------------------------------------------------------------------------
 const mockGetSkill = vi.fn();
+const mockSearchSkills = vi.fn();
 vi.mock("../api/client.js", () => ({
   getSkill: (...args: unknown[]) => mockGetSkill(...args),
+  searchSkills: (...args: unknown[]) => mockSearchSkills(...args),
   reportInstall: vi.fn().mockResolvedValue(undefined),
   reportInstallBatch: vi.fn().mockResolvedValue(undefined),
+  submitSkill: vi.fn().mockResolvedValue(undefined),
 }));
 
 // ---------------------------------------------------------------------------
@@ -184,6 +187,8 @@ vi.mock("../utils/output.js", () => ({
   dim: (s: string) => s,
   cyan: (s: string) => s,
   spinner: () => ({ stop: vi.fn() }),
+  link: (_href: string, text: string) => text,
+  formatInstalls: (n: number) => String(n),
 }));
 
 // ---------------------------------------------------------------------------
@@ -2827,5 +2832,366 @@ describe("addCommand unregistered plugin discovery", () => {
       .map((c: unknown[]) => String(c[0]))
       .join("\n");
     expect(logOutput).toContain("incomplete");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveViaSearch — flat name search disambiguation (0504)
+// ---------------------------------------------------------------------------
+
+describe("resolveViaSearch (flat name search disambiguation)", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
+    mockCheckPlatformSecurity.mockResolvedValue(null);
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockFindProjectRoot.mockReturnValue(process.cwd());
+    mockPromptCheckboxList.mockResolvedValue([0]);
+    mockPromptConfirm.mockResolvedValue(true);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  // T-002: single result auto-installs
+  it("auto-installs when search returns exactly one non-blocked result", async () => {
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "skill-creator", author: "acme", ownerSlug: "acme", repoSlug: "tools", skillSlug: "skill-creator", githubStars: 100, score: 90, tier: "VERIFIED", installs: 10, description: "A skill" },
+      ],
+      hasMore: false,
+    });
+
+    // The re-invocation of addCommand("acme/tools/skill-creator") will hit the 3-part branch
+    // which calls detectMarketplaceRepo → then installSingleSkillLegacy
+    mockDiscoverSkills.mockResolvedValue([]);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill Creator\nCreates skills.",
+    }) as unknown as typeof fetch;
+
+    await addCommand("skill-creator", {});
+
+    expect(mockSearchSkills).toHaveBeenCalledWith("skill-creator");
+    // Verify it went through the 3-part path (installSingleSkillLegacy)
+    const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(logOutput).toContain("acme/tools/skill-creator");
+  });
+
+  // T-002: zero results prints error
+  it("prints error and suggests vskill find when zero results", async () => {
+    mockSearchSkills.mockResolvedValue({ results: [], hasMore: false });
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    await addCommand("nonexistent-skill", {});
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+    const errOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(errOutput).toContain("vskill find nonexistent-skill");
+    mockExit.mockRestore();
+  });
+
+  // T-002: search API error falls back to installFromRegistry
+  it("falls back to installFromRegistry when search API throws", async () => {
+    mockSearchSkills.mockRejectedValue(new Error("Network error"));
+    mockGetSkill.mockResolvedValue({
+      name: "my-skill",
+      author: "alice",
+      version: "1.0.0",
+      content: "# My Skill",
+      installs: 0,
+      updatedAt: "",
+    });
+
+    await addCommand("my-skill", {});
+
+    expect(mockGetSkill).toHaveBeenCalledWith("my-skill");
+  });
+
+  // T-002: single blocked result treated as zero installable
+  it("treats single blocked result as zero installable", async () => {
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "bad-skill", author: "evil", ownerSlug: "evil", repoSlug: "bad", skillSlug: "bad-skill", isBlocked: true, githubStars: 0, score: 0, tier: "BLOCKED", installs: 0, description: "Bad" },
+      ],
+      hasMore: false,
+    });
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    await addCommand("bad-skill", {});
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+    const errOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(errOutput).toContain("No installable skills found");
+    mockExit.mockRestore();
+  });
+
+  // T-003: TTY interactive disambiguation
+  it("shows interactive prompt for multiple TTY results and installs selected", async () => {
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "skill-a", author: "a", ownerSlug: "a", repoSlug: "repo-a", skillSlug: "skill-a", githubStars: 100, score: 90, tier: "VERIFIED", installs: 10, description: "A" },
+        { name: "skill-b", author: "b", ownerSlug: "b", repoSlug: "repo-b", skillSlug: "skill-b", githubStars: 50, score: 80, tier: "VERIFIED", installs: 5, description: "B" },
+        { name: "skill-c", author: "c", ownerSlug: "c", repoSlug: "repo-c", skillSlug: "skill-c", githubStars: 25, score: 70, tier: "VERIFIED", installs: 2, description: "C" },
+      ],
+      hasMore: false,
+    });
+
+    mockIsTTY.mockReturnValue(true);
+    // User selects the second option (index 1)
+    mockPromptChoice.mockResolvedValue(1);
+
+    // After selection, addCommand re-enters with 3-part path
+    mockDiscoverSkills.mockResolvedValue([]);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill B content",
+    }) as unknown as typeof fetch;
+
+    await addCommand("skill", {});
+
+    expect(mockPromptChoice).toHaveBeenCalledWith(
+      expect.stringContaining("Select a skill"),
+      expect.arrayContaining([
+        expect.objectContaining({ label: "a/repo-a/skill-a" }),
+        expect.objectContaining({ label: "b/repo-b/skill-b" }),
+        expect.objectContaining({ label: "c/repo-c/skill-c" }),
+      ]),
+    );
+  });
+
+  // T-003: blocked results displayed but not selectable
+  it("excludes blocked results from promptChoice options", async () => {
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "good-a", author: "a", ownerSlug: "a", repoSlug: "ra", skillSlug: "good-a", githubStars: 100, score: 90, tier: "VERIFIED", installs: 10, description: "A" },
+        { name: "good-b", author: "b", ownerSlug: "b", repoSlug: "rb", skillSlug: "good-b", githubStars: 50, score: 80, tier: "VERIFIED", installs: 5, description: "B" },
+        { name: "blocked", author: "evil", ownerSlug: "evil", repoSlug: "bad", skillSlug: "blocked", isBlocked: true, githubStars: 0, score: 0, tier: "BLOCKED", installs: 0, description: "Bad" },
+      ],
+      hasMore: false,
+    });
+
+    mockIsTTY.mockReturnValue(true);
+    mockPromptChoice.mockResolvedValue(0);
+
+    mockDiscoverSkills.mockResolvedValue([]);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Content",
+    }) as unknown as typeof fetch;
+
+    await addCommand("skill", {});
+
+    // promptChoice should have 2 options (blocked excluded)
+    const choices = mockPromptChoice.mock.calls[0][1];
+    expect(choices).toHaveLength(2);
+    expect(choices.map((c: { label: string }) => c.label)).not.toContain("evil/bad/blocked");
+  });
+
+  // T-005: non-TTY prints list and exits
+  it("prints ranked list and exits 1 in non-TTY with multiple results", async () => {
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "skill-a", author: "a", ownerSlug: "a", repoSlug: "ra", skillSlug: "skill-a", githubStars: 100, score: 90, tier: "VERIFIED", installs: 10, description: "A" },
+        { name: "skill-b", author: "b", ownerSlug: "b", repoSlug: "rb", skillSlug: "skill-b", githubStars: 50, score: 80, tier: "VERIFIED", installs: 5, description: "B" },
+      ],
+      hasMore: false,
+    });
+
+    mockIsTTY.mockReturnValue(false);
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    await addCommand("skill", {});
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+    const errOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(errOutput).toContain("Ambiguous match");
+    expect(errOutput).toContain("owner/repo/skill");
+    mockExit.mockRestore();
+  });
+
+  // T-005: non-TTY error mentions exact path format
+  it("non-TTY error message instructs exact path format", async () => {
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "skill-a", author: "a", ownerSlug: "a", repoSlug: "ra", skillSlug: "skill-a", githubStars: 100, score: 90, tier: "VERIFIED", installs: 10, description: "A" },
+        { name: "skill-b", author: "b", ownerSlug: "b", repoSlug: "rb", skillSlug: "skill-b", githubStars: 50, score: 80, tier: "VERIFIED", installs: 5, description: "B" },
+      ],
+      hasMore: false,
+    });
+
+    mockIsTTY.mockReturnValue(false);
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    await addCommand("skill", {});
+
+    const allOutput = [
+      ...(console.error as ReturnType<typeof vi.fn>).mock.calls,
+      ...(console.log as ReturnType<typeof vi.fn>).mock.calls,
+    ].map((c: unknown[]) => String(c[0])).join("\n");
+    expect(allOutput).toContain("vskill install owner/repo/skill");
+    mockExit.mockRestore();
+  });
+
+  // T-007: 2-part path skips resolveViaSearch
+  it("2-part owner/repo path does not call searchSkills", async () => {
+    mockDiscoverSkills.mockResolvedValue([]);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+
+    await addCommand("owner/repo", {});
+
+    expect(mockSearchSkills).not.toHaveBeenCalled();
+  });
+
+  // T-007: 3-part path skips resolveViaSearch
+  it("3-part owner/repo/skill path does not call searchSkills", async () => {
+    mockDiscoverSkills.mockResolvedValue([]);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+
+    await addCommand("owner/repo/skill", {});
+
+    expect(mockSearchSkills).not.toHaveBeenCalled();
+  });
+
+  // T-008: --yes auto-picks first ranked non-blocked result
+  it("--yes flag auto-picks first ranked non-blocked result without prompting", async () => {
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "skill-a", author: "a", ownerSlug: "a", repoSlug: "ra", skillSlug: "skill-a", githubStars: 100, score: 90, tier: "VERIFIED", installs: 10, description: "A" },
+        { name: "skill-b", author: "b", ownerSlug: "b", repoSlug: "rb", skillSlug: "skill-b", githubStars: 50, score: 80, tier: "VERIFIED", installs: 5, description: "B" },
+      ],
+      hasMore: false,
+    });
+
+    mockIsTTY.mockReturnValue(true);
+
+    mockDiscoverSkills.mockResolvedValue([]);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Content",
+    }) as unknown as typeof fetch;
+
+    await addCommand("skill", { yes: true });
+
+    // promptChoice should NOT be called
+    expect(mockPromptChoice).not.toHaveBeenCalled();
+
+    const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(logOutput).toContain("Auto-selecting first result");
+    expect(logOutput).toContain("a/ra/skill-a");
+  });
+
+  // T-008: --yes with all blocked exits 1
+  it("--yes flag with all blocked results exits with code 1", async () => {
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "blocked-a", author: "evil", ownerSlug: "evil", repoSlug: "ba", skillSlug: "blocked-a", isBlocked: true, githubStars: 0, score: 0, tier: "BLOCKED", installs: 0, description: "Bad" },
+        { name: "blocked-b", author: "evil", ownerSlug: "evil", repoSlug: "bb", skillSlug: "blocked-b", isBlocked: true, githubStars: 0, score: 0, tier: "BLOCKED", installs: 0, description: "Bad" },
+      ],
+      hasMore: false,
+    });
+
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    await addCommand("blocked", { yes: true });
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+    mockExit.mockRestore();
+  });
+
+  // T-008: --yes on non-TTY also auto-picks (does not exit 1)
+  it("--yes flag on non-TTY auto-picks first result", async () => {
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "skill-a", author: "a", ownerSlug: "a", repoSlug: "ra", skillSlug: "skill-a", githubStars: 100, score: 90, tier: "VERIFIED", installs: 10, description: "A" },
+        { name: "skill-b", author: "b", ownerSlug: "b", repoSlug: "rb", skillSlug: "skill-b", githubStars: 50, score: 80, tier: "VERIFIED", installs: 5, description: "B" },
+      ],
+      hasMore: false,
+    });
+
+    mockIsTTY.mockReturnValue(false);
+
+    mockDiscoverSkills.mockResolvedValue([]);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Content",
+    }) as unknown as typeof fetch;
+
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    await addCommand("skill", { yes: true });
+
+    // Should NOT exit 1 — --yes overrides non-TTY behavior
+    expect(mockExit).not.toHaveBeenCalled();
+    expect(mockPromptChoice).not.toHaveBeenCalled();
+    mockExit.mockRestore();
+  });
+
+  // T-006: all results blocked displays them with BLOCKED labels
+  it("displays all blocked results with BLOCKED labels before error", async () => {
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "blocked-a", author: "evil", ownerSlug: "evil", repoSlug: "ba", skillSlug: "blocked-a", isBlocked: true, threatType: "credential-theft", severity: "critical", githubStars: 0, score: 0, tier: "BLOCKED", installs: 0, description: "Bad" },
+        { name: "blocked-b", author: "evil", ownerSlug: "evil", repoSlug: "bb", skillSlug: "blocked-b", isBlocked: true, githubStars: 0, score: 0, tier: "BLOCKED", installs: 0, description: "Bad" },
+      ],
+      hasMore: false,
+    });
+
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    await addCommand("blocked", {});
+
+    const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(logOutput).toContain("BLOCKED");
+    expect(mockExit).toHaveBeenCalledWith(1);
+    mockExit.mockRestore();
+  });
+
+  // T-006: results with missing slug fields not in installable set
+  it("results missing slug fields are displayed but not installable", async () => {
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "no-slugs", author: "a", repoUrl: "https://github.com/a/b", githubStars: 1000, score: 99, tier: "CERTIFIED", installs: 0, description: "No slugs" },
+      ],
+      hasMore: false,
+    });
+
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    await addCommand("no-slugs", {});
+
+    // Should treat as zero installable (missing ownerSlug/repoSlug/skillSlug)
+    expect(mockExit).toHaveBeenCalledWith(1);
+    mockExit.mockRestore();
   });
 });

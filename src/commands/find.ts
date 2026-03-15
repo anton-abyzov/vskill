@@ -5,73 +5,12 @@
 import type { SkillSearchResult } from "../api/client.js";
 import { searchSkills } from "../api/client.js";
 import { bold, dim, cyan, yellow, green, red, link, formatInstalls } from "../utils/output.js";
+import { extractBaseRepo, formatSkillId, getSkillUrl, getTrustBadge } from "../utils/skill-display.js";
 
 interface FindOptions {
   json?: boolean;
   noHint?: boolean;
   limit?: number;
-}
-
-/**
- * Extract `owner/repo` from a GitHub URL.
- */
-function extractBaseRepo(repoUrl: string | undefined): string | null {
-  if (!repoUrl) return null;
-  const match = repoUrl.match(/([^/]+\/[^/]+?)(?:\/tree\/|\.git|$)/);
-  return match ? match[1] : null;
-}
-
-/**
- * Format skill display: `owner/repo/skill-name`.
- * Uses slug fields when available, falls back to extracting from repoUrl/name.
- */
-function formatSkillId(r: SkillSearchResult): string {
-  const displayName = r.skillSlug || r.name.split("/").pop() || r.name;
-  const publisher = r.ownerSlug && r.repoSlug
-    ? `${r.ownerSlug}/${r.repoSlug}`
-    : extractBaseRepo(r.repoUrl);
-  return publisher ? `${publisher}/${displayName}` : displayName;
-}
-
-/**
- * Build the verified-skill.com URL for a skill.
- * Uses hierarchical slug fields (owner/repo/skill) when available,
- * falls back to flat name.
- */
-function getSkillUrl(r: SkillSearchResult): string {
-  if (r.ownerSlug && r.repoSlug && r.skillSlug) {
-    return `https://verified-skill.com/skills/${encodeURIComponent(r.ownerSlug)}/${encodeURIComponent(r.repoSlug)}/${encodeURIComponent(r.skillSlug)}`;
-  }
-  const parts = r.name.split("/");
-  if (parts.length === 3) {
-    return `https://verified-skill.com/skills/${parts.map(encodeURIComponent).join("/")}`;
-  }
-  // Fallback: derive owner/repo from repoUrl + use flat name as skill slug
-  const base = extractBaseRepo(r.repoUrl);
-  if (base) {
-    const skillName = r.name.split("/").pop() || r.name;
-    return `https://verified-skill.com/skills/${base.split("/").map(encodeURIComponent).join("/")}/${encodeURIComponent(skillName)}`;
-  }
-  return `https://verified-skill.com/skills/${encodeURIComponent(r.name)}`;
-}
-
-/**
- * Return a colored trust badge string.
- * Prefers certTier (formal certification status shown on website)
- * over trustTier (computed trust score tier).
- */
-function getTrustBadge(certTier: string | undefined, trustTier: string | undefined): string {
-  // Prefer certTier — matches what the website displays
-  if (certTier === "CERTIFIED") return green("\u2713 certified");
-  if (certTier === "VERIFIED") return cyan("\u2713 verified");
-  // Fall back to trustTier
-  switch (trustTier) {
-    case "T4": return green("\u2713 certified");
-    case "T3": return cyan("\u2713 verified");
-    case "T2": return yellow("~ pending");
-    case "T1": return dim("~ pending");
-    default: return "";
-  }
 }
 
 export async function findCommand(query: string, opts?: FindOptions): Promise<void> {

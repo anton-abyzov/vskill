@@ -53,6 +53,7 @@ import {
 import { isTTY, createPrompter } from "../utils/prompts.js";
 import { installSymlink, installCopy } from "../installer/canonical.js";
 import { getMarketplaceName } from "../marketplace/index.js";
+import { rankSearchResults, formatSkillId, getSkillUrl, getTrustBadge, formatResultLine } from "../utils/skill-display.js";
 
 // ---------------------------------------------------------------------------
 // Marketplace detection — auto-detect Claude Code plugin marketplaces
@@ -1707,11 +1708,8 @@ export async function addCommand(
   }
 
   if (parts.length !== 2) {
-    // No slash → try registry lookup by skill name
-    console.log(
-      yellow("Tip: Prefer owner/repo format for direct GitHub installs.")
-    );
-    return installFromRegistry(source, opts);
+    // No slash → search registry and disambiguate
+    return resolveViaSearch(source, opts);
   }
 
   const [owner, repo] = parts;
@@ -1916,6 +1914,96 @@ function extractSearchBaseRepo(repoUrl: string | undefined): string | null {
   if (!repoUrl) return null;
   const match = repoUrl.match(/([^/]+\/[^/]+?)(?:\/tree\/|\.git|$)/);
   return match ? match[1] : null;
+}
+
+// ---------------------------------------------------------------------------
+// Search-first disambiguation — resolve flat name via search API
+// ---------------------------------------------------------------------------
+
+async function resolveViaSearch(
+  flatName: string,
+  opts: AddOptions,
+): Promise<void> {
+  let results: import("../api/client.js").SkillSearchResult[];
+  try {
+    const response = await searchSkills(flatName);
+    results = response.results;
+  } catch {
+    // Search API failed — fall back to existing direct lookup behavior
+    console.log(
+      yellow("Tip: Prefer owner/repo format for direct GitHub installs.")
+    );
+    return installFromRegistry(flatName, opts);
+  }
+
+  const ranked = rankSearchResults(results, flatName);
+  const installable = ranked.filter(
+    (r) => !r.isBlocked && r.ownerSlug && r.repoSlug && r.skillSlug,
+  );
+
+  // Zero installable results
+  if (installable.length === 0) {
+    // Display whatever results we have (blocked with labels)
+    if (ranked.length > 0) {
+      console.log(bold(`\nSearch results for "${flatName}":\n`));
+      for (const r of ranked) {
+        console.log(formatResultLine(r));
+        console.log();
+      }
+    }
+    console.error(
+      red(`No installable skills found matching "${flatName}".\n`) +
+        dim(`Try ${cyan(`vskill find ${flatName}`)} for a broader search, or `) +
+        dim(`use ${cyan("owner/repo/skill")} for exact installs.`)
+    );
+    process.exit(1);
+    return;
+  }
+
+  // Single installable result — auto-install
+  if (installable.length === 1) {
+    const r = installable[0];
+    const fullPath = `${r.ownerSlug}/${r.repoSlug}/${r.skillSlug}`;
+    console.log(dim(`Found: ${formatSkillId(r)}`));
+    return addCommand(fullPath, opts);
+  }
+
+  // Multiple installable results — check --yes flag first
+  if (opts.yes) {
+    const r = installable[0];
+    const fullPath = `${r.ownerSlug}/${r.repoSlug}/${r.skillSlug}`;
+    console.log(dim(`Auto-selecting first result: ${formatSkillId(r)}`));
+    return addCommand(fullPath, opts);
+  }
+
+  // Multiple results — display them
+  console.log(bold(`\nMultiple skills match "${flatName}":\n`));
+  for (const r of ranked) {
+    console.log(formatResultLine(r));
+    console.log();
+  }
+
+  // Non-TTY: print list and exit
+  if (!isTTY()) {
+    console.error(
+      red("Ambiguous match. ") +
+        dim(`Specify the exact skill: ${cyan(`vskill install owner/repo/skill`)}`)
+    );
+    process.exit(1);
+    return;
+  }
+
+  // TTY: interactive prompt — only installable results are selectable
+  const choices = installable.map((r) => ({
+    label: formatSkillId(r),
+    hint: getTrustBadge(r.certTier, r.trustTier).replace(/\x1b\[[0-9;]*[A-Za-z]/g, "") || undefined,
+  }));
+
+  const prompter = createPrompter();
+  const selected = await prompter.promptChoice("Select a skill to install:", choices);
+  const chosen = installable[selected];
+  const fullPath = `${chosen.ownerSlug}/${chosen.repoSlug}/${chosen.skillSlug}`;
+  return addCommand(fullPath, opts);
 }
 
 // ---------------------------------------------------------------------------

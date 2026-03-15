@@ -51,19 +51,6 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
             style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
           >
             <button
-              onClick={() => sk.setMode("manual")}
-              className="px-3 py-1.5 rounded-md text-[12px] font-medium transition-all duration-200"
-              style={{
-                background: sk.mode === "manual" ? "var(--surface-4, var(--surface-3))" : "transparent",
-                color: sk.mode === "manual" ? "var(--text-primary)" : "var(--text-tertiary)",
-                boxShadow: sk.mode === "manual" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
-                cursor: "pointer",
-                border: "none",
-              }}
-            >
-              Manual
-            </button>
-            <button
               onClick={() => sk.setMode("ai")}
               className="px-3 py-1.5 rounded-md text-[12px] font-medium transition-all duration-200"
               style={{
@@ -78,6 +65,19 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                 <SparkleIcon size={12} />
                 AI-Assisted
               </span>
+            </button>
+            <button
+              onClick={() => sk.setMode("manual")}
+              className="px-3 py-1.5 rounded-md text-[12px] font-medium transition-all duration-200"
+              style={{
+                background: sk.mode === "manual" ? "var(--surface-4, var(--surface-3))" : "transparent",
+                color: sk.mode === "manual" ? "var(--text-primary)" : "var(--text-tertiary)",
+                boxShadow: sk.mode === "manual" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                cursor: "pointer",
+                border: "none",
+              }}
+            >
+              Manual
             </button>
           </div>
         </div>

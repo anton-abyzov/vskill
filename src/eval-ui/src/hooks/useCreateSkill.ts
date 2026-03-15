@@ -114,7 +114,7 @@ export interface UseCreateSkillReturn {
 
 export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreateSkillOptions): UseCreateSkillReturn {
   // Mode toggle
-  const [mode, setMode] = useState<"manual" | "ai">("manual");
+  const [mode, setMode] = useState<"manual" | "ai">("ai");
 
   // Layout detection
   const [layout, setLayout] = useState<ProjectLayoutResponse | null>(null);

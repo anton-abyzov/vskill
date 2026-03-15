@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 export interface ClassifiedError {
-  category: "rate_limit" | "context_window" | "auth" | "timeout" | "provider_unavailable" | "parse_error" | "unknown";
+  category: "rate_limit" | "context_window" | "auth" | "timeout" | "model_not_found" | "provider_unavailable" | "parse_error" | "unknown";
   title: string;
   description: string;
   hint: string;
@@ -150,6 +150,22 @@ export function classifyError(err: unknown, provider?: string): ClassifiedError 
       description: "The AI provider did not respond within the time limit (120s).",
       hint: "Try a simpler instruction or a smaller skill. If using Ollama, ensure the model is loaded.",
       retryable: true,
+    };
+  }
+
+  // Model not found — must come before provider_unavailable since both match "not found"
+  if (/model\b.*not found/i.test(msg) && !/command not found/i.test(msg)) {
+    const modelMatch = msg.match(/model\s+"?([^\s"]+)"?/i);
+    const modelName = modelMatch?.[1] || "unknown";
+    const pullHint = provider === "ollama"
+      ? `Pull the model first: ollama pull ${modelName}`
+      : `The model "${modelName}" is not available. Check the model name or try a different one.`;
+    return {
+      category: "model_not_found",
+      title: "Model Not Found",
+      description: `The requested model "${modelName}" is not available.`,
+      hint: pullHint,
+      retryable: false,
     };
   }
 

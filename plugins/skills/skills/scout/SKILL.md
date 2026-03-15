@@ -167,6 +167,7 @@ After running the install command:
 | Scenario | Action |
 |----------|--------|
 | `npx vskill` not found | Tell user to install: `npm install -g vskill` or use `npx` |
+| `npm error code E401` with `npx` | A project `.npmrc` with a private registry is interfering. Use: `npx --registry https://registry.npmjs.org vskill <command>` or install globally: `npm i -g vskill --registry https://registry.npmjs.org` |
 | Network error on search | Suggest checking internet connection; offer to try again |
 | No results found | Try broader search terms; suggest visiting verified-skill.com |
 | Scan FAIL on install | Explain the security concern; suggest `--force` only if user understands the risk |

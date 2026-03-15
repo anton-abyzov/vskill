@@ -21,24 +21,49 @@ describe("computeVerdict", () => {
     expect(computeVerdict(0.40, 1.0, 5.0)).toBe("INEFFECTIVE");
   });
 
-  it("returns DEGRADING when passRate < 0.4", () => {
+  it("returns EMERGING when passRate < 0.4 and skillAvg > baselineAvg", () => {
+    // Classic case: baseline=0, skill has some score
+    expect(computeVerdict(0.33, 5.0, 0.0)).toBe("EMERGING");
+    // Skill slightly outperforms baseline but low pass rate
+    expect(computeVerdict(0.20, 3.0, 2.0)).toBe("EMERGING");
+    expect(computeVerdict(0.10, 2.5, 1.0)).toBe("EMERGING");
+    // Just barely above baseline
+    expect(computeVerdict(0.39, 5.0, 1.0)).toBe("EMERGING");
+  });
+
+  it("returns DEGRADING when passRate < 0.4 and skillAvg <= baselineAvg", () => {
     expect(computeVerdict(0.30, 2.0, 3.0)).toBe("DEGRADING");
     expect(computeVerdict(0.10, 1.0, 1.0)).toBe("DEGRADING");
     expect(computeVerdict(0.0, 0.0, 0.0)).toBe("DEGRADING");
-    expect(computeVerdict(0.39, 5.0, 1.0)).toBe("DEGRADING");
+    // Skill worse than baseline
+    expect(computeVerdict(0.20, 1.0, 2.0)).toBe("DEGRADING");
   });
 
-  it("handles boundary values correctly", () => {
-    // Exactly 0.8 pass rate, exactly +1 rubric → EFFECTIVE
+  it("handles boundary at passRate = 0.4", () => {
+    // Exactly 0.4 → INEFFECTIVE (not EMERGING or DEGRADING)
+    expect(computeVerdict(0.4, 3.0, 3.0)).toBe("INEFFECTIVE");
+    expect(computeVerdict(0.4, 5.0, 0.0)).toBe("INEFFECTIVE");
+    expect(computeVerdict(0.4, 1.0, 5.0)).toBe("INEFFECTIVE");
+  });
+
+  it("handles boundary at passRate = 0.6", () => {
+    // Exactly 0.6, skill > baseline → MARGINAL
+    expect(computeVerdict(0.6, 3.1, 3.0)).toBe("MARGINAL");
+    // Exactly 0.6, skill = baseline → INEFFECTIVE
+    expect(computeVerdict(0.6, 3.0, 3.0)).toBe("INEFFECTIVE");
+  });
+
+  it("handles boundary at passRate = 0.8", () => {
+    // 0.8 pass rate, rubric diff > 1 → EFFECTIVE
     expect(computeVerdict(0.8, 4.0, 2.9)).toBe("EFFECTIVE");
     // 0.8 pass rate but rubric diff exactly 1 → NOT EFFECTIVE (needs >1)
     expect(computeVerdict(0.8, 4.0, 3.0)).toBe("MARGINAL");
-    // Exactly 0.6 pass rate, skill > baseline → MARGINAL
-    expect(computeVerdict(0.6, 3.1, 3.0)).toBe("MARGINAL");
-    // Exactly 0.6 pass rate, skill = baseline → INEFFECTIVE
-    expect(computeVerdict(0.6, 3.0, 3.0)).toBe("INEFFECTIVE");
-    // Exactly 0.4 pass rate → INEFFECTIVE
-    expect(computeVerdict(0.4, 3.0, 3.0)).toBe("INEFFECTIVE");
+  });
+
+  it("skillAvg == baselineAvg with low passRate → DEGRADING (not EMERGING)", () => {
+    expect(computeVerdict(0.30, 3.0, 3.0)).toBe("DEGRADING");
+    expect(computeVerdict(0.0, 0.0, 0.0)).toBe("DEGRADING");
+    expect(computeVerdict(0.39, 2.5, 2.5)).toBe("DEGRADING");
   });
 });
 
@@ -47,6 +72,7 @@ describe("verdictColor", () => {
     expect(verdictColor("EFFECTIVE")).toBe("green");
     expect(verdictColor("MARGINAL")).toBe("yellow");
     expect(verdictColor("INEFFECTIVE")).toBe("orange");
+    expect(verdictColor("EMERGING")).toBe("cyan");
     expect(verdictColor("DEGRADING")).toBe("red");
   });
 });

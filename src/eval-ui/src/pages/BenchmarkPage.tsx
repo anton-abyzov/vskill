@@ -201,26 +201,44 @@ export function BenchmarkPage() {
       </div>
 
       {/* Run buttons */}
-      <div className="flex items-center gap-2 mb-7">
-        <button onClick={() => handleStartBenchmark()} disabled={running} className="btn btn-primary">
+      <div className="flex items-center gap-2 mb-2">
+        <button
+          onClick={() => handleStartBenchmark()}
+          disabled={running}
+          className="btn btn-primary"
+          title="Run all eval cases with your skill and grade assertions"
+        >
           {running && runScope === "all" && !isBaselineMode ? (
             <><div className="spinner" style={{ borderTopColor: "#fff", borderColor: "rgba(255,255,255,0.2)", width: 14, height: 14 }} /> Running All...</>
           ) : (
             <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg> Run All ({evalCases?.evals.length ?? 0} cases)</>
           )}
         </button>
-        <button onClick={() => handleStartBaseline()} disabled={running} className="btn btn-ghost" style={{ color: "#f97316" }}>
+        <button
+          onClick={() => handleStartBaseline()}
+          disabled={running}
+          className="btn btn-ghost"
+          style={{ color: "#f97316", border: "1px solid rgba(249,115,22,0.4)" }}
+          title="Run all eval cases without your skill to measure raw LLM capability"
+        >
           {running && isBaselineMode ? (
             <><div className="spinner" style={{ borderTopColor: "#f97316", borderColor: "rgba(249,115,22,0.2)", width: 14, height: 14 }} /> Running Baseline...</>
           ) : (
             <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" /></svg> Run Baseline</>
           )}
         </button>
-        <button onClick={() => navigate(`/skills/${plugin}/${skill}/compare`)} className="btn btn-purple">
+        <button
+          onClick={() => navigate(`/skills/${plugin}/${skill}/compare`)}
+          className="btn btn-purple"
+          title="Run each case both with and without your skill, then blind-score and compare"
+        >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>
           Run A/B
         </button>
       </div>
+      <p className="text-[11px] mb-7" style={{ color: "var(--text-tertiary)" }}>
+        Tip: Use A/B to see if your skill actually improves output quality
+      </p>
 
       {error && (
         <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>

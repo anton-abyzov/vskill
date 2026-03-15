@@ -1,13 +1,17 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useSSE } from "../sse";
-import { api } from "../api";
 import { useConfig } from "../ConfigContext";
 import { GroupedBarChart } from "../components/GroupedBarChart";
 import { ProgressLog } from "../components/ProgressLog";
 import type { ProgressEntry } from "../components/ProgressLog";
 import { ActionItemsPanel } from "../components/ActionItemsPanel";
+import { RunningVerdictBar } from "../components/RunningVerdictBar";
+import { useProgressiveSummary } from "../hooks/useProgressiveSummary";
+import { VERDICT_STYLES } from "../utils/verdict-styles";
 import type { ActionItems } from "../types";
+
+import type { EvalVerdict } from "../../../eval/verdict.js";
 
 interface ComparisonOutputsEvent {
   eval_id: number;
@@ -22,12 +26,19 @@ interface ComparisonOutputsEvent {
   winner: "skill" | "baseline" | "tie";
 }
 
-const VERDICT_STYLES: Record<string, { bg: string; text: string; border: string; glow: string }> = {
-  EFFECTIVE:    { bg: "var(--green-muted)",  text: "var(--green)",  border: "var(--green)",  glow: "rgba(52,211,153,0.15)" },
-  MARGINAL:     { bg: "var(--yellow-muted)", text: "var(--yellow)", border: "var(--yellow)", glow: "rgba(251,191,36,0.15)" },
-  INEFFECTIVE:  { bg: "rgba(251,146,60,0.12)", text: "var(--orange)", border: "var(--orange)", glow: "rgba(251,146,60,0.15)" },
-  DEGRADING:    { bg: "var(--red-muted)",    text: "var(--red)",    border: "var(--red)",    glow: "rgba(248,113,113,0.15)" },
-};
+interface AssertionResultEvent {
+  eval_id: number;
+  assertion_id: number;
+  text: string;
+  pass: boolean;
+  reasoning: string;
+}
+
+interface CaseCompleteEvent {
+  eval_id: number;
+  status: string;
+  pass_rate: number;
+}
 
 export function ComparisonPage() {
   const { plugin, skill } = useParams<{ plugin: string; skill: string }>();
@@ -63,7 +74,10 @@ export function ComparisonPage() {
   const comparisons: ComparisonOutputsEvent[] = [];
   const caseErrors: Array<{ eval_id: number; error: string }> = [];
   const activeCases: Array<{ eval_id: number; eval_name: string }> = [];
+  const assertionsByCase = new Map<number, AssertionResultEvent[]>();
+  const completedCaseIds = new Set<number>();
   const progressEntries: ProgressEntry[] = [];
+  let totalCases = 0;
   for (const evt of events) {
     if (evt.event === "outputs_ready") {
       const d = evt.data as ComparisonOutputsEvent;
@@ -74,8 +88,17 @@ export function ComparisonPage() {
     } else if (evt.event === "case_start") {
       const d = evt.data as { eval_id: number; eval_name: string };
       if (!activeCases.find((c) => c.eval_id === d.eval_id)) activeCases.push(d);
+    } else if (evt.event === "assertion_result") {
+      const d = evt.data as AssertionResultEvent;
+      const arr = assertionsByCase.get(d.eval_id) ?? [];
+      if (!arr.some((a) => a.assertion_id === d.assertion_id)) arr.push(d);
+      assertionsByCase.set(d.eval_id, arr);
+    } else if (evt.event === "case_complete") {
+      const d = evt.data as CaseCompleteEvent;
+      completedCaseIds.add(d.eval_id);
     } else if (evt.event === "progress") {
       const d = evt.data as { eval_id?: number; phase: string; message: string; current?: number; total?: number };
+      if (d.total && d.total > totalCases) totalCases = d.total;
       progressEntries.push({
         timestamp: Date.now(),
         evalId: d.eval_id,
@@ -86,6 +109,10 @@ export function ComparisonPage() {
       });
     }
   }
+  // Fallback: use activeCases count if no progress events reported total
+  if (totalCases === 0) totalCases = activeCases.length;
+
+  const progressiveSummary = useProgressiveSummary(events, totalCases);
 
   // The latest case being processed (for progress display)
   const completedIds = new Set([...comparisons.map(c => c.eval_id), ...caseErrors.map(c => c.eval_id)]);
@@ -160,12 +187,21 @@ export function ComparisonPage() {
         </div>
       )}
 
+      {/* Running verdict bar — shown during comparison execution */}
+      {(running || (done && !doneData?.verdict)) && totalCases > 0 && (
+        <RunningVerdictBar summary={progressiveSummary} />
+      )}
+
       {comparisons.length > 0 && (
         <div className="space-y-4 stagger-children">
           {comparisons.map((c) => {
             const isExpanded = expandedOutputs.has(c.eval_id);
             const winnerLabel = c.winner === "skill" ? "Skill Wins" : c.winner === "baseline" ? "Baseline Wins" : "Tie";
             const winnerColor = c.winner === "skill" ? "var(--green)" : c.winner === "baseline" ? "var(--red)" : "var(--text-tertiary)";
+            const caseAssertions = assertionsByCase.get(c.eval_id) ?? [];
+            const caseIsComplete = completedCaseIds.has(c.eval_id);
+            const failingAssertions = caseAssertions.filter((a) => !a.pass);
+            const showFixButton = caseIsComplete && caseAssertions.length > 0 && failingAssertions.length > 0;
 
             return (
               <div key={c.eval_id} className="glass-card overflow-hidden">
@@ -206,6 +242,24 @@ export function ComparisonPage() {
                       isWinner={c.winner === "baseline"}
                     />
                   </div>
+
+                  {/* Per-case Fix button — only when case has failing assertions */}
+                  {showFixButton && plugin && skill && (
+                    <div className="mt-4 flex justify-end">
+                      <button
+                        onClick={() => {
+                          const notes = failingAssertions.map((a) => a.text).join("; ");
+                          window.location.href = `/workspace/${plugin}/${skill}?improve=true&eval_id=${c.eval_id}&notes=${encodeURIComponent(notes)}`;
+                        }}
+                        className="btn btn-purple text-[12px] px-3 py-1.5"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                        </svg>
+                        Fix
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Expand/collapse actual outputs */}
@@ -269,7 +323,8 @@ export function ComparisonPage() {
 
           {/* Verdict */}
           {done && doneData?.verdict && (() => {
-            const vs = VERDICT_STYLES[doneData.verdict] || VERDICT_STYLES.INEFFECTIVE;
+            const verdictKey = doneData.verdict as EvalVerdict;
+            const vs = VERDICT_STYLES[verdictKey] ?? VERDICT_STYLES.INEFFECTIVE;
             return (
               <div
                 className="glass-card p-8 text-center animate-fade-in-scale"
@@ -282,7 +337,7 @@ export function ComparisonPage() {
                     <MetricPill label="Skill Avg" value={doneData.comparison.skillRubricAvg.toFixed(1)} />
                     <MetricPill label="Baseline Avg" value={doneData.comparison.baselineRubricAvg.toFixed(1)} />
                     <MetricPill
-                      label="Delta"
+                      label="Rubric Delta"
                       value={`${doneData.comparison.delta > 0 ? "+" : ""}${doneData.comparison.delta.toFixed(1)}`}
                       color={doneData.comparison.delta > 0 ? "var(--green)" : doneData.comparison.delta < 0 ? "var(--red)" : "var(--text-secondary)"}
                     />

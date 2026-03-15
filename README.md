@@ -72,6 +72,12 @@ npx vskill install --repo anton-abyzov/vskill --plugin frontend
 
 Or install globally: `npm install -g vskill`
 
+> **Getting E401 errors?** If your project has a `.npmrc` pointing to a private registry (e.g. AWS CodeArtifact, GitHub Packages), npx may fail with `npm error code E401`. Fix it by overriding the registry:
+> ```bash
+> npx --registry https://registry.npmjs.org vskill install <skill>
+> ```
+> Or install globally once to avoid this entirely: `npm i -g vskill --registry https://registry.npmjs.org`
+
 <br/>
 
 ## Three-Tier Verification

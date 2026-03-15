@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
-// verdict.ts -- four-tier eval verdict computation
+// verdict.ts -- five-tier eval verdict computation
 // ---------------------------------------------------------------------------
 
-export type EvalVerdict = "EFFECTIVE" | "MARGINAL" | "INEFFECTIVE" | "DEGRADING";
+export type EvalVerdict = "EFFECTIVE" | "MARGINAL" | "INEFFECTIVE" | "EMERGING" | "DEGRADING";
 
 export function computeVerdict(
   assertionPassRate: number,
@@ -18,6 +18,9 @@ export function computeVerdict(
   if (assertionPassRate >= 0.4) {
     return "INEFFECTIVE";
   }
+  if (skillRubricAvg > baselineRubricAvg) {
+    return "EMERGING";
+  }
   return "DEGRADING";
 }
 
@@ -29,6 +32,8 @@ export function verdictColor(verdict: EvalVerdict): string {
       return "yellow";
     case "INEFFECTIVE":
       return "orange";
+    case "EMERGING":
+      return "cyan";
     case "DEGRADING":
       return "red";
   }

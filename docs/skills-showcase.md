@@ -302,6 +302,8 @@ npx vskill install remotion-best-practices
 
 Every skill is scanned before installation. No exceptions. No `--skip-scan`.
 
+> **E401 errors?** If a project `.npmrc` points to a private registry, use: `npx --registry https://registry.npmjs.org vskill install <skill>`
+
 Invoke skills in your agent:
 
 ```

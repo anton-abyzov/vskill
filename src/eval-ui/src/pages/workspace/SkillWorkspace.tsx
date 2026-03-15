@@ -105,6 +105,24 @@ export function SkillWorkspaceInner() {
       {/* Detail header */}
       <DetailHeader state={state} isReadOnly={isReadOnly} onDelete={isReadOnly ? undefined : handleDelete} />
 
+      {/* Workspace-level error banner (e.g. delete failures) */}
+      {state.error && (
+        <div
+          className="flex items-center gap-2 px-4 py-2 text-[12px]"
+          style={{ background: "var(--red-muted)", color: "var(--red)", borderBottom: "1px solid var(--border-subtle)" }}
+        >
+          <span className="flex-1">{state.error}</span>
+          <button
+            onClick={() => dispatch({ type: "SET_ERROR", error: null })}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--red)", padding: 2 }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* Tab bar */}
       <TabBar
         activePanel={state.activePanel}

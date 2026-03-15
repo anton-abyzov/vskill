@@ -1,33 +1,12 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { api } from "../api";
-import { useConfig } from "../ConfigContext";
-import type { ProjectLayoutResponse, DetectedLayout, GeneratedEval, SaveDraftRequest } from "../types";
+import { useCreateSkill, toKebab } from "../hooks/useCreateSkill";
 import { ProgressLog } from "./ProgressLog";
-import type { ProgressEntry } from "./ProgressLog";
 import { ErrorCard } from "./ErrorCard";
-import type { ClassifiedError } from "./ErrorCard";
 import { renderMarkdown } from "../utils/renderMarkdown";
 import { SkillFileTree } from "./SkillFileTree";
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Styles
 // ---------------------------------------------------------------------------
-
-function toKebab(s: string, trim = true): string {
-  let r = s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  if (trim) r = r.replace(/^-+|-+$/g, "");
-  return r;
-}
-
-function resolvePathPreview(root: string, layout: 1 | 2 | 3, plugin: string, name: string): string {
-  const short = root.split("/").slice(-2).join("/");
-  const prefix = `.../${short}`;
-  switch (layout) {
-    case 1: return `${prefix}/${plugin}/skills/${name || "{skill}"}/SKILL.md`;
-    case 2: return `${prefix}/plugins/${plugin}/skills/${name || "{skill}"}/SKILL.md`;
-    case 3: return `${prefix}/skills/${name || "{skill}"}/SKILL.md`;
-  }
-}
 
 const inputStyle = {
   background: "var(--surface-3)",
@@ -57,273 +36,7 @@ interface Props {
 }
 
 export function CreateSkillInline({ onCreated, onCancel }: Props) {
-  // Mode toggle
-  const [mode, setMode] = useState<"manual" | "ai">("manual");
-
-  // Layout detection
-  const [layout, setLayout] = useState<ProjectLayoutResponse | null>(null);
-  const [layoutLoading, setLayoutLoading] = useState(true);
-
-  // Config (providers/models) — shared via context
-  const { config } = useConfig();
-
-  // Form state
-  const [name, setName] = useState("");
-  const [selectedLayout, setSelectedLayout] = useState<1 | 2 | 3>(3);
-  const [plugin, setPlugin] = useState("");
-  const [newPlugin, setNewPlugin] = useState("");
-  const [description, setDescription] = useState("");
-  const [model, setModel] = useState("");
-  const [allowedTools, setAllowedTools] = useState("");
-  const [body, setBody] = useState("");
-  const [pendingEvals, setPendingEvals] = useState<GeneratedEval[] | null>(null);
-
-  // Body preview toggle
-  const [bodyViewMode, setBodyViewMode] = useState<"write" | "preview">("write");
-
-  // Submission
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // AI generation state
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [generating, setGenerating] = useState(false);
-  const [aiGenerated, setAiGenerated] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiClassifiedError, setAiClassifiedError] = useState<ClassifiedError | null>(null);
-  const [aiProgress, setAiProgress] = useState<ProgressEntry[]>([]);
-  const promptRef = useRef<HTMLTextAreaElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
-  // AI generation metadata (stored for history/persistence, not displayed)
-  const aiMetaRef = useRef<{ prompt: string; provider: string; model: string; reasoning: string } | null>(null);
-
-  // Draft persistence
-  const [draftSaved, setDraftSaved] = useState(false);
-  const [draftFiles, setDraftFiles] = useState<string[]>([]);
-
-  // Plugin recommendation (shown after AI generation when plugins are available)
-  const [showPluginRecommendation, setShowPluginRecommendation] = useState(false);
-
-  // Load layout + config on mount
-  useEffect(() => {
-    api.getProjectLayout()
-      .then((l) => {
-        setLayout(l);
-        setSelectedLayout(l.suggestedLayout);
-        const suggested = l.detectedLayouts.find((d) => d.layout === l.suggestedLayout);
-        if (suggested?.existingPlugins.length) setPlugin(suggested.existingPlugins[0]);
-      })
-      .catch(() => {})
-      .finally(() => setLayoutLoading(false));
-
-  }, []);
-
-  // Auto-focus prompt when switching to AI mode
-  useEffect(() => {
-    if (mode === "ai") promptRef.current?.focus();
-  }, [mode]);
-
-  // Cleanup SSE on unmount
-  useEffect(() => {
-    return () => { abortRef.current?.abort(); };
-  }, []);
-
-  // Computed values
-  const availablePlugins = useMemo(() => {
-    if (!layout) return [];
-    return layout.detectedLayouts.find((d) => d.layout === selectedLayout)?.existingPlugins || [];
-  }, [layout, selectedLayout]);
-
-  const effectivePlugin = plugin === "__new__" ? newPlugin : plugin;
-
-  const pathPreview = layout
-    ? resolvePathPreview(layout.root, selectedLayout, effectivePlugin || "{plugin}", name || "{skill}")
-    : "";
-
-  const creatableLayouts = useMemo(() => {
-    if (!layout) return [];
-    return layout.detectedLayouts.filter((d): d is DetectedLayout & { layout: 1 | 2 | 3 } => d.layout !== 4);
-  }, [layout]);
-
-  // Detect if there are plugin-based layouts available for recommendation
-  const pluginLayoutInfo = useMemo(() => {
-    if (!layout) return null;
-    // Find a layout with existing plugins (prefer layout 2 > 1)
-    const l2 = layout.detectedLayouts.find((d) => d.layout === 2 && d.existingPlugins.length > 0);
-    const l1 = layout.detectedLayouts.find((d) => d.layout === 1 && d.existingPlugins.length > 0);
-    const best = l2 || l1;
-    if (!best) return null;
-    return { layout: best.layout as 1 | 2, plugins: best.existingPlugins };
-  }, [layout]);
-
-  // Resolve provider/model for generation request
-  const resolveAiConfig = useCallback(() => {
-    if (!config) return { provider: "claude-cli", model: "sonnet" };
-    const provider = config.provider || "claude-cli";
-    // Extract model ID from config.model (e.g. "claude-sonnet" -> "sonnet")
-    let modelId = config.model || "sonnet";
-    if (provider === "claude-cli" && modelId.startsWith("claude-")) {
-      modelId = modelId.replace("claude-", "");
-    }
-    return { provider, model: modelId };
-  }, [config]);
-
-  // ---------------------------------------------------------------------------
-  // Handlers
-  // ---------------------------------------------------------------------------
-
-  const handleCancelGenerate = useCallback(() => {
-    abortRef.current?.abort();
-    setGenerating(false);
-  }, []);
-
-  async function handleGenerate() {
-    setAiError(null);
-    setAiClassifiedError(null);
-    setAiProgress([]);
-    aiMetaRef.current = null;
-    if (!aiPrompt.trim()) { setAiError("Describe what your skill should do"); return; }
-
-    setGenerating(true);
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    const { provider, model: aiModel } = resolveAiConfig();
-
-    try {
-      const res = await fetch(`/api/skills/generate?sse`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: aiPrompt.trim(), provider, model: aiModel }),
-        signal: controller.signal,
-      });
-
-      if (!res.ok || !res.body) {
-        let msg = `HTTP ${res.status}`;
-        try { const j = await res.json(); if (j.error) msg = j.error; } catch {}
-        throw new Error(msg);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let currentEvent = "";
-
-      while (true) {
-        const { done: readerDone, value } = await reader.read();
-        if (readerDone) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (currentEvent === "progress") {
-                setAiProgress((prev) => [...prev, { phase: data.phase, message: data.message, timestamp: Date.now() }]);
-              } else if (currentEvent === "done" || currentEvent === "complete") {
-                const genName = data.name;
-                const genDescription = data.description;
-                const genModel = data.model || "";
-                const genAllowedTools = data.allowedTools || "";
-                const genBody = data.body;
-                const genEvals = data.evals?.length ? data.evals : null;
-                const meta = {
-                  prompt: aiPrompt.trim(),
-                  provider: resolveAiConfig().provider,
-                  model: resolveAiConfig().model,
-                  reasoning: data.reasoning || "",
-                };
-
-                setName(genName);
-                setDescription(genDescription);
-                setModel(genModel);
-                setAllowedTools(genAllowedTools);
-                setBody(genBody);
-                setPendingEvals(genEvals);
-                setAiGenerated(true);
-                aiMetaRef.current = meta;
-                setMode("manual");
-
-                // Show plugin recommendation if on layout 3 and plugins exist
-                if (selectedLayout === 3 && pluginLayoutInfo) {
-                  setShowPluginRecommendation(true);
-                }
-
-                // Auto-save draft to file system
-                const draftReq: SaveDraftRequest = {
-                  name: genName,
-                  plugin: effectivePlugin || "",
-                  layout: selectedLayout,
-                  description: genDescription,
-                  model: genModel || undefined,
-                  allowedTools: genAllowedTools || undefined,
-                  body: genBody,
-                  evals: genEvals || undefined,
-                  aiMeta: meta,
-                };
-                api.saveDraft(draftReq)
-                  .then((result) => {
-                    setDraftSaved(true);
-                    setDraftFiles(result.files);
-                  })
-                  .catch(() => { /* draft save failure is non-blocking */ });
-              } else if (currentEvent === "error") {
-                setAiError(data.message || data.description || "Unknown error");
-                if (data.category) setAiClassifiedError(data as ClassifiedError);
-              }
-            } catch {
-              // skip malformed data
-            }
-            currentEvent = "";
-          }
-        }
-      }
-    } catch (err) {
-      if ((err as Error).name !== "AbortError") {
-        setAiError((err as Error).message);
-      }
-    } finally {
-      setGenerating(false);
-      abortRef.current = null;
-    }
-  }
-
-  async function handleCreate() {
-    setError(null);
-    if (!name.trim()) { setError("Skill name is required"); return; }
-    if (!description.trim()) { setError("Description is required"); return; }
-    if (selectedLayout !== 3 && !effectivePlugin.trim()) { setError("Plugin name is required"); return; }
-
-    setCreating(true);
-    try {
-      const result = await api.createSkill({
-        name: toKebab(name),
-        plugin: effectivePlugin || "",
-        layout: selectedLayout,
-        description,
-        model: model || undefined,
-        allowedTools: allowedTools || undefined,
-        body,
-        evals: pendingEvals || undefined,
-        aiMeta: aiMetaRef.current || undefined,
-      });
-      onCreated(result.plugin, result.skill);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+  const sk = useCreateSkill({ onCreated });
 
   return (
     <div className="px-8 py-6 max-w-4xl animate-fade-in overflow-auto h-full">
@@ -338,12 +51,12 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
             style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
           >
             <button
-              onClick={() => setMode("manual")}
+              onClick={() => sk.setMode("manual")}
               className="px-3 py-1.5 rounded-md text-[12px] font-medium transition-all duration-200"
               style={{
-                background: mode === "manual" ? "var(--surface-4, var(--surface-3))" : "transparent",
-                color: mode === "manual" ? "var(--text-primary)" : "var(--text-tertiary)",
-                boxShadow: mode === "manual" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                background: sk.mode === "manual" ? "var(--surface-4, var(--surface-3))" : "transparent",
+                color: sk.mode === "manual" ? "var(--text-primary)" : "var(--text-tertiary)",
+                boxShadow: sk.mode === "manual" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
                 cursor: "pointer",
                 border: "none",
               }}
@@ -351,12 +64,12 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
               Manual
             </button>
             <button
-              onClick={() => setMode("ai")}
+              onClick={() => sk.setMode("ai")}
               className="px-3 py-1.5 rounded-md text-[12px] font-medium transition-all duration-200"
               style={{
-                background: mode === "ai" ? "rgba(168,85,247,0.15)" : "transparent",
-                color: mode === "ai" ? "#a855f7" : "var(--text-tertiary)",
-                boxShadow: mode === "ai" ? "0 1px 3px rgba(168,85,247,0.15)" : "none",
+                background: sk.mode === "ai" ? "rgba(168,85,247,0.15)" : "transparent",
+                color: sk.mode === "ai" ? "#a855f7" : "var(--text-tertiary)",
+                boxShadow: sk.mode === "ai" ? "0 1px 3px rgba(168,85,247,0.15)" : "none",
                 cursor: "pointer",
                 border: "none",
               }}
@@ -371,7 +84,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
       </div>
 
       {/* Loading skeleton */}
-      {layoutLoading && (
+      {sk.layoutLoading && (
         <div className="space-y-3">
           <div className="skeleton h-10 w-full rounded-lg" />
           <div className="skeleton h-10 w-full rounded-lg" />
@@ -381,7 +94,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
       {/* ================================================================= */}
       {/* AI-ASSISTED MODE                                                  */}
       {/* ================================================================= */}
-      {!layoutLoading && layout && mode === "ai" && (
+      {!sk.layoutLoading && sk.layout && sk.mode === "ai" && (
         <div className="space-y-4 animate-fade-in">
           {/* Describe your skill */}
           <div className="glass-card p-4">
@@ -395,48 +108,47 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
               Describe Your Skill
             </h3>
             <textarea
-              ref={promptRef}
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
+              ref={sk.promptRef}
+              value={sk.aiPrompt}
+              onChange={(e) => sk.setAiPrompt(e.target.value)}
               placeholder={"e.g., A skill that helps format SQL queries, optimize them for performance, and explain query execution plans.\n\nInclude any specific behaviors, constraints, or output formats you want."}
               rows={5}
-              disabled={generating}
+              disabled={sk.generating}
               className="w-full px-3 py-2.5 rounded-lg text-[13px] resize-y"
               style={{ ...inputStyle, minHeight: "120px" }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
-                  handleGenerate();
+                  sk.handleGenerate();
                 }
               }}
             />
-            <p className="text-[11px] mt-2" style={{ color: "var(--text-tertiary)" }}>
-              Describe what the skill should do. The AI will generate the name, description, system prompt, and test cases.
-              <span className="ml-1" style={{ color: "var(--text-quaternary, var(--text-tertiary))" }}>Cmd+Enter to generate</span>
+            <p className="text-[11px] mt-2" style={{ color: "var(--text-quaternary, var(--text-tertiary))" }}>
+              Cmd+Enter to generate
             </p>
           </div>
 
           {/* Progress log during generation */}
-          {generating && aiProgress.length > 0 && (
-            <ProgressLog entries={aiProgress} isRunning={true} />
+          {sk.generating && sk.aiProgress.length > 0 && (
+            <ProgressLog entries={sk.aiProgress} isRunning={true} />
           )}
 
           {/* Error display */}
-          {aiError && (
+          {sk.aiError && (
             <div>
-              {aiClassifiedError ? (
+              {sk.aiClassifiedError ? (
                 <ErrorCard
-                  error={aiClassifiedError}
-                  onRetry={handleGenerate}
-                  onDismiss={() => { setAiError(null); setAiClassifiedError(null); }}
+                  error={sk.aiClassifiedError}
+                  onRetry={sk.handleGenerate}
+                  onDismiss={sk.clearAiError}
                 />
               ) : (
                 <div>
                   <div className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
-                    {aiError}
+                    {sk.aiError}
                   </div>
                   <button
-                    onClick={handleGenerate}
+                    onClick={sk.handleGenerate}
                     className="mt-2 text-[12px] font-medium"
                     style={{ color: "#a855f7", background: "none", border: "none", cursor: "pointer" }}
                   >
@@ -449,9 +161,9 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
 
           {/* Generate / Cancel buttons */}
           <div className="flex items-center gap-3">
-            {generating ? (
+            {sk.generating ? (
               <button
-                onClick={handleCancelGenerate}
+                onClick={sk.handleCancelGenerate}
                 className="px-5 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 flex items-center gap-2"
                 style={{ background: "var(--surface-3)", color: "var(--text-secondary)", border: "none", cursor: "pointer" }}
               >
@@ -459,13 +171,13 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
               </button>
             ) : (
               <button
-                onClick={handleGenerate}
-                disabled={!aiPrompt.trim()}
+                onClick={sk.handleGenerate}
+                disabled={!sk.aiPrompt.trim()}
                 className="px-5 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 flex items-center gap-2"
                 style={{
-                  background: !aiPrompt.trim() ? "var(--surface-3)" : "#a855f7",
-                  color: !aiPrompt.trim() ? "var(--text-tertiary)" : "#fff",
-                  cursor: !aiPrompt.trim() ? "not-allowed" : "pointer",
+                  background: !sk.aiPrompt.trim() ? "var(--surface-3)" : "#a855f7",
+                  color: !sk.aiPrompt.trim() ? "var(--text-tertiary)" : "#fff",
+                  cursor: !sk.aiPrompt.trim() ? "not-allowed" : "pointer",
                   border: "none",
                 }}
               >
@@ -480,11 +192,11 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
             >
               Cancel
             </button>
-            {!generating && (
+            {!sk.generating && (
               <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
                 or fill in the form manually
                 <button
-                  onClick={() => setMode("manual")}
+                  onClick={() => sk.setMode("manual")}
                   className="ml-1 font-medium"
                   style={{ color: "var(--accent)", background: "none", border: "none", cursor: "pointer" }}
                 >
@@ -499,24 +211,24 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
       {/* ================================================================= */}
       {/* MANUAL MODE                                                       */}
       {/* ================================================================= */}
-      {!layoutLoading && layout && mode === "manual" && (
+      {!sk.layoutLoading && sk.layout && sk.mode === "manual" && (
         <div className="space-y-4 animate-fade-in">
           {/* Location */}
           <div className="glass-card p-4">
             <h3 className="text-[13px] font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Location</h3>
-            {creatableLayouts.length > 1 && (
+            {sk.creatableLayouts.length > 1 && (
               <div className="mb-3">
                 <label className="text-[11px] font-medium uppercase tracking-wider mb-2 block" style={{ color: "var(--text-tertiary)" }}>Layout</label>
                 <div className="flex gap-2">
-                  {creatableLayouts.map((l) => (
+                  {sk.creatableLayouts.map((l) => (
                     <button
                       key={l.layout}
-                      onClick={() => { setSelectedLayout(l.layout as 1 | 2 | 3); setPlugin(l.existingPlugins[0] || ""); setNewPlugin(""); }}
+                      onClick={() => { sk.setSelectedLayout(l.layout as 1 | 2 | 3); sk.setPlugin(l.existingPlugins[0] || ""); sk.setNewPlugin(""); }}
                       className="px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-150"
                       style={{
-                        background: selectedLayout === l.layout ? "var(--accent)" : "var(--surface-3)",
-                        color: selectedLayout === l.layout ? "#fff" : "var(--text-secondary)",
-                        border: `1px solid ${selectedLayout === l.layout ? "var(--accent)" : "var(--border-subtle)"}`,
+                        background: sk.selectedLayout === l.layout ? "var(--accent)" : "var(--surface-3)",
+                        color: sk.selectedLayout === l.layout ? "#fff" : "var(--text-secondary)",
+                        border: `1px solid ${sk.selectedLayout === l.layout ? "var(--accent)" : "var(--border-subtle)"}`,
                         cursor: "pointer",
                       }}
                     >
@@ -526,20 +238,20 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                 </div>
               </div>
             )}
-            {selectedLayout !== 3 && (
+            {sk.selectedLayout !== 3 && (
               <div className="mb-3">
                 <label className="text-[11px] font-medium uppercase tracking-wider mb-2 block" style={{ color: "var(--text-tertiary)" }}>Plugin</label>
                 <select
-                  value={plugin}
-                  onChange={(e) => { setPlugin(e.target.value); setNewPlugin(""); }}
+                  value={sk.plugin}
+                  onChange={(e) => { sk.setPlugin(e.target.value); sk.setNewPlugin(""); }}
                   className="w-full px-3 py-2 rounded-lg text-[13px]"
                   style={inputStyle}
                 >
-                  {availablePlugins.map((p) => <option key={p} value={p}>{p}</option>)}
+                  {sk.availablePlugins.map((p) => <option key={p} value={p}>{p}</option>)}
                   <option value="__new__">+ New plugin...</option>
                 </select>
-                {plugin === "__new__" && (
-                  <input type="text" value={newPlugin} onChange={(e) => setNewPlugin(toKebab(e.target.value))} placeholder="my-plugin"
+                {sk.plugin === "__new__" && (
+                  <input type="text" value={sk.newPlugin} onChange={(e) => sk.setNewPlugin(toKebab(e.target.value))} placeholder="my-plugin"
                     className="w-full mt-2 px-3 py-2 rounded-lg text-[13px]"
                     style={inputStyle}
                   />
@@ -547,12 +259,12 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
               </div>
             )}
             <div className="px-3 py-2 rounded-lg text-[11px] font-mono" style={{ background: "var(--surface-0)", color: "var(--text-tertiary)", border: "1px solid var(--border-subtle)" }}>
-              {pathPreview}
+              {sk.pathPreview}
             </div>
           </div>
 
           {/* Plugin recommendation */}
-          {showPluginRecommendation && pluginLayoutInfo && selectedLayout === 3 && (
+          {sk.showPluginRecommendation && sk.pluginLayoutInfo && sk.selectedLayout === 3 && (
             <div
               className="px-4 py-3 rounded-lg text-[12px] animate-fade-in flex items-center justify-between gap-3"
               style={{
@@ -566,24 +278,20 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                   <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
                 </svg>
                 <span>
-                  Plugins detected (<strong>{pluginLayoutInfo.plugins.slice(0, 3).join(", ")}</strong>).
+                  Plugins detected (<strong>{sk.pluginLayoutInfo.plugins.slice(0, 3).join(", ")}</strong>).
                   Add this skill to a plugin for better organization.
                 </span>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <button
-                  onClick={() => {
-                    setSelectedLayout(pluginLayoutInfo.layout);
-                    setPlugin(pluginLayoutInfo.plugins[0]);
-                    setShowPluginRecommendation(false);
-                  }}
+                  onClick={sk.applyPluginRecommendation}
                   className="px-3 py-1 rounded-md text-[11px] font-medium"
                   style={{ background: "#3b82f6", color: "#fff", border: "none", cursor: "pointer" }}
                 >
                   Use plugin
                 </button>
                 <button
-                  onClick={() => setShowPluginRecommendation(false)}
+                  onClick={() => sk.setShowPluginRecommendation(false)}
                   className="w-5 h-5 rounded flex items-center justify-center"
                   style={{ color: "var(--text-tertiary)", background: "none", border: "none", cursor: "pointer" }}
                 >
@@ -600,14 +308,14 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
             <h3 className="text-[13px] font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Skill Details</h3>
             <div className="mb-3">
               <label className="text-[11px] font-medium uppercase tracking-wider mb-1 block" style={{ color: "var(--text-tertiary)" }}>Name <span style={{ color: "var(--red)" }}>*</span></label>
-              <input type="text" value={name} onChange={(e) => setName(toKebab(e.target.value, false))} placeholder="my-skill"
+              <input type="text" value={sk.name} onChange={(e) => sk.setName(toKebab(e.target.value, false))} placeholder="my-skill"
                 className="w-full px-3 py-2 rounded-lg text-[13px]"
                 style={inputStyle}
               />
             </div>
             <div className="mb-3">
               <label className="text-[11px] font-medium uppercase tracking-wider mb-1 block" style={{ color: "var(--text-tertiary)" }}>Description <span style={{ color: "var(--red)" }}>*</span></label>
-              <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Brief description" rows={3}
+              <textarea value={sk.description} onChange={(e) => sk.setDescription(e.target.value)} placeholder="Brief description" rows={3}
                 className="w-full px-3 py-2 rounded-lg text-[13px] resize-y"
                 style={{ ...inputStyle, minHeight: "72px" }}
               />
@@ -615,7 +323,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
             <div className="flex gap-3">
               <div className="flex-1">
                 <label className="text-[11px] font-medium uppercase tracking-wider mb-1 block" style={{ color: "var(--text-tertiary)" }}>Model</label>
-                <select value={model} onChange={(e) => setModel(e.target.value)}
+                <select value={sk.model} onChange={(e) => sk.setModel(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg text-[13px]"
                   style={inputStyle}
                 >
@@ -627,7 +335,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
               </div>
               <div className="flex-1">
                 <label className="text-[11px] font-medium uppercase tracking-wider mb-1 block" style={{ color: "var(--text-tertiary)" }}>Allowed Tools</label>
-                <input type="text" value={allowedTools} onChange={(e) => setAllowedTools(e.target.value)} placeholder="Read, Write, Edit..."
+                <input type="text" value={sk.allowedTools} onChange={(e) => sk.setAllowedTools(e.target.value)} placeholder="Read, Write, Edit..."
                   className="w-full px-3 py-2 rounded-lg text-[13px]"
                   style={inputStyle}
                 />
@@ -663,13 +371,13 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                 {(["write", "preview"] as const).map((m) => (
                   <button
                     key={m}
-                    onClick={() => setBodyViewMode(m)}
+                    onClick={() => sk.setBodyViewMode(m)}
                     className="flex items-center gap-1 rounded-md transition-all duration-150"
                     style={{
                       padding: "4px 10px",
-                      background: bodyViewMode === m ? "var(--surface-4)" : "transparent",
-                      color: bodyViewMode === m ? "var(--text-primary)" : "var(--text-tertiary)",
-                      fontSize: 11, fontWeight: bodyViewMode === m ? 600 : 400,
+                      background: sk.bodyViewMode === m ? "var(--surface-4)" : "transparent",
+                      color: sk.bodyViewMode === m ? "var(--text-primary)" : "var(--text-tertiary)",
+                      fontSize: 11, fontWeight: sk.bodyViewMode === m ? 600 : 400,
                       border: "none", cursor: "pointer",
                     }}
                   >
@@ -687,14 +395,14 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                 ))}
               </div>
             </div>
-            {bodyViewMode === "write" ? (
-              <textarea value={body} onChange={(e) => setBody(e.target.value)}
+            {sk.bodyViewMode === "write" ? (
+              <textarea value={sk.body} onChange={(e) => sk.setBody(e.target.value)}
                 placeholder={"# /my-skill\n\nYou are an expert at...\n"}
                 rows={8}
                 className="w-full px-3 py-2 rounded-lg text-[13px] font-mono resize-y"
                 style={{ ...inputStyle, minHeight: "150px" }}
               />
-            ) : body.trim() ? (
+            ) : sk.body.trim() ? (
               <div
                 className="text-[13px] leading-relaxed overflow-x-auto rounded-lg px-4 py-3"
                 style={{
@@ -705,7 +413,7 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
                   maxHeight: "400px",
                   overflowY: "auto",
                 }}
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(sk.body) }}
               />
             ) : (
               <div
@@ -726,30 +434,30 @@ export function CreateSkillInline({ onCreated, onCancel }: Props) {
 
           {/* Skill folder structure visualization */}
           <SkillFileTree
-            skillName={name || "{skill}"}
-            hasEvals={!!(pendingEvals && pendingEvals.length > 0)}
-            isDraft={draftSaved}
+            skillName={sk.name || "{skill}"}
+            hasEvals={false}
+            isDraft={sk.draftSaved}
           />
 
-          {error && (
+          {sk.error && (
             <div className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
-              {error}
+              {sk.error}
             </div>
           )}
 
           <div className="flex items-center gap-3">
             <button
-              onClick={handleCreate}
-              disabled={creating || !name || !description}
+              onClick={sk.handleCreate}
+              disabled={sk.creating || !sk.name || !sk.description}
               className="px-5 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150"
               style={{
-                background: creating || !name || !description ? "var(--surface-3)" : "var(--accent)",
-                color: creating || !name || !description ? "var(--text-tertiary)" : "#fff",
-                cursor: creating || !name || !description ? "not-allowed" : "pointer",
+                background: sk.creating || !sk.name || !sk.description ? "var(--surface-3)" : "var(--accent)",
+                color: sk.creating || !sk.name || !sk.description ? "var(--text-tertiary)" : "#fff",
+                cursor: sk.creating || !sk.name || !sk.description ? "not-allowed" : "pointer",
                 border: "none",
               }}
             >
-              {creating ? "Saving..." : aiGenerated ? "Save" : "Create Skill"}
+              {sk.creating ? "Creating..." : "Create Skill"}
             </button>
             <button
               onClick={onCancel}

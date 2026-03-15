@@ -42,7 +42,7 @@ program
 
 program
   .command("init")
-  .description("Show detected AI agents and update lockfile (optional)")
+  .description("Detect installed AI agents and optionally update the lockfile")
   .action(async () => {
     const { initCommand } = await import("./commands/init.js");
     await initCommand();

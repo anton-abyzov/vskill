@@ -12,6 +12,7 @@ import { resolveCredential, resolveAllCredentials } from "./credential-resolver.
 import { resolveProfile } from "./chrome-profile.js";
 import { PlatformRateLimiter } from "./rate-limiter.js";
 import { judgeAssertion } from "./judge.js";
+import type { Assertion } from "./schema.js";
 import { createLlmClient } from "./llm.js";
 import type { LlmClient } from "./llm.js";
 import type {
@@ -221,7 +222,7 @@ export async function runIntegrationCase(
       const client = createLlmClient();
       const results = await Promise.all(
         evalCase.assertions.map((assertion) =>
-          judgeAssertion(generatedOutput, assertion, client),
+          judgeAssertion(generatedOutput, assertion as Assertion, client),
         ),
       );
 

@@ -46,6 +46,10 @@ export function registerIntegrationRoutes(router: Router, root: string): void {
         const integrationCase: IntegrationEvalCase = {
           ...evalCase,
           testType: "integration",
+          cleanup: evalCase.cleanup?.map((c) => ({
+            type: c.action,
+            description: c.description ?? c.action,
+          })),
         };
 
         sendSSE(res, "preflight_start", { evalId: evalCase.id, name: evalCase.name });

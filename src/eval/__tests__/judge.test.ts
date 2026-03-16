@@ -108,6 +108,66 @@ describe("judgeAssertion", () => {
     expect(systemPrompt).toContain("SIMULATION MODE");
     expect(systemPrompt).toContain("Slack");
   });
+  // ---------------------------------------------------------------------------
+  // TC-006: judgeClient overrides generation client
+  // ---------------------------------------------------------------------------
+
+  it("uses judgeClient when provided instead of generation client (TC-006)", async () => {
+    const generationClient = mockClient(
+      JSON.stringify({ pass: false, reasoning: "should not be called" }),
+    );
+    const judgeClient = mockClient(
+      JSON.stringify({ pass: true, reasoning: "judge client used" }),
+    );
+
+    const result = await judgeAssertion("output", ASSERTION, generationClient, judgeClient);
+
+    expect(result.pass).toBe(true);
+    expect(result.reasoning).toBe("judge client used");
+    expect(judgeClient.generate).toHaveBeenCalledTimes(1);
+    expect(generationClient.generate).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // TC-007: Backward compatibility — no judgeClient
+  // ---------------------------------------------------------------------------
+
+  it("uses generation client when judgeClient is not provided (TC-007)", async () => {
+    const client = mockClient(
+      JSON.stringify({ pass: true, reasoning: "generation client used" }),
+    );
+
+    const result = await judgeAssertion("output", ASSERTION, client);
+
+    expect(result.pass).toBe(true);
+    expect(client.generate).toHaveBeenCalledTimes(1);
+  });
+
+  it("handles judgeClient with mcpDeps", async () => {
+    const generationClient = mockClient(
+      JSON.stringify({ pass: false, reasoning: "should not be called" }),
+    );
+    const judgeClient = mockClient(
+      JSON.stringify({ pass: true, reasoning: "judge + mcp" }),
+    );
+
+    const mcpDeps: McpDependency[] = [
+      {
+        server: "Slack",
+        url: "https://mcp.slack.com/mcp",
+        transport: "http",
+        matchedTools: ["slack_send_message"],
+        configSnippet: "{}",
+      },
+    ];
+
+    const result = await judgeAssertion("output", ASSERTION, generationClient, judgeClient, mcpDeps);
+
+    expect(result.pass).toBe(true);
+    const systemPrompt = (judgeClient.generate as any).mock.calls[0][0];
+    expect(systemPrompt).toContain("SIMULATION MODE");
+    expect(generationClient.generate).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

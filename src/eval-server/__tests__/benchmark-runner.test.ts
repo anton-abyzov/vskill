@@ -290,7 +290,7 @@ describe("runSingleCaseSSE", () => {
     expect(result.assertions).toHaveLength(2);
   });
 
-  it("stops evaluating assertions when aborted", async () => {
+  it("marks assertions as aborted when isAborted returns true", async () => {
     const res = makeMockRes();
     const client = makeMockClient();
     const evalCase = makeEvalCase({
@@ -300,13 +300,8 @@ describe("runSingleCaseSSE", () => {
       ],
     });
 
-    // Abort after the first assertion loop check
-    let callCount = 0;
-    const isAborted = () => {
-      callCount++;
-      return callCount > 1; // first call returns false, second returns true
-    };
-
+    // Always aborted — assertions run via Promise.all, so aborted ones
+    // get { pass: false, reasoning: "aborted" } immediately
     vi.mocked(judgeAssertion).mockResolvedValue({
       id: "a1",
       text: "first",
@@ -319,11 +314,12 @@ describe("runSingleCaseSSE", () => {
       evalCase,
       systemPrompt: "system",
       client,
-      isAborted,
+      isAborted: () => true,
     });
 
-    // Only one assertion should have been evaluated
-    expect(result.assertions).toHaveLength(1);
+    // Both assertions should be present but marked as aborted
+    expect(result.assertions).toHaveLength(2);
+    expect(result.assertions.every((a) => a.reasoning === "aborted")).toBe(true);
   });
 
   it("passes totalCases through to case_start event", async () => {

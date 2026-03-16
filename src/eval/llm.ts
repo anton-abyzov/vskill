@@ -31,6 +31,7 @@ export interface GenerateResult {
   durationMs: number;
   inputTokens: number | null;
   outputTokens: number | null;
+  cost: number | null;
 }
 
 export interface LlmClient {
@@ -38,7 +39,7 @@ export interface LlmClient {
   readonly model: string;
 }
 
-export type ProviderName = "anthropic" | "claude-cli" | "codex-cli" | "gemini-cli" | "ollama";
+export type ProviderName = "anthropic" | "claude-cli" | "codex-cli" | "gemini-cli" | "ollama" | "openrouter";
 
 function detectProvider(): ProviderName {
   return "claude-cli";
@@ -75,6 +76,7 @@ export function estimateDurationSec(
     "codex-cli":   [8, 20],
     "gemini-cli":  [8, 20],
     "ollama":      [5, 30],
+    "openrouter":  [4, 15],
   };
   const [lo, hi] = perCall[provider] ?? [5, 20];
   const totalCalls = totalCases + totalAssertions; // 1 generate + N judges
@@ -100,9 +102,11 @@ export function createLlmClient(overrides?: LlmOverrides): LlmClient {
       return createGeminiCliClient(modelOverride);
     case "ollama":
       return createOllamaClient(modelOverride);
+    case "openrouter":
+      return createOpenRouterClient(modelOverride);
     default:
       throw new Error(
-        `Unknown VSKILL_EVAL_PROVIDER: "${provider}". Use "claude-cli", "codex-cli", "gemini-cli", "anthropic", or "ollama".`,
+        `Unknown VSKILL_EVAL_PROVIDER: "${provider}". Use "claude-cli", "codex-cli", "gemini-cli", "anthropic", "ollama", or "openrouter".`,
       );
   }
 }
@@ -153,6 +157,7 @@ function createAnthropicClient(modelOverride?: string): LlmClient {
           durationMs,
           inputTokens: response.usage?.input_tokens ?? null,
           outputTokens: response.usage?.output_tokens ?? null,
+          cost: null,
         };
       } finally {
         clearTimeout(timeout);
@@ -246,7 +251,7 @@ function createCliClient(config: CliConfig): LlmClient {
         proc.stdin.end(combinedPrompt);
       });
 
-      return { text, durationMs: Date.now() - start, inputTokens: null, outputTokens: null };
+      return { text, durationMs: Date.now() - start, inputTokens: null, outputTokens: null, cost: null };
     },
   };
 }
@@ -347,6 +352,70 @@ function createOllamaClient(modelOverride?: string): LlmClient {
         durationMs: Date.now() - start,
         inputTokens: data.prompt_eval_count ?? null,
         outputTokens: data.eval_count ?? null,
+        cost: null,
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Provider: OpenRouter (100+ models via single API key)
+// ---------------------------------------------------------------------------
+function createOpenRouterClient(modelOverride?: string): LlmClient {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "OPENROUTER_API_KEY is not set. Visit https://openrouter.ai/keys to get your key, then run:\n  export OPENROUTER_API_KEY=<your-key>",
+    );
+  }
+
+  const model = modelOverride || process.env.VSKILL_EVAL_MODEL || "anthropic/claude-sonnet-4";
+
+  return {
+    model,
+    async generate(systemPrompt: string, userPrompt: string): Promise<GenerateResult> {
+      const start = Date.now();
+
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+          "HTTP-Referer": "https://verified-skill.com",
+          "X-Title": "vSkill Studio",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: 4096,
+        }),
+        signal: AbortSignal.timeout(getTimeoutMs()),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`OpenRouter request failed (${response.status}): ${error}`);
+      }
+
+      const data = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          total_cost?: number;
+        };
+      };
+
+      const text = data.choices?.[0]?.message?.content || "";
+      return {
+        text,
+        durationMs: Date.now() - start,
+        inputTokens: data.usage?.prompt_tokens ?? null,
+        outputTokens: data.usage?.completion_tokens ?? null,
+        cost: data.usage?.total_cost ?? null,
       };
     },
   };

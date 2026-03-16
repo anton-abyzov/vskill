@@ -2,7 +2,7 @@
 // SecondaryFileViewer — read-only viewer for non-SKILL.md files
 // ---------------------------------------------------------------------------
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { SkillFileContent } from "../types";
 import { renderMarkdown } from "../utils/renderMarkdown";
 import { api } from "../api";
@@ -147,9 +147,10 @@ interface SecondaryFileViewerProps {
   plugin?: string;
   skill?: string;
   onSaved?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
-export function SecondaryFileViewer({ file, loading, error, viewMode, plugin, skill, onSaved }: SecondaryFileViewerProps) {
+export function SecondaryFileViewer({ file, loading, error, viewMode, plugin, skill, onSaved, onDirtyChange }: SecondaryFileViewerProps) {
   const [localViewMode, setLocalViewMode] = useState<ViewMode>(viewMode);
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState("");
@@ -159,12 +160,21 @@ export function SecondaryFileViewer({ file, loading, error, viewMode, plugin, sk
   // Sync prop changes (e.g. user toggles in EditorPanel toolbar)
   const effectiveMode = viewMode !== localViewMode ? viewMode : localViewMode;
 
+  // Notify parent of dirty state
+  useEffect(() => {
+    onDirtyChange?.(editing);
+  }, [editing, onDirtyChange]);
+
   const handleEdit = useCallback(() => {
     if (file?.content != null) {
       setEditContent(file.content);
       setEditing(true);
     }
   }, [file]);
+
+  const handleCancel = useCallback(() => {
+    setEditing(false);
+  }, []);
 
   const handleSave = useCallback(async () => {
     if (!plugin || !skill || !file) return;
@@ -182,6 +192,19 @@ export function SecondaryFileViewer({ file, loading, error, viewMode, plugin, sk
       setSaving(false);
     }
   }, [plugin, skill, file, editContent, onSaved]);
+
+  // Ctrl+S / Cmd+S keyboard shortcut
+  useEffect(() => {
+    if (!editing) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [editing, handleSave]);
 
   if (loading) {
     return (
@@ -243,99 +266,98 @@ export function SecondaryFileViewer({ file, loading, error, viewMode, plugin, sk
         </div>
       )}
 
-      {/* View mode toolbar (only for json/md) */}
-      {fileType !== "other" && (
-        <div
+      {/* Toolbar — always visible for non-binary files */}
+      <div
+        style={{
+          display: "flex",
+          gap: 4,
+          padding: "4px 8px",
+          borderBottom: "1px solid var(--border-subtle)",
+          background: "var(--surface-0)",
+        }}
+      >
+        {/* View mode toggles — only for md/json */}
+        {(fileType === "md" || fileType === "json") && (["raw", "split", "preview"] as ViewMode[]).map((mode) => (
+          <button
+            key={mode}
+            onClick={() => setLocalViewMode(mode)}
+            style={{
+              padding: "2px 8px",
+              fontSize: 11,
+              background: effectiveMode === mode ? "var(--accent-muted)" : "none",
+              color: effectiveMode === mode ? "var(--accent)" : "var(--text-tertiary)",
+              border: "none",
+              borderRadius: 3,
+              cursor: "pointer",
+              textTransform: "capitalize",
+            }}
+          >
+            {mode}
+          </button>
+        ))}
+        <span
           style={{
+            marginLeft: "auto",
+            fontSize: 11,
+            color: "var(--text-tertiary)",
             display: "flex",
-            gap: 4,
-            padding: "4px 8px",
-            borderBottom: "1px solid var(--border-subtle)",
-            background: "var(--surface-0)",
+            alignItems: "center",
+            gap: 6,
           }}
         >
-          {(["raw", "split", "preview"] as ViewMode[]).map((mode) => (
+          {formatBytes(file.size)}
+          {plugin && skill && !file.binary && !editing && (
             <button
-              key={mode}
-              onClick={() => setLocalViewMode(mode)}
+              onClick={handleEdit}
               style={{
-                padding: "2px 8px",
-                fontSize: 11,
-                background: effectiveMode === mode ? "var(--accent-muted)" : "none",
-                color: effectiveMode === mode ? "var(--accent)" : "var(--text-tertiary)",
+                padding: "1px 6px",
+                fontSize: 10,
+                background: "var(--accent-muted)",
+                color: "var(--accent)",
                 border: "none",
                 borderRadius: 3,
                 cursor: "pointer",
-                textTransform: "capitalize",
               }}
             >
-              {mode}
+              Edit
             </button>
-          ))}
-          <span
-            style={{
-              marginLeft: "auto",
-              fontSize: 11,
-              color: "var(--text-tertiary)",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            {formatBytes(file.size)}
-            {plugin && skill && !file.binary && !editing && (
+          )}
+          {editing && (
+            <>
               <button
-                onClick={handleEdit}
+                onClick={handleSave}
+                disabled={saving}
                 style={{
                   padding: "1px 6px",
                   fontSize: 10,
-                  background: "var(--accent-muted)",
-                  color: "var(--accent)",
+                  background: "var(--accent)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 3,
+                  cursor: "pointer",
+                  opacity: saving ? 0.6 : 1,
+                }}
+              >
+                {saving ? "Saving..." : "Save"}
+              </button>
+              <button
+                onClick={handleCancel}
+                style={{
+                  padding: "1px 6px",
+                  fontSize: 10,
+                  background: "var(--surface-3)",
+                  color: "var(--text-tertiary)",
                   border: "none",
                   borderRadius: 3,
                   cursor: "pointer",
                 }}
               >
-                Edit
+                Cancel
               </button>
-            )}
-            {editing && (
-              <>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  style={{
-                    padding: "1px 6px",
-                    fontSize: 10,
-                    background: "var(--accent)",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 3,
-                    cursor: "pointer",
-                    opacity: saving ? 0.6 : 1,
-                  }}
-                >
-                  {saving ? "Saving..." : "Save"}
-                </button>
-                <button
-                  onClick={() => setEditing(false)}
-                  style={{
-                    padding: "1px 6px",
-                    fontSize: 10,
-                    background: "var(--surface-3)",
-                    color: "var(--text-tertiary)",
-                    border: "none",
-                    borderRadius: 3,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-              </>
-            )}
-          </span>
-        </div>
-      )}
+            </>
+          )}
+        </span>
+      </div>
 
       {/* Toast */}
       {toast && (
@@ -353,25 +375,74 @@ export function SecondaryFileViewer({ file, loading, error, viewMode, plugin, sk
       )}
 
       {/* Content area */}
-      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {editing ? (
-          <textarea
-            value={editContent}
-            onChange={(e) => setEditContent(e.target.value)}
-            style={{
-              flex: 1,
-              width: "100%",
-              resize: "none",
-              background: "var(--surface-0)",
-              color: "var(--text-primary)",
-              border: "none",
-              outline: "none",
-              padding: "12px 16px",
-              fontSize: 12,
-              fontFamily: "var(--font-mono, monospace)",
-              lineHeight: 1.6,
-            }}
-          />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto" }}>
+            <textarea
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              style={{
+                flex: 1,
+                width: "100%",
+                resize: "none",
+                background: "var(--surface-0)",
+                color: "var(--text-primary)",
+                border: "none",
+                outline: "none",
+                padding: "12px 16px",
+                fontSize: 12,
+                fontFamily: "var(--font-mono, monospace)",
+                lineHeight: 1.6,
+              }}
+            />
+            {/* Sticky save bar */}
+            <div
+              style={{
+                position: "sticky",
+                bottom: 0,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "6px 12px",
+                background: "var(--surface-1)",
+                borderTop: "1px solid var(--border-subtle)",
+              }}
+            >
+              <span style={{ flex: 1, fontSize: 11, color: "var(--text-tertiary)" }}>
+                Unsaved changes
+              </span>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                style={{
+                  padding: "3px 12px",
+                  fontSize: 11,
+                  background: "var(--accent)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  opacity: saving ? 0.6 : 1,
+                }}
+              >
+                {saving ? "Saving..." : "Save"}
+              </button>
+              <button
+                onClick={handleCancel}
+                style={{
+                  padding: "3px 12px",
+                  fontSize: 11,
+                  background: "var(--surface-3)",
+                  color: "var(--text-tertiary)",
+                  border: "none",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         ) : effectiveMode === "split" && fileType !== "other" ? (
           <>
             <div style={{ flex: 1, display: "flex", flexDirection: "column", borderRight: "1px solid var(--border-subtle)" }}>

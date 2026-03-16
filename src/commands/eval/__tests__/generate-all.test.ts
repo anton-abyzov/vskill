@@ -80,16 +80,22 @@ const VALID_GENERATED = `\`\`\`json
 // ---------------------------------------------------------------------------
 
 describe("runEvalGenerateAll", () => {
+  const origEnv = { ...process.env };
+
   beforeEach(() => {
     testDir = join(tmpdir(), `vskill-genall-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
     vi.resetAllMocks();
     mockGenerate.mockResolvedValue({ text: VALID_GENERATED });
+    // Ensure env is clean for auto-provider tests
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.VSKILL_EVAL_PROVIDER;
   });
 
   afterEach(() => {
     rmSync(testDir, { recursive: true, force: true });
     vi.restoreAllMocks();
+    process.env = { ...origEnv };
   });
 
   it("generates for skills lacking evals", async () => {
@@ -172,5 +178,104 @@ describe("runEvalGenerateAll", () => {
     const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("Scanned: 1");
     expect(output).toContain("Generated: 1");
+  });
+
+  // --- New tests for T-008, T-009 ---
+
+  it("processes skills concurrently with explicit --concurrency", async () => {
+    createSkill("marketing", "skill-a");
+    createSkill("marketing", "skill-b");
+    createSkill("marketing", "skill-c");
+    createSkill("marketing", "skill-d");
+    createSkill("marketing", "skill-e");
+
+    const callTimes: number[] = [];
+    mockGenerate.mockImplementation(async () => {
+      callTimes.push(Date.now());
+      // Short delay to ensure overlap detection works
+      await new Promise((r) => setTimeout(r, 10));
+      return { text: VALID_GENERATED };
+    });
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runEvalGenerateAll(testDir, false, 3);
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("Generated: 5");
+    expect(output).toContain("Concurrency: 3");
+    // All 5 skills should have evals
+    expect(mockGenerate).toHaveBeenCalledTimes(5);
+  });
+
+  it("no artificial 2s delays between skills", async () => {
+    createSkill("marketing", "skill-a");
+    createSkill("marketing", "skill-b");
+    createSkill("marketing", "skill-c");
+
+    mockGenerate.mockResolvedValue({ text: VALID_GENERATED });
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const start = Date.now();
+    await runEvalGenerateAll(testDir, false, 3);
+    const elapsed = Date.now() - start;
+
+    // With 3 skills and concurrency 3, should be under 2s total (no 2s delay between calls)
+    expect(elapsed).toBeLessThan(2000);
+  });
+
+  it("auto-selects anthropic provider when ANTHROPIC_API_KEY is set", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test-key";
+    delete process.env.VSKILL_EVAL_PROVIDER;
+
+    createSkill("marketing", "skill-a");
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runEvalGenerateAll(testDir, false);
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("Auto-selected anthropic provider for batch operation");
+    expect(output).toContain("Provider: anthropic");
+  });
+
+  it("respects explicit VSKILL_EVAL_PROVIDER over auto-selection", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test-key";
+    process.env.VSKILL_EVAL_PROVIDER = "claude-cli";
+
+    createSkill("marketing", "skill-a");
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runEvalGenerateAll(testDir, false);
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).not.toContain("Auto-selected");
+    expect(output).toContain("Provider: claude-cli");
+    // CLI provider defaults to concurrency 1
+    expect(output).toContain("Concurrency: 1");
+  });
+
+  it("defaults concurrency to 1 for CLI providers", async () => {
+    process.env.VSKILL_EVAL_PROVIDER = "claude-cli";
+
+    createSkill("marketing", "skill-a");
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runEvalGenerateAll(testDir, false);
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("Concurrency: 1");
+  });
+
+  it("defaults concurrency to 3 for API providers", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test-key";
+    delete process.env.VSKILL_EVAL_PROVIDER;
+
+    createSkill("marketing", "skill-a");
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runEvalGenerateAll(testDir, false);
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("Concurrency: 3");
   });
 });

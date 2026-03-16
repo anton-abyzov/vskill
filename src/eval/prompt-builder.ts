@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type { EvalsFile } from "./schema.js";
+import type { McpDependency } from "./mcp-detector.js";
 import { detectMcpDependencies } from "./mcp-detector.js";
 
 // ---------------------------------------------------------------------------
@@ -108,6 +109,206 @@ function detectBashTools(skillContent: string): boolean {
   if (!allowedToolsMatch) return false;
   const tools = allowedToolsMatch[1].toLowerCase();
   return tools.includes("bash") || tools.includes("read") || tools.includes("write") || tools.includes("edit");
+}
+
+// ---------------------------------------------------------------------------
+// Browser & platform detection (pure functions for integration test gen)
+// ---------------------------------------------------------------------------
+
+export interface BrowserRequirements {
+  hasBrowser: boolean;
+  suggestedProfile?: string;
+}
+
+export function detectBrowserRequirements(skillContent: string): BrowserRequirements {
+  const hasBash = detectBashTools(skillContent);
+  if (!hasBash) return { hasBrowser: false };
+
+  const body = skillContent.replace(/^---\s*\n[\s\S]*?\n---/, "");
+  const browserPattern = /\b(browser|chrome|chromium|playwright|puppeteer|selenium|chrome[\s-]?profile)\b/i;
+  if (browserPattern.test(body)) {
+    return { hasBrowser: true, suggestedProfile: "Default" };
+  }
+  return { hasBrowser: false };
+}
+
+const PLATFORM_KEYWORDS: Record<string, string> = {
+  twitter: "Twitter",
+  "x.com": "Twitter",
+  "\\bx\\b": "Twitter",
+  linkedin: "LinkedIn",
+  slack: "Slack",
+  instagram: "Instagram",
+  youtube: "YouTube",
+  tiktok: "TikTok",
+  reddit: "Reddit",
+  facebook: "Facebook",
+  discord: "Discord",
+  telegram: "Telegram",
+  threads: "Threads",
+  "dev.to": "dev.to",
+};
+
+export function detectPlatformTargets(skillContent: string): string[] {
+  const body = skillContent.replace(/^---\s*\n[\s\S]*?\n---/, "");
+  const detected = new Set<string>();
+  for (const [keyword, platform] of Object.entries(PLATFORM_KEYWORDS)) {
+    const regex = new RegExp(keyword, "i");
+    if (regex.test(body)) {
+      detected.add(platform);
+    }
+  }
+  return Array.from(detected);
+}
+
+// ---------------------------------------------------------------------------
+// Credential hints (MCP server → env var names)
+// ---------------------------------------------------------------------------
+
+export const CREDENTIAL_HINTS: Record<string, string[]> = {
+  Slack: ["SLACK_BOT_TOKEN", "SLACK_USER_TOKEN"],
+  GitHub: ["GITHUB_TOKEN"],
+  Linear: ["LINEAR_API_KEY"],
+  "Google Workspace": ["GOOGLE_APPLICATION_CREDENTIALS"],
+  Notion: ["NOTION_API_KEY"],
+  Jira: ["JIRA_API_TOKEN", "JIRA_EMAIL"],
+  Confluence: ["CONFLUENCE_API_TOKEN"],
+  Figma: ["FIGMA_ACCESS_TOKEN"],
+  Sentry: ["SENTRY_AUTH_TOKEN"],
+};
+
+// ---------------------------------------------------------------------------
+// Integration eval prompt builder
+// ---------------------------------------------------------------------------
+
+const INTEGRATION_SCHEMA_REFERENCE = `
+## Integration evals.json Schema Extension
+
+Integration test cases extend the base schema with these additional fields:
+
+{
+  "id": <number>,
+  "name": "<string>",
+  "prompt": "<string>",
+  "expected_output": "<string>",
+  "testType": "integration",
+  "requiredCredentials": ["<ENV_VAR_NAME>", ...],
+  "requirements": {
+    "chromeProfile": "<string, Chrome profile name for browser-based tests>",
+    "platform": "<string, target platform name>"
+  },
+  "cleanup": [
+    {
+      "action": "delete_post" | "remove_artifact" | "custom",
+      "platform": "<string>",
+      "identifier": "{POSTED_ID}",
+      "description": "<what this cleanup step does>"
+    }
+  ],
+  "assertions": [...]
+}
+
+Every integration eval MUST have testType: "integration".
+`;
+
+export function buildIntegrationEvalPrompt(
+  skillContent: string,
+  mcpDeps: McpDependency[],
+  browserReqs: BrowserRequirements,
+  platforms: string[],
+): string {
+  let credentialSection = "";
+  if (mcpDeps.length > 0) {
+    const creds: string[] = [];
+    for (const dep of mcpDeps) {
+      const hints = CREDENTIAL_HINTS[dep.server];
+      if (hints) {
+        creds.push(`- **${dep.server}**: ${hints.join(", ")}`);
+      }
+    }
+    if (creds.length > 0) {
+      credentialSection = `\n## Required Credentials\n\nPopulate \`requiredCredentials\` with these environment variable names:\n${creds.join("\n")}\n`;
+    }
+  }
+
+  let browserSection = "";
+  if (browserReqs.hasBrowser) {
+    browserSection = `\n## Browser Requirements\n\nThis skill uses browser automation. Each integration test case MUST include:\n- \`requirements.chromeProfile\`: "${browserReqs.suggestedProfile || "Default"}"\n\nThe integration test runner will launch Chrome with this profile's logged-in sessions.\n`;
+  }
+
+  let platformSection = "";
+  if (platforms.length > 0) {
+    const platformList = platforms.map((p) => `- ${p}`).join("\n");
+    platformSection = `\n## Platform Targets\n\nDetected platforms:\n${platformList}\n\nFor each platform-targeting test case, include a \`cleanup\` block:\n- action: "delete_post" for social media posts\n- action: "remove_artifact" for created resources\n- action: "custom" for other cleanup needs\n- platform: the target platform name\n- identifier: "{POSTED_ID}" (placeholder replaced at runtime)\n- description: what the cleanup step does\n`;
+  }
+
+  return `You are an expert eval generator for AI skills. Your task is to create INTEGRATION test cases for the skill described below.
+
+## Skill Content (SKILL.md)
+
+${skillContent}
+
+${INTEGRATION_SCHEMA_REFERENCE}
+
+${BEST_PRACTICES}
+${credentialSection}${browserSection}${platformSection}
+## Instructions
+
+Generate integration eval cases that test the skill against real external services. Each case must have:
+- \`testType: "integration"\`
+- \`requiredCredentials\` array with needed env vars
+- \`requirements\` object with chromeProfile (if browser-based) and platform
+- \`cleanup\` array with cleanup actions for any created artifacts
+- At least 2 objectively verifiable assertions per case
+
+Output ONLY the JSON inside a \`\`\`json code fence. The JSON should be an array of eval case objects (NOT the full evals.json wrapper — just the array of cases).`;
+}
+
+// ---------------------------------------------------------------------------
+// Integration eval response parser
+// ---------------------------------------------------------------------------
+
+export function parseGeneratedIntegrationEvals(raw: string): EvalsFile["evals"] {
+  const match = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (!match) {
+    throw new Error(
+      "No JSON code block found in LLM response. Expected ```json ... ``` fence.",
+    );
+  }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(match[1]);
+  } catch (err) {
+    throw new Error(
+      `Invalid JSON in code block: ${(err as Error).message}`,
+    );
+  }
+
+  // Accept both array and wrapped object
+  const cases = Array.isArray(parsed) ? parsed : parsed.evals;
+  if (!Array.isArray(cases) || cases.length === 0) {
+    throw new Error("Expected a non-empty array of integration eval cases");
+  }
+
+  return cases.map((c: any) => ({
+    id: c.id,
+    name: c.name || `integration-case-${c.id}`,
+    prompt: c.prompt,
+    expected_output: c.expected_output || "",
+    files: Array.isArray(c.files) ? c.files : [],
+    assertions: Array.isArray(c.assertions)
+      ? c.assertions.map((a: any) => ({
+          id: a.id,
+          text: a.text,
+          type: a.type || "boolean",
+        }))
+      : [],
+    testType: "integration" as const,
+    requiredCredentials: Array.isArray(c.requiredCredentials) ? c.requiredCredentials : undefined,
+    requirements: c.requirements || undefined,
+    cleanup: Array.isArray(c.cleanup) ? c.cleanup : undefined,
+  }));
 }
 
 export function buildEvalSystemPrompt(skillContent: string): string {

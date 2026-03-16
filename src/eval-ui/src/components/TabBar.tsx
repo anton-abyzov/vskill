@@ -39,7 +39,8 @@ const TAB_GROUPS: TabGroup[] = [
     label: "Insights",
     tabs: [
       { id: "history", label: "History", shortcut: "5" },
-      { id: "deps", label: "Deps", shortcut: "6" },
+      { id: "leaderboard", label: "Leaderboard", shortcut: "6" },
+      { id: "deps", label: "Deps", shortcut: "7" },
     ],
   },
 ];
@@ -81,6 +82,14 @@ function TabIcon({ id }: { id: PanelId }) {
         <svg {...props}>
           <circle cx="12" cy="12" r="10" />
           <polyline points="12 6 12 12 16 14" />
+        </svg>
+      );
+    case "leaderboard":
+      return (
+        <svg {...props}>
+          <path d="M18 20V10" />
+          <path d="M12 20V4" />
+          <path d="M6 20v-6" />
         </svg>
       );
     case "deps":

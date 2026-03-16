@@ -4,6 +4,8 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { VALID_CLEANUP_ACTIONS } from "./integration-types.js";
+import type { EvalCleanupSchema, EvalRequirementsSchema } from "./integration-types.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,6 +26,8 @@ export interface EvalCase {
   assertions: Assertion[];
   testType?: "unit" | "integration";
   requiredCredentials?: string[];
+  requirements?: EvalRequirementsSchema;
+  cleanup?: EvalCleanupSchema[];
 }
 
 export interface EvalsFile {
@@ -32,6 +36,11 @@ export interface EvalsFile {
 }
 
 export interface ValidationError {
+  path: string;
+  message: string;
+}
+
+export interface ValidationWarning {
   path: string;
   message: string;
 }
@@ -51,7 +60,20 @@ export class EvalValidationError extends Error {
 // Validator
 // ---------------------------------------------------------------------------
 
-export function loadAndValidateEvals(skillDir: string): EvalsFile {
+export interface ValidatedEvalsResult {
+  evalsFile: EvalsFile;
+  warnings: ValidationWarning[];
+}
+
+export function loadAndValidateEvals(skillDir: string): EvalsFile;
+export function loadAndValidateEvals(skillDir: string, opts: { returnWarnings: true }): ValidatedEvalsResult;
+export function loadAndValidateEvals(skillDir: string, opts?: { returnWarnings?: boolean }): EvalsFile | ValidatedEvalsResult {
+  const result = _loadAndValidateEvalsInternal(skillDir);
+  if (opts?.returnWarnings) return result;
+  return result.evalsFile;
+}
+
+function _loadAndValidateEvalsInternal(skillDir: string): ValidatedEvalsResult {
   const filePath = join(skillDir, "evals", "evals.json");
 
   if (!existsSync(filePath)) {
@@ -177,6 +199,56 @@ export function loadAndValidateEvals(skillDir: string): EvalsFile {
     throw new EvalValidationError(errors);
   }
 
+  // Integration-specific validation (warnings + cleanup action errors)
+  const warnings: ValidationWarning[] = [];
+  const integrationErrors: ValidationError[] = [];
+
+  for (let i = 0; i < parsed.evals.length; i++) {
+    const evalCase = parsed.evals[i];
+    const prefix = `evals[${i}]`;
+
+    if (evalCase.testType !== "integration") continue;
+
+    // AC-US4-01: Missing requiredCredentials → warning (not error)
+    if (!Array.isArray(evalCase.requiredCredentials) || evalCase.requiredCredentials.length === 0) {
+      warnings.push({
+        path: `${prefix}.requiredCredentials`,
+        message: "integration test case has no requiredCredentials — some integration tests may not need credentials, but verify this is intentional",
+      });
+    }
+
+    // AC-US4-02: Invalid cleanup actions → error
+    if (Array.isArray(evalCase.cleanup)) {
+      for (let j = 0; j < evalCase.cleanup.length; j++) {
+        const cleanup = evalCase.cleanup[j];
+        if (cleanup.action && !(VALID_CLEANUP_ACTIONS as readonly string[]).includes(cleanup.action)) {
+          integrationErrors.push({
+            path: `${prefix}.cleanup[${j}].action`,
+            message: `invalid cleanup action "${cleanup.action}" — allowed values: ${VALID_CLEANUP_ACTIONS.join(", ")}`,
+          });
+        }
+      }
+    }
+
+    // AC-US4-03: Prose assertions heuristic → warning
+    if (Array.isArray(evalCase.assertions)) {
+      const outcomeVerbs = /\b(returns|contains|exists|equals|includes|matches|starts|ends|has|is|shows|displays|produces|emits|creates|deletes|responds|status)\b/i;
+      for (let j = 0; j < evalCase.assertions.length; j++) {
+        const assertion = evalCase.assertions[j];
+        if (typeof assertion.text === "string" && assertion.text.length > 100 && !outcomeVerbs.test(assertion.text)) {
+          warnings.push({
+            path: `${prefix}.assertions[${j}].text`,
+            message: "assertion looks like LLM-judged prose — consider using API status codes or resource existence assertions for integration tests",
+          });
+        }
+      }
+    }
+  }
+
+  if (integrationErrors.length > 0) {
+    throw new EvalValidationError(integrationErrors);
+  }
+
   // Normalize: default files to [], testType to "unit"
   const evals: EvalCase[] = parsed.evals.map((e: any) => ({
     id: e.id,
@@ -191,7 +263,9 @@ export function loadAndValidateEvals(skillDir: string): EvalsFile {
     })),
     testType: e.testType === "integration" ? "integration" : "unit",
     ...(Array.isArray(e.requiredCredentials) ? { requiredCredentials: e.requiredCredentials } : {}),
+    ...(e.requirements ? { requirements: e.requirements } : {}),
+    ...(Array.isArray(e.cleanup) ? { cleanup: e.cleanup } : {}),
   }));
 
-  return { skill_name: parsed.skill_name, evals };
+  return { evalsFile: { skill_name: parsed.skill_name, evals }, warnings };
 }

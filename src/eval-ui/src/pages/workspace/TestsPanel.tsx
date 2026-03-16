@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef, Fragment } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import { api } from "../../api";
-import type { EvalCase, Assertion, EvalsFile, CaseHistoryEntry } from "../../types";
+import type { EvalCase, Assertion, EvalsFile, CaseHistoryEntry, CredentialStatus } from "../../types";
 import { getTestType } from "../../types";
 import type { InlineResult, CaseRunStatus } from "./workspaceTypes";
 import { passRateColor, shortDate, fmtDuration, MiniTrend } from "../../utils/historyUtils";
@@ -122,6 +122,19 @@ export function TestsPanel() {
     ? allCases
     : allCases.filter((c) => getTestType(c) === testTypeFilter);
   const selectedCase = cases.find((c) => c.id === selectedCaseId) ?? null;
+
+  // T-046: Fetch credential status for integration tests
+  const [credentialStatuses, setCredentialStatuses] = useState<CredentialStatus[]>([]);
+  const hasIntegrationTests = useMemo(() => allCases.some((c) => getTestType(c) === "integration"), [allCases]);
+  useEffect(() => {
+    if (!hasIntegrationTests) return;
+    api.getCredentials(state.plugin, state.skill)
+      .then((res) => setCredentialStatuses(res.credentials))
+      .catch(() => setCredentialStatuses([]));
+  }, [state.plugin, state.skill, hasIntegrationTests]);
+  const missingCredNames = useMemo(() => new Set(
+    credentialStatuses.filter((c) => c.status === "missing").map((c) => c.name)
+  ), [credentialStatuses]);
 
   const handleGenerateEvals = useCallback(() => {
     generateEvals();
@@ -276,8 +289,17 @@ export function TestsPanel() {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {tt === "unit" ? "Unit" : "Integration"}
+                      {tt === "unit" ? "U" : "I"}
                     </span>
+                    {/* T-046: Lock icon for integration tests with missing credentials */}
+                    {tt === "integration" && c.requiredCredentials?.some((cr) => missingCredNames.has(cr)) && (
+                      <span title="Configure credentials to run">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
+                      </span>
+                    )}
                   </span>
                   <StatusPill result={result} />
                 </div>
@@ -469,6 +491,24 @@ function CaseDetail({
           )}
         </div>
       </div>
+
+      {/* T-048: Platform note for integration tests on installed skills */}
+      {isReadOnly && tt === "integration" && (
+        <div
+          data-testid="platform-integration-note"
+          className="mb-4 px-4 py-3 rounded-xl flex items-center gap-3"
+          style={{ background: "var(--accent-muted)", border: "1px solid rgba(99,131,255,0.2)" }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+            <line x1="8" y1="21" x2="16" y2="21" />
+            <line x1="12" y1="17" x2="12" y2="21" />
+          </svg>
+          <span className="text-[12px] font-medium" style={{ color: "var(--accent)" }}>
+            Run locally in vSkill Studio
+          </span>
+        </div>
+      )}
 
       {/* All passing celebration */}
       {allPassing && (

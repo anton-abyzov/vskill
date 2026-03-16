@@ -88,6 +88,11 @@ const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
     { id: "o3", label: "OpenAI o3" },
     { id: "o4-mini", label: "OpenAI o4-mini" },
   ],
+  "openrouter": [
+    { id: "anthropic/claude-sonnet-4", label: "Claude Sonnet 4 (via OpenRouter)" },
+    { id: "meta-llama/llama-3.1-70b-instruct", label: "Llama 3.1 70B" },
+    { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro (via OpenRouter)" },
+  ],
 };
 
 // ---------------------------------------------------------------------------
@@ -148,6 +153,14 @@ async function detectAvailableProviders(): Promise<Array<{
     models: PROVIDER_MODELS["anthropic"],
   });
 
+  // OpenRouter — available if OPENROUTER_API_KEY is set
+  providers.push({
+    id: "openrouter",
+    label: "OpenRouter (100+ models, requires key)",
+    available: !!process.env.OPENROUTER_API_KEY,
+    models: PROVIDER_MODELS["openrouter"],
+  });
+
   // Ollama — cached probe (500ms timeout, refreshes every 30s)
   const ollama = await probeOllama();
   providers.push({
@@ -164,6 +177,43 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // Health check
   router.get("/api/health", (_req, res) => {
     sendJson(res, { ok: true });
+  });
+
+  // OpenRouter model search proxy
+  router.get("/api/openrouter/models", async (_req, res) => {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      sendJson(res, { error: "OPENROUTER_API_KEY not configured" }, 400);
+      return;
+    }
+    try {
+      const resp = await fetch("https://openrouter.ai/api/v1/models", {
+        headers: { "Authorization": `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!resp.ok) {
+        sendJson(res, { error: `OpenRouter API returned ${resp.status}` }, 502);
+        return;
+      }
+      const data = (await resp.json()) as {
+        data?: Array<{
+          id: string;
+          name?: string;
+          pricing?: { prompt?: string; completion?: string };
+        }>;
+      };
+      const models = (data.data || []).map((m) => ({
+        id: m.id,
+        name: m.name || m.id,
+        pricing: {
+          prompt: parseFloat(m.pricing?.prompt || "0"),
+          completion: parseFloat(m.pricing?.completion || "0"),
+        },
+      }));
+      sendJson(res, { models });
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 500);
+    }
   });
 
   // Config — expose current provider/model + available providers + project
@@ -532,14 +582,26 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     }
   });
 
-  // Run benchmark (SSE) — optionally accepts { eval_ids: number[] } to run specific cases
+  // Run benchmark (SSE) — optionally accepts { eval_ids, concurrency, judgeModel, noCache }
   router.post("/api/skills/:plugin/:skill/benchmark", async (req, res, params) => {
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     let aborted = false;
     res.on("close", () => { aborted = true; });
 
-    const body = await readBody(req).catch(() => ({})) as { eval_ids?: number[] };
+    const body = await readBody(req).catch(() => ({})) as {
+      eval_ids?: number[];
+      concurrency?: number;
+      judgeModel?: string;
+      noCache?: boolean;
+    };
     const filterIds = Array.isArray(body?.eval_ids) ? new Set(body.eval_ids) : null;
+
+    // Validate concurrency
+    const concurrency = typeof body?.concurrency === "number" ? body.concurrency : undefined;
+    if (concurrency !== undefined && (concurrency < 1 || !Number.isInteger(concurrency))) {
+      sendJson(res, { error: "concurrency must be a positive integer" }, 400, req);
+      return;
+    }
 
     initSSE(res, req);
 
@@ -550,11 +612,34 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       const client = getClient();
       const systemPrompt = buildEvalSystemPrompt(skillContent);
 
+      // Create separate judge client if judgeModel is specified
+      let judgeClient: import("../eval/llm.js").LlmClient | undefined;
+      if (body?.judgeModel && typeof body.judgeModel === "string") {
+        const slashIdx = body.judgeModel.indexOf("/");
+        if (slashIdx > 0) {
+          judgeClient = createLlmClient({
+            provider: body.judgeModel.slice(0, slashIdx) as ProviderName,
+            model: body.judgeModel.slice(slashIdx + 1),
+          });
+        }
+      }
+
+      // Create judge cache unless noCache
+      let judgeCache: import("../eval/judge-cache.js").JudgeCache | undefined;
+      if (!body?.noCache) {
+        const { JudgeCache } = await import("../eval/judge-cache.js");
+        judgeCache = new JudgeCache(skillDir);
+      }
+
       await runBenchmarkSSE({
         res, skillDir, skillName: evals.skill_name, systemPrompt,
         runType: "benchmark", provider: currentOverrides.provider || "claude-cli",
-        evalCases: evals.evals, filterIds, client, isAborted: () => aborted,
+        evalCases: evals.evals, filterIds, client, judgeClient, judgeCache,
+        isAborted: () => aborted, concurrency,
       });
+
+      // Flush cache after run
+      judgeCache?.flush();
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       sendSSEDone(res, { error: errorMsg });

@@ -1,5 +1,5 @@
 // API client for the eval server
-import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent } from "./types";
+import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel } from "./types";
 
 const BASE = "";
 
@@ -27,7 +27,7 @@ export interface ModelOption {
 }
 
 export interface ProviderInfo {
-  id: "claude-cli" | "anthropic" | "ollama";
+  id: "claude-cli" | "anthropic" | "ollama" | "openrouter" | "gemini-cli" | "codex-cli";
   label: string;
   available: boolean;
   models: ModelOption[];
@@ -204,5 +204,46 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path, content }),
     });
+  },
+
+  // ---------------------------------------------------------------------------
+  // Leaderboard / Sweep (T-055)
+  // ---------------------------------------------------------------------------
+
+  getLeaderboard(plugin: string, skill: string): Promise<{ entries: SweepResult[] }> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/leaderboard`);
+  },
+
+  getLeaderboardEntry(plugin: string, skill: string, timestamp: string): Promise<SweepResult> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/leaderboard/${encodeURIComponent(timestamp)}`);
+  },
+
+  startSweep(plugin: string, skill: string, body: { models: string[]; judge: string; runs?: number; concurrency?: number }): EventSource {
+    const url = `${BASE}/api/skills/${plugin}/${skill}/sweep`;
+    const es = new EventSource(url);
+    // POST-based SSE: use fetch instead and return an EventSource-like object
+    // The backend expects POST, so we use fetch with ReadableStream
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify(body),
+    });
+    return es;
+  },
+
+  // ---------------------------------------------------------------------------
+  // Credentials (T-055)
+  // ---------------------------------------------------------------------------
+
+  getCredentials(plugin: string, skill: string): Promise<{ credentials: CredentialStatus[] }> {
+    return fetchJson(`/api/credentials/${plugin}/${skill}`);
+  },
+
+  // ---------------------------------------------------------------------------
+  // OpenRouter models (T-055)
+  // ---------------------------------------------------------------------------
+
+  searchModels(): Promise<{ models: OpenRouterModel[] }> {
+    return fetchJson("/api/openrouter/models");
   },
 };

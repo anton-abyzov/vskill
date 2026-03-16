@@ -362,3 +362,56 @@ export interface GenerateSkillResponse {
   reasoning: string;
 }
 
+// ---------------------------------------------------------------------------
+// Sweep / Leaderboard types (T-054)
+// ---------------------------------------------------------------------------
+
+export interface ModelResult {
+  provider: string;
+  model: string;
+  passRate: { mean: number; stddev: number };
+  rubricScore?: { mean: number; stddev: number };
+  duration: { mean: number; stddev: number };
+  cost: { total: number; perCase: number } | null;
+  status: "complete" | "error";
+  errorMessage: string | null;
+  caseResults?: Array<{
+    eval_id: number;
+    eval_name: string;
+    status: "pass" | "fail" | "error";
+    pass_rate: number;
+  }>;
+}
+
+export interface SweepResult {
+  sweepId: string;
+  timestamp: string;
+  judge: string;
+  runs: number;
+  models: ModelResult[];
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  model: string;
+  provider: string;
+  passRate: number;
+  rubricScore: number | null;
+  duration: number;
+  cost: number | null;
+  sparklineData: number[];
+  isBest: boolean;
+}
+
+export interface CredentialStatus {
+  name: string;
+  status: "ready" | "missing" | "resolved" | "untested" | "error";
+  source?: string;
+}
+
+export interface OpenRouterModel {
+  id: string;
+  name: string;
+  pricing: { prompt: number; completion: number };
+}
+

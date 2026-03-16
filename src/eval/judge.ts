@@ -37,9 +37,27 @@ export async function judgeAssertion(
   output: string,
   assertion: Assertion,
   client: LlmClient,
+  judgeClientOrMcpDeps?: LlmClient | McpDependency[],
   mcpDeps?: McpDependency[],
 ): Promise<AssertionResult> {
-  const systemPrompt = buildJudgeSystemPrompt(mcpDeps);
+  // Support both old signature (client, mcpDeps?) and new (client, judgeClient?, mcpDeps?)
+  let effectiveJudgeClient: LlmClient;
+  let effectiveMcpDeps: McpDependency[] | undefined;
+
+  if (Array.isArray(judgeClientOrMcpDeps)) {
+    // Old-style call: judgeAssertion(output, assertion, client, mcpDeps)
+    effectiveJudgeClient = client;
+    effectiveMcpDeps = judgeClientOrMcpDeps;
+  } else if (judgeClientOrMcpDeps && typeof judgeClientOrMcpDeps === "object" && "generate" in judgeClientOrMcpDeps) {
+    // New-style call: judgeAssertion(output, assertion, client, judgeClient, mcpDeps?)
+    effectiveJudgeClient = judgeClientOrMcpDeps;
+    effectiveMcpDeps = mcpDeps;
+  } else {
+    effectiveJudgeClient = client;
+    effectiveMcpDeps = mcpDeps;
+  }
+
+  const systemPrompt = buildJudgeSystemPrompt(effectiveMcpDeps);
 
   const userPrompt = `## LLM Output
 ${output}
@@ -49,7 +67,7 @@ ${assertion.text}
 
 Does the LLM output satisfy this assertion? Respond with JSON only: { "pass": boolean, "reasoning": "..." }`;
 
-  const { text: raw } = await client.generate(systemPrompt, userPrompt);
+  const { text: raw } = await effectiveJudgeClient.generate(systemPrompt, userPrompt);
 
   const parsed = parseJudgeResponse(raw);
 

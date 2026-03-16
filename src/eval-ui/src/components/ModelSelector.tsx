@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { ProviderInfo, ModelOption, ConfigResponse } from "../api";
 import { useConfig } from "../ConfigContext";
+import { ModelSearchDropdown } from "./ModelSearchDropdown";
 
 export function ModelSelector() {
   const { config, updateConfig, refreshConfig } = useConfig();
@@ -104,36 +105,48 @@ export function ModelSelector() {
                   </span>
                 </div>
 
-                {/* Model options */}
-                {provider.models.map((model) => {
-                  const isActive = isModelActive(config, provider.id, model.id);
-                  const isDisabled = !provider.available || saving;
-
-                  return (
-                    <button
-                      key={`${provider.id}-${model.id}`}
-                      onClick={() => !isDisabled && selectModel(provider, model)}
-                      disabled={isDisabled}
-                      className="w-full px-3 py-1.5 flex items-center gap-2.5 text-left transition-all duration-100"
-                      style={{
-                        background: isActive ? "var(--accent-muted)" : "transparent",
-                        color: isDisabled ? "var(--text-tertiary)" : "var(--text-primary)",
-                        opacity: isDisabled ? 0.4 : 1,
-                        cursor: isDisabled ? "not-allowed" : "pointer",
+                {/* T-053: OpenRouter gets a search dropdown instead of fixed list */}
+                {provider.id === "openrouter" && provider.available ? (
+                  <div className="px-3 py-1.5">
+                    <ModelSearchDropdown
+                      value={config.provider === "openrouter" ? config.model : ""}
+                      onChange={(modelId) => {
+                        if (!saving) selectModel(provider, { id: modelId, label: modelId });
                       }}
-                      onMouseEnter={(e) => { if (!isDisabled && !isActive) e.currentTarget.style.background = "var(--surface-3)"; }}
-                      onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
-                    >
-                      <div
-                        className="w-3 h-3 rounded-full flex-shrink-0 flex items-center justify-center"
-                        style={{ border: `2px solid ${isActive ? "var(--accent)" : "var(--border-subtle)"}` }}
+                    />
+                  </div>
+                ) : (
+                  /* Model options */
+                  provider.models.map((model) => {
+                    const isActive = isModelActive(config, provider.id, model.id);
+                    const isDisabled = !provider.available || saving;
+
+                    return (
+                      <button
+                        key={`${provider.id}-${model.id}`}
+                        onClick={() => !isDisabled && selectModel(provider, model)}
+                        disabled={isDisabled}
+                        className="w-full px-3 py-1.5 flex items-center gap-2.5 text-left transition-all duration-100"
+                        style={{
+                          background: isActive ? "var(--accent-muted)" : "transparent",
+                          color: isDisabled ? "var(--text-tertiary)" : "var(--text-primary)",
+                          opacity: isDisabled ? 0.4 : 1,
+                          cursor: isDisabled ? "not-allowed" : "pointer",
+                        }}
+                        onMouseEnter={(e) => { if (!isDisabled && !isActive) e.currentTarget.style.background = "var(--surface-3)"; }}
+                        onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
                       >
-                        {isActive && <div className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)" }} />}
-                      </div>
-                      <span className="text-[12px]" style={{ fontWeight: isActive ? 600 : 400 }} title={model.id}>{model.label}</span>
-                    </button>
-                  );
-                })}
+                        <div
+                          className="w-3 h-3 rounded-full flex-shrink-0 flex items-center justify-center"
+                          style={{ border: `2px solid ${isActive ? "var(--accent)" : "var(--border-subtle)"}` }}
+                        >
+                          {isActive && <div className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)" }} />}
+                        </div>
+                        <span className="text-[12px]" style={{ fontWeight: isActive ? 600 : 400 }} title={model.id}>{model.label}</span>
+                      </button>
+                    );
+                  })
+                )}
               </div>
             ))}
           </div>

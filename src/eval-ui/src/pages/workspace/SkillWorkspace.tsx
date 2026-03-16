@@ -10,9 +10,10 @@ import { RunPanel } from "./RunPanel";
 import { ActivationPanel } from "./ActivationPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { DepsPanel } from "./DepsPanel";
+import { LeaderboardPanel } from "./LeaderboardPanel";
 import type { PanelId } from "./workspaceTypes";
 
-const VALID_PANELS: PanelId[] = ["editor", "tests", "run", "activation", "history", "deps"];
+const VALID_PANELS: PanelId[] = ["editor", "tests", "run", "activation", "history", "leaderboard", "deps"];
 
 function isValidPanel(value: string | null): value is PanelId {
   return value != null && (VALID_PANELS as string[]).includes(value);
@@ -61,9 +62,9 @@ export function SkillWorkspaceInner() {
     const meta = e.ctrlKey || e.metaKey;
 
     // Ctrl+1..6 — panel switching
-    if (meta && e.key >= "1" && e.key <= "6") {
+    if (meta && e.key >= "1" && e.key <= "7") {
       e.preventDefault();
-      const panels: PanelId[] = ["editor", "tests", "run", "activation", "history", "deps"];
+      const panels: PanelId[] = ["editor", "tests", "run", "activation", "history", "leaderboard", "deps"];
       dispatch({ type: "SET_PANEL", panel: panels[parseInt(e.key) - 1] });
       return;
     }
@@ -141,6 +142,7 @@ export function SkillWorkspaceInner() {
           {state.activePanel === "run" && <RunPanel />}
           {state.activePanel === "activation" && <ActivationPanel />}
           {state.activePanel === "history" && <HistoryPanel />}
+          {state.activePanel === "leaderboard" && <LeaderboardPanel />}
           {state.activePanel === "deps" && <DepsPanel />}
         </div>
       </div>

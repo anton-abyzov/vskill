@@ -152,8 +152,16 @@ program
   .command("eval [subcommand] [target]")
   .description("Eval commands: serve, init, run, coverage, generate-all")
   .option("--force", "Overwrite existing evals.json")
+  .option("--type <type>", "Test type for eval init: unit, integration, or all (default: unit)")
   .option("--root <path>", "Root directory to scan for skills (default: current dir)")
   .option("--port <number>", "Port for eval UI server (default: 3077)")
+  .option("--concurrency <number>", "Max concurrent LLM calls (default: 5 for API, 1 for CLI)")
+  .option("--judge-model <provider/model>", "Use a separate model for assertion judging")
+  .option("--no-cache", "Bypass judge result cache")
+  .option("--models <list>", "Comma-separated model specs for sweep (e.g., 'anthropic/claude-sonnet-4,openrouter/meta-llama/llama-3.1-70b')")
+  .option("--judge <provider/model>", "Judge model for sweep (e.g., 'anthropic/claude-sonnet-4')")
+  .option("--runs <number>", "Number of iterations per model in sweep (default: 1)")
+  .option("--batch", "Use Anthropic Batch API for judge calls (50% cost savings, requires anthropic provider)")
   .action(async (subcommand?: string, target?: string, opts?: any) => {
     const { evalCommand } = await import("./commands/eval.js");
     await evalCommand(subcommand || "coverage", target, opts);

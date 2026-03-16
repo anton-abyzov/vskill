@@ -63,18 +63,37 @@ export async function generateComparisonOutputs(
   skillContent: string,
   client: LlmClient,
   onProgress?: ComparisonProgressCallback,
+  options?: { parallel?: boolean },
 ): Promise<ComparisonOutput> {
   const skillSystemPrompt = buildEvalSystemPrompt(skillContent);
   const baselineSystemPrompt = buildBaselineSystemPrompt();
 
-  // Run sequentially (claude-cli can only handle one at a time)
+  const totalTokens = (r: { inputTokens: number | null; outputTokens: number | null }) =>
+    r.inputTokens != null && r.outputTokens != null ? r.inputTokens + r.outputTokens : null;
+
+  // T-004: Parallelize skill+baseline generation for API providers
+  if (options?.parallel) {
+    onProgress?.("generating", "Generating skill and baseline outputs concurrently...");
+    const [skillResult, baselineResult] = await Promise.all([
+      client.generate(skillSystemPrompt, prompt),
+      client.generate(baselineSystemPrompt, prompt),
+    ]);
+
+    return {
+      skillOutput: skillResult.text,
+      skillDurationMs: skillResult.durationMs,
+      skillTokens: totalTokens(skillResult),
+      baselineOutput: baselineResult.text,
+      baselineDurationMs: baselineResult.durationMs,
+      baselineTokens: totalTokens(baselineResult),
+    };
+  }
+
+  // Sequential fallback for CLI providers
   onProgress?.("generating_skill", "Generating skill output...");
   const skillResult = await client.generate(skillSystemPrompt, prompt);
   onProgress?.("generating_baseline", "Generating baseline output...");
   const baselineResult = await client.generate(baselineSystemPrompt, prompt);
-
-  const totalTokens = (r: typeof skillResult) =>
-    r.inputTokens != null && r.outputTokens != null ? r.inputTokens + r.outputTokens : null;
 
   return {
     skillOutput: skillResult.text,

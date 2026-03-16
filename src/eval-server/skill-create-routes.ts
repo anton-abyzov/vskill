@@ -243,9 +243,8 @@ function checkSkillCreatorInstalled(): boolean {
 // AI skill generation
 // ---------------------------------------------------------------------------
 
-const GENERATE_SYSTEM_PROMPT = `You are an expert AI skill engineer in Skill Studio. Given a user's description of what a skill should do, generate a complete, production-quality skill definition.
-
-## Skill Studio Best Practices
+// Shared best practices block used by both body and eval prompts
+const SKILL_STUDIO_BEST_PRACTICES = `## Skill Studio Best Practices
 
 ### SKILL.md Anatomy
 Every skill has YAML frontmatter (description required, name/model/allowed-tools optional) and a markdown body with instructions.
@@ -289,7 +288,71 @@ When a skill includes allowed-tools: Bash (or Read, Write, Edit), the skill body
 - Open with an explicit execution directive: "Execute each step immediately. Run Bash commands directly — do not ask for permission or describe plans."
 - Use "Step N — [action verb]. Run this immediately:" headers, not "Step N: [noun] Discovery"
 - Every step must end with a concrete, complete, copy-pasteable code block — not prose describing what the code would do
-- Include any variable values (paths, URLs, flags) directly in the code block, not as placeholders
+- Include any variable values (paths, URLs, flags) directly in the code block, not as placeholders`;
+
+const BODY_SYSTEM_PROMPT = `You are an expert AI skill engineer in Skill Studio. Given a user's description of what a skill should do, generate the SKILL.md body and metadata (NOT evals).
+
+${SKILL_STUDIO_BEST_PRACTICES}
+
+## Output Format
+Return a JSON object with these fields:
+{
+  "name": "kebab-case-name",
+  "description": "Third-person trigger description with specific activation phrases",
+  "model": "",
+  "allowedTools": "",
+  "body": "# /skill-name\\n\\nFull system prompt with ## sections"
+}
+
+Field rules:
+- name: kebab-case, concise, descriptive (e.g., "sql-formatter", "api-docs-generator")
+- description: 1-3 sentences with trigger phrases. Must pass the "would Claude trigger on this?" test
+- model: "" (any) unless task clearly requires opus-level reasoning or is trivially haiku-suitable
+- allowedTools: comma-separated list (e.g., "Read, Write, Edit, Bash") or "" for unrestricted. Only restrict when the skill genuinely shouldn't use certain tools
+- body: Complete markdown starting with # /skill-name, structured with ## sections, 500-2000 words
+
+Return ONLY the JSON object — no code fences, no preamble.
+
+After the JSON, on a new line, write "---REASONING---" followed by a brief explanation of your design choices (why this name, why these trigger phrases, what Skill Studio rules you applied).`;
+
+const EVAL_SYSTEM_PROMPT = `You are an expert AI skill evaluator. Given a skill's name, description, and purpose, generate eval test cases that verify the skill works correctly.
+
+### Eval Assertions for Action-Oriented Skills (CRITICAL)
+The eval evaluates the LLM text response — it cannot run Bash or call tools. Assertions must check for code/commands present IN the response, not whether they were executed.
+- BAD: "Runs a bash command to discover profiles" (implies execution — will always fail)
+- GOOD: "Response includes a bash code block that lists Chrome profile directories"
+- BAD: "Opens https://studio.youtube.com as the target URL"
+- GOOD: "Response includes studio.youtube.com as the target URL in a code block or command"
+- BAD: "Checks that the file exists before uploading"
+- GOOD: "Response includes a bash command checking whether the file exists (e.g., using test -f or ls)"
+
+## Output Format
+Return a JSON object with these fields:
+{
+  "evals": [
+    {
+      "id": 1,
+      "name": "test case name",
+      "prompt": "realistic user prompt",
+      "expected_output": "description of correct behavior",
+      "assertions": [
+        { "id": "a1", "text": "objectively verifiable assertion", "type": "boolean" }
+      ]
+    }
+  ]
+}
+
+Field rules:
+- evals: 2-3 realistic test cases with objectively verifiable assertions
+- Prompts should be what real users would say, not abstract test inputs
+- Each assertion must be independently verifiable by a judge LLM reading the response text
+
+Return ONLY the JSON object — no code fences, no preamble.`;
+
+// Keep the monolithic prompt for backward compatibility (used nowhere after refactor but exported for tests)
+const GENERATE_SYSTEM_PROMPT = `You are an expert AI skill engineer in Skill Studio. Given a user's description of what a skill should do, generate a complete, production-quality skill definition.
+
+${SKILL_STUDIO_BEST_PRACTICES}
 
 ### Eval Assertions for Action-Oriented Skills (CRITICAL)
 The eval evaluates the LLM text response — it cannot run Bash or call tools. Assertions must check for code/commands present IN the response, not whether they were executed.
@@ -353,23 +416,98 @@ interface GenerateSkillResult {
     assertions: Array<{ id: string; text: string; type: string }>;
   }>;
   reasoning: string;
+  warning?: string;
 }
 
+/** Strip code fences and parse JSON from raw LLM output */
+function cleanAndParseJson(raw: string): Record<string, unknown> {
+  const cleaned = raw.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "");
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    throw new Error("AI response was not valid JSON. Try again or use manual mode.");
+  }
+}
+
+interface BodyResult {
+  name: string;
+  description: string;
+  model: string;
+  allowedTools: string;
+  body: string;
+  reasoning: string;
+}
+
+type EvalItem = GenerateSkillResult["evals"][number];
+
+interface EvalsResult {
+  evals: EvalItem[];
+}
+
+function parseBodyResponse(raw: string): BodyResult {
+  const parts = raw.split("---REASONING---");
+  const jsonPart = parts[0].trim();
+  const reasoning = parts.length > 1 ? parts[1].trim() : "Skill generated using Skill Studio best practices.";
+
+  const parsed = cleanAndParseJson(jsonPart);
+  const name = String(parsed.name || "").replace(/[^a-z0-9-]/g, "").replace(/^-+|-+$/g, "");
+  if (!name) throw new Error("AI returned an invalid skill name. Try again or use manual mode.");
+
+  return {
+    name,
+    description: String(parsed.description || ""),
+    model: String(parsed.model || ""),
+    allowedTools: String(parsed.allowedTools || ""),
+    body: String(parsed.body || ""),
+    reasoning,
+  };
+}
+
+function parseEvalsResponse(raw: string): EvalsResult {
+  const jsonPart = raw.trim();
+  const parsed = cleanAndParseJson(jsonPart);
+  const evals = Array.isArray(parsed.evals) ? (parsed.evals as EvalItem[]).slice(0, 10) : [];
+  return { evals };
+}
+
+function mergeGenerateResults(
+  bodySettled: PromiseSettledResult<BodyResult>,
+  evalsSettled: PromiseSettledResult<EvalsResult>,
+): GenerateSkillResult {
+  // Body is required — if it failed, propagate the error
+  if (bodySettled.status === "rejected") {
+    throw bodySettled.reason instanceof Error
+      ? bodySettled.reason
+      : new Error(String(bodySettled.reason));
+  }
+
+  const bodyResult = bodySettled.value;
+
+  // Evals are optional — if they failed, return body with empty evals and warning
+  if (evalsSettled.status === "rejected") {
+    const reason = evalsSettled.reason instanceof Error
+      ? evalsSettled.reason.message
+      : String(evalsSettled.reason);
+    return {
+      ...bodyResult,
+      evals: [],
+      warning: `eval generation failed: ${reason}`,
+    };
+  }
+
+  return {
+    ...bodyResult,
+    evals: evalsSettled.value.evals,
+  };
+}
+
+/** Legacy monolithic parser — still used as fallback */
 function parseGenerateResponse(raw: string): GenerateSkillResult {
   const parts = raw.split("---REASONING---");
   const jsonPart = parts[0].trim();
   const reasoning = parts.length > 1 ? parts[1].trim() : "Skill generated using Skill Studio best practices.";
 
-  // Strip code fences if present
-  const cleaned = jsonPart.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "");
-
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    throw new Error("AI response was not valid JSON. Try again or use manual mode.");
-  }
-
+  const parsed = cleanAndParseJson(jsonPart);
   const name = String(parsed.name || "").replace(/[^a-z0-9-]/g, "").replace(/^-+|-+$/g, "");
   if (!name) throw new Error("AI returned an invalid skill name. Try again or use manual mode.");
 
@@ -587,7 +725,7 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
     }, 200, _req);
   });
 
-  // POST /api/skills/generate — AI-assisted skill generation
+  // POST /api/skills/generate — AI-assisted skill generation (parallel body + evals)
   router.post("/api/skills/generate", async (req, res) => {
     const body = (await readBody(req)) as GenerateSkillRequest;
 
@@ -614,24 +752,47 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
     try {
       if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "preparing", message: "Building prompt..." });
 
-      const client = createLlmClient({
+      // Body generation: capable model (user-specified or default)
+      const bodyClient = createLlmClient({
         provider: body.provider,
         model: body.model,
       });
 
-      if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "generating", message: "Generating skill..." });
+      // Eval generation: fast/cheap model (configurable via VSKILL_EVAL_GEN_MODEL, default haiku)
+      const evalModel = process.env.VSKILL_EVAL_GEN_MODEL || "haiku";
+      const evalClient = createLlmClient({
+        provider: body.provider,
+        model: evalModel,
+      });
 
-      const userPrompt = `Generate a complete skill definition for:\n\n${body.prompt.trim()}\n\nApply Skill Studio best practices. Return the JSON object followed by ---REASONING--- and your explanation.`;
+      const bodyPrompt = `Generate a skill definition (body and metadata only, NO evals) for:\n\n${body.prompt.trim()}\n\nApply Skill Studio best practices. Return the JSON object followed by ---REASONING--- and your explanation.`;
+      const evalPrompt = `Generate eval test cases for this skill:\n\n${body.prompt.trim()}\n\nReturn only the JSON object with an "evals" array.`;
 
-      const result = wantsSSE
-        ? await withHeartbeat(res, undefined, "generating", "Generating skill", () => client.generate(GENERATE_SYSTEM_PROMPT, userPrompt))
-        : await client.generate(GENERATE_SYSTEM_PROMPT, userPrompt);
+      // Emit SSE events for both parallel phases
+      if (wantsSSE && !aborted) {
+        sendSSE(res, "progress", { phase: "generating-body", message: "Generating skill body..." });
+        sendSSE(res, "progress", { phase: "generating-evals", message: "Generating evals..." });
+      }
+
+      // Launch both calls in parallel
+      const bodyCall = wantsSSE
+        ? withHeartbeat(res, undefined, "generating-body", "Generating body", () => bodyClient.generate(BODY_SYSTEM_PROMPT, bodyPrompt))
+        : bodyClient.generate(BODY_SYSTEM_PROMPT, bodyPrompt);
+
+      const evalCall = wantsSSE
+        ? withHeartbeat(res, undefined, "generating-evals", "Generating evals", () => evalClient.generate(EVAL_SYSTEM_PROMPT, evalPrompt))
+        : evalClient.generate(EVAL_SYSTEM_PROMPT, evalPrompt);
+
+      const [bodySettled, evalsSettled] = await Promise.allSettled([
+        bodyCall.then((r) => parseBodyResponse(r.text)),
+        evalCall.then((r) => parseEvalsResponse(r.text)),
+      ]);
 
       if (aborted) return;
 
-      if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "parsing", message: "Parsing result..." });
+      if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "parsing", message: "Merging results..." });
 
-      const parsed = parseGenerateResponse(result.text);
+      const parsed = mergeGenerateResults(bodySettled, evalsSettled);
 
       if (wantsSSE && !aborted) {
         sendSSEDone(res, parsed);

@@ -260,6 +260,52 @@ describe("runComparison with MCP auto-detection", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// TC-005: Parallel skill+baseline generation
+// ---------------------------------------------------------------------------
+
+describe("generateComparisonOutputs parallel mode", () => {
+  it("runs skill and baseline concurrently when parallel=true (TC-005)", async () => {
+    const callTimestamps: number[] = [];
+
+    const client: LlmClient = {
+      model: "test-model",
+      generate: vi.fn(async (_sys: string, _user: string) => {
+        callTimestamps.push(Date.now());
+        await new Promise((r) => setTimeout(r, 50));
+        return { text: "output", durationMs: 50, inputTokens: 10, outputTokens: 20 };
+      }),
+    };
+
+    const result = await generateComparisonOutputs("prompt", "skill content", client, undefined, { parallel: true });
+
+    expect(result.skillOutput).toBe("output");
+    expect(result.baselineOutput).toBe("output");
+    expect(client.generate).toHaveBeenCalledTimes(2);
+
+    // Both calls should start within 10ms of each other (concurrent)
+    expect(Math.abs(callTimestamps[0] - callTimestamps[1])).toBeLessThan(20);
+  });
+
+  it("runs sequentially when parallel is false/undefined", async () => {
+    const callTimestamps: number[] = [];
+
+    const client: LlmClient = {
+      model: "test-model",
+      generate: vi.fn(async (_sys: string, _user: string) => {
+        callTimestamps.push(Date.now());
+        await new Promise((r) => setTimeout(r, 30));
+        return { text: "output", durationMs: 30, inputTokens: 10, outputTokens: 20 };
+      }),
+    };
+
+    await generateComparisonOutputs("prompt", "skill content", client);
+
+    // Second call should start after first completes (~30ms gap)
+    expect(callTimestamps[1] - callTimestamps[0]).toBeGreaterThanOrEqual(25);
+  });
+});
+
 describe("generateComparisonOutputs with onProgress", () => {
   it("calls onProgress with generating_skill before first LLM call", async () => {
     const client = mockClient(["skill response", "baseline response"]);

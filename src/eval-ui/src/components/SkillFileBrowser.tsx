@@ -235,7 +235,7 @@ export function SkillFileBrowser({ files, activeFile, onSelect, onRefresh }: Ski
             </div>
           ) : (
             tree.map((node) => (
-              <TreeItem key={node.path} node={node} depth={0} activeFile={activeFile} onSelect={(path) => { onSelect(path); setExpanded(false); }} />
+              <TreeItem key={node.path} node={node} depth={0} activeFile={activeFile} onSelect={onSelect} />
             ))
           )}
         </div>

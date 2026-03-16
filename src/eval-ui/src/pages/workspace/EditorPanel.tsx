@@ -83,6 +83,12 @@ export function EditorPanel() {
   const { config } = useConfig();
 
   const { files, activeFile, secondaryContent, loading: filesLoading, error: filesError, selectFile, refresh: refreshFiles, isSkillMd } = useSkillFiles(plugin ?? "", skill ?? "");
+  const [secondaryDirty, setSecondaryDirty] = useState(false);
+
+  const guardedSelectFile = useCallback((path: string) => {
+    if (secondaryDirty && !window.confirm("You have unsaved changes. Discard?")) return;
+    selectFile(path);
+  }, [secondaryDirty, selectFile]);
 
   useEffect(() => {
     return () => { regenAbortRef.current?.abort(); };
@@ -378,7 +384,7 @@ export function EditorPanel() {
         <SkillFileBrowser
           files={files}
           activeFile={activeFile}
-          onSelect={selectFile}
+          onSelect={guardedSelectFile}
           onRefresh={refreshFiles}
         />
       )}
@@ -393,6 +399,7 @@ export function EditorPanel() {
           plugin={plugin ?? undefined}
           skill={skill ?? undefined}
           onSaved={() => { selectFile(activeFile); refreshFiles(); }}
+          onDirtyChange={setSecondaryDirty}
         />
       )}
 

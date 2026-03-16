@@ -43,6 +43,7 @@ describe("evalCommand router", () => {
     expect(mocks.runEvalInit).toHaveBeenCalledWith(
       expect.stringContaining("marketing/skills/social-media-posting"),
       false,
+      "unit",
     );
   });
 
@@ -53,6 +54,11 @@ describe("evalCommand router", () => {
 
     expect(mocks.runEvalRun).toHaveBeenCalledWith(
       expect.stringContaining("marketing/skills/social-media-posting"),
+      expect.objectContaining({
+        concurrency: undefined,
+        judgeModel: undefined,
+        noCache: false,
+      }),
     );
   });
 
@@ -68,7 +74,7 @@ describe("evalCommand router", () => {
       force: true,
     });
 
-    expect(mocks.runEvalGenerateAll).toHaveBeenCalledWith("/tmp/test", true);
+    expect(mocks.runEvalGenerateAll).toHaveBeenCalledWith("/tmp/test", true, undefined);
   });
 
   it("prints error for unknown subcommand", async () => {

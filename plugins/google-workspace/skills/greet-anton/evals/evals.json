@@ -1,0 +1,87 @@
+{
+  "skill_name": "greet-anton",
+  "evals": [
+    {
+      "id": 1,
+      "name": "Session start greeting",
+      "prompt": "Hey there! Just starting a new session.",
+      "expected_output": "A warm, concise greeting addressing Anton by name with a natural transition to readiness",
+      "files": [],
+      "assertions": [
+        {
+          "id": "addresses-anton",
+          "text": "Response addresses Anton by first name",
+          "type": "boolean"
+        },
+        {
+          "id": "signals-readiness",
+          "text": "Response signals readiness to work without using the phrase 'how can I help you today'",
+          "type": "boolean"
+        },
+        {
+          "id": "concise-greeting",
+          "text": "Greeting is 1-2 sentences, not a lengthy paragraph",
+          "type": "boolean"
+        },
+        {
+          "id": "no-emojis",
+          "text": "Response does not contain any emojis",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Farewell after task completion",
+      "prompt": "Thanks, that's all I needed. We got the authentication module refactored and all tests passing. See you!",
+      "expected_output": "A warm farewell addressing Anton by name, optionally acknowledging the completed auth refactor work",
+      "files": [],
+      "assertions": [
+        {
+          "id": "addresses-anton-farewell",
+          "text": "Response addresses Anton by first name",
+          "type": "boolean"
+        },
+        {
+          "id": "farewell-tone",
+          "text": "Response is a farewell or sign-off message, not a greeting or offer to continue working",
+          "type": "boolean"
+        },
+        {
+          "id": "concise-farewell",
+          "text": "Farewell is 1-2 sentences, not a lengthy paragraph",
+          "type": "boolean"
+        },
+        {
+          "id": "no-emojis-farewell",
+          "text": "Response does not contain any emojis",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Simple hi triggers greeting",
+      "prompt": "Hi",
+      "expected_output": "A personalized greeting for Anton that varies from a generic bot response",
+      "files": [],
+      "assertions": [
+        {
+          "id": "addresses-anton-hi",
+          "text": "Response addresses Anton by first name",
+          "type": "boolean"
+        },
+        {
+          "id": "not-generic",
+          "text": "Response does not contain the phrase 'how can I help you today' or 'how may I assist you'",
+          "type": "boolean"
+        },
+        {
+          "id": "warm-and-natural",
+          "text": "Response reads as a natural, teammate-style greeting rather than a customer service script",
+          "type": "boolean"
+        }
+      ]
+    }
+  ]
+}

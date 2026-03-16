@@ -1,0 +1,78 @@
+{
+  "timestamp": "2026-03-16T07:57:45.133Z",
+  "model": "claude-opus",
+  "skill_name": "greet-anton",
+  "cases": [
+    {
+      "eval_id": 2,
+      "eval_name": "Farewell after task completion",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "durationMs": 22645,
+      "tokens": null,
+      "assertions": [
+        {
+          "id": "addresses-anton-farewell",
+          "text": "Response addresses Anton by first name",
+          "pass": true,
+          "reasoning": "The output addresses the user as 'Anton' by first name."
+        },
+        {
+          "id": "farewell-tone",
+          "text": "Response is a farewell or sign-off message, not a greeting or offer to continue working",
+          "pass": true,
+          "reasoning": "The output is a farewell/sign-off message ('See you next time') that wraps up the session, not a greeting or offer to continue working."
+        },
+        {
+          "id": "concise-farewell",
+          "text": "Farewell is 1-2 sentences, not a lengthy paragraph",
+          "pass": true,
+          "reasoning": "The farewell is 2 sentences, which falls within the 1-2 sentence requirement."
+        },
+        {
+          "id": "no-emojis-farewell",
+          "text": "Response does not contain any emojis",
+          "pass": true,
+          "reasoning": "The output contains no emojis — only plain text characters."
+        }
+      ],
+      "comparisonDetail": {
+        "skillDurationMs": 22645,
+        "skillTokens": null,
+        "baselineDurationMs": 13638,
+        "baselineTokens": null,
+        "skillContentScore": 4,
+        "skillStructureScore": 4,
+        "baselineContentScore": 4,
+        "baselineStructureScore": 4,
+        "winner": "tie"
+      }
+    }
+  ],
+  "overall_pass_rate": 1,
+  "type": "comparison",
+  "provider": "claude-cli",
+  "verdict": "INEFFECTIVE",
+  "comparison": {
+    "skillPassRate": 1,
+    "baselinePassRate": 0,
+    "skillRubricAvg": 4,
+    "baselineRubricAvg": 4,
+    "delta": 0
+  },
+  "actionItems": {
+    "recommendation": "remove",
+    "summary": "The skill produces zero measurable improvement over baseline (delta 0.0) with identical scores across all dimensions, meaning it adds prompt complexity and token cost with no benefit.",
+    "weaknesses": [
+      "Zero delta — skill output is indistinguishable from baseline in both content (4/4) and structure (4/4)",
+      "Only one eval case (farewell) was tested, and it resulted in a tie, providing no evidence the skill adds value",
+      "The skill runs on Haiku model which still costs tokens for a greeting/farewell that the base model handles equally well"
+    ],
+    "strengths": [
+      "100% assertion pass rate shows the skill doesn't break anything",
+      "The skill file itself is well-structured with clear rules and examples"
+    ],
+    "suggestedFocus": "Remove the skill entirely — personalized greetings and farewells are handled adequately by the base model without a dedicated skill, so the added complexity and token overhead are not justified."
+  }
+}

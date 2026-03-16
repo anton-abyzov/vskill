@@ -1,0 +1,74 @@
+{
+  "timestamp": "2026-03-16T07:57:17.548Z",
+  "model": "claude-opus",
+  "skill_name": "greet-anton",
+  "cases": [
+    {
+      "eval_id": 3,
+      "eval_name": "Simple hi triggers greeting",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "durationMs": 16881,
+      "tokens": null,
+      "assertions": [
+        {
+          "id": "addresses-anton-hi",
+          "text": "Response addresses Anton by first name",
+          "pass": true,
+          "reasoning": "The output addresses the user as 'Anton' by first name in the greeting 'Hey Anton!'"
+        },
+        {
+          "id": "not-generic",
+          "text": "Response does not contain the phrase 'how can I help you today' or 'how may I assist you'",
+          "pass": true,
+          "reasoning": "The output says 'What are we working on?' and does not contain either 'how can I help you today' or 'how may I assist you'."
+        },
+        {
+          "id": "warm-and-natural",
+          "text": "Response reads as a natural, teammate-style greeting rather than a customer service script",
+          "pass": true,
+          "reasoning": "The greeting is casual and direct — 'Hey Anton! Good to have you back. What are we working on?' reads like a teammate catching up, not a scripted customer service response. It uses informal language, acknowledges the person by name naturally, and jumps straight to collaboration."
+        }
+      ],
+      "comparisonDetail": {
+        "skillDurationMs": 16881,
+        "skillTokens": null,
+        "baselineDurationMs": 11627,
+        "baselineTokens": null,
+        "skillContentScore": 3,
+        "skillStructureScore": 3,
+        "baselineContentScore": 3,
+        "baselineStructureScore": 3,
+        "winner": "tie"
+      }
+    }
+  ],
+  "overall_pass_rate": 1,
+  "type": "comparison",
+  "provider": "claude-cli",
+  "verdict": "INEFFECTIVE",
+  "comparison": {
+    "skillPassRate": 1,
+    "baselinePassRate": 0,
+    "skillRubricAvg": 3,
+    "baselineRubricAvg": 3,
+    "delta": 0
+  },
+  "actionItems": {
+    "recommendation": "improve",
+    "summary": "The skill tied with baseline (3.0 vs 3.0, delta 0.0) on a single eval case, showing it adds no measurable value yet but doesn't hurt. The greeting output meets assertions but lacks the distinctiveness needed to outscore generic responses.",
+    "weaknesses": [
+      "Only one eval case ('Simple hi triggers greeting') was tested — insufficient data to draw strong conclusions",
+      "Content score of 3/5 suggests the greeting was adequate but not notably warmer or more personal than baseline",
+      "Zero delta means the skill instructions aren't producing output that judges rate higher than unguided behavior",
+      "The skill's emphasis on varied tone and energy isn't translating into measurably better scores"
+    ],
+    "strengths": [
+      "100% assertion pass rate — the skill reliably triggers on greeting signals and addresses Anton by name",
+      "No regression — the skill doesn't degrade output quality compared to baseline",
+      "The skill structure is clear with distinct greeting/farewell workflows and concrete examples"
+    ],
+    "suggestedFocus": "Add 2-3 more eval cases (farewell, time-of-day greeting, post-task goodbye) and sharpen the skill's rules to produce responses that are concretely distinct from baseline — e.g., mandate referencing the current project or last session's work to create personalization a generic response cannot match."
+  }
+}

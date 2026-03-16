@@ -1,9 +1,0 @@
-{
-  "version": "1.0",
-  "incrementId": "0470-skill-studio-full-redesign",
-  "timestamp": "2026-03-11T13:55:00.000Z",
-  "verdict": "PASS",
-  "shipReadiness": "READY",
-  "summary": { "totalFindings": 0, "critical": 0, "high": 0, "medium": 0 },
-  "findings": []
-}

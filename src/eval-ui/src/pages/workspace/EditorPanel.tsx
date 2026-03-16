@@ -390,6 +390,9 @@ export function EditorPanel() {
           loading={filesLoading}
           error={filesError}
           viewMode={viewMode}
+          plugin={plugin ?? undefined}
+          skill={skill ?? undefined}
+          onSaved={() => { selectFile(activeFile); refreshFiles(); }}
         />
       )}
 

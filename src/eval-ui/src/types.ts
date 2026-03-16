@@ -13,6 +13,12 @@ export interface EvalCase {
   expected_output: string;
   files: string[];
   assertions: Assertion[];
+  testType?: "unit" | "integration";
+  requiredCredentials?: string[];
+}
+
+export function getTestType(evalCase: EvalCase): "unit" | "integration" {
+  return evalCase.testType === "integration" ? "integration" : "unit";
 }
 
 export interface EvalsFile {

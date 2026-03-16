@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import { initSSE, sendSSE, sendSSEDone, withHeartbeat, startDynamicHeartbeat } from "./sse-helpers.js";
@@ -350,6 +350,37 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     const truncated = buf.length > TRUNCATE_AT;
     const content = (truncated ? buf.subarray(0, TRUNCATE_AT) : buf).toString("utf-8");
     sendJson(res, { path: filePath, content, size, truncated: truncated || undefined }, 200, req);
+  });
+
+  // Save (create/overwrite) a file inside a skill directory
+  router.put("/api/skills/:plugin/:skill/file", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    if (!resolve(skillDir).startsWith(resolve(root))) {
+      sendJson(res, { error: "Invalid skill path" }, 400, req);
+      return;
+    }
+
+    const body = (await readBody(req)) as { path?: string; content?: string };
+    const filePath = body.path ?? "";
+    if (!filePath) {
+      sendJson(res, { error: "Missing path field" }, 400, req);
+      return;
+    }
+    if (typeof body.content !== "string") {
+      sendJson(res, { error: "Missing content field" }, 400, req);
+      return;
+    }
+
+    const fullPath = resolve(join(skillDir, filePath));
+    if (!fullPath.startsWith(resolve(skillDir))) {
+      sendJson(res, { error: "Path traversal denied" }, 403, req);
+      return;
+    }
+
+    mkdirSync(dirname(fullPath), { recursive: true });
+    writeFileSync(fullPath, body.content, "utf-8");
+    const size = Buffer.byteLength(body.content, "utf-8");
+    sendJson(res, { ok: true, path: filePath, size }, 200, req);
   });
 
   // Delete a source skill (recursively removes its directory)

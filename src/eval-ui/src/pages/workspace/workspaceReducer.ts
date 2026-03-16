@@ -35,6 +35,8 @@ export const initialWorkspaceState: WorkspaceState = {
   activationSummary: null,
   activationRunning: false,
   activationError: null,
+  activationTotalPrompts: 0,
+  activationStartedAt: null,
   loading: true,
   error: null,
 };
@@ -276,7 +278,7 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return { ...state, activationPrompts: action.prompts };
 
     case "ACTIVATION_START":
-      return { ...state, activationRunning: true, activationResults: [], activationSummary: null, activationError: null };
+      return { ...state, activationRunning: true, activationResults: [], activationSummary: null, activationError: null, activationStartedAt: Date.now() };
 
     case "ACTIVATION_RESULT":
       return { ...state, activationResults: [...state.activationResults, action.result] };
@@ -289,6 +291,13 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 
     case "ACTIVATION_RESET":
       return { ...state, activationResults: [], activationSummary: null, activationError: null };
+
+    case "ACTIVATION_TIMEOUT":
+      return { ...state, activationRunning: false, activationError: "Activation test timed out after 120 seconds" };
+
+    case "ACTIVATION_CANCEL": {
+      return { ...state, activationRunning: false };
+    }
 
     default:
       return state;

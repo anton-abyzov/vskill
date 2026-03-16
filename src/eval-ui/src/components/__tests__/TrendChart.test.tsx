@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 
-// Mock useState before importing TrendChart — returns [initialState, noop]
+// Mock React hooks before importing TrendChart
 vi.mock("react", () => ({
   useState: (init: unknown) => [init, () => {}],
+  useMemo: (fn: () => unknown) => fn(),
 }));
 
 import { TrendChart } from "../../components/TrendChart";

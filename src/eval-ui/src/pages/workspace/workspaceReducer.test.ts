@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { workspaceReducer, initialWorkspaceState } from "./workspaceReducer.js";
 import type { WorkspaceState, WorkspaceAction } from "./workspaceTypes.js";
-import type { EvalChange } from "../../types";
+import type { EvalChange, ActivationResult } from "../../types";
 
 function makeState(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
   return { ...initialWorkspaceState, ...overrides };
@@ -159,6 +159,125 @@ describe("workspaceReducer - AI Edit eval changes", () => {
       expect(result.aiEditEvalChanges).toEqual([]);
       expect(result.aiEditEvalSelections.size).toBe(0);
       expect(result.aiEditEvalsRetry).toBeNull();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Activation timeout and cancel reducer tests (T-009)
+// ---------------------------------------------------------------------------
+
+function makeActivationResult(prompt: string, classification: "TP" | "TN" | "FP" | "FN"): ActivationResult {
+  return {
+    prompt,
+    expected: classification === "TP" || classification === "FN" ? "should_activate" : "should_not_activate",
+    activate: classification === "TP" || classification === "FP",
+    confidence: "high",
+    reasoning: "test",
+    classification,
+  };
+}
+
+describe("workspaceReducer - Activation timeout and cancel", () => {
+  describe("ACTIVATION_START", () => {
+    it("sets activationRunning and activationStartedAt", () => {
+      const state = makeState();
+      const result = dispatch(state, { type: "ACTIVATION_START" });
+      expect(result.activationRunning).toBe(true);
+      expect(result.activationStartedAt).toBeGreaterThan(0);
+      expect(result.activationResults).toEqual([]);
+      expect(result.activationSummary).toBeNull();
+      expect(result.activationError).toBeNull();
+    });
+  });
+
+  describe("ACTIVATION_TIMEOUT", () => {
+    it("sets activationRunning to false and shows timeout message", () => {
+      const state = makeState({ activationRunning: true, activationStartedAt: Date.now() - 120000 });
+      const result = dispatch(state, { type: "ACTIVATION_TIMEOUT" });
+      expect(result.activationRunning).toBe(false);
+      expect(result.activationError).toContain("timed out");
+      expect(result.activationError).toContain("120");
+    });
+
+    it("preserves partial results on timeout", () => {
+      const partialResults = [
+        makeActivationResult("test1", "TP"),
+        makeActivationResult("test2", "TN"),
+      ];
+      const state = makeState({
+        activationRunning: true,
+        activationResults: partialResults,
+      });
+      const result = dispatch(state, { type: "ACTIVATION_TIMEOUT" });
+      expect(result.activationRunning).toBe(false);
+      expect(result.activationResults).toHaveLength(2);
+      expect(result.activationResults[0].prompt).toBe("test1");
+    });
+  });
+
+  describe("ACTIVATION_CANCEL", () => {
+    it("sets activationRunning to false", () => {
+      const state = makeState({ activationRunning: true });
+      const result = dispatch(state, { type: "ACTIVATION_CANCEL", totalPrompts: 5 });
+      expect(result.activationRunning).toBe(false);
+    });
+
+    it("preserves completed results (3 of 5 completed)", () => {
+      const completedResults = [
+        makeActivationResult("prompt1", "TP"),
+        makeActivationResult("prompt2", "TN"),
+        makeActivationResult("prompt3", "FP"),
+      ];
+      const state = makeState({
+        activationRunning: true,
+        activationResults: completedResults,
+      });
+      const result = dispatch(state, { type: "ACTIVATION_CANCEL", totalPrompts: 5 });
+      expect(result.activationRunning).toBe(false);
+      expect(result.activationResults).toHaveLength(3);
+      expect(result.activationResults[0].classification).toBe("TP");
+      expect(result.activationResults[1].classification).toBe("TN");
+      expect(result.activationResults[2].classification).toBe("FP");
+    });
+
+    it("handles cancel with 0 completed results", () => {
+      const state = makeState({
+        activationRunning: true,
+        activationResults: [],
+      });
+      const result = dispatch(state, { type: "ACTIVATION_CANCEL", totalPrompts: 5 });
+      expect(result.activationRunning).toBe(false);
+      expect(result.activationResults).toHaveLength(0);
+    });
+  });
+
+  describe("state transitions", () => {
+    it("ACTIVATION_START -> ACTIVATION_RESULT -> ACTIVATION_TIMEOUT preserves partial", () => {
+      let state = makeState();
+      state = dispatch(state, { type: "ACTIVATION_START" });
+      expect(state.activationRunning).toBe(true);
+
+      state = dispatch(state, { type: "ACTIVATION_RESULT", result: makeActivationResult("p1", "TP") });
+      state = dispatch(state, { type: "ACTIVATION_RESULT", result: makeActivationResult("p2", "TN") });
+      expect(state.activationResults).toHaveLength(2);
+
+      state = dispatch(state, { type: "ACTIVATION_TIMEOUT" });
+      expect(state.activationRunning).toBe(false);
+      expect(state.activationResults).toHaveLength(2);
+      expect(state.activationError).toContain("timed out");
+    });
+
+    it("ACTIVATION_START -> ACTIVATION_RESULT -> ACTIVATION_CANCEL preserves partial", () => {
+      let state = makeState();
+      state = dispatch(state, { type: "ACTIVATION_START" });
+      state = dispatch(state, { type: "ACTIVATION_RESULT", result: makeActivationResult("p1", "TP") });
+      state = dispatch(state, { type: "ACTIVATION_RESULT", result: makeActivationResult("p2", "FN") });
+      state = dispatch(state, { type: "ACTIVATION_RESULT", result: makeActivationResult("p3", "TN") });
+
+      state = dispatch(state, { type: "ACTIVATION_CANCEL", totalPrompts: 5 });
+      expect(state.activationRunning).toBe(false);
+      expect(state.activationResults).toHaveLength(3);
     });
   });
 });

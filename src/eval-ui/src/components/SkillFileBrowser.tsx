@@ -5,10 +5,17 @@
 import { useState, useMemo } from "react";
 import type { SkillFileEntry } from "../types";
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 interface TreeNode {
   name: string;
   path: string;
   type: "file" | "dir";
+  size: number;
   children: TreeNode[];
 }
 
@@ -20,7 +27,7 @@ function buildTree(entries: SkillFileEntry[]): TreeNode[] {
   for (const entry of entries) {
     const parts = entry.path.split("/");
     const name = parts[parts.length - 1];
-    const node: TreeNode = { name, path: entry.path, type: entry.type, children: [] };
+    const node: TreeNode = { name, path: entry.path, type: entry.type, size: entry.size, children: [] };
     byPath.set(entry.path, node);
   }
 
@@ -147,7 +154,10 @@ function TreeItem({ node, depth, activeFile, onSelect }: TreeItemProps) {
     >
       <span style={{ width: 10 }} />
       <FileIcon />
-      <span>{node.name}</span>
+      <span style={{ flex: 1 }}>{node.name}</span>
+      <span style={{ fontSize: 9, color: "var(--text-tertiary)", marginRight: 4, whiteSpace: "nowrap" }}>
+        {formatFileSize(node.size)}
+      </span>
     </button>
   );
 }

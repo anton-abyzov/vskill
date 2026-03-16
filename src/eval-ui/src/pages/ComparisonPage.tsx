@@ -321,6 +321,11 @@ export function ComparisonPage() {
             />
           )}
 
+          {/* Rubric criterion per-model scores */}
+          {done && comparisons.length > 0 && (
+            <RubricChart comparisons={comparisons} />
+          )}
+
           {/* Verdict */}
           {done && doneData?.verdict && (() => {
             const verdictKey = doneData.verdict as EvalVerdict;
@@ -348,6 +353,54 @@ export function ComparisonPage() {
                     Assertion pass rate: {Math.round(doneData.overall_pass_rate * 100)}%
                   </div>
                 )}
+              </div>
+            );
+          })()}
+
+          {/* Aggregate stats + winner badge */}
+          {done && comparisons.length > 0 && (() => {
+            const agg = computeAggregateStats(comparisons);
+            const winner = getWinner(agg.skill, agg.baseline);
+            return (
+              <div className="glass-card p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-tertiary)" }}>
+                    Aggregate Summary
+                  </div>
+                  {winner !== "tie" && (
+                    <span
+                      className="pill text-[10px] font-bold"
+                      style={{
+                        background: winner === "skill" ? "var(--green-muted)" : "var(--red-muted)",
+                        color: winner === "skill" ? "var(--green)" : "var(--red)",
+                        padding: "3px 10px",
+                      }}
+                    >
+                      Winner: {winner === "skill" ? "With Skill" : "Without Skill"}
+                    </span>
+                  )}
+                  {winner === "tie" && (
+                    <span className="pill text-[10px] font-bold" style={{ background: "var(--surface-3)", color: "var(--text-tertiary)", padding: "3px 10px" }}>
+                      Tie
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="rounded-xl p-4" style={{ background: "var(--surface-2)", border: winner === "skill" ? "1px solid var(--green)" : "1px solid transparent" }}>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-tertiary)" }}>With Skill</div>
+                    <div className="text-[20px] font-bold mb-1" style={{ color: "var(--accent)" }}>{agg.skill.avgScore.toFixed(1)}</div>
+                    <div className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+                      Win rate: {Math.round(agg.skill.passRate * 100)}%
+                    </div>
+                  </div>
+                  <div className="rounded-xl p-4" style={{ background: "var(--surface-2)", border: winner === "baseline" ? "1px solid var(--red)" : "1px solid transparent" }}>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-tertiary)" }}>Without Skill</div>
+                    <div className="text-[20px] font-bold mb-1" style={{ color: "var(--text-secondary)" }}>{agg.baseline.avgScore.toFixed(1)}</div>
+                    <div className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+                      Win rate: {Math.round(agg.baseline.passRate * 100)}%
+                    </div>
+                  </div>
+                </div>
               </div>
             );
           })()}
@@ -429,6 +482,11 @@ function OutputPanel({ label, output, accentColor, hasBorderLeft }: {
   accentColor?: string;
   hasBorderLeft?: boolean;
 }) {
+  const [showFull, setShowFull] = useState(false);
+  const truncateAt = 500;
+  const needsTruncation = output.length > truncateAt;
+  const displayText = !showFull && needsTruncation ? output.slice(0, truncateAt) + "..." : output;
+
   return (
     <div className="p-4" style={{
       borderLeft: hasBorderLeft ? "1px solid var(--border-subtle)" : undefined,
@@ -445,8 +503,17 @@ function OutputPanel({ label, output, accentColor, hasBorderLeft }: {
         className="text-[12px] leading-relaxed p-3 rounded-lg max-h-64 overflow-y-auto whitespace-pre-wrap"
         style={{ background: "var(--surface-1)", color: "var(--text-secondary)", fontFamily: "var(--font-mono, monospace)" }}
       >
-        {output || "(empty output)"}
+        {displayText || "(empty output)"}
       </div>
+      {needsTruncation && (
+        <button
+          onClick={() => setShowFull(!showFull)}
+          className="text-[11px] mt-1.5 transition-colors duration-150"
+          style={{ color: "var(--accent)", background: "none", border: "none", cursor: "pointer" }}
+        >
+          {showFull ? "Collapse" : "Show full output"}
+        </button>
+      )}
     </div>
   );
 }
@@ -458,4 +525,114 @@ function MetricPill({ label, value, color }: { label: string; value: string; col
       <div className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>{label}</div>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Rubric criterion per-model horizontal bar chart (inline SVG)
+// ---------------------------------------------------------------------------
+
+function RubricChart({ comparisons }: { comparisons: ComparisonOutputsEvent[] }) {
+  const criteria = ["Content", "Structure"];
+  const skillAvgs = criteria.map((_, i) => {
+    const scores = comparisons.map((c) => i === 0 ? c.skillContentScore : c.skillStructureScore);
+    return scores.reduce((a, b) => a + b, 0) / scores.length;
+  });
+  const baselineAvgs = criteria.map((_, i) => {
+    const scores = comparisons.map((c) => i === 0 ? c.baselineContentScore : c.baselineStructureScore);
+    return scores.reduce((a, b) => a + b, 0) / scores.length;
+  });
+
+  const maxVal = 5;
+  const barH = 14;
+  const rowH = 42;
+  const labelW = 70;
+  const chartW = 280;
+  const svgW = labelW + chartW + 60;
+  const svgH = criteria.length * rowH + 30;
+
+  return (
+    <div className="glass-card p-5">
+      <div className="text-[11px] font-semibold uppercase tracking-widest mb-3" style={{ color: "var(--text-tertiary)" }}>
+        Rubric Criterion Scores
+      </div>
+      <div className="flex items-center gap-4 mb-3">
+        <div className="flex items-center gap-1.5">
+          <div style={{ width: 10, height: 10, borderRadius: 2, background: "#6383ff" }} />
+          <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>With Skill</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div style={{ width: 10, height: 10, borderRadius: 2, background: "#a0a0a0" }} />
+          <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>Without Skill</span>
+        </div>
+      </div>
+      <svg width={svgW} height={svgH} style={{ overflow: "visible" }}>
+        {criteria.map((label, i) => {
+          const y = i * rowH + 10;
+          const skillW = (skillAvgs[i] / maxVal) * chartW;
+          const baseW = (baselineAvgs[i] / maxVal) * chartW;
+          return (
+            <g key={label}>
+              <text x={0} y={y + barH / 2 + 1} fontSize={11} fill="var(--text-secondary)" dominantBaseline="middle">
+                {label}
+              </text>
+              {/* Skill bar */}
+              <rect x={labelW} y={y - 1} width={skillW} height={barH} rx={3} fill="#6383ff" />
+              <text x={labelW + skillW + 4} y={y + barH / 2} fontSize={10} fill="#6383ff" dominantBaseline="middle">
+                {skillAvgs[i].toFixed(1)}
+              </text>
+              {/* Baseline bar */}
+              <rect x={labelW} y={y + barH + 3} width={baseW} height={barH} rx={3} fill="#a0a0a0" />
+              <text x={labelW + baseW + 4} y={y + barH + 3 + barH / 2} fontSize={10} fill="#a0a0a0" dominantBaseline="middle">
+                {baselineAvgs[i].toFixed(1)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Aggregate stats computation and winner badge
+// ---------------------------------------------------------------------------
+
+export interface AggregateStats {
+  passRate: number;
+  avgScore: number;
+  avgDurationMs: number;
+  caseCount: number;
+}
+
+export function computeAggregateStats(comparisons: ComparisonOutputsEvent[]): { skill: AggregateStats; baseline: AggregateStats } {
+  const n = comparisons.length || 1;
+  const skillScores = comparisons.map((c) => (c.skillContentScore + c.skillStructureScore) / 2);
+  const baselineScores = comparisons.map((c) => (c.baselineContentScore + c.baselineStructureScore) / 2);
+
+  const skillAvg = skillScores.reduce((a, b) => a + b, 0) / n;
+  const baselineAvg = baselineScores.reduce((a, b) => a + b, 0) / n;
+
+  const skillWins = comparisons.filter((c) => c.winner === "skill").length;
+  const baselineWins = comparisons.filter((c) => c.winner === "baseline").length;
+
+  return {
+    skill: {
+      passRate: skillWins / n,
+      avgScore: skillAvg,
+      avgDurationMs: 0,
+      caseCount: n,
+    },
+    baseline: {
+      passRate: baselineWins / n,
+      avgScore: baselineAvg,
+      avgDurationMs: 0,
+      caseCount: n,
+    },
+  };
+}
+
+export function getWinner(skill: AggregateStats, baseline: AggregateStats): "skill" | "baseline" | "tie" {
+  if (skill.avgScore > baseline.avgScore + 0.01) return "skill";
+  if (baseline.avgScore > skill.avgScore + 0.01) return "baseline";
+  return "tie";
 }

@@ -118,7 +118,7 @@ export function HistoryPanel() {
           {/* Trend chart */}
           {history.length > 0 && (
             <div className="mb-5 rounded-xl p-4" style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)" }}>
-              <TrendChart entries={history} />
+              <TrendChart entries={history} onPointClick={(entry) => handleRunClick(entry.timestamp)} />
             </div>
           )}
 

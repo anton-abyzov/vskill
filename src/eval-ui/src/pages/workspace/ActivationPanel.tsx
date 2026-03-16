@@ -24,8 +24,8 @@ const PROMPT_TEMPLATES = [
 ];
 
 export function ActivationPanel() {
-  const { state, dispatch, runActivationTest } = useWorkspace();
-  const { plugin, skill, activationPrompts, activationResults, activationSummary, activationRunning, activationError } = state;
+  const { state, dispatch, runActivationTest, cancelActivation } = useWorkspace();
+  const { plugin, skill, activationPrompts, activationResults, activationSummary, activationRunning, activationError, activationStartedAt } = state;
 
   const [promptsText, setPromptsText] = useState(activationPrompts);
   const [skillDescription, setSkillDescription] = useState<string | null>(null);
@@ -129,31 +129,50 @@ export function ActivationPanel() {
             </span>
           </div>
 
-          {/* Run button */}
-          <button
-            onClick={handleRun}
-            disabled={activationRunning || !promptsText.trim()}
-            className="btn btn-primary self-start"
-          >
-            {activationRunning ? (
+          {/* Run button + Cancel + Progress */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleRun}
+              disabled={activationRunning || !promptsText.trim()}
+              className="btn btn-primary"
+            >
+              {activationRunning ? (
+                <>
+                  <div
+                    className="spinner"
+                    style={{ borderTopColor: "#fff", borderColor: "rgba(255,255,255,0.2)", width: 14, height: 14 }}
+                  />
+                  Testing...
+                </>
+              ) : (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <circle cx="12" cy="12" r="6" />
+                    <circle cx="12" cy="12" r="2" />
+                  </svg>
+                  Run Activation Test
+                </>
+              )}
+            </button>
+
+            {activationRunning && (
               <>
-                <div
-                  className="spinner"
-                  style={{ borderTopColor: "#fff", borderColor: "rgba(255,255,255,0.2)", width: 14, height: 14 }}
-                />
-                Testing...
-              </>
-            ) : (
-              <>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <circle cx="12" cy="12" r="6" />
-                  <circle cx="12" cy="12" r="2" />
-                </svg>
-                Run Activation Test
+                <button
+                  onClick={cancelActivation}
+                  className="btn btn-secondary text-[12px]"
+                >
+                  Cancel
+                </button>
+                <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+                  {activationResults.length} / {promptCount} prompts tested
+                  {activationStartedAt && (
+                    <ElapsedTime startedAt={activationStartedAt} />
+                  )}
+                </span>
               </>
             )}
-          </button>
+          </div>
         </div>
 
         {/* Right: Skill description — always visible */}
@@ -383,4 +402,13 @@ function ConfusionCell({ abbr, count, bg, color, description }: {
       <div className="text-[9px] mt-0.5" style={{ color: "var(--text-tertiary)" }}>{description}</div>
     </div>
   );
+}
+
+function ElapsedTime({ startedAt }: { startedAt: number }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [startedAt]);
+  return <span className="ml-2">({elapsed}s)</span>;
 }

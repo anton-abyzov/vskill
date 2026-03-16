@@ -2,8 +2,11 @@ import { useState, useCallback, useEffect, useMemo, useRef, Fragment } from "rea
 import { useWorkspace } from "./WorkspaceContext";
 import { api } from "../../api";
 import type { EvalCase, Assertion, EvalsFile, CaseHistoryEntry } from "../../types";
+import { getTestType } from "../../types";
 import type { InlineResult, CaseRunStatus } from "./workspaceTypes";
 import { passRateColor, shortDate, fmtDuration, MiniTrend } from "../../utils/historyUtils";
+import { verdictExplanation } from "../../../../eval/verdict.js";
+import type { VerdictExplanationResult } from "../../../../eval/verdict.js";
 import { ProgressLog } from "../../components/ProgressLog";
 import { ErrorCard } from "../../components/ErrorCard";
 
@@ -110,10 +113,14 @@ export function TestsPanel() {
     return false;
   }, [caseRunStates]);
   const [showForm, setShowForm] = useState(false);
+  const [testTypeFilter, setTestTypeFilter] = useState<"all" | "unit" | "integration">("all");
 
   const defaultEvals: EvalsFile = { skill_name: state.skill, evals: [] };
   const effectiveEvals = evals ?? defaultEvals;
-  const cases = effectiveEvals.evals;
+  const allCases = effectiveEvals.evals;
+  const cases = testTypeFilter === "all"
+    ? allCases
+    : allCases.filter((c) => getTestType(c) === testTypeFilter);
   const selectedCase = cases.find((c) => c.id === selectedCaseId) ?? null;
 
   const handleGenerateEvals = useCallback(() => {
@@ -214,10 +221,35 @@ export function TestsPanel() {
             )}
           </div>
         </div>
+        {/* Test type filter tabs */}
+        <div className="flex px-3 py-1.5 gap-1" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+          {(["all", "unit", "integration"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setTestTypeFilter(tab)}
+              style={{
+                padding: "2px 8px",
+                fontSize: 10,
+                fontWeight: testTypeFilter === tab ? 600 : 400,
+                background: testTypeFilter === tab ? "var(--accent-muted)" : "transparent",
+                color: testTypeFilter === tab ? "var(--accent)" : "var(--text-tertiary)",
+                border: "none",
+                borderRadius: 4,
+                cursor: "pointer",
+                textTransform: "capitalize",
+              }}
+            >
+              {tab === "all" ? `All (${allCases.length})` : tab === "unit"
+                ? `Unit (${allCases.filter((c) => getTestType(c) === "unit").length})`
+                : `Integration (${allCases.filter((c) => getTestType(c) === "integration").length})`}
+            </button>
+          ))}
+        </div>
         <div className="py-1">
           {cases.map((c) => {
             const result = inlineResults.get(c.id);
             const active = selectedCaseId === c.id;
+            const tt = getTestType(c);
             return (
               <button
                 key={c.id}
@@ -231,8 +263,21 @@ export function TestsPanel() {
                 onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
               >
                 <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-[12px] font-medium truncate" style={{ color: active ? "var(--text-primary)" : "var(--text-secondary)" }}>
+                  <span className="text-[12px] font-medium truncate flex items-center gap-1.5" style={{ color: active ? "var(--text-primary)" : "var(--text-secondary)" }}>
                     #{c.id} {c.name}
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 600,
+                        padding: "1px 5px",
+                        borderRadius: 9999,
+                        background: tt === "unit" ? "rgba(99,131,255,0.15)" : "rgba(251,146,60,0.15)",
+                        color: tt === "unit" ? "#6383ff" : "#fb923c",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {tt === "unit" ? "Unit" : "Integration"}
+                    </span>
                   </span>
                   <StatusPill result={result} />
                 </div>
@@ -370,6 +415,9 @@ function CaseDetail({
 
   const allPassing = result && result.assertions.length > 0 && result.assertions.every((a) => a.pass);
   const hasFails = result && result.assertions.some((a) => !a.pass);
+  const tt = getTestType(evalCase);
+  const missingCreds = evalCase.requiredCredentials ?? [];
+  const hasCredGate = tt === "integration" && missingCreds.length > 0;
 
   return (
     <div className="p-5 animate-fade-in" key={evalCase.id}>
@@ -378,6 +426,18 @@ function CaseDetail({
         <div className="flex items-center gap-2">
           <span className="text-[16px] font-semibold" style={{ color: "var(--text-primary)" }}>
             #{evalCase.id} {evalCase.name}
+          </span>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              padding: "2px 7px",
+              borderRadius: 9999,
+              background: tt === "unit" ? "rgba(99,131,255,0.15)" : "rgba(251,146,60,0.15)",
+              color: tt === "unit" ? "#6383ff" : "#fb923c",
+            }}
+          >
+            {tt === "unit" ? "Unit" : "Integration"}
           </span>
           <StatusPill result={result} />
         </div>
@@ -415,6 +475,39 @@ function CaseDetail({
         <div className="mb-4 px-4 py-3 rounded-xl flex items-center gap-3" style={{ background: "var(--green-muted)", border: "1px solid rgba(52, 211, 153, 0.2)" }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
           <span className="text-[13px] font-medium" style={{ color: "var(--green)" }}>All assertions passing</span>
+        </div>
+      )}
+
+      {/* Credential gate for integration tests */}
+      {hasCredGate && (
+        <div className="mb-4 px-4 py-3 rounded-xl" style={{ background: "rgba(251,146,60,0.1)", border: "1px solid rgba(251,146,60,0.2)" }}>
+          <div className="flex items-center gap-2 mb-1">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            <span className="text-[12px] font-semibold" style={{ color: "#fb923c" }}>Required Credentials</span>
+          </div>
+          <div className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            This integration test requires the following environment variables:
+          </div>
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {missingCreds.map((cred) => (
+              <span
+                key={cred}
+                style={{
+                  fontSize: 10,
+                  fontFamily: "var(--font-mono, monospace)",
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  background: "rgba(251,146,60,0.15)",
+                  color: "#fb923c",
+                }}
+              >
+                {cred}
+              </span>
+            ))}
+          </div>
         </div>
       )}
 
@@ -525,6 +618,35 @@ function CaseDetail({
 
       {/* LLM Output (collapsible) */}
       {result?.output && <OutputSection output={result.output} durationMs={result.durationMs} tokens={result.tokens} />}
+
+      {/* Recommendations for INEFFECTIVE results (score < 0.2) */}
+      {result && result.passRate != null && result.passRate < 0.2 && (() => {
+        const ve = verdictExplanation("INEFFECTIVE", result.passRate);
+        return ve.recommendations && ve.recommendations.length > 0 ? (
+          <Section title="Recommendations">
+            <div className="rounded-xl p-4" style={{ background: "rgba(251,146,60,0.08)", border: "1px solid rgba(251,146,60,0.2)" }}>
+              <div className="flex items-center gap-2 mb-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                <span className="text-[12px] font-semibold" style={{ color: "#fb923c" }}>
+                  This eval is significantly below expectations
+                </span>
+              </div>
+              <ul className="space-y-1.5 ml-1">
+                {ve.recommendations.map((rec, i) => (
+                  <li key={i} className="flex items-start gap-2 text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                    <span style={{ color: "#fb923c", fontWeight: 600, flexShrink: 0 }}>•</span>
+                    {rec}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </Section>
+        ) : null;
+      })()}
 
       {/* Execution History (collapsible) */}
       <CaseHistorySection evalId={evalCase.id} sharedEntries={historyEntries} sharedLoading={historyLoading} />
@@ -723,19 +845,53 @@ function Section({ title, action, children }: { title: string; action?: React.Re
 }
 
 function StatusPill({ result }: { result?: InlineResult }) {
+  const [showTooltip, setShowTooltip] = useState(false);
   if (!result || result.status == null) {
     return <span className="pill text-[10px]" style={{ background: "var(--surface-3)", color: "var(--text-tertiary)" }}>--</span>;
   }
   const pass = result.status === "pass";
+  const score = result.passRate ?? 0;
+  const verdict = pass ? "PASS" : "FAIL";
+  const explanation = verdictExplanation(verdict, score);
+
   return (
     <span
       className="pill text-[10px]"
       style={{
         background: pass ? "var(--green-muted)" : "var(--red-muted)",
         color: pass ? "var(--green)" : "var(--red)",
+        position: "relative",
+        cursor: "default",
       }}
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+      aria-describedby={showTooltip ? "verdict-tooltip" : undefined}
     >
       {result.passRate != null ? `${Math.round(result.passRate * 100)}%` : result.status}
+      {showTooltip && (
+        <div
+          id="verdict-tooltip"
+          role="tooltip"
+          style={{
+            position: "absolute",
+            bottom: "calc(100% + 6px)",
+            right: 0,
+            padding: "6px 10px",
+            background: "var(--surface-4)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 6,
+            fontSize: 11,
+            color: "var(--text-secondary)",
+            whiteSpace: "nowrap",
+            zIndex: 50,
+            maxWidth: 300,
+            width: "max-content",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+          }}
+        >
+          {explanation.explanation}
+        </div>
+      )}
     </span>
   );
 }

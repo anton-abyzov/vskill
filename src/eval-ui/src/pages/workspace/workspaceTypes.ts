@@ -119,6 +119,8 @@ export interface WorkspaceState {
   activationSummary: (ActivationSummary & { description?: string }) | null;
   activationRunning: boolean;
   activationError: string | null;
+  activationTotalPrompts: number;
+  activationStartedAt: number | null;
 
   // Loading
   loading: boolean;
@@ -169,7 +171,9 @@ export type WorkspaceAction =
   | { type: "ACTIVATION_RESULT"; result: ActivationResult }
   | { type: "ACTIVATION_DONE"; summary: ActivationSummary & { description?: string } }
   | { type: "ACTIVATION_ERROR"; error: string }
-  | { type: "ACTIVATION_RESET" };
+  | { type: "ACTIVATION_RESET" }
+  | { type: "ACTIVATION_TIMEOUT" }
+  | { type: "ACTIVATION_CANCEL"; totalPrompts: number };
 
 // ---------------------------------------------------------------------------
 // Context value
@@ -192,6 +196,7 @@ export interface WorkspaceContextValue {
   refreshSkillContent: () => Promise<void>;
   generateEvals: () => Promise<void>;
   runActivationTest: (prompts: string) => void;
+  cancelActivation: () => void;
   submitAiEdit: (instruction: string, provider?: string, model?: string) => void;
   cancelAiEdit: () => void;
   applyAiEdit: () => Promise<void>;

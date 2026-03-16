@@ -295,4 +295,61 @@ describe("loadAndValidateEvals", () => {
     const result = loadAndValidateEvals("/skills/my-skill");
     expect(result.evals[0].files).toEqual([]);
   });
+
+  it("defaults testType to 'unit' when absent", () => {
+    mocks.existsSync.mockReturnValue(true);
+    mocks.readFileSync.mockReturnValue(JSON.stringify(VALID_EVALS));
+
+    const result = loadAndValidateEvals("/skills/my-skill");
+    expect(result.evals[0].testType).toBe("unit");
+  });
+
+  it("accepts testType 'unit' and passes it through", () => {
+    const evalsWithUnit = {
+      ...VALID_EVALS,
+      evals: [{ ...VALID_EVALS.evals[0], testType: "unit" }],
+    };
+    mocks.existsSync.mockReturnValue(true);
+    mocks.readFileSync.mockReturnValue(JSON.stringify(evalsWithUnit));
+
+    const result = loadAndValidateEvals("/skills/my-skill");
+    expect(result.evals[0].testType).toBe("unit");
+  });
+
+  it("accepts testType 'integration' and passes it through", () => {
+    const evalsWithIntegration = {
+      ...VALID_EVALS,
+      evals: [{ ...VALID_EVALS.evals[0], testType: "integration" }],
+    };
+    mocks.existsSync.mockReturnValue(true);
+    mocks.readFileSync.mockReturnValue(JSON.stringify(evalsWithIntegration));
+
+    const result = loadAndValidateEvals("/skills/my-skill");
+    expect(result.evals[0].testType).toBe("integration");
+  });
+
+  it("accepts requiredCredentials array and passes it through", () => {
+    const evalsWithCreds = {
+      ...VALID_EVALS,
+      evals: [{
+        ...VALID_EVALS.evals[0],
+        testType: "integration",
+        requiredCredentials: ["OPENAI_API_KEY", "STRIPE_KEY"],
+      }],
+    };
+    mocks.existsSync.mockReturnValue(true);
+    mocks.readFileSync.mockReturnValue(JSON.stringify(evalsWithCreds));
+
+    const result = loadAndValidateEvals("/skills/my-skill");
+    expect(result.evals[0].requiredCredentials).toEqual(["OPENAI_API_KEY", "STRIPE_KEY"]);
+    expect(result.evals[0].testType).toBe("integration");
+  });
+
+  it("omits requiredCredentials when not provided", () => {
+    mocks.existsSync.mockReturnValue(true);
+    mocks.readFileSync.mockReturnValue(JSON.stringify(VALID_EVALS));
+
+    const result = loadAndValidateEvals("/skills/my-skill");
+    expect(result.evals[0].requiredCredentials).toBeUndefined();
+  });
 });

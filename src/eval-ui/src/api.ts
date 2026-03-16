@@ -197,4 +197,12 @@ export const api = {
   getSkillFile(plugin: string, skill: string, path: string): Promise<SkillFileContent> {
     return fetchJson(`/api/skills/${plugin}/${skill}/file?path=${encodeURIComponent(path)}`);
   },
+
+  saveSkillFile(plugin: string, skill: string, path: string, content: string): Promise<{ ok: boolean; path: string; size: number }> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/file`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, content }),
+    });
+  },
 };

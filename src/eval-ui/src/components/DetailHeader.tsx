@@ -1,4 +1,5 @@
 import type { WorkspaceState } from "../pages/workspace/workspaceTypes";
+import { passRateColor, passRateBackground } from "../utils/passRateColor";
 
 interface Props {
   state: WorkspaceState;
@@ -14,13 +15,8 @@ export function DetailHeader({ state, isReadOnly, onDelete }: Props) {
   const totalAssertions = evals?.evals.reduce((sum, e) => sum + e.assertions.length, 0) ?? 0;
   const totalCases = evals?.evals.length ?? 0;
 
-  const passColor = passRate != null
-    ? passRate >= 80 ? "var(--green)" : passRate >= 50 ? "var(--yellow)" : "var(--red)"
-    : "var(--text-tertiary)";
-
-  const passBackground = passRate != null
-    ? passRate >= 80 ? "var(--green-muted)" : passRate >= 50 ? "var(--yellow-muted)" : "var(--red-muted)"
-    : "var(--surface-3)";
+  const passColor = passRateColor(passRate);
+  const passBackground = passRateBackground(passRate);
 
   return (
     <div

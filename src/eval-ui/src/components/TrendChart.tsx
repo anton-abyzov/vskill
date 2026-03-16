@@ -1,11 +1,12 @@
 // Pure SVG trend chart — pass rate over time, color-coded by run type
 // No external chart dependencies
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { HistorySummary } from "../types";
 
 interface TrendChartProps {
   entries: HistorySummary[];
+  onPointClick?: (entry: HistorySummary) => void;
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -33,19 +34,27 @@ function formatShortDate(iso: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-export function TrendChart({ entries }: TrendChartProps) {
+function formatDuration(ms: number | undefined | null): string {
+  if (ms == null) return "--";
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+export function TrendChart({ entries, onPointClick }: TrendChartProps) {
   const [tooltip, setTooltip] = useState<{
     x: number;
     y: number;
     entry: HistorySummary;
   } | null>(null);
 
-  if (entries.length < 2) return null;
+  // T-003: Reverse entries so oldest is first (left-to-right chronological)
+  const sorted = useMemo(() => [...entries].reverse(), [entries]);
 
-  const n = entries.length;
+  if (sorted.length < 2) return null;
+
+  const n = sorted.length;
 
   // Map each entry to chart coordinates
-  const points = entries.map((entry, i) => {
+  const points = sorted.map((entry, i) => {
     const x = PAD + (i / (n - 1)) * PLOT_W;
     const pct = entry.passRate * 100;
     const y = PAD + PLOT_H - (pct / 100) * PLOT_H;
@@ -56,10 +65,10 @@ export function TrendChart({ entries }: TrendChartProps) {
   const polylinePoints = points.map((p) => `${p.x},${p.y}`).join(" ");
 
   // Collect unique types present in data for legend
-  const typesPresent = Array.from(new Set(entries.map((e) => e.type)));
+  const typesPresent = Array.from(new Set(sorted.map((e) => e.type)));
 
   return (
-    <div className="glass-card p-5 animate-fade-in" style={{ position: "relative" }}>
+    <div className="glass-card p-5 animate-fade-in" style={{ position: "relative", overflowX: n >= 20 ? "auto" : undefined }}>
       <div className="text-[13px] font-semibold mb-2" style={{ color: "var(--text-primary)" }}>
         Pass Rate Trend
       </div>
@@ -159,10 +168,11 @@ export function TrendChart({ entries }: TrendChartProps) {
               (e.currentTarget as SVGCircleElement).setAttribute("r", "5");
               setTooltip(null);
             }}
+            onClick={() => onPointClick?.(p.entry)}
           />
         ))}
 
-        {/* X-axis labels (first, middle, last to avoid clutter) */}
+        {/* X-axis labels — auto-spaced for 20+ runs */}
         {labelIndices(n).map((i) => (
           <text
             key={i}
@@ -171,12 +181,12 @@ export function TrendChart({ entries }: TrendChartProps) {
             textAnchor="middle"
             style={{ fill: "var(--text-tertiary)", fontSize: 10 }}
           >
-            {formatShortDate(entries[i].timestamp)}
+            {formatShortDate(sorted[i].timestamp)}
           </text>
         ))}
       </svg>
 
-      {/* Tooltip */}
+      {/* Tooltip — T-004: includes duration, tokens, model */}
       {tooltip && (
         <div
           style={{
@@ -213,15 +223,30 @@ export function TrendChart({ entries }: TrendChartProps) {
               {Math.round(tooltip.entry.passRate * 100)}%
             </span>
           </div>
+          <div className="text-[10px] mt-1.5 flex items-center gap-3" style={{ color: "var(--text-tertiary)" }}>
+            <span>{formatDuration(tooltip.entry.totalDurationMs)}</span>
+            <span>{tooltip.entry.totalTokens != null ? `${tooltip.entry.totalTokens} tokens` : "--"}</span>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-/** Pick a small set of x-axis label indices to avoid overlap. */
+/** Pick a small set of x-axis label indices to avoid overlap.
+ *  T-006: For 20+ entries, show every Nth label where N = ceil(n/10),
+ *  always including first and last. */
 function labelIndices(n: number): number[] {
   if (n <= 3) return Array.from({ length: n }, (_, i) => i);
   if (n <= 6) return [0, Math.floor(n / 2), n - 1];
-  return [0, Math.floor(n / 3), Math.floor((2 * n) / 3), n - 1];
+  if (n < 20) return [0, Math.floor(n / 3), Math.floor((2 * n) / 3), n - 1];
+
+  // 20+ entries: show every Nth label
+  const step = Math.ceil(n / 10);
+  const indices: number[] = [0];
+  for (let i = step; i < n - 1; i += step) {
+    indices.push(i);
+  }
+  indices.push(n - 1);
+  return indices;
 }

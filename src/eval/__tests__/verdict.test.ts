@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeVerdict, verdictColor } from "../verdict.js";
+import { computeVerdict, verdictColor, verdictExplanation } from "../verdict.js";
 
 describe("computeVerdict", () => {
   it("returns EFFECTIVE when passRate >= 0.8 and skill rubric > baseline + 1", () => {
@@ -74,5 +74,89 @@ describe("verdictColor", () => {
     expect(verdictColor("INEFFECTIVE")).toBe("orange");
     expect(verdictColor("EMERGING")).toBe("cyan");
     expect(verdictColor("DEGRADING")).toBe("red");
+  });
+});
+
+describe("verdictExplanation", () => {
+  const rubric = [
+    { criterion: "Accuracy", score: 0.9 },
+    { criterion: "Completeness", score: 0.8 },
+    { criterion: "Clarity", score: 0.3 },
+  ];
+
+  it("explains PASS with score 0.7", () => {
+    const result = verdictExplanation("PASS", 0.7, rubric);
+    expect(result.explanation).toContain("PASS");
+    expect(result.explanation).toContain("0.70");
+    expect(result.explanation).toContain("Accuracy");
+    expect(result.recommendations).toBeUndefined();
+  });
+
+  it("explains PASS with score 1.0", () => {
+    const result = verdictExplanation("PASS", 1.0, rubric);
+    expect(result.explanation).toContain("met expectations");
+    expect(result.recommendations).toBeUndefined();
+  });
+
+  it("explains EFFECTIVE with score >= 0.7", () => {
+    const result = verdictExplanation("EFFECTIVE", 0.85, rubric);
+    expect(result.explanation).toContain("EFFECTIVE");
+    expect(result.explanation).toContain("met expectations");
+    expect(result.recommendations).toBeUndefined();
+  });
+
+  it("explains FAIL with score 0.39", () => {
+    const result = verdictExplanation("FAIL", 0.39, rubric);
+    expect(result.explanation).toContain("FAIL");
+    expect(result.explanation).toContain("did not meet");
+    expect(result.recommendations).toBeDefined();
+    expect(result.recommendations!.length).toBeGreaterThan(0);
+  });
+
+  it("explains FAIL with score 0.0", () => {
+    const result = verdictExplanation("FAIL", 0.0, [
+      { criterion: "Accuracy", score: 0.1 },
+    ]);
+    expect(result.explanation).toContain("FAIL");
+    expect(result.recommendations).toBeDefined();
+    expect(result.recommendations!.some((r) => r.includes("Accuracy"))).toBe(true);
+  });
+
+  it("explains DEGRADING with score < 0.4", () => {
+    const result = verdictExplanation("DEGRADING", 0.2, rubric);
+    expect(result.explanation).toContain("DEGRADING");
+    expect(result.recommendations).toBeDefined();
+  });
+
+  it("explains INEFFECTIVE with score 0.15", () => {
+    const result = verdictExplanation("INEFFECTIVE", 0.15, rubric);
+    expect(result.explanation).toContain("INEFFECTIVE");
+    expect(result.explanation).toContain("significantly below");
+    expect(result.recommendations).toBeDefined();
+    expect(result.recommendations!.some((r) => r.includes("examples"))).toBe(true);
+  });
+
+  it("handles boundary score 0.4 without recommendations", () => {
+    const result = verdictExplanation("MARGINAL", 0.4, rubric);
+    expect(result.explanation).toContain("MARGINAL");
+    expect(result.explanation).toContain("mixed results");
+    expect(result.recommendations).toBeUndefined();
+  });
+
+  it("works without rubric data", () => {
+    const result = verdictExplanation("PASS", 0.8);
+    expect(result.explanation).toContain("PASS");
+    expect(result.recommendations).toBeUndefined();
+  });
+
+  it("provides recommendations only for FAIL/INEFFECTIVE, not PASS", () => {
+    const passResult = verdictExplanation("PASS", 0.9, rubric);
+    expect(passResult.recommendations).toBeUndefined();
+
+    const failResult = verdictExplanation("FAIL", 0.2, rubric);
+    expect(failResult.recommendations).toBeDefined();
+
+    const ineffResult = verdictExplanation("INEFFECTIVE", 0.1, rubric);
+    expect(ineffResult.recommendations).toBeDefined();
   });
 });

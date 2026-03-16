@@ -2,9 +2,10 @@
 // SecondaryFileViewer — read-only viewer for non-SKILL.md files
 // ---------------------------------------------------------------------------
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import type { SkillFileContent } from "../types";
 import { renderMarkdown } from "../utils/renderMarkdown";
+import { api } from "../api";
 
 type ViewMode = "raw" | "split" | "preview";
 
@@ -122,18 +123,65 @@ function PreviewPane({ content, fileType }: PreviewPaneProps) {
   );
 }
 
+function highlightJson(raw: string): string {
+  try {
+    const formatted = JSON.stringify(JSON.parse(raw), null, 2);
+    return formatted
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"([^"\\]|\\.)*"\s*:/g, (m) => `<span style="color:#6383ff">${m}</span>`)
+      .replace(/:\s*"([^"\\]|\\.)*"/g, (m) => `<span style="color:#22c55e">${m.slice(0, 2)}<span style="color:#22c55e">${m.slice(2)}</span></span>`)
+      .replace(/:\s*(-?\d+\.?\d*)/g, (m, n) => `: <span style="color:#fb923c">${n}</span>`)
+      .replace(/:\s*(true|false|null)/g, (m, kw) => `: <span style="color:#a855f7">${kw}</span>`);
+  } catch {
+    return raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+}
+
 interface SecondaryFileViewerProps {
   file: SkillFileContent | null;
   loading: boolean;
   error: string | null;
   viewMode: ViewMode;
+  plugin?: string;
+  skill?: string;
+  onSaved?: () => void;
 }
 
-export function SecondaryFileViewer({ file, loading, error, viewMode }: SecondaryFileViewerProps) {
+export function SecondaryFileViewer({ file, loading, error, viewMode, plugin, skill, onSaved }: SecondaryFileViewerProps) {
   const [localViewMode, setLocalViewMode] = useState<ViewMode>(viewMode);
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   // Sync prop changes (e.g. user toggles in EditorPanel toolbar)
   const effectiveMode = viewMode !== localViewMode ? viewMode : localViewMode;
+
+  const handleEdit = useCallback(() => {
+    if (file?.content != null) {
+      setEditContent(file.content);
+      setEditing(true);
+    }
+  }, [file]);
+
+  const handleSave = useCallback(async () => {
+    if (!plugin || !skill || !file) return;
+    setSaving(true);
+    try {
+      await api.saveSkillFile(plugin, skill, file.path, editContent);
+      setToast("Saved");
+      setEditing(false);
+      onSaved?.();
+      setTimeout(() => setToast(null), 2000);
+    } catch (err) {
+      setToast(`Save failed: ${(err as Error).message}`);
+      setTimeout(() => setToast(null), 3000);
+    } finally {
+      setSaving(false);
+    }
+  }, [plugin, skill, file, editContent, onSaved]);
 
   if (loading) {
     return (
@@ -231,26 +279,146 @@ export function SecondaryFileViewer({ file, loading, error, viewMode }: Secondar
               color: "var(--text-tertiary)",
               display: "flex",
               alignItems: "center",
+              gap: 6,
             }}
           >
-            {formatBytes(file.size)} · read-only
+            {formatBytes(file.size)}
+            {plugin && skill && !file.binary && !editing && (
+              <button
+                onClick={handleEdit}
+                style={{
+                  padding: "1px 6px",
+                  fontSize: 10,
+                  background: "var(--accent-muted)",
+                  color: "var(--accent)",
+                  border: "none",
+                  borderRadius: 3,
+                  cursor: "pointer",
+                }}
+              >
+                Edit
+              </button>
+            )}
+            {editing && (
+              <>
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  style={{
+                    padding: "1px 6px",
+                    fontSize: 10,
+                    background: "var(--accent)",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 3,
+                    cursor: "pointer",
+                    opacity: saving ? 0.6 : 1,
+                  }}
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+                <button
+                  onClick={() => setEditing(false)}
+                  style={{
+                    padding: "1px 6px",
+                    fontSize: 10,
+                    background: "var(--surface-3)",
+                    color: "var(--text-tertiary)",
+                    border: "none",
+                    borderRadius: 3,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+              </>
+            )}
           </span>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div
+          style={{
+            padding: "4px 12px",
+            background: toast.startsWith("Save failed") ? "var(--red-muted)" : "var(--green-muted)",
+            borderBottom: "1px solid var(--border-subtle)",
+            fontSize: 11,
+            color: toast.startsWith("Save failed") ? "var(--red)" : "var(--green)",
+          }}
+        >
+          {toast}
         </div>
       )}
 
       {/* Content area */}
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-        {effectiveMode === "split" && fileType !== "other" ? (
+        {editing ? (
+          <textarea
+            value={editContent}
+            onChange={(e) => setEditContent(e.target.value)}
+            style={{
+              flex: 1,
+              width: "100%",
+              resize: "none",
+              background: "var(--surface-0)",
+              color: "var(--text-primary)",
+              border: "none",
+              outline: "none",
+              padding: "12px 16px",
+              fontSize: 12,
+              fontFamily: "var(--font-mono, monospace)",
+              lineHeight: 1.6,
+            }}
+          />
+        ) : effectiveMode === "split" && fileType !== "other" ? (
           <>
             <div style={{ flex: 1, display: "flex", flexDirection: "column", borderRight: "1px solid var(--border-subtle)" }}>
               <RawPane content={content} />
             </div>
             <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto" }}>
-              <PreviewPane content={content} fileType={fileType} />
+              {fileType === "json" ? (
+                <pre
+                  style={{
+                    flex: 1,
+                    margin: 0,
+                    padding: "12px 16px",
+                    overflow: "auto",
+                    background: "var(--surface-0)",
+                    fontSize: 12,
+                    fontFamily: "var(--font-mono, monospace)",
+                    lineHeight: 1.6,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                  dangerouslySetInnerHTML={{ __html: highlightJson(content) }}
+                />
+              ) : (
+                <PreviewPane content={content} fileType={fileType} />
+              )}
             </div>
           </>
         ) : effectiveMode === "preview" && fileType !== "other" ? (
-          <PreviewPane content={content} fileType={fileType} />
+          fileType === "json" ? (
+            <pre
+              style={{
+                flex: 1,
+                margin: 0,
+                padding: "12px 16px",
+                overflow: "auto",
+                background: "var(--surface-0)",
+                fontSize: 12,
+                fontFamily: "var(--font-mono, monospace)",
+                lineHeight: 1.6,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+              dangerouslySetInnerHTML={{ __html: highlightJson(content) }}
+            />
+          ) : (
+            <PreviewPane content={content} fileType={fileType} />
+          )
         ) : (
           <RawPane content={content} />
         )}

@@ -22,6 +22,8 @@ export interface EvalCase {
   expected_output: string;
   files: string[];
   assertions: Assertion[];
+  testType?: "unit" | "integration";
+  requiredCredentials?: string[];
 }
 
 export interface EvalsFile {
@@ -175,7 +177,7 @@ export function loadAndValidateEvals(skillDir: string): EvalsFile {
     throw new EvalValidationError(errors);
   }
 
-  // Normalize: default files to []
+  // Normalize: default files to [], testType to "unit"
   const evals: EvalCase[] = parsed.evals.map((e: any) => ({
     id: e.id,
     name: e.name,
@@ -187,6 +189,8 @@ export function loadAndValidateEvals(skillDir: string): EvalsFile {
       text: a.text,
       type: a.type || "boolean",
     })),
+    testType: e.testType === "integration" ? "integration" : "unit",
+    ...(Array.isArray(e.requiredCredentials) ? { requiredCredentials: e.requiredCredentials } : {}),
   }));
 
   return { skill_name: parsed.skill_name, evals };

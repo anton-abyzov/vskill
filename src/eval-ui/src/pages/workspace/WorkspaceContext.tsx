@@ -491,6 +491,10 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
         dispatch({ type: "ACTIVATION_RESULT", result: evt.data as ActivationResult });
       }
       if (evt.event === "done") {
+        if (activationTimeoutRef.current) {
+          clearTimeout(activationTimeoutRef.current);
+          activationTimeoutRef.current = null;
+        }
         dispatch({ type: "ACTIVATION_DONE", summary: evt.data as ActivationSummary & { description?: string } });
       }
     }
@@ -498,9 +502,24 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
 
   useEffect(() => {
     if (activationSSE.error) {
+      if (activationTimeoutRef.current) {
+        clearTimeout(activationTimeoutRef.current);
+        activationTimeoutRef.current = null;
+      }
       dispatch({ type: "ACTIVATION_ERROR", error: activationSSE.error });
     }
   }, [activationSSE.error]);
+
+  const activationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelActivation = useCallback(() => {
+    if (activationTimeoutRef.current) {
+      clearTimeout(activationTimeoutRef.current);
+      activationTimeoutRef.current = null;
+    }
+    activationSSE.stop();
+    dispatch({ type: "ACTIVATION_CANCEL", totalPrompts: 0 });
+  }, [activationSSE]);
 
   const runActivationTest = useCallback((promptsText: string) => {
     const lines = promptsText.trim().split("\n").filter(Boolean);
@@ -514,7 +533,16 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
       return { prompt: line.trim(), expected: "auto" as const };
     });
     dispatch({ type: "ACTIVATION_START" });
+    dispatch({ type: "SET_ACTIVATION_PROMPTS", prompts: promptsText });
     activationSSE.start(`/api/skills/${plugin}/${skill}/activation-test`, { prompts });
+
+    // T-007: 120s client-side timeout
+    if (activationTimeoutRef.current) clearTimeout(activationTimeoutRef.current);
+    activationTimeoutRef.current = setTimeout(() => {
+      activationSSE.stop();
+      dispatch({ type: "ACTIVATION_TIMEOUT" });
+      activationTimeoutRef.current = null;
+    }, 120_000);
   }, [plugin, skill, activationSSE]);
 
   const value = useMemo<WorkspaceContextValue>(() => ({
@@ -532,6 +560,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     refreshSkillContent,
     generateEvals,
     runActivationTest,
+    cancelActivation,
     submitAiEdit,
     cancelAiEdit,
     applyAiEdit,
@@ -540,7 +569,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     selectAllEvalChanges,
     deselectAllEvalChanges,
     retryEvalsSave,
-  }), [state, isReadOnly, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, submitAiEdit, cancelAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave]);
+  }), [state, isReadOnly, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, cancelActivation, submitAiEdit, cancelAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave]);
 
   return (
     <WorkspaceCtx.Provider value={value}>

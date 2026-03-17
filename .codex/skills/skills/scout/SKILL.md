@@ -17,8 +17,6 @@ Activate this skill when the user:
 - Mentions "skill registry", "verified-skill.com", or "vskill"
 - Asks "what skills can help me with X?"
 - Just installed vskill and wants to explore what's available
-- Wants to check, list, update, or remove installed skills
-- Asks for detailed info about a specific skill before installing
 
 ## Quick Start
 
@@ -34,16 +32,6 @@ For new users or "what's available?" queries, start with this overview:
 
 ## Workflow
 
-### Step 0: Check What's Already Installed
-
-Before recommending new skills, check what the user already has:
-
-```bash
-npx vskill list
-```
-
-This shows all installed skills with their versions and sources. Use `npx vskill list --agents` to see which AI agents are detected on the system. Avoid recommending skills that are already installed.
-
 ### Step 1: Parse the User's Intent
 
 Determine what the user is looking for:
@@ -51,7 +39,6 @@ Determine what the user is looking for:
 - **Technology/domain**: e.g., "React", "Kubernetes", "payments", "testing"
 - **Specific skill**: e.g., "nextjs", "stripe-integration", "helm-charts"
 - **Broad exploration**: e.g., "what's available?", "show me everything"
-- **Manage installed skills**: list, update, remove, or inspect existing skills
 
 ### Step 1b: Project-Aware Recommendations (when user doesn't know)
 
@@ -156,31 +143,6 @@ npx vskill install <owner>/<repo>
 npx vskill install <owner>/<repo> --skill <skill-name>
 ```
 
-**Advanced install flags** (use when needed):
-
-| Flag | Purpose |
-|------|---------|
-| `--global` | Install to global agent directories (available across all projects) |
-| `--select` | Interactive picker to choose specific skills and agents |
-| `--only-skills <names>` | Cherry-pick specific skills from a plugin (comma-separated) |
-| `--agent <id>` | Target a specific AI agent (e.g., `claude-code`, `cursor`) |
-| `--copy` | Force file copy instead of symlink (useful in CI/containers) |
-| `--yes` / `-y` | Skip confirmation prompts |
-
-### Step 5b: Inspect Before Installing (Third-Party Skills)
-
-For skills NOT from the official `anton-abyzov/vskill` collection, always inspect before installing:
-
-```bash
-# Get detailed info (trust tier, score, provenance, installs)
-npx vskill info <owner>/<repo>/<skill-name>
-
-# Run a local security scan on a skill file
-npx vskill scan <path-to-SKILL.md>
-```
-
-Only recommend `--force` for the official `anton-abyzov/vskill` plugins. For third-party skills, let the user review the scan results and decide.
-
 ### Step 6: Confirm Installation
 
 After running the install command:
@@ -188,28 +150,6 @@ After running the install command:
 2. List which agents received the skill (Claude Code, Cursor, etc.)
 3. Mention the skill's namespace for invocation (e.g., `mobile:appstore`)
 4. Suggest restarting the AI agent if needed to pick up new skills
-
-### Step 7: Manage Installed Skills
-
-Help users manage their installed skills when asked:
-
-**Update skills** (checks for newer versions with diff scanning):
-```bash
-npx vskill update <skill-name>   # Update a specific skill
-npx vskill update --all           # Update all installed skills
-```
-
-**Remove skills**:
-```bash
-npx vskill remove <skill-name>          # Remove from current project
-npx vskill remove <skill-name> --global # Remove from global install
-```
-
-**Audit a project for security issues**:
-```bash
-npx vskill audit              # Full project audit
-npx vskill audit --ci         # CI-friendly output (exits non-zero on issues)
-```
 
 ## Error Handling
 
@@ -219,14 +159,10 @@ npx vskill audit --ci         # CI-friendly output (exits non-zero on issues)
 | `npm error code E401` with `npx` | A project `.npmrc` with a private registry is interfering. Use: `npx --registry https://registry.npmjs.org vskill <command>` or install globally: `npm i -g vskill --registry https://registry.npmjs.org` |
 | Network error on search | Suggest checking internet connection; offer to try again |
 | No results found | Try broader search terms; suggest visiting verified-skill.com |
-| Scan FAIL on install | Explain the security concern; recommend `npx vskill scan` first to review details; suggest `--force` only if user understands the risk |
+| Scan FAIL on install | Explain the security concern; suggest `--force` only if user understands the risk |
 | Scan CONCERNS on install | Explain findings; `--force` is safer here than with FAIL |
 | Blocked skill (blocklist) | Warn user strongly; this skill has known security issues |
 | No agents detected | User needs to install Claude Code, Cursor, or another supported agent first |
-| Rate limit (HTTP 429 or GitHub 403) | Wait a minute and retry; suggest using `--json` to reduce API calls |
-| Partial install failure | Some skills in a bundle may fail (permissions, symlinks). Check `npx vskill list` to see what succeeded; retry individual failures |
-| Lockfile out of sync | Run `npx vskill init` to resync the lockfile with actual installed skills |
-| Already installed (version conflict) | Run `npx vskill update <skill>` to update, or `npx vskill remove` then reinstall |
 
 ## Examples
 
@@ -252,8 +188,7 @@ npx vskill audit --ci         # CI-friendly output (exits non-zero on issues)
 **Action**:
 1. Run `npx vskill find "nextjs" --json` to confirm availability
 2. Show the result with tier and score
-3. Run `npx vskill install <owner>/<repo> --skill <skill-name>` using the actual result from the search
-4. Confirm which agents received the skill
+3. Run `npx vskill install mobile:appstore` (or suggest the full mobile bundle)
 
 ### Example 4: Broad Exploration
 **User**: "What skills are available?"
@@ -266,27 +201,11 @@ npx vskill audit --ci         # CI-friendly output (exits non-zero on issues)
 ### Example 5: Project-Aware Recommendation
 **User**: "What skills would help with my project?"
 **Action**:
-1. Run `npx vskill list` to check what's already installed
-2. Look at the project's tech stack (package.json, Cargo.toml, go.mod, etc.)
-3. Identify relevant domains (mobile, marketing, google-workspace, productivity)
-4. Search for skills matching each domain
-5. Present a curated recommendation list (excluding already-installed skills)
-6. Offer to install matching bundles
-
-### Example 6: Manage Installed Skills
-**User**: "Update all my skills" / "Remove the appstore skill"
-**Action**:
-1. For updates: run `npx vskill update --all` and report what changed
-2. For removal: run `npx vskill remove <skill-name>` and confirm
-3. For inspection: run `npx vskill info <skill-name>` to show details
-
-### Example 7: Inspect Before Installing
-**User**: "Is this kubernetes skill safe to install?"
-**Action**:
-1. Run `npx vskill info <owner>/<repo>/<skill-name>` to check tier and score
-2. Present the trust tier, security score, provenance, and install count
-3. Explain what the tier means (see Trust Tiers section)
-4. If VERIFIED or CERTIFIED, confirm it's safe; if UNSCANNED, suggest running `npx vskill scan` first
+1. Look at the project's tech stack (package.json, Cargo.toml, go.mod, etc.)
+2. Identify relevant domains (mobile, marketing, google-workspace, productivity)
+3. Search for skills matching each domain
+4. Present a curated recommendation list
+5. Offer to install matching bundles
 
 ## Trust Tiers
 
@@ -301,10 +220,7 @@ When presenting results, explain trust tiers to help users make informed decisio
 
 - Always use `--json` flag when searching programmatically to get structured output
 - The `--force` flag on install bypasses scan prompts but does NOT skip the scan itself
-- **Only use `--force` for official `anton-abyzov/vskill` plugins** — for third-party skills, run `npx vskill info` and review the scan results first
 - Plugin bundles from `anton-abyzov/vskill` are the official curated collection
-- Third-party skills should be evaluated based on their trust tier and score — use `npx vskill info <skill>` to check
+- Third-party skills should be evaluated based on their trust tier and score
 - Skills are installed per-agent (Claude Code, Cursor, etc.) — the CLI handles multi-agent installs
 - Use `--all` with `--repo` to install all 5 plugin bundles in one command
-- Run `npx vskill list` before recommending to avoid suggesting already-installed skills
-- `vskill search` is an alias for `vskill find` — both work identically

@@ -1,0 +1,265 @@
+{
+  "timestamp": "2026-03-17T19:34:49.895Z",
+  "model": "claude-sonnet",
+  "skill_name": "scout",
+  "cases": [
+    {
+      "eval_id": 1,
+      "eval_name": "New user onboarding — what should I install?",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Mentions or recommends running `npx vskill list` or `vskill list` to check what is already installed",
+          "pass": true,
+          "reasoning": "The LLM output explicitly mentions running `npx vskill list` to check installed skills, both in the initial request for Bash permission and in the alternative instructions where it tells the user to run `npx vskill list` themselves."
+        },
+        {
+          "id": "a2",
+          "text": "Mentions analyzing the project's tech stack (references package.json, go.mod, Cargo.toml, or similar config files)",
+          "pass": true,
+          "reasoning": "The output explicitly mentions analyzing the project's tech stack and references package.json as an example config file to examine."
+        },
+        {
+          "id": "a3",
+          "text": "Recommends specific plugin bundles from the official collection (mobile, marketing, google-workspace, productivity, or skills)",
+          "pass": true,
+          "reasoning": "The output explicitly lists all 5 plugin bundles (mobile, marketing, google-workspace, productivity, skills) in a table with descriptions, and provides installation commands for both individual bundles and all at once."
+        },
+        {
+          "id": "a4",
+          "text": "Mentions or shows the `--all` option to install everything at once",
+          "pass": true,
+          "reasoning": "The output explicitly mentions and shows the `--all` option with the command `npx vskill install --repo anton-abyzov/vskill --all --force` under the 'To install all bundles at once' heading."
+        }
+      ]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "Technology-specific search",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.25,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Mentions or shows the command `npx vskill find` (or `vskill search`) with a kubernetes-related query",
+          "pass": true,
+          "reasoning": "The output explicitly shows the command `npx vskill find \"kubernetes\" --json` which is a kubernetes-related query using the vskill find command."
+        },
+        {
+          "id": "a2",
+          "text": "Describes presenting results in a table or structured format with tier and score information",
+          "pass": false,
+          "reasoning": "The LLM output does not present any results in a table or structured format with tier and score information. It only describes what it intends to do once it has the data, saying it will 'present matching skills with tier/score info' in the future, but no actual table or structured results are shown."
+        },
+        {
+          "id": "a3",
+          "text": "Explains how to evaluate results based on trust tier (CERTIFIED vs VERIFIED) or score",
+          "pass": false,
+          "reasoning": "The LLM output does not explain how to evaluate results based on trust tier (CERTIFIED vs VERIFIED) or score. It only mentions it will 'present matching skills with tier/score info' but provides no explanation of what those tiers mean, how to differentiate between them, or how scores factor into selection criteria."
+        },
+        {
+          "id": "a4",
+          "text": "Shows or describes the install command (`npx vskill install`) for the recommended skill",
+          "pass": false,
+          "reasoning": "The LLM output does not show or describe the install command (`npx vskill install`) for any recommended skill. It only mentions running `npx vskill list` and `npx vskill find 'kubernetes' --json` to search for skills, but stops short of recommending a specific skill or providing the install command. The output defers action pending terminal access or user input."
+        }
+      ]
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "Inspect before installing third-party skill",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Mentions or recommends using `npx vskill info` or `npx vskill scan` to inspect the skill before installing",
+          "pass": true,
+          "reasoning": "The LLM output explicitly mentions and recommends both `npx vskill info composiohq/awesome-claude-skills/junglescout-automation` and `npx vskill scan ~/.claude/skills/junglescout-automation/SKILL.md` as steps to inspect the skill before installing, satisfying the assertion fully."
+        },
+        {
+          "id": "a2",
+          "text": "Explains trust tiers (CERTIFIED/VERIFIED/UNSCANNED/BLOCKED) and what they mean for safety",
+          "pass": true,
+          "reasoning": "The output explicitly lists all four trust tiers (CERTIFIED, VERIFIED, UNSCANNED, BLOCKED) and explains their safety implications: VERIFIED/CERTIFIED are safe to install normally, UNSCANNED requires review before deciding, and BLOCKED should not be installed."
+        },
+        {
+          "id": "a3",
+          "text": "Mentions security score, provenance verification, or install count as factors to evaluate",
+          "pass": true,
+          "reasoning": "The LLM output explicitly mentions all three factors: security score (0–100), provenance (author identity verification), and install count as outputs of the `npx vskill info` command that should be evaluated."
+        },
+        {
+          "id": "a4",
+          "text": "Does NOT recommend --force for this third-party skill without the user explicitly accepting the risk",
+          "pass": true,
+          "reasoning": "The output explicitly states 'You should not use --force until you've reviewed the info output' and provides a safe install flow that never mentions --force as a recommended step. It clearly advises caution with third-party skills before proceeding."
+        }
+      ]
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "Plugin bundle recommendation",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Identifies the `mobile` plugin bundle as relevant for React Native + App Store",
+          "pass": true,
+          "reasoning": "The LLM output explicitly identifies the 'mobile' plugin bundle as recommended for React Native + App Store needs, stating 'Recommended: mobile plugin bundle' and describing it as containing 'App Store Connect automation skill (mobile:appstore), which handles the publishing workflow'."
+        },
+        {
+          "id": "a2",
+          "text": "Mentions that the mobile bundle includes the appstore skill for App Store Connect automation",
+          "pass": true,
+          "reasoning": "The output explicitly mentions the 'mobile' plugin bundle and states it includes the 'mobile:appstore' skill described as 'App Store Connect automation — submit builds, manage metadata, releases'."
+        },
+        {
+          "id": "a3",
+          "text": "Shows the install command with `--repo anton-abyzov/vskill --plugin mobile`",
+          "pass": true,
+          "reasoning": "The output explicitly shows the install command `npx vskill install --repo anton-abyzov/vskill --plugin mobile --force` which includes both `--repo anton-abyzov/vskill` and `--plugin mobile` flags."
+        },
+        {
+          "id": "a4",
+          "text": "The install command includes --force (appropriate for official plugins) or explains why --force is used",
+          "pass": true,
+          "reasoning": "The output includes --force in the install command and explicitly explains why: 'The --force flag is safe here since this is the official curated collection (pre-verified, CERTIFIED tier).'"
+        }
+      ]
+    },
+    {
+      "eval_id": 5,
+      "eval_name": "Manage installed skills — update and remove",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.75,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Mentions or shows the command `npx vskill update --all` for updating all skills",
+          "pass": true,
+          "reasoning": "The LLM output explicitly shows the command `npx vskill update --all` in step 2, labeled as '— update all skills'."
+        },
+        {
+          "id": "a2",
+          "text": "Mentions or shows the command `npx vskill remove greet-anton` for removing the specific skill",
+          "pass": true,
+          "reasoning": "The LLM output explicitly shows the command `npx vskill remove greet-anton` in step 3 of the bulleted list."
+        },
+        {
+          "id": "a3",
+          "text": "Describes or mentions both operations (update and remove) as separate steps",
+          "pass": true,
+          "reasoning": "The output explicitly lists both 'update all skills' (step 2) and 'remove the greet-anton skill' (step 3) as separate numbered steps/operations."
+        },
+        {
+          "id": "a4",
+          "text": "Mentions the --global flag option for removing from global installs or explains the scope of removal",
+          "pass": false,
+          "reasoning": "The LLM output does not mention the --global flag or explain the scope of removal. It simply includes `npx vskill remove greet-anton` without any reference to global vs local installation scope or the --global flag option."
+        }
+      ]
+    },
+    {
+      "eval_id": 6,
+      "eval_name": "Error handling — E401 npm error",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Identifies the E401 as a private .npmrc registry interference issue",
+          "pass": true,
+          "reasoning": "The output explicitly states 'a project `.npmrc` file is pointing to a private registry that's blocking the request', directly identifying E401 as a private .npmrc registry interference issue."
+        },
+        {
+          "id": "a2",
+          "text": "Suggests using `npx --registry https://registry.npmjs.org vskill <command>` as a workaround",
+          "pass": true,
+          "reasoning": "The LLM output explicitly suggests using `npx --registry https://registry.npmjs.org vskill <command>` as Option 1, which exactly matches the assertion."
+        },
+        {
+          "id": "a3",
+          "text": "Alternatively suggests global install: `npm i -g vskill --registry https://registry.npmjs.org`",
+          "pass": true,
+          "reasoning": "The LLM output explicitly suggests a global install command `npm i -g vskill --registry https://registry.npmjs.org` as Option 2, which exactly matches the assertion."
+        }
+      ]
+    },
+    {
+      "eval_id": 7,
+      "eval_name": "Broad exploration — show everything available",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.75,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Lists all 5 official plugin bundles (mobile, marketing, google-workspace, productivity, skills) with descriptions",
+          "pass": true,
+          "reasoning": "The output explicitly lists all 5 official plugin bundles in a table: mobile, marketing, google-workspace, productivity, and skills — each with domain and description information."
+        },
+        {
+          "id": "a2",
+          "text": "Mentions the skills included in each bundle",
+          "pass": true,
+          "reasoning": "The output includes a table that lists each bundle with a 'What's Included' column that mentions specific skills within each bundle (e.g., mobile includes 'App Store Connect automation (appstore)', marketing includes 'Social media posting, Slack messaging', google-workspace includes 'Google Workspace CLI (gws)', productivity includes 'Expert network survey completion', skills includes 'Scout skill')."
+        },
+        {
+          "id": "a3",
+          "text": "Mentions the verified-skill.com registry for discovering third-party skills beyond the official bundles",
+          "pass": false,
+          "reasoning": "The output mentions searching the 'full public registry' for third-party skills via `npx vskill find`, but does not specifically mention verified-skill.com as the registry for discovering third-party skills beyond the official bundles."
+        },
+        {
+          "id": "a4",
+          "text": "Asks which domain the user wants to explore further or offers to install all bundles",
+          "pass": true,
+          "reasoning": "The output explicitly asks 'Want me to search for skills in a specific domain (e.g., \"kubernetes\", \"react\", \"testing\")? Or shall I install one of these bundles?' — this directly asks which domain the user wants to explore further and offers to install bundles."
+        }
+      ]
+    },
+    {
+      "eval_id": 8,
+      "eval_name": "No search results — graceful fallback",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Mentions or describes using `npx vskill find` to search the registry for quantum computing skills",
+          "pass": true,
+          "reasoning": "The LLM output explicitly mentions using `npx vskill find` with the search terms 'quantum computing optimization' and 'quantum', including the --json flag, to search the registry for quantum computing skills."
+        },
+        {
+          "id": "a2",
+          "text": "Acknowledges the possibility of no results or limited results for this niche query",
+          "pass": true,
+          "reasoning": "The output explicitly acknowledges 'If no results come back, the registry may not have a quantum computing skill yet' — directly addressing the possibility of no results for this niche query."
+        },
+        {
+          "id": "a3",
+          "text": "Suggests trying broader or related search terms as alternatives",
+          "pass": true,
+          "reasoning": "The output explicitly suggests trying broader terms ('quantum' instead of 'quantum computing optimization') as an alternative search strategy if the initial search returns nothing."
+        },
+        {
+          "id": "a4",
+          "text": "Mentions or links to verified-skill.com as a place to browse the full registry",
+          "pass": true,
+          "reasoning": "The output explicitly mentions visiting verified-skill.com as a next step to browse the full catalog, including a direct link to the site."
+        }
+      ]
+    }
+  ]
+}

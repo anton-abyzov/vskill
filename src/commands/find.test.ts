@@ -40,6 +40,9 @@ describe("findCommand", () => {
     await findCommand("test", { json: false, noHint: false });
     const output = logs.join("\n");
     expect(output).toContain("test-skill\ttest/test-skill\t1300");
+    // Install hint should show full skill path, not just repo
+    expect(output).toContain("Install: npx vskill i test/test-skill/test-skill");
+    expect(output).toContain("More from this repo: npx vskill i test/test-skill");
   });
 
   it("hint is suppressed with --json flag", async () => {
@@ -54,6 +57,21 @@ describe("findCommand", () => {
     await findCommand("test", { json: false, noHint: true });
     const output = logs.join("\n");
     expect(output).not.toContain("Install:");
+  });
+
+  it("TTY install hint shows exact skill path with repo suggestion", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "scout", author: "anton", repoUrl: "https://github.com/anton-abyzov/vskill", tier: "VERIFIED", score: 90, installs: 100, githubStars: 3, vskillInstalls: 100, ownerSlug: "anton-abyzov", repoSlug: "vskill", skillSlug: "scout" },
+      ],
+      hasMore: false,
+    });
+    await findCommand("anton-abyzov/vskill/scout");
+    const output = logs.join("\n");
+    expect(output).toContain("npx vskill i anton-abyzov/vskill/scout");
+    expect(output).toContain("More from this repo: ");
+    expect(output).toContain("npx vskill i anton-abyzov/vskill");
   });
 
   it("displays GitHub stars in TTY mode", async () => {

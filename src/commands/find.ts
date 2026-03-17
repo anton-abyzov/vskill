@@ -104,13 +104,15 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
       );
     }
 
-    // Install hint
+    // Install hint — show exact skill path, then suggest full repo for more
     if (!opts?.noHint) {
       const firstInstallable = results.find((r) => !r.isBlocked);
       if (firstInstallable) {
+        const skillId = formatSkillId(firstInstallable);
         const repo = extractBaseRepo(firstInstallable.repoUrl);
-        if (repo) {
-          console.log(dim("\nInstall: ") + cyan(`npx vskill i ${repo}`));
+        console.log(dim("\nInstall: ") + cyan(`npx vskill i ${skillId}`));
+        if (repo && repo !== skillId) {
+          console.log(dim("  More from this repo: ") + cyan(`npx vskill i ${repo}`));
         }
       }
     }
@@ -143,9 +145,11 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
   if (!opts?.noHint) {
     const firstInstallable = results.find((r) => !r.isBlocked);
     if (firstInstallable) {
+      const skillId = formatSkillId(firstInstallable);
       const repo = extractBaseRepo(firstInstallable.repoUrl);
-      if (repo) {
-        console.log(`\nInstall: npx vskill i ${repo}`);
+      console.log(`\nInstall: npx vskill i ${skillId}`);
+      if (repo && repo !== skillId) {
+        console.log(`  More from this repo: npx vskill i ${repo}`);
       }
     }
   }

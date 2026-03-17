@@ -1,0 +1,232 @@
+{
+  "skill_name": "scout",
+  "evals": [
+    {
+      "id": 1,
+      "name": "New user onboarding — what should I install?",
+      "prompt": "I just installed vskill. What skills should I install for my project?",
+      "expected_output": "The skill recommends checking what's already installed with `vskill list`, suggests analyzing the project's tech stack, and recommends specific plugin bundles. Offers to install all recommended bundles or let the user pick.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Mentions or recommends running `npx vskill list` or `vskill list` to check what is already installed",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Mentions analyzing the project's tech stack (references package.json, go.mod, Cargo.toml, or similar config files)",
+          "type": "boolean"
+        },
+        {
+          "id": "a3",
+          "text": "Recommends specific plugin bundles from the official collection (mobile, marketing, google-workspace, productivity, or skills)",
+          "type": "boolean"
+        },
+        {
+          "id": "a4",
+          "text": "Mentions or shows the `--all` option to install everything at once",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Technology-specific search",
+      "prompt": "I need a skill for Kubernetes deployments. Can you find one?",
+      "expected_output": "The skill describes searching with `npx vskill find`, explains the result format with tiers and scores, and offers to install the best match.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Mentions or shows the command `npx vskill find` (or `vskill search`) with a kubernetes-related query",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Describes presenting results in a table or structured format with tier and score information",
+          "type": "boolean"
+        },
+        {
+          "id": "a3",
+          "text": "Explains how to evaluate results based on trust tier (CERTIFIED vs VERIFIED) or score",
+          "type": "boolean"
+        },
+        {
+          "id": "a4",
+          "text": "Shows or describes the install command (`npx vskill install`) for the recommended skill",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Inspect before installing third-party skill",
+      "prompt": "I found a skill called composiohq/awesome-claude-skills/junglescout-automation. Is it safe to install?",
+      "expected_output": "The skill recommends using `npx vskill info` to check the trust tier, security score, and provenance. Explains what the tier means. Does NOT recommend --force for third-party skills.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Mentions or recommends using `npx vskill info` or `npx vskill scan` to inspect the skill before installing",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Explains trust tiers (CERTIFIED/VERIFIED/UNSCANNED/BLOCKED) and what they mean for safety",
+          "type": "boolean"
+        },
+        {
+          "id": "a3",
+          "text": "Mentions security score, provenance verification, or install count as factors to evaluate",
+          "type": "boolean"
+        },
+        {
+          "id": "a4",
+          "text": "Does NOT recommend --force for this third-party skill without the user explicitly accepting the risk",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Plugin bundle recommendation",
+      "prompt": "I'm building a React Native app and need to publish to the App Store. What plugins do you recommend?",
+      "expected_output": "The skill identifies the mobile plugin bundle as relevant based on the React Native context. Recommends the mobile bundle and shows the install command.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Identifies the `mobile` plugin bundle as relevant for React Native + App Store",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Mentions that the mobile bundle includes the appstore skill for App Store Connect automation",
+          "type": "boolean"
+        },
+        {
+          "id": "a3",
+          "text": "Shows the install command with `--repo anton-abyzov/vskill --plugin mobile`",
+          "type": "boolean"
+        },
+        {
+          "id": "a4",
+          "text": "The install command includes --force (appropriate for official plugins) or explains why --force is used",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Manage installed skills — update and remove",
+      "prompt": "I want to update all my installed skills and then remove the greet-anton skill.",
+      "expected_output": "The skill describes using `npx vskill update --all` for updates and `npx vskill remove greet-anton` for removal.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Mentions or shows the command `npx vskill update --all` for updating all skills",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Mentions or shows the command `npx vskill remove greet-anton` for removing the specific skill",
+          "type": "boolean"
+        },
+        {
+          "id": "a3",
+          "text": "Describes or mentions both operations (update and remove) as separate steps",
+          "type": "boolean"
+        },
+        {
+          "id": "a4",
+          "text": "Mentions the --global flag option for removing from global installs or explains the scope of removal",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Error handling — E401 npm error",
+      "prompt": "I tried to install a skill but got npm error code E401. How do I fix this?",
+      "expected_output": "The skill identifies this as a private .npmrc registry interference issue and provides the workaround: use --registry flag or install globally with the public registry.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Identifies the E401 as a private .npmrc registry interference issue",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Suggests using `npx --registry https://registry.npmjs.org vskill <command>` as a workaround",
+          "type": "boolean"
+        },
+        {
+          "id": "a3",
+          "text": "Alternatively suggests global install: `npm i -g vskill --registry https://registry.npmjs.org`",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Broad exploration — show everything available",
+      "prompt": "What skills are available? Show me everything.",
+      "expected_output": "The skill lists all 5 official plugin bundles with descriptions and skill contents, then asks which domain interests the user for deeper exploration. Also mentions the verified-skill.com registry for third-party skills.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Lists all 5 official plugin bundles (mobile, marketing, google-workspace, productivity, skills) with descriptions",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Mentions the skills included in each bundle",
+          "type": "boolean"
+        },
+        {
+          "id": "a3",
+          "text": "Mentions the verified-skill.com registry for discovering third-party skills beyond the official bundles",
+          "type": "boolean"
+        },
+        {
+          "id": "a4",
+          "text": "Asks which domain the user wants to explore further or offers to install all bundles",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "No search results — graceful fallback",
+      "prompt": "Find me a skill for quantum computing optimization.",
+      "expected_output": "The skill describes searching the registry, acknowledges that niche queries may not have results, suggests broader search terms, and directs the user to verified-skill.com.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Mentions or describes using `npx vskill find` to search the registry for quantum computing skills",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Acknowledges the possibility of no results or limited results for this niche query",
+          "type": "boolean"
+        },
+        {
+          "id": "a3",
+          "text": "Suggests trying broader or related search terms as alternatives",
+          "type": "boolean"
+        },
+        {
+          "id": "a4",
+          "text": "Mentions or links to verified-skill.com as a place to browse the full registry",
+          "type": "boolean"
+        }
+      ]
+    }
+  ]
+}

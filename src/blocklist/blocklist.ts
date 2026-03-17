@@ -155,9 +155,13 @@ export async function checkBlocklist(
 export async function checkInstallSafety(
   skillName: string,
   contentHash?: string,
+  repoUrl?: string,
 ): Promise<InstallSafetyResult> {
   try {
-    const url = `${getApiBaseUrl()}/api/v1/blocklist/check?name=${encodeURIComponent(skillName)}`;
+    let url = `${getApiBaseUrl()}/api/v1/blocklist/check?name=${encodeURIComponent(skillName)}`;
+    if (repoUrl) {
+      url += `&repoUrl=${encodeURIComponent(repoUrl)}`;
+    }
     const res = await fetch(url, {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(5000),

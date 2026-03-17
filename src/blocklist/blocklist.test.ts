@@ -28,6 +28,7 @@ const originalFetch = globalThis.fetch;
 // ---------------------------------------------------------------------------
 const {
   checkBlocklist,
+  checkInstallSafety,
   syncBlocklist,
   getCachedBlocklist,
   isBlocklistStale,
@@ -331,5 +332,49 @@ describe("checkBlocklist", () => {
 
     const result = await checkBlocklist("evil-skill", "sha256:nomatch");
     expect(result).toEqual(entry);
+  });
+});
+
+describe("checkInstallSafety — repoUrl parameter", () => {
+  it("includes repoUrl in API query when provided", async () => {
+    const safeResult = { blocked: false, rejected: false };
+
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => safeResult,
+    });
+
+    await checkInstallSafety("my-skill", undefined, "https://github.com/owner/repo");
+
+    const calledUrl = mocks.fetch.mock.calls[0][0] as string;
+    expect(calledUrl).toContain("&repoUrl=https%3A%2F%2Fgithub.com%2Fowner%2Frepo");
+  });
+
+  it("does NOT include repoUrl in API query when undefined", async () => {
+    const safeResult = { blocked: false, rejected: false };
+
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => safeResult,
+    });
+
+    await checkInstallSafety("my-skill");
+
+    const calledUrl = mocks.fetch.mock.calls[0][0] as string;
+    expect(calledUrl).not.toContain("repoUrl");
+  });
+
+  it("URL-encodes special characters in repoUrl", async () => {
+    const safeResult = { blocked: false, rejected: false };
+
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => safeResult,
+    });
+
+    await checkInstallSafety("my-skill", undefined, "https://github.com/owner/repo with spaces");
+
+    const calledUrl = mocks.fetch.mock.calls[0][0] as string;
+    expect(calledUrl).toContain("&repoUrl=https%3A%2F%2Fgithub.com%2Fowner%2Frepo%20with%20spaces");
   });
 });

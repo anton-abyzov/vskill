@@ -795,8 +795,17 @@ async function promptInstallOptions(
     }
   }
 
-  // Scope: --global flag → global install; default → project (cwd)
-  useGlobal = !!opts.global;
+  // Scope: skip prompt if --global or --cwd already set
+  if (!opts.global && !opts.cwd) {
+    const prompter2 = createPrompter();
+    const scopeIdx = await prompter2.promptChoice("Installation scope:", [
+      { label: "Project", hint: "install in current project root" },
+      { label: "Global", hint: "install in user home directory" },
+    ]);
+    useGlobal = scopeIdx === 1;
+  } else {
+    useGlobal = !!opts.global;
+  }
 
   // Installation method (skip if --copy explicitly set)
   let useSymlink = !opts.copy;
@@ -1189,7 +1198,8 @@ async function installOneGitHubSkill(
   agentRawUrls?: Record<string, string>,
 ): Promise<SkillInstallResult> {
   // Blocklist + rejection check BEFORE fetching (prevents misleading 404)
-  const safety = await checkInstallSafety(skillName);
+  const repoUrl = `https://github.com/${owner}/${repo}`;
+  const safety = await checkInstallSafety(skillName, undefined, repoUrl);
   if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
     return { skillName, installed: false, verdict: "BLOCKED" };
@@ -1416,7 +1426,8 @@ async function installRepoPlugin(
   const pluginPath = pluginSource.replace(/^\.\//, "");
 
   // Blocklist + rejection check BEFORE fetching content
-  const safety = await checkInstallSafety(pluginName);
+  const repoUrl = `https://github.com/${ownerRepo}`;
+  const safety = await checkInstallSafety(pluginName, undefined, repoUrl);
   if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
     throw new Error(`Plugin "${pluginName}" is on the blocklist`);
@@ -2141,7 +2152,7 @@ async function installFromRegistry(
   const content = detail.content;
 
   // Blocklist + rejection check
-  const safety = await checkInstallSafety(skillName);
+  const safety = await checkInstallSafety(skillName, undefined, detail.repoUrl);
   if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
     process.exit(1);
@@ -2255,7 +2266,8 @@ async function installSingleSkillLegacy(
 ): Promise<void> {
   // Blocklist + rejection check BEFORE fetching (prevents misleading 404)
   const skillName = skill || repo;
-  const safety = await checkInstallSafety(skillName);
+  const repoUrl = `https://github.com/${owner}/${repo}`;
+  const safety = await checkInstallSafety(skillName, undefined, repoUrl);
   if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
     process.exit(1);

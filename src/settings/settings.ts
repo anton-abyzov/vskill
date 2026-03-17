@@ -108,3 +108,53 @@ export function isPluginEnabled(
   const settings = readSettings(opts);
   return settings.enabledPlugins?.[pluginId] === true;
 }
+
+/**
+ * List all plugin IDs currently enabled (value === true) in settings.json.
+ */
+export function listEnabledPlugins(opts: SettingsOptions): string[] {
+  const settings = readSettings(opts);
+  if (!settings.enabledPlugins) return [];
+  return Object.entries(settings.enabledPlugins)
+    .filter(([, v]) => v === true)
+    .map(([k]) => k);
+}
+
+/**
+ * Remove enabledPlugins entries not backed by a lockfile entry.
+ *
+ * Plugin IDs use `<skillName>@<marketplace>` format.
+ * A plugin is stale when no lockfile skill matches by name AND marketplace.
+ *
+ * Designed for `vskill init` (pre-launch) — runs BEFORE Claude Code
+ * loads its in-memory settings cache, preventing ghost re-writes.
+ *
+ * @returns Array of purged plugin IDs
+ */
+export function purgeStalePlugins(
+  opts: SettingsOptions,
+  lockfileSkills: Record<string, { marketplace?: string }>,
+): string[] {
+  const settings = readSettings(opts);
+  if (!settings.enabledPlugins) return [];
+
+  const purged: string[] = [];
+  for (const pluginId of Object.keys(settings.enabledPlugins)) {
+    const atIdx = pluginId.lastIndexOf("@");
+    if (atIdx === -1) continue;
+
+    const skillName = pluginId.slice(0, atIdx);
+    const marketplace = pluginId.slice(atIdx + 1);
+
+    const lockEntry = lockfileSkills[skillName];
+    if (!lockEntry || lockEntry.marketplace !== marketplace) {
+      purged.push(pluginId);
+      delete settings.enabledPlugins[pluginId];
+    }
+  }
+
+  if (purged.length > 0) {
+    writeSettings(settings, opts);
+  }
+  return purged;
+}

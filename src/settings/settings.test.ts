@@ -23,9 +23,13 @@ vi.mock("node:os", () => ({
 }));
 
 // Import after mocks are set up
-const { enablePlugin, disablePlugin, isPluginEnabled } = await import(
-  "./settings.js"
-);
+const {
+  enablePlugin,
+  disablePlugin,
+  isPluginEnabled,
+  listEnabledPlugins,
+  purgeStalePlugins,
+} = await import("./settings.js");
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -138,5 +142,122 @@ describe("isPluginEnabled", () => {
     expect(
       isPluginEnabled("frontend@vskill", { scope: "user" })
     ).toBe(false);
+  });
+});
+
+describe("listEnabledPlugins", () => {
+  it("returns empty array when no settings exist", () => {
+    mockExistsSync.mockReturnValue(false);
+
+    expect(listEnabledPlugins({ scope: "user" })).toEqual([]);
+  });
+
+  it("returns only enabled (true) plugin IDs, filtering out disabled ones", () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({
+        enabledPlugins: {
+          "frontend@vskill": true,
+          "backend@vskill": false,
+          "testing@vskill": true,
+        },
+      })
+    );
+
+    const result = listEnabledPlugins({ scope: "user" });
+    expect(result).toEqual(["frontend@vskill", "testing@vskill"]);
+  });
+});
+
+describe("purgeStalePlugins", () => {
+  it("purges entries not found in lockfile", () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({
+        enabledPlugins: {
+          "frontend@vskill": true,
+          "ghost@vskill": true,
+        },
+      })
+    );
+
+    const purged = purgeStalePlugins({ scope: "user" }, {
+      frontend: { marketplace: "vskill" },
+    });
+
+    expect(purged).toEqual(["ghost@vskill"]);
+    expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
+    const [, writtenContent] = mockWriteFileSync.mock.calls[0];
+    const parsed = JSON.parse(writtenContent);
+    expect(parsed.enabledPlugins).toEqual({ "frontend@vskill": true });
+  });
+
+  it("preserves entries that match lockfile (same skill name + marketplace)", () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({
+        enabledPlugins: {
+          "frontend@vskill": true,
+          "backend@vskill": false,
+        },
+      })
+    );
+
+    const purged = purgeStalePlugins({ scope: "user" }, {
+      frontend: { marketplace: "vskill" },
+      backend: { marketplace: "vskill" },
+    });
+
+    expect(purged).toEqual([]);
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+  });
+
+  it("returns empty array when no enabledPlugins exist", () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({}));
+
+    const purged = purgeStalePlugins({ scope: "user" }, {
+      frontend: { marketplace: "vskill" },
+    });
+
+    expect(purged).toEqual([]);
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+  });
+
+  it("does not purge entries without @ separator (non-marketplace entries)", () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({
+        enabledPlugins: {
+          "local-only": true,
+          "ghost@vskill": true,
+        },
+      })
+    );
+
+    const purged = purgeStalePlugins({ scope: "user" }, {});
+
+    expect(purged).toEqual(["ghost@vskill"]);
+    expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
+    const [, writtenContent] = mockWriteFileSync.mock.calls[0];
+    const parsed = JSON.parse(writtenContent);
+    expect(parsed.enabledPlugins).toEqual({ "local-only": true });
+  });
+
+  it("only writes settings if something was actually purged", () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({
+        enabledPlugins: {
+          "frontend@vskill": true,
+        },
+      })
+    );
+
+    purgeStalePlugins({ scope: "user" }, {
+      frontend: { marketplace: "vskill" },
+    });
+
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
   });
 });

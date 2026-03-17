@@ -192,4 +192,12 @@ program
     await marketplaceCommand(subcommand, opts);
   });
 
+program
+  .command("cleanup")
+  .description("Remove stale plugin entries from settings.json and orphaned cache")
+  .action(async () => {
+    const { cleanupCommand } = await import("./commands/cleanup.js");
+    await cleanupCommand();
+  });
+
 program.parse();

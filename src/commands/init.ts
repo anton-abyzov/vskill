@@ -10,6 +10,7 @@ import {
 import { readLockfile, writeLockfile, ensureLockfile } from "../lockfile/index.js";
 import { filterAgents } from "../utils/agent-filter.js";
 import { syncCoreSkills, findCoreSkillsDir } from "../core-skills/sync.js";
+import { purgeStalePlugins } from "../settings/index.js";
 import { bold, green, dim, cyan, red, table } from "../utils/output.js";
 
 export interface InitOptions {
@@ -73,6 +74,25 @@ export async function initCommand(opts: InitOptions = {}): Promise<void> {
     lock.agents = agentIds;
     writeLockfile(lock);
     console.log(green("Created vskill.lock"));
+  }
+
+  // Purge stale plugin entries from settings.json (before Claude Code caches them)
+  const lockForPurge = readLockfile();
+  if (lockForPurge?.skills) {
+    const purgedUser = purgeStalePlugins({ scope: "user" }, lockForPurge.skills);
+    const purgedProject = purgeStalePlugins(
+      { scope: "project", projectDir: process.cwd() },
+      lockForPurge.skills,
+    );
+    const allPurged = [...purgedUser, ...purgedProject];
+    if (allPurged.length > 0) {
+      console.log(
+        dim(`\nPurged ${allPurged.length} stale plugin${allPurged.length === 1 ? "" : "s"} from settings.json:`),
+      );
+      for (const id of allPurged) {
+        console.log(dim(`  - ${id}`));
+      }
+    }
   }
 
   // Sync core SpecWeave skills to all target agents

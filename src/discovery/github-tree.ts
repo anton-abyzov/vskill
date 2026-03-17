@@ -115,6 +115,7 @@ export function extractDescription(content: string): string | undefined {
  * Matches:
  *  - Root `SKILL.md` (name = repo)
  *  - `skills/{name}/SKILL.md` (name = directory name, one level deep only)
+ *  - `plugins/{non-specweave}/skills/{name}/SKILL.md` (non-framework plugin skills)
  *
  * After discovery, fetches content for each skill in parallel (3s timeout)
  * to populate the `description` field.
@@ -162,10 +163,30 @@ export async function discoverSkills(
     }
 
     // skills/{name}/SKILL.md (exactly one directory deep)
-    // IMPORTANT: Only match skills/ directory. Never plugins/ — those are handled by installRepoPlugin.
     const match = entry.path.match(/^skills\/([^/]+)\/SKILL\.md$/);
     if (match) {
       const skillName = match[1];
+      // If already discovered via plugins/, replace (skills/ takes priority)
+      const idx = skills.findIndex((s) => s.name === skillName);
+      const newSkill: DiscoveredSkill = {
+        name: skillName,
+        path: entry.path,
+        rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${entry.path}`,
+      };
+      if (idx >= 0) {
+        skills[idx] = newSkill;
+      } else {
+        skills.push(newSkill);
+      }
+      continue;
+    }
+
+    // plugins/{non-specweave}/skills/{name}/SKILL.md — non-framework plugin skills
+    const pluginMatch = entry.path.match(
+      /^plugins\/(?!specweave)[^/]+\/skills\/([^/]+)\/SKILL\.md$/,
+    );
+    if (pluginMatch) {
+      const skillName = pluginMatch[1];
       skills.push({
         name: skillName,
         path: entry.path,
@@ -179,6 +200,21 @@ export async function discoverSkills(
     if (agentMatch) {
       const skillName = agentMatch[1];
       const agentFilename = agentMatch[2];
+      let map = agentFilesBySkill.get(skillName);
+      if (!map) {
+        map = {};
+        agentFilesBySkill.set(skillName, map);
+      }
+      map[`agents/${agentFilename}`] = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${entry.path}`;
+    }
+
+    // plugins/{non-specweave}/skills/{name}/agents/*.md — plugin agent files
+    const pluginAgentMatch = entry.path.match(
+      /^plugins\/(?!specweave)[^/]+\/skills\/([^/]+)\/agents\/([^/]+\.md)$/,
+    );
+    if (pluginAgentMatch) {
+      const skillName = pluginAgentMatch[1];
+      const agentFilename = pluginAgentMatch[2];
       let map = agentFilesBySkill.get(skillName);
       if (!map) {
         map = {};

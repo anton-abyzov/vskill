@@ -6,6 +6,26 @@
       "tier": "BUNDLED",
       "installedAt": "2026-03-17T14:04:11.390Z",
       "source": "local:specweave"
+    },
+    "scout": {
+      "version": "0.0.0",
+      "sha": "2a385643153d",
+      "tier": "VERIFIED",
+      "installedAt": "2026-03-17T22:28:48.270Z",
+      "source": "github:anton-abyzov/vskill",
+      "scope": "project"
     }
-  }
+  },
+  "agents": [
+    "aider",
+    "antigravity",
+    "claude-code",
+    "codex",
+    "cursor",
+    "kiro-cli",
+    "openclaw",
+    "pi",
+    "windsurf"
+  ],
+  "updatedAt": "2026-03-17T22:28:48.271Z"
 }

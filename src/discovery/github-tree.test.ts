@@ -481,3 +481,172 @@ describe("discovery scope guard", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Plugin skill discovery (non-specweave plugins)
+// ---------------------------------------------------------------------------
+
+describe("plugin skill discovery", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    _resetBranchCache();
+  });
+
+  // T-001: Basic plugin skill match
+  it("discovers skills under plugins/{non-specweave}/skills/", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse([
+          "plugins/skills/skills/scout/SKILL.md",
+          "README.md",
+        ]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      name: "scout",
+      path: "plugins/skills/skills/scout/SKILL.md",
+      rawUrl: "https://raw.githubusercontent.com/owner/repo/main/plugins/skills/skills/scout/SKILL.md",
+    });
+  });
+
+  // T-002: Plugin agent file attachment
+  it("attaches agent files from plugin skill directories", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse([
+          "plugins/skills/skills/scout/SKILL.md",
+          "plugins/skills/skills/scout/agents/research.md",
+          "plugins/skills/skills/scout/agents/helper.md",
+        ]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("scout");
+    expect(result[0].agentRawUrls).toEqual({
+      "agents/research.md": "https://raw.githubusercontent.com/owner/repo/main/plugins/skills/skills/scout/agents/research.md",
+      "agents/helper.md": "https://raw.githubusercontent.com/owner/repo/main/plugins/skills/skills/scout/agents/helper.md",
+    });
+  });
+
+  // T-003: Framework plugin exclusion preserved
+  it("excludes plugins/specweave*/skills/ but includes non-specweave", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse([
+          "plugins/skills/skills/scout/SKILL.md",
+          "plugins/specweave-github/skills/push/SKILL.md",
+        ]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("scout");
+  });
+
+  // T-004: Mixed specweave and non-specweave with existing patterns
+  it("mixed: non-specweave plugin + specweave excluded + skills/ pattern", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse([
+          "plugins/skills/skills/scout/SKILL.md",
+          "plugins/specweave/skills/pm/SKILL.md",
+          "skills/tdd-cycle/SKILL.md",
+        ]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+
+    expect(result).toHaveLength(2);
+    const names = result.map((s) => s.name);
+    expect(names).toContain("scout");
+    expect(names).toContain("tdd-cycle");
+    expect(names).not.toContain("pm");
+  });
+
+  // T-005: Multiple non-specweave plugin skills
+  it("discovers multiple non-specweave plugin skills", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse([
+          "plugins/marketing/skills/slack-messaging/SKILL.md",
+          "plugins/mobile/skills/appstore/SKILL.md",
+        ]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+
+    expect(result).toHaveLength(2);
+    const names = result.map((s) => s.name);
+    expect(names).toContain("slack-messaging");
+    expect(names).toContain("appstore");
+    expect(result[0].rawUrl).toContain(result[0].path);
+    expect(result[1].rawUrl).toContain(result[1].path);
+  });
+
+  // T-006: All three patterns coexist
+  it("root + skills/ + plugins/ all coexist", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse([
+          "SKILL.md",
+          "plugins/custom/skills/bar/SKILL.md",
+          "skills/foo/SKILL.md",
+        ]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+
+    expect(result).toHaveLength(3);
+    const names = result.map((s) => s.name);
+    expect(names).toContain("repo");
+    expect(names).toContain("foo");
+    expect(names).toContain("bar");
+  });
+
+  // T-007: Deeply nested path is rejected
+  it("rejects deeply nested plugin paths", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse([
+          "plugins/a/b/c/skills/x/SKILL.md",
+        ]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+
+    expect(result).toEqual([]);
+  });
+
+  // T-008: skills/ wins dedup over plugins/ for same skill name
+  it("skills/ takes priority over plugins/ for same skill name", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse([
+          "plugins/foo/skills/scout/SKILL.md",
+          "skills/scout/SKILL.md",
+        ]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("scout");
+    expect(result[0].path).toBe("skills/scout/SKILL.md");
+  });
+});

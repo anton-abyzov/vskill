@@ -1713,8 +1713,23 @@ export async function addCommand(
   if (parts.length === 3) {
     const [threeOwner, threeRepo, threeSkill] = parts;
     const detection = await detectMarketplaceRepo(threeOwner, threeRepo);
-    if (detection.isMarketplace && detection.manifestContent && hasPlugin(threeSkill, detection.manifestContent)) {
-      return installMarketplaceRepo(threeOwner, threeRepo, detection.manifestContent, opts, [threeSkill]);
+    if (detection.isMarketplace && detection.manifestContent) {
+      // Direct plugin name match (e.g. owner/repo/pluginName)
+      if (hasPlugin(threeSkill, detection.manifestContent)) {
+        return installMarketplaceRepo(threeOwner, threeRepo, detection.manifestContent, opts, [threeSkill]);
+      }
+      // Skill-inside-plugin: search all plugins for a skill with this name
+      const branch = await getDefaultBranch(threeOwner, threeRepo);
+      const mktPlugins = getAvailablePlugins(detection.manifestContent);
+      for (const plugin of mktPlugins) {
+        const pluginPath = plugin.source.replace(/^\.\//, "");
+        const subpath = `${pluginPath}/skills/${threeSkill}/SKILL.md`;
+        const probeUrl = `https://raw.githubusercontent.com/${threeOwner}/${threeRepo}/${branch}/${subpath}`;
+        const probeRes = await fetch(probeUrl);
+        if (probeRes.ok) {
+          return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts, subpath);
+        }
+      }
     }
     return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts);
   }
@@ -2264,6 +2279,7 @@ async function installSingleSkillLegacy(
   repo: string,
   skill: string | undefined,
   opts: AddOptions,
+  skillSubpathOverride?: string,
 ): Promise<void> {
   // Blocklist + rejection check BEFORE fetching (prevents misleading 404)
   const skillName = skill || repo;
@@ -2284,7 +2300,7 @@ async function installSingleSkillLegacy(
   }
 
   const branch = await getDefaultBranch(owner, repo);
-  const skillSubpath = skill ? `skills/${skill}/SKILL.md` : "SKILL.md";
+  const skillSubpath = skillSubpathOverride || (skill ? `skills/${skill}/SKILL.md` : "SKILL.md");
   const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${skillSubpath}`;
 
   // Fetch SKILL.md
@@ -2294,7 +2310,10 @@ async function installSingleSkillLegacy(
   let legacyAgentFiles: Record<string, string> | undefined;
   if (skill) {
     try {
-      const agentsDirUrl = `https://api.github.com/repos/${owner}/${repo}/contents/skills/${skill}/agents`;
+      const agentsBasePath = skillSubpathOverride
+        ? skillSubpathOverride.replace(/\/SKILL\.md$/, "/agents")
+        : `skills/${skill}/agents`;
+      const agentsDirUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${agentsBasePath}`;
       const dirRes = await fetch(agentsDirUrl, { headers: { Accept: "application/vnd.github.v3+json" } });
       if (dirRes.ok) {
         const entries = (await dirRes.json()) as Array<{ name: string; download_url?: string }>;

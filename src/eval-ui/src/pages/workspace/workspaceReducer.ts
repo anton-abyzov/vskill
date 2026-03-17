@@ -37,6 +37,10 @@ export const initialWorkspaceState: WorkspaceState = {
   activationError: null,
   activationTotalPrompts: 0,
   activationStartedAt: null,
+  generatingPrompts: false,
+  generatingPromptsError: null,
+  activationHistory: null,
+  activationHistoryLoading: false,
   loading: true,
   error: null,
 };
@@ -298,6 +302,22 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     case "ACTIVATION_CANCEL": {
       return { ...state, activationRunning: false };
     }
+
+    // -- AI prompt generation --
+
+    case "GENERATE_PROMPTS_START":
+      return { ...state, generatingPrompts: true, generatingPromptsError: null };
+
+    case "GENERATE_PROMPTS_DONE":
+      return { ...state, generatingPrompts: false };
+
+    case "GENERATE_PROMPTS_ERROR":
+      return { ...state, generatingPrompts: false, generatingPromptsError: action.error };
+
+    // -- Activation history --
+
+    case "ACTIVATION_HISTORY_LOADED":
+      return { ...state, activationHistory: action.runs, activationHistoryLoading: false };
 
     default:
       return state;

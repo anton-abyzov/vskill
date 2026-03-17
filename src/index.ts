@@ -163,6 +163,7 @@ program
   .option("--judge <provider/model>", "Judge model for sweep (e.g., 'anthropic/claude-sonnet-4')")
   .option("--runs <number>", "Number of iterations per model in sweep (default: 1)")
   .option("--batch", "Use Anthropic Batch API for judge calls (50% cost savings, requires anthropic provider)")
+  .option("--baseline", "Run each model with AND without skill to measure skill amplification")
   .action(async (subcommand?: string, target?: string, opts?: any) => {
     const { evalCommand } = await import("./commands/eval.js");
     await evalCommand(subcommand || "coverage", target, opts);

@@ -21,6 +21,7 @@ export function registerSweepRoutes(router: Router, root: string): void {
       judge?: string;
       runs?: number;
       concurrency?: number;
+      baseline?: boolean;
     };
 
     if (!body.models || !Array.isArray(body.models) || body.models.length === 0) {
@@ -65,6 +66,7 @@ export function registerSweepRoutes(router: Router, root: string): void {
       judge: body.judge,
       runs: body.runs ?? 1,
       concurrency: body.concurrency ?? 5,
+      baseline: body.baseline,
     };
 
     try {

@@ -9,7 +9,7 @@ import { red, dim } from "../utils/output.js";
 export async function evalCommand(
   subcommand: string,
   target?: string,
-  opts: { force?: boolean; type?: string; root?: string; port?: string; credentialKey?: string; concurrency?: string; judgeModel?: string; noCache?: boolean; cache?: boolean; models?: string; judge?: string; runs?: string; batch?: boolean } = {},
+  opts: { force?: boolean; type?: string; root?: string; port?: string; credentialKey?: string; concurrency?: string; judgeModel?: string; noCache?: boolean; cache?: boolean; models?: string; judge?: string; runs?: string; batch?: boolean; baseline?: boolean } = {},
 ): Promise<void> {
   const root = opts.root ? resolve(opts.root) : resolve(".");
 
@@ -79,6 +79,7 @@ export async function evalCommand(
         judge: opts.judge,
         runs: opts.runs ? parseInt(opts.runs, 10) : undefined,
         concurrency: opts.concurrency ? parseInt(opts.concurrency, 10) : undefined,
+        baseline: opts.baseline,
       });
     }
 

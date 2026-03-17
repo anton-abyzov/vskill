@@ -2,8 +2,8 @@
 // skill-create-routes.ts -- Skill creation & project layout detection
 // ---------------------------------------------------------------------------
 
-import { existsSync, readdirSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
-import { join, basename } from "node:path";
+import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
+import { join, basename, resolve } from "node:path";
 import { homedir } from "node:os";
 import { AGENTS_REGISTRY } from "../agents/agents-registry.js";
 import type { Router } from "./router.js";
@@ -55,10 +55,18 @@ interface CreateSkillRequest {
     assertions: Array<{ id: string; text: string; type: string }>;
   }>;
   aiMeta?: AiGenerationMeta;
+  draftDir?: string;
 }
 
 interface SaveDraftRequest extends CreateSkillRequest {
   aiMeta: AiGenerationMeta;
+}
+
+export interface PluginSuggestion {
+  plugin: string;
+  layout: 1 | 2;
+  confidence: "high" | "medium" | "low";
+  reason: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +210,130 @@ function computeSkillDir(root: string, layout: 1 | 2 | 3, plugin: string, name: 
     case 2: return join(root, "plugins", plugin, "skills", name);
     case 3: return join(root, "skills", name);
   }
+}
+
+/**
+ * Match a newly generated skill against existing plugins by tag/keyword overlap.
+ * Returns the best-matching plugin if score exceeds threshold, or null.
+ */
+export function matchExistingPlugin(
+  skillName: string,
+  skillDescription: string,
+  skillTags: string[],
+  root: string,
+): PluginSuggestion | null {
+  const layout = detectProjectLayout(root);
+  const pluginSkills = new Map<string, { layout: 1 | 2; tags: Set<string>; keywords: Set<string> }>();
+
+  // Gather existing plugin metadata from detected layouts
+  for (const detected of layout.detectedLayouts) {
+    if (detected.layout !== 1 && detected.layout !== 2) continue;
+    for (const pluginName of detected.existingPlugins) {
+      if (pluginSkills.has(pluginName)) continue;
+      const tags = new Set<string>();
+      const keywords = new Set<string>();
+
+      // Read SKILL.md frontmatter from each skill in this plugin
+      const skillsDirPath = detected.layout === 1
+        ? join(root, pluginName, "skills")
+        : join(root, "plugins", pluginName, "skills");
+
+      const skillDirs = listSkillDirs(skillsDirPath);
+      for (const skillDir of skillDirs) {
+        const mdPath = join(skillsDirPath, skillDir, "SKILL.md");
+        try {
+          const content = readFileSync(mdPath, "utf-8");
+          const tagsMatch = content.match(/^---[\s\S]*?tags:\s*(.+)[\s\S]*?---/m);
+          if (tagsMatch) {
+            for (const t of tagsMatch[1].split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)) {
+              tags.add(t);
+            }
+          }
+          const descMatch = content.match(/^---[\s\S]*?description:\s*"([^"]+)"[\s\S]*?---/);
+          if (descMatch) {
+            for (const w of descMatch[1].toLowerCase().split(/\s+/).filter((w) => w.length > 3)) {
+              keywords.add(w);
+            }
+          }
+        } catch { /* skip unreadable */ }
+      }
+
+      // Also add plugin name segments as keywords
+      for (const seg of pluginName.split(/[-_.]/).filter(Boolean)) {
+        keywords.add(seg.toLowerCase());
+      }
+
+      pluginSkills.set(pluginName, { layout: detected.layout as 1 | 2, tags, keywords });
+    }
+  }
+
+  if (pluginSkills.size === 0) return null;
+
+  const inputTags = new Set(skillTags.map((t) => t.toLowerCase()));
+  const inputKeywords = new Set(
+    skillDescription.toLowerCase().split(/\s+/).filter((w) => w.length > 3),
+  );
+  // Add skill name segments
+  for (const seg of skillName.split(/[-_.]/).filter(Boolean)) {
+    inputKeywords.add(seg.toLowerCase());
+  }
+
+  let bestPlugin: string | null = null;
+  let bestScore = 0;
+  let bestLayout: 1 | 2 = 1;
+  let bestReason = "";
+
+  for (const [pluginName, data] of pluginSkills) {
+    let score = 0;
+    const matchingTags: string[] = [];
+    const matchingKeywords: string[] = [];
+
+    // Tag overlap (weighted heavily)
+    for (const tag of inputTags) {
+      if (data.tags.has(tag)) {
+        score += 3;
+        matchingTags.push(tag);
+      }
+    }
+
+    // Keyword overlap
+    for (const kw of inputKeywords) {
+      if (data.keywords.has(kw)) {
+        score += 1;
+        matchingKeywords.push(kw);
+      }
+    }
+
+    // Plugin name similarity: shared segments (e.g. "browser-automation" ↔ "browser-screenshot")
+    const pluginSegs = new Set(pluginName.toLowerCase().split(/[-_.]/).filter(Boolean));
+    const skillSegs = new Set(skillName.toLowerCase().split(/[-_.]/).filter(Boolean));
+    let sharedSegs = 0;
+    for (const seg of skillSegs) {
+      if (pluginSegs.has(seg)) sharedSegs++;
+    }
+    if (sharedSegs > 0) score += sharedSegs * 2;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestPlugin = pluginName;
+      bestLayout = data.layout;
+      const parts: string[] = [];
+      if (matchingTags.length > 0) parts.push(`${matchingTags.length} matching tags: ${matchingTags.join(", ")}`);
+      if (matchingKeywords.length > 0) parts.push(`${matchingKeywords.length} keyword overlaps`);
+      bestReason = parts.join("; ") || "name similarity";
+    }
+  }
+
+  if (!bestPlugin || bestScore < 2) return null;
+
+  const confidence: "high" | "medium" | "low" = bestScore >= 6 ? "high" : bestScore >= 3 ? "medium" : "low";
+
+  return {
+    plugin: bestPlugin,
+    layout: bestLayout,
+    confidence,
+    reason: bestReason,
+  };
 }
 
 /** Check if skill-creator skill is installed in any agent's skill directory */
@@ -618,6 +750,15 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
         try { unlinkSync(draftPath); } catch { /* ignore */ }
       }
 
+      // Clean up old draft directory if plugin was changed
+      if (body.draftDir) {
+        const resolvedDraft = resolve(root, body.draftDir);
+        // Security: ensure draftDir is within the project root
+        if (resolvedDraft.startsWith(resolve(root)) && resolvedDraft !== resolve(targetDir)) {
+          try { rmSync(resolvedDraft, { recursive: true, force: true }); } catch { /* non-blocking */ }
+        }
+      }
+
       sendJson(res, {
         ok: true,
         plugin: body.layout === 3 ? (basename(root) || "default") : body.plugin,
@@ -626,6 +767,7 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
         skillMdPath,
       }, 201, req);
     } catch (err) {
+      // On failure, do NOT delete draftDir — preserve user's work
       sendJson(res, { error: `Failed to create skill: ${(err as Error).message}` }, 500, req);
     }
   });
@@ -794,10 +936,23 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
 
       const parsed = mergeGenerateResults(bodySettled, evalsSettled);
 
+      // Match against existing plugins
+      const tags = parsed.description
+        ? parsed.description.toLowerCase().split(/[,;]+/).map((s: string) => s.trim()).filter(Boolean)
+        : [];
+      const suggestedPlugin = matchExistingPlugin(
+        parsed.name,
+        parsed.description,
+        tags,
+        root,
+      );
+
+      const result = { ...parsed, suggestedPlugin };
+
       if (wantsSSE && !aborted) {
-        sendSSEDone(res, parsed);
+        sendSSEDone(res, result);
       } else {
-        sendJson(res, parsed, 200, req);
+        sendJson(res, result, 200, req);
       }
     } catch (err) {
       if (wantsSSE && !aborted) {

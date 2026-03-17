@@ -1,4 +1,4 @@
-// T-049, T-050, T-051: Leaderboard panel — sweep results table with sparklines
+// Leaderboard panel — sweep results table with sparklines + skill amplification view
 import { useState, useEffect, useMemo } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import { api } from "../../api";
@@ -42,7 +42,6 @@ function Sparkline({ data }: { data: number[] }) {
         strokeLinejoin="round"
         strokeLinecap="round"
       />
-      {/* endpoint dot */}
       {(() => {
         const [lx, ly] = coords[coords.length - 1].split(",");
         return <circle cx={lx} cy={ly} r={2.5} fill={color} />;
@@ -76,31 +75,148 @@ function BestModelBadge() {
 }
 
 // ---------------------------------------------------------------------------
+// Amplification badge
+// ---------------------------------------------------------------------------
+
+function AmplificationBadge({ pct }: { pct: number }) {
+  const color = pct >= 10 ? "var(--green)" : pct >= 0 ? "var(--yellow)" : "var(--red)";
+  const bg = pct >= 10 ? "var(--green-muted)" : pct >= 0 ? "var(--yellow-muted)" : "var(--red-muted)";
+  const sign = pct >= 0 ? "+" : "";
+  return (
+    <span className="pill" style={{ background: bg, color, fontSize: 10, fontWeight: 600 }}>
+      {sign}{pct.toFixed(1)}%
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Skill Quality Badge
+// ---------------------------------------------------------------------------
+
+function SkillQualityBadge({ score, rating }: { score: number; rating: string }) {
+  const colors: Record<string, { bg: string; fg: string }> = {
+    excellent: { bg: "var(--green-muted)", fg: "var(--green)" },
+    good: { bg: "var(--green-muted)", fg: "var(--green)" },
+    marginal: { bg: "var(--yellow-muted)", fg: "var(--yellow)" },
+    minimal: { bg: "var(--yellow-muted)", fg: "var(--yellow)" },
+    harmful: { bg: "var(--red-muted)", fg: "var(--red)" },
+  };
+  const c = colors[rating] ?? colors.minimal;
+  const sign = score >= 0 ? "+" : "";
+  return (
+    <div className="flex items-center gap-2 mt-3">
+      <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>Skill Quality:</span>
+      <span className="pill" style={{ background: c.bg, color: c.fg, fontSize: 11, fontWeight: 600 }}>
+        {sign}{score.toFixed(1)}% ({rating.toUpperCase()})
+      </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Judge Bias Warning
+// ---------------------------------------------------------------------------
+
+function JudgeBiasWarning({ warning }: { warning: string }) {
+  return (
+    <div
+      className="flex items-center gap-2 px-3 py-2 rounded-lg mb-3"
+      style={{ background: "var(--yellow-muted)", border: "1px solid rgba(251,191,36,0.3)" }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--yellow)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+        <line x1="12" y1="9" x2="12" y2="13" />
+        <line x1="12" y1="17" x2="12.01" y2="17" />
+      </svg>
+      <span className="text-[11px]" style={{ color: "var(--yellow)" }}>{warning}</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab selector
+// ---------------------------------------------------------------------------
+
+type LeaderboardTab = "rankings" | "amplification";
+
+function TabSelector({ active, onChange, hasBaseline }: { active: LeaderboardTab; onChange: (t: LeaderboardTab) => void; hasBaseline: boolean }) {
+  return (
+    <div className="flex gap-1 p-0.5 rounded-lg" style={{ background: "var(--surface-2)" }}>
+      <button
+        onClick={() => onChange("rankings")}
+        className="px-3 py-1 rounded-md text-[11px] font-medium transition-all"
+        style={{
+          background: active === "rankings" ? "var(--surface-3)" : "transparent",
+          color: active === "rankings" ? "var(--text-primary)" : "var(--text-tertiary)",
+        }}
+      >
+        Rankings
+      </button>
+      <button
+        onClick={() => onChange("amplification")}
+        disabled={!hasBaseline}
+        className="px-3 py-1 rounded-md text-[11px] font-medium transition-all"
+        style={{
+          background: active === "amplification" ? "var(--surface-3)" : "transparent",
+          color: !hasBaseline ? "var(--text-tertiary)" : active === "amplification" ? "var(--text-primary)" : "var(--text-tertiary)",
+          opacity: hasBaseline ? 1 : 0.5,
+          cursor: hasBaseline ? "pointer" : "not-allowed",
+        }}
+        title={hasBaseline ? "View skill amplification data" : "Run sweep with --baseline to see amplification data"}
+      >
+        Skill Amplification
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Build leaderboard entries from sweep results
 // ---------------------------------------------------------------------------
 
 function buildLeaderboard(sweeps: SweepResult[]): LeaderboardEntry[] {
   if (sweeps.length === 0) return [];
 
-  // Aggregate: for each model, collect pass rates from all sweeps
-  const modelMap = new Map<string, { provider: string; passRates: number[]; lastRubric: number | null; lastDuration: number; lastCost: number | null }>();
+  const modelMap = new Map<string, {
+    provider: string;
+    passRates: number[];
+    lastRubric: number | null;
+    lastDuration: number;
+    lastCost: number | null;
+    lastBaselinePassRate: number | undefined;
+    lastSkillDelta: number | undefined;
+    lastAmplificationPct: number | undefined;
+    lastCompositeScore: number | undefined;
+    hasBaseline: boolean;
+  }>();
 
   for (const sweep of sweeps) {
     for (const m of sweep.models) {
       if (m.status === "error") continue;
       const key = `${m.provider}/${m.model}`;
       if (!modelMap.has(key)) {
-        modelMap.set(key, { provider: m.provider, passRates: [], lastRubric: null, lastDuration: 0, lastCost: null });
+        modelMap.set(key, {
+          provider: m.provider, passRates: [], lastRubric: null,
+          lastDuration: 0, lastCost: null, lastBaselinePassRate: undefined,
+          lastSkillDelta: undefined, lastAmplificationPct: undefined,
+          lastCompositeScore: undefined, hasBaseline: false,
+        });
       }
       const entry = modelMap.get(key)!;
       entry.passRates.push(m.passRate.mean);
       entry.lastRubric = m.rubricScore?.mean ?? null;
       entry.lastDuration = m.duration.mean;
       entry.lastCost = m.cost?.total ?? null;
+      entry.lastCompositeScore = m.compositeScore;
+      if (m.baselinePassRate != null) {
+        entry.lastBaselinePassRate = m.baselinePassRate.mean;
+        entry.lastSkillDelta = m.skillDelta?.mean;
+        entry.lastAmplificationPct = m.amplificationPct;
+        entry.hasBaseline = true;
+      }
     }
   }
 
-  // Build entries
   const entries: LeaderboardEntry[] = [];
   for (const [key, data] of modelMap) {
     const [provider, ...modelParts] = key.split("/");
@@ -114,15 +230,189 @@ function buildLeaderboard(sweeps: SweepResult[]): LeaderboardEntry[] {
       cost: data.lastCost,
       sparklineData: data.passRates,
       isBest: false,
+      baselinePassRate: data.lastBaselinePassRate,
+      skillDelta: data.lastSkillDelta,
+      amplificationPct: data.lastAmplificationPct,
+      compositeScore: data.lastCompositeScore,
+      hasBaseline: data.hasBaseline,
     });
   }
 
-  // Sort by pass rate desc, assign rank
-  entries.sort((a, b) => b.passRate - a.passRate);
+  // Sort by composite score, then pass rate
+  entries.sort((a, b) => {
+    if (a.compositeScore != null && b.compositeScore != null) {
+      return b.compositeScore - a.compositeScore;
+    }
+    return b.passRate - a.passRate;
+  });
   entries.forEach((e, i) => { e.rank = i + 1; });
   if (entries.length > 0) entries[0].isBest = true;
 
   return entries;
+}
+
+// ---------------------------------------------------------------------------
+// Table header cell
+// ---------------------------------------------------------------------------
+
+const thStyle = (align: "center" | "left" = "left") => ({
+  padding: "10px 12px",
+  fontSize: 10,
+  fontWeight: 600 as const,
+  textTransform: "uppercase" as const,
+  letterSpacing: "0.05em",
+  color: "var(--text-tertiary)",
+  textAlign: align,
+  whiteSpace: "nowrap" as const,
+});
+
+// ---------------------------------------------------------------------------
+// Rankings Table (original view)
+// ---------------------------------------------------------------------------
+
+function RankingsTable({ entries }: { entries: LeaderboardEntry[] }) {
+  return (
+    <div className="glass-card" style={{ overflow: "hidden" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+            {["#", "Model", "Pass Rate", "Rubric", "Duration", "Cost", "Trend"].map((h) => (
+              <th key={h} style={thStyle(h === "#" ? "center" : "left")}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((entry) => (
+            <tr
+              key={`${entry.provider}/${entry.model}`}
+              style={{ borderBottom: "1px solid var(--border-subtle)" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-2)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            >
+              <td style={{ padding: "10px 12px", textAlign: "center", fontSize: 12, fontWeight: 600, color: "var(--text-tertiary)", width: 40 }}>
+                {entry.rank}
+              </td>
+              <td style={{ padding: "10px 12px" }}>
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{entry.model}</span>
+                  <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>{entry.provider}</span>
+                  {entry.isBest && <BestModelBadge />}
+                </div>
+              </td>
+              <td style={{ padding: "10px 12px" }}>
+                <span className="pill" style={{
+                  background: entry.passRate >= 0.7 ? "var(--green-muted)" : entry.passRate >= 0.4 ? "var(--yellow-muted)" : "var(--red-muted)",
+                  color: passRateColor(entry.passRate), fontSize: 11, fontWeight: 600,
+                }}>
+                  {Math.round(entry.passRate * 100)}%
+                </span>
+              </td>
+              <td style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-secondary)" }}>
+                {entry.rubricScore != null ? entry.rubricScore.toFixed(1) : "--"}
+              </td>
+              <td style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-secondary)" }}>
+                {entry.duration < 1000 ? `${Math.round(entry.duration)}ms` : `${(entry.duration / 1000).toFixed(1)}s`}
+              </td>
+              <td style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-secondary)" }}>
+                {entry.cost != null ? `$${entry.cost.toFixed(4)}` : "N/A"}
+              </td>
+              <td style={{ padding: "10px 12px" }}>
+                <Sparkline data={entry.sparklineData} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Amplification Table (new view for --baseline data)
+// ---------------------------------------------------------------------------
+
+function AmplificationTable({ entries }: { entries: LeaderboardEntry[] }) {
+  // Sort by amplification (most helped first)
+  const sorted = [...entries].filter((e) => e.hasBaseline).sort((a, b) => (b.amplificationPct ?? 0) - (a.amplificationPct ?? 0));
+
+  if (sorted.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <div className="text-center">
+          <div className="text-[12px]" style={{ color: "var(--text-tertiary)" }}>
+            No baseline data available. Run sweep with <code>--baseline</code> flag.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="glass-card" style={{ overflow: "hidden" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+            {["#", "Model", "With Skill", "Without Skill", "Delta", "Amplification", "Trend"].map((h) => (
+              <th key={h} style={thStyle(h === "#" ? "center" : "left")}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((entry, i) => (
+            <tr
+              key={`${entry.provider}/${entry.model}`}
+              style={{ borderBottom: "1px solid var(--border-subtle)" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-2)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            >
+              <td style={{ padding: "10px 12px", textAlign: "center", fontSize: 12, fontWeight: 600, color: "var(--text-tertiary)", width: 40 }}>
+                {i + 1}
+              </td>
+              <td style={{ padding: "10px 12px" }}>
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{entry.model}</span>
+                  <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>{entry.provider}</span>
+                </div>
+              </td>
+              <td style={{ padding: "10px 12px" }}>
+                <span className="pill" style={{
+                  background: entry.passRate >= 0.7 ? "var(--green-muted)" : entry.passRate >= 0.4 ? "var(--yellow-muted)" : "var(--red-muted)",
+                  color: passRateColor(entry.passRate), fontSize: 11, fontWeight: 600,
+                }}>
+                  {Math.round(entry.passRate * 100)}%
+                </span>
+              </td>
+              <td style={{ padding: "10px 12px" }}>
+                {entry.baselinePassRate != null ? (
+                  <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                    {Math.round(entry.baselinePassRate * 100)}%
+                  </span>
+                ) : "--"}
+              </td>
+              <td style={{ padding: "10px 12px" }}>
+                {entry.skillDelta != null ? (
+                  <span className="text-[11px] font-medium" style={{
+                    color: entry.skillDelta >= 0 ? "var(--green)" : "var(--red)",
+                  }}>
+                    {entry.skillDelta >= 0 ? "+" : ""}{(entry.skillDelta * 100).toFixed(1)}pp
+                  </span>
+                ) : "--"}
+              </td>
+              <td style={{ padding: "10px 12px" }}>
+                {entry.amplificationPct != null && isFinite(entry.amplificationPct)
+                  ? <AmplificationBadge pct={entry.amplificationPct} />
+                  : "--"
+                }
+              </td>
+              <td style={{ padding: "10px 12px" }}>
+                <Sparkline data={entry.sparklineData} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +426,7 @@ export function LeaderboardPanel() {
   const [sweeps, setSweeps] = useState<SweepResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<LeaderboardTab>("rankings");
 
   useEffect(() => {
     setLoading(true);
@@ -147,8 +438,10 @@ export function LeaderboardPanel() {
   }, [plugin, skill]);
 
   const entries = useMemo(() => buildLeaderboard(sweeps), [sweeps]);
+  const hasBaseline = sweeps.some((s) => s.baselineEnabled);
+  const latestSweep = sweeps[0];
+  const judgeBiasWarning = latestSweep?.judgeBiasWarning;
 
-  // Loading
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -157,7 +450,6 @@ export function LeaderboardPanel() {
     );
   }
 
-  // Error
   if (error) {
     return (
       <div className="flex items-center justify-center h-full px-8">
@@ -169,7 +461,6 @@ export function LeaderboardPanel() {
     );
   }
 
-  // T-051: Empty state
   if (entries.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 px-8">
@@ -191,115 +482,43 @@ export function LeaderboardPanel() {
           >
             vskill eval sweep --models "anthropic/claude-sonnet-4,openrouter/meta-llama/llama-3.1-70b" --judge "anthropic/claude-sonnet-4"
           </div>
+          <div className="text-[11px] mt-2" style={{ color: "var(--text-tertiary)" }}>
+            Add <code>--baseline</code> to measure skill amplification per model.
+          </div>
         </div>
       </div>
     );
   }
 
-  // T-049: Leaderboard table
   return (
     <div className="p-5 animate-fade-in">
+      {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <div className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>
-          Model Leaderboard
+        <div className="flex items-center gap-3">
+          <div className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>
+            Model Leaderboard
+          </div>
+          <TabSelector active={tab} onChange={setTab} hasBaseline={hasBaseline} />
         </div>
         <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
           {sweeps.length} sweep{sweeps.length !== 1 ? "s" : ""} &middot; {entries.length} model{entries.length !== 1 ? "s" : ""}
         </span>
       </div>
 
-      <div className="glass-card" style={{ overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-              {["#", "Model", "Pass Rate", "Rubric", "Duration", "Cost", "Trend"].map((h) => (
-                <th
-                  key={h}
-                  style={{
-                    padding: "10px 12px",
-                    fontSize: 10,
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    color: "var(--text-tertiary)",
-                    textAlign: h === "#" ? "center" : "left",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr
-                key={`${entry.provider}/${entry.model}`}
-                style={{ borderBottom: "1px solid var(--border-subtle)" }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-2)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-              >
-                {/* Rank */}
-                <td style={{ padding: "10px 12px", textAlign: "center", fontSize: 12, fontWeight: 600, color: "var(--text-tertiary)", width: 40 }}>
-                  {entry.rank}
-                </td>
+      {/* Judge bias warning */}
+      {judgeBiasWarning && <JudgeBiasWarning warning={judgeBiasWarning} />}
 
-                {/* Model */}
-                <td style={{ padding: "10px 12px" }}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>
-                      {entry.model}
-                    </span>
-                    <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
-                      {entry.provider}
-                    </span>
-                    {entry.isBest && <BestModelBadge />}
-                  </div>
-                </td>
+      {/* Table */}
+      {tab === "rankings" ? (
+        <RankingsTable entries={entries} />
+      ) : (
+        <AmplificationTable entries={entries} />
+      )}
 
-                {/* Pass Rate */}
-                <td style={{ padding: "10px 12px" }}>
-                  <span
-                    className="pill"
-                    style={{
-                      background: entry.passRate >= 0.7
-                        ? "var(--green-muted)"
-                        : entry.passRate >= 0.4
-                          ? "var(--yellow-muted)"
-                          : "var(--red-muted)",
-                      color: passRateColor(entry.passRate),
-                      fontSize: 11,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {Math.round(entry.passRate * 100)}%
-                  </span>
-                </td>
-
-                {/* Rubric */}
-                <td style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-secondary)" }}>
-                  {entry.rubricScore != null ? entry.rubricScore.toFixed(1) : "--"}
-                </td>
-
-                {/* Duration */}
-                <td style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-secondary)" }}>
-                  {entry.duration < 1000 ? `${Math.round(entry.duration)}ms` : `${(entry.duration / 1000).toFixed(1)}s`}
-                </td>
-
-                {/* Cost */}
-                <td style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-secondary)" }}>
-                  {entry.cost != null ? `$${entry.cost.toFixed(4)}` : "N/A"}
-                </td>
-
-                {/* Sparkline */}
-                <td style={{ padding: "10px 12px" }}>
-                  <Sparkline data={entry.sparklineData} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {/* Skill quality badge */}
+      {tab === "amplification" && latestSweep?.skillQualityScore != null && latestSweep?.skillQualityRating && (
+        <SkillQualityBadge score={latestSweep.skillQualityScore} rating={latestSweep.skillQualityRating} />
+      )}
     </div>
   );
 }

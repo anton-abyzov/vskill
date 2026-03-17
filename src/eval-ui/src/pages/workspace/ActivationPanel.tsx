@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import { renderMarkdown } from "../../utils/renderMarkdown";
-import type { ActivationResult, ActivationSummary } from "../../types";
+import type { ActivationResult } from "../../types";
+import type { ActivationHistoryRun } from "./workspaceTypes";
 
 const CLASSIFICATION_STYLES: Record<string, { bg: string; text: string }> = {
   TP: { bg: "var(--green-muted)", text: "var(--green)" },
@@ -10,25 +11,25 @@ const CLASSIFICATION_STYLES: Record<string, { bg: string; text: string }> = {
   FN: { bg: "rgba(248,113,113,0.06)", text: "rgba(248,113,113,0.6)" },
 };
 
-const PROMPT_TEMPLATES = [
-  { label: "Should activate", prompts: [
-    "+How do I use this feature?",
-    "+Show me best practices for this",
-    "+What's the recommended approach?",
-  ]},
-  { label: "Should NOT activate", prompts: [
-    "!What's the weather today?",
-    "!Write me a poem",
-    "!How do I cook pasta?",
-  ]},
-];
-
 export function ActivationPanel() {
-  const { state, dispatch, runActivationTest, cancelActivation } = useWorkspace();
-  const { plugin, skill, activationPrompts, activationResults, activationSummary, activationRunning, activationError, activationStartedAt } = state;
+  const { state, dispatch, runActivationTest, cancelActivation, generateActivationPrompts } = useWorkspace();
+  const {
+    plugin, skill, activationPrompts, activationResults, activationSummary,
+    activationRunning, activationError, activationStartedAt,
+    generatingPrompts, generatingPromptsError,
+    activationHistory,
+  } = state;
 
   const [promptsText, setPromptsText] = useState(activationPrompts);
   const [skillDescription, setSkillDescription] = useState<string | null>(null);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+
+  // Sync local promptsText when activationPrompts changes from AI generation
+  useEffect(() => {
+    if (activationPrompts && activationPrompts !== promptsText) {
+      setPromptsText(activationPrompts);
+    }
+  }, [activationPrompts]);
 
   useEffect(() => {
     dispatch({ type: "SET_ACTIVATION_PROMPTS", prompts: promptsText });
@@ -45,16 +46,17 @@ export function ActivationPanel() {
     runActivationTest(promptsText);
   }
 
-  function addTemplatePrompts(prompts: string[]) {
-    const current = promptsText.trim();
-    const newText = current ? `${current}\n${prompts.join("\n")}` : prompts.join("\n");
-    setPromptsText(newText);
+  function handleGeneratePrompts() {
+    generateActivationPrompts(8);
   }
 
   const promptCount = promptsText.trim().split("\n").filter(Boolean).length;
   const correctResults = activationResults.filter((r) => r.classification === "TP" || r.classification === "TN");
   const incorrectResults = activationResults.filter((r) => r.classification === "FP" || r.classification === "FN");
   const cleanDescription = skillDescription?.replace(/^---[\s\S]*?---\s*/, "").trim() ?? null;
+  const hasGeneratedPrompts = promptsText.trim().length > 0;
+  // NOTE: renderMarkdown performs sanitization before rendering
+  const descriptionHtml = cleanDescription ? renderMarkdown(cleanDescription) : "";
 
   return (
     <div className="p-5 space-y-5">
@@ -79,26 +81,54 @@ export function ActivationPanel() {
               Test Prompts
             </label>
             <div className="flex gap-1.5">
-              {PROMPT_TEMPLATES.map((t) => (
-                <button
-                  key={t.label}
-                  onClick={() => addTemplatePrompts(t.prompts)}
-                  className="text-[10px] px-2.5 py-1 rounded-md transition-colors duration-150"
-                  style={{ background: "var(--surface-2)", color: "var(--text-tertiary)", border: "1px solid var(--border-subtle)" }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = "var(--text-primary)";
+              <button
+                onClick={handleGeneratePrompts}
+                disabled={generatingPrompts || !cleanDescription || activationRunning}
+                className="text-[10px] px-2.5 py-1 rounded-md transition-colors duration-150 flex items-center gap-1.5"
+                style={{
+                  background: generatingPrompts ? "var(--surface-3)" : "var(--surface-2)",
+                  color: !cleanDescription ? "var(--text-tertiary)" : "var(--accent)",
+                  border: "1px solid var(--border-subtle)",
+                  opacity: !cleanDescription ? 0.5 : 1,
+                  cursor: !cleanDescription ? "not-allowed" : "pointer",
+                }}
+                title={!cleanDescription ? "No skill description available" : undefined}
+                onMouseEnter={(e) => {
+                  if (cleanDescription && !generatingPrompts) {
                     e.currentTarget.style.background = "var(--surface-3)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = "var(--text-tertiary)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!generatingPrompts) {
                     e.currentTarget.style.background = "var(--surface-2)";
-                  }}
-                >
-                  + {t.label}
-                </button>
-              ))}
+                  }
+                }}
+              >
+                {generatingPrompts ? (
+                  <>
+                    <div
+                      className="spinner"
+                      style={{ borderTopColor: "var(--accent)", borderColor: "var(--border-subtle)", width: 10, height: 10 }}
+                    />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 3v3m6.36.64l-2.12 2.12M21 12h-3m-.64 6.36l-2.12-2.12M12 21v-3m-4.24.64l2.12-2.12M3 12h3m.64-6.36l2.12 2.12" />
+                    </svg>
+                    {hasGeneratedPrompts ? "Regenerate" : "Generate"} Test Prompts
+                  </>
+                )}
+              </button>
             </div>
           </div>
+
+          {generatingPromptsError && (
+            <div className="text-[11px] px-2 py-1 rounded" style={{ color: "var(--red)", background: "var(--red-muted)" }}>
+              {generatingPromptsError}
+            </div>
+          )}
 
           <textarea
             className="input-field resize-y font-mono text-[12px]"
@@ -190,7 +220,7 @@ export function ActivationPanel() {
               <div
                 className="text-[12px] leading-relaxed"
                 style={{ color: "var(--text-secondary)" }}
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(cleanDescription) }}
+                dangerouslySetInnerHTML={{ __html: descriptionHtml }}
               />
             ) : (
               <div className="text-[12px]" style={{ color: "var(--text-tertiary)" }}>
@@ -306,8 +336,124 @@ export function ActivationPanel() {
           </div>
         </div>
       )}
+
+      {/* Test History */}
+      <ActivationHistorySection
+        history={activationHistory}
+        expanded={historyExpanded}
+        onToggle={() => setHistoryExpanded(!historyExpanded)}
+      />
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Activation History Section
+// ---------------------------------------------------------------------------
+
+function ActivationHistorySection({ history, expanded, onToggle }: {
+  history: ActivationHistoryRun[] | null;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  if (history === null) return null; // not loaded yet
+
+  return (
+    <div className="glass-card overflow-hidden">
+      <button
+        className="w-full px-4 py-3 flex items-center justify-between text-left"
+        style={{ borderBottom: expanded ? "1px solid var(--border-subtle)" : "none" }}
+        onClick={onToggle}
+      >
+        <span className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-tertiary)" }}>
+          Test History
+          {history.length > 0 && (
+            <span className="ml-2 font-normal" style={{ color: "var(--text-tertiary)" }}>
+              ({history.length} run{history.length !== 1 ? "s" : ""})
+            </span>
+          )}
+        </span>
+        <svg
+          width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          style={{ transform: expanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {expanded && (
+        <div className="px-4 py-3">
+          {history.length === 0 ? (
+            <div className="text-[12px] py-4 text-center" style={{ color: "var(--text-tertiary)" }}>
+              No test runs yet
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {history.map((run) => (
+                <HistoryRow key={run.id} run={run} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HistoryRow({ run }: { run: ActivationHistoryRun }) {
+  const reliability = Math.round(run.summary.reliability * 100);
+  const reliabilityColor = reliability >= 80 ? "var(--green)" : reliability >= 60 ? "var(--yellow)" : "var(--red)";
+  const verdict = reliability >= 80 ? "Good" : reliability >= 60 ? "Needs Work" : "Poor";
+  const verdictColor = reliabilityColor;
+
+  return (
+    <div
+      className="flex items-center gap-3 px-3 py-2.5 rounded-lg"
+      style={{ background: "var(--surface-1)" }}
+    >
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            {formatRelativeTime(run.timestamp)}
+          </span>
+          <span
+            className="pill text-[9px] px-1.5"
+            style={{ background: "var(--surface-2)", color: "var(--text-tertiary)" }}
+          >
+            {run.model || run.provider}
+          </span>
+          <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
+            {run.promptCount} prompts
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 flex-shrink-0">
+        <span className="text-[12px] font-semibold" style={{ color: reliabilityColor, fontVariantNumeric: "tabular-nums" }}>
+          {reliability}%
+        </span>
+        <span
+          className="text-[10px] font-medium px-2 py-0.5 rounded"
+          style={{ color: verdictColor, background: `color-mix(in srgb, ${verdictColor} 10%, transparent)` }}
+        >
+          {verdict}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function formatRelativeTime(iso: string): string {
+  const now = Date.now();
+  const then = new Date(iso).getTime();
+  const diffSec = Math.floor((now - then) / 1000);
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}d ago`;
+  return new Date(iso).toLocaleDateString();
 }
 
 // ---------------------------------------------------------------------------

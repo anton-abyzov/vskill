@@ -122,9 +122,38 @@ export interface WorkspaceState {
   activationTotalPrompts: number;
   activationStartedAt: number | null;
 
+  // AI prompt generation
+  generatingPrompts: boolean;
+  generatingPromptsError: string | null;
+
+  // Activation history
+  activationHistory: ActivationHistoryRun[] | null;
+  activationHistoryLoading: boolean;
+
   // Loading
   loading: boolean;
   error: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Activation history types
+// ---------------------------------------------------------------------------
+
+export interface ActivationHistoryRun {
+  id: string;
+  timestamp: string;
+  model: string;
+  provider: string;
+  promptCount: number;
+  summary: {
+    precision: number;
+    recall: number;
+    reliability: number;
+    tp: number;
+    tn: number;
+    fp: number;
+    fn: number;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +202,11 @@ export type WorkspaceAction =
   | { type: "ACTIVATION_ERROR"; error: string }
   | { type: "ACTIVATION_RESET" }
   | { type: "ACTIVATION_TIMEOUT" }
-  | { type: "ACTIVATION_CANCEL"; totalPrompts: number };
+  | { type: "ACTIVATION_CANCEL"; totalPrompts: number }
+  | { type: "GENERATE_PROMPTS_START" }
+  | { type: "GENERATE_PROMPTS_DONE" }
+  | { type: "GENERATE_PROMPTS_ERROR"; error: string }
+  | { type: "ACTIVATION_HISTORY_LOADED"; runs: ActivationHistoryRun[] };
 
 // ---------------------------------------------------------------------------
 // Context value
@@ -197,6 +230,8 @@ export interface WorkspaceContextValue {
   generateEvals: () => Promise<void>;
   runActivationTest: (prompts: string) => void;
   cancelActivation: () => void;
+  generateActivationPrompts: (count?: number) => void;
+  fetchActivationHistory: () => void;
   submitAiEdit: (instruction: string, provider?: string, model?: string) => void;
   cancelAiEdit: () => void;
   applyAiEdit: () => Promise<void>;

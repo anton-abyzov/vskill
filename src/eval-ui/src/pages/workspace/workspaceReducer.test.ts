@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { workspaceReducer, initialWorkspaceState } from "./workspaceReducer.js";
-import type { WorkspaceState, WorkspaceAction } from "./workspaceTypes.js";
+import type { WorkspaceState, WorkspaceAction, ActivationHistoryRun } from "./workspaceTypes.js";
 import type { EvalChange, ActivationResult } from "../../types";
 
 function makeState(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
@@ -278,6 +278,89 @@ describe("workspaceReducer - Activation timeout and cancel", () => {
       state = dispatch(state, { type: "ACTIVATION_CANCEL", totalPrompts: 5 });
       expect(state.activationRunning).toBe(false);
       expect(state.activationResults).toHaveLength(3);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AI Prompt Generation reducer tests (T-011)
+// ---------------------------------------------------------------------------
+
+describe("workspaceReducer - AI Prompt Generation", () => {
+  describe("GENERATE_PROMPTS_START", () => {
+    it("sets generatingPrompts to true and clears error", () => {
+      const state = makeState({ generatingPromptsError: "old error" });
+      const result = dispatch(state, { type: "GENERATE_PROMPTS_START" });
+      expect(result.generatingPrompts).toBe(true);
+      expect(result.generatingPromptsError).toBeNull();
+    });
+  });
+
+  describe("GENERATE_PROMPTS_DONE", () => {
+    it("sets generatingPrompts to false", () => {
+      const state = makeState({ generatingPrompts: true });
+      const result = dispatch(state, { type: "GENERATE_PROMPTS_DONE" });
+      expect(result.generatingPrompts).toBe(false);
+    });
+  });
+
+  describe("GENERATE_PROMPTS_ERROR", () => {
+    it("sets generatingPrompts to false and stores error", () => {
+      const state = makeState({ generatingPrompts: true });
+      const result = dispatch(state, { type: "GENERATE_PROMPTS_ERROR", error: "LLM failed" });
+      expect(result.generatingPrompts).toBe(false);
+      expect(result.generatingPromptsError).toBe("LLM failed");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Activation History reducer tests (T-021)
+// ---------------------------------------------------------------------------
+
+function makeHistoryRun(id: string, reliability: number): ActivationHistoryRun {
+  return {
+    id,
+    timestamp: new Date().toISOString(),
+    model: "claude-sonnet",
+    provider: "claude-cli",
+    promptCount: 8,
+    summary: {
+      precision: 0.9,
+      recall: 0.85,
+      reliability,
+      tp: 4,
+      tn: 3,
+      fp: 0,
+      fn: 1,
+    },
+  };
+}
+
+describe("workspaceReducer - Activation History", () => {
+  describe("ACTIVATION_HISTORY_LOADED", () => {
+    it("stores history runs and sets loading to false", () => {
+      const runs = [makeHistoryRun("run-1", 0.875), makeHistoryRun("run-2", 0.75)];
+      const state = makeState({ activationHistoryLoading: true });
+      const result = dispatch(state, { type: "ACTIVATION_HISTORY_LOADED", runs });
+      expect(result.activationHistory).toHaveLength(2);
+      expect(result.activationHistory![0].id).toBe("run-1");
+      expect(result.activationHistoryLoading).toBe(false);
+    });
+
+    it("handles empty history", () => {
+      const state = makeState();
+      const result = dispatch(state, { type: "ACTIVATION_HISTORY_LOADED", runs: [] });
+      expect(result.activationHistory).toEqual([]);
+    });
+  });
+
+  describe("initial state", () => {
+    it("has correct defaults for new fields", () => {
+      expect(initialWorkspaceState.generatingPrompts).toBe(false);
+      expect(initialWorkspaceState.generatingPromptsError).toBeNull();
+      expect(initialWorkspaceState.activationHistory).toBeNull();
+      expect(initialWorkspaceState.activationHistoryLoading).toBe(false);
     });
   });
 });

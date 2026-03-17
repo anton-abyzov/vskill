@@ -22,6 +22,8 @@ export interface ModelSpec {
 export interface ModelStats {
   mean: number;
   stddev: number;
+  median?: number;
+  ci95?: [number, number]; // 95% confidence interval [lower, upper]
 }
 
 export interface ModelResult {
@@ -34,6 +36,11 @@ export interface ModelResult {
   status: "complete" | "error";
   errorMessage: string | null;
   caseResults: BenchmarkCase[][];
+  // Baseline comparison (populated when --baseline is used)
+  baselinePassRate?: ModelStats;
+  skillDelta?: ModelStats;         // passRate - baselinePassRate
+  amplificationPct?: number;       // (delta.mean / baseline.mean) * 100
+  compositeScore?: number;         // weighted ranking score
 }
 
 export interface SweepResult {
@@ -42,6 +49,10 @@ export interface SweepResult {
   judge: string;
   runs: number;
   models: ModelResult[];
+  baselineEnabled?: boolean;
+  skillQualityScore?: number;       // median amplificationPct across models
+  skillQualityRating?: "excellent" | "good" | "marginal" | "minimal" | "harmful";
+  judgeBiasWarning?: string;        // set when judge matches a competitor model
 }
 
 export interface SweepOpts {
@@ -53,13 +64,16 @@ export interface SweepOpts {
   judge: string;
   runs: number;
   concurrency: number;
+  baseline?: boolean;
+  baselinePrompt?: string; // defaults to "You are a helpful AI assistant."
 }
 
 export type SweepSSEEvent =
-  | { type: "sweep_start"; data: { totalModels: number; runs: number; judge: string } }
+  | { type: "sweep_start"; data: { totalModels: number; runs: number; judge: string; baseline: boolean } }
   | { type: "sweep_model_start"; data: { model: string; provider: string; modelIndex: number; totalModels: number } }
-  | { type: "sweep_model_progress"; data: { model: string; currentCase: number; totalCases: number; run: number; totalRuns: number; percentComplete: number } }
-  | { type: "sweep_model_complete"; data: { model: string; provider: string; status: "complete" | "error"; passRate?: ModelStats; errorMessage?: string } }
+  | { type: "sweep_model_progress"; data: { model: string; currentCase: number; totalCases: number; run: number; totalRuns: number; percentComplete: number; phase?: "skill" | "baseline" } }
+  | { type: "sweep_model_complete"; data: { model: string; provider: string; status: "complete" | "error"; passRate?: ModelStats; baselinePassRate?: ModelStats; skillDelta?: ModelStats; amplificationPct?: number; errorMessage?: string } }
+  | { type: "sweep_judge_bias_warning"; data: { judge: string; matchedModel: string; warning: string } }
   | { type: "sweep_complete"; data: SweepResult };
 
 // ---------------------------------------------------------------------------
@@ -108,9 +122,91 @@ export function computeStddev(values: number[], mean: number): number {
   return Math.sqrt(variance);
 }
 
+export function computeMedian(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+export function computeCI95(values: number[]): [number, number] | undefined {
+  if (values.length < 2) return undefined;
+  const mean = computeMean(values);
+  const stddev = computeStddev(values, mean);
+  // t-distribution critical value for 95% CI (approximation for small samples)
+  const tCritical = values.length <= 5 ? 2.776 : values.length <= 10 ? 2.262 : 1.96;
+  const margin = tCritical * (stddev / Math.sqrt(values.length));
+  return [Math.max(0, mean - margin), Math.min(1, mean + margin)];
+}
+
 export function computeStats(values: number[]): ModelStats {
   const mean = computeMean(values);
-  return { mean, stddev: computeStddev(values, mean) };
+  return {
+    mean,
+    stddev: computeStddev(values, mean),
+    median: computeMedian(values),
+    ci95: computeCI95(values),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Judge bias detection
+// ---------------------------------------------------------------------------
+
+export function detectJudgeBias(judgeSpec: string, modelSpecs: string[]): string | undefined {
+  const judgeParts = judgeSpec.split("/");
+  const judgeModel = judgeParts.slice(1).join("/").toLowerCase();
+  const judgeProvider = judgeParts[0].toLowerCase();
+
+  for (const spec of modelSpecs) {
+    const parts = spec.split("/");
+    const modelName = parts.slice(1).join("/").toLowerCase();
+    const modelProvider = parts[0].toLowerCase();
+
+    // Exact match
+    if (judgeModel === modelName && judgeProvider === modelProvider) {
+      return `Judge model "${judgeSpec}" is identical to competitor model "${spec}". Self-preference bias is likely. Consider using a different judge model.`;
+    }
+    // Same provider family (e.g., anthropic/claude-sonnet judging anthropic/claude-opus)
+    if (judgeProvider === modelProvider && judgeModel !== modelName) {
+      // Extract family prefix: "claude-sonnet-4" → "claude", "meta-llama/llama-3.1-70b" → "meta-llama/llama"
+      const extractFamily = (m: string) => m.split(/[-_]/)[0];
+      const judgeFamily = extractFamily(judgeModel);
+      const modelFamily = extractFamily(modelName);
+      if (judgeFamily === modelFamily && judgeFamily.length > 0) {
+        return `Judge "${judgeSpec}" is from the same model family as "${spec}". Family-preference bias is possible. Consider a judge from a different provider.`;
+      }
+    }
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Composite ranking score
+// ---------------------------------------------------------------------------
+
+export function computeCompositeScore(passRate: ModelStats, runs: number): number {
+  const confidence = Math.min(1, runs / 5);
+  const stability = 1 - Math.min(1, passRate.stddev * 5); // lower stddev = higher stability
+  return passRate.mean * 0.7 + stability * 0.15 + confidence * 0.15;
+}
+
+// ---------------------------------------------------------------------------
+// Skill quality score from amplification data
+// ---------------------------------------------------------------------------
+
+export type SkillQualityRating = "excellent" | "good" | "marginal" | "minimal" | "harmful";
+
+export function computeSkillQualityScore(amplifications: number[]): { score: number; rating: SkillQualityRating } {
+  if (amplifications.length === 0) return { score: 0, rating: "minimal" };
+  const score = computeMedian(amplifications);
+  let rating: SkillQualityRating;
+  if (score >= 20) rating = "excellent";
+  else if (score >= 10) rating = "good";
+  else if (score >= 5) rating = "marginal";
+  else if (score >= 0) rating = "minimal";
+  else rating = "harmful";
+  return { score, rating };
 }
 
 // ---------------------------------------------------------------------------
@@ -148,15 +244,144 @@ export function aggregateRuns(
 // Sweep runner — yields SSE events as an async generator
 // ---------------------------------------------------------------------------
 
+/**
+ * Run a single model through all eval cases with a given system prompt.
+ * Returns aggregated BenchmarkResult[] (one per run).
+ */
+async function* runModelCases(
+  client: ReturnType<typeof createLlmClient>,
+  judgeSpec: ModelSpec,
+  systemPrompt: string,
+  evalCases: EvalCase[],
+  skillName: string,
+  spec: ModelSpec,
+  runs: number,
+  modelIndex: number,
+  totalModels: number,
+  totalPhases: number,
+  phaseOffset: number,
+  phase: "skill" | "baseline",
+): AsyncGenerator<SweepSSEEvent, BenchmarkResult[]> {
+  const runResults: BenchmarkResult[] = [];
+  const totalSteps = totalModels * totalPhases * runs * evalCases.length;
+
+  for (let run = 0; run < runs; run++) {
+    const cases: BenchmarkCase[] = [];
+
+    for (let ci = 0; ci < evalCases.length; ci++) {
+      const evalCase = evalCases[ci];
+      const step = modelIndex * totalPhases * runs * evalCases.length
+        + phaseOffset * runs * evalCases.length
+        + run * evalCases.length + ci + 1;
+      const percentComplete = Math.round((step / totalSteps) * 100);
+
+      yield {
+        type: "sweep_model_progress",
+        data: {
+          model: spec.model,
+          currentCase: ci + 1,
+          totalCases: evalCases.length,
+          run: run + 1,
+          totalRuns: runs,
+          percentComplete,
+          phase,
+        },
+      };
+
+      try {
+        const genResult = await client.generate(systemPrompt, evalCase.prompt);
+        const benchCase: BenchmarkCase = {
+          eval_id: evalCase.id,
+          eval_name: evalCase.name,
+          status: "pass",
+          error_message: null,
+          pass_rate: 1,
+          durationMs: genResult.durationMs,
+          tokens: (genResult.inputTokens ?? 0) + (genResult.outputTokens ?? 0) || null,
+          inputTokens: genResult.inputTokens,
+          outputTokens: genResult.outputTokens,
+          output: genResult.text,
+          assertions: [],
+        };
+        (benchCase as any).cost = genResult.cost;
+
+        if (evalCase.assertions.length > 0) {
+          const judgeClient = createLlmClient({
+            provider: judgeSpec.provider,
+            model: judgeSpec.model,
+          });
+          const { judgeAssertion } = await import("../eval/judge.js");
+
+          const assertionResults = await Promise.all(
+            evalCase.assertions.map((a) =>
+              judgeAssertion(genResult.text, a, judgeClient),
+            ),
+          );
+          benchCase.assertions = assertionResults;
+          benchCase.pass_rate =
+            assertionResults.length > 0
+              ? assertionResults.filter((a) => a.pass).length / assertionResults.length
+              : 0;
+          benchCase.status = assertionResults.every((a) => a.pass) ? "pass" : "fail";
+        }
+
+        cases.push(benchCase);
+      } catch (err) {
+        cases.push({
+          eval_id: evalCase.id,
+          eval_name: evalCase.name,
+          status: "error",
+          error_message: err instanceof Error ? err.message : String(err),
+          pass_rate: 0,
+          assertions: [],
+        });
+      }
+    }
+
+    const totalAssertions = cases.reduce((s, c) => s + c.assertions.length, 0);
+    const passedAssertions = cases.reduce(
+      (s, c) => s + c.assertions.filter((a) => a.pass).length, 0,
+    );
+
+    runResults.push({
+      timestamp: new Date().toISOString(),
+      model: spec.model,
+      skill_name: skillName,
+      cases,
+      overall_pass_rate: totalAssertions > 0 ? passedAssertions / totalAssertions : 0,
+      type: "benchmark",
+      provider: spec.provider,
+      totalDurationMs: cases.reduce((s, c) => s + (c.durationMs ?? 0), 0),
+      totalInputTokens: cases.reduce((s, c) => s + (c.inputTokens ?? 0), 0),
+      totalOutputTokens: cases.reduce((s, c) => s + (c.outputTokens ?? 0), 0),
+      scope: "bulk",
+    });
+  }
+
+  return runResults;
+}
+
 export async function* runSweep(opts: SweepOpts): AsyncGenerator<SweepSSEEvent> {
   const { skillDir, skillName, systemPrompt, evalCases, models, judge, runs, concurrency } = opts;
+  const baseline = opts.baseline ?? false;
+  const baselinePrompt = opts.baselinePrompt ?? "You are a helpful AI assistant.";
 
   const modelSpecs = models.map(parseModelSpec);
   const judgeSpec = parseModelSpec(judge);
+  const totalPhases = baseline ? 2 : 1;
+
+  // Judge bias detection
+  const judgeBiasWarning = detectJudgeBias(judge, models);
+  if (judgeBiasWarning) {
+    yield {
+      type: "sweep_judge_bias_warning",
+      data: { judge, matchedModel: models.find((m) => judgeBiasWarning.includes(m)) ?? models[0], warning: judgeBiasWarning },
+    };
+  }
 
   yield {
     type: "sweep_start",
-    data: { totalModels: modelSpecs.length, runs, judge },
+    data: { totalModels: modelSpecs.length, runs, judge, baseline },
   };
 
   const sweepResults: ModelResult[] = [];
@@ -176,109 +401,60 @@ export async function* runSweep(opts: SweepOpts): AsyncGenerator<SweepSSEEvent> 
 
     try {
       const client = createLlmClient({ provider: spec.provider, model: spec.model });
-      const runResults: BenchmarkResult[] = [];
 
-      for (let run = 0; run < runs; run++) {
-        const cases: BenchmarkCase[] = [];
-
-        for (let ci = 0; ci < evalCases.length; ci++) {
-          const evalCase = evalCases[ci];
-          const percentComplete = Math.round(
-            ((mi * runs * evalCases.length + run * evalCases.length + ci + 1) /
-              (modelSpecs.length * runs * evalCases.length)) * 100,
-          );
-
-          yield {
-            type: "sweep_model_progress",
-            data: {
-              model: spec.model,
-              currentCase: ci + 1,
-              totalCases: evalCases.length,
-              run: run + 1,
-              totalRuns: runs,
-              percentComplete,
-            },
-          };
-
-          try {
-            const genResult = await client.generate(systemPrompt, evalCase.prompt);
-            // Create a basic benchmark case from the generation result
-            const benchCase: BenchmarkCase = {
-              eval_id: evalCase.id,
-              eval_name: evalCase.name,
-              status: "pass",
-              error_message: null,
-              pass_rate: 1,
-              durationMs: genResult.durationMs,
-              tokens: (genResult.inputTokens ?? 0) + (genResult.outputTokens ?? 0) || null,
-              inputTokens: genResult.inputTokens,
-              outputTokens: genResult.outputTokens,
-              output: genResult.text,
-              assertions: [],
-            };
-            // Attach cost if available
-            (benchCase as any).cost = genResult.cost;
-
-            // Judge assertions if a judge is configured
-            if (evalCase.assertions.length > 0) {
-              const judgeClient = createLlmClient({
-                provider: judgeSpec.provider,
-                model: judgeSpec.model,
-              });
-              const { judgeAssertion } = await import("../eval/judge.js");
-
-              const assertionResults = await Promise.all(
-                evalCase.assertions.map((a) =>
-                  judgeAssertion(genResult.text, a, judgeClient),
-                ),
-              );
-              benchCase.assertions = assertionResults;
-              benchCase.pass_rate =
-                assertionResults.length > 0
-                  ? assertionResults.filter((a) => a.pass).length / assertionResults.length
-                  : 0;
-              benchCase.status = assertionResults.every((a) => a.pass) ? "pass" : "fail";
-            }
-
-            cases.push(benchCase);
-          } catch (err) {
-            cases.push({
-              eval_id: evalCase.id,
-              eval_name: evalCase.name,
-              status: "error",
-              error_message: err instanceof Error ? err.message : String(err),
-              pass_rate: 0,
-              assertions: [],
-            });
-          }
-        }
-
-        const totalAssertions = cases.reduce((s, c) => s + c.assertions.length, 0);
-        const passedAssertions = cases.reduce(
-          (s, c) => s + c.assertions.filter((a) => a.pass).length, 0,
-        );
-
-        runResults.push({
-          timestamp: new Date().toISOString(),
-          model: spec.model,
-          skill_name: skillName,
-          cases,
-          overall_pass_rate: totalAssertions > 0 ? passedAssertions / totalAssertions : 0,
-          type: "benchmark",
-          provider: spec.provider,
-          totalDurationMs: cases.reduce((s, c) => s + (c.durationMs ?? 0), 0),
-          totalInputTokens: cases.reduce((s, c) => s + (c.inputTokens ?? 0), 0),
-          totalOutputTokens: cases.reduce((s, c) => s + (c.outputTokens ?? 0), 0),
-          scope: "bulk",
-        });
+      // Phase 1: Run WITH skill prompt
+      const skillGen = runModelCases(
+        client, judgeSpec, systemPrompt, evalCases, skillName,
+        spec, runs, mi, modelSpecs.length, totalPhases, 0, "skill",
+      );
+      let skillRunResults: BenchmarkResult[] = [];
+      let next = await skillGen.next();
+      while (!next.done) {
+        yield next.value;
+        next = await skillGen.next();
       }
+      skillRunResults = next.value;
 
-      const aggregated = aggregateRuns(runResults, spec.provider, spec.model);
-      sweepResults.push({
+      const aggregated = aggregateRuns(skillRunResults, spec.provider, spec.model);
+      const modelResult: ModelResult = {
         ...aggregated,
+        compositeScore: computeCompositeScore(aggregated.passRate, runs),
         status: "complete",
         errorMessage: null,
-      });
+      };
+
+      // Phase 2: Run WITHOUT skill prompt (baseline)
+      if (baseline) {
+        const baselineGen = runModelCases(
+          client, judgeSpec, baselinePrompt, evalCases, skillName,
+          spec, runs, mi, modelSpecs.length, totalPhases, 1, "baseline",
+        );
+        let baselineRunResults: BenchmarkResult[] = [];
+        let bNext = await baselineGen.next();
+        while (!bNext.done) {
+          yield bNext.value;
+          bNext = await baselineGen.next();
+        }
+        baselineRunResults = bNext.value;
+
+        const baselineAgg = aggregateRuns(baselineRunResults, spec.provider, spec.model);
+        modelResult.baselinePassRate = baselineAgg.passRate;
+
+        // Compute skill delta
+        const deltaValues = skillRunResults.map((sr, i) => {
+          const br = baselineRunResults[i];
+          return (sr.overall_pass_rate ?? 0) - (br?.overall_pass_rate ?? 0);
+        });
+        modelResult.skillDelta = computeStats(deltaValues);
+
+        // Compute amplification percentage
+        const baselineMean = baselineAgg.passRate.mean;
+        modelResult.amplificationPct = baselineMean > 0
+          ? ((aggregated.passRate.mean - baselineMean) / baselineMean) * 100
+          : aggregated.passRate.mean > 0 ? Infinity : 0;
+      }
+
+      sweepResults.push(modelResult);
 
       yield {
         type: "sweep_model_complete",
@@ -287,6 +463,9 @@ export async function* runSweep(opts: SweepOpts): AsyncGenerator<SweepSSEEvent> 
           provider: spec.provider,
           status: "complete",
           passRate: aggregated.passRate,
+          baselinePassRate: modelResult.baselinePassRate,
+          skillDelta: modelResult.skillDelta,
+          amplificationPct: modelResult.amplificationPct,
         },
       };
     } catch (err) {
@@ -315,6 +494,20 @@ export async function* runSweep(opts: SweepOpts): AsyncGenerator<SweepSSEEvent> 
     }
   }
 
+  // Compute skill quality score if baseline was enabled
+  let skillQualityScore: number | undefined;
+  let skillQualityRating: SkillQualityRating | undefined;
+  if (baseline) {
+    const amplifications = sweepResults
+      .filter((m) => m.status === "complete" && m.amplificationPct != null && isFinite(m.amplificationPct!))
+      .map((m) => m.amplificationPct!);
+    if (amplifications.length > 0) {
+      const quality = computeSkillQualityScore(amplifications);
+      skillQualityScore = quality.score;
+      skillQualityRating = quality.rating;
+    }
+  }
+
   // Write leaderboard file
   const sweepResult: SweepResult = {
     sweepId: randomUUID(),
@@ -322,6 +515,10 @@ export async function* runSweep(opts: SweepOpts): AsyncGenerator<SweepSSEEvent> 
     judge,
     runs,
     models: sweepResults,
+    baselineEnabled: baseline || undefined,
+    skillQualityScore,
+    skillQualityRating,
+    judgeBiasWarning: judgeBiasWarning || undefined,
   };
 
   await writeLeaderboard(skillDir, sweepResult);

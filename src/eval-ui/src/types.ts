@@ -310,6 +310,7 @@ export interface CreateSkillRequest {
   body: string;
   evals?: GeneratedEval[];
   aiMeta?: AiGenerationMeta;
+  draftDir?: string;
 }
 
 export interface CreateSkillResponse {
@@ -366,12 +367,19 @@ export interface GenerateSkillResponse {
 // Sweep / Leaderboard types (T-054)
 // ---------------------------------------------------------------------------
 
+export interface ModelStats {
+  mean: number;
+  stddev: number;
+  median?: number;
+  ci95?: [number, number];
+}
+
 export interface ModelResult {
   provider: string;
   model: string;
-  passRate: { mean: number; stddev: number };
-  rubricScore?: { mean: number; stddev: number };
-  duration: { mean: number; stddev: number };
+  passRate: ModelStats;
+  rubricScore?: ModelStats;
+  duration: ModelStats;
   cost: { total: number; perCase: number } | null;
   status: "complete" | "error";
   errorMessage: string | null;
@@ -381,6 +389,11 @@ export interface ModelResult {
     status: "pass" | "fail" | "error";
     pass_rate: number;
   }>;
+  // Baseline comparison (populated when --baseline is used)
+  baselinePassRate?: ModelStats;
+  skillDelta?: ModelStats;
+  amplificationPct?: number;
+  compositeScore?: number;
 }
 
 export interface SweepResult {
@@ -389,6 +402,10 @@ export interface SweepResult {
   judge: string;
   runs: number;
   models: ModelResult[];
+  baselineEnabled?: boolean;
+  skillQualityScore?: number;
+  skillQualityRating?: "excellent" | "good" | "marginal" | "minimal" | "harmful";
+  judgeBiasWarning?: string;
 }
 
 export interface LeaderboardEntry {
@@ -401,6 +418,12 @@ export interface LeaderboardEntry {
   cost: number | null;
   sparklineData: number[];
   isBest: boolean;
+  // Baseline fields (populated when sweep used --baseline)
+  baselinePassRate?: number;
+  skillDelta?: number;
+  amplificationPct?: number;
+  compositeScore?: number;
+  hasBaseline: boolean;
 }
 
 export interface CredentialStatus {

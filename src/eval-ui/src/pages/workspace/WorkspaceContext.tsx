@@ -1,11 +1,12 @@
 import { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useRef } from "react";
 import { api } from "../../api";
+import { useConfig } from "../../ConfigContext";
 import { useMultiSSE, useSSE } from "../../sse";
 import type { SSEEvent } from "../../sse";
 import type { ActivationResult, ActivationSummary } from "../../types";
 import type { EvalsFile, BenchmarkResult, EvalChange } from "../../types";
 import type { ClassifiedError } from "../../components/ErrorCard";
-import type { WorkspaceContextValue, PanelId, RunMode, InlineResult, AssertionResultInline } from "./workspaceTypes";
+import type { WorkspaceContextValue, PanelId, RunMode, InlineResult, AssertionResultInline, ActivationHistoryRun } from "./workspaceTypes";
 import { workspaceReducer, initialWorkspaceState } from "./workspaceReducer";
 
 // ---------------------------------------------------------------------------
@@ -182,8 +183,10 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     }
 
     load();
+    // Also fetch activation history on mount
+    fetchActivationHistory();
     return () => { cancelled = true; };
-  }, [plugin, skill]);
+  }, [plugin, skill, fetchActivationHistory]);
 
   // ---------------------------------------------------------------------------
   // Async actions
@@ -293,11 +296,13 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
   // -- AI Edit (SSE-backed) --
   const aiEditSSE = useSSE();
   const aiEditAbortRef = useRef<(() => void) | null>(null);
+  const lastAiEditIdxRef = useRef(0);
 
-  // Process AI Edit SSE events
+  // Process AI Edit SSE events (cursor pattern to avoid duplicate dispatch)
   useEffect(() => {
-    if (!aiEditSSE.events.length) return;
-    for (const evt of aiEditSSE.events) {
+    const events = aiEditSSE.events;
+    for (let i = lastAiEditIdxRef.current; i < events.length; i++) {
+      const evt = events[i];
       const data = evt.data as Record<string, unknown>;
       if (evt.event === "progress") {
         dispatch({
@@ -324,6 +329,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
         });
       }
     }
+    lastAiEditIdxRef.current = events.length;
   }, [aiEditSSE.events]);
 
   useEffect(() => {
@@ -339,6 +345,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
 
   const submitAiEdit = useCallback(async (instruction: string, provider?: string, model?: string) => {
     if (isReadOnly) return;
+    lastAiEditIdxRef.current = 0;
     dispatch({ type: "AI_EDIT_LOADING" });
     aiEditAbortRef.current = aiEditSSE.stop;
     aiEditSSE.start(`/api/skills/${plugin}/${skill}/improve?sse`, {
@@ -428,11 +435,13 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
 
   // -- Generate Evals (SSE-backed) --
   const genEvalsSSE = useSSE();
+  const lastGenEvalsIdxRef = useRef(0);
 
-  // Process Generate Evals SSE events
+  // Process Generate Evals SSE events (cursor pattern to avoid duplicate dispatch)
   useEffect(() => {
-    if (!genEvalsSSE.events.length) return;
-    for (const evt of genEvalsSSE.events) {
+    const events = genEvalsSSE.events;
+    for (let i = lastGenEvalsIdxRef.current; i < events.length; i++) {
+      const evt = events[i];
       const data = evt.data as Record<string, unknown>;
       if (evt.event === "progress") {
         dispatch({
@@ -445,7 +454,6 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
         });
       }
       if (evt.event === "done") {
-        // Save the generated evals to disk, then update state
         const evalsFile = data as unknown as EvalsFile;
         api.saveEvals(plugin, skill, evalsFile)
           .then((saved) => dispatch({ type: "GENERATE_EVALS_DONE", evals: saved }))
@@ -455,6 +463,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
         dispatch({ type: "GENERATE_EVALS_ERROR", classified: data as unknown as ClassifiedError });
       }
     }
+    lastGenEvalsIdxRef.current = events.length;
   }, [genEvalsSSE.events, plugin, skill]);
 
   useEffect(() => {
@@ -469,6 +478,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
 
   const generateEvals = useCallback(async () => {
     if (isReadOnly) return;
+    lastGenEvalsIdxRef.current = 0;
     dispatch({ type: "GENERATE_EVALS_START" });
     genEvalsSSE.start(`/api/skills/${plugin}/${skill}/generate-evals?sse`);
   }, [isReadOnly, plugin, skill, genEvalsSSE]);
@@ -477,16 +487,19 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
   // Activation test SSE
   // ---------------------------------------------------------------------------
   const activationSSE = useSSE();
+  const lastActivationIdxRef = useRef(0);
+  const { config } = useConfig();
 
   // Cleanup activation SSE on unmount
   useEffect(() => {
     return () => { activationSSE.stop(); };
   }, [activationSSE.stop]);
 
-  // Process activation SSE events
+  // Process activation SSE events (cursor pattern to avoid duplicate dispatch)
   useEffect(() => {
-    if (!activationSSE.events.length) return;
-    for (const evt of activationSSE.events) {
+    const events = activationSSE.events;
+    for (let i = lastActivationIdxRef.current; i < events.length; i++) {
+      const evt = events[i];
       if (evt.event === "prompt_result") {
         dispatch({ type: "ACTIVATION_RESULT", result: evt.data as ActivationResult });
       }
@@ -495,10 +508,31 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
           clearTimeout(activationTimeoutRef.current);
           activationTimeoutRef.current = null;
         }
-        dispatch({ type: "ACTIVATION_DONE", summary: evt.data as ActivationSummary & { description?: string } });
+        const summary = evt.data as ActivationSummary & { description?: string };
+        dispatch({ type: "ACTIVATION_DONE", summary });
+
+        // Prepend the completed run to the activation history
+        const run: ActivationHistoryRun = {
+          id: `run-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          model: config?.model || "unknown",
+          provider: config?.provider || "unknown",
+          promptCount: summary.total,
+          summary: {
+            precision: summary.precision,
+            recall: summary.recall,
+            reliability: summary.reliability,
+            tp: summary.tp,
+            tn: summary.tn,
+            fp: summary.fp,
+            fn: summary.fn,
+          },
+        };
+        dispatch({ type: "ACTIVATION_HISTORY_LOADED", runs: [run, ...(state.activationHistory ?? [])] });
       }
     }
-  }, [activationSSE.events]);
+    lastActivationIdxRef.current = events.length;
+  }, [activationSSE.events, config, state.activationHistory]);
 
   useEffect(() => {
     if (activationSSE.error) {
@@ -532,18 +566,115 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
       }
       return { prompt: line.trim(), expected: "auto" as const };
     });
+    lastActivationIdxRef.current = 0;
     dispatch({ type: "ACTIVATION_START" });
     dispatch({ type: "SET_ACTIVATION_PROMPTS", prompts: promptsText });
-    activationSSE.start(`/api/skills/${plugin}/${skill}/activation-test`, { prompts });
 
-    // T-007: 120s client-side timeout
+    // Forward model config from ConfigContext
+    const body: Record<string, unknown> = { prompts };
+    if (config?.provider) body.provider = config.provider;
+    if (config?.model) body.model = config.model;
+    activationSSE.start(`/api/skills/${plugin}/${skill}/activation-test`, body);
+
+    // 120s client-side timeout
     if (activationTimeoutRef.current) clearTimeout(activationTimeoutRef.current);
     activationTimeoutRef.current = setTimeout(() => {
       activationSSE.stop();
       dispatch({ type: "ACTIVATION_TIMEOUT" });
       activationTimeoutRef.current = null;
     }, 120_000);
-  }, [plugin, skill, activationSSE]);
+  }, [plugin, skill, activationSSE, config]);
+
+  // ---------------------------------------------------------------------------
+  // AI prompt generation
+  // ---------------------------------------------------------------------------
+  const generateActivationPrompts = useCallback(async (count = 8) => {
+    dispatch({ type: "GENERATE_PROMPTS_START" });
+    try {
+      const reqBody: Record<string, unknown> = { count };
+      if (config?.provider) reqBody.provider = config.provider;
+      if (config?.model) reqBody.model = config.model;
+
+      const res = await fetch(`/api/skills/${plugin}/${skill}/activation-prompts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(reqBody),
+      });
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { const j = await res.json(); if (j.error) msg = j.error; } catch {}
+        throw new Error(msg);
+      }
+
+      // Backend returns SSE stream — parse events to extract prompts from the done event
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let currentEvent = "";
+      let finalPrompts: Array<{ prompt: string; expected: string }> = [];
+
+      while (true) {
+        const { done: readerDone, value } = await reader.read();
+        if (readerDone) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === "done") {
+                finalPrompts = data.prompts || [];
+              }
+              if (currentEvent === "error") {
+                throw new Error(data.message || data.description || "Generation failed");
+              }
+            } catch (e) {
+              if (e instanceof Error && e.message !== "Generation failed") {
+                // skip malformed JSON
+              } else {
+                throw e;
+              }
+            }
+            currentEvent = "";
+          }
+        }
+      }
+
+      const text = finalPrompts.map((p) => {
+        const prefix = p.expected === "should_activate" ? "+" : "!";
+        return `${prefix}${p.prompt}`;
+      }).join("\n");
+
+      dispatch({ type: "SET_ACTIVATION_PROMPTS", prompts: text });
+      dispatch({ type: "GENERATE_PROMPTS_DONE" });
+    } catch (e) {
+      dispatch({ type: "GENERATE_PROMPTS_ERROR", error: (e as Error).message });
+    }
+  }, [plugin, skill, config]);
+
+  // ---------------------------------------------------------------------------
+  // Activation history
+  // ---------------------------------------------------------------------------
+  const fetchActivationHistory = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/skills/${plugin}/${skill}/activation-history`);
+      if (!res.ok) {
+        if (res.status === 404) {
+          dispatch({ type: "ACTIVATION_HISTORY_LOADED", runs: [] });
+          return;
+        }
+        return;
+      }
+      const data = await res.json();
+      dispatch({ type: "ACTIVATION_HISTORY_LOADED", runs: data.runs || [] });
+    } catch {
+      // Non-blocking — history is optional
+    }
+  }, [plugin, skill]);
 
   const value = useMemo<WorkspaceContextValue>(() => ({
     state,
@@ -561,6 +692,8 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     generateEvals,
     runActivationTest,
     cancelActivation,
+    generateActivationPrompts,
+    fetchActivationHistory,
     submitAiEdit,
     cancelAiEdit,
     applyAiEdit,
@@ -569,7 +702,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     selectAllEvalChanges,
     deselectAllEvalChanges,
     retryEvalsSave,
-  }), [state, isReadOnly, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, cancelActivation, submitAiEdit, cancelAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave]);
+  }), [state, isReadOnly, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, cancelActivation, generateActivationPrompts, fetchActivationHistory, submitAiEdit, cancelAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave]);
 
   return (
     <WorkspaceCtx.Provider value={value}>

@@ -29,6 +29,8 @@ import { buildEvalInitPrompt, parseGeneratedEvals } from "../eval/prompt-builder
 import { testActivation } from "../eval/activation-tester.js";
 import type { ActivationPrompt, SkillMeta } from "../eval/activation-tester.js";
 import { detectMcpDependencies, detectSkillDependencies } from "../eval/mcp-detector.js";
+import { writeActivationRun, listActivationRuns, getActivationRun } from "../eval/activation-history.js";
+import type { ActivationHistoryRun } from "../eval/activation-history.js";
 
 // ---------------------------------------------------------------------------
 // In-memory config state — UI can change provider/model at runtime.
@@ -1143,7 +1145,11 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     initSSE(res, req);
 
     try {
-      const body = (await readBody(req)) as { prompts: ActivationPrompt[] };
+      const body = (await readBody(req)) as {
+        prompts: ActivationPrompt[];
+        provider?: ProviderName;
+        model?: string;
+      };
       const skillMdPath = join(skillDir, "SKILL.md");
       const skillContent = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
 
@@ -1157,7 +1163,11 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         tags: tagsMatch ? tagsMatch[1].split(",").map((t: string) => t.trim()).filter(Boolean) : [],
       };
 
-      const client = getClient();
+      // Use per-request model overrides if provided, fall back to global config
+      const client = body.provider || body.model
+        ? createLlmClient({ provider: body.provider, model: body.model })
+        : getClient();
+
       const summary = await testActivation(description, body.prompts, client, (result) => {
         if (!aborted) {
           sendSSE(res, "prompt_result", result);
@@ -1165,11 +1175,120 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       }, meta);
 
       if (!aborted) {
+        // Write activation history entry
+        const usedProvider = body.provider || currentOverrides.provider || "unknown";
+        const usedModel = body.model || currentOverrides.model || "unknown";
+        const run: ActivationHistoryRun = {
+          id: `run-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          model: usedModel,
+          provider: usedProvider,
+          promptCount: summary.total,
+          summary: {
+            precision: summary.precision,
+            recall: summary.recall,
+            reliability: summary.reliability,
+            tp: summary.tp,
+            tn: summary.tn,
+            fp: summary.fp,
+            fn: summary.fn,
+          },
+          results: summary.results,
+        };
+        try { await writeActivationRun(skillDir, run); } catch { /* non-blocking */ }
+
         sendSSEDone(res, { ...summary, description });
       }
     } catch (err) {
       sendSSEDone(res, { error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  // AI-generate activation test prompts (SSE)
+  router.post("/api/skills/:plugin/:skill/activation-prompts", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    let aborted = false;
+    res.on("close", () => { aborted = true; });
+
+    try {
+      const body = (await readBody(req)) as {
+        count?: number;
+        provider?: ProviderName;
+        model?: string;
+      };
+
+      const skillMdPath = join(skillDir, "SKILL.md");
+      if (!existsSync(skillMdPath)) {
+        sendJson(res, { error: "SKILL.md not found" }, 404, req);
+        return;
+      }
+      const skillContent = readFileSync(skillMdPath, "utf-8");
+      const descMatch = skillContent.match(/^---[\s\S]*?description:\s*"([^"]+)"[\s\S]*?---/);
+      const description = descMatch ? descMatch[1] : "";
+
+      if (!description) {
+        sendJson(res, { error: "No skill description available" }, 400, req);
+        return;
+      }
+
+      initSSE(res, req);
+
+      const count = body.count || 8;
+      const half = Math.ceil(count / 2);
+
+      const client = body.provider || body.model
+        ? createLlmClient({ provider: body.provider, model: body.model })
+        : getClient();
+
+      const systemPrompt = `Given this skill description, generate test prompts to evaluate activation quality.
+Generate ${count} prompts: ${half} that SHOULD activate this skill, ${count - half} that should NOT.
+For "should not" prompts, make them plausible but clearly outside this skill's domain.
+Return one JSON object per line: {"prompt": "...", "expected": "should_activate"|"should_not_activate"}
+Return ONLY the JSON lines, no other text.`;
+
+      const userPrompt = `Skill description: ${description}`;
+
+      const { text } = await client.generate(systemPrompt, userPrompt);
+      if (aborted) return;
+
+      const allPrompts: Array<{ prompt: string; expected: string }> = [];
+      const lines = text.split("\n").filter((l) => l.trim());
+      for (const line of lines) {
+        try {
+          const cleaned = line.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+          if (!cleaned.startsWith("{")) continue;
+          const parsed = JSON.parse(cleaned);
+          if (parsed.prompt && parsed.expected) {
+            allPrompts.push({ prompt: parsed.prompt, expected: parsed.expected });
+            if (!aborted) sendSSE(res, "prompt_generated", parsed);
+          }
+        } catch { /* skip malformed lines */ }
+      }
+
+      if (!aborted) sendSSEDone(res, { prompts: allPrompts });
+    } catch (err) {
+      if (!aborted) {
+        sendSSEDone(res, { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+  });
+
+  // List activation test history (summaries only)
+  router.get("/api/skills/:plugin/:skill/activation-history", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    const runs = await listActivationRuns(skillDir);
+    sendJson(res, { runs }, 200, req);
+  });
+
+  // Get full activation test run by ID
+  router.get("/api/skills/:plugin/:skill/activation-history/:runId", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    const run = await getActivationRun(skillDir, params.runId);
+    if (!run) {
+      sendJson(res, { error: "Run not found" }, 404, req);
+      return;
+    }
+    sendJson(res, run, 200, req);
   });
 
   // Get skill dependencies (MCP + skill-to-skill)

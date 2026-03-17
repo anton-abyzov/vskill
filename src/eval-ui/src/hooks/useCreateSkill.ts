@@ -153,6 +153,9 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
   // AI generation metadata (stored for history/persistence)
   const aiMetaRef = useRef<{ prompt: string; provider: string; model: string; reasoning: string } | null>(null);
 
+  // Draft path tracking for cleanup on plugin change
+  const draftDirRef = useRef<string | null>(null);
+
   // Draft persistence
   const [draftSaved, setDraftSaved] = useState(false);
 
@@ -306,8 +309,31 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
                 aiMetaRef.current = meta;
                 setMode("manual");
 
-                // Show plugin recommendation if on layout 3 and plugins exist
-                if (selectedLayout === 3 && pluginLayoutInfo) {
+                // Apply suggested plugin from backend
+                // Contract: suggestedPlugin: { plugin, layout, confidence, reason } | null
+                if (data.suggestedPlugin && typeof data.suggestedPlugin === "object" && data.suggestedPlugin.plugin) {
+                  const sp = data.suggestedPlugin as { plugin: string; layout?: 1 | 2; confidence?: string; reason?: string };
+                  const allPlugins = layout?.detectedLayouts.flatMap((d) => d.existingPlugins) ?? [];
+                  if (allPlugins.includes(sp.plugin)) {
+                    setPlugin(sp.plugin);
+                    // Use layout from the suggestion if provided, otherwise scan
+                    if (sp.layout && (sp.layout === 1 || sp.layout === 2)) {
+                      setSelectedLayout(sp.layout);
+                    } else {
+                      const matchLayout = layout?.detectedLayouts.find(
+                        (d) => d.existingPlugins.includes(sp.plugin)
+                      );
+                      if (matchLayout && (matchLayout.layout === 1 || matchLayout.layout === 2)) {
+                        setSelectedLayout(matchLayout.layout);
+                      }
+                    }
+                  } else {
+                    // New plugin name — enter "New Plugin" mode
+                    setPlugin("__new__");
+                    setNewPlugin(sp.plugin);
+                  }
+                } else if (selectedLayout === 3 && pluginLayoutInfo) {
+                  // Fallback: show plugin recommendation if on layout 3
                   setShowPluginRecommendation(true);
                 }
 
@@ -323,7 +349,10 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
                   aiMeta: meta,
                 };
                 api.saveDraft(draftReq)
-                  .then(() => { setDraftSaved(true); })
+                  .then((res) => {
+                    setDraftSaved(true);
+                    if (res?.dir) draftDirRef.current = res.dir;
+                  })
                   .catch(() => { /* draft save failure is non-blocking */ });
               } else if (currentEvent === "error") {
                 setAiError(data.message || data.description || "Unknown error");
@@ -344,7 +373,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
       setGenerating(false);
       abortRef.current = null;
     }
-  }, [aiPrompt, resolveAiConfig, selectedLayout, pluginLayoutInfo, effectivePlugin]);
+  }, [aiPrompt, resolveAiConfig, selectedLayout, pluginLayoutInfo, effectivePlugin, layout]);
 
   const handleCreate = useCallback(async () => {
     setError(null);
@@ -363,7 +392,9 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
         allowedTools: allowedTools || undefined,
         body,
         aiMeta: aiMetaRef.current || undefined,
+        draftDir: draftDirRef.current || undefined,
       });
+      draftDirRef.current = null;
       onCreated(result.plugin, result.skill);
     } catch (err) {
       setError((err as Error).message);

@@ -1,6 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { parseModelSpec, computeStats, aggregateRuns } from "../../eval-server/sweep-runner.js";
-import type { ModelSpec, SweepSSEEvent } from "../../eval-server/sweep-runner.js";
+import {
+  parseModelSpec,
+  computeStats,
+  computeMedian,
+  computeCI95,
+  aggregateRuns,
+  detectJudgeBias,
+  computeCompositeScore,
+  computeSkillQualityScore,
+} from "../../eval-server/sweep-runner.js";
+import type { ModelSpec, ModelStats, SweepSSEEvent } from "../../eval-server/sweep-runner.js";
 import type { BenchmarkResult, BenchmarkCase } from "../benchmark.js";
 
 // ---------------------------------------------------------------------------
@@ -132,5 +141,201 @@ describe("aggregateRuns", () => {
     expect(agg.passRate.mean).toBeCloseTo(0.95, 3);
     expect(agg.passRate.stddev).toBe(0);
     expect(agg.duration.stddev).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: computeMedian
+// ---------------------------------------------------------------------------
+
+describe("computeMedian", () => {
+  it("returns median of odd-length array", () => {
+    expect(computeMedian([0.3, 0.5, 0.9])).toBe(0.5);
+  });
+
+  it("returns median of even-length array", () => {
+    expect(computeMedian([0.4, 0.6])).toBe(0.5);
+  });
+
+  it("returns 0 for empty array", () => {
+    expect(computeMedian([])).toBe(0);
+  });
+
+  it("returns single value for length-1 array", () => {
+    expect(computeMedian([0.7])).toBe(0.7);
+  });
+
+  it("handles unsorted input", () => {
+    expect(computeMedian([0.9, 0.1, 0.5])).toBe(0.5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: computeCI95
+// ---------------------------------------------------------------------------
+
+describe("computeCI95", () => {
+  it("returns undefined for single value", () => {
+    expect(computeCI95([0.8])).toBeUndefined();
+  });
+
+  it("returns bounds for two values", () => {
+    const ci = computeCI95([0.7, 0.9]);
+    expect(ci).toBeDefined();
+    expect(ci![0]).toBeLessThan(0.8);
+    expect(ci![1]).toBeGreaterThan(0.8);
+  });
+
+  it("clamps lower bound to 0", () => {
+    const ci = computeCI95([0.01, 0.02, 0.01]);
+    expect(ci).toBeDefined();
+    expect(ci![0]).toBeGreaterThanOrEqual(0);
+  });
+
+  it("clamps upper bound to 1", () => {
+    const ci = computeCI95([0.98, 0.99, 1.0]);
+    expect(ci).toBeDefined();
+    expect(ci![1]).toBeLessThanOrEqual(1);
+  });
+
+  it("returns narrower CI with more data", () => {
+    const ci2 = computeCI95([0.7, 0.9]);
+    const ci10 = computeCI95([0.75, 0.8, 0.78, 0.82, 0.79, 0.81, 0.77, 0.83, 0.76, 0.84]);
+    expect(ci10).toBeDefined();
+    expect(ci2).toBeDefined();
+    const width2 = ci2![1] - ci2![0];
+    const width10 = ci10![1] - ci10![0];
+    expect(width10).toBeLessThan(width2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: computeStats enhanced
+// ---------------------------------------------------------------------------
+
+describe("computeStats (enhanced)", () => {
+  it("includes median in output", () => {
+    const stats = computeStats([0.3, 0.5, 0.9]);
+    expect(stats.median).toBe(0.5);
+  });
+
+  it("includes ci95 for N>=2", () => {
+    const stats = computeStats([0.7, 0.9]);
+    expect(stats.ci95).toBeDefined();
+  });
+
+  it("ci95 is undefined for N=1", () => {
+    const stats = computeStats([0.8]);
+    expect(stats.ci95).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: detectJudgeBias
+// ---------------------------------------------------------------------------
+
+describe("detectJudgeBias", () => {
+  it("detects exact match (self-judging)", () => {
+    const warning = detectJudgeBias(
+      "anthropic/claude-sonnet-4",
+      ["anthropic/claude-sonnet-4", "openrouter/meta-llama/llama-3.1-70b"],
+    );
+    expect(warning).toBeDefined();
+    expect(warning).toContain("identical");
+  });
+
+  it("detects same-family match (anthropic models)", () => {
+    const warning = detectJudgeBias(
+      "anthropic/claude-sonnet-4",
+      ["anthropic/claude-opus-4", "openrouter/meta-llama/llama-3.1-70b"],
+    );
+    // Both are anthropic — should warn about family bias
+    expect(warning).toBeDefined();
+    expect(warning).toContain("family");
+  });
+
+  it("returns undefined for different providers", () => {
+    const warning = detectJudgeBias(
+      "anthropic/claude-sonnet-4",
+      ["openrouter/meta-llama/llama-3.1-70b", "ollama/llama3.1:8b"],
+    );
+    expect(warning).toBeUndefined();
+  });
+
+  it("returns undefined when no models match", () => {
+    const warning = detectJudgeBias(
+      "openrouter/gpt-4o",
+      ["anthropic/claude-sonnet-4"],
+    );
+    expect(warning).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: computeCompositeScore
+// ---------------------------------------------------------------------------
+
+describe("computeCompositeScore", () => {
+  it("returns higher score for higher pass rate", () => {
+    const scoreA = computeCompositeScore({ mean: 0.9, stddev: 0.05 }, 3);
+    const scoreB = computeCompositeScore({ mean: 0.7, stddev: 0.05 }, 3);
+    expect(scoreA).toBeGreaterThan(scoreB);
+  });
+
+  it("returns higher score for more runs (higher confidence)", () => {
+    const score5runs = computeCompositeScore({ mean: 0.8, stddev: 0.05 }, 5);
+    const score1run = computeCompositeScore({ mean: 0.8, stddev: 0.05 }, 1);
+    expect(score5runs).toBeGreaterThan(score1run);
+  });
+
+  it("returns higher score for lower stddev (more stable)", () => {
+    const stableScore = computeCompositeScore({ mean: 0.8, stddev: 0.01 }, 3);
+    const unstableScore = computeCompositeScore({ mean: 0.8, stddev: 0.2 }, 3);
+    expect(stableScore).toBeGreaterThan(unstableScore);
+  });
+
+  it("confidence caps at 1.0 for runs >= 5", () => {
+    const score5 = computeCompositeScore({ mean: 0.8, stddev: 0.05 }, 5);
+    const score10 = computeCompositeScore({ mean: 0.8, stddev: 0.05 }, 10);
+    expect(score5).toBe(score10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: computeSkillQualityScore
+// ---------------------------------------------------------------------------
+
+describe("computeSkillQualityScore", () => {
+  it("rates >= 20% as excellent", () => {
+    const result = computeSkillQualityScore([25, 30, 20]);
+    expect(result.rating).toBe("excellent");
+    expect(result.score).toBe(25);
+  });
+
+  it("rates 10-20% as good", () => {
+    const result = computeSkillQualityScore([12, 15, 18]);
+    expect(result.rating).toBe("good");
+  });
+
+  it("rates 5-10% as marginal", () => {
+    const result = computeSkillQualityScore([5, 7, 9]);
+    expect(result.rating).toBe("marginal");
+  });
+
+  it("rates 0-5% as minimal", () => {
+    const result = computeSkillQualityScore([1, 2, 3]);
+    expect(result.rating).toBe("minimal");
+  });
+
+  it("rates negative as harmful", () => {
+    const result = computeSkillQualityScore([-5, -3, -1]);
+    expect(result.rating).toBe("harmful");
+    expect(result.score).toBe(-3);
+  });
+
+  it("returns minimal for empty array", () => {
+    const result = computeSkillQualityScore([]);
+    expect(result.rating).toBe("minimal");
+    expect(result.score).toBe(0);
   });
 });

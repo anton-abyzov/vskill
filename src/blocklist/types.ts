@@ -28,6 +28,7 @@ export interface RejectionInfo {
   reason: string;
   score: number | null;
   rejectedAt: string;
+  repoUrl?: string;
 }
 
 export interface InstallSafetyResult {

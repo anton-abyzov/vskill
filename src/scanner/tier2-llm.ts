@@ -116,8 +116,18 @@ function parseResponse(raw: string): Omit<Tier2Result, 'model'> {
   }
 }
 
+/** Max retry attempts for transient AI API failures */
+const MAX_RETRIES = 3;
+
+/** Initial backoff in ms (doubles each attempt) */
+const INITIAL_BACKOFF_MS = 1000;
+
 /**
  * Runs Tier 2 LLM-based security analysis.
+ *
+ * Retries up to MAX_RETRIES times with exponential backoff on transient
+ * failures (network errors, timeouts, 5xx). Only returns FAIL after all
+ * retries are exhausted.
  *
  * @param content - The SKILL.md file content
  * @param tier1Findings - Findings from the Tier 1 pattern scanner
@@ -132,29 +142,39 @@ export async function runTier2Scan(
   const systemPrompt = buildSystemPrompt();
   const userMessage = buildUserMessage(content, tier1Findings);
 
-  try {
-    const result = await ai.run(TIER2_MODEL, {
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage },
-      ],
-    });
+  let lastError: string = 'unknown error';
 
-    const responseText = result.response ?? '';
-    const parsed = parseResponse(responseText);
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const result = await ai.run(TIER2_MODEL, {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage },
+        ],
+      });
 
-    return {
-      ...parsed,
-      model: TIER2_MODEL,
-    };
-  } catch (error) {
-    // On API failure, return conservative FAIL
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    return {
-      score: 0,
-      verdict: 'FAIL',
-      rationale: `Tier 2 scan failed: ${errorMsg}`,
-      model: TIER2_MODEL,
-    };
+      const responseText = result.response ?? '';
+      const parsed = parseResponse(responseText);
+
+      return {
+        ...parsed,
+        model: TIER2_MODEL,
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+
+      if (attempt < MAX_RETRIES) {
+        const backoff = INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1);
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+      }
+    }
   }
+
+  // All retries exhausted — return conservative FAIL
+  return {
+    score: 0,
+    verdict: 'FAIL',
+    rationale: `Tier 2 scan failed after ${MAX_RETRIES} attempts: ${lastError}`,
+    model: TIER2_MODEL,
+  };
 }

@@ -582,7 +582,7 @@ describe("addCommand blocklist check (GitHub path)", () => {
       addCommand("owner/evil-repo", {}),
     ).rejects.toThrow("process.exit");
 
-    expect(mockCheckInstallSafety).toHaveBeenCalledWith("evil-repo");
+    expect(mockCheckInstallSafety).toHaveBeenCalledWith("evil-repo", undefined, "https://github.com/owner/evil-repo");
     expect(mockExit).toHaveBeenCalledWith(1);
 
     // Tier 1 scan should NOT have been called (blocked before scan)
@@ -612,7 +612,7 @@ describe("addCommand blocklist check (GitHub path)", () => {
 
     await addCommand("owner/safe-repo", {});
 
-    expect(mockCheckInstallSafety).toHaveBeenCalledWith("safe-repo");
+    expect(mockCheckInstallSafety).toHaveBeenCalledWith("safe-repo", undefined, "https://github.com/owner/safe-repo");
     expect(mockRunTier1Scan).toHaveBeenCalled();
   });
 
@@ -630,7 +630,7 @@ describe("addCommand blocklist check (GitHub path)", () => {
 
     await addCommand("owner/repo", { skill: "my-skill" });
 
-    expect(mockCheckInstallSafety).toHaveBeenCalledWith("my-skill");
+    expect(mockCheckInstallSafety).toHaveBeenCalledWith("my-skill", undefined, "https://github.com/owner/repo");
   });
 });
 
@@ -675,7 +675,7 @@ describe("addCommand blocklist check (plugin path)", () => {
       addCommand("source", { plugin: "evil-plugin", pluginDir: "/tmp/test" }),
     ).rejects.toThrow("process.exit");
 
-    expect(mockCheckInstallSafety).toHaveBeenCalledWith("evil-plugin");
+    expect(mockCheckInstallSafety).toHaveBeenCalledWith("evil-plugin", undefined, undefined);
     expect(mockRunTier1Scan).not.toHaveBeenCalled();
 
     mockExit.mockRestore();
@@ -710,7 +710,7 @@ describe("addCommand blocklist check (plugin path)", () => {
 
     await addCommand("source", { plugin: "safe-plugin", pluginDir: "/tmp/test" });
 
-    expect(mockCheckInstallSafety).toHaveBeenCalledWith("safe-plugin");
+    expect(mockCheckInstallSafety).toHaveBeenCalledWith("safe-plugin", undefined, undefined);
     expect(mockRunTier1Scan).toHaveBeenCalled();
   });
 });

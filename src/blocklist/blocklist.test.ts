@@ -377,4 +377,87 @@ describe("checkInstallSafety — repoUrl parameter", () => {
     const calledUrl = mocks.fetch.mock.calls[0][0] as string;
     expect(calledUrl).toContain("&repoUrl=https%3A%2F%2Fgithub.com%2Fowner%2Frepo%20with%20spaces");
   });
+
+  it("ignores rejection from a different repo (name-only collision)", async () => {
+    const mismatchResult = {
+      blocked: false,
+      rejected: true,
+      rejection: {
+        skillName: "skills",
+        state: "REJECTED",
+        reason: "Below auto-approve threshold",
+        score: 50,
+        rejectedAt: "2026-01-01T00:00:00.000Z",
+        repoUrl: "https://github.com/XCelerationApp/XCeleration",
+      },
+    };
+
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => mismatchResult,
+    });
+
+    const result = await checkInstallSafety(
+      "skills",
+      undefined,
+      "https://github.com/anton-abyzov/vskill",
+    );
+
+    expect(result.rejected).toBe(false);
+    expect(result.rejection).toBeUndefined();
+  });
+
+  it("keeps rejection when repoUrl matches", async () => {
+    const matchResult = {
+      blocked: false,
+      rejected: true,
+      rejection: {
+        skillName: "skills",
+        state: "REJECTED",
+        reason: "Actual security issue",
+        score: 30,
+        rejectedAt: "2026-01-01T00:00:00.000Z",
+        repoUrl: "https://github.com/anton-abyzov/vskill",
+      },
+    };
+
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => matchResult,
+    });
+
+    const result = await checkInstallSafety(
+      "skills",
+      undefined,
+      "https://github.com/anton-abyzov/vskill",
+    );
+
+    expect(result.rejected).toBe(true);
+    expect(result.rejection?.repoUrl).toBe("https://github.com/anton-abyzov/vskill");
+  });
+
+  it("keeps rejection when no client repoUrl provided (cannot verify)", async () => {
+    const rejResult = {
+      blocked: false,
+      rejected: true,
+      rejection: {
+        skillName: "skills",
+        state: "REJECTED",
+        reason: "Some issue",
+        score: 50,
+        rejectedAt: "2026-01-01T00:00:00.000Z",
+        repoUrl: "https://github.com/other/repo",
+      },
+    };
+
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => rejResult,
+    });
+
+    // No repoUrl passed — cannot verify, so keep the rejection
+    const result = await checkInstallSafety("skills");
+
+    expect(result.rejected).toBe(true);
+  });
 });

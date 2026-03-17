@@ -151,6 +151,10 @@ export async function checkBlocklist(
  * Makes a single HTTP call to GET /api/v1/blocklist/check?name=X.
  * Falls back to local checkBlocklist() when the API is unreachable
  * (graceful degradation: rejected=false).
+ *
+ * When repoUrl is provided and the API returns a rejection from a different
+ * repo, the rejection is ignored (name-only matching can produce false
+ * positives across unrelated repos).
  */
 export async function checkInstallSafety(
   skillName: string,
@@ -174,6 +178,17 @@ export async function checkInstallSafety(
     }
 
     const data = (await res.json()) as InstallSafetyResult;
+
+    // Ignore rejections from a different repo (API matches by name only,
+    // so a rejection of "skills" from repo A should not block repo B).
+    if (data.rejected && repoUrl && data.rejection?.repoUrl) {
+      const normalise = (u: string) => u.replace(/\/+$/, "").toLowerCase();
+      if (normalise(data.rejection.repoUrl) !== normalise(repoUrl)) {
+        data.rejected = false;
+        data.rejection = undefined;
+      }
+    }
+
     return data;
   } catch {
     // Network error — fall back to local blocklist check

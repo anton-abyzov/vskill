@@ -968,6 +968,7 @@ async function installPluginDir(
   basePath: string,
   pluginName: string,
   opts: AddOptions,
+  repoUrl?: string,
 ): Promise<void> {
   // Resolve the plugin subdirectory from marketplace.json
   const pluginDir = resolvePluginDir(basePath, pluginName);
@@ -990,7 +991,7 @@ async function installPluginDir(
   }
 
   // Blocklist + rejection check (before scanning)
-  const safety = await checkInstallSafety(pluginName);
+  const safety = await checkInstallSafety(pluginName, undefined, repoUrl);
   if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
     process.exit(1);

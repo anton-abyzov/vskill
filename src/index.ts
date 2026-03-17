@@ -42,10 +42,11 @@ program
 
 program
   .command("init")
-  .description("Detect installed AI agents and optionally update the lockfile")
-  .action(async () => {
+  .description("Detect installed AI agents, create lockfile, and sync core skills")
+  .option("--agent <id>", "Sync to specific agent even if not installed (repeatable)", collect, [])
+  .action(async (opts) => {
     const { initCommand } = await import("./commands/init.js");
-    await initCommand();
+    await initCommand(opts);
   });
 
 program

@@ -1,6 +1,6 @@
 # vskill Plugin Marketplace — Skills Showcase
 
-> **42 expert skills. 13 domain plugins. One command to install.**
+> **Expert skills across multiple domain plugins. One command to install.**
 >
 > Each skill gives your AI agent deep, production-ready expertise in a specific domain. Not generic advice — battle-tested patterns, real CLI tooling, and actual code you can ship.
 

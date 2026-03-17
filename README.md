@@ -9,8 +9,8 @@
   <a href="https://www.npmjs.com/package/vskill"><img src="https://img.shields.io/npm/v/vskill?color=cb3837&logo=npm" alt="npm" /></a>
   <a href="https://www.npmjs.com/package/vskill"><img src="https://img.shields.io/npm/dw/vskill?color=cb3837&logo=npm&label=downloads" alt="downloads" /></a>
   <img src="https://img.shields.io/badge/agents-49_platforms-0969DA" alt="49 agents" />
-  <img src="https://img.shields.io/badge/plugins-13-8B5CF6" alt="13 plugins" />
-  <img src="https://img.shields.io/badge/skills-42-10B981" alt="42 skills" />
+  <img src="https://img.shields.io/badge/plugins-5-8B5CF6" alt="5 plugins" />
+  <img src="https://img.shields.io/badge/skills-7-10B981" alt="7 skills" />
   <a href="https://verified-skill.com"><img src="https://img.shields.io/badge/registry-verified--skill.com-F59E0B" alt="registry" /></a>
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" />
 </p>
@@ -60,14 +60,11 @@ Every install goes through the security pipeline. No exceptions. No `--skip-scan
 # Install from any GitHub repo
 npx vskill install remotion-dev/skills/remotion-best-practices
 
-# Install by name (registry lookup)
-npx vskill install remotion-best-practices
-
 # Browse a repo and pick interactively
 npx vskill install remotion-dev/skills
 
 # Install a plugin (Claude Code)
-npx vskill install --repo anton-abyzov/vskill --plugin frontend
+npx vskill install --repo anton-abyzov/vskill --plugin mobile
 ```
 
 Or install globally: `npm install -g vskill`
@@ -106,71 +103,29 @@ vskill auto-detects your installed agents and installs skills to all of them at 
 
 ## Plugin Marketplace
 
-vskill ships **42 expert skills** organized into **13 domain plugins**. Each plugin has its own namespace — install only what you need.
+vskill ships **7 expert skills** organized into **5 domain plugins**. Each plugin has its own namespace — install only what you need.
 
 ```bash
-npx vskill install --repo anton-abyzov/vskill --plugin frontend
-npx vskill install --repo anton-abyzov/vskill --plugin infra
+npx vskill install --repo anton-abyzov/vskill --plugin mobile
+npx vskill install --repo anton-abyzov/vskill --plugin marketing
 ```
 
 Then invoke as `/plugin:skill` in your agent:
 
 ```
-/frontend:nextjs     /infra:aws        /mobile:flutter
-/ml:rag              /testing:mutation  /security:patterns
+/mobile:appstore             /marketing:social-media-posting
+/google-workspace:gws        /skills:scout
 ```
 
 ### Available Plugins
 
-<table>
-<tr>
-<td width="50%" valign="top">
-
-**frontend** — React 19, Next.js, Figma, i18n, design systems
-- `frontend-core` `design` `figma` `i18n` `nextjs`
-
-**backend** — Java Spring Boot, Rust
-- `java-spring` `rust`
-
-**infra** — AWS, Azure, GCP, CI/CD, secrets, observability
-- `aws` `azure` `gcp` `github-actions` `devsecops` `opentelemetry` `secrets`
-
-**mobile** — React Native, Flutter, SwiftUI, Jetpack, app store
-- `react-native` `expo` `flutter` `swiftui` `jetpack` `capacitor` `deep-linking` `testing` `appstore`
-
-**ml** — RAG, LangChain, Hugging Face, fine-tuning, edge ML
-- `rag` `langchain` `huggingface` `fine-tuning` `edge`
-
-**testing** — Performance, accessibility, mutation testing
-- `performance` `accessibility` `mutation`
-
-</td>
-<td width="50%" valign="top">
-
-**kafka** — Kafka Streams, n8n workflows
-- `streams-topology` `n8n`
-
-**confluent** — Kafka Connect, ksqlDB, Schema Registry
-- `kafka-connect` `ksqldb` `schema-registry`
-
-**payments** — Billing, subscriptions, PCI compliance
-- `billing` `pci`
-
-**security** — Vulnerability pattern detection
-- `patterns`
-
-**blockchain** — Solidity, Foundry, smart contracts
-- `blockchain-core`
-
-**google-workspace** — Google Workspace CLI (gws) for Drive, Sheets, Docs, Calendar, Chat, Admin
-- `gws`
-
-**skills** — Skill discovery and recommendations
-- `scout`
-
-</td>
-</tr>
-</table>
+| Plugin | Description | Skills |
+|--------|-------------|--------|
+| **mobile** | React Native, Expo, Flutter, SwiftUI, Jetpack Compose, app store | `appstore` |
+| **marketing** | Social media content creation, posting, and engagement across 11 platforms, plus Slack messaging | `social-media-posting` `slack-messaging` |
+| **google-workspace** | Google Workspace CLI (gws) for Drive, Sheets, Docs, Calendar, Chat, Admin | `gws` |
+| **skills** | Skill discovery and recommendations | `scout` |
+| **productivity** | Expert network survey completion and paid expertise sharing | `survey-passing` |
 
 <br/>
 

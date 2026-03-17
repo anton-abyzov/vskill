@@ -22,9 +22,9 @@ Activate this skill when the user:
 
 For new users or "what's available?" queries, start with this overview:
 
-> **12 plugin bundles** are available from the official vskill collection, covering frontend, backend, testing, mobile, infrastructure, payments, ML, Kafka, Confluent, security, blockchain, and discovery (scout).
+> **5 plugin bundles** are available from the official vskill collection, covering mobile, marketing, google-workspace, productivity, and discovery (scout).
 >
-> Each bundle contains focused, high-value skills. For example, the `frontend` bundle includes skills for React 19, Next.js, design, Figma, and i18n.
+> Each bundle contains focused, high-value skills. For example, the `mobile` bundle includes the app store automation skill.
 >
 > **Install a bundle**: `npx vskill install --repo anton-abyzov/vskill --plugin <name> --force`
 > **Install everything**: `npx vskill install --repo anton-abyzov/vskill --all --force`
@@ -45,20 +45,16 @@ Determine what the user is looking for:
 When the user says "I don't know" or "what should I install?", analyze their project:
 
 1. Check for tech stack indicators:
-   - `package.json` → frontend/backend bundles (check for React, Next.js, Express, etc.)
-   - `go.mod` → backend (Go)
-   - `Cargo.toml` → backend (Rust)
-   - `pom.xml` / `build.gradle` → backend (Java/Spring)
-   - `docker-compose.yml` / `Dockerfile` → infra
-   - `terraform/` or `*.tf` → infra
-   - `*.test.*` or `__tests__/` → testing
-   - `.github/workflows/` → infra (CI/CD)
+   - `package.json` with React Native/Expo → mobile bundle
+   - `ios/` or `android/` directories → mobile bundle
+   - Social media or marketing context → marketing bundle
+   - Google Workspace integrations → google-workspace bundle
+   - General skill discovery → skills bundle (this skill)
 
 2. Based on findings, recommend specific bundles with reasoning:
    > "Based on your project, I recommend these bundles:
-   > - **frontend** — you have React and Next.js in package.json
-   > - **testing** — you have test files with Vitest
-   > - **infra** — you have GitHub Actions workflows"
+   > - **mobile** — you have React Native and Expo in package.json
+   > - **marketing** — you mentioned social media posting needs"
 
 3. Offer to install all recommended bundles at once.
 
@@ -71,7 +67,7 @@ npx vskill find "<query>" --json
 ```
 
 The `--json` flag returns structured results. Each result contains:
-- `name` — skill identifier (e.g., "frontend:nextjs")
+- `name` — skill identifier (e.g., "mobile:appstore")
 - `author` — skill author
 - `tier` — certification tier: CERTIFIED or VERIFIED
 - `score` — trust score (0-100)
@@ -90,8 +86,8 @@ Format search results as a clear table:
 ```
 | Name              | Author        | Tier      | Score | Installs | Description                    |
 |-------------------|---------------|-----------|-------|----------|--------------------------------|
-| frontend:nextjs   | Anton Abyzov  | CERTIFIED |    95 |      340 | Next.js 14+ App Router expert  |
-| frontend:react    | Anton Abyzov  | VERIFIED  |    88 |      280 | React patterns & hooks         |
+| mobile:appstore   | Anton Abyzov  | CERTIFIED |    95 |      340 | App Store Connect automation   |
+| marketing:social  | Anton Abyzov  | VERIFIED  |    88 |      280 | Social media posting           |
 ```
 
 After the table:
@@ -107,21 +103,14 @@ When the query matches a known plugin category, suggest the full plugin bundle i
 
 | Plugin | Domain | Skills Included |
 |--------|--------|-----------------|
-| `frontend` | Frontend development | React 19, Next.js, design, Figma, i18n |
-| `backend` | Backend development | Java Spring, Rust |
-| `testing` | Testing | Accessibility, performance, mutation testing |
-| `mobile` | Mobile development | React Native, Expo, Flutter, SwiftUI, Jetpack Compose, app store, deep linking |
-| `infra` | Cloud infrastructure | AWS CDK, Azure Bicep, GCP, DevSecOps, GitHub Actions, OpenTelemetry, secrets |
-| `payments` | Payment processing | Billing, subscriptions, PCI compliance |
-| `ml` | Machine learning | RAG, LangChain, Hugging Face, fine-tuning, edge ML |
-| `kafka` | Apache Kafka | Kafka Streams topology, n8n workflow automation |
-| `confluent` | Confluent platform | Schema Registry, ksqlDB, Kafka Connect |
-| `blockchain` | Blockchain / Web3 | Solidity, Foundry, smart contract security, gas optimization |
-| `security` | Security | Real-time vulnerability pattern detection |
+| `mobile` | Mobile development | App Store Connect automation (`appstore`) |
+| `marketing` | Marketing & comms | Social media posting, Slack messaging |
+| `google-workspace` | Google Workspace | Google Workspace CLI (`gws`) |
+| `productivity` | Personal productivity | Expert network survey completion |
 | `skills` | Discovery | This skill — search verified-skill.com and install skills |
 
 Example recommendation:
-> "Your query matches the **frontend** plugin bundle, which includes skills for React, Next.js, Vue, Angular, and more. Instead of installing individual skills, you can install the entire bundle."
+> "Your query matches the **mobile** plugin bundle, which includes the App Store Connect automation skill. Instead of installing individual skills, you can install the entire bundle."
 
 ### Step 5: Install
 
@@ -159,7 +148,7 @@ npx vskill install <owner>/<repo> --skill <skill-name>
 After running the install command:
 1. Report the installation result (success/failure)
 2. List which agents received the skill (Claude Code, Cursor, etc.)
-3. Mention the skill's namespace for invocation (e.g., `frontend:nextjs`)
+3. Mention the skill's namespace for invocation (e.g., `mobile:appstore`)
 4. Suggest restarting the AI agent if needed to pick up new skills
 
 ## Error Handling
@@ -167,6 +156,7 @@ After running the install command:
 | Scenario | Action |
 |----------|--------|
 | `npx vskill` not found | Tell user to install: `npm install -g vskill` or use `npx` |
+| `npm error code E401` with `npx` | A project `.npmrc` with a private registry is interfering. Use: `npx --registry https://registry.npmjs.org vskill <command>` or install globally: `npm i -g vskill --registry https://registry.npmjs.org` |
 | Network error on search | Suggest checking internet connection; offer to try again |
 | No results found | Try broader search terms; suggest visiting verified-skill.com |
 | Scan FAIL on install | Explain the security concern; suggest `--force` only if user understands the risk |
@@ -189,8 +179,8 @@ After running the install command:
 **Action**:
 1. Run `npx vskill find "kubernetes" --json`
 2. Present results table
-3. Recommend the `k8s` plugin bundle
-4. Ask if they want individual skills or the full bundle
+3. Recommend relevant skills from the registry
+4. Ask if they want individual skills or a full bundle
 5. Install their choice
 
 ### Example 3: Specific Skill Install
@@ -198,12 +188,12 @@ After running the install command:
 **Action**:
 1. Run `npx vskill find "nextjs" --json` to confirm availability
 2. Show the result with tier and score
-3. Run `npx vskill install frontend:nextjs` (or suggest the full frontend bundle)
+3. Run `npx vskill install mobile:appstore` (or suggest the full mobile bundle)
 
 ### Example 4: Broad Exploration
 **User**: "What skills are available?"
 **Action**:
-1. List the 16 available plugin bundles with descriptions
+1. List the 5 available plugin bundles with descriptions
 2. Ask which domain interests them
 3. Search that domain and present specific skills
 4. Install based on selection
@@ -212,7 +202,7 @@ After running the install command:
 **User**: "What skills would help with my project?"
 **Action**:
 1. Look at the project's tech stack (package.json, Cargo.toml, go.mod, etc.)
-2. Identify relevant domains (frontend, backend, testing, infra)
+2. Identify relevant domains (mobile, marketing, google-workspace, productivity)
 3. Search for skills matching each domain
 4. Present a curated recommendation list
 5. Offer to install matching bundles
@@ -233,4 +223,4 @@ When presenting results, explain trust tiers to help users make informed decisio
 - Plugin bundles from `anton-abyzov/vskill` are the official curated collection
 - Third-party skills should be evaluated based on their trust tier and score
 - Skills are installed per-agent (Claude Code, Cursor, etc.) — the CLI handles multi-agent installs
-- Use `--all` with `--repo` to install all 12 plugin bundles in one command
+- Use `--all` with `--repo` to install all 5 plugin bundles in one command

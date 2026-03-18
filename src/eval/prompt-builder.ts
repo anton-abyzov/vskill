@@ -89,6 +89,16 @@ const BEST_PRACTICES = `
    - GOOD: "Response includes a bash command checking whether the file exists (e.g., using [ -f ... ] or ls)"
    - BAD: "Opens https://studio.youtube.com as the target URL"
    - GOOD: "Response includes studio.youtube.com as the target URL in a code block or command"
+
+7. **Functional over formatting: assert on WHAT, not HOW it looks**. Do not assert on formatting details like blank lines, paragraph count, whitespace structure, exact heading levels, bullet formatting, or sentence count. These are stylistic choices that vary between LLM runs and do not indicate skill quality.
+   - BAD: "The greeting is a single short sentence (not multiple paragraphs)" (formatting-rigid)
+   - GOOD: "The response starts with a greeting that includes the user's name" (semantic/functional)
+   - BAD: "The response uses exactly 3 bullet points" (formatting-rigid)
+   - GOOD: "The response lists at least 3 distinct benefits" (content-focused)
+
+8. **Unit-test granularity**: Each assertion should check exactly ONE observable behavior. Avoid compound assertions that test multiple things at once. This makes failures easier to diagnose and reduces false negatives.
+   - BAD: "The response greets the user, lists benefits, and ends with a farewell" (tests 3 things)
+   - GOOD: Three separate assertions, one for greeting, one for benefits, one for farewell
 `;
 
 // ---------------------------------------------------------------------------

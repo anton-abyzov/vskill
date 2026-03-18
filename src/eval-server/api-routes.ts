@@ -863,6 +863,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         eval_name: string;
         comparison: Awaited<ReturnType<typeof runComparison>>;
         assertionResults: BenchmarkAssertionResult[];
+        baselineAssertionResults: BenchmarkAssertionResult[];
       }> = [];
 
       for (const evalCase of casesToRun) {
@@ -910,6 +911,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
           });
 
           const assertionResults: BenchmarkAssertionResult[] = [];
+          const baselineAssertionResults: BenchmarkAssertionResult[] = [];
           for (let ai = 0; ai < evalCase.assertions.length; ai++) {
             const assertion = evalCase.assertions[ai];
             if (aborted) break;
@@ -920,14 +922,25 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
               current: ai + 1,
               total: evalCase.assertions.length,
             });
-            const result = await judgeAssertion(comparison.skillOutput, assertion, client);
-            assertionResults.push(result);
+            const [skillResult, baselineResult] = await Promise.all([
+              judgeAssertion(comparison.skillOutput, assertion, client),
+              judgeAssertion(comparison.baselineOutput, assertion, client),
+            ]);
+            assertionResults.push(skillResult);
+            baselineAssertionResults.push(baselineResult);
             sendSSE(res, "assertion_result", {
               eval_id: evalCase.id,
-              assertion_id: result.id,
-              text: result.text,
-              pass: result.pass,
-              reasoning: result.reasoning,
+              assertion_id: skillResult.id,
+              text: skillResult.text,
+              pass: skillResult.pass,
+              reasoning: skillResult.reasoning,
+            });
+            sendSSE(res, "baseline_assertion_result", {
+              eval_id: evalCase.id,
+              assertion_id: baselineResult.id,
+              text: baselineResult.text,
+              pass: baselineResult.pass,
+              reasoning: baselineResult.reasoning,
             });
           }
 
@@ -948,6 +961,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
             eval_name: evalCase.name,
             comparison,
             assertionResults,
+            baselineAssertionResults,
           });
 
           sendSSE(res, "comparison_scored", {
@@ -997,7 +1011,13 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
               ) / comparisonResults.length
             : 0;
 
-        const verdict = computeVerdict(passRate, skillRubricAvg, baselineRubricAvg);
+        const baselinePassed = comparisonResults.reduce(
+          (s, r) => s + r.baselineAssertionResults.filter((a) => a.pass).length,
+          0,
+        );
+        const baselinePassRate = totalAssertions > 0 ? baselinePassed / totalAssertions : 0;
+
+        const verdict = computeVerdict(passRate, skillRubricAvg, baselineRubricAvg, baselinePassRate);
 
         // Generate action items (one LLM call with comparison context)
         let actionItems;
@@ -1062,10 +1082,10 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
           verdict,
           comparison: {
             skillPassRate: passRate,
-            baselinePassRate: 0,
+            baselinePassRate,
             skillRubricAvg,
             baselineRubricAvg,
-            delta: skillRubricAvg - baselineRubricAvg,
+            delta: passRate - baselinePassRate,
           },
           ...(actionItems ? { actionItems } : {}),
         };

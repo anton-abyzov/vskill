@@ -254,9 +254,12 @@ describe("comparison endpoint SSE events", () => {
 
     vi.mocked(runComparison).mockResolvedValue(makeComparisonResult());
 
+    // Each assertion now calls judgeAssertion twice (skill + baseline via Promise.all)
     vi.mocked(judgeAssertion)
       .mockResolvedValueOnce({ id: "a1", text: "check one", pass: true, reasoning: "ok" })
-      .mockResolvedValueOnce({ id: "a2", text: "check two", pass: true, reasoning: "ok" });
+      .mockResolvedValueOnce({ id: "a1", text: "check one", pass: true, reasoning: "baseline ok" })
+      .mockResolvedValueOnce({ id: "a2", text: "check two", pass: true, reasoning: "ok" })
+      .mockResolvedValueOnce({ id: "a2", text: "check two", pass: true, reasoning: "baseline ok" });
 
     const router = makeRouter();
     const req = makeMockReq("POST", "/api/skills/test/my-skill/compare");
@@ -289,9 +292,13 @@ describe("comparison endpoint SSE events", () => {
 
     vi.mocked(runComparison).mockResolvedValue(makeComparisonResult());
 
+    // Each assertion now calls judgeAssertion twice (skill + baseline via Promise.all)
+    // a1: skill=pass, baseline=pass; a2: skill=fail, baseline=pass
     vi.mocked(judgeAssertion)
       .mockResolvedValueOnce({ id: "a1", text: "check one", pass: true, reasoning: "ok" })
-      .mockResolvedValueOnce({ id: "a2", text: "check two", pass: false, reasoning: "nope" });
+      .mockResolvedValueOnce({ id: "a1", text: "check one", pass: true, reasoning: "baseline ok" })
+      .mockResolvedValueOnce({ id: "a2", text: "check two", pass: false, reasoning: "nope" })
+      .mockResolvedValueOnce({ id: "a2", text: "check two", pass: true, reasoning: "baseline ok" });
 
     const router = makeRouter();
     const req = makeMockReq("POST", "/api/skills/test/my-skill/compare");
@@ -306,6 +313,10 @@ describe("comparison endpoint SSE events", () => {
     const [, , data] = caseCompleteEvents[0] as [unknown, string, Record<string, unknown>];
     expect(data.status).toBe("fail");
     expect(data.pass_rate).toBe(0.5);
+
+    // Verify baseline_assertion_result SSE events are emitted
+    const baselineEvents = sseCalls.filter(([, event]) => event === "baseline_assertion_result");
+    expect(baselineEvents).toHaveLength(2);
   });
 
   it("still emits legacy outputs_ready and comparison_scored events (backward compat)", async () => {

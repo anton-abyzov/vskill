@@ -468,6 +468,15 @@ The eval evaluates the LLM text response — it cannot run Bash or call tools. A
 - BAD: "Checks that the file exists before uploading"
 - GOOD: "Response includes a bash command checking whether the file exists (e.g., using test -f or ls)"
 
+### Assertion Quality: Functional Over Formatting (CRITICAL)
+Assert on FUNCTIONAL correctness, not formatting or presentation details. Each assertion should test exactly ONE observable behavior (unit-test style).
+- NEVER assert on: blank lines, paragraph count, whitespace, exact heading levels, bullet formatting, sentence count, or line breaks
+- GOOD: "The response includes a greeting that contains the name 'Anton'" (checks functional behavior)
+- BAD: "The greeting is a single short sentence (not multiple paragraphs)" (tests formatting, not function)
+- GOOD: "The response lists at least 3 benefits of TypeScript" (checks content)
+- BAD: "The response uses exactly 3 bullet points" (tests formatting)
+Formatting is stylistic — it varies between LLM runs and does not indicate skill quality.
+
 ## Output Format
 Return a JSON object with these fields:
 {
@@ -488,6 +497,7 @@ Field rules:
 - evals: 2-3 realistic test cases with objectively verifiable assertions
 - Prompts should be what real users would say, not abstract test inputs
 - Each assertion must be independently verifiable by a judge LLM reading the response text
+- Each assertion should check exactly ONE functional behavior (unit-test granularity)
 
 Return ONLY the JSON object — no code fences, no preamble.`;
 

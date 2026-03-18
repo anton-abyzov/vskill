@@ -15,10 +15,11 @@ describe("computeVerdict", () => {
     expect(computeVerdict(0.85, 3.5, 3.0)).toBe("MARGINAL");
   });
 
-  it("returns INEFFECTIVE when passRate >= 0.4 (but not MARGINAL)", () => {
-    expect(computeVerdict(0.50, 2.5, 3.0)).toBe("INEFFECTIVE");
-    expect(computeVerdict(0.45, 3.0, 3.0)).toBe("INEFFECTIVE");
-    expect(computeVerdict(0.40, 1.0, 5.0)).toBe("INEFFECTIVE");
+  it("returns INEFFECTIVE when medium passRate but no improvement over baseline", () => {
+    // 50% skill, 60% baseline → no improvement → INEFFECTIVE
+    expect(computeVerdict(0.50, 2.5, 3.0, 0.6)).toBe("INEFFECTIVE");
+    // 55% skill, 55% baseline → no improvement → INEFFECTIVE
+    expect(computeVerdict(0.55, 3.0, 3.0, 0.55)).toBe("INEFFECTIVE");
   });
 
   it("returns EMERGING when passRate < 0.4 and skillAvg > baselineAvg", () => {
@@ -39,18 +40,22 @@ describe("computeVerdict", () => {
     expect(computeVerdict(0.20, 1.0, 2.0)).toBe("DEGRADING");
   });
 
-  it("handles boundary at passRate = 0.4", () => {
-    // Exactly 0.4 → INEFFECTIVE (not EMERGING or DEGRADING)
-    expect(computeVerdict(0.4, 3.0, 3.0)).toBe("INEFFECTIVE");
-    expect(computeVerdict(0.4, 5.0, 0.0)).toBe("INEFFECTIVE");
-    expect(computeVerdict(0.4, 1.0, 5.0)).toBe("INEFFECTIVE");
+  it("handles boundary at passRate = 0.4 (low zone)", () => {
+    // 0.4 is below 0.5 → falls to low pass rate zone
+    // Equal rubric → DEGRADING
+    expect(computeVerdict(0.4, 3.0, 3.0)).toBe("DEGRADING");
+    // Skill rubric better → EMERGING
+    expect(computeVerdict(0.4, 5.0, 0.0)).toBe("EMERGING");
+    // Skill rubric worse → DEGRADING
+    expect(computeVerdict(0.4, 1.0, 5.0)).toBe("DEGRADING");
   });
 
   it("handles boundary at passRate = 0.6", () => {
-    // Exactly 0.6, skill > baseline → MARGINAL
+    // Exactly 0.6 with baselinePassRate=0 (default): passRateDelta=0.6 > 0 → MARGINAL
     expect(computeVerdict(0.6, 3.1, 3.0)).toBe("MARGINAL");
-    // Exactly 0.6, skill = baseline → INEFFECTIVE
-    expect(computeVerdict(0.6, 3.0, 3.0)).toBe("INEFFECTIVE");
+    expect(computeVerdict(0.6, 3.0, 3.0)).toBe("MARGINAL");
+    // Exactly 0.6 with baseline also 0.6: no improvement → INEFFECTIVE
+    expect(computeVerdict(0.6, 3.0, 3.0, 0.6)).toBe("INEFFECTIVE");
   });
 
   it("handles boundary at passRate = 0.8", () => {
@@ -64,6 +69,48 @@ describe("computeVerdict", () => {
     expect(computeVerdict(0.30, 3.0, 3.0)).toBe("DEGRADING");
     expect(computeVerdict(0.0, 0.0, 0.0)).toBe("DEGRADING");
     expect(computeVerdict(0.39, 2.5, 2.5)).toBe("DEGRADING");
+  });
+
+  // --- Baseline-aware verdict tests (4th param: baselinePassRate) ---
+
+  it("EFFECTIVE when skill pass rate high AND significantly better than baseline", () => {
+    // 100% skill, 50% baseline, good rubric delta → EFFECTIVE
+    expect(computeVerdict(1.0, 4.5, 2.5, 0.5)).toBe("EFFECTIVE");
+    // 85% skill, 60% baseline, rubric > baseline + 1 → EFFECTIVE
+    expect(computeVerdict(0.85, 4.5, 3.0, 0.6)).toBe("EFFECTIVE");
+  });
+
+  it("MARGINAL when skill pass rate high but baseline also high (no improvement)", () => {
+    // 80% skill, 80% baseline — skill shows no improvement
+    expect(computeVerdict(0.8, 3.5, 3.5, 0.8)).toBe("MARGINAL");
+    // 90% skill, 85% baseline — slight improvement only
+    expect(computeVerdict(0.9, 4.0, 3.8, 0.85)).toBe("MARGINAL");
+  });
+
+  it("DEGRADING when skill pass rate much worse than baseline", () => {
+    // 30% skill, 70% baseline — skill is clearly worse
+    expect(computeVerdict(0.3, 2.0, 4.0, 0.7)).toBe("DEGRADING");
+  });
+
+  it("never returns INEFFECTIVE for assertionPassRate >= 0.8", () => {
+    // Even with bad rubric and equal baseline, high pass rate should NOT be INEFFECTIVE
+    expect(computeVerdict(0.8, 3.0, 3.0, 0.8)).not.toBe("INEFFECTIVE");
+    expect(computeVerdict(1.0, 2.0, 3.0, 1.0)).not.toBe("INEFFECTIVE");
+    expect(computeVerdict(0.85, 1.0, 5.0, 0.85)).not.toBe("INEFFECTIVE");
+  });
+
+  it("INEFFECTIVE when moderate pass rate but no improvement over baseline", () => {
+    // 50% skill, 60% baseline — skill doesn't help
+    expect(computeVerdict(0.5, 3.0, 3.5, 0.6)).toBe("INEFFECTIVE");
+    // 60% skill, 70% baseline, rubric equal — no improvement
+    expect(computeVerdict(0.6, 3.0, 3.0, 0.7)).toBe("INEFFECTIVE");
+  });
+
+  it("backwards compatible: 3-arg calls default baselinePassRate to 0", () => {
+    // Old-style calls should still work (baselinePassRate defaults to 0)
+    expect(computeVerdict(0.85, 4.5, 3.0)).toBe("EFFECTIVE");
+    expect(computeVerdict(0.70, 3.5, 3.0)).toBe("MARGINAL");
+    expect(computeVerdict(0.0, 0.0, 0.0)).toBe("DEGRADING");
   });
 });
 

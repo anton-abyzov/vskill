@@ -1,0 +1,79 @@
+{
+  "timestamp": "2026-03-18T17:07:45.089Z",
+  "model": "sonnet",
+  "skill_name": "greet-anton",
+  "cases": [
+    {
+      "eval_id": 2,
+      "eval_name": "Farewell at end of completed task",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "durationMs": 18956,
+      "tokens": null,
+      "assertions": [
+        {
+          "id": "farewell-uses-name",
+          "text": "The response includes a farewell that contains the name 'Anton'",
+          "pass": true,
+          "reasoning": "The response 'That's a wrap — bye-bye Anton!' contains a farewell message that includes the name 'Anton'."
+        },
+        {
+          "id": "farewell-comes-last",
+          "text": "The farewell appears at the end of the response, after all task content",
+          "pass": true,
+          "reasoning": "The output contains only the farewell message with no other task content preceding it, so the farewell is at the end (and beginning) of the response."
+        },
+        {
+          "id": "farewell-is-brief",
+          "text": "The farewell is a single short sentence",
+          "pass": true,
+          "reasoning": "The output 'That's a wrap — bye-bye Anton!' is a single short sentence."
+        },
+        {
+          "id": "farewell-no-generic",
+          "text": "The farewell does not use a generic phrase without Anton's name (e.g., 'Goodbye!' alone)",
+          "pass": true,
+          "reasoning": "The farewell includes Anton's name explicitly ('bye-bye Anton!'), so it is not a generic phrase without his name."
+        }
+      ],
+      "comparisonDetail": {
+        "skillDurationMs": 18956,
+        "skillTokens": null,
+        "baselineDurationMs": 11899,
+        "baselineTokens": null,
+        "skillContentScore": 2,
+        "skillStructureScore": 2,
+        "baselineContentScore": 4,
+        "baselineStructureScore": 4,
+        "winner": "baseline"
+      }
+    }
+  ],
+  "overall_pass_rate": 1,
+  "type": "comparison",
+  "provider": "claude-cli",
+  "verdict": "INEFFECTIVE",
+  "comparison": {
+    "skillPassRate": 1,
+    "baselinePassRate": 0,
+    "skillRubricAvg": 2,
+    "baselineRubricAvg": 4,
+    "delta": -2
+  },
+  "actionItems": {
+    "recommendation": "remove",
+    "summary": "The skill actively degrades output quality: baseline scored 4/4 vs skill's 2/2 across both content and structure in the only tested case, despite 100% assertion pass rate. The assertions are too weak to reflect real quality — the rubric scores reveal the skill makes responses worse.",
+    "weaknesses": [
+      "Case 'Farewell at end of completed task': skill scored 2/5 on both content and structure vs baseline's 4/5 — a -2 delta indicating the farewell addition actively hurts response quality",
+      "The skill's farewell phrases ('Bye-bye Anton!') feel forced and unprofessional in a technical assistant context, lowering perceived quality",
+      "Assertions pass 100% but rubric scores are low — the assertions only check presence of name/farewell, not whether the output is actually better, masking the quality degradation",
+      "Adding boilerplate greetings/farewells adds noise without value, diluting the signal of the actual technical response"
+    ],
+    "strengths": [
+      "Clear, specific instructions with examples — the skill itself is well-written and unambiguous",
+      "Correctly scoped to one-line greetings to avoid overwhelming the actual response"
+    ],
+    "suggestedFocus": "Remove this skill entirely — personalized greetings and farewells reduce perceived professionalism in a coding assistant context and the rubric data confirms they degrade output quality compared to baseline."
+  }
+}

@@ -8,16 +8,27 @@ export function computeVerdict(
   assertionPassRate: number,
   skillRubricAvg: number,
   baselineRubricAvg: number,
+  baselinePassRate: number = 0,
 ): EvalVerdict {
-  if (assertionPassRate >= 0.8 && skillRubricAvg > baselineRubricAvg + 1) {
-    return "EFFECTIVE";
-  }
-  if (assertionPassRate >= 0.6 && skillRubricAvg > baselineRubricAvg) {
+  const passRateDelta = assertionPassRate - baselinePassRate;
+
+  // High pass rate zone (>= 0.8)
+  if (assertionPassRate >= 0.8) {
+    if (passRateDelta > 0.15 && skillRubricAvg > baselineRubricAvg + 1) {
+      return "EFFECTIVE";
+    }
     return "MARGINAL";
   }
-  if (assertionPassRate >= 0.4) {
+
+  // Medium pass rate zone (>= 0.5)
+  if (assertionPassRate >= 0.5) {
+    if (passRateDelta > 0) {
+      return "MARGINAL";
+    }
     return "INEFFECTIVE";
   }
+
+  // Low pass rate zone (< 0.5)
   if (skillRubricAvg > baselineRubricAvg) {
     return "EMERGING";
   }

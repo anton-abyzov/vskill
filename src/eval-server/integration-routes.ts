@@ -183,11 +183,18 @@ export function registerIntegrationRoutes(router: Router, root: string): void {
         return;
       }
 
+      const urlParams = req.url
+        ? new URL(req.url, "http://localhost").searchParams
+        : new URLSearchParams();
+      const reveal = urlParams.get("reveal") === "true";
+      const revealKey = urlParams.get("key"); // optional: reveal only this key
+
       const content = readFileSync(dotenvPath, "utf-8");
       const parsed = parseDotenv(content);
       const paramList = Object.entries(parsed).map(([key, val]) => ({
         name: key,
         maskedValue: val.length > 0 ? "***" + val.slice(-4) : "",
+        ...(reveal && (!revealKey || revealKey === key) ? { value: val } : {}),
         status: val.trim() !== "" ? "ready" as const : "missing" as const,
       }));
 

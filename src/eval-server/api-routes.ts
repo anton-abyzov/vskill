@@ -593,72 +593,53 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
       if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "parsing", message: "Parsing generated evals..." });
 
-      // Parse based on test type
-      if (isIntegration) {
-        const integrationCases = parseGeneratedIntegrationEvals(genResult.text);
+      // Parse generated cases
+      const newCases = isIntegration
+        ? parseGeneratedIntegrationEvals(genResult.text)
+        : parseGeneratedEvals(genResult.text).evals;
 
-        // Load existing evals to merge and avoid ID collisions
-        let existingEvals: EvalsFile | null = null;
-        try { existingEvals = loadAndValidateEvals(skillDir); } catch (e) {
-          if ((e as NodeJS.ErrnoException).code !== "ENOENT" &&
-              !(e instanceof Error && e.message.includes("ENOENT"))) {
-            throw e;
-          }
-          // File doesn't exist — no existing evals, proceed with empty
+      // Load existing evals to merge — both unit and integration paths merge
+      // to prevent data loss (e.g., regenerating unit tests won't wipe integration tests)
+      let existingEvals: EvalsFile | null = null;
+      try { existingEvals = loadAndValidateEvals(skillDir); } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT" &&
+            !(e instanceof Error && e.message.includes("ENOENT"))) {
+          throw e;
         }
+      }
 
-        const existingIds = existingEvals?.evals.map((e) => e.id) ?? [];
-        const maxId = existingIds.length > 0 ? Math.max(...existingIds) : 0;
+      // Filter out existing cases of the same type, then merge with new ones
+      const keepType = isIntegration ? "unit" : "integration";
+      const keptCases = (existingEvals?.evals || []).filter(
+        (c) => (c.testType ?? "unit") === keepType,
+      );
 
-        // Re-number integration cases to avoid collisions
-        const reNumbered = integrationCases.map((c, i) => ({ ...c, id: maxId + 1 + i }));
+      const maxId = keptCases.length > 0 ? Math.max(...keptCases.map((c) => c.id)) : 0;
+      const reNumbered = newCases.map((c, i) => ({ ...c, id: maxId + 1 + i }));
 
-        const mergedEvals: EvalsFile = {
-          skill_name: existingEvals?.skill_name || params.skill,
-          evals: [...(existingEvals?.evals || []), ...reNumbered],
-        };
+      const mergedEvals: EvalsFile = {
+        skill_name: existingEvals?.skill_name || params.skill,
+        evals: [...keptCases, ...reNumbered],
+      };
 
-        // Record history
-        try {
-          await writeHistoryEntry(skillDir, {
-            timestamp: new Date().toISOString(),
-            model: client.model,
-            skill_name: mergedEvals.skill_name,
-            cases: [],
-            overall_pass_rate: undefined,
-            type: "eval-generate",
-            provider: overrides.provider || "claude-cli",
-            generate: { prompt, result: JSON.stringify(mergedEvals) },
-          });
-        } catch { /* history write failure should not break the main response */ }
+      // Record history
+      try {
+        await writeHistoryEntry(skillDir, {
+          timestamp: new Date().toISOString(),
+          model: client.model,
+          skill_name: mergedEvals.skill_name,
+          cases: [],
+          overall_pass_rate: undefined,
+          type: "eval-generate",
+          provider: overrides.provider || "claude-cli",
+          generate: { prompt, result: JSON.stringify(mergedEvals) },
+        });
+      } catch { /* history write failure should not break the main response */ }
 
-        if (wantsSSE && !aborted) {
-          sendSSEDone(res, mergedEvals);
-        } else {
-          sendJson(res, mergedEvals, 200, req);
-        }
+      if (wantsSSE && !aborted) {
+        sendSSEDone(res, mergedEvals);
       } else {
-        const evalsFile = parseGeneratedEvals(genResult.text);
-
-        // Record history entry for eval generation
-        try {
-          await writeHistoryEntry(skillDir, {
-            timestamp: new Date().toISOString(),
-            model: client.model,
-            skill_name: evalsFile.skill_name || params.skill,
-            cases: [],
-            overall_pass_rate: undefined,
-            type: "eval-generate",
-            provider: overrides.provider || "claude-cli",
-            generate: { prompt, result: JSON.stringify(evalsFile) },
-          });
-        } catch { /* history write failure should not break the main response */ }
-
-        if (wantsSSE && !aborted) {
-          sendSSEDone(res, evalsFile);
-        } else {
-          sendJson(res, evalsFile, 200, req);
-        }
+        sendJson(res, mergedEvals, 200, req);
       }
     } catch (err) {
       if (wantsSSE && !aborted) {

@@ -247,8 +247,13 @@ export const api = {
     });
   },
 
-  getParams(plugin: string, skill: string): Promise<{ params: Array<{ name: string; maskedValue: string; status: string }> }> {
+  getParams(plugin: string, skill: string): Promise<{ params: Array<{ name: string; maskedValue: string; value?: string; status: string }> }> {
     return fetchJson(`/api/credentials/${plugin}/${skill}/params`);
+  },
+
+  getParamsRevealed(plugin: string, skill: string, key?: string): Promise<{ params: Array<{ name: string; maskedValue: string; value?: string; status: string }> }> {
+    const qs = key ? `reveal=true&key=${encodeURIComponent(key)}` : "reveal=true";
+    return fetchJson(`/api/credentials/${plugin}/${skill}/params?${qs}`);
   },
 
   // ---------------------------------------------------------------------------

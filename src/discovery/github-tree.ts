@@ -61,6 +61,22 @@ export async function getDefaultBranch(owner: string, repo: string): Promise<str
   return branch;
 }
 
+/**
+ * Check whether a GitHub repo exists. Returns false only on 404.
+ * Fails open on network errors or rate limits (returns true).
+ */
+export async function checkRepoExists(owner: string, repo: string): Promise<boolean> {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+      headers: { Accept: "application/vnd.github.v3+json" },
+    });
+    if (res.status === 404) return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 export interface DiscoveredSkill {
   name: string;
   path: string;

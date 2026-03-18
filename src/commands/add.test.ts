@@ -138,9 +138,11 @@ vi.mock("../api/client.js", () => ({
 // ---------------------------------------------------------------------------
 const mockDiscoverSkills = vi.fn();
 const mockGetDefaultBranch = vi.fn().mockResolvedValue("main");
+const mockCheckRepoExists = vi.fn().mockResolvedValue(true);
 vi.mock("../discovery/github-tree.js", () => ({
   discoverSkills: (...args: unknown[]) => mockDiscoverSkills(...args),
   getDefaultBranch: (...args: unknown[]) => mockGetDefaultBranch(...args),
+  checkRepoExists: (...args: unknown[]) => mockCheckRepoExists(...args),
   warnRateLimitOnce: vi.fn(),
 }));
 
@@ -324,11 +326,13 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
       // Call addCommand with plugin option and pluginDir (local source)
       await addCommand(localPath, { plugin: "frontend", pluginDir: localPath });
 
-      // copyFileSync should have been called (copyPluginFiltered uses it)
-      expect(mockCopyFileSync).toHaveBeenCalled();
-      const cpCall = mockCopyFileSync.mock.calls[0];
-      // Source should include plugins/frontend
-      expect(cpCall[0]).toContain("plugins/frontend");
+      // SKILL.md is processed via ensureFrontmatter and written with writeFileSync
+      const writeCall = mockWriteFileSync.mock.calls.find(
+        (c: unknown[]) => typeof c[0] === "string" && (c[0] as string).endsWith("SKILL.md")
+      );
+      expect(writeCall).toBeDefined();
+      // The written content should contain frontmatter (name field injected by ensureFrontmatter)
+      expect(writeCall![1]).toContain("name:");
     });
   });
 
@@ -387,10 +391,11 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
 
       await addCommand(localPath, { plugin: "newplugin", pluginDir: localPath });
 
-      // copyFileSync should be called with path including plugins/newplugin
-      expect(mockCopyFileSync).toHaveBeenCalled();
-      const cpCall = mockCopyFileSync.mock.calls[0];
-      expect(cpCall[0]).toContain("plugins/newplugin");
+      // SKILL.md is processed via ensureFrontmatter and written with writeFileSync
+      const writeCall = mockWriteFileSync.mock.calls.find(
+        (c: unknown[]) => typeof c[0] === "string" && (c[0] as string).endsWith("SKILL.md")
+      );
+      expect(writeCall).toBeDefined();
     });
   });
 
@@ -447,8 +452,11 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
 
       // mkdirSync is called for each directory level (recursive copy)
       expect(mockMkdirSync).toHaveBeenCalled();
-      // copyFileSync is called for files within subdirectories
-      expect(mockCopyFileSync).toHaveBeenCalled();
+      // SKILL.md files are processed via ensureFrontmatter and written with writeFileSync
+      const skillWrites = mockWriteFileSync.mock.calls.filter(
+        (c: unknown[]) => typeof c[0] === "string" && (c[0] as string).endsWith("SKILL.md")
+      );
+      expect(skillWrites.length).toBeGreaterThan(0);
       // Verify it created subdirectory structure
       const mkdirCalls = mockMkdirSync.mock.calls.map((c: unknown[]) => String(c[0]));
       expect(mkdirCalls.some((p: string) => p.includes("skills") || p.includes("hooks"))).toBe(true);
@@ -1206,6 +1214,8 @@ describe("addCommand source format routing", () => {
     mockCheckPlatformSecurity.mockResolvedValue(null);
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockCheckRepoExists.mockResolvedValue(true);
+    mockDiscoverSkills.mockResolvedValue([]);
     mockEnsureLockfile.mockReturnValue({
       version: 1,
       agents: [],
@@ -1224,11 +1234,11 @@ describe("addCommand source format routing", () => {
     globalThis.fetch = originalFetch;
   });
 
-  // TC-017: 3-part format owner/repo/skill routes to installSingleSkillLegacy
-  it("3-part format fetches from skills/<skill>/SKILL.md and bypasses discovery", async () => {
+  // TC-017: 3-part format owner/repo/skill routes via discovery then fallback
+  it("3-part format uses discovery then falls back to skills/<skill>/SKILL.md", async () => {
     await addCommand("owner/repo/my-skill", {});
 
-    expect(mockDiscoverSkills).not.toHaveBeenCalled();
+    expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md"
     );
@@ -1326,6 +1336,8 @@ describe("addCommand source format routing", () => {
     mockCheckPlatformSecurity.mockResolvedValue(null);
     mockRunTier1Scan.mockReturnValue(makeScanResult());
     mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockCheckRepoExists.mockResolvedValue(true);
+    mockDiscoverSkills.mockResolvedValue([]);
     mockEnsureLockfile.mockReturnValue({
       version: 1,
       agents: [],
@@ -1337,6 +1349,81 @@ describe("addCommand source format routing", () => {
     // 3-part format
     await addCommand("owner/repo/specific", {});
     expect(globalThis.fetch).toHaveBeenCalledWith(expectedUrl);
+  });
+
+  // TC-026: 3-part format shows repo-not-found error when repo does not exist
+  it("3-part format shows repo-not-found error when repo does not exist", async () => {
+    mockCheckRepoExists.mockResolvedValue(false);
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    await addCommand("nonexistent-owner/nonexistent-repo/my-skill", {});
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+    const errorOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(errorOutput).toContain("does not exist on GitHub");
+    expect(errorOutput).toContain("vskill install my-skill");
+    mockExit.mockRestore();
+  });
+
+  // TC-027: 2-part with --skill and non-existent repo shows repo-not-found error
+  it("2-part with --skill shows repo-not-found error when repo does not exist", async () => {
+    mockCheckRepoExists.mockResolvedValue(false);
+    const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
+
+    await addCommand("owner/nonexistent", { skill: "my-skill" });
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+    const errorOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(errorOutput).toContain("does not exist on GitHub");
+    mockExit.mockRestore();
+  });
+
+  // TC-028: 3-part format uses discovery to find skill in plugins/ path
+  it("3-part format uses discovery when skill is in plugins/ path", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      {
+        name: "scout",
+        path: "plugins/skills/skills/scout/SKILL.md",
+        rawUrl: "https://raw.githubusercontent.com/anton-abyzov/vskill/main/plugins/skills/skills/scout/SKILL.md",
+      },
+    ]);
+
+    await addCommand("anton-abyzov/vskill/scout", {});
+
+    expect(mockDiscoverSkills).toHaveBeenCalledWith("anton-abyzov", "vskill");
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://raw.githubusercontent.com/anton-abyzov/vskill/main/plugins/skills/skills/scout/SKILL.md"
+    );
+  });
+
+  // TC-029: 3-part format falls back to hardcoded path when discovery finds no match
+  it("3-part format falls back to skills/<skill>/SKILL.md when discovery finds no match", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "other-skill", path: "skills/other-skill/SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/skills/other-skill/SKILL.md" },
+    ]);
+
+    await addCommand("owner/repo/my-skill", {});
+
+    expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md"
+    );
+  });
+
+  // TC-030: 3-part format falls back when discovery returns empty array
+  it("3-part format falls back to hardcoded path when discovery returns empty array", async () => {
+    mockDiscoverSkills.mockResolvedValue([]);
+
+    await addCommand("owner/repo/my-skill", {});
+
+    expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md"
+    );
   });
 });
 

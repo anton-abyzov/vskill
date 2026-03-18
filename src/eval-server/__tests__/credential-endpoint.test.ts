@@ -229,4 +229,46 @@ describe("GET /api/credentials/:plugin/:skill/params", () => {
       fakeReq,
     );
   });
+
+  it("returns full values when ?reveal=true is set", async () => {
+    const revealReq = { url: "/api/credentials/myplugin/myskill/params?reveal=true" } as any;
+    mocks.existsSync.mockReturnValue(true);
+    mocks.readFileSync.mockReturnValue("KEY1=secret123\nKEY2=abc");
+    mocks.parseDotenv.mockReturnValue({ KEY1: "secret123", KEY2: "abc" });
+
+    await handler(revealReq, fakeRes, params);
+
+    expect(mocks.sendJson).toHaveBeenCalledWith(
+      fakeRes,
+      {
+        params: [
+          { name: "KEY1", maskedValue: "***t123", value: "secret123", status: "ready" },
+          { name: "KEY2", maskedValue: "***abc", value: "abc", status: "ready" },
+        ],
+      },
+      200,
+      revealReq,
+    );
+  });
+
+  it("returns full value for only the requested key when ?reveal=true&key=KEY1", async () => {
+    const revealReq = { url: "/api/credentials/myplugin/myskill/params?reveal=true&key=KEY1" } as any;
+    mocks.existsSync.mockReturnValue(true);
+    mocks.readFileSync.mockReturnValue("KEY1=secret123\nKEY2=abc");
+    mocks.parseDotenv.mockReturnValue({ KEY1: "secret123", KEY2: "abc" });
+
+    await handler(revealReq, fakeRes, params);
+
+    expect(mocks.sendJson).toHaveBeenCalledWith(
+      fakeRes,
+      {
+        params: [
+          { name: "KEY1", maskedValue: "***t123", value: "secret123", status: "ready" },
+          { name: "KEY2", maskedValue: "***abc", status: "ready" },
+        ],
+      },
+      200,
+      revealReq,
+    );
+  });
 });

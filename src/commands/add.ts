@@ -31,7 +31,7 @@ import type { BlocklistEntry, RejectionInfo } from "../blocklist/types.js";
 import { getSkill, searchSkills } from "../api/client.js";
 import type { SkillSearchResult } from "../api/client.js";
 import { checkPlatformSecurity } from "../security/index.js";
-import { discoverSkills, getDefaultBranch, warnRateLimitOnce } from "../discovery/github-tree.js";
+import { discoverSkills, getDefaultBranch, checkRepoExists, warnRateLimitOnce } from "../discovery/github-tree.js";
 import { parseGitHubSource, classifyIdentifier } from "../utils/validation.js";
 import {
   parseSkillsShUrl,
@@ -658,7 +658,13 @@ function copyPluginFiltered(sourceDir: string, targetDir: string, relBase = ""):
       const nextTargetDir = isFlattened ? targetDir : join(targetDir, entry);
       copyPluginFiltered(sourcePath, nextTargetDir, relPath);
     } else if (stat.isFile() && !shouldSkipFromCommands(relPath)) {
-      copyFileSync(sourcePath, join(targetDir, entry));
+      if (entry === "SKILL.md") {
+        const raw = readFileSync(sourcePath, "utf-8");
+        const skillName = basename(relBase || sourceDir);
+        writeFileSync(join(targetDir, entry), ensureFrontmatter(raw, skillName), "utf-8");
+      } else {
+        copyFileSync(sourcePath, join(targetDir, entry));
+      }
     }
   }
 }
@@ -1777,6 +1783,15 @@ export async function addCommand(
         }
       }
     }
+
+    // Try discovery to find actual skill path before falling back to hardcoded pattern
+    const discovered = await discoverSkills(threeOwner, threeRepo);
+    const discoveredMatch = discovered.find(s => s.name === threeSkill);
+    if (discoveredMatch) {
+      return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts, discoveredMatch.path);
+    }
+
+    // Fallback: discovery didn't find the skill — try hardcoded skills/{name}/SKILL.md
     return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts);
   }
 
@@ -2344,6 +2359,16 @@ async function installSingleSkillLegacy(
   }
   if (safety.tainted) {
     printTaintedWarning(skillName, safety.taintReason);
+  }
+
+  // Check if the repo exists before attempting to fetch SKILL.md
+  const repoExists = await checkRepoExists(owner, repo);
+  if (!repoExists) {
+    console.error(
+      red(`Repository ${owner}/${repo} does not exist on GitHub.`) + "\n" +
+      dim(`Hint: To search by name, use: vskill install ${skill || repo}`)
+    );
+    return process.exit(1);
   }
 
   const branch = await getDefaultBranch(owner, repo);

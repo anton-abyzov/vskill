@@ -7,6 +7,7 @@ import {
   discoverSkills,
   extractDescription,
   getDefaultBranch,
+  checkRepoExists,
   _resetBranchCache,
   warnRateLimitOnce,
   _resetRateLimitWarned,
@@ -648,5 +649,56 @@ describe("plugin skill discovery", () => {
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe("scout");
     expect(result[0].path).toBe("skills/scout/SKILL.md");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkRepoExists
+// ---------------------------------------------------------------------------
+
+describe("checkRepoExists", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("returns true for repos that exist (200)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ default_branch: "develop" }),
+    }) as unknown as typeof fetch;
+
+    const exists = await checkRepoExists("owner", "repo");
+    expect(exists).toBe(true);
+  });
+
+  it("returns false for repos that do not exist (404)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    }) as unknown as typeof fetch;
+
+    const exists = await checkRepoExists("owner", "nonexistent");
+    expect(exists).toBe(false);
+  });
+
+  it("returns true on network errors (fail open)", async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(
+      new Error("Network error"),
+    ) as unknown as typeof fetch;
+
+    const exists = await checkRepoExists("owner", "repo");
+    expect(exists).toBe(true);
+  });
+
+  it("returns true on rate limit 403 (fail open)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+    }) as unknown as typeof fetch;
+
+    const exists = await checkRepoExists("owner", "repo");
+    expect(exists).toBe(true);
   });
 });

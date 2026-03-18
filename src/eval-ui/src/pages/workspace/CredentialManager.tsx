@@ -7,8 +7,16 @@ interface Props {
   skill: string;
 }
 
+interface MergedCredential {
+  name: string;
+  status: string;
+  source?: string;
+  maskedValue?: string;
+  revealedValue?: string;
+}
+
 export function CredentialManager({ plugin, skill }: Props) {
-  const [credentials, setCredentials] = useState<CredentialStatus[]>([]);
+  const [credentials, setCredentials] = useState<MergedCredential[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -17,16 +25,71 @@ export function CredentialManager({ plugin, skill }: Props) {
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
+  const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set());
 
-  const fetchCredentials = useCallback(() => {
+  const fetchCredentials = useCallback(async () => {
     setLoading(true);
-    api.getCredentials(plugin, skill)
-      .then((res) => setCredentials(res.credentials))
-      .catch(() => setCredentials([]))
-      .finally(() => setLoading(false));
+    try {
+      const [credRes, paramRes] = await Promise.all([
+        api.getCredentials(plugin, skill).catch(() => ({ credentials: [] as CredentialStatus[] })),
+        api.getParams(plugin, skill).catch(() => ({ params: [] as Array<{ name: string; maskedValue: string; status: string }> })),
+      ]);
+
+      const paramMap = new Map(paramRes.params.map((p) => [p.name, p]));
+      const seen = new Set<string>();
+
+      // Merge: credentials (from integration test declarations) + params (from .env.local)
+      const merged: MergedCredential[] = [];
+
+      for (const cred of credRes.credentials) {
+        seen.add(cred.name);
+        const param = paramMap.get(cred.name);
+        merged.push({
+          name: cred.name,
+          status: cred.status === "ready" || cred.status === "resolved" ? "ready" : "missing",
+          source: cred.source,
+          maskedValue: param?.maskedValue,
+        });
+      }
+
+      // Add params not already in credentials (custom parameters)
+      for (const param of paramRes.params) {
+        if (!seen.has(param.name)) {
+          merged.push({
+            name: param.name,
+            status: param.status,
+            maskedValue: param.maskedValue,
+          });
+        }
+      }
+
+      setCredentials(merged);
+    } finally {
+      setLoading(false);
+    }
   }, [plugin, skill]);
 
   useEffect(() => { fetchCredentials(); }, [fetchCredentials]);
+
+  const toggleReveal = useCallback(async (name: string) => {
+    if (revealedKeys.has(name)) {
+      // Hide
+      setRevealedKeys((prev) => { const next = new Set(prev); next.delete(name); return next; });
+      setCredentials((prev) => prev.map((c) => c.name === name ? { ...c, revealedValue: undefined } : c));
+      return;
+    }
+    // Reveal — fetch only the requested key's value
+    try {
+      const res = await api.getParamsRevealed(plugin, skill, name);
+      const param = res.params.find((p) => p.name === name);
+      if (param) {
+        setCredentials((prev) => prev.map((c) => c.name === name ? { ...c, revealedValue: param.value } : c));
+        setRevealedKeys((prev) => new Set(prev).add(name));
+      }
+    } catch {
+      // Silently fail — reveal is convenience, not critical
+    }
+  }, [plugin, skill, revealedKeys]);
 
   const handleSave = async (name: string, value: string) => {
     if (!name.trim() || !value.trim()) return;
@@ -36,6 +99,7 @@ export function CredentialManager({ plugin, skill }: Props) {
       await api.setCredential(plugin, skill, name, value);
       setEditingKey(null);
       setEditValue("");
+      setRevealedKeys(new Set()); // Clear reveals after edit
       fetchCredentials();
     } catch (e) {
       setError((e as Error).message);
@@ -105,17 +169,50 @@ export function CredentialManager({ plugin, skill }: Props) {
               className="flex items-center gap-3 px-3 py-2.5"
               style={{ borderBottom: "1px solid var(--border-subtle)", background: "var(--surface-1)" }}
             >
-              <span className="text-[11px] font-mono font-medium flex-1 truncate" style={{ color: "var(--text-primary)" }}>
+              <span className="text-[11px] font-mono font-medium truncate" style={{ color: "var(--text-primary)", minWidth: 80 }}>
                 {cred.name}
               </span>
+
+              {/* Masked/revealed value */}
+              {cred.maskedValue && (
+                <span className="text-[10px] font-mono truncate" style={{ color: "var(--text-tertiary)", maxWidth: 120 }}>
+                  {revealedKeys.has(cred.name) && cred.revealedValue != null
+                    ? cred.revealedValue
+                    : cred.maskedValue}
+                </span>
+              )}
+
+              {/* Reveal toggle */}
+              {cred.maskedValue && (
+                <button
+                  onClick={() => toggleReveal(cred.name)}
+                  className="btn btn-ghost px-1"
+                  title={revealedKeys.has(cred.name) ? "Hide value" : "Reveal value"}
+                  style={{ color: "var(--text-tertiary)", lineHeight: 1 }}
+                >
+                  {revealedKeys.has(cred.name) ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                      <line x1="1" y1="1" x2="23" y2="23" />
+                    </svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  )}
+                </button>
+              )}
+
               <span
                 className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
                 style={{
-                  background: cred.status === "ready" || cred.status === "resolved" ? "rgba(52,211,153,0.15)" : "rgba(251,146,60,0.15)",
-                  color: cred.status === "ready" || cred.status === "resolved" ? "var(--green)" : "#fb923c",
+                  background: cred.status === "ready" ? "rgba(52,211,153,0.15)" : "rgba(251,146,60,0.15)",
+                  color: cred.status === "ready" ? "var(--green)" : "#fb923c",
                 }}
               >
-                {cred.status === "ready" || cred.status === "resolved" ? "ready" : "missing"}
+                {cred.status === "ready" ? "ready" : "missing"}
               </span>
               {cred.source && (
                 <span className="text-[9px]" style={{ color: "var(--text-tertiary)" }}>{cred.source}</span>

@@ -112,6 +112,39 @@ export function createLlmClient(overrides?: LlmOverrides): LlmClient {
 }
 
 // ---------------------------------------------------------------------------
+// Model normalization — prevents cross-provider model ID leaks.
+// e.g. "claude-sonnet" (a displayModel artifact) → "sonnet" for CLI,
+//      "sonnet" (CLI shorthand) → "claude-sonnet-4-6" for Anthropic API.
+// ---------------------------------------------------------------------------
+const CLAUDE_CLI_NORMALIZE: Record<string, string> = {
+  "claude-sonnet": "sonnet",
+  "claude-opus": "opus",
+  "claude-haiku": "haiku",
+  "claude-sonnet-4-6": "sonnet",
+  "claude-sonnet-4-20250514": "sonnet",
+  "claude-opus-4-6": "opus",
+  "claude-opus-4-20250514": "opus",
+  "claude-haiku-4-5-20251001": "haiku",
+};
+
+const ANTHROPIC_NORMALIZE: Record<string, string> = {
+  "sonnet": "claude-sonnet-4-6",
+  "opus": "claude-opus-4-6",
+  "haiku": "claude-haiku-4-5-20251001",
+  "claude-sonnet": "claude-sonnet-4-6",
+  "claude-opus": "claude-opus-4-6",
+  "claude-haiku": "claude-haiku-4-5-20251001",
+};
+
+function normalizeClaudeCliModel(model: string): string {
+  return CLAUDE_CLI_NORMALIZE[model] || model;
+}
+
+function normalizeAnthropicModel(model: string): string {
+  return ANTHROPIC_NORMALIZE[model] || model;
+}
+
+// ---------------------------------------------------------------------------
 // Provider: Anthropic API
 // ---------------------------------------------------------------------------
 function createAnthropicClient(modelOverride?: string): LlmClient {
@@ -124,7 +157,8 @@ function createAnthropicClient(modelOverride?: string): LlmClient {
     );
   }
 
-  const model = modelOverride || process.env.VSKILL_EVAL_MODEL || DEFAULT_MODEL;
+  const raw = modelOverride || process.env.VSKILL_EVAL_MODEL || DEFAULT_MODEL;
+  const model = normalizeAnthropicModel(raw);
   let clientInstance: any = null;
 
   return {
@@ -261,12 +295,13 @@ function createCliClient(config: CliConfig): LlmClient {
 // Strips CLAUDE* env vars so the child process doesn't detect nesting.
 // ---------------------------------------------------------------------------
 function createClaudeCliClient(modelOverride?: string): LlmClient {
-  const model = modelOverride || process.env.VSKILL_EVAL_MODEL || "sonnet";
+  const raw = modelOverride || process.env.VSKILL_EVAL_MODEL || "sonnet";
+  const model = normalizeClaudeCliModel(raw);
   return createCliClient({
     binary: "claude",
     name: "Claude",
     args: ["-p", "--model", model],
-    displayModel: `claude-${model}`,
+    displayModel: model,
     stripEnvPrefix: "CLAUDE",
     notFoundMsg:
       "Claude CLI not found. Install it:\n  npm install -g @anthropic-ai/claude-code\n\nOr use a different provider:\n  export VSKILL_EVAL_PROVIDER=ollama",

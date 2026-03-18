@@ -81,13 +81,13 @@ describe("createLlmClient", () => {
 
   it("defaults to claude-cli from a plain terminal", () => {
     const client = createLlmClient();
-    expect(client.model).toBe("claude-sonnet");
+    expect(client.model).toBe("sonnet");
   });
 
   it("defaults to claude-cli even inside Claude Code session", () => {
     process.env.CLAUDECODE = "1";
     const client = createLlmClient();
-    expect(client.model).toBe("claude-sonnet");
+    expect(client.model).toBe("sonnet");
   });
 
   it("explicit VSKILL_EVAL_PROVIDER overrides auto-detection", () => {
@@ -133,7 +133,7 @@ describe("createLlmClient", () => {
 
   it("override provider=claude-cli with custom model", () => {
     const client = createLlmClient({ provider: "claude-cli", model: "opus" });
-    expect(client.model).toBe("claude-opus");
+    expect(client.model).toBe("opus");
   });
 
   it("override provider=ollama with custom model", () => {
@@ -144,7 +144,7 @@ describe("createLlmClient", () => {
   it("override provider=claude-cli inside Claude Code session", () => {
     process.env.CLAUDECODE = "1";
     const client = createLlmClient({ provider: "claude-cli" });
-    expect(client.model).toBe("claude-sonnet");
+    expect(client.model).toBe("sonnet");
   });
 
   it("override provider=codex-cli with custom model", () => {
@@ -273,7 +273,7 @@ describe("createLlmClient", () => {
 
     it("defaults to sonnet model", () => {
       const client = createLlmClient();
-      expect(client.model).toBe("claude-sonnet");
+      expect(client.model).toBe("sonnet");
     });
 
     it("passes custom model from VSKILL_EVAL_MODEL", async () => {
@@ -281,7 +281,7 @@ describe("createLlmClient", () => {
       mockSpawn.mockReturnValue(createFakeProc("ok\n"));
 
       const client = createLlmClient();
-      expect(client.model).toBe("claude-opus");
+      expect(client.model).toBe("opus");
       await client.generate("sys", "usr");
 
       expect(mockSpawn).toHaveBeenCalledWith(
@@ -326,7 +326,7 @@ describe("createLlmClient", () => {
       mockSpawn.mockReturnValue(createFakeProc("response\n"));
 
       const client = createLlmClient();
-      expect(client.model).toBe("claude-sonnet");
+      expect(client.model).toBe("sonnet");
       await client.generate("sys", "usr");
 
       // Verify CLAUDE* env vars are stripped from spawned process

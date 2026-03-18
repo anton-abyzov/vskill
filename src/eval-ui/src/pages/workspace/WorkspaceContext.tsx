@@ -143,6 +143,26 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
   }, [sseStopAll]);
 
   // ---------------------------------------------------------------------------
+  // Activation history (must be declared before the initial data fetch effect)
+  // ---------------------------------------------------------------------------
+  const fetchActivationHistory = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/skills/${plugin}/${skill}/activation-history`);
+      if (!res.ok) {
+        if (res.status === 404) {
+          dispatch({ type: "ACTIVATION_HISTORY_LOADED", runs: [] });
+          return;
+        }
+        return;
+      }
+      const data = await res.json();
+      dispatch({ type: "ACTIVATION_HISTORY_LOADED", runs: data.runs || [] });
+    } catch {
+      // Non-blocking — history is optional
+    }
+  }, [plugin, skill]);
+
+  // ---------------------------------------------------------------------------
   // Initial data fetch
   // ---------------------------------------------------------------------------
   useEffect(() => {
@@ -659,26 +679,6 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
       dispatch({ type: "GENERATE_PROMPTS_ERROR", error: (e as Error).message });
     }
   }, [plugin, skill, config]);
-
-  // ---------------------------------------------------------------------------
-  // Activation history
-  // ---------------------------------------------------------------------------
-  const fetchActivationHistory = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/skills/${plugin}/${skill}/activation-history`);
-      if (!res.ok) {
-        if (res.status === 404) {
-          dispatch({ type: "ACTIVATION_HISTORY_LOADED", runs: [] });
-          return;
-        }
-        return;
-      }
-      const data = await res.json();
-      dispatch({ type: "ACTIVATION_HISTORY_LOADED", runs: data.runs || [] });
-    } catch {
-      // Non-blocking — history is optional
-    }
-  }, [plugin, skill]);
 
   const value = useMemo<WorkspaceContextValue>(() => ({
     state,

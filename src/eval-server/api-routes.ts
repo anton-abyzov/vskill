@@ -33,6 +33,17 @@ import { writeActivationRun, listActivationRuns, getActivationRun } from "../eva
 import type { ActivationHistoryRun } from "../eval/activation-history.js";
 
 // ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+export function extractDescription(skillContent: string): string {
+  const fmMatch = skillContent.match(/^---[\s\S]*?description:\s*"([^"]+)"[\s\S]*?---/);
+  if (fmMatch) return fmMatch[1];
+  const body = skillContent.replace(/^---[\s\S]*?---\s*/, "").trim();
+  return body.slice(0, 500);
+}
+
+// ---------------------------------------------------------------------------
 // In-memory config state — UI can change provider/model at runtime.
 //
 // Default: claude-cli (Sonnet). The eval server is always run from a separate
@@ -1229,8 +1240,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       const skillContent = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
 
       // Extract description, name, and tags from frontmatter
-      const descMatch = skillContent.match(/^---[\s\S]*?description:\s*"([^"]+)"[\s\S]*?---/);
-      const description = descMatch ? descMatch[1] : skillContent.slice(0, 500);
+      const description = extractDescription(skillContent);
       const nameMatch = skillContent.match(/^---[\s\S]*?name:\s*(\S+)[\s\S]*?---/);
       const tagsMatch = skillContent.match(/^---[\s\S]*?tags:\s*(.+)[\s\S]*?---/m);
       const meta: SkillMeta = {
@@ -1300,13 +1310,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         return;
       }
       const skillContent = readFileSync(skillMdPath, "utf-8");
-      const descMatch = skillContent.match(/^---[\s\S]*?description:\s*"([^"]+)"[\s\S]*?---/);
-      const description = descMatch ? descMatch[1] : "";
-
-      if (!description) {
-        sendJson(res, { error: "No skill description available" }, 400, req);
-        return;
-      }
+      const description = extractDescription(skillContent);
 
       initSSE(res, req);
 

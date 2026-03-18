@@ -223,10 +223,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
     if (resolveAiConfigOverride) return resolveAiConfigOverride();
     if (!config) return { provider: "claude-cli", model: "sonnet" };
     const provider = config.provider || "claude-cli";
-    let modelId = config.model || "sonnet";
-    if (provider === "claude-cli" && modelId.startsWith("claude-")) {
-      modelId = modelId.replace("claude-", "");
-    }
+    const modelId = config.model || "sonnet";
     return { provider, model: modelId };
   }, [config, resolveAiConfigOverride]);
 

@@ -614,10 +614,12 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       // to prevent data loss (e.g., regenerating unit tests won't wipe integration tests)
       let existingEvals: EvalsFile | null = null;
       try { existingEvals = loadAndValidateEvals(skillDir); } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ENOENT" &&
-            !(e instanceof Error && e.message.includes("ENOENT"))) {
-          throw e;
-        }
+        // Expected when generating evals for the first time (no evals.json yet).
+        // Swallow ENOENT and "No evals.json found" errors; re-throw anything else.
+        const isFileMissing =
+          (e as NodeJS.ErrnoException).code === "ENOENT" ||
+          (e instanceof Error && (e.message.includes("ENOENT") || e.message.includes("No evals.json found")));
+        if (!isFileMissing) throw e;
       }
 
       // Filter out existing cases of the same type, then merge with new ones

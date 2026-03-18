@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
-import { join, basename, resolve } from "node:path";
+import { join, basename, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { AGENTS_REGISTRY } from "../agents/agents-registry.js";
 import type { Router } from "./router.js";
@@ -210,6 +210,16 @@ function computeSkillDir(root: string, layout: 1 | 2 | 3, plugin: string, name: 
     case 2: return join(root, "plugins", plugin, "skills", name);
     case 3: return join(root, "skills", name);
   }
+}
+
+/**
+ * Check if a resolved path is strictly within a root directory.
+ * Uses trailing separator to prevent prefix collision (e.g., /project vs /project-evil).
+ */
+export function isDraftWithinRoot(draftPath: string, root: string): boolean {
+  const resolvedRoot = resolve(root) + sep;
+  const resolvedDraft = resolve(draftPath);
+  return resolvedDraft.startsWith(resolvedRoot) && resolvedDraft !== resolve(root);
 }
 
 /**
@@ -753,8 +763,7 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
       // Clean up old draft directory if plugin was changed
       if (body.draftDir) {
         const resolvedDraft = resolve(root, body.draftDir);
-        // Security: ensure draftDir is within the project root
-        if (resolvedDraft.startsWith(resolve(root)) && resolvedDraft !== resolve(targetDir)) {
+        if (isDraftWithinRoot(resolvedDraft, root) && resolvedDraft !== resolve(targetDir)) {
           try { rmSync(resolvedDraft, { recursive: true, force: true }); } catch { /* non-blocking */ }
         }
       }
@@ -907,7 +916,14 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
         model: evalModel,
       });
 
-      const bodyPrompt = `Generate a skill definition (body and metadata only, NO evals) for:\n\n${body.prompt.trim()}\n\nApply Skill Studio best practices. Return the JSON object followed by ---REASONING--- and your explanation.`;
+      // Detect existing plugins to inject into the body prompt for LLM-based category matching
+      const layout = detectProjectLayout(root);
+      const existingPlugins = [...new Set(layout.detectedLayouts.flatMap(d => d.existingPlugins))];
+      const pluginContext = existingPlugins.length > 0
+        ? `\n\nExisting plugins in this project: ${JSON.stringify(existingPlugins)}. Include a "suggestedPlugin" field in your JSON response with the best-matching plugin name from this list, or a new kebab-case name if none fit.`
+        : `\n\nInclude a "suggestedPlugin" field in your JSON response with a suggested kebab-case plugin/category name for this skill.`;
+
+      const bodyPrompt = `Generate a skill definition (body and metadata only, NO evals) for:\n\n${body.prompt.trim()}\n\nApply Skill Studio best practices. Return the JSON object followed by ---REASONING--- and your explanation.${pluginContext}`;
       const evalPrompt = `Generate eval test cases for this skill:\n\n${body.prompt.trim()}\n\nReturn only the JSON object with an "evals" array.`;
 
       // Emit SSE events for both parallel phases

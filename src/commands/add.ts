@@ -653,17 +653,21 @@ const COPY_SKIP_MD = new Set(["README.md", "CHANGELOG.md", "LICENSE.md", "FRESHN
  * Check if a .md file inside a plugin should be promoted to SKILL.md.
  * Returns true when the file is likely skill content (not documentation, not inside agents/).
  */
-function isSkillMdCandidate(entry: string, relPath: string): boolean {
+/** @internal Exported for testing */
+export function isSkillMdCandidate(entry: string, relPath: string): boolean {
   if (!entry.endsWith(".md")) return false;
   if (entry === "SKILL.md") return false;
   if (COPY_SKIP_MD.has(entry)) return false;
-  // Don't promote files inside agents/ subdirectories — those are agent templates
   const parts = relPath.split("/");
+  // Don't promote files inside agents/ subdirectories — those are agent templates
   if (parts.some((p) => p === "agents")) return false;
+  // Don't promote files from commands/ — those are slash commands, not skill content
+  if (parts.some((p) => p === "commands")) return false;
   return true;
 }
 
-function copyPluginFiltered(sourceDir: string, targetDir: string, relBase = ""): void {
+/** @internal Exported for testing */
+export function copyPluginFiltered(sourceDir: string, targetDir: string, relBase = ""): void {
   mkdirSync(targetDir, { recursive: true });
   const entries = readdirSync(sourceDir);
   for (const entry of entries) {
@@ -673,7 +677,15 @@ function copyPluginFiltered(sourceDir: string, targetDir: string, relBase = ""):
     if (stat.isDirectory()) {
       // Flatten: root-level commands/ and skills/ merge into the parent target dir
       const isFlattened = !relBase && (entry === "commands" || entry === "skills");
-      const nextTargetDir = isFlattened ? targetDir : join(targetDir, entry);
+      let nextTargetDir = isFlattened ? targetDir : join(targetDir, entry);
+      // Prevent double-nesting: when inside a flattened skills/ directory and
+      // a skill subdirectory has the same name as the target directory
+      // (e.g., single-skill plugin where pluginName == skillName),
+      // merge into the target instead of creating a redundant nested directory.
+      const inFlattenedSkills = relBase === "skills";
+      if (inFlattenedSkills && entry === basename(targetDir)) {
+        nextTargetDir = targetDir;
+      }
       copyPluginFiltered(sourcePath, nextTargetDir, relPath);
     } else if (stat.isFile() && !shouldSkipFromCommands(relPath)) {
       if (entry === "SKILL.md" || isSkillMdCandidate(entry, relPath)) {
@@ -1653,7 +1665,11 @@ async function installRepoPlugin(
     try {
       // Skills: {agent-dir}/{plugin-name}/{skill-name}/SKILL.md
       for (const skill of skills) {
-        const skillDir = join(plugDir, skill.name);
+        // Prevent double-nesting when plugin has a single skill with same name
+        // (e.g., frontend-design plugin containing frontend-design skill)
+        const skillDir = skill.name === pluginName
+          ? plugDir
+          : join(plugDir, skill.name);
         mkdirSync(skillDir, { recursive: true });
         writeFileSync(join(skillDir, "SKILL.md"), ensureFrontmatter(skill.content, skill.name), "utf-8");
       }

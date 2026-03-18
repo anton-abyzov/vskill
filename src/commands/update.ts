@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { readLockfile, writeLockfile } from "../lockfile/index.js";
 import { ensureFrontmatter } from "../installer/frontmatter.js";
+import { ensureSkillMdNaming } from "../installer/migrate.js";
 import { getSkill } from "../api/client.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { filterAgents } from "../utils/agent-filter.js";
@@ -177,6 +178,11 @@ export async function updateCommand(
         } catch {
           // Silently skip write failures for update
         }
+      }
+      // Defense-in-depth: enforce SKILL.md naming after update
+      for (const agent of agents) {
+        const agentBase = join(process.cwd(), agent.localSkillsDir);
+        ensureSkillMdNaming(agentBase);
       }
 
       // 7. Update lockfile entry — preserve source and all existing fields

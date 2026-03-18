@@ -53,6 +53,7 @@ import {
 import { isTTY, createPrompter } from "../utils/prompts.js";
 import { installSymlink, installCopy } from "../installer/canonical.js";
 import { ensureFrontmatter } from "../installer/frontmatter.js";
+import { ensureSkillMdNaming } from "../installer/migrate.js";
 import { getMarketplaceName } from "../marketplace/index.js";
 import { rankSearchResults, formatSkillId, getSkillUrl, getTrustBadge, formatResultLine } from "../utils/skill-display.js";
 
@@ -645,6 +646,23 @@ export function shouldSkipFromCommands(relPath: string): boolean {
   return false;
 }
 
+/** Skip-list of .md files that are documentation, not skill content. */
+const COPY_SKIP_MD = new Set(["README.md", "CHANGELOG.md", "LICENSE.md", "FRESHNESS.md", "PLUGIN.md"]);
+
+/**
+ * Check if a .md file inside a plugin should be promoted to SKILL.md.
+ * Returns true when the file is likely skill content (not documentation, not inside agents/).
+ */
+function isSkillMdCandidate(entry: string, relPath: string): boolean {
+  if (!entry.endsWith(".md")) return false;
+  if (entry === "SKILL.md") return false;
+  if (COPY_SKIP_MD.has(entry)) return false;
+  // Don't promote files inside agents/ subdirectories — those are agent templates
+  const parts = relPath.split("/");
+  if (parts.some((p) => p === "agents")) return false;
+  return true;
+}
+
 function copyPluginFiltered(sourceDir: string, targetDir: string, relBase = ""): void {
   mkdirSync(targetDir, { recursive: true });
   const entries = readdirSync(sourceDir);
@@ -658,10 +676,10 @@ function copyPluginFiltered(sourceDir: string, targetDir: string, relBase = ""):
       const nextTargetDir = isFlattened ? targetDir : join(targetDir, entry);
       copyPluginFiltered(sourcePath, nextTargetDir, relPath);
     } else if (stat.isFile() && !shouldSkipFromCommands(relPath)) {
-      if (entry === "SKILL.md") {
+      if (entry === "SKILL.md" || isSkillMdCandidate(entry, relPath)) {
         const raw = readFileSync(sourcePath, "utf-8");
         const skillName = basename(relBase || sourceDir);
-        writeFileSync(join(targetDir, entry), ensureFrontmatter(raw, skillName), "utf-8");
+        writeFileSync(join(targetDir, "SKILL.md"), ensureFrontmatter(raw, skillName), "utf-8");
       } else {
         copyFileSync(sourcePath, join(targetDir, entry));
       }
@@ -1156,6 +1174,7 @@ async function installPluginDir(
         rmSync(cacheDir, { recursive: true, force: true });
       }
       copyPluginFiltered(pluginDir, cacheDir);
+      ensureSkillMdNaming(cacheDir);
       fixHookPermissions(cacheDir);
       locations.push(`${agent.displayName}: ${cacheDir}`);
     } catch (err) {
@@ -1643,6 +1662,7 @@ async function installRepoPlugin(
         mkdirSync(plugDir, { recursive: true });
         writeFileSync(join(plugDir, cmd.name), cmd.content, "utf-8");
       }
+      ensureSkillMdNaming(plugDir);
       locations.push(`${agent.displayName}: ${plugDir}`);
     } catch (err) {
       console.error(

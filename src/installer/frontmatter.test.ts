@@ -3,6 +3,7 @@ import {
   ensureFrontmatter,
   validateSkillNameStrict,
   extractDescription,
+  quoteYAMLValue,
 } from "./frontmatter.js";
 
 describe("ensureFrontmatter", () => {
@@ -140,5 +141,106 @@ describe("extractDescription", () => {
     const body = `# Title\n\n${longParagraph}`;
     const result = extractDescription(body, "my-skill");
     expect(result.length).toBeLessThanOrEqual(200);
+  });
+});
+
+describe("quoteYAMLValue", () => {
+  it("returns plain value when no special chars", () => {
+    expect(quoteYAMLValue("A simple description")).toBe("A simple description");
+  });
+
+  it("quotes value containing colon", () => {
+    expect(quoteYAMLValue("Fix: update parser")).toBe('"Fix: update parser"');
+  });
+
+  it("quotes value containing hash", () => {
+    expect(quoteYAMLValue("#123 feature")).toBe('"#123 feature"');
+  });
+
+  it("quotes value containing brackets", () => {
+    expect(quoteYAMLValue("Feature [NEW]")).toBe('"Feature [NEW]"');
+  });
+
+  it("quotes value containing curly braces", () => {
+    expect(quoteYAMLValue("{key: val}")).toBe('"{key: val}"');
+  });
+
+  it("escapes inner double quotes", () => {
+    expect(quoteYAMLValue('It\'s "amazing"')).toBe('"It\'s \\"amazing\\""');
+  });
+
+  it("escapes inner backslashes", () => {
+    expect(quoteYAMLValue("path\\to\\file")).toBe('"path\\\\to\\\\file"');
+  });
+
+  it("quotes value starting with YAML boolean word", () => {
+    expect(quoteYAMLValue("Yes it works")).toBe('"Yes it works"');
+    expect(quoteYAMLValue("true story")).toBe('"true story"');
+    expect(quoteYAMLValue("no problem")).toBe('"no problem"');
+  });
+
+  it("quotes value containing asterisk", () => {
+    expect(quoteYAMLValue("*important*")).toBe('"*important*"');
+  });
+
+  it("quotes value containing ampersand", () => {
+    expect(quoteYAMLValue("A & B")).toBe('"A & B"');
+  });
+
+  it("quotes value containing exclamation mark", () => {
+    expect(quoteYAMLValue("!tag value")).toBe('"!tag value"');
+  });
+
+  it("quotes value containing pipe or greater-than", () => {
+    expect(quoteYAMLValue("|multiline")).toBe('"|multiline"');
+    expect(quoteYAMLValue(">folded")).toBe('">folded"');
+  });
+});
+
+describe("ensureFrontmatter — YAML quoting", () => {
+  it("quotes description with colon when injecting frontmatter", () => {
+    const content = "# Title\n\nDeploy: staging environment";
+    const result = ensureFrontmatter(content, "my-skill");
+    expect(result).toContain('description: "Deploy: staging environment"');
+  });
+
+  it("quotes description with brackets when injecting into existing frontmatter", () => {
+    const content = "---\nname: my-skill\n---\n# Title\n\nFeature [NEW]";
+    const result = ensureFrontmatter(content, "my-skill");
+    expect(result).toContain('description: "Feature [NEW]"');
+  });
+
+  it("does not quote plain description", () => {
+    const content = "# Title\n\nA simple feature";
+    const result = ensureFrontmatter(content, "my-skill");
+    expect(result).toContain("description: A simple feature");
+    expect(result).not.toContain('"A simple feature"');
+  });
+});
+
+describe("ensureFrontmatter — BOM handling", () => {
+  it("strips UTF-8 BOM and injects frontmatter correctly", () => {
+    const content = "\uFEFF# My Skill\n\nDoes cool things.";
+    const result = ensureFrontmatter(content, "my-skill");
+    expect(result).toMatch(/^---\n/);
+    expect(result).toContain("name: my-skill");
+    expect(result).not.toContain("\uFEFF");
+  });
+
+  it("strips BOM from content with existing frontmatter", () => {
+    const content = "\uFEFF---\nname: my-skill\ndescription: Test\n---\n# Body";
+    const result = ensureFrontmatter(content, "my-skill");
+    expect(result).not.toContain("\uFEFF");
+    // Should recognize the frontmatter, not duplicate it
+    expect(result.match(/---/g)!.length).toBe(2);
+  });
+});
+
+describe("ensureFrontmatter — idempotency", () => {
+  it("calling ensureFrontmatter twice produces identical result", () => {
+    const content = "# My Skill\n\nDeploy: staging";
+    const first = ensureFrontmatter(content, "my-skill");
+    const second = ensureFrontmatter(first, "my-skill");
+    expect(second).toBe(first);
   });
 });

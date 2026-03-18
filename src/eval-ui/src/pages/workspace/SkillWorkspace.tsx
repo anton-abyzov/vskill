@@ -4,6 +4,9 @@ import { useStudio } from "../../StudioContext";
 import { api } from "../../api";
 import { DetailHeader } from "../../components/DetailHeader";
 import { TabBar } from "../../components/TabBar";
+import { ErrorCard } from "../../components/ErrorCard";
+import { ErrorBoundary } from "../../components/ErrorBoundary";
+import { classifyErrorClient } from "../../shared/classifyErrorClient";
 import { EditorPanel } from "./EditorPanel";
 import { TestsPanel } from "./TestsPanel";
 import { RunPanel } from "./RunPanel";
@@ -108,19 +111,11 @@ export function SkillWorkspaceInner() {
 
       {/* Workspace-level error banner (e.g. delete failures) */}
       {state.error && (
-        <div
-          className="flex items-center gap-2 px-4 py-2 text-[12px]"
-          style={{ background: "var(--red-muted)", color: "var(--red)", borderBottom: "1px solid var(--border-subtle)" }}
-        >
-          <span className="flex-1">{state.error}</span>
-          <button
-            onClick={() => dispatch({ type: "SET_ERROR", error: null })}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--red)", padding: 2 }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+        <div className="px-4 py-2" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+          <ErrorCard
+            error={classifyErrorClient(state.error)}
+            onDismiss={() => dispatch({ type: "SET_ERROR", error: null })}
+          />
         </div>
       )}
 
@@ -135,17 +130,19 @@ export function SkillWorkspaceInner() {
       />
 
       {/* Panel content */}
-      <div className="flex-1 overflow-hidden" style={{ background: "var(--surface-0)" }}>
-        <div className="animate-fade-in" key={state.activePanel} style={{ height: "100%", overflow: "auto" }}>
-          {state.activePanel === "editor" && <EditorPanel />}
-          {state.activePanel === "tests" && <TestsPanel />}
-          {state.activePanel === "run" && <RunPanel />}
-          {state.activePanel === "activation" && <ActivationPanel />}
-          {state.activePanel === "history" && <HistoryPanel />}
-          {state.activePanel === "leaderboard" && <LeaderboardPanel />}
-          {state.activePanel === "deps" && <DepsPanel />}
+      <ErrorBoundary key={`${state.plugin}/${state.skill}`}>
+        <div className="flex-1 overflow-hidden" style={{ background: "var(--surface-0)" }}>
+          <div className="animate-fade-in" key={state.activePanel} style={{ height: "100%", overflow: "auto" }}>
+            {state.activePanel === "editor" && <EditorPanel />}
+            {state.activePanel === "tests" && <TestsPanel />}
+            {state.activePanel === "run" && <RunPanel />}
+            {state.activePanel === "activation" && <ActivationPanel />}
+            {state.activePanel === "history" && <HistoryPanel />}
+            {state.activePanel === "leaderboard" && <LeaderboardPanel />}
+            {state.activePanel === "deps" && <DepsPanel />}
+          </div>
         </div>
-      </div>
+      </ErrorBoundary>
     </div>
   );
 }

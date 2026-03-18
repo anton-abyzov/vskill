@@ -9,6 +9,7 @@ import { verdictExplanation } from "../../../../eval/verdict.js";
 import type { VerdictExplanationResult } from "../../../../eval/verdict.js";
 import { ProgressLog } from "../../components/ProgressLog";
 import { ErrorCard } from "../../components/ErrorCard";
+import { ParameterStorePanel } from "./ParameterStorePanel";
 
 // ---------------------------------------------------------------------------
 // Assertion quality badge types
@@ -118,10 +119,20 @@ export function TestsPanel() {
   const defaultEvals: EvalsFile = { skill_name: state.skill, evals: [] };
   const effectiveEvals = evals ?? defaultEvals;
   const allCases = effectiveEvals.evals;
-  const cases = testTypeFilter === "all"
-    ? allCases
-    : allCases.filter((c) => getTestType(c) === testTypeFilter);
+  const cases = useMemo(() =>
+    testTypeFilter === "all"
+      ? allCases
+      : allCases.filter((c) => getTestType(c) === testTypeFilter),
+    [testTypeFilter, allCases],
+  );
   const selectedCase = cases.find((c) => c.id === selectedCaseId) ?? null;
+
+  // US-001: Auto-select first visible case when filter changes and current selection is hidden
+  useEffect(() => {
+    if (selectedCaseId !== null && !cases.find((c) => c.id === selectedCaseId)) {
+      dispatch({ type: "SELECT_CASE", caseId: cases.length > 0 ? cases[0].id : null });
+    }
+  }, [cases, selectedCaseId, dispatch]);
 
   // T-046: Fetch credential status for integration tests
   const [credentialStatuses, setCredentialStatuses] = useState<CredentialStatus[]>([]);
@@ -219,7 +230,7 @@ export function TestsPanel() {
           <div className="w-full max-w-md mt-3">
             <ErrorCard
               error={generateEvalsError}
-              onRetry={handleGenerateEvals}
+              onRetry={() => handleGenerateEvals()}
             />
           </div>
         )}
@@ -366,6 +377,13 @@ export function TestsPanel() {
             </button>
           )}
         </div>
+
+        {/* Parameter store for integration test credentials */}
+        {hasIntegrationTests && (
+          <div style={{ borderTop: "1px solid var(--border-subtle)" }}>
+            <ParameterStorePanel />
+          </div>
+        )}
       </div>
 
       {/* Right: Case detail */}

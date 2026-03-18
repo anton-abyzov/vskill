@@ -11,6 +11,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { findCoreSkillsDir, listCoreSkills, syncCoreSkills } from "./sync.js";
+import { migrateStaleSkillFiles } from "../installer/migrate.js";
+import { lstatSync } from "node:fs";
 
 function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
   return {
@@ -206,6 +208,86 @@ describe("core-skills/sync", () => {
       );
       expect(content).toContain("name: architect");
       expect(content).toContain("# architect");
+    });
+
+    it("writes sw/{name}/SKILL.md structure, not flat sw/{name}.md (AC-US4-01)", () => {
+      createSkillFixture(skillsSource, "architect");
+      createSkillFixture(skillsSource, "pm");
+
+      const agent = makeAgent({
+        id: "opencode",
+        localSkillsDir: ".opencode/skills",
+      });
+      syncCoreSkills([agent], projectRoot, skillsSource);
+
+      // Correct: sw/{name}/SKILL.md
+      expect(
+        existsSync(
+          join(projectRoot, ".opencode", "skills", "sw", "architect", "SKILL.md"),
+        ),
+      ).toBe(true);
+      expect(
+        existsSync(
+          join(projectRoot, ".opencode", "skills", "sw", "pm", "SKILL.md"),
+        ),
+      ).toBe(true);
+
+      // Incorrect flat files must NOT exist
+      expect(
+        existsSync(join(projectRoot, ".opencode", "skills", "sw", "architect.md")),
+      ).toBe(false);
+      expect(
+        existsSync(join(projectRoot, ".opencode", "skills", "sw", "pm.md")),
+      ).toBe(false);
+    });
+
+    it("agent files written alongside SKILL.md in sw/{name}/ subdir (AC-US4-02)", () => {
+      createSkillFixture(skillsSource, "team-lead", { withAgents: true });
+
+      const agent = makeAgent({
+        id: "opencode",
+        localSkillsDir: ".opencode/skills",
+      });
+      syncCoreSkills([agent], projectRoot, skillsSource);
+
+      // Agent file should be inside sw/team-lead/agents/
+      const agentFile = join(
+        projectRoot,
+        ".opencode",
+        "skills",
+        "sw",
+        "team-lead",
+        "agents",
+        "worker.md",
+      );
+      expect(existsSync(agentFile)).toBe(true);
+      expect(readFileSync(agentFile, "utf-8")).toContain("Worker agent for team-lead");
+    });
+
+    it("migration cleans stale sw/ flat files before sync (AC-US4-03)", () => {
+      createSkillFixture(skillsSource, "pm");
+
+      const agent = makeAgent({
+        id: "opencode",
+        localSkillsDir: ".opencode/skills",
+      });
+
+      // Pre-create stale flat file from a prior version
+      const swDir = join(projectRoot, ".opencode", "skills", "sw");
+      mkdirSync(swDir, { recursive: true });
+      writeFileSync(join(swDir, "pm.md"), "# PM (stale flat file from old sync)");
+
+      // Run migration BEFORE sync (as init.ts does)
+      const agentSkillsDir = join(projectRoot, ".opencode", "skills");
+      migrateStaleSkillFiles(agentSkillsDir);
+
+      // Now sync
+      syncCoreSkills([agent], projectRoot, skillsSource);
+
+      // Stale flat file gone
+      expect(existsSync(join(swDir, "pm.md"))).toBe(false);
+      // Correct structure exists
+      expect(existsSync(join(swDir, "pm", "SKILL.md"))).toBe(true);
     });
 
     it("handles claude-code agent (copy fallback, no symlink)", () => {

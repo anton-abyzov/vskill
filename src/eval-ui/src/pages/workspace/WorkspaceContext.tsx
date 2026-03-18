@@ -10,6 +10,14 @@ import type { WorkspaceContextValue, PanelId, RunMode, InlineResult, AssertionRe
 import { workspaceReducer, initialWorkspaceState } from "./workspaceReducer";
 
 // ---------------------------------------------------------------------------
+// Runtime type guard for testType — prevents MouseEvent leak from onClick
+// ---------------------------------------------------------------------------
+export function sanitizeTestType(value: unknown): "unit" | "integration" | undefined {
+  if (value === "unit" || value === "integration") return value;
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
 // Pure accumulator mutation — extracted for testability
 // ---------------------------------------------------------------------------
 export function applySSEToAccumulator(r: InlineResult, evt: SSEEvent): void {
@@ -504,7 +512,8 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     const body: Record<string, unknown> = {};
     if (config?.provider) body.provider = config.provider;
     if (config?.model) body.model = config.model;
-    if (opts?.testType) body.testType = opts.testType;
+    const testType = sanitizeTestType(opts?.testType);
+    if (testType) body.testType = testType;
     genEvalsSSE.start(`/api/skills/${plugin}/${skill}/generate-evals?sse`, Object.keys(body).length > 0 ? body : undefined);
   }, [isReadOnly, plugin, skill, genEvalsSSE, config]);
 

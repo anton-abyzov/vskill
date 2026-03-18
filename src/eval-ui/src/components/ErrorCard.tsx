@@ -1,13 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-
-export interface ClassifiedError {
-  category: "rate_limit" | "context_window" | "auth" | "timeout" | "provider_unavailable" | "parse_error" | "unknown";
-  title: string;
-  description: string;
-  hint: string;
-  retryable: boolean;
-  retryAfterMs?: number;
-}
+export type { ClassifiedError } from "../shared/classifiedError";
+import type { ClassifiedError } from "../shared/classifiedError";
 
 interface ErrorCardProps {
   error: ClassifiedError;
@@ -20,6 +13,7 @@ const CATEGORY_CONFIG: Record<string, { icon: string; color: string }> = {
   context_window: { icon: "\u26A0", color: "var(--amber, #f59e0b)" }, // warning
   auth: { icon: "\uD83D\uDD12", color: "var(--red, #ef4444)" }, // lock
   timeout: { icon: "\u231B", color: "var(--amber, #f59e0b)" }, // hourglass
+  model_not_found: { icon: "\uD83D\uDD0D", color: "var(--red, #ef4444)" }, // magnifying glass
   provider_unavailable: { icon: "\u26A1", color: "var(--red, #ef4444)" }, // lightning
   parse_error: { icon: "\u2753", color: "var(--amber, #f59e0b)" }, // question
   unknown: { icon: "\u274C", color: "var(--red, #ef4444)" }, // x mark

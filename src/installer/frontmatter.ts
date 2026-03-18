@@ -16,6 +16,24 @@ const HAS_DESCRIPTION_RE = /^description:/m;
 /** Max description length per agentskills.io standard */
 const MAX_DESCRIPTION_LENGTH = 200;
 
+/** YAML-special characters that require quoting */
+const YAML_SPECIAL_RE = /[:#\[\]{}'*&!>|"\\]/;
+
+/** YAML boolean words that need quoting when they start a value */
+const YAML_BOOL_START_RE = /^(true|false|yes|no|on|off|null)\b/i;
+
+/**
+ * Quote a YAML value if it contains special characters.
+ * Escapes inner backslashes and double quotes, wraps in "...".
+ */
+export function quoteYAMLValue(value: string): string {
+  if (!YAML_SPECIAL_RE.test(value) && !YAML_BOOL_START_RE.test(value)) {
+    return value;
+  }
+  const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `"${escaped}"`;
+}
+
 /**
  * Validate a skill name against the agentskills.io standard.
  * Must be lowercase alphanumeric with hyphens, 1-64 chars, no leading/trailing hyphens.
@@ -48,12 +66,12 @@ export function extractDescription(body: string, skillName: string): string {
  * Pure function — normalizes CRLF, preserves existing fields, injects missing ones.
  */
 export function ensureFrontmatter(content: string, skillName: string): string {
-  const normalized = content.replace(/\r\n/g, "\n");
+  const normalized = content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
   const match = normalized.match(FRONTMATTER_RE);
 
   if (!match) {
     const desc = extractDescription(normalized, skillName);
-    return `---\nname: ${skillName}\ndescription: ${desc}\n---\n\n${normalized}`;
+    return `---\nname: ${skillName}\ndescription: ${quoteYAMLValue(desc)}\n---\n\n${normalized}`;
   }
 
   const fmBlock = match[1];
@@ -73,7 +91,7 @@ export function ensureFrontmatter(content: string, skillName: string): string {
   if (!hasDescription) {
     const body = normalized.slice(match[0].length);
     const desc = extractDescription(body, skillName);
-    updatedBlock = `${updatedBlock}\ndescription: ${desc}`;
+    updatedBlock = `${updatedBlock}\ndescription: ${quoteYAMLValue(desc)}`;
   }
 
   return normalized.replace(FRONTMATTER_RE, `---\n${updatedBlock}\n---`);

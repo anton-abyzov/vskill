@@ -11,6 +11,8 @@ import { readLockfile, writeLockfile, ensureLockfile } from "../lockfile/index.j
 import { filterAgents } from "../utils/agent-filter.js";
 import { syncCoreSkills, findCoreSkillsDir } from "../core-skills/sync.js";
 import { purgeStalePlugins } from "../settings/index.js";
+import { migrateStaleSkillFiles, ensureSkillMdNaming } from "../installer/migrate.js";
+import { resolveAgentSkillsDir } from "../installer/canonical.js";
 import { bold, green, dim, cyan, red, table } from "../utils/output.js";
 
 export interface InitOptions {
@@ -92,6 +94,33 @@ export async function initCommand(opts: InitOptions = {}): Promise<void> {
       for (const id of allPurged) {
         console.log(dim(`  - ${id}`));
       }
+    }
+  }
+
+  // Migrate stale flat .md files to {name}/SKILL.md subdirectory structure
+  if (agents.length > 0) {
+    let totalMigrated = 0;
+    let totalRemoved = 0;
+    for (const agent of agents) {
+      try {
+        const agentSkillsDir = resolveAgentSkillsDir(agent, {
+          global: false,
+          projectRoot: process.cwd(),
+        });
+        const result = migrateStaleSkillFiles(agentSkillsDir);
+        totalMigrated += result.migratedCount;
+        totalRemoved += result.removedCount;
+        // Post-migration enforcement: ensure every skill subdir has SKILL.md
+        const naming = ensureSkillMdNaming(agentSkillsDir);
+        totalMigrated += naming.renamedCount;
+      } catch {
+        // Non-fatal — skip migration for this agent
+      }
+    }
+    if (totalMigrated > 0 || totalRemoved > 0) {
+      console.log(
+        dim(`\nMigrated ${totalMigrated} stale skill file${totalMigrated === 1 ? "" : "s"}, removed ${totalRemoved} duplicate${totalRemoved === 1 ? "" : "s"}`),
+      );
     }
   }
 

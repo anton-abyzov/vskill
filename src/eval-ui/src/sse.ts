@@ -6,6 +6,32 @@ export interface SSEEvent<T = unknown> {
   data: T;
 }
 
+/**
+ * Safe JSON serializer that handles circular references and non-serializable
+ * objects (DOM nodes, React fiber refs, class instances) without throwing.
+ */
+export function safeStringify(body: unknown): string | undefined {
+  if (body === undefined) return undefined;
+  try {
+    return JSON.stringify(body);
+  } catch (err) {
+    console.error("Failed to serialize request body:", err);
+    // Attempt fallback with circular ref replacement
+    try {
+      const seen = new WeakSet();
+      return JSON.stringify(body, (_key, value) => {
+        if (typeof value === "object" && value !== null) {
+          if (seen.has(value)) return "[Circular]";
+          seen.add(value);
+        }
+        return value;
+      });
+    } catch {
+      return JSON.stringify({ error: "Request body could not be serialized" });
+    }
+  }
+}
+
 export function useSSE<T = unknown>() {
   const [events, setEvents] = useState<SSEEvent<T>[]>([]);
   const [running, setRunning] = useState(false);
@@ -23,10 +49,11 @@ export function useSSE<T = unknown>() {
     abortRef.current = controller;
 
     try {
+      const serializedBody = safeStringify(body);
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: body ? JSON.stringify(body) : undefined,
+        body: serializedBody,
         signal: controller.signal,
       });
 
@@ -122,10 +149,11 @@ export function useMultiSSE(callbacks: MultiSSECallbacks) {
     });
 
     try {
+      const serializedBody = safeStringify(body);
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: body ? JSON.stringify(body) : undefined,
+        body: serializedBody,
         signal: controller.signal,
       });
 

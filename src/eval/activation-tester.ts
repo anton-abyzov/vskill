@@ -90,7 +90,7 @@ async function resolvePrompts(
   prompts: ActivationPrompt[],
   client: LlmClient,
   meta?: SkillMeta,
-  onProgress?: (phase: string, index: number, total: number) => void,
+  onProgress?: (phase: "classifying", index: number, total: number) => void,
 ): Promise<ResolvedPrompt[]> {
   const resolved: ResolvedPrompt[] = [];
   const autoTotal = meta ? prompts.filter((p) => p.expected === "auto").length : 0;
@@ -121,7 +121,7 @@ export async function testActivation(
   client: LlmClient,
   onResult?: (result: ActivationResult) => void,
   meta?: SkillMeta,
-  onProgress?: (phase: string, index: number, total: number) => void,
+  onProgress?: (phase: "classifying", index: number, total: number) => void,
 ): Promise<ActivationSummary> {
   // Phase 1: resolve auto expectations
   const resolved = await resolvePrompts(prompts, client, meta, onProgress);

@@ -524,6 +524,10 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     const events = activationSSE.events;
     for (let i = lastActivationIdxRef.current; i < events.length; i++) {
       const evt = events[i];
+      if (evt.event === "classifying") {
+        const progress = evt.data as { index: number; total: number };
+        dispatch({ type: "ACTIVATION_CLASSIFYING", index: progress.index, total: progress.total });
+      }
       if (evt.event === "prompt_result") {
         dispatch({ type: "ACTIVATION_RESULT", result: evt.data as ActivationResult });
       }
@@ -662,8 +666,8 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
                 throw new Error(data.message || data.description || "Generation failed");
               }
             } catch (e) {
-              if (e instanceof Error && e.message !== "Generation failed") {
-                // skip malformed JSON
+              if (e instanceof SyntaxError) {
+                // skip malformed JSON lines
               } else {
                 throw e;
               }

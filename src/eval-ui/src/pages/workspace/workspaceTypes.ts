@@ -121,6 +121,7 @@ export interface WorkspaceState {
   activationError: string | null;
   activationTotalPrompts: number;
   activationStartedAt: number | null;
+  activationClassifyingStatus: string | null;
 
   // AI prompt generation
   generatingPrompts: boolean;
@@ -200,6 +201,7 @@ export type WorkspaceAction =
   | { type: "ACTIVATION_RESULT"; result: ActivationResult }
   | { type: "ACTIVATION_DONE"; summary: ActivationSummary & { description?: string } }
   | { type: "ACTIVATION_ERROR"; error: string }
+  | { type: "ACTIVATION_CLASSIFYING"; index: number; total: number }
   | { type: "ACTIVATION_RESET" }
   | { type: "ACTIVATION_TIMEOUT" }
   | { type: "ACTIVATION_CANCEL"; totalPrompts: number }

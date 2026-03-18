@@ -37,6 +37,7 @@ export const initialWorkspaceState: WorkspaceState = {
   activationError: null,
   activationTotalPrompts: 0,
   activationStartedAt: null,
+  activationClassifyingStatus: null,
   generatingPrompts: false,
   generatingPromptsError: null,
   activationHistory: null,
@@ -282,16 +283,19 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return { ...state, activationPrompts: action.prompts };
 
     case "ACTIVATION_START":
-      return { ...state, activationRunning: true, activationResults: [], activationSummary: null, activationError: null, activationStartedAt: Date.now() };
+      return { ...state, activationRunning: true, activationResults: [], activationSummary: null, activationError: null, activationClassifyingStatus: null, activationStartedAt: Date.now() };
 
     case "ACTIVATION_RESULT":
       return { ...state, activationResults: [...state.activationResults, action.result] };
 
     case "ACTIVATION_DONE":
-      return { ...state, activationRunning: false, activationSummary: action.summary };
+      return { ...state, activationRunning: false, activationSummary: action.summary, activationClassifyingStatus: null };
+
+    case "ACTIVATION_CLASSIFYING":
+      return { ...state, activationClassifyingStatus: `Classifying prompt ${action.index}/${action.total}...` };
 
     case "ACTIVATION_ERROR":
-      return { ...state, activationRunning: false, activationError: action.error };
+      return { ...state, activationRunning: false, activationError: action.error, activationClassifyingStatus: null };
 
     case "ACTIVATION_RESET":
       return { ...state, activationResults: [], activationSummary: null, activationError: null };

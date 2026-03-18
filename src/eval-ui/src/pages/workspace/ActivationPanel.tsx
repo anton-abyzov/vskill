@@ -15,7 +15,7 @@ export function ActivationPanel() {
   const { state, dispatch, runActivationTest, cancelActivation, generateActivationPrompts } = useWorkspace();
   const {
     plugin, skill, activationPrompts, activationResults, activationSummary,
-    activationRunning, activationError, activationStartedAt,
+    activationRunning, activationError, activationStartedAt, activationClassifyingStatus,
     generatingPrompts, generatingPromptsError,
     activationHistory,
   } = state;
@@ -205,7 +205,9 @@ export function ActivationPanel() {
                   Cancel
                 </button>
                 <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
-                  {activationResults.length} / {promptCount} prompts tested
+                  {activationClassifyingStatus
+                    ? activationClassifyingStatus
+                    : `${activationResults.length} / ${promptCount} prompts tested`}
                   {activationStartedAt && (
                     <ElapsedTime startedAt={activationStartedAt} />
                   )}

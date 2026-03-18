@@ -1329,7 +1329,10 @@ Return ONLY the JSON lines, no other text.`;
 
       const userPrompt = `Skill description: ${description}`;
 
-      const { text } = await client.generate(systemPrompt, userPrompt);
+      const { text } = await withHeartbeat(
+        res, undefined, "generating", "Generating test prompts...",
+        () => client.generate(systemPrompt, userPrompt),
+      );
       if (aborted) return;
 
       const allPrompts: Array<{ prompt: string; expected: string }> = [];

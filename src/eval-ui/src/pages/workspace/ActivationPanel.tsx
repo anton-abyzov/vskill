@@ -124,6 +124,16 @@ export function ActivationPanel() {
             </div>
           </div>
 
+          {!cleanDescription && !activationRunning && (
+            <div
+              className="text-[11px] mt-1"
+              style={{ color: "var(--text-tertiary)" }}
+              aria-live="polite"
+            >
+              Add a description to your skill's frontmatter to enable prompt generation.
+            </div>
+          )}
+
           {generatingPromptsError && (
             <div className="text-[11px] px-2 py-1 rounded" style={{ color: "var(--red)", background: "var(--red-muted)" }}>
               {generatingPromptsError}

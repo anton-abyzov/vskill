@@ -346,7 +346,8 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
       });
 
       mockStatSync.mockImplementation((p: string) => {
-        if (typeof p === "string" && p.includes("plugins/newplugin")) {
+        // Only the base directory is a directory, not files inside it
+        if (typeof p === "string" && p.endsWith("plugins/newplugin")) {
           return { isDirectory: () => true, isFile: () => false };
         }
         return { isDirectory: () => false, isFile: () => true };

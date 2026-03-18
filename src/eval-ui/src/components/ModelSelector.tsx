@@ -159,9 +159,6 @@ export function ModelSelector() {
 /** Determine if a model option is the currently active one. */
 function isModelActive(config: ConfigResponse, providerId: string, modelId: string): boolean {
   if (config.provider !== providerId) return false;
-  if (providerId === "claude-cli") {
-    return config.model === `claude-${modelId}`;
-  }
   return config.model === modelId;
 }
 

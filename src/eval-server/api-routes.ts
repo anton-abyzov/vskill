@@ -52,6 +52,13 @@ export function extractDescription(skillContent: string): string {
 // ---------------------------------------------------------------------------
 let currentOverrides: LlmOverrides = { provider: "claude-cli" };
 
+/** Return the effective raw model ID (suitable for round-tripping via the API). */
+function getEffectiveRawModel(): string {
+  if (currentOverrides.model) return currentOverrides.model;
+  const provider = (currentOverrides.provider || "claude-cli") as ProviderName;
+  return PROVIDER_MODELS[provider]?.[0]?.id || "sonnet";
+}
+
 function getClient(): ReturnType<typeof createLlmClient> {
   return createLlmClient(currentOverrides);
 }
@@ -230,13 +237,17 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   });
 
   // Config — expose current provider/model + available providers + project
+  // IMPORTANT: Return raw model IDs (e.g. "sonnet"), NOT display models
+  // (e.g. "claude-sonnet"). The frontend round-trips config.model back to
+  // generate-evals and other endpoints, so it must be a valid CLI model ID.
   router.get("/api/config", async (_req, res) => {
     try {
-      const client = getClient();
+      // Validate the client can be created (catches missing API keys etc.)
+      getClient();
       const providers = await detectAvailableProviders();
       sendJson(res, {
         provider: currentOverrides.provider || null,
-        model: client.model,
+        model: getEffectiveRawModel(),
         providers,
         projectName: projectName || null,
         root,
@@ -256,9 +267,10 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     if (body.provider && !body.model) delete currentOverrides.model;
 
     try {
-      const client = getClient();
+      // Validate the client can be created
+      getClient();
       const providers = await detectAvailableProviders();
-      sendJson(res, { provider: currentOverrides.provider || null, model: client.model, providers });
+      sendJson(res, { provider: currentOverrides.provider || null, model: getEffectiveRawModel(), providers });
     } catch (err) {
       // Revert to safe default (not empty — empty triggers auto-detection which
       // picks ollama inside Claude Code sessions instead of claude-cli)

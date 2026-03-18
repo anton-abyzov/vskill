@@ -332,6 +332,67 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
     });
   });
 
+  // resolvePluginDir falls back to plugins/ folder when not in marketplace.json
+  describe("resolvePluginDir falls back to plugins/ folder", () => {
+    it("installs from plugins/<name> folder when plugin not in marketplace.json (local)", async () => {
+      const localPath = "/tmp/test-repo";
+
+      mockExistsSync.mockImplementation((p: string) => {
+        // marketplace.json exists but won't contain "newplugin"
+        if (typeof p === "string" && p.includes(".claude-plugin/marketplace.json")) return true;
+        // The fallback directory plugins/newplugin exists
+        if (typeof p === "string" && p.includes("plugins/newplugin")) return true;
+        return false;
+      });
+
+      mockStatSync.mockImplementation((p: string) => {
+        if (typeof p === "string" && p.includes("plugins/newplugin")) {
+          return { isDirectory: () => true, isFile: () => false };
+        }
+        return { isDirectory: () => false, isFile: () => true };
+      });
+
+      mockReadFileSync.mockImplementation((p: string) => {
+        if (typeof p === "string" && p.includes("marketplace.json")) {
+          // Marketplace only has "sw", NOT "newplugin"
+          return JSON.stringify({
+            name: "specweave",
+            version: "1.0.0",
+            plugins: [
+              { name: "sw", source: "./plugins/specweave", version: "1.0.0" },
+            ],
+          });
+        }
+        return "";
+      });
+
+      // readdirSync for collectPluginContent and copyPluginFiltered
+      mockReaddirSync.mockImplementation((_dir: string, opts?: unknown) => {
+        if (typeof opts === "object" && opts !== null && (opts as Record<string, unknown>).recursive) {
+          return ["skills/SKILL.md"];
+        }
+        return ["SKILL.md"];
+      });
+
+      mockRunTier1Scan.mockReturnValue(makeScanResult());
+      mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+      mockEnsureLockfile.mockReturnValue({
+        version: 1,
+        agents: [],
+        skills: {},
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      await addCommand(localPath, { plugin: "newplugin", pluginDir: localPath });
+
+      // copyFileSync should be called with path including plugins/newplugin
+      expect(mockCopyFileSync).toHaveBeenCalled();
+      const cpCall = mockCopyFileSync.mock.calls[0];
+      expect(cpCall[0]).toContain("plugins/newplugin");
+    });
+  });
+
   // TC-002: Full directory structure preserved on installation
   describe("TC-002: full directory structure is preserved", () => {
     it("recursively copies all subdirectories (skills, hooks, commands, agents, .claude-plugin) to cache", async () => {
@@ -1739,7 +1800,78 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
     exitSpy.mockRestore();
   });
 
-  it("exits with error when plugin not found in marketplace", async () => {
+  it("falls back to folder probe when plugin not in marketplace.json", async () => {
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockFindProjectRoot.mockReturnValue("/project");
+    mockExistsSync.mockReturnValue(false);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    // Marketplace only has "backend", NOT "unlisted"
+    const noUnlistedMarketplace = JSON.stringify({
+      name: "vskill",
+      version: "1.0.0",
+      plugins: [
+        { name: "backend", source: "./plugins/backend", version: "1.0.0" },
+      ],
+    });
+
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      // Marketplace manifest — "unlisted" NOT listed
+      if (url.includes("marketplace.json")) {
+        return { ok: true, text: async () => noUnlistedMarketplace };
+      }
+      // Skills directory listing inside the probed folder
+      if (url.includes("/contents/plugins/unlisted/skills")) {
+        return {
+          ok: true,
+          json: async () => [{ name: "react", type: "dir" }],
+        };
+      }
+      // Commands directory listing
+      if (url.includes("/contents/plugins/unlisted/commands")) {
+        return { ok: true, json: async () => [] };
+      }
+      // Folder probe: plugins/unlisted/ exists as a directory
+      if (url.includes("/contents/plugins/unlisted")) {
+        return {
+          ok: true,
+          json: async () => [
+            { name: "skills", type: "dir" },
+            { name: "commands", type: "dir" },
+          ],
+        };
+      }
+      // Raw SKILL.md content
+      if (url.includes("/skills/react/SKILL.md")) {
+        return { ok: true, text: async () => "# React Skill\nUI library" };
+      }
+      return { ok: false };
+    }) as unknown as typeof fetch;
+
+    await addCommand("ignored", { repo: "anton-abyzov/vskill", plugin: "unlisted" });
+
+    // Should have installed the skill under the plugin namespace
+    const writeCalls = mockWriteFileSync.mock.calls as [string, string][];
+    const skillPaths = writeCalls.filter(([p]) => p.includes("SKILL.md")).map(([p]) => p);
+    expect(skillPaths.length).toBe(1);
+    expect(skillPaths[0]).toContain("/unlisted/react/SKILL.md");
+
+    // Lockfile should record version 0.0.0 since plugin is not in marketplace
+    expect(mockWriteLockfile).toHaveBeenCalled();
+    const lock = mockWriteLockfile.mock.calls[0][0];
+    expect(lock.skills.unlisted).toBeDefined();
+    expect(lock.skills.unlisted.version).toBe("0.0.0");
+  });
+
+  it("exits with error when plugin not found in marketplace or as a folder in the repo", async () => {
     mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
     globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("marketplace.json")) {

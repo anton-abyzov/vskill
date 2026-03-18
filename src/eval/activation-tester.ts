@@ -90,12 +90,16 @@ async function resolvePrompts(
   prompts: ActivationPrompt[],
   client: LlmClient,
   meta?: SkillMeta,
+  onProgress?: (phase: string, index: number, total: number) => void,
 ): Promise<ResolvedPrompt[]> {
   const resolved: ResolvedPrompt[] = [];
+  const autoTotal = meta ? prompts.filter((p) => p.expected === "auto").length : 0;
+  let autoIndex = 0;
   for (const p of prompts) {
     if (p.expected === "auto") {
       if (meta) {
         const expected = await classifyExpectation(meta, p.prompt, client);
+        onProgress?.("classifying", ++autoIndex, autoTotal);
         resolved.push({ prompt: p.prompt, expected, autoClassified: true });
       } else {
         resolved.push({ prompt: p.prompt, expected: "should_activate", autoClassified: true });
@@ -117,9 +121,10 @@ export async function testActivation(
   client: LlmClient,
   onResult?: (result: ActivationResult) => void,
   meta?: SkillMeta,
+  onProgress?: (phase: string, index: number, total: number) => void,
 ): Promise<ActivationSummary> {
   // Phase 1: resolve auto expectations
-  const resolved = await resolvePrompts(prompts, client, meta);
+  const resolved = await resolvePrompts(prompts, client, meta, onProgress);
 
   // Phase 2: evaluate each prompt against description
   const results: ActivationResult[] = [];

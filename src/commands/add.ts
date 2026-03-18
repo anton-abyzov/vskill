@@ -223,9 +223,28 @@ async function installMarketplaceRepo(
         selectedUnregistered = matchedUnreg;
         console.log(dim(`Installing ${matchedUnreg.length} unregistered plugin${matchedUnreg.length === 1 ? "" : "s"}: ${matchedUnreg.map((u) => u.name).join(", ")}`));
       } else {
-        console.error(red(`Plugin "${preSelected[0]}" not found in marketplace or repo.`));
-        process.exit(1);
-        return;
+        // Not in marketplace or unregistered list — probe plugins/<name>/ folder directly
+        let probeSource: string | null = null;
+        try {
+          const probeRes = await fetch(
+            `https://api.github.com/repos/${owner}/${repo}/contents/plugins/${preSelected[0]}`,
+            { headers: { "User-Agent": "vskill-cli" } },
+          );
+          if (probeRes.ok) {
+            const data = await probeRes.json();
+            if (Array.isArray(data)) {
+              probeSource = `./plugins/${preSelected[0]}`;
+            }
+          }
+        } catch { /* fall through */ }
+        if (!probeSource) {
+          console.error(red(`"${preSelected[0]}" not found in marketplace, unregistered plugins, or as a folder in the repo.`));
+          process.exit(1);
+          return;
+        }
+        selectedPlugins = [];
+        selectedUnregistered = [{ name: preSelected[0], source: probeSource }];
+        console.log(yellow(`"${preSelected[0]}" not in marketplace.json — found as folder at plugins/${preSelected[0]}/`));
       }
     }
   } else if (!isTTY() && !opts.yes && !opts.all) {
@@ -910,7 +929,7 @@ function printTaintedWarning(skillName: string, reason?: string): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve the plugin subdirectory from marketplace.json.
+ * Resolve the plugin subdirectory from marketplace.json or plugins/ folder.
  * Returns the absolute path to the plugin's source directory.
  */
 function resolvePluginDir(
@@ -918,13 +937,19 @@ function resolvePluginDir(
   pluginName: string,
 ): string | null {
   const marketplacePath = join(basePath, ".claude-plugin", "marketplace.json");
-  if (!existsSync(marketplacePath)) return null;
+  if (existsSync(marketplacePath)) {
+    const content = readFileSync(marketplacePath, "utf-8");
+    const source = getPluginSource(pluginName, content);
+    if (source) return resolve(basePath, source);
+  }
 
-  const content = readFileSync(marketplacePath, "utf-8");
-  const source = getPluginSource(pluginName, content);
-  if (!source) return null;
+  // Fallback: check if plugins/<name> exists as a directory
+  const pluginDir = resolve(basePath, "plugins", pluginName);
+  if (existsSync(pluginDir) && statSync(pluginDir).isDirectory()) {
+    return pluginDir;
+  }
 
-  return resolve(basePath, source);
+  return null;
 }
 
 /**
@@ -983,8 +1008,8 @@ async function installPluginDir(
       }
     }
     console.error(
-      red(`Plugin "${pluginName}" not found in marketplace.json\n`) +
-        dim(`Checked: ${mktPath}`) +
+      red(`"${pluginName}" not found in marketplace.json or as a plugins/ folder.\n`) +
+        dim(`Checked: ${mktPath} and plugins/${pluginName}/`) +
         available
     );
     process.exit(1);
@@ -1415,13 +1440,31 @@ async function installRepoPlugin(
   }
 
   // Find the plugin in the marketplace (or use override for unregistered plugins)
-  const pluginSource = overrideSource || getPluginSource(pluginName, manifestContent);
+  let pluginSource = overrideSource || getPluginSource(pluginName, manifestContent);
   if (!pluginSource) {
-    const available = getAvailablePlugins(manifestContent).map((p) => p.name);
-    throw new Error(
-      `Plugin "${pluginName}" not found in marketplace.json. ` +
-        `Available plugins: ${available.join(", ")}`
-    );
+    // Not in marketplace.json — probe plugins/<name>/ folder in the repo
+    const probeSpin = spinner(`Looking for "${pluginName}" folder in repo`);
+    try {
+      const probeRes = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/contents/plugins/${pluginName}`,
+        { headers: { "User-Agent": "vskill-cli" } },
+      );
+      if (probeRes.ok) {
+        const data = await probeRes.json();
+        if (Array.isArray(data)) {
+          pluginSource = `./plugins/${pluginName}`;
+          probeSpin.stop(yellow(`"${pluginName}" not in marketplace.json — found as folder at plugins/${pluginName}/`));
+        }
+      }
+    } catch { /* network error — fall through */ }
+    if (!pluginSource) {
+      probeSpin.stop();
+      const available = getAvailablePlugins(manifestContent).map((p) => p.name);
+      throw new Error(
+        `"${pluginName}" not found in marketplace.json or as a folder in the repo.\n` +
+          `Available plugins: ${available.join(", ")}`
+      );
+    }
   }
   const pluginVersion = overrideSource ? "0.0.0" : (getPluginVersion(pluginName, manifestContent) || "0.0.0");
   const pluginPath = pluginSource.replace(/^\.\//, "");

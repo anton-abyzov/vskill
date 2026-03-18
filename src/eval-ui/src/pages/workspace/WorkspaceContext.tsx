@@ -532,27 +532,31 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
           clearTimeout(activationTimeoutRef.current);
           activationTimeoutRef.current = null;
         }
-        const summary = evt.data as ActivationSummary & { description?: string };
-        dispatch({ type: "ACTIVATION_DONE", summary });
+        const raw = evt.data as { error?: string } & ActivationSummary & { description?: string };
+        if (raw.error) {
+          dispatch({ type: "ACTIVATION_ERROR", error: raw.error });
+        } else {
+          dispatch({ type: "ACTIVATION_DONE", summary: raw });
 
-        // Prepend the completed run to the activation history
-        const run: ActivationHistoryRun = {
-          id: `run-${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          model: config?.model || "unknown",
-          provider: config?.provider || "unknown",
-          promptCount: summary.total,
-          summary: {
-            precision: summary.precision,
-            recall: summary.recall,
-            reliability: summary.reliability,
-            tp: summary.tp,
-            tn: summary.tn,
-            fp: summary.fp,
-            fn: summary.fn,
-          },
-        };
-        dispatch({ type: "ACTIVATION_HISTORY_LOADED", runs: [run, ...(state.activationHistory ?? [])] });
+          // Prepend the completed run to the activation history
+          const run: ActivationHistoryRun = {
+            id: `run-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            model: config?.model || "unknown",
+            provider: config?.provider || "unknown",
+            promptCount: raw.total,
+            summary: {
+              precision: raw.precision,
+              recall: raw.recall,
+              reliability: raw.reliability,
+              tp: raw.tp,
+              tn: raw.tn,
+              fp: raw.fp,
+              fn: raw.fn,
+            },
+          };
+          dispatch({ type: "ACTIVATION_HISTORY_LOADED", runs: [run, ...(state.activationHistory ?? [])] });
+        }
       }
     }
     lastActivationIdxRef.current = events.length;
@@ -651,6 +655,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
             try {
               const data = JSON.parse(line.slice(6));
               if (currentEvent === "done") {
+                if (data.error) throw new Error(data.error);
                 finalPrompts = data.prompts || [];
               }
               if (currentEvent === "error") {

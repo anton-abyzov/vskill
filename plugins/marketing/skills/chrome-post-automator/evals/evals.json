@@ -33,7 +33,11 @@
           "text": "Response attempts JavaScript DOM interaction (querySelector, execute javascript) before falling back to System Events",
           "type": "boolean"
         }
-      ]
+      ],
+      "testType": "integration",
+      "requirements": {
+        "chromeProfile": "personal"
+      }
     },
     {
       "id": 2,
@@ -69,7 +73,8 @@
           "text": "Response escapes quotes properly across bash, AppleScript, and JavaScript layers (no unescaped nested quotes)",
           "type": "boolean"
         }
-      ]
+      ],
+      "testType": "unit"
     },
     {
       "id": 3,
@@ -108,7 +113,27 @@
           "text": "Response includes a step to verify the comment was submitted by checking page content or success indicators",
           "type": "boolean"
         }
-      ]
+      ],
+      "testType": "unit"
+    },
+    {
+      "id": 4,
+      "name": "Post news to linkedin page",
+      "prompt": "Open the Google Chrome profile that is specified in the parameters and do the post with just the test message body.",
+      "expected_output": "A message is posted on the LinkedIn page.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "assert-1773814362112",
+          "text": "Opening an account shows the post with this test message body. ",
+          "type": "boolean"
+        }
+      ],
+      "testType": "integration",
+      "requirements": {
+        "platform": "linkedin",
+        "chromeProfile": "Personal"
+      }
     }
   ]
 }

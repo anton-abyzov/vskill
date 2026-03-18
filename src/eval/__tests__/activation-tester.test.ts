@@ -223,6 +223,79 @@ describe("testActivation — auto-classification", () => {
     expect(summary.results[0].classification).toBe("TP");
   });
 
+  it("calls onProgress for each auto-prompt during Phase 1", async () => {
+    const client = mockClient([
+      // Phase 1: classify 2 auto prompts
+      JSON.stringify({ related: true }),
+      JSON.stringify({ related: false }),
+      // Phase 2: evaluate 2 prompts
+      JSON.stringify({ activate: true, confidence: "high", reasoning: "Yes" }),
+      JSON.stringify({ activate: false, confidence: "high", reasoning: "No" }),
+    ]);
+
+    const prompts: ActivationPrompt[] = [
+      { prompt: "send a slack message", expected: "auto" },
+      { prompt: "write a poem", expected: "auto" },
+    ];
+
+    const onProgress = vi.fn();
+    await testActivation("desc", prompts, client, undefined, SKILL_META, onProgress);
+
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(onProgress).toHaveBeenNthCalledWith(1, "classifying", 1, 2);
+    expect(onProgress).toHaveBeenNthCalledWith(2, "classifying", 2, 2);
+  });
+
+  it("does not call onProgress when all prompts have explicit expected", async () => {
+    const client = mockClient([
+      JSON.stringify({ activate: true, confidence: "high", reasoning: "Yes" }),
+      JSON.stringify({ activate: false, confidence: "high", reasoning: "No" }),
+    ]);
+
+    const onProgress = vi.fn();
+    await testActivation("desc", PROMPTS, client, undefined, undefined, onProgress);
+
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it("calls onProgress only for auto prompts in mixed array", async () => {
+    const client = mockClient([
+      // Phase 1: only 1 auto prompt
+      JSON.stringify({ related: false }),
+      // Phase 2: all 3
+      JSON.stringify({ activate: true, confidence: "high", reasoning: "Yes" }),
+      JSON.stringify({ activate: false, confidence: "high", reasoning: "No" }),
+      JSON.stringify({ activate: false, confidence: "high", reasoning: "No" }),
+    ]);
+
+    const prompts: ActivationPrompt[] = [
+      { prompt: "send a slack message", expected: "should_activate" },
+      { prompt: "write a poem", expected: "should_not_activate" },
+      { prompt: "unlabeled", expected: "auto" },
+    ];
+
+    const onProgress = vi.fn();
+    await testActivation("desc", prompts, client, undefined, SKILL_META, onProgress);
+
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress).toHaveBeenCalledWith("classifying", 1, 1);
+  });
+
+  it("works without onProgress (backward compatible)", async () => {
+    const client = mockClient([
+      JSON.stringify({ related: true }),
+      JSON.stringify({ activate: true, confidence: "high", reasoning: "Yes" }),
+    ]);
+
+    const prompts: ActivationPrompt[] = [
+      { prompt: "test", expected: "auto" },
+    ];
+
+    // No onProgress — should not throw
+    const summary = await testActivation("desc", prompts, client, undefined, SKILL_META);
+    expect(summary.total).toBe(1);
+  });
+
   it("existing tests with explicit expected still work without meta", async () => {
     const client = mockClient([
       JSON.stringify({ activate: true, confidence: "high", reasoning: "Yes" }),

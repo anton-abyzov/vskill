@@ -283,6 +283,47 @@ describe("workspaceReducer - Activation timeout and cancel", () => {
 });
 
 // ---------------------------------------------------------------------------
+// ACTIVATION_ERROR from done event (T-001 / 0566)
+// ---------------------------------------------------------------------------
+
+describe("workspaceReducer - ACTIVATION_ERROR from done event", () => {
+  it("ACTIVATION_ERROR sets activationRunning to false and activationError to the error string", () => {
+    const state = makeState({ activationRunning: true });
+    const result = dispatch(state, { type: "ACTIVATION_ERROR", error: "LLM call failed" });
+    expect(result.activationRunning).toBe(false);
+    expect(result.activationError).toBe("LLM call failed");
+  });
+
+  it("ACTIVATION_ERROR does not clear activationResults (partial results preserved)", () => {
+    const partialResults = [
+      makeActivationResult("test1", "TP"),
+      makeActivationResult("test2", "TN"),
+    ];
+    const state = makeState({ activationRunning: true, activationResults: partialResults });
+    const result = dispatch(state, { type: "ACTIVATION_ERROR", error: "provider error" });
+    expect(result.activationResults).toHaveLength(2);
+    expect(result.activationResults[0].prompt).toBe("test1");
+  });
+
+  it("ACTIVATION_START -> ACTIVATION_RESULT x2 -> ACTIVATION_ERROR preserves partial results and sets error", () => {
+    let state = makeState();
+    state = dispatch(state, { type: "ACTIVATION_START" });
+    state = dispatch(state, { type: "ACTIVATION_RESULT", result: makeActivationResult("p1", "TP") });
+    state = dispatch(state, { type: "ACTIVATION_RESULT", result: makeActivationResult("p2", "FN") });
+    state = dispatch(state, { type: "ACTIVATION_ERROR", error: "No API key configured" });
+    expect(state.activationRunning).toBe(false);
+    expect(state.activationResults).toHaveLength(2);
+    expect(state.activationError).toBe("No API key configured");
+  });
+
+  it("ACTIVATION_START clears prior activationError", () => {
+    const state = makeState({ activationError: "previous error" });
+    const result = dispatch(state, { type: "ACTIVATION_START" });
+    expect(result.activationError).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // AI Prompt Generation reducer tests (T-011)
 // ---------------------------------------------------------------------------
 
@@ -310,6 +351,27 @@ describe("workspaceReducer - AI Prompt Generation", () => {
       const result = dispatch(state, { type: "GENERATE_PROMPTS_ERROR", error: "LLM failed" });
       expect(result.generatingPrompts).toBe(false);
       expect(result.generatingPromptsError).toBe("LLM failed");
+    });
+  });
+
+  describe("GENERATE_PROMPTS flow with error-in-done (T-003 / 0566)", () => {
+    it("GENERATE_PROMPTS_START -> GENERATE_PROMPTS_ERROR settles correctly", () => {
+      let state = makeState();
+      state = dispatch(state, { type: "GENERATE_PROMPTS_START" });
+      expect(state.generatingPrompts).toBe(true);
+      expect(state.generatingPromptsError).toBeNull();
+      state = dispatch(state, { type: "GENERATE_PROMPTS_ERROR", error: "generation failed" });
+      expect(state.generatingPrompts).toBe(false);
+      expect(state.generatingPromptsError).toBe("generation failed");
+    });
+
+    it("second run after error clears previous error", () => {
+      let state = makeState();
+      state = dispatch(state, { type: "GENERATE_PROMPTS_ERROR", error: "first error" });
+      expect(state.generatingPromptsError).toBe("first error");
+      state = dispatch(state, { type: "GENERATE_PROMPTS_START" });
+      expect(state.generatingPrompts).toBe(true);
+      expect(state.generatingPromptsError).toBeNull();
     });
   });
 });

@@ -1247,7 +1247,9 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         if (!aborted) {
           sendSSE(res, "prompt_result", result);
         }
-      }, meta);
+      }, meta, (phase, index, total) => {
+        if (!aborted) sendSSE(res, phase, { index, total });
+      });
 
       if (!aborted) {
         // Write activation history entry

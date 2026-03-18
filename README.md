@@ -154,7 +154,7 @@ vskill init                 Initialize vskill in a project
 | `--global` `-g` | Install to global scope |
 | `--copy` | Copy files instead of symlinking |
 | `--skill <name>` | Pick a specific skill from a multi-skill repo |
-| `--plugin <name>` | Pick a plugin from a marketplace repo |
+| `--plugin <name>` | Pick a plugin by name (checks marketplace, then plugins/ folder) |
 | `--plugin-dir <path>` | Local directory as plugin source |
 | `--repo <owner/repo>` | Remote GitHub repo as plugin source |
 | `--agent <id>` | Target a specific agent (e.g., `cursor`) |

@@ -278,10 +278,10 @@ The CLI returns structured JSON from every command, so the agent parses response
 
 The recommended starting point. Scout analyzes your project structure and recommends the right skills:
 
-- Detects `package.json` → suggests frontend/backend plugins
-- Detects `docker-compose.yml` → suggests infra plugin
+- Detects `package.json` → suggests relevant skills for your stack
+- Detects `docker-compose.yml` → suggests infra skills
 - Detects `.github/workflows/` → suggests GitHub Actions skill
-- Detects test files → suggests testing plugin
+- Detects test files → suggests testing skills
 
 Search the [verified-skill.com](https://verified-skill.com) registry by keyword, browse available plugins, or install entire bundles with one command.
 

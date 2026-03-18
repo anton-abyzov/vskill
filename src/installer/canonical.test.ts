@@ -11,6 +11,28 @@ import {
   resolveAgentSkillsDir,
 } from "./canonical.js";
 
+// Controlled mock for symlinkSync to test symlink-failure fallback path (TC-103)
+const { getForceSymlinkFailure, setForceSymlinkFailure } = vi.hoisted(() => {
+  let force = false;
+  return {
+    getForceSymlinkFailure: () => force,
+    setForceSymlinkFailure: (v: boolean) => { force = v; },
+  };
+});
+
+vi.mock("node:fs", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...original,
+    symlinkSync: ((...args: any[]) => {
+      if (getForceSymlinkFailure()) {
+        throw new Error("Mocked EPERM: symlink creation not permitted");
+      }
+      return (original.symlinkSync as Function)(...args);
+    }),
+  };
+});
+
 function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
   return {
     id: "claude-code",
@@ -146,9 +168,11 @@ describe("canonical installer", () => {
         projectRoot: tempDir,
       });
 
-      // Canonical SKILL.md exists
+      // Canonical SKILL.md exists with frontmatter
       const canonicalPath = join(tempDir, ".agents", "skills", "my-skill", "SKILL.md");
-      expect(readFileSync(canonicalPath, "utf-8")).toBe("# My Skill\nContent here");
+      const canonicalContent = readFileSync(canonicalPath, "utf-8");
+      expect(canonicalContent).toContain("name: my-skill");
+      expect(canonicalContent).toContain("# My Skill\nContent here");
 
       // Each agent dir has a symlink
       const cursorLink = join(tempDir, ".cursor", "skills", "my-skill");
@@ -176,7 +200,9 @@ describe("canonical installer", () => {
       const claudePath = join(tempDir, ".claude", "skills", "my-skill");
       expect(lstatSync(claudePath).isDirectory()).toBe(true);
       expect(lstatSync(claudePath).isSymbolicLink()).toBe(false);
-      expect(readFileSync(join(claudePath, "SKILL.md"), "utf-8")).toBe("# My Skill\nContent here");
+      const claudeContent = readFileSync(join(claudePath, "SKILL.md"), "utf-8");
+      expect(claudeContent).toContain("name: my-skill");
+      expect(claudeContent).toContain("# My Skill\nContent here");
 
       // Cursor gets a symlink
       const cursorLink = join(tempDir, ".cursor", "skills", "my-skill");
@@ -245,12 +271,16 @@ describe("canonical installer", () => {
         projectRoot: tempDir,
       });
 
-      // Each agent has its own copy
+      // Each agent has its own copy with frontmatter
       const claudePath = join(tempDir, ".claude", "commands", "my-skill", "SKILL.md");
-      expect(readFileSync(claudePath, "utf-8")).toBe("# My Skill\nContent");
+      const claudeCopyContent = readFileSync(claudePath, "utf-8");
+      expect(claudeCopyContent).toContain("name: my-skill");
+      expect(claudeCopyContent).toContain("# My Skill\nContent");
 
       const cursorPath = join(tempDir, ".cursor", "skills", "my-skill", "SKILL.md");
-      expect(readFileSync(cursorPath, "utf-8")).toBe("# My Skill\nContent");
+      const cursorCopyContent = readFileSync(cursorPath, "utf-8");
+      expect(cursorCopyContent).toContain("name: my-skill");
+      expect(cursorCopyContent).toContain("# My Skill\nContent");
 
       // No canonical .agents/ directory
       const canonicalDir = join(tempDir, ".agents");
@@ -293,7 +323,9 @@ describe("canonical installer", () => {
       });
 
       const skillPath = join(tempDir, ".claude", "commands", "simple-skill", "SKILL.md");
-      expect(readFileSync(skillPath, "utf-8")).toBe("# Simple");
+      const simpleContent = readFileSync(skillPath, "utf-8");
+      expect(simpleContent).toContain("name: simple-skill");
+      expect(simpleContent).toContain("# Simple");
       // No agents/ directory created
       expect(existsSync(join(tempDir, ".claude", "commands", "simple-skill", "agents"))).toBe(false);
     });
@@ -333,9 +365,107 @@ describe("canonical installer", () => {
       expect(result[0]).toContain("vskill-test");
       expect(result[0]).not.toContain(join("Projects", ".claude"));
 
-      // Verify the file actually exists at the correct location
+      // Verify the file actually exists at the correct location with frontmatter
       const skillPath = join(userCwd, ".claude", "skills", "remotion", "SKILL.md");
-      expect(readFileSync(skillPath, "utf-8")).toBe("# Remotion\nCreate videos");
+      const remotionContent = readFileSync(skillPath, "utf-8");
+      expect(remotionContent).toContain("name: remotion");
+      expect(remotionContent).toContain("# Remotion\nCreate videos");
+    });
+  });
+
+  describe("frontmatter integration", () => {
+    it("TC-101: installSymlink writes canonical SKILL.md with name in frontmatter", () => {
+      const agents = [
+        makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" }),
+      ];
+
+      installSymlink("my-skill", "# My Skill\nThis does things.", agents, {
+        global: false,
+        projectRoot: tempDir,
+      });
+
+      const canonicalPath = join(tempDir, ".agents", "skills", "my-skill", "SKILL.md");
+      const written = readFileSync(canonicalPath, "utf-8");
+      expect(written).toMatch(/^---\n[\s\S]*name: my-skill[\s\S]*\n---/);
+      expect(written).toContain("# My Skill\nThis does things.");
+    });
+
+    it("TC-102: installSymlink copy-fallback for claude-code agent gets frontmatter", () => {
+      const agents = [
+        makeAgent({ id: "claude-code", localSkillsDir: ".claude/skills" }),
+      ];
+
+      installSymlink("my-skill", "# My Skill\nThis does things.", agents, {
+        global: false,
+        projectRoot: tempDir,
+      });
+
+      const claudePath = join(tempDir, ".claude", "skills", "my-skill", "SKILL.md");
+      const written = readFileSync(claudePath, "utf-8");
+      expect(written).toMatch(/^---\n[\s\S]*name: my-skill[\s\S]*\n---/);
+      expect(written).toContain("# My Skill\nThis does things.");
+    });
+
+    it("TC-103: symlink-failure fallback writes SKILL.md with frontmatter", () => {
+      setForceSymlinkFailure(true);
+      try {
+        const agents = [
+          makeAgent({ id: "test-agent", localSkillsDir: ".test-agent/skills" }),
+        ];
+
+        installSymlink("my-skill", "# My Skill\nThis does things.", agents, {
+          global: false,
+          projectRoot: tempDir,
+        });
+
+        // Symlink failed → fallback direct copy should still have frontmatter
+        const fallbackPath = join(tempDir, ".test-agent", "skills", "my-skill", "SKILL.md");
+        const written = readFileSync(fallbackPath, "utf-8");
+        expect(written).toMatch(/^---\n[\s\S]*name: my-skill[\s\S]*\n---/);
+        expect(written).toContain("# My Skill\nThis does things.");
+      } finally {
+        setForceSymlinkFailure(false);
+      }
+    });
+
+    it("TC-104: installCopy writes SKILL.md with name in frontmatter", () => {
+      const agents = [
+        makeAgent({ id: "claude-code", localSkillsDir: ".claude/commands" }),
+        makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" }),
+      ];
+
+      installCopy("my-skill", "# My Skill\nThis does things.", agents, {
+        global: false,
+        projectRoot: tempDir,
+      });
+
+      const claudePath = join(tempDir, ".claude", "commands", "my-skill", "SKILL.md");
+      const claudeContent = readFileSync(claudePath, "utf-8");
+      expect(claudeContent).toMatch(/^---\n[\s\S]*name: my-skill[\s\S]*\n---/);
+      expect(claudeContent).toContain("# My Skill\nThis does things.");
+
+      const cursorPath = join(tempDir, ".cursor", "skills", "my-skill", "SKILL.md");
+      const cursorContent = readFileSync(cursorPath, "utf-8");
+      expect(cursorContent).toMatch(/^---\n[\s\S]*name: my-skill[\s\S]*\n---/);
+      expect(cursorContent).toContain("# My Skill\nThis does things.");
+    });
+
+    it("TC-105: existing frontmatter name preserved, not overwritten by skillName", () => {
+      const agents = [
+        makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" }),
+      ];
+
+      const content = "---\nname: custom-name\ndescription: Custom desc\n---\n# Body";
+
+      installSymlink("my-skill", content, agents, {
+        global: false,
+        projectRoot: tempDir,
+      });
+
+      const canonicalPath = join(tempDir, ".agents", "skills", "my-skill", "SKILL.md");
+      const written = readFileSync(canonicalPath, "utf-8");
+      expect(written).toContain("name: custom-name");
+      expect(written).not.toContain("name: my-skill");
     });
   });
 });

@@ -268,6 +268,25 @@ describe("updateCommand", () => {
     expect(writtenLock.skills["frontend"].source).toBe("github:test/repo");
   });
 
+  it("TC-201: written SKILL.md contains frontmatter with name field", async () => {
+    mockRunTier1Scan.mockReturnValue({ verdict: "PASS", score: 100, findings: [] });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    // Find all writeFileSync calls that wrote SKILL.md
+    const writeCalls = mockWriteFileSync.mock.calls.filter(
+      (c) => (c[0] as string).endsWith("SKILL.md"),
+    );
+    expect(writeCalls.length).toBeGreaterThan(0);
+
+    for (const call of writeCalls) {
+      const written = call[1] as string;
+      expect(written).toMatch(/^---\n/);
+      expect(written).toContain("name: frontend");
+    }
+  });
+
   it("writes lockfile exactly once after the loop", async () => {
     mockReadLockfile.mockReturnValue({
       version: 1,

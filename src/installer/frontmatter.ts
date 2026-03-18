@@ -1,0 +1,80 @@
+/** Matches a valid YAML frontmatter block: opening ---, content, closing --- */
+const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---/;
+
+/** agentskills.io name format: lowercase alphanumeric + hyphens, 2-64 chars */
+const SKILL_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
+
+/** Single lowercase alphanumeric character (valid 1-char skill name) */
+const SINGLE_CHAR_RE = /^[a-z0-9]$/;
+
+/** Detects `name:` field at the start of a line in frontmatter */
+const HAS_NAME_RE = /^name:/m;
+
+/** Detects `description:` field at the start of a line in frontmatter */
+const HAS_DESCRIPTION_RE = /^description:/m;
+
+/** Max description length per agentskills.io standard */
+const MAX_DESCRIPTION_LENGTH = 200;
+
+/**
+ * Validate a skill name against the agentskills.io standard.
+ * Must be lowercase alphanumeric with hyphens, 1-64 chars, no leading/trailing hyphens.
+ */
+export function validateSkillNameStrict(name: string): boolean {
+  if (name.length === 0 || name.length > 64) return false;
+  if (name.length === 1) return SINGLE_CHAR_RE.test(name);
+  return SKILL_NAME_RE.test(name);
+}
+
+/**
+ * Extract a description from the body of a SKILL.md file.
+ * Returns the first non-heading, non-blank line, truncated to 200 chars.
+ * Falls back to a humanized version of the skill name.
+ */
+export function extractDescription(body: string, skillName: string): string {
+  const lines = body.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) continue;
+    return trimmed.length > MAX_DESCRIPTION_LENGTH
+      ? trimmed.slice(0, MAX_DESCRIPTION_LENGTH)
+      : trimmed;
+  }
+  return skillName.replace(/-/g, " ");
+}
+
+/**
+ * Ensure a SKILL.md string contains valid `name` and `description` frontmatter.
+ * Pure function — normalizes CRLF, preserves existing fields, injects missing ones.
+ */
+export function ensureFrontmatter(content: string, skillName: string): string {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const match = normalized.match(FRONTMATTER_RE);
+
+  if (!match) {
+    const desc = extractDescription(normalized, skillName);
+    return `---\nname: ${skillName}\ndescription: ${desc}\n---\n\n${normalized}`;
+  }
+
+  const fmBlock = match[1];
+  const hasName = HAS_NAME_RE.test(fmBlock);
+  const hasDescription = HAS_DESCRIPTION_RE.test(fmBlock);
+
+  if (hasName && hasDescription) {
+    return normalized;
+  }
+
+  let updatedBlock = fmBlock;
+
+  if (!hasName) {
+    updatedBlock = `name: ${skillName}\n${updatedBlock}`;
+  }
+
+  if (!hasDescription) {
+    const body = normalized.slice(match[0].length);
+    const desc = extractDescription(body, skillName);
+    updatedBlock = `${updatedBlock}\ndescription: ${desc}`;
+  }
+
+  return normalized.replace(FRONTMATTER_RE, `---\n${updatedBlock}\n---`);
+}

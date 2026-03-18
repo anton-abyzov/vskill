@@ -6,6 +6,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { readLockfile, writeLockfile } from "../lockfile/index.js";
+import { ensureFrontmatter } from "../installer/frontmatter.js";
 import { getSkill } from "../api/client.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { filterAgents } from "../utils/agent-filter.js";
@@ -159,6 +160,7 @@ export async function updateCommand(
       }
 
       // 6. Install to each agent
+      const processedContent = ensureFrontmatter(result.content, name);
       for (const agent of agents) {
         const skillDir = join(
           process.cwd(),
@@ -169,7 +171,7 @@ export async function updateCommand(
           mkdirSync(skillDir, { recursive: true });
           writeFileSync(
             join(skillDir, "SKILL.md"),
-            result.content,
+            processedContent,
             "utf-8"
           );
         } catch {

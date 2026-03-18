@@ -1378,7 +1378,7 @@ describe("addCommand registry install (no slash in source)", () => {
     expect(mockRunTier1Scan).toHaveBeenCalledWith("# My Skill\nDoes great things.");
     expect(mockWriteFileSync).toHaveBeenCalledWith(
       expect.stringContaining("my-skill"),
-      "# My Skill\nDoes great things.",
+      expect.stringContaining("name: my-skill"),
       "utf-8"
     );
     expect(mockWriteLockfile).toHaveBeenCalledWith(
@@ -1902,6 +1902,70 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
     expect(scannedContent).toContain("Next.js Skill");
     expect(scannedContent).toContain("React Skill");
     expect(scannedContent).toContain("Scaffold");
+  });
+
+  it("avoids double namespace when pluginName matches localSkillsDir basename", async () => {
+    // Agent whose localSkillsDir ends in "skills" — same as the plugin name
+    const skillsAgent = makeAgent({
+      id: "claude-code",
+      displayName: "Claude Code",
+      localSkillsDir: ".claude/skills",
+      globalSkillsDir: "~/.claude/skills",
+    });
+
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([skillsAgent]);
+    mockFindProjectRoot.mockReturnValue("/project");
+    mockExistsSync.mockReturnValue(false);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    // Marketplace with a plugin literally named "skills"
+    const skillsMarketplace = JSON.stringify({
+      name: "test-marketplace",
+      version: "1.0.0",
+      plugins: [
+        { name: "skills", source: "./plugins/skills", version: "1.0.0" },
+      ],
+    });
+
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("marketplace.json")) {
+        return { ok: true, text: async () => skillsMarketplace };
+      }
+      // Skills directory listing inside plugins/skills/skills/
+      if (url.includes("/contents/plugins/skills/skills")) {
+        return {
+          ok: true,
+          json: async () => [{ name: "scout", type: "dir" }],
+        };
+      }
+      // Commands directory
+      if (url.includes("/contents/plugins/skills/commands")) {
+        return { ok: true, json: async () => [] };
+      }
+      // Raw SKILL.md content
+      if (url.includes("/skills/scout/SKILL.md")) {
+        return { ok: true, text: async () => "# Scout Skill\nDiscovery tool" };
+      }
+      return { ok: false };
+    }) as unknown as typeof fetch;
+
+    await addCommand("ignored", { repo: "owner/repo", plugin: "skills" });
+
+    // Verify the written paths: should be .claude/skills/scout/SKILL.md
+    // NOT .claude/skills/skills/scout/SKILL.md (double namespace bug)
+    const writeCalls = mockWriteFileSync.mock.calls as [string, string][];
+    const skillPaths = writeCalls.filter(([p]) => p.includes("SKILL.md")).map(([p]) => p);
+    expect(skillPaths.length).toBe(1);
+    expect(skillPaths[0]).toContain("/skills/scout/SKILL.md");
+    expect(skillPaths[0]).not.toContain("/skills/skills/");
   });
 });
 

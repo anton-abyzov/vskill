@@ -52,6 +52,7 @@ import {
 } from "../utils/output.js";
 import { isTTY, createPrompter } from "../utils/prompts.js";
 import { installSymlink, installCopy } from "../installer/canonical.js";
+import { ensureFrontmatter } from "../installer/frontmatter.js";
 import { getMarketplaceName } from "../marketplace/index.js";
 import { rankSearchResults, formatSkillId, getSkillUrl, getTrustBadge, formatResultLine } from "../utils/skill-display.js";
 
@@ -519,11 +520,12 @@ async function installMarketplaceRepo(
           const contentRes = await fetch(rawUrl);
           if (!contentRes.ok) continue;
           const content = await contentRes.text();
+          const processedContent = ensureFrontmatter(content, sd.name);
           for (const agent of agents) {
             const baseDir = resolveInstallBase(opts, agent);
             const skillDir = join(baseDir, sd.name);
             mkdirSync(skillDir, { recursive: true });
-            writeFileSync(join(skillDir, "SKILL.md"), content, "utf-8");
+            writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
           }
           installedSkillNames.push(sd.name);
         }
@@ -533,11 +535,12 @@ async function installMarketplaceRepo(
         const contentRes = await fetch(rawUrl);
         if (contentRes.ok) {
           const content = await contentRes.text();
+          const processedContent = ensureFrontmatter(content, plugin.name);
           for (const agent of agents) {
             const baseDir = resolveInstallBase(opts, agent);
             const skillDir = join(baseDir, plugin.name);
             mkdirSync(skillDir, { recursive: true });
-            writeFileSync(join(skillDir, "SKILL.md"), content, "utf-8");
+            writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
           }
           installedSkillNames.push(plugin.name);
         }
@@ -1620,14 +1623,14 @@ async function installRepoPlugin(
 
   for (const agent of selectedAgents) {
     const baseDir = resolveInstallBase(opts, agent);
-    const plugDir = join(baseDir, pluginName);
+    const plugDir = basename(baseDir) === pluginName ? baseDir : join(baseDir, pluginName);
 
     try {
       // Skills: {agent-dir}/{plugin-name}/{skill-name}/SKILL.md
       for (const skill of skills) {
         const skillDir = join(plugDir, skill.name);
         mkdirSync(skillDir, { recursive: true });
-        writeFileSync(join(skillDir, "SKILL.md"), skill.content, "utf-8");
+        writeFileSync(join(skillDir, "SKILL.md"), ensureFrontmatter(skill.content, skill.name), "utf-8");
       }
       // Commands: {agent-dir}/{plugin-name}/{command-name}.md
       for (const cmd of commands) {
@@ -2276,12 +2279,13 @@ async function installFromRegistry(
   const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
   const locations: string[] = [];
 
+  const processedContent = ensureFrontmatter(content, skillName);
   for (const agent of selectedAgents) {
     const baseDir = resolveInstallBase(opts, agent);
     const skillDir = join(baseDir, skillName);
     try {
       mkdirSync(skillDir, { recursive: true });
-      writeFileSync(join(skillDir, "SKILL.md"), content, "utf-8");
+      writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
       locations.push(`${agent.displayName}: ${skillDir}`);
     } catch (err) {
       console.error(

@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync } from "node:f
 import { join, relative, dirname } from "node:path";
 import os from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
+import { ensureFrontmatter } from "./frontmatter.js";
 
 export interface InstallOptions {
   global: boolean;
@@ -109,6 +110,7 @@ export function installSymlink(
   opts: InstallOptions,
   agentFiles?: Record<string, string>,
 ): string[] {
+  content = ensureFrontmatter(content, skillName);
   const canonicalSkillDir = join(ensureCanonicalDir(opts.projectRoot, opts.global), skillName);
   mkdirSync(canonicalSkillDir, { recursive: true });
   writeFileSync(join(canonicalSkillDir, "SKILL.md"), content);
@@ -159,6 +161,7 @@ export function installCopy(
   opts: InstallOptions,
   agentFiles?: Record<string, string>,
 ): string[] {
+  content = ensureFrontmatter(content, skillName);
   const installed: string[] = [];
 
   for (const agent of agents) {

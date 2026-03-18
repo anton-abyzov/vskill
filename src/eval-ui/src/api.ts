@@ -239,6 +239,18 @@ export const api = {
     return fetchJson(`/api/credentials/${plugin}/${skill}`);
   },
 
+  setCredential(plugin: string, skill: string, name: string, value: string): Promise<{ ok: boolean; credential: CredentialStatus }> {
+    return fetchJson(`/api/credentials/${plugin}/${skill}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, value }),
+    });
+  },
+
+  getParams(plugin: string, skill: string): Promise<{ params: Array<{ name: string; maskedValue: string; status: string }> }> {
+    return fetchJson(`/api/credentials/${plugin}/${skill}/params`);
+  },
+
   // ---------------------------------------------------------------------------
   // OpenRouter models (T-055)
   // ---------------------------------------------------------------------------

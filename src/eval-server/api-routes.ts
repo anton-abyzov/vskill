@@ -25,7 +25,7 @@ import type { ProviderName, LlmOverrides } from "../eval/llm.js";
 import { runComparison } from "../eval/comparator.js";
 import { computeVerdict } from "../eval/verdict.js";
 import { generateActionItems } from "../eval/action-items.js";
-import { buildEvalInitPrompt, parseGeneratedEvals } from "../eval/prompt-builder.js";
+import { buildEvalInitPrompt, parseGeneratedEvals, buildIntegrationEvalPrompt, parseGeneratedIntegrationEvals, detectBrowserRequirements, detectPlatformTargets } from "../eval/prompt-builder.js";
 import { testActivation } from "../eval/activation-tester.js";
 import type { ActivationPrompt, SkillMeta } from "../eval/activation-tester.js";
 import { detectMcpDependencies, detectSkillDependencies } from "../eval/mcp-detector.js";
@@ -517,6 +517,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   });
 
   // Generate evals using AI — reads SKILL.md and returns generated EvalsFile
+  // Accepts optional { provider, model, testType } in request body
   router.post("/api/skills/:plugin/:skill/generate-evals", async (req, res, params) => {
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const skillMdPath = join(skillDir, "SKILL.md");
@@ -534,17 +535,46 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
     if (wantsSSE) initSSE(res, req);
 
+    // Read optional body params for model selection + test type
+    const body = await readBody(req).catch(() => ({})) as {
+      provider?: ProviderName;
+      model?: string;
+      testType?: "unit" | "integration";
+    };
+
+    // Build per-request client: use body overrides if provided, else global
+    const overrides: LlmOverrides = { ...currentOverrides };
+    if (body.provider) overrides.provider = body.provider;
+    if (body.model) overrides.model = body.model;
+
+    const isIntegration = body.testType === "integration";
+
     try {
       if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "preparing", message: "Reading skill content..." });
 
       const skillContent = readFileSync(skillMdPath, "utf-8");
-      const prompt = buildEvalInitPrompt(skillContent);
-      const client = getClient();
 
-      if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "generating", message: "Generating test cases..." });
+      // Build prompt based on test type
+      let prompt: string;
+      if (isIntegration) {
+        const mcpDeps = detectMcpDependencies(skillContent);
+        const browserReqs = detectBrowserRequirements(skillContent);
+        const platforms = detectPlatformTargets(skillContent);
+        prompt = buildIntegrationEvalPrompt(skillContent, mcpDeps, browserReqs, platforms);
+      } else {
+        prompt = buildEvalInitPrompt(skillContent);
+      }
+
+      const client = createLlmClient(overrides);
+
+      if (wantsSSE && !aborted) sendSSE(res, "progress", {
+        phase: "generating",
+        message: `Generating ${isIntegration ? "integration" : "unit"} test cases...`,
+      });
 
       const genResult = wantsSSE
-        ? await withHeartbeat(res, undefined, "generating", "Generating test cases", () =>
+        ? await withHeartbeat(res, undefined, "generating",
+            `Generating ${isIntegration ? "integration" : "unit"} test cases`, () =>
             client.generate("You generate eval test cases for AI skills. Output only valid JSON in a code fence.", prompt))
         : await client.generate("You generate eval test cases for AI skills. Output only valid JSON in a code fence.", prompt);
 
@@ -552,31 +582,76 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
       if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "parsing", message: "Parsing generated evals..." });
 
-      const evalsFile = parseGeneratedEvals(genResult.text);
+      // Parse based on test type
+      if (isIntegration) {
+        const integrationCases = parseGeneratedIntegrationEvals(genResult.text);
 
-      // Record history entry for eval generation
-      try {
-        const client = getClient();
-        await writeHistoryEntry(skillDir, {
-          timestamp: new Date().toISOString(),
-          model: client.model,
-          skill_name: evalsFile.skill_name || params.skill,
-          cases: [],
-          overall_pass_rate: undefined,
-          type: "eval-generate",
-          provider: currentOverrides.provider || "claude-cli",
-          generate: { prompt: prompt, result: JSON.stringify(evalsFile) },
-        });
-      } catch { /* history write failure should not break the main response */ }
+        // Load existing evals to merge and avoid ID collisions
+        let existingEvals: EvalsFile | null = null;
+        try { existingEvals = loadAndValidateEvals(skillDir); } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== "ENOENT" &&
+              !(e instanceof Error && e.message.includes("ENOENT"))) {
+            throw e;
+          }
+          // File doesn't exist — no existing evals, proceed with empty
+        }
 
-      if (wantsSSE && !aborted) {
-        sendSSEDone(res, evalsFile);
+        const existingIds = existingEvals?.evals.map((e) => e.id) ?? [];
+        const maxId = existingIds.length > 0 ? Math.max(...existingIds) : 0;
+
+        // Re-number integration cases to avoid collisions
+        const reNumbered = integrationCases.map((c, i) => ({ ...c, id: maxId + 1 + i }));
+
+        const mergedEvals: EvalsFile = {
+          skill_name: existingEvals?.skill_name || params.skill,
+          evals: [...(existingEvals?.evals || []), ...reNumbered],
+        };
+
+        // Record history
+        try {
+          await writeHistoryEntry(skillDir, {
+            timestamp: new Date().toISOString(),
+            model: client.model,
+            skill_name: mergedEvals.skill_name,
+            cases: [],
+            overall_pass_rate: undefined,
+            type: "eval-generate",
+            provider: overrides.provider || "claude-cli",
+            generate: { prompt, result: JSON.stringify(mergedEvals) },
+          });
+        } catch { /* history write failure should not break the main response */ }
+
+        if (wantsSSE && !aborted) {
+          sendSSEDone(res, mergedEvals);
+        } else {
+          sendJson(res, mergedEvals, 200, req);
+        }
       } else {
-        sendJson(res, evalsFile, 200, req);
+        const evalsFile = parseGeneratedEvals(genResult.text);
+
+        // Record history entry for eval generation
+        try {
+          await writeHistoryEntry(skillDir, {
+            timestamp: new Date().toISOString(),
+            model: client.model,
+            skill_name: evalsFile.skill_name || params.skill,
+            cases: [],
+            overall_pass_rate: undefined,
+            type: "eval-generate",
+            provider: overrides.provider || "claude-cli",
+            generate: { prompt, result: JSON.stringify(evalsFile) },
+          });
+        } catch { /* history write failure should not break the main response */ }
+
+        if (wantsSSE && !aborted) {
+          sendSSEDone(res, evalsFile);
+        } else {
+          sendJson(res, evalsFile, 200, req);
+        }
       }
     } catch (err) {
       if (wantsSSE && !aborted) {
-        sendSSE(res, "error", classifyError(err, currentOverrides.provider || "claude-cli"));
+        sendSSE(res, "error", classifyError(err, overrides.provider || "claude-cli"));
         res.end();
       } else {
         sendJson(res, { error: `Eval generation failed: ${(err as Error).message}` }, 500, req);

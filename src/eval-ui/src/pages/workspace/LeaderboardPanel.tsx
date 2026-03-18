@@ -238,12 +238,11 @@ function buildLeaderboard(sweeps: SweepResult[]): LeaderboardEntry[] {
     });
   }
 
-  // Sort by composite score, then pass rate
+  // Sort by composite score (fallback to pass rate when composite unavailable)
   entries.sort((a, b) => {
-    if (a.compositeScore != null && b.compositeScore != null) {
-      return b.compositeScore - a.compositeScore;
-    }
-    return b.passRate - a.passRate;
+    const scoreA = a.compositeScore ?? a.passRate;
+    const scoreB = b.compositeScore ?? b.passRate;
+    return scoreB - scoreA;
   });
   entries.forEach((e, i) => { e.rank = i + 1; });
   if (entries.length > 0) entries[0].isBest = true;
@@ -431,6 +430,7 @@ export function LeaderboardPanel() {
   useEffect(() => {
     setLoading(true);
     setError(null);
+    setTab("rankings"); // Reset tab on context switch
     api.getLeaderboard(plugin, skill)
       .then((res) => setSweeps(res.entries))
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
@@ -438,7 +438,7 @@ export function LeaderboardPanel() {
   }, [plugin, skill]);
 
   const entries = useMemo(() => buildLeaderboard(sweeps), [sweeps]);
-  const hasBaseline = sweeps.some((s) => s.baselineEnabled);
+  const hasBaseline = entries.some((e) => e.hasBaseline);
   const latestSweep = sweeps[0];
   const judgeBiasWarning = latestSweep?.judgeBiasWarning;
 

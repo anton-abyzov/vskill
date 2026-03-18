@@ -434,6 +434,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
   }, [plugin, skill]);
 
   // -- Generate Evals (SSE-backed) --
+  const { config } = useConfig();
   const genEvalsSSE = useSSE();
   const lastGenEvalsIdxRef = useRef(0);
 
@@ -476,19 +477,22 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     return () => { genEvalsSSE.stop(); };
   }, [genEvalsSSE.stop]);
 
-  const generateEvals = useCallback(async () => {
+  const generateEvals = useCallback(async (opts?: { testType?: "unit" | "integration" }) => {
     if (isReadOnly) return;
     lastGenEvalsIdxRef.current = 0;
     dispatch({ type: "GENERATE_EVALS_START" });
-    genEvalsSSE.start(`/api/skills/${plugin}/${skill}/generate-evals?sse`);
-  }, [isReadOnly, plugin, skill, genEvalsSSE]);
+    const body: Record<string, unknown> = {};
+    if (config?.provider) body.provider = config.provider;
+    if (config?.model) body.model = config.model;
+    if (opts?.testType) body.testType = opts.testType;
+    genEvalsSSE.start(`/api/skills/${plugin}/${skill}/generate-evals?sse`, Object.keys(body).length > 0 ? body : undefined);
+  }, [isReadOnly, plugin, skill, genEvalsSSE, config]);
 
   // ---------------------------------------------------------------------------
   // Activation test SSE
   // ---------------------------------------------------------------------------
   const activationSSE = useSSE();
   const lastActivationIdxRef = useRef(0);
-  const { config } = useConfig();
 
   // Cleanup activation SSE on unmount
   useEffect(() => {

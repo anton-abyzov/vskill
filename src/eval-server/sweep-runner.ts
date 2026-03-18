@@ -118,7 +118,8 @@ export function computeMean(values: number[]): number {
 
 export function computeStddev(values: number[], mean: number): number {
   if (values.length <= 1) return 0;
-  const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
+  // Sample standard deviation (Bessel's correction: N-1)
+  const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (values.length - 1);
   return Math.sqrt(variance);
 }
 
@@ -136,7 +137,8 @@ export function computeCI95(values: number[]): [number, number] | undefined {
   // t-distribution critical value for 95% CI (approximation for small samples)
   const tCritical = values.length <= 5 ? 2.776 : values.length <= 10 ? 2.262 : 1.96;
   const margin = tCritical * (stddev / Math.sqrt(values.length));
-  return [Math.max(0, mean - margin), Math.min(1, mean + margin)];
+  // No clamping — CI is valid for any metric (pass rates, durations, costs)
+  return [mean - margin, mean + margin];
 }
 
 export function computeStats(values: number[]): ModelStats {
@@ -153,7 +155,12 @@ export function computeStats(values: number[]): ModelStats {
 // Judge bias detection
 // ---------------------------------------------------------------------------
 
-export function detectJudgeBias(judgeSpec: string, modelSpecs: string[]): string | undefined {
+export interface JudgeBiasResult {
+  warning: string;
+  matchedModel: string;
+}
+
+export function detectJudgeBias(judgeSpec: string, modelSpecs: string[]): JudgeBiasResult | undefined {
   const judgeParts = judgeSpec.split("/");
   const judgeModel = judgeParts.slice(1).join("/").toLowerCase();
   const judgeProvider = judgeParts[0].toLowerCase();
@@ -165,16 +172,21 @@ export function detectJudgeBias(judgeSpec: string, modelSpecs: string[]): string
 
     // Exact match
     if (judgeModel === modelName && judgeProvider === modelProvider) {
-      return `Judge model "${judgeSpec}" is identical to competitor model "${spec}". Self-preference bias is likely. Consider using a different judge model.`;
+      return {
+        warning: `Judge model "${judgeSpec}" is identical to competitor model "${spec}". Self-preference bias is likely. Consider using a different judge model.`,
+        matchedModel: spec,
+      };
     }
     // Same provider family (e.g., anthropic/claude-sonnet judging anthropic/claude-opus)
     if (judgeProvider === modelProvider && judgeModel !== modelName) {
-      // Extract family prefix: "claude-sonnet-4" → "claude", "meta-llama/llama-3.1-70b" → "meta-llama/llama"
       const extractFamily = (m: string) => m.split(/[-_]/)[0];
       const judgeFamily = extractFamily(judgeModel);
       const modelFamily = extractFamily(modelName);
       if (judgeFamily === modelFamily && judgeFamily.length > 0) {
-        return `Judge "${judgeSpec}" is from the same model family as "${spec}". Family-preference bias is possible. Consider a judge from a different provider.`;
+        return {
+          warning: `Judge "${judgeSpec}" is from the same model family as "${spec}". Family-preference bias is possible. Consider a judge from a different provider.`,
+          matchedModel: spec,
+        };
       }
     }
   }
@@ -265,6 +277,13 @@ async function* runModelCases(
   const runResults: BenchmarkResult[] = [];
   const totalSteps = totalModels * totalPhases * runs * evalCases.length;
 
+  // Hoist judge client and import outside the hot loop
+  const needsJudge = evalCases.some((c) => c.assertions.length > 0);
+  const judgeClient = needsJudge
+    ? createLlmClient({ provider: judgeSpec.provider, model: judgeSpec.model })
+    : null;
+  const judgeModule = needsJudge ? await import("../eval/judge.js") : null;
+
   for (let run = 0; run < runs; run++) {
     const cases: BenchmarkCase[] = [];
 
@@ -305,16 +324,11 @@ async function* runModelCases(
         };
         (benchCase as any).cost = genResult.cost;
 
-        if (evalCase.assertions.length > 0) {
-          const judgeClient = createLlmClient({
-            provider: judgeSpec.provider,
-            model: judgeSpec.model,
-          });
-          const { judgeAssertion } = await import("../eval/judge.js");
+        if (evalCase.assertions.length > 0 && judgeClient && judgeModule) {
 
           const assertionResults = await Promise.all(
             evalCase.assertions.map((a) =>
-              judgeAssertion(genResult.text, a, judgeClient),
+              judgeModule.judgeAssertion(genResult.text, a, judgeClient),
             ),
           );
           benchCase.assertions = assertionResults;
@@ -371,11 +385,11 @@ export async function* runSweep(opts: SweepOpts): AsyncGenerator<SweepSSEEvent> 
   const totalPhases = baseline ? 2 : 1;
 
   // Judge bias detection
-  const judgeBiasWarning = detectJudgeBias(judge, models);
-  if (judgeBiasWarning) {
+  const judgeBias = detectJudgeBias(judge, models);
+  if (judgeBias) {
     yield {
       type: "sweep_judge_bias_warning",
-      data: { judge, matchedModel: models.find((m) => judgeBiasWarning.includes(m)) ?? models[0], warning: judgeBiasWarning },
+      data: { judge, matchedModel: judgeBias.matchedModel, warning: judgeBias.warning },
     };
   }
 
@@ -447,11 +461,11 @@ export async function* runSweep(opts: SweepOpts): AsyncGenerator<SweepSSEEvent> 
         });
         modelResult.skillDelta = computeStats(deltaValues);
 
-        // Compute amplification percentage
+        // Compute amplification percentage (undefined when baseline is 0 — can't divide)
         const baselineMean = baselineAgg.passRate.mean;
         modelResult.amplificationPct = baselineMean > 0
           ? ((aggregated.passRate.mean - baselineMean) / baselineMean) * 100
-          : aggregated.passRate.mean > 0 ? Infinity : 0;
+          : undefined;
       }
 
       sweepResults.push(modelResult);
@@ -518,7 +532,7 @@ export async function* runSweep(opts: SweepOpts): AsyncGenerator<SweepSSEEvent> 
     baselineEnabled: baseline || undefined,
     skillQualityScore,
     skillQualityRating,
-    judgeBiasWarning: judgeBiasWarning || undefined,
+    judgeBiasWarning: judgeBias?.warning,
   };
 
   await writeLeaderboard(skillDir, sweepResult);

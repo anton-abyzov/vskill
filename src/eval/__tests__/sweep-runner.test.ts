@@ -9,7 +9,7 @@ import {
   computeCompositeScore,
   computeSkillQualityScore,
 } from "../../eval-server/sweep-runner.js";
-import type { ModelSpec, ModelStats, SweepSSEEvent } from "../../eval-server/sweep-runner.js";
+import type { ModelSpec } from "../../eval-server/sweep-runner.js";
 import type { BenchmarkResult, BenchmarkCase } from "../benchmark.js";
 
 // ---------------------------------------------------------------------------
@@ -65,10 +65,11 @@ describe("computeStats", () => {
     expect(stats.mean).toBeCloseTo(0.8, 5);
   });
 
-  // TC-051: Stddev computed correctly
-  it("computes stddev for [0.8, 0.9, 0.7]", () => {
+  // TC-051: Sample stddev computed correctly (Bessel's correction: N-1)
+  it("computes sample stddev for [0.8, 0.9, 0.7]", () => {
     const stats = computeStats([0.8, 0.9, 0.7]);
-    expect(stats.stddev).toBeCloseTo(0.0816, 3);
+    // Sample stddev: sqrt(((0.0^2 + 0.1^2 + (-0.1)^2) / 2)) = sqrt(0.02/2) = 0.1
+    expect(stats.stddev).toBeCloseTo(0.1, 3);
   });
 
   // TC-052: N=1 stddev is 0
@@ -129,7 +130,7 @@ describe("aggregateRuns", () => {
     expect(agg.provider).toBe("anthropic");
     expect(agg.model).toBe("claude-sonnet-4");
     expect(agg.passRate.mean).toBeCloseTo(0.8, 3);
-    expect(agg.passRate.stddev).toBeCloseTo(0.0816, 3);
+    expect(agg.passRate.stddev).toBeCloseTo(0.1, 3);
     expect(agg.duration.mean).toBeCloseTo(1000, -1);
     expect(agg.caseResults).toHaveLength(3);
   });
@@ -186,16 +187,17 @@ describe("computeCI95", () => {
     expect(ci![1]).toBeGreaterThan(0.8);
   });
 
-  it("clamps lower bound to 0", () => {
+  it("lower bound can go below 0 for small values", () => {
     const ci = computeCI95([0.01, 0.02, 0.01]);
     expect(ci).toBeDefined();
-    expect(ci![0]).toBeGreaterThanOrEqual(0);
+    // No clamping — CI is raw, consumer decides how to interpret
+    expect(ci![0]).toBeLessThan(ci![1]);
   });
 
-  it("clamps upper bound to 1", () => {
+  it("upper bound can exceed 1 for values near 1", () => {
     const ci = computeCI95([0.98, 0.99, 1.0]);
     expect(ci).toBeDefined();
-    expect(ci![1]).toBeLessThanOrEqual(1);
+    expect(ci![0]).toBeLessThan(ci![1]);
   });
 
   it("returns narrower CI with more data", () => {
@@ -236,38 +238,43 @@ describe("computeStats (enhanced)", () => {
 
 describe("detectJudgeBias", () => {
   it("detects exact match (self-judging)", () => {
-    const warning = detectJudgeBias(
+    const result = detectJudgeBias(
       "anthropic/claude-sonnet-4",
       ["anthropic/claude-sonnet-4", "openrouter/meta-llama/llama-3.1-70b"],
     );
-    expect(warning).toBeDefined();
-    expect(warning).toContain("identical");
+    expect(result).toBeDefined();
+    expect(result!.warning).toContain("identical");
+    expect(result!.matchedModel).toBe("anthropic/claude-sonnet-4");
   });
 
   it("detects same-family match (anthropic models)", () => {
-    const warning = detectJudgeBias(
+    const result = detectJudgeBias(
       "anthropic/claude-sonnet-4",
       ["anthropic/claude-opus-4", "openrouter/meta-llama/llama-3.1-70b"],
     );
-    // Both are anthropic — should warn about family bias
-    expect(warning).toBeDefined();
-    expect(warning).toContain("family");
+    expect(result).toBeDefined();
+    expect(result!.warning).toContain("family");
+    expect(result!.matchedModel).toBe("anthropic/claude-opus-4");
   });
 
   it("returns undefined for different providers", () => {
-    const warning = detectJudgeBias(
+    const result = detectJudgeBias(
       "anthropic/claude-sonnet-4",
       ["openrouter/meta-llama/llama-3.1-70b", "ollama/llama3.1:8b"],
     );
-    expect(warning).toBeUndefined();
+    expect(result).toBeUndefined();
   });
 
   it("returns undefined when no models match", () => {
-    const warning = detectJudgeBias(
+    const result = detectJudgeBias(
       "openrouter/gpt-4o",
       ["anthropic/claude-sonnet-4"],
     );
-    expect(warning).toBeUndefined();
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined for empty model list", () => {
+    expect(detectJudgeBias("anthropic/claude-sonnet-4", [])).toBeUndefined();
   });
 });
 

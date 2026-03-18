@@ -136,12 +136,14 @@ export function TestsPanel() {
     credentialStatuses.filter((c) => c.status === "missing").map((c) => c.name)
   ), [credentialStatuses]);
 
-  const handleGenerateEvals = useCallback(() => {
-    generateEvals();
+  const [generateDropdownOpen, setGenerateDropdownOpen] = useState(false);
+  const handleGenerateEvals = useCallback((testType?: "unit" | "integration") => {
+    setGenerateDropdownOpen(false);
+    generateEvals(testType ? { testType } : undefined);
   }, [generateEvals]);
 
   // Empty state (or validation error)
-  if (!evals || cases.length === 0) {
+  if (!evals || allCases.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 px-8">
         <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: evalsError ? "var(--error-muted, #3f1a1a)" : "var(--accent-muted)" }}>
@@ -172,9 +174,37 @@ export function TestsPanel() {
         </div>
         <div className="flex gap-2">
           <button onClick={() => setShowForm(true)} disabled={isReadOnly} className="btn btn-primary text-[12px]">Create Test Case</button>
-          <button onClick={handleGenerateEvals} disabled={generateEvalsLoading || isReadOnly} className="btn btn-secondary text-[12px]">
-            {generateEvalsLoading ? <><span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> Generating...</> : "Generate with AI"}
-          </button>
+          <div style={{ position: "relative" }}>
+            <div className="flex">
+              <button onClick={() => handleGenerateEvals("unit")} disabled={generateEvalsLoading || isReadOnly} className="btn btn-secondary text-[12px]" style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}>
+                {generateEvalsLoading ? <><span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> Generating...</> : "Generate Unit Tests"}
+              </button>
+              <button
+                onClick={() => setGenerateDropdownOpen(!generateDropdownOpen)}
+                disabled={generateEvalsLoading || isReadOnly}
+                className="btn btn-secondary text-[12px]"
+                style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: "1px solid var(--border-default)", padding: "4px 6px" }}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
+              </button>
+            </div>
+            {generateDropdownOpen && (
+              <div
+                className="absolute right-0 mt-1 rounded-lg py-1 z-50"
+                style={{ background: "var(--surface-1)", border: "1px solid var(--border-default)", minWidth: 180, boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}
+              >
+                <button
+                  onClick={() => handleGenerateEvals("integration")}
+                  className="w-full text-left px-3 py-2 text-[12px] transition-colors duration-100"
+                  style={{ color: "var(--text-secondary)", background: "transparent" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-2)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                >
+                  Generate Integration Tests
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Progress log during generation */}
@@ -259,6 +289,11 @@ export function TestsPanel() {
           ))}
         </div>
         <div className="py-1">
+          {cases.length === 0 && allCases.length > 0 && (
+            <div className="flex items-center justify-center py-8 px-3 text-[12px]" style={{ color: "var(--text-tertiary)" }}>
+              No {testTypeFilter === "all" ? "" : testTypeFilter + " "}tests yet
+            </div>
+          )}
           {cases.map((c) => {
             const result = inlineResults.get(c.id);
             const active = selectedCaseId === c.id;
@@ -449,18 +484,45 @@ function CaseDetail({
           <span className="text-[16px] font-semibold" style={{ color: "var(--text-primary)" }}>
             #{evalCase.id} {evalCase.name}
           </span>
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-              padding: "2px 7px",
-              borderRadius: 9999,
-              background: tt === "unit" ? "rgba(99,131,255,0.15)" : "rgba(251,146,60,0.15)",
-              color: tt === "unit" ? "#6383ff" : "#fb923c",
-            }}
-          >
-            {tt === "unit" ? "Unit" : "Integration"}
-          </span>
+          {isReadOnly ? (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                padding: "2px 7px",
+                borderRadius: 9999,
+                background: tt === "unit" ? "rgba(99,131,255,0.15)" : "rgba(251,146,60,0.15)",
+                color: tt === "unit" ? "#6383ff" : "#fb923c",
+              }}
+            >
+              {tt === "unit" ? "Unit" : "Integration"}
+            </span>
+          ) : (
+            <button
+              onClick={() => {
+                const newType = tt === "unit" ? "integration" : "unit";
+                if (newType === "unit") {
+                  const { requiredCredentials, requirements, cleanup, ...rest } = evalCase;
+                  updateCase({ ...rest, testType: "unit" });
+                } else {
+                  updateCase({ ...evalCase, testType: "integration" });
+                }
+              }}
+              title={`Click to switch to ${tt === "unit" ? "integration" : "unit"}`}
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                padding: "2px 7px",
+                borderRadius: 9999,
+                background: tt === "unit" ? "rgba(99,131,255,0.15)" : "rgba(251,146,60,0.15)",
+                color: tt === "unit" ? "#6383ff" : "#fb923c",
+                border: "none",
+                cursor: "pointer",
+              }}
+            >
+              {tt === "unit" ? "Unit" : "Integration"}
+            </button>
+          )}
           <StatusPill result={result} />
         </div>
         <div className="flex items-center gap-2">
@@ -549,6 +611,11 @@ function CaseDetail({
             ))}
           </div>
         </div>
+      )}
+
+      {/* Editable integration fields */}
+      {!isReadOnly && tt === "integration" && (
+        <IntegrationFieldsEditor evalCase={evalCase} onUpdate={updateCase} />
       )}
 
       {/* Prompt */}
@@ -1231,8 +1298,31 @@ function NewCaseForm({ evals, onSave, onCancel }: { evals: EvalsFile; onSave: (u
   const [prompt, setPrompt] = useState("");
   const [expected, setExpected] = useState("");
   const [assertions, setAssertions] = useState<Assertion[]>([{ id: `assert-${Date.now()}`, text: "", type: "boolean" }]);
+  const [testType, setTestType] = useState<"unit" | "integration">("unit");
+  const [credentialInput, setCredentialInput] = useState("");
+  const [credentials, setCredentials] = useState<string[]>([]);
+  const [platform, setPlatform] = useState("");
+  const [chromeProfile, setChromeProfile] = useState("");
 
   const nextId = Math.max(0, ...evals.evals.map((e) => e.id)) + 1;
+
+  const handleTypeChange = (type: "unit" | "integration") => {
+    setTestType(type);
+    if (type === "unit") {
+      setCredentials([]);
+      setCredentialInput("");
+      setPlatform("");
+      setChromeProfile("");
+    }
+  };
+
+  const addCredential = () => {
+    const val = credentialInput.trim().toUpperCase();
+    if (val && !credentials.includes(val)) {
+      setCredentials([...credentials, val]);
+    }
+    setCredentialInput("");
+  };
 
   const handleSave = () => {
     if (!name.trim() || !prompt.trim()) return;
@@ -1243,14 +1333,45 @@ function NewCaseForm({ evals, onSave, onCancel }: { evals: EvalsFile; onSave: (u
       expected_output: expected.trim(),
       files: [],
       assertions: assertions.filter((a) => a.text.trim()),
+      ...(testType === "integration" ? {
+        testType: "integration" as const,
+        ...(credentials.length > 0 ? { requiredCredentials: credentials } : {}),
+        ...((platform || chromeProfile) ? { requirements: {
+          ...(platform ? { platform } : {}),
+          ...(chromeProfile ? { chromeProfile } : {}),
+        } } : {}),
+      } : {}),
     };
     onSave({ ...evals, evals: [...evals.evals, newCase] });
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center animate-overlay-in" style={{ background: "rgba(0,0,0,0.6)" }}>
-      <div className="w-full max-w-lg rounded-xl p-6 animate-modal-in" style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)" }}>
+      <div className="w-full max-w-lg rounded-xl p-6 animate-modal-in" style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)", maxHeight: "85vh", overflowY: "auto" }}>
         <div className="text-[15px] font-semibold mb-4" style={{ color: "var(--text-primary)" }}>New Test Case</div>
+
+        {/* Test type toggle */}
+        <div className="mb-3">
+          <span className="text-[11px] font-semibold uppercase tracking-wider mb-1.5 block" style={{ color: "var(--text-tertiary)" }}>Type</span>
+          <div className="flex gap-1 p-0.5 rounded-lg" style={{ background: "var(--surface-2)", display: "inline-flex" }}>
+            {(["unit", "integration"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => handleTypeChange(t)}
+                className="px-3 py-1 rounded-md text-[12px] font-medium transition-all duration-150"
+                style={{
+                  background: testType === t ? (t === "unit" ? "rgba(99,131,255,0.2)" : "rgba(251,146,60,0.2)") : "transparent",
+                  color: testType === t ? (t === "unit" ? "#6383ff" : "#fb923c") : "var(--text-tertiary)",
+                  border: "none",
+                  cursor: "pointer",
+                  textTransform: "capitalize",
+                }}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <label className="block mb-3">
           <span className="text-[11px] font-semibold uppercase tracking-wider mb-1 block" style={{ color: "var(--text-tertiary)" }}>Name</span>
@@ -1293,10 +1414,132 @@ function NewCaseForm({ evals, onSave, onCancel }: { evals: EvalsFile; onSave: (u
           </button>
         </div>
 
+        {/* Integration-specific fields */}
+        {testType === "integration" && (
+          <div className="mb-4 p-3 rounded-lg" style={{ background: "rgba(251,146,60,0.06)", border: "1px solid rgba(251,146,60,0.15)" }}>
+            <span className="text-[11px] font-semibold uppercase tracking-wider mb-2 block" style={{ color: "#fb923c" }}>Integration Settings</span>
+
+            {/* Required Credentials */}
+            <div className="mb-3">
+              <span className="text-[11px] mb-1 block" style={{ color: "var(--text-secondary)" }}>Required Credentials</span>
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                {credentials.map((cred) => (
+                  <span
+                    key={cred}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono"
+                    style={{ background: "rgba(251,146,60,0.15)", color: "#fb923c" }}
+                  >
+                    {cred}
+                    <button onClick={() => setCredentials(credentials.filter((c) => c !== cred))} style={{ color: "#fb923c", lineHeight: 1 }}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-1.5">
+                <input
+                  value={credentialInput}
+                  onChange={(e) => setCredentialInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCredential(); } }}
+                  className="input-field flex-1 text-[11px] font-mono"
+                  placeholder="e.g., SLACK_BOT_TOKEN"
+                />
+                <button onClick={addCredential} className="btn btn-ghost text-[11px]" style={{ color: "#fb923c" }}>Add</button>
+              </div>
+            </div>
+
+            {/* Platform */}
+            <label className="block mb-3">
+              <span className="text-[11px] mb-1 block" style={{ color: "var(--text-secondary)" }}>Platform</span>
+              <input value={platform} onChange={(e) => setPlatform(e.target.value)} className="input-field text-[11px]" placeholder="e.g., linkedin, twitter" />
+            </label>
+
+            {/* Chrome Profile */}
+            <label className="block">
+              <span className="text-[11px] mb-1 block" style={{ color: "var(--text-secondary)" }}>Chrome Profile</span>
+              <input value={chromeProfile} onChange={(e) => setChromeProfile(e.target.value)} className="input-field text-[11px]" placeholder="e.g., Default" />
+            </label>
+          </div>
+        )}
+
         <div className="flex justify-end gap-2">
           <button onClick={onCancel} className="btn btn-secondary text-[12px]">Cancel</button>
           <button onClick={handleSave} disabled={!name.trim() || !prompt.trim()} className="btn btn-primary text-[12px]">Save</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Integration Fields Editor (used in CaseDetail)
+// ---------------------------------------------------------------------------
+
+function IntegrationFieldsEditor({ evalCase, onUpdate }: { evalCase: EvalCase; onUpdate: (updated: EvalCase) => void }) {
+  const [credInput, setCredInput] = useState("");
+
+  const addCred = () => {
+    const val = credInput.trim().toUpperCase();
+    if (val && !(evalCase.requiredCredentials ?? []).includes(val)) {
+      onUpdate({ ...evalCase, requiredCredentials: [...(evalCase.requiredCredentials ?? []), val] });
+    }
+    setCredInput("");
+  };
+
+  const removeCred = (cred: string) => {
+    const updated = (evalCase.requiredCredentials ?? []).filter((c) => c !== cred);
+    onUpdate({ ...evalCase, requiredCredentials: updated.length > 0 ? updated : undefined });
+  };
+
+  return (
+    <div className="mb-4 p-3 rounded-lg" style={{ background: "rgba(251,146,60,0.06)", border: "1px solid rgba(251,146,60,0.15)" }}>
+      <span className="text-[11px] font-semibold uppercase tracking-wider mb-2 block" style={{ color: "#fb923c" }}>Integration Settings</span>
+
+      {/* Required Credentials */}
+      <div className="mb-2.5">
+        <span className="text-[10px] mb-1 block" style={{ color: "var(--text-secondary)" }}>Required Credentials</span>
+        <div className="flex flex-wrap gap-1.5 mb-1.5">
+          {(evalCase.requiredCredentials ?? []).map((cred) => (
+            <span key={cred} className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono" style={{ background: "rgba(251,146,60,0.15)", color: "#fb923c" }}>
+              {cred}
+              <button onClick={() => removeCred(cred)} style={{ color: "#fb923c", lineHeight: 1 }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="flex gap-1.5">
+          <input
+            value={credInput}
+            onChange={(e) => setCredInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCred(); } }}
+            className="input-field flex-1 text-[11px] font-mono"
+            placeholder="e.g., GITHUB_TOKEN"
+          />
+          <button onClick={addCred} className="btn btn-ghost text-[11px]" style={{ color: "#fb923c" }}>Add</button>
+        </div>
+      </div>
+
+      {/* Platform */}
+      <div className="mb-2.5">
+        <span className="text-[10px] mb-1 block" style={{ color: "var(--text-secondary)" }}>Platform</span>
+        <input
+          value={evalCase.requirements?.platform ?? ""}
+          onChange={(e) => onUpdate({ ...evalCase, requirements: { ...evalCase.requirements, platform: e.target.value || undefined } })}
+          className="input-field text-[11px]"
+          placeholder="e.g., linkedin, twitter"
+        />
+      </div>
+
+      {/* Chrome Profile */}
+      <div>
+        <span className="text-[10px] mb-1 block" style={{ color: "var(--text-secondary)" }}>Chrome Profile</span>
+        <input
+          value={evalCase.requirements?.chromeProfile ?? ""}
+          onChange={(e) => onUpdate({ ...evalCase, requirements: { ...evalCase.requirements, chromeProfile: e.target.value || undefined } })}
+          className="input-field text-[11px]"
+          placeholder="e.g., Default"
+        />
       </div>
     </div>
   );

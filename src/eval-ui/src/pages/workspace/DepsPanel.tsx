@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import { api } from "../../api";
 import { McpDependencies } from "../../components/McpDependencies";
+import { CredentialManager } from "./CredentialManager";
 import type { DependenciesResponse } from "../../types";
 
 export function DepsPanel() {
@@ -28,8 +29,11 @@ export function DepsPanel() {
 
   if (!deps) {
     return (
-      <div className="flex items-center justify-center h-full text-[13px]" style={{ color: "var(--text-tertiary)" }}>
-        No dependency information available
+      <div className="p-5 max-w-3xl">
+        <div className="text-[13px] mb-4" style={{ color: "var(--text-tertiary)" }}>
+          No MCP dependency information available
+        </div>
+        <CredentialManager plugin={plugin} skill={skill} />
       </div>
     );
   }
@@ -37,6 +41,7 @@ export function DepsPanel() {
   return (
     <div className="p-5 max-w-3xl">
       <McpDependencies plugin={plugin} skill={skill} />
+      <CredentialManager plugin={plugin} skill={skill} />
     </div>
   );
 }

@@ -227,7 +227,7 @@ export interface WorkspaceContextValue {
   improveForCase: (evalId: number, notes?: string) => Promise<void>;
   applyImproveAndRerun: (evalId: number, improved: string) => Promise<void>;
   refreshSkillContent: () => Promise<void>;
-  generateEvals: () => Promise<void>;
+  generateEvals: (opts?: { testType?: "unit" | "integration" }) => Promise<void>;
   runActivationTest: (prompts: string) => void;
   cancelActivation: () => void;
   generateActivationPrompts: (count?: number) => void;

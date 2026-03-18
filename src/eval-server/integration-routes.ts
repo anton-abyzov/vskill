@@ -3,12 +3,13 @@
 // ---------------------------------------------------------------------------
 
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import { initSSE, sendSSE, sendSSEDone } from "./sse-helpers.js";
 import { resolveSkillDir } from "./skill-resolver.js";
 import { loadAndValidateEvals } from "../eval/schema.js";
-import { resolveAllCredentials } from "../eval/credential-resolver.js";
+import { resolveAllCredentials, writeCredential, resolveCredential, parseDotenv } from "../eval/credential-resolver.js";
 import { runIntegrationCase, isFirstRun, recordRun, promptConfirmation } from "../eval/integration-runner.js";
 import type { IntegrationEvalCase } from "../eval/integration-types.js";
 
@@ -116,6 +117,83 @@ export function registerIntegrationRoutes(router: Router, root: string): void {
       sendJson(res, { credentials }, 200, req);
     } catch (err) {
       sendJson(res, { error: (err as Error).message, credentials: [] }, 400, req);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // PUT /api/credentials/:plugin/:skill -- save a credential to .env.local
+  // -------------------------------------------------------------------------
+  router.put("/api/credentials/:plugin/:skill", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+
+    try {
+      const body = (await readBody(req)) as { name?: string; value?: string };
+      const name = body?.name?.trim();
+      const value = body?.value;
+
+      if (!name || typeof name !== "string") {
+        sendJson(res, { error: "name is required and must be a non-empty string" }, 400, req);
+        return;
+      }
+      if (!/^[A-Z][A-Z0-9_]*$/i.test(name)) {
+        sendJson(res, { error: "name must start with a letter and contain only letters, digits, and underscores" }, 400, req);
+        return;
+      }
+      if (value === undefined || value === null || typeof value !== "string") {
+        sendJson(res, { error: "value is required and must be a string" }, 400, req);
+        return;
+      }
+
+      // Treat whitespace-only values as empty (missing)
+      const trimmedValue = value.trim();
+      if (trimmedValue === "") {
+        sendJson(res, { error: "value must not be empty or whitespace-only" }, 400, req);
+        return;
+      }
+
+      // Strip newlines to prevent .env injection
+      const safeValue = value.replace(/[\r\n]/g, "");
+
+      writeCredential(skillDir, name, safeValue);
+
+      // Re-resolve to confirm persistence
+      const resolved = resolveCredential(name, skillDir);
+      const credential = {
+        name,
+        status: resolved ? "ready" as const : "missing" as const,
+        ...(resolved?.source ? { source: resolved.source } : {}),
+      };
+
+      sendJson(res, { ok: true, credential }, 200, req);
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 500, req);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /api/credentials/:plugin/:skill/params -- read all .env.local params
+  // -------------------------------------------------------------------------
+  router.get("/api/credentials/:plugin/:skill/params", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+
+    try {
+      const dotenvPath = join(skillDir, ".env.local");
+      if (!existsSync(dotenvPath)) {
+        sendJson(res, { params: [] }, 200, req);
+        return;
+      }
+
+      const content = readFileSync(dotenvPath, "utf-8");
+      const parsed = parseDotenv(content);
+      const paramList = Object.entries(parsed).map(([key, val]) => ({
+        name: key,
+        maskedValue: val.length > 0 ? "***" + val.slice(-4) : "",
+        status: val.trim() !== "" ? "ready" as const : "missing" as const,
+      }));
+
+      sendJson(res, { params: paramList }, 200, req);
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message, params: [] }, 400, req);
     }
   });
 }

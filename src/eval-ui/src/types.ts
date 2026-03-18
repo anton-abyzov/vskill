@@ -15,6 +15,16 @@ export interface EvalCase {
   assertions: Assertion[];
   testType?: "unit" | "integration";
   requiredCredentials?: string[];
+  requirements?: {
+    chromeProfile?: string;
+    platform?: string;
+  };
+  cleanup?: Array<{
+    action: "delete_post" | "remove_artifact" | "custom";
+    platform?: string;
+    identifier?: string;
+    description?: string;
+  }>;
 }
 
 export function getTestType(evalCase: EvalCase): "unit" | "integration" {

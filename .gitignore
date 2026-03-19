@@ -26,3 +26,4 @@ dist/
 
 # Runtime artifacts
 .claude/agent-memory/
+vskill.lock

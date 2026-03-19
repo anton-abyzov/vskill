@@ -129,8 +129,12 @@ export function stripClaudeFields(content: string, skillName: string): string {
     fmBlock = fmBlock.replace(new RegExp(pattern.source, pattern.flags), "");
   }
 
+  // Collapse consecutive blank lines left by field removal
+  fmBlock = fmBlock.replace(/\n{3,}/g, "\n\n");
+
   if (!HAS_NAME_RE.test(fmBlock)) {
-    fmBlock = `name: ${skillName}\n${fmBlock}`;
+    // Leading \n ensures separation from opening ---
+    fmBlock = `\nname: ${skillName}${fmBlock}`;
   }
 
   return `---${fmBlock}---${body}`;

@@ -4,9 +4,12 @@
 // ---------------------------------------------------------------------------
 
 import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { getDefaultBranch } from "../discovery/github-tree.js";
 import { getPluginSource, getPluginVersion } from "../marketplace/index.js";
 import { getSkill } from "../api/client.js";
+import { findCoreSkillsDir, listCoreSkills } from "../core-skills/sync.js";
 import type { ParsedSource } from "../resolvers/source-resolver.js";
 import type { SkillLockEntry } from "../lockfile/types.js";
 
@@ -185,6 +188,54 @@ async function fetchPlugin(
 }
 
 // ---------------------------------------------------------------------------
+// Local: fetch from specweave plugin cache
+// ---------------------------------------------------------------------------
+function fetchLocal(skillName: string, entry: SkillLockEntry): FetchResult | null {
+  const coreDir = findCoreSkillsDir();
+  if (!coreDir) return null;
+
+  // The lockfile skill name (e.g. "sw") is a plugin-level entry.
+  // Find all individual skills under the plugin's skills directory.
+  const skillNames = listCoreSkills(coreDir);
+  if (skillNames.length === 0) return null;
+
+  const files: Record<string, string> = {};
+  for (const name of skillNames) {
+    const skillDir = join(coreDir, name);
+    const skillMdPath = join(skillDir, "SKILL.md");
+    if (!existsSync(skillMdPath)) continue;
+
+    files[`${name}/SKILL.md`] = readFileSync(skillMdPath, "utf-8");
+
+    // Include agents/*.md if present
+    const agentsDir = join(skillDir, "agents");
+    if (existsSync(agentsDir) && statSync(agentsDir).isDirectory()) {
+      for (const file of readdirSync(agentsDir)) {
+        if (file.endsWith(".md")) {
+          files[`${name}/agents/${file}`] = readFileSync(
+            join(agentsDir, file),
+            "utf-8",
+          );
+        }
+      }
+    }
+  }
+
+  if (Object.keys(files).length === 0) return null;
+
+  const sha = computeSha(files);
+  const combined = Object.values(files).join("\n");
+
+  return {
+    content: combined,
+    version: entry.version,
+    sha,
+    tier: entry.tier,
+    files,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Main dispatch
 // ---------------------------------------------------------------------------
 export async function fetchFromSource(
@@ -206,8 +257,7 @@ export async function fetchFromSource(
       return fetchPlugin(parsed.owner, parsed.repo, parsed.pluginName, entry);
 
     case "local":
-      // Managed by external tool (e.g. specweave refresh-plugins). Skip silently.
-      return null;
+      return fetchLocal(skillName, entry);
 
     case "unknown":
       return null;

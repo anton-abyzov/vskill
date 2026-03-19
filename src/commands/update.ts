@@ -85,14 +85,9 @@ export async function updateCommand(
       return;
     }
     toUpdate = [skill];
-  } else if (opts.all) {
-    toUpdate = skillNames;
   } else {
-    console.log(
-      yellow("Specify a skill name or use --all to update everything.")
-    );
-    console.log(dim(`Installed: ${skillNames.join(", ")}`));
-    return;
+    // Default: update all installed skills (--all is now implicit)
+    toUpdate = skillNames;
   }
 
   let agents = await detectInstalledAgents();
@@ -121,14 +116,7 @@ export async function updateCommand(
       // 1. Try source-aware fetch first
       let result = await fetchFromSource(parsed, name, entry);
 
-      // 2. For local sources that returned null: skip (no registry fallback)
-      if (result === null && parsed.type === "local") {
-        spin.stop();
-        console.log(dim(`${name}: managed by specweave refresh-plugins — skipping`));
-        continue;
-      }
-
-      // 3. Fall back to registry for unknown/failed sources
+      // 2. Fall back to registry for unknown/failed sources
       if (result === null) {
         try {
           const remote = await getSkill(name);

@@ -238,7 +238,7 @@ describe("updateCommand", () => {
     expect(mockWriteFileSync).toHaveBeenCalled();
   });
 
-  it("skips skill and does not call getSkill for local source when fetchFromSource returns null", async () => {
+  it("falls back to registry for local source when fetchFromSource returns null (no cache)", async () => {
     mockReadLockfile.mockReturnValue({
       version: 1,
       agents: ["claude-code"],
@@ -255,12 +255,14 @@ describe("updateCommand", () => {
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
     mockFetchFromSource.mockResolvedValue(null);
+    // Registry fallback also returns nothing
+    mockGetSkill.mockRejectedValue(new Error("not found"));
 
     const { updateCommand } = await import("./update.js");
     await updateCommand("sw", { all: false });
 
-    // local sources: no registry fallback, no file writes
-    expect(mockGetSkill).not.toHaveBeenCalled();
+    // Local sources now fall back to registry when cache is unavailable
+    expect(mockGetSkill).toHaveBeenCalledWith("sw");
     expect(mockWriteFileSync).not.toHaveBeenCalled();
   });
 

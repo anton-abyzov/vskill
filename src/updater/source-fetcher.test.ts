@@ -27,6 +27,16 @@ vi.mock("../marketplace/index.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock core-skills/sync (findCoreSkillsDir, listCoreSkills)
+// ---------------------------------------------------------------------------
+const mockFindCoreSkillsDir = vi.hoisted(() => vi.fn());
+const mockListCoreSkills = vi.hoisted(() => vi.fn());
+vi.mock("../core-skills/sync.js", () => ({
+  findCoreSkillsDir: mockFindCoreSkillsDir,
+  listCoreSkills: mockListCoreSkills,
+}));
+
+// ---------------------------------------------------------------------------
 // Mock global fetch
 // ---------------------------------------------------------------------------
 const mockFetch = vi.hoisted(() => vi.fn());
@@ -224,14 +234,43 @@ describe("fetchFromSource", () => {
 
   // ---- local ----------------------------------------------------------
 
-  it("returns null for local source (skip with no fetch)", async () => {
+  it("returns file map from local plugin cache for local source", async () => {
     const parsed: ParsedSource = { type: "local", baseName: "specweave" };
+    const { mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+
+    // Create temp skill directory with real files
+    const tmpSkillsDir = join(tmpdir(), `vskill-test-${Date.now()}`);
+    mkdirSync(join(tmpSkillsDir, "pm"), { recursive: true });
+    mkdirSync(join(tmpSkillsDir, "architect"), { recursive: true });
+    writeFileSync(join(tmpSkillsDir, "pm", "SKILL.md"), "# PM Skill", "utf-8");
+    writeFileSync(join(tmpSkillsDir, "architect", "SKILL.md"), "# Architect Skill", "utf-8");
+
+    mockFindCoreSkillsDir.mockReturnValue(tmpSkillsDir);
+    mockListCoreSkills.mockReturnValue(["pm", "architect"]);
+
+    const result = await fetchFromSource(parsed, "sw", MOCK_LOCK_ENTRY);
+
+    expect(result).not.toBeNull();
+    expect(result!.files).toBeDefined();
+    expect(result!.files!["pm/SKILL.md"]).toBe("# PM Skill");
+    expect(result!.files!["architect/SKILL.md"]).toBe("# Architect Skill");
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockGetSkill).not.toHaveBeenCalled();
+
+    // Cleanup
+    rmSync(tmpSkillsDir, { recursive: true, force: true });
+  });
+
+  it("returns null for local source when no plugin cache exists", async () => {
+    const parsed: ParsedSource = { type: "local", baseName: "specweave" };
+    mockFindCoreSkillsDir.mockReturnValue(null);
 
     const result = await fetchFromSource(parsed, "sw", MOCK_LOCK_ENTRY);
 
     expect(result).toBeNull();
     expect(mockFetch).not.toHaveBeenCalled();
-    expect(mockGetSkill).not.toHaveBeenCalled();
   });
 
   // ---- unknown --------------------------------------------------------

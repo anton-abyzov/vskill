@@ -306,4 +306,57 @@ describe("stripClaudeFields", () => {
     const second = stripClaudeFields(first, "s");
     expect(second).toBe(first);
   });
+
+  it("produces valid YAML when all fields are Claude-only (name injected after ---)", () => {
+    const content = "---\nmodel: opus\n---\n# Body";
+    const result = stripClaudeFields(content, "my-skill");
+    // Must have newline between --- and name:
+    expect(result).toMatch(/^---\n/);
+    expect(result).toContain("name: my-skill");
+    expect(result).not.toContain("---name:");
+  });
+
+  it("collapses consecutive blank lines from stripped middle fields", () => {
+    const content = [
+      "---",
+      "name: s",
+      "model: opus",
+      "description: d",
+      "allowed-tools: Read,Write",
+      "context: fork",
+      "version: 1.0",
+      "---",
+      "# Body",
+    ].join("\n");
+    const result = stripClaudeFields(content, "s");
+    // Should not have triple+ newlines in frontmatter
+    const fmMatch = result.match(/^---([\s\S]*?)---/);
+    expect(fmMatch).toBeTruthy();
+    expect(fmMatch![1]).not.toMatch(/\n{3,}/);
+    expect(result).toContain("version: 1.0");
+  });
+
+  it("handles frontmatter with only Claude fields (no name, no description)", () => {
+    const content = "---\nuser-invocable: true\nmodel: opus\ncontext: fork\n---\n# Body\n\nSome desc";
+    const result = stripClaudeFields(content, "my-skill");
+    expect(result).toMatch(/^---\n/);
+    expect(result).toContain("name: my-skill");
+    expect(result).not.toContain("user-invocable");
+    expect(result).not.toContain("model:");
+    expect(result).not.toContain("context:");
+  });
+
+  it("handles CRLF line endings", () => {
+    const content = "---\r\nname: s\r\nmodel: opus\r\ndescription: d\r\n---\r\n# Body";
+    const result = stripClaudeFields(content, "s");
+    expect(result).not.toContain("\r");
+    expect(result).not.toContain("model:");
+    expect(result).toContain("name: s");
+  });
+
+  it("handles allowed-tools with complex value", () => {
+    const content = "---\nname: s\ndescription: d\nallowed-tools: Read, Write, Grep, Agent, Bash\n---\n# Body";
+    const result = stripClaudeFields(content, "s");
+    expect(result).not.toContain("allowed-tools");
+  });
 });

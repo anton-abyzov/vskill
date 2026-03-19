@@ -468,4 +468,110 @@ describe("canonical installer", () => {
       expect(written).not.toContain("name: my-skill");
     });
   });
+
+  describe("Claude field stripping", () => {
+    const CLAUDE_CONTENT = [
+      "---",
+      "description: PM skill",
+      "argument-hint: \"[topic]\"",
+      "context: fork",
+      "model: opus",
+      "user-invocable: true",
+      "allowed-tools: Read,Write,Grep",
+      "---",
+      "# PM Skill body",
+    ].join("\n");
+
+    it("installSymlink: Claude Code copy keeps all fields", () => {
+      const agents = [
+        makeAgent({ id: "claude-code", localSkillsDir: ".claude/skills" }),
+      ];
+
+      installSymlink("pm", CLAUDE_CONTENT, agents, {
+        global: false,
+        projectRoot: tempDir,
+      });
+
+      const claudePath = join(tempDir, ".claude", "skills", "pm", "SKILL.md");
+      const written = readFileSync(claudePath, "utf-8");
+      expect(written).toContain("model: opus");
+      expect(written).toContain("user-invocable: true");
+      expect(written).toContain("allowed-tools:");
+      expect(written).toContain("context: fork");
+      expect(written).toContain("argument-hint:");
+    });
+
+    it("installSymlink: canonical (non-Claude) strips Claude fields", () => {
+      const agents = [
+        makeAgent({ id: "opencode", localSkillsDir: ".opencode/skills" }),
+      ];
+
+      installSymlink("pm", CLAUDE_CONTENT, agents, {
+        global: false,
+        projectRoot: tempDir,
+      });
+
+      const canonicalPath = join(tempDir, ".agents", "skills", "pm", "SKILL.md");
+      const written = readFileSync(canonicalPath, "utf-8");
+      expect(written).toContain("name: pm");
+      expect(written).toContain("description: PM skill");
+      expect(written).not.toContain("model:");
+      expect(written).not.toContain("user-invocable");
+      expect(written).not.toContain("allowed-tools:");
+      expect(written).not.toContain("context:");
+      expect(written).not.toContain("argument-hint:");
+      expect(written).toContain("# PM Skill body");
+    });
+
+    it("installSymlink: symlink-failure fallback uses stripped content", () => {
+      setForceSymlinkFailure(true);
+      try {
+        const agents = [
+          makeAgent({ id: "opencode", localSkillsDir: ".opencode/skills" }),
+        ];
+
+        installSymlink("pm", CLAUDE_CONTENT, agents, {
+          global: false,
+          projectRoot: tempDir,
+        });
+
+        const fallbackPath = join(tempDir, ".opencode", "skills", "pm", "SKILL.md");
+        const written = readFileSync(fallbackPath, "utf-8");
+        expect(written).not.toContain("model:");
+        expect(written).not.toContain("user-invocable");
+        expect(written).toContain("name: pm");
+        expect(written).toContain("description: PM skill");
+      } finally {
+        setForceSymlinkFailure(false);
+      }
+    });
+
+    it("installCopy: Claude keeps fields, non-Claude strips them", () => {
+      const agents = [
+        makeAgent({ id: "claude-code", localSkillsDir: ".claude/skills" }),
+        makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" }),
+      ];
+
+      installCopy("pm", CLAUDE_CONTENT, agents, {
+        global: false,
+        projectRoot: tempDir,
+      });
+
+      // Claude keeps all fields
+      const claudeContent = readFileSync(
+        join(tempDir, ".claude", "skills", "pm", "SKILL.md"), "utf-8"
+      );
+      expect(claudeContent).toContain("model: opus");
+      expect(claudeContent).toContain("user-invocable: true");
+
+      // Cursor gets stripped
+      const cursorContent = readFileSync(
+        join(tempDir, ".cursor", "skills", "pm", "SKILL.md"), "utf-8"
+      );
+      expect(cursorContent).not.toContain("model:");
+      expect(cursorContent).not.toContain("user-invocable");
+      expect(cursorContent).toContain("name: pm");
+      expect(cursorContent).toContain("description: PM skill");
+    });
+  });
 });

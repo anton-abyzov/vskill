@@ -81,6 +81,7 @@ const APPROX_COST_PER_CALL: Record<string, number> = {
 function estimateCostLabel(provider: string | null, totalCalls: number): string | null {
   if (!provider) return null;
   const perCall = APPROX_COST_PER_CALL[provider];
+  // Unknown or free providers: return null to suppress cost display (intentional)
   if (perCall == null || perCall === 0) return null;
   const min = perCall * totalCalls * 0.5;
   const max = perCall * totalCalls * 2;
@@ -308,7 +309,7 @@ export function RunPanel() {
             )}
 
             {/* Celebration CTA — 100% pass rate, no existing comparison */}
-            {latestBenchmark.overall_pass_rate === 1 && !latestBenchmark.comparison && (
+            {latestBenchmark.overall_pass_rate >= 0.9999 && !latestBenchmark.comparison && (
               <button
                 onClick={() => runAll("comparison")}
                 disabled={cases.length === 0 || isReadOnly}
@@ -355,10 +356,10 @@ export function RunPanel() {
                 {latestBenchmark.verdict && ` | ${verdictLabel(latestBenchmark.verdict)}`}
               </div>
               {(() => {
-                const totalAssertions = latestBenchmark.cases.reduce((s, c) => s + c.assertions.length, 0);
+                const benchmarkTotalAssertions = latestBenchmark.cases.reduce((s, c) => s + c.assertions.length, 0);
                 const stmt = deltaStatement(
                   latestBenchmark.comparison.delta,
-                  totalAssertions,
+                  benchmarkTotalAssertions,
                   latestBenchmark.cases.length,
                 );
                 return (
@@ -453,7 +454,7 @@ function RunCaseCard({ name, evalId, result, caseCost, caseBillingMode, caseInpu
             <span
               className="pill text-[10px]"
               style={{
-                background: result.status === "pass" ? "var(--green-muted)" : result.status === "error" ? "var(--red-muted)" : "var(--red-muted)",
+                background: result.status === "pass" ? "var(--green-muted)" : "var(--red-muted)",
                 color: result.status === "pass" ? "var(--green)" : "var(--red)",
               }}
             >

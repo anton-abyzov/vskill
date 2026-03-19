@@ -158,4 +158,9 @@ describe("winnerLabel", () => {
     expect(winnerLabel("tie").text).toBe("Tie");
     expect(winnerLabel("tie").isSkill).toBe(false);
   });
+
+  it('falls back to "Tie" for unrecognized winner values', () => {
+    expect(winnerLabel("").text).toBe("Tie");
+    expect(winnerLabel("draw").text).toBe("Tie");
+  });
 });

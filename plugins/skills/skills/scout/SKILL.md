@@ -28,8 +28,8 @@ For new users or "what's available?" queries, start with this overview:
 >
 > Each bundle contains focused, high-value skills. For example, the `mobile` bundle includes the app store automation skill.
 >
-> **Install a bundle**: `npx vskill install --repo anton-abyzov/vskill --plugin <name> --force`
-> **Install everything**: `npx vskill install --repo anton-abyzov/vskill --all --force`
+> **Install a bundle**: `npx vskill i anton-abyzov/vskill/<skill-name>`
+> **Install everything**: `npx vskill i anton-abyzov/vskill`
 > **Search the registry**: `npx vskill find "<query>"`
 
 ## Workflow
@@ -136,12 +136,12 @@ npx vskill install <skill-name>
 
 **Install a plugin bundle** (all skills in a domain):
 ```bash
-npx vskill install --repo anton-abyzov/vskill --plugin <plugin-name> --force
+npx vskill i anton-abyzov/vskill/<skill-name>
 ```
 
 **Install ALL plugin bundles at once**:
 ```bash
-npx vskill install --repo anton-abyzov/vskill --all --force
+npx vskill i anton-abyzov/vskill
 ```
 
 The `--force` flag bypasses the interactive security scan prompt (the scan still runs, but auto-accepts PASS/CONCERNS verdicts). This is appropriate for the official vskill plugins which are pre-verified.

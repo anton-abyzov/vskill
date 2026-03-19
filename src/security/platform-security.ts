@@ -6,14 +6,14 @@ const BASE_URL = "https://verified-skill.com";
 
 export interface ProviderResult {
   provider: string;
-  status: string; // "PASS" | "FAIL" | "PENDING" | "TIMED_OUT"
-  verdict: string | null;
+  status: "PASS" | "FAIL" | "PENDING" | "TIMED_OUT";
+  verdict: "PASS" | "FAIL" | "CONCERNS" | "PENDING" | null;
   criticalCount: number;
 }
 
 export interface PlatformSecurityResult {
   hasCritical: boolean;
-  overallVerdict: string;
+  overallVerdict: "PASS" | "FAIL" | "PENDING" | "TIMED_OUT" | "CERTIFIED";
   providers: ProviderResult[];
   reportUrl: string;
 }
@@ -29,7 +29,10 @@ export async function checkPlatformSecurity(
     const url = `${BASE_URL}/api/v1/skills/${skillName.split("/").map(encodeURIComponent).join("/")}/security`;
     const res = await fetch(url);
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn(`[platform-security] HTTP ${res.status} for ${skillName}`);
+      return null;
+    }
 
     const data = (await res.json()) as {
       overallVerdict?: string;
@@ -59,7 +62,8 @@ export async function checkPlatformSecurity(
       providers,
       reportUrl: String(data.reportUrl || ""),
     };
-  } catch {
+  } catch (err) {
+    console.warn(`[platform-security] check failed for ${skillName}:`, err instanceof Error ? err.message : String(err));
     return null;
   }
 }

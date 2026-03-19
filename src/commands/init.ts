@@ -82,7 +82,7 @@ export async function initCommand(opts: InitOptions = {}): Promise<void> {
 
   // Uninstall stale plugins via claude CLI (before Claude Code caches settings)
   if (currentLock.skills) {
-    const results = uninstallStalePlugins(writtenLock.skills, { log: (m) => console.log(dim(m)) });
+    const results = uninstallStalePlugins(currentLock.skills, { log: (m) => console.log(dim(m)) });
     if (results.length > 0) {
       console.log(
         dim(`\nRemoved ${results.filter((r) => r.ok).length} stale plugin${results.length === 1 ? "" : "s"}`),

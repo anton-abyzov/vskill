@@ -7,6 +7,15 @@ const SKILL_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
 /** Single lowercase alphanumeric character (valid 1-char skill name) */
 const SINGLE_CHAR_RE = /^[a-z0-9]$/;
 
+/** Claude Code-specific frontmatter fields that non-Claude agents don't support */
+const CLAUDE_FIELD_PATTERNS = [
+  /^user-invoc?k?able\s*:.*\n?/gm,
+  /^allowed-tools\s*:.*\n?/gm,
+  /^model\s*:.*\n?/gm,
+  /^argument-hint\s*:.*\n?/gm,
+  /^context\s*:.*\n?/gm,
+];
+
 /** Detects `name:` field at the start of a line in frontmatter */
 const HAS_NAME_RE = /^name:/m;
 
@@ -95,4 +104,34 @@ export function ensureFrontmatter(content: string, skillName: string): string {
   }
 
   return normalized.replace(FRONTMATTER_RE, `---\n${updatedBlock}\n---`);
+}
+
+/**
+ * Strip Claude Code-specific frontmatter fields for non-Claude agents.
+ * Removes: user-invocable, allowed-tools, model, argument-hint, context.
+ * Ensures `name:` is present (required by all agents).
+ */
+export function stripClaudeFields(content: string, skillName: string): string {
+  const normalized = content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+
+  if (!normalized.startsWith("---")) {
+    const desc = extractDescription(normalized, skillName);
+    return `---\nname: ${skillName}\ndescription: ${quoteYAMLValue(desc)}\n---\n\n${normalized}`;
+  }
+
+  const endIdx = normalized.indexOf("---", 3);
+  if (endIdx === -1) return normalized;
+
+  let fmBlock = normalized.substring(3, endIdx);
+  const body = normalized.substring(endIdx + 3);
+
+  for (const pattern of CLAUDE_FIELD_PATTERNS) {
+    fmBlock = fmBlock.replace(new RegExp(pattern.source, pattern.flags), "");
+  }
+
+  if (!HAS_NAME_RE.test(fmBlock)) {
+    fmBlock = `name: ${skillName}\n${fmBlock}`;
+  }
+
+  return `---${fmBlock}---${body}`;
 }

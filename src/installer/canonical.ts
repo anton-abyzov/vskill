@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync } from "node:f
 import { join, relative, dirname } from "node:path";
 import os from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
-import { ensureFrontmatter } from "./frontmatter.js";
+import { ensureFrontmatter, stripClaudeFields } from "./frontmatter.js";
 
 export interface InstallOptions {
   global: boolean;
@@ -111,9 +111,12 @@ export function installSymlink(
   agentFiles?: Record<string, string>,
 ): string[] {
   content = ensureFrontmatter(content, skillName);
+  const strippedContent = stripClaudeFields(content, skillName);
+
+  // Canonical gets stripped content — non-Claude agents symlink here
   const canonicalSkillDir = join(ensureCanonicalDir(opts.projectRoot, opts.global), skillName);
   mkdirSync(canonicalSkillDir, { recursive: true });
-  writeFileSync(join(canonicalSkillDir, "SKILL.md"), content);
+  writeFileSync(join(canonicalSkillDir, "SKILL.md"), strippedContent);
   if (agentFiles) writeAgentFiles(canonicalSkillDir, agentFiles);
 
   const installed: string[] = [];
@@ -126,8 +129,10 @@ export function installSymlink(
 
     // Agents with known symlink issues get direct copy
     if (COPY_FALLBACK_AGENTS.has(agent.id)) {
+      // Claude Code gets full content with all fields
+      const agentContent = agent.id === "claude-code" ? content : strippedContent;
       mkdirSync(linkPath, { recursive: true });
-      writeFileSync(join(linkPath, "SKILL.md"), content);
+      writeFileSync(join(linkPath, "SKILL.md"), agentContent);
       if (agentFiles) writeAgentFiles(linkPath, agentFiles);
       installed.push(linkPath);
       continue;
@@ -138,9 +143,9 @@ export function installSymlink(
     if (ok) {
       installed.push(linkPath);
     } else {
-      // Fallback to copy on symlink failure
+      // Fallback to copy on symlink failure — use stripped content for non-Claude
       mkdirSync(linkPath, { recursive: true });
-      writeFileSync(join(linkPath, "SKILL.md"), content);
+      writeFileSync(join(linkPath, "SKILL.md"), strippedContent);
       if (agentFiles) writeAgentFiles(linkPath, agentFiles);
       installed.push(linkPath);
     }
@@ -162,13 +167,16 @@ export function installCopy(
   agentFiles?: Record<string, string>,
 ): string[] {
   content = ensureFrontmatter(content, skillName);
+  const strippedContent = stripClaudeFields(content, skillName);
   const installed: string[] = [];
 
   for (const agent of agents) {
+    // Claude Code gets full content; all others get stripped
+    const agentContent = agent.id === "claude-code" ? content : strippedContent;
     const agentSkillsDir = resolveAgentSkillsDir(agent, opts);
     const skillDir = join(agentSkillsDir, skillName);
     mkdirSync(skillDir, { recursive: true });
-    writeFileSync(join(skillDir, "SKILL.md"), content);
+    writeFileSync(join(skillDir, "SKILL.md"), agentContent);
     if (agentFiles) writeAgentFiles(skillDir, agentFiles);
     installed.push(skillDir);
   }

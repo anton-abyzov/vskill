@@ -1,7 +1,9 @@
 // Leaderboard panel — sweep results table with sparklines + skill amplification view
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import { api } from "../../api";
+import { useOnDataEvent } from "../../hooks/useDataEvents";
+import { useSWR, mutate } from "../../hooks/useSWR";
 import type { SweepResult, LeaderboardEntry } from "../../types";
 import { passRateColor } from "../../utils/historyUtils";
 
@@ -422,20 +424,20 @@ export function LeaderboardPanel() {
   const { state } = useWorkspace();
   const { plugin, skill } = state;
 
-  const [sweeps, setSweeps] = useState<SweepResult[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<LeaderboardTab>("rankings");
+  const swrKey = `leaderboard/${plugin}/${skill}`;
+  const fetcher = useCallback(() => api.getLeaderboard(plugin, skill), [plugin, skill]);
+  const { data: leaderboardData, loading, error: swrError } = useSWR<{ entries: SweepResult[] }>(swrKey, fetcher);
+  const sweeps = leaderboardData?.entries ?? [];
+  const error = swrError?.message ?? null;
 
+  // Reset tab when skill context changes
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    setTab("rankings"); // Reset tab on context switch
-    api.getLeaderboard(plugin, skill)
-      .then((res) => setSweeps(res.entries))
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-      .finally(() => setLoading(false));
+    setTab("rankings");
   }, [plugin, skill]);
+
+  const invalidate = useCallback(() => mutate(swrKey), [swrKey]);
+  useOnDataEvent("leaderboard:updated", invalidate);
 
   const entries = useMemo(() => buildLeaderboard(sweeps), [sweeps]);
   const hasBaseline = entries.some((e) => e.hasBaseline);

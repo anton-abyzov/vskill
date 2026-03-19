@@ -38,6 +38,8 @@ export interface BenchmarkCase {
   tokens?: number | null;
   inputTokens?: number | null;
   outputTokens?: number | null;
+  cost?: number | null;
+  billingMode?: string;
   output?: string;
   assertions: BenchmarkAssertionResult[];
   comparisonDetail?: ComparisonCaseDetail;
@@ -64,6 +66,7 @@ export interface BenchmarkResult {
   totalDurationMs?: number;
   totalInputTokens?: number | null;
   totalOutputTokens?: number | null;
+  totalCost?: number | null;
   scope?: "single" | "bulk";
   verdict?: string;
   comparison?: {

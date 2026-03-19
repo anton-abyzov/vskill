@@ -7,6 +7,7 @@ import { join, resolve, dirname } from "node:path";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import { initSSE, sendSSE, sendSSEDone, withHeartbeat, startDynamicHeartbeat } from "./sse-helpers.js";
+import { dataEventBus, emitDataEvent } from "./data-events.js";
 import { classifyError } from "./error-classifier.js";
 import { runBenchmarkSSE, runSingleCaseSSE, assembleBulkResult } from "./benchmark-runner.js";
 import { getSkillSemaphore } from "./concurrency.js";
@@ -197,6 +198,36 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // Health check
   router.get("/api/health", (_req, res) => {
     sendJson(res, { ok: true });
+  });
+
+  // Server-Sent Events endpoint for data change notifications
+  // Clients subscribe here to receive push updates when benchmarks complete,
+  // history is written, or leaderboard is updated.
+  router.get("/api/events", (req, res) => {
+    initSSE(res, req);
+
+    const onBenchmarkComplete = (payload: unknown) => {
+      sendSSE(res, "benchmark:complete", payload ?? {});
+    };
+    const onHistoryWritten = (payload: unknown) => {
+      sendSSE(res, "history:written", payload ?? {});
+    };
+    const onLeaderboardUpdated = (payload: unknown) => {
+      sendSSE(res, "leaderboard:updated", payload ?? {});
+    };
+
+    dataEventBus.on("benchmark:complete", onBenchmarkComplete);
+    dataEventBus.on("history:written", onHistoryWritten);
+    dataEventBus.on("leaderboard:updated", onLeaderboardUpdated);
+
+    const cleanup = () => {
+      dataEventBus.off("benchmark:complete", onBenchmarkComplete);
+      dataEventBus.off("history:written", onHistoryWritten);
+      dataEventBus.off("leaderboard:updated", onLeaderboardUpdated);
+    };
+
+    req.on("close", cleanup);
+    req.on("aborted", cleanup);
   });
 
   // OpenRouter model search proxy
@@ -814,6 +845,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
             scope: "single",
           };
           await writeHistoryEntry(skillDir, result);
+          emitDataEvent("benchmark:complete");
         }
         sendSSEDone(res, benchCase);
       }
@@ -832,6 +864,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       if (!body?.result) { sendJson(res, { error: "Missing result" }, 400, req); return; }
       const result = { ...body.result, scope: "bulk" as const };
       await writeHistoryEntry(skillDir, result);
+      emitDataEvent("history:written");
       sendJson(res, { ok: true }, 200, req);
     } catch (err) {
       sendJson(res, { error: (err as Error).message }, 500, req);
@@ -1091,6 +1124,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         };
 
         await writeHistoryEntry(skillDir, historyResult);
+        emitDataEvent("history:written");
         sendSSEDone(res, historyResult);
       }
     } catch (err) {

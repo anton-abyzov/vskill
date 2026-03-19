@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback } from "react";
 import { api } from "../api";
 import type { StatsResult } from "../types";
+import { formatCost } from "../utils/formatCost";
+import { useOnDataEvent } from "../hooks/useDataEvents";
+import { useSWR, mutate } from "../hooks/useSWR";
 
 interface StatsPanelProps {
   plugin: string;
@@ -66,16 +69,13 @@ function TrendLine({ points }: { points: Array<{ passRate: number }> }) {
 }
 
 export function StatsPanel({ plugin, skill }: StatsPanelProps) {
-  const [stats, setStats] = useState<StatsResult | null>(null);
-  const [loading, setLoading] = useState(true);
+  const swrKey = `stats/${plugin}/${skill}`;
+  const fetcher = useCallback(() => api.getStats(plugin, skill), [plugin, skill]);
+  const { data: stats, loading } = useSWR<StatsResult>(swrKey, fetcher);
 
-  useEffect(() => {
-    setLoading(true);
-    api.getStats(plugin, skill)
-      .then(setStats)
-      .catch(() => setStats(null))
-      .finally(() => setLoading(false));
-  }, [plugin, skill]);
+  const invalidate = useCallback(() => mutate(swrKey), [swrKey]);
+  useOnDataEvent("benchmark:complete", invalidate);
+  useOnDataEvent("history:written", invalidate);
 
   if (loading) {
     return (
@@ -148,6 +148,28 @@ export function StatsPanel({ plugin, skill }: StatsPanelProps) {
             {stats.modelStats.length}
           </div>
         </div>
+
+        {stats.totalCost != null && (
+          <div className="glass-card p-4">
+            <div className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: "var(--text-tertiary)" }}>
+              Total Cost
+            </div>
+            <div className="text-[20px] font-bold" style={{ color: "var(--text-primary)" }}>
+              {formatCost(stats.totalCost)}
+            </div>
+          </div>
+        )}
+
+        {stats.costPerRun != null && (
+          <div className="glass-card p-4">
+            <div className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: "var(--text-tertiary)" }}>
+              Avg Cost/Run
+            </div>
+            <div className="text-[20px] font-bold" style={{ color: "var(--text-primary)" }}>
+              {formatCost(stats.costPerRun)}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Trend chart */}
@@ -173,6 +195,7 @@ export function StatsPanel({ plugin, skill }: StatsPanelProps) {
                 <th style={{ textAlign: "center", padding: "6px 8px", color: "var(--text-tertiary)", fontWeight: 600, fontSize: 11 }}>Runs</th>
                 <th style={{ textAlign: "center", padding: "6px 8px", color: "var(--text-tertiary)", fontWeight: 600, fontSize: 11 }}>Avg Pass Rate</th>
                 <th style={{ textAlign: "center", padding: "6px 8px", color: "var(--text-tertiary)", fontWeight: 600, fontSize: 11 }}>Avg Duration</th>
+                <th style={{ textAlign: "center", padding: "6px 8px", color: "var(--text-tertiary)", fontWeight: 600, fontSize: 11 }}>Avg Cost</th>
               </tr>
             </thead>
             <tbody>
@@ -187,6 +210,9 @@ export function StatsPanel({ plugin, skill }: StatsPanelProps) {
                   </td>
                   <td style={{ padding: "8px", textAlign: "center", fontFamily: "var(--font-mono, monospace)", color: "var(--text-secondary)" }}>
                     {fmtDuration(m.avgDurationMs)}
+                  </td>
+                  <td style={{ padding: "8px", textAlign: "center", fontFamily: "var(--font-mono, monospace)", color: "var(--text-secondary)" }}>
+                    {m.avgCost != null ? formatCost(m.avgCost) : "N/A"}
                   </td>
                 </tr>
               ))}

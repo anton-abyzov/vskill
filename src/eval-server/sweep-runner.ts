@@ -7,6 +7,7 @@ import { mkdir, writeFile, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createLlmClient } from "../eval/llm.js";
 import type { ProviderName, LlmClient } from "../eval/llm.js";
+import { emitDataEvent } from "./data-events.js";
 import type { EvalCase } from "../eval/schema.js";
 import type { BenchmarkResult, BenchmarkCase } from "../eval/benchmark.js";
 
@@ -233,7 +234,7 @@ export function aggregateRuns(
   const passRates = results.map((r) => r.overall_pass_rate ?? 0);
   const durations = results.map((r) => r.totalDurationMs ?? 0);
   const costs = results.map((r) =>
-    r.cases.reduce((sum, c) => sum + ((c as any).cost ?? 0), 0),
+    r.cases.reduce((sum, c) => sum + (c.cost ?? 0), 0),
   );
   const totalCost = costs.reduce((s, c) => s + c, 0);
   const totalCases = results.reduce((s, r) => s + r.cases.length, 0);
@@ -319,10 +320,11 @@ async function* runModelCases(
           tokens: (genResult.inputTokens ?? 0) + (genResult.outputTokens ?? 0) || null,
           inputTokens: genResult.inputTokens,
           outputTokens: genResult.outputTokens,
+          cost: genResult.cost,
+          billingMode: genResult.billingMode,
           output: genResult.text,
           assertions: [],
         };
-        (benchCase as any).cost = genResult.cost;
 
         if (evalCase.assertions.length > 0 && judgeClient && judgeModule) {
 
@@ -536,6 +538,7 @@ export async function* runSweep(opts: SweepOpts): AsyncGenerator<SweepSSEEvent> 
   };
 
   await writeLeaderboard(skillDir, sweepResult);
+  emitDataEvent("leaderboard:updated");
 
   yield { type: "sweep_complete", data: sweepResult };
 }

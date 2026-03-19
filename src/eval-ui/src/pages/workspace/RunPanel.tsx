@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import type { RunMode, InlineResult, CaseRunStatus } from "./workspaceTypes";
 import type { ClassifiedError } from "../../components/ErrorCard";
+import { formatCost, formatTokens } from "../../utils/formatCost";
 
 /** Estimate duration label based on case/assertion count (client-side heuristic) */
 function estimateLabel(totalCases: number, totalAssertions: number): string {
@@ -146,12 +147,17 @@ export function RunPanel() {
           const r = inlineResults.get(c.id);
           const caseRunState = caseRunStates.get(c.id);
           const caseStatus = caseRunState?.status ?? "idle";
+          const benchCase = latestBenchmark?.cases.find((bc) => bc.eval_id === c.id);
           return (
             <RunCaseCard
               key={c.id}
               name={c.name}
               evalId={c.id}
               result={r}
+              caseCost={benchCase?.cost}
+              caseBillingMode={benchCase?.billingMode}
+              caseInputTokens={benchCase?.inputTokens}
+              caseOutputTokens={benchCase?.outputTokens}
               caseStatus={caseStatus}
               runMode={caseRunState?.mode ?? null}
               isReadOnly={isReadOnly}
@@ -190,6 +196,9 @@ export function RunPanel() {
               <div className="text-[11px] mt-1" style={{ color: "var(--text-tertiary)" }}>
                 Total: {(latestBenchmark.totalDurationMs / 1000).toFixed(1)}s
                 {latestBenchmark.model && ` | Model: ${latestBenchmark.model}`}
+                {latestBenchmark.totalInputTokens != null && latestBenchmark.totalOutputTokens != null
+                  && ` | Tokens: ${formatTokens(latestBenchmark.totalInputTokens, latestBenchmark.totalOutputTokens)}`}
+                {latestBenchmark.totalCost != null && ` | Cost: ${formatCost(latestBenchmark.totalCost)}`}
               </div>
             )}
 
@@ -250,10 +259,14 @@ const MODE_BADGE: Record<string, { label: string; bg: string; color: string }> =
   comparison: { label: "Compare", bg: "rgba(168,85,247,0.12)", color: "rgb(168,85,247)" },
 };
 
-function RunCaseCard({ name, evalId, result, caseStatus, runMode, isReadOnly, onRun, onBaseline, onCompare, onCancel }: {
+function RunCaseCard({ name, evalId, result, caseCost, caseBillingMode, caseInputTokens, caseOutputTokens, caseStatus, runMode, isReadOnly, onRun, onBaseline, onCompare, onCancel }: {
   name: string;
   evalId: number;
   result?: InlineResult;
+  caseCost?: number | null;
+  caseBillingMode?: string;
+  caseInputTokens?: number | null;
+  caseOutputTokens?: number | null;
   caseStatus: CaseRunStatus;
   runMode: RunMode | null;
   isReadOnly?: boolean;
@@ -318,6 +331,16 @@ function RunCaseCard({ name, evalId, result, caseStatus, runMode, isReadOnly, on
               }}
             >
               {result.passRate != null ? `${Math.round(result.passRate * 100)}%` : result.status}
+            </span>
+          )}
+          {caseInputTokens != null && caseOutputTokens != null && (
+            <span className="text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono, monospace)" }}>
+              {formatTokens(caseInputTokens, caseOutputTokens)}
+            </span>
+          )}
+          {caseCost != null && (
+            <span className="text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono, monospace)" }}>
+              {formatCost(caseCost, caseBillingMode)}
             </span>
           )}
           {caseStatus === "cancelled" && (

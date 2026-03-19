@@ -7,6 +7,9 @@ import { HistoryPerEval } from "../../components/HistoryPerEval";
 import { computeDiff } from "../../utils/diff";
 import type { DiffLine } from "../../utils/diff";
 import type { HistorySummary, HistoryCompareResult, BenchmarkResult } from "../../types";
+import { formatCost } from "../../utils/formatCost";
+import { useOnDataEvent } from "../../hooks/useDataEvents";
+import { useSWR, mutate } from "../../hooks/useSWR";
 
 type Tab = "timeline" | "per-eval" | "statistics";
 
@@ -14,8 +17,6 @@ export function HistoryPanel() {
   const { state, dispatch } = useWorkspace();
   const { plugin, skill } = state;
   const [tab, setTab] = useState<Tab>("timeline");
-  const [history, setHistory] = useState<HistorySummary[]>([]);
-  const [loading, setLoading] = useState(true);
   const [filterModel, setFilterModel] = useState("");
   const [filterType, setFilterType] = useState<"" | "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct" | "ai-generate" | "eval-generate">("");
 
@@ -29,25 +30,30 @@ export function HistoryPanel() {
   const [detailRun, setDetailRun] = useState<BenchmarkResult | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  useEffect(() => {
-    setLoading(true);
-    api.getHistory(plugin, skill, {
+  const swrKey = `history/${plugin}/${skill}?model=${filterModel}&type=${filterType}`;
+  const fetcher = useCallback(
+    () => api.getHistory(plugin, skill, {
       model: filterModel || undefined,
       type: (filterType || undefined) as HistorySummary["type"] | undefined,
-    }).then((h) => {
-      setHistory(h);
+    }),
+    [plugin, skill, filterModel, filterType],
+  );
+  const { data: historyData, loading } = useSWR<HistorySummary[]>(swrKey, fetcher);
+  const history = historyData ?? [];
 
-      // Detect regressions from last 2 runs
-      if (h.length >= 2) {
-        api.compareRuns(plugin, skill, h[0].timestamp, h[1].timestamp)
-          .then((cr) => {
-            const regressions = cr.regressions.filter((r) => r.change === "regression");
-            dispatch({ type: "SET_REGRESSIONS", regressions });
-          })
-          .catch(() => {});
-      }
-    }).catch(() => {}).finally(() => setLoading(false));
-  }, [plugin, skill, filterModel, filterType]);
+  // Side effect: detect regressions when fresh history arrives
+  useEffect(() => {
+    if (!historyData || historyData.length < 2) return;
+    api.compareRuns(plugin, skill, historyData[0].timestamp, historyData[1].timestamp)
+      .then((cr) => {
+        const regressions = cr.regressions.filter((r) => r.change === "regression");
+        dispatch({ type: "SET_REGRESSIONS", regressions });
+      })
+      .catch(() => {});
+  }, [historyData, plugin, skill, dispatch]);
+
+  const invalidate = useCallback(() => mutate(swrKey), [swrKey]);
+  useOnDataEvent("history:written", invalidate);
 
   const handleRunClick = useCallback(async (timestamp: string) => {
     if (compareMode) {
@@ -225,6 +231,11 @@ export function HistoryPanel() {
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>{h.model}</span>
+                        {h.totalCost != null && h.totalCost > 0 && (
+                          <span className="text-[11px] font-mono" style={{ color: "var(--text-tertiary)" }}>
+                            {formatCost(h.totalCost)}
+                          </span>
+                        )}
                         <span
                           className="text-[12px] font-semibold"
                           style={{ color: h.passRate >= 0.8 ? "var(--green)" : h.passRate >= 0.5 ? "var(--yellow)" : "var(--red)" }}

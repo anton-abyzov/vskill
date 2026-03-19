@@ -25,6 +25,9 @@
 
 import { spawn } from "node:child_process";
 import { resolveCliBinary, enhancedPath } from "../utils/resolve-binary.js";
+import { calculateCost, getBillingMode } from "./pricing.js";
+
+export type BillingMode = "per-token" | "subscription" | "free";
 
 export interface GenerateResult {
   text: string;
@@ -32,6 +35,7 @@ export interface GenerateResult {
   inputTokens: number | null;
   outputTokens: number | null;
   cost: number | null;
+  billingMode: BillingMode;
 }
 
 export interface LlmClient {
@@ -186,12 +190,15 @@ function createAnthropicClient(modelOverride?: string): LlmClient {
 
         const textBlock = response.content.find((b: any) => b.type === "text");
         const text = textBlock && "text" in textBlock ? textBlock.text : "";
+        const inputTokens = response.usage?.input_tokens ?? null;
+        const outputTokens = response.usage?.output_tokens ?? null;
         return {
           text,
           durationMs,
-          inputTokens: response.usage?.input_tokens ?? null,
-          outputTokens: response.usage?.output_tokens ?? null,
-          cost: null,
+          inputTokens,
+          outputTokens,
+          cost: calculateCost("anthropic", model, inputTokens, outputTokens),
+          billingMode: getBillingMode("anthropic"),
         };
       } finally {
         clearTimeout(timeout);
@@ -213,6 +220,7 @@ interface CliConfig {
   displayModel: string;
   notFoundMsg: string;
   stripEnvPrefix?: string; // e.g. "CLAUDE" — strips env vars starting with this prefix
+  provider: string; // provider ID for billing mode lookup
 }
 
 function createCliClient(config: CliConfig): LlmClient {
@@ -285,7 +293,7 @@ function createCliClient(config: CliConfig): LlmClient {
         proc.stdin.end(combinedPrompt);
       });
 
-      return { text, durationMs: Date.now() - start, inputTokens: null, outputTokens: null, cost: null };
+      return { text, durationMs: Date.now() - start, inputTokens: null, outputTokens: null, cost: null, billingMode: getBillingMode(config.provider) };
     },
   };
 }
@@ -303,6 +311,7 @@ function createClaudeCliClient(modelOverride?: string): LlmClient {
     args: ["-p", "--model", model],
     displayModel: model,
     stripEnvPrefix: "CLAUDE",
+    provider: "claude-cli",
     notFoundMsg:
       "Claude CLI not found. Install it:\n  npm install -g @anthropic-ai/claude-code\n\nOr use a different provider:\n  export VSKILL_EVAL_PROVIDER=ollama",
   });
@@ -318,6 +327,7 @@ function createCodexCliClient(modelOverride?: string): LlmClient {
     name: "Codex",
     args: ["exec", "--model", model],
     displayModel: `codex-${model}`,
+    provider: "codex-cli",
     notFoundMsg:
       "Codex CLI not found. Install it:\n  npm install -g @openai/codex\n\nOr use a different provider:\n  export VSKILL_EVAL_PROVIDER=claude-cli",
   });
@@ -334,6 +344,7 @@ function createGeminiCliClient(modelOverride?: string): LlmClient {
     name: "Gemini",
     args: ["-p", "--model", model],
     displayModel: model,
+    provider: "gemini-cli",
     notFoundMsg:
       "Gemini CLI not found. Install it:\n  npm install -g @google/gemini-cli\n\nOr use a different provider:\n  export VSKILL_EVAL_PROVIDER=claude-cli",
   });
@@ -387,7 +398,8 @@ function createOllamaClient(modelOverride?: string): LlmClient {
         durationMs: Date.now() - start,
         inputTokens: data.prompt_eval_count ?? null,
         outputTokens: data.eval_count ?? null,
-        cost: null,
+        cost: 0,
+        billingMode: "free" as const,
       };
     },
   };
@@ -445,12 +457,16 @@ function createOpenRouterClient(modelOverride?: string): LlmClient {
       };
 
       const text = data.choices?.[0]?.message?.content || "";
+      const inputTokens = data.usage?.prompt_tokens ?? null;
+      const outputTokens = data.usage?.completion_tokens ?? null;
+      const apiCost = data.usage?.total_cost ?? null;
       return {
         text,
         durationMs: Date.now() - start,
-        inputTokens: data.usage?.prompt_tokens ?? null,
-        outputTokens: data.usage?.completion_tokens ?? null,
-        cost: data.usage?.total_cost ?? null,
+        inputTokens,
+        outputTokens,
+        cost: apiCost ?? calculateCost("openrouter", model, inputTokens, outputTokens),
+        billingMode: "per-token" as const,
       };
     },
   };

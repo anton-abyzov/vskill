@@ -252,7 +252,7 @@ describe("OpenRouter provider", () => {
   // cost field on non-openrouter providers is null
   // -------------------------------------------------------------------------
 
-  it("non-openrouter providers return cost: null", async () => {
+  it("ollama provider returns cost: 0 (free)", async () => {
     process.env.OPENROUTER_API_KEY = "test-key";
     // Ollama provider
     fetchSpy.mockResolvedValue(
@@ -260,6 +260,7 @@ describe("OpenRouter provider", () => {
     );
     const client = createLlmClient({ provider: "ollama" });
     const result = await client.generate("system", "user");
-    expect(result.cost).toBeNull();
+    expect(result.cost).toBe(0);
+    expect(result.billingMode).toBe("free");
   });
 });

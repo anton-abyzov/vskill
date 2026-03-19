@@ -7,6 +7,7 @@ import { GroupedBarChart } from "../components/GroupedBarChart";
 import { ProgressLog } from "../components/ProgressLog";
 import type { ProgressEntry } from "../components/ProgressLog";
 import type { EvalsFile, BenchmarkResult, CaseHistoryEntry } from "../types";
+import { formatCost, formatTokens } from "../utils/formatCost";
 
 interface AssertionEvent {
   eval_id: number;
@@ -31,6 +32,8 @@ interface OutputReadyEvent {
   output: string;
   durationMs?: number;
   tokens?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
 }
 
 interface CaseData {
@@ -42,6 +45,9 @@ interface CaseData {
   errorMessage?: string;
   durationMs?: number;
   tokens?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cost?: number | null;
 }
 
 export function BenchmarkPage() {
@@ -156,6 +162,8 @@ export function BenchmarkPage() {
       existing.output = d.output;
       if (d.durationMs != null) existing.durationMs = d.durationMs;
       if (d.tokens != null) existing.tokens = d.tokens;
+      if (d.inputTokens != null) existing.inputTokens = d.inputTokens;
+      if (d.outputTokens != null) existing.outputTokens = d.outputTokens;
       currentResults.set(d.eval_id, existing);
     }
     if (evt.event === "assertion_result") {
@@ -167,11 +175,12 @@ export function BenchmarkPage() {
       }
     }
     if (evt.event === "case_complete") {
-      const d = evt.data as CaseCompleteEvent;
+      const d = evt.data as CaseCompleteEvent & { cost?: number | null };
       const existing = currentResults.get(d.eval_id) || { assertions: [] };
       existing.status = d.status;
       existing.passRate = d.pass_rate;
       existing.errorMessage = d.error_message || undefined;
+      if (d.cost != null) existing.cost = d.cost;
       currentResults.set(d.eval_id, existing);
     }
   }
@@ -362,9 +371,18 @@ export function BenchmarkPage() {
                           {(data.durationMs / 1000).toFixed(1)}s
                         </span>
                       )}
-                      {data.tokens != null && (
+                      {data.inputTokens != null && data.outputTokens != null ? (
+                        <span className="text-[11px] font-mono" style={{ color: "var(--text-tertiary)" }}>
+                          {formatTokens(data.inputTokens, data.outputTokens)}
+                        </span>
+                      ) : data.tokens != null && (
                         <span className="text-[11px] font-mono" style={{ color: "var(--text-tertiary)" }}>
                           {data.tokens.toLocaleString()} tok
+                        </span>
+                      )}
+                      {data.cost != null && data.cost > 0 && (
+                        <span className="text-[11px] font-mono" style={{ color: "var(--text-tertiary)" }}>
+                          {formatCost(data.cost)}
                         </span>
                       )}
                       {/* Status pill */}
@@ -638,6 +656,10 @@ export function BenchmarkPage() {
                   {model && <span>{model}</span>}
                   {totalMs > 0 && <span>{(totalMs / 1000).toFixed(1)}s total</span>}
                   {hasTokens && totalTok > 0 && <span>{totalTok.toLocaleString()} tokens</span>}
+                  {(() => {
+                    const totalCost = allData.reduce((s, d) => s + (d.cost ?? 0), 0);
+                    return totalCost > 0 ? <span>{formatCost(totalCost)}</span> : null;
+                  })()}
                 </div>
               </div>
             );

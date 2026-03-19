@@ -4,7 +4,7 @@
 
 import { readdir, readFile, mkdir, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import type { BenchmarkResult, BenchmarkAssertionResult } from "./benchmark.js";
+import type { BenchmarkResult, BenchmarkCase, BenchmarkAssertionResult } from "./benchmark.js";
 import { writeBenchmark } from "./benchmark.js";
 
 export interface HistorySummary {
@@ -17,6 +17,7 @@ export interface HistorySummary {
   caseCount: number;
   totalDurationMs: number;
   totalTokens: number | null;
+  totalCost?: number | null;
   provider?: string;
   verdict?: string;
 }
@@ -144,6 +145,11 @@ export async function listHistory(
         ? data.cases.reduce((s, c) => s + (c.tokens ?? 0), 0)
         : null;
 
+      const hasCost = data.cases.some((c: BenchmarkCase) => c.cost != null) || (data as any).totalCost != null;
+      const totalCost = hasCost
+        ? (data as any).totalCost ?? data.cases.reduce((s: number, c: BenchmarkCase) => s + (c.cost ?? 0), 0)
+        : null;
+
       entries.push({
         timestamp: fromFilesafeTimestamp(file),
         filename: file,
@@ -154,6 +160,7 @@ export async function listHistory(
         caseCount: data.cases.length,
         totalDurationMs,
         totalTokens,
+        totalCost,
         provider: data.provider,
         verdict: data.verdict,
       });
@@ -231,6 +238,8 @@ export async function getCaseHistory(
 
 export interface StatsResult {
   totalRuns: number;
+  totalCost: number | null;
+  costPerRun: number | null;
   assertionStats: Array<{
     id: string;
     text: string;
@@ -244,11 +253,13 @@ export interface StatsResult {
     runs: number;
     avgPassRate: number;
     avgDurationMs: number;
+    avgCost: number | null;
   }>;
   trendPoints: Array<{
     timestamp: string;
     passRate: number;
     model: string;
+    cost?: number | null;
   }>;
 }
 
@@ -258,7 +269,7 @@ export async function computeStats(skillDir: string): Promise<StatsResult> {
   try {
     files = await readdir(historyDir);
   } catch {
-    return { totalRuns: 0, assertionStats: [], modelStats: [], trendPoints: [] };
+    return { totalRuns: 0, totalCost: null, costPerRun: null, assertionStats: [], modelStats: [], trendPoints: [] };
   }
 
   const jsonFiles = files.filter((f) => f.endsWith(".json")).sort();
@@ -266,9 +277,11 @@ export async function computeStats(skillDir: string): Promise<StatsResult> {
   // Per-assertion tracking: key = "evalId:assertionId"
   const assertionMap = new Map<string, { id: string; text: string; passes: number; total: number; evalId: number; evalName: string }>();
   // Per-model tracking
-  const modelMap = new Map<string, { runs: number; totalPassRate: number; totalDurationMs: number }>();
+  const modelMap = new Map<string, { runs: number; totalPassRate: number; totalDurationMs: number; totalCost: number; hasCost: boolean }>();
   // Trend points
   const trendPoints: StatsResult["trendPoints"] = [];
+  let globalTotalCost = 0;
+  let globalHasCost = false;
 
   for (const file of jsonFiles) {
     try {
@@ -282,18 +295,31 @@ export async function computeStats(skillDir: string): Promise<StatsResult> {
       const passRate = totalAssertions > 0 ? passedAssertions / totalAssertions : 0;
       const totalDurationMs = data.cases.reduce((s, c) => s + (c.durationMs ?? 0), 0);
 
+      // Cost aggregation
+      const runHasCost = data.cases.some((c) => c.cost != null) || data.totalCost != null;
+      const runCost = data.totalCost ?? (runHasCost ? data.cases.reduce((s, c) => s + (c.cost ?? 0), 0) : 0);
+      if (runHasCost) {
+        globalHasCost = true;
+        globalTotalCost += runCost;
+      }
+
       // Trend
       trendPoints.push({
         timestamp: fromFilesafeTimestamp(file),
         passRate,
         model: data.model,
+        cost: runHasCost ? runCost : null,
       });
 
       // Model stats
-      const existing = modelMap.get(data.model) || { runs: 0, totalPassRate: 0, totalDurationMs: 0 };
+      const existing = modelMap.get(data.model) || { runs: 0, totalPassRate: 0, totalDurationMs: 0, totalCost: 0, hasCost: false };
       existing.runs++;
       existing.totalPassRate += passRate;
       existing.totalDurationMs += totalDurationMs;
+      if (runHasCost) {
+        existing.hasCost = true;
+        existing.totalCost += runCost;
+      }
       modelMap.set(data.model, existing);
 
       // Per-assertion stats
@@ -330,11 +356,17 @@ export async function computeStats(skillDir: string): Promise<StatsResult> {
       runs: s.runs,
       avgPassRate: s.runs > 0 ? s.totalPassRate / s.runs : 0,
       avgDurationMs: s.runs > 0 ? s.totalDurationMs / s.runs : 0,
+      avgCost: s.hasCost && s.runs > 0 ? s.totalCost / s.runs : null,
     }))
     .sort((a, b) => b.avgPassRate - a.avgPassRate);
 
+  const totalCost = globalHasCost ? globalTotalCost : null;
+  const costPerRun = globalHasCost && trendPoints.length > 0 ? globalTotalCost / trendPoints.length : null;
+
   return {
     totalRuns: trendPoints.length,
+    totalCost,
+    costPerRun,
     assertionStats,
     modelStats,
     trendPoints,

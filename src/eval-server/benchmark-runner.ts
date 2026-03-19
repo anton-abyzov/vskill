@@ -146,6 +146,8 @@ export async function runSingleCaseSSE(opts: SingleCaseRunOptions): Promise<Benc
       output: genResult.text,
       durationMs: genResult.durationMs,
       tokens: totalTokens,
+      inputTokens: genResult.inputTokens ?? null,
+      outputTokens: genResult.outputTokens ?? null,
     });
 
     emitSSE("progress", {
@@ -205,6 +207,8 @@ export async function runSingleCaseSSE(opts: SingleCaseRunOptions): Promise<Benc
       tokens: totalTokens,
       inputTokens: genResult.inputTokens,
       outputTokens: genResult.outputTokens,
+      cost: genResult.cost,
+      billingMode: genResult.billingMode,
       output: genResult.text,
       assertions: assertionResults,
     };
@@ -215,6 +219,8 @@ export async function runSingleCaseSSE(opts: SingleCaseRunOptions): Promise<Benc
       pass_rate: passRate,
       durationMs: genResult.durationMs,
       tokens: totalTokens,
+      cost: genResult.cost,
+      billing_mode: genResult.billingMode,
     });
 
     return benchCase;
@@ -254,6 +260,8 @@ export function assembleBulkResult(
   );
   const totalDurationMs = cases.reduce((s, c) => s + (c.durationMs ?? 0), 0);
   const hasTokens = cases.some((c) => c.inputTokens != null);
+  const hasCost = cases.some((c) => c.cost != null);
+  const totalCost = hasCost ? cases.reduce((s, c) => s + (c.cost ?? 0), 0) : null;
 
   return {
     timestamp: new Date().toISOString(),
@@ -266,6 +274,7 @@ export function assembleBulkResult(
     totalDurationMs,
     totalInputTokens: hasTokens ? cases.reduce((s, c) => s + (c.inputTokens ?? 0), 0) : null,
     totalOutputTokens: hasTokens ? cases.reduce((s, c) => s + (c.outputTokens ?? 0), 0) : null,
+    totalCost,
     scope: "bulk",
   };
 }

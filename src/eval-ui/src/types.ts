@@ -82,6 +82,8 @@ export interface BenchmarkCase {
   tokens?: number | null;
   inputTokens?: number | null;
   outputTokens?: number | null;
+  cost?: number | null;
+  billingMode?: string;
   output?: string;
   assertions: BenchmarkAssertionResult[];
   comparisonDetail?: ComparisonCaseDetail;
@@ -108,6 +110,7 @@ export interface BenchmarkResult {
   totalDurationMs?: number;
   totalInputTokens?: number | null;
   totalOutputTokens?: number | null;
+  totalCost?: number | null;
   verdict?: string;
   comparison?: {
     skillPassRate: number;
@@ -138,6 +141,7 @@ export interface HistorySummary {
   caseCount?: number;
   totalDurationMs?: number;
   totalTokens?: number | null;
+  totalCost?: number | null;
   provider?: string;
   verdict?: string;
 }
@@ -188,6 +192,8 @@ export interface CaseHistoryEntry {
 
 export interface StatsResult {
   totalRuns: number;
+  totalCost?: number | null;
+  costPerRun?: number | null;
   assertionStats: Array<{
     id: string;
     text: string;
@@ -201,11 +207,13 @@ export interface StatsResult {
     runs: number;
     avgPassRate: number;
     avgDurationMs: number;
+    avgCost?: number | null;
   }>;
   trendPoints: Array<{
     timestamp: string;
     passRate: number;
     model: string;
+    cost?: number | null;
   }>;
 }
 

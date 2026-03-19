@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useWorkspace } from "./WorkspaceContext";
+import { useConfig } from "../../ConfigContext";
 import type { RunMode, InlineResult, CaseRunStatus } from "./workspaceTypes";
 import type { ClassifiedError } from "../../components/ErrorCard";
 import { formatCost, formatTokens } from "../../utils/formatCost";
@@ -14,9 +15,29 @@ function estimateLabel(totalCases: number, totalAssertions: number): string {
   return `${fmt(minSec)}\u2013${fmt(maxSec)}`;
 }
 
+// Client-side cost estimation — approximate per-call costs by provider
+const APPROX_COST_PER_CALL: Record<string, number> = {
+  "anthropic": 0.01,    // ~2K input + 1K output tokens at Sonnet rates
+  "openrouter": 0.01,   // varies, use Sonnet-equivalent
+  "ollama": 0,           // free
+  "claude-cli": 0,       // subscription
+  "codex-cli": 0,        // subscription
+  "gemini-cli": 0,       // free tier
+};
+
+function estimateCostLabel(provider: string | null, totalCalls: number): string | null {
+  if (!provider) return null;
+  const perCall = APPROX_COST_PER_CALL[provider];
+  if (perCall == null || perCall === 0) return null;
+  const min = perCall * totalCalls * 0.5;
+  const max = perCall * totalCalls * 2;
+  return `${formatCost(min)}\u2013${formatCost(max)}`;
+}
+
 export function RunPanel() {
   const { state, runCase, runAll, cancelCase, cancelAll, isReadOnly } = useWorkspace();
   const { evals, caseRunStates, bulkRunActive, latestBenchmark, inlineResults } = state;
+  const { config } = useConfig();
 
   const cases = evals?.evals ?? [];
 
@@ -60,7 +81,9 @@ export function RunPanel() {
   }, [isAnyRunning]);
 
   const totalAssertions = cases.reduce((s, c) => s + c.assertions.length, 0);
+  const totalCalls = cases.length + totalAssertions;
   const durationEstimate = useMemo(() => estimateLabel(cases.length, totalAssertions), [cases.length, totalAssertions]);
+  const costEstimate = useMemo(() => estimateCostLabel(config?.provider ?? null, totalCalls), [config?.provider, totalCalls]);
 
   return (
     <div className="p-5">
@@ -108,6 +131,19 @@ export function RunPanel() {
             Baseline Only
           </button>
         </div>
+
+        {!isAnyRunning && cases.length > 0 && (
+          <div className="flex items-center gap-3 mt-2 text-[10px]" style={{ color: "var(--text-tertiary)" }}>
+            <span>Est. duration: {durationEstimate}</span>
+            {costEstimate && <span>Est. cost: {costEstimate}</span>}
+            {!costEstimate && config?.provider && (config.provider === "claude-cli" || config.provider === "codex-cli") && (
+              <span>Cost: Subscription</span>
+            )}
+            {!costEstimate && config?.provider && (config.provider === "ollama" || config.provider === "gemini-cli") && (
+              <span>Cost: Free</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Progress */}

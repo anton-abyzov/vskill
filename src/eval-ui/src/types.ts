@@ -154,8 +154,8 @@ export interface HistoryFilter {
 }
 
 export interface HistoryCompareResult {
-  runA: { timestamp: string; model: string; passRate: number; type: string };
-  runB: { timestamp: string; model: string; passRate: number; type: string };
+  runA: { timestamp: string; model: string; passRate: number; type: string; totalCost?: number | null };
+  runB: { timestamp: string; model: string; passRate: number; type: string; totalCost?: number | null };
   regressions: Array<{
     assertionId: string;
     evalId: number;

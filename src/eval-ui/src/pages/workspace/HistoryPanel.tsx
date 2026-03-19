@@ -289,6 +289,18 @@ function CompareResultView({ result }: { result: HistoryCompareResult }) {
         Comparison: {new Date(result.runA.timestamp).toLocaleDateString()} vs {new Date(result.runB.timestamp).toLocaleDateString()}
       </div>
 
+      {(result.runA.totalCost != null || result.runB.totalCost != null) && (
+        <div className="flex items-center gap-4 mb-3 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+          <span>Run A cost: {formatCost(result.runA.totalCost ?? null)}</span>
+          <span>Run B cost: {formatCost(result.runB.totalCost ?? null)}</span>
+          {result.runA.totalCost != null && result.runB.totalCost != null && (
+            <span style={{ color: result.runB.totalCost <= result.runA.totalCost ? "var(--green)" : "var(--red)" }}>
+              Delta: {formatCost(result.runB.totalCost - result.runA.totalCost)}
+            </span>
+          )}
+        </div>
+      )}
+
       {regressions.length > 0 && (
         <div className="mb-3">
           <div className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--red)" }}>
@@ -371,17 +383,25 @@ function DetailView({ run, onClose }: { run: BenchmarkResult; onClose: () => voi
       </div>
       <div className="text-[11px] mb-3" style={{ color: "var(--text-tertiary)" }}>
         Model: {run.model} | Cases: {run.cases.length} | Pass Rate: {run.overall_pass_rate != null ? `${Math.round(run.overall_pass_rate * 100)}%` : "--"}
+        {run.totalCost != null && run.totalCost > 0 && ` | Cost: ${formatCost(run.totalCost)}`}
       </div>
       <div className="space-y-2">
         {run.cases.map((c) => (
           <div key={c.eval_id} className="rounded-lg px-3 py-2" style={{ background: "var(--surface-2)" }}>
             <div className="flex items-center justify-between">
               <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>#{c.eval_id} {c.eval_name}</span>
-              <span className="text-[11px] font-semibold" style={{
-                color: c.status === "pass" ? "var(--green)" : "var(--red)",
-              }}>
-                {c.pass_rate != null ? `${Math.round(c.pass_rate * 100)}%` : c.status}
-              </span>
+              <div className="flex items-center gap-2">
+                {c.cost != null && c.cost > 0 && (
+                  <span className="text-[10px] font-mono" style={{ color: "var(--text-tertiary)" }}>
+                    {formatCost(c.cost)}
+                  </span>
+                )}
+                <span className="text-[11px] font-semibold" style={{
+                  color: c.status === "pass" ? "var(--green)" : "var(--red)",
+                }}>
+                  {c.pass_rate != null ? `${Math.round(c.pass_rate * 100)}%` : c.status}
+                </span>
+              </div>
             </div>
           </div>
         ))}

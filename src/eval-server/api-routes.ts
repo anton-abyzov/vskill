@@ -1201,16 +1201,21 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     const totalB = runB.cases.reduce((s, c) => s + c.assertions.length, 0);
     const passedB = runB.cases.reduce((s, c) => s + c.assertions.filter((a) => a.pass).length, 0);
 
+    const costA = runA.totalCost ?? (runA.cases.some((c: any) => c.cost != null) ? runA.cases.reduce((s: number, c: any) => s + (c.cost ?? 0), 0) : null);
+    const costB = runB.totalCost ?? (runB.cases.some((c: any) => c.cost != null) ? runB.cases.reduce((s: number, c: any) => s + (c.cost ?? 0), 0) : null);
+
     sendJson(res, {
       runA: {
         timestamp: runA.timestamp, model: runA.model,
         passRate: totalA > 0 ? passedA / totalA : 0,
         type: runA.type || "benchmark",
+        totalCost: costA,
       },
       runB: {
         timestamp: runB.timestamp, model: runB.model,
         passRate: totalB > 0 ? passedB / totalB : 0,
         type: runB.type || "benchmark",
+        totalCost: costB,
       },
       regressions,
       caseDiffs,

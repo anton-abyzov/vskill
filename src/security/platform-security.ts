@@ -26,7 +26,7 @@ export async function checkPlatformSecurity(
   skillName: string,
 ): Promise<PlatformSecurityResult | null> {
   try {
-    const url = `${BASE_URL}/api/v1/skills/${encodeURIComponent(skillName)}/security`;
+    const url = `${BASE_URL}/api/v1/skills/${skillName.split("/").map(encodeURIComponent).join("/")}/security`;
     const res = await fetch(url);
 
     if (!res.ok) return null;

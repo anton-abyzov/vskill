@@ -4,15 +4,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mock node:fs
 // ---------------------------------------------------------------------------
 const mockReadFileSync = vi.fn();
-const mockWriteFileSync = vi.fn();
 const mockExistsSync = vi.fn();
-const mockMkdirSync = vi.fn();
 
 vi.mock("node:fs", () => ({
   readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
-  writeFileSync: (...args: unknown[]) => mockWriteFileSync(...args),
   existsSync: (...args: unknown[]) => mockExistsSync(...args),
-  mkdirSync: (...args: unknown[]) => mockMkdirSync(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -24,8 +20,6 @@ vi.mock("node:os", () => ({
 
 // Import after mocks are set up
 const {
-  enablePlugin,
-  disablePlugin,
   isPluginEnabled,
   listEnabledPlugins,
   purgeStalePlugins,
@@ -36,79 +30,6 @@ const {
 // ---------------------------------------------------------------------------
 beforeEach(() => {
   vi.clearAllMocks();
-});
-
-describe("enablePlugin", () => {
-  it("TC-010: enables plugin in empty/new settings.json", () => {
-    // settings.json doesn't exist
-    mockExistsSync.mockReturnValue(false);
-
-    enablePlugin("frontend@vskill", { scope: "user" });
-
-    // Should write to ~/.claude/settings.json
-    expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
-    const [writePath, writtenContent] = mockWriteFileSync.mock.calls[0];
-    expect(writePath).toBe("/home/testuser/.claude/settings.json");
-
-    const parsed = JSON.parse(writtenContent);
-    expect(parsed).toEqual({
-      enabledPlugins: { "frontend@vskill": true },
-    });
-  });
-
-  it("TC-011: project scope writes to correct location", () => {
-    mockExistsSync.mockReturnValue(false);
-
-    enablePlugin("frontend@vskill", {
-      scope: "project",
-      projectDir: "/tmp/test-project",
-    });
-
-    expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
-    const [writePath] = mockWriteFileSync.mock.calls[0];
-    expect(writePath).toBe("/tmp/test-project/.claude/settings.json");
-  });
-
-  it("TC-012: preserves existing settings when adding plugin", () => {
-    mockExistsSync.mockReturnValue(true);
-    mockReadFileSync.mockReturnValue(
-      JSON.stringify({
-        theme: "dark",
-        enabledPlugins: { other: true },
-      })
-    );
-
-    enablePlugin("frontend@vskill", { scope: "user" });
-
-    expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
-    const [, writtenContent] = mockWriteFileSync.mock.calls[0];
-    const parsed = JSON.parse(writtenContent);
-    expect(parsed).toEqual({
-      theme: "dark",
-      enabledPlugins: {
-        other: true,
-        "frontend@vskill": true,
-      },
-    });
-  });
-});
-
-describe("disablePlugin", () => {
-  it("sets plugin to false in settings.json", () => {
-    mockExistsSync.mockReturnValue(true);
-    mockReadFileSync.mockReturnValue(
-      JSON.stringify({
-        enabledPlugins: { "frontend@vskill": true },
-      })
-    );
-
-    disablePlugin("frontend@vskill", { scope: "user" });
-
-    expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
-    const [, writtenContent] = mockWriteFileSync.mock.calls[0];
-    const parsed = JSON.parse(writtenContent);
-    expect(parsed.enabledPlugins["frontend@vskill"]).toBe(false);
-  });
 });
 
 describe("isPluginEnabled", () => {
@@ -170,7 +91,7 @@ describe("listEnabledPlugins", () => {
 });
 
 describe("purgeStalePlugins", () => {
-  it("purges entries not found in lockfile", () => {
+  it("returns stale entries not found in lockfile", () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue(
       JSON.stringify({
@@ -181,18 +102,14 @@ describe("purgeStalePlugins", () => {
       })
     );
 
-    const purged = purgeStalePlugins({ scope: "user" }, {
+    const stale = purgeStalePlugins({ scope: "user" }, {
       frontend: { marketplace: "vskill" },
     });
 
-    expect(purged).toEqual(["ghost@vskill"]);
-    expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
-    const [, writtenContent] = mockWriteFileSync.mock.calls[0];
-    const parsed = JSON.parse(writtenContent);
-    expect(parsed.enabledPlugins).toEqual({ "frontend@vskill": true });
+    expect(stale).toEqual(["ghost@vskill"]);
   });
 
-  it("preserves entries that match lockfile (same skill name + marketplace)", () => {
+  it("returns empty array when all entries match lockfile", () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue(
       JSON.stringify({
@@ -203,28 +120,26 @@ describe("purgeStalePlugins", () => {
       })
     );
 
-    const purged = purgeStalePlugins({ scope: "user" }, {
+    const stale = purgeStalePlugins({ scope: "user" }, {
       frontend: { marketplace: "vskill" },
       backend: { marketplace: "vskill" },
     });
 
-    expect(purged).toEqual([]);
-    expect(mockWriteFileSync).not.toHaveBeenCalled();
+    expect(stale).toEqual([]);
   });
 
   it("returns empty array when no enabledPlugins exist", () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue(JSON.stringify({}));
 
-    const purged = purgeStalePlugins({ scope: "user" }, {
+    const stale = purgeStalePlugins({ scope: "user" }, {
       frontend: { marketplace: "vskill" },
     });
 
-    expect(purged).toEqual([]);
-    expect(mockWriteFileSync).not.toHaveBeenCalled();
+    expect(stale).toEqual([]);
   });
 
-  it("does not purge entries without @ separator (non-marketplace entries)", () => {
+  it("does not flag entries without @ separator (non-marketplace entries)", () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue(
       JSON.stringify({
@@ -235,29 +150,24 @@ describe("purgeStalePlugins", () => {
       })
     );
 
-    const purged = purgeStalePlugins({ scope: "user" }, {});
+    const stale = purgeStalePlugins({ scope: "user" }, {});
 
-    expect(purged).toEqual(["ghost@vskill"]);
-    expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
-    const [, writtenContent] = mockWriteFileSync.mock.calls[0];
-    const parsed = JSON.parse(writtenContent);
-    expect(parsed.enabledPlugins).toEqual({ "local-only": true });
+    expect(stale).toEqual(["ghost@vskill"]);
   });
 
-  it("only writes settings if something was actually purged", () => {
+  it("only reads, never writes — callers are responsible for CLI uninstall", () => {
+    // settings.ts no longer imports writeFileSync at all; this test confirms
+    // purgeStalePlugins is a pure read that returns IDs without side effects.
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue(
       JSON.stringify({
-        enabledPlugins: {
-          "frontend@vskill": true,
-        },
+        enabledPlugins: { "ghost@vskill": true },
       })
     );
 
-    purgeStalePlugins({ scope: "user" }, {
-      frontend: { marketplace: "vskill" },
-    });
+    const stale = purgeStalePlugins({ scope: "user" }, {});
 
-    expect(mockWriteFileSync).not.toHaveBeenCalled();
+    expect(stale).toEqual(["ghost@vskill"]);
+    expect(mockReadFileSync).toHaveBeenCalledTimes(1);
   });
 });

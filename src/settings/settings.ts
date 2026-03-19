@@ -1,9 +1,14 @@
 // ---------------------------------------------------------------------------
-// Claude Code settings.json management
+// Claude Code settings.json — READ-ONLY access
+//
+// This module only reads settings.json. All writes must go through the
+// claude CLI (claude plugin install/uninstall). Direct filesystem writes
+// to settings.json bypass Claude Code's atomicity guarantees and can cause
+// race conditions when Claude Code holds the file in memory.
 // ---------------------------------------------------------------------------
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { homedir } from "node:os";
 
 export interface SettingsOptions {
@@ -43,62 +48,6 @@ function readSettings(opts: SettingsOptions): SettingsJson {
 }
 
 /**
- * Writes settings.json, creating parent directories if needed.
- */
-function writeSettings(settings: SettingsJson, opts: SettingsOptions): void {
-  const p = settingsPath(opts);
-  const dir = dirname(p);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  writeFileSync(p, JSON.stringify(settings, null, 2) + "\n", "utf-8");
-}
-
-/**
- * Enable a plugin in settings.json.
- */
-export function enablePlugin(
-  pluginId: string,
-  opts: SettingsOptions,
-): void {
-  const settings = readSettings(opts);
-  if (!settings.enabledPlugins) {
-    settings.enabledPlugins = {};
-  }
-  settings.enabledPlugins[pluginId] = true;
-  writeSettings(settings, opts);
-}
-
-/**
- * Disable a plugin in settings.json (set to false).
- */
-export function disablePlugin(
-  pluginId: string,
-  opts: SettingsOptions,
-): void {
-  const settings = readSettings(opts);
-  if (!settings.enabledPlugins) {
-    settings.enabledPlugins = {};
-  }
-  settings.enabledPlugins[pluginId] = false;
-  writeSettings(settings, opts);
-}
-
-/**
- * Remove a plugin entry entirely from settings.json (vs. setting to false).
- */
-export function removePlugin(
-  pluginId: string,
-  opts: SettingsOptions,
-): void {
-  const settings = readSettings(opts);
-  if (settings.enabledPlugins) {
-    delete settings.enabledPlugins[pluginId];
-  }
-  writeSettings(settings, opts);
-}
-
-/**
  * Check if a plugin is enabled in settings.json.
  */
 export function isPluginEnabled(
@@ -121,15 +70,15 @@ export function listEnabledPlugins(opts: SettingsOptions): string[] {
 }
 
 /**
- * Remove enabledPlugins entries not backed by a lockfile entry.
+ * Identify enabledPlugins entries not backed by a lockfile entry.
  *
  * Plugin IDs use `<skillName>@<marketplace>` format.
  * A plugin is stale when no lockfile skill matches by name AND marketplace.
  *
- * Designed for `vskill init` (pre-launch) — runs BEFORE Claude Code
- * loads its in-memory settings cache, preventing ghost re-writes.
+ * Returns the list of stale plugin IDs — callers are responsible for
+ * uninstalling them via `claudePluginUninstall()`.
  *
- * @returns Array of purged plugin IDs
+ * @returns Array of stale plugin IDs
  */
 export function purgeStalePlugins(
   opts: SettingsOptions,
@@ -138,7 +87,7 @@ export function purgeStalePlugins(
   const settings = readSettings(opts);
   if (!settings.enabledPlugins) return [];
 
-  const purged: string[] = [];
+  const stale: string[] = [];
   for (const pluginId of Object.keys(settings.enabledPlugins)) {
     const atIdx = pluginId.lastIndexOf("@");
     if (atIdx === -1) continue;
@@ -148,13 +97,9 @@ export function purgeStalePlugins(
 
     const lockEntry = lockfileSkills[skillName];
     if (!lockEntry || lockEntry.marketplace !== marketplace) {
-      purged.push(pluginId);
-      delete settings.enabledPlugins[pluginId];
+      stale.push(pluginId);
     }
   }
 
-  if (purged.length > 0) {
-    writeSettings(settings, opts);
-  }
-  return purged;
+  return stale;
 }

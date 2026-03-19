@@ -46,12 +46,13 @@ if (remaining.length > 0) {
   console.log("Or manually delete the directories listed above.\n");
 }
 
-// Clean plugin cache if it exists
-const cacheDir = path.join(home, ".claude", "plugins", "cache");
+// Clean only the vskill-owned marketplace subdirectory from the plugin cache.
+// Never delete the entire cache — other tools may share ~/.claude/plugins/cache/.
+const vskillCacheDir = path.join(home, ".claude", "plugins", "cache", "specweave");
 try {
-  if (fs.existsSync(cacheDir)) {
-    fs.rmSync(cacheDir, { recursive: true, force: true });
-    console.log("vskill: Cleaned plugin cache at " + cacheDir);
+  if (fs.existsSync(vskillCacheDir)) {
+    fs.rmSync(vskillCacheDir, { recursive: true, force: true });
+    console.log("vskill: Cleaned plugin cache at " + vskillCacheDir);
   }
 } catch {
   // Ignore cleanup errors

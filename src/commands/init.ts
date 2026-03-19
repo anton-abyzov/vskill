@@ -11,6 +11,7 @@ import { readLockfile, writeLockfile, ensureLockfile } from "../lockfile/index.j
 import { filterAgents } from "../utils/agent-filter.js";
 import { syncCoreSkills, findCoreSkillsDir } from "../core-skills/sync.js";
 import { purgeStalePlugins } from "../settings/index.js";
+import { claudePluginUninstall } from "../utils/claude-plugin.js";
 import { migrateStaleSkillFiles, ensureSkillMdNaming } from "../installer/migrate.js";
 import { resolveAgentSkillsDir } from "../installer/canonical.js";
 import { bold, green, dim, cyan, red, table } from "../utils/output.js";
@@ -78,21 +79,29 @@ export async function initCommand(opts: InitOptions = {}): Promise<void> {
     console.log(green("Created vskill.lock"));
   }
 
-  // Purge stale plugin entries from settings.json (before Claude Code caches them)
+  // Uninstall stale plugins via claude CLI (before Claude Code caches settings)
   const lockForPurge = readLockfile();
   if (lockForPurge?.skills) {
-    const purgedUser = purgeStalePlugins({ scope: "user" }, lockForPurge.skills);
-    const purgedProject = purgeStalePlugins(
+    const staleUser = purgeStalePlugins({ scope: "user" }, lockForPurge.skills);
+    const staleProject = purgeStalePlugins(
       { scope: "project", projectDir: process.cwd() },
       lockForPurge.skills,
     );
-    const allPurged = [...purgedUser, ...purgedProject];
-    if (allPurged.length > 0) {
+    const allStale = [
+      ...staleUser.map((id) => ({ id, scope: "user" as const })),
+      ...staleProject.map((id) => ({ id, scope: "project" as const })),
+    ];
+    if (allStale.length > 0) {
       console.log(
-        dim(`\nPurged ${allPurged.length} stale plugin${allPurged.length === 1 ? "" : "s"} from settings.json:`),
+        dim(`\nRemoving ${allStale.length} stale plugin${allStale.length === 1 ? "" : "s"}:`),
       );
-      for (const id of allPurged) {
-        console.log(dim(`  - ${id}`));
+      for (const { id, scope } of allStale) {
+        try {
+          claudePluginUninstall(id, scope);
+          console.log(dim(`  - ${id}`));
+        } catch {
+          // non-fatal — plugin may not have been registered via claude CLI
+        }
       }
     }
   }

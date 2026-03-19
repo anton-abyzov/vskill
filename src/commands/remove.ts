@@ -9,7 +9,7 @@ import { createInterface } from "node:readline";
 import { resolveTilde } from "../utils/paths.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { readLockfile, removeSkillFromLock } from "../lockfile/index.js";
-import { removePlugin } from "../settings/settings.js";
+import { claudePluginUninstall } from "../utils/claude-plugin.js";
 import { bold, green, red, yellow, dim } from "../utils/output.js";
 
 interface RemoveOptions {
@@ -102,23 +102,15 @@ export async function removeCommand(
     removeSkillFromLock(skillName);
   }
 
-  // Clean up plugin settings and cache if this was a marketplace plugin
+  // Uninstall marketplace plugin via claude CLI (handles settings.json + cache)
   if (skillEntry?.pluginDir && skillEntry.marketplace) {
     const pluginId = `${skillName}@${skillEntry.marketplace}`;
     const scope = skillEntry.scope ?? "user";
-    removePlugin(pluginId, { scope });
-
-    // Remove orphaned plugin cache
-    const cacheDir = resolveTilde(
-      join(homedir(), ".claude", "plugins", "cache", skillEntry.marketplace, skillName),
-    );
-    if (existsSync(cacheDir)) {
-      try {
-        rmSync(cacheDir, { recursive: true, force: true });
-        console.log(dim(`Plugin cache removed: ${cacheDir}`));
-      } catch {
-        // non-fatal
-      }
+    try {
+      claudePluginUninstall(pluginId, scope);
+      console.log(dim(`Plugin uninstalled: ${pluginId}`));
+    } catch {
+      // non-fatal — plugin may not have been registered via claude CLI
     }
   }
 

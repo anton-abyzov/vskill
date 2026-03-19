@@ -701,23 +701,6 @@ export function copyPluginFiltered(sourceDir: string, targetDir: string, relBase
 }
 
 // ---------------------------------------------------------------------------
-// Plugin cache cleanup
-// ---------------------------------------------------------------------------
-
-/**
- * Remove stale plugin cache from ~/.claude/plugins/cache/.
- * Previous native installs may have left cached files that leak as ghost slash commands.
- */
-function cleanPluginCache(pluginName: string, marketplace: string): void {
-  const cacheDir = join(resolveTilde("~/.claude/plugins/cache"), marketplace, pluginName);
-  try {
-    if (existsSync(cacheDir)) {
-      rmSync(cacheDir, { recursive: true, force: true });
-    }
-  } catch { /* ignore - cache dir might not exist */ }
-}
-
-// ---------------------------------------------------------------------------
 
 interface AddOptions {
   skill?: string;
@@ -1162,14 +1145,6 @@ async function installPluginDir(
     gitUrl = execSync("git remote get-url origin", { cwd: resolve(basePath), stdio: ["pipe", "pipe", "ignore"], timeout: 5_000 })
       .toString().trim() || undefined;
   } catch { /* not a git repo or no remote — use local path */ }
-
-  // Clean stale plugin cache
-  try {
-    const marketplaceName = JSON.parse(mktContent).name;
-    if (marketplaceName) {
-      cleanPluginCache(pluginName, marketplaceName);
-    }
-  } catch { /* ignore parse errors */ }
 
   // Install: recursively copy plugin directory to each agent
   const sha = computeSha(content);

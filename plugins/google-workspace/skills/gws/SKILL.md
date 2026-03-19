@@ -233,18 +233,13 @@ In **compact mode**, the `gws_discover` meta-tool lets the agent explore availab
 
 ### Claude Code MCP Configuration
 
-Add to your Claude settings (e.g., `~/.claude/settings.json` or project `.claude/settings.json`):
+Register the MCP server via the Claude CLI:
 
-```json
-{
-  "mcpServers": {
-    "google-workspace": {
-      "command": "npx",
-      "args": ["@googleworkspace/cli", "mcp", "-s", "drive,sheets,docs,calendar", "--tool-mode", "compact"]
-    }
-  }
-}
+```bash
+claude mcp add google-workspace -- npx @googleworkspace/cli mcp -s drive,sheets,docs,calendar --tool-mode compact
 ```
+
+To scope it to a specific project only, add `--scope project`.
 
 **Service filtering** (`-s` flag) is a security boundary — only expose services the agent actually needs. Don't use `-s all` unless necessary.
 

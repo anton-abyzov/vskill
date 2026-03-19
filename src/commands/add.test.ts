@@ -62,10 +62,15 @@ vi.mock("node:child_process", () => ({
 // ---------------------------------------------------------------------------
 // Mock node:crypto
 // ---------------------------------------------------------------------------
-const mockDigest = vi.fn().mockReturnValue("abcdef123456xxxx");
-const mockUpdate = vi.fn().mockReturnValue({ digest: mockDigest });
+const MOCK_SHA_64 = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
 vi.mock("node:crypto", () => ({
-  createHash: () => ({ update: mockUpdate }),
+  createHash: () => {
+    const obj = {
+      update: vi.fn().mockImplementation(() => obj),
+      digest: vi.fn().mockReturnValue(MOCK_SHA_64),
+    };
+    return obj;
+  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -3477,5 +3482,84 @@ describe("resolveViaSearch (flat name search disambiguation)", () => {
     // Should treat as zero installable (missing ownerSlug/repoSlug/skillSlug)
     expect(mockExit).toHaveBeenCalledWith(1);
     mockExit.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Skill Versioning: 64-char SHA, files manifest, version extraction (0584)
+// ---------------------------------------------------------------------------
+
+describe("skill versioning (0584)", () => {
+  beforeEach(() => {
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockFilterAgents.mockImplementation((agents: unknown[]) => agents);
+    mockFindProjectRoot.mockReturnValue(process.cwd());
+    mockCheckPlatformSecurity.mockResolvedValue(null);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  it("lockfile entry sha is 64 characters (not 12) for GitHub flat install", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "my-skill", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/SKILL.md" },
+    ]);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# My Skill",
+    }) as unknown as typeof fetch;
+
+    await addCommand("owner/repo", {});
+
+    const lockArg = mockWriteLockfile.mock.calls[0]?.[0] as { skills: Record<string, { sha: string }> } | undefined;
+    expect(lockArg).toBeDefined();
+    const entry = lockArg!.skills["my-skill"];
+    expect(entry).toBeDefined();
+    expect(entry.sha).toBeDefined();
+    expect(entry.sha.length).toBe(64);
+  });
+
+  it("lockfile entry contains files array with sorted relative paths", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "my-skill", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/SKILL.md" },
+    ]);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# My Skill",
+    }) as unknown as typeof fetch;
+
+    await addCommand("owner/repo", {});
+
+    const lockArg = mockWriteLockfile.mock.calls[0]?.[0] as { skills: Record<string, { files?: string[] }> } | undefined;
+    expect(lockArg).toBeDefined();
+    const entry = lockArg!.skills["my-skill"];
+    expect(entry).toBeDefined();
+    expect(entry.files).toBeDefined();
+    expect(Array.isArray(entry.files)).toBe(true);
+    expect(entry.files).toEqual(["SKILL.md"]);
+  });
+
+  it("version defaults to 1.0.0 for first install when no frontmatter version", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "my-skill", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/SKILL.md" },
+    ]);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# My Skill\nNo frontmatter here",
+    }) as unknown as typeof fetch;
+
+    await addCommand("owner/repo", {});
+
+    const lockArg = mockWriteLockfile.mock.calls[0]?.[0] as { skills: Record<string, { version: string }> } | undefined;
+    expect(lockArg).toBeDefined();
+    const entry = lockArg!.skills["my-skill"];
+    expect(entry).toBeDefined();
+    expect(entry.version).toBe("1.0.0");
   });
 });

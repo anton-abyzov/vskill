@@ -8,3 +8,4 @@ export {
   readSkillsShLock,
 } from "./lockfile.js";
 export { findProjectRoot, getProjectRoot } from "./project-root.js";
+export { migrateLockEntry, migrateLock } from "./migration.js";

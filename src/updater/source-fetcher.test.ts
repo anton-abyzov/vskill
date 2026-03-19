@@ -32,7 +32,7 @@ vi.mock("../marketplace/index.js", () => ({
 const mockFetch = vi.hoisted(() => vi.fn());
 vi.stubGlobal("fetch", mockFetch);
 
-import { fetchFromSource } from "./source-fetcher.js";
+import { fetchFromSource, normalizeContent, computeSha } from "./source-fetcher.js";
 import type { ParsedSource } from "../resolvers/source-resolver.js";
 
 const MOCK_LOCK_ENTRY = {
@@ -241,5 +241,230 @@ describe("fetchFromSource", () => {
 
     const result = await fetchFromSource(parsed, "skill", MOCK_LOCK_ENTRY);
     expect(result).toBeNull();
+  });
+
+  // ---- sha is 64-char hex in all fetch results -----------------------
+
+  it("returns 64-char hex sha from registry fetch", async () => {
+    const parsed: ParsedSource = { type: "registry", skillName: "architect" };
+    mockGetSkill.mockResolvedValue({
+      content: "# Registry skill",
+      version: "2.0.0",
+      sha: "abc123",
+      tier: "VERIFIED",
+    });
+
+    const result = await fetchFromSource(parsed, "architect", MOCK_LOCK_ENTRY);
+
+    expect(result).not.toBeNull();
+    expect(result!.sha).toHaveLength(64);
+    expect(result!.sha).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("returns 64-char hex sha from github flat fetch", async () => {
+    const parsed: ParsedSource = { type: "github", owner: "foo", repo: "bar" };
+    mockFetch.mockResolvedValue(mockFetchOk("# GitHub flat skill"));
+
+    const result = await fetchFromSource(parsed, "myskill", MOCK_LOCK_ENTRY);
+
+    expect(result).not.toBeNull();
+    expect(result!.sha).toHaveLength(64);
+    expect(result!.sha).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("returns 64-char hex sha from plugin fetch", async () => {
+    const parsed: ParsedSource = {
+      type: "github-plugin",
+      owner: "org",
+      repo: "repo",
+      pluginName: "frontend",
+    };
+    const marketplaceJson = JSON.stringify({
+      name: "repo",
+      owner: { name: "org" },
+      plugins: [{ name: "frontend", source: "./plugins/frontend", version: "1.2.3" }],
+    });
+
+    mockFetch.mockResolvedValueOnce(mockFetchOk(marketplaceJson));
+    mockFetch.mockResolvedValueOnce(
+      mockFetchOk(
+        JSON.stringify({
+          tree: [
+            { path: "plugins/frontend/skills/nextjs/SKILL.md", type: "blob" },
+          ],
+        }),
+      ),
+    );
+    mockFetch.mockResolvedValueOnce(mockFetchOk("# nextjs skill"));
+
+    mockGetPluginSource.mockReturnValue("./plugins/frontend");
+    mockGetPluginVersion.mockReturnValue("1.2.3");
+
+    const result = await fetchFromSource(parsed, "frontend", {
+      ...MOCK_LOCK_ENTRY,
+      pluginDir: true,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.sha).toHaveLength(64);
+    expect(result!.sha).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  // ---- FetchResult.files population -----------------------------------
+
+  it("populates files map in registry fetch result", async () => {
+    const parsed: ParsedSource = { type: "registry", skillName: "architect" };
+    mockGetSkill.mockResolvedValue({
+      content: "# Registry skill",
+      version: "2.0.0",
+      sha: "abc123",
+      tier: "VERIFIED",
+    });
+
+    const result = await fetchFromSource(parsed, "architect", MOCK_LOCK_ENTRY);
+
+    expect(result).not.toBeNull();
+    expect(result!.files).toEqual({ "SKILL.md": "# Registry skill" });
+  });
+
+  it("populates files map in github flat fetch result", async () => {
+    const parsed: ParsedSource = { type: "github", owner: "foo", repo: "bar" };
+    mockFetch.mockResolvedValue(mockFetchOk("# GitHub flat skill"));
+
+    const result = await fetchFromSource(parsed, "myskill", MOCK_LOCK_ENTRY);
+
+    expect(result).not.toBeNull();
+    expect(result!.files).toEqual({ "SKILL.md": "# GitHub flat skill" });
+  });
+
+  it("populates files map in plugin fetch result", async () => {
+    const parsed: ParsedSource = {
+      type: "github-plugin",
+      owner: "org",
+      repo: "repo",
+      pluginName: "frontend",
+    };
+    const marketplaceJson = JSON.stringify({
+      name: "repo",
+      owner: { name: "org" },
+      plugins: [{ name: "frontend", source: "./plugins/frontend", version: "1.2.3" }],
+    });
+
+    mockFetch.mockResolvedValueOnce(mockFetchOk(marketplaceJson));
+    mockFetch.mockResolvedValueOnce(
+      mockFetchOk(
+        JSON.stringify({
+          tree: [
+            { path: "plugins/frontend/skills/nextjs/SKILL.md", type: "blob" },
+            { path: "plugins/frontend/skills/react/SKILL.md", type: "blob" },
+          ],
+        }),
+      ),
+    );
+    mockFetch.mockResolvedValueOnce(mockFetchOk("# nextjs skill"));
+    mockFetch.mockResolvedValueOnce(mockFetchOk("# react skill"));
+
+    mockGetPluginSource.mockReturnValue("./plugins/frontend");
+    mockGetPluginVersion.mockReturnValue("1.2.3");
+
+    const result = await fetchFromSource(parsed, "frontend", {
+      ...MOCK_LOCK_ENTRY,
+      pluginDir: true,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.files).toBeDefined();
+    expect(result!.files!["plugins/frontend/skills/nextjs/SKILL.md"]).toBe("# nextjs skill");
+    expect(result!.files!["plugins/frontend/skills/react/SKILL.md"]).toBe("# react skill");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeContent
+// ---------------------------------------------------------------------------
+describe("normalizeContent", () => {
+  it("strips UTF-8 BOM prefix", () => {
+    expect(normalizeContent("\uFEFFhello")).toBe("hello");
+  });
+
+  it("normalizes CRLF to LF", () => {
+    expect(normalizeContent("line1\r\nline2\r\n")).toBe("line1\nline2\n");
+  });
+
+  it("strips BOM and normalizes CRLF together", () => {
+    expect(normalizeContent("\uFEFFa\r\nb")).toBe("a\nb");
+  });
+
+  it("passes through clean content unchanged", () => {
+    expect(normalizeContent("hello world")).toBe("hello world");
+  });
+
+  it("handles empty string", () => {
+    expect(normalizeContent("")).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeSha
+// ---------------------------------------------------------------------------
+describe("computeSha", () => {
+  // ---- single-string overload ------------------------------------------
+
+  it("returns full 64-char hex for single string", () => {
+    const sha = computeSha("hello world");
+    expect(sha).toHaveLength(64);
+    expect(sha).toMatch(/^[0-9a-f]{64}$/);
+    expect(sha).toBe("b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
+  });
+
+  it("normalizes CRLF before hashing single string", () => {
+    const withCrlf = computeSha("hello\r\nworld");
+    const withLf = computeSha("hello\nworld");
+    expect(withCrlf).toBe(withLf);
+  });
+
+  it("strips BOM before hashing single string", () => {
+    const withBom = computeSha("\uFEFFhello");
+    const without = computeSha("hello");
+    expect(withBom).toBe(without);
+  });
+
+  // ---- multi-file overload ---------------------------------------------
+
+  it("returns full 64-char hex for multi-file input", () => {
+    const sha = computeSha({ "a.md": "alpha", "b.md": "beta" });
+    expect(sha).toHaveLength(64);
+    expect(sha).toMatch(/^[0-9a-f]{64}$/);
+    expect(sha).toBe("7c499b4d26d8ad8ab87252aa7657af21a0512c1ea7c7b2da50f5b4c69c036c5f");
+  });
+
+  it("sorts keys by path (case-sensitive ascending) for deterministic hash", () => {
+    const hash1 = computeSha({ "b.md": "beta", "a.md": "alpha" });
+    const hash2 = computeSha({ "a.md": "alpha", "b.md": "beta" });
+    expect(hash1).toBe(hash2);
+  });
+
+  it("produces different hashes for different file contents", () => {
+    const hash1 = computeSha({ "a.md": "alpha" });
+    const hash2 = computeSha({ "a.md": "changed" });
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it("produces different hashes for different file paths", () => {
+    const hash1 = computeSha({ "a.md": "content" });
+    const hash2 = computeSha({ "b.md": "content" });
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it("normalizes CRLF in multi-file content before hashing", () => {
+    const withCrlf = computeSha({ "a.md": "line1\r\nline2" });
+    const withLf = computeSha({ "a.md": "line1\nline2" });
+    expect(withCrlf).toBe(withLf);
+  });
+
+  it("strips BOM in multi-file content before hashing", () => {
+    const withBom = computeSha({ "a.md": "\uFEFFcontent" });
+    const without = computeSha({ "a.md": "content" });
+    expect(withBom).toBe(without);
   });
 });

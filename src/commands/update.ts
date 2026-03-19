@@ -2,9 +2,8 @@
 // vskill update -- update installed skills
 // ---------------------------------------------------------------------------
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { createHash } from "node:crypto";
+import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { join, dirname, resolve, relative } from "node:path";
 import { readLockfile, writeLockfile } from "../lockfile/index.js";
 import { ensureFrontmatter } from "../installer/frontmatter.js";
 import { ensureSkillMdNaming } from "../installer/migrate.js";
@@ -13,7 +12,8 @@ import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { filterAgents } from "../utils/agent-filter.js";
 import { runTier1Scan } from "../scanner/index.js";
 import { parseSource } from "../resolvers/source-resolver.js";
-import { fetchFromSource } from "../updater/source-fetcher.js";
+import { fetchFromSource, computeSha } from "../updater/source-fetcher.js";
+import { resolveVersion, extractFrontmatterVersion } from "../utils/version.js";
 import {
   bold,
   green,
@@ -23,6 +23,32 @@ import {
   cyan,
   spinner,
 } from "../utils/output.js";
+
+/**
+ * Remove files that existed in a previous skill version but no longer exist
+ * in the new version. Only runs when oldFiles is defined (post-migration).
+ */
+function cleanupGhostFiles(
+  skillDir: string,
+  oldFiles: string[] | undefined,
+  newFiles: string[],
+): void {
+  if (!oldFiles) return;
+  const resolvedBase = resolve(skillDir);
+  const newSet = new Set(newFiles);
+  for (const file of oldFiles) {
+    if (!newSet.has(file)) {
+      const target = resolve(skillDir, file);
+      // Guard: never delete outside the skill directory
+      if (!target.startsWith(resolvedBase + "/") && target !== resolvedBase) continue;
+      try {
+        unlinkSync(target);
+      } catch {
+        // File may already be missing — ignore
+      }
+    }
+  }
+}
 
 interface UpdateOptions {
   all?: boolean;
@@ -107,15 +133,14 @@ export async function updateCommand(
         try {
           const remote = await getSkill(name);
           if (remote.content) {
-            const sha = createHash("sha256")
-              .update(remote.content)
-              .digest("hex")
-              .slice(0, 12);
+            const files: Record<string, string> = { "SKILL.md": remote.content };
+            const sha = computeSha(files);
             result = {
               content: remote.content,
               version: remote.version || entry.version,
               sha,
               tier: remote.tier || entry.tier,
+              files,
             };
           }
         } catch {
@@ -160,8 +185,21 @@ export async function updateCommand(
         continue;
       }
 
-      // 6. Install to each agent
-      const processedContent = ensureFrontmatter(result.content, name);
+      // 6. Resolve version
+      const newVersion = resolveVersion({
+        serverVersion: result.version,
+        frontmatterVersion: extractFrontmatterVersion(result.content),
+        currentVersion: entry.version,
+        hashChanged: true,
+        isFirstInstall: false,
+      });
+
+      // 7. Determine new file manifest
+      const newFileKeys = result.files
+        ? Object.keys(result.files).sort()
+        : ["SKILL.md"];
+
+      // 8. Ghost file cleanup + install to each agent
       for (const agent of agents) {
         const skillDir = join(
           process.cwd(),
@@ -169,12 +207,31 @@ export async function updateCommand(
           name
         );
         try {
-          mkdirSync(skillDir, { recursive: true });
-          writeFileSync(
-            join(skillDir, "SKILL.md"),
-            processedContent,
-            "utf-8"
-          );
+          // Clean up files removed in the new version
+          cleanupGhostFiles(skillDir, entry.files, newFileKeys);
+
+          // Write all files from the files map (or just SKILL.md for compat)
+          const resolvedSkillDir = resolve(skillDir);
+          if (result.files) {
+            for (const [relPath, fileContent] of Object.entries(result.files)) {
+              const filePath = resolve(skillDir, relPath);
+              // Guard: never write outside the skill directory
+              if (!filePath.startsWith(resolvedSkillDir + "/") && filePath !== resolvedSkillDir) continue;
+              mkdirSync(dirname(filePath), { recursive: true });
+              writeFileSync(
+                filePath,
+                relPath === "SKILL.md" ? ensureFrontmatter(fileContent, name) : fileContent,
+                "utf-8"
+              );
+            }
+          } else {
+            mkdirSync(skillDir, { recursive: true });
+            writeFileSync(
+              join(skillDir, "SKILL.md"),
+              ensureFrontmatter(result.content, name),
+              "utf-8"
+            );
+          }
         } catch {
           // Silently skip write failures for update
         }
@@ -185,13 +242,14 @@ export async function updateCommand(
         ensureSkillMdNaming(agentBase);
       }
 
-      // 7. Update lockfile entry — preserve source and all existing fields
+      // 9. Update lockfile entry — preserve source and all existing fields
       lock.skills[name] = {
         ...entry,
-        version: result.version,
+        version: newVersion,
         sha: result.sha,
         tier: result.tier,
         installedAt: new Date().toISOString(),
+        files: newFileKeys,
       };
 
       updated++;

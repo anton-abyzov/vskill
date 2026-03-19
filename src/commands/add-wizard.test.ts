@@ -30,10 +30,14 @@ vi.mock("node:path", async () => {
   return { ...actual };
 });
 
-const mockDigest = vi.fn().mockReturnValue("abcdef123456xxxx");
-const mockUpdate = vi.fn().mockReturnValue({ digest: mockDigest });
 vi.mock("node:crypto", () => ({
-  createHash: () => ({ update: mockUpdate }),
+  createHash: () => {
+    const obj = {
+      update: vi.fn().mockImplementation(() => obj),
+      digest: vi.fn().mockReturnValue("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"),
+    };
+    return obj;
+  },
 }));
 
 // ---------------------------------------------------------------------------

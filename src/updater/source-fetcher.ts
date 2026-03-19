@@ -16,6 +16,8 @@ export interface FetchResult {
   version: string;
   sha: string;
   tier: string;
+  /** Path-to-content map of all files in this skill. */
+  files?: Record<string, string>;
 }
 
 function buildAuthHeader(): Record<string, string> {
@@ -34,8 +36,23 @@ async function fetchRaw(url: string): Promise<string | null> {
   }
 }
 
-function computeSha(content: string): string {
-  return createHash("sha256").update(content).digest("hex").slice(0, 12);
+export function normalizeContent(content: string): string {
+  return content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+}
+
+export function computeSha(content: string): string;
+export function computeSha(files: Record<string, string>): string;
+export function computeSha(input: string | Record<string, string>): string {
+  const h = createHash("sha256");
+  if (typeof input === "string") {
+    h.update(normalizeContent(input));
+  } else {
+    const sorted = Object.keys(input).sort();
+    for (const path of sorted) {
+      h.update(`${path}\0${normalizeContent(input[path])}\n`);
+    }
+  }
+  return h.digest("hex");
 }
 
 // ---------------------------------------------------------------------------
@@ -45,12 +62,14 @@ async function fetchRegistry(skillName: string, entry: SkillLockEntry): Promise<
   try {
     const remote = await getSkill(skillName);
     if (!remote.content) return null;
-    const sha = computeSha(remote.content);
+    const files: Record<string, string> = { "SKILL.md": remote.content };
+    const sha = computeSha(files);
     return {
       content: remote.content,
       version: remote.version || entry.version,
       sha,
       tier: remote.tier || entry.tier,
+      files,
     };
   } catch {
     return null;
@@ -77,11 +96,13 @@ async function fetchGitHubFlat(
   }
   if (!content) return null;
 
+  const files: Record<string, string> = { "SKILL.md": content };
   return {
     content,
     version: entry.version,
-    sha: computeSha(content),
+    sha: computeSha(files),
     tier: entry.tier,
+    files,
   };
 }
 
@@ -146,15 +167,20 @@ async function fetchPlugin(
   const successful = fetched.filter((f) => f.content !== null) as Array<{ path: string; content: string }>;
   if (successful.length === 0) return null;
 
-  // 6. Combine content (sorted by path for deterministic SHA)
+  // 6. Build files map and combine content (sorted by path for deterministic SHA)
   successful.sort((a, b) => a.path.localeCompare(b.path));
+  const files: Record<string, string> = {};
+  for (const f of successful) {
+    files[f.path] = f.content;
+  }
   const combined = successful.map((f) => f.content).join("\n");
 
   return {
     content: combined,
     version,
-    sha: computeSha(combined),
+    sha: computeSha(files),
     tier: entry.tier,
+    files,
   };
 }
 

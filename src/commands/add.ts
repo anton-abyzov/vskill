@@ -14,7 +14,6 @@ import {
   rmSync,
 } from "node:fs";
 import { join, resolve, basename } from "node:path";
-import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import os from "node:os";
 import { resolveTilde } from "../utils/paths.js";
@@ -56,6 +55,8 @@ import { ensureFrontmatter } from "../installer/frontmatter.js";
 import { ensureSkillMdNaming } from "../installer/migrate.js";
 import { getMarketplaceName } from "../marketplace/index.js";
 import { rankSearchResults, formatSkillId, getSkillUrl, getTrustBadge, formatResultLine } from "../utils/skill-display.js";
+import { computeSha } from "../updater/source-fetcher.js";
+import { extractFrontmatterVersion } from "../utils/version.js";
 
 // ---------------------------------------------------------------------------
 // Marketplace detection — auto-detect Claude Code plugin marketplaces
@@ -1171,7 +1172,7 @@ async function installPluginDir(
   } catch { /* ignore parse errors */ }
 
   // Install: recursively copy plugin directory to each agent
-  const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
+  const sha = computeSha(content);
   const locations: string[] = [];
 
   for (const agent of selectedAgents) {
@@ -1209,6 +1210,7 @@ async function installPluginDir(
     installedAt: new Date().toISOString(),
     source: `local:${basePath}`,
     scope: opts.global ? "user" : "project",
+    files: ["SKILL.md"],
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock, lockDir);
@@ -1251,6 +1253,7 @@ interface SkillInstallResult {
   verdict: string;
   score?: number;
   sha?: string;
+  version?: string;
 }
 
 async function installOneGitHubSkill(
@@ -1349,7 +1352,7 @@ async function installOneGitHubSkill(
   }
 
   // Install to each agent using canonical installer
-  const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
+  const sha = computeSha(content);
   const installOpts = { global: !!opts.global, projectRoot };
 
   try {
@@ -1363,7 +1366,8 @@ async function installOneGitHubSkill(
     return { skillName, installed: false, verdict: "WRITE_ERROR", score: scanResult.score };
   }
 
-  return { skillName, installed: true, verdict: scanResult.verdict, score: scanResult.score, sha };
+  const skillVersion = extractFrontmatterVersion(content) || "1.0.0";
+  return { skillName, installed: true, verdict: scanResult.verdict, score: scanResult.score, sha, version: skillVersion };
 }
 
 // ---------------------------------------------------------------------------
@@ -1655,7 +1659,10 @@ async function installRepoPlugin(
   const projectRoot = safeProjectRoot();
 
   // Install skills and commands with namespace prefix
-  const sha = createHash("sha256").update(combined).digest("hex").slice(0, 12);
+  const sha = computeSha(combined);
+  const skillFileNames = skills.map((s) =>
+    s.name === pluginName ? "SKILL.md" : `${s.name}/SKILL.md`
+  ).sort();
   const locations: string[] = [];
 
   for (const agent of selectedAgents) {
@@ -1698,6 +1705,7 @@ async function installRepoPlugin(
     installedAt: new Date().toISOString(),
     source: `github:${owner}/${repo}#plugin:${pluginName}`,
     scope: opts.global ? "user" : "project",
+    files: skillFileNames,
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock, lockDir);
@@ -1943,12 +1951,13 @@ export async function addCommand(
   for (const r of results) {
     if (r.installed && r.sha) {
       lock.skills[r.skillName] = {
-        version: "0.0.0",
+        version: r.version || "1.0.0",
         sha: r.sha,
         tier: "VERIFIED",
         installedAt: new Date().toISOString(),
         source: `github:${owner}/${repo}`,
         scope: opts.global ? "user" : "project",
+        files: ["SKILL.md"],
       };
     }
   }
@@ -2327,7 +2336,7 @@ async function installFromRegistry(
   const projectRoot = safeProjectRoot();
 
   // Install to each agent
-  const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
+  const sha = computeSha(content);
   const locations: string[] = [];
 
   const processedContent = ensureFrontmatter(content, skillName);
@@ -2349,13 +2358,15 @@ async function installFromRegistry(
   // Update lockfile (global → ~/.agents/, project → project root)
   const lockDir = lockfileRoot(opts);
   const lock = ensureLockfile(lockDir);
+  const registryVersion = detail.version || extractFrontmatterVersion(content) || "1.0.0";
   lock.skills[skillName] = {
-    version: detail.version || "0.0.0",
+    version: registryVersion,
     sha,
     tier: "VERIFIED",
     installedAt: new Date().toISOString(),
     source: `registry:${skillName}`,
     scope: opts.global ? "user" : "project",
+    files: ["SKILL.md"],
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock, lockDir);
@@ -2542,7 +2553,7 @@ async function installSingleSkillLegacy(
   if (!selections.symlink) opts.copy = true;
 
   // Install to each agent using canonical installer
-  const sha = createHash("sha256").update(content).digest("hex").slice(0, 12);
+  const sha = computeSha(content);
   const projectRoot = safeProjectRoot();
   const installOpts = { global: !!opts.global, projectRoot };
 
@@ -2553,13 +2564,15 @@ async function installSingleSkillLegacy(
   // Update lockfile (global → ~/.agents/, project → project root)
   const lockDir = lockfileRoot(opts);
   const lock = ensureLockfile(lockDir);
+  const ghVersion = extractFrontmatterVersion(content) || "1.0.0";
   lock.skills[skillName] = {
-    version: "0.0.0",
+    version: ghVersion,
     sha,
     tier: "VERIFIED",
     installedAt: new Date().toISOString(),
     source: `github:${owner}/${repo}`,
     scope: opts.global ? "user" : "project",
+    files: ["SKILL.md"],
   };
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock, lockDir);

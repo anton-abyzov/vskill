@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { VskillLock, SkillLockEntry } from "./types.js";
 import { getProjectRoot } from "./project-root.js";
+import { migrateLock } from "./migration.js";
 
 const LOCKFILE_NAME = "vskill.lock";
 const SKILLS_SH_LOCKFILE = ".skill-lock.json";
@@ -23,7 +24,7 @@ export function readLockfile(dir?: string): VskillLock | null {
   if (!existsSync(p)) return null;
   try {
     const raw = readFileSync(p, "utf-8");
-    return JSON.parse(raw) as VskillLock;
+    return migrateLock(JSON.parse(raw) as VskillLock);
   } catch {
     return null;
   }

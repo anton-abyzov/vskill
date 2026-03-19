@@ -16,6 +16,8 @@ export interface SkillLockEntry {
   scope?: "user" | "project";
   /** Absolute path where the plugin was installed */
   installedPath?: string;
+  /** Sorted list of relative file paths for ghost file detection */
+  files?: string[];
 }
 
 export interface VskillLock {

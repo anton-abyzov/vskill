@@ -5,9 +5,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ---------------------------------------------------------------------------
 const mockMkdirSync = vi.hoisted(() => vi.fn());
 const mockWriteFileSync = vi.hoisted(() => vi.fn());
+const mockUnlinkSync = vi.hoisted(() => vi.fn());
 vi.mock("node:fs", () => ({
   mkdirSync: (...args: unknown[]) => mockMkdirSync(...args),
   writeFileSync: (...args: unknown[]) => mockWriteFileSync(...args),
+  unlinkSync: (...args: unknown[]) => mockUnlinkSync(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -32,8 +34,14 @@ vi.mock("../api/client.js", () => ({
 // Mock source-aware fetcher
 // ---------------------------------------------------------------------------
 const mockFetchFromSource = vi.hoisted(() => vi.fn());
+const mockComputeSha = vi.hoisted(() => vi.fn((input: unknown) => {
+  // Mimic 64-char hex digest
+  if (typeof input === "string") return "a".repeat(64);
+  return "b".repeat(64);
+}));
 vi.mock("../updater/source-fetcher.js", () => ({
   fetchFromSource: (...args: unknown[]) => mockFetchFromSource(...args),
+  computeSha: (...args: unknown[]) => mockComputeSha(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -45,6 +53,17 @@ vi.mock("../agents/agents-registry.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock installer modules
+// ---------------------------------------------------------------------------
+vi.mock("../installer/frontmatter.js", () => ({
+  ensureFrontmatter: (content: string, name: string) => `---\nname: ${name}\n---\n${content}`,
+}));
+const mockEnsureSkillMdNaming = vi.hoisted(() => vi.fn());
+vi.mock("../installer/migrate.js", () => ({
+  ensureSkillMdNaming: (...args: unknown[]) => mockEnsureSkillMdNaming(...args),
+}));
+
+// ---------------------------------------------------------------------------
 // Mock scanner
 // ---------------------------------------------------------------------------
 const mockRunTier1Scan = vi.hoisted(() =>
@@ -52,6 +71,16 @@ const mockRunTier1Scan = vi.hoisted(() =>
 );
 vi.mock("../scanner/index.js", () => ({
   runTier1Scan: (...args: unknown[]) => mockRunTier1Scan(...args),
+}));
+
+// ---------------------------------------------------------------------------
+// Mock version utilities
+// ---------------------------------------------------------------------------
+const mockResolveVersion = vi.hoisted(() => vi.fn().mockReturnValue("2.0.0"));
+const mockExtractFrontmatterVersion = vi.hoisted(() => vi.fn().mockReturnValue(undefined));
+vi.mock("../utils/version.js", () => ({
+  resolveVersion: (...args: unknown[]) => mockResolveVersion(...args),
+  extractFrontmatterVersion: (...args: unknown[]) => mockExtractFrontmatterVersion(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -126,6 +155,9 @@ describe("updateCommand", () => {
       sha: "new-sha-12345",
       tier: "VERIFIED",
     });
+    // Version resolution defaults
+    mockResolveVersion.mockReturnValue("2.0.0");
+    mockExtractFrontmatterVersion.mockReturnValue(undefined);
   });
 
   it("updates only the filtered agent when --agent is provided", async () => {
@@ -309,5 +341,258 @@ describe("updateCommand", () => {
     await updateCommand(undefined, { all: true });
 
     expect(mockWriteLockfile).toHaveBeenCalledTimes(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // US-005: No-change detection (64-char SHA comparison)
+  // ---------------------------------------------------------------------------
+
+  it("does not write files when 64-char SHA matches", async () => {
+    const sha64 = "a1b2c3d4e5f6".repeat(5) + "a1b2";  // 62 chars, pad to 64
+    const fullSha = sha64 + "ff";  // exactly 64 chars
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: ["claude-code"],
+      skills: {
+        frontend: {
+          version: "1.0.0",
+          sha: fullSha,
+          tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z",
+          source: "github:test/repo",
+          files: ["SKILL.md"],
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockFetchFromSource.mockResolvedValue({
+      content: "# Same content",
+      version: "1.0.0",
+      sha: fullSha,
+      tier: "VERIFIED",
+      files: { "SKILL.md": "# Same content" },
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+  });
+
+  it("does not modify lockfile entry when SHA matches", async () => {
+    const fullSha = "c".repeat(64);
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: ["claude-code"],
+      skills: {
+        frontend: {
+          version: "1.5.0",
+          sha: fullSha,
+          tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z",
+          source: "github:test/repo",
+          files: ["SKILL.md"],
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockFetchFromSource.mockResolvedValue({
+      content: "# Same",
+      version: "1.5.0",
+      sha: fullSha,
+      tier: "VERIFIED",
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    const writtenLock = mockWriteLockfile.mock.calls[0][0] as {
+      skills: Record<string, { version: string; sha: string; installedAt: string }>;
+    };
+    // Version, sha, and installedAt should remain unchanged
+    expect(writtenLock.skills["frontend"].version).toBe("1.5.0");
+    expect(writtenLock.skills["frontend"].sha).toBe(fullSha);
+    expect(writtenLock.skills["frontend"].installedAt).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  // ---------------------------------------------------------------------------
+  // US-005: Version resolution on update
+  // ---------------------------------------------------------------------------
+
+  it("calls resolveVersion when SHA has changed", async () => {
+    mockFetchFromSource.mockResolvedValue({
+      content: "# Changed",
+      version: "3.0.0",
+      sha: "d".repeat(64),
+      tier: "VERIFIED",
+      files: { "SKILL.md": "# Changed" },
+    });
+    mockResolveVersion.mockReturnValue("3.0.0");
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    expect(mockResolveVersion).toHaveBeenCalled();
+    expect(mockResolveVersion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverVersion: "3.0.0",
+        hashChanged: true,
+        isFirstInstall: false,
+      }),
+    );
+    const writtenLock = mockWriteLockfile.mock.calls[0][0] as {
+      skills: Record<string, { version: string }>;
+    };
+    expect(writtenLock.skills["frontend"].version).toBe("3.0.0");
+  });
+
+  // ---------------------------------------------------------------------------
+  // US-006: Ghost file cleanup
+  // ---------------------------------------------------------------------------
+
+  it("deletes ghost files that exist in old manifest but not new", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: ["claude-code"],
+      skills: {
+        frontend: {
+          version: "1.0.0",
+          sha: "old-sha-" + "0".repeat(56),
+          tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z",
+          source: "github:test/repo",
+          files: ["SKILL.md", "agents/a.md", "agents/b.md"],
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockFetchFromSource.mockResolvedValue({
+      content: "# Updated",
+      version: "2.0.0",
+      sha: "new-sha-" + "1".repeat(56),
+      tier: "VERIFIED",
+      files: { "SKILL.md": "# Updated", "agents/a.md": "# Agent A" },
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    // agents/b.md should be deleted for each agent directory
+    const unlinkCalls = mockUnlinkSync.mock.calls.map((c) => c[0] as string);
+    const ghostDeletes = unlinkCalls.filter((p: string) => p.includes("agents/b.md"));
+    expect(ghostDeletes.length).toBeGreaterThan(0);
+  });
+
+  it("updates lockfile files array to reflect new version's files", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: ["claude-code"],
+      skills: {
+        frontend: {
+          version: "1.0.0",
+          sha: "old-sha-" + "0".repeat(56),
+          tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z",
+          source: "github:test/repo",
+          files: ["SKILL.md", "agents/a.md", "agents/b.md"],
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockFetchFromSource.mockResolvedValue({
+      content: "# Updated",
+      version: "2.0.0",
+      sha: "new-sha-" + "1".repeat(56),
+      tier: "VERIFIED",
+      files: { "SKILL.md": "# Updated", "agents/a.md": "# Agent A" },
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    const writtenLock = mockWriteLockfile.mock.calls[0][0] as {
+      skills: Record<string, { files?: string[] }>;
+    };
+    expect(writtenLock.skills["frontend"].files).toEqual(["SKILL.md", "agents/a.md"]);
+  });
+
+  it("does not delete files when pre-migration entry has no files field", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: ["claude-code"],
+      skills: {
+        frontend: {
+          version: "1.0.0",
+          sha: "old-sha-" + "0".repeat(56),
+          tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z",
+          source: "github:test/repo",
+          // no files field — pre-migration entry
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockFetchFromSource.mockResolvedValue({
+      content: "# Updated",
+      version: "2.0.0",
+      sha: "new-sha-" + "1".repeat(56),
+      tier: "VERIFIED",
+      files: { "SKILL.md": "# Updated" },
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    // No ghost deletions when old entry has no files manifest
+    expect(mockUnlinkSync).not.toHaveBeenCalled();
+    // But new files manifest should be stored
+    const writtenLock = mockWriteLockfile.mock.calls[0][0] as {
+      skills: Record<string, { files?: string[] }>;
+    };
+    expect(writtenLock.skills["frontend"].files).toEqual(["SKILL.md"]);
+  });
+
+  // ---------------------------------------------------------------------------
+  // US-006: Multi-file write
+  // ---------------------------------------------------------------------------
+
+  it("writes all files from result.files map", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: ["claude-code"],
+      skills: {
+        frontend: {
+          version: "1.0.0",
+          sha: "old-" + "0".repeat(60),
+          tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z",
+          source: "github:test/repo",
+          files: ["SKILL.md"],
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockFetchFromSource.mockResolvedValue({
+      content: "# Main",
+      version: "2.0.0",
+      sha: "new-" + "1".repeat(60),
+      tier: "VERIFIED",
+      files: { "SKILL.md": "# Main", "agents/helper.md": "# Helper" },
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    const writePaths = mockWriteFileSync.mock.calls.map((c) => c[0] as string);
+    const skillMdWrites = writePaths.filter((p: string) => p.endsWith("SKILL.md"));
+    const helperWrites = writePaths.filter((p: string) => p.endsWith("agents/helper.md"));
+    expect(skillMdWrites.length).toBeGreaterThan(0);
+    expect(helperWrites.length).toBeGreaterThan(0);
   });
 });

@@ -78,66 +78,46 @@ export function LeftPanel() {
         </button>
       </div>
 
-      {/* Skill-Creator status — only relevant for Claude models */}
-      {creatorStatus && (() => {
-        const isClaude = config?.provider === "claude-cli";
-        if (creatorStatus.installed && isClaude) {
-          return (
-            <div className="px-3 pb-2 flex-shrink-0">
-              <div className="flex items-center gap-2 px-3 py-1.5 text-[11px]" style={{ color: "var(--text-tertiary)" }}>
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "var(--green)" }} />
-                Skill Creator installed
-              </div>
+      {/* Skill-Creator status — works with all AI tools */}
+      {creatorStatus && (creatorStatus.installed ? (
+        <div className="px-3 pb-2 flex-shrink-0">
+          <div className="flex items-center gap-2 px-3 py-1.5 text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "var(--green)" }} />
+            Skill Creator installed
+          </div>
+        </div>
+      ) : (
+        <div className="px-3 pb-2 flex-shrink-0">
+          <div
+            className="px-3 py-2 rounded-lg text-[11px]"
+            style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+          >
+            <div className="flex items-center gap-2 mb-1.5" style={{ color: "var(--yellow)" }}>
+              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "var(--yellow)" }} />
+              <span className="font-medium">Skill Creator not installed</span>
             </div>
-          );
-        }
-        if (creatorStatus.installed && !isClaude) {
-          return (
-            <div className="px-3 pb-2 flex-shrink-0">
-              <div className="flex items-center gap-2 px-3 py-1.5 text-[11px]" style={{ color: "var(--text-tertiary)", opacity: 0.5 }}>
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "var(--text-tertiary)" }} />
-                Skill Creator (Claude only)
-              </div>
-            </div>
-          );
-        }
-        if (!creatorStatus.installed && isClaude) {
-          return (
-            <div className="px-3 pb-2 flex-shrink-0">
-              <div
-                className="px-3 py-2 rounded-lg text-[11px]"
-                style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
-              >
-                <div className="flex items-center gap-2 mb-1.5" style={{ color: "var(--yellow)" }}>
-                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "var(--yellow)" }} />
-                  <span className="font-medium">Skill Creator not installed</span>
-                </div>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(creatorStatus.installCommand).then(() => {
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 2000);
-                    }).catch(() => {});
-                  }}
-                  className="w-full text-left px-2 py-1 rounded text-[10px] font-mono cursor-pointer transition-colors duration-150"
-                  style={{
-                    background: "var(--surface-0)",
-                    color: "var(--text-secondary)",
-                    border: "1px solid var(--border-subtle)",
-                  }}
-                  title="Click to copy"
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
-                >
-                  {copied ? "Copied!" : creatorStatus.installCommand}
-                </button>
-              </div>
-            </div>
-          );
-        }
-        // Not installed + non-Claude → hide entirely
-        return null;
-      })()}
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(creatorStatus.installCommand).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }).catch(() => {});
+              }}
+              className="w-full text-left px-2 py-1 rounded text-[10px] font-mono cursor-pointer transition-colors duration-150"
+              style={{
+                background: "var(--surface-0)",
+                color: "var(--text-secondary)",
+                border: "1px solid var(--border-subtle)",
+              }}
+              title="Click to copy"
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
+            >
+              {copied ? "Copied!" : creatorStatus.installCommand}
+            </button>
+          </div>
+        </div>
+      ))}
 
       {/* Skill list */}
       <div className="flex-1 overflow-y-auto" style={{ borderTop: "1px solid var(--border-subtle)" }}>

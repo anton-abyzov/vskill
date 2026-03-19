@@ -4,9 +4,8 @@
 
 import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
 import { join, basename, resolve, sep } from "node:path";
-import { homedir } from "node:os";
-import { AGENTS_REGISTRY } from "../agents/agents-registry.js";
 import type { Router } from "./router.js";
+import { isSkillCreatorInstalled } from "../utils/skill-creator-detection.js";
 import { sendJson, readBody } from "./router.js";
 import { createLlmClient } from "../eval/llm.js";
 import type { ProviderName } from "../eval/llm.js";
@@ -344,41 +343,6 @@ export function matchExistingPlugin(
     confidence,
     reason: bestReason,
   };
-}
-
-/** Check if skill-creator skill is installed in any agent's skill directory */
-function checkSkillCreatorInstalled(): boolean {
-  const home = homedir();
-
-  // Canonical vskill path (source of truth)
-  if (existsSync(join(home, ".agents", "skills", "skill-creator"))) return true;
-
-  // Check every registered agent's global skills directory
-  for (const agent of AGENTS_REGISTRY) {
-    const resolved = agent.globalSkillsDir.replace("~", home);
-    if (existsSync(join(resolved, "skill-creator"))) return true;
-
-    // Also check plugin cache dir if the agent has one (e.g. Claude)
-    // Plugins live at: cache/<marketplace>/<plugin-name>/<version>/
-    if (agent.pluginCacheDir) {
-      const cacheDir = agent.pluginCacheDir.replace("~", home);
-      try {
-        if (existsSync(cacheDir)) {
-          const marketplaces = readdirSync(cacheDir, { withFileTypes: true });
-          for (const mkt of marketplaces) {
-            if (!mkt.isDirectory()) continue;
-            const mktPath = join(cacheDir, mkt.name);
-            const plugins = readdirSync(mktPath, { withFileTypes: true });
-            for (const plugin of plugins) {
-              if (plugin.isDirectory() && plugin.name.includes("skill-creator")) return true;
-            }
-          }
-        }
-      } catch { /* ignore */ }
-    }
-  }
-
-  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -879,7 +843,7 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
 
   // GET /api/skill-creator-status — check if skill-creator is installed
   router.get("/api/skill-creator-status", async (_req, res) => {
-    const installed = checkSkillCreatorInstalled();
+    const installed = isSkillCreatorInstalled(root);
     sendJson(res, {
       installed,
       installCommand: "npx vskill install anthropics/skills/skill-creator",

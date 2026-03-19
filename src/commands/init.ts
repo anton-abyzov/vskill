@@ -100,7 +100,7 @@ export async function initCommand(opts: InitOptions = {}): Promise<void> {
           claudePluginUninstall(id, scope);
           console.log(dim(`  - ${id}`));
         } catch {
-          // non-fatal — plugin may not have been registered via claude CLI
+          console.log(dim(`  - ${id} (skipped — not registered via CLI)`));
         }
       }
     }

@@ -4,7 +4,6 @@
 
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import { resolveTilde } from "../utils/paths.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
@@ -110,7 +109,8 @@ export async function removeCommand(
       claudePluginUninstall(pluginId, scope);
       console.log(dim(`Plugin uninstalled: ${pluginId}`));
     } catch {
-      // non-fatal — plugin may not have been registered via claude CLI
+      console.log(yellow(`Plugin ${pluginId} may still be registered in Claude Code settings.`));
+      console.log(dim(`  Run: claude plugin uninstall ${pluginId}`));
     }
   }
 

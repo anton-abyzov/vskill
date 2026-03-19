@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { migrateStaleSkillFiles, ensureSkillMdNaming } from "./migrate.js";
+import { migrateStaleSkillFiles, ensureSkillMdNaming, cleanStaleNesting } from "./migrate.js";
 
 describe("migrateStaleSkillFiles", () => {
   let tempDir: string;
@@ -522,5 +522,81 @@ describe("ensureSkillMdNaming", () => {
     expect(existsSync(join(skillDir, "SKILL.md"))).toBe(true);
     expect(existsSync(join(skillDir, "architect.md"))).toBe(false);
     expect(result.renamedCount).toBe(1);
+  });
+});
+
+// =========================================================================
+// cleanStaleNesting — remove double-nested artifacts from pre-fix installs
+// =========================================================================
+
+describe("cleanStaleNesting", () => {
+  let tempDir: string;
+  let skillsDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "vskill-nesting-"));
+    skillsDir = join(tempDir, "skills");
+    mkdirSync(skillsDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("removes stale nested dir when parent has SKILL.md", () => {
+    const skillDir = join(skillsDir, "nanobanana");
+    const nestedDir = join(skillDir, "nanobanana");
+    mkdirSync(nestedDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), "# Correct");
+    writeFileSync(join(nestedDir, "SKILL.md"), "# Stale");
+
+    cleanStaleNesting(skillDir);
+
+    expect(existsSync(join(skillDir, "SKILL.md"))).toBe(true);
+    expect(existsSync(nestedDir)).toBe(false);
+  });
+
+  it("does NOT remove nested dir when parent has no SKILL.md", () => {
+    const skillDir = join(skillsDir, "myskill");
+    const nestedDir = join(skillDir, "myskill");
+    mkdirSync(nestedDir, { recursive: true });
+    writeFileSync(join(nestedDir, "SKILL.md"), "# Only copy");
+
+    cleanStaleNesting(skillDir);
+
+    // Nested dir should survive — it's the only copy
+    expect(existsSync(nestedDir)).toBe(true);
+    expect(existsSync(join(nestedDir, "SKILL.md"))).toBe(true);
+  });
+
+  it("is a no-op when no nested dir exists", () => {
+    const skillDir = join(skillsDir, "clean");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), "# Clean");
+
+    cleanStaleNesting(skillDir);
+
+    expect(existsSync(join(skillDir, "SKILL.md"))).toBe(true);
+  });
+
+  it("skips symlinked nested dir", () => {
+    const skillDir = join(skillsDir, "linked");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), "# Correct");
+
+    const realDir = join(tempDir, "real-linked");
+    mkdirSync(realDir, { recursive: true });
+    writeFileSync(join(realDir, "SKILL.md"), "# Real");
+    symlinkSync(realDir, join(skillDir, "linked"));
+
+    cleanStaleNesting(skillDir);
+
+    // Symlinked nested dir should survive
+    expect(lstatSync(join(skillDir, "linked")).isSymbolicLink()).toBe(true);
+  });
+
+  it("handles non-existent skillDir gracefully", () => {
+    // Should not throw
+    cleanStaleNesting(join(tempDir, "does-not-exist"));
   });
 });

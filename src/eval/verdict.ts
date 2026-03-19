@@ -113,7 +113,7 @@ const VERDICT_LABELS: Record<EvalVerdict, string> = {
 };
 
 function isEvalVerdict(v: string): v is EvalVerdict {
-  return v in VERDICT_LABELS;
+  return Object.hasOwn(VERDICT_LABELS, v);
 }
 
 export function verdictLabel(verdict: string): string {

@@ -52,7 +52,7 @@ import {
 import { isTTY, createPrompter } from "../utils/prompts.js";
 import { installSymlink, installCopy } from "../installer/canonical.js";
 import { ensureFrontmatter } from "../installer/frontmatter.js";
-import { ensureSkillMdNaming } from "../installer/migrate.js";
+import { ensureSkillMdNaming, cleanStaleNesting } from "../installer/migrate.js";
 import { getMarketplaceName } from "../marketplace/index.js";
 import { rankSearchResults, formatSkillId, getSkillUrl, getTrustBadge, formatResultLine } from "../utils/skill-display.js";
 import { computeSha } from "../updater/source-fetcher.js";
@@ -528,6 +528,7 @@ async function installMarketplaceRepo(
             const skillDir = join(baseDir, sd.name);
             mkdirSync(skillDir, { recursive: true });
             writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
+            cleanStaleNesting(skillDir);
           }
           installedSkillNames.push(sd.name);
         }
@@ -543,6 +544,7 @@ async function installMarketplaceRepo(
             const skillDir = join(baseDir, plugin.name);
             mkdirSync(skillDir, { recursive: true });
             writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
+            cleanStaleNesting(skillDir);
           }
           installedSkillNames.push(plugin.name);
         }
@@ -1654,6 +1656,7 @@ async function installRepoPlugin(
           : join(plugDir, skill.name);
         mkdirSync(skillDir, { recursive: true });
         writeFileSync(join(skillDir, "SKILL.md"), ensureFrontmatter(skill.content, skill.name), "utf-8");
+        cleanStaleNesting(skillDir);
       }
       // Commands: {agent-dir}/{plugin-name}/{command-name}.md
       for (const cmd of commands) {
@@ -2321,6 +2324,7 @@ async function installFromRegistry(
     try {
       mkdirSync(skillDir, { recursive: true });
       writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
+      cleanStaleNesting(skillDir);
       locations.push(`${agent.displayName}: ${skillDir}`);
     } catch (err) {
       console.error(

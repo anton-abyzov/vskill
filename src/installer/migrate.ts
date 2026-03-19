@@ -8,6 +8,7 @@ import {
   writeFileSync,
   mkdirSync,
   unlinkSync,
+  rmSync,
   existsSync,
   lstatSync,
 } from "node:fs";
@@ -192,6 +193,36 @@ function enforceSkillMdInDir(dir: string, result: NamingResult): void {
         `Failed to enforce SKILL.md in ${entryPath}: ${(err as Error).message}`,
       );
     }
+  }
+}
+
+/**
+ * Remove stale double-nested skill directories left by pre-fix installations.
+ *
+ * Before the double-nesting fix (ec19dde, 2026-03-18), installing a plugin
+ * whose single skill shared its name would create:
+ *   {skillsDir}/{name}/{name}/SKILL.md   (incorrect)
+ * instead of:
+ *   {skillsDir}/{name}/SKILL.md           (correct)
+ *
+ * When called AFTER writing the correct SKILL.md, this function detects and
+ * removes the stale nested directory.
+ *
+ * @param skillDir  The directory that should contain SKILL.md directly,
+ *                  e.g. `~/.claude/skills/nanobanana/`
+ */
+export function cleanStaleNesting(skillDir: string): void {
+  const name = basename(skillDir);
+  const nested = join(skillDir, name);
+  try {
+    const stat = lstatSync(nested);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return;
+    // Only remove the nested dir when the parent already has the correct SKILL.md
+    if (existsSync(join(skillDir, "SKILL.md"))) {
+      rmSync(nested, { recursive: true, force: true });
+    }
+  } catch {
+    // Nested dir doesn't exist — nothing to clean
   }
 }
 

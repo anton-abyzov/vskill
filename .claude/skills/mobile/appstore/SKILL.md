@@ -667,7 +667,7 @@ asc auth status
 | `ASC_DEFAULT_OUTPUT` | Default output format (json/table/markdown) |
 | `ASC_SLACK_WEBHOOK` | Slack webhook URL |
 | `ASC_DEBUG` | Enable debug logging (`1` or `api`) |
-| `ASC_BYPASS_KEYCHAIN` | Skip keychain, use config/env |
+| `ASC_BYPASS_KEYCHAIN` | Skip `keychain` auth, use config/env |
 
 ## CI/CD INTEGRATION (GitHub Actions)
 

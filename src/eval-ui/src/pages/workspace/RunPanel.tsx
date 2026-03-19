@@ -12,15 +12,22 @@ import { verdictLabel } from "../../../../eval/verdict.js";
 // ---------------------------------------------------------------------------
 
 /** Returns the appropriate pass-rate label based on the benchmark run type. */
-export function passRateLabel(type?: string): string {
+export function passRateLabel(type?: RunMode | string): string {
   return type === "baseline" ? "Baseline Pass Rate" : "Skill Pass Rate";
 }
 
-/** Formats model + timestamp into a provenance string like "claude-sonnet-4-5 · Mar 19, 2026". */
+/** Formats model + timestamp into a provenance string like "claude-sonnet-4-5 · Mar 19, 2026 7:30 PM". */
 export function formatProvenance(model?: string, timestamp?: string): string {
-  const datePart = timestamp
-    ? new Date(timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-    : "";
+  let datePart = "";
+  if (timestamp) {
+    const d = new Date(timestamp);
+    if (!isNaN(d.getTime())) {
+      datePart = d.toLocaleDateString("en-US", {
+        month: "short", day: "numeric", year: "numeric",
+        hour: "numeric", minute: "2-digit",
+      });
+    }
+  }
   const parts = [model, datePart].filter(Boolean);
   return parts.join(" · ");
 }
@@ -30,6 +37,7 @@ export function deltaStatement(delta: number, totalAssertions: number, caseCount
   const caseWord = caseCount === 1 ? "test case" : "test cases";
   if (delta === 0) return `Your skill performs the same as the baseline across ${caseCount} ${caseWord}`;
   const diff = Math.round(Math.abs(delta) * totalAssertions);
+  if (diff === 0) return `Your skill performs the same as the baseline across ${caseCount} ${caseWord}`;
   const direction = delta > 0 ? "more" : "fewer";
   return `Your skill passes ${diff} ${direction} assertions across ${caseCount} ${caseWord}`;
 }
@@ -39,14 +47,12 @@ export function formatComparisonScore(
   skillScore: number,
   baselineScore: number,
 ): { skill: number; baseline: number } {
-  return {
-    skill: Math.round((skillScore / 5) * 100),
-    baseline: Math.round((baselineScore / 5) * 100),
-  };
+  const pct = (s: number) => Math.round(Math.min(100, Math.max(0, (s / 5) * 100)));
+  return { skill: pct(skillScore), baseline: pct(baselineScore) };
 }
 
 /** Returns winner badge text and accent flag for a comparison result. */
-export function winnerLabel(winner: string): { text: string; isSkill: boolean } {
+export function winnerLabel(winner: "skill" | "baseline" | "tie" | string): { text: string; isSkill: boolean } {
   if (winner === "skill") return { text: "Skill wins", isSkill: true };
   if (winner === "baseline") return { text: "Baseline wins", isSkill: false };
   return { text: "Tie", isSkill: false };

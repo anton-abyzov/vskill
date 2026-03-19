@@ -104,7 +104,7 @@ export function verdictExplanation(
   };
 }
 
-const VERDICT_LABELS: Record<string, string> = {
+const VERDICT_LABELS: Record<EvalVerdict, string> = {
   EFFECTIVE: "Strong Improvement",
   MARGINAL: "Moderate Improvement",
   EMERGING: "Early Promise",
@@ -113,7 +113,7 @@ const VERDICT_LABELS: Record<string, string> = {
 };
 
 export function verdictLabel(verdict: string): string {
-  return VERDICT_LABELS[verdict] ?? verdict;
+  return VERDICT_LABELS[verdict as EvalVerdict] ?? verdict;
 }
 
 export function verdictColor(verdict: EvalVerdict): string {

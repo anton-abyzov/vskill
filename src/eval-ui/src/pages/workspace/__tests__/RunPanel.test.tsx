@@ -49,6 +49,8 @@ describe("formatProvenance", () => {
     expect(result).toContain("claude-sonnet-4-5");
     expect(result).toContain("·");
     expect(result).toContain("Mar 19, 2026");
+    // AC-US1-04 requires time component (e.g. "7:30 PM")
+    expect(result).toMatch(/\d+:\d{2}/);
   });
 
   it("returns only model when timestamp is missing", () => {
@@ -66,6 +68,13 @@ describe("formatProvenance", () => {
   it("returns empty string when both model and timestamp are missing", () => {
     expect(formatProvenance(undefined, undefined)).toBe("");
     expect(formatProvenance("", "")).toBe("");
+  });
+
+  it("ignores invalid (non-date) timestamp strings", () => {
+    const result = formatProvenance("claude-sonnet-4-5", "not-a-date");
+    // invalid timestamp → treated as missing → only model shown, no separator
+    expect(result).toBe("claude-sonnet-4-5");
+    expect(result).not.toContain("Invalid Date");
   });
 });
 
@@ -95,6 +104,13 @@ describe("deltaStatement", () => {
     expect(result).toContain("4 test cases");
   });
 
+  it("says 'performs the same' when near-zero delta rounds to 0 assertions", () => {
+    // delta=0.001, totalAssertions=1 → Math.round(0.001) = 0 → treat as same
+    const result = deltaStatement(0.001, 1, 5);
+    expect(result).toContain("same");
+    expect(result).not.toContain("0 more");
+  });
+
   it("handles singular test case correctly", () => {
     const result = deltaStatement(1.0, 3, 1);
     expect(result).toContain("1 test case");
@@ -116,6 +132,11 @@ describe("formatComparisonScore", () => {
   it("rounds to nearest integer", () => {
     // 3/5 = 60%, 1/5 = 20%
     expect(formatComparisonScore(3, 1)).toEqual({ skill: 60, baseline: 20 });
+  });
+
+  it("clamps out-of-range scores to [0, 100]", () => {
+    expect(formatComparisonScore(0, 0)).toEqual({ skill: 0, baseline: 0 });
+    expect(formatComparisonScore(6, 10)).toEqual({ skill: 100, baseline: 100 });
   });
 });
 

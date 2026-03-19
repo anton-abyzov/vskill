@@ -2,11 +2,11 @@
 // vskill update -- update installed skills
 // ---------------------------------------------------------------------------
 
-import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
-import { join, dirname, resolve, relative } from "node:path";
+import { unlinkSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { readLockfile, writeLockfile } from "../lockfile/index.js";
-import { ensureFrontmatter } from "../installer/frontmatter.js";
 import { ensureSkillMdNaming } from "../installer/migrate.js";
+import { installSymlink } from "../installer/canonical.js";
 import { getSkill } from "../api/client.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { filterAgents } from "../utils/agent-filter.js";
@@ -187,46 +187,53 @@ export async function updateCommand(
         ? Object.keys(result.files).sort()
         : ["SKILL.md"];
 
-      // 8. Ghost file cleanup + install to each agent
+      // 8. Ghost file cleanup + install via canonical installer
+      const projectRoot = process.cwd();
       for (const agent of agents) {
-        const skillDir = join(
-          process.cwd(),
-          agent.localSkillsDir,
-          name
-        );
+        const skillDir = join(projectRoot, agent.localSkillsDir, name);
         try {
-          // Clean up files removed in the new version
           cleanupGhostFiles(skillDir, entry.files, newFileKeys);
-
-          // Write all files from the files map (or just SKILL.md for compat)
-          const resolvedSkillDir = resolve(skillDir);
-          if (result.files) {
-            for (const [relPath, fileContent] of Object.entries(result.files)) {
-              const filePath = resolve(skillDir, relPath);
-              // Guard: never write outside the skill directory
-              if (!filePath.startsWith(resolvedSkillDir + "/") && filePath !== resolvedSkillDir) continue;
-              mkdirSync(dirname(filePath), { recursive: true });
-              writeFileSync(
-                filePath,
-                relPath === "SKILL.md" ? ensureFrontmatter(fileContent, name) : fileContent,
-                "utf-8"
-              );
-            }
-          } else {
-            mkdirSync(skillDir, { recursive: true });
-            writeFileSync(
-              join(skillDir, "SKILL.md"),
-              ensureFrontmatter(result.content, name),
-              "utf-8"
-            );
-          }
         } catch {
-          // Silently skip write failures for update
+          // Non-fatal — continue with install
         }
       }
+      // Also clean ghost files in canonical dir
+      const canonicalSkillDir = join(projectRoot, ".agents", "skills", name);
+      try {
+        cleanupGhostFiles(canonicalSkillDir, entry.files, newFileKeys);
+      } catch {
+        // Non-fatal
+      }
+
+      // Extract agentFiles (non-SKILL.md files) from the files map
+      let agentFiles: Record<string, string> | undefined;
+      if (result.files) {
+        const extra: Record<string, string> = {};
+        for (const [relPath, fileContent] of Object.entries(result.files)) {
+          if (relPath !== "SKILL.md") {
+            extra[relPath] = fileContent;
+          }
+        }
+        if (Object.keys(extra).length > 0) {
+          agentFiles = extra;
+        }
+      }
+
+      try {
+        installSymlink(
+          name,
+          result.content,
+          agents,
+          { global: false, projectRoot },
+          agentFiles,
+        );
+      } catch {
+        // Silently skip install failures for update
+      }
+
       // Defense-in-depth: enforce SKILL.md naming after update
       for (const agent of agents) {
-        const agentBase = join(process.cwd(), agent.localSkillsDir);
+        const agentBase = join(projectRoot, agent.localSkillsDir);
         ensureSkillMdNaming(agentBase);
       }
 

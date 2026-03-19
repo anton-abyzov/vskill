@@ -57,10 +57,19 @@ vi.mock("../agents/agents-registry.js", () => ({
 // ---------------------------------------------------------------------------
 vi.mock("../installer/frontmatter.js", () => ({
   ensureFrontmatter: (content: string, name: string) => `---\nname: ${name}\n---\n${content}`,
+  stripClaudeFields: (content: string, _name: string) => content.replace(/^user-invocable\s*:.*\n?/gm, ""),
 }));
 const mockEnsureSkillMdNaming = vi.hoisted(() => vi.fn());
 vi.mock("../installer/migrate.js", () => ({
   ensureSkillMdNaming: (...args: unknown[]) => mockEnsureSkillMdNaming(...args),
+}));
+
+// ---------------------------------------------------------------------------
+// Mock canonical installer
+// ---------------------------------------------------------------------------
+const mockInstallSymlink = vi.hoisted(() => vi.fn().mockReturnValue([]));
+vi.mock("../installer/canonical.js", () => ({
+  installSymlink: (...args: unknown[]) => mockInstallSymlink(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -164,26 +173,23 @@ describe("updateCommand", () => {
     const { updateCommand } = await import("./update.js");
     await updateCommand("frontend", { all: false, agent: "claude-code" });
 
-    // Should only write to claude-code's skill dir, NOT cursor's
-    const mkdirCalls = mockMkdirSync.mock.calls.map((c) => c[0] as string);
-    const claudeCalls = mkdirCalls.filter((p: string) => p.includes(".claude"));
-    const cursorCalls = mkdirCalls.filter((p: string) => p.includes(".cursor"));
-
-    expect(claudeCalls.length).toBeGreaterThan(0);
-    expect(cursorCalls.length).toBe(0);
+    // installSymlink should receive only claude-code agent, not cursor
+    expect(mockInstallSymlink).toHaveBeenCalledTimes(1);
+    const agents = mockInstallSymlink.mock.calls[0][2];
+    expect(agents).toHaveLength(1);
+    expect(agents[0].id).toBe("claude-code");
   });
 
   it("updates all detected agents when --agent is NOT provided", async () => {
     const { updateCommand } = await import("./update.js");
     await updateCommand("frontend", { all: false });
 
-    // Should write to BOTH agent dirs
-    const mkdirCalls = mockMkdirSync.mock.calls.map((c) => c[0] as string);
-    const claudeCalls = mkdirCalls.filter((p: string) => p.includes(".claude"));
-    const cursorCalls = mkdirCalls.filter((p: string) => p.includes(".cursor"));
-
-    expect(claudeCalls.length).toBeGreaterThan(0);
-    expect(cursorCalls.length).toBeGreaterThan(0);
+    // installSymlink should receive both agents
+    expect(mockInstallSymlink).toHaveBeenCalledTimes(1);
+    const agents = mockInstallSymlink.mock.calls[0][2];
+    const agentIds = agents.map((a: { id: string }) => a.id);
+    expect(agentIds).toContain("claude-code");
+    expect(agentIds).toContain("cursor");
   });
 
   it("exits with error when --agent specifies unknown ID", async () => {
@@ -235,7 +241,7 @@ describe("updateCommand", () => {
     await updateCommand("frontend", { all: false });
 
     expect(mockGetSkill).toHaveBeenCalledWith("frontend");
-    expect(mockWriteFileSync).toHaveBeenCalled();
+    expect(mockInstallSymlink).toHaveBeenCalled();
   });
 
   it("falls back to registry for local source when fetchFromSource returns null (no cache)", async () => {
@@ -302,23 +308,17 @@ describe("updateCommand", () => {
     expect(writtenLock.skills["frontend"].source).toBe("github:test/repo");
   });
 
-  it("TC-201: written SKILL.md contains frontmatter with name field", async () => {
+  it("TC-201: installSymlink receives correct skill name and content", async () => {
     mockRunTier1Scan.mockReturnValue({ verdict: "PASS", score: 100, findings: [] });
 
     const { updateCommand } = await import("./update.js");
     await updateCommand("frontend", { all: false });
 
-    // Find all writeFileSync calls that wrote SKILL.md
-    const writeCalls = mockWriteFileSync.mock.calls.filter(
-      (c) => (c[0] as string).endsWith("SKILL.md"),
-    );
-    expect(writeCalls.length).toBeGreaterThan(0);
-
-    for (const call of writeCalls) {
-      const written = call[1] as string;
-      expect(written).toMatch(/^---\n/);
-      expect(written).toContain("name: frontend");
-    }
+    // installSymlink is responsible for frontmatter + writing; verify it was called with correct args
+    expect(mockInstallSymlink).toHaveBeenCalledTimes(1);
+    const call = mockInstallSymlink.mock.calls[0];
+    expect(call[0]).toBe("frontend"); // skill name
+    expect(call[1]).toBe(UPDATED_CONTENT); // content passed for frontmatter handling
   });
 
   it("writes lockfile exactly once after the loop", async () => {
@@ -591,10 +591,103 @@ describe("updateCommand", () => {
     const { updateCommand } = await import("./update.js");
     await updateCommand("frontend", { all: false });
 
-    const writePaths = mockWriteFileSync.mock.calls.map((c) => c[0] as string);
-    const skillMdWrites = writePaths.filter((p: string) => p.endsWith("SKILL.md"));
-    const helperWrites = writePaths.filter((p: string) => p.endsWith("agents/helper.md"));
-    expect(skillMdWrites.length).toBeGreaterThan(0);
-    expect(helperWrites.length).toBeGreaterThan(0);
+    // installSymlink should be called with agentFiles containing the non-SKILL.md file
+    expect(mockInstallSymlink).toHaveBeenCalledTimes(1);
+    const call = mockInstallSymlink.mock.calls[0];
+    expect(call[0]).toBe("frontend"); // skill name
+    expect(call[1]).toBe("# Main"); // SKILL.md content
+    expect(call[4]).toEqual({ "agents/helper.md": "# Helper" }); // agentFiles
+  });
+
+  // ---------------------------------------------------------------------------
+  // Canonical installer routing (installSymlink)
+  // ---------------------------------------------------------------------------
+
+  it("calls installSymlink instead of writing files directly", async () => {
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    expect(mockInstallSymlink).toHaveBeenCalled();
+  });
+
+  it("passes skill content and filtered agents to installSymlink", async () => {
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    const call = mockInstallSymlink.mock.calls[0];
+    // arg 0: skill name
+    expect(call[0]).toBe("frontend");
+    // arg 1: content (the SKILL.md content from the fetch result)
+    expect(call[1]).toBe(UPDATED_CONTENT);
+    // arg 2: agents array — should be all detected agents
+    expect(call[2]).toEqual(MOCK_AGENTS);
+    // arg 3: install options with projectRoot and global=false
+    expect(call[3]).toMatchObject({ global: false, projectRoot: expect.any(String) });
+  });
+
+  it("passes agentFiles from result.files to installSymlink", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: ["claude-code"],
+      skills: {
+        frontend: {
+          version: "1.0.0",
+          sha: "old-" + "0".repeat(60),
+          tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z",
+          source: "github:test/repo",
+          files: ["SKILL.md"],
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockFetchFromSource.mockResolvedValue({
+      content: "# Main",
+      version: "2.0.0",
+      sha: "new-" + "1".repeat(60),
+      tier: "VERIFIED",
+      files: { "SKILL.md": "# Main", "agents/helper.md": "# Helper" },
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    const call = mockInstallSymlink.mock.calls[0];
+    // arg 4: agentFiles — should contain non-SKILL.md files
+    expect(call[4]).toEqual({ "agents/helper.md": "# Helper" });
+  });
+
+  it("only passes filtered agents to installSymlink when --agent is used", async () => {
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false, agent: "claude-code" });
+
+    const call = mockInstallSymlink.mock.calls[0];
+    // Only claude-code should be passed, not cursor
+    expect(call[2]).toHaveLength(1);
+    expect(call[2][0].id).toBe("claude-code");
+  });
+
+  it("does not call installSymlink when SHA is unchanged", async () => {
+    mockFetchFromSource.mockResolvedValue({
+      content: "# Same content",
+      version: "1.0.0",
+      sha: "aaa111bbb222",
+      tier: "VERIFIED",
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    expect(mockInstallSymlink).not.toHaveBeenCalled();
+  });
+
+  it("does not call installSymlink when scan fails", async () => {
+    mockRunTier1Scan.mockReturnValue({ verdict: "FAIL", score: 0, findings: ["malicious"] });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    expect(mockInstallSymlink).not.toHaveBeenCalled();
   });
 });

@@ -47,8 +47,8 @@ export async function checkPlatformSecurity(
 
     const providers: ProviderResult[] = (data.providers || []).map((p) => ({
       provider: String(p.provider || ""),
-      status: String(p.status || "PENDING"),
-      verdict: p.verdict ?? null,
+      status: (String(p.status || "PENDING")) as ProviderResult["status"],
+      verdict: (p.verdict ?? null) as ProviderResult["verdict"],
       criticalCount: Number(p.criticalCount ?? 0),
     }));
 
@@ -58,7 +58,7 @@ export async function checkPlatformSecurity(
 
     return {
       hasCritical,
-      overallVerdict: String(data.overallVerdict || "PENDING"),
+      overallVerdict: (String(data.overallVerdict || "PENDING")) as PlatformSecurityResult["overallVerdict"],
       providers,
       reportUrl: String(data.reportUrl || ""),
     };

@@ -3,7 +3,54 @@ import { useWorkspace } from "./WorkspaceContext";
 import { useConfig } from "../../ConfigContext";
 import type { RunMode, InlineResult, CaseRunStatus } from "./workspaceTypes";
 import type { ClassifiedError } from "../../components/ErrorCard";
+import type { ComparisonCaseDetail } from "../../types";
 import { formatCost, formatTokens } from "../../utils/formatCost";
+import { verdictLabel } from "../../../../eval/verdict.js";
+
+// ---------------------------------------------------------------------------
+// Exported pure helpers (tested in RunPanel.test.tsx)
+// ---------------------------------------------------------------------------
+
+/** Returns the appropriate pass-rate label based on the benchmark run type. */
+export function passRateLabel(type?: string): string {
+  return type === "baseline" ? "Baseline Pass Rate" : "Skill Pass Rate";
+}
+
+/** Formats model + timestamp into a provenance string like "claude-sonnet-4-5 · Mar 19, 2026". */
+export function formatProvenance(model?: string, timestamp?: string): string {
+  const datePart = timestamp
+    ? new Date(timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : "";
+  const parts = [model, datePart].filter(Boolean);
+  return parts.join(" · ");
+}
+
+/** Produces a human-readable improvement statement from comparison delta. */
+export function deltaStatement(delta: number, totalAssertions: number, caseCount: number): string {
+  const caseWord = caseCount === 1 ? "test case" : "test cases";
+  if (delta === 0) return `Your skill performs the same as the baseline across ${caseCount} ${caseWord}`;
+  const diff = Math.round(Math.abs(delta) * totalAssertions);
+  const direction = delta > 0 ? "more" : "fewer";
+  return `Your skill passes ${diff} ${direction} assertions across ${caseCount} ${caseWord}`;
+}
+
+/** Converts 1-5 rubric scores to percentage pairs for display. */
+export function formatComparisonScore(
+  skillScore: number,
+  baselineScore: number,
+): { skill: number; baseline: number } {
+  return {
+    skill: Math.round((skillScore / 5) * 100),
+    baseline: Math.round((baselineScore / 5) * 100),
+  };
+}
+
+/** Returns winner badge text and accent flag for a comparison result. */
+export function winnerLabel(winner: string): { text: string; isSkill: boolean } {
+  if (winner === "skill") return { text: "Skill wins", isSkill: true };
+  if (winner === "baseline") return { text: "Baseline wins", isSkill: false };
+  return { text: "Tie", isSkill: false };
+}
 
 /** Estimate duration label based on case/assertion count (client-side heuristic) */
 function estimateLabel(totalCases: number, totalAssertions: number): string {
@@ -121,14 +168,29 @@ export function RunPanel() {
               Cancel All
             </button>
           )}
-          <button onClick={() => runAll("comparison")} disabled={cases.length === 0 || isAnyRunning || isReadOnly} className="btn btn-primary text-[12px]">
-            Compare All
+          <button
+            onClick={() => runAll("comparison")}
+            disabled={cases.length === 0 || isAnyRunning || isReadOnly}
+            className="btn btn-primary text-[12px]"
+            title="Runs both your skill and the baseline, then compares results side by side"
+          >
+            Run A/B Test
           </button>
-          <button onClick={() => runAll("benchmark")} disabled={cases.length === 0 || isAnyRunning || isReadOnly} className="btn btn-secondary text-[12px]">
-            Skill Only
+          <button
+            onClick={() => runAll("benchmark")}
+            disabled={cases.length === 0 || isAnyRunning || isReadOnly}
+            className="btn btn-secondary text-[12px]"
+            title="Runs benchmark using your skill only"
+          >
+            Test Skill
           </button>
-          <button onClick={() => runAll("baseline")} disabled={cases.length === 0 || isAnyRunning || isReadOnly} className="btn btn-secondary text-[12px]">
-            Baseline Only
+          <button
+            onClick={() => runAll("baseline")}
+            disabled={cases.length === 0 || isAnyRunning || isReadOnly}
+            className="btn btn-secondary text-[12px]"
+            title="Runs benchmark using the baseline (no skill) for reference"
+          >
+            Test Baseline
           </button>
         </div>
 
@@ -196,6 +258,7 @@ export function RunPanel() {
               caseOutputTokens={benchCase?.outputTokens}
               caseStatus={caseStatus}
               runMode={caseRunState?.mode ?? null}
+              comparisonDetail={benchCase?.comparisonDetail}
               isReadOnly={isReadOnly}
               onRun={(id) => runCase(id, "benchmark")}
               onBaseline={(id) => runCase(id, "baseline")}
@@ -215,7 +278,7 @@ export function RunPanel() {
           >
             <div className="flex items-center justify-between">
               <span className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
-                Overall Pass Rate
+                {passRateLabel(latestBenchmark.type)}
               </span>
               <span
                 className="text-[20px] font-bold"
@@ -264,9 +327,17 @@ export function RunPanel() {
               className="rounded-xl p-4"
               style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)" }}
             >
-              <div className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--text-tertiary)" }}>
+              <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>
                 Skill vs Baseline
               </div>
+              {(() => {
+                const provenance = formatProvenance(latestBenchmark.model, latestBenchmark.timestamp);
+                return provenance ? (
+                  <div className="text-[10px] mt-0.5 mb-3" style={{ color: "var(--text-tertiary)" }}>
+                    {provenance}
+                  </div>
+                ) : <div className="mb-3" />;
+              })()}
               <div className="grid grid-cols-2 gap-4">
                 <ScoreBar label="Skill" value={latestBenchmark.comparison.skillPassRate} color="var(--accent)" />
                 <ScoreBar label="Baseline" value={latestBenchmark.comparison.baselinePassRate} color="var(--text-tertiary)" />
@@ -275,8 +346,21 @@ export function RunPanel() {
                 color: latestBenchmark.comparison.delta > 0 ? "var(--green)" : latestBenchmark.comparison.delta < 0 ? "var(--red)" : "var(--text-tertiary)",
               }}>
                 Delta: {latestBenchmark.comparison.delta > 0 ? "+" : ""}{(latestBenchmark.comparison.delta * 100).toFixed(1)}%
-                {latestBenchmark.verdict && ` | ${latestBenchmark.verdict}`}
+                {latestBenchmark.verdict && ` | ${verdictLabel(latestBenchmark.verdict)}`}
               </div>
+              {(() => {
+                const totalAssertions = latestBenchmark.cases.reduce((s, c) => s + c.assertions.length, 0);
+                const stmt = deltaStatement(
+                  latestBenchmark.comparison.delta,
+                  totalAssertions,
+                  latestBenchmark.cases.length,
+                );
+                return (
+                  <div className="mt-1 text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+                    {stmt}
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -295,7 +379,7 @@ const MODE_BADGE: Record<string, { label: string; bg: string; color: string }> =
   comparison: { label: "Compare", bg: "rgba(168,85,247,0.12)", color: "rgb(168,85,247)" },
 };
 
-function RunCaseCard({ name, evalId, result, caseCost, caseBillingMode, caseInputTokens, caseOutputTokens, caseStatus, runMode, isReadOnly, onRun, onBaseline, onCompare, onCancel }: {
+function RunCaseCard({ name, evalId, result, caseCost, caseBillingMode, caseInputTokens, caseOutputTokens, caseStatus, runMode, comparisonDetail, isReadOnly, onRun, onBaseline, onCompare, onCancel }: {
   name: string;
   evalId: number;
   result?: InlineResult;
@@ -305,6 +389,7 @@ function RunCaseCard({ name, evalId, result, caseCost, caseBillingMode, caseInpu
   caseOutputTokens?: number | null;
   caseStatus: CaseRunStatus;
   runMode: RunMode | null;
+  comparisonDetail?: ComparisonCaseDetail;
   isReadOnly?: boolean;
   onRun: (evalId: number) => void;
   onBaseline: (evalId: number) => void;
@@ -425,6 +510,39 @@ function RunCaseCard({ name, evalId, result, caseCost, caseBillingMode, caseInpu
               {result.output}
             </pre>
           )}
+        </div>
+      )}
+
+      {/* Per-case comparison detail row */}
+      {comparisonDetail && (
+        <div className="px-4 pb-3">
+          <div
+            className="rounded-lg px-3 py-2"
+            style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+          >
+            <div className="flex items-center gap-4 text-[11px] flex-wrap">
+              {(() => {
+                const content = formatComparisonScore(comparisonDetail.skillContentScore, comparisonDetail.baselineContentScore);
+                const structure = formatComparisonScore(comparisonDetail.skillStructureScore, comparisonDetail.baselineStructureScore);
+                const badge = winnerLabel(comparisonDetail.winner);
+                return (
+                  <>
+                    <span style={{ color: "var(--text-secondary)" }}>
+                      Content: Skill {content.skill}% / Baseline {content.baseline}%
+                    </span>
+                    <span style={{ color: "var(--text-tertiary)" }}>·</span>
+                    <span style={{ color: "var(--text-secondary)" }}>
+                      Structure: Skill {structure.skill}% / Baseline {structure.baseline}%
+                    </span>
+                    <span style={{ color: "var(--text-tertiary)" }}>·</span>
+                    <span style={{ color: badge.isSkill ? "var(--accent)" : "var(--text-tertiary)", fontWeight: 500 }}>
+                      {badge.text}
+                    </span>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
         </div>
       )}
 

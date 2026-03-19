@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeVerdict, verdictColor, verdictExplanation } from "../verdict.js";
+import { computeVerdict, verdictColor, verdictExplanation, verdictLabel } from "../verdict.js";
 
 describe("computeVerdict", () => {
   it("returns EFFECTIVE when passRate >= 0.8 and skill rubric > baseline + 1", () => {
@@ -205,5 +205,40 @@ describe("verdictExplanation", () => {
 
     const ineffResult = verdictExplanation("INEFFECTIVE", 0.1, rubric);
     expect(ineffResult.recommendations).toBeDefined();
+  });
+});
+
+describe("verdictLabel", () => {
+  it('maps "EFFECTIVE" to "Strong Improvement"', () => {
+    expect(verdictLabel("EFFECTIVE")).toBe("Strong Improvement");
+  });
+
+  it('maps "MARGINAL" to "Moderate Improvement"', () => {
+    expect(verdictLabel("MARGINAL")).toBe("Moderate Improvement");
+  });
+
+  it('maps "EMERGING" to "Early Promise"', () => {
+    expect(verdictLabel("EMERGING")).toBe("Early Promise");
+  });
+
+  it('maps "INEFFECTIVE" to "Needs Work"', () => {
+    expect(verdictLabel("INEFFECTIVE")).toBe("Needs Work");
+  });
+
+  it('maps "DEGRADING" to "Regression"', () => {
+    expect(verdictLabel("DEGRADING")).toBe("Regression");
+  });
+
+  it("passes through unknown verdict strings unchanged", () => {
+    expect(verdictLabel("UNKNOWN_CODE")).toBe("UNKNOWN_CODE");
+    expect(verdictLabel("")).toBe("");
+    expect(verdictLabel("some-other-thing")).toBe("some-other-thing");
+  });
+
+  it("is a pure function with no side effects", () => {
+    const result1 = verdictLabel("EFFECTIVE");
+    const result2 = verdictLabel("EFFECTIVE");
+    expect(result1).toBe(result2);
+    expect(typeof verdictLabel).toBe("function");
   });
 });

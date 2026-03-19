@@ -104,6 +104,18 @@ export function verdictExplanation(
   };
 }
 
+const VERDICT_LABELS: Record<string, string> = {
+  EFFECTIVE: "Strong Improvement",
+  MARGINAL: "Moderate Improvement",
+  EMERGING: "Early Promise",
+  INEFFECTIVE: "Needs Work",
+  DEGRADING: "Regression",
+};
+
+export function verdictLabel(verdict: string): string {
+  return VERDICT_LABELS[verdict] ?? verdict;
+}
+
 export function verdictColor(verdict: EvalVerdict): string {
   switch (verdict) {
     case "EFFECTIVE":

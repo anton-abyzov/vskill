@@ -3,16 +3,15 @@
 // ---------------------------------------------------------------------------
 
 import { resolve, basename } from "node:path";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import * as net from "node:net";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { startEvalServer } from "../../eval-server/eval-server.js";
 import { yellow, dim, red, cyan, bold } from "../../utils/output.js";
 import { createPrompter } from "../../utils/prompts.js";
-import { AGENTS_REGISTRY } from "../../agents/agents-registry.js";
+import { isSkillCreatorInstalled } from "../../utils/skill-creator-detection.js";
 
 /**
  * Deterministic port for a project path.
@@ -26,36 +25,7 @@ export function projectPort(rootPath: string): number {
 }
 
 function checkSkillCreator(): void {
-  const home = homedir();
-
-  // Check canonical vskill path first
-  let found = existsSync(join(home, ".agents", "skills", "skill-creator"));
-
-  // Check every registered agent's global skills directory and plugin cache
-  if (!found) {
-    found = AGENTS_REGISTRY.some((agent) => {
-      const resolved = agent.globalSkillsDir.replace("~", home);
-      if (existsSync(join(resolved, "skill-creator"))) return true;
-
-      // Check plugin cache: cache/<marketplace>/<plugin-name>/<version>/
-      if (agent.pluginCacheDir) {
-        const cacheDir = agent.pluginCacheDir.replace("~", home);
-        try {
-          if (existsSync(cacheDir)) {
-            for (const mkt of readdirSync(cacheDir, { withFileTypes: true })) {
-              if (!mkt.isDirectory()) continue;
-              for (const plugin of readdirSync(join(cacheDir, mkt.name), { withFileTypes: true })) {
-                if (plugin.isDirectory() && plugin.name.includes("skill-creator")) return true;
-              }
-            }
-          }
-        } catch { /* ignore */ }
-      }
-      return false;
-    });
-  }
-
-  if (!found) {
+  if (!isSkillCreatorInstalled()) {
     console.log(
       yellow("\n  Skill-Creator not detected.") +
         "\n\n" +

@@ -245,3 +245,65 @@ describe("ensureFrontmatter — idempotency", () => {
     expect(second).toBe(first);
   });
 });
+
+describe("stripClaudeFields", () => {
+  it("strips user-invocable, allowed-tools, model, argument-hint, context", () => {
+    const content = [
+      "---",
+      "name: my-skill",
+      "description: A skill",
+      "user-invocable: true",
+      "allowed-tools: Read,Write",
+      "model: opus",
+      "argument-hint: [topic]",
+      "context: fork",
+      "---",
+      "# Body",
+    ].join("\n");
+    const result = stripClaudeFields(content, "my-skill");
+    expect(result).toContain("name: my-skill");
+    expect(result).toContain("description: A skill");
+    expect(result).not.toContain("user-invocable");
+    expect(result).not.toContain("allowed-tools");
+    expect(result).not.toContain("model:");
+    expect(result).not.toContain("argument-hint");
+    expect(result).not.toContain("context:");
+    expect(result).toContain("# Body");
+  });
+
+  it("strips user-invokable (alternate spelling)", () => {
+    const content = "---\nname: s\ndescription: d\nuser-invokable: true\n---\n# Body";
+    const result = stripClaudeFields(content, "s");
+    expect(result).not.toContain("user-invokable");
+  });
+
+  it("injects name when missing after stripping", () => {
+    const content = "---\ndescription: A skill\nmodel: opus\n---\n# Body";
+    const result = stripClaudeFields(content, "my-skill");
+    expect(result).toContain("name: my-skill");
+    expect(result).not.toContain("model:");
+  });
+
+  it("preserves non-Claude fields untouched", () => {
+    const content = "---\nname: s\ndescription: d\nauthor: Alice\nversion: 1.0\nmodel: opus\n---\n# Body";
+    const result = stripClaudeFields(content, "s");
+    expect(result).toContain("author: Alice");
+    expect(result).toContain("version: 1.0");
+    expect(result).not.toContain("model:");
+  });
+
+  it("handles content with no frontmatter", () => {
+    const content = "# My Skill\n\nDoes things.";
+    const result = stripClaudeFields(content, "my-skill");
+    expect(result).toMatch(/^---\n/);
+    expect(result).toContain("name: my-skill");
+    expect(result).toContain("# My Skill");
+  });
+
+  it("is idempotent", () => {
+    const content = "---\nname: s\ndescription: d\nmodel: opus\n---\n# Body";
+    const first = stripClaudeFields(content, "s");
+    const second = stripClaudeFields(first, "s");
+    expect(second).toBe(first);
+  });
+});

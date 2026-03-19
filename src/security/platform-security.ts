@@ -18,6 +18,24 @@ export interface PlatformSecurityResult {
   reportUrl: string;
 }
 
+// ---------------------------------------------------------------------------
+// Runtime validation helpers
+// ---------------------------------------------------------------------------
+
+const VALID_STATUSES = new Set<ProviderResult["status"]>(["PASS", "FAIL", "PENDING", "TIMED_OUT"]);
+const VALID_VERDICTS = new Set<NonNullable<ProviderResult["verdict"]>>(["PASS", "FAIL", "CONCERNS", "PENDING"]);
+const VALID_OVERALL = new Set<PlatformSecurityResult["overallVerdict"]>(["PASS", "FAIL", "PENDING", "TIMED_OUT", "CERTIFIED"]);
+
+function validateEnum<T extends string>(value: string, allowed: Set<T>, fallback: T): T {
+  const upper = value.toUpperCase() as T;
+  return allowed.has(upper) ? upper : fallback;
+}
+
+function safeNumber(value: unknown, fallback: number): number {
+  const n = Number(value ?? fallback);
+  return isNaN(n) ? fallback : n;
+}
+
 /**
  * Check external SAST scan results from the platform API.
  * Returns null on any network/API error (best-effort, non-fatal).
@@ -27,7 +45,7 @@ export async function checkPlatformSecurity(
 ): Promise<PlatformSecurityResult | null> {
   try {
     const url = `${BASE_URL}/api/v1/skills/${skillName.split("/").map(encodeURIComponent).join("/")}/security`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
 
     if (!res.ok) {
       console.warn(`[platform-security] HTTP ${res.status} for ${skillName}`);
@@ -41,16 +59,21 @@ export async function checkPlatformSecurity(
         provider?: string;
         status?: string;
         verdict?: string | null;
-        criticalCount?: number;
+        criticalCount?: unknown;
       }>;
     };
 
     const providers: ProviderResult[] = (data.providers || []).map((p) => ({
       provider: String(p.provider || ""),
-      status: (String(p.status || "PENDING")) as ProviderResult["status"],
-      verdict: (p.verdict ?? null) as ProviderResult["verdict"],
-      criticalCount: Number(p.criticalCount ?? 0),
+      status: validateEnum(String(p.status || "PENDING"), VALID_STATUSES, "PENDING"),
+      verdict: p.verdict == null ? null : validateEnum(String(p.verdict), VALID_VERDICTS, "PENDING"),
+      criticalCount: safeNumber(p.criticalCount, 0),
     }));
+
+    // Empty providers = no scan data available — report as PENDING, not all-clear
+    const overallVerdict = providers.length === 0
+      ? "PENDING" as const
+      : validateEnum(String(data.overallVerdict || "PENDING"), VALID_OVERALL, "PENDING");
 
     const hasCritical = providers.some(
       (p) => p.status === "FAIL" && p.criticalCount > 0,
@@ -58,7 +81,7 @@ export async function checkPlatformSecurity(
 
     return {
       hasCritical,
-      overallVerdict: (String(data.overallVerdict || "PENDING")) as PlatformSecurityResult["overallVerdict"],
+      overallVerdict,
       providers,
       reportUrl: String(data.reportUrl || ""),
     };

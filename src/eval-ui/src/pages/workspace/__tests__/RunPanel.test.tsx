@@ -34,9 +34,11 @@ describe("passRateLabel", () => {
     expect(passRateLabel(undefined)).toBe("Skill Pass Rate");
   });
 
-  it('returns "Skill Pass Rate" for any other run type', () => {
-    expect(passRateLabel("model-compare")).toBe("Skill Pass Rate");
-    expect(passRateLabel("improve")).toBe("Skill Pass Rate");
+  it('returns "Skill Pass Rate" for any other run type (defensive runtime check)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(passRateLabel("model-compare" as any)).toBe("Skill Pass Rate");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(passRateLabel("improve" as any)).toBe("Skill Pass Rate");
   });
 });
 
@@ -138,6 +140,11 @@ describe("formatComparisonScore", () => {
     expect(formatComparisonScore(0, 0)).toEqual({ skill: 0, baseline: 0 });
     expect(formatComparisonScore(6, 10)).toEqual({ skill: 100, baseline: 100 });
   });
+
+  it("clamps negative inputs to 0", () => {
+    expect(formatComparisonScore(-1, -2)).toEqual({ skill: 0, baseline: 0 });
+    expect(formatComparisonScore(-5, 3)).toEqual({ skill: 0, baseline: 60 });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -159,8 +166,10 @@ describe("winnerLabel", () => {
     expect(winnerLabel("tie").isSkill).toBe(false);
   });
 
-  it('falls back to "Tie" for unrecognized winner values', () => {
-    expect(winnerLabel("").text).toBe("Tie");
-    expect(winnerLabel("draw").text).toBe("Tie");
+  it('falls back to "Tie" for unrecognized winner values (defensive runtime check)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(winnerLabel("" as any).text).toBe("Tie");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(winnerLabel("draw" as any).text).toBe("Tie");
   });
 });

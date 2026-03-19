@@ -8,7 +8,7 @@ describe("computeVerdict", () => {
     expect(computeVerdict(1.0, 5.0, 1.0)).toBe("EFFECTIVE");
   });
 
-  it("returns MARGINAL when passRate >= 0.6 and skill rubric > baseline (but not EFFECTIVE)", () => {
+  it("returns MARGINAL when passRate >= 0.5 and skill improves over baseline (but not EFFECTIVE)", () => {
     expect(computeVerdict(0.70, 3.5, 3.0)).toBe("MARGINAL");
     expect(computeVerdict(0.60, 2.5, 2.0)).toBe("MARGINAL");
     // High pass rate but rubric only slightly better → MARGINAL
@@ -48,6 +48,15 @@ describe("computeVerdict", () => {
     expect(computeVerdict(0.4, 5.0, 0.0)).toBe("EMERGING");
     // Skill rubric worse → DEGRADING
     expect(computeVerdict(0.4, 1.0, 5.0)).toBe("DEGRADING");
+  });
+
+  it("handles boundary at passRate = 0.5 (medium zone entry)", () => {
+    // Exactly 0.5 with baselinePassRate=0 (default): passRateDelta=0.5 > 0 → MARGINAL
+    expect(computeVerdict(0.5, 3.0, 3.0)).toBe("MARGINAL");
+    // Exactly 0.5 with baseline also 0.5: no improvement → INEFFECTIVE
+    expect(computeVerdict(0.5, 3.0, 3.0, 0.5)).toBe("INEFFECTIVE");
+    // Exactly 0.5 with baseline 0.4: slight improvement → MARGINAL
+    expect(computeVerdict(0.5, 3.0, 3.0, 0.4)).toBe("MARGINAL");
   });
 
   it("handles boundary at passRate = 0.6", () => {
@@ -181,6 +190,29 @@ describe("verdictExplanation", () => {
     expect(result.explanation).toContain("significantly below");
     expect(result.recommendations).toBeDefined();
     expect(result.recommendations!.some((r) => r.includes("examples"))).toBe(true);
+  });
+
+  it("explains EMERGING verdict with mixed rubric", () => {
+    const result = verdictExplanation("EMERGING", 0.35, rubric);
+    expect(result.explanation).toContain("EMERGING");
+    expect(result.explanation).toContain("0.35");
+    expect(result.explanation).toContain("mixed results");
+  });
+
+  it("explains FAIL with score in [0.4, 0.7) — provides recommendations", () => {
+    const result = verdictExplanation("FAIL", 0.5, rubric);
+    expect(result.explanation).toContain("FAIL");
+    expect(result.explanation).toContain("did not meet");
+    expect(result.recommendations).toBeDefined();
+    expect(result.recommendations!.length).toBeGreaterThan(0);
+    expect(result.recommendations!.some((r) => r.includes("Clarity"))).toBe(true);
+  });
+
+  it("explains DEGRADING with score in [0.4, 0.7) — provides recommendations", () => {
+    const result = verdictExplanation("DEGRADING", 0.55, rubric);
+    expect(result.explanation).toContain("DEGRADING");
+    expect(result.explanation).toContain("did not meet");
+    expect(result.recommendations).toBeDefined();
   });
 
   it("handles boundary score 0.4 without recommendations", () => {

@@ -12,7 +12,7 @@ import { verdictLabel } from "../../../../eval/verdict.js";
 // ---------------------------------------------------------------------------
 
 /** Returns the appropriate pass-rate label based on the benchmark run type. */
-export function passRateLabel(type?: RunMode | string): string {
+export function passRateLabel(type?: RunMode): string {
   return type === "baseline" ? "Baseline Pass Rate" : "Skill Pass Rate";
 }
 
@@ -52,7 +52,7 @@ export function formatComparisonScore(
 }
 
 /** Returns winner badge text and accent flag for a comparison result. */
-export function winnerLabel(winner: "skill" | "baseline" | "tie" | string): { text: string; isSkill: boolean } {
+export function winnerLabel(winner: "skill" | "baseline" | "tie"): { text: string; isSkill: boolean } {
   if (winner === "skill") return { text: "Skill wins", isSkill: true };
   if (winner === "baseline") return { text: "Baseline wins", isSkill: false };
   return { text: "Tie", isSkill: false };
@@ -380,7 +380,7 @@ export function RunPanel() {
 // Run case card — independent per-case controls
 // ---------------------------------------------------------------------------
 
-const MODE_BADGE: Record<string, { label: string; bg: string; color: string }> = {
+const MODE_BADGE: Record<RunMode, { label: string; bg: string; color: string }> = {
   benchmark: { label: "Skill", bg: "var(--accent-muted)", color: "var(--accent)" },
   baseline: { label: "Baseline", bg: "var(--surface-3)", color: "var(--text-tertiary)" },
   comparison: { label: "Compare", bg: "rgba(168,85,247,0.12)", color: "rgb(168,85,247)" },

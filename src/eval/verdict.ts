@@ -46,7 +46,7 @@ export interface VerdictExplanationResult {
 }
 
 export function verdictExplanation(
-  verdict: string,
+  verdict: EvalVerdict | "PASS" | "FAIL",
   score: number,
   rubric?: RubricCriterion[],
 ): VerdictExplanationResult {
@@ -63,7 +63,7 @@ export function verdictExplanation(
     };
   }
 
-  if ((verdict === "FAIL" || verdict === "DEGRADING") && score < 0.4) {
+  if ((verdict === "FAIL" || verdict === "DEGRADING") && score < 0.7) {
     const failedList = failed.length > 0
       ? ` Failed criteria: ${failed.map((r) => r.criterion).join(", ")}.`
       : "";
@@ -92,7 +92,7 @@ export function verdictExplanation(
     };
   }
 
-  // Default/boundary case (e.g., score 0.4-0.7 or unmatched verdict)
+  // Default/boundary case (e.g., unmatched verdict or PASS/EFFECTIVE with low score)
   const metNote = passed.length > 0
     ? ` Passing: ${passed.map((r) => r.criterion).join(", ")}.`
     : "";
@@ -112,8 +112,12 @@ const VERDICT_LABELS: Record<EvalVerdict, string> = {
   DEGRADING: "Regression",
 };
 
+function isEvalVerdict(v: string): v is EvalVerdict {
+  return v in VERDICT_LABELS;
+}
+
 export function verdictLabel(verdict: string): string {
-  return VERDICT_LABELS[verdict as EvalVerdict] ?? verdict;
+  return isEvalVerdict(verdict) ? VERDICT_LABELS[verdict] : verdict;
 }
 
 export function verdictColor(verdict: EvalVerdict): string {

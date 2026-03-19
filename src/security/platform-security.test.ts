@@ -96,6 +96,86 @@ describe("checkPlatformSecurity", () => {
     expect(result).toBeNull();
   });
 
+  it("returns overallVerdict PENDING when providers array is empty", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makePlatformResponse({
+          overallVerdict: "CERTIFIED",
+          providers: [],
+        }),
+    }) as unknown as typeof fetch;
+
+    const result = await checkPlatformSecurity("empty-scan");
+
+    expect(result).not.toBeNull();
+    expect(result!.overallVerdict).toBe("PENDING");
+    expect(result!.providers).toHaveLength(0);
+    expect(result!.hasCritical).toBe(false);
+  });
+
+  it("normalizes lowercase status/verdict strings to uppercase", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makePlatformResponse({
+          overallVerdict: "fail",
+          providers: [
+            { provider: "semgrep", status: "fail", verdict: "concerns", criticalCount: 1 },
+          ],
+        }),
+    }) as unknown as typeof fetch;
+
+    const result = await checkPlatformSecurity("lowercase-skill");
+
+    expect(result).not.toBeNull();
+    expect(result!.overallVerdict).toBe("FAIL");
+    expect(result!.providers[0].status).toBe("FAIL");
+    expect(result!.providers[0].verdict).toBe("CONCERNS");
+  });
+
+  it("falls back invalid enum values to PENDING", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makePlatformResponse({
+          overallVerdict: "BOGUS",
+          providers: [
+            { provider: "semgrep", status: "INVALID", verdict: "NOPE", criticalCount: 0 },
+          ],
+        }),
+    }) as unknown as typeof fetch;
+
+    const result = await checkPlatformSecurity("invalid-enums");
+
+    expect(result).not.toBeNull();
+    expect(result!.overallVerdict).toBe("PENDING");
+    expect(result!.providers[0].status).toBe("PENDING");
+    expect(result!.providers[0].verdict).toBe("PENDING");
+  });
+
+  it("treats non-numeric criticalCount as 0", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makePlatformResponse({
+          overallVerdict: "FAIL",
+          providers: [
+            { provider: "semgrep", status: "FAIL", verdict: "FAIL", criticalCount: "N/A" },
+            { provider: "snyk", status: "FAIL", verdict: "FAIL", criticalCount: undefined },
+          ],
+        }),
+    }) as unknown as typeof fetch;
+
+    const result = await checkPlatformSecurity("nan-counts");
+
+    expect(result).not.toBeNull();
+    expect(result!.providers[0].criticalCount).toBe(0);
+    expect(result!.providers[1].criticalCount).toBe(0);
+    // NaN criticalCount means hasCritical should be false (0 > 0 is false)
+    expect(result!.hasCritical).toBe(false);
+  });
+
   it("returns hasCritical: false when status is PENDING (does not block)", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,

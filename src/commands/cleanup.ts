@@ -6,8 +6,8 @@ import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { readLockfile } from "../lockfile/index.js";
-import { purgeStalePlugins, listEnabledPlugins } from "../settings/index.js";
-import { claudePluginUninstall } from "../utils/claude-plugin.js";
+import { listEnabledPlugins } from "../settings/index.js";
+import { uninstallStalePlugins } from "../utils/claude-plugin.js";
 import { bold, green, dim, yellow } from "../utils/output.js";
 
 export async function cleanupCommand(): Promise<void> {
@@ -17,28 +17,13 @@ export async function cleanupCommand(): Promise<void> {
   const skills = lock?.skills ?? {};
 
   // Uninstall stale plugins via claude CLI
-  const staleUser = purgeStalePlugins({ scope: "user" }, skills);
-  const staleProject = purgeStalePlugins(
-    { scope: "project", projectDir: process.cwd() },
-    skills,
-  );
-  const allStale = [
-    ...staleUser.map((id) => ({ id, scope: "user" as const })),
-    ...staleProject.map((id) => ({ id, scope: "project" as const })),
-  ];
-
-  if (allStale.length > 0) {
+  const results = uninstallStalePlugins(skills);
+  if (results.length > 0) {
     console.log(
-      green(`Removing ${allStale.length} stale plugin${allStale.length === 1 ? "" : "s"}:\n`),
+      green(`Removing ${results.length} stale plugin${results.length === 1 ? "" : "s"}:\n`),
     );
-    for (const { id, scope } of allStale) {
-      try {
-        claudePluginUninstall(id, scope);
-        console.log(`  ${dim(">")} ${id}`);
-      } catch {
-        // non-fatal — plugin may not have been registered via claude CLI
-        console.log(`  ${dim(">")} ${id} ${dim("(skipped — not registered via CLI)")}`);
-      }
+    for (const { id, ok } of results) {
+      console.log(`  ${dim(">")} ${id}${ok ? "" : ` ${dim("(skipped — not registered via CLI)")}`}`);
     }
   } else {
     console.log(dim("No stale plugin entries found in settings.json."));
@@ -80,7 +65,7 @@ export async function cleanupCommand(): Promise<void> {
     console.log(dim(`\n${remaining.length} enabled plugin${remaining.length === 1 ? "" : "s"} remaining: ${remaining.join(", ")}`));
   }
 
-  if (allStale.length > 0) {
+  if (results.length > 0) {
     console.log(yellow("\nRestart Claude Code to reload its plugin settings."));
   }
 }

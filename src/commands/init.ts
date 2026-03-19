@@ -10,8 +10,7 @@ import {
 import { readLockfile, writeLockfile, ensureLockfile } from "../lockfile/index.js";
 import { filterAgents } from "../utils/agent-filter.js";
 import { syncCoreSkills, findCoreSkillsDir } from "../core-skills/sync.js";
-import { purgeStalePlugins } from "../settings/index.js";
-import { claudePluginUninstall } from "../utils/claude-plugin.js";
+import { uninstallStalePlugins } from "../utils/claude-plugin.js";
 import { migrateStaleSkillFiles, ensureSkillMdNaming } from "../installer/migrate.js";
 import { resolveAgentSkillsDir } from "../installer/canonical.js";
 import { bold, green, dim, cyan, red, table } from "../utils/output.js";
@@ -68,41 +67,26 @@ export async function initCommand(opts: InitOptions = {}): Promise<void> {
   // pruned lists from --agent-filtered installs)
   const agentIds = agents.map((a) => a.id);
   const existing = readLockfile();
+  let currentLock;
   if (existing) {
     existing.agents = [...new Set([...(existing.agents || []), ...agentIds])];
     writeLockfile(existing);
+    currentLock = existing;
     console.log(dim("Updated existing vskill.lock"));
   } else {
-    const lock = ensureLockfile();
-    lock.agents = agentIds;
-    writeLockfile(lock);
+    currentLock = ensureLockfile();
+    currentLock.agents = agentIds;
+    writeLockfile(currentLock);
     console.log(green("Created vskill.lock"));
   }
 
   // Uninstall stale plugins via claude CLI (before Claude Code caches settings)
-  const lockForPurge = readLockfile();
-  if (lockForPurge?.skills) {
-    const staleUser = purgeStalePlugins({ scope: "user" }, lockForPurge.skills);
-    const staleProject = purgeStalePlugins(
-      { scope: "project", projectDir: process.cwd() },
-      lockForPurge.skills,
-    );
-    const allStale = [
-      ...staleUser.map((id) => ({ id, scope: "user" as const })),
-      ...staleProject.map((id) => ({ id, scope: "project" as const })),
-    ];
-    if (allStale.length > 0) {
+  if (currentLock.skills) {
+    const results = uninstallStalePlugins(writtenLock.skills, { log: (m) => console.log(dim(m)) });
+    if (results.length > 0) {
       console.log(
-        dim(`\nRemoving ${allStale.length} stale plugin${allStale.length === 1 ? "" : "s"}:`),
+        dim(`\nRemoved ${results.filter((r) => r.ok).length} stale plugin${results.length === 1 ? "" : "s"}`),
       );
-      for (const { id, scope } of allStale) {
-        try {
-          claudePluginUninstall(id, scope);
-          console.log(dim(`  - ${id}`));
-        } catch {
-          console.log(dim(`  - ${id} (skipped — not registered via CLI)`));
-        }
-      }
     }
   }
 

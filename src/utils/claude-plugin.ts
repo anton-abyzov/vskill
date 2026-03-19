@@ -7,6 +7,7 @@
 
 import { execFileSync } from "node:child_process";
 import { resolveCliBinary } from "./resolve-binary.js";
+import { purgeStalePlugins } from "../settings/index.js";
 
 /**
  * Uninstall a marketplace plugin via the claude CLI.
@@ -34,4 +35,40 @@ export function claudePluginUninstall(
     ["plugin", "uninstall", "--scope", scope, "--", pluginId],
     { stdio: "pipe", ...(opts?.cwd ? { cwd: opts.cwd } : {}) },
   );
+}
+
+/**
+ * Detect and uninstall stale plugins from both user and project scopes.
+ *
+ * Combines `purgeStalePlugins()` (read-only detection) with
+ * `claudePluginUninstall()` (CLI-delegated removal) in a single call.
+ *
+ * @returns Array of `{ id, scope, ok }` for each stale plugin processed
+ */
+export function uninstallStalePlugins(
+  lockfileSkills: Record<string, { marketplace?: string }>,
+  opts?: { log?: (msg: string) => void },
+): Array<{ id: string; scope: "user" | "project"; ok: boolean }> {
+  const log = opts?.log ?? console.log;
+  const staleUser = purgeStalePlugins({ scope: "user" }, lockfileSkills);
+  const staleProject = purgeStalePlugins(
+    { scope: "project", projectDir: process.cwd() },
+    lockfileSkills,
+  );
+  const allStale = [
+    ...staleUser.map((id) => ({ id, scope: "user" as const })),
+    ...staleProject.map((id) => ({ id, scope: "project" as const })),
+  ];
+
+  const results: Array<{ id: string; scope: "user" | "project"; ok: boolean }> = [];
+  for (const { id, scope } of allStale) {
+    try {
+      claudePluginUninstall(id, scope);
+      results.push({ id, scope, ok: true });
+    } catch {
+      log(`  ${id} (skipped — not registered via CLI)`);
+      results.push({ id, scope, ok: false });
+    }
+  }
+  return results;
 }

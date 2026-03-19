@@ -22,6 +22,7 @@ export function ParameterStorePanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  const [revealedValues, setRevealedValues] = useState<Record<string, string>>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -84,14 +85,23 @@ export function ParameterStorePanel() {
     }
   }, [plugin, skill, newKey, newValue, refresh]);
 
-  const toggleReveal = (name: string) => {
-    setRevealed((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  };
+  const toggleReveal = useCallback(async (name: string) => {
+    if (revealed.has(name)) {
+      setRevealed((prev) => { const next = new Set(prev); next.delete(name); return next; });
+      setRevealedValues((prev) => { const next = { ...prev }; delete next[name]; return next; });
+      return;
+    }
+    try {
+      const res = await api.getParamsRevealed(plugin, skill, name);
+      const param = res.params.find((p) => p.name === name);
+      if (param?.value) {
+        setRevealedValues((prev) => ({ ...prev, [name]: param.value! }));
+        setRevealed((prev) => new Set(prev).add(name));
+      }
+    } catch {
+      // Reveal is convenience, not critical
+    }
+  }, [plugin, skill, revealed]);
 
   // Merge credentials and params: credentials first (with status), then extra params
   const credNames = new Set(credentials.map((c) => c.name));
@@ -153,15 +163,15 @@ export function ParameterStorePanel() {
             {entry.status}
           </span>
 
-          {/* Masked value with partial reveal */}
-          {entry.maskedValue && (
+          {/* Masked value with reveal toggle */}
+          {(entry.maskedValue || entry.status === "ready") && (
             <span className="text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>
-              {revealed.has(entry.name) ? entry.maskedValue : "***"}
+              {revealed.has(entry.name) ? (revealedValues[entry.name] ?? entry.maskedValue) : (entry.maskedValue || "***")}
               <button
                 onClick={() => toggleReveal(entry.name)}
                 className="text-[9px] ml-1"
                 style={{ color: "var(--accent)", cursor: "pointer", background: "none", border: "none" }}
-                aria-label={`${revealed.has(entry.name) ? "Hide" : "Show"} masked value for ${entry.name}`}
+                aria-label={`${revealed.has(entry.name) ? "Hide" : "Reveal"} value for ${entry.name}`}
               >
                 {revealed.has(entry.name) ? "hide" : "show"}
               </button>

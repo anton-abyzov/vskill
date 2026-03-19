@@ -33,12 +33,14 @@ vi.mock("../WorkspaceContext", () => ({
 
 const mockGetCredentials = vi.fn();
 const mockGetParams = vi.fn();
+const mockGetParamsRevealed = vi.fn();
 const mockSetCredential = vi.fn();
 
 vi.mock("../../api", () => ({
   api: {
     getCredentials: (...args: unknown[]) => mockGetCredentials(...args),
     getParams: (...args: unknown[]) => mockGetParams(...args),
+    getParamsRevealed: (...args: unknown[]) => mockGetParamsRevealed(...args),
     setCredential: (...args: unknown[]) => mockSetCredential(...args),
   },
 }));

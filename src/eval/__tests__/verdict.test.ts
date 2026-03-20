@@ -115,6 +115,19 @@ describe("computeVerdict", () => {
     expect(computeVerdict(0.6, 3.0, 3.0, 0.7)).toBe("INEFFECTIVE");
   });
 
+  it("handles NaN assertionPassRate — falls to low zone", () => {
+    // NaN >= 0.8 → false, NaN >= 0.5 → false → low zone
+    // skillRubricAvg 3.0 > baselineRubricAvg 2.0 → true → EMERGING
+    expect(computeVerdict(NaN, 3.0, 2.0)).toBe("EMERGING");
+    // Equal rubrics → DEGRADING
+    expect(computeVerdict(NaN, 3.0, 3.0)).toBe("DEGRADING");
+  });
+
+  it("handles NaN rubric averages — MARGINAL in high pass rate zone", () => {
+    // 0.8 >= 0.8 → true, NaN > 0.15 → false → MARGINAL
+    expect(computeVerdict(0.8, NaN, NaN)).toBe("MARGINAL");
+  });
+
   it("backwards compatible: 3-arg calls default baselinePassRate to 0", () => {
     // Old-style calls should still work (baselinePassRate defaults to 0)
     expect(computeVerdict(0.85, 4.5, 3.0)).toBe("EFFECTIVE");
@@ -196,7 +209,7 @@ describe("verdictExplanation", () => {
     const result = verdictExplanation("EMERGING", 0.35, rubric);
     expect(result.explanation).toContain("EMERGING");
     expect(result.explanation).toContain("0.35");
-    expect(result.explanation).toContain("mixed results");
+    expect(result.explanation).toContain("early promise");
   });
 
   it("explains FAIL with score in [0.4, 0.7) — provides recommendations", () => {
@@ -215,11 +228,32 @@ describe("verdictExplanation", () => {
     expect(result.recommendations).toBeDefined();
   });
 
-  it("handles boundary score 0.4 without recommendations", () => {
+  it("explains MARGINAL with score 0.65 — provides recommendations", () => {
+    const result = verdictExplanation("MARGINAL", 0.65, rubric);
+    expect(result.explanation).toContain("MARGINAL");
+    expect(result.recommendations).toBeDefined();
+    expect(result.recommendations!.length).toBeGreaterThan(0);
+    expect(result.recommendations!.some((r) => r.includes("Clarity"))).toBe(true);
+  });
+
+  it("explains EMERGING with score 0.35 — provides recommendations", () => {
+    const result = verdictExplanation("EMERGING", 0.35, rubric);
+    expect(result.explanation).toContain("EMERGING");
+    expect(result.recommendations).toBeDefined();
+    expect(result.recommendations!.length).toBeGreaterThan(0);
+  });
+
+  it("explains INEFFECTIVE with score 0.45 — provides recommendations", () => {
+    const result = verdictExplanation("INEFFECTIVE", 0.45, rubric);
+    expect(result.explanation).toContain("INEFFECTIVE");
+    expect(result.recommendations).toBeDefined();
+    expect(result.recommendations!.length).toBeGreaterThan(0);
+  });
+
+  it("handles boundary score 0.4 with recommendations for MARGINAL", () => {
     const result = verdictExplanation("MARGINAL", 0.4, rubric);
     expect(result.explanation).toContain("MARGINAL");
-    expect(result.explanation).toContain("mixed results");
-    expect(result.recommendations).toBeUndefined();
+    expect(result.recommendations).toBeDefined();
   });
 
   it("works without rubric data", () => {

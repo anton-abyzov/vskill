@@ -27,7 +27,7 @@ function makePlatformResponse(overrides: Record<string, unknown> = {}) {
       {
         provider: "semgrep",
         status: "PASS",
-        verdict: "clean",
+        verdict: "PASS",
         criticalCount: 0,
       },
     ],
@@ -174,6 +174,52 @@ describe("checkPlatformSecurity", () => {
     expect(result!.providers[1].criticalCount).toBe(0);
     // NaN criticalCount means hasCritical should be false (0 > 0 is false)
     expect(result!.hasCritical).toBe(false);
+  });
+
+  it("warns when safeNumber coerces non-numeric criticalCount to fallback", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makePlatformResponse({
+          providers: [
+            { provider: "semgrep", status: "PASS", verdict: "PASS", criticalCount: "N/A" },
+          ],
+        }),
+    }) as unknown as typeof fetch;
+
+    await checkPlatformSecurity("warn-nan");
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[platform-security]"),
+      "N/A",
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("warns when validateEnum falls back on invalid enum value", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makePlatformResponse({
+          overallVerdict: "BOGUS",
+          providers: [
+            { provider: "semgrep", status: "GARBAGE", verdict: "NOPE", criticalCount: 0 },
+          ],
+        }),
+    }) as unknown as typeof fetch;
+
+    await checkPlatformSecurity("warn-enum");
+
+    // Should warn for invalid status, verdict, and overallVerdict
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("GARBAGE"),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("NOPE"),
+    );
+    warnSpy.mockRestore();
   });
 
   it("returns hasCritical: false when status is PENDING (does not block)", async () => {

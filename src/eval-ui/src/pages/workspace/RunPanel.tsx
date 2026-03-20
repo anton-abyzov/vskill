@@ -47,7 +47,7 @@ export function formatComparisonScore(
   skillScore: number,
   baselineScore: number,
 ): { skill: number; baseline: number } {
-  const pct = (s: number) => Math.round(Math.min(100, Math.max(0, (s / 5) * 100)));
+  const pct = (s: number) => { const v = (s / 5) * 100; return isNaN(v) ? 0 : Math.round(Math.min(100, Math.max(0, v))); };
   return { skill: pct(skillScore), baseline: pct(baselineScore) };
 }
 
@@ -69,7 +69,7 @@ function estimateLabel(totalCases: number, totalAssertions: number): string {
 }
 
 // Client-side cost estimation — approximate per-call costs by provider
-const APPROX_COST_PER_CALL: Record<string, number> = {
+const APPROX_COST_PER_CALL: Partial<Record<string, number>> = {
   "anthropic": 0.01,    // ~2K input + 1K output tokens at Sonnet rates
   "openrouter": 0.01,   // varies, use Sonnet-equivalent
   "ollama": 0,           // free

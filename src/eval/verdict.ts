@@ -92,6 +92,48 @@ export function verdictExplanation(
     };
   }
 
+  if (verdict === "MARGINAL") {
+    const recommendations = [
+      ...weak.map((r) => `Strengthen "${r.criterion}" (score: ${r.score.toFixed(2)})`),
+      ...failed.map((r) => `Improve "${r.criterion}" (score: ${r.score.toFixed(2)})`),
+    ];
+    if (recommendations.length === 0) {
+      recommendations.push("Review prompt instructions for areas of improvement");
+    }
+    return {
+      explanation: `${verdict} (score ${score.toFixed(2)}): moderate improvement detected.`,
+      recommendations,
+    };
+  }
+
+  if (verdict === "EMERGING") {
+    const recommendations = [
+      ...failed.map((r) => `Improve "${r.criterion}" (score: ${r.score.toFixed(2)})`),
+      ...weak.map((r) => `Strengthen "${r.criterion}" (score: ${r.score.toFixed(2)})`),
+    ];
+    if (recommendations.length === 0) {
+      recommendations.push("Add more specific guidance to your prompt instructions");
+    }
+    return {
+      explanation: `${verdict} (score ${score.toFixed(2)}): early promise — focus on weak areas to improve.`,
+      recommendations,
+    };
+  }
+
+  if (verdict === "INEFFECTIVE" && score >= 0.2) {
+    const recommendations = [
+      ...failed.map((r) => `Rework "${r.criterion}" — currently at ${r.score.toFixed(2)}`),
+      ...weak.map((r) => `Strengthen "${r.criterion}" (score: ${r.score.toFixed(2)})`),
+    ];
+    if (recommendations.length === 0) {
+      recommendations.push("Consider restructuring your prompt approach");
+    }
+    return {
+      explanation: `${verdict} (score ${score.toFixed(2)}): below expectations but showing some capability.`,
+      recommendations,
+    };
+  }
+
   // Default/boundary case (e.g., unmatched verdict or PASS/EFFECTIVE with low score)
   const metNote = passed.length > 0
     ? ` Passing: ${passed.map((r) => r.criterion).join(", ")}.`

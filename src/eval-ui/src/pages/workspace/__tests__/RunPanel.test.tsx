@@ -145,6 +145,12 @@ describe("formatComparisonScore", () => {
     expect(formatComparisonScore(-1, -2)).toEqual({ skill: 0, baseline: 0 });
     expect(formatComparisonScore(-5, 3)).toEqual({ skill: 0, baseline: 60 });
   });
+
+  it("returns 0 for NaN inputs instead of propagating NaN", () => {
+    expect(formatComparisonScore(NaN, 3)).toEqual({ skill: 0, baseline: 60 });
+    expect(formatComparisonScore(4, NaN)).toEqual({ skill: 80, baseline: 0 });
+    expect(formatComparisonScore(NaN, NaN)).toEqual({ skill: 0, baseline: 0 });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -22,18 +22,24 @@ export interface PlatformSecurityResult {
 // Runtime validation helpers
 // ---------------------------------------------------------------------------
 
-const VALID_STATUSES = new Set<ProviderResult["status"]>(["PASS", "FAIL", "PENDING", "TIMED_OUT"]);
-const VALID_VERDICTS = new Set<NonNullable<ProviderResult["verdict"]>>(["PASS", "FAIL", "CONCERNS", "PENDING"]);
-const VALID_OVERALL = new Set<PlatformSecurityResult["overallVerdict"]>(["PASS", "FAIL", "PENDING", "TIMED_OUT", "CERTIFIED"]);
+const VALID_STATUSES: ReadonlySet<ProviderResult["status"]> = new Set(["PASS", "FAIL", "PENDING", "TIMED_OUT"]);
+const VALID_VERDICTS: ReadonlySet<NonNullable<ProviderResult["verdict"]>> = new Set(["PASS", "FAIL", "CONCERNS", "PENDING"]);
+const VALID_OVERALL: ReadonlySet<PlatformSecurityResult["overallVerdict"]> = new Set(["PASS", "FAIL", "PENDING", "TIMED_OUT", "CERTIFIED"]);
 
-function validateEnum<T extends string>(value: string, allowed: Set<T>, fallback: T): T {
+function validateEnum<T extends string>(value: string, allowed: ReadonlySet<T>, fallback: T): T {
   const upper = value.toUpperCase() as T;
-  return allowed.has(upper) ? upper : fallback;
+  if (allowed.has(upper)) return upper;
+  console.warn(`[platform-security] invalid enum value "${value}", using fallback "${fallback}"`);
+  return fallback;
 }
 
 function safeNumber(value: unknown, fallback: number): number {
   const n = Number(value ?? fallback);
-  return isNaN(n) ? fallback : n;
+  if (isNaN(n)) {
+    console.warn(`[platform-security] non-numeric value coerced to ${fallback}:`, value);
+    return fallback;
+  }
+  return n;
 }
 
 /**

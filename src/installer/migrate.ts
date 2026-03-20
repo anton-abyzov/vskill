@@ -58,7 +58,7 @@ export function migrateStaleSkillFiles(
   try {
     entries = readdirSync(skillsDir);
   } catch (err) {
-    result.errors.push(`Could not read skills directory ${skillsDir}: ${(err as Error).message}`);
+    result.errors.push(`Could not read skills directory ${skillsDir}: ${err instanceof Error ? err.message : String(err)}`);
     return result;
   }
 
@@ -109,7 +109,7 @@ export function ensureSkillMdNaming(skillsDir: string): NamingResult {
   try {
     entries = readdirSync(skillsDir);
   } catch (err) {
-    result.errors.push(`Could not read skills directory ${skillsDir}: ${(err as Error).message}`);
+    result.errors.push(`Could not read skills directory ${skillsDir}: ${err instanceof Error ? err.message : String(err)}`);
     return result;
   }
 
@@ -137,7 +137,7 @@ function enforceSkillMdInDir(dir: string, result: NamingResult): void {
   try {
     entries = readdirSync(dir);
   } catch (err) {
-    result.errors.push(`Could not read directory ${dir}: ${(err as Error).message}`);
+    result.errors.push(`Could not read directory ${dir}: ${err instanceof Error ? err.message : String(err)}`);
     return;
   }
 
@@ -186,14 +186,14 @@ function enforceSkillMdInDir(dir: string, result: NamingResult): void {
         try {
           unlinkSync(join(entryPath, candidates[i]));
         } catch (err) {
-          result.errors.push(`Could not remove duplicate ${candidates[i]} in ${entryPath}: ${(err as Error).message}`);
+          result.errors.push(`Could not remove duplicate ${candidates[i]} in ${entryPath}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 
       result.renamedCount++;
     } catch (err) {
       result.errors.push(
-        `Failed to enforce SKILL.md in ${entryPath}: ${(err as Error).message}`,
+        `Failed to enforce SKILL.md in ${entryPath}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -237,7 +237,7 @@ function migrateDirLevel(dir: string, result: MigrationResult): void {
   try {
     entries = readdirSync(dir);
   } catch (err) {
-    result.errors.push(`Could not read directory ${dir}: ${(err as Error).message}`);
+    result.errors.push(`Could not read directory ${dir}: ${err instanceof Error ? err.message : String(err)}`);
     return;
   }
 
@@ -280,7 +280,7 @@ function migrateDirLevel(dir: string, result: MigrationResult): void {
       }
     } catch (err) {
       result.errors.push(
-        `Failed to migrate ${filePath}: ${(err as Error).message}`,
+        `Failed to migrate ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }

@@ -387,7 +387,7 @@ async function installMarketplaceRepo(
               rmSync(dir, { recursive: true, force: true });
               removedCount++;
             } catch (err) {
-              console.warn(`Could not remove ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+              console.warn(`[vskill] Could not remove ${dir}: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
         }

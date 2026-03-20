@@ -128,6 +128,11 @@ describe("computeVerdict", () => {
     expect(computeVerdict(0.8, NaN, NaN)).toBe("MARGINAL");
   });
 
+  it("handles NaN baselinePassRate — MARGINAL due to NaN delta", () => {
+    // passRateDelta = 0.9 - NaN = NaN, NaN > 0.15 is false → MARGINAL (not EFFECTIVE)
+    expect(computeVerdict(0.9, 4.5, 3.0, NaN)).toBe("MARGINAL");
+  });
+
   it("backwards compatible: 3-arg calls default baselinePassRate to 0", () => {
     // Old-style calls should still work (baselinePassRate defaults to 0)
     expect(computeVerdict(0.85, 4.5, 3.0)).toBe("EFFECTIVE");
@@ -226,6 +231,13 @@ describe("verdictExplanation", () => {
     expect(result.explanation).toContain("DEGRADING");
     expect(result.explanation).toContain("did not meet");
     expect(result.recommendations).toBeDefined();
+  });
+
+  it("explains DEGRADING with score >= 0.7 — still provides recommendations", () => {
+    const result = verdictExplanation("DEGRADING", 0.75, rubric);
+    expect(result.explanation).toContain("DEGRADING");
+    expect(result.recommendations).toBeDefined();
+    expect(result.recommendations!.length).toBeGreaterThan(0);
   });
 
   it("explains MARGINAL with score 0.65 — provides recommendations", () => {

@@ -64,7 +64,7 @@ export function verdictExplanation(
     };
   }
 
-  if ((verdict === "FAIL" || verdict === "DEGRADING") && score < 0.7) {
+  if (verdict === "FAIL" || verdict === "DEGRADING") {
     const failedList = failed.length > 0
       ? ` Failed criteria: ${failed.map((r) => r.criterion).join(", ")}.`
       : "";
@@ -81,47 +81,18 @@ export function verdictExplanation(
     };
   }
 
-  if (verdict === "INEFFECTIVE" && score < 0.2) {
-    const suggestions = [
-      ...failed.map((r) => `Rework "${r.criterion}" — currently at ${r.score.toFixed(2)}`),
-      "Consider adding examples to your system prompt",
-      "Review the rubric criteria for achievability",
-    ];
-    return {
-      explanation: `${verdict} (score ${score.toFixed(2)}): evaluation is significantly below expectations.`,
-      recommendations: suggestions,
-    };
-  }
-
-  if (verdict === "MARGINAL") {
-    const recommendations = [
-      ...weak.map((r) => `Strengthen "${r.criterion}" (score: ${r.score.toFixed(2)})`),
-      ...failed.map((r) => `Improve "${r.criterion}" (score: ${r.score.toFixed(2)})`),
-    ];
-    if (recommendations.length === 0) {
-      recommendations.push("Review prompt instructions for areas of improvement");
+  if (verdict === "INEFFECTIVE") {
+    if (score < 0.2) {
+      const suggestions = [
+        ...failed.map((r) => `Rework "${r.criterion}" — currently at ${r.score.toFixed(2)}`),
+        "Consider adding examples to your system prompt",
+        "Review the rubric criteria for achievability",
+      ];
+      return {
+        explanation: `${verdict} (score ${score.toFixed(2)}): evaluation is significantly below expectations.`,
+        recommendations: suggestions,
+      };
     }
-    return {
-      explanation: `${verdict} (score ${score.toFixed(2)}): moderate improvement detected.`,
-      recommendations,
-    };
-  }
-
-  if (verdict === "EMERGING") {
-    const recommendations = [
-      ...failed.map((r) => `Improve "${r.criterion}" (score: ${r.score.toFixed(2)})`),
-      ...weak.map((r) => `Strengthen "${r.criterion}" (score: ${r.score.toFixed(2)})`),
-    ];
-    if (recommendations.length === 0) {
-      recommendations.push("Add more specific guidance to your prompt instructions");
-    }
-    return {
-      explanation: `${verdict} (score ${score.toFixed(2)}): early promise — focus on weak areas to improve.`,
-      recommendations,
-    };
-  }
-
-  if (verdict === "INEFFECTIVE" && score >= 0.2) {
     const recommendations = [
       ...failed.map((r) => `Rework "${r.criterion}" — currently at ${r.score.toFixed(2)}`),
       ...weak.map((r) => `Strengthen "${r.criterion}" (score: ${r.score.toFixed(2)})`),
@@ -135,7 +106,39 @@ export function verdictExplanation(
     };
   }
 
-  // Default/boundary case (e.g., unmatched verdict or PASS/EFFECTIVE with low score)
+  if (verdict === "MARGINAL") {
+    const recommendations = [
+      ...weak.map((r) => `Strengthen "${r.criterion}" (score: ${r.score.toFixed(2)})`),
+      ...failed.map((r) => `Improve "${r.criterion}" (score: ${r.score.toFixed(2)})`),
+    ];
+    if (recommendations.length === 0) {
+      recommendations.push(passed.length > 0
+        ? "Assertion pass rate is below target despite strong rubric scores — review test case alignment"
+        : "Review prompt instructions for areas of improvement");
+    }
+    return {
+      explanation: `${verdict} (score ${score.toFixed(2)}): moderate improvement detected.`,
+      recommendations,
+    };
+  }
+
+  if (verdict === "EMERGING") {
+    const recommendations = [
+      ...failed.map((r) => `Improve "${r.criterion}" (score: ${r.score.toFixed(2)})`),
+      ...weak.map((r) => `Strengthen "${r.criterion}" (score: ${r.score.toFixed(2)})`),
+    ];
+    if (recommendations.length === 0) {
+      recommendations.push(passed.length > 0
+        ? "Assertion pass rate is below target despite strong rubric scores — review test case alignment"
+        : "Add more specific guidance to your prompt instructions");
+    }
+    return {
+      explanation: `${verdict} (score ${score.toFixed(2)}): early promise — focus on weak areas to improve.`,
+      recommendations,
+    };
+  }
+
+  // Default/boundary case (e.g., PASS/EFFECTIVE with low score)
   const metNote = passed.length > 0
     ? ` Passing: ${passed.map((r) => r.criterion).join(", ")}.`
     : "";

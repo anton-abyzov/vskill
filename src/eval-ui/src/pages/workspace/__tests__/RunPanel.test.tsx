@@ -151,6 +151,11 @@ describe("formatComparisonScore", () => {
     expect(formatComparisonScore(4, NaN)).toEqual({ skill: 80, baseline: 0 });
     expect(formatComparisonScore(NaN, NaN)).toEqual({ skill: 0, baseline: 0 });
   });
+
+  it("returns 0 for Infinity inputs instead of clamping to 100", () => {
+    expect(formatComparisonScore(Infinity, 3)).toEqual({ skill: 0, baseline: 60 });
+    expect(formatComparisonScore(-Infinity, 3)).toEqual({ skill: 0, baseline: 60 });
+  });
 });
 
 // ---------------------------------------------------------------------------

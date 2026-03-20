@@ -191,8 +191,7 @@ describe("checkPlatformSecurity", () => {
     await checkPlatformSecurity("warn-nan");
 
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("[platform-security]"),
-      "N/A",
+      expect.stringContaining("N/A"),
     );
     warnSpy.mockRestore();
   });
@@ -222,6 +221,47 @@ describe("checkPlatformSecurity", () => {
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("BOGUS"),
     );
+    warnSpy.mockRestore();
+  });
+
+  it("warns when criticalCount is empty string (coerces to 0 silently)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makePlatformResponse({
+          providers: [
+            { provider: "semgrep", status: "PASS", verdict: "PASS", criticalCount: "" },
+          ],
+        }),
+    }) as unknown as typeof fetch;
+
+    await checkPlatformSecurity("empty-string");
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("empty string coerced to 0"),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("sanitizes control characters in logged values", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makePlatformResponse({
+          providers: [
+            { provider: "semgrep", status: "PASS", verdict: "PASS", criticalCount: "line1\nline2\x00null" },
+          ],
+        }),
+    }) as unknown as typeof fetch;
+
+    await checkPlatformSecurity("control-chars");
+
+    const warnCalls = warnSpy.mock.calls.map((c) => c.join(" "));
+    const safeNumberCall = warnCalls.find((c) => c.includes("non-numeric") || c.includes("coerced"));
+    expect(safeNumberCall).toBeDefined();
+    expect(safeNumberCall).not.toMatch(/[\x00-\x1f\x7f]/);
     warnSpy.mockRestore();
   });
 

@@ -47,7 +47,7 @@ export function formatComparisonScore(
   skillScore: number,
   baselineScore: number,
 ): { skill: number; baseline: number } {
-  const pct = (s: number) => { const v = (s / 5) * 100; return isNaN(v) ? 0 : Math.round(Math.min(100, Math.max(0, v))); };
+  const pct = (s: number) => { const v = (s / 5) * 100; return !isFinite(v) ? 0 : Math.round(Math.min(100, Math.max(0, v))); };
   return { skill: pct(skillScore), baseline: pct(baselineScore) };
 }
 

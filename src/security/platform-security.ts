@@ -26,17 +26,25 @@ const VALID_STATUSES: ReadonlySet<ProviderResult["status"]> = new Set(["PASS", "
 const VALID_VERDICTS: ReadonlySet<NonNullable<ProviderResult["verdict"]>> = new Set(["PASS", "FAIL", "CONCERNS", "PENDING"]);
 const VALID_OVERALL: ReadonlySet<PlatformSecurityResult["overallVerdict"]> = new Set(["PASS", "FAIL", "PENDING", "TIMED_OUT", "CERTIFIED"]);
 
+function sanitizeLogValue(v: unknown): string {
+  return String(v).replace(/[\x00-\x1f\x7f]/g, "").slice(0, 50);
+}
+
 function validateEnum<T extends string>(value: string, allowed: ReadonlySet<T>, fallback: T): T {
   const upper = value.toUpperCase();
   if (allowed.has(upper as T)) return upper as T;
-  console.warn(`[platform-security] invalid enum value "${value}", using fallback "${fallback}"`);
+  console.warn(`[platform-security] invalid enum value "${sanitizeLogValue(value)}", using fallback "${fallback}"`);
   return fallback;
 }
 
 function safeNumber(value: unknown, fallback: number): number {
+  if (value === "") {
+    console.warn(`[platform-security] empty string coerced to ${fallback}`);
+    return fallback;
+  }
   const n = Number(value ?? fallback);
   if (isNaN(n)) {
-    console.warn(`[platform-security] non-numeric value coerced to ${fallback}:`, value);
+    console.warn(`[platform-security] non-numeric value coerced to ${fallback}: ${sanitizeLogValue(value)}`);
     return fallback;
   }
   return n;
@@ -54,7 +62,7 @@ export async function checkPlatformSecurity(
     const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
 
     if (!res.ok) {
-      console.warn(`[platform-security] HTTP ${res.status} for ${skillName}`);
+      console.warn(`[platform-security] HTTP ${res.status} for ${sanitizeLogValue(skillName)}`);
       return null;
     }
 
@@ -92,7 +100,7 @@ export async function checkPlatformSecurity(
       reportUrl: String(data.reportUrl || ""),
     };
   } catch (err) {
-    console.warn(`[platform-security] check failed for ${skillName}:`, err instanceof Error ? err.message : String(err));
+    console.warn(`[platform-security] check failed for ${sanitizeLogValue(skillName)}: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }

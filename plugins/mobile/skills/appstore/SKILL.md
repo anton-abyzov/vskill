@@ -787,11 +787,11 @@ asc auth status
 | `ASC_MAX_RETRIES` | Retry count (default: 3) |
 | `ASC_DEFAULT_OUTPUT` | Default output format (json/table/markdown) |
 | `ASC_DEBUG` | Enable debug logging (`1` or `api`) |
-| `ASC_BYPASS_KEYCHAIN` | Skip keychain auth, use config/env |
+| `ASC_BYPASS_KEYCHAIN` | Skip `Keychain` auth, use config/env |
 
 **CI WARNING**: `ASC_DEBUG=api` logs full HTTP request/response bodies including auth tokens. NEVER enable in CI logs visible to external contributors.
 
-**NOTE**: `ASC_BYPASS_KEYCHAIN` is useful in CI/Docker where macOS Keychain is unavailable. In local development, keychain storage is more secure.
+**NOTE**: `ASC_BYPASS_KEYCHAIN` is useful in CI/Docker where macOS `Keychain` is unavailable. In local development, `Keychain` storage is more secure.
 
 ## CI/CD INTEGRATION (GitHub Actions)
 

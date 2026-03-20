@@ -47,9 +47,10 @@ export interface VerdictExplanationResult {
 
 export function verdictExplanation(
   verdict: EvalVerdict | "PASS" | "FAIL",
-  score: number,
+  rawScore: number,
   rubric?: RubricCriterion[],
 ): VerdictExplanationResult {
+  const score = isNaN(rawScore) ? 0 : rawScore;
   const passed = rubric?.filter((r) => r.score >= 0.7) ?? [];
   const failed = rubric?.filter((r) => r.score < 0.4) ?? [];
   const weak = rubric?.filter((r) => r.score >= 0.4 && r.score < 0.7) ?? [];

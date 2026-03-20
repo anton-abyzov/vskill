@@ -27,8 +27,8 @@ const VALID_VERDICTS: ReadonlySet<NonNullable<ProviderResult["verdict"]>> = new 
 const VALID_OVERALL: ReadonlySet<PlatformSecurityResult["overallVerdict"]> = new Set(["PASS", "FAIL", "PENDING", "TIMED_OUT", "CERTIFIED"]);
 
 function validateEnum<T extends string>(value: string, allowed: ReadonlySet<T>, fallback: T): T {
-  const upper = value.toUpperCase() as T;
-  if (allowed.has(upper)) return upper;
+  const upper = value.toUpperCase();
+  if (allowed.has(upper as T)) return upper as T;
   console.warn(`[platform-security] invalid enum value "${value}", using fallback "${fallback}"`);
   return fallback;
 }

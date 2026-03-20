@@ -256,6 +256,19 @@ describe("verdictExplanation", () => {
     expect(result.recommendations).toBeDefined();
   });
 
+  it("handles NaN score — normalizes to 0, provides recommendations", () => {
+    const result = verdictExplanation("INEFFECTIVE", NaN, rubric);
+    expect(result.explanation).toContain("0.00");
+    expect(result.explanation).not.toContain("NaN");
+    expect(result.recommendations).toBeDefined();
+  });
+
+  it("handles NaN score for MARGINAL — no 'NaN' in output", () => {
+    const result = verdictExplanation("MARGINAL", NaN, rubric);
+    expect(result.explanation).not.toContain("NaN");
+    expect(result.recommendations).toBeDefined();
+  });
+
   it("works without rubric data", () => {
     const result = verdictExplanation("PASS", 0.8);
     expect(result.explanation).toContain("PASS");

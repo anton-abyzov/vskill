@@ -47,8 +47,8 @@ describe("checkPlatformSecurity", () => {
         makePlatformResponse({
           overallVerdict: "FAIL",
           providers: [
-            { provider: "semgrep", status: "FAIL", verdict: "critical", criticalCount: 3 },
-            { provider: "snyk", status: "PASS", verdict: "clean", criticalCount: 0 },
+            { provider: "semgrep", status: "FAIL", verdict: "FAIL", criticalCount: 3 },
+            { provider: "snyk", status: "PASS", verdict: "PASS", criticalCount: 0 },
           ],
         }),
     }) as unknown as typeof fetch;
@@ -218,6 +218,9 @@ describe("checkPlatformSecurity", () => {
     );
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("NOPE"),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("BOGUS"),
     );
     warnSpy.mockRestore();
   });

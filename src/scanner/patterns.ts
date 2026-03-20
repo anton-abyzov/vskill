@@ -222,7 +222,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Keychain access",
     severity: "critical",
     description: "Detects macOS keychain or system credential store access",
-    pattern: /security\s+find-(?:generic|internet)-password|keychain|credential-store/g,
+    pattern: /security\s+find-(?:generic|internet)-password|security\s+(?:default-|login-|delete-|export-|import-|show-)?keychain|SecKeychain\w*|keychain\s*[.(]|credential-store/g,
     category: "credential-theft",
   },
   {
@@ -634,7 +634,7 @@ function computeHtmlCommentLines(lines: string[]): Set<number> {
 // These patterns commonly fire on installation instructions and code examples
 // inside fenced code blocks. Downgrade to "info" when in documentation context.
 
-const DOCUMENTATION_SAFE_PATTERNS = new Set(["PE-001", "PE-002", "PE-003", "FS-001", "CI-008", "CT-002", "NA-001", "PI-003"]);
+const DOCUMENTATION_SAFE_PATTERNS = new Set(["PE-001", "PE-002", "PE-003", "FS-001", "CI-008", "CT-002", "CT-004", "NA-001", "PI-003"]);
 
 // ---- Markdown-link safe context for FS-003 ---------------------------------
 

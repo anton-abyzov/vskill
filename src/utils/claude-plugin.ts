@@ -10,6 +10,29 @@ import { resolveCliBinary } from "./resolve-binary.js";
 import { purgeStalePlugins } from "../settings/index.js";
 
 /**
+ * Install a marketplace plugin via the claude CLI.
+ *
+ * Delegates to: claude plugin install --scope <scope> -- <pluginId>
+ *
+ * This is the only sanctioned way to add entries to settings.json's
+ * enabledPlugins field and populate the plugin cache.
+ *
+ * @throws if the claude binary is not found or the install fails
+ */
+export function claudePluginInstall(
+  pluginId: string,
+  scope: "user" | "project" | "local" = "user",
+  opts?: { cwd?: string },
+): void {
+  const claude = resolveCliBinary("claude");
+  execFileSync(
+    claude,
+    ["plugin", "install", "--scope", scope, "--", pluginId],
+    { stdio: "pipe", timeout: 30_000, ...(opts?.cwd ? { cwd: opts.cwd } : {}) },
+  );
+}
+
+/**
  * Uninstall a marketplace plugin via the claude CLI.
  *
  * Delegates to: claude plugin uninstall --scope <scope> -- <pluginId>

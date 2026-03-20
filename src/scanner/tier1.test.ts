@@ -338,3 +338,16 @@ describe("runTier1Scan — FS-003 markdown link suppression", () => {
     expect(result.verdict).toBe("PASS");
   });
 });
+
+// ---------------------------------------------------------------------------
+// CT-004: documentation-safe downgrade in fenced code block
+// ---------------------------------------------------------------------------
+describe("runTier1Scan — CT-004 doc-safe downgrade", () => {
+  it("downgrades CT-004 to info inside fenced code block", () => {
+    const content = "```bash\nsecurity find-generic-password -s test\n```";
+    const result = runTier1Scan(content);
+    const ct004 = result.findings.filter((f) => f.patternId === "CT-004");
+    expect(ct004.length).toBeGreaterThan(0);
+    expect(ct004[0].severity).toBe("info");
+  });
+});

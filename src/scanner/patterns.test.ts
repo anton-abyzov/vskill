@@ -295,6 +295,52 @@ describe("scanContent — credential-theft patterns", () => {
     expect(findings.some((f) => f.patternId === "CT-004")).toBe(true);
   });
 
+  it("CT-004: detects security default-keychain command", () => {
+    const findings = scanContent(
+      "security default-keychain -s login.keychain",
+    );
+    expect(findings.some((f) => f.patternId === "CT-004")).toBe(true);
+  });
+
+  it("CT-004: detects SecKeychainFindGenericPassword API call", () => {
+    const findings = scanContent(
+      "SecKeychainFindGenericPassword(NULL, strlen(svc), svc)",
+    );
+    expect(findings.some((f) => f.patternId === "CT-004")).toBe(true);
+  });
+
+  it("CT-004: detects keychain.get() method call", () => {
+    const findings = scanContent('keychain.get("mySecret")');
+    expect(findings.some((f) => f.patternId === "CT-004")).toBe(true);
+  });
+
+  it("CT-004: detects keychain.find() method call", () => {
+    const findings = scanContent('keychain.find({ service: "app" })');
+    expect(findings.some((f) => f.patternId === "CT-004")).toBe(true);
+  });
+
+  it("CT-004: does NOT match env var name ASC_BYPASS_KEYCHAIN", () => {
+    const findings = scanContent("ASC_BYPASS_KEYCHAIN");
+    expect(findings.some((f) => f.patternId === "CT-004")).toBe(false);
+  });
+
+  it("CT-004: does NOT match documentation text about keychain", () => {
+    const findings = scanContent(
+      "Skip keychain auth, use config/env",
+    );
+    expect(findings.some((f) => f.patternId === "CT-004")).toBe(false);
+  });
+
+  it("CT-004: does NOT match documentation text mentioning Keychain unavailable", () => {
+    const findings = scanContent("macOS Keychain is unavailable");
+    expect(findings.some((f) => f.patternId === "CT-004")).toBe(false);
+  });
+
+  it("CT-004: does NOT match env var assignment BYPASS_KEYCHAIN=1", () => {
+    const findings = scanContent("BYPASS_KEYCHAIN=1");
+    expect(findings.some((f) => f.patternId === "CT-004")).toBe(false);
+  });
+
   it("CT-005: detects secrets in environment with dynamic key", () => {
     const findings = scanContent("const val = process.env[varName];");
     expect(findings.some((f) => f.patternId === "CT-005")).toBe(true);
@@ -789,6 +835,14 @@ describe("scanContent — documentation-safe pattern downgrades", () => {
     const na001 = findings.filter((f) => f.patternId === "NA-001");
     expect(na001.length).toBeGreaterThan(0);
     expect(na001[0].severity).toBe("info");
+  });
+
+  it("CT-004 downgrades to info inside fenced code block", () => {
+    const content = "```bash\nsecurity find-generic-password -s test\n```";
+    const findings = scanContent(content);
+    const ct004 = findings.filter((f) => f.patternId === "CT-004");
+    expect(ct004.length).toBeGreaterThan(0);
+    expect(ct004[0].severity).toBe("info");
   });
 });
 

@@ -10,7 +10,7 @@ import {
 import { readLockfile, writeLockfile, ensureLockfile } from "../lockfile/index.js";
 import { filterAgents } from "../utils/agent-filter.js";
 import { syncCoreSkills, findCoreSkillsDir } from "../core-skills/sync.js";
-import { uninstallStalePlugins } from "../utils/claude-plugin.js";
+import { uninstallStalePlugins, claudePluginInstall } from "../utils/claude-plugin.js";
 import { migrateStaleSkillFiles, ensureSkillMdNaming } from "../installer/migrate.js";
 import { resolveAgentSkillsDir } from "../installer/canonical.js";
 import { bold, green, dim, cyan, red, table } from "../utils/output.js";
@@ -119,7 +119,23 @@ export async function initCommand(opts: InitOptions = {}): Promise<void> {
 
   // Sync core SpecWeave skills to all target agents
   if (agents.length > 0) {
-    const coreDir = findCoreSkillsDir();
+    let coreDir = findCoreSkillsDir();
+
+    // If core skills not found and Claude Code is among detected agents,
+    // attempt to install the Claude plugin automatically
+    if (!coreDir && agents.some((a) => a.id === "claude-code")) {
+      try {
+        console.log(dim("\nClaude plugin not cached. Installing specweave@claude-code..."));
+        claudePluginInstall("specweave@claude-code", "user");
+        coreDir = findCoreSkillsDir();
+        if (coreDir) {
+          console.log(green("Claude plugin installed successfully."));
+        }
+      } catch {
+        // Plugin install failed — fall through to manual message
+      }
+    }
+
     if (coreDir) {
       const synced = syncCoreSkills(agents, process.cwd(), coreDir);
       if (synced > 0) {

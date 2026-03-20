@@ -69,7 +69,6 @@ which asc && asc --version
 
 **If `asc` is NOT found**, guide the user:
 
-```markdown
 **`asc` CLI is not installed.** Choose an installation method:
 
 1. **Homebrew (recommended)**:
@@ -90,7 +89,6 @@ which asc && asc --version
    ```
 
 After installing, run this command again.
-```
 
 **STOP** if `asc` is not installed. Do not proceed.
 
@@ -102,7 +100,6 @@ asc auth status --validate
 
 **If auth fails**, guide the user through setup:
 
-```markdown
 **Authentication required.** You need an App Store Connect API key.
 
 1. **Generate API key** at https://appstoreconnect.apple.com/access/integrations/api
@@ -126,7 +123,6 @@ asc auth status --validate
    ```
 
 3. **Verify**: `asc auth status --validate`
-```
 
 If auth has issues, suggest: `asc auth doctor --fix --confirm`
 

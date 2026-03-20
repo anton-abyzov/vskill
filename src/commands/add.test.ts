@@ -2730,7 +2730,7 @@ describe("detectMarketplaceRepo", () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2762,7 +2762,7 @@ describe("addCommand marketplace integration", () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2842,7 +2842,7 @@ describe("addCommand marketplace integration", () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2869,7 +2869,7 @@ describe("addCommand marketplace integration", () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2887,7 +2887,7 @@ describe("addCommand marketplace integration", () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2928,7 +2928,7 @@ describe("addCommand marketplace integration", () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -2981,7 +2981,7 @@ describe("addCommand marketplace integration", () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -3026,7 +3026,7 @@ describe("addCommand unregistered plugin discovery", () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -3061,7 +3061,7 @@ describe("addCommand unregistered plugin discovery", () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -3096,7 +3096,7 @@ describe("addCommand unregistered plugin discovery", () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ download_url: "https://example.com/marketplace.json" }),
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
       })
       .mockResolvedValueOnce({
         ok: true,

@@ -59,6 +59,16 @@ import { computeSha } from "../updater/source-fetcher.js";
 import { extractFrontmatterVersion } from "../utils/version.js";
 
 // ---------------------------------------------------------------------------
+/** Validate that a download_url from GitHub Contents API points to a trusted GitHub domain. */
+function isGitHubDownloadUrl(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url);
+    return protocol === "https:" && (hostname === "raw.githubusercontent.com" || hostname === "api.github.com");
+  } catch {
+    return false;
+  }
+}
+
 // Marketplace detection — auto-detect Claude Code plugin marketplaces
 // ---------------------------------------------------------------------------
 
@@ -77,8 +87,8 @@ function parseManifestFromContentsApi(
 async function parseManifestFromContentsApi(
   data: { download_url?: string; content?: string; encoding?: string },
 ): Promise<string | null> {
-  // Prefer download_url for raw content
-  if (data.download_url) {
+  // Prefer download_url for raw content — validate URL before fetching (SSRF prevention)
+  if (data.download_url && isGitHubDownloadUrl(data.download_url)) {
     const rawRes = await fetch(data.download_url);
     if (rawRes.ok) {
       const content = await rawRes.text();
@@ -147,8 +157,9 @@ export async function detectMarketplaceRepo(
         return { isMarketplace: true, manifestContent: content };
       }
     }
-  } catch {
-    // all attempts exhausted
+  } catch (err) {
+    // All attempts exhausted — log so network failures are diagnosable
+    console.warn(`[vskill] Marketplace detection failed for ${owner}/${repo}: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return { isMarketplace: false };
@@ -375,7 +386,9 @@ async function installMarketplaceRepo(
             try {
               rmSync(dir, { recursive: true, force: true });
               removedCount++;
-            } catch { /* ignore removal errors */ }
+            } catch (err) {
+              console.warn(`Could not remove ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+            }
           }
         }
       }
@@ -440,14 +453,17 @@ async function installMarketplaceRepo(
               }
               console.log(dim("  Track: ") + link(trackUrl, trackUrl));
             }
-          } catch {
+          } catch (err) {
             unverifiedCount++;
             const submitUrl = `https://verified-skill.com/submit`;
             console.log(yellow(`  Could not submit ${skill.name} automatically.`));
+            console.warn(`[vskill] Submission failed for ${skill.name}: ${err instanceof Error ? err.message : String(err)}`);
             console.log(dim("  Submit manually: ") + link(submitUrl, submitUrl));
           }
         }
-      } catch { /* skip discovery errors */ }
+      } catch (err) {
+        console.warn(`[vskill] Discovery error for ${unreg.name}: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
     console.log();
 
@@ -2039,8 +2055,9 @@ async function resolveViaSearch(
   try {
     const response = await searchSkills(flatName);
     results = response.results;
-  } catch {
+  } catch (err) {
     // Search API failed — fall back to existing direct lookup behavior
+    console.warn(`[vskill] Search API unavailable: ${err instanceof Error ? err.message : String(err)}`);
     console.log(
       yellow("Tip: Prefer owner/repo format for direct GitHub installs.")
     );
@@ -2198,8 +2215,9 @@ async function installFromRegistry(
         process.exit(1);
         return;
       }
-    } catch {
+    } catch (err) {
       // Search also failed — fall through to generic error
+      console.warn(`[vskill] Could not fetch suggestions for "${skillName}": ${err instanceof Error ? err.message : String(err)}`);
     }
 
     console.error(
@@ -2415,7 +2433,7 @@ async function installSingleSkillLegacy(
       const dirRes = await fetch(agentsDirUrl, { headers: { Accept: "application/vnd.github.v3+json" } });
       if (dirRes.ok) {
         const entries = (await dirRes.json()) as Array<{ name: string; download_url?: string }>;
-        const mdEntries = entries.filter((e) => e.name.endsWith(".md") && e.download_url);
+        const mdEntries = entries.filter((e) => e.name.endsWith(".md") && e.download_url && isGitHubDownloadUrl(e.download_url!));
         if (mdEntries.length > 0) {
           legacyAgentFiles = {};
           const fetches = mdEntries.map(async (entry) => {

@@ -57,7 +57,8 @@ export function migrateStaleSkillFiles(
   let entries: string[];
   try {
     entries = readdirSync(skillsDir);
-  } catch {
+  } catch (err) {
+    result.errors.push(`Could not read skills directory ${skillsDir}: ${(err as Error).message}`);
     return result;
   }
 
@@ -70,7 +71,7 @@ export function migrateStaleSkillFiles(
         migrateDirLevel(entryPath, result);
       }
     } catch {
-      // Skip unreadable entries
+      // Skip unreadable entries (binary files, permission edge cases)
     }
   }
 
@@ -107,7 +108,8 @@ export function ensureSkillMdNaming(skillsDir: string): NamingResult {
   let entries: string[];
   try {
     entries = readdirSync(skillsDir);
-  } catch {
+  } catch (err) {
+    result.errors.push(`Could not read skills directory ${skillsDir}: ${(err as Error).message}`);
     return result;
   }
 
@@ -134,7 +136,8 @@ function enforceSkillMdInDir(dir: string, result: NamingResult): void {
   let entries: string[];
   try {
     entries = readdirSync(dir);
-  } catch {
+  } catch (err) {
+    result.errors.push(`Could not read directory ${dir}: ${(err as Error).message}`);
     return;
   }
 
@@ -182,8 +185,8 @@ function enforceSkillMdInDir(dir: string, result: NamingResult): void {
       for (let i = 1; i < candidates.length; i++) {
         try {
           unlinkSync(join(entryPath, candidates[i]));
-        } catch {
-          // Non-fatal
+        } catch (err) {
+          result.errors.push(`Could not remove duplicate ${candidates[i]} in ${entryPath}: ${(err as Error).message}`);
         }
       }
 
@@ -233,7 +236,8 @@ function migrateDirLevel(dir: string, result: MigrationResult): void {
   let entries: string[];
   try {
     entries = readdirSync(dir);
-  } catch {
+  } catch (err) {
+    result.errors.push(`Could not read directory ${dir}: ${(err as Error).message}`);
     return;
   }
 

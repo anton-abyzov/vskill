@@ -436,7 +436,7 @@ asc screenshots upload \
   --display-type "APP_IPHONE_67" \
   --file /path/to/screenshot.png
 
-asc screenshots delete --screenshot-id "$SCREENSHOT_ID"
+asc screenshots delete --screenshot-id "$SCREENSHOT_ID" --confirm
 ```
 
 ### Video Previews
@@ -824,7 +824,7 @@ jobs:
       - name: Upload and Distribute
         run: |
           asc publish testflight \
-            --app ${{ vars.APP_ID }} \
+            --app "${{ vars.APP_ID }}" \
             --ipa ./build/MyApp.ipa \
             --groups "Beta Testers"
 ```

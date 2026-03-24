@@ -113,11 +113,16 @@ export function installSymlink(
   content = ensureFrontmatter(content, skillName);
   const strippedContent = stripClaudeFields(content, skillName);
 
-  // Canonical gets stripped content — non-Claude agents symlink here
-  const canonicalSkillDir = join(ensureCanonicalDir(opts.projectRoot, opts.global), skillName);
-  mkdirSync(canonicalSkillDir, { recursive: true });
-  writeFileSync(join(canonicalSkillDir, "SKILL.md"), strippedContent);
-  if (agentFiles) writeAgentFiles(canonicalSkillDir, agentFiles);
+  // Skip canonical .agents/ dir when all agents use copy-fallback (e.g., claude-code only)
+  const needsCanonical = agents.some(a => !COPY_FALLBACK_AGENTS.has(a.id));
+
+  let canonicalSkillDir: string | undefined;
+  if (needsCanonical) {
+    canonicalSkillDir = join(ensureCanonicalDir(opts.projectRoot, opts.global), skillName);
+    mkdirSync(canonicalSkillDir, { recursive: true });
+    writeFileSync(join(canonicalSkillDir, "SKILL.md"), strippedContent);
+    if (agentFiles) writeAgentFiles(canonicalSkillDir, agentFiles);
+  }
 
   const installed: string[] = [];
 
@@ -138,7 +143,7 @@ export function installSymlink(
       continue;
     }
 
-    const ok = createRelativeSymlink(canonicalSkillDir, linkPath);
+    const ok = createRelativeSymlink(canonicalSkillDir!, linkPath);
 
     if (ok) {
       installed.push(linkPath);

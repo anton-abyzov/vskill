@@ -242,6 +242,57 @@ describe("canonical installer", () => {
       expect(readFileSync(cursorAgentFile, "utf-8")).toBe("# Frontend Agent");
     });
 
+    it("skips canonical .agents/ dir when all agents are copy-fallback", () => {
+      const agents = [
+        makeAgent({ id: "claude-code", localSkillsDir: ".claude/skills" }),
+      ];
+
+      const result = installSymlink("my-skill", "# My Skill\nContent here", agents, {
+        global: false,
+        projectRoot: tempDir,
+      });
+
+      // Claude Code gets a direct copy
+      const claudePath = join(tempDir, ".claude", "skills", "my-skill", "SKILL.md");
+      expect(existsSync(claudePath)).toBe(true);
+
+      // .agents/ canonical dir should NOT exist — no agent uses symlinks
+      const canonicalDir = join(tempDir, ".agents");
+      expect(existsSync(canonicalDir)).toBe(false);
+
+      expect(result).toHaveLength(1);
+    });
+
+    it("skips canonical .agents/ dir when multiple copy-fallback agents", () => {
+      const agents = [
+        makeAgent({ id: "claude-code", localSkillsDir: ".claude/skills" }),
+        makeAgent({ id: "claude-code", localSkillsDir: ".claude/commands" }),
+      ];
+
+      installSymlink("my-skill", "# My Skill\nContent", agents, {
+        global: false,
+        projectRoot: tempDir,
+      });
+
+      // .agents/ canonical dir should NOT exist
+      expect(existsSync(join(tempDir, ".agents"))).toBe(false);
+    });
+
+    it("still creates canonical .agents/ when mix of fallback and symlink agents", () => {
+      const agents = [
+        makeAgent({ id: "claude-code", localSkillsDir: ".claude/skills" }),
+        makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" }),
+      ];
+
+      installSymlink("my-skill", "# My Skill\nContent", agents, {
+        global: false,
+        projectRoot: tempDir,
+      });
+
+      // .agents/ canonical SHOULD exist — cursor needs symlink
+      expect(existsSync(join(tempDir, ".agents", "skills", "my-skill", "SKILL.md"))).toBe(true);
+    });
+
     it("overwrites existing symlink or directory at target", () => {
       const agents = [makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" })];
 

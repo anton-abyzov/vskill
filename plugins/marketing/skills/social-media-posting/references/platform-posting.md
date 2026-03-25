@@ -494,11 +494,65 @@ After posting: `https://x.com/{handle}/status/{id}` — find the latest tweet on
 5. Use `keyboard.type()` — LinkedIn's Quill editor rejects `fill` actions
 6. Click Post button
 
+### Personal Profile Posting (Claude Cowork / Chrome Extension MCP)
+
+When posting from Claude Cowork (Dispatch + Computer Use) via the Chrome extension MCP:
+
+1. Navigate to `https://www.linkedin.com/feed/`
+2. Click "Start a post" to open the compose dialog
+3. Click into the compose text area ("What do you want to talk about?")
+4. **Text input: use system clipboard paste (CRITICAL)**
+   - LinkedIn's compose dialog renders inside a full-page iframe (`/preload/`) with a Quill editor
+   - The editor is NOT accessible via `document.querySelectorAll('[contenteditable]')` from the main frame
+   - Chrome extension `type` action does NOT work — text appears to type but doesn't register
+   - **SOLUTION:** Use AppleScript to set clipboard text, then Cmd+V paste via Chrome extension:
+
+   ```applescript
+   -- Step 1: Set text to clipboard via osascript MCP
+   set the clipboard to "Your post text here..."
+   ```
+
+   ```
+   -- Step 2: Click into compose area, then Cmd+V via Chrome extension
+   Chrome MCP: left_click at compose area coordinates
+   Chrome MCP: key "cmd+v"
+   ```
+
+5. **Image attachment: use AppleScript PNGf clipboard technique (CRITICAL)**
+   - Chrome extension `file_upload` returns "Not allowed" for sandbox VM paths
+   - Chrome extension `upload_image` cannot access sandbox-uploaded files
+   - Direct file paths from sandbox VM don't exist on the Mac host
+   - **SOLUTION:** AppleScript PNGf clipboard + Cmd+V paste:
+
+   ```applescript
+   -- Step 1: If image is in sandbox VM, find it on host via mdfind
+   do shell script "mdfind -name 'image-filename' 2>/dev/null | head -5"
+
+   -- Step 2: Copy to accessible location
+   do shell script "cp '/found/host/path/image.png' '/tmp/post_image.png'"
+
+   -- Step 3: Read image as PNGf into clipboard
+   set theFile to POSIX file "/tmp/post_image.png"
+   set the clipboard to (read theFile as «class PNGf»)
+   ```
+
+   ```
+   -- Step 4: Cmd+V in the compose dialog to paste image
+   Chrome MCP: key "cmd+v"
+   ```
+
+   This works because LinkedIn's Quill editor accepts PNGf clipboard data as an inline image attachment.
+
+6. Click Post button
+
 ### Key Gotchas
 
 - LinkedIn uses a Quill rich text editor — Puppeteer's `fill` action does NOT work
-- Must use `page.keyboard.type()` after clicking into the editor
+- Must use `page.keyboard.type()` after clicking into the editor (Puppeteer) OR clipboard paste (Chrome extension MCP)
 - Premium upsell modals randomly appear — dismiss them first
+- LinkedIn compose dialog lives inside a full-page `/preload/` iframe — JavaScript from the main frame cannot find or interact with the editor
+- Chrome extension `type` action silently fails on LinkedIn compose — always use clipboard paste
+- For image upload from sandbox environments (Claude Cowork), the only reliable method is the AppleScript PNGf clipboard technique — all file upload APIs fail due to path isolation between sandbox VM and host
 
 ---
 
@@ -1046,6 +1100,52 @@ Prerequisites:
 - Increase delays if the picker is slow (SSD vs HDD, large directories)
 - Verify picker opened: `osascript -e 'tell app "System Events" to tell process "Google Chrome" to count of sheets of window 1'` → should be 1
 
+### Cross-Environment Image Transfer (Claude Cowork Sandbox -> Mac Host -> Browser)
+
+When running inside Claude Cowork (Dispatch), files exist in a sandbox VM that is NOT accessible from the Mac host filesystem. This is the reliable pattern for getting images from the sandbox into browser compose boxes:
+
+**Step 1: Locate the file on the host**
+
+User-uploaded files in Claude Cowork are synced to the host at unpredictable paths. Use `mdfind` (macOS Spotlight) via AppleScript to locate them:
+
+```applescript
+-- Via osascript MCP tool
+do shell script "mdfind -name 'image-filename-without-extension' 2>/dev/null | head -5"
+```
+
+This returns the host-side path, e.g.:
+`/Users/username/Library/Application Support/Claude/local-agent-mode-sessions/.../uploads/image.png`
+
+**Step 2: Copy to /tmp for reliable access**
+
+```applescript
+do shell script "cp '/Users/.../uploads/image.png' '/tmp/post_image.png'"
+```
+
+**Step 3: Load image as PNGf into system clipboard**
+
+```applescript
+set theFile to POSIX file "/tmp/post_image.png"
+set the clipboard to (read theFile as «class PNGf»)
+```
+
+**Step 4: Paste into browser compose box**
+
+Use the Chrome extension MCP's `key "cmd+v"` action while the compose box is focused. This works on:
+- X/Twitter compose box
+- Threads compose box
+- LinkedIn compose dialog (Quill editor)
+
+**What Doesn't Work for Cross-Environment Image Transfer:**
+
+| Method | Problem |
+|--------|---------|
+| Chrome extension `file_upload` with sandbox path | "Not allowed" — path doesn't exist on host |
+| Chrome extension `file_upload` with host path | Security restriction — blocked by extension |
+| Chrome extension `upload_image` with imageId | Can't access sandbox-uploaded images by path |
+| HTTP server bridge (sandbox -> host) | Mac can't reach sandbox VM IP (172.16.10.3) |
+| Direct `/tmp/` path from sandbox | Different filesystem — sandbox `/tmp` != host `/tmp` |
+
 ### Reliable Element Clicking
 
 ```javascript
@@ -1109,7 +1209,10 @@ for (let i = 0; i < 30; i++) {
 | `Transcode not finished yet` (HTTP 202) | Instagram API | Wait 30s before calling `configure_to_clips` |
 | `media_needs_reupload` / `cover_photo_upload_error` | Instagram API | Upload cover photo (`rupload_igphoto`) before configure |
 | Missing `is_clips_video` → HTTP 500 | Instagram API | Add `"is_clips_video":true` to rupload params |
-| `fill` action fails on editor | LinkedIn | Use `page.keyboard.type()` — Quill editor |
+| `fill` action fails on editor | LinkedIn | Use `page.keyboard.type()` (Puppeteer) or clipboard paste (Chrome ext MCP) — Quill editor |
+| Chrome ext `type` silently fails in compose | LinkedIn | Compose dialog is in `/preload/` iframe — use clipboard paste via AppleScript + Cmd+V |
+| Image upload fails from sandbox VM | LinkedIn, X, Threads | Use AppleScript PNGf clipboard technique: `mdfind` -> copy to `/tmp` -> `read as PNGf` -> Cmd+V |
+| JS can't find contenteditable in compose | LinkedIn | Editor is inside full-page `/preload/` iframe — not accessible from main frame JS |
 | Tag search input invisible | Instagram | Tab navigation + CDP clicks (hidden DOM) |
 | Thread creation fails | X/Twitter | Post main tweet first, then reply separately |
 | Premium upsell blocks posting | LinkedIn | Dismiss modal first |

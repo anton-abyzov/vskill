@@ -402,6 +402,43 @@ Best practice: Do BOTH for maximum reach.
 
 Navigate to post URL → Click `svg[aria-label="More options"]` → Click "Edit" → Caption field: `[aria-label="Write a caption..."]` → Click Done.
 
+### Representing Screenshots in Instagram Carousels
+
+When you have a single static screenshot (like a Cowork demo or feature showcase), consider expanding it into a multi-slide carousel for better engagement:
+
+**Carousel Structure Example (3 slides):**
+1. **Slide 1 — The Screenshot (Hero Slide)**
+   - Full screenshot cropped to Instagram carousel ratio (1:1 or 4:5)
+   - Use `ffmpeg` or ImageMagick to crop:
+   ```bash
+   # Crop to 1:1 (square)
+   ffmpeg -i screenshot.png -vf "scale=1080:1080:force_original_aspect_ratio=decrease,pad=1080:1080:(ow-iw)/2:(oh-ih)/2:white" slide1.jpg
+
+   # Or crop to 4:5 (Instagram standard)
+   ffmpeg -i screenshot.png -vf "scale=1080:1350:force_original_aspect_ratio=decrease,pad=1080:1350:(ow-iw)/2:(oh-ih)/2:white" slide1.jpg
+   ```
+
+2. **Slide 2 — Close-up of Key Result**
+   - Zoom in on the most important output (e.g., calculation result, feature highlight)
+   - Crop to same dimensions
+
+3. **Slide 3 — Text Overlay Explanation**
+   - Create a text-only slide with caption/context
+   - Use `ffmpeg drawtext` to overlay text on a solid color background:
+   ```bash
+   ffmpeg -f lavfi -i color=white:s=1080x1350:d=1 \
+     -vf "drawtext=fontsize=60:fontcolor=black:text='Your text here':x=(w-text_w)/2:y=(h-text_h)/2" \
+     slide3.jpg
+   ```
+
+**Upload as Carousel:**
+Use the Instagram API approach (signed_body) documented in the Carousel Upload via Instagram API section, NOT the browser UI.
+
+**Why Carousels?**
+- Higher engagement than single images
+- Tells a complete story (raw → result → explanation)
+- Algorithm boost — carousels get more impressions
+
 ---
 
 ## X/Twitter
@@ -461,6 +498,45 @@ send("DOM.setFileInputFiles", {
 import time
 time.sleep(45)
 ```
+
+### Image Attachment from Claude Cowork (Sandbox Environment)
+
+When posting static screenshots or images from Claude Cowork, use the **AppleScript PNGf clipboard technique** instead of CDP `DOM.setFileInputFiles`:
+
+**Why PNGf over CDP?**
+- CDP file paths don't resolve across sandbox VM -> Mac host filesystem boundary
+- PNGf clipboard paste is the only cross-environment method that reliably works
+
+**Step 1: Locate image on host filesystem**
+
+If the image is in the Claude Cowork sandbox VM:
+```applescript
+do shell script "mdfind -name 'screenshot-filename' 2>/dev/null | head -5"
+```
+
+**Step 2: Copy to /tmp**
+
+```applescript
+do shell script "cp '/Users/.../uploads/screenshot.png' '/tmp/post_image.png'"
+```
+
+**Step 3: Load image as PNGf into clipboard**
+
+```applescript
+set theFile to POSIX file "/tmp/post_image.png"
+set the clipboard to (read theFile as «class PNGf»)
+```
+
+**Step 4: Click compose box and paste**
+
+```
+1. Click into the tweet composer: [data-testid="tweetTextarea_0"]
+2. Use Chrome extension MCP: key "cmd+v"
+3. Image attaches immediately (no file picker needed)
+4. Click Post
+```
+
+This method **verified working** for static screenshots as of March 2026.
 
 ### Thread Creation
 
@@ -611,6 +687,45 @@ send("DOM.setFileInputFiles", {
     "files": ["/full/path/to/video.MOV"]
 })
 ```
+
+### Image Attachment from Claude Cowork (Sandbox Environment)
+
+When posting static screenshots or images from Claude Cowork, use the **AppleScript PNGf clipboard technique**:
+
+**Why PNGf over CDP?**
+- CDP file paths don't resolve across sandbox VM -> Mac host filesystem boundary
+- PNGf clipboard paste is the only cross-environment method that reliably works on Threads
+
+**Step 1: Locate image on host filesystem**
+
+If the image is in the Claude Cowork sandbox VM:
+```applescript
+do shell script "mdfind -name 'screenshot-filename' 2>/dev/null | head -5"
+```
+
+**Step 2: Copy to /tmp**
+
+```applescript
+do shell script "cp '/Users/.../uploads/screenshot.png' '/tmp/post_image.png'"
+```
+
+**Step 3: Load image as PNGf into clipboard**
+
+```applescript
+set theFile to POSIX file "/tmp/post_image.png"
+set the clipboard to (read theFile as «class PNGf»)
+```
+
+**Step 4: Click compose box and paste**
+
+```
+1. Click into the Threads composer area
+2. Use Chrome extension MCP: key "cmd+v"
+3. Image attaches immediately
+4. Proceed with text and posting
+```
+
+This method **verified working** for static screenshots as of March 2026, just like X/Twitter and LinkedIn.
 
 ### Multi-Post Thread vs Single Post
 
@@ -880,6 +995,55 @@ Key details:
 - PID changes on restart — always re-detect
 - CDP `/json/activate/{id}` changes CDP target but not the visible browser tab
 
+### Converting Screenshots to Video (Static Slides)
+
+TikTok is **video-only** -- static screenshots and images are rejected during content checks. When you have a single static screenshot or demo (like a Cowork calculator task screenshot), convert it to a video using ffmpeg:
+
+**Minimum video requirements for TikTok algorithm visibility:**
+- **Minimum duration: 16 seconds** -- videos shorter than this get lower algorithmic distribution
+- **Format: 1080x1920 (9:16 portrait), 30fps, H.264/AAC**
+- **Keep a single frame visible for at least 3 seconds** (typical slideshow duration per frame)
+
+**Basic screenshot-to-video conversion:**
+
+```bash
+# Convert a single PNG/JPG screenshot to a 16-second video
+ffmpeg -loop 1 -i screenshot.png \
+  -c:v libx264 -t 16 -pix_fmt yuv420p \
+  -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black" \
+  -r 30 \
+  output.mp4
+```
+
+**With text overlay (add context/explanation):**
+
+```bash
+ffmpeg -loop 1 -i screenshot.png \
+  -c:v libx264 -t 16 -pix_fmt yuv420p \
+  -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,
+        drawtext=fontfile=/System/Library/Fonts/Helvetica.ttc:fontsize=60:fontcolor=white:
+        text='Your Hook Text Here':x=(w-text_w)/2:y=200" \
+  -r 30 \
+  output.mp4
+```
+
+**Why minimum 16 seconds?**
+- TikTok algorithm throttles distribution for videos under 15 seconds
+- Watch time matters -- longer videos = more engagement signals
+- Holding a single frame for 16 seconds keeps the video long enough without actual animations
+
+**Multi-frame slideshow (multiple screenshots):**
+
+```bash
+# If you have multiple screenshots (slide1.png, slide2.png, etc.)
+# Each frame displays for 4 seconds, total 16 seconds for 4 slides
+ffmpeg -framerate 0.25 -i slide_%d.png \
+  -c:v libx264 -r 30 -pix_fmt yuv420p \
+  -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black" \
+  -t 16 \
+  output.mp4
+```
+
 ### Photo Carousel → Video Conversion
 
 TikTok web doesn't support photo carousels. Convert slides to video:
@@ -1103,6 +1267,11 @@ Prerequisites:
 ### Cross-Environment Image Transfer (Claude Cowork Sandbox -> Mac Host -> Browser)
 
 When running inside Claude Cowork (Dispatch), files exist in a sandbox VM that is NOT accessible from the Mac host filesystem. This is the reliable pattern for getting images from the sandbox into browser compose boxes:
+
+**Verified Working Platforms (as of March 2026):**
+- X/Twitter -- PNGf clipboard paste into tweet composer
+- Threads -- PNGf clipboard paste into post composer
+- LinkedIn -- PNGf clipboard paste into Quill editor
 
 **Step 1: Locate the file on the host**
 

@@ -1,0 +1,13 @@
+{
+  "eval_id": 4,
+  "eval_name": "no-browser-tools-graceful-fallback",
+  "prompt": "Create a contact form page for my portfolio site. Clean, minimal design with a subtle background texture. Plain HTML/CSS/JS, no framework. I don't have any browser extensions or MCP servers set up.",
+  "assertions": [
+    { "id": "vanilla-html", "text": "Uses plain HTML/CSS/JS without any framework dependency", "type": "boolean" },
+    { "id": "minimal-aesthetic", "text": "Implements a clean, minimal design direction as requested — not overloaded with effects", "type": "boolean" },
+    { "id": "background-texture", "text": "Includes a subtle background texture (noise, grain, gradient mesh, or similar)", "type": "boolean" },
+    { "id": "suggests-browser-setup", "text": "Mentions or recommends setting up Chrome extension or Playwright MCP for visual verification since no browser tools are available", "type": "boolean" },
+    { "id": "form-functional", "text": "The contact form has proper form elements (input, textarea, button) with appropriate types and labels", "type": "boolean" },
+    { "id": "focus-states", "text": "Includes visible focus states on form inputs for keyboard accessibility", "type": "boolean" }
+  ]
+}

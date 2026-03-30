@@ -1,0 +1,12 @@
+{
+  "eval_id": 6,
+  "eval_name": "console-error-detection-and-fix",
+  "prompt": "I just built this product card grid but something's not right — the images aren't loading and I think there might be JS errors. Can you check it in the browser and fix whatever's wrong? Chrome extension is connected, app running on localhost:5173.",
+  "assertions": [
+    { "id": "navigates-to-app", "text": "Navigates to localhost:5173 using available browser tools to inspect the running application", "type": "boolean" },
+    { "id": "reads-console", "text": "Checks the browser console for JavaScript errors or warnings", "type": "boolean" },
+    { "id": "identifies-issues", "text": "Identifies specific issues (broken image URLs, JS errors, or similar) from the browser inspection", "type": "boolean" },
+    { "id": "fixes-code", "text": "Makes code changes to fix the identified issues", "type": "boolean" },
+    { "id": "re-verifies", "text": "Returns to the browser after fixing to confirm the issues are resolved", "type": "boolean" }
+  ]
+}

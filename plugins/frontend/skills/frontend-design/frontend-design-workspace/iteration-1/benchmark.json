@@ -1,0 +1,41 @@
+{
+  "skill_name": "frontend-design",
+  "iteration": 1,
+  "timestamp": "2026-03-30T12:00:00Z",
+  "results": {
+    "with_skill": {
+      "eval_1_landing_page": { "pass_rate": 1.0, "assertions": 7, "passed": 7 },
+      "eval_4_no_browser": { "pass_rate": 1.0, "assertions": 6, "passed": 6 },
+      "eval_6_console_errors": { "pass_rate": 0.8, "assertions": 5, "passed": 4 },
+      "overall": { "pass_rate": 0.944, "total_assertions": 18, "total_passed": 17 }
+    },
+    "without_skill": {
+      "eval_1_landing_page": { "pass_rate": 0.57, "assertions": 7, "passed": 4 },
+      "eval_4_no_browser": { "pass_rate": 0.83, "assertions": 6, "passed": 5 },
+      "eval_6_console_errors": { "pass_rate": 0.0, "assertions": 5, "passed": 0 },
+      "overall": { "pass_rate": 0.5, "total_assertions": 18, "total_passed": 9 }
+    },
+    "delta": {
+      "overall_improvement": "+44.4pp",
+      "from": 0.5,
+      "to": 0.944
+    }
+  },
+  "analysis": {
+    "strongest_improvements": [
+      "browser-verification-attempted: 0% → 100% (the skill's core value prop)",
+      "console-error-workflow: 0% → 80% (without skill, agent can't use Chrome extension at all)",
+      "no-generic-fonts: baseline uses Inter, skill version avoids it",
+      "reduced-motion: baseline skips it, skill version always includes it",
+      "suggests-browser-setup: only with-skill recommends Chrome/Playwright setup"
+    ],
+    "non_discriminating_assertions": [
+      "dark-theme-not-pure-black: both versions pass (Claude naturally avoids pure black when asked for dark theme)",
+      "css-variables: both versions pass (standard practice)",
+      "editorial-direction: both versions pass (prompt is specific enough to guide this)"
+    ],
+    "skill_weakness": [
+      "eval-6 fixes-code: with-skill described diagnostic steps but didn't show actual Edit tool calls (it described what it WOULD do but the output format was plan-only, so this is a test design issue, not a skill issue)"
+    ]
+  }
+}

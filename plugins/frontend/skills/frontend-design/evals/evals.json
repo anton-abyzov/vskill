@@ -1,0 +1,94 @@
+{
+  "skill_name": "frontend-design",
+  "evals": [
+    {
+      "id": 1,
+      "name": "landing-page-bold-aesthetic",
+      "prompt": "I need a landing page for my new SaaS product called 'Meridian' — it's a project management tool for creative agencies. The vibe should feel premium and editorial, not the usual tech startup look. Dark theme, sophisticated typography, some subtle animations on scroll. React + Tailwind project, dev server runs on localhost:3000.",
+      "expected_output": "Generates a distinctive landing page with editorial aesthetic, non-generic font choices, dark theme with rich backgrounds, scroll-triggered animations, and attempts to verify it visually in the browser.",
+      "files": [],
+      "assertions": [
+        { "id": "no-generic-fonts", "text": "Does not use Inter, Roboto, Arial, or system-ui as the primary display font — chooses a distinctive alternative", "type": "boolean" },
+        { "id": "dark-theme-not-pure-black", "text": "Uses rich dark backgrounds (not pure #000000) with tinted or warm undertones", "type": "boolean" },
+        { "id": "css-variables", "text": "Defines a color system using CSS custom properties or Tailwind theme extension for consistency", "type": "boolean" },
+        { "id": "scroll-animation", "text": "Includes scroll-triggered or staggered entrance animations with CSS or a motion library", "type": "boolean" },
+        { "id": "reduced-motion", "text": "Includes a prefers-reduced-motion media query or check to disable animations for accessibility", "type": "boolean" },
+        { "id": "browser-verification-attempted", "text": "Attempts to open the result in a browser (Chrome extension, Playwright MCP, or mentions the need to verify visually)", "type": "boolean" },
+        { "id": "editorial-direction", "text": "The overall aesthetic direction is clearly editorial/premium — not a generic tech startup template", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "dashboard-with-verification-loop",
+      "prompt": "Build me an analytics dashboard for our internal metrics tool. It should have a sidebar nav, a main content area with some charts (use placeholder data), and a header with user avatar. Make it look really polished — I'm tired of dashboards that all look the same. I have the Chrome extension connected, so you can check how it looks.",
+      "expected_output": "Generates a visually distinctive dashboard, then uses the Chrome extension to navigate to it, visually verify the layout, check for console errors, and iterate if anything looks off.",
+      "files": [],
+      "assertions": [
+        { "id": "sidebar-layout", "text": "Implements a sidebar navigation + main content area layout structure", "type": "boolean" },
+        { "id": "distinctive-design", "text": "Makes deliberate aesthetic choices that differentiate it from a generic dashboard template (unique colors, typography, or spatial composition)", "type": "boolean" },
+        { "id": "chrome-ext-used", "text": "Uses Chrome extension MCP tools (or describes using them) to navigate to the running app and visually inspect the result", "type": "boolean" },
+        { "id": "console-check", "text": "Checks the browser console for errors or warnings during verification", "type": "boolean" },
+        { "id": "iteration-on-issues", "text": "If visual issues are found during browser verification, makes code changes and re-verifies (or describes this workflow)", "type": "boolean" },
+        { "id": "placeholder-data", "text": "Uses realistic placeholder data for charts and metrics — not empty states or lorem ipsum", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "playwright-mcp-fallback",
+      "prompt": "I need a pricing page for our B2B product. Three tiers, toggle between monthly/annual, feature comparison table at the bottom. The Playwright MCP server is set up but I don't have the Chrome extension. Make sure it actually looks good — take screenshots to verify. Next.js project on port 3000.",
+      "expected_output": "Generates a pricing page, then uses Playwright MCP to navigate, take screenshots, check the accessibility tree, and verify the visual result. Falls back to Playwright MCP since Chrome extension is unavailable.",
+      "files": [],
+      "assertions": [
+        { "id": "three-tiers", "text": "Implements three distinct pricing tiers with clear visual hierarchy (one tier emphasized as recommended/popular)", "type": "boolean" },
+        { "id": "monthly-annual-toggle", "text": "Includes a functional toggle between monthly and annual pricing with price updates", "type": "boolean" },
+        { "id": "playwright-screenshot", "text": "Uses Playwright MCP browser_take_screenshot (or equivalent) to capture and verify the rendered page", "type": "boolean" },
+        { "id": "playwright-navigate", "text": "Uses Playwright MCP browser_navigate to open the dev server URL", "type": "boolean" },
+        { "id": "accessibility-check", "text": "Uses browser_snapshot or similar to check the accessibility tree structure, or mentions accessibility compliance", "type": "boolean" },
+        { "id": "no-ai-slop", "text": "Avoids the generic purple-gradient-on-white pricing page pattern", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "no-browser-tools-graceful-fallback",
+      "prompt": "Create a contact form page for my portfolio site. Clean, minimal design with a subtle background texture. Plain HTML/CSS/JS, no framework. I don't have any browser extensions or MCP servers set up.",
+      "expected_output": "Generates a polished contact form with minimal aesthetic, uses vanilla HTML/CSS/JS, and since no browser tools are available, suggests setting up Chrome extension or Playwright MCP for visual verification.",
+      "files": [],
+      "assertions": [
+        { "id": "vanilla-html", "text": "Uses plain HTML/CSS/JS without any framework dependency", "type": "boolean" },
+        { "id": "minimal-aesthetic", "text": "Implements a clean, minimal design direction as requested — not overloaded with effects", "type": "boolean" },
+        { "id": "background-texture", "text": "Includes a subtle background texture (noise, grain, gradient mesh, or similar)", "type": "boolean" },
+        { "id": "suggests-browser-setup", "text": "Mentions or recommends setting up Chrome extension or Playwright MCP for visual verification since no browser tools are available", "type": "boolean" },
+        { "id": "form-functional", "text": "The contact form has proper form elements (input, textarea, button) with appropriate types and labels", "type": "boolean" },
+        { "id": "focus-states", "text": "Includes visible focus states on form inputs for keyboard accessibility", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "responsive-verification",
+      "prompt": "I've got this hero section but it looks broken on mobile. Here's the component at src/components/Hero.tsx — can you fix the responsive layout and verify it works at different screen sizes? Playwright MCP is available.",
+      "expected_output": "Reads the existing component, fixes responsive issues, then uses Playwright MCP to verify at multiple viewport sizes (mobile, tablet, desktop) by resizing and taking screenshots.",
+      "files": [],
+      "assertions": [
+        { "id": "reads-existing", "text": "Reads the existing Hero.tsx file before making changes (doesn't rewrite from scratch without understanding current code)", "type": "boolean" },
+        { "id": "responsive-fix", "text": "Addresses responsive layout issues using media queries, flexbox/grid adjustments, or responsive utility classes", "type": "boolean" },
+        { "id": "multi-viewport-check", "text": "Verifies the result at multiple viewport widths (at least mobile and desktop) using browser_resize or similar", "type": "boolean" },
+        { "id": "screenshots-at-sizes", "text": "Takes screenshots at different viewport sizes to confirm the responsive fix works", "type": "boolean" },
+        { "id": "preserves-intent", "text": "Preserves the original design intent while fixing the responsive issues — doesn't redesign the component", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "console-error-detection-and-fix",
+      "prompt": "I just built this product card grid but something's not right — the images aren't loading and I think there might be JS errors. Can you check it in the browser and fix whatever's wrong? Chrome extension is connected, app running on localhost:5173.",
+      "expected_output": "Uses Chrome extension to navigate to the page, identifies console errors and broken images, fixes the underlying code issues, and re-verifies in the browser.",
+      "files": [],
+      "assertions": [
+        { "id": "navigates-to-app", "text": "Navigates to localhost:5173 using available browser tools to inspect the running application", "type": "boolean" },
+        { "id": "reads-console", "text": "Checks the browser console for JavaScript errors or warnings", "type": "boolean" },
+        { "id": "identifies-issues", "text": "Identifies specific issues (broken image URLs, JS errors, or similar) from the browser inspection", "type": "boolean" },
+        { "id": "fixes-code", "text": "Makes code changes to fix the identified issues", "type": "boolean" },
+        { "id": "re-verifies", "text": "Returns to the browser after fixing to confirm the issues are resolved", "type": "boolean" }
+      ]
+    }
+  ]
+}

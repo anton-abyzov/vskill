@@ -1,0 +1,82 @@
+[
+  {
+    "query": "I need to build a landing page for my new startup — it's a fintech app called Vault. Dark theme, modern feel, some nice scroll animations. React + Tailwind, running on localhost:3000",
+    "should_trigger": true
+  },
+  {
+    "query": "the hero section on our marketing site looks super generic and AI-ish right now. can you redesign it? make it feel more like a luxury brand editorial, less like every other SaaS page. i have the chrome extension connected so you can see what it looks like",
+    "should_trigger": true
+  },
+  {
+    "query": "Build me a dashboard interface for monitoring IoT sensor data — sidebar nav, real-time chart area, alert panel on the right. The current version looks like a bootstrap template from 2018 and I want something that actually looks designed",
+    "should_trigger": true
+  },
+  {
+    "query": "I have this pricing component at src/components/Pricing.tsx but the spacing is all wrong and the cards don't look balanced. Can you fix the visual styling and check it in the browser? Playwright MCP is set up",
+    "should_trigger": true
+  },
+  {
+    "query": "create a contact form page for my portfolio. clean minimal design, subtle grain texture background, nice typography. plain html/css, no react",
+    "should_trigger": true
+  },
+  {
+    "query": "We need a settings page for our admin panel — user profile section at top, notification preferences in the middle, danger zone at the bottom. Should look polished and professional, not just a list of checkboxes",
+    "should_trigger": true
+  },
+  {
+    "query": "the product card grid I just built has broken images and there are JS errors in the console. app is on localhost:5173, chrome extension is connected. can you check what's wrong and fix it?",
+    "should_trigger": true
+  },
+  {
+    "query": "i want to beautify this existing table component — add zebra striping, better header styling, some hover effects, and make it responsive so it scrolls horizontally on mobile. vue 3 project",
+    "should_trigger": true
+  },
+  {
+    "query": "Create a 404 error page that's actually fun and memorable — maybe something with an animation or illustration. Not just centered text saying 'page not found'. Next.js app",
+    "should_trigger": true
+  },
+  {
+    "query": "build a modal/dialog component for confirming destructive actions (like deleting a project). needs to feel serious — red accent, clear hierarchy between cancel and confirm, smooth enter/exit animations",
+    "should_trigger": true
+  },
+  {
+    "query": "Set up Figma Code Connect in my React project. Here's our design system file: https://figma.com/design/abc123/DesignSystem?node-id=0-1",
+    "should_trigger": false
+  },
+  {
+    "query": "write a REST API endpoint in Express that handles user registration with email validation and password hashing",
+    "should_trigger": false
+  },
+  {
+    "query": "I need to set up a PostgreSQL database with Prisma. Here's my schema — can you generate the migrations?",
+    "should_trigger": false
+  },
+  {
+    "query": "Extract the design tokens from our Figma file https://figma.com/design/tok123/Tokens?node-id=0-1 and generate CSS custom properties",
+    "should_trigger": false
+  },
+  {
+    "query": "deploy this Next.js app to Vercel and set up the environment variables from our .env.production file",
+    "should_trigger": false
+  },
+  {
+    "query": "write unit tests for the useAuth hook — cover login, logout, token refresh, and the error states. vitest project",
+    "should_trigger": false
+  },
+  {
+    "query": "refactor this function to use async/await instead of promise chains, and add proper error handling. it's at src/utils/api.ts",
+    "should_trigger": false
+  },
+  {
+    "query": "configure eslint and prettier for our typescript monorepo — we want strict mode with no-any and consistent-return rules",
+    "should_trigger": false
+  },
+  {
+    "query": "create a GitHub Actions CI pipeline that runs our vitest tests, builds the app, and deploys to staging on every PR to main",
+    "should_trigger": false
+  },
+  {
+    "query": "I need to implement WebSocket real-time updates for our chat feature. The backend is FastAPI and frontend is React. Focus on the connection management and reconnection logic",
+    "should_trigger": false
+  }
+]

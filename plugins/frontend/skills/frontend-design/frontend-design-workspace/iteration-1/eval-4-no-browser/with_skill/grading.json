@@ -1,0 +1,38 @@
+{
+  "eval_id": 4,
+  "eval_name": "no-browser-tools-graceful-fallback",
+  "variant": "with_skill",
+  "expectations": [
+    {
+      "text": "Uses plain HTML/CSS/JS without any framework dependency",
+      "passed": true,
+      "evidence": "Output explicitly states 'Plain HTML/CSS/JS as specified. No build tools, no framework.' Code consists of index.html, styles.css, and script.js with no framework imports."
+    },
+    {
+      "text": "Implements a clean, minimal design direction as requested -- not overloaded with effects",
+      "passed": true,
+      "evidence": "Design described as 'warm minimalism with an editorial edge' with 'generous white space, deliberate type.' Only three restrained animation moments, all wrapped in prefers-reduced-motion. Single-column centered layout with a clean card-based form."
+    },
+    {
+      "text": "Includes a subtle background texture (noise, grain, gradient mesh, or similar)",
+      "passed": true,
+      "evidence": "SVG feTurbulence noise filter (fractalNoise, baseFrequency 0.65, numOctaves 4) applied via body::before pseudo-element at 0.035 opacity. Described as 'fine-grained paper-like texture' over warm parchment background."
+    },
+    {
+      "text": "Mentions or recommends setting up Chrome extension or Playwright MCP for visual verification since no browser tools are available",
+      "passed": true,
+      "evidence": "Dedicated 'Browser Tool Detection Result' section explicitly lists all four detection paths exhausted. 'Recommended Setup for Verification' section provides both Playwright MCP setup command ('claude mcp add playwright -- npx @playwright/mcp@latest') and Chrome Extension installation steps."
+    },
+    {
+      "text": "The contact form has proper form elements (input, textarea, button) with appropriate types and labels",
+      "passed": true,
+      "evidence": "Form includes: input type='text' for name, input type='email' for email, input type='text' for subject, textarea for message, and button type='submit'. Each has a label element with matching 'for'/'id' attributes, and required fields have the 'required' attribute."
+    },
+    {
+      "text": "Includes visible focus states on form inputs for keyboard accessibility",
+      "passed": true,
+      "evidence": ".form-input:focus-visible sets border-color and box-shadow (3px accent ring at 12% opacity plus inset shadow). .btn-submit:focus-visible has a 2px outline with 3px offset. .footer-link:focus-visible also has outline styling. Uses :focus-visible (not just :focus) for proper keyboard-only targeting."
+    }
+  ],
+  "pass_rate": 1.0
+}

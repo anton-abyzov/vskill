@@ -1,0 +1,33 @@
+{
+  "eval_id": 6,
+  "eval_name": "console-error-detection-and-fix",
+  "variant": "without_skill",
+  "expectations": [
+    {
+      "text": "Navigates to localhost:5173 using available browser tools to inspect the running application",
+      "passed": false,
+      "evidence": "Does not navigate to localhost:5173. Step 1 starts with Glob/Read to locate source files. Step 3 explicitly states: 'Without a browser automation skill or MCP tool connected to Chrome DevTools, I have no direct way to... take screenshots of the actual rendered state.'"
+    },
+    {
+      "text": "Checks the browser console for JavaScript errors or warnings",
+      "passed": false,
+      "evidence": "Step 3 explicitly states: 'I have no direct way to: View the browser console output for JS errors.' The approach relies entirely on static code analysis to guess at potential errors."
+    },
+    {
+      "text": "Identifies specific issues (broken image URLs, JS errors, or similar) from the browser inspection",
+      "passed": false,
+      "evidence": "No browser inspection occurs. Step 2 performs static code analysis listing common issue patterns (incorrect src paths, broken interpolation, mapping over undefined data, missing key props), but these are educated guesses from reading source code, not identified from runtime inspection."
+    },
+    {
+      "text": "Makes code changes to fix the identified issues",
+      "passed": false,
+      "evidence": "Step 4 describes hypothetical fixes ('Common fixes might include...') but no actual code changes are made. The output is a plan describing what would be done, with no Edit tool invocations or file modifications recorded."
+    },
+    {
+      "text": "Returns to the browser after fixing to confirm the issues are resolved",
+      "passed": false,
+      "evidence": "Step 5 explicitly acknowledges verification is limited to linters, type checkers, and 'Asking the user to refresh the browser and confirm if the issues are resolved.' No browser re-verification occurs."
+    }
+  ],
+  "pass_rate": 0.0
+}

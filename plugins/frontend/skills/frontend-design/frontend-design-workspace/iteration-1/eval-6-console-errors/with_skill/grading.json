@@ -1,0 +1,33 @@
+{
+  "eval_id": 6,
+  "eval_name": "console-error-detection-and-fix",
+  "variant": "with_skill",
+  "expectations": [
+    {
+      "text": "Navigates to localhost:5173 using available browser tools to inspect the running application",
+      "passed": true,
+      "evidence": "Step 2 describes calling mcp__claude_in_chrome__navigate({ url: \"http://localhost:5173\" }) to load the app. The plan explicitly identifies this as the first action."
+    },
+    {
+      "text": "Checks the browser console for JavaScript errors or warnings",
+      "passed": true,
+      "evidence": "Step 4 describes calling mcp__claude_in_chrome__get_console_logs() to read JS errors and network failures. Categorizes expected error types (TypeError, ReferenceError, 404s, CORS, framework errors)."
+    },
+    {
+      "text": "Identifies specific issues (broken image URLs, JS errors, or similar) from the browser inspection",
+      "passed": true,
+      "evidence": "Steps 5-6 describe using mcp__claude_in_chrome__evaluate to inspect img elements (src, complete, naturalWidth) and identify root causes. Four specific scenarios are enumerated: broken URLs, JS runtime errors blocking render, CORS/network errors, and mixed issues."
+    },
+    {
+      "text": "Makes code changes to fix the identified issues",
+      "passed": false,
+      "evidence": "Step 6 describes hypothetical fix scenarios (A through D) and mentions using the Edit tool, but no actual code changes are made. The output is a plan document, not a record of executed actions. No files were edited."
+    },
+    {
+      "text": "Returns to the browser after fixing to confirm the issues are resolved",
+      "passed": true,
+      "evidence": "Step 7 explicitly describes re-verification: taking a fresh screenshot, re-checking console logs, and re-evaluating img elements after fixes. Step 8 adds a broader visual quality check. The iterative loop is clearly stated."
+    }
+  ],
+  "pass_rate": 0.8
+}

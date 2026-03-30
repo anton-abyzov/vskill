@@ -1,0 +1,43 @@
+{
+  "eval_id": 1,
+  "eval_name": "landing-page-bold-aesthetic",
+  "variant": "without_skill",
+  "expectations": [
+    {
+      "text": "Does not use Inter, Roboto, Arial, or system-ui as the primary display font — chooses a distinctive alternative",
+      "passed": false,
+      "evidence": "Display/heading font is \"Playfair Display\" (distinctive serif, passes). However, the body/UI font is explicitly \"Inter\" — listed as the primary sans-serif: \"font-sans: ['Inter', 'system-ui', 'sans-serif']\". Inter is one of the banned generic fonts and is used as the primary body font throughout all components."
+    },
+    {
+      "text": "Uses rich dark backgrounds (not pure #000000) with tinted or warm undertones",
+      "passed": true,
+      "evidence": "Primary background is #0C0B0E (\"Obsidian\"), elevated is #1A181D (\"Charcoal\"), surface is #252329 (\"Graphite\"). None are pure #000000. Explicitly states \"Pure black feels sterile. Warm obsidian creates depth.\" The colors have a slight warm-purple undertone."
+    },
+    {
+      "text": "Defines a color system using CSS custom properties or Tailwind theme extension for consistency",
+      "passed": true,
+      "evidence": "Defines a full Tailwind theme extension in tailwind.config.js with named color tokens: obsidian, charcoal, graphite, slate-edge, ash, ivory, gold (with light variant), sage, pewter. Also adds custom letterSpacing (editorial: '0.08em'). No CSS custom properties (:root vars) are used, but the Tailwind extension qualifies."
+    },
+    {
+      "text": "Includes scroll-triggered or staggered entrance animations with CSS or a motion library",
+      "passed": true,
+      "evidence": "Implements useScrollReveal hook with IntersectionObserver. Defines CSS utility classes: animate-fade-up (translateY 30px + opacity), animate-hr-grow (scaleX), stagger-child with nth-child delays (80ms increments up to 6 children). Hero has fade-in entrance on load. Features grid, Showcase, Testimonials, Pricing all use scroll-triggered reveals."
+    },
+    {
+      "text": "Includes a prefers-reduced-motion media query or check to disable animations for accessibility",
+      "passed": false,
+      "evidence": "No @media (prefers-reduced-motion) query appears anywhere in the output. No JavaScript matchMedia check for reduced motion. The useScrollReveal hook has no reduced-motion handling. The CSS animations in index.css have no reduced-motion override. Grep confirms zero matches for 'reduced-motion' or 'prefers-reduced' in the entire output."
+    },
+    {
+      "text": "Attempts to open the result in a browser (Chrome extension, Playwright MCP, or mentions the need to verify visually)",
+      "passed": false,
+      "evidence": "The output includes a \"Verification Steps\" section listing 10 manual checks (e.g., \"open localhost:3000, verify dark background renders\"), but these are written as instructions for the user to follow manually. There is no attempt to actually open a browser, use Playwright MCP, Chrome extension, or run any automated verification. No browser tool detection or usage is present — it is purely a checklist of what to check by hand."
+    },
+    {
+      "text": "The overall aesthetic direction is clearly editorial/premium — not a generic tech startup template",
+      "passed": true,
+      "evidence": "Concept is \"The Editorial Studio\" — explicitly references Monocle magazine and Swiss design. Uses Playfair Display serif for headlines, gold accent instead of blue/purple, 1px gap grid for magazine-style feature cards, no border-radius anywhere (\"sharp corners signal intentionality\"), editorial dividers with gold rules, and two-tier pricing. Design decisions table documents anti-generic choices. However, use of Inter for body text slightly undermines the premium feel."
+    }
+  ],
+  "pass_rate": 0.57
+}

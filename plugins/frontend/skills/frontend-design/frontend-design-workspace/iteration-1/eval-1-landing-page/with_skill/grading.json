@@ -1,0 +1,43 @@
+{
+  "eval_id": 1,
+  "eval_name": "landing-page-bold-aesthetic",
+  "variant": "with_skill",
+  "expectations": [
+    {
+      "text": "Does not use Inter, Roboto, Arial, or system-ui as the primary display font — chooses a distinctive alternative",
+      "passed": true,
+      "evidence": "Display font is \"Instrument Serif\" from Google Fonts. Body font is \"General Sans\" (with system-ui only as a fallback, not primary). Neither Inter, Roboto, nor Arial appear anywhere in the output."
+    },
+    {
+      "text": "Uses rich dark backgrounds (not pure #000000) with tinted or warm undertones",
+      "passed": true,
+      "evidence": "Primary background is #0F0E0C (\"Deep warm charcoal\"), secondary is #1A1816, tertiary is #242220. Explicitly states \"No pure black -- all backgrounds use a deep warm charcoal\" and rationale: \"Pure black feels harsh and digital. The warm undertone adds sophistication.\""
+    },
+    {
+      "text": "Defines a color system using CSS custom properties or Tailwind theme extension for consistency",
+      "passed": true,
+      "evidence": "Defines both CSS custom properties (:root with --bg-primary, --text-primary, --accent, etc.) and a full Tailwind theme extension in tailwind.config.js under colors.meridian with named tokens (bg, surface, elevated, text, muted, faint, accent, accent-hover, accent-subtle, border, border-hover)."
+    },
+    {
+      "text": "Includes scroll-triggered or staggered entrance animations with CSS or a motion library",
+      "passed": true,
+      "evidence": "Implements a useScrollReveal hook using IntersectionObserver for scroll-triggered reveals. Hero has staggered word-by-word entrance (120ms delay per word). Features, ProductShowcase, CTA sections all use scroll-triggered fade-up animations with translateY(60px) transitions. Logo ticker uses infinite CSS animation (animate-logo-scroll)."
+    },
+    {
+      "text": "Includes a prefers-reduced-motion media query or check to disable animations for accessibility",
+      "passed": true,
+      "evidence": "Two layers of reduced-motion support: (1) CSS media query in index.css: \"@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; ... } }\" (2) JavaScript check in useScrollReveal hook: \"window.matchMedia('(prefers-reduced-motion: reduce)').matches\" which immediately sets isVisible=true, skipping all animation."
+    },
+    {
+      "text": "Attempts to open the result in a browser (Chrome extension, Playwright MCP, or mentions the need to verify visually)",
+      "passed": true,
+      "evidence": "Dedicates an entire \"Phase 3: Visual Verification Loop\" section. Checks for Chrome Extension (mcp__claude_in_chrome__*), Playwright MCP (mcp__playwright__*), and Playwright CLI tools. Provides detailed 5-round incremental verification workflow with Playwright test code for screenshots, scroll testing, responsive checks at 375px/768px/1440px, and accessibility tree snapshots. Notes that no browser MCP tools are available and recommends installation."
+    },
+    {
+      "text": "The overall aesthetic direction is clearly editorial/premium — not a generic tech startup template",
+      "passed": true,
+      "evidence": "Explicitly targets \"Luxury editorial. Think Monocle magazine meets a Swiss design monograph.\" Uses copper accent (#C8956A) instead of tech-blue, asymmetric 7/12 hero layout, noise texture overlay, text-based logo ticker in serif font, edge-to-edge product screenshots with gradient fades, no gradient blobs or floating dashboard mockups. Summary table explicitly documents anti-generic decisions."
+    }
+  ],
+  "pass_rate": 1.0
+}

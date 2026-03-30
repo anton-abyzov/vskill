@@ -1,0 +1,14 @@
+{
+  "eval_id": 1,
+  "eval_name": "landing-page-bold-aesthetic",
+  "prompt": "I need a landing page for my new SaaS product called 'Meridian' — it's a project management tool for creative agencies. The vibe should feel premium and editorial, not the usual tech startup look. Dark theme, sophisticated typography, some subtle animations on scroll. React + Tailwind project, dev server runs on localhost:3000.",
+  "assertions": [
+    { "id": "no-generic-fonts", "text": "Does not use Inter, Roboto, Arial, or system-ui as the primary display font — chooses a distinctive alternative", "type": "boolean" },
+    { "id": "dark-theme-not-pure-black", "text": "Uses rich dark backgrounds (not pure #000000) with tinted or warm undertones", "type": "boolean" },
+    { "id": "css-variables", "text": "Defines a color system using CSS custom properties or Tailwind theme extension for consistency", "type": "boolean" },
+    { "id": "scroll-animation", "text": "Includes scroll-triggered or staggered entrance animations with CSS or a motion library", "type": "boolean" },
+    { "id": "reduced-motion", "text": "Includes a prefers-reduced-motion media query or check to disable animations for accessibility", "type": "boolean" },
+    { "id": "browser-verification-attempted", "text": "Attempts to open the result in a browser (Chrome extension, Playwright MCP, or mentions the need to verify visually)", "type": "boolean" },
+    { "id": "editorial-direction", "text": "The overall aesthetic direction is clearly editorial/premium — not a generic tech startup template", "type": "boolean" }
+  ]
+}

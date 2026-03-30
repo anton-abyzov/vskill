@@ -1,0 +1,38 @@
+{
+  "eval_id": 4,
+  "eval_name": "no-browser-tools-graceful-fallback",
+  "variant": "without_skill",
+  "expectations": [
+    {
+      "text": "Uses plain HTML/CSS/JS without any framework dependency",
+      "passed": true,
+      "evidence": "Output states 'Vanilla JS, no dependencies' and 'Zero external JS libraries, zero icon libraries, zero CSS frameworks.' Code consists of index.html, style.css, and script.js with no framework imports."
+    },
+    {
+      "text": "Implements a clean, minimal design direction as requested -- not overloaded with effects",
+      "passed": true,
+      "evidence": "Design described as 'restrained, editorial aesthetic' with emphasis on 'whitespace and typography doing the heavy lifting.' Clean card-based layout with generous padding, subtle shadows, and minimal animation (fade-in on success state only)."
+    },
+    {
+      "text": "Includes a subtle background texture (noise, grain, gradient mesh, or similar)",
+      "passed": true,
+      "evidence": "Uses layered CSS radial-gradients combined with an SVG feTurbulence filter (fractalNoise, baseFrequency 0.65) applied via body::before pseudo-element at 0.4 opacity. Described as 'subtle paper-like grain' that 'adds zero network requests.'"
+    },
+    {
+      "text": "Mentions or recommends setting up Chrome extension or Playwright MCP for visual verification since no browser tools are available",
+      "passed": false,
+      "evidence": "No mention of browser tools, Chrome extension, Playwright MCP, or any visual verification setup anywhere in the output. The output goes directly from code to a 'Summary of Approach' section without any verification discussion."
+    },
+    {
+      "text": "The contact form has proper form elements (input, textarea, button) with appropriate types and labels",
+      "passed": true,
+      "evidence": "Form includes: input type='text' for name, input type='email' for email, input type='text' for subject, textarea for message, and button type='submit'. Each has a label element with matching 'for'/'id' attributes, and required fields have the 'required' attribute. Also includes a 'Send Another' reset button."
+    },
+    {
+      "text": "Includes visible focus states on form inputs for keyboard accessibility",
+      "passed": true,
+      "evidence": ".form__input:focus sets border-color to accent and box-shadow to '0 0 0 3px var(--focus-ring)' (accent at 30% opacity). Invalid inputs also get a distinct focus ring. However, uses :focus rather than :focus-visible, and the submit button and reset button lack any focus styling."
+    }
+  ],
+  "pass_rate": 0.83
+}

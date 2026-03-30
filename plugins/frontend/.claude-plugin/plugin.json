@@ -1,6 +1,6 @@
 {
   "name": "frontend",
-  "description": "Frontend development skills — Figma-to-code workflows, Code Connect publishing, design token extraction, and design system integration across React, Vue, SwiftUI, and Compose",
+  "description": "Frontend development skills — visual design with browser verification, Figma-to-code workflows, Code Connect publishing, design token extraction, and design system integration across React, Vue, SwiftUI, and Compose",
   "version": "0.1.0",
   "author": {
     "name": "Anton Abyzov",
@@ -10,5 +10,5 @@
   "homepage": "https://github.com/anton-abyzov/vskill",
   "repository": "https://github.com/anton-abyzov/vskill",
   "license": "MIT",
-  "keywords": ["frontend", "figma", "code-connect", "design-to-code", "design-tokens", "react", "vue", "swiftui", "compose"]
+  "keywords": ["frontend", "figma", "code-connect", "design-to-code", "design-tokens", "visual-verification", "browser", "chrome", "playwright", "react", "vue", "swiftui", "compose"]
 }

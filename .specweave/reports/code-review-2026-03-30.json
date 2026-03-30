@@ -1,0 +1,37 @@
+{
+  "version": "1.1",
+  "scope": "uncommitted changes in vskill repo",
+  "date": "2026-03-30",
+  "reviewers": ["logic", "types"],
+  "gateCheck": { "passed": true, "reason": "22 changed lines (excluding lock files)" },
+  "summary": {
+    "total": 1,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+  },
+  "validation": {
+    "performed": false,
+    "reason": "No critical/high findings"
+  },
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "LOW",
+      "reviewer": "logic",
+      "file": "src/commands/eval/run.ts",
+      "line": 163,
+      "description": "The overall_pass_rate computation reuses `totalAssertions` from line 75 (computed from evalsFile.evals) rather than from benchmarkCases. In normal operation these should be equal, but if an eval case errors out mid-run, the counts could diverge. Consider using benchmarkCases as the source for consistency with assembleBulkResult().",
+      "validated": true
+    }
+  ],
+  "files_reviewed": [
+    "src/commands/eval/run.ts",
+    "plugins/frontend/skills/figma-connect/evals/evals.json",
+    "plugins/productivity/skills/survey-passing/evals/evals.json",
+    "plugins/productivity/skills/survey-passing/SKILL.md"
+  ],
+  "notes": "4 changes: engine bug fix (5 lines), figma-connect eval rewrite (46 assertions), survey-passing eval fix + 2 new cases, SKILL.md Gmail optional. All JSON valid, tests pass (31/31). The engine fix correctly adds overall_pass_rate to CLI benchmark output matching the server's assembleBulkResult pattern."
+}

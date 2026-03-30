@@ -1,0 +1,73 @@
+{
+  "timestamp": "2026-03-30T10:05:06.516Z",
+  "model": "opus",
+  "skill_name": "survey-passing",
+  "cases": [
+    {
+      "eval_id": 2,
+      "eval_name": "Pre-flight check flags video survey",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "durationMs": 9517,
+      "tokens": null,
+      "assertions": [
+        {
+          "id": "flags-video-requirement",
+          "text": "Response identifies the video/recording requirement as a blocker that prevents automated completion",
+          "pass": true,
+          "reasoning": "The output clearly identifies the video response requirement as a blocker, stating 'that's a no-go for automation' and explaining that video recording needs the user in front of the camera, which prevents automated completion."
+        },
+        {
+          "id": "does-not-attempt-survey",
+          "text": "Response does NOT proceed to fill out or complete the survey, instead deferring to the user",
+          "pass": true,
+          "reasoning": "The response explicitly defers to the user, stating 'You'll need to record this one yourself' and does not attempt to fill out or complete the survey."
+        },
+        {
+          "id": "suggests-manual-completion",
+          "text": "Response suggests the user complete this survey manually or indicates the user needs to handle it themselves",
+          "pass": true,
+          "reasoning": "The output explicitly states 'You'll need to record this one yourself' and suggests the user complete the survey manually, clearly indicating the user needs to handle it themselves."
+        }
+      ],
+      "comparisonDetail": {
+        "skillDurationMs": 9517,
+        "skillTokens": null,
+        "baselineDurationMs": 11113,
+        "baselineTokens": null,
+        "skillContentScore": 3,
+        "skillStructureScore": 3,
+        "baselineContentScore": 5,
+        "baselineStructureScore": 5,
+        "winner": "baseline"
+      }
+    }
+  ],
+  "overall_pass_rate": 1,
+  "type": "comparison",
+  "provider": "claude-cli",
+  "verdict": "MARGINAL",
+  "comparison": {
+    "skillPassRate": 1,
+    "baselinePassRate": 0.6666666666666666,
+    "skillRubricAvg": 3,
+    "baselineRubricAvg": 5,
+    "delta": 0.33333333333333337
+  },
+  "actionItems": {
+    "recommendation": "rewrite",
+    "summary": "The skill scored significantly worse than baseline (-2.0 delta) on the only eval case, with content and structure both at 3/5 vs baseline's 5/5. The skill's approach to the pre-flight check scenario produced inferior output despite passing all assertions.",
+    "weaknesses": [
+      "Severe content quality gap: 3/5 vs 5/5 on the 'Pre-flight check flags video survey' case — the skill's guidance produced less complete or less accurate handling of video detection",
+      "Structure score 3/5 vs 5/5 suggests the skill's output formatting or organization degraded compared to baseline's natural response",
+      "Only one eval case tested, but it's a core capability (pre-flight checks) and the skill lost decisively — this isn't an edge case failure, it's a fundamental one",
+      "The skill file is heavily procedural with browser automation steps that may be polluting the model's response quality for simpler reasoning tasks like flagging a video survey"
+    ],
+    "strengths": [
+      "100% assertion pass rate — the skill does identify the correct signals (video keywords) even if the overall output quality suffers",
+      "The skill correctly defines the domain and trigger keywords for activation"
+    ],
+    "suggestedFocus": "Strip the skill down to decision logic and quality criteria (what makes a good survey response, when to skip) and remove browser automation procedures that belong in a separate tool layer, so the model focuses on judgment quality rather than step-by-step mechanics."
+  }
+}

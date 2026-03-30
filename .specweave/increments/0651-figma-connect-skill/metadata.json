@@ -1,0 +1,14 @@
+{
+  "id": "0651-figma-connect-skill",
+  "status": "completed",
+  "type": "feature",
+  "priority": "P1",
+  "created": "2026-03-30T09:39:22.033Z",
+  "lastActivity": "2026-03-30T10:00:00.000Z",
+  "testMode": "TDD",
+  "coverageTarget": 90,
+  "feature_id": null,
+  "epic_id": null,
+  "externalLinks": {},
+  "completedAt": "2026-03-30T10:05:00.000Z"
+}

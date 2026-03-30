@@ -1,0 +1,79 @@
+{
+  "timestamp": "2026-03-30T10:05:28.001Z",
+  "model": "opus",
+  "skill_name": "survey-passing",
+  "cases": [
+    {
+      "eval_id": 1,
+      "eval_name": "Find and start survey from Gmail",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.75,
+      "durationMs": 19598,
+      "tokens": null,
+      "assertions": [
+        {
+          "id": "searches-survey-keywords",
+          "text": "Response includes Gmail search queries targeting survey-related keywords such as 'reward', 'survey', 'canopy', 'honorarium', or dollar amounts",
+          "pass": true,
+          "reasoning": "The output includes multiple Gmail search queries targeting survey-related keywords including 'survey', 'reward', 'canopy', and dollar amounts ($50/$65/$100)."
+        },
+        {
+          "id": "searches-platform-senders",
+          "text": "Response includes searching by sender or keyword for at least one of arbolus, guidepoint, or glg",
+          "pass": true,
+          "reasoning": "The output explicitly mentions searching by sender using 'from:arbolus OR from:guidepoint OR from:glg' and includes keyword searches for survey/reward/canopy. All three senders (arbolus, guidepoint, glg) are referenced in the search queries."
+        },
+        {
+          "id": "uses-chrome-profile",
+          "text": "Response references using a persistent Chrome profile (not Browser Relay or a fresh/incognito session) for Gmail access",
+          "pass": false,
+          "reasoning": "The LLM output discusses Gmail MCP tool permissions and suggests either re-running with permissions enabled or checking Gmail manually. It makes no reference whatsoever to using a persistent Chrome profile for Gmail access."
+        },
+        {
+          "id": "mentions-unread-filter",
+          "text": "Response mentions filtering for unread or recent emails rather than browsing all mail",
+          "pass": true,
+          "reasoning": "The response mentions filtering for recent emails by specifying 'last 7 days' timeframe and using 'newer_than:7d' in the manual search suggestion, rather than browsing all mail."
+        }
+      ],
+      "comparisonDetail": {
+        "skillDurationMs": 19598,
+        "skillTokens": null,
+        "baselineDurationMs": 17057,
+        "baselineTokens": null,
+        "skillContentScore": 4,
+        "skillStructureScore": 4,
+        "baselineContentScore": 4,
+        "baselineStructureScore": 4,
+        "winner": "tie"
+      }
+    }
+  ],
+  "overall_pass_rate": 0.75,
+  "type": "comparison",
+  "provider": "claude-cli",
+  "verdict": "INEFFECTIVE",
+  "comparison": {
+    "skillPassRate": 0.75,
+    "baselinePassRate": 0.75,
+    "skillRubricAvg": 4,
+    "baselineRubricAvg": 4,
+    "delta": 0
+  },
+  "actionItems": {
+    "recommendation": "improve",
+    "summary": "The skill tied with baseline (delta 0.0) and failed the Chrome profile assertion, meaning its key differentiator (persistent profile for Gmail access) was not picked up by the LLM. The skill has useful domain knowledge but needs its tooling instructions made more prominent and concrete.",
+    "weaknesses": [
+      "The persistent Chrome profile instruction (Step 1) was ignored — the LLM defaulted to Gmail MCP tools instead, causing the only assertion failure",
+      "Only 1 eval case makes statistical conclusions weak, but even in that single case the skill added zero measurable value over baseline",
+      "The skill's workflow assumes tool capabilities (persistent Chrome profile, TOOLS.md port config) that may not be available or understood by the LLM without stronger grounding"
+    ],
+    "strengths": [
+      "Content score matched baseline (4/4), showing the skill's domain knowledge (platform names, search queries, reward amounts) is solid and doesn't degrade output",
+      "3 of 4 assertions passed, meaning the general survey-finding workflow logic is sound",
+      "The skill covers a well-defined, actionable niche with clear trigger keywords"
+    ],
+    "suggestedFocus": "Move the persistent Chrome profile requirement into a bolded, top-level CRITICAL RULE section (outside the workflow steps) with an explicit negative constraint: 'NEVER use Gmail MCP tools or fresh/incognito sessions — ALWAYS use the persistent Chrome profile on the configured port.'"
+  }
+}

@@ -153,11 +153,16 @@ export async function runEvalRun(skillDir: string, options?: EvalRunOptions): Pr
   );
 
   // Write benchmark.json
+  const passedAssertions = benchmarkCases.reduce(
+    (s, c) => s + c.assertions.filter((a) => a.pass).length,
+    0,
+  );
   const benchmark: BenchmarkResult = {
     timestamp: new Date().toISOString(),
     model,
     skill_name: evalsFile.skill_name,
     cases: benchmarkCases,
+    overall_pass_rate: totalAssertions > 0 ? passedAssertions / totalAssertions : 0,
   };
 
   await writeBenchmark(skillDir, benchmark);

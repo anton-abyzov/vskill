@@ -15,9 +15,12 @@ The user is a real domain expert who receives paid survey invitations. This skil
 
 ## Workflow
 
-### Step 1: Find Survey Emails
+### Step 1: Find the Survey
 
-Open Gmail via the user's **persistent Chrome profile** (NOT Browser Relay). Refer to TOOLS.md for profile port configuration.
+**Option A — Check email for invitations:**
+Search the user's Gmail for survey invitations using an authenticated method:
+- **Gmail MCP tools** (preferred if available): Use `gmail_search_messages` with queries below
+- **Persistent Chrome profile** (fallback): Open Gmail via the user's profile. Refer to TOOLS.md for port config
 
 Search strategies:
 - `subject:reward survey`
@@ -27,6 +30,9 @@ Search strategies:
 - `subject:honorarium OR subject:compensation`
 
 Look for unread emails with dollar amounts. Open the email, find the survey/canopy link, click through.
+
+**Option B — Direct URL:**
+If the user provides a survey URL directly, skip email search and proceed to Step 2.
 
 ### Step 2: Pre-Flight Checks
 

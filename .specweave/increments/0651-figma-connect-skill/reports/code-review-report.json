@@ -1,0 +1,30 @@
+{
+  "version": "1.1",
+  "scope": "increment 0651-figma-connect-skill",
+  "date": "2026-03-30",
+  "reviewers": ["structural-validation"],
+  "gateCheck": { "passed": true, "reason": "Content-only increment (markdown + JSON skill files, no executable code)" },
+  "summary": {
+    "total": 1,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+  },
+  "validation": {
+    "performed": false,
+    "reason": "No critical/high findings to validate"
+  },
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "LOW",
+      "reviewer": "structural-validation",
+      "file": "plugins/frontend/skills/figma-connect/SKILL.md",
+      "description": "SKILL.md at 342 lines has room for additional content. Consider adding a 'Troubleshooting' quick-reference section inline (currently only in Error Handling table) for common first-time setup issues.",
+      "validated": true
+    }
+  ],
+  "notes": "Increment creates 7 new files (SKILL.md, plugin.json, evals.json, activation-prompts.json, 3 reference docs). All files validated: JSON parses correctly, eval IDs unique, assertion counts 3-5 per case, activation prompts balanced 10/10, SKILL.md under 500 lines. No executable code — standard code reviewers (logic, security, performance, types) not applicable."
+}

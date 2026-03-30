@@ -1,0 +1,392 @@
+{
+  "timestamp": "2026-03-30T11:05:43.050Z",
+  "model": "sonnet",
+  "skill_name": "figma-connect",
+  "cases": [
+    {
+      "eval_id": 1,
+      "eval_name": "setup-react-project",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.8,
+      "assertions": [
+        {
+          "id": "auth-check",
+          "text": "Response describes checking Figma MCP authentication (e.g., via whoami) as a prerequisite step before proceeding",
+          "pass": true,
+          "reasoning": "The response explicitly mentions that `mcp__claude_ai_Figma__whoami` tool was attempted (blocked by permission mode), describes MCP auth as needing attention, and explains that Figma MCP server authentication is required before using MCP tools like design-to-code, token extraction, and screenshot. This clearly presents MCP authentication as a prerequisite step."
+        },
+        {
+          "id": "framework-detect",
+          "text": "Response describes detecting the project framework (React) from package.json or project files",
+          "pass": true,
+          "reasoning": "The output explicitly states 'Framework: React + Tailwind (detected from `package.json`)' which directly describes detecting the project framework from package.json."
+        },
+        {
+          "id": "cli-install",
+          "text": "Response includes installing or verifying @figma/code-connect CLI availability as part of the setup workflow",
+          "pass": true,
+          "reasoning": "The LLM output explicitly mentions that `@figma/code-connect` ^1.4.2 is already installed, which constitutes verifying its availability as part of the setup workflow. It also references running `npx figma connect publish` as a next step, confirming CLI usage awareness."
+        },
+        {
+          "id": "config-generation",
+          "text": "Response describes creating or configuring figma.config.json with appropriate settings for the project",
+          "pass": true,
+          "reasoning": "The response describes the existing figma.config.json configuration and provides a suggested improvement with appropriate settings including parser, include/exclude patterns, label, and figmaUrl fields for the project."
+        },
+        {
+          "id": "design-system-rules",
+          "text": "Response mentions generating design system rules (e.g., via create_design_system_rules) to establish project conventions",
+          "pass": false,
+          "reasoning": "The LLM output does not mention generating design system rules or the create_design_system_rules tool. It focuses on authentication setup, CLI configuration, and next steps for design-to-code workflows, token extraction, and publishing Code Connect mappings, but never references establishing project conventions via design system rules generation."
+        }
+      ]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "design-to-code-with-existing-connect",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.25,
+      "assertions": [
+        {
+          "id": "url-parse",
+          "text": "Response identifies the need to extract fileKey and nodeId from the Figma URL, converting the dash-separated node-id to colon format (e.g., 42-156 becomes 42:156)",
+          "pass": false,
+          "reasoning": "The LLM output does not mention extracting fileKey or nodeId from a Figma URL, nor does it discuss converting dash-separated node IDs to colon format. The response is entirely focused on permission/access issues with the Figma MCP tools and provides no URL parsing guidance whatsoever."
+        },
+        {
+          "id": "check-existing-cc",
+          "text": "Response describes checking for existing Code Connect mappings (e.g., via get_code_connect_map) before generating new code",
+          "pass": true,
+          "reasoning": "The output explicitly mentions checking existing Code Connect mappings via `mcp__claude_ai_Figma__get_code_connect_map` as step 3 in the list of required tools, and confirms the intent to 'check existing Code Connect mappings' before generating the adapted component implementation."
+        },
+        {
+          "id": "design-context",
+          "text": "Response describes retrieving design context from Figma (e.g., via get_design_context) using the extracted file key and node ID",
+          "pass": false,
+          "reasoning": "The output mentions get_design_context as a tool it would use, but it did not actually retrieve any design context from Figma. The response explains that MCP tools are blocked and asks the user to change permission settings before it can proceed. No design context was retrieved, no file key or node ID was extracted or used."
+        },
+        {
+          "id": "adapts-to-project",
+          "text": "Response emphasizes adapting generated code to the project's existing components, tokens, and conventions rather than using raw Figma output",
+          "pass": false,
+          "reasoning": "The LLM output does not address adapting generated code to the project's existing components, tokens, and conventions at all. It only explains that Figma MCP tools are blocked and provides instructions for enabling permissions. There is no mention of code adaptation, existing project components, design tokens, or conventions."
+        }
+      ]
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "design-to-code-no-connect",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.25,
+      "assertions": [
+        {
+          "id": "screenshot",
+          "text": "Response mentions getting a visual reference or screenshot of the Figma design to guide implementation",
+          "pass": true,
+          "reasoning": "The output explicitly mentions 'Take a screenshot of node `10:200` in file `def456` for visual reference' in the numbered list of planned steps, directly addressing getting a visual reference of the Figma design to guide implementation."
+        },
+        {
+          "id": "no-cc-graceful",
+          "text": "Response acknowledges the absence of Code Connect and describes proceeding with design-to-code without requiring it",
+          "pass": false,
+          "reasoning": "The output does not acknowledge the absence of Code Connect. In fact, it states the opposite — that '@figma/code-connect is already installed (^1.4.2) — no setup needed'. Furthermore, the output does not describe proceeding with design-to-code without Code Connect; instead, it stops and asks the user to update permission settings before proceeding."
+        },
+        {
+          "id": "generates-code",
+          "text": "Response describes generating implementation code adapted to the project's framework and conventions",
+          "pass": false,
+          "reasoning": "The output does not generate any implementation code. It explains that Figma MCP tools are blocked and asks the user to update permissions before proceeding. While it describes what it *would* do once permissions are granted (steps 1-4 including adapting to React + Tailwind conventions), no actual implementation code is generated or provided."
+        },
+        {
+          "id": "suggests-cc-setup",
+          "text": "Response recommends setting up Code Connect after implementation to improve future design-to-code workflows",
+          "pass": false,
+          "reasoning": "The LLM output does not recommend setting up Code Connect after implementation. It actually notes that @figma/code-connect is already installed and figma.config.json exists, and focuses on requesting permission changes to proceed with the Figma MCP tools. There is no recommendation about setting up Code Connect post-implementation."
+        }
+      ]
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "publish-code-connect-mappings",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.8,
+      "assertions": [
+        {
+          "id": "get-suggestions",
+          "text": "Response describes using AI-suggested mappings (e.g., via get_code_connect_suggestions) to guide the component mapping process",
+          "pass": true,
+          "reasoning": "The output explicitly mentions calling `get_code_connect_suggestions` to auto-generate the mapping in Step 4, and again in the publish flow step 1 where it states '`get_code_connect_suggestions` → match the component to node `5:30`'."
+        },
+        {
+          "id": "generate-figma-tsx",
+          "text": "Response describes generating a .figma.tsx Code Connect file with prop mappings for the Button component",
+          "pass": true,
+          "reasoning": "The output explicitly mentions 'Generate a `.figma.tsx` mapping file with props' as step 2 of the publish flow, which describes generating a .figma.tsx Code Connect file with prop mappings for the Button component."
+        },
+        {
+          "id": "validate-before-publish",
+          "text": "Response includes a validation step (e.g., figma connect parse) before publishing the mapping",
+          "pass": true,
+          "reasoning": "The response explicitly includes 'npx figma connect parse → validate' as step 3 in the publish flow, which is a validation step before 'npx figma connect publish → push to Dev Mode' in step 4."
+        },
+        {
+          "id": "publish-cli",
+          "text": "Response describes publishing the Code Connect mapping to Figma Dev Mode via the CLI",
+          "pass": true,
+          "reasoning": "The output explicitly describes publishing the Code Connect mapping via CLI in Step 4 of the publish flow: '`npx figma connect publish` → push to Dev Mode', which directly describes publishing the Code Connect mapping to Figma Dev Mode via the CLI."
+        },
+        {
+          "id": "verify-after-publish",
+          "text": "Response includes a verification step after publishing to confirm the mapping was registered in Figma",
+          "pass": false,
+          "reasoning": "The LLM output describes steps needed before publishing (creating component, installing CLI, setting auth token) but does not include any verification step after publishing to confirm the mapping was registered in Figma. The publish flow listed ends at 'npx figma connect publish → push to Dev Mode' with no follow-up verification step."
+        }
+      ]
+    },
+    {
+      "eval_id": 5,
+      "eval_name": "publish-dry-run",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.6666666666666666,
+      "assertions": [
+        {
+          "id": "dry-run-flag",
+          "text": "Response mentions using the --dry-run flag with the Code Connect publish command",
+          "pass": true,
+          "reasoning": "The output explicitly mentions `--dry-run` flag in the command `npx figma connect publish --dry-run`"
+        },
+        {
+          "id": "no-actual-publish",
+          "text": "Response does not describe running an actual publish without the --dry-run flag",
+          "pass": true,
+          "reasoning": "The response only mentions running with --dry-run flag and does not describe or suggest running an actual publish without the --dry-run flag."
+        },
+        {
+          "id": "reports-results",
+          "text": "Response describes presenting the dry-run output to the user showing what would be published",
+          "pass": false,
+          "reasoning": "The LLM output does not describe presenting dry-run output to the user. Instead, it explains blockers preventing a dry run from being executed (missing token and no mapping files), and asks the user how they want to proceed. No dry-run output is shown or described."
+        }
+      ]
+    },
+    {
+      "eval_id": 6,
+      "eval_name": "extract-tokens-css-variables",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "extract-variables",
+          "text": "Response describes extracting Figma variables (e.g., via get_variable_defs) from the provided design file",
+          "pass": true,
+          "reasoning": "The output explicitly describes extracting Figma variables using get_variable_defs(fileKey='tok123', nodeId='0:1') and mentions grouping them by category (colors, spacing, typography), which directly addresses extracting Figma variables from the provided design file."
+        },
+        {
+          "id": "css-format",
+          "text": "Response specifies outputting tokens as CSS custom properties (--variable-name: value format) rather than raw JSON",
+          "pass": true,
+          "reasoning": "The LLM output explicitly states it will 'Write CSS custom properties to `tokens/` directory', which implies CSS custom properties (--variable-name: value format) rather than raw JSON."
+        },
+        {
+          "id": "respects-directory",
+          "text": "Response references the user's specified tokens/ directory as the output location for generated token files",
+          "pass": true,
+          "reasoning": "The LLM output explicitly mentions writing CSS custom properties to the `tokens/` directory, which matches the user's specified output location."
+        },
+        {
+          "id": "organized-output",
+          "text": "Response describes organizing tokens by category (e.g., colors, spacing, typography) in the output",
+          "pass": true,
+          "reasoning": "The output explicitly mentions grouping tokens 'by category (colors, spacing, typography, etc.)' in step 3 of the planned workflow."
+        }
+      ]
+    },
+    {
+      "eval_id": 7,
+      "eval_name": "extract-tokens-tailwind",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.6666666666666666,
+      "assertions": [
+        {
+          "id": "detects-tailwind",
+          "text": "Response describes detecting Tailwind CSS in the project (e.g., via tailwind.config.js or postcss config)",
+          "pass": true,
+          "reasoning": "The output mentions detecting Tailwind v4 with `@tailwindcss/vite` and notes it uses CSS-first config via `@theme` in a `.css` file rather than `tailwind.config.js`, indicating the LLM did detect Tailwind CSS in the project."
+        },
+        {
+          "id": "tailwind-format",
+          "text": "Response specifies outputting tokens in Tailwind theme.extend format rather than generic CSS custom properties",
+          "pass": false,
+          "reasoning": "The LLM output mentions mapping tokens into Tailwind config and references Tailwind v4 with CSS-first config via `@theme` in a `.css` file, but does not specify outputting tokens in `theme.extend` format. In fact, it explicitly notes Tailwind v4 uses CSS-first config rather than tailwind.config.js, which means `theme.extend` format is not applicable or mentioned."
+        },
+        {
+          "id": "extract-via-mcp",
+          "text": "Response describes extracting Figma variables (e.g., via get_variable_defs) as the source for design token data",
+          "pass": true,
+          "reasoning": "The output explicitly mentions calling `get_variable_defs('tok123', '0:1')` to pull all variables from the Figma file as the source for design token data."
+        }
+      ]
+    },
+    {
+      "eval_id": 8,
+      "eval_name": "roundtrip-full-lifecycle",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.6,
+      "assertions": [
+        {
+          "id": "starts-with-setup",
+          "text": "Response begins with authentication and framework detection as the initial setup phase",
+          "pass": false,
+          "reasoning": "The response begins with a 'Setup Audit' table, not with authentication and framework detection as an initial setup phase. While the table does include auth status (FIGMA_ACCESS_TOKEN, Figma MCP auth) and framework detection (React + Tailwind), the response opens with 'Here's the current setup status:' followed by an audit summary — it does not frame authentication and framework detection as the 'initial setup phase' or begin with that focus. The response presents findings rather than describing/executing an initial setup phase centered on those two items."
+        },
+        {
+          "id": "extracts-tokens",
+          "text": "Response includes a token extraction step that describes pulling design variables from Figma into the project",
+          "pass": true,
+          "reasoning": "The response explicitly mentions 'Token extraction — pull variables from `abc123` into Tailwind config' as step 1 in the 'Once you set FIGMA_ACCESS_TOKEN' section, which describes pulling design variables from Figma into the project."
+        },
+        {
+          "id": "generates-code",
+          "text": "Response includes a design-to-code step describing component implementation from the design system",
+          "pass": true,
+          "reasoning": "The response explicitly mentions a 'Design-to-code' step under 'Once you set FIGMA_ACCESS_TOKEN and allow the Figma MCP tools, I can proceed with: ... 2. Design-to-code — implement components from node-id=0:1', which describes component implementation from the design system."
+        },
+        {
+          "id": "publishes-cc",
+          "text": "Response includes a step describing publishing Code Connect mappings back to Figma Dev Mode",
+          "pass": true,
+          "reasoning": "The response explicitly mentions 'Publish mappings — connect your React components back to Dev Mode' as step 3 in the 'Once you set FIGMA_ACCESS_TOKEN and allow the Figma MCP tools, I can proceed with' section, which describes publishing Code Connect mappings back to Figma Dev Mode."
+        },
+        {
+          "id": "verifies-roundtrip",
+          "text": "Response includes a verification step to confirm the full roundtrip pipeline is working end-to-end",
+          "pass": false,
+          "reasoning": "The response outlines setup steps and prerequisites (token setup, MCP auth, config update) but does not include any verification step to confirm the full roundtrip pipeline works end-to-end. There is no mention of running a test publish, checking a connection, or validating that design-to-code and code-back-to-Figma flows are functional after setup."
+        }
+      ]
+    },
+    {
+      "eval_id": 9,
+      "eval_name": "error-auth-failure-mcp",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.3333333333333333,
+      "assertions": [
+        {
+          "id": "whoami-first",
+          "text": "Response describes checking Figma authentication (e.g., via whoami) as the very first step before any design operations",
+          "pass": false,
+          "reasoning": "The LLM output does not mention checking Figma authentication via whoami or any similar authentication check as a first step. Instead, it explains that MCP tools are blocked due to permission mode and offers two alternative options. There is no reference to authentication checking at all."
+        },
+        {
+          "id": "handles-auth-failure",
+          "text": "Response explains how to resolve authentication failures, including the Figma MCP OAuth flow or token setup",
+          "pass": false,
+          "reasoning": "The output explains that MCP tools are blocked due to 'don't ask mode' permission settings and suggests switching permission modes or manually exporting from Figma. It does not explain how to resolve authentication failures, nor does it mention OAuth flow or token setup for the Figma MCP."
+        },
+        {
+          "id": "no-unauthenticated-calls",
+          "text": "Response does not describe proceeding with design context retrieval or other Figma operations without first verifying authentication",
+          "pass": true,
+          "reasoning": "The response explicitly states that Figma MCP tools are blocked and does not proceed with any design context retrieval or Figma operations. Instead, it asks the user to either change permission settings or manually export design data before proceeding."
+        }
+      ]
+    },
+    {
+      "eval_id": 10,
+      "eval_name": "error-cli-not-installed",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "cli-check",
+          "text": "Response describes checking whether the @figma/code-connect CLI is available before attempting to publish",
+          "pass": true,
+          "reasoning": "The output explicitly mentions that '@figma/code-connect' is not installed as a blocker and provides the command to install it, indicating the LLM checked for the CLI's availability before attempting to publish."
+        },
+        {
+          "id": "install-guidance",
+          "text": "Response provides installation instructions for @figma/code-connect (e.g., npm install -D) if the CLI is not found",
+          "pass": true,
+          "reasoning": "The output explicitly provides installation instructions for @figma/code-connect with the command `npm install -D @figma/code-connect` under the 'Missing prerequisites' section."
+        },
+        {
+          "id": "no-blind-publish",
+          "text": "Response does not describe attempting to publish without first confirming CLI availability",
+          "pass": true,
+          "reasoning": "The LLM output lists missing prerequisites including the @figma/code-connect package not being installed, and asks clarifying questions before proceeding. It explicitly does not attempt to publish - instead it identifies blockers and requests confirmation/clarification before any publish action."
+        }
+      ]
+    },
+    {
+      "eval_id": 11,
+      "eval_name": "branch-url-handling",
+      "status": "pass",
+      "error_message": null,
+      "pass_rate": 1,
+      "assertions": [
+        {
+          "id": "branch-url-parse",
+          "text": "Response correctly identifies the branch URL format and specifies using branchKey456 as the fileKey (not abc123)",
+          "pass": true,
+          "reasoning": "The LLM output explicitly states 'Take a screenshot of node `8:99` from branch `branchKey456`' and references 'branchKey456 as the fileKey' in the workflow steps, correctly identifying that the branch key should be used as the fileKey rather than the original file key abc123."
+        },
+        {
+          "id": "correct-node-id",
+          "text": "Response extracts the nodeId as 8:99 (converting the dash in node-id to a colon)",
+          "pass": true,
+          "reasoning": "The LLM output explicitly references node `8:99` (with a colon), correctly converting the dash-separated node-id format to colon format as required."
+        },
+        {
+          "id": "design-context-call",
+          "text": "Response describes retrieving design context using branchKey456 as the fileKey and 8:99 as the nodeId",
+          "pass": true,
+          "reasoning": "The output explicitly mentions using 'branchKey456' as the branch/file key and '8:99' as the nodeId in the planned workflow steps (step 2 and step 4), describing retrieving design context with those exact values."
+        }
+      ]
+    },
+    {
+      "eval_id": 12,
+      "eval_name": "vue-framework-detection",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0,
+      "assertions": [
+        {
+          "id": "detects-vue",
+          "text": "Response identifies Vue 3 as the project framework based on the user's description or project configuration",
+          "pass": false,
+          "reasoning": "The LLM output identifies React as the project framework (mentions React parser, .figma.tsx pattern), not Vue 3."
+        },
+        {
+          "id": "vue-label",
+          "text": "Response specifies using 'Vue' as the Code Connect label when configuring or creating mappings",
+          "pass": false,
+          "reasoning": "The LLM output mentions React as the configured parser and does not specify 'Vue' as the Code Connect label anywhere in the response."
+        },
+        {
+          "id": "vue-sfc-output",
+          "text": "Response describes generating code in Vue Single File Component format (template, script setup, style sections) rather than React JSX",
+          "pass": false,
+          "reasoning": "The LLM output describes React JSX implementation (mentions React parser, .figma.tsx pattern, and React-based Code Connect mapping), not Vue Single File Component format with template/script setup/style sections."
+        },
+        {
+          "id": "passes-framework",
+          "text": "Response mentions configuring the client framework as 'vue' when interacting with Figma tools or Code Connect settings",
+          "pass": false,
+          "reasoning": "The LLM output mentions React as the configured framework ('React parser', 'src/**/*.figma.tsx' pattern), not Vue. There is no mention of configuring the client framework as 'vue' anywhere in the response."
+        }
+      ]
+    }
+  ],
+  "overall_pass_rate": 0.6086956521739131
+}

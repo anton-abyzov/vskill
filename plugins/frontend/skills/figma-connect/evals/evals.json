@@ -1,0 +1,159 @@
+{
+  "skill_name": "figma-connect",
+  "evals": [
+    {
+      "id": 1,
+      "name": "setup-react-project",
+      "prompt": "Set up Figma Code Connect in my React project. Here's our design system file: https://figma.com/design/abc123/DesignSystem?node-id=0-1",
+      "expected_output": "Response describes a complete setup workflow: checking MCP authentication, detecting React as the framework, installing @figma/code-connect, creating figma.config.json, and optionally generating design system rules.",
+      "files": [],
+      "assertions": [
+        { "id": "auth-check", "text": "Response describes checking Figma MCP authentication (e.g., via whoami) as a prerequisite step before proceeding", "type": "boolean" },
+        { "id": "framework-detect", "text": "Response describes detecting the project framework (React) from package.json or project files", "type": "boolean" },
+        { "id": "cli-install", "text": "Response includes installing or verifying @figma/code-connect CLI availability as part of the setup workflow", "type": "boolean" },
+        { "id": "config-generation", "text": "Response describes creating or configuring figma.config.json with appropriate settings for the project", "type": "boolean" },
+        { "id": "design-system-rules", "text": "Response mentions generating design system rules (e.g., via create_design_system_rules) to establish project conventions", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "design-to-code-with-existing-connect",
+      "prompt": "Implement this card component from our Figma: https://figma.com/design/xyz789/App?node-id=42-156. We already have Code Connect set up.",
+      "expected_output": "Response describes parsing the Figma URL to extract fileKey and nodeId, checking existing Code Connect mappings, retrieving design context, and adapting output to the project's stack and conventions.",
+      "files": [],
+      "assertions": [
+        { "id": "url-parse", "text": "Response identifies the need to extract fileKey and nodeId from the Figma URL, converting the dash-separated node-id to colon format (e.g., 42-156 becomes 42:156)", "type": "boolean" },
+        { "id": "check-existing-cc", "text": "Response describes checking for existing Code Connect mappings (e.g., via get_code_connect_map) before generating new code", "type": "boolean" },
+        { "id": "design-context", "text": "Response describes retrieving design context from Figma (e.g., via get_design_context) using the extracted file key and node ID", "type": "boolean" },
+        { "id": "adapts-to-project", "text": "Response emphasizes adapting generated code to the project's existing components, tokens, and conventions rather than using raw Figma output", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "design-to-code-no-connect",
+      "prompt": "Build this hero section from Figma: https://figma.com/design/def456/Marketing?node-id=10-200. We don't have Code Connect yet.",
+      "expected_output": "Response describes getting a visual reference and design context from Figma, gracefully handling the absence of Code Connect, generating adapted code, and recommending Code Connect setup afterward.",
+      "files": [],
+      "assertions": [
+        { "id": "screenshot", "text": "Response mentions getting a visual reference or screenshot of the Figma design to guide implementation", "type": "boolean" },
+        { "id": "no-cc-graceful", "text": "Response acknowledges the absence of Code Connect and describes proceeding with design-to-code without requiring it", "type": "boolean" },
+        { "id": "generates-code", "text": "Response describes generating implementation code adapted to the project's framework and conventions", "type": "boolean" },
+        { "id": "suggests-cc-setup", "text": "Response recommends setting up Code Connect after implementation to improve future design-to-code workflows", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "publish-code-connect-mappings",
+      "prompt": "Publish Code Connect for our Button component at src/components/Button.tsx to the Figma file https://figma.com/design/abc123/DS?node-id=5-30",
+      "expected_output": "Response describes getting AI-suggested mappings, generating a .figma.tsx file with prop mappings, validating with CLI parse, publishing via CLI, and verifying the result.",
+      "files": [],
+      "assertions": [
+        { "id": "get-suggestions", "text": "Response describes using AI-suggested mappings (e.g., via get_code_connect_suggestions) to guide the component mapping process", "type": "boolean" },
+        { "id": "generate-figma-tsx", "text": "Response describes generating a .figma.tsx Code Connect file with prop mappings for the Button component", "type": "boolean" },
+        { "id": "validate-before-publish", "text": "Response includes a validation step (e.g., figma connect parse) before publishing the mapping", "type": "boolean" },
+        { "id": "publish-cli", "text": "Response describes publishing the Code Connect mapping to Figma Dev Mode via the CLI", "type": "boolean" },
+        { "id": "verify-after-publish", "text": "Response includes a verification step after publishing to confirm the mapping was registered in Figma", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "publish-dry-run",
+      "prompt": "I want to test my Code Connect mappings before actually publishing. Can you do a dry run for https://figma.com/design/abc123/DS?node-id=5-30?",
+      "expected_output": "Response describes running a dry-run publish and presenting the results without actually publishing.",
+      "files": [],
+      "assertions": [
+        { "id": "dry-run-flag", "text": "Response mentions using the --dry-run flag with the Code Connect publish command", "type": "boolean" },
+        { "id": "no-actual-publish", "text": "Response does not describe running an actual publish without the --dry-run flag", "type": "boolean" },
+        { "id": "reports-results", "text": "Response describes presenting the dry-run output to the user showing what would be published", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "extract-tokens-css-variables",
+      "prompt": "Extract the design tokens from our Figma file https://figma.com/design/tok123/Tokens?node-id=0-1 and generate CSS custom properties. We use a tokens/ directory.",
+      "expected_output": "Response describes extracting Figma variables, detecting CSS output format, generating CSS custom properties organized by category, and writing to the tokens/ directory.",
+      "files": [],
+      "assertions": [
+        { "id": "extract-variables", "text": "Response describes extracting Figma variables (e.g., via get_variable_defs) from the provided design file", "type": "boolean" },
+        { "id": "css-format", "text": "Response specifies outputting tokens as CSS custom properties (--variable-name: value format) rather than raw JSON", "type": "boolean" },
+        { "id": "respects-directory", "text": "Response references the user's specified tokens/ directory as the output location for generated token files", "type": "boolean" },
+        { "id": "organized-output", "text": "Response describes organizing tokens by category (e.g., colors, spacing, typography) in the output", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "extract-tokens-tailwind",
+      "prompt": "Pull our design tokens from Figma and add them to our Tailwind config. Figma file: https://figma.com/design/tok123/Tokens?node-id=0-1",
+      "expected_output": "Response describes extracting Figma variables, detecting Tailwind in the project, and mapping tokens to Tailwind theme.extend format.",
+      "files": [],
+      "assertions": [
+        { "id": "detects-tailwind", "text": "Response describes detecting Tailwind CSS in the project (e.g., via tailwind.config.js or postcss config)", "type": "boolean" },
+        { "id": "tailwind-format", "text": "Response specifies outputting tokens in Tailwind theme.extend format rather than generic CSS custom properties", "type": "boolean" },
+        { "id": "extract-via-mcp", "text": "Response describes extracting Figma variables (e.g., via get_variable_defs) as the source for design token data", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "roundtrip-full-lifecycle",
+      "prompt": "We're starting a new project and want the full Figma-to-code setup. Our design system is at https://figma.com/design/abc123/DS?node-id=0-1. We use React with Tailwind.",
+      "expected_output": "Response describes the complete roundtrip workflow: setup (auth, framework, CLI, config), token extraction, design-to-code generation, Code Connect publishing, and verification.",
+      "files": [],
+      "assertions": [
+        { "id": "starts-with-setup", "text": "Response begins with authentication and framework detection as the initial setup phase", "type": "boolean" },
+        { "id": "extracts-tokens", "text": "Response includes a token extraction step that describes pulling design variables from Figma into the project", "type": "boolean" },
+        { "id": "generates-code", "text": "Response includes a design-to-code step describing component implementation from the design system", "type": "boolean" },
+        { "id": "publishes-cc", "text": "Response includes a step describing publishing Code Connect mappings back to Figma Dev Mode", "type": "boolean" },
+        { "id": "verifies-roundtrip", "text": "Response includes a verification step to confirm the full roundtrip pipeline is working end-to-end", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "error-auth-failure-mcp",
+      "prompt": "Implement this component from Figma: https://figma.com/design/abc123/App?node-id=1-1",
+      "expected_output": "Response describes checking authentication first, explains how to handle auth failures via OAuth, and does not proceed with design operations without valid auth.",
+      "files": [],
+      "assertions": [
+        { "id": "whoami-first", "text": "Response describes checking Figma authentication (e.g., via whoami) as the very first step before any design operations", "type": "boolean" },
+        { "id": "handles-auth-failure", "text": "Response explains how to resolve authentication failures, including the Figma MCP OAuth flow or token setup", "type": "boolean" },
+        { "id": "no-unauthenticated-calls", "text": "Response does not describe proceeding with design context retrieval or other Figma operations without first verifying authentication", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "error-cli-not-installed",
+      "prompt": "Publish my Code Connect mappings for the Button component to Figma.",
+      "expected_output": "Response describes checking CLI availability first and providing installation guidance if the CLI is not found.",
+      "files": [],
+      "assertions": [
+        { "id": "cli-check", "text": "Response describes checking whether the @figma/code-connect CLI is available before attempting to publish", "type": "boolean" },
+        { "id": "install-guidance", "text": "Response provides installation instructions for @figma/code-connect (e.g., npm install -D) if the CLI is not found", "type": "boolean" },
+        { "id": "no-blind-publish", "text": "Response does not describe attempting to publish without first confirming CLI availability", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 11,
+      "name": "branch-url-handling",
+      "prompt": "Implement this from our feature branch design: https://figma.com/design/abc123/branch/branchKey456/MyFile?node-id=8-99",
+      "expected_output": "Response correctly identifies the branch URL format and describes using branchKey456 as the fileKey with nodeId 8:99.",
+      "files": [],
+      "assertions": [
+        { "id": "branch-url-parse", "text": "Response correctly identifies the branch URL format and specifies using branchKey456 as the fileKey (not abc123)", "type": "boolean" },
+        { "id": "correct-node-id", "text": "Response extracts the nodeId as 8:99 (converting the dash in node-id to a colon)", "type": "boolean" },
+        { "id": "design-context-call", "text": "Response describes retrieving design context using branchKey456 as the fileKey and 8:99 as the nodeId", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 12,
+      "name": "vue-framework-detection",
+      "prompt": "Set up Figma Code Connect for my Vue 3 project and implement the NavBar component from https://figma.com/design/vue123/App?node-id=3-15",
+      "expected_output": "Response identifies Vue 3 as the framework, specifies 'Vue' as the Code Connect label, describes generating Vue SFC format code, and mentions configuring the client framework as vue.",
+      "files": [],
+      "assertions": [
+        { "id": "detects-vue", "text": "Response identifies Vue 3 as the project framework based on the user's description or project configuration", "type": "boolean" },
+        { "id": "vue-label", "text": "Response specifies using 'Vue' as the Code Connect label when configuring or creating mappings", "type": "boolean" },
+        { "id": "vue-sfc-output", "text": "Response describes generating code in Vue Single File Component format (template, script setup, style sections) rather than React JSX", "type": "boolean" },
+        { "id": "passes-framework", "text": "Response mentions configuring the client framework as 'vue' when interacting with Figma tools or Code Connect settings", "type": "boolean" }
+      ]
+    }
+  ]
+}

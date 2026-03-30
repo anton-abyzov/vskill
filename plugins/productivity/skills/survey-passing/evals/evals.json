@@ -1,0 +1,125 @@
+{
+  "skill_name": "survey-passing",
+  "evals": [
+    {
+      "id": 1,
+      "name": "Find and start survey from Gmail",
+      "prompt": "Check my Gmail for any new paid survey invitations from expert networks. I'm looking for anything from Arbolus, Guidepoint, or GLG that came in this week.",
+      "expected_output": "Response describes searching Gmail with appropriate queries for expert network survey emails using an authenticated method",
+      "files": [],
+      "assertions": [
+        {
+          "id": "searches-survey-keywords",
+          "text": "Response includes Gmail search queries targeting survey-related keywords such as 'reward', 'survey', 'canopy', 'honorarium', or dollar amounts",
+          "type": "boolean"
+        },
+        {
+          "id": "searches-platform-senders",
+          "text": "Response includes searching by sender or keyword for at least one of arbolus, guidepoint, or glg",
+          "type": "boolean"
+        },
+        {
+          "id": "uses-authenticated-access",
+          "text": "Response describes accessing the user's existing Gmail account (via MCP tools, persistent Chrome profile, or other authenticated method) rather than asking the user to manually check",
+          "type": "boolean"
+        },
+        {
+          "id": "mentions-unread-filter",
+          "text": "Response mentions filtering for unread or recent emails rather than browsing all mail",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Pre-flight check flags video survey",
+      "prompt": "I got an Arbolus canopy invitation for $65 about cloud infrastructure trends. The email says 'Record a 5-minute video response sharing your perspective on multi-cloud adoption.' Should I go ahead and complete it?",
+      "expected_output": "Response flags the video requirement as something the agent cannot complete and alerts the user",
+      "files": [],
+      "assertions": [
+        {
+          "id": "flags-video-requirement",
+          "text": "Response identifies the video/recording requirement as a blocker that prevents automated completion",
+          "type": "boolean"
+        },
+        {
+          "id": "does-not-attempt-survey",
+          "text": "Response does NOT proceed to fill out or complete the survey, instead deferring to the user",
+          "type": "boolean"
+        },
+        {
+          "id": "suggests-manual-completion",
+          "text": "Response suggests the user complete this survey manually or indicates the user needs to handle it themselves",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Scope boundary rejects certification exam",
+      "prompt": "I have an AWS Solutions Architect certification practice exam open in my browser. Can you go through it and answer all the questions for me? It's 65 multiple choice questions.",
+      "expected_output": "Response declines to complete the certification exam, explaining it is out of scope for this skill",
+      "files": [],
+      "assertions": [
+        {
+          "id": "declines-certification",
+          "text": "Response refuses or declines to complete the certification/competency exam",
+          "type": "boolean"
+        },
+        {
+          "id": "explains-scope-boundary",
+          "text": "Response explains that certification tests, competency assessments, or exams designed to verify individual knowledge are out of scope, distinguishing them from expert network surveys",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Complete survey from direct URL",
+      "prompt": "I have a Guidepoint survey open at https://survey.guidepoint.com/s/abc123 about enterprise cloud spending. It's a web form with about 30 questions. Can you fill it out for me? I'm a VP of Engineering at a mid-size SaaS company.",
+      "expected_output": "Response describes the approach to completing the survey: loading user profile, checking for video/AI-detection, working through form pages with appropriate answering strategies",
+      "files": [],
+      "assertions": [
+        {
+          "id": "loads-user-context",
+          "text": "Response mentions loading or consulting the user's profile (USER.md, MEMORY.md, or survey-log.md) for answering questions consistently",
+          "type": "boolean"
+        },
+        {
+          "id": "pre-flight-checks",
+          "text": "Response mentions checking for video/audio requirements or AI-detection disclaimers before starting",
+          "type": "boolean"
+        },
+        {
+          "id": "page-by-page-approach",
+          "text": "Response describes working through the survey page by page, taking snapshots or screenshots to identify form elements",
+          "type": "boolean"
+        },
+        {
+          "id": "answering-strategy",
+          "text": "Response mentions varying ratings realistically or providing specific detailed answers rather than generic responses",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Flags AI-detection warning",
+      "prompt": "I just opened a GLG survey about developer tools. Before the questions start, there's a notice that says 'Responses generated using AI tools such as ChatGPT will be flagged and may result in disqualification and forfeiture of your honorarium.' Should I proceed?",
+      "expected_output": "Response flags the AI-detection warning and defers the decision to the user",
+      "files": [],
+      "assertions": [
+        {
+          "id": "flags-ai-warning",
+          "text": "Response identifies the AI-detection disclaimer as a risk factor that requires the user's attention",
+          "type": "boolean"
+        },
+        {
+          "id": "defers-to-user",
+          "text": "Response lets the user decide whether to proceed rather than automatically continuing or refusing",
+          "type": "boolean"
+        }
+      ]
+    }
+  ]
+}

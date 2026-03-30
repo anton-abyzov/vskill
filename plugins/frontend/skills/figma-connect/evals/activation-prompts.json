@@ -1,0 +1,84 @@
+{
+  "prompts": [
+    {
+      "prompt": "implement this card component from our figma design https://figma.com/design/abc123/App?node-id=42-156",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "set up code connect for our react component library so figma dev mode shows the right code snippets",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "extract the design tokens from our figma file and generate css variables for our project",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "publish our button component mapping to figma so designers can see the code in dev mode",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "i need to connect our vue components to figma — set up the full pipeline from design to code",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "can you do a dry run of our code connect publish to see if anything would break?",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "pull the color and spacing variables from figma and put them in our tailwind config",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "check if our figma components already have code connect mappings and show me which ones are missing",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "build this hero section based on the figma design at figma.com/design/xyz789/Marketing?node-id=10-200",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "set up figma code connect in our SwiftUI project for the iOS design system",
+      "expected": "should_activate"
+    },
+    {
+      "prompt": "deploy my react app to vercel and set up the CI/CD pipeline",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "create a new figma file with a wireframe for our landing page",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "review this pull request and check the code quality",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "write unit tests for my button component using vitest",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "post about our new design system on linkedin and twitter",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "set up storybook for our component library with automated visual regression tests",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "convert this sketch file to figma format",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "create a database schema for our user management system",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "help me write a figma plugin that auto-generates icons from svg files",
+      "expected": "should_not_activate"
+    },
+    {
+      "prompt": "set up eslint and prettier for our typescript project",
+      "expected": "should_not_activate"
+    }
+  ]
+}

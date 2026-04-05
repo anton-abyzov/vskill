@@ -12,6 +12,7 @@ import { getSkill } from "../api/client.js";
 import { findCoreSkillsDir, listCoreSkills } from "../core-skills/sync.js";
 import type { ParsedSource } from "../resolvers/source-resolver.js";
 import type { SkillLockEntry } from "../lockfile/types.js";
+import { extractFrontmatterVersion } from "../utils/version.js";
 
 export interface FetchResult {
   /** Skill content. For plugin-dir sources: combined content of all skills. */
@@ -102,7 +103,7 @@ async function fetchGitHubFlat(
   const files: Record<string, string> = { "SKILL.md": content };
   return {
     content,
-    version: entry.version,
+    version: extractFrontmatterVersion(content) || entry.version,
     sha: computeSha(files),
     tier: entry.tier,
     files,

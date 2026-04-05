@@ -142,6 +142,14 @@ program
   });
 
 program
+  .command("versions <skill-name>")
+  .description("List published versions for a skill")
+  .action(async (skillName: string) => {
+    const { versionsCommand } = await import("./commands/versions.js");
+    await versionsCommand(skillName);
+  });
+
+program
   .command("blocklist [subcommand] [name]")
   .description("Manage the malicious skills blocklist")
   .action(async (subcommand?: string, name?: string) => {

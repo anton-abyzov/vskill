@@ -419,6 +419,84 @@ describe("fetchFromSource", () => {
 });
 
 // ---------------------------------------------------------------------------
+// fetchGitHubFlat version resolution (T-009 / AC-US4-01, AC-US4-02)
+// ---------------------------------------------------------------------------
+describe("fetchGitHubFlat version resolution", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetDefaultBranch.mockResolvedValue("main");
+  });
+
+  it("returns frontmatter version when SKILL.md has valid version field", async () => {
+    const skillContent = [
+      "---",
+      "name: test-skill",
+      "version: 2.1.0",
+      "description: A test skill",
+      "---",
+      "",
+      "# Test Skill",
+    ].join("\n");
+
+    mockFetch.mockResolvedValue(mockFetchOk(skillContent));
+
+    const result = await fetchFromSource(
+      { type: "github", owner: "testowner", repo: "testrepo" },
+      "test-skill",
+      { ...MOCK_LOCK_ENTRY, version: "1.0.0" },
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.version).toBe("2.1.0");
+  });
+
+  it("returns entry.version as fallback when no frontmatter version field", async () => {
+    const skillContent = [
+      "---",
+      "name: test-skill",
+      "description: A test skill",
+      "---",
+      "",
+      "# Test Skill",
+    ].join("\n");
+
+    mockFetch.mockResolvedValue(mockFetchOk(skillContent));
+
+    const result = await fetchFromSource(
+      { type: "github", owner: "testowner", repo: "testrepo" },
+      "test-skill",
+      { ...MOCK_LOCK_ENTRY, version: "1.0.0" },
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.version).toBe("1.0.0");
+  });
+
+  it("returns entry.version when frontmatter version is invalid semver", async () => {
+    const skillContent = [
+      "---",
+      "name: test-skill",
+      "version: not-a-version",
+      "description: A test skill",
+      "---",
+      "",
+      "# Test Skill",
+    ].join("\n");
+
+    mockFetch.mockResolvedValue(mockFetchOk(skillContent));
+
+    const result = await fetchFromSource(
+      { type: "github", owner: "testowner", repo: "testrepo" },
+      "test-skill",
+      { ...MOCK_LOCK_ENTRY, version: "1.0.0" },
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.version).toBe("1.0.0");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // normalizeContent
 // ---------------------------------------------------------------------------
 describe("normalizeContent", () => {

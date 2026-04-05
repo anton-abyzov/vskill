@@ -233,6 +233,36 @@ export async function getSubmission(
   return apiRequest(`/api/v1/submissions/${encodeURIComponent(id)}`);
 }
 
+export interface SkillVersionEntry {
+  version: string;
+  certTier: string;
+  createdAt: string;
+  contentHash?: string;
+  certScore?: number;
+  diffSummary?: string | null;
+}
+
+/**
+ * List published versions for a skill.
+ * Supports hierarchical names (owner/repo/skill).
+ */
+export async function getVersions(
+  name: string,
+): Promise<SkillVersionEntry[]> {
+  const data = await apiRequest<{ versions?: unknown[] }>(
+    `${skillApiPath(name)}/versions`,
+  );
+  const items = Array.isArray(data.versions) ? data.versions : [];
+  return items.map((v) => v as Record<string, unknown>).map((v) => ({
+    version: String(v.version || ""),
+    certTier: String(v.certTier || ""),
+    createdAt: String(v.createdAt || ""),
+    contentHash: v.contentHash ? String(v.contentHash) : undefined,
+    certScore: v.certScore != null ? Number(v.certScore) : undefined,
+    diffSummary: v.diffSummary != null ? String(v.diffSummary) : null,
+  }));
+}
+
 /**
  * Report a skill install to the platform with retry.
  * Respects VSKILL_NO_TELEMETRY=1 env var for opt-out.

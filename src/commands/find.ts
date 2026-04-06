@@ -39,16 +39,16 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     return;
   }
 
-  // Sort: blocked at end, then by cert tier (CERTIFIED > VERIFIED > other), then stars
+  // Sort: blocked at end, then by relevance score, then cert tier, then stars
   results.sort((a, b) => {
     if (a.isBlocked && !b.isBlocked) return 1;
     if (!a.isBlocked && b.isBlocked) return -1;
+    const scoreDiff = (b.score ?? 0) - (a.score ?? 0);
+    if (scoreDiff !== 0) return scoreDiff;
     const certRank = (t: string | undefined) => t === "CERTIFIED" ? 0 : t === "VERIFIED" ? 1 : 2;
     const certDiff = certRank(a.certTier) - certRank(b.certTier);
     if (certDiff !== 0) return certDiff;
-    const starDiff = (b.githubStars ?? 0) - (a.githubStars ?? 0);
-    if (starDiff !== 0) return starDiff;
-    return (b.score ?? 0) - (a.score ?? 0);
+    return (b.githubStars ?? 0) - (a.githubStars ?? 0);
   });
 
   // JSON output mode

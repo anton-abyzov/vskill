@@ -82,28 +82,12 @@ describe("findCommand", () => {
     expect(output).toContain("test/test-skill/test-skill");
   });
 
-  it("sorts results by githubStars descending", async () => {
+  it("sorts results by relevance score descending", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     mockSearchSkills.mockResolvedValue({
       results: [
-        { name: "low-stars", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 10, githubStars: 10, vskillInstalls: 10 },
-        { name: "high-stars", author: "b", repoUrl: "https://github.com/b/c", tier: "VERIFIED", score: 50, installs: 5000, githubStars: 5000, vskillInstalls: 100 },
-      ],
-      hasMore: false,
-    });
-    await findCommand("test");
-    const output = logs.join("\n");
-    const highIdx = output.indexOf("high-stars");
-    const lowIdx = output.indexOf("low-stars");
-    expect(highIdx).toBeLessThan(lowIdx);
-  });
-
-  it("uses relevance score as tiebreaker for equal stars", async () => {
-    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
-    mockSearchSkills.mockResolvedValue({
-      results: [
-        { name: "low-score", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 30, installs: 100, githubStars: 10, vskillInstalls: 100 },
-        { name: "high-score", author: "b", repoUrl: "https://github.com/b/c", tier: "VERIFIED", score: 90, installs: 100, githubStars: 10, vskillInstalls: 100 },
+        { name: "low-score", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 50, installs: 5000, githubStars: 5000, vskillInstalls: 100 },
+        { name: "high-score", author: "b", repoUrl: "https://github.com/b/c", tier: "VERIFIED", score: 90, installs: 10, githubStars: 10, vskillInstalls: 10 },
       ],
       hasMore: false,
     });
@@ -111,6 +95,22 @@ describe("findCommand", () => {
     const output = logs.join("\n");
     const highIdx = output.indexOf("high-score");
     const lowIdx = output.indexOf("low-score");
+    expect(highIdx).toBeLessThan(lowIdx);
+  });
+
+  it("uses githubStars as tiebreaker for equal scores", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "low-stars", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 100, githubStars: 10, vskillInstalls: 100 },
+        { name: "high-stars", author: "b", repoUrl: "https://github.com/b/c", tier: "VERIFIED", score: 90, installs: 100, githubStars: 5000, vskillInstalls: 100 },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    const highIdx = output.indexOf("high-stars");
+    const lowIdx = output.indexOf("low-stars");
     expect(highIdx).toBeLessThan(lowIdx);
   });
 
@@ -506,13 +506,13 @@ describe("findCommand", () => {
     expect(output).toContain("\u2713 certified");
   });
 
-  it("sorts CERTIFIED before VERIFIED before unranked", async () => {
+  it("uses cert tier as tiebreaker: CERTIFIED before VERIFIED before unranked", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     mockSearchSkills.mockResolvedValue({
       results: [
         { name: "unranked", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 100, githubStars: 5000, vskillInstalls: 100, trustTier: "T2" },
         { name: "verified-skill", author: "a", repoUrl: "https://github.com/a/c", tier: "VERIFIED", score: 90, installs: 100, githubStars: 3000, vskillInstalls: 100, certTier: "VERIFIED" },
-        { name: "certified-skill", author: "a", repoUrl: "https://github.com/a/d", tier: "CERTIFIED", score: 95, installs: 100, githubStars: 100, vskillInstalls: 100, certTier: "CERTIFIED" },
+        { name: "certified-skill", author: "a", repoUrl: "https://github.com/a/d", tier: "CERTIFIED", score: 90, installs: 100, githubStars: 100, vskillInstalls: 100, certTier: "CERTIFIED" },
       ],
       hasMore: false,
     });

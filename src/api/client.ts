@@ -28,9 +28,9 @@ export interface SkillSearchResult {
   pluginName?: string | null;
   isTainted?: boolean;
   /** Trust tier (T0-T4) */
-  trustTier?: string;
-  /** Certification tier (CERTIFIED, VERIFIED, etc.) */
-  certTier?: string;
+  trustTier?: "T0" | "T1" | "T2" | "T3" | "T4";
+  /** Certification tier */
+  certTier?: "CERTIFIED" | "VERIFIED";
   /** True when the skill is on the blocklist (known malicious) */
   isBlocked?: boolean;
   /** Threat classification (e.g. "credential-theft", "prompt-injection") */
@@ -154,8 +154,8 @@ export async function searchSkills(
     command: s.command ? String(s.command) : null,
     pluginName: s.pluginName ? String(s.pluginName) : null,
     isTainted: !!s.isTainted,
-    trustTier: s.trustTier ? String(s.trustTier) : undefined,
-    certTier: s.certTier ? String(s.certTier) : undefined,
+    trustTier: s.trustTier ? String(s.trustTier) as SkillSearchResult["trustTier"] : undefined,
+    certTier: s.certTier ? String(s.certTier) as SkillSearchResult["certTier"] : undefined,
     isBlocked: !!s.isBlocked,
     threatType: s.threatType ? String(s.threatType) : undefined,
     severity: s.severity ? String(s.severity) : undefined,

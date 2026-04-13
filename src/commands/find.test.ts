@@ -525,6 +525,54 @@ describe("findCommand", () => {
     expect(verIdx).toBeLessThan(unrIdx);
   });
 
+  it("sorts blocked skills to the end", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "blocked-skill", author: "evil", repoUrl: "https://github.com/evil/bad", tier: "BLOCKED", score: 95, installs: 0, githubStars: 10000, isBlocked: true, threatType: "credential-theft", severity: "critical", vskillInstalls: 0 },
+        { name: "clean-skill", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 10, installs: 100, githubStars: 5, vskillInstalls: 100 },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    const cleanIdx = output.indexOf("clean-skill");
+    const blockedIdx = output.indexOf("blocked-skill");
+    expect(cleanIdx).toBeLessThan(blockedIdx);
+  });
+
+  it("sorts by score over cert tier: high-score VERIFIED beats low-score CERTIFIED", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "certified-low", author: "a", repoUrl: "https://github.com/a/b", tier: "CERTIFIED", score: 30, installs: 100, githubStars: 5000, vskillInstalls: 100, certTier: "CERTIFIED" },
+        { name: "verified-high", author: "b", repoUrl: "https://github.com/b/c", tier: "VERIFIED", score: 90, installs: 10, githubStars: 10, vskillInstalls: 10, certTier: "VERIFIED" },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    const highIdx = output.indexOf("verified-high");
+    const lowIdx = output.indexOf("certified-low");
+    expect(highIdx).toBeLessThan(lowIdx);
+  });
+
+  it("treats missing score as 0 and sorts below scored results", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "no-score", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", installs: 100, githubStars: 5000, vskillInstalls: 100, certTier: "CERTIFIED" },
+        { name: "has-score", author: "b", repoUrl: "https://github.com/b/c", tier: "VERIFIED", score: 50, installs: 10, githubStars: 10, vskillInstalls: 10 },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    const scoredIdx = output.indexOf("has-score");
+    const unscoredIdx = output.indexOf("no-score");
+    expect(scoredIdx).toBeLessThan(unscoredIdx);
+  });
+
   it("no alternateRepos renders identically to current behavior", async () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     mockSearchSkills.mockResolvedValue({

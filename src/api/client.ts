@@ -330,6 +330,65 @@ export async function reportInstall(
  *
  * @param skills - Array of { skillName, repoUrl? } to report
  */
+// ---------------------------------------------------------------------------
+// Check-updates types
+// ---------------------------------------------------------------------------
+
+export interface CheckUpdateItem {
+  name: string;
+  currentVersion: string;
+  sha?: string;
+}
+
+export interface CheckUpdateResult {
+  name: string;
+  installed: string;
+  latest: string | null;
+  updateAvailable: boolean;
+  versionBump?: string;
+  diffSummary?: string;
+  certTier?: string;
+  certScore?: number;
+}
+
+/**
+ * Check multiple installed skills for available updates in a single request.
+ * Throws on error — caller is responsible for handling failures.
+ */
+export async function checkUpdates(
+  skills: CheckUpdateItem[],
+): Promise<CheckUpdateResult[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const res = await fetch(`${BASE_URL}/api/v1/skills/check-updates`, {
+      method: "POST",
+      headers: {
+        "User-Agent": "vskill-cli",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        skills,
+        platform: process.platform,
+        cliVersion: VERSION,
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      const isJson = body.startsWith("{") || body.startsWith("[");
+      const truncated = isJson ? body.slice(0, 200) : `(non-JSON response, ${body.length} bytes)`;
+      throw new Error(
+        `API request failed: ${res.status} ${res.statusText} - ${truncated}`,
+      );
+    }
+    const data = (await res.json()) as { results: CheckUpdateResult[] };
+    return data.results ?? [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function reportInstallBatch(
   skills: Array<{ skillName: string; repoUrl?: string }>,
 ): Promise<void> {

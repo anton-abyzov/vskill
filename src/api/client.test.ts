@@ -6,8 +6,9 @@ import {
   getSubmission,
   reportInstall,
   reportInstallBatch,
+  checkUpdates,
 } from "./client.js";
-import type { SubmissionRequest } from "./client.js";
+import type { SubmissionRequest, CheckUpdateItem } from "./client.js";
 
 // ---------------------------------------------------------------------------
 // Mock global fetch
@@ -564,6 +565,71 @@ describe("reportInstallBatch", () => {
     mockFetch.mockResolvedValue(jsonResponse({ ok: true, results: [] }));
 
     await reportInstallBatch([{ skillName: "pm" }]);
+
+    const callArgs = mockFetch.mock.calls[0];
+    const options = callArgs[1];
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe("checkUpdates", () => {
+  it("sends POST to check-updates endpoint with skills array", async () => {
+    const apiResult = [
+      { name: "pm", installed: "1.0.0", latest: "1.1.0", updateAvailable: true, versionBump: "minor" },
+    ];
+    mockFetch.mockResolvedValue(jsonResponse({ results: apiResult }));
+
+    const items: CheckUpdateItem[] = [
+      { name: "pm", currentVersion: "1.0.0", sha: "abc123" },
+    ];
+    const result = await checkUpdates(items);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE_URL}/api/v1/skills/check-updates`,
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          "User-Agent": "vskill-cli",
+        }),
+        body: expect.any(String),
+      }),
+    );
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.skills).toEqual(items);
+    expect(result).toEqual(apiResult);
+  });
+
+  it("includes cliVersion and platform in request body", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ results: [] }));
+
+    await checkUpdates([{ name: "pm", currentVersion: "1.0.0" }]);
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.platform).toBe(process.platform);
+    expect(body.cliVersion).toBeDefined();
+  });
+
+  it("throws on API error", async () => {
+    mockFetch.mockResolvedValue(errorResponse(500, "Internal Server Error", "db down"));
+
+    await expect(
+      checkUpdates([{ name: "pm", currentVersion: "1.0.0" }])
+    ).rejects.toThrow(/API request failed: 500/);
+  });
+
+  it("throws on network error", async () => {
+    mockFetch.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await expect(
+      checkUpdates([{ name: "pm", currentVersion: "1.0.0" }])
+    ).rejects.toThrow("Failed to fetch");
+  });
+
+  it("passes an AbortSignal for timeout", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ results: [] }));
+
+    await checkUpdates([{ name: "pm", currentVersion: "1.0.0" }]);
 
     const callArgs = mockFetch.mock.calls[0];
     const options = callArgs[1];

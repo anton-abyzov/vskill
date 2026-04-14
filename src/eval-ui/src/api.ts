@@ -263,4 +263,55 @@ export const api = {
   searchModels(): Promise<{ models: OpenRouterModel[] }> {
     return fetchJson("/api/openrouter/models");
   },
+
+  // ---------------------------------------------------------------------------
+  // Skill updates (version awareness)
+  // ---------------------------------------------------------------------------
+
+  async getSkillUpdates(): Promise<SkillUpdateInfo[]> {
+    try {
+      const res = await fetch(`${BASE}/api/skills/updates`);
+      if (!res.ok) return [];
+      return await res.json();
+    } catch {
+      return [];
+    }
+  },
 };
+
+export interface SkillUpdateInfo {
+  name: string;
+  installed: string;
+  latest: string | null;
+  updateAvailable: boolean;
+}
+
+/**
+ * Merge update info into SkillInfo array. Matches by skill name
+ * (last segment of the update's `name` field against SkillInfo.skill).
+ */
+export function mergeUpdatesIntoSkills(
+  skills: SkillInfo[],
+  updates: SkillUpdateInfo[],
+): SkillInfo[] {
+  if (!updates.length) return skills;
+
+  // Build lookup: skill short name → update info
+  const lookup = new Map<string, SkillUpdateInfo>();
+  for (const u of updates) {
+    // name format: "owner/repo/skill" — extract last segment
+    const shortName = u.name.split("/").pop() || u.name;
+    lookup.set(shortName, u);
+  }
+
+  return skills.map((s) => {
+    const u = lookup.get(s.skill);
+    if (!u) return s;
+    return {
+      ...s,
+      updateAvailable: u.updateAvailable,
+      currentVersion: u.installed,
+      latestVersion: u.latest ?? undefined,
+    };
+  });
+}

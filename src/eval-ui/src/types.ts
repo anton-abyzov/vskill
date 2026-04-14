@@ -47,6 +47,9 @@ export interface SkillInfo {
   benchmarkStatus: "pass" | "fail" | "pending" | "stale" | "missing";
   lastBenchmark: string | null;
   origin: "source" | "installed";
+  updateAvailable?: boolean;
+  currentVersion?: string;
+  latestVersion?: string;
 }
 
 export interface BenchmarkAssertionResult {

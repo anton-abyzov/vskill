@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, useCallback, useEffect, useMemo } from "react";
-import { api } from "./api";
+import { api, mergeUpdatesIntoSkills } from "./api";
 import type { SkillInfo } from "./types";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 
@@ -135,6 +135,12 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             dispatch({ type: "SELECT_SKILL", skill: { plugin, skill, origin: found.origin } });
           }
         }
+        // Non-blocking: fetch update info and merge into skills
+        api.getSkillUpdates().then((updates) => {
+          if (updates.length > 0) {
+            dispatch({ type: "SET_SKILLS", skills: mergeUpdatesIntoSkills(skills, updates) });
+          }
+        }).catch(() => { /* silent — cards render without badges */ });
       })
       .catch((e) => dispatch({ type: "SET_SKILLS_ERROR", error: e.message }));
   }, []);

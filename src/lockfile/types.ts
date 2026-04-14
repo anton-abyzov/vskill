@@ -26,4 +26,6 @@ export interface VskillLock {
   skills: Record<string, SkillLockEntry>;
   createdAt: string;
   updatedAt: string;
+  /** ISO timestamp of last update check (throttle hint to 24h) */
+  lastUpdateCheck?: string;
 }

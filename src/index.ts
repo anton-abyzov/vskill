@@ -209,4 +209,13 @@ program
     await cleanupCommand();
   });
 
+program
+  .command("outdated")
+  .description("Check installed skills for available updates")
+  .option("--json", "Output as JSON")
+  .action(async (opts: { json?: boolean }) => {
+    const { outdatedCommand } = await import("./commands/outdated.js");
+    await outdatedCommand(opts);
+  });
+
 program.parse();

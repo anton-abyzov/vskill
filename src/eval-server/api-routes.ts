@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync, statSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { join, resolve, dirname } from "node:path";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
@@ -335,6 +336,21 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       }),
     );
     sendJson(res, enriched, 200, req);
+  });
+
+  // Check for skill updates via `vskill outdated --json`
+  router.get("/api/skills/updates", async (req, res) => {
+    try {
+      const raw = execSync("vskill outdated --json", {
+        timeout: 15_000,
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const parsed = JSON.parse(raw);
+      sendJson(res, Array.isArray(parsed) ? parsed : [], 200, req);
+    } catch {
+      sendJson(res, [], 200, req);
+    }
   });
 
   // Get skill detail

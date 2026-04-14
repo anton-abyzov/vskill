@@ -1980,6 +1980,10 @@ export async function addCommand(
   if (forceRecoverable) {
     console.log(dim("\nUse --force to install skills that failed security checks."));
   }
+
+  // Post-install hint: check if other installed skills have updates (T-011/T-012/T-013)
+  const { postInstallHint } = await import("./outdated.js");
+  await postInstallHint(lock, lockDir, results.map((r) => r.skillName));
 }
 
 // ---------------------------------------------------------------------------

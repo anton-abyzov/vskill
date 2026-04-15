@@ -9,7 +9,7 @@ allowed-tools:
   - Bash
   - CronCreate
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   tags: obsidian, vault, wiki, knowledge-management, para, llm-wiki, ingest, lint, cron
 ---
 

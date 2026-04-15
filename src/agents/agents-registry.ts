@@ -548,6 +548,85 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
 /** Total number of registered agents */
 export const TOTAL_AGENTS = AGENTS_REGISTRY.length;
 
+// ---------------------------------------------------------------------------
+// Agent Creation Profile
+// ---------------------------------------------------------------------------
+
+/** Profile for generating skills targeted at a specific agent */
+export interface AgentCreationProfile {
+  agent: AgentDefinition;
+  /** Claude-specific frontmatter fields to remove for this agent */
+  stripFields: string[];
+  /** Agent-specific guidance to inject into the generation prompt */
+  addGuidance: string[];
+  /** Feature support snapshot for generation context */
+  featureSupport: FeatureSupport;
+}
+
+/** Claude-specific frontmatter fields that non-Claude agents don't support */
+const CLAUDE_STRIP_FIELDS = [
+  'user-invocable',
+  'allowed-tools',
+  'model',
+  'argument-hint',
+  'context',
+];
+
+/**
+ * Filter agents by feature requirements.
+ * Returns agents where ALL specified features are true (AND logic).
+ * Empty requirements object returns all agents.
+ */
+export function filterAgentsByFeatures(
+  requirements: Partial<FeatureSupport>,
+): AgentDefinition[] {
+  const entries = Object.entries(requirements) as [keyof FeatureSupport, boolean][];
+  if (entries.length === 0) return [...AGENTS_REGISTRY];
+  return AGENTS_REGISTRY.filter((agent) =>
+    entries.every(([key, value]) => agent.featureSupport[key] === value),
+  );
+}
+
+/**
+ * Get the creation profile for a specific agent.
+ * Returns guidance on what to strip/add when generating skills for this agent.
+ *
+ * - Claude Code: empty stripFields, empty addGuidance (full feature support)
+ * - Non-Claude: stripFields lists Claude-specific fields, addGuidance warns about unsupported features
+ */
+export function getAgentCreationProfile(agentId: string): AgentCreationProfile | undefined {
+  const agent = AGENTS_REGISTRY.find((a) => a.id === agentId);
+  if (!agent) return undefined;
+
+  const { featureSupport } = agent;
+
+  // Claude Code has full feature support — no stripping or guidance needed
+  if (agent.id === 'claude-code') {
+    return { agent, stripFields: [], addGuidance: [], featureSupport };
+  }
+
+  const addGuidance: string[] = [];
+  if (!featureSupport.slashCommands) {
+    addGuidance.push('Do NOT reference slash commands (/command syntax) in the skill body.');
+  }
+  if (!featureSupport.hooks) {
+    addGuidance.push('Do NOT include hook examples or lifecycle hook references.');
+  }
+  if (!featureSupport.mcp) {
+    addGuidance.push('Do NOT reference MCP tools; use CLI/filesystem alternatives only.');
+  }
+  if (!featureSupport.customSystemPrompt) {
+    addGuidance.push('Keep the skill as plain instructions without system prompt framing.');
+  }
+
+  return {
+    agent,
+    stripFields: CLAUDE_STRIP_FIELDS,
+    addGuidance,
+    featureSupport,
+  };
+}
+
 /**
  * Returns all universal agents (support the universal skill format).
  */

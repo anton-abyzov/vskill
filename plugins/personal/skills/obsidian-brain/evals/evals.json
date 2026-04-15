@@ -1,0 +1,210 @@
+{
+  "skill_name": "obsidian-brain",
+  "evals": [
+    {
+      "id": 1,
+      "name": "Clean text file ingest produces wiki page with correct frontmatter",
+      "operation": "ingest",
+      "prompt": "I just dropped a new article about distributed systems into the inbox. Please ingest it into the vault.",
+      "expected_output": "A wiki page is created with correct frontmatter (type: source, title field), wikilinks to related pages, index.md updated, log entry with +page prefix, and the original moved to a PARA folder",
+      "files": [
+        {
+          "path": "{{VAULT_PATH}}/{{INBOX_DIR}}/distributed-systems-article.md",
+          "content": "# Understanding Distributed Systems\n\nDistributed systems are collections of independent computers that appear to users as a single system.\n\n## Key Concepts\n- CAP theorem\n- Eventual consistency\n- Partition tolerance\n\n## References\n- Designing Data-Intensive Applications by Martin Kleppmann"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "wiki-page-created",
+          "text": "A new wiki page is created in the wiki directory with a date-prefixed slug filename (e.g., YYYY-MM-DD-distributed-systems.md)",
+          "type": "boolean"
+        },
+        {
+          "id": "frontmatter-correct",
+          "text": "The wiki page has YAML frontmatter with 'type: source' and a 'title' field",
+          "type": "boolean"
+        },
+        {
+          "id": "wikilinks-present",
+          "text": "The wiki page contains at least one [[wikilink]] to a related existing or new page",
+          "type": "boolean"
+        },
+        {
+          "id": "index-updated",
+          "text": "The index file is updated with an entry for the new wiki page in the format '- [[page-name]] -- summary'",
+          "type": "boolean"
+        },
+        {
+          "id": "log-entry-created",
+          "text": "A log entry is appended with the format 'YYYY-MM-DD HH:MM | +page | page-name | created from distributed-systems-article.md'",
+          "type": "boolean"
+        },
+        {
+          "id": "original-moved",
+          "text": "The original file is moved from inbox to a PARA folder (not deleted, not left in inbox)",
+          "type": "boolean"
+        },
+        {
+          "id": "source-not-modified",
+          "text": "The original source file content is not modified during the ingest process",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Credential file detected and routed to secure folder",
+      "operation": "ingest",
+      "prompt": "There's a new file in the inbox. Please ingest all inbox files into the vault.",
+      "expected_output": "The credential file is detected, NOT turned into a wiki page, moved to the credentials folder, and a !cred warning is logged",
+      "files": [
+        {
+          "path": "{{VAULT_PATH}}/{{INBOX_DIR}}/aws-config.md",
+          "content": "# AWS Configuration\n\naws_access_key_id = AKIAIOSFODNN7EXAMPLE\naws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n\nRegion: us-east-1\nOutput: json"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "credential-detected",
+          "text": "The agent identifies the file as containing credentials (AWS access key pattern matched)",
+          "type": "boolean"
+        },
+        {
+          "id": "no-wiki-page",
+          "text": "No wiki page is created for this file — credential content never enters the wiki",
+          "type": "boolean"
+        },
+        {
+          "id": "routed-to-credentials",
+          "text": "The file is moved to the configured credentials_folder path",
+          "type": "boolean"
+        },
+        {
+          "id": "cred-log-entry",
+          "text": "A log entry is created with '!cred' prefix indicating credential detection",
+          "type": "boolean"
+        },
+        {
+          "id": "ingestion-stopped",
+          "text": "Ingestion is stopped for this specific file but other non-credential inbox files can still be processed",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Query produces synthesized answer with wikilink citations",
+      "operation": "query",
+      "prompt": "What do I know about distributed systems and their trade-offs? Synthesize an answer from my vault.",
+      "expected_output": "A synthesized answer citing relevant wiki pages via [[wikilinks]], distinguishing facts from inference",
+      "files": [],
+      "assertions": [
+        {
+          "id": "reads-index-first",
+          "text": "The agent reads index.md to identify relevant pages before reading individual pages",
+          "type": "boolean"
+        },
+        {
+          "id": "cites-with-wikilinks",
+          "text": "The answer contains at least one [[wikilink]] citation to a source page",
+          "type": "boolean"
+        },
+        {
+          "id": "synthesized-not-copied",
+          "text": "The answer is a synthesis across multiple pages, not a copy-paste from a single page",
+          "type": "boolean"
+        },
+        {
+          "id": "filesystem-only",
+          "text": "The query uses only Read, Glob, and Grep tools — no Obsidian app or CLI calls",
+          "type": "boolean"
+        },
+        {
+          "id": "query-logged",
+          "text": "A log entry with '?query' prefix is created documenting the query",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Lint detects orphan wiki page not in index",
+      "operation": "lint",
+      "prompt": "Run a health check on my vault to find any organizational issues.",
+      "expected_output": "Lint report identifies the orphan page as an error-severity finding with a fix suggestion to add it to index.md",
+      "files": [
+        {
+          "path": "{{VAULT_PATH}}/{{WIKI_DIR}}/orphan-topic.md",
+          "content": "---\ntype: concept\ntitle: \"Orphan Topic\"\n---\n\nThis page exists but is not listed in index.md."
+        }
+      ],
+      "assertions": [
+        {
+          "id": "orphan-detected",
+          "text": "The lint report identifies orphan-topic.md as an orphan page not listed in index.md",
+          "type": "boolean"
+        },
+        {
+          "id": "severity-correct",
+          "text": "The orphan finding is categorized as 'error' severity",
+          "type": "boolean"
+        },
+        {
+          "id": "fix-suggested",
+          "text": "The report includes an actionable fix suggestion (e.g., add [[orphan-topic]] to index.md)",
+          "type": "boolean"
+        },
+        {
+          "id": "lint-logged",
+          "text": "A log entry with '!lint' prefix is created with a summary of findings",
+          "type": "boolean"
+        },
+        {
+          "id": "uses-lint-script",
+          "text": "The agent runs scripts/lint-check.sh for deterministic checks before performing LLM analysis",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Scheduled run with empty inbox skips ingest and logs completion",
+      "operation": "scheduled",
+      "prompt": "Run obsidian-brain scheduled maintenance on the vault.",
+      "expected_output": "Pre-flight checks pass, ingest is skipped (empty inbox), index rebuild runs, and completion is logged",
+      "files": [],
+      "assertions": [
+        {
+          "id": "preflight-passes",
+          "text": "Pre-flight check verifies vault accessibility and inbox count before proceeding",
+          "type": "boolean"
+        },
+        {
+          "id": "ingest-skipped",
+          "text": "Ingest is skipped because the inbox is empty (zero files)",
+          "type": "boolean"
+        },
+        {
+          "id": "index-rebuilt",
+          "text": "The index rebuild step runs via scripts/update-index.sh regardless of inbox state",
+          "type": "boolean"
+        },
+        {
+          "id": "start-logged",
+          "text": "A log entry records the start of the scheduled run",
+          "type": "boolean"
+        },
+        {
+          "id": "completion-logged",
+          "text": "A log entry records the completion of the scheduled run with summary (0 ingested, index rebuilt)",
+          "type": "boolean"
+        },
+        {
+          "id": "no-silent-failure",
+          "text": "The run produces at least a start and completion log entry — no silent pass-through",
+          "type": "boolean"
+        }
+      ]
+    }
+  ]
+}

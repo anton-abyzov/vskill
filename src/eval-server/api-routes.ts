@@ -33,6 +33,53 @@ import type { ActivationPrompt, SkillMeta } from "../eval/activation-tester.js";
 import { detectMcpDependencies, detectSkillDependencies } from "../eval/mcp-detector.js";
 import { writeActivationRun, listActivationRuns, getActivationRun } from "../eval/activation-history.js";
 import type { ActivationHistoryRun } from "../eval/activation-history.js";
+import { AGENTS_REGISTRY, detectInstalledAgents } from "../agents/agents-registry.js";
+import type { AgentDefinition } from "../agents/agents-registry.js";
+
+// ---------------------------------------------------------------------------
+// Installed agents response builder
+// ---------------------------------------------------------------------------
+
+export interface InstalledAgentEntry {
+  id: string;
+  displayName: string;
+  featureSupport: AgentDefinition["featureSupport"];
+  isUniversal: boolean;
+  installed: boolean;
+}
+
+export interface InstalledAgentsResponse {
+  agents: InstalledAgentEntry[];
+  suggested: string;
+}
+
+/**
+ * Build the response for GET /api/agents/installed.
+ * Returns all known agents with installed flag based on detected agents.
+ */
+export function buildInstalledAgentsResponse(
+  detectedAgents: AgentDefinition[],
+): InstalledAgentsResponse {
+  const detectedIds = new Set(detectedAgents.map((a) => a.id));
+
+  const agents: InstalledAgentEntry[] = AGENTS_REGISTRY.map((agent) => ({
+    id: agent.id,
+    displayName: agent.displayName,
+    featureSupport: agent.featureSupport,
+    isUniversal: agent.isUniversal,
+    installed: detectedIds.has(agent.id),
+  }));
+
+  // Suggest claude-code if installed, otherwise first installed alphabetically, fallback to claude-code
+  let suggested = "claude-code";
+  if (detectedIds.has("claude-code")) {
+    suggested = "claude-code";
+  } else if (detectedAgents.length > 0) {
+    suggested = detectedAgents[0].id;
+  }
+
+  return { agents, suggested };
+}
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -199,6 +246,16 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // Health check
   router.get("/api/health", (_req, res) => {
     sendJson(res, { ok: true });
+  });
+
+  // Installed agents — returns all 49 known agents with installed flag
+  router.get("/api/agents/installed", async (_req, res) => {
+    try {
+      const detected = await detectInstalledAgents();
+      sendJson(res, buildInstalledAgentsResponse(detected), 200, _req);
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 500, _req);
+    }
   });
 
   // Server-Sent Events endpoint for data change notifications

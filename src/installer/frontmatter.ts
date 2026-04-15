@@ -106,6 +106,27 @@ export function ensureFrontmatter(content: string, skillName: string): string {
   return normalized.replace(FRONTMATTER_RE, `---\n${updatedBlock}\n---`);
 }
 
+/** Detects `target-agents:` field in frontmatter */
+const HAS_TARGET_AGENTS_RE = /^target-agents:\s*(.*)/m;
+
+/**
+ * Parse the optional `target-agents` field from SKILL.md frontmatter.
+ * Returns an array of agent IDs, or undefined if the field is absent.
+ */
+export function parseTargetAgents(content: string): string[] | undefined {
+  const normalized = content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+  const match = normalized.match(FRONTMATTER_RE);
+  if (!match) return undefined;
+
+  const fmBlock = match[1];
+  const agentsMatch = fmBlock.match(HAS_TARGET_AGENTS_RE);
+  if (!agentsMatch) return undefined;
+
+  const raw = agentsMatch[1].trim().replace(/^["']|["']$/g, "");
+  const agents = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  return agents.length > 0 ? agents : undefined;
+}
+
 /**
  * Strip Claude Code-specific frontmatter fields for non-Claude agents.
  * Removes: user-invocable, allowed-tools, model, argument-hint, context.

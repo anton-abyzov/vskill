@@ -6,6 +6,8 @@ import {
   getNonUniversalAgents,
   getAgent,
   detectInstalledAgents,
+  filterAgentsByFeatures,
+  getAgentCreationProfile,
 } from "./agents-registry.js";
 
 // ---------------------------------------------------------------------------
@@ -293,5 +295,111 @@ describe("AGENTS_REGISTRY — pluginCacheDir", () => {
     const claudeCode = getAgent("claude-code");
     expect(claudeCode).toBeDefined();
     expect(claudeCode!.pluginCacheDir).toBe("~/.claude/plugins/cache");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// filterAgentsByFeatures()
+// ---------------------------------------------------------------------------
+describe("filterAgentsByFeatures", () => {
+  it("returns agents matching a single feature flag", () => {
+    const result = filterAgentsByFeatures({ slashCommands: true });
+    expect(result.length).toBeGreaterThan(0);
+    for (const agent of result) {
+      expect(agent.featureSupport.slashCommands).toBe(true);
+    }
+  });
+
+  it("returns agents matching multiple feature flags (AND logic)", () => {
+    const result = filterAgentsByFeatures({ slashCommands: true, hooks: true });
+    expect(result.length).toBeGreaterThan(0);
+    for (const agent of result) {
+      expect(agent.featureSupport.slashCommands).toBe(true);
+      expect(agent.featureSupport.hooks).toBe(true);
+    }
+    // claude-code is the only agent with hooks: true
+    expect(result.map((a) => a.id)).toContain("claude-code");
+  });
+
+  it("returns empty array when no agents match", () => {
+    // No agent has hooks: true AND slashCommands: false simultaneously
+    // Actually, let's test with an impossible combo
+    const withHooks = filterAgentsByFeatures({ hooks: true });
+    // All agents with hooks also have slashCommands, so filtering hooks:true + customSystemPrompt:false should be empty
+    const result = filterAgentsByFeatures({ hooks: true, customSystemPrompt: false });
+    expect(result).toHaveLength(0);
+  });
+
+  it("returns all agents when no features specified", () => {
+    const result = filterAgentsByFeatures({});
+    expect(result).toHaveLength(AGENTS_REGISTRY.length);
+  });
+
+  it("filters on mcp feature correctly", () => {
+    const result = filterAgentsByFeatures({ mcp: true });
+    expect(result.length).toBeGreaterThan(0);
+    for (const agent of result) {
+      expect(agent.featureSupport.mcp).toBe(true);
+    }
+    expect(result.map((a) => a.id)).toContain("cursor");
+    expect(result.map((a) => a.id)).toContain("claude-code");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getAgentCreationProfile()
+// ---------------------------------------------------------------------------
+describe("getAgentCreationProfile", () => {
+  it("returns a profile for a known non-Claude agent (cursor)", () => {
+    const profile = getAgentCreationProfile("cursor");
+    expect(profile).toBeDefined();
+    expect(profile!.agent.id).toBe("cursor");
+    expect(profile!.featureSupport).toEqual(getAgent("cursor")!.featureSupport);
+    expect(profile!.stripFields.length).toBeGreaterThan(0);
+    expect(profile!.addGuidance.length).toBeGreaterThan(0);
+  });
+
+  it("returns a profile for claude-code with empty stripFields", () => {
+    const profile = getAgentCreationProfile("claude-code");
+    expect(profile).toBeDefined();
+    expect(profile!.agent.id).toBe("claude-code");
+    expect(profile!.stripFields).toHaveLength(0);
+    expect(profile!.addGuidance).toHaveLength(0);
+    expect(profile!.featureSupport.hooks).toBe(true);
+    expect(profile!.featureSupport.slashCommands).toBe(true);
+  });
+
+  it("returns undefined for unknown agent", () => {
+    expect(getAgentCreationProfile("unknown-agent")).toBeUndefined();
+  });
+
+  it("returns stripFields that include Claude-specific fields for agents without hooks", () => {
+    const profile = getAgentCreationProfile("codex");
+    expect(profile).toBeDefined();
+    // Codex has no slashCommands, no hooks, no mcp
+    expect(profile!.stripFields).toContain("allowed-tools");
+    expect(profile!.stripFields).toContain("user-invocable");
+    expect(profile!.stripFields).toContain("model");
+    expect(profile!.stripFields).toContain("argument-hint");
+    expect(profile!.stripFields).toContain("context");
+  });
+
+  it("includes guidance about missing features for limited agents", () => {
+    const profile = getAgentCreationProfile("codex");
+    expect(profile).toBeDefined();
+    // Codex has slashCommands: false, hooks: false, mcp: false
+    const guidance = profile!.addGuidance.join(" ");
+    expect(guidance).toMatch(/slash command/i);
+    expect(guidance).toMatch(/hook/i);
+    expect(guidance).toMatch(/MCP/i);
+  });
+
+  it("does not include guidance about features the agent supports", () => {
+    // Cursor supports slashCommands, mcp, customSystemPrompt but not hooks
+    const profile = getAgentCreationProfile("cursor");
+    expect(profile).toBeDefined();
+    const guidance = profile!.addGuidance.join(" ");
+    expect(guidance).toMatch(/hook/i); // cursor lacks hooks
+    expect(guidance).not.toMatch(/slash command/i); // cursor has slashCommands
   });
 });

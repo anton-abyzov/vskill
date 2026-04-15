@@ -9,6 +9,29 @@ import type { ClassifiedError } from "../components/ErrorCard";
 // Helpers
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Generate request body builder (extracted for testability)
+// ---------------------------------------------------------------------------
+
+export interface GenerateRequestInput {
+  prompt: string;
+  provider: string;
+  model: string;
+  targetAgents?: string[];
+}
+
+export function buildGenerateRequestBody(input: GenerateRequestInput): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    prompt: input.prompt,
+    provider: input.provider,
+    model: input.model,
+  };
+  if (input.targetAgents && input.targetAgents.length > 0) {
+    body.targetAgents = input.targetAgents;
+  }
+  return body;
+}
+
 export function toKebab(s: string, trim = true): string {
   let r = s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   if (trim) r = r.replace(/^-+|-+$/g, "");
@@ -93,6 +116,10 @@ export interface UseCreateSkillReturn {
   handleCancelGenerate: () => void;
   clearAiError: () => void;
 
+  // Target agents
+  targetAgents: string[];
+  setTargetAgents: (agents: string[]) => void;
+
   // Draft
   draftSaved: boolean;
 
@@ -135,6 +162,9 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
 
   // Body preview toggle
   const [bodyViewMode, setBodyViewMode] = useState<"write" | "preview">("write");
+
+  // Target agents
+  const [targetAgents, setTargetAgents] = useState<string[]>([]);
 
   // Submission
   const [creating, setCreating] = useState(false);
@@ -258,7 +288,12 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
       const res = await fetch(`/api/skills/generate?sse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: aiPrompt.trim(), provider, model: aiModel }),
+        body: JSON.stringify(buildGenerateRequestBody({
+          prompt: aiPrompt.trim(),
+          provider,
+          model: aiModel,
+          targetAgents,
+        })),
         signal: controller.signal,
       });
 
@@ -370,7 +405,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
       setGenerating(false);
       abortRef.current = null;
     }
-  }, [aiPrompt, resolveAiConfig, selectedLayout, pluginLayoutInfo, effectivePlugin, layout]);
+  }, [aiPrompt, resolveAiConfig, selectedLayout, pluginLayoutInfo, effectivePlugin, layout, targetAgents]);
 
   const handleCreate = useCallback(async () => {
     setError(null);
@@ -423,6 +458,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
     generating, aiGenerated,
     aiError, aiClassifiedError, aiProgress,
     promptRef, handleGenerate, handleCancelGenerate, clearAiError,
+    targetAgents, setTargetAgents,
     draftSaved,
     showPluginRecommendation, setShowPluginRecommendation,
     pluginLayoutInfo, applyPluginRecommendation,

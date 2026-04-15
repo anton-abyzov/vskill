@@ -12,6 +12,8 @@ import type { ProviderName } from "../eval/llm.js";
 import { initSSE, sendSSE, sendSSEDone, withHeartbeat } from "./sse-helpers.js";
 import { classifyError } from "./error-classifier.js";
 import { writeHistoryEntry } from "../eval/benchmark-history.js";
+import { getAgentCreationProfile } from "../agents/agents-registry.js";
+import type { AgentCreationProfile } from "../agents/agents-registry.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -512,10 +514,73 @@ Return ONLY the JSON object — no code fences, no preamble.
 
 After the JSON, on a new line, write "---REASONING---" followed by a brief explanation of your design choices (why this name, why these trigger phrases, what Skill Studio rules you applied).`;
 
+// ---------------------------------------------------------------------------
+// Agent-aware prompt augmentation
+// ---------------------------------------------------------------------------
+
+/**
+ * Build an agent-aware system prompt by conditionally appending a
+ * "## Target Agent Constraints" section when non-Claude agents are targeted.
+ *
+ * When targetAgents is absent, empty, or only contains "claude-code",
+ * the base prompt is returned unchanged (backward compatible).
+ */
+export function buildAgentAwareSystemPrompt(
+  basePrompt: string,
+  targetAgents: string[] | undefined,
+): string {
+  if (!targetAgents || targetAgents.length === 0) return basePrompt;
+
+  // Collect profiles for non-Claude agents only
+  const profiles: AgentCreationProfile[] = [];
+  for (const agentId of targetAgents) {
+    if (agentId === "claude-code") continue;
+    const profile = getAgentCreationProfile(agentId);
+    if (profile) profiles.push(profile);
+  }
+
+  if (profiles.length === 0) return basePrompt;
+
+  // Aggregate agent names and constraints
+  const agentNames = profiles.map((p) => p.agent.displayName).join(", ");
+
+  // Build feature matrix
+  const featureLines = profiles.map((p) => {
+    const fs = p.featureSupport;
+    return `- ${p.agent.displayName}: slashCommands=${fs.slashCommands}, hooks=${fs.hooks}, mcp=${fs.mcp}, customSystemPrompt=${fs.customSystemPrompt}`;
+  });
+
+  // Deduplicate guidance across all profiles
+  const allGuidance = new Set<string>();
+  for (const p of profiles) {
+    for (const g of p.addGuidance) allGuidance.add(g);
+  }
+
+  if (allGuidance.size === 0) return basePrompt;
+
+  const constraintSection = [
+    "",
+    "## Target Agent Constraints",
+    "",
+    `This skill targets: ${agentNames}`,
+    "",
+    "Feature availability for target agents:",
+    ...featureLines,
+    "",
+    "IMPORTANT CONSTRAINTS:",
+    ...[...allGuidance].map((g) => `- ${g}`),
+    "",
+    "Generate a skill body that works across ALL target agents by using only universally available features.",
+  ].join("\n");
+
+  return basePrompt + constraintSection;
+}
+
 interface GenerateSkillRequest {
   prompt: string;
   provider?: ProviderName;
   model?: string;
+  targetAgents?: string[];
 }
 
 interface GenerateSkillResult {
@@ -900,6 +965,9 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
       const bodyPrompt = `Generate a skill definition (body and metadata only, NO evals) for:\n\n${body.prompt.trim()}\n\nApply Skill Studio best practices. Return the JSON object followed by ---REASONING--- and your explanation.${pluginContext}`;
       const evalPrompt = `Generate eval test cases for this skill:\n\n${body.prompt.trim()}\n\nReturn only the JSON object with an "evals" array.`;
 
+      // Agent-aware prompt augmentation: append constraints for non-Claude agents
+      const effectiveSystemPrompt = buildAgentAwareSystemPrompt(BODY_SYSTEM_PROMPT, body.targetAgents);
+
       // Emit SSE events for both parallel phases
       if (wantsSSE && !aborted) {
         sendSSE(res, "progress", { phase: "generating-body", message: "Generating skill body..." });
@@ -908,8 +976,8 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
 
       // Launch both calls in parallel
       const bodyCall = wantsSSE
-        ? withHeartbeat(res, undefined, "generating-body", "Generating body", () => bodyClient.generate(BODY_SYSTEM_PROMPT, bodyPrompt))
-        : bodyClient.generate(BODY_SYSTEM_PROMPT, bodyPrompt);
+        ? withHeartbeat(res, undefined, "generating-body", "Generating body", () => bodyClient.generate(effectiveSystemPrompt, bodyPrompt))
+        : bodyClient.generate(effectiveSystemPrompt, bodyPrompt);
 
       const evalCall = wantsSSE
         ? withHeartbeat(res, undefined, "generating-evals", "Generating evals", () => evalClient.generate(EVAL_SYSTEM_PROMPT, evalPrompt))

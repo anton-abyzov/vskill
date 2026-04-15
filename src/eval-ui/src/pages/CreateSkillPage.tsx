@@ -6,6 +6,8 @@ import { ProgressLog } from "../components/ProgressLog";
 import { ErrorCard } from "../components/ErrorCard";
 import { renderMarkdown } from "../utils/renderMarkdown";
 import { SkillFileTree } from "../components/SkillFileTree";
+import { AgentSelector } from "../components/AgentSelector";
+import type { InstalledAgentEntry } from "../components/AgentSelector";
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -41,6 +43,19 @@ export function CreateSkillPage() {
   const [aiProvider, setAiProvider] = useState("claude-cli");
   const [aiModel, setAiModel] = useState("sonnet");
 
+  // Installed agents list (loaded from API)
+  const [installedAgents, setInstalledAgents] = useState<InstalledAgentEntry[]>([]);
+
+  // Load installed agents from API
+  useEffect(() => {
+    fetch("/api/agents/installed")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.agents) setInstalledAgents(data.agents);
+      })
+      .catch(() => {});
+  }, []);
+
   // Initialize AI provider/model defaults from shared config
   useEffect(() => {
     if (!config) return;
@@ -70,6 +85,7 @@ export function CreateSkillPage() {
     else lines.push('description: ""');
     if (sk.allowedTools.trim()) lines.push(`allowed-tools: ${sk.allowedTools.trim()}`);
     if (sk.model) lines.push(`model: ${sk.model}`);
+    if (sk.targetAgents.length > 0) lines.push(`target-agents: ${sk.targetAgents.join(", ")}`);
     lines.push("---");
     lines.push("");
     if (sk.body.trim()) {
@@ -234,6 +250,23 @@ export function CreateSkillPage() {
                 </div>
               </div>
             </div>
+
+            {/* Target Agents (optional) */}
+            {installedAgents.length > 0 && (
+              <div className="glass-card p-5">
+                <h3 className="text-[13px] font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
+                  Target Agents
+                  <span className="text-[11px] font-normal ml-2" style={{ color: "var(--text-tertiary)" }}>
+                    (optional — leave empty for Claude Code default)
+                  </span>
+                </h3>
+                <AgentSelector
+                  agents={installedAgents}
+                  selectedIds={sk.targetAgents}
+                  onChange={sk.setTargetAgents}
+                />
+              </div>
+            )}
 
             {/* Progress log during generation */}
             {sk.generating && sk.aiProgress.length > 0 && (

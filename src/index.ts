@@ -104,6 +104,8 @@ program
   .command("submit [source]")
   .description("Submit a skill for verification on verified-skill.com")
   .option("--skill <name>", "Skill name within a multi-skill repo")
+  .option("--path <path>", "Path to SKILL.md within the repo")
+  .option("--browser", "Use browser-based GitHub OAuth instead of API")
   .action(async (source: string | undefined, opts) => {
     const { submitCommand } = await import("./commands/submit.js");
     await submitCommand(source, opts);

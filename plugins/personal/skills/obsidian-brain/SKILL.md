@@ -79,26 +79,28 @@ Patterns (case-insensitive):
 
 **On credential match**: STOP wiki ingestion for that file (never create a wiki page from credentials).
 
-1. **Identify context** — scan filename and content for project/area signals:
-   - Does it mention an active project? Check folders in `{{VAULT_PATH}}/{{PROJECTS_FOLDER}}/`
-   - Does it mention an ongoing area or company? Check folders in `{{VAULT_PATH}}/{{AREAS_FOLDER}}/`
-   - Does it relate to something archived? Check `{{VAULT_PATH}}/{{ARCHIVE_FOLDER}}/`
-2. **Route by context** (first match wins):
-   - **Active project match** → move to `{{PROJECTS_FOLDER}}/<project>/` (e.g., Xero key for EasyChamp → EasyChamp folder)
-   - **Ongoing area match** → move to `{{AREAS_FOLDER}}/<area>/` (e.g., EasyChamp admin creds → EasyChamp Business Operations/)
-   - **Archived match** → move to `{{ARCHIVE_FOLDER}}/<topic>/`
-   - **No project/area match** → move to `{{VAULT_PATH}}/{{CREDENTIALS_FOLDER}}/` (generic catch-all)
-3. Log: `YYYY-MM-DD HH:MM | !cred | <filename> | credential detected, routed to <destination>`
-4. **Never** create a wiki page from credential content
-5. Continue processing remaining inbox files
+1. **Discover vault structure** — list subfolders across all PARA categories to understand what domains exist (see [references/routing-rules.md](references/routing-rules.md) Step 1)
+2. **Identify domain** — analyze filename + content for domain signals (company names, project names, service types, technology keywords). Match against existing vault folders.
+3. **Route by domain context** (see [references/routing-rules.md](references/routing-rules.md) Step 3 for the full decision tree):
+   - **Domain match** → route to domain's folder (company, project, or area)
+   - **Service match** → route to the service's tech subfolder in Resources
+   - **Personal account** → route to typed subfolder in `{{CREDENTIALS_FOLDER}}/` (Email-Accounts/, Social-Media/, Cloud-Providers/, etc.)
+   - **Unknown** → `{{CREDENTIALS_FOLDER}}/` root (last resort only)
+4. Log: `YYYY-MM-DD HH:MM | !cred | <filename> | credential detected, routed to <destination>`
+5. **Never** create a wiki page from credential content
+6. Continue processing remaining inbox files
 
 #### Ingest Procedure
+
+**Before processing any files**, scan the vault structure to build a routing map:
+- List subfolders in `{{PROJECTS_FOLDER}}/`, `{{AREAS_FOLDER}}/`, `{{RESOURCES_FOLDER}}/`, `{{ARCHIVE_FOLDER}}/`
+- This tells you what domains exist, which are active vs archived, and prevents creating duplicate folders
 
 For each non-credential file in the inbox:
 
 1. **Read** the source file (never modify it in place)
-2. **Classify** content: determine the wiki page type and PARA destination
-   - See [references/routing-rules.md](references/routing-rules.md) for the full routing table
+2. **Identify domain first** — what domain does this content belong to? Match against existing vault folders by company name, project name, technology, service. Then determine PARA category (Project vs Area vs Resource vs Archive).
+   - See [references/routing-rules.md](references/routing-rules.md) for the full domain recognition and routing table
 3. **Create wiki page** in `{{VAULT_PATH}}/{{WIKI_DIR}}/`:
    - Filename: `slugified-name.md` (lowercase, hyphens, max 60 chars)
    - Sources get date prefix: `YYYY-MM-DD-slug.md`

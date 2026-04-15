@@ -18,6 +18,8 @@ export interface SkillLockEntry {
   installedPath?: string;
   /** Sorted list of relative file paths for ghost file detection */
   files?: string[];
+  /** When set, skill is pinned at this version and skipped by `update` */
+  pinnedVersion?: string;
 }
 
 export interface VskillLock {

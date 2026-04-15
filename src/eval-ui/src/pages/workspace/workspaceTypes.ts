@@ -6,7 +6,7 @@ import type { ClassifiedError } from "../../components/ErrorCard";
 // Panel IDs
 // ---------------------------------------------------------------------------
 
-export type PanelId = "editor" | "tests" | "run" | "activation" | "history" | "deps" | "leaderboard";
+export type PanelId = "editor" | "tests" | "run" | "activation" | "history" | "deps" | "leaderboard" | "versions";
 
 // ---------------------------------------------------------------------------
 // Inline result (per-case benchmark result for cross-panel display)

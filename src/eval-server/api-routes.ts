@@ -10,6 +10,8 @@ import { sendJson, readBody } from "./router.js";
 import { initSSE, sendSSE, sendSSEDone, withHeartbeat, startDynamicHeartbeat } from "./sse-helpers.js";
 import { dataEventBus, emitDataEvent } from "./data-events.js";
 import { classifyError } from "./error-classifier.js";
+import { readLockfile } from "../lockfile/lockfile.js";
+import { parseSource } from "../resolvers/source-resolver.js";
 import { runBenchmarkSSE, runSingleCaseSSE, assembleBulkResult } from "./benchmark-runner.js";
 import { getSkillSemaphore } from "./concurrency.js";
 import { resolveSkillDir } from "./skill-resolver.js";
@@ -407,6 +409,155 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       sendJson(res, Array.isArray(parsed) ? parsed : [], 200, req);
     } catch {
       sendJson(res, [], 200, req);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Version proxy, diff, update, and batch-update routes (Phase 2)
+  // MUST be registered BEFORE the /:plugin/:skill catch-all below.
+  // -------------------------------------------------------------------------
+
+  const PLATFORM_BASE = "https://verified-skill.com";
+
+  /** Resolve plugin/skill to full hierarchical API name using lockfile source. */
+  function resolveSkillApiName(skill: string): string {
+    const lock = readLockfile();
+    if (!lock) return skill;
+    const entry = lock.skills[skill];
+    if (!entry?.source) return skill;
+    const parsed = parseSource(entry.source);
+    if (parsed.type === "github" || parsed.type === "github-plugin" || parsed.type === "marketplace") {
+      return `${parsed.owner}/${parsed.repo}/${skill}`;
+    }
+    return skill;
+  }
+
+  // T-009: Versions proxy route
+  router.get("/api/skills/:plugin/:skill/versions", async (req, res, params) => {
+    const fullName = resolveSkillApiName(params.skill);
+    const parts = fullName.split("/");
+    const apiPath = parts.length === 3
+      ? `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}/versions`
+      : `/api/v1/skills/${encodeURIComponent(fullName)}/versions`;
+
+    try {
+      const resp = await fetch(`${PLATFORM_BASE}${apiPath}`, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!resp.ok) {
+        sendJson(res, { error: "Platform API unavailable" }, 502, req);
+        return;
+      }
+      const data = (await resp.json()) as { versions?: unknown[] };
+      const versions = Array.isArray(data.versions) ? data.versions : [];
+
+      // Enrich with isInstalled from lockfile
+      const lock = readLockfile();
+      const installedVersion = lock?.skills[params.skill]?.version;
+      const enriched = versions.map((v: any) => ({
+        ...v,
+        isInstalled: installedVersion ? v.version === installedVersion : undefined,
+      }));
+
+      sendJson(res, enriched, 200, req);
+    } catch {
+      sendJson(res, { error: "Platform API unavailable" }, 502, req);
+    }
+  });
+
+  // T-010: Diff proxy route
+  router.get("/api/skills/:plugin/:skill/versions/diff", async (req, res, params) => {
+    const url = new URL(req.url ?? "", "http://localhost");
+    const from = url.searchParams.get("from");
+    const to = url.searchParams.get("to");
+
+    if (!from || !to) {
+      sendJson(res, { error: "Missing required query params: from and to" }, 400, req);
+      return;
+    }
+
+    const fullName = resolveSkillApiName(params.skill);
+    const parts = fullName.split("/");
+    const basePath = parts.length === 3
+      ? `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}/versions`
+      : `/api/v1/skills/${encodeURIComponent(fullName)}/versions`;
+
+    try {
+      const resp = await fetch(
+        `${PLATFORM_BASE}${basePath}?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+        { signal: AbortSignal.timeout(10_000) },
+      );
+      if (!resp.ok) {
+        sendJson(res, { error: "Platform API unavailable" }, 502, req);
+        return;
+      }
+      const data = await resp.json();
+      sendJson(res, data, 200, req);
+    } catch {
+      sendJson(res, { error: "Platform API unavailable" }, 502, req);
+    }
+  });
+
+  // T-011: Single-skill update SSE endpoint
+  router.post("/api/skills/:plugin/:skill/update", async (req, res, params) => {
+    initSSE(res, req);
+    const skillName = params.skill;
+
+    sendSSE(res, "progress", { status: "updating", skill: skillName });
+
+    try {
+      execSync(`vskill update ${skillName}`, {
+        timeout: 60_000,
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      sendSSE(res, "progress", { status: "done", skill: skillName });
+      sendSSEDone(res, { status: "done", skill: skillName });
+    } catch (err) {
+      sendSSE(res, "error", { error: (err as Error).message, skill: skillName });
+      sendSSEDone(res, { status: "error", skill: skillName });
+    }
+  });
+
+  // T-012: Batch update SSE + 409 conflict guard
+  let batchUpdateInProgress = false;
+
+  router.post("/api/skills/batch-update", async (req, res) => {
+    if (batchUpdateInProgress) {
+      sendJson(res, { error: "Update already in progress" }, 409, req);
+      return;
+    }
+    batchUpdateInProgress = true;
+
+    const body = (await readBody(req)) as { skills?: string[] };
+    const skills = Array.isArray(body.skills) ? body.skills : [];
+
+    initSSE(res, req);
+
+    let updated = 0;
+    let failed = 0;
+
+    try {
+      for (const skill of skills) {
+        sendSSE(res, "skill:start", { skill });
+
+        try {
+          execSync(`vskill update ${skill}`, {
+            timeout: 60_000,
+            encoding: "utf-8",
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+          sendSSE(res, "skill:done", { skill });
+          updated++;
+        } catch (err) {
+          sendSSE(res, "skill:error", { skill, error: (err as Error).message });
+          failed++;
+        }
+      }
+
+      sendSSEDone(res, { updated, failed, skipped: 0 });
+    } finally {
+      batchUpdateInProgress = false;
     }
   });
 

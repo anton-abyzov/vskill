@@ -263,6 +263,28 @@ export async function getVersions(
   }));
 }
 
+export interface VersionDiffResult {
+  from: string;
+  to: string;
+  diffSummary: string;
+  contentDiff: string;
+}
+
+/**
+ * Get a unified diff between two versions of a skill.
+ * Uses the platform `?from=X&to=Y` endpoint.
+ */
+export async function getVersionDiff(
+  name: string,
+  from: string,
+  to: string,
+): Promise<VersionDiffResult> {
+  const encoded = [encodeURIComponent(from), encodeURIComponent(to)];
+  return apiRequest<VersionDiffResult>(
+    `${skillApiPath(name)}/versions?from=${encoded[0]}&to=${encoded[1]}`,
+  );
+}
+
 /**
  * Report a skill install to the platform with retry.
  * Respects VSKILL_NO_TELEMETRY=1 env var for opt-out.

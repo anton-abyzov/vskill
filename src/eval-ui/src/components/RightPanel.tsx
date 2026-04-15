@@ -1,8 +1,10 @@
+import { useState, useEffect } from "react";
 import { useStudio } from "../StudioContext";
 import { WorkspaceProvider } from "../pages/workspace/WorkspaceContext";
 import { SkillWorkspaceInner } from "../pages/workspace/SkillWorkspace";
 import { CreateSkillInline } from "./CreateSkillInline";
 import { EmptyState } from "./EmptyState";
+import { UpdatesPanel } from "../pages/UpdatesPanel";
 
 function MobileBackButton() {
   const { state, setMobileView } = useStudio();
@@ -30,6 +32,23 @@ function MobileBackButton() {
 
 export function RightPanel() {
   const { state, selectSkill, setMode, refreshSkills } = useStudio();
+  const [hash, setHash] = useState(window.location.hash);
+
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  // Updates view
+  if (hash === "#/updates") {
+    return (
+      <div className="h-full overflow-auto animate-fade-in">
+        <MobileBackButton />
+        <UpdatesPanel />
+      </div>
+    );
+  }
 
   // Create mode
   if (state.mode === "create") {

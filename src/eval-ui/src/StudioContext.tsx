@@ -96,6 +96,7 @@ interface StudioContextValue {
   setSearch: (query: string) => void;
   setMobileView: (view: "list" | "detail") => void;
   refreshSkills: () => void;
+  updateCount: number;
 }
 
 const StudioCtx = createContext<StudioContextValue | null>(null);
@@ -171,6 +172,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: "SET_MOBILE_VIEW", view });
   }, []);
 
+  const updateCount = useMemo(
+    () => state.skills.filter((s) => s.updateAvailable).length,
+    [state.skills],
+  );
+
   const value = useMemo<StudioContextValue>(() => ({
     state,
     selectSkill,
@@ -179,7 +185,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     setSearch,
     setMobileView,
     refreshSkills: loadSkills,
-  }), [state, selectSkill, clearSelection, setMode, setSearch, setMobileView, loadSkills]);
+    updateCount,
+  }), [state, selectSkill, clearSelection, setMode, setSearch, setMobileView, loadSkills, updateCount]);
 
   return <StudioCtx.Provider value={value}>{children}</StudioCtx.Provider>;
 }

@@ -1,5 +1,5 @@
 // API client for the eval server
-import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel } from "./types";
+import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel, VersionEntry, VersionDiff } from "./types";
 
 const BASE = "";
 
@@ -262,6 +262,39 @@ export const api = {
 
   searchModels(): Promise<{ models: OpenRouterModel[] }> {
     return fetchJson("/api/openrouter/models");
+  },
+
+  // ---------------------------------------------------------------------------
+  // Version lifecycle (Phase 2)
+  // ---------------------------------------------------------------------------
+
+  getSkillVersions(plugin: string, skill: string): Promise<VersionEntry[]> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/versions`);
+  },
+
+  getVersionDiff(plugin: string, skill: string, from: string, to: string): Promise<VersionDiff> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/versions/diff?from=${from}&to=${to}`);
+  },
+
+  startBatchUpdate(skills: string[]): EventSource {
+    const url = `${BASE}/api/skills/batch-update`;
+    const es = new EventSource(url);
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify({ skills }),
+    });
+    return es;
+  },
+
+  startSkillUpdate(plugin: string, skill: string): EventSource {
+    const url = `${BASE}/api/skills/${plugin}/${skill}/update`;
+    const es = new EventSource(url);
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    });
+    return es;
   },
 
   // ---------------------------------------------------------------------------

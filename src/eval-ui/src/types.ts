@@ -50,6 +50,45 @@ export interface SkillInfo {
   updateAvailable?: boolean;
   currentVersion?: string;
   latestVersion?: string;
+  pinnedVersion?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Version lifecycle types (Phase 2)
+// ---------------------------------------------------------------------------
+
+export interface VersionEntry {
+  version: string;
+  certTier: string;
+  certScore?: number;
+  diffSummary: string | null;
+  createdAt: string;
+  isInstalled?: boolean;
+}
+
+export interface VersionDiff {
+  from: string;
+  to: string;
+  diffSummary: string;
+  contentDiff: string;
+}
+
+export interface VersionDetail {
+  version: string;
+  content: string;
+  certTier: string;
+  certScore?: number;
+  createdAt: string;
+}
+
+export interface BatchUpdateProgress {
+  skill: string;
+  status: "pending" | "updating" | "scanning" | "installing" | "done" | "error" | "skipped";
+  fromVersion?: string;
+  toVersion?: string;
+  scanScore?: number;
+  scanVerdict?: string;
+  error?: string;
 }
 
 export interface BenchmarkAssertionResult {

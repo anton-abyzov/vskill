@@ -57,18 +57,29 @@ export function SkillCard({ skill, isSelected, onSelect }: Props) {
           {status.label}
         </span>
       </div>
-      {skill.updateAvailable && skill.latestVersion && (
-        <div className="flex items-center mb-1">
-          <span
-            className="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full"
-            style={{ background: "var(--yellow-muted)", color: "var(--yellow)" }}
-          >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 19V5" />
-              <path d="M5 12l7-7 7 7" />
-            </svg>
-            {skill.latestVersion}
-          </span>
+      {(skill.updateAvailable && skill.latestVersion || skill.pinnedVersion) && (
+        <div className="flex items-center gap-1.5 mb-1">
+          {skill.updateAvailable && skill.latestVersion && (
+            <span
+              className="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full"
+              style={{ background: "var(--yellow-muted)", color: "var(--yellow)" }}
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 19V5" />
+                <path d="M5 12l7-7 7 7" />
+              </svg>
+              {skill.latestVersion}
+            </span>
+          )}
+          {skill.pinnedVersion && (
+            <span
+              className="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full"
+              style={{ background: "var(--surface-3)", color: "var(--text-tertiary)" }}
+              title={`Pinned at ${skill.pinnedVersion}`}
+            >
+              📌 {skill.pinnedVersion}
+            </span>
+          )}
         </div>
       )}
       <div className="flex items-center gap-2 text-[11px]" style={{ color: "var(--text-tertiary)" }}>

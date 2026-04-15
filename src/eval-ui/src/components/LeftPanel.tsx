@@ -7,7 +7,7 @@ import { ModelSelector } from "./ModelSelector";
 import { api } from "../api";
 
 export function LeftPanel() {
-  const { state, setMode } = useStudio();
+  const { state, setMode, updateCount } = useStudio();
   const { config } = useConfig();
   const [creatorStatus, setCreatorStatus] = useState<{ installed: boolean; installCommand: string } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -77,6 +77,43 @@ export function LeftPanel() {
           New Skill
         </button>
       </div>
+
+      {/* Updates nav entry */}
+      {updateCount > 0 && (
+        <div className="px-3 pb-2 flex-shrink-0">
+          <button
+            onClick={() => {
+              window.location.hash = "/updates";
+              setMode("browse");
+            }}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-[12px] font-medium transition-all duration-150"
+            style={{
+              background: window.location.hash === "#/updates" ? "var(--surface-3)" : "var(--surface-2)",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border-subtle)",
+              cursor: "pointer",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-3)"; }}
+            onMouseLeave={(e) => {
+              if (window.location.hash !== "#/updates") e.currentTarget.style.background = "var(--surface-2)";
+            }}
+          >
+            <span className="flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 19V5" />
+                <path d="M5 12l7-7 7 7" />
+              </svg>
+              Updates
+            </span>
+            <span
+              className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
+              style={{ background: "var(--yellow-muted)", color: "var(--yellow)" }}
+            >
+              {updateCount}
+            </span>
+          </button>
+        </div>
+      )}
 
       {/* Skill-Creator status — works with all AI tools */}
       {creatorStatus && (creatorStatus.installed ? (

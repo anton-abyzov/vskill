@@ -232,6 +232,51 @@ describe("outdatedCommand", () => {
     ]);
   });
 
+  // Pin display: shows pin column for pinned skills
+  it("shows pin indicator for pinned skills in table", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1, agents: [],
+      skills: {
+        "architect": { version: "1.0.0", sha: "abc", tier: "VERIFIED", installedAt: "", source: "github:a/b", pinnedVersion: "1.0.0" },
+        "pm": { version: "1.0.0", sha: "def", tier: "VERIFIED", installedAt: "", source: "github:a/b" },
+      },
+    });
+    mockCheckUpdates.mockResolvedValue([
+      { name: "a/b/architect", installed: "1.0.0", latest: "2.0.0", updateAvailable: true, versionBump: "major", certTier: "CERTIFIED" },
+      { name: "a/b/pm", installed: "1.0.0", latest: "1.1.0", updateAvailable: true, versionBump: "minor", certTier: "VERIFIED" },
+    ]);
+
+    await expect(outdatedCommand({})).rejects.toThrow("process.exit");
+
+    const output = logs.join("\n");
+    expect(output).toContain("Pin");
+    expect(output).toContain("📌");
+    // Summary should exclude pinned from count
+    expect(output).toContain("1 skill(s) have updates available");
+    expect(output).toContain("1 pinned");
+  });
+
+  // Pin display: --json enriches pinned skills
+  it("enriches --json output with pinned field", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1, agents: [],
+      skills: {
+        "architect": { version: "1.0.0", sha: "abc", tier: "VERIFIED", installedAt: "", source: "github:a/b", pinnedVersion: "1.0.0" },
+      },
+    });
+    mockCheckUpdates.mockResolvedValue([
+      { name: "a/b/architect", installed: "1.0.0", latest: "2.0.0", updateAvailable: true },
+    ]);
+
+    await expect(outdatedCommand({ json: true })).rejects.toThrow("process.exit");
+
+    const output = logs.join("\n");
+    const parsed = JSON.parse(output);
+    const arch = parsed.find((r: any) => r.name.includes("architect"));
+    expect(arch.pinned).toBe(true);
+    expect(arch.pinnedVersion).toBe("1.0.0");
+  });
+
   // T-008: Table headers
   it("displays table headers for outdated results", async () => {
     mockReadLockfile.mockReturnValue({

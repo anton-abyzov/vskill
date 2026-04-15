@@ -52,6 +52,7 @@ function cleanupGhostFiles(
 
 interface UpdateOptions {
   all?: boolean;
+  force?: boolean;
   agent?: string | string[];
 }
 
@@ -109,6 +110,13 @@ export async function updateCommand(
 
   for (const name of toUpdate) {
     const entry = lock.skills[name];
+
+    // Skip pinned skills unless --force is used
+    if (entry.pinnedVersion && !opts.force) {
+      console.log(dim(`${name}: pinned at ${entry.pinnedVersion} — skipping`));
+      continue;
+    }
+
     const parsed = parseSource(entry.source ?? "");
     const spin = spinner(`Checking ${name}`);
 

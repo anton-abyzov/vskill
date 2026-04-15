@@ -93,6 +93,7 @@ program
   .command("update [skill]")
   .description("Update installed skills from the registry")
   .option("--all", "Update all installed skills")
+  .option("--force", "Override version pin for this update")
   .option("--agent <id>", "Update only for specific agent (repeatable)", collect, [])
   .action(async (skill: string | undefined, opts) => {
     const { updateCommand } = await import("./commands/update.js");
@@ -144,9 +145,13 @@ program
 program
   .command("versions <skill-name>")
   .description("List published versions for a skill")
-  .action(async (skillName: string) => {
+  .option("--diff", "Show unified diff between installed and latest (or --from/--to)")
+  .option("--from <version>", "Start version for diff comparison")
+  .option("--to <version>", "End version for diff comparison")
+  .option("--json", "Output as JSON")
+  .action(async (skillName: string, opts: { diff?: boolean; from?: string; to?: string; json?: boolean }) => {
     const { versionsCommand } = await import("./commands/versions.js");
-    await versionsCommand(skillName);
+    await versionsCommand(skillName, opts);
   });
 
 program
@@ -207,6 +212,22 @@ program
   .action(async () => {
     const { cleanupCommand } = await import("./commands/cleanup.js");
     await cleanupCommand();
+  });
+
+program
+  .command("pin <skill> [version]")
+  .description("Pin a skill to prevent automatic updates")
+  .action(async (skill: string, version?: string) => {
+    const { pinCommand } = await import("./commands/pin.js");
+    await pinCommand(skill, version);
+  });
+
+program
+  .command("unpin <skill>")
+  .description("Remove version pin from a skill")
+  .action(async (skill: string) => {
+    const { unpinCommand } = await import("./commands/pin.js");
+    await unpinCommand(skill);
   });
 
 program

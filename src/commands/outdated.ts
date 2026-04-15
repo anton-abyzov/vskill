@@ -60,9 +60,24 @@ export async function outdatedCommand(opts: { json?: boolean }): Promise<void> {
 
   const outdated = results.filter((r) => r.updateAvailable);
 
-  // --json mode: output raw results and exit
+  // Build pin lookup from lockfile
+  const pinMap = new Map<string, string>();
+  for (const [name, entry] of Object.entries(lock.skills)) {
+    if (entry.pinnedVersion) {
+      // Map both short and resolved names
+      pinMap.set(name, entry.pinnedVersion);
+      const resolved = resolveFullName(name, entry.source);
+      if (resolved !== name) pinMap.set(resolved, entry.pinnedVersion);
+    }
+  }
+
+  // --json mode: output raw results enriched with pin info and exit
   if (opts.json) {
-    console.log(JSON.stringify(results, null, 2));
+    const enriched = results.map((r) => ({
+      ...r,
+      ...(pinMap.has(r.name) ? { pinned: true, pinnedVersion: pinMap.get(r.name) } : {}),
+    }));
+    console.log(JSON.stringify(enriched, null, 2));
     if (outdated.length > 0) process.exit(1);
     return;
   }
@@ -73,7 +88,11 @@ export async function outdatedCommand(opts: { json?: boolean }): Promise<void> {
     return;
   }
 
-  const headers = ["Skill", "Installed", "Latest", "Bump", "Tier"];
+  // Separate pinned and unpinned for count
+  const pinnedOutdated = outdated.filter((r) => pinMap.has(r.name));
+  const unpinnedOutdated = outdated.filter((r) => !pinMap.has(r.name));
+
+  const headers = ["Skill", "Installed", "Latest", "Bump", "Tier", "Pin"];
   const rows = outdated.map((r) => {
     const tierColor =
       r.certTier === "CERTIFIED"
@@ -81,16 +100,22 @@ export async function outdatedCommand(opts: { json?: boolean }): Promise<void> {
         : r.certTier === "VERIFIED"
           ? green
           : dim;
+    const pinVersion = pinMap.get(r.name);
     return [
       bold(r.name),
       red(r.installed),
       green(r.latest ?? "unknown"),
       r.versionBump ? cyan(r.versionBump) : dim("-"),
       r.certTier ? tierColor(r.certTier) : dim("-"),
+      pinVersion ? dim(`📌 ${pinVersion}`) : "",
     ];
   });
 
-  console.log(bold(`\n${outdated.length} skill(s) have updates available:\n`));
+  const countLabel = pinnedOutdated.length > 0
+    ? `${unpinnedOutdated.length} skill(s) have updates available (${pinnedOutdated.length} pinned):`
+    : `${outdated.length} skill(s) have updates available:`;
+
+  console.log(bold(`\n${countLabel}\n`));
   console.log(table(headers, rows));
   console.log(dim(`\nRun ${cyan("vskill update --all")} to update.\n`));
   process.exit(1);

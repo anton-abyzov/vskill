@@ -14,9 +14,10 @@ import { ActivationPanel } from "./ActivationPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { DepsPanel } from "./DepsPanel";
 import { LeaderboardPanel } from "./LeaderboardPanel";
+import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import type { PanelId } from "./workspaceTypes";
 
-const VALID_PANELS: PanelId[] = ["editor", "tests", "run", "activation", "history", "leaderboard", "deps"];
+const VALID_PANELS: PanelId[] = ["editor", "tests", "run", "activation", "history", "leaderboard", "deps", "versions"];
 
 function isValidPanel(value: string | null): value is PanelId {
   return value != null && (VALID_PANELS as string[]).includes(value);
@@ -64,10 +65,10 @@ export function SkillWorkspaceInner() {
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const meta = e.ctrlKey || e.metaKey;
 
-    // Ctrl+1..6 — panel switching
-    if (meta && e.key >= "1" && e.key <= "7") {
+    // Ctrl+1..8 — panel switching
+    if (meta && e.key >= "1" && e.key <= "8") {
       e.preventDefault();
-      const panels: PanelId[] = ["editor", "tests", "run", "activation", "history", "leaderboard", "deps"];
+      const panels: PanelId[] = ["editor", "tests", "run", "activation", "history", "leaderboard", "deps", "versions"];
       dispatch({ type: "SET_PANEL", panel: panels[parseInt(e.key) - 1] });
       return;
     }
@@ -140,6 +141,7 @@ export function SkillWorkspaceInner() {
             {state.activePanel === "history" && <HistoryPanel />}
             {state.activePanel === "leaderboard" && <LeaderboardPanel />}
             {state.activePanel === "deps" && <DepsPanel />}
+            {state.activePanel === "versions" && <VersionHistoryPanel />}
           </div>
         </div>
       </ErrorBoundary>

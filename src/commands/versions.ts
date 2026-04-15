@@ -52,7 +52,11 @@ export async function versionsCommand(
     const versions = await getVersions(resolved);
 
     if (versions.length === 0) {
-      console.log(dim("No versions found for ") + cyan(resolved));
+      if (opts.json) {
+        console.log(JSON.stringify([]));
+      } else {
+        console.log(dim("No versions found for ") + cyan(resolved));
+      }
       return;
     }
 

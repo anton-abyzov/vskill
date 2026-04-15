@@ -1,0 +1,108 @@
+<!--
+  P&L Template for Tax Filing Skill
+  Replace all {{PLACEHOLDER}} values with actual data.
+  Convert to PDF: chrome --headless --print-to-pdf="output.pdf" this-file.html
+-->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{{COMPANY_NAME}} - {{TAX_YEAR}} Income Statement</title>
+<style>
+  @page { margin: 0.75in; size: letter; }
+  body { font-family: 'Georgia', 'Times New Roman', serif; color: #1a1a1a; max-width: 700px; margin: 0 auto; padding: 40px; line-height: 1.4; }
+  .header { text-align: center; border-bottom: 3px double #333; padding-bottom: 20px; margin-bottom: 30px; }
+  .header h1 { font-size: 22px; margin: 0 0 4px 0; letter-spacing: 1px; }
+  .header h2 { font-size: 14px; font-weight: normal; margin: 0 0 4px 0; color: #444; }
+  .header .period { font-size: 13px; color: #666; margin-top: 8px; }
+  .header .ein { font-size: 12px; color: #666; }
+  .section-title { font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; color: #333; border-bottom: 1px solid #999; padding-bottom: 4px; margin-top: 28px; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 4px 0; font-size: 13px; }
+  td:last-child { text-align: right; width: 140px; }
+  .indent { padding-left: 24px; }
+  .indent2 { padding-left: 48px; }
+  .total-row td { font-weight: bold; border-top: 1px solid #333; padding-top: 6px; }
+  .subtotal-row td { border-top: 1px solid #ccc; padding-top: 4px; }
+  .grand-total td { font-weight: bold; font-size: 15px; border-top: 3px double #333; border-bottom: 3px double #333; padding: 8px 0; }
+  .spacer td { height: 14px; }
+  .note { font-size: 11px; color: #666; margin-top: 30px; border-top: 1px solid #ccc; padding-top: 12px; }
+  .note p { margin: 4px 0; }
+  .comparison { margin-top: 24px; }
+  .comparison table { font-size: 12px; }
+  .comparison td { padding: 3px 8px; border: 1px solid #ddd; }
+  .comparison th { padding: 3px 8px; border: 1px solid #ddd; background: #f5f5f5; font-size: 11px; text-align: right; }
+  .comparison th:first-child { text-align: left; }
+  .tax-box { margin-top: 24px; border: 2px solid #333; padding: 16px; }
+  .tax-box h3 { margin: 0 0 8px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
+  .tax-box table td { font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>{{COMPANY_NAME_UPPER}}</h1>
+  <h2>Income Statement (Profit & Loss)</h2>
+  <div class="ein">EIN: {{EIN}} | {{ENTITY_TYPE}} | NAICS {{NAICS}}</div>
+  <div class="period">For the Year Ended December 31, {{TAX_YEAR}}</div>
+</div>
+
+<div class="section-title">Revenue</div>
+<table>
+  <tr><td class="indent">Consulting Services (C2C)</td><td></td></tr>
+  <!-- Repeat for each client -->
+  <tr><td class="indent2">{{CLIENT_NAME}}</td><td>{{CLIENT_AMOUNT}}</td></tr>
+  <!-- End repeat -->
+  <tr class="subtotal-row"><td class="indent"><strong>Total Revenue</strong></td><td><strong>{{TOTAL_REVENUE}}</strong></td></tr>
+</table>
+
+<div class="section-title">Other Income</div>
+<table>
+  <tr><td class="indent">{{OTHER_INCOME_DESC}}</td><td>{{OTHER_INCOME_AMOUNT}}</td></tr>
+  <tr class="subtotal-row"><td class="indent"><strong>Total Other Income</strong></td><td><strong>{{TOTAL_OTHER_INCOME}}</strong></td></tr>
+  <tr class="spacer"><td></td><td></td></tr>
+  <tr class="total-row"><td><strong>TOTAL INCOME</strong></td><td><strong>{{TOTAL_INCOME}}</strong></td></tr>
+</table>
+
+<div class="section-title">Expenses</div>
+<table>
+  <!-- Repeat for each expense category, sorted by amount descending -->
+  <tr><td class="indent">{{EXPENSE_CATEGORY}}</td><td>{{EXPENSE_AMOUNT}}</td></tr>
+  <!-- End repeat -->
+  <tr class="spacer"><td></td><td></td></tr>
+  <tr class="total-row"><td><strong>TOTAL EXPENSES</strong></td><td><strong>{{TOTAL_EXPENSES}}</strong></td></tr>
+</table>
+
+<table style="margin-top: 20px;">
+  <tr class="grand-total"><td>NET INCOME BEFORE TAX</td><td>{{NET_INCOME}}</td></tr>
+</table>
+
+<div class="tax-box">
+  <h3>Tax Summary</h3>
+  <table>
+    <tr><td>Taxable income</td><td>{{NET_INCOME}}</td></tr>
+    <tr><td>Federal corporate tax rate</td><td>{{TAX_RATE}}</td></tr>
+    <tr><td><strong>Federal tax due</strong></td><td><strong>{{TAX_DUE}}</strong></td></tr>
+    <tr><td>Payments made</td><td>{{PAYMENTS_MADE}}</td></tr>
+    <tr><td style="border-top: 1px solid #333; padding-top: 4px;"><strong>Balance due</strong></td><td style="border-top: 1px solid #333; padding-top: 4px;"><strong>{{BALANCE_DUE}}</strong></td></tr>
+  </table>
+</div>
+
+<div class="comparison">
+  <div class="section-title">Year-Over-Year Comparison</div>
+  <table>
+    <tr><th></th><th>{{YEAR_MINUS_2}}</th><th>{{YEAR_MINUS_1}}</th><th>{{TAX_YEAR}}</th></tr>
+    <tr><td>Gross Receipts</td><td style="text-align:right">{{YOY_REV_2}}</td><td style="text-align:right">{{YOY_REV_1}}</td><td style="text-align:right">{{YOY_REV_0}}</td></tr>
+    <tr><td>Total Expenses</td><td style="text-align:right">{{YOY_EXP_2}}</td><td style="text-align:right">{{YOY_EXP_1}}</td><td style="text-align:right">{{YOY_EXP_0}}</td></tr>
+    <tr><td><strong>Net Income</strong></td><td style="text-align:right">{{YOY_NET_2}}</td><td style="text-align:right">{{YOY_NET_1}}</td><td style="text-align:right"><strong>{{YOY_NET_0}}</strong></td></tr>
+    <tr><td>Tax Paid</td><td style="text-align:right">{{YOY_TAX_2}}</td><td style="text-align:right">{{YOY_TAX_1}}</td><td style="text-align:right">{{YOY_TAX_0}}</td></tr>
+  </table>
+</div>
+
+<div class="note">
+  <p><strong>Prepared:</strong> {{PREPARED_DATE}} | <strong>Basis:</strong> {{ACCOUNTING_BASIS}} | <strong>Source:</strong> {{DATA_SOURCE}}</p>
+  <p>{{ADDITIONAL_NOTES}}</p>
+</div>
+
+</body>
+</html>

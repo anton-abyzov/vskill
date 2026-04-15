@@ -1,0 +1,110 @@
+<!--
+  Invoice Template for Tax Filing Skill
+  Replace all {{PLACEHOLDER}} values with actual data.
+-->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Invoice {{INVOICE_NUMBER}}</title>
+<style>
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; margin: 40px; color: #333; max-width: 800px; }
+  .header { display: flex; justify-content: space-between; margin-bottom: 40px; }
+  .invoice-title { font-size: 28px; font-weight: 300; color: #2c3e50; }
+  .invoice-num { font-size: 14px; color: #7f8c8d; margin-top: 4px; }
+  .parties { display: flex; justify-content: space-between; margin-bottom: 30px; }
+  .party { width: 45%; }
+  .party-label { font-size: 11px; text-transform: uppercase; color: #95a5a6; margin-bottom: 6px; letter-spacing: 1px; }
+  .party-name { font-weight: 600; font-size: 15px; }
+  .party-detail { font-size: 13px; color: #555; line-height: 1.5; }
+  .meta { margin-bottom: 30px; }
+  .meta-row { display: flex; gap: 40px; }
+  .meta-label { font-size: 11px; text-transform: uppercase; color: #95a5a6; letter-spacing: 1px; }
+  .meta-value { font-size: 14px; font-weight: 500; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+  th { text-align: left; padding: 10px 12px; background: #f8f9fa; border-bottom: 2px solid #dee2e6; font-size: 12px; text-transform: uppercase; color: #6c757d; letter-spacing: 0.5px; }
+  th:last-child { text-align: right; }
+  td { padding: 8px 12px; border-bottom: 1px solid #eee; font-size: 13px; }
+  td:last-child { text-align: right; }
+  .total-row td { font-weight: 600; font-size: 16px; padding: 12px; border-top: 2px solid #333; border-bottom: none; }
+  .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #95a5a6; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="invoice-title">INVOICE</div>
+    <div class="invoice-num">{{INVOICE_NUMBER}}</div>
+  </div>
+  <div style="text-align:right; font-size:13px; color:#555;">
+    <strong>{{PROVIDER_NAME}}</strong><br>
+    {{PROVIDER_TAX_ID_LABEL}}: {{PROVIDER_TAX_ID}}<br>
+    {{PROVIDER_ADDRESS_LINE1}}<br>
+    {{PROVIDER_ADDRESS_LINE2}}<br>
+    {{PROVIDER_COUNTRY}}
+  </div>
+</div>
+
+<div class="parties">
+  <div class="party">
+    <div class="party-label">Bill To</div>
+    <div class="party-name">{{COMPANY_NAME}}</div>
+    <div class="party-detail">
+      EIN: {{EIN}}<br>
+      {{COMPANY_ADDRESS}}<br>
+      United States
+    </div>
+  </div>
+</div>
+
+<div class="meta">
+  <div class="meta-row">
+    <div class="meta-item">
+      <div class="meta-label">Invoice Date</div>
+      <div class="meta-value">{{INVOICE_DATE}}</div>
+    </div>
+    <div class="meta-item">
+      <div class="meta-label">Service Period</div>
+      <div class="meta-value">{{SERVICE_PERIOD}}</div>
+    </div>
+    <div class="meta-item">
+      <div class="meta-label">Payment Terms</div>
+      <div class="meta-value">Due on Receipt</div>
+    </div>
+    <div class="meta-item">
+      <div class="meta-label">Currency</div>
+      <div class="meta-value">USD</div>
+    </div>
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Description</th>
+      <th>Amount</th>
+    </tr>
+  </thead>
+  <tbody>
+    <!-- Repeat for each line item -->
+    <tr>
+      <td>{{LINE_ITEM_DESCRIPTION}}</td>
+      <td>{{LINE_ITEM_AMOUNT}}</td>
+    </tr>
+    <!-- End repeat -->
+    <tr class="total-row">
+      <td>TOTAL</td>
+      <td>{{TOTAL_AMOUNT}}</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="footer">
+  <p><strong>Payment Status:</strong> {{PAYMENT_STATUS}}</p>
+  <p>Services provided by {{PROVIDER_NAME}} ({{PROVIDER_TAX_ID_LABEL}} {{PROVIDER_TAX_ID}}), registered in {{PROVIDER_COUNTRY}}.<br>
+  All services performed outside the United States.</p>
+</div>
+
+</body>
+</html>

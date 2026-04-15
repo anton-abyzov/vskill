@@ -73,8 +73,9 @@ export function extractDescription(body: string, skillName: string): string {
 /**
  * Ensure a SKILL.md string contains valid `name` and `description` frontmatter.
  * Pure function — normalizes CRLF, preserves existing fields, injects missing ones.
+ * When `forceName` is true, overrides the existing `name` field with `skillName`.
  */
-export function ensureFrontmatter(content: string, skillName: string): string {
+export function ensureFrontmatter(content: string, skillName: string, forceName = false): string {
   const normalized = content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
   const match = normalized.match(FRONTMATTER_RE);
 
@@ -87,8 +88,21 @@ export function ensureFrontmatter(content: string, skillName: string): string {
   const hasName = HAS_NAME_RE.test(fmBlock);
   const hasDescription = HAS_DESCRIPTION_RE.test(fmBlock);
 
-  if (hasName && hasDescription) {
+  if (hasName && hasDescription && !forceName) {
     return normalized;
+  }
+
+  // When forceName is set, replace existing name field with the namespaced name
+  if (forceName && hasName) {
+    const updatedFm = fmBlock.replace(HAS_NAME_RE, `name: ${skillName}`);
+    const rest = normalized.slice(match[0].length);
+    const desc = hasDescription ? "" : null;
+    if (desc === null) {
+      return `---\n${updatedFm}\n---\n${rest}`;
+    }
+    const body = rest;
+    const extractedDesc = extractDescription(body, skillName);
+    return `---\n${updatedFm}\ndescription: ${quoteYAMLValue(extractedDesc)}\n---\n${rest}`;
   }
 
   let updatedBlock = fmBlock;

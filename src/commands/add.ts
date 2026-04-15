@@ -538,10 +538,13 @@ async function installMarketplaceRepo(
           const contentRes = await fetch(rawUrl);
           if (!contentRes.ok) continue;
           const content = await contentRes.text();
-          const processedContent = ensureFrontmatter(content, sd.name);
+          const namespacedName = sd.name === plugin.name ? plugin.name : `${plugin.name}/${sd.name}`;
+          const processedContent = ensureFrontmatter(content, namespacedName, true);
           for (const agent of agents) {
             const baseDir = resolveInstallBase(opts, agent);
-            const skillDir = join(baseDir, sd.name);
+            const skillDir = sd.name === plugin.name
+              ? join(baseDir, plugin.name)
+              : join(baseDir, plugin.name, sd.name);
             mkdirSync(skillDir, { recursive: true });
             writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
             cleanStaleNesting(skillDir);
@@ -1671,7 +1674,8 @@ async function installRepoPlugin(
           ? plugDir
           : join(plugDir, skill.name);
         mkdirSync(skillDir, { recursive: true });
-        writeFileSync(join(skillDir, "SKILL.md"), ensureFrontmatter(skill.content, skill.name), "utf-8");
+        const namespacedSkillName = skill.name === pluginName ? pluginName : `${pluginName}/${skill.name}`;
+        writeFileSync(join(skillDir, "SKILL.md"), ensureFrontmatter(skill.content, namespacedSkillName, true), "utf-8");
         cleanStaleNesting(skillDir);
       }
       // Commands: {agent-dir}/{plugin-name}/{command-name}.md

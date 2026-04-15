@@ -77,11 +77,20 @@ Patterns (case-insensitive):
   bearer\s+[a-zA-Z0-9\-._~+/]+=*
 ```
 
-**On credential match**: STOP ingestion for that file immediately.
-1. Move the file to `{{VAULT_PATH}}/{{CREDENTIALS_FOLDER}}/`
-2. Log: `YYYY-MM-DD HH:MM | !cred | <filename> | credential detected, routed to secure folder`
-3. **Never** create a wiki page from credential content
-4. Continue processing remaining inbox files
+**On credential match**: STOP wiki ingestion for that file (never create a wiki page from credentials).
+
+1. **Identify context** — scan filename and content for project/area signals:
+   - Does it mention an active project? Check folders in `{{VAULT_PATH}}/{{PROJECTS_FOLDER}}/`
+   - Does it mention an ongoing area or company? Check folders in `{{VAULT_PATH}}/{{AREAS_FOLDER}}/`
+   - Does it relate to something archived? Check `{{VAULT_PATH}}/{{ARCHIVE_FOLDER}}/`
+2. **Route by context** (first match wins):
+   - **Active project match** → move to `{{PROJECTS_FOLDER}}/<project>/` (e.g., Xero key for EasyChamp → EasyChamp folder)
+   - **Ongoing area match** → move to `{{AREAS_FOLDER}}/<area>/` (e.g., EasyChamp admin creds → EasyChamp Business Operations/)
+   - **Archived match** → move to `{{ARCHIVE_FOLDER}}/<topic>/`
+   - **No project/area match** → move to `{{VAULT_PATH}}/{{CREDENTIALS_FOLDER}}/` (generic catch-all)
+3. Log: `YYYY-MM-DD HH:MM | !cred | <filename> | credential detected, routed to <destination>`
+4. **Never** create a wiki page from credential content
+5. Continue processing remaining inbox files
 
 #### Ingest Procedure
 

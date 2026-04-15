@@ -9,7 +9,7 @@ allowed-tools:
   - Bash
   - CronCreate
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   tags: obsidian, vault, wiki, knowledge-management, para, llm-wiki, ingest, lint, cron
 ---
 
@@ -77,19 +77,30 @@ Patterns (case-insensitive):
   bearer\s+[a-zA-Z0-9\-._~+/]+=*
 ```
 
-**On credential match**: STOP ingestion for that file immediately.
-1. Move the file to `{{VAULT_PATH}}/{{CREDENTIALS_FOLDER}}/`
-2. Log: `YYYY-MM-DD HH:MM | !cred | <filename> | credential detected, routed to secure folder`
-3. **Never** create a wiki page from credential content
-4. Continue processing remaining inbox files
+**On credential match**: STOP wiki ingestion for that file (never create a wiki page from credentials).
+
+1. **Discover vault structure** — list subfolders across all PARA categories to understand what domains exist (see [references/routing-rules.md](references/routing-rules.md) Step 1)
+2. **Identify domain** — analyze filename + content for domain signals (company names, project names, service types, technology keywords). Match against existing vault folders.
+3. **Route by domain context** (see [references/routing-rules.md](references/routing-rules.md) Step 3 for the full decision tree):
+   - **Domain match** → route to domain's folder (company, project, or area)
+   - **Service match** → route to the service's tech subfolder in Resources
+   - **Personal account** → route to typed subfolder in `{{CREDENTIALS_FOLDER}}/` (Email-Accounts/, Social-Media/, Cloud-Providers/, etc.)
+   - **Unknown** → `{{CREDENTIALS_FOLDER}}/` root (last resort only)
+4. Log: `YYYY-MM-DD HH:MM | !cred | <filename> | credential detected, routed to <destination>`
+5. **Never** create a wiki page from credential content
+6. Continue processing remaining inbox files
 
 #### Ingest Procedure
+
+**Before processing any files**, scan the vault structure to build a routing map:
+- List subfolders in `{{PROJECTS_FOLDER}}/`, `{{AREAS_FOLDER}}/`, `{{RESOURCES_FOLDER}}/`, `{{ARCHIVE_FOLDER}}/`
+- This tells you what domains exist, which are active vs archived, and prevents creating duplicate folders
 
 For each non-credential file in the inbox:
 
 1. **Read** the source file (never modify it in place)
-2. **Classify** content: determine the wiki page type and PARA destination
-   - See [references/routing-rules.md](references/routing-rules.md) for the full routing table
+2. **Identify domain first** — what domain does this content belong to? Match against existing vault folders by company name, project name, technology, service. Then determine PARA category (Project vs Area vs Resource vs Archive).
+   - See [references/routing-rules.md](references/routing-rules.md) for the full domain recognition and routing table
 3. **Create wiki page** in `{{VAULT_PATH}}/{{WIKI_DIR}}/`:
    - Filename: `slugified-name.md` (lowercase, hyphens, max 60 chars)
    - Sources get date prefix: `YYYY-MM-DD-slug.md`

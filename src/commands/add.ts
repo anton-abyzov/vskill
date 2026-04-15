@@ -542,9 +542,7 @@ async function installMarketplaceRepo(
           const processedContent = ensureFrontmatter(content, namespacedName, true);
           for (const agent of agents) {
             const baseDir = resolveInstallBase(opts, agent);
-            const skillDir = sd.name === plugin.name
-              ? join(baseDir, plugin.name)
-              : join(baseDir, plugin.name, sd.name);
+            const skillDir = join(baseDir, sd.name);
             mkdirSync(skillDir, { recursive: true });
             writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
             cleanStaleNesting(skillDir);
@@ -2558,21 +2556,20 @@ async function installSingleSkillLegacy(
   if (selections.global) opts.global = true;
   if (!selections.symlink) opts.copy = true;
 
-  // Install to each agent using canonical installer
-  // When a plugin namespace is known, use it for directory structure and name field
-  const installName = pluginNamespace && skillName !== pluginNamespace
+  // Install to each agent using canonical installer (flat directory, namespaced frontmatter name)
+  const namespacedName = pluginNamespace && skillName !== pluginNamespace
     ? `${pluginNamespace}/${skillName}`
     : skillName;
   const namespacedContent = pluginNamespace
-    ? ensureFrontmatter(content, installName, true)
+    ? ensureFrontmatter(content, namespacedName, true)
     : content;
   const sha = computeSha(content);
   const projectRoot = safeProjectRoot();
   const installOpts = { global: !!opts.global, projectRoot };
 
   const locations = opts.copy
-    ? installCopy(installName, namespacedContent, selectedAgents, installOpts, legacyAgentFiles)
-    : installSymlink(installName, namespacedContent, selectedAgents, installOpts, legacyAgentFiles);
+    ? installCopy(skillName, namespacedContent, selectedAgents, installOpts, legacyAgentFiles)
+    : installSymlink(skillName, namespacedContent, selectedAgents, installOpts, legacyAgentFiles);
 
   // Update lockfile (global → ~/.agents/, project → project root)
   const lockDir = lockfileRoot(opts);

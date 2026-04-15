@@ -1821,7 +1821,7 @@ export async function addCommand(
         const probeUrl = `https://raw.githubusercontent.com/${threeOwner}/${threeRepo}/${branch}/${subpath}`;
         const probeRes = await fetch(probeUrl);
         if (probeRes.ok) {
-          return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts, subpath);
+          return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts, subpath, plugin.name);
         }
       }
     }
@@ -2394,6 +2394,7 @@ async function installSingleSkillLegacy(
   skill: string | undefined,
   opts: AddOptions,
   skillSubpathOverride?: string,
+  pluginNamespace?: string,
 ): Promise<void> {
   // Blocklist + rejection check BEFORE fetching (prevents misleading 404)
   const skillName = skill || repo;
@@ -2558,13 +2559,20 @@ async function installSingleSkillLegacy(
   if (!selections.symlink) opts.copy = true;
 
   // Install to each agent using canonical installer
+  // When a plugin namespace is known, use it for directory structure and name field
+  const installName = pluginNamespace && skillName !== pluginNamespace
+    ? `${pluginNamespace}/${skillName}`
+    : skillName;
+  const namespacedContent = pluginNamespace
+    ? ensureFrontmatter(content, installName, true)
+    : content;
   const sha = computeSha(content);
   const projectRoot = safeProjectRoot();
   const installOpts = { global: !!opts.global, projectRoot };
 
   const locations = opts.copy
-    ? installCopy(skillName, content, selectedAgents, installOpts, legacyAgentFiles)
-    : installSymlink(skillName, content, selectedAgents, installOpts, legacyAgentFiles);
+    ? installCopy(installName, namespacedContent, selectedAgents, installOpts, legacyAgentFiles)
+    : installSymlink(installName, namespacedContent, selectedAgents, installOpts, legacyAgentFiles);
 
   // Update lockfile (global → ~/.agents/, project → project root)
   const lockDir = lockfileRoot(opts);

@@ -22,6 +22,7 @@ export interface StudioState {
   skillsError: string | null;
   isMobile: boolean;
   mobileView: "list" | "detail";
+  updateNotificationDismissed: boolean;
 }
 
 const initialState: StudioState = {
@@ -33,6 +34,7 @@ const initialState: StudioState = {
   skillsError: null,
   isMobile: false,
   mobileView: "list",
+  updateNotificationDismissed: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -48,7 +50,8 @@ type StudioAction =
   | { type: "SET_SKILLS_ERROR"; error: string }
   | { type: "SET_SKILLS_LOADING"; loading: boolean }
   | { type: "SET_MOBILE"; isMobile: boolean }
-  | { type: "SET_MOBILE_VIEW"; view: "list" | "detail" };
+  | { type: "SET_MOBILE_VIEW"; view: "list" | "detail" }
+  | { type: "DISMISS_UPDATE_NOTIFICATION" };
 
 function studioReducer(state: StudioState, action: StudioAction): StudioState {
   switch (action.type) {
@@ -79,6 +82,8 @@ function studioReducer(state: StudioState, action: StudioAction): StudioState {
       return { ...state, isMobile: action.isMobile };
     case "SET_MOBILE_VIEW":
       return { ...state, mobileView: action.view };
+    case "DISMISS_UPDATE_NOTIFICATION":
+      return { ...state, updateNotificationDismissed: true };
     default:
       return state;
   }
@@ -97,6 +102,7 @@ interface StudioContextValue {
   setMobileView: (view: "list" | "detail") => void;
   refreshSkills: () => void;
   updateCount: number;
+  dismissUpdateNotification: () => void;
 }
 
 const StudioCtx = createContext<StudioContextValue | null>(null);
@@ -172,6 +178,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: "SET_MOBILE_VIEW", view });
   }, []);
 
+  const dismissUpdateNotification = useCallback(() => {
+    dispatch({ type: "DISMISS_UPDATE_NOTIFICATION" });
+  }, []);
+
   const updateCount = useMemo(
     () => state.skills.filter((s) => s.updateAvailable).length,
     [state.skills],
@@ -186,7 +196,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     setMobileView,
     refreshSkills: loadSkills,
     updateCount,
-  }), [state, selectSkill, clearSelection, setMode, setSearch, setMobileView, loadSkills, updateCount]);
+    dismissUpdateNotification,
+  }), [state, selectSkill, clearSelection, setMode, setSearch, setMobileView, loadSkills, updateCount, dismissUpdateNotification]);
 
   return <StudioCtx.Provider value={value}>{children}</StudioCtx.Provider>;
 }

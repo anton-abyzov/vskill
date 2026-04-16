@@ -49,6 +49,14 @@ export async function pinCommand(
   writeLockfile(lock);
 
   console.log(green(`Pinned ${bold(skill)} at ${bold(pinVersion)}`));
+  if (version && version !== entry.version) {
+    console.log(
+      dim(`Note: installed version is ${entry.version}. Pin prevents future updates past ${pinVersion}.`),
+    );
+    console.log(
+      dim(`To install version ${pinVersion}, use: ${cyan(`vskill install ${skill}@${pinVersion}`)}`),
+    );
+  }
 }
 
 export async function unpinCommand(skill: string): Promise<void> {

@@ -16,7 +16,8 @@ export interface ModelPricing {
 
 const PRICING: Record<string, Record<string, ModelPricing>> = {
   anthropic: {
-    "claude-opus-4-6": { inputPerMillion: 15, outputPerMillion: 75, updatedAt: "2025-05-01" },
+    "claude-opus-4-7": { inputPerMillion: 5, outputPerMillion: 25, updatedAt: "2026-04-16" },
+    "claude-opus-4-6": { inputPerMillion: 5, outputPerMillion: 25, updatedAt: "2026-04-16" },
     "claude-opus-4-20250514": { inputPerMillion: 15, outputPerMillion: 75, updatedAt: "2025-05-01" },
     "claude-sonnet-4-6": { inputPerMillion: 3, outputPerMillion: 15, updatedAt: "2025-05-01" },
     "claude-sonnet-4-20250514": { inputPerMillion: 3, outputPerMillion: 15, updatedAt: "2025-05-01" },
@@ -40,10 +41,10 @@ const PRICING: Record<string, Record<string, ModelPricing>> = {
 const MODEL_ALIASES: Record<string, Record<string, string>> = {
   anthropic: {
     "sonnet": "claude-sonnet-4-6",
-    "opus": "claude-opus-4-6",
+    "opus": "claude-opus-4-7",
     "haiku": "claude-haiku-4-5-20251001",
     "claude-sonnet": "claude-sonnet-4-6",
-    "claude-opus": "claude-opus-4-6",
+    "claude-opus": "claude-opus-4-7",
     "claude-haiku": "claude-haiku-4-5-20251001",
   },
   openai: {},

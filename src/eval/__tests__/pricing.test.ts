@@ -17,10 +17,10 @@ describe("pricing engine", () => {
     });
 
     it("calculates cost for anthropic claude-opus-4-6", () => {
-      // Opus: $15/M input, $75/M output
+      // Opus 4.6: $5/M input, $25/M output
       const cost = calculateCost("anthropic", "claude-opus-4-6", 10000, 5000);
-      // (10000/1M * 15) + (5000/1M * 75) = 0.15 + 0.375 = 0.525
-      expect(cost).toBeCloseTo(0.525, 6);
+      // (10000/1M * 5) + (5000/1M * 25) = 0.05 + 0.125 = 0.175
+      expect(cost).toBeCloseTo(0.175, 6);
     });
 
     it("calculates cost for anthropic claude-haiku", () => {
@@ -68,10 +68,10 @@ describe("pricing engine", () => {
       expect(pricing!.inputPerMillion).toBe(3);
     });
 
-    it("resolves 'opus' alias to claude-opus-4-6 for anthropic", () => {
+    it("resolves 'opus' alias to claude-opus-4-7 for anthropic", () => {
       const pricing = getProviderPricing("anthropic", "opus");
       expect(pricing).not.toBeNull();
-      expect(pricing!.inputPerMillion).toBe(15);
+      expect(pricing!.inputPerMillion).toBe(5);
     });
 
     it("resolves 'haiku' alias to claude-haiku for anthropic", () => {

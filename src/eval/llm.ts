@@ -126,6 +126,7 @@ const CLAUDE_CLI_NORMALIZE: Record<string, string> = {
   "claude-haiku": "haiku",
   "claude-sonnet-4-6": "sonnet",
   "claude-sonnet-4-20250514": "sonnet",
+  "claude-opus-4-7": "opus",
   "claude-opus-4-6": "opus",
   "claude-opus-4-20250514": "opus",
   "claude-haiku-4-5-20251001": "haiku",
@@ -133,10 +134,10 @@ const CLAUDE_CLI_NORMALIZE: Record<string, string> = {
 
 const ANTHROPIC_NORMALIZE: Record<string, string> = {
   "sonnet": "claude-sonnet-4-6",
-  "opus": "claude-opus-4-6",
+  "opus": "claude-opus-4-7",
   "haiku": "claude-haiku-4-5-20251001",
   "claude-sonnet": "claude-sonnet-4-6",
-  "claude-opus": "claude-opus-4-6",
+  "claude-opus": "claude-opus-4-7",
   "claude-haiku": "claude-haiku-4-5-20251001",
 };
 

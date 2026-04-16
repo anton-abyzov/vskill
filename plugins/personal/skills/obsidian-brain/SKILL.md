@@ -9,7 +9,7 @@ allowed-tools:
   - Bash
   - CronCreate
 metadata:
-  version: 1.1.0
+  version: 1.2.0
   tags: obsidian, vault, wiki, knowledge-management, para, llm-wiki, ingest, lint, cron
 ---
 
@@ -275,6 +275,114 @@ No silent failures -- every run produces at least a start + completion/error log
 6. **Index must be plain text** -- links + one-line summaries, no Dataview queries
 7. **No git operations** on the vault -- Obsidian Sync handles synchronization
 8. **No Obsidian app dependency** -- all operations use filesystem tools only
+
+---
+
+## Troubleshooting
+
+Common issues and their resolutions, organized by operation.
+
+### Ingest Issues
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| File stays in inbox after ingest | Move failed (permissions or path with special chars) | Check file permissions with `ls -la`; ensure target PARA folder exists; escape special characters in path |
+| Wiki page created but not in index | Index update step was skipped or errored | Run `bash scripts/update-index.sh` manually to rebuild the full index |
+| Duplicate wiki pages for same entity | Dedup check missed due to alias mismatch | Merge pages manually: keep the older page, append content from the newer one under `## Update YYYY-MM-DD`, add aliases from both to frontmatter, delete the duplicate, update index |
+| Credential guard false positive | Content contains patterns like `token: "explanation"` in documentation | Review the file manually; if safe, temporarily rename the matching line, ingest, then restore. Never disable the credential guard entirely |
+| Source routed to wrong PARA folder | Domain signals were ambiguous or folder structure changed | Move the file to the correct folder with `mv`; update the log entry; re-scan vault structure on next ingest |
+
+### Query Issues
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Query returns no results | Index is stale or search terms don't match wiki page content | Rebuild index with `scripts/update-index.sh`; try broader search terms; check if content is in a different vault |
+| Cross-vault query misses pages | Secondary vault path not configured or inaccessible | Verify vault paths in global CLAUDE.md; check directory exists with `test -d` |
+| Synthesis contradicts source pages | LLM hallucination during synthesis | Always verify synthesis claims against the cited source pages; flag contradictions explicitly |
+
+### Lint Issues
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `lint-check.sh` reports false orphans | Page exists but uses a different slug format than index expects | Standardize the page filename to match the index entry, or update the index |
+| Lint finds hundreds of missing cross-refs | Wikilinks use display names instead of filenames | Use `[[filename\|Display Name]]` format; never use display-only wikilinks |
+| Scheduled lint never runs | CronCreate not configured or last-run check is too aggressive | Verify cron exists; check `{{LOG_FILE}}` last entry timestamp; reduce the 2-hour dedup window if needed |
+
+### General Issues
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Vault path not found | Drive not mounted, cloud sync incomplete, or path changed | Verify the path with `test -d "{{VAULT_PATH}}"`; check if Obsidian Sync is active; update config if vault moved |
+| Log file growing unbounded | No log rotation configured | Periodically archive old log entries: move lines older than 90 days to `wiki/log-archive-YYYY.md` |
+| Scripts fail with permission denied | Shell scripts lost execute bit after sync | Run `chmod +x scripts/*.sh` in the skill's scripts directory |
+| Non-ASCII filenames garbled | Terminal or filesystem encoding mismatch | Ensure locale supports UTF-8 (`locale` should show `UTF-8`); Obsidian vaults on macOS use NFD normalization |
+
+---
+
+## Batch Operations
+
+Bulk vault maintenance operations for reorganizing, auditing, or migrating content at scale.
+
+### Bulk Re-routing
+
+Move all files from one PARA folder to another based on changed domain ownership:
+
+```
+Procedure:
+1. Glob for all files in the source folder
+2. For each file, read frontmatter to confirm domain
+3. Move to target folder, preserving subfolder structure
+4. Update any wiki pages that reference the old path
+5. Log each move: YYYY-MM-DD HH:MM | >batch | filename | re-routed from <source> to <target>
+```
+
+**Use case**: A project completes and all its files should move from Projects to Archive.
+
+### Tag Normalization
+
+Standardize inconsistent tags across the vault:
+
+```
+Procedure:
+1. Grep all frontmatter `tags:` fields across wiki/ and PARA folders
+2. Build a frequency map of all tags
+3. Identify near-duplicates (e.g., "js" vs "javascript", "k8s" vs "kubernetes")
+4. Present a normalization plan to the user for approval
+5. Apply approved renames across all affected files
+6. Log: YYYY-MM-DD HH:MM | >batch | - | normalized N tags across M files
+```
+
+### Orphan Cleanup
+
+Systematically resolve all orphan wiki pages:
+
+```
+Procedure:
+1. Run lint-check.sh to get the orphan list
+2. For each orphan, determine if it should be:
+   a. Added to index (legitimate page, just missing from index)
+   b. Merged into an existing page (duplicate content)
+   c. Deleted (stale or empty page with no value)
+3. Execute the chosen action for each orphan
+4. Rebuild the index after all changes
+5. Log: YYYY-MM-DD HH:MM | >batch | - | resolved N orphans (A indexed, B merged, C deleted)
+```
+
+### Vault Statistics
+
+Generate a health summary of the entire vault:
+
+```
+Procedure:
+1. Count files per PARA category and wiki/
+2. Count total wikilinks and calculate average links per page
+3. Identify the 10 most-linked pages (hub pages)
+4. Identify pages with zero inbound links (isolated pages)
+5. Calculate inbox throughput (files ingested per week from log)
+6. Report wiki growth rate (pages created per month from log)
+```
+
+Output as a wiki page: `{{WIKI_DIR}}/vault-statistics-YYYY-MM.md` with `type: synthesis`.
 
 ---
 

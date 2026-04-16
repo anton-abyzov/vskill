@@ -78,7 +78,8 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
         const starsStr = `\u2605${formatInstalls(stars)}`;
         const badge = getTrustBadge(r.certTier, r.trustTier);
         const pluginBadge = r.pluginName ? dim(` [${r.pluginName}]`) : "";
-        console.log(`${bold(label)}${pluginBadge}  ${dim(starsStr)}${badge ? "  " + badge : ""}`);
+        const versionStr = r.currentVersion ? dim(` v${r.currentVersion}`) : "";
+        console.log(`${bold(label)}${pluginBadge}${versionStr}  ${dim(starsStr)}${badge ? "  " + badge : ""}`);
       }
 
       console.log(`  ${link(url, cyan(url))}`);
@@ -129,7 +130,7 @@ export async function findCommand(query: string, opts?: FindOptions): Promise<vo
     } else {
       const altRepos = r.alternateRepos?.map((a) => `${a.ownerSlug}/${a.repoSlug}`).join(",") ?? "";
       const tierOut = r.certTier ?? r.trustTier ?? "";
-      console.log(`${name}\t${repo}\t${r.githubStars ?? 0}\t${tierOut}\t${r.pluginName ?? ""}\t${altRepos}`);
+      console.log(`${name}\t${repo}\t${r.currentVersion ?? ""}\t${r.githubStars ?? 0}\t${tierOut}\t${r.pluginName ?? ""}\t${altRepos}`);
     }
   }
 

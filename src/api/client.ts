@@ -45,6 +45,8 @@ export interface SkillSearchResult {
   repoSlug?: string;
   /** Skill folder name (e.g., "gog") */
   skillSlug?: string;
+  /** Current published version (semver) */
+  currentVersion?: string;
   /** Alternate repos containing the same skill from the same org */
   alternateRepos?: Array<{ ownerSlug: string; repoSlug: string; repoUrl: string }>;
 }

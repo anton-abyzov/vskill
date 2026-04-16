@@ -39,7 +39,7 @@ describe("findCommand", () => {
     Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
     await findCommand("test", { json: false, noHint: false });
     const output = logs.join("\n");
-    expect(output).toContain("test-skill\ttest/test-skill\t1300");
+    expect(output).toContain("test-skill\ttest/test-skill\t\t1300");
     // Install hint should show full skill path, not just repo
     expect(output).toContain("Install: npx vskill i test/test-skill/test-skill");
     expect(output).toContain("More from this repo: npx vskill i test/test-skill");
@@ -72,6 +72,32 @@ describe("findCommand", () => {
     expect(output).toContain("npx vskill i anton-abyzov/vskill/scout");
     expect(output).toContain("More from this repo: ");
     expect(output).toContain("npx vskill i anton-abyzov/vskill");
+  });
+
+  it("TTY output shows version when currentVersion is present", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "versioned-skill", author: "a", repoUrl: "https://github.com/a/b", tier: "VERIFIED", score: 90, installs: 100, githubStars: 10, vskillInstalls: 100, currentVersion: "2.3.1" },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test");
+    const output = logs.join("\n");
+    expect(output).toContain("v2.3.1");
+  });
+
+  it("non-TTY output includes currentVersion in tab-separated fields", async () => {
+    Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+    mockSearchSkills.mockResolvedValue({
+      results: [
+        { name: "versioned-skill", author: "a", repoUrl: "https://github.com/owner/repo", tier: "VERIFIED", score: 90, installs: 100, githubStars: 10, vskillInstalls: 100, currentVersion: "1.2.0" },
+      ],
+      hasMore: false,
+    });
+    await findCommand("test", { noHint: true });
+    const dataLines = logs.filter((l) => l.includes("\t"));
+    expect(dataLines[0]).toContain("1.2.0");
   });
 
   it("displays GitHub stars in TTY mode", async () => {
@@ -215,7 +241,7 @@ describe("findCommand", () => {
     await findCommand("test", { noHint: true });
     const dataLines = logs.filter((l) => l.includes("\t"));
     expect(dataLines.length).toBe(1);
-    expect(dataLines[0]).toBe("my-skill\towner/repo\t10\t\t\t");
+    expect(dataLines[0]).toBe("my-skill\towner/repo\t\t10\t\t\t");
   });
 
   it("non-TTY output includes trustTier when present", async () => {
@@ -228,7 +254,7 @@ describe("findCommand", () => {
     });
     await findCommand("test", { noHint: true });
     const dataLines = logs.filter((l) => l.includes("\t"));
-    expect(dataLines[0]).toBe("my-skill\towner/repo\t10\tT3\t\t");
+    expect(dataLines[0]).toBe("my-skill\towner/repo\t\t10\tT3\t\t");
   });
 
   it("non-TTY output prefers certTier over trustTier", async () => {
@@ -241,7 +267,7 @@ describe("findCommand", () => {
     });
     await findCommand("test", { noHint: true });
     const dataLines = logs.filter((l) => l.includes("\t"));
-    expect(dataLines[0]).toBe("my-skill\towner/repo\t10\tVERIFIED\t\t");
+    expect(dataLines[0]).toBe("my-skill\towner/repo\t\t10\tVERIFIED\t\t");
   });
 
   it("non-TTY blocked output uses BLOCKED as third column", async () => {
@@ -463,7 +489,7 @@ describe("findCommand", () => {
     });
     await findCommand("test", { noHint: true });
     const dataLines = logs.filter((l) => l.includes("\t"));
-    expect(dataLines[0]).toBe("release-skill\towner/repo\t10\t\tspecweave-release\t");
+    expect(dataLines[0]).toBe("release-skill\towner/repo\t\t10\t\tspecweave-release\t");
   });
 
   it("piped mode without pluginName has no extra field", async () => {
@@ -476,7 +502,7 @@ describe("findCommand", () => {
     });
     await findCommand("test", { noHint: true });
     const dataLines = logs.filter((l) => l.includes("\t"));
-    expect(dataLines[0]).toBe("plain-skill\towner/repo\t10\t\t\t");
+    expect(dataLines[0]).toBe("plain-skill\towner/repo\t\t10\t\t\t");
   });
 
   it("certTier VERIFIED shows verified badge even when trustTier is T2", async () => {

@@ -281,7 +281,7 @@ export async function getVersionDiff(
 ): Promise<VersionDiffResult> {
   const encoded = [encodeURIComponent(from), encodeURIComponent(to)];
   return apiRequest<VersionDiffResult>(
-    `${skillApiPath(name)}/versions?from=${encoded[0]}&to=${encoded[1]}`,
+    `${skillApiPath(name)}/versions/diff?from=${encoded[0]}&to=${encoded[1]}`,
   );
 }
 
@@ -296,6 +296,7 @@ export async function getVersionDiff(
 export async function reportInstall(
   skillName: string,
   repoUrl?: string,
+  version?: string,
 ): Promise<void> {
   const verbose = process.env.VSKILL_DEBUG === "1";
   try {
@@ -317,6 +318,7 @@ export async function reportInstall(
               },
               body: JSON.stringify({
                 ...(repoUrl ? { repoUrl } : {}),
+                ...(version ? { version } : {}),
                 source: "cli",
                 platform: process.platform,
                 cliVersion: VERSION,
@@ -412,7 +414,7 @@ export async function checkUpdates(
 }
 
 export async function reportInstallBatch(
-  skills: Array<{ skillName: string; repoUrl?: string }>,
+  skills: Array<{ skillName: string; repoUrl?: string; version?: string }>,
 ): Promise<void> {
   const verbose = process.env.VSKILL_DEBUG === "1";
   try {

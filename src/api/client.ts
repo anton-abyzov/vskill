@@ -165,6 +165,7 @@ export async function searchSkills(
     ownerSlug: s.ownerSlug ? String(s.ownerSlug) : undefined,
     repoSlug: s.repoSlug ? String(s.repoSlug) : undefined,
     skillSlug: s.skillSlug ? String(s.skillSlug) : undefined,
+    currentVersion: s.currentVersion ? String(s.currentVersion) : undefined,
     alternateRepos: Array.isArray(s.alternateRepos) ? (s.alternateRepos as Array<Record<string, unknown>>).map((a) => ({
       ownerSlug: String(a.ownerSlug || ""),
       repoSlug: String(a.repoSlug || ""),

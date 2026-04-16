@@ -101,21 +101,29 @@ For each non-credential file in the inbox:
 1. **Read** the source file (never modify it in place)
 2. **Identify domain first** — what domain does this content belong to? Match against existing vault folders by company name, project name, technology, service. Then determine PARA category (Project vs Area vs Resource vs Archive).
    - See [references/routing-rules.md](references/routing-rules.md) for the full domain recognition and routing table
-3. **Create wiki page** in `{{VAULT_PATH}}/{{WIKI_DIR}}/`:
+3. **Deduplication check** — before creating a new wiki page, search for existing pages that cover the same entity or topic:
+   - Grep `{{WIKI_DIR}}/` for the entity name, key identifiers, and primary topics from the source
+   - If an existing page covers the same entity (matching `title` or `aliases` in frontmatter), **extend it** instead of creating a duplicate:
+     - Append new information under a dated section header (`## Update YYYY-MM-DD`)
+     - Add any new cross-references
+     - Update frontmatter `tags` and `aliases` if the source reveals new ones
+   - If a related but distinct page exists, create the new page but add bidirectional cross-references
+   - Log merges: `YYYY-MM-DD HH:MM | ~merge | page-name | merged content from <source> (dedup)`
+4. **Create wiki page** in `{{VAULT_PATH}}/{{WIKI_DIR}}/` (only if no existing page was extended in step 3):
    - Filename: `slugified-name.md` (lowercase, hyphens, max 60 chars)
    - Sources get date prefix: `YYYY-MM-DD-slug.md`
    - Frontmatter: see [references/wiki-format.md](references/wiki-format.md)
    - Add `[[wikilinks]]` to related existing pages
    - Cap at 1500 lines; if longer, split into parts with `(part N)` suffix and cross-references
-4. **Update related pages**: add cross-references (`[[new-page]]`) to existing wiki pages that share topics
-5. **Update index**: append the new page entry to `{{VAULT_PATH}}/{{INDEX_FILE}}`
+5. **Update related pages**: add cross-references (`[[new-page]]`) to existing wiki pages that share topics
+6. **Update index**: append the new page entry to `{{VAULT_PATH}}/{{INDEX_FILE}}`
    - Format: `- [[page-name]] -- one-line summary`
-6. **Log** all mutations to `{{VAULT_PATH}}/{{LOG_FILE}}`:
+7. **Log** all mutations to `{{VAULT_PATH}}/{{LOG_FILE}}`:
    - New page: `YYYY-MM-DD HH:MM | +page | page-name | created from <source>`
    - Updated page: `YYYY-MM-DD HH:MM | ~page | page-name | added cross-ref to <new-page>`
    - Ingest event: `YYYY-MM-DD HH:MM | >ingest | <source> | N pages created/updated`
    - New link: `YYYY-MM-DD HH:MM | @link | page-a -> page-b | bidirectional cross-ref`
-7. **Route original** file to the correct PARA folder per routing rules
+8. **Route original** file to the correct PARA folder per routing rules
    - Use `Bash` to move: the source file is read-only during ingest, then moved (not copied)
 
 A single source should touch 5-15 wiki pages. The wiki compounds with every ingest.
@@ -146,6 +154,19 @@ Synthesizes answers from across the vault, with source citations via wikilinks.
    - Log: `YYYY-MM-DD HH:MM | ?query | synthesis-slug | query: "<summary of question>"`
 6. **Log the query** even if no page is filed:
    - `YYYY-MM-DD HH:MM | ?query | - | query: "<summary of question>", N pages consulted`
+
+#### Multi-Vault Query
+
+When a query spans multiple knowledge domains, search across all configured vaults. Vault paths are defined in the user's global CLAUDE.md (typically personal-docs, engineering-docs, and ai-power vaults).
+
+**Cross-vault search procedure**:
+1. Start with the primary vault (`{{VAULT_PATH}}`) -- this is always the default
+2. If the query involves technical/engineering topics, also search the engineering-docs vault
+3. If the query involves AI/ML research, also search the ai-power vault
+4. Prefix cross-vault citations with the vault name: `[engineering-docs] [[page-name]]`
+5. Note in the synthesis when information was sourced from multiple vaults
+
+Cross-vault search is **opt-in by context** -- only expand beyond the primary vault when the query clearly spans domains. Single-domain queries stay within the primary vault for speed.
 
 ---
 

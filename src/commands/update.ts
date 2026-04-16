@@ -2,7 +2,7 @@
 // vskill update -- update installed skills
 // ---------------------------------------------------------------------------
 
-import { unlinkSync } from "node:fs";
+import { unlinkSync, rmdirSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { readLockfile, writeLockfile } from "../lockfile/index.js";
 import { ensureSkillMdNaming } from "../installer/migrate.js";
@@ -46,6 +46,28 @@ function cleanupGhostFiles(
       } catch {
         // File may already be missing — ignore
       }
+    }
+  }
+  // Clean up empty directories left behind
+  const dirsToCheck = new Set<string>();
+  for (const file of oldFiles) {
+    if (!newSet.has(file)) {
+      const dir = resolve(skillDir, file, "..");
+      if (dir !== resolvedBase && dir.startsWith(resolvedBase + "/")) {
+        dirsToCheck.add(dir);
+      }
+    }
+  }
+  // Remove empty dirs bottom-up
+  const sortedDirs = [...dirsToCheck].sort((a, b) => b.length - a.length);
+  for (const dir of sortedDirs) {
+    try {
+      const entries = readdirSync(dir);
+      if (entries.length === 0) {
+        rmdirSync(dir);
+      }
+    } catch {
+      // Directory may already be removed — ignore
     }
   }
 }
@@ -183,7 +205,7 @@ export async function updateCommand(
 
       // 6. Resolve version
       const newVersion = resolveVersion({
-        serverVersion: result.version,
+        serverVersion: parsed.type === "registry" ? result.version : undefined,
         frontmatterVersion: extractFrontmatterVersion(result.content),
         currentVersion: entry.version,
         hashChanged: true,

@@ -12,7 +12,12 @@ import type { SkillLockEntry, VskillLock } from "./types.js";
 export function migrateLockEntry(entry: SkillLockEntry): SkillLockEntry {
   const version =
     !entry.version || entry.version === "0.0.0" ? "1.0.0" : entry.version;
-  return { ...entry, version };
+
+  // Normalize tier values from external tools (e.g., specweave migration uses "free")
+  const validTiers = ["CERTIFIED", "VERIFIED", "SCANNED"];
+  const tier = validTiers.includes(entry.tier) ? entry.tier : "VERIFIED";
+
+  return { ...entry, version, tier };
 }
 
 /**

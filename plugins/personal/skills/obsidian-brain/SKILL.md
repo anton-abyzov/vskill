@@ -402,3 +402,13 @@ Shell scripts for deterministic operations (POSIX-compatible):
 - [scripts/detect-changes.sh](scripts/detect-changes.sh) -- inbox file count + recently modified files
 - [scripts/update-index.sh](scripts/update-index.sh) -- regenerate index from wiki page frontmatter
 - [scripts/lint-check.sh](scripts/lint-check.sh) -- orphan detection, missing cross-refs, backlog count
+
+## Quick Reference
+
+| Operation | Trigger | Frequency |
+|-----------|---------|-----------|
+| **Ingest** | New files in `raw/inbox/` | 4x/day via CronCreate |
+| **Query** | User asks about vault content | On-demand |
+| **Lint** | Health check request | Weekly or on-demand |
+
+**Emergency ingest**: If inbox has 50+ files, process in batches of 10 with a `~batch` log tag.

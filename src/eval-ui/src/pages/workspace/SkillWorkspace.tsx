@@ -25,7 +25,7 @@ function isValidPanel(value: string | null): value is PanelId {
 
 export function SkillWorkspaceInner() {
   const { state, dispatch, saveContent, isReadOnly } = useWorkspace();
-  const { refreshSkills, clearSelection } = useStudio();
+  const { state: studioState, refreshSkills, clearSelection } = useStudio();
 
   const handleDelete = useCallback(async () => {
     try {
@@ -101,6 +101,7 @@ export function SkillWorkspaceInner() {
   }
 
   const isRunning = Array.from(state.caseRunStates.values()).some((s) => s.status === "running" || s.status === "queued");
+  const hasUpdate = studioState.skills.find((s) => s.skill === state.skill && s.plugin === state.plugin)?.updateAvailable ?? false;
 
   // ---------------------------------------------------------------------------
   // Render
@@ -128,6 +129,7 @@ export function SkillWorkspaceInner() {
         isRunning={isRunning}
         hasRegressions={state.regressions.length > 0}
         isActivationRunning={state.activationRunning}
+        hasUpdate={hasUpdate}
       />
 
       {/* Panel content */}

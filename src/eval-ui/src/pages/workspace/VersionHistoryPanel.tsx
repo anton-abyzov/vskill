@@ -1,7 +1,8 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { useWorkspace } from "./WorkspaceContext";
+import { useStudio } from "../../StudioContext";
 import { api } from "../../api";
-import { useSWR } from "../../hooks/useSWR";
+import { useSWR, mutate } from "../../hooks/useSWR";
 import { ChangelogViewer } from "../../components/ChangelogViewer";
 import type { VersionEntry, VersionDiff } from "../../types";
 
@@ -19,6 +20,7 @@ function truncate(s: string | null, max: number): string {
 export function VersionHistoryPanel() {
   const { state } = useWorkspace();
   const { plugin, skill } = state;
+  const { refreshSkills, updateCount } = useStudio();
 
   // Fetch versions
   const swrKey = `versions/${plugin}/${skill}`;
@@ -32,6 +34,11 @@ export function VersionHistoryPanel() {
   // Diff state
   const [diff, setDiff] = useState<VersionDiff | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
+
+  // Update state (T-006)
+  const [updateStatus, setUpdateStatus] = useState<"idle" | "updating" | "scanning" | "installing" | "done" | "error">("idle");
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const esRef = useRef<EventSource | null>(null);
 
   // Pagination sentinel
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -83,6 +90,75 @@ export function VersionHistoryPanel() {
     setSelectedB(latest.version);
   }, [installed, latest]);
 
+  // T-006: Update handler
+  // Server emits named SSE events via sendSSE(res, eventName, data):
+  //   "progress" → { status: "updating" | "scanning" | "installing" | "done" }
+  //   "done"     → final event (sendSSEDone closes the stream)
+  //   "error"    → { error: "..." }
+  const handleUpdate = useCallback(() => {
+    setUpdateStatus("updating");
+    setUpdateError(null);
+
+    const es = api.startSkillUpdate(plugin, skill);
+    esRef.current = es;
+
+    es.addEventListener("progress", (evt: MessageEvent) => {
+      try {
+        const data = JSON.parse(evt.data);
+        switch (data.status) {
+          case "scanning":
+            setUpdateStatus("scanning");
+            break;
+          case "installing":
+            setUpdateStatus("installing");
+            break;
+          case "done":
+            setUpdateStatus("done");
+            break;
+        }
+      } catch {
+        // Malformed SSE data — reset to idle so user can retry
+        setUpdateStatus("error");
+        setUpdateError("Unexpected response from server");
+      }
+    });
+
+    es.addEventListener("done", () => {
+      es.close();
+      esRef.current = null;
+      refreshSkills();
+      mutate(swrKey);
+      setUpdateStatus("done");
+    });
+
+    es.addEventListener("error", (evt: Event) => {
+      // SSE "error" can be either a named server event or a connection error.
+      // Named server events have evt.data with error details.
+      const me = evt as MessageEvent;
+      let errorMsg = "Connection lost";
+      if (me.data) {
+        try {
+          const data = JSON.parse(me.data);
+          errorMsg = data.error || "Update failed";
+        } catch {}
+      }
+      setUpdateStatus("error");
+      setUpdateError(errorMsg);
+      es.close();
+      esRef.current = null;
+    });
+  }, [plugin, skill, swrKey, refreshSkills]);
+
+  // Cleanup EventSource on unmount
+  useEffect(() => {
+    return () => {
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+    };
+  }, []);
+
   if (loading) {
     return (
       <div className="p-5">
@@ -112,11 +188,48 @@ export function VersionHistoryPanel() {
         <div className="text-[14px] font-semibold" style={{ color: "var(--text-primary)" }}>
           Version History
         </div>
-        {showAutoLink && (
-          <button onClick={handleAutoLink} className="btn btn-secondary text-[11px]">
-            View changes since installed
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {showAutoLink && (
+            <button onClick={handleAutoLink} className="btn btn-secondary text-[11px]">
+              View changes since installed
+            </button>
+          )}
+          {showAutoLink && updateStatus !== "done" && (
+            updateStatus === "error" ? (
+              <span className="flex items-center gap-1.5">
+                <span className="text-[11px]" style={{ color: "var(--red)" }}>
+                  {updateError || "Update failed"}
+                </span>
+                <button onClick={handleUpdate} className="btn btn-secondary text-[11px]">
+                  Retry
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={handleUpdate}
+                disabled={updateStatus !== "idle"}
+                className="btn btn-primary text-[11px]"
+              >
+                {updateStatus === "idle"
+                  ? `Update to ${latest?.version}`
+                  : updateStatus === "updating"
+                    ? "Starting update..."
+                    : updateStatus === "scanning"
+                      ? "Scanning..."
+                      : "Installing..."}
+              </button>
+            )
+          )}
+          {updateCount > 1 && (
+            <button
+              onClick={() => { window.location.hash = "#/updates"; }}
+              className="text-[11px] hover:underline"
+              style={{ color: "var(--text-tertiary)", background: "transparent", border: "none", cursor: "pointer" }}
+            >
+              Manage all updates ({updateCount})
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Compare hint */}

@@ -41,6 +41,7 @@ vi.mock("../WorkspaceContext", () => ({
 
 vi.mock("../../../StudioContext", () => ({
   useStudio: () => ({
+    state: { skills: [] },
     refreshSkills: vi.fn(),
     clearSelection: vi.fn(),
   }),

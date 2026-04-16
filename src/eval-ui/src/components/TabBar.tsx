@@ -7,6 +7,7 @@ interface Props {
   isRunning: boolean;
   hasRegressions: boolean;
   isActivationRunning: boolean;
+  hasUpdate?: boolean;
 }
 
 interface TabDef {
@@ -110,7 +111,7 @@ function TabIcon({ id }: { id: PanelId }) {
   }
 }
 
-export function TabBar({ activePanel, onPanelChange, isDirty, isRunning, hasRegressions, isActivationRunning }: Props) {
+export function TabBar({ activePanel, onPanelChange, isDirty, isRunning, hasRegressions, isActivationRunning, hasUpdate }: Props) {
   return (
     <div
       className="flex items-center gap-0.5 px-3 overflow-x-auto"
@@ -126,7 +127,8 @@ export function TabBar({ activePanel, onPanelChange, isDirty, isRunning, hasRegr
             const showDot = (tab.id === "editor" && isDirty) ||
               (tab.id === "run" && isRunning) ||
               (tab.id === "activation" && isActivationRunning) ||
-              (tab.id === "history" && hasRegressions);
+              (tab.id === "history" && hasRegressions) ||
+              (tab.id === "versions" && hasUpdate);
 
             const dotColor = tab.id === "run" ? "var(--accent)"
               : tab.id === "activation" ? "var(--accent)"

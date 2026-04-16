@@ -68,7 +68,7 @@ export async function submitCommand(
       repoUrl,
       skillName: opts.skill,
       skillPath: opts.path,
-      source: "cli-auto",
+      source: "cli-submit",
     });
 
     if (response.blocked) {

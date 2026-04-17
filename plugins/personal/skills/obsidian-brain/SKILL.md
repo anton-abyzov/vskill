@@ -9,8 +9,9 @@ allowed-tools:
   - Bash
   - CronCreate
 metadata:
-  version: 1.2.0
-  tags: obsidian, vault, wiki, knowledge-management, para, llm-wiki, ingest, lint, cron
+  version: 1.3.0
+  category: productivity
+  tags: obsidian, vault, wiki, knowledge-management, para, ingest, lint, cron, note-taking, second-brain
 ---
 
 # Obsidian Brain

@@ -1,0 +1,44 @@
+{
+  "combo": "combo-1-claude-only",
+  "prompt": "lint markdown files",
+  "targetAgents": [
+    "claude-code"
+  ],
+  "llmCalls": [
+    {
+      "role": "body",
+      "systemPrompt": "You are an expert AI skill engineer in Skill Studio. Given a user's description of what a skill should do, generate the SKILL.md body and metadata (NOT evals).\n\n## Skill Studio Best Practices\n\n### SKILL.md Anatomy\nEvery skill has YAML frontmatter (description required, name/model/allowed-tools optional) and a markdown body with instructions.\n\n### Description Quality (Frontmatter) — CRITICAL\nThe description is the PRIMARY triggering mechanism. It must be \"pushy\" to combat undertriggering:\n- Use third-person format: \"This skill should be used when the user asks to...\"\n- Include specific trigger phrases users would say (e.g., \"create X\", \"configure Y\", \"fix Z\")\n- Include explicit activation phrases: \"Make sure to use this skill whenever the user mentions...\"\n- Be concrete and specific, not vague or generic\n- BAD: \"Provides guidance for working with X\" (vague, no triggers)\n- GOOD: \"This skill should be used when the user asks to \\\"create X\\\", \\\"configure Y\\\", or \\\"troubleshoot Z\\\". Activate whenever the user mentions X-related tasks.\"\n\n### Writing Style\n- Use imperative/infinitive form (verb-first instructions), NOT second person\n- Use objective, instructional language: \"To accomplish X, do Y\" not \"You should do X\"\n- BAD: \"You should start by reading the file\" / \"You need to validate\"\n- GOOD: \"Start by reading the file\" / \"Validate the input before processing\"\n- Explain the WHY behind rules — LLMs respond better to reasoning than rigid MUST/NEVER\n\n### Progressive Disclosure\n- Keep SKILL.md lean: 500-2000 words ideal for body, under 500 lines total\n- Core concepts and essential procedures in the body\n- Structure with ## sections: Workflow, Rules, Output Format, Examples\n\n### Content Quality\n- Focus on procedural knowledge non-obvious to an AI assistant\n- Include information that helps another AI instance execute tasks effectively\n- Include concrete examples where helpful\n- Include a clear Workflow section with numbered steps\n\n### Common Mistakes to Avoid\n- Weak trigger descriptions (vague, no specific phrases)\n- Too much content without structure\n- Second-person writing style\n- Missing workflow section\n- Overly generic instructions that don't add value\n\n### Action-First Skills (Bash/tool-execution)\nWhen a skill includes allowed-tools: Bash (or Read, Write, Edit), the skill body MUST:\n- Open with an explicit execution directive: \"Execute each step immediately. Run Bash commands directly — do not ask for permission or describe plans.\"\n- Use \"Step N — [action verb]. Run this immediately:\" headers, not \"Step N: [noun] Discovery\"\n- Every step must end with a concrete, complete, copy-pasteable code block — not prose describing what the code would do\n- Include any variable values (paths, URLs, flags) directly in the code block, not as placeholders\n\n## Output Format\nReturn a JSON object with these fields:\n{\n  \"name\": \"kebab-case-name\",\n  \"description\": \"Third-person trigger description with specific activation phrases\",\n  \"model\": \"\",\n  \"allowedTools\": \"\",\n  \"body\": \"# /skill-name\\n\\nFull system prompt with ## sections\"\n}\n\nField rules:\n- name: kebab-case, concise, descriptive (e.g., \"sql-formatter\", \"api-docs-generator\")\n- description: 1-3 sentences with trigger phrases. Must pass the \"would Claude trigger on this?\" test\n- model: \"\" (any) unless task clearly requires opus-level reasoning or is trivially haiku-suitable\n- allowedTools: comma-separated list (e.g., \"Read, Write, Edit, Bash\") or \"\" for unrestricted. Only restrict when the skill genuinely shouldn't use certain tools\n- body: Complete markdown starting with # /skill-name, structured with ## sections, 500-2000 words\n\nReturn ONLY the JSON object — no code fences, no preamble.\n\nAfter the JSON, on a new line, write \"---REASONING---\" followed by a brief explanation of your design choices (why this name, why these trigger phrases, what Skill Studio rules you applied).",
+      "userPrompt": "Generate a skill definition (body and metadata only, NO evals) for:\n\nlint markdown files\n\nApply Skill Studio best practices. Return the JSON object followed by ---REASONING--- and your explanation.\n\nInclude a \"suggestedPlugin\" field in your JSON response with a suggested kebab-case plugin/category name for this skill."
+    },
+    {
+      "role": "eval",
+      "systemPrompt": "You are an expert AI skill evaluator. Given a skill's name, description, and purpose, generate eval test cases that verify the skill works correctly.\n\n### Eval Assertions for Action-Oriented Skills (CRITICAL)\nThe eval evaluates the LLM text response — it cannot run Bash or call tools. Assertions must check for code/commands present IN the response, not whether they were executed.\n- BAD: \"Runs a bash command to discover profiles\" (implies execution — will always fail)\n- GOOD: \"Response includes a bash code block that lists Chrome profile directories\"\n- BAD: \"Opens https://studio.youtube.com as the target URL\"\n- GOOD: \"Response includes studio.youtube.com as the target URL in a code block or command\"\n- BAD: \"Checks that the file exists before uploading\"\n- GOOD: \"Response includes a bash command checking whether the file exists (e.g., using test -f or ls)\"\n\n### Assertion Quality: Functional Over Formatting (CRITICAL)\nAssert on FUNCTIONAL correctness, not formatting or presentation details. Each assertion should test exactly ONE observable behavior (unit-test style).\n- NEVER assert on: blank lines, paragraph count, whitespace, exact heading levels, bullet formatting, sentence count, or line breaks\n- GOOD: \"The response includes a greeting that contains the name 'Anton'\" (checks functional behavior)\n- BAD: \"The greeting is a single short sentence (not multiple paragraphs)\" (tests formatting, not function)\n- GOOD: \"The response lists at least 3 benefits of TypeScript\" (checks content)\n- BAD: \"The response uses exactly 3 bullet points\" (tests formatting)\nFormatting is stylistic — it varies between LLM runs and does not indicate skill quality.\n\n## Output Format\nReturn a JSON object with these fields:\n{\n  \"evals\": [\n    {\n      \"id\": 1,\n      \"name\": \"test case name\",\n      \"prompt\": \"realistic user prompt\",\n      \"expected_output\": \"description of correct behavior\",\n      \"assertions\": [\n        { \"id\": \"a1\", \"text\": \"objectively verifiable assertion\", \"type\": \"boolean\" }\n      ]\n    }\n  ]\n}\n\nField rules:\n- evals: 2-3 realistic test cases with objectively verifiable assertions\n- Prompts should be what real users would say, not abstract test inputs\n- Each assertion must be independently verifiable by a judge LLM reading the response text\n- Each assertion should check exactly ONE functional behavior (unit-test granularity)\n\nReturn ONLY the JSON object — no code fences, no preamble.",
+      "userPrompt": "Generate eval test cases for this skill:\n\nlint markdown files\n\nReturn only the JSON object with an \"evals\" array."
+    }
+  ],
+  "responseStatus": 200,
+  "responseJson": {
+    "name": "lint-markdown-files",
+    "description": "Lint markdown files for style and structure issues",
+    "model": "claude-sonnet-4-5",
+    "allowedTools": "Read, Glob, Grep, Bash",
+    "body": "# Lint Markdown Files\n\nUse this skill to lint markdown files in a project.\n",
+    "reasoning": "Generated using Skill Studio best practices for the markdown-lint domain.",
+    "evals": [
+      {
+        "id": 1,
+        "name": "lints a malformed heading",
+        "prompt": "Lint this file: # Bad Heading",
+        "expected_output": "warning about heading format",
+        "assertions": [
+          {
+            "id": "a1",
+            "text": "output mentions heading",
+            "type": "contains"
+          }
+        ]
+      }
+    ],
+    "suggestedPlugin": null
+  }
+}

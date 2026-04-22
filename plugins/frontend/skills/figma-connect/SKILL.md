@@ -19,9 +19,9 @@ This skill requires two independent authentication paths:
 2. Requires Full or Dev seat on a paid Figma plan.
 
 **CLI Auth (Token)** — for `npx figma connect publish/parse/create`:
-1. Check: `echo $FIGMA_ACCESS_TOKEN` or `npx figma connect --version`
+1. Check: `[ -n "$FIGMA_ACCESS_TOKEN" ] && echo "Token set" || echo "Token missing"` or `npx figma connect --version`
 2. If missing: create a personal access token at figma.com/developers with scopes "Code Connect: Write" and "File content: Read"
-3. Set via: `export FIGMA_ACCESS_TOKEN=<token>` or add to `.env`
+3. Set via: `export FIGMA_ACCESS_TOKEN=<token>` (prefer `.env` with `.gitignore` entry to avoid shell history exposure)
 
 **Always check both** before workflows that use both (Setup, Publish, Roundtrip). Design-to-Code and Token Extraction only need MCP auth.
 
@@ -41,7 +41,7 @@ Auto-detect the project framework to set MCP `clientFrameworks` param and CLI Co
 | `pubspec.yaml` has `flutter` | Flutter | `Flutter` | `flutter` |
 | None detected / plain HTML | Web Components | `Web Components` | `html,css` |
 
-When ambiguous (e.g., monorepo with multiple frameworks), ask the user.
+**Precedence**: User-stated framework in the prompt always overrides file detection. When ambiguous (e.g., monorepo with multiple frameworks), ask the user.
 
 ## URL Parsing
 
@@ -108,19 +108,21 @@ Always convert `node-id` dashes to colons: `42-156` becomes `42:156`.
 
 ## Mode 2: Design-to-Code
 
-**When**: User shares a Figma URL and wants code implementation.
+**When**: User shares a Figma URL and wants code implementation. (For new projects needing full setup first, run Mode 1 before this.)
 
 ### Steps
 
-1. **Parse URL**: Extract `fileKey` and `nodeId` (see URL Parsing section).
+1. **Check MCP auth**: Call `whoami()`. If it fails, guide OAuth setup and stop.
 
-2. **Screenshot** (visual confirmation):
+2. **Parse URL**: Extract `fileKey` and `nodeId` (see URL Parsing section).
+
+3. **Screenshot** (visual confirmation):
    Call `get_screenshot(fileKey, nodeId)` to see what we're implementing.
 
-3. **Check existing Code Connect**:
-   Call `get_code_connect_map(fileKey, nodeId)`. If mappings exist, the response to `get_design_context` will include `<CodeConnectSnippet>` wrappers with import statements and component usage — prioritize these over generated code.
+4. **Check existing Code Connect**:
+   Call `get_code_connect_map(fileKey, nodeId)` to check whether mappings exist. Note: `get_design_context` independently includes `<CodeConnectSnippet>` wrappers when mappings are present — prioritize these over generated code.
 
-4. **Get design context**:
+5. **Get design context**:
    ```
    get_design_context(
      fileKey, nodeId,
@@ -130,16 +132,16 @@ Always convert `node-id` dashes to colons: `42-156` becomes `42:156`.
    ```
    Returns: reference code (default React+Tailwind), screenshot, asset download URLs.
 
-5. **Adapt to project conventions**:
+6. **Adapt to project conventions**:
    - Replace hardcoded colors/spacing with project tokens (CSS vars, Tailwind classes)
    - Use existing project components instead of generating duplicates
    - Follow project file naming and directory conventions
    - Import from project's component library, not generated imports
    - If Code Connect snippets were returned, use them as the primary implementation reference
 
-6. **Download assets**: Use the asset URLs from `get_design_context` response for images, icons, etc.
+7. **Download assets**: Use the asset URLs from `get_design_context` response for images, icons, etc.
 
-7. **Suggest Code Connect** (if not set up):
+8. **Suggest Code Connect** (if not set up):
    If `get_code_connect_map` returned empty, suggest: "Consider setting up Code Connect to improve future design-to-code workflows. Run the Setup mode to get started."
 
 ### MCP Tools Used
@@ -297,7 +299,7 @@ See `references/token-format-mappings.md` for all supported formats.
 2. **Token Extraction** (Mode 4): Pull Figma variables into project token files
 3. **Design-to-Code** (Mode 2): Implement key components from the design system
 4. **Code Connect Publish** (Mode 3): Map implemented components back to Figma
-5. **Verify**: Call `get_design_context` again — response should now include Code Connect snippets, confirming the roundtrip is working
+5. **Verify**: Call `get_design_context` again with the same fileKey/nodeId. When Code Connect mappings are registered, the response includes Code Connect snippet wrappers (typically tagged similar to `<CodeConnectSnippet>`) containing the component import and usage — look for these as the confirmation signal. If absent, re-run `npx figma connect publish` and retry.
 
 ### When to Use
 - Greenfield project connecting to an existing Figma design system
@@ -315,7 +317,7 @@ See `references/token-format-mappings.md` for all supported formats.
 | Check existing mappings | MCP `get_code_connect_map` | Read-only operation |
 | Get mapping suggestions | MCP `get_code_connect_suggestions` | AI-powered matching |
 | Create simple mappings | MCP `send_code_connect_mappings` | No prop mapping needed |
-| Create complex mappings | CLI `figma connect create` + edit | Rich prop mapping API |
+| Create complex mappings | Generate `.figma.tsx` manually + CLI `figma connect parse` | Rich prop mapping API |
 | Validate before publish | CLI `figma connect parse` | Local validation |
 | Publish to Dev Mode | CLI `figma connect publish` | Only way to make snippets visible |
 | Dry-run validation | CLI `figma connect publish --dry-run` | Pre-flight check |
@@ -336,7 +338,7 @@ See `references/token-format-mappings.md` for all supported formats.
 | `figma connect parse` errors | Invalid .figma.tsx syntax | Check Code Connect template syntax, ensure correct imports |
 | `figma connect publish` 403 | Token lacks "Code Connect: Write" scope | Regenerate token with correct scopes |
 | `get_code_connect_suggestions` empty | No published library components | Publish components to team library first |
-| Rate limit (429) | Too many MCP calls | Starter: 6/month, Pro: 200/day, Enterprise: 600/day. Batch operations. |
+| Rate limit (429) | Too many MCP calls | Rate limits vary by plan — check Figma developer documentation for current limits. Batch operations to reduce API calls. |
 | Node not found | Invalid nodeId or file moved | Verify URL, check if file was renamed or node deleted |
 | Branch URL wrong fileKey | Using fileKey instead of branchKey | For branch URLs, use branchKey as fileKey (see URL Parsing) |
 | Code Connect conflict | UI and CLI mappings on same node | Only one connection type per component. Remove one before adding the other. |

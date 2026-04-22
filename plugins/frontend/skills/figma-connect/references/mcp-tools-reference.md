@@ -94,11 +94,6 @@ Complete API reference for all Figma MCP server tools available via `mcp__claude
 
 ## Rate Limits
 
-| Plan | Daily | Per-Minute |
-|------|-------|-----------|
-| Enterprise | 600 | 20 |
-| Organization | 200 | 15 |
-| Professional | 200 | 10 |
-| Starter | 6/month | N/A |
+Rate limits vary by plan. Check [Figma developer documentation](https://www.figma.com/developers/api) for current limits. Batch operations to reduce API calls.
 
 **Exempt tools**: add_code_connect_map, whoami

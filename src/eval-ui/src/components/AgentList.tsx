@@ -115,9 +115,14 @@ function AgentRow({ agent, isActive, isFocused, onFocus, onSelect, onOpenSetting
     "zed": { label: providers.zed.installCta },
   };
 
+  // 0686 T-012: Claude Code row stacks a billing caption under the agent
+  // name, so fixed 36px clips the second line. Other rows keep 36px exactly
+  // for visual continuity.
+  const isClaudeCode = agent.id === "claude-cli" || agent.id === "claude-code";
   const rowStyle: React.CSSProperties = {
-    height: 36,
-    padding: "0 12px",
+    minHeight: 36,
+    height: isClaudeCode ? "auto" : 36,
+    padding: isClaudeCode ? "6px 12px" : "0 12px",
     display: "flex",
     alignItems: "center",
     gap: 8,
@@ -169,8 +174,47 @@ function AgentRow({ agent, isActive, isFocused, onFocus, onSelect, onOpenSetting
       )}
       {!agent.wrapperFolder && <span style={{ width: 6, height: 6, flexShrink: 0 }} aria-hidden="true" />}
 
-      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {agent.displayName}
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <span
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {agent.displayName}
+        </span>
+        {/* 0686 T-012 (US-006): compact billing label + tooltip on Claude
+            Code row. Label text + tooltip copy are research-verified and
+            MUST stay byte-for-byte identical (enforced by
+            AgentList.claudeCodeLabel.test.tsx). We support both `claude-cli`
+            (runtime id in useAgentCatalog) and `claude-code` (server
+            AgentsResponse id) so whichever surface drives the picker, the
+            label still fires. */}
+        {(agent.id === "claude-cli" || agent.id === "claude-code") && (
+          <span
+            data-testid="claude-code-billing-label"
+            title={strings.claudeCodeLabel.tooltip}
+            style={{
+              fontSize: 10,
+              color: "var(--text-secondary, var(--text-tertiary))",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              marginTop: 1,
+            }}
+          >
+            {strings.claudeCodeLabel.compactLabel}
+          </span>
+        )}
       </span>
 
       {/* Availability glyph */}

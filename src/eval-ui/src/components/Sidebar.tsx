@@ -25,6 +25,11 @@ interface Props {
    * browser menu is shown.
    */
   onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>, skill: SkillInfo) => void;
+  /**
+   * 0683 T-005: per-origin outdated counts, plumbed through from the
+   * provider so each section header can render its `N updates ▾` chip.
+   */
+  outdatedByOrigin?: { source: number; installed: number };
 }
 
 interface SectionData {
@@ -62,7 +67,7 @@ function partitionAndGroup(
  * exposes the thresholded list as a single path so swapping in a virtual
  * scroller is local to `<SectionList>`.
  */
-export function Sidebar({ skills, selectedKey, onSelect, isLoading, error, onRetry, onContextMenu }: Props) {
+export function Sidebar({ skills, selectedKey, onSelect, isLoading, error, onRetry, onContextMenu, outdatedByOrigin }: Props) {
   const [query, setQuery] = useState("");
   // T-0684 (Perf-2): defer the query so the input stays responsive even
   // when the filtered list is expensive to re-compute. The input keeps
@@ -146,7 +151,7 @@ export function Sidebar({ skills, selectedKey, onSelect, isLoading, error, onRet
 
       {!isLoading && !error && (
         <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-          <SidebarSection origin="source" count={own.total} filteredCount={query ? own.filtered : null}>
+          <SidebarSection origin="source" count={own.total} filteredCount={query ? own.filtered : null} updateCount={outdatedByOrigin?.source}>
             {own.filtered === 0 ? (
               <OwnEmptyState queryActive={!!query} />
             ) : (
@@ -162,7 +167,7 @@ export function Sidebar({ skills, selectedKey, onSelect, isLoading, error, onRet
 
           <FullWidthDivider />
 
-          <SidebarSection origin="installed" count={installed.total} filteredCount={query ? installed.filtered : null}>
+          <SidebarSection origin="installed" count={installed.total} filteredCount={query ? installed.filtered : null} updateCount={outdatedByOrigin?.installed}>
             {installed.filtered === 0 ? (
               <InstalledEmptyState queryActive={!!query} />
             ) : (

@@ -309,7 +309,7 @@ describe("createLlmClient", () => {
         proc.emit("error", err);
       }, 0);
 
-      await expect(promise).rejects.toThrow("Claude CLI not found");
+      await expect(promise).rejects.toThrow("Claude Code not found");
     });
 
     it("throws with truncated error on non-zero exit", async () => {

@@ -1,5 +1,6 @@
 import type { SelectedSkill } from "../StudioContext";
-import { ModelSelector } from "./ModelSelector";
+import { AgentModelPicker } from "./AgentModelPicker";
+import { UpdateBell } from "./UpdateBell";
 
 interface Props {
   projectName: string | null;
@@ -148,12 +149,15 @@ export function TopRail({ projectName, selected, onOpenPalette }: Props) {
         data-toprail-right="true"
         style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
       >
-        {/* T-060: Model selector wired into the right-side action cluster.
-            ModelSelector is hook-heavy and consumes useConfig(); it renders
-            null until the ConfigProvider has hydrated, so the surrounding
-            layout never shifts. Tests supply a mock via vi.mock. */}
-        <span data-slot="model-selector" style={{ minWidth: 140 }}>
-          <ModelSelector />
+        {/* 0682: AgentModelPicker replaces the legacy flat ModelSelector.
+            Two-pane agent + model chooser with searchable OpenRouter catalog,
+            unified Settings modal, and Claude Code auto-default. */}
+        <span data-slot="agent-model-picker" style={{ minWidth: 200 }}>
+          <AgentModelPicker />
+        </span>
+        {/* 0683 T-008: UpdateBell sits between ModelSelector and the ⌘K button. */}
+        <span data-slot="update-bell" style={{ display: "inline-flex" }}>
+          <UpdateBell />
         </span>
         <button
           type="button"

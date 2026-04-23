@@ -352,13 +352,19 @@ npx vskill eval generate-all              # Batch-generate for all skills
 
 Previous benchmark results are displayed on the skill detail page without re-running. Per-case pass/fail status, time, and token usage are shown inline.
 
+## Claude Max/Pro subscription compliance
+
+vSkill Studio does not consume your Max/Pro subscription quota directly. It delegates to the official [Claude Code CLI](https://docs.claude.com/en/docs/claude-code), the sanctioned consumer per Anthropic's April 2026 Terms of Service update. The Claude adapter never reads `~/.claude/credentials*`, `~/.claude/auth*`, or `~/.claude/token*` — a bundled unit test (`src/eval/__tests__/claude-cli-compliance.test.ts`) plus a dist-bundle grep gate (`scripts/check-bundle-compliance.sh`) enforce this on every build.
+
+Issue API keys for direct access at [platform.claude.com/settings/keys](https://platform.claude.com/settings/keys) or [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys). Keys entered in Studio's Settings modal are stored locally on-device only (in-memory + browser localStorage mirror, or macOS Keychain on opt-in) — never synced, never committed to git, never transmitted off-device except to the provider's own API.
+
 ### Model configuration
 
 The eval system supports multiple LLM providers. Switch between them in the eval UI dropdown or via environment variables.
 
 | Provider | Models | Requirements |
 |:---------|:-------|:-------------|
-| **Claude CLI** | Sonnet, Opus, Haiku | Claude Max/Pro subscription + `claude` CLI installed |
+| **Claude Code (CLI)** | Sonnet, Opus, Haiku | `@anthropic-ai/claude-code` installed on PATH — Studio delegates to your existing Claude Code session. |
 | **Anthropic API** | Claude Sonnet 4.6, Opus 4.6, Haiku 4.5 | `ANTHROPIC_API_KEY` env var |
 | **Ollama** | Any locally installed model | Ollama running at `localhost:11434` |
 | **LM Studio** | Any model loaded in LM Studio | LM Studio running at `localhost:1234` (no API key needed) |
@@ -370,8 +376,10 @@ VSKILL_EVAL_PROVIDER=anthropic VSKILL_EVAL_MODEL=claude-opus-4-6 npx vskill eval
 # Use Ollama with a local model
 VSKILL_EVAL_PROVIDER=ollama VSKILL_EVAL_MODEL=qwen2.5:32b npx vskill eval run my-skill
 
-# Custom Ollama server
-OLLAMA_BASE_URL=http://gpu-server:11434 VSKILL_EVAL_PROVIDER=ollama npx vskill eval run my-skill
+# Custom Ollama server — OLLAMA_HOST is the primary env var (matches Ollama's own docs).
+# OLLAMA_BASE_URL is preserved for backcompat but deprecated; Studio logs a one-shot
+# warning if both are set.
+OLLAMA_HOST=http://gpu-server:11434 VSKILL_EVAL_PROVIDER=ollama npx vskill eval run my-skill
 
 # Use LM Studio with a locally loaded model (no API key required)
 VSKILL_EVAL_PROVIDER=lm-studio VSKILL_EVAL_MODEL=qwen2.5-coder-7b npx vskill eval run my-skill

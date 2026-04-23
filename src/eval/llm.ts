@@ -2,8 +2,11 @@
 // LLM client for eval commands — supports multiple CLI tools and API providers
 //
 // Provider selection via VSKILL_EVAL_PROVIDER env var:
-//   "claude-cli" — Claude Code CLI (uses your Max/Pro plan, no API key)
-//   "codex-cli"  — OpenAI Codex CLI (uses ChatGPT subscription or CODEX_API_KEY)
+//   "claude-cli" — Claude Code CLI (delegates to your existing Claude Code
+//                  session; the CLI handles quota. No API key, no OAuth, and
+//                  no reads of ~/.claude/credentials|auth|token. See the
+//                  compliance block above createClaudeCliClient() below.)
+//   "codex-cli"  — OpenAI Codex CLI (uses ChatGPT session or CODEX_API_KEY)
 //   "gemini-cli" — Google Gemini CLI (free tier or GOOGLE_API_KEY)
 //   "anthropic"  — Anthropic API (requires ANTHROPIC_API_KEY)
 //   "ollama"     — Local Ollama server (free, requires ollama running)
@@ -26,6 +29,7 @@
 import { spawn } from "node:child_process";
 import { resolveCliBinary, enhancedPath } from "../utils/resolve-binary.js";
 import { calculateCost, getBillingMode } from "./pricing.js";
+import { resolveOllamaBaseUrl } from "./env.js";
 
 export type BillingMode = "per-token" | "subscription" | "free";
 
@@ -303,8 +307,20 @@ function createCliClient(config: CliConfig): LlmClient {
 }
 
 // ---------------------------------------------------------------------------
-// Provider: Claude CLI (uses your Max/Pro subscription — no API key needed)
-// Strips CLAUDE* env vars so the child process doesn't detect nesting.
+// Provider: Claude CLI — delegates to the official `claude` binary.
+//
+// COMPLIANCE CONTRACT (ToS, April 2026):
+//   This adapter MUST NOT read any file under `~/.claude/credentials*`,
+//   `~/.claude/auth*`, or `~/.claude/token*`. All session auth is owned by
+//   the `claude` CLI child process; vSkill Studio delegates and consumes
+//   only stdout/stderr. See `src/eval/__tests__/claude-cli-compliance.test.ts`
+//   which asserts zero fs reads against those paths at the Node API level,
+//   and `scripts/check-bundle-compliance.sh` which greps the built bundle
+//   for the literal path strings.
+//
+//   Env handling: `CLAUDE*` env vars are stripped from the child so the CLI
+//   does not detect a nested session. No env var is added to compensate —
+//   the CLI resolves its own auth state.
 // ---------------------------------------------------------------------------
 function createClaudeCliClient(modelOverride?: string): LlmClient {
   const raw = modelOverride || process.env.VSKILL_EVAL_MODEL || "sonnet";
@@ -317,7 +333,7 @@ function createClaudeCliClient(modelOverride?: string): LlmClient {
     stripEnvPrefix: "CLAUDE",
     provider: "claude-cli",
     notFoundMsg:
-      "Claude CLI not found. Install it:\n  npm install -g @anthropic-ai/claude-code\n\nOr use a different provider:\n  export VSKILL_EVAL_PROVIDER=ollama",
+      "Claude Code not found. Install it: `npm install -g @anthropic-ai/claude-code`. Or choose a provider with an API key.",
   });
 }
 
@@ -358,7 +374,7 @@ function createGeminiCliClient(modelOverride?: string): LlmClient {
 // Provider: Ollama (local models — free, no API key)
 // ---------------------------------------------------------------------------
 function createOllamaClient(modelOverride?: string): LlmClient {
-  const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+  const baseUrl = resolveOllamaBaseUrl(process.env);
   const model = modelOverride || process.env.VSKILL_EVAL_MODEL || "llama3.1:8b";
 
   return {

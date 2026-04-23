@@ -5,11 +5,19 @@
 // ---------------------------------------------------------------------------
 import { describe, it, expect, vi } from "vitest";
 
-// Mock ModelSelector so TopRail can be rendered without ConfigProvider.
-// We assert on its presence/position via the mock's data-testid.
-vi.mock("../ModelSelector", () => ({
-  ModelSelector: () =>
-    ({ type: "div", props: { "data-testid": "model-selector-mock" } } as unknown),
+// Mock AgentModelPicker (0682) so TopRail can be rendered without the full
+// useAgentCatalog/useCredentialStorage hook graph. We assert on its presence
+// and position via the mock's data-testid.
+vi.mock("../AgentModelPicker", () => ({
+  AgentModelPicker: () =>
+    ({ type: "div", props: { "data-testid": "agent-model-picker-mock" } } as unknown),
+}));
+
+// 0683 T-008: UpdateBell is new in TopRail; stub so this structural test
+// continues to render without a StudioContext.
+vi.mock("../UpdateBell", () => ({
+  UpdateBell: () =>
+    ({ type: "div", props: { "data-testid": "update-bell-mock" } } as unknown),
 }));
 
 // The StatusBar consumes useTheme() which expects a ThemeProvider above it.
@@ -162,7 +170,7 @@ describe("T-060 TopRail — model selector wiring", () => {
     }));
     const slot = findElements(tree, (el) => {
       const attrs = el.props as Record<string, unknown>;
-      return attrs["data-slot"] === "model-selector";
+      return attrs["data-slot"] === "agent-model-picker";
     });
     expect(slot.length).toBe(1);
   });
@@ -182,7 +190,7 @@ describe("T-060 TopRail — model selector wiring", () => {
       ? rightGroup.props.children
       : [rightGroup.props.children];
     const slotIndex = childrenArr.findIndex(
-      (c) => c && typeof c === "object" && (c as ReactEl).props?.["data-slot"] === "model-selector",
+      (c) => c && typeof c === "object" && (c as ReactEl).props?.["data-slot"] === "agent-model-picker",
     );
     const paletteIndex = childrenArr.findIndex(
       (c) =>

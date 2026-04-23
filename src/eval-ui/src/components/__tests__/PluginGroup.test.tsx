@@ -12,6 +12,15 @@ function expand(node: unknown): unknown {
     const rendered = (el.type as (props: Record<string, unknown>) => unknown)(el.props);
     return expand(rendered);
   }
+  // 0683 T-004: step through React.memo-wrapped components so children
+  // of memo'd SkillRows still flow into the assertion pipeline.
+  if (el.type && typeof el.type === "object") {
+    const memoInner = (el.type as { type?: unknown }).type;
+    if (typeof memoInner === "function") {
+      const rendered = (memoInner as (props: Record<string, unknown>) => unknown)(el.props);
+      return expand(rendered);
+    }
+  }
   if (el.props?.children != null) {
     return { ...el, props: { ...el.props, children: expand(el.props.children) } };
   }

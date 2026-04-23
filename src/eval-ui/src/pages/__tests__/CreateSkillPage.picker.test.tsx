@@ -152,7 +152,7 @@ function makeConfig(providers: ProviderInfo[]): ConfigResponse {
 
 const claudeProvider: ProviderInfo = {
   id: "claude-cli",
-  label: "Claude (Max/Pro)",
+  label: "Use current Claude Code session",
   available: true,
   models: [{ id: "sonnet", label: "Sonnet" }, { id: "opus", label: "Opus" }],
 };

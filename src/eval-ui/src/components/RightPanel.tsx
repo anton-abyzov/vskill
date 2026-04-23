@@ -9,6 +9,7 @@ import { EmptyState } from "./EmptyState";
 import { UpdatesPanel } from "../pages/UpdatesPanel";
 import { DetailHeader } from "./DetailHeader";
 import { MetadataTab } from "./MetadataTab";
+import { UpdateAction } from "./UpdateAction";
 
 // ---------------------------------------------------------------------------
 // T-031: Detail-panel host with Overview / Versions tab bar.
@@ -365,6 +366,10 @@ function renderSkillDetail(
       <div style={{ padding: 16, paddingBottom: 12 }}>
         {DetailHeader({ skill })}
       </div>
+      {/* 0683 T-010: "Update to X.Y.Z" block appears directly under the
+          header when an update is pending, so it is visible regardless of
+          which tab is active. Returns null when no update is available. */}
+      <UpdateAction skill={skill} />
       {renderTabBar(active, onChange)}
       <div
         role="tabpanel"

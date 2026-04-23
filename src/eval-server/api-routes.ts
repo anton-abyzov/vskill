@@ -37,6 +37,9 @@ import { writeActivationRun, listActivationRuns, getActivationRun } from "../eva
 import type { ActivationHistoryRun } from "../eval/activation-history.js";
 import { AGENTS_REGISTRY, detectInstalledAgents } from "../agents/agents-registry.js";
 import type { AgentDefinition } from "../agents/agents-registry.js";
+import { resolveOllamaBaseUrl } from "../eval/env.js";
+import * as settingsStore from "./settings-store.js";
+import { loadStudioSelection, saveStudioSelection } from "./studio-json.js";
 
 // ---------------------------------------------------------------------------
 // Installed agents response builder
@@ -394,6 +397,18 @@ const PROBE_CACHE_TTL = 30_000; // re-probe every 30s
 let ollamaCache: { available: boolean; models: ModelOption[]; ts: number } | null = null;
 let lmStudioCache: { available: boolean; models: ModelOption[]; ts: number } | null = null;
 
+// OpenRouter catalog cache — 10 min TTL per-key (keyed by last-8 of apiKey
+// so two keys don't collide and we never store full keys). Exported as a
+// module const for tests to reset via resetOpenRouterCache().
+type OpenRouterCacheEntry = {
+  value: Array<{ id: string; name: string; contextWindow?: number; pricing: { prompt: number; completion: number } }>;
+  fetchedAt: number;
+};
+export const OPENROUTER_CACHE = new Map<string, OpenRouterCacheEntry>();
+export function resetOpenRouterCache(): void {
+  OPENROUTER_CACHE.clear();
+}
+
 /** Test hook: clear all probe caches so the next detectAvailableProviders() re-probes. */
 export function resetDetectionCache(): void {
   ollamaCache = null;
@@ -408,7 +423,7 @@ async function probeOllama(): Promise<{ available: boolean; models: ModelOption[
   let models = PROVIDER_MODELS["ollama"];
   let available = false;
   try {
-    const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+    const baseUrl = resolveOllamaBaseUrl(process.env);
     const resp = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(500) });
     if (resp.ok) {
       available = true;
@@ -450,6 +465,78 @@ async function probeLmStudio(): Promise<{ available: boolean; models: ModelOptio
   return lmStudioCache;
 }
 
+/**
+ * Detection block — surfaces wrapper-folder presence and binary availability
+ * so the UI can render accurate "installed" dots and "install me" CTAs.
+ *
+ * Shape is part of the /api/config response (the frontend types.ts is
+ * read-only per the 0682 ownership boundary, so the field is carried as
+ * opaque JSON and consumed by useAgentCatalog via its own typing).
+ */
+export interface DetectionInfo {
+  wrapperFolders: Record<string, boolean>;
+  binaries: Record<string, boolean>;
+}
+
+const DETECTION_WRAPPER_FOLDERS = [
+  ".claude",
+  ".cursor",
+  ".codex",
+  ".gemini",
+  ".github",
+  ".zed",
+  ".specweave",
+];
+
+const DETECTION_BINARIES = ["claude", "cursor", "codex", "gemini"];
+
+let detectionCache: { data: DetectionInfo; ts: number } | null = null;
+const DETECTION_CACHE_TTL = 30_000;
+
+export function resetProjectDetectionCache(): void {
+  detectionCache = null;
+}
+
+/**
+ * Scan the project root for known agent wrapper folders and the system
+ * PATH for known agent binaries. Cheap synchronous scan (`existsSync` +
+ * `which`) cached for 30 s so repeated `/api/config` polls don't burn CPU.
+ */
+export function detectProjectAgents(root: string): DetectionInfo {
+  const now = Date.now();
+  if (detectionCache && now - detectionCache.ts < DETECTION_CACHE_TTL) {
+    return detectionCache.data;
+  }
+
+  const wrapperFolders: Record<string, boolean> = {};
+  for (const folder of DETECTION_WRAPPER_FOLDERS) {
+    try {
+      wrapperFolders[folder] = existsSync(join(root, folder));
+    } catch {
+      wrapperFolders[folder] = false;
+    }
+  }
+
+  const binaries: Record<string, boolean> = {};
+  for (const bin of DETECTION_BINARIES) {
+    binaries[bin] = isBinaryOnPath(bin);
+  }
+
+  const data: DetectionInfo = { wrapperFolders, binaries };
+  detectionCache = { data, ts: now };
+  return data;
+}
+
+function isBinaryOnPath(name: string): boolean {
+  try {
+    const cmd = process.platform === "win32" ? `where ${name}` : `command -v ${name}`;
+    execSync(cmd, { stdio: "ignore", timeout: 1000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function detectAvailableProviders(): Promise<Array<{
   id: ProviderName;
   label: string;
@@ -463,27 +550,33 @@ export async function detectAvailableProviders(): Promise<Array<{
     models: ModelOption[];
   }> = [];
 
-  // Claude CLI — always available for the eval server (runs in a separate terminal)
+  // Claude CLI — delegates to the `claude` binary; the CLI owns session auth.
+  // See src/eval/llm.ts createClaudeCliClient compliance doc-block.
   providers.push({
     id: "claude-cli",
-    label: "Claude (Max/Pro subscription)",
+    label: "Use current Claude Code session",
     available: true,
     models: PROVIDER_MODELS["claude-cli"],
   });
 
-  // Anthropic API — available if ANTHROPIC_API_KEY is set
+  // Anthropic API — available if ANTHROPIC_API_KEY is set OR a key is in the
+  // settings-store (browser tier or Darwin keychain).
   providers.push({
     id: "anthropic",
-    label: "Anthropic API (requires key)",
-    available: !!process.env.ANTHROPIC_API_KEY,
+    label: "Anthropic API",
+    available:
+      !!process.env.ANTHROPIC_API_KEY ||
+      settingsStore.hasKeySync("anthropic"),
     models: PROVIDER_MODELS["anthropic"],
   });
 
-  // OpenRouter — available if OPENROUTER_API_KEY is set
+  // OpenRouter — available if OPENROUTER_API_KEY is set OR a key is stored.
   providers.push({
     id: "openrouter",
-    label: "OpenRouter (100+ models, requires key)",
-    available: !!process.env.OPENROUTER_API_KEY,
+    label: "OpenRouter",
+    available:
+      !!process.env.OPENROUTER_API_KEY ||
+      settingsStore.hasKeySync("openrouter"),
     models: PROVIDER_MODELS["openrouter"],
   });
 
@@ -554,19 +647,43 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     req.on("aborted", cleanup);
   });
 
-  // OpenRouter model search proxy
+  // OpenRouter model search proxy — 10-minute in-memory cache keyed by the
+  // last-8 chars of the API key so different keys don't collide while the
+  // key itself is never stored in the cache map. Stale cache served (with
+  // X-Vskill-Catalog-Age header) when upstream is down.
   router.get("/api/openrouter/models", async (_req, res) => {
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const envKey = process.env.OPENROUTER_API_KEY;
+    const storedKey = settingsStore.readKeySync("openrouter");
+    const apiKey = envKey || storedKey;
     if (!apiKey) {
       sendJson(res, { error: "OPENROUTER_API_KEY not configured" }, 400);
       return;
     }
+    const cacheKey = apiKey.slice(-8);
+    const now = Date.now();
+    const cached = OPENROUTER_CACHE.get(cacheKey);
+    const CACHE_TTL_MS = 600_000; // 10 min
+
+    // Fresh cache hit — serve immediately without upstream.
+    if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
+      const ageSec = Math.floor((now - cached.fetchedAt) / 1000);
+      res.setHeader?.("X-Vskill-Catalog-Age", String(ageSec));
+      sendJson(res, { models: cached.value, ageSec });
+      return;
+    }
+
     try {
       const resp = await fetch("https://openrouter.ai/api/v1/models", {
         headers: { "Authorization": `Bearer ${apiKey}` },
         signal: AbortSignal.timeout(10_000),
       });
       if (!resp.ok) {
+        if (cached) {
+          const ageSec = Math.floor((now - cached.fetchedAt) / 1000);
+          res.setHeader?.("X-Vskill-Catalog-Age", String(ageSec));
+          sendJson(res, { models: cached.value, ageSec, stale: true });
+          return;
+        }
         sendJson(res, { error: `OpenRouter API returned ${resp.status}` }, 502);
         return;
       }
@@ -574,21 +691,93 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         data?: Array<{
           id: string;
           name?: string;
+          context_length?: number;
           pricing?: { prompt?: string; completion?: string };
         }>;
       };
       const models = (data.data || []).map((m) => ({
         id: m.id,
         name: m.name || m.id,
+        contextWindow: typeof m.context_length === "number" ? m.context_length : undefined,
         pricing: {
           prompt: parseFloat(m.pricing?.prompt || "0"),
           completion: parseFloat(m.pricing?.completion || "0"),
         },
       }));
-      sendJson(res, { models });
+      OPENROUTER_CACHE.set(cacheKey, { value: models, fetchedAt: now });
+      res.setHeader?.("X-Vskill-Catalog-Age", "0");
+      sendJson(res, { models, ageSec: 0 });
+    } catch (err) {
+      if (cached) {
+        const ageSec = Math.floor((now - cached.fetchedAt) / 1000);
+        res.setHeader?.("X-Vskill-Catalog-Age", String(ageSec));
+        sendJson(res, { models: cached.value, ageSec, stale: true });
+        return;
+      }
+      sendJson(res, { error: (err as Error).message }, 500);
+    }
+  });
+
+  // Settings / API key endpoints (0682 — US-004).
+  // Keys live on-device only. Never logged, never synced, never returned
+  // through GET. Response includes only metadata (stored, updatedAt, tier).
+  router.get("/api/settings/keys", async (_req, res) => {
+    sendJson(res, settingsStore.listKeys());
+  });
+
+  router.post("/api/settings/keys", async (req, res) => {
+    // Reject any request that smuggles the key in a query-string — JSON body only.
+    const url = (req as unknown as { url?: string }).url || "";
+    if (/[?&]key=/.test(url)) {
+      sendJson(res, { error: "key must not appear in query string" }, 400);
+      return;
+    }
+    const body = (await readBody(req)) as {
+      provider?: string;
+      key?: string;
+      tier?: "browser" | "keychain";
+    };
+    if (!body.key || typeof body.key !== "string" || body.key.trim().length === 0) {
+      sendJson(res, { error: "key must be non-empty string" }, 400);
+      return;
+    }
+    if (body.provider !== "anthropic" && body.provider !== "openrouter") {
+      sendJson(res, { error: `unknown provider: ${String(body.provider)}` }, 400);
+      return;
+    }
+    try {
+      const saved = await settingsStore.saveKey(
+        body.provider,
+        body.key.trim(),
+        body.tier ?? "browser",
+      );
+      // Prefix hint — non-blocking, purely informational
+      let warning: string | undefined;
+      if (body.provider === "anthropic" && !body.key.startsWith("sk-ant-")) {
+        warning = "key doesn't match typical Anthropic prefix sk-ant-";
+      } else if (body.provider === "openrouter" && !body.key.startsWith("sk-or-")) {
+        warning = "key doesn't match typical OpenRouter prefix sk-or-";
+      }
+      sendJson(res, {
+        ok: true,
+        updatedAt: saved.updatedAt,
+        tier: saved.tier,
+        available: true,
+        ...(warning ? { warning } : {}),
+      });
     } catch (err) {
       sendJson(res, { error: (err as Error).message }, 500);
     }
+  });
+
+  router.delete("/api/settings/keys/:provider", async (req, res) => {
+    const provider = (req as unknown as { params?: { provider?: string } }).params?.provider;
+    if (provider !== "anthropic" && provider !== "openrouter") {
+      sendJson(res, { error: `unknown provider: ${String(provider)}` }, 400);
+      return;
+    }
+    await settingsStore.removeKey(provider);
+    sendJson(res, { ok: true });
   });
 
   // Config — expose current provider/model + available providers + project
@@ -596,24 +785,43 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // (e.g. "claude-sonnet"). The frontend round-trips config.model back to
   // generate-evals and other endpoints, so it must be a valid CLI model ID.
   router.get("/api/config", async (_req, res) => {
+    // On first load (no currentOverrides), try to restore from .vskill/studio.json.
+    if (!currentOverrides.provider) {
+      const stored = loadStudioSelection(root);
+      if (stored) {
+        currentOverrides.provider = stored.activeAgent as ProviderName;
+        if (stored.activeModel) currentOverrides.model = stored.activeModel;
+      }
+    }
     try {
       // Validate the client can be created (catches missing API keys etc.)
       getClient();
       const providers = await detectAvailableProviders();
+      const detection = detectProjectAgents(root);
       sendJson(res, {
         provider: currentOverrides.provider || null,
         model: getEffectiveRawModel(),
         providers,
+        detection,
         projectName: projectName || null,
         root,
       });
     } catch (err) {
       const providers = await detectAvailableProviders().catch(() => []);
-      sendJson(res, { provider: null, model: "unknown", error: (err as Error).message, providers, projectName: projectName || null, root });
+      const detection = detectProjectAgents(root);
+      sendJson(res, {
+        provider: null,
+        model: "unknown",
+        error: (err as Error).message,
+        providers,
+        detection,
+        projectName: projectName || null,
+        root,
+      });
     }
   });
 
-  // Update config — change provider/model at runtime
+  // Update config — change provider/model at runtime and persist atomically.
   router.post("/api/config", async (req, res) => {
     const body = (await readBody(req)) as { provider?: ProviderName; model?: string };
     if (body.provider) currentOverrides.provider = body.provider;
@@ -625,6 +833,20 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       // Validate the client can be created
       getClient();
       const providers = await detectAvailableProviders();
+      // Persist to .vskill/studio.json (atomic tmp-then-rename). Fire-and-forget
+      // from the handler's perspective — errors are logged but not surfaced,
+      // matching how currentOverrides already survives process lifetime.
+      if (currentOverrides.provider) {
+        try {
+          await saveStudioSelection(root, {
+            activeAgent: currentOverrides.provider,
+            activeModel: getEffectiveRawModel(),
+            updatedAt: new Date().toISOString(),
+          });
+        } catch (e) {
+          console.warn(`[studio.json] atomic write failed: ${(e as Error).message}`);
+        }
+      }
       sendJson(res, { provider: currentOverrides.provider || null, model: getEffectiveRawModel(), providers });
     } catch (err) {
       // Revert to safe default (not empty — empty triggers auto-detection which

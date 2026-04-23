@@ -41,7 +41,7 @@ export function App() {
 }
 
 function Shell() {
-  const { state, selectSkill, refreshSkills } = useStudio();
+  const { state, selectSkill, refreshSkills, outdatedByOrigin } = useStudio();
   const { config } = useConfig();
   const { mode, resolvedTheme, setTheme } = useTheme();
   const { toast } = useToast();
@@ -214,6 +214,7 @@ function Shell() {
             error={state.skillsError ?? null}
             onRetry={refreshSkills}
             onContextMenu={openContextMenu}
+            outdatedByOrigin={outdatedByOrigin}
           />
         }
         resizeHandle={
@@ -233,6 +234,20 @@ function Shell() {
             projectPath={config?.root ?? null}
             modelName={config?.model ?? null}
             health={config?.error ? "degraded" : "ok"}
+            providers={config?.providers?.map((p) => {
+              const id = p.id as string;
+              return {
+                id,
+                label: p.label,
+                available: p.available,
+                kind:
+                  id === "ollama" || id === "lm-studio"
+                    ? "start-service"
+                    : id === "anthropic" || id === "openrouter"
+                      ? "api-key"
+                      : "cli-install",
+              };
+            })}
           />
         }
       />

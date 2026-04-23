@@ -1,10 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
 
-// TopRail renders ModelSelector (T-060), which consumes useConfig() from
-// ConfigContext. These tests exercise TopRail as a pure function without a
-// provider, so we stub ModelSelector to a no-op element.
-vi.mock("../ModelSelector", () => ({
-  ModelSelector: () => null,
+// TopRail renders AgentModelPicker (0682), which consumes useAgentCatalog()
+// + fetch(). These tests exercise TopRail as a pure function without a
+// provider, so we stub the picker to a no-op element.
+vi.mock("../AgentModelPicker", () => ({
+  AgentModelPicker: () => null,
+}));
+
+// 0683 T-008: UpdateBell consumes useStudio() and is lazy-loaded internally.
+// Stub it for the TopRail unit tests — coverage lives in UpdateBell.test.tsx.
+vi.mock("../UpdateBell", () => ({
+  UpdateBell: () => null,
 }));
 
 import { TopRail } from "../TopRail";

@@ -174,7 +174,7 @@ Configured in `src/eval/llm.ts`. Current providers:
 | `claude-cli` | shells out to `claude` binary | — (uses Claude Code session) | Default — zero config inside Claude Code. **April 2026: Third-party OAuth token scraping banned; official CLI delegation is still allowed.** |
 | `anthropic` | Anthropic SDK | `ANTHROPIC_API_KEY` | Direct API access. Requires key from [platform.claude.com/settings/keys](https://platform.claude.com/settings/keys). |
 | `openrouter` | OpenAI-compat SDK | `OPENROUTER_API_KEY` | 300+ models. |
-| `ollama` | REST to `localhost:11434` | `OLLAMA_BASE_URL` *(normalization to `OLLAMA_HOST` pending in 0680)* | Detection probes `GET /api/tags` with 30s cache. Uses `/api/chat` for system+user messages. |
+| `ollama` | REST to `localhost:11434` | `OLLAMA_HOST` (primary) / `OLLAMA_BASE_URL` (deprecated) | Detection probes `GET /api/tags` with 30s cache. Uses `/api/chat` for system+user messages. Helper: `src/eval/env.ts::resolveOllamaBaseUrl()`. |
 | `codex-cli` | shells out to OpenAI Codex CLI | — | |
 | `gemini-cli` | shells out to Google Gemini CLI | — | |
 | `lmstudio` *(planned 0677)* | OpenAI-compat via SDK | `LM_STUDIO_BASE_URL` (default `http://localhost:1234/v1`) | Detection probes `GET /v1/models`, 500ms timeout. |
@@ -189,6 +189,47 @@ Configured in `src/eval/llm.ts`. Current providers:
 | `claude-haiku-4-5-20251001` | ~200K | 1 / 5 |
 
 *Sonnet 4.7 and Opus 4.7 — Opus 4.7 confirmed April 16, 2026; Sonnet 4.7 not currently available.*
+
+### 5.1 Environment variables
+
+All env vars Studio reads. Every `Read at` file:line is grep-verified against source. Precedence rules are authoritative — conflicting assignments emit one deprecation line via `warnOnce()` (see `src/eval/env.ts`).
+
+| Variable | Default | Required | Read at | Purpose |
+|---|---|---|---|---|
+| `ANTHROPIC_API_KEY` | — | Only for `anthropic` provider | `src/eval/llm.ts::createAnthropicClient`, `src/eval-server/api-routes.ts::detectAvailableProviders` | Direct Anthropic API calls. |
+| `OPENROUTER_API_KEY` | — | Only for `openrouter` provider | `src/eval-server/api-routes.ts` (`/api/openrouter/models` handler) | OpenRouter catalog + completions. Stored key (via Settings modal) takes precedence when set. |
+| `GOOGLE_API_KEY` | — | Optional for `gemini-cli` | `src/eval/llm.ts::createGeminiCliClient` | Gemini CLI auth passthrough. |
+| `OLLAMA_HOST` | `http://localhost:11434` | No | `src/eval/env.ts::resolveOllamaBaseUrl` (single call site) | Ollama server URL (primary). Bare `host:port` auto-prefixes `http://`. |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | No (deprecated — use `OLLAMA_HOST`) | `src/eval/env.ts::resolveOllamaBaseUrl` | Legacy fallback; one-shot warn-once log when both `OLLAMA_HOST` and `OLLAMA_BASE_URL` disagree. |
+| `LM_STUDIO_BASE_URL` | `http://localhost:1234/v1` | No | `src/eval-server/api-routes.ts::probeLmStudio`, `src/eval/llm.ts::createLmStudioClient` | LM Studio OpenAI-compat endpoint. |
+| `VSKILL_EVAL_PROVIDER` | `claude-cli` | No | `src/eval/llm.ts::createLlmClient` | Provider override for headless eval runs. |
+| `VSKILL_EVAL_MODEL` | provider default | No | `src/eval/llm.ts::createLlmClient` | Model override for headless eval runs. |
+| `VSKILL_EVAL_TIMEOUT` | `300` (seconds) | No | `src/eval/llm.ts::getTimeoutMs` | Per-call timeout for CLI providers. |
+| `CODEX_API_KEY` | — | Optional for `codex-cli` | `src/eval/llm.ts::createCodexCliClient` (via CLI env passthrough) | Codex CLI credential. |
+
+Examples:
+
+```bash
+# Point Ollama at a remote GPU workstation (OLLAMA_HOST is primary).
+OLLAMA_HOST=http://gpu-server:11434 npx vskill studio
+
+# Bare host:port is auto-prefixed with http://.
+OLLAMA_HOST=gpu.local:11434 npx vskill studio
+
+# Both set — OLLAMA_HOST wins and a deprecation line is logged once.
+OLLAMA_HOST=http://gpu:11434 OLLAMA_BASE_URL=http://legacy:11434 npx vskill studio
+```
+
+### 5.2 Claude Code session delegation — ToS compliance (April 2026)
+
+Anthropic's April 4, 2026 Terms of Service update prohibits third-party tools from consuming Max/Pro quota via OAuth token scraping. **vSkill Studio does not consume your Max/Pro subscription quota directly.** It delegates to the official [Claude Code CLI](https://docs.claude.com/en/docs/claude-code), which is the sanctioned consumer. The adapter in `src/eval/llm.ts::createClaudeCliClient()` shells out to the `claude` binary and never reads any file under `~/.claude/credentials*`, `~/.claude/auth*`, or `~/.claude/token*`.
+
+This contract is enforced by two blocking gates:
+
+1. **Unit test** — `src/eval/__tests__/claude-cli-compliance.test.ts` mocks every fs read API and asserts zero observed paths match `/\.claude\/(credentials|auth|token)/i` while the adapter runs against a fake `claude` shim.
+2. **Bundle grep** — `scripts/check-bundle-compliance.sh` runs after `npm run build` and fails CI on any credential-path literal in `dist/`.
+
+If the `claude` binary is missing, the UI tells you to install it (`npm install -g @anthropic-ai/claude-code`) and never suggests `ANTHROPIC_API_KEY` as a substitute — that would require a different (paid) provider.
 
 ---
 

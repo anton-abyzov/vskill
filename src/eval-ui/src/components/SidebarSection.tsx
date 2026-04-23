@@ -7,6 +7,11 @@ interface Props {
   count: number;
   /** Optional filtered count (when a search is active). */
   filteredCount?: number | null;
+  /**
+   * 0683 T-005: outdated-skill count for this origin. When > 0 the header
+   * renders a warm-amber `N updates ▾` chip that navigates to `#/updates`.
+   */
+  updateCount?: number;
   children?: ReactNode;
 }
 
@@ -73,7 +78,7 @@ function writeCollapsed(key: string, collapsed: boolean) {
  *   renders `(N of M)` to make search scope explicit.
  * - Header is an <h2> inside a clickable <button> with aria-expanded.
  */
-export function SidebarSection({ origin, count, filteredCount, children }: Props) {
+export function SidebarSection({ origin, count, filteredCount, updateCount, children }: Props) {
   const storageKey = STORAGE_KEYS[origin];
   const [collapsed, setCollapsed] = useState<boolean>(() => readCollapsed(storageKey));
 
@@ -145,6 +150,9 @@ export function SidebarSection({ origin, count, filteredCount, children }: Props
             ? `(${filteredCount} of ${count})`
             : `(${count})`}
         </span>
+        {updateCount != null && updateCount > 0 && (
+          <UpdateCountChip origin={origin} updateCount={updateCount} />
+        )}
       </button>
       {!collapsed && (
         <div
@@ -161,6 +169,59 @@ export function SidebarSection({ origin, count, filteredCount, children }: Props
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * 0683 T-005: "N updates ▾" chip rendered inside the section header button.
+ *
+ * - Color: `var(--color-own)` (warm amber) + mono tabular-nums.
+ * - Click routes to `#/updates` and stops propagation so the parent header
+ *   button's collapse-toggle does not fire.
+ * - `role="link"` + `aria-label` so screen readers announce navigation.
+ * - Focus ring uses the shared `--border-focus` token at 2px.
+ */
+function UpdateCountChip({ origin, updateCount }: { origin: SectionOrigin; updateCount: number }) {
+  const [focused, setFocused] = useState(false);
+  const originLabel = LABELS[origin].toLowerCase();
+  const label = `${updateCount} updates available in ${originLabel} section, view all`;
+  return (
+    <span
+      role="link"
+      tabIndex={0}
+      data-testid="sidebar-section-update-chip"
+      aria-label={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        window.location.hash = "#/updates";
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          e.stopPropagation();
+          window.location.hash = "#/updates";
+        }
+      }}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 2,
+        fontSize: 10,
+        color: "var(--color-own)",
+        fontFamily: "var(--font-mono)",
+        fontVariantNumeric: "tabular-nums",
+        cursor: "pointer",
+        padding: "0 4px",
+        borderRadius: 3,
+        outline: focused ? "2px solid var(--border-focus)" : "none",
+        outlineOffset: 2,
+      }}
+    >
+      {updateCount} updates
+      <span aria-hidden="true" style={{ fontSize: 9, marginLeft: 2 }}>▾</span>
+    </span>
   );
 }
 

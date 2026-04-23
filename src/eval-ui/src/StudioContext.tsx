@@ -1,7 +1,9 @@
 import { createContext, useContext, useReducer, useCallback, useEffect, useMemo } from "react";
 import { api, mergeUpdatesIntoSkills } from "./api";
 import type { SkillInfo } from "./types";
+import type { SkillUpdateInfo } from "./api";
 import { useMediaQuery } from "./hooks/useMediaQuery";
+import { useSkillUpdates } from "./hooks/useSkillUpdates";
 
 // ---------------------------------------------------------------------------
 // State
@@ -93,7 +95,7 @@ function studioReducer(state: StudioState, action: StudioAction): StudioState {
 // Context
 // ---------------------------------------------------------------------------
 
-interface StudioContextValue {
+export interface StudioContextValue {
   state: StudioState;
   selectSkill: (skill: SelectedSkill) => void;
   clearSelection: () => void;
@@ -103,6 +105,14 @@ interface StudioContextValue {
   refreshSkills: () => void;
   updateCount: number;
   dismissUpdateNotification: () => void;
+  /** Raw update list returned by `GET /api/skills/updates` (0683). */
+  updates: SkillUpdateInfo[];
+  /** Counts of outdated skills partitioned by origin (0683 T-002). */
+  outdatedByOrigin: { source: number; installed: number };
+  /** Flag surfaced by `useSkillUpdates` while a fetch is in flight. */
+  isRefreshingUpdates: boolean;
+  /** Manually re-request `GET /api/skills/updates` (dedup'd). */
+  refreshUpdates: () => Promise<void>;
 }
 
 const StudioCtx = createContext<StudioContextValue | null>(null);
@@ -126,7 +136,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: "SET_MOBILE", isMobile });
   }, [isMobile]);
 
-  // Fetch skills on mount; restore selection from URL hash if present
+  // Fetch skills on mount; restore selection from URL hash if present.
+  // The update-awareness merge moved to `useSkillUpdates` (0683 T-002) so we
+  // no longer fire a duplicate /api/skills/updates here.
   const loadSkills = useCallback(() => {
     dispatch({ type: "SET_SKILLS_LOADING", loading: true });
     api.getSkills()
@@ -142,12 +154,6 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             dispatch({ type: "SELECT_SKILL", skill: { plugin, skill, origin: found.origin } });
           }
         }
-        // Non-blocking: fetch update info and merge into skills
-        api.getSkillUpdates().then((updates) => {
-          if (updates.length > 0) {
-            dispatch({ type: "SET_SKILLS", skills: mergeUpdatesIntoSkills(skills, updates) });
-          }
-        }).catch(() => { /* silent — cards render without badges */ });
       })
       .catch((e) => dispatch({ type: "SET_SKILLS_ERROR", error: e.message }));
   }, []);
@@ -182,13 +188,49 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: "DISMISS_UPDATE_NOTIFICATION" });
   }, []);
 
-  const updateCount = useMemo(
-    () => state.skills.filter((s) => s.updateAvailable).length,
-    [state.skills],
+  // 0683 T-002: shared polling hook owns the /api/skills/updates call. Every
+  // consumer (SkillRow glyph, SidebarSection chip, TopRail bell, RightPanel
+  // UpdateAction) reads through this single source of truth.
+  const skillUpdates = useSkillUpdates();
+
+  // Re-merge the raw skills with the latest update list on every change.
+  // `mergeUpdatesIntoSkills` only writes fields when an entry exists, so we
+  // strip any stale flags from `state.skills` first — otherwise a skill that
+  // just moved from outdated to current would keep its `updateAvailable`
+  // flag forever.
+  const mergedSkills = useMemo<SkillInfo[]>(() => {
+    const reset = state.skills.map((s) => {
+      if (!s.updateAvailable && s.latestVersion === undefined) return s;
+      const copy: SkillInfo = { ...s };
+      delete copy.updateAvailable;
+      delete copy.currentVersion;
+      delete copy.latestVersion;
+      return copy;
+    });
+    return mergeUpdatesIntoSkills(reset, skillUpdates.updates);
+  }, [state.skills, skillUpdates.updates]);
+
+  const outdatedByOrigin = useMemo(() => {
+    const counts = { source: 0, installed: 0 };
+    for (const s of mergedSkills) {
+      if (s.updateAvailable) counts[s.origin] += 1;
+    }
+    return counts;
+  }, [mergedSkills]);
+
+  // Override `state.skills` with the merged array so existing consumers
+  // automatically see `updateAvailable` without touching their read path.
+  const effectiveState = useMemo<StudioState>(
+    () => ({ ...state, skills: mergedSkills }),
+    [state, mergedSkills],
   );
 
+  const updateCount = skillUpdates.updateCount;
+  const refreshUpdates = skillUpdates.refresh;
+  const isRefreshingUpdates = skillUpdates.isRefreshing;
+
   const value = useMemo<StudioContextValue>(() => ({
-    state,
+    state: effectiveState,
     selectSkill,
     clearSelection,
     setMode,
@@ -197,7 +239,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     refreshSkills: loadSkills,
     updateCount,
     dismissUpdateNotification,
-  }), [state, selectSkill, clearSelection, setMode, setSearch, setMobileView, loadSkills, updateCount, dismissUpdateNotification]);
+    updates: skillUpdates.updates,
+    outdatedByOrigin,
+    isRefreshingUpdates,
+    refreshUpdates,
+  }), [effectiveState, selectSkill, clearSelection, setMode, setSearch, setMobileView, loadSkills, updateCount, dismissUpdateNotification, skillUpdates.updates, outdatedByOrigin, isRefreshingUpdates, refreshUpdates]);
 
   return <StudioCtx.Provider value={value}>{children}</StudioCtx.Provider>;
 }

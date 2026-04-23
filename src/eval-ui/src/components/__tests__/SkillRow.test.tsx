@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { SkillRow } from "../SkillRow";
+import { SkillRowInner as SkillRow } from "../SkillRow";
 import type { SkillInfo } from "../../types";
 
 type ReactEl = { type: unknown; props: Record<string, unknown> };
@@ -113,19 +113,15 @@ describe("SkillRow", () => {
     expect(onSelect).toHaveBeenCalled();
   });
 
-  it("shows the updateAvailable chip for installed skills with update", () => {
+  it("shows the update-available glyph for installed skills with update", () => {
     const tree = expand(SkillRow({
       skill: makeSkill("installed", true),
       isSelected: false,
       onSelect: vi.fn(),
     }));
-    const collectText = (n: unknown): string => {
-      if (n == null) return "";
-      if (typeof n === "string" || typeof n === "number") return String(n);
-      if (Array.isArray(n)) return n.map(collectText).join("");
-      const el = n as ReactEl;
-      return el.props?.children != null ? collectText(el.props.children) : "";
-    };
-    expect(collectText(tree).toLowerCase()).toContain("update");
+    // 0683 T-004 replaces the old "update" pill with a `↑` glyph carrying
+    // the stable `skill-row-update-glyph` test id.
+    const hits = findElements(tree, (el) => el.props?.["data-testid"] === "skill-row-update-glyph");
+    expect(hits.length).toBe(1);
   });
 });

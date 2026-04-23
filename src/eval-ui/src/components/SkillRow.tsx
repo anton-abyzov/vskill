@@ -1,8 +1,10 @@
+import { memo } from "react";
 import type { SkillInfo } from "../types";
 // T-032: SkillRowHoverCard is imported here so sidebar callers can wrap a
 // SkillRow with the hover card via `<SkillRowHoverCard skill={skill}>...`.
 // This import lines up the dependency without altering SkillRow styling.
 import { SkillRowHoverCard } from "./SkillRowHoverCard";
+import { UpdateBadge } from "./UpdateBadge";
 void SkillRowHoverCard;
 
 interface Props {
@@ -29,7 +31,7 @@ interface Props {
  * - `updateAvailable` chip renders an accent-colored "Update" pill with the
  *   latest version when applicable.
  */
-export function SkillRow({ skill, isSelected, onSelect, onContextMenu }: Props) {
+function SkillRowBase({ skill, isSelected, onSelect, onContextMenu }: Props) {
   const dotColor = skill.origin === "installed" ? "var(--status-installed)" : "var(--status-own)";
 
   return (
@@ -125,32 +127,17 @@ export function SkillRow({ skill, isSelected, onSelect, onContextMenu }: Props) 
         </span>
       )}
 
-      {/* Update available chip */}
-      {skill.updateAvailable && (
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 3,
-            fontSize: 10,
-            fontFamily: "var(--font-mono)",
-            fontVariantNumeric: "tabular-nums",
-            color: "var(--accent-surface)",
-            padding: "1px 6px",
-            border: "1px solid var(--accent-surface)",
-            borderRadius: 4,
-            flexShrink: 0,
-            textTransform: "lowercase",
-          }}
-          title={skill.latestVersion ? `Update available: ${skill.latestVersion}` : "Update available"}
-        >
-          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 19V5" />
-            <path d="M5 12l7-7 7 7" />
-          </svg>
-          update
-        </span>
-      )}
+      {/* 0683 US-001: subtle ↑ glyph replaces the old "update" pill. */}
+      <UpdateBadge skill={skill} />
     </button>
   );
 }
+
+/**
+ * 0683 T-004: wrap SkillRow in `React.memo` so sidebars with many rows only
+ * re-render the rows whose props actually changed when an update poll lands.
+ * The raw function is still exported as `SkillRowInner` for existing tests
+ * that invoke the component as a plain function.
+ */
+export const SkillRowInner = SkillRowBase;
+export const SkillRow = memo(SkillRowBase);

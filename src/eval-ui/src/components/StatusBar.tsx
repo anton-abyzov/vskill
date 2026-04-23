@@ -4,6 +4,7 @@ import {
   type ThemeMode,
   type ResolvedTheme,
 } from "../theme/theme-utils";
+import { ProvidersSegment, type ProvidersSegmentProvider } from "./ProvidersSegment";
 
 function readRawStoredMode(): string | null {
   try {
@@ -19,6 +20,10 @@ interface Props {
   modelName?: string | null;
   health?: "ok" | "degraded" | "down";
   onPathClick?: () => void;
+  /** 0682: providers + handlers for the StatusBar lock/unlock segment. */
+  providers?: ProvidersSegmentProvider[];
+  onOpenProviderSettings?: (providerId: string) => void;
+  onOpenProviderInstallHelp?: (providerId: string) => void;
 }
 
 /**
@@ -28,7 +33,15 @@ interface Props {
  * Theme toggle cycles: light → dark → auto. The aria-label always describes
  * the next mode so screen readers announce the action rather than the state.
  */
-export function StatusBar({ projectPath, modelName, health = "ok", onPathClick }: Props) {
+export function StatusBar({
+  projectPath,
+  modelName,
+  health = "ok",
+  onPathClick,
+  providers,
+  onOpenProviderSettings,
+  onOpenProviderInstallHelp,
+}: Props) {
   const { mode, resolvedTheme, setTheme } = useTheme();
   // T-0684 (B2): When the user has not persisted any theme choice, an
   // "auto" mode is really the default — clicking should FLIP the rendered
@@ -106,6 +119,17 @@ export function StatusBar({ projectPath, modelName, health = "ok", onPathClick }
         <Dot color={healthColor} />
         <span style={{ textTransform: "capitalize" }}>{health}</span>
       </span>
+
+      {providers && providers.length > 0 && (
+        <>
+          <Sep />
+          <ProvidersSegment
+            providers={providers}
+            onOpenSettings={onOpenProviderSettings}
+            onOpenInstallHelp={onOpenProviderInstallHelp}
+          />
+        </>
+      )}
 
       <div style={{ flex: 1 }} />
 

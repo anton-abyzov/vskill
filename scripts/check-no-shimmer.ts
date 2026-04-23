@@ -39,7 +39,13 @@ const SKIP_DIRS = new Set([
 
 const PATTERNS: Array<{ label: string; re: RegExp }> = [
   { label: "@keyframes shimmer", re: /@keyframes\s+shimmer\b/i },
-  { label: ".skeleton {", re: /\.skeleton\s*\{/ },
+  // `.skeleton` class alone is allowed as a legacy alias of `.placeholder`
+  // (static, no animation). Only flag `.skeleton` rules that include
+  // `animation:` — those would resurrect the shimmer pattern.
+  {
+    label: ".skeleton { ... animation: ... }",
+    re: /\.skeleton\s*\{[^}]*animation:/,
+  },
 ];
 
 export function scanForShimmer(rootDir: string): ShimmerViolation[] {

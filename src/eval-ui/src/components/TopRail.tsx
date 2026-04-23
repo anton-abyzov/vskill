@@ -1,11 +1,18 @@
 import type { SelectedSkill } from "../StudioContext";
 import { AgentModelPicker } from "./AgentModelPicker";
+import { StudioLogo } from "./StudioLogo";
 import { UpdateBell } from "./UpdateBell";
 
 interface Props {
   projectName: string | null;
   selected: SelectedSkill | null;
   onOpenPalette: () => void;
+  /**
+   * 0686 T-001 (US-001): called when the user activates the "Skill Studio"
+   * logo. App.tsx uses this to clear any selected skill so the detail pane
+   * returns to its empty state alongside the hash navigation to "#/".
+   */
+  onHome?: () => void;
 }
 
 // T-059: Breadcrumb segments dispatch a `studio:navigate-scope` CustomEvent
@@ -32,7 +39,7 @@ function dispatchNavigateScope(
  *   - project name  — Inter Tight 400, --text-secondary.
  *   - breadcrumb    — Inter Tight 400, plugin name in meta style, skill name in primary.
  */
-export function TopRail({ projectName, selected, onOpenPalette }: Props) {
+export function TopRail({ projectName, selected, onOpenPalette, onHome }: Props) {
   const originLabel = selected
     ? selected.origin === "installed"
       ? "Installed"
@@ -51,27 +58,9 @@ export function TopRail({ projectName, selected, onOpenPalette }: Props) {
         fontFamily: "var(--font-sans)",
       }}
     >
-      {/* Logo block */}
+      {/* Logo block — 0686 T-001: logo is now a StudioLogo home-link. */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-        <div
-          aria-hidden="true"
-          style={{
-            width: 24,
-            height: 24,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: 6,
-            background: "color-mix(in srgb, var(--accent-surface) 20%, transparent)",
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-surface)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-          </svg>
-        </div>
-        <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em", color: "var(--text-primary)" }}>
-          Skill Studio
-        </span>
+        <StudioLogo onHome={onHome} />
         {projectName && (
           <span
             title={projectName}

@@ -84,8 +84,27 @@ export interface SkillInfo {
   lastModified?: string | null;
   /** Total byte size of the skill dir (sum of regular files, non-recursive fine for now). */
   sizeBytes?: number | null;
-  /** For `origin: "installed"` only — the agent id whose config owns this skill (e.g. "claude-code"). */
+  /** For `origin: "installed"` / tri-scope `installed` + `global` — the agent id whose config owns this skill (e.g. "claude-code"). null for `own` scope. */
   sourceAgent?: string | null;
+  // -------------------------------------------------------------------------
+  // 0686: tri-scope sidebar + symlink transparency.
+  //
+  // The server (scanSkillsTriScope + /api/skills enrichment) populates these
+  // on every response. UI partitions the sidebar into OWN / INSTALLED / GLOBAL
+  // using `scope`, renders a chain-link glyph when `isSymlink === true`, and
+  // prints a human "Install method" row from `installMethod`.
+  //
+  // Back-compat: when the server returns a legacy shape (no `scope`), the
+  // normalizer in api.ts defaults `scope` to `"own"` (AC-US3-02).
+  // -------------------------------------------------------------------------
+  /** OWN (user-authored, outside any wrapper) / INSTALLED (agent's project-local) / GLOBAL (agent's home). */
+  scope?: "own" | "installed" | "global";
+  /** `fs.lstatSync(dir).isSymbolicLink()` at scan time. */
+  isSymlink?: boolean;
+  /** Absolute realpath of the symlink target. `null` when not a symlink, or when a cycle was detected. */
+  symlinkTarget?: string | null;
+  /** How the skill got here: author (own), copied (regular file install), or symlinked (plugin cache). */
+  installMethod?: "authored" | "copied" | "symlinked";
   // -------------------------------------------------------------------------
   // Pre-existing install/update state (populated by mergeUpdatesIntoSkills).
   // -------------------------------------------------------------------------
@@ -93,6 +112,41 @@ export interface SkillInfo {
   currentVersion?: string;
   latestVersion?: string;
   pinnedVersion?: string;
+}
+
+// ---------------------------------------------------------------------------
+// 0686: /api/agents response shape (consumed by AgentScopePicker).
+//
+// Mirrors the server-side AgentsResponse in src/eval-server/api-routes.ts.
+// Kept here as a pure type (no backend import) to preserve the eval-ui
+// tsconfig boundary.
+// ---------------------------------------------------------------------------
+
+export interface AgentScopeEntry {
+  id: string;
+  displayName: string;
+  featureSupport: {
+    slashCommands: boolean;
+    hooks: boolean;
+    mcp: boolean;
+    customSystemPrompt: boolean;
+  };
+  isUniversal: boolean;
+  parentCompany: string;
+  detected: boolean;
+  isDefault: boolean;
+  localSkillCount: number;
+  globalSkillCount: number;
+  resolvedLocalDir: string;
+  resolvedGlobalDir: string;
+  lastSync: string | null;
+  health: "ok" | "stale" | "missing";
+}
+
+export interface AgentsResponse {
+  agents: AgentScopeEntry[];
+  suggested: string;
+  sharedFolders: Array<{ path: string; consumers: string[] }>;
 }
 
 // ---------------------------------------------------------------------------

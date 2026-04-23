@@ -8,6 +8,12 @@ vi.mock("../UpdateBell", () => ({
   UpdateBell: () =>
     ({ type: "div", props: { "data-slot-marker": "update-bell" } } as unknown),
 }));
+// 0686 T-001: StudioLogo uses hooks — stub to a plain marker div so the
+// manual `expand()` walker doesn't hit a null dispatcher.
+vi.mock("../StudioLogo", () => ({
+  StudioLogo: () =>
+    ({ type: "div", props: { "data-slot-marker": "studio-logo" } } as unknown),
+}));
 
 import { TopRail } from "../TopRail";
 

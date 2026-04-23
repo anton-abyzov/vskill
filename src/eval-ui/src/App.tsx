@@ -13,6 +13,14 @@ import { ToastProvider, useToast } from "./components/ToastProvider";
 import { ShortcutModal } from "./components/ShortcutModal";
 import { ContextMenu } from "./components/ContextMenu";
 import type { ContextMenuState } from "./components/ContextMenu";
+import { SetupDrawer } from "./components/SetupDrawer";
+import { useSetupDrawer } from "./hooks/useSetupDrawer";
+import { AgentScopePicker, agentsResponseToPickerEntries } from "./components/AgentScopePicker";
+import { useAgentsResponse } from "./hooks/useAgentsResponse";
+import {
+  getStudioPreference,
+  writeStudioPreference,
+} from "./hooks/useStudioPreferences";
 import {
   closedContextMenuState,
   openContextMenuAt,
@@ -41,7 +49,7 @@ export function App() {
 }
 
 function Shell() {
-  const { state, selectSkill, refreshSkills, outdatedByOrigin } = useStudio();
+  const { state, selectSkill, clearSelection, refreshSkills, outdatedByOrigin } = useStudio();
   const { config } = useConfig();
   const { mode, resolvedTheme, setTheme } = useTheme();
   const { toast } = useToast();
@@ -69,6 +77,51 @@ function Shell() {
     },
     [],
   );
+
+  // 0686 T-002 (US-002): AgentScopePicker state. `activeAgentId` is persisted
+  // under `useStudioPreferences.activeAgent`; the initial value falls back to
+  // the server's suggested agent, then to "claude-cli". Picker calls fire
+  // both a localStorage write AND a `studio:agent-changed` event so other
+  // observers (e.g., the Sidebar's scope fetch) can refresh without prop
+  // drilling.
+  const agentsResponse = useAgentsResponse();
+  const [activeAgentId, setActiveAgentIdState] = useState<string | null>(() =>
+    getStudioPreference<string | null>("activeAgent", null),
+  );
+  useEffect(() => {
+    // Hydrate from the server's `suggested` when no persisted choice exists.
+    if (!activeAgentId && agentsResponse.response?.suggested) {
+      setActiveAgentIdState(agentsResponse.response.suggested);
+    }
+  }, [activeAgentId, agentsResponse.response?.suggested]);
+  const handleActiveAgentChange = useCallback((agentId: string) => {
+    setActiveAgentIdState(agentId);
+    writeStudioPreference("activeAgent", agentId);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("studio:agent-changed", { detail: { agentId } }),
+      );
+    }
+  }, []);
+  const pickerEntries = useMemo(
+    () => (agentsResponse.response ? agentsResponseToPickerEntries(agentsResponse.response) : []),
+    [agentsResponse.response],
+  );
+
+  // 0686 T-010 (US-005): Shared SetupDrawer wired at the App root. Any
+  // descendant that needs inline setup docs (AgentModelPicker "Need help
+  // connecting?", AgentScopePicker "Set up...", scope empty states) opens
+  // it via a `studio:open-setup-drawer` CustomEvent carrying `{ provider }`.
+  const setupDrawer = useSetupDrawer();
+  useEffect(() => {
+    function onOpenSetup(e: Event) {
+      if (!(e instanceof CustomEvent)) return;
+      const detail = e.detail as { provider?: string } | undefined;
+      if (detail?.provider) setupDrawer.open(detail.provider);
+    }
+    window.addEventListener("studio:open-setup-drawer", onOpenSetup);
+    return () => window.removeEventListener("studio:open-setup-drawer", onOpenSetup);
+  }, [setupDrawer]);
   const closeContextMenu = useCallback(() => {
     setContextMenuState(closedContextMenuState);
   }, []);
@@ -199,6 +252,7 @@ function Shell() {
             projectName={config?.projectName ?? null}
             selected={state.selectedSkill}
             onOpenPalette={() => setPaletteOpen(true)}
+            onHome={clearSelection}
           />
         }
         sidebar={
@@ -215,6 +269,17 @@ function Shell() {
             onRetry={refreshSkills}
             onContextMenu={openContextMenu}
             outdatedByOrigin={outdatedByOrigin}
+            activeAgentId={activeAgentId}
+            topSlot={
+              agentsResponse.status === "ready" && pickerEntries.length > 0 ? (
+                <AgentScopePicker
+                  agents={pickerEntries}
+                  activeAgentId={activeAgentId}
+                  onActiveAgentChange={handleActiveAgentChange}
+                  onOpenSetup={(providerId) => setupDrawer.open(providerId)}
+                />
+              ) : null
+            }
           />
         }
         resizeHandle={
@@ -253,6 +318,14 @@ function Shell() {
       />
       {/* T-040: Shortcut cheatsheet — no lazy wrapper (tiny, frequent use). */}
       <ShortcutModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      {/* 0686 T-010: Single-instance SetupDrawer mounted at the App root so
+          any child can request per-provider setup docs via the shared
+          `studio:open-setup-drawer` CustomEvent. */}
+      <SetupDrawer
+        open={setupDrawer.isOpen}
+        providerKey={setupDrawer.providerKey}
+        onClose={setupDrawer.close}
+      />
       {/* T-064: Single app-level ContextMenu, anchored to the shared state. */}
       <ContextMenu
         state={contextMenuState}

@@ -15,7 +15,9 @@ import { parseSource } from "../resolvers/source-resolver.js";
 import { runBenchmarkSSE, runSingleCaseSSE, assembleBulkResult } from "./benchmark-runner.js";
 import { getSkillSemaphore } from "./concurrency.js";
 import { resolveSkillDir } from "./skill-resolver.js";
-import { scanSkills, classifyOrigin } from "../eval/skill-scanner.js";
+import { scanSkills, classifyOrigin, scanSkillsTriScope } from "../eval/skill-scanner.js";
+import type { SkillInfo, SkillScope } from "../eval/skill-scanner.js";
+import { resolveGlobalSkillsDir } from "../eval/path-utils.js";
 import { loadAndValidateEvals, EvalValidationError } from "../eval/schema.js";
 import type { EvalsFile } from "../eval/schema.js";
 import { readBenchmark } from "../eval/benchmark.js";
@@ -84,6 +86,274 @@ export function buildInstalledAgentsResponse(
   }
 
   return { agents, suggested };
+}
+
+// ---------------------------------------------------------------------------
+// 0686 — /api/agents response builder + detection cache.
+//
+// Returns agent registry entries filtered to those with presence (local
+// folder, global folder, or detectInstalled binary) with per-agent
+// localSkillCount + globalSkillCount + isDefault + resolved absolute paths.
+// Shared-folder grouping surfaces agents that map to the same normalized
+// globalSkillsDir (e.g. kimi + amp + replit → ~/.config/agents/skills).
+//
+// Presence is cached for 30s (mirrors detectAvailableProviders pattern).
+// ---------------------------------------------------------------------------
+
+export interface AgentScopeEntry {
+  id: string;
+  displayName: string;
+  featureSupport: AgentDefinition["featureSupport"];
+  isUniversal: boolean;
+  parentCompany: string;
+  detected: boolean;
+  isDefault: boolean;
+  localSkillCount: number;
+  globalSkillCount: number;
+  resolvedLocalDir: string;
+  resolvedGlobalDir: string;
+  lastSync: string | null;
+  health: "ok" | "stale" | "missing";
+}
+
+export interface AgentsResponse {
+  agents: AgentScopeEntry[];
+  suggested: string;
+  sharedFolders: Array<{ path: string; consumers: string[] }>;
+}
+
+interface AgentPresenceCacheEntry {
+  data: AgentsResponse;
+  ts: number;
+  rootKey: string;
+  homeKey: string;
+  binariesKey: string;
+}
+
+let agentPresenceCache: AgentPresenceCacheEntry | null = null;
+const AGENT_PRESENCE_CACHE_TTL = 30_000;
+
+/** Test hook — clear the 30 s cache so the next buildAgentsResponse() re-scans. */
+export function resetAgentPresenceCache(): void {
+  agentPresenceCache = null;
+}
+
+interface BuildAgentsOptions {
+  /** Project root (typically eval-server cwd). */
+  root: string;
+  /** Override home dir (primarily for tests / fixture homes). */
+  home?: string;
+  /** Agents whose CLI binary is on PATH — optional; callers may pre-detect. */
+  detectedBinaries?: Set<string>;
+}
+
+/** Count skills in a directory following the `<dir>/<skill>/SKILL.md` layout.
+ *  Non-recursive — skills are conventionally flat children of the skills dir. */
+function countSkillsIn(dir: string): number {
+  if (!existsSync(dir)) return 0;
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    let count = 0;
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+      // Accept plain dirs AND symlinked-dirs.
+      let isDirLike = entry.isDirectory();
+      if (!isDirLike && entry.isSymbolicLink?.()) {
+        try { isDirLike = statSync(fullPath).isDirectory(); } catch { /* broken link */ }
+      }
+      if (!isDirLike) continue;
+      if (existsSync(join(fullPath, "SKILL.md"))) count++;
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Build the /api/agents response. Filters to agents with presence and
+ * includes per-agent counts, resolved paths, and shared-folder grouping.
+ *
+ * Results are cached for 30s keyed by `(root, home, binaries)` so repeated
+ * polls don't re-walk the filesystem.
+ */
+export async function buildAgentsResponse(
+  opts: BuildAgentsOptions,
+): Promise<AgentsResponse> {
+  const root = opts.root;
+  const home = opts.home;
+  const detectedBinaries = opts.detectedBinaries ?? new Set<string>();
+
+  const cacheKey = {
+    rootKey: root,
+    homeKey: home ?? "",
+    binariesKey: [...detectedBinaries].sort().join(","),
+  };
+  const now = Date.now();
+  if (
+    agentPresenceCache &&
+    now - agentPresenceCache.ts < AGENT_PRESENCE_CACHE_TTL &&
+    agentPresenceCache.rootKey === cacheKey.rootKey &&
+    agentPresenceCache.homeKey === cacheKey.homeKey &&
+    agentPresenceCache.binariesKey === cacheKey.binariesKey
+  ) {
+    return agentPresenceCache.data;
+  }
+
+  // Map each agent → resolved local + global dir. For tests, `home` overrides
+  // the homedir-derived global path. In production, resolveGlobalSkillsDir()
+  // handles cross-platform resolution (darwin / linux / win32).
+  const entries: AgentScopeEntry[] = [];
+  const globalDirByAgentId = new Map<string, string>();
+
+  for (const agent of AGENTS_REGISTRY) {
+    const resolvedLocalDir = join(root, agent.localSkillsDir);
+    const resolvedGlobalDir = home
+      ? join(home, firstNonTildeSegment(agent.globalSkillsDir))
+      : resolveGlobalSkillsDir(agent);
+    globalDirByAgentId.set(agent.id, resolvedGlobalDir);
+
+    const localExists = existsSync(resolvedLocalDir);
+    const globalExists = existsSync(resolvedGlobalDir);
+    const binaryDetected = detectedBinaries.has(agent.id);
+
+    const hasPresence = localExists || globalExists || binaryDetected;
+    if (!hasPresence) continue;
+
+    const localSkillCount = countSkillsIn(resolvedLocalDir);
+    const globalSkillCount = countSkillsIn(resolvedGlobalDir);
+    const firstLocalSegment = agent.localSkillsDir.split("/")[0] || "";
+    const hasProjectFolder = firstLocalSegment
+      ? existsSync(join(root, firstLocalSegment))
+      : false;
+    const isDefault = agent.id === "claude-code" && hasProjectFolder;
+
+    // Best-effort lastSync from lockfile — null when no lockfile or no entry.
+    const lastSync = resolveAgentLastSync(root, agent.id);
+    const health = computeAgentHealth(lastSync, localSkillCount + globalSkillCount);
+
+    entries.push({
+      id: agent.id,
+      displayName: agent.displayName,
+      featureSupport: agent.featureSupport,
+      isUniversal: agent.isUniversal,
+      parentCompany: agent.parentCompany,
+      detected: hasPresence,
+      isDefault,
+      localSkillCount,
+      globalSkillCount,
+      resolvedLocalDir,
+      resolvedGlobalDir,
+      lastSync,
+      health,
+    });
+  }
+
+  // Sort: healthy + detected first, then by id.
+  entries.sort((a, b) => {
+    const aMissing = a.health === "missing";
+    const bMissing = b.health === "missing";
+    if (aMissing !== bMissing) return aMissing ? 1 : -1;
+    return a.id.localeCompare(b.id);
+  });
+
+  // Shared-folder grouping — normalize paths via resolve() and group agents
+  // whose resolvedGlobalDir maps to the same absolute path.
+  const sharedGroups = new Map<string, string[]>();
+  for (const entry of entries) {
+    const key = resolve(entry.resolvedGlobalDir);
+    const list = sharedGroups.get(key) ?? [];
+    list.push(entry.id);
+    sharedGroups.set(key, list);
+  }
+  const sharedFolders: AgentsResponse["sharedFolders"] = [];
+  for (const [path, consumers] of sharedGroups.entries()) {
+    if (consumers.length >= 2) {
+      sharedFolders.push({ path, consumers: consumers.sort() });
+    }
+  }
+
+  // Suggested: claude-code if detected; else alphabetically-first detected;
+  // else claude-code as fallback (consistent with buildInstalledAgentsResponse).
+  let suggested = "claude-code";
+  if (!entries.some((e) => e.id === "claude-code")) {
+    suggested = entries[0]?.id ?? "claude-code";
+  }
+
+  const data: AgentsResponse = { agents: entries, suggested, sharedFolders };
+
+  agentPresenceCache = { data, ts: now, ...cacheKey };
+  return data;
+}
+
+function firstNonTildeSegment(p: string): string {
+  if (p.startsWith("~/") || p.startsWith("~\\")) return p.slice(2);
+  if (p.startsWith("~")) return p.slice(1);
+  return p;
+}
+
+/** Read the lockfile and return the newest `updatedAt` across entries owned by
+ *  `agentId`. Returns null if the lockfile is missing or has no matching entry. */
+function resolveAgentLastSync(root: string, _agentId: string): string | null {
+  try {
+    const lock = readLockfile(root);
+    if (!lock?.skills) return null;
+    let newest: string | null = null;
+    for (const entry of Object.values(lock.skills)) {
+      const updatedAt = (entry as { updatedAt?: string }).updatedAt;
+      if (typeof updatedAt === "string" && (!newest || updatedAt > newest)) {
+        newest = updatedAt;
+      }
+    }
+    return newest;
+  } catch {
+    return null;
+  }
+}
+
+function computeAgentHealth(
+  lastSync: string | null,
+  totalSkills: number,
+): "ok" | "stale" | "missing" {
+  if (totalSkills === 0 && !lastSync) return "missing";
+  if (!lastSync) return "ok";
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  const age = Date.now() - new Date(lastSync).getTime();
+  return age > SEVEN_DAYS_MS ? "stale" : "ok";
+}
+
+// ---------------------------------------------------------------------------
+// 0686 — /api/skills?scope=&agent= filter.
+//
+// The existing /api/skills response is the SSoT for skill shape; this helper
+// applies an in-memory filter on top of the full tri-scope list so the
+// endpoint stays a pure projection (no fresh disk walk per query).
+// ---------------------------------------------------------------------------
+
+export interface SkillScopeFilter {
+  scope?: string;
+  agent?: string;
+}
+
+export function filterSkillsByScopeAndAgent<T extends SkillInfo>(
+  skills: T[],
+  filter: SkillScopeFilter,
+): T[] {
+  let out = skills;
+  if (filter.scope !== undefined) {
+    const allowed: SkillScope[] = ["own", "installed", "global"];
+    if (!allowed.includes(filter.scope as SkillScope)) return [];
+    out = out.filter((s) => (s.scope ?? "own") === filter.scope);
+  }
+  if (filter.agent !== undefined) {
+    const agent = filter.agent;
+    out = out.filter((s) => {
+      const scope = s.scope ?? "own";
+      if (scope === "own") return true;
+      return s.sourceAgent === agent;
+    });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -617,6 +887,20 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     }
   });
 
+  // 0686 — /api/agents: agents with filesystem presence + per-agent counts +
+  // shared-folder grouping. 30s detection cache (mirrors Ollama/LM Studio
+  // probe pattern from 0677).
+  router.get("/api/agents", async (req, res) => {
+    try {
+      const detected = await detectInstalledAgents();
+      const detectedBinaries = new Set(detected.map((a) => a.id));
+      const data = await buildAgentsResponse({ root, detectedBinaries });
+      sendJson(res, data, 200, req);
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 500, req);
+    }
+  });
+
   // Server-Sent Events endpoint for data change notifications
   // Clients subscribe here to receive push updates when benchmarks complete,
   // history is written, or leaderboard is updated.
@@ -865,7 +1149,34 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   //     unknown/missing fields default to `null` (not undefined) so the shape
   //     remains JSON-stable for all consumers.
   router.get("/api/skills", async (req, res) => {
-    const skills = await scanSkills(root);
+    // 0686: ?scope=own|installed|global and ?agent=<id> query params.
+    // When either is present, switch to tri-scope scanning so the response
+    // carries the new `scope`/`isSymlink`/`symlinkTarget`/`installMethod`/
+    // `sourceAgent` fields. With no filter, we stay on the legacy two-scope
+    // path AND still layer the tri-scope enrichment on top so the UI gets a
+    // consistent shape either way.
+    const url = new URL(req.url ?? "/api/skills", "http://localhost");
+    const rawScope = url.searchParams.get("scope") ?? undefined;
+    const rawAgent = url.searchParams.get("agent") ?? undefined;
+
+    // Determine which agent's global scope to scan. When the caller doesn't
+    // specify one, default to the suggested agent from buildAgentsResponse —
+    // that's usually claude-code but falls back to the first detected agent.
+    let activeAgent = rawAgent;
+    if (!activeAgent) {
+      try {
+        const detected = await detectInstalledAgents();
+        const resp = await buildAgentsResponse({
+          root,
+          detectedBinaries: new Set(detected.map((a) => a.id)),
+        });
+        activeAgent = resp.suggested;
+      } catch {
+        activeAgent = "claude-code";
+      }
+    }
+
+    const skills = await scanSkillsTriScope(root, { agentId: activeAgent });
     const enriched = await Promise.all(
       skills.map(async (s) => {
         let evalCount = 0;
@@ -879,12 +1190,17 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         } catch { /* no evals */ }
         const benchmark = await readBenchmark(s.dir);
         const meta = buildSkillMetadata(s.dir, s.origin, root);
-        // Defensive origin guarantee — scanSkills sets it, but fall back to a
-        // recomputation if anything downstream ever widens the type.
         const origin = s.origin ?? classifyOrigin(s.dir, root);
+        // Preserve scanner-derived sourceAgent (populated for installed + global
+        // scopes) over the metadata-derived one which only covers local wrappers.
+        const sourceAgent = s.sourceAgent ?? meta.sourceAgent;
         return {
           ...s,
           origin,
+          scope: s.scope ?? (origin === "installed" ? "installed" : "own"),
+          isSymlink: s.isSymlink ?? false,
+          symlinkTarget: s.symlinkTarget ?? null,
+          installMethod: s.installMethod ?? (origin === "installed" ? "copied" : "authored"),
           evalCount,
           assertionCount,
           benchmarkStatus: computeBenchmarkStatus(benchmark, evalIds, s.hasEvals),
@@ -902,11 +1218,15 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
           entryPoint: meta.entryPoint,
           lastModified: meta.lastModified,
           sizeBytes: meta.sizeBytes,
-          sourceAgent: meta.sourceAgent,
+          sourceAgent,
         };
       }),
     );
-    sendJson(res, enriched, 200, req);
+    const filtered = filterSkillsByScopeAndAgent(enriched, {
+      scope: rawScope,
+      agent: rawAgent,
+    });
+    sendJson(res, filtered, 200, req);
   });
 
   // Check for skill updates via `vskill outdated --json`

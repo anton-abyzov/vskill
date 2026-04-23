@@ -4,8 +4,13 @@ import type { SkillInfo } from "../types";
 // SkillRow with the hover card via `<SkillRowHoverCard skill={skill}>...`.
 // This import lines up the dependency without altering SkillRow styling.
 import { SkillRowHoverCard } from "./SkillRowHoverCard";
+import { SymlinkChip } from "./SymlinkChip";
 import { UpdateBadge } from "./UpdateBadge";
 void SkillRowHoverCard;
+
+// 0686 T-015 (US-008): SkillInfo carries `isSymlink` + `symlinkTarget` once
+// the server enrichment is active. Legacy payloads (pre-0686) omit both,
+// so the chip only renders when `isSymlink === true`.
 
 interface Props {
   skill: SkillInfo;
@@ -126,6 +131,12 @@ function SkillRowBase({ skill, isSelected, onSelect, onContextMenu }: Props) {
           {skill.version}
         </span>
       )}
+
+      {/* 0686 US-008: chain-link glyph when the skill was installed via
+          symlink. Renders when the server enriches SkillInfo with the
+          isSymlink flag; legacy payloads omit both fields and the chip
+          stays hidden automatically. */}
+      {skill.isSymlink && <SymlinkChip target={skill.symlinkTarget ?? null} />}
 
       {/* 0683 US-001: subtle ↑ glyph replaces the old "update" pill. */}
       <UpdateBadge skill={skill} />

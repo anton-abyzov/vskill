@@ -179,6 +179,12 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
         </span>
       </div>
 
+      {/* 0686 T-015 (US-008): "Install method" row — surfaces symlinked /
+          copied / authored provenance. Server populates `installMethod` +
+          `symlinkTarget` once CONTRACT_READY; we render defensively so the
+          row stays hidden on legacy payloads. */}
+      <InstallMethodRow skill={skill} />
+
       {/* Row 3: path chip + copy button */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {/* T-066: The chip itself is clickable — qa-findings #7 flagged that
@@ -236,6 +242,61 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 0686 T-015 (US-008): Install method row — appears in the new detail
+// header when the server payload includes `installMethod` / `symlinkTarget`.
+// Defensive: hidden entirely when the fields aren't present, so pre-
+// CONTRACT_READY SkillInfo payloads render identically to before.
+// ---------------------------------------------------------------------------
+
+function InstallMethodRow({ skill }: { skill: SkillInfo }) {
+  const method = skill.installMethod;
+  const target = skill.symlinkTarget;
+  if (!method) return null;
+
+  let label = "";
+  switch (method) {
+    case "symlinked":
+      label = target ? `Symlinked from ${target}` : "Symlinked (target unresolved)";
+      break;
+    case "copied":
+      label = "Copied (independent)";
+      break;
+    case "authored":
+      label = "Authored";
+      break;
+    default:
+      return null;
+  }
+  return (
+    <div
+      data-testid="detail-header-install-method"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 11,
+        color: "var(--text-secondary)",
+        fontFamily: "var(--font-sans)",
+        margin: "6px 0 8px",
+      }}
+    >
+      <span
+        style={{
+          fontWeight: 600,
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+          fontSize: 10,
+          color: "var(--text-tertiary)",
+        }}
+      >
+        Install method
+      </span>
+      <span style={{ fontFamily: "var(--font-mono)" }}>{label}</span>
     </div>
   );
 }

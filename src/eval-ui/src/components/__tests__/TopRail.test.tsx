@@ -13,6 +13,15 @@ vi.mock("../UpdateBell", () => ({
   UpdateBell: () => null,
 }));
 
+// 0686 T-001: StudioLogo uses useState for hover/focus — TopRail tests call
+// components as plain functions without a host, so a stub preserves the
+// "Skill Studio" label text for the existing containment assertion while
+// the semantic coverage (href, role, keyboard, focus ring) lives in
+// StudioLogo.test.tsx.
+vi.mock("../StudioLogo", () => ({
+  StudioLogo: () => "Skill Studio",
+}));
+
 import { TopRail } from "../TopRail";
 
 type ReactEl = { type: unknown; props: Record<string, unknown> };

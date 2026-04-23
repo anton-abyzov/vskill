@@ -59,7 +59,7 @@ behavior are marked `test.fixme()` so the suite stays green today.
 ### Playwright specs
 All 14 interactions have a matching `test(...)` in `e2e/qa-click-audit.spec.ts`:
 
-1. `breadcrumb nav [AC-US3-01]` — passes as "currently non-interactive" (asserts count=0 of anchors/buttons). Once finding #6 is fixed, flip the assertion.
+1. `breadcrumb nav [AC-US3-01]` — updated in increment 0684 (B7) to assert the shipped T-059 behavior: 2 interactive segments (`Own`, `test-plugin`) plus an inert current segment (`test-skill`). Regression canary closed.
 2. `detail tabs [AC-US3-01, AC-US8-06]` — will FAIL until finding #1 is fixed; that's the intended signal.
 3. `copy path button [AC-US3-01]` — reads clipboard on chromium.
 4. `sidebar row click [AC-US1-03, AC-US3-01]` — green.

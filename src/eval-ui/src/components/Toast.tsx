@@ -133,25 +133,34 @@ export function ToastStack({ toasts, onDismiss, liveMessage, liveAssertiveMessag
     <>
       <AriaLive politeness="polite" message={liveMessage} />
       <AriaLive politeness="assertive" message={liveAssertiveMessage} />
-      <div
-        data-testid="toast-stack"
-        style={{
-          position: "fixed",
-          right: 16,
-          bottom: 16,
-          display: "flex",
-          flexDirection: "column-reverse",
-          gap: 8,
-          zIndex: 50,
-          pointerEvents: "none",
-        }}
-      >
-        {toasts.map((t) => (
-          <div key={t.id} style={{ pointerEvents: "auto" }}>
-            <ToastItem toast={t} onDismiss={onDismiss} />
-          </div>
-        ))}
-      </div>
+      {/*
+        T-0684 (B8): Only render the stack container when there are toasts.
+        qa-click-audit.spec.ts:385 asserts zero elements matching
+        `[data-testid^="toast-"]` after Escape; when the stack div was
+        always-rendered its `data-testid="toast-stack"` survived dismissal
+        and kept the count at 1.
+      */}
+      {toasts.length > 0 && (
+        <div
+          data-testid="toast-stack"
+          style={{
+            position: "fixed",
+            right: 16,
+            bottom: 16,
+            display: "flex",
+            flexDirection: "column-reverse",
+            gap: 8,
+            zIndex: 50,
+            pointerEvents: "none",
+          }}
+        >
+          {toasts.map((t) => (
+            <div key={t.id} style={{ pointerEvents: "auto" }}>
+              <ToastItem toast={t} onDismiss={onDismiss} />
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }

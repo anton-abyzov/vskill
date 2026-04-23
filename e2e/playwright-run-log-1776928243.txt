@@ -1,0 +1,408 @@
+
+Running 56 tests using 8 workers
+
+  ✓   8 e2e/eval-ui.spec.ts:7:1 › health endpoint returns ok (29ms)
+  ✓   9 e2e/eval-ui.spec.ts:14:1 › UI loads with sidebar and heading (108ms)
+  ✘   1 e2e/lighthouse-budget.spec.ts:31:3 › T-055 — Lighthouse budget smoke (proxy via PerformanceTimeline) › FCP is reported within the smoke budget (135ms)
+  ✓   7 e2e/sidebar-split.spec.ts:27:3 › sidebar split › OWN and INSTALLED section headers render with counts (247ms)
+  ✘   4 e2e/qa-click-audit.spec.ts:44:3 › breadcrumb nav [AC-US3-01] › breadcrumb items are rendered but currently NOT interactive — regression tracked in qa-findings.md (729ms)
+  ✓  10 e2e/eval-ui.spec.ts:23:1 › GET /api/skills returns test-skill (1.2s)
+  ✓   6 e2e/performance-marks.spec.ts:50:3 › T-051 — interaction performance budgets › detail panel renders within 120ms of skill click (2.2s)
+  ✓   3 e2e/keyboard-shortcuts.spec.ts:33:3 › T-050 — global keyboard shortcuts › '/' focuses the sidebar search input from the body (2.4s)
+  ✓  12 e2e/lighthouse-budget.spec.ts:50:3 › T-055 — Lighthouse budget smoke (proxy via PerformanceTimeline) › DOM interactive is reported within the smoke budget (1.4s)
+  ✓   5 e2e/detail-panel.spec.ts:14:3 › detail panel — T-034 › clicking a skill populates DetailHeader + Metadata tab (2.9s)
+  ✓  14 e2e/eval-ui.spec.ts:37:1 › skills list page shows test-skill (3.1s)
+  ✓  19 e2e/eval-ui.spec.ts:47:1 › GET /api/skills/:plugin/:skill returns skill content (99ms)
+  ✘  15 e2e/performance-marks.spec.ts:74:3 › T-051 — interaction performance budgets › typing in search updates results within 80ms (2.4s)
+  ✓  20 e2e/eval-ui.spec.ts:54:1 › GET /api/skills/:plugin/:skill/evals returns eval cases (157ms)
+  ✓  13 e2e/qa-click-audit.spec.ts:73:3 › detail tabs [AC-US3-01, AC-US8-06] › Overview / Versions tab buttons switch content and ARIA state (3.2s)
+  ✓  21 e2e/eval-ui.spec.ts:65:1 › PUT /api/skills/:plugin/:skill/evals validates body (651ms)
+  ✘  16 e2e/keyboard-shortcuts.spec.ts:47:3 › T-050 — global keyboard shortcuts › 'j' and 'k' move selection in the sidebar (2.9s)
+  ✓  24 e2e/eval-ui.spec.ts:74:1 › PUT /api/skills/:plugin/:skill/evals saves valid data (541ms)
+  ✓  26 e2e/eval-ui.spec.ts:108:1 › GET /api/skills/:plugin/:skill/benchmark/latest returns benchmark (4ms)
+  ✓  27 e2e/eval-ui.spec.ts:122:1 › GET /api/skills/:plugin/:skill/history returns array (4ms)
+  ✓  28 e2e/eval-ui.spec.ts:133:1 › GET /api/skills/nonexistent/skill returns empty detail (3ms)
+  ✓  18 e2e/theme-persistence.spec.ts:39:3 › T-049 — theme persistence across reload › FOUC-guard applies dark theme before React mount (3.0s)
+  ✓  23 e2e/performance-marks.spec.ts:97:3 › T-051 — interaction performance budgets › theme toggle does not schedule long-tasks > 50ms (520ms)
+  ✓  29 e2e/eval-ui.spec.ts:140:1 › GET /api/skills/nonexistent/skill/evals returns error (417ms)
+  ✓  31 e2e/eval-ui.spec.ts:145:1 › GET /api/unknown-route returns 404 (376ms)
+  ✓  25 e2e/keyboard-shortcuts.spec.ts:70:3 › T-050 — global keyboard shortcuts › '?' opens the keyboard cheatsheet modal and Escape closes it (413ms)
+  ✓  22 e2e/qa-click-audit.spec.ts:105:3 › copy path button [AC-US3-01] › clicking Copy writes the skill path to the clipboard (2.0s)
+  ✘   2 e2e/leaderboard.spec.ts:5:3 › Leaderboard page › leaderboard tab is visible in workspace (7.3s)
+  ✓  30 e2e/theme-persistence.spec.ts:63:3 › T-049 — theme persistence across reload › data-theme remains dark after page.reload() (2.4s)
+  ✓  32 e2e/eval-ui.spec.ts:154:1 › skill list links navigate to detail page (2.0s)
+  ✓  34 e2e/qa-click-audit.spec.ts:135:3 › sidebar row click [AC-US1-03, AC-US3-01] › clicking a sidebar row populates the right panel (2.2s)
+  ✘  11 e2e/sidebar-split.spec.ts:47:3 › sidebar split › collapse state for OWN section persists across reload (9.3s)
+  ✓  36 e2e/theme-persistence.spec.ts:79:3 › T-049 — theme persistence across reload › status-bar toggle cycles dark → auto and persists (1.5s)
+  ✘  17 e2e/tests-panel.spec.ts:5:3 › TestsPanel filter tabs and badges › tests panel shows filter tabs (All, Unit, Integration) (7.9s)
+  ✘  37 e2e/eval-ui.spec.ts:168:1 › page loads in under 1 second (1.9s)
+  ✓  38 e2e/qa-click-audit.spec.ts:149:3 › sidebar search [AC-US4-01, AC-US4-06] › typing in the filter narrows rows; '/' focuses the input (1.6s)
+  ✓  42 e2e/eval-ui.spec.ts:177:1 › API /api/skills responds in under 200ms (175ms)
+  ✓  39 e2e/sidebar-split.spec.ts:72:3 › sidebar split › '/' shortcut focuses the sidebar search input (833ms)
+  ✓  43 e2e/eval-ui.spec.ts:185:1 › API /api/config responds in under 1 second (85ms)
+  ✓  41 e2e/tests-panel.spec.ts:18:3 › TestsPanel filter tabs and badges › test cases show type badges (U/I) (1.2s)
+  ✓  44 e2e/eval-ui.spec.ts:194:1 › skill detail page loads in under 1 second (817ms)
+  ✘  45 e2e/tests-panel.spec.ts:30:3 › TestsPanel filter tabs and badges › filter tabs filter the test case list (378ms)
+  ✘  33 e2e/keyboard-shortcuts.spec.ts:85:3 › T-050 — global keyboard shortcuts › Cmd/Ctrl+B toggles sidebar visibility (6.5s)
+  ✘  46 e2e/keyboard-shortcuts.spec.ts:100:3 › T-050 — global keyboard shortcuts › Cmd/Ctrl+Shift+D toggles the theme (152ms)
+  ✘  40 e2e/qa-click-audit.spec.ts:174:3 › section collapse persistence [AC-US1-05] › clicking OWN header toggles collapse; state persists on reload (6.2s)
+  ✓  47 e2e/qa-click-audit.spec.ts:208:3 › keyboard navigation [AC-US4-02, AC-US4-05] › j/k move selection; Enter reselects; ? opens the shortcut cheatsheet (175ms)
+  ✘  48 e2e/qa-click-audit.spec.ts:230:3 › theme toggle [AC-US2-03, AC-US2-04] › status-bar theme button flips data-theme and persists to localStorage (747ms)
+  ✓  49 e2e/qa-click-audit.spec.ts:265:3 › command palette [FR-005] › Cmd/Ctrl+K opens the palette; Escape dismisses it (236ms)
+  -  50 e2e/qa-click-audit.spec.ts:288:8 › context menu [AC-US4-07] › right-click on a skill row opens the custom ContextMenu
+  ✓  51 e2e/qa-click-audit.spec.ts:311:3 › metadata tab links + wrapping [AC-US3-02, AC-US3-05] › ENTRY POINT and DIRECTORY render; paths break cleanly and are not mid-word-clipped (514ms)
+  -  52 e2e/qa-click-audit.spec.ts:335:8 › metadata tab links + wrapping [AC-US3-02, AC-US3-05] › HOMEPAGE renders as an external anchor with rel=noopener when populated
+  -  53 e2e/qa-click-audit.spec.ts:351:8 › skill deps chips [AC-US3-04] › clicking an installed dep chip navigates to that skill
+  ✓  54 e2e/qa-click-audit.spec.ts:368:3 › versions tab [AC-US3-08] › versions tab shows version history (integrated) — regression noted if fallback is displayed (670ms)
+  ✘  55 e2e/qa-click-audit.spec.ts:385:3 › toast lifecycle [AC-US4-08] › pressing 'e' fires a toast; it auto-dismisses within 5s; Escape dismisses earlier (611ms)
+  ✘  35 e2e/leaderboard.spec.ts:13:3 › Leaderboard page › leaderboard panel shows empty state when no sweep data (30.0s)
+  ✓  56 e2e/leaderboard.spec.ts:24:3 › Leaderboard page › leaderboard API endpoint responds (28ms)
+
+
+  1) e2e/eval-ui.spec.ts:168:1 › page loads in under 1 second ──────────────────────────────────────
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBeLessThan[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected: < [32m1000[39m
+    Received:   [31m1914[39m
+
+      172 |   await expect(page.locator("text=test-skill")).toBeVisible();
+      173 |   const elapsed = Date.now() - start;
+    > 174 |   expect(elapsed).toBeLessThan(1000);
+          |                   ^
+      175 | });
+      176 |
+      177 | test("API /api/skills responds in under 200ms", async ({ request }) => {
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/eval-ui.spec.ts:174:19
+
+    Error Context: test-results/eval-ui-page-loads-in-under-1-second/error-context.md
+
+  2) e2e/keyboard-shortcuts.spec.ts:47:3 › T-050 — global keyboard shortcuts › 'j' and 'k' move selection in the sidebar 
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mnot[2m.[22mtoBeNull[2m()[22m
+
+    Received: [31mnull[39m
+
+      56 |       document.querySelector("[data-testid='skill-row'][aria-selected='true']")?.textContent?.trim() ?? null,
+      57 |     );
+    > 58 |     expect(firstSelected).not.toBeNull();
+         |                               ^
+      59 |
+      60 |     // 'j' again advances to the next row (when multiple exist). On the
+      61 |     // single-fixture dataset there is only one row, so 'j' is a no-op but
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/keyboard-shortcuts.spec.ts:58:31
+
+    Error Context: test-results/keyboard-shortcuts-T-050-—-51205-ve-selection-in-the-sidebar/error-context.md
+
+  3) e2e/keyboard-shortcuts.spec.ts:85:3 › T-050 — global keyboard shortcuts › Cmd/Ctrl+B toggles sidebar visibility 
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeHidden[2m([22m[2m)[22m failed
+
+    Locator:  getByRole('complementary', { name: /Skills sidebar/i })
+    Expected: hidden
+    Received: visible
+    Timeout:  5000ms
+
+    Call log:
+    [2m  - Expect "toBeHidden" with timeout 5000ms[22m
+    [2m  - waiting for getByRole('complementary', { name: /Skills sidebar/i })[22m
+    [2m    9 × locator resolved to <aside aria-label="Skills sidebar">…</aside>[22m
+    [2m      - unexpected value "visible"[22m
+
+
+      92 |
+      93 |     await page.keyboard.press(`${mod()}+b`);
+    > 94 |     await expect(aside).toBeHidden();
+         |                         ^
+      95 |
+      96 |     await page.keyboard.press(`${mod()}+b`);
+      97 |     await expect(aside).toBeVisible();
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/keyboard-shortcuts.spec.ts:94:25
+
+    Error Context: test-results/keyboard-shortcuts-T-050-—-5bfd1--toggles-sidebar-visibility/error-context.md
+
+  4) e2e/keyboard-shortcuts.spec.ts:100:3 › T-050 — global keyboard shortcuts › Cmd/Ctrl+Shift+D toggles the theme 
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mnot[2m.[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: not [32m"light"[39m
+
+      111 |       () => document.documentElement.dataset.theme,
+      112 |     );
+    > 113 |     expect(after).not.toBe(initial);
+          |                       ^
+      114 |
+      115 |     // Press again — must flip back (or advance to the next resolved theme).
+      116 |     await page.keyboard.press(`${mod()}+Shift+D`);
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/keyboard-shortcuts.spec.ts:113:23
+
+    Error Context: test-results/keyboard-shortcuts-T-050-—-8e55e-l-Shift-D-toggles-the-theme/error-context.md
+
+  5) e2e/leaderboard.spec.ts:5:3 › Leaderboard page › leaderboard tab is visible in workspace ──────
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+
+    Locator: locator('text=Leaderboard')
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+    [2m  - Expect "toBeVisible" with timeout 5000ms[22m
+    [2m  - waiting for locator('text=Leaderboard')[22m
+
+
+       8 |     await page.locator("text=test-skill").click();
+       9 |     // Check leaderboard tab exists
+    > 10 |     await expect(page.locator("text=Leaderboard")).toBeVisible();
+         |                                                    ^
+      11 |   });
+      12 |
+      13 |   test("leaderboard panel shows empty state when no sweep data", async ({ page }) => {
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/leaderboard.spec.ts:10:52
+
+    Error Context: test-results/leaderboard-Leaderboard-pa-419c8-tab-is-visible-in-workspace/error-context.md
+
+  6) e2e/leaderboard.spec.ts:13:3 › Leaderboard page › leaderboard panel shows empty state when no sweep data 
+
+    [31mTest timeout of 30000ms exceeded.[39m
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Call log:
+    [2m  - waiting for locator('text=Leaderboard')[22m
+
+
+      15 |     await page.locator("text=test-skill").click();
+      16 |     // Click leaderboard tab
+    > 17 |     await page.locator("text=Leaderboard").click();
+         |                                            ^
+      18 |     // Should show empty state
+      19 |     await expect(page.locator("text=No sweep results yet")).toBeVisible();
+      20 |     // Should show sweep command instructions
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/leaderboard.spec.ts:17:44
+
+    Error Context: test-results/leaderboard-Leaderboard-pa-24aac-ty-state-when-no-sweep-data/error-context.md
+
+  7) e2e/lighthouse-budget.spec.ts:31:3 › T-055 — Lighthouse budget smoke (proxy via PerformanceTimeline) › FCP is reported within the smoke budget 
+
+    Error: no FCP entry reported by the browser
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mnot[2m.[22mtoBeNull[2m()[22m
+
+    Received: [31mnull[39m
+
+      41 |     });
+      42 |
+    > 43 |     expect(fcp, "no FCP entry reported by the browser").not.toBeNull();
+         |                                                             ^
+      44 |     expect.soft(fcp!, `FCP=${fcp}ms`).toBeLessThanOrEqual(FCP_SMOKE_BUDGET_MS);
+      45 |     // Hard ceiling 2× budget — catches huge regressions without tripping on
+      46 |     // cold-start variance.
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/lighthouse-budget.spec.ts:43:61
+
+    Error Context: test-results/lighthouse-budget-T-055-—--47efd-ted-within-the-smoke-budget/error-context.md
+
+  8) e2e/performance-marks.spec.ts:74:3 › T-051 — interaction performance budgets › typing in search updates results within 80ms 
+
+    Error: sidebar-filter duration: 313ms
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mtoBeLessThanOrEqual[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected: <= [32m80[39m
+    Received:    [31m313[39m
+
+      88 |     // Use a soft assertion so a single outlier run doesn't nuke the suite —
+      89 |     // the p95 observation is what we care about.
+    > 90 |     expect.soft(duration, `sidebar-filter duration: ${duration}ms`).toBeLessThanOrEqual(
+         |                                                                     ^
+      91 |       SEARCH_BUDGET_MS,
+      92 |     );
+      93 |     // Hard ceiling to catch regressions: 2× budget.
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/performance-marks.spec.ts:90:69
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBeLessThanOrEqual[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected: <= [32m160[39m
+    Received:    [31m313[39m
+
+      92 |     );
+      93 |     // Hard ceiling to catch regressions: 2× budget.
+    > 94 |     expect(duration).toBeLessThanOrEqual(SEARCH_BUDGET_MS * 2);
+         |                      ^
+      95 |   });
+      96 |
+      97 |   test("theme toggle does not schedule long-tasks > 50ms", async ({ page }) => {
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/performance-marks.spec.ts:94:22
+
+    Error Context: test-results/performance-marks-T-051-—--d0a06-updates-results-within-80ms/error-context.md
+
+  9) e2e/qa-click-audit.spec.ts:44:3 › breadcrumb nav [AC-US3-01] › breadcrumb items are rendered but currently NOT interactive — regression tracked in qa-findings.md 
+
+    Error: breadcrumb segments are non-interactive today; if this count grows the QA audit must be updated — see qa-findings.md
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m0[39m
+    Received: [31m2[39m
+
+      63 |       linkCount,
+      64 |       "breadcrumb segments are non-interactive today; if this count grows the QA audit must be updated — see qa-findings.md",
+    > 65 |     ).toBe(0);
+         |       ^
+      66 |   });
+      67 | });
+      68 |
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/qa-click-audit.spec.ts:65:7
+
+    Error Context: test-results/qa-click-audit-breadcrumb--876fe-n-tracked-in-qa-findings-md/error-context.md
+
+  10) e2e/qa-click-audit.spec.ts:174:3 › section collapse persistence [AC-US1-05] › clicking OWN header toggles collapse; state persists on reload 
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoHaveAttribute[2m([22m[32mexpected[39m[2m)[22m failed
+
+    Locator:  locator('button[data-testid=\'sidebar-section-header\']').filter({ hasText: 'Own' })
+    Expected: [32m"[7mfals[27me"[39m
+    Received: [31m"[7mtru[27me"[39m
+    Timeout:  5000ms
+
+    Call log:
+    [2m  - Expect "toHaveAttribute" with timeout 5000ms[22m
+    [2m  - waiting for locator('button[data-testid=\'sidebar-section-header\']').filter({ hasText: 'Own' })[22m
+    [2m    9 × locator resolved to <button type="button" aria-expanded="true" id="sidebar-section-source-header" data-testid="sidebar-section-header" aria-controls="sidebar-section-source-group">…</button>[22m
+    [2m      - unexpected value "true"[22m
+
+
+      198 |     const ownHeaderAfter = page
+      199 |       .locator("button[data-testid='sidebar-section-header']", { hasText: "Own" });
+    > 200 |     await expect(ownHeaderAfter).toHaveAttribute("aria-expanded", "false");
+          |                                  ^
+      201 |   });
+      202 | });
+      203 |
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/qa-click-audit.spec.ts:200:34
+
+    Error Context: test-results/qa-click-audit-section-col-6d000-se-state-persists-on-reload/error-context.md
+
+  11) e2e/qa-click-audit.spec.ts:230:3 › theme toggle [AC-US2-03, AC-US2-04] › status-bar theme button flips data-theme and persists to localStorage 
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mnot[2m.[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: not [32m"light"[39m
+
+      242 |     await toggle.click();
+      243 |     const after = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));
+    > 244 |     expect(after).not.toBe(before);
+          |                       ^
+      245 |
+      246 |     const stored = await page.evaluate(() => window.localStorage.getItem("vskill-theme"));
+      247 |     expect(stored, "theme selection must persist to `vskill-theme`").toBeTruthy();
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/qa-click-audit.spec.ts:244:23
+
+    Error Context: test-results/qa-click-audit-theme-toggl-6cd19-nd-persists-to-localStorage/error-context.md
+
+  12) e2e/qa-click-audit.spec.ts:385:3 › toast lifecycle [AC-US4-08] › pressing 'e' fires a toast; it auto-dismisses within 5s; Escape dismisses earlier 
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m0[39m
+    Received: [31m1[39m
+
+      402 |       .locator('[data-toast-role="toast"], [data-testid^="toast-"]')
+      403 |       .count();
+    > 404 |     expect(toastStillVisibleCount).toBe(0);
+          |                                    ^
+      405 |   });
+      406 | });
+      407 |
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/qa-click-audit.spec.ts:404:36
+
+    Error Context: test-results/qa-click-audit-toast-lifec-1dd3b-5s-Escape-dismisses-earlier/error-context.md
+
+  13) e2e/sidebar-split.spec.ts:47:3 › sidebar split › collapse state for OWN section persists across reload 
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoHaveAttribute[2m([22m[32mexpected[39m[2m)[22m failed
+
+    Locator:  locator('button[data-testid=\'sidebar-section-header\']').filter({ hasText: 'Own' })
+    Expected: [32m"[7mfals[27me"[39m
+    Received: [31m"[7mtru[27me"[39m
+    Timeout:  5000ms
+
+    Call log:
+    [2m  - Expect "toHaveAttribute" with timeout 5000ms[22m
+    [2m  - waiting for locator('button[data-testid=\'sidebar-section-header\']').filter({ hasText: 'Own' })[22m
+    [2m    7 × locator resolved to <button type="button" aria-expanded="true" id="sidebar-section-source-header" data-testid="sidebar-section-header" aria-controls="sidebar-section-source-group">…</button>[22m
+    [2m      - unexpected value "true"[22m
+
+
+      63 |       hasText: "Own",
+      64 |     });
+    > 65 |     await expect(ownHeaderAfterReload).toHaveAttribute("aria-expanded", "false");
+         |                                        ^
+      66 |
+      67 |     // Re-expand
+      68 |     await ownHeaderAfterReload.click();
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/sidebar-split.spec.ts:65:40
+
+    Error Context: test-results/sidebar-split-sidebar-spli-7d7f6-tion-persists-across-reload/error-context.md
+
+  14) e2e/tests-panel.spec.ts:5:3 › TestsPanel filter tabs and badges › tests panel shows filter tabs (All, Unit, Integration) 
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+
+    Locator: locator('button:has-text(\'Unit\')').first()
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+    [2m  - Expect "toBeVisible" with timeout 5000ms[22m
+    [2m  - waiting for locator('button:has-text(\'Unit\')').first()[22m
+
+
+      12 |     // Filter tabs should be visible
+      13 |     await expect(page.locator("button:has-text('All')").first()).toBeVisible();
+    > 14 |     await expect(page.locator("button:has-text('Unit')").first()).toBeVisible();
+         |                                                                   ^
+      15 |     await expect(page.locator("button:has-text('Integration')").first()).toBeVisible();
+      16 |   });
+      17 |
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/tests-panel.spec.ts:14:67
+
+    Error Context: test-results/tests-panel-TestsPanel-fil-9961a--tabs-All-Unit-Integration-/error-context.md
+
+  15) e2e/tests-panel.spec.ts:30:3 › TestsPanel filter tabs and badges › filter tabs filter the test case list 
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBeGreaterThan[2m([22m[32mexpected[39m[2m)[22m
+
+    Expected: > [32m0[39m
+    Received:   [31m0[39m
+
+      40 |     const allCases = page.locator("button:has-text('#')");
+      41 |     const allCount = await allCases.count();
+    > 42 |     expect(allCount).toBeGreaterThan(0);
+         |                      ^
+      43 |   });
+      44 | });
+      45 |
+        at /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/tests-panel.spec.ts:42:22
+
+    Error Context: test-results/tests-panel-TestsPanel-fil-b6480-s-filter-the-test-case-list/error-context.md
+
+  15 failed
+    e2e/eval-ui.spec.ts:168:1 › page loads in under 1 second ───────────────────────────────────────
+    e2e/keyboard-shortcuts.spec.ts:47:3 › T-050 — global keyboard shortcuts › 'j' and 'k' move selection in the sidebar 
+    e2e/keyboard-shortcuts.spec.ts:85:3 › T-050 — global keyboard shortcuts › Cmd/Ctrl+B toggles sidebar visibility 
+    e2e/keyboard-shortcuts.spec.ts:100:3 › T-050 — global keyboard shortcuts › Cmd/Ctrl+Shift+D toggles the theme 
+    e2e/leaderboard.spec.ts:5:3 › Leaderboard page › leaderboard tab is visible in workspace ───────
+    e2e/leaderboard.spec.ts:13:3 › Leaderboard page › leaderboard panel shows empty state when no sweep data 
+    e2e/lighthouse-budget.spec.ts:31:3 › T-055 — Lighthouse budget smoke (proxy via PerformanceTimeline) › FCP is reported within the smoke budget 
+    e2e/performance-marks.spec.ts:74:3 › T-051 — interaction performance budgets › typing in search updates results within 80ms 
+    e2e/qa-click-audit.spec.ts:44:3 › breadcrumb nav [AC-US3-01] › breadcrumb items are rendered but currently NOT interactive — regression tracked in qa-findings.md 
+    e2e/qa-click-audit.spec.ts:174:3 › section collapse persistence [AC-US1-05] › clicking OWN header toggles collapse; state persists on reload 
+    e2e/qa-click-audit.spec.ts:230:3 › theme toggle [AC-US2-03, AC-US2-04] › status-bar theme button flips data-theme and persists to localStorage 
+    e2e/qa-click-audit.spec.ts:385:3 › toast lifecycle [AC-US4-08] › pressing 'e' fires a toast; it auto-dismisses within 5s; Escape dismisses earlier 
+    e2e/sidebar-split.spec.ts:47:3 › sidebar split › collapse state for OWN section persists across reload 
+    e2e/tests-panel.spec.ts:5:3 › TestsPanel filter tabs and badges › tests panel shows filter tabs (All, Unit, Integration) 
+    e2e/tests-panel.spec.ts:30:3 › TestsPanel filter tabs and badges › filter tabs filter the test case list 
+  3 skipped
+  38 passed (41.9s)

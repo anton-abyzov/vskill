@@ -3,6 +3,7 @@ import { useStudio } from "../StudioContext";
 import type { SkillInfo } from "../types";
 import { WorkspaceProvider } from "../pages/workspace/WorkspaceContext";
 import { VersionHistoryPanel } from "../pages/workspace/VersionHistoryPanel";
+import { SkillWorkspaceInner } from "../pages/workspace/SkillWorkspace";
 import { CreateSkillInline } from "./CreateSkillInline";
 import { EmptyState } from "./EmptyState";
 import { UpdatesPanel } from "../pages/UpdatesPanel";
@@ -371,11 +372,36 @@ function renderSkillDetail(
         aria-labelledby={`detail-tab-${active}`}
         style={{ flex: 1, minHeight: 0, overflow: "auto" }}
       >
-        {active === "overview" && MetadataTab({
-          skill,
-          allSkills: integrated?.allSkills ?? [],
-          onSelectSkill: integrated?.onSelectSkill,
-        })}
+        {active === "overview" && (
+          <>
+            {MetadataTab({
+              skill,
+              allSkills: integrated?.allSkills ?? [],
+              onSelectSkill: integrated?.onSelectSkill,
+            })}
+            {/* T-0684 (B5 / B6): mount SkillWorkspaceInner so the workspace
+                TabBar (Editor / Tests / Run / Leaderboard / …) is
+                accessible from the default Overview view. The 0674
+                redesign removed the `/skills/:plugin/:skill` workspace
+                route without replacing the navigation surface, which
+                left leaderboard.spec.ts and tests-panel.spec.ts with no
+                way to reach the panels they exercise. hideHeader keeps
+                `getByTestId("detail-header")` matching exactly one
+                element so detail-panel.spec.ts stays green. */}
+            {integrated != null && (
+              <WorkspaceProvider
+                key={`${skill.plugin}/${skill.skill}-workspace`}
+                plugin={skill.plugin}
+                skill={skill.skill}
+                origin={skill.origin}
+              >
+                <div style={{ minHeight: 520, display: "flex", flexDirection: "column" }}>
+                  <SkillWorkspaceInner hideHeader />
+                </div>
+              </WorkspaceProvider>
+            )}
+          </>
+        )}
         {active === "versions" && integrated != null && (
           <WorkspaceProvider key={`${skill.plugin}/${skill.skill}-versions`} plugin={skill.plugin} skill={skill.skill} origin={skill.origin}>
             <div style={{ padding: 16 }}>

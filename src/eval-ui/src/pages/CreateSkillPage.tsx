@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useCreateSkill, toKebab } from "../hooks/useCreateSkill";
 import { useConfig } from "../ConfigContext";
@@ -8,6 +8,10 @@ import { renderMarkdown } from "../utils/renderMarkdown";
 import { SkillFileTree } from "../components/SkillFileTree";
 import { AgentSelector } from "../components/AgentSelector";
 import type { InstalledAgentEntry } from "../components/AgentSelector";
+import {
+  readStudioPreferences,
+  writeStudioPreference,
+} from "../hooks/useStudioPreferences";
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -39,9 +43,25 @@ export function CreateSkillPage() {
   const navigate = useNavigate();
   const { config } = useConfig();
 
-  // Page-specific: explicit AI provider/model pickers
+  // ---------------------------------------------------------------------------
+  // 0678 — Source-model picker state
+  //
+  // The Create page renders an explicit Provider+Model dropdown. The selection
+  // is persisted to STUDIO_PREFS_KEY under `skillGenModel` so it sticks across
+  // reloads AND tabs (via the `storage` event). Defaults are { claude-cli,
+  // sonnet } exactly when no persisted selection exists — matching the
+  // server-side legacy default for back-compat.
+  //
+  // TODO(0678): extract <ProviderModelPicker> — shared with ComparisonPage
+  // (see ADR-0678-02 — deferred until both usage sites stabilize).
+  // ---------------------------------------------------------------------------
   const [aiProvider, setAiProvider] = useState("claude-cli");
   const [aiModel, setAiModel] = useState("sonnet");
+  const [usingPersistedSelection, setUsingPersistedSelection] = useState(false);
+  const [revertedToast, setRevertedToast] = useState<{ provider: string; model: string } | null>(null);
+  // Track whether we have hydrated the picker from config yet — the first
+  // pass is purely a hydration effect and must not write back to storage.
+  const hydratedRef = useRef(false);
 
   // Installed agents list (loaded from API)
   const [installedAgents, setInstalledAgents] = useState<InstalledAgentEntry[]>([]);
@@ -56,15 +76,87 @@ export function CreateSkillPage() {
       .catch(() => {});
   }, []);
 
-  // Initialize AI provider/model defaults from shared config
+  // Hydrate provider/model from persisted preferences the moment config is
+  // available. If the persisted provider is no longer detected (or the model
+  // it pinned is gone) we revert to the default pair and raise a toast — the
+  // persisted value is not cleared (it becomes usable again when the provider
+  // returns; see plan.md §5).
   useEffect(() => {
     if (!config) return;
-    const hasCli = config.providers.find((p) => p.id === "claude-cli" && p.available);
-    if (hasCli) {
+    const availableProviders = config.providers.filter((p) => p.available);
+    const persisted = readStudioPreferences().skillGenModel;
+
+    // If no providers are available at all, leave defaults — the picker will
+    // render disabled (AC-US1-04).
+    if (availableProviders.length === 0) {
+      hydratedRef.current = true;
+      return;
+    }
+
+    if (
+      persisted &&
+      typeof persisted === "object" &&
+      typeof persisted.provider === "string" &&
+      typeof persisted.model === "string"
+    ) {
+      const match = availableProviders.find((p) => p.id === persisted.provider);
+      const modelOk = match?.models.some((m) => m.id === persisted.model);
+      if (match && modelOk) {
+        setAiProvider(persisted.provider);
+        setAiModel(persisted.model);
+        setUsingPersistedSelection(true);
+        hydratedRef.current = true;
+        return;
+      }
+      // Persisted selection references a provider/model not currently
+      // detected → fall back to default + one-time toast (AC-US1-05).
+      setRevertedToast({ provider: persisted.provider, model: persisted.model });
+    }
+
+    // Default path: prefer claude-cli/sonnet when available; otherwise pick the
+    // first available provider's first model id.
+    const cli = availableProviders.find((p) => p.id === "claude-cli");
+    if (cli) {
       setAiProvider("claude-cli");
       setAiModel("sonnet");
+    } else {
+      const first = availableProviders[0];
+      setAiProvider(first.id);
+      setAiModel(first.models[0]?.id ?? "");
     }
+    setUsingPersistedSelection(false);
+    hydratedRef.current = true;
   }, [config]);
+
+  // Cross-tab propagation (AC-US3-02): when another tab writes skillGenModel,
+  // re-hydrate this tab's picker.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== null && !e.key.includes("vskill.studio.prefs")) return;
+      const prefs = readStudioPreferences();
+      const next = prefs.skillGenModel;
+      if (
+        next &&
+        typeof next === "object" &&
+        typeof next.provider === "string" &&
+        typeof next.model === "string"
+      ) {
+        setAiProvider(next.provider);
+        setAiModel(next.model);
+        setUsingPersistedSelection(true);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  // Persist selection changes — but only AFTER the initial hydration pass, so
+  // a mount with no prior preference doesn't spuriously write the default
+  // values and cause the "Default" caption to disappear on reload.
+  const writePersistedSelection = useCallback((provider: string, model: string) => {
+    writeStudioPreference("skillGenModel", { provider, model });
+    setUsingPersistedSelection(true);
+  }, []);
 
   const resolveAiConfigOverride = useCallback(() => {
     return { provider: aiProvider, model: aiModel };
@@ -208,12 +300,54 @@ export function CreateSkillPage() {
               </p>
             </div>
 
-            {/* Provider + Model row */}
+            {/* Provider + Model row — 0678 source-model picker */}
             <div className="glass-card p-5">
-              <h3 className="text-[13px] font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
-                Generation Model
+              <h3 className="text-[13px] font-semibold mb-3 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
+                <span>Source Model</span>
+                {!usingPersistedSelection && aiProvider === "claude-cli" && aiModel === "sonnet" && (
+                  <span
+                    className="text-[10px] font-normal uppercase tracking-wider px-1.5 py-0.5 rounded"
+                    style={{ color: "var(--text-tertiary)", background: "var(--surface-2)" }}
+                  >
+                    Default
+                  </span>
+                )}
               </h3>
-              <div className="flex gap-4">
+
+              {/* AC-US1-05 — one-time non-modal toast when the persisted
+                  selection references an unavailable provider/model. */}
+              {revertedToast && (
+                <div
+                  role="status"
+                  className="mb-3 px-3 py-2 rounded-lg text-[12px] flex items-center justify-between gap-3"
+                  style={{
+                    background: "var(--surface-2)",
+                    color: "var(--text-secondary)",
+                    border: "1px solid var(--border-subtle)",
+                  }}
+                >
+                  <span>
+                    Previous selection <code>{revertedToast.provider}/{revertedToast.model}</code> unavailable — reverted to default.
+                  </span>
+                  <button
+                    onClick={() => setRevertedToast(null)}
+                    className="text-[11px]"
+                    style={{ color: "var(--text-tertiary)", background: "none", border: "none", cursor: "pointer" }}
+                    aria-label="Dismiss notice"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              <div
+                className="flex gap-4"
+                title={
+                  !aiProviderInfo
+                    ? "Install a provider (Ollama / LM Studio / OpenRouter) or run `claude login` to enable model selection."
+                    : undefined
+                }
+              >
                 <div className="flex-1">
                   <label className="text-[11px] font-medium uppercase tracking-wider mb-2 block" style={{ color: "var(--text-tertiary)" }}>
                     Provider
@@ -221,11 +355,19 @@ export function CreateSkillPage() {
                   <select
                     value={aiProvider}
                     onChange={(e) => {
-                      setAiProvider(e.target.value);
-                      const p = config?.providers.find((p) => p.id === e.target.value);
-                      if (p?.models[0]) setAiModel(p.models[0].id);
+                      const nextProvider = e.target.value;
+                      setAiProvider(nextProvider);
+                      const p = config?.providers.find((p) => p.id === nextProvider);
+                      const nextModel = p?.models[0]?.id ?? aiModel;
+                      if (p?.models[0]) setAiModel(nextModel);
+                      writePersistedSelection(nextProvider, nextModel);
                     }}
-                    disabled={sk.generating}
+                    disabled={sk.generating || !aiProviderInfo}
+                    title={
+                      !aiProviderInfo
+                        ? "Install a provider (Ollama / LM Studio / OpenRouter) or run `claude login` to enable model selection."
+                        : undefined
+                    }
                     className="w-full px-3 py-2 rounded-lg text-[13px]"
                     style={inputStyle}
                   >
@@ -240,8 +382,12 @@ export function CreateSkillPage() {
                   </label>
                   <select
                     value={aiModel}
-                    onChange={(e) => setAiModel(e.target.value)}
-                    disabled={sk.generating}
+                    onChange={(e) => {
+                      const nextModel = e.target.value;
+                      setAiModel(nextModel);
+                      writePersistedSelection(aiProvider, nextModel);
+                    }}
+                    disabled={sk.generating || !aiProviderInfo}
                     className="w-full px-3 py-2 rounded-lg text-[13px]"
                     style={inputStyle}
                   >

@@ -41,7 +41,7 @@ async function grantClipboard(page: Page) {
 // 1. Breadcrumb navigation (AC-US3-01, AC-US1-02 — projectName / origin / plugin)
 // ---------------------------------------------------------------------------
 test.describe("breadcrumb nav [AC-US3-01]", () => {
-  test("breadcrumb items are rendered but currently NOT interactive — regression tracked in qa-findings.md", async ({ page }) => {
+  test("breadcrumb renders Own + plugin as interactive segments; current segment is inert", async ({ page }) => {
     await page.goto("/");
     await selectFixtureSkill(page);
 
@@ -53,16 +53,23 @@ test.describe("breadcrumb nav [AC-US3-01]", () => {
     await expect(breadcrumb).toContainText(/test-plugin/);
     await expect(breadcrumb).toContainText(/test-skill/);
 
-    // Regression: none of the breadcrumb segments are buttons or links.
-    // The spec is ambiguous on this (AC-US3-01 says "breadcrumb-style prefix"
-    // — no click contract). We assert the CURRENT behavior so a future PR
-    // that adds click targets fails this test and forces the team to
-    // reclassify it to "interactive".
-    const linkCount = await breadcrumb.locator("a, button").count();
-    expect(
-      linkCount,
-      "breadcrumb segments are non-interactive today; if this count grows the QA audit must be updated — see qa-findings.md",
-    ).toBe(0);
+    // T-059 (increment 0674) made breadcrumbs interactive: Own + plugin
+    // are buttons that filter/navigate the sidebar; the active segment
+    // (test-skill) remains a plain text node so it doesn't imply an
+    // action that loops back to the current view. This test replaces
+    // the prior `linkCount === 0` regression canary (T-0684 / B7).
+    const segments = breadcrumb.locator("a, button");
+    await expect(segments).toHaveCount(2);
+    await expect(segments.filter({ hasText: /own/i })).toBeVisible();
+    await expect(segments.filter({ hasText: /test-plugin/ })).toBeVisible();
+
+    // The current segment is a static label, not a button/link.
+    const current = breadcrumb.locator("text=test-skill");
+    await expect(current).toBeVisible();
+    const currentIsInteractive = await current.evaluate((el) =>
+      !!el.closest("a, button"),
+    );
+    expect(currentIsInteractive).toBe(false);
   });
 });
 

@@ -46,6 +46,9 @@ export function ComparisonPage() {
   const { config: globalConfig } = useConfig();
   const [expandedOutputs, setExpandedOutputs] = useState<Set<number>>(new Set());
   const model = globalConfig?.model ?? null;
+  // 0677: surface a "Local" tag when the active provider is a local server
+  // (Ollama or LM Studio) so users know a comparison run will stay offline.
+  const isLocalProvider = globalConfig?.provider === "ollama" || globalConfig?.provider === "lm-studio";
   const [searchParams] = useSearchParams();
   const autostartRef = useRef(false);
 
@@ -151,6 +154,15 @@ export function ComparisonPage() {
             <span className="text-[11px] font-mono px-1.5 py-0.5 rounded" style={{ background: "var(--surface-3)", color: "var(--accent)" }}>
               {model}
             </span>
+            {isLocalProvider && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider"
+                style={{ background: "var(--surface-3)", color: "var(--text-tertiary)" }}
+                title="Local provider — inference stays on your machine"
+              >
+                Local
+              </span>
+            )}
           </div>
         )}
       </div>

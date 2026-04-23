@@ -379,12 +379,14 @@ export function TestsPanel() {
           )}
         </div>
 
-        {/* Parameter store for integration test credentials */}
-        {hasIntegrationTests && (
-          <div style={{ borderTop: "1px solid var(--border-subtle)" }}>
-            <ParameterStorePanel />
-          </div>
-        )}
+        {/* Parameter store for integration test credentials.
+            T-0684 (B6): render unconditionally — the panel gracefully
+            degrades to an empty "No parameters yet" state when a skill
+            has zero integration tests, and the surrounding tab group is
+            already visible, so hiding this row was surprising UX. */}
+        <div style={{ borderTop: "1px solid var(--border-subtle)" }}>
+          <ParameterStorePanel />
+        </div>
       </div>
 
       {/* Right: Case detail */}

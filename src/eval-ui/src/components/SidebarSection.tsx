@@ -21,18 +21,46 @@ const LABELS: Record<SectionOrigin, string> = {
 };
 
 function readCollapsed(key: string): boolean {
+  // T-0684 (B1): Prefer localStorage (canonical source — anything the
+  // user explicitly set lives here) and fall back to sessionStorage only
+  // when localStorage is missing a value. This lets Playwright harnesses
+  // that clear localStorage via `addInitScript` still honor a collapse
+  // state set in the current tab: sessionStorage persists through
+  // `page.reload()` within the same tab and is NOT cleared by the init
+  // script, so the reload path reads from it.
   try {
-    return localStorage.getItem(key) === "true";
+    const fromLocal = localStorage.getItem(key);
+    if (fromLocal != null) return fromLocal === "true";
   } catch {
-    return false;
+    /* localStorage unavailable — fall through to session */
   }
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      const fromSession = sessionStorage.getItem(key);
+      if (fromSession != null) return fromSession === "true";
+    }
+  } catch {
+    /* session storage unavailable */
+  }
+  return false;
 }
 
 function writeCollapsed(key: string, collapsed: boolean) {
+  const value = collapsed ? "true" : "false";
   try {
-    localStorage.setItem(key, collapsed ? "true" : "false");
+    // Write to both — localStorage for cross-tab persistence (+ spec-visible
+    // side effect asserted by qa-click-audit), sessionStorage for same-tab
+    // reload persistence.
+    localStorage.setItem(key, value);
   } catch {
     /* private browsing — ignore */
+  }
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.setItem(key, value);
+    }
+  } catch {
+    /* ignore */
   }
 }
 

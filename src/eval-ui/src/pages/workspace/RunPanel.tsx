@@ -73,6 +73,7 @@ const APPROX_COST_PER_CALL: Partial<Record<string, number>> = {
   "anthropic": 0.01,    // ~2K input + 1K output tokens at Sonnet rates
   "openrouter": 0.01,   // varies, use Sonnet-equivalent
   "ollama": 0,           // free
+  "lm-studio": 0,        // free (local inference, no API cost)
   "claude-cli": 0,       // subscription
   "codex-cli": 0,        // subscription
   "gemini-cli": 0,       // free tier
@@ -208,7 +209,7 @@ export function RunPanel() {
             {!costEstimate && config?.provider && (config.provider === "claude-cli" || config.provider === "codex-cli") && (
               <span>Cost: Subscription</span>
             )}
-            {!costEstimate && config?.provider && (config.provider === "ollama" || config.provider === "gemini-cli") && (
+            {!costEstimate && config?.provider && (config.provider === "ollama" || config.provider === "lm-studio" || config.provider === "gemini-cli") && (
               <span>Cost: Free</span>
             )}
           </div>

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
 import type { SkillInfo } from "../types";
 import { SidebarSection } from "./SidebarSection";
@@ -64,10 +64,15 @@ function partitionAndGroup(
  */
 export function Sidebar({ skills, selectedKey, onSelect, isLoading, error, onRetry, onContextMenu }: Props) {
   const [query, setQuery] = useState("");
+  // T-0684 (Perf-2): defer the query so the input stays responsive even
+  // when the filtered list is expensive to re-compute. The input keeps
+  // rendering the typed value; `partitionAndGroup` consumes the deferred
+  // value, so React is free to skip intermediate frames under load.
+  const deferredQuery = useDeferredValue(query);
 
   const { own, installed } = useMemo(
-    () => partitionAndGroup(skills, query),
-    [skills, query],
+    () => partitionAndGroup(skills, deferredQuery),
+    [skills, deferredQuery],
   );
 
   const combinedFiltered = own.filtered + installed.filtered;

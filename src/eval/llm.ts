@@ -43,7 +43,7 @@ export interface LlmClient {
   readonly model: string;
 }
 
-export type ProviderName = "anthropic" | "claude-cli" | "codex-cli" | "gemini-cli" | "ollama" | "openrouter";
+export type ProviderName = "anthropic" | "claude-cli" | "codex-cli" | "gemini-cli" | "lm-studio" | "ollama" | "openrouter";
 
 function detectProvider(): ProviderName {
   return "claude-cli";
@@ -80,6 +80,7 @@ export function estimateDurationSec(
     "codex-cli":   [8, 20],
     "gemini-cli":  [8, 20],
     "ollama":      [5, 30],
+    "lm-studio":   [5, 30],
     "openrouter":  [4, 15],
   };
   const [lo, hi] = perCall[provider] ?? [5, 20];
@@ -106,11 +107,13 @@ export function createLlmClient(overrides?: LlmOverrides): LlmClient {
       return createGeminiCliClient(modelOverride);
     case "ollama":
       return createOllamaClient(modelOverride);
+    case "lm-studio":
+      return createLmStudioClient(modelOverride);
     case "openrouter":
       return createOpenRouterClient(modelOverride);
     default:
       throw new Error(
-        `Unknown VSKILL_EVAL_PROVIDER: "${provider}". Use "claude-cli", "codex-cli", "gemini-cli", "anthropic", "ollama", or "openrouter".`,
+        `Unknown VSKILL_EVAL_PROVIDER: "${provider}". Use "claude-cli", "codex-cli", "gemini-cli", "anthropic", "ollama", "lm-studio", or "openrouter".`,
       );
   }
 }
@@ -468,6 +471,81 @@ function createOpenRouterClient(modelOverride?: string): LlmClient {
         outputTokens,
         cost: apiCost ?? calculateCost("openrouter", model, inputTokens, outputTokens),
         billingMode: "per-token" as const,
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Provider: LM Studio (local OpenAI-compatible server — free, no API key)
+//
+// Mirrors the OpenRouter adapter at the HTTP level because LM Studio exposes
+// the OpenAI chat completions surface verbatim at `<base>/chat/completions`.
+// Three constants differ from OpenRouter:
+//   - base URL: process.env.LM_STUDIO_BASE_URL ?? "http://localhost:1234/v1"
+//   - API key:  the literal string "lm-studio" (LM Studio ignores the token)
+//   - billing:  "free" (local inference)
+//
+// Env overrides:
+//   - LM_STUDIO_BASE_URL    — custom endpoint (e.g. a LAN machine)
+//   - VSKILL_EVAL_MODEL     — the model id loaded in LM Studio
+//
+// Note: LM Studio does not enforce the Bearer token, so the dummy value
+// "lm-studio" is safe to hardcode. Forks that do enforce it can override via
+// a future LM_STUDIO_API_KEY env var (not wired in this increment per
+// ADR-0677-02).
+// ---------------------------------------------------------------------------
+function createLmStudioClient(modelOverride?: string): LlmClient {
+  const baseUrl = process.env.LM_STUDIO_BASE_URL || "http://localhost:1234/v1";
+  const model = modelOverride || process.env.VSKILL_EVAL_MODEL || "local-model";
+
+  return {
+    model,
+    async generate(systemPrompt: string, userPrompt: string): Promise<GenerateResult> {
+      const start = Date.now();
+
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer lm-studio",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: 4096,
+        }),
+        signal: AbortSignal.timeout(getTimeoutMs()),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(
+          `LM Studio request failed (${response.status}): ${errorBody.slice(0, 200)}`,
+        );
+      }
+
+      const data = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+        };
+      };
+
+      const text = data.choices?.[0]?.message?.content || "";
+      const inputTokens = data.usage?.prompt_tokens ?? null;
+      const outputTokens = data.usage?.completion_tokens ?? null;
+      return {
+        text,
+        durationMs: Date.now() - start,
+        inputTokens,
+        outputTokens,
+        cost: 0,
+        billingMode: "free" as const,
       };
     },
   };

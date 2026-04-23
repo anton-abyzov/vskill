@@ -21,6 +21,7 @@
     "lint:serif-scope": "npx tsx scripts/check-serif-scope.ts",
     "lint:voice": "npx tsx scripts/check-strings-voice.ts",
     "lint:bundle-size": "npx tsx scripts/check-bundle-size.ts",
+    "lint:skills-spec": "npx tsx scripts/validate-skills-spec.ts",
     "clean": "rm -rf dist",
     "preuninstall": "node scripts/preuninstall.cjs",
     "prepublishOnly": "npm run build && npm run build:eval-ui"

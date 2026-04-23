@@ -23,7 +23,18 @@ function isValidPanel(value: string | null): value is PanelId {
   return value != null && (VALID_PANELS as string[]).includes(value);
 }
 
-export function SkillWorkspaceInner() {
+export interface SkillWorkspaceInnerProps {
+  /**
+   * T-0684 (B5 / B6): when true, skip rendering the duplicate
+   * `<DetailHeader />`. Used by RightPanel when the SkillWorkspaceInner
+   * is embedded beneath the already-rendered metadata detail header —
+   * otherwise `getByTestId("detail-header")` in detail-panel.spec.ts
+   * would resolve to two elements and fail.
+   */
+  hideHeader?: boolean;
+}
+
+export function SkillWorkspaceInner({ hideHeader = false }: SkillWorkspaceInnerProps = {}) {
   const { state, dispatch, saveContent, isReadOnly } = useWorkspace();
   const { state: studioState, refreshSkills, clearSelection } = useStudio();
 
@@ -109,7 +120,9 @@ export function SkillWorkspaceInner() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Detail header */}
-      <DetailHeader state={state} isReadOnly={isReadOnly} onDelete={isReadOnly ? undefined : handleDelete} />
+      {!hideHeader && (
+        <DetailHeader state={state} isReadOnly={isReadOnly} onDelete={isReadOnly ? undefined : handleDelete} />
+      )}
 
       {/* Workspace-level error banner (e.g. delete failures) */}
       {state.error && (

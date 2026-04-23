@@ -372,18 +372,37 @@ const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
     { id: "meta-llama/llama-3.1-70b-instruct", label: "Llama 3.1 70B" },
     { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro (via OpenRouter)" },
   ],
+  // LM Studio's default model list is empty because the actual list depends on
+  // what models the user has loaded. The probe at probeLmStudio() populates
+  // this dynamically from GET /v1/models.
+  "lm-studio": [],
 };
 
 // ---------------------------------------------------------------------------
-// Ollama detection cache — avoids 500ms+ probe on every /api/config request.
-// Without this, page load blocks on a 2s timeout when Ollama is not running.
+// Local provider detection caches — avoid 500ms+ probes on every /api/config
+// request. Without the caches, page load blocks on the timeout when the
+// local server is not running. TTL is 30s to balance freshness with latency.
+//
+// Both Ollama and LM Studio share the same TTL and silent-failure semantics
+// (probe → non-2xx / throw → `available: false`, no log above debug).
+//
+// Follow-up (out of scope for 0677): Ollama's upstream standard env var is
+// OLLAMA_HOST but this codebase uses OLLAMA_BASE_URL. Do not change here;
+// tracked separately.
 // ---------------------------------------------------------------------------
+const PROBE_CACHE_TTL = 30_000; // re-probe every 30s
 let ollamaCache: { available: boolean; models: ModelOption[]; ts: number } | null = null;
-const OLLAMA_CACHE_TTL = 30_000; // re-probe every 30s
+let lmStudioCache: { available: boolean; models: ModelOption[]; ts: number } | null = null;
+
+/** Test hook: clear all probe caches so the next detectAvailableProviders() re-probes. */
+export function resetDetectionCache(): void {
+  ollamaCache = null;
+  lmStudioCache = null;
+}
 
 async function probeOllama(): Promise<{ available: boolean; models: ModelOption[] }> {
   const now = Date.now();
-  if (ollamaCache && now - ollamaCache.ts < OLLAMA_CACHE_TTL) {
+  if (ollamaCache && now - ollamaCache.ts < PROBE_CACHE_TTL) {
     return ollamaCache;
   }
   let models = PROVIDER_MODELS["ollama"];
@@ -403,7 +422,35 @@ async function probeOllama(): Promise<{ available: boolean; models: ModelOption[
   return ollamaCache;
 }
 
-async function detectAvailableProviders(): Promise<Array<{
+// ---------------------------------------------------------------------------
+// probeLmStudio — hits GET <base>/models to detect LM Studio and populate the
+// model list from the server's loaded models. Mirrors the Ollama pattern:
+// 500ms AbortSignal timeout, 30s in-memory cache, silent failure on any
+// exception. Base URL is overridable via LM_STUDIO_BASE_URL.
+// ---------------------------------------------------------------------------
+async function probeLmStudio(): Promise<{ available: boolean; models: ModelOption[] }> {
+  const now = Date.now();
+  if (lmStudioCache && now - lmStudioCache.ts < PROBE_CACHE_TTL) {
+    return lmStudioCache;
+  }
+  let models: ModelOption[] = PROVIDER_MODELS["lm-studio"];
+  let available = false;
+  try {
+    const baseUrl = process.env.LM_STUDIO_BASE_URL || "http://localhost:1234/v1";
+    const resp = await fetch(`${baseUrl}/models`, { signal: AbortSignal.timeout(500) });
+    if (resp.ok) {
+      available = true;
+      const data = await resp.json() as { data?: Array<{ id: string }> };
+      if (data.data?.length) {
+        models = data.data.map((m) => ({ id: m.id, label: m.id }));
+      }
+    }
+  } catch { /* lm studio not running */ }
+  lmStudioCache = { available, models, ts: now };
+  return lmStudioCache;
+}
+
+export async function detectAvailableProviders(): Promise<Array<{
   id: ProviderName;
   label: string;
   available: boolean;
@@ -440,13 +487,22 @@ async function detectAvailableProviders(): Promise<Array<{
     models: PROVIDER_MODELS["openrouter"],
   });
 
-  // Ollama — cached probe (500ms timeout, refreshes every 30s)
-  const ollama = await probeOllama();
+  // Local providers (Ollama + LM Studio) — cached probes fired in parallel so
+  // total detection time stays ≤ 550ms even if both time out.
+  const [ollama, lmStudio] = await Promise.all([probeOllama(), probeLmStudio()]);
+
   providers.push({
     id: "ollama",
     label: "Ollama (local, free)",
     available: ollama.available,
     models: ollama.models,
+  });
+
+  providers.push({
+    id: "lm-studio",
+    label: "LM Studio (local, free)",
+    available: lmStudio.available,
+    models: lmStudio.models,
   });
 
   return providers;

@@ -34,6 +34,7 @@ const PANEL_GROUPS: PanelGroup[] = [
     panels: [
       { id: "history", label: "History", shortcut: "5" },
       { id: "deps", label: "Deps", shortcut: "6" },
+      { id: "leaderboard", label: "Leaderboard", shortcut: "7" },
     ],
   },
 ];
@@ -83,6 +84,14 @@ function PanelIcon({ id, active }: { id: PanelId; active: boolean }) {
         <svg {...props}>
           <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
           <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+        </svg>
+      );
+    case "leaderboard":
+      return (
+        <svg {...props}>
+          <rect x="3" y="12" width="4" height="9" />
+          <rect x="10" y="6" width="4" height="15" />
+          <rect x="17" y="9" width="4" height="12" />
         </svg>
       );
   }

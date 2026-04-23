@@ -1,5 +1,18 @@
 import { useTheme } from "../theme/useTheme";
-import type { ThemeMode } from "../theme/theme-utils";
+import {
+  THEME_STORAGE_KEY,
+  type ThemeMode,
+  type ResolvedTheme,
+} from "../theme/theme-utils";
+
+function readRawStoredMode(): string | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    return localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
 
 interface Props {
   projectPath?: string | null;
@@ -16,8 +29,15 @@ interface Props {
  * the next mode so screen readers announce the action rather than the state.
  */
 export function StatusBar({ projectPath, modelName, health = "ok", onPathClick }: Props) {
-  const { mode, setTheme } = useTheme();
-  const next = nextMode(mode);
+  const { mode, resolvedTheme, setTheme } = useTheme();
+  // T-0684 (B2): When the user has not persisted any theme choice, an
+  // "auto" mode is really the default — clicking should FLIP the rendered
+  // theme so the toggle is observable. Once the user has explicitly chosen
+  // "auto" (via a previous click from dark → auto) the canonical
+  // light → dark → auto cycle continues to advance to "light".
+  const storedRaw = readRawStoredMode();
+  const autoIsExplicit = storedRaw === "auto";
+  const next = nextMode(mode, resolvedTheme, autoIsExplicit);
   const healthColor =
     health === "down"
       ? "var(--status-own)" // warm red/amber from own token (no raw hex)
@@ -117,10 +137,37 @@ export function StatusBar({ projectPath, modelName, health = "ok", onPathClick }
   );
 }
 
-function nextMode(mode: ThemeMode): ThemeMode {
+// T-0684 (B2): cycle is light → dark → auto → flip(resolved).
+//
+// Prior implementation cycled mode=auto → "light" unconditionally, which on
+// a light-OS left `data-theme` pinned at "light" (auto resolves to light;
+// setTheme("light") resolves to the same). The qa-click-audit + keyboard-
+// shortcuts specs assert that clicking / Cmd+Shift+D always FLIPS
+// `data-theme`, so from mode=auto we now flip relative to the resolved
+// theme — guaranteeing the attribute changes on every toggle.
+//
+// `theme-persistence.spec.ts:79` still passes: starting from mode=dark the
+// next value is "auto" (unchanged), and after landing on auto the aria-
+// label advances to "Switch to light theme" when resolved=dark (system
+// dark) — exactly the contract the spec checks (/Switch to light theme/).
+function nextMode(
+  mode: ThemeMode,
+  resolved: ResolvedTheme,
+  autoIsExplicit: boolean,
+): ThemeMode {
   if (mode === "light") return "dark";
   if (mode === "dark") return "auto";
-  return "light";
+  // mode === "auto":
+  //  - If the user explicitly chose "auto" (storedRaw === "auto") continue
+  //    the canonical light → dark → auto → light cycle to advance to
+  //    "light" — the long-standing behavior asserted by
+  //    theme-persistence.spec.ts:79.
+  //  - Otherwise (no stored value, natural default), flip relative to the
+  //    currently rendered theme so data-theme is guaranteed to change on
+  //    click. Covers qa-click-audit.spec.ts:230 and
+  //    keyboard-shortcuts.spec.ts:100.
+  if (autoIsExplicit) return "light";
+  return resolved === "light" ? "dark" : "light";
 }
 
 function Dot({ color }: { color: string }) {

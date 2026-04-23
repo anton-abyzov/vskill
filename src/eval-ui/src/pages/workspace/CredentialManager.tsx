@@ -152,7 +152,7 @@ export function CredentialManager({ plugin, skill }: Props) {
       </div>
 
       {error && (
-        <div className="mb-2 px-3 py-2 rounded-lg text-[11px]" style={{ background: "var(--error-muted, #3f1a1a)", color: "var(--error, #f87171)" }}>
+        <div className="mb-2 px-3 py-2 rounded-lg text-[11px]" style={{ background: "var(--red-muted)", color: "var(--red)" }}>
           {error}
         </div>
       )}
@@ -208,8 +208,8 @@ export function CredentialManager({ plugin, skill }: Props) {
               <span
                 className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
                 style={{
-                  background: cred.status === "ready" ? "rgba(52,211,153,0.15)" : "rgba(251,146,60,0.15)",
-                  color: cred.status === "ready" ? "var(--green)" : "#fb923c",
+                  background: cred.status === "ready" ? "var(--green-muted)" : "var(--orange-muted)",
+                  color: cred.status === "ready" ? "var(--green)" : "var(--orange)",
                 }}
               >
                 {cred.status === "ready" ? "ready" : "missing"}

@@ -1,13 +1,250 @@
+import { useState, useCallback } from "react";
 import type { WorkspaceState } from "../pages/workspace/workspaceTypes";
+import type { SkillInfo } from "../types";
 import { passRateColor, passRateBackground } from "../utils/passRateColor";
+import { strings } from "../strings";
 
-interface Props {
+// T-065: Dispatching a CustomEvent keeps DetailHeader test-mode-friendly
+// (no hook subscription to ToastProvider) while still surfacing a real
+// toast in the running app — App.tsx bridges `studio:toast` events into
+// useToast() once during mount.
+function emitToast(message: string, severity: "info" | "error" = "info"): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("studio:toast", { detail: { message, severity } }),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// T-026: DetailHeader — redesigned card-style header.
+//
+// Two usage shapes are supported:
+//
+//   1) New Phase-3 shape — pass `skill: SkillInfo`. Renders a calm "paper
+//      card" header with serif skill name, plugin breadcrumb, dot-only origin
+//      badge, truncated path chip with copy-to-clipboard, and version in
+//      tabular-nums. This is the shape consumed by `RightPanel` (T-031).
+//
+//   2) Legacy shape — pass `state: WorkspaceState` (plus optional isReadOnly
+//      / onDelete). Preserved so the existing `SkillWorkspaceInner` tab panel
+//      flow keeps rendering while the new detail panel rolls out. This path
+//      delegates to `LegacyDetailHeader` below and is unchanged from before.
+// ---------------------------------------------------------------------------
+
+interface LegacyProps {
   state: WorkspaceState;
+  isReadOnly?: boolean;
+  onDelete?: () => void;
+  skill?: undefined;
+}
+
+interface NewProps {
+  skill: SkillInfo;
+  state?: undefined;
   isReadOnly?: boolean;
   onDelete?: () => void;
 }
 
-export function DetailHeader({ state, isReadOnly, onDelete }: Props) {
+type Props = NewProps | LegacyProps;
+
+export function DetailHeader(props: Props) {
+  if (props.skill) {
+    // Call as a function (not as JSX) so tests inspecting the returned tree
+    // see the card `<div>` at the root instead of a wrapper component type.
+    return NewDetailHeader({ skill: props.skill });
+  }
+  return LegacyDetailHeader({ state: props.state, isReadOnly: props.isReadOnly, onDelete: props.onDelete });
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+function truncatePath(p: string, max = 48): string {
+  if (p.length <= max) return p;
+  // Keep head + "…" + tail so the filename end remains readable.
+  const head = p.slice(0, 12);
+  const tail = p.slice(p.length - (max - 12 - 1));
+  return `${head}…${tail}`;
+}
+
+// ---------------------------------------------------------------------------
+// New header (Phase 3)
+// ---------------------------------------------------------------------------
+
+function NewDetailHeader({ skill }: { skill: SkillInfo }) {
+  const [copied, setCopied] = useState(false);
+
+  const onCopyPath = useCallback(async () => {
+    try {
+      await navigator.clipboard?.writeText(skill.dir);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+      // T-065: Surface a real toast in addition to the inline "Copied"
+      // label — the button label flip is easy to miss on a large screen.
+      emitToast(strings.toasts.pathCopied, "info");
+    } catch {
+      emitToast(strings.toasts.permissionDenied, "error");
+    }
+  }, [skill.dir]);
+
+  const originLabel = skill.origin === "installed" ? "Installed" : "Own";
+  const originColor = skill.origin === "installed" ? "var(--status-installed)" : "var(--status-own)";
+
+  return (
+    <div
+      data-testid="detail-header"
+      style={{
+        background: "var(--bg-surface)",
+        border: "1px solid var(--border-default)",
+        borderRadius: 8,
+        padding: "14px 16px",
+        boxShadow: "none",
+      }}
+    >
+      {/* Row 1: plugin breadcrumb + origin dot badge */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          fontFamily: "var(--font-sans)",
+          fontSize: 12,
+          color: "var(--text-secondary)",
+          marginBottom: 4,
+        }}
+      >
+        <span data-testid="detail-header-plugin">{skill.plugin}</span>
+        <span aria-hidden="true" style={{ color: "var(--text-secondary)" }}>›</span>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            color: "var(--text-secondary)",
+            fontSize: 11,
+            letterSpacing: 0.3,
+            textTransform: "uppercase",
+          }}
+        >
+          <span
+            data-origin-dot={skill.origin}
+            aria-label={`Origin: ${originLabel}`}
+            style={{
+              display: "inline-block",
+              width: 7,
+              height: 7,
+              borderRadius: 999,
+              background: originColor,
+            }}
+          />
+          {originLabel}
+        </span>
+      </div>
+
+      {/* Row 2: skill name (serif) + version (tabular-nums) */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 8,
+        }}
+      >
+        <h2
+          data-testid="detail-header-name"
+          style={{
+            fontFamily: "var(--font-serif)",
+            fontSize: 20,
+            fontWeight: 500,
+            lineHeight: 1.25,
+            color: "var(--text-primary)",
+            margin: 0,
+          }}
+        >
+          {skill.skill}
+        </h2>
+        <span
+          data-testid="detail-header-version"
+          style={{
+            fontFamily: "var(--font-sans)",
+            fontVariantNumeric: "tabular-nums",
+            fontSize: 12,
+            color: "var(--text-secondary)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {skill.version ?? "—"}
+        </span>
+      </div>
+
+      {/* Row 3: path chip + copy button */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {/* T-066: The chip itself is clickable — qa-findings #7 flagged that
+            the bordered mono box LOOKS interactive but silently swallowed
+            clicks. Clicking it performs the same copy+toast action as the
+            explicit button below. */}
+        <button
+          type="button"
+          data-testid="detail-header-path-chip"
+          title={skill.dir}
+          aria-label={`Copy path ${skill.dir} to clipboard`}
+          onClick={onCopyPath}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            padding: "2px 8px",
+            border: "1px solid var(--border-default)",
+            borderRadius: 4,
+            background: "transparent",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            color: "var(--text-secondary)",
+            maxWidth: "100%",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            cursor: "pointer",
+          }}
+        >
+          {truncatePath(skill.dir || "—")}
+        </button>
+        <button
+          data-testid="detail-header-copy-path"
+          type="button"
+          onClick={onCopyPath}
+          aria-label="Copy skill path to clipboard"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "2px 8px",
+            background: "transparent",
+            border: "1px solid var(--border-default)",
+            borderRadius: 4,
+            color: "var(--text-secondary)",
+            fontFamily: "var(--font-sans)",
+            fontSize: 11,
+            cursor: "pointer",
+          }}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Legacy header (pre-T-026) — preserved verbatim for SkillWorkspaceInner
+// ---------------------------------------------------------------------------
+
+function LegacyDetailHeader({ state, isReadOnly, onDelete }: { state: WorkspaceState; isReadOnly?: boolean; onDelete?: () => void }) {
   const { plugin, skill, evals, latestBenchmark, isDirty, caseRunStates, regressions, iterationCount } = state;
   const isRunning = Array.from(caseRunStates.values()).some((s) => s.status === "running" || s.status === "queued");
 
@@ -23,7 +260,6 @@ export function DetailHeader({ state, isReadOnly, onDelete }: Props) {
       className="flex items-center justify-between px-4 py-2.5"
       style={{ borderBottom: "1px solid var(--border-subtle)", background: "var(--surface-1)", flexShrink: 0 }}
     >
-      {/* Left: Breadcrumb */}
       <div className="flex items-center gap-2 text-[13px]">
         <span style={{ color: "var(--text-tertiary)" }}>{plugin}</span>
         <Chevron />
@@ -58,7 +294,6 @@ export function DetailHeader({ state, isReadOnly, onDelete }: Props) {
         )}
       </div>
 
-      {/* Right: Stats pills + delete */}
       <div className="flex items-center gap-2">
         {!isReadOnly && onDelete && (
           <button

@@ -61,14 +61,14 @@ function BestModelBadge() {
     <span
       className="pill"
       style={{
-        background: "rgba(251,191,36,0.15)",
-        color: "#fbbf24",
+        background: "var(--yellow-muted)",
+        color: "var(--yellow)",
         fontSize: 9,
         fontWeight: 700,
         gap: 3,
       }}
     >
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="#fbbf24" stroke="none">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="var(--yellow)" stroke="none">
         <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
       </svg>
       Best Model
@@ -123,7 +123,7 @@ function JudgeBiasWarning({ warning }: { warning: string }) {
   return (
     <div
       className="flex items-center gap-2 px-3 py-2 rounded-lg mb-3"
-      style={{ background: "var(--yellow-muted)", border: "1px solid rgba(251,191,36,0.3)" }}
+      style={{ background: "var(--yellow-muted)", border: "1px solid var(--yellow-muted)" }}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--yellow)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />

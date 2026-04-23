@@ -366,7 +366,7 @@ export function SkillDetailPage() {
 
       {/* Error */}
       {error && (
-        <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
+        <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}>
           {error}
         </div>
       )}
@@ -514,7 +514,7 @@ export function SkillDetailPage() {
                               disabled={improvingEvalId != null}
                               className="text-[11px] font-medium flex items-center gap-1 transition-colors duration-150"
                               style={{ color: "var(--text-tertiary)" }}
-                              onMouseEnter={(e) => { if (improvingEvalId == null) e.currentTarget.style.color = "#a855f7"; }}
+                              onMouseEnter={(e) => { if (improvingEvalId == null) e.currentTarget.style.color = "var(--purple)"; }}
                               onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-tertiary)"; }}
                             >
                               {improvingEvalId === evalCase.id ? (
@@ -533,7 +533,7 @@ export function SkillDetailPage() {
                               disabled={improvingEvalId != null}
                               className="text-[11px] font-medium flex items-center gap-1 transition-colors duration-150"
                               style={{ color: "var(--text-tertiary)" }}
-                              onMouseEnter={(e) => { e.currentTarget.style.color = "#a855f7"; }}
+                              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--purple)"; }}
                               onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-tertiary)"; }}
                             >
                               Fix with notes
@@ -572,9 +572,9 @@ export function SkillDetailPage() {
 
                     {/* Per-case improve result */}
                     {improveResult?.evalId === evalCase.id && (
-                      <div className="mb-2 p-3 rounded-lg animate-fade-in" style={{ background: "rgba(168,85,247,0.08)", border: "1px solid rgba(168,85,247,0.2)" }}>
+                      <div className="mb-2 p-3 rounded-lg animate-fade-in" style={{ background: "var(--purple-muted)", border: "1px solid var(--purple-muted)" }}>
                         <div className="text-[11px] mb-2" style={{ color: "var(--text-secondary)" }}>
-                          <span className="font-semibold" style={{ color: "#a855f7" }}>AI suggestion: </span>
+                          <span className="font-semibold" style={{ color: "var(--purple)" }}>AI suggestion: </span>
                           {improveResult.result.reasoning}
                         </div>
                         <div className="flex gap-2">
@@ -613,7 +613,7 @@ export function SkillDetailPage() {
                             className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
                             style={{ background: a.pass ? "var(--green)" : "var(--red)" }}
                           >
-                            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="var(--color-paper)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                               {a.pass ? <polyline points="20 6 9 17 4 12" /> : <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>}
                             </svg>
                           </div>
@@ -702,7 +702,7 @@ export function SkillDetailPage() {
 
               {generateError && (
                 <div className="mt-3 mx-auto max-w-md px-4 py-3 rounded-lg text-[13px] text-left"
-                  style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
+                  style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}>
                   {generateError}
                 </div>
               )}
@@ -745,8 +745,9 @@ export function SkillDetailPage() {
       {/* Save toast */}
       {saving && (
         <div className="fixed bottom-5 right-5 flex items-center gap-2 px-4 py-2.5 rounded-lg text-[13px] animate-fade-in-scale"
-          style={{ background: "var(--accent)", color: "#fff", boxShadow: "0 8px 32px rgba(99,131,255,0.3)" }}>
-          <div className="spinner" style={{ borderTopColor: "#fff", borderColor: "rgba(255,255,255,0.2)" }} />
+          // eslint-disable-next-line vskill/no-raw-color -- intentional: toast elevation shadow uses alpha-only black; theme-swap not meaningful
+          style={{ background: "var(--accent)", color: "var(--color-paper)", boxShadow: "0 8px 32px rgba(0,0,0,0.3)" }}>
+          <div className="spinner" style={{ borderTopColor: "var(--color-paper)", borderColor: "var(--border-default)" }} />
           Saving...
         </div>
       )}
@@ -886,6 +887,7 @@ function EvalCaseFormModal({
       ref={overlayRef}
       onClick={handleBackdropClick}
       className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4 animate-overlay-in"
+      // eslint-disable-next-line vskill/no-raw-color -- intentional: modal scrim uses alpha-only black, theme-swap unwanted
       style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}
     >
       <form
@@ -896,6 +898,7 @@ function EvalCaseFormModal({
           background: "var(--surface-1)",
           border: "1px solid var(--border-default)",
           borderRadius: "16px",
+          // eslint-disable-next-line vskill/no-raw-color -- intentional: modal elevation shadow uses alpha-only values
           boxShadow: "0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04)",
           maxHeight: "min(85vh, 720px)",
         }}

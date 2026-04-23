@@ -1,0 +1,236 @@
+import type { SelectedSkill } from "../StudioContext";
+import { ModelSelector } from "./ModelSelector";
+
+interface Props {
+  projectName: string | null;
+  selected: SelectedSkill | null;
+  onOpenPalette: () => void;
+}
+
+// T-059: Breadcrumb segments dispatch a `studio:navigate-scope` CustomEvent
+// so listeners (sidebar) can act on "filter to this plugin" or "scroll to
+// this origin section". Using a DOM event avoids threading new props
+// through StudioLayout / App while polish-interactions is mid-edit on
+// App.tsx. The sidebar listener is a separate follow-up (tracked as a
+// blocking note on T-059) — the click surface itself is wired here.
+function dispatchNavigateScope(
+  detail: { scope: "origin"; origin: "source" | "installed" } | { scope: "plugin"; plugin: string },
+): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("studio:navigate-scope", { detail }));
+}
+
+/**
+ * Top rail — logo + "Skill Studio" label + breadcrumb + ⌘K trigger.
+ *
+ * Breadcrumb format: `OWN › plugin › skill-name` or `INSTALLED › plugin › skill-name`.
+ * When no skill is selected, only the project name shows after the logo.
+ *
+ * Typography:
+ *   - "Skill Studio" — Inter Tight 600 semibold (var(--font-sans)).
+ *   - project name  — Inter Tight 400, --text-secondary.
+ *   - breadcrumb    — Inter Tight 400, plugin name in meta style, skill name in primary.
+ */
+export function TopRail({ projectName, selected, onOpenPalette }: Props) {
+  const originLabel = selected
+    ? selected.origin === "installed"
+      ? "Installed"
+      : "Own"
+    : null;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 16,
+        height: "100%",
+        width: "100%",
+        padding: "0 16px",
+        fontFamily: "var(--font-sans)",
+      }}
+    >
+      {/* Logo block */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+        <div
+          aria-hidden="true"
+          style={{
+            width: 24,
+            height: 24,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            borderRadius: 6,
+            background: "color-mix(in srgb, var(--accent-surface) 20%, transparent)",
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-surface)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+          </svg>
+        </div>
+        <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em", color: "var(--text-primary)" }}>
+          Skill Studio
+        </span>
+        {projectName && (
+          <span
+            title={projectName}
+            style={{
+              fontSize: 12,
+              color: "var(--text-secondary)",
+              borderLeft: "1px solid var(--border-default)",
+              paddingLeft: 10,
+              maxWidth: 220,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {projectName}
+          </span>
+        )}
+      </div>
+
+      {/* Breadcrumb */}
+      <nav
+        aria-label="Breadcrumb"
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: 12,
+          color: "var(--text-secondary)",
+        }}
+      >
+        {selected && originLabel && (
+          <>
+            <BreadcrumbButton
+              segment="origin"
+              onClick={() => dispatchNavigateScope({ scope: "origin", origin: selected.origin })}
+              style={{
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                fontWeight: 600,
+                color: selected.origin === "installed" ? "var(--status-installed)" : "var(--status-own)",
+              }}
+            >
+              {originLabel}
+            </BreadcrumbButton>
+            <Separator />
+            <BreadcrumbButton
+              segment="plugin"
+              onClick={() => dispatchNavigateScope({ scope: "plugin", plugin: selected.plugin })}
+              style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}
+            >
+              {selected.plugin}
+            </BreadcrumbButton>
+            <Separator />
+            <span
+              data-breadcrumb-segment="skill"
+              aria-current="page"
+              style={{
+                color: "var(--text-primary)",
+                fontWeight: 500,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {selected.skill}
+            </span>
+          </>
+        )}
+      </nav>
+
+      {/* Quick actions */}
+      <div
+        data-toprail-right="true"
+        style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
+      >
+        {/* T-060: Model selector wired into the right-side action cluster.
+            ModelSelector is hook-heavy and consumes useConfig(); it renders
+            null until the ConfigProvider has hydrated, so the surrounding
+            layout never shifts. Tests supply a mock via vi.mock. */}
+        <span data-slot="model-selector" style={{ minWidth: 140 }}>
+          <ModelSelector />
+        </span>
+        <button
+          type="button"
+          onClick={onOpenPalette}
+          aria-label="Open command palette"
+          title="Command palette (⌘K)"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            height: 26,
+            padding: "0 10px",
+            borderRadius: 4,
+            border: "1px solid var(--border-default)",
+            background: "transparent",
+            color: "var(--text-secondary)",
+            fontSize: 11,
+            fontFamily: "var(--font-mono)",
+            cursor: "pointer",
+          }}
+        >
+          <span>⌘K</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// T-059: Breadcrumb button — shared styling for clickable OWN / plugin
+// segments. Hover lifts the color to accent-ink; rest is text-secondary.
+// Uses a plain <button> for correct keyboard semantics.
+// ---------------------------------------------------------------------------
+function BreadcrumbButton({
+  segment,
+  onClick,
+  style,
+  children,
+}: {
+  segment: "origin" | "plugin";
+  onClick: () => void;
+  style?: React.CSSProperties;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      data-breadcrumb-segment={segment}
+      onClick={onClick}
+      style={{
+        background: "transparent",
+        border: "none",
+        padding: 0,
+        cursor: "pointer",
+        color: "var(--text-secondary)",
+        fontFamily: "inherit",
+        ...style,
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.color = "var(--color-accent-ink)";
+      }}
+      onMouseLeave={(e) => {
+        // Restore the segment-specific color if one was supplied via style,
+        // else fall back to --text-secondary.
+        const restore = (style?.color as string | undefined) ?? "var(--text-secondary)";
+        (e.currentTarget as HTMLButtonElement).style.color = restore;
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Separator() {
+  return (
+    <span aria-hidden="true" style={{ color: "var(--border-default)", fontSize: 10 }}>
+      ›
+    </span>
+  );
+}

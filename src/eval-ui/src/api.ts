@@ -21,6 +21,88 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+// ---------------------------------------------------------------------------
+// SkillInfo response normalization (T-021, T-025)
+//
+// The server is the SSoT for origin + frontmatter fields. These helpers act as
+// a defensive boundary so downstream UI code (sidebar split, detail panel)
+// never has to reason about missing/invalid values. Rules:
+//   - `origin` MUST be "source" | "installed" — default "source" with console.warn
+//   - Frontmatter scalar fields MUST be string | null — default null
+//   - Frontmatter array fields MUST be string[] | null — default null
+//   - Numeric stats (sizeBytes) MUST be number | null — default null
+// ---------------------------------------------------------------------------
+
+function coerceStringOrNull(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+function coerceNumberOrNull(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function coerceStringArrayOrNull(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null;
+  const filtered = v.filter((x): x is string => typeof x === "string" && x.length > 0);
+  return filtered.length > 0 ? filtered : null;
+}
+
+export function normalizeSkillInfo(raw: unknown): SkillInfo {
+  const r = (raw ?? {}) as Record<string, unknown>;
+
+  // Origin — T-021 guarantee: always "source" | "installed", never missing
+  let origin: "source" | "installed";
+  if (r.origin === "source" || r.origin === "installed") {
+    origin = r.origin;
+  } else {
+    origin = "source";
+    console.warn(
+      `[api.getSkills] skill ${String(r.plugin)}/${String(r.skill)} has invalid origin=${JSON.stringify(r.origin)}; defaulting to 'source'`,
+    );
+  }
+
+  const info: SkillInfo = {
+    plugin: typeof r.plugin === "string" ? r.plugin : "",
+    skill: typeof r.skill === "string" ? r.skill : "",
+    dir: typeof r.dir === "string" ? r.dir : "",
+    hasEvals: Boolean(r.hasEvals),
+    hasBenchmark: Boolean(r.hasBenchmark),
+    evalCount: typeof r.evalCount === "number" ? r.evalCount : 0,
+    assertionCount: typeof r.assertionCount === "number" ? r.assertionCount : 0,
+    benchmarkStatus:
+      r.benchmarkStatus === "pass" || r.benchmarkStatus === "fail" ||
+      r.benchmarkStatus === "pending" || r.benchmarkStatus === "stale" ||
+      r.benchmarkStatus === "missing"
+        ? r.benchmarkStatus
+        : "missing",
+    lastBenchmark: typeof r.lastBenchmark === "string" ? r.lastBenchmark : null,
+    origin,
+    // T-025: frontmatter + filesystem fields (all | null)
+    description: coerceStringOrNull(r.description),
+    version: coerceStringOrNull(r.version),
+    category: coerceStringOrNull(r.category),
+    author: coerceStringOrNull(r.author),
+    license: coerceStringOrNull(r.license),
+    homepage: coerceStringOrNull(r.homepage),
+    tags: coerceStringArrayOrNull(r.tags),
+    deps: coerceStringArrayOrNull(r.deps),
+    mcpDeps: coerceStringArrayOrNull(r.mcpDeps),
+    entryPoint: coerceStringOrNull(r.entryPoint),
+    lastModified: coerceStringOrNull(r.lastModified),
+    sizeBytes: coerceNumberOrNull(r.sizeBytes),
+    sourceAgent: coerceStringOrNull(r.sourceAgent),
+  };
+
+  // Preserve optional version-update fields passthrough (merged later by
+  // mergeUpdatesIntoSkills — see bottom of file).
+  if (typeof r.updateAvailable === "boolean") info.updateAvailable = r.updateAvailable;
+  if (typeof r.currentVersion === "string") info.currentVersion = r.currentVersion;
+  if (typeof r.latestVersion === "string") info.latestVersion = r.latestVersion;
+  if (typeof r.pinnedVersion === "string") info.pinnedVersion = r.pinnedVersion;
+
+  return info;
+}
+
 export interface ModelOption {
   id: string;
   label: string;
@@ -55,8 +137,9 @@ export const api = {
     });
   },
 
-  getSkills(): Promise<SkillInfo[]> {
-    return fetchJson("/api/skills");
+  async getSkills(): Promise<SkillInfo[]> {
+    const raw = await fetchJson<unknown[]>("/api/skills");
+    return Array.isArray(raw) ? raw.map(normalizeSkillInfo) : [];
   },
 
   getSkillDetail(plugin: string, skill: string): Promise<{ plugin: string; skill: string; skillContent: string }> {

@@ -46,7 +46,49 @@ export interface SkillInfo {
   assertionCount: number;
   benchmarkStatus: "pass" | "fail" | "pending" | "stale" | "missing";
   lastBenchmark: string | null;
+  /**
+   * Origin classification — SSoT is classifyOrigin() in src/eval/skill-scanner.ts.
+   * Guaranteed non-null by the /api/skills response normalizer in api.ts (T-021).
+   * Drives the sidebar OWN/INSTALLED split.
+   */
   origin: "source" | "installed";
+  // -------------------------------------------------------------------------
+  // T-025: Frontmatter + filesystem fields — backward-compatible extension.
+  //
+  // All new fields use `| null` (JSON-serializable) rather than `?`/undefined
+  // so that existing consumers see a consistent shape. The server populates
+  // these from SKILL.md frontmatter parsing + fs.statSync. When a field is
+  // absent or unreadable, the server MUST return null.
+  // -------------------------------------------------------------------------
+  /** Frontmatter `description` — primary triggering text for the skill. */
+  description?: string | null;
+  /** Frontmatter `version` — semver string, if declared. Separate from installed `currentVersion` below. */
+  version?: string | null;
+  /** Frontmatter `category` — e.g. "productivity", "devops". */
+  category?: string | null;
+  /** Frontmatter `author`. */
+  author?: string | null;
+  /** Frontmatter `license` — SPDX identifier when provided. */
+  license?: string | null;
+  /** Frontmatter `homepage` URL. */
+  homepage?: string | null;
+  /** Frontmatter `tags` — freeform taxonomy. */
+  tags?: string[] | null;
+  /** Frontmatter `deps` or `skill-deps` — other skills this one depends on. */
+  deps?: string[] | null;
+  /** Frontmatter `mcp-deps` or `mcpDeps` — MCP server names this skill expects. */
+  mcpDeps?: string[] | null;
+  /** Entry-point file relative to dir (default `"SKILL.md"`). */
+  entryPoint?: string | null;
+  /** ISO 8601 timestamp of the most recent mtime in the skill dir. */
+  lastModified?: string | null;
+  /** Total byte size of the skill dir (sum of regular files, non-recursive fine for now). */
+  sizeBytes?: number | null;
+  /** For `origin: "installed"` only — the agent id whose config owns this skill (e.g. "claude-code"). */
+  sourceAgent?: string | null;
+  // -------------------------------------------------------------------------
+  // Pre-existing install/update state (populated by mergeUpdatesIntoSkills).
+  // -------------------------------------------------------------------------
   updateAvailable?: boolean;
   currentVersion?: string;
   latestVersion?: string;

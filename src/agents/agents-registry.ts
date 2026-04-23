@@ -37,6 +37,10 @@ export interface AgentDefinition {
   featureSupport: FeatureSupport;
   /** Directory path for cached plugin installations (agent-specific) */
   pluginCacheDir?: string;
+  /** Directory where marketplace-synced plugin SOURCES live. Differs from pluginCacheDir:
+   *  cache holds INSTALLED plugins at `{dir}/{marketplace}/{plugin}/`, marketplaces hold
+   *  SOURCES at `{dir}/{marketplace}/plugins/{plugin}/` (extra `/plugins/` segment). */
+  pluginMarketplaceDir?: string;
 }
 
 /**
@@ -162,6 +166,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     parentCompany: 'Anthropic',
     featureSupport: { slashCommands: true, hooks: true, mcp: true, customSystemPrompt: true },
     pluginCacheDir: '~/.claude/plugins/cache',
+    pluginMarketplaceDir: '~/.claude/plugins/marketplaces',
   },
   {
     id: 'openclaw',

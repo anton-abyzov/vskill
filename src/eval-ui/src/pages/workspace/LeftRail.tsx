@@ -39,7 +39,7 @@ const PANEL_GROUPS: PanelGroup[] = [
 ];
 
 function PanelIcon({ id, active }: { id: PanelId; active: boolean }) {
-  const stroke = active ? "#fff" : "currentColor";
+  const stroke = active ? "var(--color-paper)" : "currentColor";
   const props = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke, strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 
   switch (id) {
@@ -135,7 +135,7 @@ export function LeftRail({ activePanel, onPanelChange, isDirty, isRunning, hasRe
                     height: 40,
                     margin: "0 auto",
                     background: active ? "var(--accent)" : "transparent",
-                    color: active ? "#fff" : "var(--text-tertiary)",
+                    color: active ? "var(--color-paper)" : "var(--text-tertiary)",
                   }}
                   onMouseEnter={(e) => {
                     if (!active) {

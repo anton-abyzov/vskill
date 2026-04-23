@@ -1,0 +1,168 @@
+// ---------------------------------------------------------------------------
+// T-031: Wire MetadataTab + VersionHistoryPanel into RightPanel tab bar
+// T-033: Detail panel empty and error states
+// ---------------------------------------------------------------------------
+import { describe, it, expect, vi } from "vitest";
+
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return {
+    ...actual,
+    useState: (init: unknown) => [init, () => {}],
+    useEffect: () => {},
+    useRef: (init: unknown) => ({ current: init }),
+    useCallback: <T,>(fn: T) => fn,
+    useMemo: <T,>(fn: () => T) => fn(),
+    useReducer: (_r: unknown, init: unknown) => [init, () => {}],
+  };
+});
+
+// The heavy workspace panels are irrelevant for RightPanel shape tests;
+// stub them so RightPanel can be imported without pulling the entire
+// WorkspaceContext surface into this test file.
+vi.mock("../../pages/workspace/SkillWorkspace", () => ({
+  SkillWorkspaceInner: () => null,
+}));
+vi.mock("../../pages/workspace/VersionHistoryPanel", () => ({
+  VersionHistoryPanel: () => null,
+}));
+vi.mock("../../pages/workspace/WorkspaceContext", () => ({
+  WorkspaceProvider: ({ children }: { children: unknown }) => children as never,
+  useWorkspace: () => ({}),
+}));
+vi.mock("../../pages/UpdatesPanel", () => ({
+  UpdatesPanel: () => null,
+}));
+vi.mock("../CreateSkillInline", () => ({
+  CreateSkillInline: () => null,
+}));
+
+// Stub eval-ui StudioContext so RightPanel's default branch is a no-op
+// when tests don't exercise the integrated path.
+vi.mock("../../StudioContext", () => ({
+  useStudio: () => ({
+    state: {
+      selectedSkill: null,
+      mode: "browse",
+      searchQuery: "",
+      skills: [],
+      skillsLoading: false,
+      skillsError: null,
+      isMobile: false,
+      mobileView: "list",
+      updateNotificationDismissed: false,
+    },
+    selectSkill: () => {},
+    clearSelection: () => {},
+    setMode: () => {},
+    setSearch: () => {},
+    refreshSkills: () => {},
+    setMobileView: () => {},
+  }),
+}));
+
+import { RightPanel } from "../RightPanel";
+import type { SkillInfo } from "../../types";
+
+type ReactEl = { type: unknown; props: Record<string, unknown> };
+
+function collectText(node: unknown): string {
+  if (node == null) return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(collectText).join("");
+  const el = node as ReactEl;
+  if (el.props?.children != null) return collectText(el.props.children);
+  return "";
+}
+
+function findAll(node: unknown, match: (el: ReactEl) => boolean): ReactEl[] {
+  if (!node || typeof node !== "object") return [];
+  if (Array.isArray(node)) return node.flatMap((c) => findAll(c, match));
+  const el = node as ReactEl;
+  const out: ReactEl[] = [];
+  if (el.type != null && match(el)) out.push(el);
+  if (el.props?.children != null) out.push(...findAll(el.props.children, match));
+  return out;
+}
+
+function makeSkill(over: Partial<SkillInfo> = {}): SkillInfo {
+  return {
+    plugin: "p",
+    skill: "s",
+    dir: "/tmp/s",
+    hasEvals: true,
+    hasBenchmark: true,
+    evalCount: 1,
+    assertionCount: 1,
+    benchmarkStatus: "pass",
+    lastBenchmark: "2026-04-01",
+    origin: "source",
+    description: "d",
+    version: "1.0.0",
+    category: null,
+    author: null,
+    license: null,
+    homepage: null,
+    tags: null,
+    deps: null,
+    mcpDeps: null,
+    entryPoint: "SKILL.md",
+    lastModified: "2026-04-20",
+    sizeBytes: 100,
+    sourceAgent: null,
+    ...over,
+  };
+}
+
+// T-033 EMPTY STATE
+describe("T-033 RightPanel — empty and error states", () => {
+  it("renders the no-selection empty state calmly when no skill selected", () => {
+    const tree = RightPanel({ selectedSkillInfo: null });
+    const text = collectText(tree);
+    expect(text).toContain("Select a skill to view details");
+  });
+
+  it("renders a friendly error state when skill load fails (no 'Oops')", () => {
+    const tree = RightPanel({
+      selectedSkillInfo: makeSkill(),
+      loadError: "permission denied",
+    });
+    const text = collectText(tree);
+    // Error copy per spec: "Couldn't load SKILL.md for <skill>"
+    expect(text).toContain("Couldn't load");
+    expect(text.toLowerCase()).not.toContain("oops");
+  });
+});
+
+// T-031 TAB BAR + INTEGRATION
+describe("T-031 RightPanel — Overview / Versions tab bar", () => {
+  it("renders the DetailHeader and Overview/Versions tab labels when a skill is selected", () => {
+    const tree = RightPanel({ selectedSkillInfo: makeSkill() });
+    const text = collectText(tree);
+    expect(text).toContain("Overview");
+    expect(text).toContain("Versions");
+  });
+
+  it("active tab uses 2px underline via border-bottom (no pill fill)", () => {
+    const tree = RightPanel({ selectedSkillInfo: makeSkill(), activeDetailTab: "overview" });
+    const tabs = findAll(tree, (el) => {
+      const attrs = el.props as Record<string, unknown>;
+      return attrs["role"] === "tab";
+    });
+    expect(tabs.length).toBe(2);
+    const activeTab = tabs.find((t) => t.props["aria-selected"] === true);
+    expect(activeTab).toBeTruthy();
+    const style = activeTab!.props.style as Record<string, string>;
+    expect(style.borderBottom).toContain("2px");
+  });
+
+  it("renders MetadataTab content when activeDetailTab is overview", () => {
+    const tree = RightPanel({
+      selectedSkillInfo: makeSkill({ version: "1.2.3" }),
+      activeDetailTab: "overview",
+    });
+    const text = collectText(tree);
+    expect(text).toContain("Frontmatter");
+    expect(text).toContain("1.2.3");
+  });
+});

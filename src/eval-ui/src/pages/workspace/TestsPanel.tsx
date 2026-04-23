@@ -157,9 +157,9 @@ export function TestsPanel() {
   if (!evals || allCases.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 px-8">
-        <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: evalsError ? "var(--error-muted, #3f1a1a)" : "var(--accent-muted)" }}>
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: evalsError ? "var(--red-muted)" : "var(--accent-muted)" }}>
           {evalsError ? (
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--error, #f87171)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--red)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
           ) : (
@@ -172,7 +172,7 @@ export function TestsPanel() {
         <div className="text-center">
           {evalsError ? (
             <>
-              <div className="text-[14px] font-medium mb-1" style={{ color: "var(--error, #f87171)" }}>Invalid evals.json</div>
+              <div className="text-[14px] font-medium mb-1" style={{ color: "var(--red)" }}>Invalid evals.json</div>
               <div className="text-[11px] font-mono px-3 py-2 rounded mt-1 max-w-sm text-left break-words" style={{ color: "var(--text-secondary)", background: "var(--surface-2)" }}>{evalsError}</div>
               <div className="text-[12px] mt-2" style={{ color: "var(--text-tertiary)" }}>Fix the evals.json file and reload, or regenerate test cases with AI</div>
             </>
@@ -202,6 +202,7 @@ export function TestsPanel() {
             {generateDropdownOpen && (
               <div
                 className="absolute right-0 mt-1 rounded-lg py-1 z-50"
+                // eslint-disable-next-line vskill/no-raw-color -- intentional: dropdown elevation shadow uses alpha-only black
                 style={{ background: "var(--surface-1)", border: "1px solid var(--border-default)", minWidth: 180, boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}
               >
                 <button
@@ -259,7 +260,7 @@ export function TestsPanel() {
               <button
                 onClick={cancelAll}
                 className="btn text-[10px] px-2 py-0.5"
-                style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(239,68,68,0.3)" }}
+                style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}
               >
                 Cancel All
               </button>
@@ -330,8 +331,8 @@ export function TestsPanel() {
                         fontWeight: 600,
                         padding: "1px 5px",
                         borderRadius: 9999,
-                        background: tt === "unit" ? "rgba(99,131,255,0.15)" : "rgba(251,146,60,0.15)",
-                        color: tt === "unit" ? "#6383ff" : "#fb923c",
+                        background: tt === "unit" ? "var(--accent-muted)" : "var(--orange-muted)",
+                        color: tt === "unit" ? "var(--accent)" : "var(--orange)",
                         whiteSpace: "nowrap",
                       }}
                     >
@@ -340,7 +341,7 @@ export function TestsPanel() {
                     {/* T-046: Lock icon for integration tests with missing credentials */}
                     {tt === "integration" && c.requiredCredentials?.some((cr) => missingCredNames.has(cr)) && (
                       <span title="Configure credentials to run">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--orange)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                           <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                         </svg>
@@ -509,8 +510,8 @@ function CaseDetail({
                 fontWeight: 600,
                 padding: "2px 7px",
                 borderRadius: 9999,
-                background: tt === "unit" ? "rgba(99,131,255,0.15)" : "rgba(251,146,60,0.15)",
-                color: tt === "unit" ? "#6383ff" : "#fb923c",
+                background: tt === "unit" ? "var(--accent-muted)" : "var(--orange-muted)",
+                color: tt === "unit" ? "var(--accent)" : "var(--orange)",
               }}
             >
               {tt === "unit" ? "Unit" : "Integration"}
@@ -532,8 +533,8 @@ function CaseDetail({
                 fontWeight: 600,
                 padding: "2px 7px",
                 borderRadius: 9999,
-                background: tt === "unit" ? "rgba(99,131,255,0.15)" : "rgba(251,146,60,0.15)",
-                color: tt === "unit" ? "#6383ff" : "#fb923c",
+                background: tt === "unit" ? "var(--accent-muted)" : "var(--orange-muted)",
+                color: tt === "unit" ? "var(--accent)" : "var(--orange)",
                 border: "none",
                 cursor: "pointer",
               }}
@@ -545,7 +546,7 @@ function CaseDetail({
         </div>
         <div className="flex items-center gap-2">
           {caseStatus === "running" || caseStatus === "queued" ? (
-            <button onClick={() => onCancel(evalCase.id)} className="btn text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(239,68,68,0.3)" }}>
+            <button onClick={() => onCancel(evalCase.id)} className="btn text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4 }}><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
               Cancel
             </button>
@@ -577,7 +578,7 @@ function CaseDetail({
         <div
           data-testid="platform-integration-note"
           className="mb-4 px-4 py-3 rounded-xl flex items-center gap-3"
-          style={{ background: "var(--accent-muted)", border: "1px solid rgba(99,131,255,0.2)" }}
+          style={{ background: "var(--accent-muted)", border: "1px solid var(--accent-muted)" }}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
@@ -592,7 +593,7 @@ function CaseDetail({
 
       {/* All passing celebration */}
       {allPassing && (
-        <div className="mb-4 px-4 py-3 rounded-xl flex items-center gap-3" style={{ background: "var(--green-muted)", border: "1px solid rgba(52, 211, 153, 0.2)" }}>
+        <div className="mb-4 px-4 py-3 rounded-xl flex items-center gap-3" style={{ background: "var(--green-muted)", border: "1px solid var(--green-muted)" }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
           <span className="text-[13px] font-medium" style={{ color: "var(--green)" }}>All assertions passing</span>
         </div>
@@ -600,13 +601,13 @@ function CaseDetail({
 
       {/* Credential gate for integration tests */}
       {hasCredGate && (
-        <div className="mb-4 px-4 py-3 rounded-xl" style={{ background: "rgba(251,146,60,0.1)", border: "1px solid rgba(251,146,60,0.2)" }}>
+        <div className="mb-4 px-4 py-3 rounded-xl" style={{ background: "var(--orange-muted)", border: "1px solid var(--orange-muted)" }}>
           <div className="flex items-center gap-2 mb-1">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--orange)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
               <path d="M7 11V7a5 5 0 0 1 10 0v4" />
             </svg>
-            <span className="text-[12px] font-semibold" style={{ color: "#fb923c" }}>Required Credentials</span>
+            <span className="text-[12px] font-semibold" style={{ color: "var(--orange)" }}>Required Credentials</span>
           </div>
           <div className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
             This integration test requires the following environment variables:
@@ -620,8 +621,8 @@ function CaseDetail({
                   fontFamily: "var(--font-mono, monospace)",
                   padding: "2px 6px",
                   borderRadius: 4,
-                  background: "rgba(251,146,60,0.15)",
-                  color: "#fb923c",
+                  background: "var(--orange-muted)",
+                  color: "var(--orange)",
                 }}
               >
                 {cred}
@@ -749,21 +750,21 @@ function CaseDetail({
         const ve = verdictExplanation("INEFFECTIVE", result.passRate);
         return ve.recommendations && ve.recommendations.length > 0 ? (
           <Section title="Recommendations">
-            <div className="rounded-xl p-4" style={{ background: "rgba(251,146,60,0.08)", border: "1px solid rgba(251,146,60,0.2)" }}>
+            <div className="rounded-xl p-4" style={{ background: "var(--orange-muted)", border: "1px solid var(--orange-muted)" }}>
               <div className="flex items-center gap-2 mb-2">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--orange)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="10" />
                   <line x1="12" y1="8" x2="12" y2="12" />
                   <line x1="12" y1="16" x2="12.01" y2="16" />
                 </svg>
-                <span className="text-[12px] font-semibold" style={{ color: "#fb923c" }}>
+                <span className="text-[12px] font-semibold" style={{ color: "var(--orange)" }}>
                   This eval is significantly below expectations
                 </span>
               </div>
               <ul className="space-y-1.5 ml-1">
                 {ve.recommendations.map((rec, i) => (
                   <li key={i} className="flex items-start gap-2 text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                    <span style={{ color: "#fb923c", fontWeight: 600, flexShrink: 0 }}>•</span>
+                    <span style={{ color: "var(--orange)", fontWeight: 600, flexShrink: 0 }}>•</span>
                     {rec}
                   </li>
                 ))}
@@ -869,8 +870,8 @@ function AssertionRow({
                   lineHeight: 1,
                   padding: "2px 6px",
                   borderRadius: 9999,
-                  background: "rgba(234, 179, 8, 0.15)",
-                  color: "#ca8a04",
+                  background: "var(--yellow-muted)",
+                  color: "var(--yellow)",
                   whiteSpace: "nowrap",
                 }}
               >
@@ -1011,6 +1012,7 @@ function StatusPill({ result }: { result?: InlineResult }) {
             zIndex: 50,
             maxWidth: 300,
             width: "max-content",
+            // eslint-disable-next-line vskill/no-raw-color -- intentional: tooltip elevation shadow uses alpha-only black
             boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
           }}
         >
@@ -1104,8 +1106,8 @@ function HistoryEntryCard({ entry }: { entry: CaseHistoryEntry }) {
           className="pill"
           style={{
             fontSize: 9, padding: "1px 6px",
-            background: entry.type === "benchmark" ? "rgba(99,131,255,0.15)" : entry.type === "comparison" ? "var(--purple-muted)" : "rgba(251,146,60,0.15)",
-            color: entry.type === "benchmark" ? "#6383ff" : entry.type === "comparison" ? "var(--purple)" : "#fb923c",
+            background: entry.type === "benchmark" ? "var(--accent-muted)" : entry.type === "comparison" ? "var(--purple-muted)" : "var(--orange-muted)",
+            color: entry.type === "benchmark" ? "var(--accent)" : entry.type === "comparison" ? "var(--purple)" : "var(--orange)",
           }}
         >
           {entry.type}
@@ -1133,7 +1135,7 @@ function HistoryEntryCard({ entry }: { entry: CaseHistoryEntry }) {
             <span className="text-[11px] font-semibold" style={{ color: delta >= 0 ? "var(--green)" : "var(--red)" }}>
               {deltaSign}{(delta * 100).toFixed(1)}%
             </span>
-            <span className="pill text-[9px]" style={{ padding: "1px 5px", background: "rgba(0,0,0,0.2)", color: verdictColor }}>
+            <span className="pill text-[9px]" style={{ padding: "1px 5px", background: "var(--surface-3)", color: verdictColor }}>
               {verdict}
             </span>
           </div>
@@ -1364,6 +1366,7 @@ function NewCaseForm({ evals, onSave, onCancel }: { evals: EvalsFile; onSave: (u
   };
 
   return (
+    // eslint-disable-next-line vskill/no-raw-color -- intentional: modal scrim uses alpha-only black
     <div className="fixed inset-0 z-50 flex items-center justify-center animate-overlay-in" style={{ background: "rgba(0,0,0,0.6)" }}>
       <div className="w-full max-w-lg rounded-xl p-6 animate-modal-in" style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)", maxHeight: "85vh", overflowY: "auto" }}>
         <div className="text-[15px] font-semibold mb-4" style={{ color: "var(--text-primary)" }}>New Test Case</div>
@@ -1378,8 +1381,8 @@ function NewCaseForm({ evals, onSave, onCancel }: { evals: EvalsFile; onSave: (u
                 onClick={() => handleTypeChange(t)}
                 className="px-3 py-1 rounded-md text-[12px] font-medium transition-all duration-150"
                 style={{
-                  background: testType === t ? (t === "unit" ? "rgba(99,131,255,0.2)" : "rgba(251,146,60,0.2)") : "transparent",
-                  color: testType === t ? (t === "unit" ? "#6383ff" : "#fb923c") : "var(--text-tertiary)",
+                  background: testType === t ? (t === "unit" ? "var(--accent-muted)" : "var(--orange-muted)") : "transparent",
+                  color: testType === t ? (t === "unit" ? "var(--accent)" : "var(--orange)") : "var(--text-tertiary)",
                   border: "none",
                   cursor: "pointer",
                   textTransform: "capitalize",
@@ -1434,8 +1437,8 @@ function NewCaseForm({ evals, onSave, onCancel }: { evals: EvalsFile; onSave: (u
 
         {/* Integration-specific fields */}
         {testType === "integration" && (
-          <div className="mb-4 p-3 rounded-lg" style={{ background: "rgba(251,146,60,0.06)", border: "1px solid rgba(251,146,60,0.15)" }}>
-            <span className="text-[11px] font-semibold uppercase tracking-wider mb-2 block" style={{ color: "#fb923c" }}>Integration Settings</span>
+          <div className="mb-4 p-3 rounded-lg" style={{ background: "var(--orange-muted)", border: "1px solid var(--orange-muted)" }}>
+            <span className="text-[11px] font-semibold uppercase tracking-wider mb-2 block" style={{ color: "var(--orange)" }}>Integration Settings</span>
 
             {/* Required Credentials */}
             <div className="mb-3">
@@ -1445,10 +1448,10 @@ function NewCaseForm({ evals, onSave, onCancel }: { evals: EvalsFile; onSave: (u
                   <span
                     key={cred}
                     className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono"
-                    style={{ background: "rgba(251,146,60,0.15)", color: "#fb923c" }}
+                    style={{ background: "var(--orange-muted)", color: "var(--orange)" }}
                   >
                     {cred}
-                    <button onClick={() => setCredentials(credentials.filter((c) => c !== cred))} style={{ color: "#fb923c", lineHeight: 1 }}>
+                    <button onClick={() => setCredentials(credentials.filter((c) => c !== cred))} style={{ color: "var(--orange)", lineHeight: 1 }}>
                       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
                     </button>
                   </span>
@@ -1462,7 +1465,7 @@ function NewCaseForm({ evals, onSave, onCancel }: { evals: EvalsFile; onSave: (u
                   className="input-field flex-1 text-[11px] font-mono"
                   placeholder="e.g., SLACK_BOT_TOKEN"
                 />
-                <button onClick={addCredential} className="btn btn-ghost text-[11px]" style={{ color: "#fb923c" }}>Add</button>
+                <button onClick={addCredential} className="btn btn-ghost text-[11px]" style={{ color: "var(--orange)" }}>Add</button>
               </div>
             </div>
 
@@ -1510,17 +1513,17 @@ function IntegrationFieldsEditor({ evalCase, onUpdate }: { evalCase: EvalCase; o
   };
 
   return (
-    <div className="mb-4 p-3 rounded-lg" style={{ background: "rgba(251,146,60,0.06)", border: "1px solid rgba(251,146,60,0.15)" }}>
-      <span className="text-[11px] font-semibold uppercase tracking-wider mb-2 block" style={{ color: "#fb923c" }}>Integration Settings</span>
+    <div className="mb-4 p-3 rounded-lg" style={{ background: "var(--orange-muted)", border: "1px solid var(--orange-muted)" }}>
+      <span className="text-[11px] font-semibold uppercase tracking-wider mb-2 block" style={{ color: "var(--orange)" }}>Integration Settings</span>
 
       {/* Required Credentials */}
       <div className="mb-2.5">
         <span className="text-[10px] mb-1 block" style={{ color: "var(--text-secondary)" }}>Required Credentials</span>
         <div className="flex flex-wrap gap-1.5 mb-1.5">
           {(evalCase.requiredCredentials ?? []).map((cred) => (
-            <span key={cred} className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono" style={{ background: "rgba(251,146,60,0.15)", color: "#fb923c" }}>
+            <span key={cred} className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono" style={{ background: "var(--orange-muted)", color: "var(--orange)" }}>
               {cred}
-              <button onClick={() => removeCred(cred)} style={{ color: "#fb923c", lineHeight: 1 }}>
+              <button onClick={() => removeCred(cred)} style={{ color: "var(--orange)", lineHeight: 1 }}>
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
               </button>
             </span>
@@ -1534,7 +1537,7 @@ function IntegrationFieldsEditor({ evalCase, onUpdate }: { evalCase: EvalCase; o
             className="input-field flex-1 text-[11px] font-mono"
             placeholder="e.g., GITHUB_TOKEN"
           />
-          <button onClick={addCred} className="btn btn-ghost text-[11px]" style={{ color: "#fb923c" }}>Add</button>
+          <button onClick={addCred} className="btn btn-ghost text-[11px]" style={{ color: "var(--orange)" }}>Add</button>
         </div>
       </div>
 

@@ -333,8 +333,8 @@ export function EditorPanel() {
                 fontWeight: aiEditOpen ? 600 : 400,
                 border: "none",
                 cursor: "pointer",
-                color: aiEditOpen ? "#a855f7" : "var(--text-tertiary)",
-                background: aiEditOpen ? "rgba(168,85,247,0.12)" : "transparent",
+                color: aiEditOpen ? "var(--purple)" : "var(--text-tertiary)",
+                background: aiEditOpen ? "var(--purple-muted)" : "transparent",
               }}
             >
               <IconWand size={13} />
@@ -350,8 +350,8 @@ export function EditorPanel() {
                 fontWeight: regenOpen ? 600 : 400,
                 border: "none",
                 cursor: "pointer",
-                color: regenOpen ? "#a855f7" : "var(--text-tertiary)",
-                background: regenOpen ? "rgba(168,85,247,0.12)" : "transparent",
+                color: regenOpen ? "var(--purple)" : "var(--text-tertiary)",
+                background: regenOpen ? "var(--purple-muted)" : "transparent",
               }}
             >
               <IconSparkle size={13} />
@@ -734,8 +734,8 @@ export function EditorPanel() {
                       className="px-3 py-0.5 text-[11px] font-mono"
                       style={{
                         background:
-                          line.type === "added" ? "rgba(34,197,94,0.1)" :
-                          line.type === "removed" ? "rgba(239,68,68,0.1)" :
+                          line.type === "added" ? "var(--green-muted)" :
+                          line.type === "removed" ? "var(--red-muted)" :
                           "transparent",
                         color:
                           line.type === "added" ? "var(--green)" :

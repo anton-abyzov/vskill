@@ -218,7 +218,7 @@ export function BenchmarkPage() {
           title="Run all eval cases with your skill and grade assertions"
         >
           {running && runScope === "all" && !isBaselineMode ? (
-            <><div className="spinner" style={{ borderTopColor: "#fff", borderColor: "rgba(255,255,255,0.2)", width: 14, height: 14 }} /> Running All...</>
+            <><div className="spinner" style={{ borderTopColor: "var(--color-paper)", borderColor: "var(--border-default)", width: 14, height: 14 }} /> Running All...</>
           ) : (
             <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg> Run All ({evalCases?.evals.length ?? 0} cases)</>
           )}
@@ -227,11 +227,11 @@ export function BenchmarkPage() {
           onClick={() => handleStartBaseline()}
           disabled={running}
           className="btn btn-ghost"
-          style={{ color: "#f97316", border: "1px solid rgba(249,115,22,0.4)" }}
+          style={{ color: "var(--orange)", border: "1px solid var(--orange-muted)" }}
           title="Run all eval cases without your skill to measure raw LLM capability"
         >
           {running && isBaselineMode ? (
-            <><div className="spinner" style={{ borderTopColor: "#f97316", borderColor: "rgba(249,115,22,0.2)", width: 14, height: 14 }} /> Running Baseline...</>
+            <><div className="spinner" style={{ borderTopColor: "var(--orange)", borderColor: "var(--orange-muted)", width: 14, height: 14 }} /> Running Baseline...</>
           ) : (
             <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" /></svg> Run Baseline</>
           )}
@@ -250,7 +250,7 @@ export function BenchmarkPage() {
       </p>
 
       {error && (
-        <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
+        <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}>
           {error}
         </div>
       )}
@@ -436,7 +436,7 @@ export function BenchmarkPage() {
                           className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
                           style={{ background: a.pass ? "var(--green)" : "var(--red)" }}
                         >
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--color-paper)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                             {a.pass ? <polyline points="20 6 9 17 4 12" /> : <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>}
                           </svg>
                         </div>
@@ -610,8 +610,10 @@ export function BenchmarkPage() {
           {/* Pass rate chart */}
           {done && currentResults.size > 1 && (() => {
             const entries = Array.from(currentResults.entries());
-            const passColor = "#34d399";
-            const failColor = "#f87171";
+            // Chart series resolve to theme tokens so the bars swap on theme change.
+            // Kept as raw CSS var strings because the chart component accepts any
+            // CSS color string; resolution happens inside SVG at paint time.
+            const passColor = "var(--green)";
             return (
               <GroupedBarChart
                 title="Benchmark Results — Pass Rate per Eval"
@@ -624,7 +626,7 @@ export function BenchmarkPage() {
                     values: [{ value: rate * 100, label: `${passed}/${total}` }],
                   };
                 })}
-                seriesColors={[entries.every(([, d]) => d.status === "pass") ? passColor : "#6383ff"]}
+                seriesColors={[entries.every(([, d]) => d.status === "pass") ? passColor : "var(--accent)"]}
                 seriesLabels={["Pass Rate"]}
                 maxValue={100}
                 formatValue={(v) => `${Math.round(v)}%`}

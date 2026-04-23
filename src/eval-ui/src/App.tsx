@@ -16,6 +16,7 @@ import type { ContextMenuState } from "./components/ContextMenu";
 import { SetupDrawer } from "./components/SetupDrawer";
 import { useSetupDrawer } from "./hooks/useSetupDrawer";
 import { AgentScopePicker, agentsResponseToPickerEntries } from "./components/AgentScopePicker";
+import { ClaudeCodeFirstUseBanner } from "./components/ClaudeCodeFirstUseBanner";
 import { useAgentsResponse } from "./hooks/useAgentsResponse";
 import {
   getStudioPreference,
@@ -272,12 +273,19 @@ function Shell() {
             activeAgentId={activeAgentId}
             topSlot={
               agentsResponse.status === "ready" && pickerEntries.length > 0 ? (
-                <AgentScopePicker
-                  agents={pickerEntries}
-                  activeAgentId={activeAgentId}
-                  onActiveAgentChange={handleActiveAgentChange}
-                  onOpenSetup={(providerId) => setupDrawer.open(providerId)}
-                />
+                <>
+                  <AgentScopePicker
+                    agents={pickerEntries}
+                    activeAgentId={activeAgentId}
+                    onActiveAgentChange={handleActiveAgentChange}
+                    onOpenSetup={(providerId) => setupDrawer.open(providerId)}
+                  />
+                  {/* 0686 T-012 (US-006): first-use banner — only renders
+                      when Claude Code is the active scope agent AND the
+                      session dismissal flag is absent. Internal gating
+                      keeps this mount point cheap. */}
+                  <ClaudeCodeFirstUseBanner activeAgentId={activeAgentId} />
+                </>
               ) : null
             }
           />

@@ -264,6 +264,131 @@ const statusBar = {
 } as const;
 
 // ---------------------------------------------------------------------------
+// 0686 US-002 / US-005 / US-006: Scope picker + Setup drawer + Claude Code
+// label copy. Every user-facing string for the 0686 surface lives here so
+// the CI voice regex and SetupProviderView regression tests can pin it.
+// ---------------------------------------------------------------------------
+
+const scopePicker = {
+  triggerAriaLabel: "Choose active agent for the sidebar",
+  popoverTitle: "Choose active agent",
+  statsInstalled: "Installed",
+  statsGlobal: "Global",
+  statsLastSync: "Last sync",
+  statsHealthOk: "Fresh",
+  statsHealthStale: "Updates available",
+  statsHealthMissing: "Not detected",
+  switchCta: "Switch for this studio session",
+  notDetectedSubheading: "Not detected",
+  setUpCta: (agent: string) => `Set up ${agent}`,
+  sharedFolderBanner: (consumers: string) => `Shared folder — consumed by ${consumers}`,
+} as const;
+
+const scopeSection = {
+  ownLabel: "Own",
+  installedLabel: "Installed",
+  globalLabel: "Global",
+  emptyOwn: "No authored skills — run vskill new.",
+  emptyInstalled: (agent: string) =>
+    `No skills installed for ${agent} in this project — run vskill install.`,
+  emptyGlobal: (agent: string) =>
+    `No global skills for ${agent} — run vskill install --global.`,
+} as const;
+
+const claudeCodeLabel = {
+  /** Exact compact label rendered on the Claude Code row in AgentModelPicker
+   *  and referenced by the AgentScopePicker stats pane. AC-US6-01 pins the
+   *  wording — do not paraphrase. */
+  compactLabel: "Covered by Max/Pro · overflow billed at API rates",
+  tooltip:
+    "Your Claude Code CLI usage runs under your Pro/Max subscription quota. " +
+    "If you've enabled extra usage in your account settings, excess usage continues " +
+    "at standard API rates. Run /usage in Claude Code or visit claude.com Settings → " +
+    "Usage to see remaining quota — vskill can't display it directly.",
+  firstUseBanner:
+    "Claude Code uses your Pro/Max subscription. No API key needed — vskill just " +
+    "runs the official claude binary on your behalf.",
+  learnMore: "Learn more",
+} as const;
+
+const setupDrawer = {
+  title: (provider: string) => `Set up ${provider}`,
+  close: "Close",
+  copy: "Copy",
+  copied: "Copied",
+  requiredEnv: "Required env vars",
+  getKey: "Get a key",
+  installRun: "Install & run",
+  learnMore: "Learn more",
+  fallbackTitle: "No setup guide available",
+  fallbackBody: "We don't ship a setup guide for this provider yet.",
+} as const;
+
+const setupProviders = {
+  anthropic: {
+    name: "Anthropic API",
+    description:
+      "Direct API access to Claude via your Anthropic API key. Pay-per-token billing.",
+    envVars: ["ANTHROPIC_API_KEY"],
+    keyUrl: "https://platform.claude.com/settings/keys",
+    learnMoreUrl: "https://docs.claude.com/en/docs/get-started",
+  },
+  openai: {
+    name: "OpenAI",
+    description:
+      "Access to GPT-4, GPT-5 and the o-series reasoning models via your OpenAI API key.",
+    envVars: ["OPENAI_API_KEY"],
+    keyUrl: "https://platform.openai.com/api-keys",
+    learnMoreUrl: "https://platform.openai.com/docs",
+  },
+  openrouter: {
+    name: "OpenRouter",
+    description:
+      "One API key, 300+ models from Anthropic, OpenAI, Google, Meta, and more.",
+    envVars: ["OPENROUTER_API_KEY"],
+    keyUrl: "https://openrouter.ai/keys",
+    learnMoreUrl: "https://openrouter.ai/docs",
+  },
+  gemini: {
+    name: "Gemini",
+    description:
+      "Google Gemini models (2.5 Pro, Flash) via Google AI Studio. Free tier available.",
+    envVars: ["GEMINI_API_KEY"],
+    keyUrl: "https://aistudio.google.com/apikey",
+    learnMoreUrl: "https://ai.google.dev/gemini-api/docs",
+  },
+  ollama: {
+    name: "Ollama",
+    description:
+      "Local models on your own machine. Zero external calls, zero cost after download.",
+    envVars: ["OLLAMA_HOST"],
+    installCmd: "curl -fsSL https://ollama.com/install.sh | sh",
+    startCmd: "ollama serve",
+    pullExample: "ollama pull llama3.2",
+    learnMoreUrl: "https://ollama.com/download",
+  },
+  lmStudio: {
+    name: "LM Studio",
+    description:
+      "Desktop app + local server for running open models with a GUI. Compatible with the OpenAI API.",
+    envVars: ["LM_STUDIO_BASE_URL"],
+    installCmd:
+      "Download from https://lmstudio.ai and launch the app, then start the local server.",
+    startCmd: "# In LM Studio: Developer → Start Server (default port 1234)",
+    pullExample: "# In LM Studio: Discover → download any GGUF model",
+    learnMoreUrl: "https://lmstudio.ai/docs",
+  },
+  claudeCode: {
+    name: "Claude Code",
+    description:
+      "No API key needed if you're logged into Claude Code. vskill just runs the official claude binary on your behalf under your Pro/Max subscription.",
+    loginHint:
+      "If you're not logged in, run claude in your terminal and authenticate with your Pro/Max account.",
+    learnMoreUrl: "https://docs.claude.com/en/docs/claude-code",
+  },
+} as const;
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 export const strings = {
@@ -282,6 +407,12 @@ export const strings = {
   models,
   settings,
   statusBar,
+  // 0686 surfaces
+  scopePicker,
+  scopeSection,
+  claudeCodeLabel,
+  setupDrawer,
+  setupProviders,
 } as const;
 
 export type Strings = typeof strings;

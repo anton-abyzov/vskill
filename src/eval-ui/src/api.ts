@@ -1,5 +1,5 @@
 // API client for the eval server
-import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel, VersionEntry, VersionDiff } from "./types";
+import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel, VersionEntry, VersionDiff, AgentsResponse } from "./types";
 
 const BASE = "";
 
@@ -61,6 +61,27 @@ export function normalizeSkillInfo(raw: unknown): SkillInfo {
     );
   }
 
+  // 0686: tri-scope (`scope`) + symlink transparency (`isSymlink`/
+  // `symlinkTarget`/`installMethod`) — defaults preserve the pre-0686 shape.
+  let scope: SkillInfo["scope"];
+  if (r.scope === "own" || r.scope === "installed" || r.scope === "global") {
+    scope = r.scope;
+  } else {
+    // Back-compat (AC-US3-02): missing scope defaults to OWN.
+    scope = origin === "installed" ? "installed" : "own";
+  }
+
+  let installMethod: SkillInfo["installMethod"];
+  if (
+    r.installMethod === "authored" ||
+    r.installMethod === "copied" ||
+    r.installMethod === "symlinked"
+  ) {
+    installMethod = r.installMethod;
+  } else {
+    installMethod = scope === "own" ? "authored" : "copied";
+  }
+
   const info: SkillInfo = {
     plugin: typeof r.plugin === "string" ? r.plugin : "",
     skill: typeof r.skill === "string" ? r.skill : "",
@@ -77,6 +98,11 @@ export function normalizeSkillInfo(raw: unknown): SkillInfo {
         : "missing",
     lastBenchmark: typeof r.lastBenchmark === "string" ? r.lastBenchmark : null,
     origin,
+    // 0686 tri-scope + symlink fields
+    scope,
+    isSymlink: typeof r.isSymlink === "boolean" ? r.isSymlink : false,
+    symlinkTarget: coerceStringOrNull(r.symlinkTarget),
+    installMethod,
     // T-025: frontmatter + filesystem fields (all | null)
     description: coerceStringOrNull(r.description),
     version: coerceStringOrNull(r.version),
@@ -137,9 +163,22 @@ export const api = {
     });
   },
 
-  async getSkills(): Promise<SkillInfo[]> {
-    const raw = await fetchJson<unknown[]>("/api/skills");
+  // 0686: getSkills() now accepts an optional filter. When `scope` or `agent`
+  // is set, they're forwarded as query params so the server can apply the
+  // tri-scope projection (own | installed | global) + agent ownership filter.
+  async getSkills(filter?: { scope?: "own" | "installed" | "global"; agent?: string }): Promise<SkillInfo[]> {
+    const params = new URLSearchParams();
+    if (filter?.scope) params.set("scope", filter.scope);
+    if (filter?.agent) params.set("agent", filter.agent);
+    const qs = params.toString();
+    const raw = await fetchJson<unknown[]>(`/api/skills${qs ? "?" + qs : ""}`);
     return Array.isArray(raw) ? raw.map(normalizeSkillInfo) : [];
+  },
+
+  // 0686: per-agent scope stats + shared-folder grouping for the
+  // AgentScopePicker. Returns agents with filesystem presence only.
+  getAgents(): Promise<AgentsResponse> {
+    return fetchJson<AgentsResponse>("/api/agents");
   },
 
   getSkillDetail(plugin: string, skill: string): Promise<{ plugin: string; skill: string; skillContent: string }> {

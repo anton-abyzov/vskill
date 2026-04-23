@@ -2,6 +2,7 @@ import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
 import type { SkillInfo } from "../types";
 import { SidebarSection } from "./SidebarSection";
+import { ScopeSection } from "./ScopeSection";
 import { SidebarSearch, matchSkillQuery } from "./SidebarSearch";
 import { PluginGroup, type SelectedKey } from "./PluginGroup";
 import { SkillRow } from "./SkillRow";
@@ -30,6 +31,70 @@ interface Props {
    * provider so each section header can render its `N updates ▾` chip.
    */
   outdatedByOrigin?: { source: number; installed: number };
+  /**
+   * 0686 T-007 (US-003): active agent id — drives tri-scope rendering and
+   * scopes the ScopeSection localStorage keys. When omitted, Sidebar
+   * keeps its legacy 2-section (Own / Installed) layout so this change
+   * is a no-op for callers that haven't opted in yet.
+   */
+  activeAgentId?: string | null;
+  /**
+   * 0686 T-007 (US-003): per-scope outdated counts for tri-scope mode.
+   * Extends 0683's two-key shape with `global`.
+   */
+  outdatedByScope?: { own: number; installed: number; global: number };
+  /**
+   * 0686 T-002 (US-002): optional sticky top-slot — App.tsx mounts the
+   * AgentScopePicker here. When absent, the Sidebar renders without a
+   * picker (legacy path). Kept as a slot so the Sidebar stays decoupled
+   * from the server's AgentsResponse shape.
+   */
+  topSlot?: React.ReactNode;
+}
+
+// ---------------------------------------------------------------------------
+// 0686 T-003 / T-007 (US-003): tri-scope partition. Falls back to the
+// legacy origin-based binary split when no skill carries a `scope` field —
+// keeps pre-0686 payloads rendering identically.
+// ---------------------------------------------------------------------------
+
+function scopeOf(s: SkillInfo): "own" | "installed" | "global" {
+  if (s.scope === "own" || s.scope === "installed" || s.scope === "global") {
+    return s.scope;
+  }
+  // AC-US3-02 back-compat: missing scope maps via origin.
+  return s.origin === "installed" ? "installed" : "own";
+}
+
+function partitionTriScope(
+  skills: SkillInfo[],
+  query: string,
+): { own: SectionData; installed: SectionData; global: SectionData } {
+  const ownAll: SkillInfo[] = [];
+  const installedAll: SkillInfo[] = [];
+  const globalAll: SkillInfo[] = [];
+  for (const s of skills) {
+    const scope = scopeOf(s);
+    if (scope === "global") globalAll.push(s);
+    else if (scope === "installed") installedAll.push(s);
+    else ownAll.push(s);
+  }
+  function buildSection(source: SkillInfo[]): SectionData {
+    const filtered = source.filter((s) => matchSkillQuery(s, query));
+    const byPluginMap: Record<string, SkillInfo[]> = {};
+    for (const s of filtered) {
+      (byPluginMap[s.plugin] ||= []).push(s);
+    }
+    const byPlugin = Object.entries(byPluginMap).sort((a, b) =>
+      a[0].localeCompare(b[0]),
+    );
+    return { total: source.length, filtered: filtered.length, byPlugin };
+  }
+  return {
+    own: buildSection(ownAll),
+    installed: buildSection(installedAll),
+    global: buildSection(globalAll),
+  };
 }
 
 interface SectionData {
@@ -67,7 +132,26 @@ function partitionAndGroup(
  * exposes the thresholded list as a single path so swapping in a virtual
  * scroller is local to `<SectionList>`.
  */
-export function Sidebar({ skills, selectedKey, onSelect, isLoading, error, onRetry, onContextMenu, outdatedByOrigin }: Props) {
+export function Sidebar({
+  skills,
+  selectedKey,
+  onSelect,
+  isLoading,
+  error,
+  onRetry,
+  onContextMenu,
+  outdatedByOrigin,
+  activeAgentId,
+  outdatedByScope,
+  topSlot,
+}: Props) {
+  // 0686 T-007 (US-003): Tri-scope mode is enabled when the caller passes
+  // an active agent OR when any incoming skill carries a `scope` field
+  // (meaning the server enrichment is live). Default path stays 2-section
+  // so pre-0686 callers continue to work.
+  const triScope =
+    !!activeAgentId || skills.some((s) => s.scope !== undefined && s.scope !== null);
+  const resolvedAgentId = activeAgentId ?? "claude-cli";
   const [query, setQuery] = useState("");
   // T-0684 (Perf-2): defer the query so the input stays responsive even
   // when the filtered list is expensive to re-compute. The input keeps
@@ -75,16 +159,23 @@ export function Sidebar({ skills, selectedKey, onSelect, isLoading, error, onRet
   // value, so React is free to skip intermediate frames under load.
   const deferredQuery = useDeferredValue(query);
 
+  const tri = useMemo(
+    () => partitionTriScope(skills, deferredQuery),
+    [skills, deferredQuery],
+  );
+  // Keep the legacy 2-section shape callable for the non-tri-scope code
+  // path — it's just `own` + (`installed` + `global` merged into installed).
   const { own, installed } = useMemo(
     () => partitionAndGroup(skills, deferredQuery),
     [skills, deferredQuery],
   );
 
-  const combinedFiltered = own.filtered + installed.filtered;
+  const combinedFiltered = tri.own.filtered + tri.installed.filtered + tri.global.filtered;
   const useVirtual = combinedFiltered >= VIRTUALIZATION_THRESHOLD;
 
-  // Flattened, alpha-sorted list across both sections — used by j/k navigation.
-  // Same sort order the visible rows use, so keystrokes walk top→bottom.
+  // Flattened, alpha-sorted list across all rendered sections — used by j/k.
+  // 0686 AC-US3-07: extends the legacy 2-section flatten to 3 sections when
+  // tri-scope is active. In 2-section mode only own + installed are walked.
   const flatSkills = useMemo<SkillInfo[]>(() => {
     const pull = (groups: Array<[string, SkillInfo[]]>): SkillInfo[] => {
       const out: SkillInfo[] = [];
@@ -94,8 +185,15 @@ export function Sidebar({ skills, selectedKey, onSelect, isLoading, error, onRet
       }
       return out;
     };
+    if (triScope) {
+      return [
+        ...pull(tri.own.byPlugin),
+        ...pull(tri.installed.byPlugin),
+        ...pull(tri.global.byPlugin),
+      ];
+    }
     return [...pull(own.byPlugin), ...pull(installed.byPlugin)];
-  }, [own.byPlugin, installed.byPlugin]);
+  }, [triScope, tri.own.byPlugin, tri.installed.byPlugin, tri.global.byPlugin, own.byPlugin, installed.byPlugin]);
 
   const currentIndex = useMemo(() => {
     if (!selectedKey) return -1;
@@ -143,13 +241,82 @@ export function Sidebar({ skills, selectedKey, onSelect, isLoading, error, onRet
         fontFamily: "var(--font-sans)",
       }}
     >
+      {topSlot}
       <SidebarSearch value={query} onChange={setQuery} />
 
       {isLoading && <SidebarLoading />}
 
       {!isLoading && error && <SidebarError error={error} onRetry={onRetry} />}
 
-      {!isLoading && !error && (
+      {!isLoading && !error && triScope && (
+        <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+          <ScopeSection
+            scope="own"
+            agentId={resolvedAgentId}
+            count={tri.own.total}
+            filteredCount={query ? tri.own.filtered : null}
+            updateCount={outdatedByScope?.own ?? outdatedByOrigin?.source}
+          >
+            {tri.own.filtered === 0 ? (
+              <OwnEmptyState queryActive={!!query} />
+            ) : (
+              <SectionList
+                items={tri.own.byPlugin}
+                selectedKey={selectedKey}
+                onSelect={onSelect}
+                onContextMenu={onContextMenu}
+                useVirtual={useVirtual}
+              />
+            )}
+          </ScopeSection>
+
+          <BoldDivider />
+
+          <ScopeSection
+            scope="installed"
+            agentId={resolvedAgentId}
+            count={tri.installed.total}
+            filteredCount={query ? tri.installed.filtered : null}
+            updateCount={outdatedByScope?.installed ?? outdatedByOrigin?.installed}
+          >
+            {tri.installed.filtered === 0 ? (
+              <InstalledEmptyState queryActive={!!query} agentId={resolvedAgentId} />
+            ) : (
+              <SectionList
+                items={tri.installed.byPlugin}
+                selectedKey={selectedKey}
+                onSelect={onSelect}
+                onContextMenu={onContextMenu}
+                useVirtual={useVirtual}
+              />
+            )}
+          </ScopeSection>
+
+          <BoldDivider />
+
+          <ScopeSection
+            scope="global"
+            agentId={resolvedAgentId}
+            count={tri.global.total}
+            filteredCount={query ? tri.global.filtered : null}
+            updateCount={outdatedByScope?.global}
+          >
+            {tri.global.filtered === 0 ? (
+              <GlobalEmptyState queryActive={!!query} agentId={resolvedAgentId} />
+            ) : (
+              <SectionList
+                items={tri.global.byPlugin}
+                selectedKey={selectedKey}
+                onSelect={onSelect}
+                onContextMenu={onContextMenu}
+                useVirtual={useVirtual}
+              />
+            )}
+          </ScopeSection>
+        </div>
+      )}
+
+      {!isLoading && !error && !triScope && (
         <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
           <SidebarSection origin="source" count={own.total} filteredCount={query ? own.filtered : null} updateCount={outdatedByOrigin?.source}>
             {own.filtered === 0 ? (
@@ -321,7 +488,13 @@ function OwnEmptyState({ queryActive }: { queryActive: boolean }) {
   );
 }
 
-function InstalledEmptyState({ queryActive }: { queryActive: boolean }) {
+function InstalledEmptyState({
+  queryActive,
+  agentId,
+}: {
+  queryActive: boolean;
+  agentId?: string;
+}) {
   if (queryActive) {
     return (
       <EmptyMessage
@@ -332,10 +505,43 @@ function InstalledEmptyState({ queryActive }: { queryActive: boolean }) {
   }
   return (
     <EmptyMessage
-      headline="No installed skills."
+      headline={
+        agentId
+          ? `No skills installed for ${agentId} in this project.`
+          : "No installed skills."
+      }
       body={
         <>
           Run <Mono>vskill install &lt;plugin&gt;</Mono> to add one.
+        </>
+      }
+    />
+  );
+}
+
+// 0686 AC-US3-04: GLOBAL empty state — scope-aware hint about
+// `vskill install --global`.
+function GlobalEmptyState({
+  queryActive,
+  agentId,
+}: {
+  queryActive: boolean;
+  agentId: string;
+}) {
+  if (queryActive) {
+    return (
+      <EmptyMessage
+        headline="No matches in this section."
+        body="Adjust the filter or press Escape to clear."
+      />
+    );
+  }
+  return (
+    <EmptyMessage
+      headline={`No global skills for ${agentId}.`}
+      body={
+        <>
+          Run <Mono>vskill install --global &lt;plugin&gt;</Mono> to add one.
         </>
       }
     />
@@ -386,6 +592,27 @@ function FullWidthDivider() {
         height: 1,
         background: "var(--border-default)",
         margin: "4px 14px",
+      }}
+    />
+  );
+}
+
+/**
+ * 0686 AC-US4-02: 3px bold scope divider between tri-scope sections.
+ * Full-width (extends past the 14px text padding) with a 1px inset shadow
+ * on top so the divider reads as a strong scope boundary, not a hairline.
+ */
+function BoldDivider() {
+  return (
+    <div
+      aria-hidden="true"
+      data-testid="scope-bold-divider"
+      style={{
+        height: 3,
+        background: "var(--color-rule)",
+        boxShadow:
+          "inset 0 1px 0 color-mix(in srgb, var(--color-rule) 50%, transparent)",
+        margin: "12px 0",
       }}
     />
   );

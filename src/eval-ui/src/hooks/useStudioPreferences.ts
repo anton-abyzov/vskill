@@ -33,6 +33,15 @@ export interface StudioPreferences {
    * — it becomes usable again when the provider returns.
    */
   skillGenModel?: { provider: string; model: string };
+  /**
+   * 0686 US-002 / T-006 (UI): AgentScopePicker persists the user's active
+   * agent here so the sidebar scope (INSTALLED / GLOBAL) binds to the same
+   * agent across reloads. Strictly UI-only — the server still reads
+   * `activeScopeAgent` out of `studio.json` via `saveStudioSelection`.
+   * This key mirrors that value so the hydrate path can render the
+   * trigger label without a round-trip.
+   */
+  activeAgent?: string;
   /** Additional opaque preference keys — callers can store anything
    *  JSON-serializable here. */
   [key: string]: unknown;

@@ -41,6 +41,11 @@ export interface AgentDefinition {
    *  cache holds INSTALLED plugins at `{dir}/{marketplace}/{plugin}/`, marketplaces hold
    *  SOURCES at `{dir}/{marketplace}/plugins/{plugin}/` (extra `/plugins/` segment). */
   pluginMarketplaceDir?: string;
+  /** Win32 override for POSIX-only globalSkillsDir entries (0686 AC-US7-03).
+   *  When set, `resolveGlobalSkillsDir` uses this on win32 instead of the
+   *  deterministic `~/.config/X/` → `%APPDATA%/X/` fallback. Ignored on
+   *  darwin + linux so POSIX hosts retain existing behavior. */
+  win32PathOverride?: string;
 }
 
 /**

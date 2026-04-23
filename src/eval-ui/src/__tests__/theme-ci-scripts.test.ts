@@ -60,28 +60,34 @@ describe("T-008: check-no-shimmer (AC-US2-01)", () => {
     expect(violations[0]?.file).toMatch(/bad\.css$/);
   });
 
-  it("flags .skeleton { class declarations", () => {
+  it("flags .skeleton { rules that include animation: (would resurrect shimmer)", () => {
     writeSandboxFile(
       "src/eval-ui/src/styles/bad.css",
-      `.skeleton { background: linear-gradient(90deg, #aaa, #bbb); }`,
+      `.skeleton { background: linear-gradient(90deg, #aaa, #bbb); animation: shimmer 1.4s infinite; }`,
     );
     const violations = scanForShimmer(sandbox);
     expect(violations.length).toBeGreaterThan(0);
-    expect(violations[0]?.pattern).toBe(".skeleton {");
+    expect(violations[0]?.pattern).toMatch(/\.skeleton.*animation/);
   });
 
-  it("flags shimmer inside .tsx as well as .css", () => {
+  it("allows .skeleton alias without animation (legacy alias of .placeholder)", () => {
+    writeSandboxFile(
+      "src/eval-ui/src/styles/legacy-alias.css",
+      `.placeholder, .skeleton { background: var(--border-default); border-radius: 4px; opacity: 0.6; }`,
+    );
+    const violations = scanForShimmer(sandbox);
+    expect(violations).toEqual([]);
+  });
+
+  it("flags shimmer inside .tsx via @keyframes or animated .skeleton", () => {
     writeSandboxFile(
       "src/eval-ui/src/components/Bad.tsx",
-      `const style = { animation: "shimmer 1s infinite" };
-       const css = ".skeleton { background: red; }";`,
+      `const keyframes = "@keyframes shimmer { 0%{opacity:0} 100%{opacity:1} }";`,
     );
     const violations = scanForShimmer(sandbox);
     expect(violations.length).toBeGreaterThanOrEqual(1);
-    const byPattern = violations.map((v: ShimmerViolation) => v.pattern).sort();
-    // Either pattern (".skeleton {" or "@keyframes shimmer") is enough;
-    // .skeleton { is what this fixture contains.
-    expect(byPattern).toContain(".skeleton {");
+    const patterns = violations.map((v: ShimmerViolation) => v.pattern);
+    expect(patterns).toContain("@keyframes shimmer");
   });
 
   it("the real vskill repo is shimmer-free", () => {

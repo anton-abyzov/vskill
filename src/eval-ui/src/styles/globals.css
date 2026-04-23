@@ -213,8 +213,10 @@ body {
 
 /* ==================================================================== */
 /* Placeholder (replaces .skeleton shimmer — static, no animation)       */
+/* .skeleton is a legacy alias mapping to the same static style.         */
 /* ==================================================================== */
-.placeholder {
+.placeholder,
+.skeleton {
   background: var(--border-default);
   border-radius: 4px;
   opacity: 0.6;

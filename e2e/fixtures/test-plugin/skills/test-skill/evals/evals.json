@@ -18,7 +18,8 @@
           "text": "Shows an example test with expect/assert statements",
           "type": "boolean"
         }
-      ]
+      ],
+      "testType": "unit"
     },
     {
       "id": 2,
@@ -37,7 +38,8 @@
           "text": "Mentions unicode or special characters as edge cases",
           "type": "boolean"
         }
-      ]
+      ],
+      "testType": "unit"
     }
   ]
 }

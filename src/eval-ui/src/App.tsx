@@ -43,12 +43,16 @@ export function App() {
 function Shell() {
   const { state, selectSkill, refreshSkills } = useStudio();
   const { config } = useConfig();
-  const { mode, setTheme } = useTheme();
+  const { mode, resolvedTheme, setTheme } = useTheme();
   const { toast } = useToast();
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => readSidebarWidth());
   const [sseConnected] = useState<boolean>(true); // SSE-connection hook lives outside Phase 2 scope
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // T-0684 (B4): Cmd+B sidebar visibility toggle. Per-session only — does
+  // NOT persist across reloads (spec non-goal). Mobile-view auto-hiding
+  // remains governed by StudioContext.mobileView.
+  const [sidebarToggledHidden, setSidebarToggledHidden] = useState(false);
   // T-063: Active detail tab lives at the App level so RightPanel can drive
   // the Overview / Versions switch in integrated mode. Without this lift,
   // `renderDetailShell` received no `onDetailTabChange` handler and clicking
@@ -123,6 +127,13 @@ function Shell() {
         onInvoke: () => setTheme(mode === "light" ? "dark" : mode === "dark" ? "auto" : "light"),
       },
       {
+        id: "toggle-sidebar",
+        label: "Toggle sidebar",
+        description: "Show or hide the skills sidebar",
+        keywords: ["sidebar", "panel", "hide", "show", "cmd+b"],
+        onInvoke: () => setSidebarToggledHidden((h) => !h),
+      },
+      {
         id: "show-shortcuts",
         label: "Show keyboard shortcuts",
         description: "Open the cheatsheet",
@@ -144,13 +155,27 @@ function Shell() {
     { key: "cmd+k", handler: () => setPaletteOpen((p) => !p) },
     { key: "ctrl+k", handler: () => setPaletteOpen((p) => !p) },
     { key: "?", handler: () => setShortcutsOpen((s) => !s) },
+    // T-0684 (B2): Flip data-theme based on RESOLVED theme rather than
+    // stored mode. When mode="auto" the stored mode !== "light" (it's
+    // "auto"), so the old logic set mode="light" — which on a light-OS
+    // leaves the resolved theme unchanged and the toggle appears broken.
+    // Basing the flip on resolvedTheme guarantees data-theme changes.
     {
       key: "cmd+shift+d",
-      handler: () => setTheme(mode === "light" ? "dark" : "light"),
+      handler: () => setTheme(resolvedTheme === "light" ? "dark" : "light"),
     },
     {
       key: "ctrl+shift+d",
-      handler: () => setTheme(mode === "light" ? "dark" : "light"),
+      handler: () => setTheme(resolvedTheme === "light" ? "dark" : "light"),
+    },
+    // T-0684 (B4): Cmd/Ctrl+B toggles skills-sidebar visibility.
+    {
+      key: "cmd+b",
+      handler: () => setSidebarToggledHidden((h) => !h),
+    },
+    {
+      key: "ctrl+b",
+      handler: () => setSidebarToggledHidden((h) => !h),
     },
     {
       key: "e",
@@ -166,7 +191,7 @@ function Shell() {
     <>
       <StudioLayout
         sidebarWidth={sidebarWidth}
-        sidebarHidden={state.isMobile && state.mobileView === "detail"}
+        sidebarHidden={sidebarToggledHidden || (state.isMobile && state.mobileView === "detail")}
         banner={<DisconnectBanner connected={sseConnected} />}
         liveMessage={liveMessage}
         topRail={

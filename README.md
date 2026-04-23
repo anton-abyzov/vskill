@@ -361,6 +361,7 @@ The eval system supports multiple LLM providers. Switch between them in the eval
 | **Claude CLI** | Sonnet, Opus, Haiku | Claude Max/Pro subscription + `claude` CLI installed |
 | **Anthropic API** | Claude Sonnet 4.6, Opus 4.6, Haiku 4.5 | `ANTHROPIC_API_KEY` env var |
 | **Ollama** | Any locally installed model | Ollama running at `localhost:11434` |
+| **LM Studio** | Any model loaded in LM Studio | LM Studio running at `localhost:1234` (no API key needed) |
 
 ```bash
 # Use Anthropic API with Opus
@@ -371,6 +372,12 @@ VSKILL_EVAL_PROVIDER=ollama VSKILL_EVAL_MODEL=qwen2.5:32b npx vskill eval run my
 
 # Custom Ollama server
 OLLAMA_BASE_URL=http://gpu-server:11434 VSKILL_EVAL_PROVIDER=ollama npx vskill eval run my-skill
+
+# Use LM Studio with a locally loaded model (no API key required)
+VSKILL_EVAL_PROVIDER=lm-studio VSKILL_EVAL_MODEL=qwen2.5-coder-7b npx vskill eval run my-skill
+
+# Custom LM Studio endpoint
+LM_STUDIO_BASE_URL=http://lan-box:1234/v1 VSKILL_EVAL_PROVIDER=lm-studio npx vskill eval run my-skill
 ```
 
 **Which model for what?**
@@ -378,6 +385,7 @@ OLLAMA_BASE_URL=http://gpu-server:11434 VSKILL_EVAL_PROVIDER=ollama npx vskill e
 - **Skill creation/improvement**: Claude (Sonnet or Opus) produces the best SKILL.md refinements. Other models like Gemini and Codex can create skills too — they understand the SKILL.md format — but output quality may vary. See Anthropic's [Skill Creator](https://github.com/anthropics/skills/tree/main/skills/skill-creator) for the reference methodology.
 - **Benchmarks & A/B comparisons**: Use any model. Cross-model testing reveals whether your skill helps weaker models, and whether base model improvements have made a capability uplift skill unnecessary.
 - **Ollama**: Free, local, no API key. Useful for rapid iteration and validating cross-model portability.
+- **LM Studio**: Free, local, OpenAI-compatible server. Defaults to `http://localhost:1234/v1`; override with `LM_STUDIO_BASE_URL`. LM Studio ignores the API key, so vskill sends a dummy `Bearer lm-studio` token automatically.
 
 ### Platform integration
 
@@ -396,6 +404,38 @@ Browse and search verified skills at **[verified-skill.com](https://verified-ski
 vskill find "react native"          # search from CLI
 vskill info remotion-best-practices # skill details
 ```
+
+<br/>
+
+## SKILL.md Spec Compliance
+
+vskill emits SKILL.md files that conform to the canonical specification at **[agentskills.io/specification](https://agentskills.io/specification)**.
+
+The spec requires `tags` and `target-agents` to live **under a `metadata:` block**, not at the top level of the frontmatter:
+
+```yaml
+---
+name: my-skill
+description: "..."
+version: 1.0.0
+metadata:
+  tags:
+    - devtools
+    - cli
+  target-agents:
+    - claude-code
+    - cursor
+---
+```
+
+### Validation
+
+- **CI gate** — `npm run lint:skills-spec` walks the repo for every `SKILL.md` and blocks drift. Uses the external `skills-ref` CLI when available; otherwise falls back to a built-in check that enforces the `tags` / `target-agents` nesting rule.
+- **Post-creation (Studio)** — the `interpretValidatorResult` / `formatValidatorReport` helpers in `src/eval-server/skill-create-routes.ts` wrap `skills-ref validate`. Warn-only by default (spec drift prints a `Validation warnings` block, skill file stays on disk); `strict: true` flips the outcome to a blocking error with exit code 1. A missing `skills-ref` binary is non-blocking by design — CI is the enforcement line.
+
+### Migration note for downstream consumers
+
+If you previously read `frontmatter.tags` or `frontmatter['target-agents']` at the top level, read them under `frontmatter.metadata.tags` / `frontmatter.metadata['target-agents']` instead. All emitters migrated in lockstep; there is no period where vskill emits mixed shapes.
 
 <br/>
 

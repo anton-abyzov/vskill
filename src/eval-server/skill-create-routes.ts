@@ -9,6 +9,7 @@ import { isSkillCreatorInstalled } from "../utils/skill-creator-detection.js";
 import { sendJson, readBody } from "./router.js";
 import { createLlmClient } from "../eval/llm.js";
 import type { ProviderName } from "../eval/llm.js";
+import { detectAvailableProviders } from "./api-routes.js";
 import { initSSE, sendSSE, sendSSEDone, withHeartbeat } from "./sse-helpers.js";
 import { classifyError } from "./error-classifier.js";
 import { writeHistoryEntry } from "../eval/benchmark-history.js";
@@ -48,6 +49,17 @@ interface CreateSkillRequest {
   model?: string;
   allowedTools?: string;
   body: string;
+  /**
+   * Spec-compliant (agentskills.io/specification): emitted under `metadata.tags`
+   * in SKILL.md frontmatter, NEVER at the top level. Optional.
+   */
+  tags?: string[];
+  /**
+   * Spec-compliant (agentskills.io/specification): emitted under
+   * `metadata.target-agents` in SKILL.md frontmatter, NEVER at the top level.
+   * Optional.
+   */
+  targetAgents?: string[];
   evals?: Array<{
     id: number;
     name: string;
@@ -179,7 +191,17 @@ function detectProjectLayout(root: string): ProjectLayoutResponse {
   return { root, detectedLayouts: layouts, suggestedLayout, existingSkills: allSkills };
 }
 
-/** Build SKILL.md content from form fields */
+/**
+ * Build SKILL.md content from form fields.
+ *
+ * Frontmatter shape is aligned with the canonical agentskills.io specification
+ * (https://agentskills.io/specification). In particular, `tags` and
+ * `target-agents` are emitted under a `metadata:` block — NEVER at the top
+ * level. See 0679-skills-spec-compliance for the increment that introduced
+ * this shape and the golden-file guardrails.
+ *
+ * Key order is stabilized: description → allowed-tools → model → metadata.
+ */
 function buildSkillMd(data: CreateSkillRequest): string {
   const lines: string[] = ["---"];
   // Description — always quote to handle special chars
@@ -190,6 +212,22 @@ function buildSkillMd(data: CreateSkillRequest): string {
   if (data.model) {
     lines.push(`model: ${data.model}`);
   }
+
+  // Spec-compliant metadata block — tags and target-agents live HERE, not at root.
+  const hasTags = Array.isArray(data.tags) && data.tags.length > 0;
+  const hasAgents = Array.isArray(data.targetAgents) && data.targetAgents.length > 0;
+  if (hasTags || hasAgents) {
+    lines.push("metadata:");
+    if (hasTags) {
+      lines.push("  tags:");
+      for (const t of data.tags!) lines.push(`    - ${t}`);
+    }
+    if (hasAgents) {
+      lines.push("  target-agents:");
+      for (const a of data.targetAgents!) lines.push(`    - ${a}`);
+    }
+  }
+
   lines.push("---");
   lines.push("");
 
@@ -202,6 +240,244 @@ function buildSkillMd(data: CreateSkillRequest): string {
   }
 
   return lines.join("\n") + "\n";
+}
+
+// ---------------------------------------------------------------------------
+// Test-friendly exports (used by 0679 golden-file tests and the
+// scripts/validate-skills-spec.ts lint target). Not intended for runtime use.
+// ---------------------------------------------------------------------------
+
+export interface BuildSkillMdInput {
+  name: string;
+  plugin: string;
+  layout: 1 | 2 | 3;
+  description: string;
+  model?: string;
+  allowedTools?: string;
+  body: string;
+  tags?: string[];
+  targetAgents?: string[];
+}
+
+/**
+ * Public alias of the private `buildSkillMd` emitter for tests and lint scripts.
+ * The underlying function is the source of truth; this export exists so
+ * golden-file tests and the CI validator can exercise the emitter without
+ * touching the HTTP route.
+ */
+export function buildSkillMdForTest(data: BuildSkillMdInput): string {
+  return buildSkillMd(data as CreateSkillRequest);
+}
+
+/**
+ * Minimal YAML frontmatter parser for test assertions — supports the shape
+ * emitted by `buildSkillMd`:
+ *   - top-level scalars (quoted or unquoted)
+ *   - `metadata:` block with `tags:` and `target-agents:` list children
+ *
+ * This is intentionally narrow. For general YAML, callers should use a real
+ * parser. Exported solely to avoid adding a YAML dep to the test target.
+ */
+export function parseFrontmatterForTest(content: string): Record<string, unknown> & { metadata: Record<string, unknown> } {
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return { metadata: {} };
+  const body = match[1];
+  const rootOut: Record<string, unknown> = {};
+  const metadataOut: Record<string, unknown> = {};
+  const lines = body.split("\n");
+
+  let i = 0;
+  let inMetadata = false;
+  let currentListKey: string | null = null;
+  let currentList: string[] | null = null;
+  let currentListScope: "root" | "metadata" | null = null;
+
+  const flushList = () => {
+    if (currentListKey && currentList) {
+      if (currentListScope === "metadata") metadataOut[currentListKey] = currentList;
+      else rootOut[currentListKey] = currentList;
+    }
+    currentListKey = null;
+    currentList = null;
+    currentListScope = null;
+  };
+
+  while (i < lines.length) {
+    const raw = lines[i];
+    if (raw.trim() === "") { i++; continue; }
+
+    // Metadata nested list item: `    - value`
+    if (/^ {4}- /.test(raw) && currentList && currentListScope === "metadata") {
+      currentList.push(raw.replace(/^ {4}- /, "").trim());
+      i++; continue;
+    }
+    // Top-level list item: `  - value`
+    if (/^ {2}- /.test(raw) && currentList && currentListScope === "root") {
+      currentList.push(raw.replace(/^ {2}- /, "").trim());
+      i++; continue;
+    }
+
+    // Metadata child key: `  key:` or `  key: value`
+    const metaChildMatch = raw.match(/^ {2}([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/);
+    if (inMetadata && metaChildMatch) {
+      flushList();
+      const key = metaChildMatch[1];
+      const value = metaChildMatch[2];
+      if (value === "") {
+        currentListKey = key;
+        currentList = [];
+        currentListScope = "metadata";
+      } else {
+        metadataOut[key] = stripQuotes(value);
+      }
+      i++; continue;
+    }
+
+    // Top-level key: `key:` or `key: value`
+    const topMatch = raw.match(/^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/);
+    if (topMatch) {
+      flushList();
+      const key = topMatch[1];
+      const value = topMatch[2];
+      if (key === "metadata") {
+        inMetadata = true;
+        i++; continue;
+      }
+      inMetadata = false;
+      if (value === "") {
+        currentListKey = key;
+        currentList = [];
+        currentListScope = "root";
+      } else {
+        rootOut[key] = stripQuotes(value);
+      }
+      i++; continue;
+    }
+
+    i++;
+  }
+  flushList();
+
+  return Object.assign(rootOut, { metadata: metadataOut }) as Record<string, unknown> & { metadata: Record<string, unknown> };
+}
+
+function stripQuotes(v: string): string {
+  if (v.length >= 2 && v.startsWith('"') && v.endsWith('"')) return v.slice(1, -1);
+  return v;
+}
+
+// ---------------------------------------------------------------------------
+// `skills-ref validate` post-creation helper (0679, US-003 / T-004 + T-005)
+//
+// The helpers below are a pure interpretation layer over a `spawnSync`-style
+// result. Keeping them pure makes the four scenarios from AC-US3-01..04
+// directly testable without stubbing child processes: a caller (route
+// handler, future CLI post-creation hook) runs `spawnSync("skills-ref",
+// ["validate", path])` and hands the result to `interpretValidatorResult`.
+//
+// Behavior (see plan.md §4):
+//   - exit 0                    → success, silent
+//   - exit non-zero, non-strict → warning, exit code stays 0
+//   - exit non-zero, strict     → error, overall exit code becomes 1
+//   - ENOENT (binary missing)   → one-line install hint, exit stays 0
+//                                 (CI enforces via lint:skills-spec instead)
+// ---------------------------------------------------------------------------
+
+export interface SpawnResultLike {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error: (NodeJS.ErrnoException | Error) | undefined;
+}
+
+export interface ValidatorOptions {
+  strict: boolean;
+}
+
+export interface ValidatorOutcome {
+  ok: boolean;
+  exitCode: 0 | 1;
+  kind: "success" | "warning" | "error" | "missing-binary";
+  messages: string[];
+  skillPath: string;
+}
+
+function extractMessages(res: SpawnResultLike): string[] {
+  const raw = (res.stderr && res.stderr.trim()) || (res.stdout && res.stdout.trim()) || "";
+  if (!raw) return [`skills-ref exited with code ${res.status ?? "unknown"}`];
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+/**
+ * Interpret a `spawnSync("skills-ref", ["validate", path])` result into a
+ * structured outcome. Pure function — no side effects, no I/O.
+ */
+export function interpretValidatorResult(
+  skillPath: string,
+  res: SpawnResultLike,
+  opts: ValidatorOptions,
+): ValidatorOutcome {
+  // Missing binary — always non-blocking (graceful degradation).
+  const errCode = (res.error as NodeJS.ErrnoException | undefined)?.code;
+  if (errCode === "ENOENT") {
+    return {
+      ok: true,
+      exitCode: 0,
+      kind: "missing-binary",
+      messages: ["Install `skills-ref` to enable spec validation: `npm i -g skills-ref`"],
+      skillPath,
+    };
+  }
+
+  // Happy path.
+  if (res.status === 0) {
+    return { ok: true, exitCode: 0, kind: "success", messages: [], skillPath };
+  }
+
+  // Non-zero exit.
+  const messages = extractMessages(res);
+  if (opts.strict) {
+    return { ok: false, exitCode: 1, kind: "error", messages, skillPath };
+  }
+  return { ok: true, exitCode: 0, kind: "warning", messages, skillPath };
+}
+
+/**
+ * Render a `ValidatorOutcome` to a human-readable string for CLI / server
+ * log surfaces. Empty string on success (silent). Pure function.
+ *
+ * Color handling is deliberately omitted here — callers that want ANSI
+ * colors wrap the returned string with their own formatter. That keeps the
+ * helper trivially testable.
+ */
+export function formatValidatorReport(outcome: ValidatorOutcome): string {
+  switch (outcome.kind) {
+    case "success":
+      return "";
+    case "missing-binary":
+      return outcome.messages[0] + "\n";
+    case "warning": {
+      const lines = [
+        `Validation warnings for ${outcome.skillPath}:`,
+        ...outcome.messages.map((m) => `  - ${m}`),
+        "",
+        "Skill file remains on disk. Spec: https://agentskills.io/specification",
+      ];
+      return lines.join("\n") + "\n";
+    }
+    case "error": {
+      const lines = [
+        `Validation failed for ${outcome.skillPath}:`,
+        ...outcome.messages.map((m) => `  - ${m}`),
+        "",
+        "Skill file remains on disk. Re-run without --strict to warn instead of block.",
+      ];
+      return lines.join("\n") + "\n";
+    }
+  }
 }
 
 /** Compute target directory for a new skill based on layout */
@@ -935,23 +1211,83 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
     let aborted = false;
     res.on("close", () => { aborted = true; });
 
+    // ---------------------------------------------------------------------
+    // 0678: Resolve + validate { provider, model } before any SSE setup.
+    //
+    // Contract (see AC-US2-01..05):
+    //   - Both absent → { provider: "claude-cli", model: "sonnet" } (legacy
+    //     default preserved so existing callers are not broken).
+    //   - provider present + model absent → fill model with first detected
+    //     model id for that provider.
+    //   - provider unknown → 400 { error: "unknown_provider", validProviders }.
+    //   - provider known + model unknown → 400 { error: "unknown_model",
+    //     validModels }.
+    //
+    // Validation uses the shared detectAvailableProviders() cache from
+    // api-routes.ts — no extra probes per request (see ADR-0678-01).
+    //
+    // IMPORTANT: validation must run BEFORE initSSE() — a 400 needs a plain
+    // JSON response, not an SSE stream.
+    // ---------------------------------------------------------------------
+    const bothAbsent = !body.provider && !body.model;
+    let resolvedProvider: string;
+    let resolvedModel: string;
+
+    if (bothAbsent) {
+      resolvedProvider = "claude-cli";
+      resolvedModel = "sonnet";
+    } else {
+      const detected = await detectAvailableProviders();
+      const detectedIds = detected.map((p) => p.id);
+      const requestedProvider = body.provider || "claude-cli";
+
+      const match = detected.find((p) => p.id === requestedProvider);
+      if (!match) {
+        sendJson(res, {
+          error: "unknown_provider",
+          validProviders: detectedIds,
+        }, 400, req);
+        return;
+      }
+
+      const validModelIds = match.models.map((m) => m.id);
+      if (body.model !== undefined) {
+        if (!validModelIds.includes(body.model)) {
+          sendJson(res, {
+            error: "unknown_model",
+            validModels: validModelIds,
+          }, 400, req);
+          return;
+        }
+        resolvedModel = body.model;
+      } else {
+        // Provider given, model omitted — pick the first model id for that
+        // provider. claude-cli's first model stays "sonnet" by construction.
+        resolvedModel = validModelIds[0] ?? "sonnet";
+      }
+      resolvedProvider = requestedProvider;
+    }
+
     if (wantsSSE) initSSE(res, req);
 
-    const providerName = body.provider || "claude-cli";
+    const providerName = resolvedProvider;
 
     try {
       if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "preparing", message: "Building prompt..." });
 
-      // Body generation: capable model (user-specified or default)
+      // Body generation: capable model (user-specified or default).
+      // 0678: pass the validated pair so selection actually reaches dispatch.
       const bodyClient = createLlmClient({
-        provider: body.provider,
-        model: body.model,
+        provider: resolvedProvider as ProviderName,
+        model: resolvedModel,
       });
 
-      // Eval generation: fast/cheap model (configurable via VSKILL_EVAL_GEN_MODEL, default haiku)
+      // Eval generation: fast/cheap model (configurable via VSKILL_EVAL_GEN_MODEL, default haiku).
+      // Eval client stays on the cheap model regardless of the body choice — this is
+      // intentional (cost amortization) and independent of the 0678 source-model picker.
       const evalModel = process.env.VSKILL_EVAL_GEN_MODEL || "haiku";
       const evalClient = createLlmClient({
-        provider: body.provider,
+        provider: resolvedProvider as ProviderName,
         model: evalModel,
       });
 

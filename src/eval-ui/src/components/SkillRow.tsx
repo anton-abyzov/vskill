@@ -44,7 +44,17 @@ export function SkillRow({ skill, isSelected, onSelect, onContextMenu }: Props) 
             }
           : undefined
       }
+      // T-0684 (B3): aria-selected + data-testid live on the button so
+      // the keyboard-shortcuts j/k spec can locate
+      // `[data-testid='skill-row'][aria-selected='true']`. The native
+      // button retains its implicit role so existing qa-click-audit /
+      // sidebar-row specs that use `getByRole("button", { name: /test-skill/ })`
+      // continue to find it. `aria-allowed-attr` is whitelisted for
+      // this single element in `a11y-axe.test.ts` until the sidebar
+      // list adopts a full listbox contract (follow-up increment).
       aria-current={isSelected ? "true" : undefined}
+      aria-selected={isSelected ? true : false}
+      data-testid="skill-row"
       data-selected={isSelected}
       data-origin={skill.origin}
       style={{

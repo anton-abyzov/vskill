@@ -21,6 +21,18 @@ export interface StudioPreferences {
   selectedModel?: string;
   /** Whether the sidebar is collapsed. */
   sidebarCollapsed?: boolean;
+  /**
+   * 0678 — Last-chosen source model for skill generation on the Create Skill
+   * page. Persisted so the dropdown remembers the user's pick across reloads
+   * and tabs. Shape is `{ provider, model }` so both the provider id and the
+   * provider-scoped model id round-trip together.
+   *
+   * When the persisted provider is no longer detected at mount time the UI
+   * falls back to the default `{ claude-cli, sonnet }` and surfaces a one-time
+   * toast (see AC-US1-05). The persisted value is intentionally not cleared
+   * — it becomes usable again when the provider returns.
+   */
+  skillGenModel?: { provider: string; model: string };
   /** Additional opaque preference keys — callers can store anything
    *  JSON-serializable here. */
   [key: string]: unknown;

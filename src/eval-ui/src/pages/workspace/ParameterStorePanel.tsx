@@ -125,7 +125,7 @@ export function ParameterStorePanel() {
       {error && (
         <div
           className="text-[10px] px-2 py-1.5 rounded mb-2"
-          style={{ background: "rgba(239,68,68,0.1)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.2)" }}
+          style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}
           role="alert"
         >
           {error}
@@ -156,8 +156,8 @@ export function ParameterStorePanel() {
           <span
             className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
             style={{
-              background: entry.status === "ready" ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
-              color: entry.status === "ready" ? "#22c55e" : "#ef4444",
+              background: entry.status === "ready" ? "var(--green-muted)" : "var(--red-muted)",
+              color: entry.status === "ready" ? "var(--green)" : "var(--red)",
             }}
           >
             {entry.status}
@@ -195,7 +195,7 @@ export function ParameterStorePanel() {
                 onClick={() => handleSave(entry.name, editValue)}
                 disabled={saving || !editValue.trim()}
                 className="text-[10px] font-medium"
-                style={{ color: "#22c55e", background: "none", border: "none", cursor: "pointer" }}
+                style={{ color: "var(--green)", background: "none", border: "none", cursor: "pointer" }}
               >
                 Save
               </button>

@@ -1,0 +1,85 @@
+import { describe, it, expect, vi } from "vitest";
+import { PluginGroup } from "../PluginGroup";
+import type { SkillInfo } from "../../types";
+
+type ReactEl = { type: unknown; props: Record<string, unknown> };
+
+function expand(node: unknown): unknown {
+  if (node == null || typeof node !== "object") return node;
+  if (Array.isArray(node)) return node.map(expand);
+  const el = node as ReactEl;
+  if (typeof el.type === "function") {
+    const rendered = (el.type as (props: Record<string, unknown>) => unknown)(el.props);
+    return expand(rendered);
+  }
+  if (el.props?.children != null) {
+    return { ...el, props: { ...el.props, children: expand(el.props.children) } };
+  }
+  return el;
+}
+
+function collectText(node: unknown): string {
+  if (node == null) return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(collectText).join("");
+  const el = node as ReactEl;
+  return el.props?.children != null ? collectText(el.props.children) : "";
+}
+
+function makeSkill(plugin: string, skill: string, origin: "source" | "installed" = "source"): SkillInfo {
+  return {
+    plugin, skill,
+    dir: `/plugins/${plugin}/${skill}`,
+    hasEvals: false, hasBenchmark: false,
+    evalCount: 0, assertionCount: 0,
+    benchmarkStatus: "missing",
+    lastBenchmark: null,
+    origin,
+  };
+}
+
+describe("PluginGroup", () => {
+  it("renders the plugin name as a header and the contained skill names", () => {
+    const tree = expand(PluginGroup({
+      plugin: "obsidian-brain",
+      skills: [makeSkill("obsidian-brain", "lint"), makeSkill("obsidian-brain", "query")],
+      selectedKey: null,
+      onSelect: vi.fn(),
+    }));
+    const text = collectText(tree);
+    expect(text).toContain("obsidian-brain");
+    expect(text).toContain("lint");
+    expect(text).toContain("query");
+  });
+
+  it("renders a per-plugin count badge", () => {
+    const tree = expand(PluginGroup({
+      plugin: "obsidian-brain",
+      skills: [makeSkill("obsidian-brain", "a"), makeSkill("obsidian-brain", "b"), makeSkill("obsidian-brain", "c")],
+      selectedKey: null,
+      onSelect: vi.fn(),
+    }));
+    expect(collectText(tree)).toMatch(/\(?3\)?/);
+  });
+
+  it("alpha-sorts skills inside a group", () => {
+    const tree = expand(PluginGroup({
+      plugin: "obsidian-brain",
+      skills: [
+        makeSkill("obsidian-brain", "zeta"),
+        makeSkill("obsidian-brain", "alpha"),
+        makeSkill("obsidian-brain", "mu"),
+      ],
+      selectedKey: null,
+      onSelect: vi.fn(),
+    }));
+    const text = collectText(tree);
+    // order within the text should be alpha, mu, zeta
+    const ia = text.indexOf("alpha");
+    const im = text.indexOf("mu");
+    const iz = text.indexOf("zeta");
+    expect(ia).toBeGreaterThanOrEqual(0);
+    expect(im).toBeGreaterThan(ia);
+    expect(iz).toBeGreaterThan(im);
+  });
+});

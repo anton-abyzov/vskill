@@ -24,8 +24,8 @@ export function projectPort(rootPath: string): number {
   return 3077 + offset;
 }
 
-function checkSkillCreator(): void {
-  if (!isSkillCreatorInstalled()) {
+function checkSkillCreator(root: string): void {
+  if (!isSkillCreatorInstalled(root)) {
     console.log(
       yellow("\n  Skill-Creator not detected.") +
         "\n\n" +
@@ -185,9 +185,9 @@ export async function runEvalServe(
   root: string,
   port: number | null,
 ): Promise<void> {
-  checkSkillCreator();
-
   const resolvedRoot = resolve(root);
+
+  checkSkillCreator(resolvedRoot);
 
   if (!existsSync(resolvedRoot)) {
     console.error(

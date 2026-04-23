@@ -9,6 +9,16 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, "../../dist/eval-ui"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("@fontsource-variable/")) {
+            return "fonts";
+          }
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     port: 3078,

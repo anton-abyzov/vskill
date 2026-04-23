@@ -204,7 +204,7 @@ export function HistoryPanel() {
                               background: selected ? "var(--accent)" : "transparent",
                             }}
                           >
-                            {selected && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>}
+                            {selected && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--color-paper)" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>}
                           </span>
                         )}
                         <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>
@@ -213,17 +213,17 @@ export function HistoryPanel() {
                         <span className="pill text-[9px]" style={{
                           background: h.type === "comparison" ? "var(--purple-muted)"
                             : h.type === "baseline" ? "var(--surface-3)"
-                            : h.type === "model-compare" ? "rgba(56,189,248,0.15)"
-                            : (h.type === "improve" || h.type === "instruct") ? "rgba(168,85,247,0.15)"
-                            : h.type === "ai-generate" ? "rgba(34,197,94,0.15)"
-                            : h.type === "eval-generate" ? "rgba(251,146,60,0.15)"
+                            : h.type === "model-compare" ? "var(--accent-muted)"
+                            : (h.type === "improve" || h.type === "instruct") ? "var(--purple-muted)"
+                            : h.type === "ai-generate" ? "var(--green-muted)"
+                            : h.type === "eval-generate" ? "var(--orange-muted)"
                             : "var(--accent-muted)",
                           color: h.type === "comparison" ? "var(--purple)"
                             : h.type === "baseline" ? "var(--text-tertiary)"
-                            : h.type === "model-compare" ? "#38bdf8"
-                            : (h.type === "improve" || h.type === "instruct") ? "#a855f7"
-                            : h.type === "ai-generate" ? "#22c55e"
-                            : h.type === "eval-generate" ? "#fb923c"
+                            : h.type === "model-compare" ? "var(--accent)"
+                            : (h.type === "improve" || h.type === "instruct") ? "var(--purple)"
+                            : h.type === "ai-generate" ? "var(--green)"
+                            : h.type === "eval-generate" ? "var(--orange)"
                             : "var(--accent)",
                         }}>
                           {h.type === "model-compare" ? "model compare" : h.type === "improve" ? "ai improve" : h.type === "instruct" ? "ai edit" : h.type === "ai-generate" ? "ai generate" : h.type === "eval-generate" ? "eval generate" : h.type}
@@ -458,9 +458,9 @@ function ImproveDiffView({ run, onClose }: { run: BenchmarkResult; onClose: () =
         <div className="flex items-center gap-3">
           <div
             className="w-8 h-8 rounded-lg flex items-center justify-center"
-            style={{ background: "rgba(168,85,247,0.15)" }}
+            style={{ background: "var(--purple-muted)" }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
             </svg>
           </div>
@@ -497,12 +497,12 @@ function ImproveDiffView({ run, onClose }: { run: BenchmarkResult; onClose: () =
         <div
           className="mx-4 mt-4 px-4 py-3 rounded-lg text-[12px]"
           style={{
-            background: "rgba(168,85,247,0.06)",
-            border: "1px solid rgba(168,85,247,0.15)",
+            background: "var(--purple-muted)",
+            border: "1px solid var(--purple-muted)",
             color: "var(--text-secondary)",
           }}
         >
-          <span className="font-semibold" style={{ color: "#a855f7" }}>AI Reasoning: </span>
+          <span className="font-semibold" style={{ color: "var(--purple)" }}>AI Reasoning: </span>
           {run.improve.reasoning}
         </div>
       )}
@@ -519,8 +519,8 @@ function ImproveDiffView({ run, onClose }: { run: BenchmarkResult; onClose: () =
                 key={i}
                 style={{
                   background:
-                    line.type === "added" ? "rgba(34,197,94,0.08)" :
-                    line.type === "removed" ? "rgba(239,68,68,0.08)" :
+                    line.type === "added" ? "var(--green-muted)" :
+                    line.type === "removed" ? "var(--red-muted)" :
                     "transparent",
                 }}
               >
@@ -530,7 +530,7 @@ function ImproveDiffView({ run, onClose }: { run: BenchmarkResult; onClose: () =
                   style={{
                     width: 40,
                     fontSize: 10,
-                    color: line.type === "removed" ? "rgba(239,68,68,0.5)" : "var(--text-tertiary)",
+                    color: line.type === "removed" ? "var(--red)" : "var(--text-tertiary)",
                     opacity: line.origNum ? 0.6 : 0.2,
                     borderRight: "1px solid var(--border-subtle)",
                   }}
@@ -543,7 +543,7 @@ function ImproveDiffView({ run, onClose }: { run: BenchmarkResult; onClose: () =
                   style={{
                     width: 40,
                     fontSize: 10,
-                    color: line.type === "added" ? "rgba(34,197,94,0.5)" : "var(--text-tertiary)",
+                    color: line.type === "added" ? "var(--green)" : "var(--text-tertiary)",
                     opacity: line.newNum ? 0.6 : 0.2,
                     borderRight: "1px solid var(--border-subtle)",
                   }}

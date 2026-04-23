@@ -157,21 +157,21 @@ export function ComparisonPage() {
 
       <button onClick={handleStart} disabled={running} className="btn btn-purple mb-7">
         {running ? (
-          <><div className="spinner" style={{ borderTopColor: "#fff", borderColor: "rgba(255,255,255,0.2)", width: 14, height: 14 }} /> Comparing...</>
+          <><div className="spinner" style={{ borderTopColor: "var(--color-paper)", borderColor: "var(--border-default)", width: 14, height: 14 }} /> Comparing...</>
         ) : (
           <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5" /><path d="M8 21H3v-5" /><path d="M21 3l-7 7" /><path d="M3 21l7-7" /></svg> Run Comparison</>
         )}
       </button>
 
       {error && (
-        <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
+        <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}>
           {error}
         </div>
       )}
 
       {/* Done-level error (e.g. failed to load evals) */}
       {doneData?.error && (
-        <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
+        <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}>
           <span className="font-semibold">Error:</span> {doneData.error}
         </div>
       )}
@@ -180,7 +180,7 @@ export function ComparisonPage() {
       {caseErrors.length > 0 && (
         <div className="space-y-2 mb-5">
           {caseErrors.map((ce) => (
-            <div key={ce.eval_id} className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
+            <div key={ce.eval_id} className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}>
               <span className="font-semibold">Eval #{ce.eval_id} failed:</span> {ce.error}
             </div>
           ))}
@@ -314,7 +314,7 @@ export function ComparisonPage() {
                   { value: (c.baselineContentScore + c.baselineStructureScore) / 2, label: `${c.baselineContentScore + c.baselineStructureScore}/10` },
                 ],
               }))}
-              seriesColors={["#6383ff", "#a0a0a0"]}
+              seriesColors={["var(--accent)", "var(--text-tertiary)"]}
               seriesLabels={["With Skill", "Without Skill"]}
               maxValue={5}
               yLabel="Avg Score"
@@ -557,11 +557,11 @@ function RubricChart({ comparisons }: { comparisons: ComparisonOutputsEvent[] })
       </div>
       <div className="flex items-center gap-4 mb-3">
         <div className="flex items-center gap-1.5">
-          <div style={{ width: 10, height: 10, borderRadius: 2, background: "#6383ff" }} />
+          <div style={{ width: 10, height: 10, borderRadius: 2, background: "var(--accent)" }} />
           <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>With Skill</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div style={{ width: 10, height: 10, borderRadius: 2, background: "#a0a0a0" }} />
+          <div style={{ width: 10, height: 10, borderRadius: 2, background: "var(--text-tertiary)" }} />
           <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>Without Skill</span>
         </div>
       </div>
@@ -576,13 +576,13 @@ function RubricChart({ comparisons }: { comparisons: ComparisonOutputsEvent[] })
                 {label}
               </text>
               {/* Skill bar */}
-              <rect x={labelW} y={y - 1} width={skillW} height={barH} rx={3} fill="#6383ff" />
-              <text x={labelW + skillW + 4} y={y + barH / 2} fontSize={10} fill="#6383ff" dominantBaseline="middle">
+              <rect x={labelW} y={y - 1} width={skillW} height={barH} rx={3} fill="var(--accent)" />
+              <text x={labelW + skillW + 4} y={y + barH / 2} fontSize={10} fill="var(--accent)" dominantBaseline="middle">
                 {skillAvgs[i].toFixed(1)}
               </text>
               {/* Baseline bar */}
-              <rect x={labelW} y={y + barH + 3} width={baseW} height={barH} rx={3} fill="#a0a0a0" />
-              <text x={labelW + baseW + 4} y={y + barH + 3 + barH / 2} fontSize={10} fill="#a0a0a0" dominantBaseline="middle">
+              <rect x={labelW} y={y + barH + 3} width={baseW} height={barH} rx={3} fill="var(--text-tertiary)" />
+              <text x={labelW + baseW + 4} y={y + barH + 3 + barH / 2} fontSize={10} fill="var(--text-tertiary)" dominantBaseline="middle">
                 {baselineAvgs[i].toFixed(1)}
               </text>
             </g>

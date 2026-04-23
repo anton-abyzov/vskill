@@ -13,8 +13,12 @@ import { AGENTS_REGISTRY } from "../agents/agents-registry.js";
  * Detection order:
  * 1. Global canonical: ~/.agents/skills/skill-creator
  * 2. Project-local canonical: {projectRoot}/.agents/skills/skill-creator
+ * 2b. Project-local agent-native: {projectRoot}/{agent.localSkillsDir}/skill-creator
+ *     for every agent in AGENTS_REGISTRY (covers .claude/skills, .cursor/skills, etc.)
  * 3. Any registered agent's global skills directory
- * 4. Any agent's plugin cache (e.g. Claude Code plugin cache)
+ * 4. Any agent's plugin cache (e.g. Claude Code plugin cache at ~/.claude/plugins/cache/)
+ * 4b. Any agent's plugin marketplace dir (e.g. ~/.claude/plugins/marketplaces/ — marketplace
+ *     sources have an extra /plugins/ segment compared to the cache tree).
  */
 export function isSkillCreatorInstalled(projectRoot?: string): boolean {
   const home = homedir();
@@ -27,7 +31,15 @@ export function isSkillCreatorInstalled(projectRoot?: string): boolean {
     return true;
   }
 
-  // 3 + 4. Check every registered agent's global skills dir and plugin cache
+  // 2b. Project-local agent-native install dirs (.claude/skills, .cursor/skills, …)
+  if (projectRoot) {
+    for (const agent of AGENTS_REGISTRY) {
+      if (existsSync(join(projectRoot, agent.localSkillsDir, "skill-creator"))) return true;
+    }
+  }
+
+  // 3 + 4 + 4b. Check every registered agent's global skills dir, plugin cache,
+  // and marketplace source dir.
   for (const agent of AGENTS_REGISTRY) {
     const resolved = agent.globalSkillsDir.replace("~", home);
     if (existsSync(join(resolved, "skill-creator"))) return true;
@@ -39,6 +51,22 @@ export function isSkillCreatorInstalled(projectRoot?: string): boolean {
           for (const mkt of readdirSync(cacheDir, { withFileTypes: true })) {
             if (!mkt.isDirectory()) continue;
             for (const plugin of readdirSync(join(cacheDir, mkt.name), { withFileTypes: true })) {
+              if (plugin.isDirectory() && plugin.name.includes("skill-creator")) return true;
+            }
+          }
+        }
+      } catch { /* ignore permission errors */ }
+    }
+
+    if (agent.pluginMarketplaceDir) {
+      const mktRoot = agent.pluginMarketplaceDir.replace("~", home);
+      try {
+        if (existsSync(mktRoot)) {
+          for (const mkt of readdirSync(mktRoot, { withFileTypes: true })) {
+            if (!mkt.isDirectory()) continue;
+            const pluginsDir = join(mktRoot, mkt.name, "plugins");
+            if (!existsSync(pluginsDir)) continue;
+            for (const plugin of readdirSync(pluginsDir, { withFileTypes: true })) {
               if (plugin.isDirectory() && plugin.name.includes("skill-creator")) return true;
             }
           }

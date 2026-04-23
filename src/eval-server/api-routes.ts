@@ -95,6 +95,213 @@ export function extractDescription(skillContent: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// T-025: SKILL.md frontmatter + filesystem enrichment for /api/skills.
+//
+// The response must carry every frontmatter field (description, version,
+// tags, etc.) alongside filesystem stats (lastModified, sizeBytes) and, for
+// installed skills, the owning agent id (sourceAgent). Unknown/missing
+// fields MUST be `null` (not undefined) so that JSON.stringify preserves
+// them — downstream consumers rely on the shape being stable.
+// ---------------------------------------------------------------------------
+
+export interface SkillMetadataFields {
+  description: string | null;
+  version: string | null;
+  category: string | null;
+  author: string | null;
+  license: string | null;
+  homepage: string | null;
+  tags: string[] | null;
+  deps: string[] | null;
+  mcpDeps: string[] | null;
+  entryPoint: string | null;
+  lastModified: string | null;
+  sizeBytes: number | null;
+  sourceAgent: string | null;
+}
+
+const EMPTY_METADATA: SkillMetadataFields = {
+  description: null,
+  version: null,
+  category: null,
+  author: null,
+  license: null,
+  homepage: null,
+  tags: null,
+  deps: null,
+  mcpDeps: null,
+  entryPoint: null,
+  lastModified: null,
+  sizeBytes: null,
+  sourceAgent: null,
+};
+
+/**
+ * Minimal YAML frontmatter parser — handles scalars and arrays (inline [a, b]
+ * or YAML list form). We intentionally avoid pulling gray-matter into the
+ * eval-server bundle; SKILL.md frontmatter is a well-bounded subset.
+ */
+export function parseSkillFrontmatter(content: string): Record<string, string | string[]> {
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return {};
+  const lines = match[1].split("\n");
+  const out: Record<string, string | string[]> = {};
+  let currentKey: string | null = null;
+  let currentList: string[] | null = null;
+
+  const stripQuotes = (s: string) => s.trim().replace(/^["']|["']$/g, "");
+
+  for (const line of lines) {
+    const listItem = line.match(/^\s+-\s+(.+)$/);
+    if (listItem && currentKey && currentList) {
+      currentList.push(stripQuotes(listItem[1]));
+      continue;
+    }
+    const kv = line.match(/^([\w-]+):\s*(.*)$/);
+    if (!kv) continue;
+    // Flush pending list
+    if (currentKey && currentList) {
+      out[currentKey] = currentList;
+      currentList = null;
+    }
+    const key = kv[1];
+    const rawValue = kv[2].trim();
+    currentKey = key;
+    if (!rawValue) {
+      // Next lines may be a YAML list
+      currentList = [];
+      continue;
+    }
+    const arrayMatch = rawValue.match(/^\[(.*)\]$/);
+    if (arrayMatch) {
+      out[key] = arrayMatch[1]
+        .split(",")
+        .map(stripQuotes)
+        .filter(Boolean);
+      currentList = null;
+    } else {
+      out[key] = stripQuotes(rawValue);
+      currentList = null;
+    }
+  }
+  if (currentKey && currentList) out[currentKey] = currentList;
+  return out;
+}
+
+function toStringOrNull(v: unknown): string | null {
+  return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+}
+
+function toStringArrayOrNull(v: unknown): string[] | null {
+  if (Array.isArray(v)) {
+    const filtered = v
+      .filter((x): x is string => typeof x === "string")
+      .map((x) => x.trim())
+      .filter(Boolean);
+    return filtered.length > 0 ? filtered : null;
+  }
+  if (typeof v === "string" && v.trim().length > 0) {
+    // Comma-separated fallback
+    const parts = v.split(",").map((x) => x.trim()).filter(Boolean);
+    return parts.length > 0 ? parts : null;
+  }
+  return null;
+}
+
+/**
+ * Best-effort total file size + newest mtime for a skill directory. Used for
+ * the detail panel's filesystem group. Non-recursive by design — skills are
+ * conventionally flat, and recursion would make large docs expensive to list.
+ */
+function statSkillDir(dir: string): { sizeBytes: number | null; lastModified: string | null } {
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    let total = 0;
+    let newest = 0;
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      try {
+        const st = statSync(join(dir, entry.name));
+        total += st.size;
+        if (st.mtimeMs > newest) newest = st.mtimeMs;
+      } catch { /* ignore unreadable file */ }
+    }
+    return {
+      sizeBytes: total > 0 ? total : null,
+      lastModified: newest > 0 ? new Date(newest).toISOString() : null,
+    };
+  } catch {
+    return { sizeBytes: null, lastModified: null };
+  }
+}
+
+/**
+ * Derive the owning agent id for an installed skill by matching its first
+ * relative path segment against AGENTS_REGISTRY.localSkillsDir. Returns null
+ * for `origin="source"` or if no registry entry matches.
+ */
+export function deriveSourceAgent(
+  skillDir: string,
+  root: string,
+  origin: "source" | "installed",
+): string | null {
+  if (origin !== "installed") return null;
+  const rel = resolve(skillDir).startsWith(resolve(root))
+    ? resolve(skillDir).slice(resolve(root).length).replace(/^[/\\]/, "")
+    : skillDir;
+  const firstSegment = rel.split(/[/\\]/)[0];
+  if (!firstSegment) return null;
+  for (const agent of AGENTS_REGISTRY) {
+    const agentFirst = agent.localSkillsDir.split("/")[0];
+    if (agentFirst && agentFirst === firstSegment) return agent.id;
+  }
+  return null;
+}
+
+/**
+ * Build the T-025 metadata payload for a single skill. Reads SKILL.md from
+ * disk if present; returns EMPTY_METADATA on any error so the /api/skills
+ * response never fails because of a single bad skill.
+ */
+export function buildSkillMetadata(
+  skillDir: string,
+  origin: "source" | "installed",
+  root: string,
+): SkillMetadataFields {
+  const skillMd = join(skillDir, "SKILL.md");
+  if (!existsSync(skillMd)) {
+    return { ...EMPTY_METADATA, sourceAgent: deriveSourceAgent(skillDir, root, origin) };
+  }
+  let fm: Record<string, string | string[]> = {};
+  try {
+    const content = readFileSync(skillMd, "utf8");
+    fm = parseSkillFrontmatter(content);
+  } catch {
+    // Fall through with empty frontmatter
+  }
+  const { sizeBytes, lastModified } = statSkillDir(skillDir);
+  // Prefer "skill-deps" / "mcp-deps" kebab-case but accept camelCase too.
+  const deps = toStringArrayOrNull(fm["skill-deps"] ?? fm.skillDeps ?? fm.deps);
+  const mcpDeps = toStringArrayOrNull(fm["mcp-deps"] ?? fm.mcpDeps ?? fm.mcpDependencies);
+  const tags = toStringArrayOrNull(fm.tags);
+  return {
+    description: toStringOrNull(fm.description),
+    version: toStringOrNull(fm.version),
+    category: toStringOrNull(fm.category),
+    author: toStringOrNull(fm.author),
+    license: toStringOrNull(fm.license),
+    homepage: toStringOrNull(fm.homepage),
+    tags,
+    deps,
+    mcpDeps,
+    entryPoint: toStringOrNull(fm.entryPoint) ?? "SKILL.md",
+    lastModified,
+    sizeBytes,
+    sourceAgent: deriveSourceAgent(skillDir, root, origin),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // In-memory config state — UI can change provider/model at runtime.
 //
 // Default: claude-cli (Sonnet). The eval server is always run from a separate
@@ -372,6 +579,13 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   });
 
   // List all skills
+  //
+  // Response contract (see src/eval-ui/src/types.ts → SkillInfo):
+  //   - `origin` is GUARANTEED non-null (T-021). Derived from classifyOrigin()
+  //     in src/eval/skill-scanner.ts — the SSoT. Never recomputed here.
+  //   - Frontmatter + filesystem fields (T-025) are included when resolvable;
+  //     unknown/missing fields default to `null` (not undefined) so the shape
+  //     remains JSON-stable for all consumers.
   router.get("/api/skills", async (req, res) => {
     const skills = await scanSkills(root);
     const enriched = await Promise.all(
@@ -386,12 +600,31 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
           evalIds = new Set(evals.evals.map((e) => e.id));
         } catch { /* no evals */ }
         const benchmark = await readBenchmark(s.dir);
+        const meta = buildSkillMetadata(s.dir, s.origin, root);
+        // Defensive origin guarantee — scanSkills sets it, but fall back to a
+        // recomputation if anything downstream ever widens the type.
+        const origin = s.origin ?? classifyOrigin(s.dir, root);
         return {
           ...s,
+          origin,
           evalCount,
           assertionCount,
           benchmarkStatus: computeBenchmarkStatus(benchmark, evalIds, s.hasEvals),
           lastBenchmark: benchmark?.timestamp ?? null,
+          // T-025: frontmatter + filesystem + sourceAgent, all nullable
+          description: meta.description,
+          version: meta.version,
+          category: meta.category,
+          author: meta.author,
+          license: meta.license,
+          homepage: meta.homepage,
+          tags: meta.tags,
+          deps: meta.deps,
+          mcpDeps: meta.mcpDeps,
+          entryPoint: meta.entryPoint,
+          lastModified: meta.lastModified,
+          sizeBytes: meta.sizeBytes,
+          sourceAgent: meta.sourceAgent,
         };
       }),
     );

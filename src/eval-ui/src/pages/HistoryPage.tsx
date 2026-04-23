@@ -44,15 +44,19 @@ function passRateBg(rate: number): string {
   return "var(--red-muted)";
 }
 
+// Run-type pills use theme tokens; each run category re-uses an existing
+// semantic color (accent / purple / orange / green) rather than inventing
+// bespoke brand hues. Keeps the history timeline swatchless-looking on
+// theme swap.
 const TYPE_PILL: Record<string, { bg: string; fg: string; label: string }> = {
-  benchmark: { bg: "rgba(99,131,255,0.15)", fg: "#6383ff", label: "Benchmark" },
+  benchmark: { bg: "var(--accent-muted)", fg: "var(--accent)", label: "Benchmark" },
   comparison: { bg: "var(--purple-muted)", fg: "var(--purple)", label: "A/B" },
-  baseline: { bg: "rgba(251,146,60,0.15)", fg: "#fb923c", label: "Baseline" },
-  "model-compare": { bg: "rgba(56,189,248,0.15)", fg: "#38bdf8", label: "Model Compare" },
-  improve: { bg: "rgba(168,85,247,0.15)", fg: "#a855f7", label: "AI Improve" },
-  instruct: { bg: "rgba(168,85,247,0.15)", fg: "#a855f7", label: "AI Edit" },
-  "ai-generate": { bg: "rgba(34,197,94,0.15)", fg: "#22c55e", label: "AI Generate" },
-  "eval-generate": { bg: "rgba(251,146,60,0.15)", fg: "#fb923c", label: "Eval Generate" },
+  baseline: { bg: "var(--orange-muted)", fg: "var(--orange)", label: "Baseline" },
+  "model-compare": { bg: "var(--accent-muted)", fg: "var(--accent)", label: "Model Compare" },
+  improve: { bg: "var(--purple-muted)", fg: "var(--purple)", label: "AI Improve" },
+  instruct: { bg: "var(--purple-muted)", fg: "var(--purple)", label: "AI Edit" },
+  "ai-generate": { bg: "var(--green-muted)", fg: "var(--green)", label: "AI Generate" },
+  "eval-generate": { bg: "var(--orange-muted)", fg: "var(--orange)", label: "Eval Generate" },
 };
 
 function verdictColor(v: string | undefined): string {
@@ -406,7 +410,7 @@ function SingleRunDetail({ run, plugin, skill, onDelete }: SingleRunDetailProps)
                   className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
                   style={{ background: a.pass ? "var(--green)" : "var(--red)" }}
                 >
-                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="var(--color-paper)" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
                     {a.pass ? <polyline points="20 6 9 17 4 12" /> : <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>}
                   </svg>
                 </div>
@@ -457,9 +461,9 @@ function ImproveDetailView({ run, onDelete }: { run: BenchmarkResult; onDelete: 
         <div className="flex items-center gap-3 mb-3">
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center"
-            style={{ background: "rgba(168,85,247,0.15)" }}
+            style={{ background: "var(--purple-muted)" }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
             </svg>
           </div>
@@ -491,13 +495,13 @@ function ImproveDetailView({ run, onDelete }: { run: BenchmarkResult; onDelete: 
           <div
             className="px-4 py-3 rounded-lg text-[12px]"
             style={{
-              background: "rgba(168,85,247,0.06)",
-              border: "1px solid rgba(168,85,247,0.15)",
+              background: "var(--purple-muted)",
+              border: "1px solid var(--purple-muted)",
               color: "var(--text-secondary)",
               lineHeight: 1.6,
             }}
           >
-            <span className="font-semibold" style={{ color: "#a855f7" }}>Reasoning: </span>
+            <span className="font-semibold" style={{ color: "var(--purple)" }}>Reasoning: </span>
             {run.improve.reasoning}
           </div>
         )}
@@ -527,8 +531,8 @@ function ImproveDetailView({ run, onDelete }: { run: BenchmarkResult; onDelete: 
                   key={i}
                   style={{
                     background:
-                      line.type === "added" ? "rgba(34,197,94,0.07)" :
-                      line.type === "removed" ? "rgba(239,68,68,0.07)" :
+                      line.type === "added" ? "var(--green-muted)" :
+                      line.type === "removed" ? "var(--red-muted)" :
                       "transparent",
                   }}
                 >
@@ -536,7 +540,7 @@ function ImproveDetailView({ run, onDelete }: { run: BenchmarkResult; onDelete: 
                     className="text-right select-none"
                     style={{
                       width: 44, padding: "0 6px", fontSize: 10, lineHeight: "22px",
-                      color: line.type === "removed" ? "rgba(239,68,68,0.45)" : "var(--text-tertiary)",
+                      color: line.type === "removed" ? "var(--red)" : "var(--text-tertiary)",
                       opacity: line.origNum ? 0.7 : 0.2,
                       borderRight: "1px solid var(--border-subtle)",
                     }}
@@ -545,7 +549,7 @@ function ImproveDetailView({ run, onDelete }: { run: BenchmarkResult; onDelete: 
                     className="text-right select-none"
                     style={{
                       width: 44, padding: "0 6px", fontSize: 10, lineHeight: "22px",
-                      color: line.type === "added" ? "rgba(34,197,94,0.45)" : "var(--text-tertiary)",
+                      color: line.type === "added" ? "var(--green)" : "var(--text-tertiary)",
                       opacity: line.newNum ? 0.7 : 0.2,
                       borderRight: "1px solid var(--border-subtle)",
                     }}
@@ -748,6 +752,7 @@ export function HistoryPage() {
               style={{
                 background: isActive ? "var(--surface-4)" : "transparent",
                 color: isActive ? "var(--text-primary)" : "var(--text-tertiary)",
+                // eslint-disable-next-line vskill/no-raw-color -- intentional: elevation shadow is alpha-only and theme-agnostic
                 boxShadow: isActive ? "0 1px 3px rgba(0,0,0,0.2)" : "none",
               }}
               onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = "var(--text-secondary)"; }}

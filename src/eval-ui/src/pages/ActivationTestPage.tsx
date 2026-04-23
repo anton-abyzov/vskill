@@ -5,9 +5,9 @@ import type { SkillInfo, ActivationResult, ActivationSummary } from "../types";
 
 const CLASSIFICATION_STYLES: Record<string, { bg: string; text: string; icon: string }> = {
   TP: { bg: "var(--green-muted)", text: "var(--green)", icon: "check" },
-  TN: { bg: "rgba(52,211,153,0.06)", text: "rgba(52,211,153,0.6)", icon: "check" },
+  TN: { bg: "var(--green-muted)", text: "var(--green)", icon: "check" },
   FP: { bg: "var(--red-muted)", text: "var(--red)", icon: "x" },
-  FN: { bg: "rgba(248,113,113,0.06)", text: "rgba(248,113,113,0.6)", icon: "x" },
+  FN: { bg: "var(--red-muted)", text: "var(--red)", icon: "x" },
 };
 
 const PROMPT_TEMPLATES = [
@@ -228,14 +228,14 @@ export function ActivationTestPage() {
 
       <button onClick={handleRun} disabled={running || !selectedSkill || !promptsText.trim()} className="btn btn-primary mb-7">
         {running ? (
-          <><div className="spinner" style={{ borderTopColor: "#fff", borderColor: "rgba(255,255,255,0.2)", width: 14, height: 14 }} /> Testing...</>
+          <><div className="spinner" style={{ borderTopColor: "var(--color-paper)", borderColor: "var(--border-default)", width: 14, height: 14 }} /> Testing...</>
         ) : (
           <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></svg> Run Activation Test</>
         )}
       </button>
 
       {error && (
-        <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
+        <div className="mb-5 px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}>
           {error}
         </div>
       )}
@@ -320,8 +320,8 @@ export function ActivationTestPage() {
             <div className="grid grid-cols-2 gap-2 max-w-xs mx-auto">
               <ConfusionCell label="True Positive" abbr="TP" count={summary.tp} bg="var(--green-muted)" color="var(--green)" description="Correctly activated" />
               <ConfusionCell label="False Positive" abbr="FP" count={summary.fp} bg="var(--red-muted)" color="var(--red)" description="Wrongly activated" />
-              <ConfusionCell label="False Negative" abbr="FN" count={summary.fn} bg="rgba(248,113,113,0.06)" color="rgba(248,113,113,0.6)" description="Missed activation" />
-              <ConfusionCell label="True Negative" abbr="TN" count={summary.tn} bg="rgba(52,211,153,0.06)" color="rgba(52,211,153,0.6)" description="Correctly silent" />
+              <ConfusionCell label="False Negative" abbr="FN" count={summary.fn} bg="var(--red-muted)" color="var(--red)" description="Missed activation" />
+              <ConfusionCell label="True Negative" abbr="TN" count={summary.tn} bg="var(--green-muted)" color="var(--green)" description="Correctly silent" />
             </div>
           </div>
         </div>
@@ -371,7 +371,7 @@ function ResultRow({ result }: { result: ActivationResult }) {
         </div>
         <div className="flex items-center gap-3 text-[12px]">
           <span className="pill" style={{
-            background: "rgba(0,0,0,0.1)",
+            background: "var(--surface-3)",
             color: cs.text,
             fontWeight: 700,
             fontSize: "10px",

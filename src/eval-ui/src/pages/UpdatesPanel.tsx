@@ -234,7 +234,7 @@ export function UpdatesPanel() {
             }}
           >
             {selected.size === selectableUpdates.length && selectableUpdates.length > 0 && (
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--color-paper)" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
             )}
           </span>
           Select All
@@ -278,7 +278,7 @@ export function UpdatesPanel() {
                       opacity: isPinned ? 0.4 : 1,
                     }}
                   >
-                    {isChecked && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>}
+                    {isChecked && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--color-paper)" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>}
                   </span>
                 </button>
 
@@ -358,6 +358,7 @@ export function UpdatesPanel() {
       {changelogDiff && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center"
+          // eslint-disable-next-line vskill/no-raw-color -- intentional: modal scrim needs constant opaque overlay independent of theme
           style={{ background: "rgba(0,0,0,0.5)" }}
           onClick={() => setChangelogDiff(null)}
         >

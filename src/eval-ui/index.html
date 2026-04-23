@@ -4,6 +4,48 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Skill Studio</title>
+    <script>
+      // FOUC-prevention: resolve theme + contrast BEFORE React mounts.
+      // Reads localStorage "vskill-theme" (values: "auto" | "light" | "dark").
+      // Falls back to prefers-color-scheme. Also sets data-contrast when
+      // prefers-contrast: more matches. try/catch wraps everything for
+      // private-browsing environments where localStorage throws.
+      (function () {
+        try {
+          var stored = null;
+          try {
+            stored = localStorage.getItem("vskill-theme");
+          } catch (e) {
+            stored = null;
+          }
+          var mode = stored === "light" || stored === "dark" || stored === "auto"
+            ? stored
+            : "auto";
+          var systemDark = false;
+          try {
+            systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          } catch (e) {
+            systemDark = false;
+          }
+          var resolved = mode === "auto" ? (systemDark ? "dark" : "light") : mode;
+          document.documentElement.dataset.theme = resolved;
+          document.documentElement.dataset.themeMode = mode;
+
+          var highContrast = false;
+          try {
+            highContrast = window.matchMedia("(prefers-contrast: more)").matches;
+          } catch (e) {
+            highContrast = false;
+          }
+          if (highContrast) {
+            document.documentElement.dataset.contrast = "more";
+          }
+        } catch (e) {
+          // Defensive: never block render on theme detection failure.
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -170,7 +170,7 @@ export function RunPanel() {
 
         <div className="flex items-center gap-2">
           {isAnyRunning && (
-            <button onClick={cancelAll} className="btn text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(239,68,68,0.3)" }}>
+            <button onClick={cancelAll} className="btn text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4 }}><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
               Cancel All
             </button>
@@ -316,8 +316,8 @@ export function RunPanel() {
                 className="text-[13px] font-semibold mt-3 w-full rounded-lg transition-opacity duration-150"
                 style={{
                   padding: "10px 0",
-                  background: "var(--green, #22c55e)",
-                  color: "#fff",
+                  background: "var(--green)",
+                  color: "var(--color-paper)",
                   border: "none",
                   cursor: "pointer",
                   opacity: cases.length === 0 ? 0.5 : 1,
@@ -383,7 +383,7 @@ export function RunPanel() {
 const MODE_BADGE: Record<RunMode, { label: string; bg: string; color: string }> = {
   benchmark: { label: "Skill", bg: "var(--accent-muted)", color: "var(--accent)" },
   baseline: { label: "Baseline", bg: "var(--surface-3)", color: "var(--text-tertiary)" },
-  comparison: { label: "Compare", bg: "rgba(168,85,247,0.12)", color: "rgb(168,85,247)" },
+  comparison: { label: "Compare", bg: "var(--purple-muted)", color: "var(--purple)" },
 };
 
 function RunCaseCard({ name, evalId, result, caseCost, caseBillingMode, caseInputTokens, caseOutputTokens, caseStatus, runMode, comparisonDetail, isReadOnly, onRun, onBaseline, onCompare, onCancel }: {
@@ -413,6 +413,7 @@ function RunCaseCard({ name, evalId, result, caseCost, caseBillingMode, caseInpu
       style={{
         background: "var(--surface-1)",
         border: isActive ? "1px solid var(--accent)" : "1px solid var(--border-subtle)",
+        // eslint-disable-next-line vskill/no-raw-color -- intentional: active-glow shadow uses alpha-only accent tint
         boxShadow: isActive ? "0 0 12px rgba(99, 131, 255, 0.15)" : "none",
       }}
     >
@@ -439,7 +440,7 @@ function RunCaseCard({ name, evalId, result, caseCost, caseBillingMode, caseInpu
             <button
               onClick={() => onCancel(evalId)}
               className="btn text-[10px] px-2 py-1"
-              style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(239,68,68,0.3)" }}
+              style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}
             >
               Cancel
             </button>
@@ -583,7 +584,7 @@ function CaseError({ errorMessage, classifiedError }: { errorMessage: string; cl
 
   return (
     <div className="px-4 pb-3">
-      <div className="rounded-lg overflow-hidden" style={{ background: "var(--red-muted)", border: "1px solid rgba(239,68,68,0.2)" }}>
+      <div className="rounded-lg overflow-hidden" style={{ background: "var(--red-muted)", border: "1px solid var(--red-muted)" }}>
         {/* Summary row — always visible */}
         <div className="flex items-center gap-2 px-3 py-2">
           <span style={{ fontSize: 12 }}>{icon}</span>

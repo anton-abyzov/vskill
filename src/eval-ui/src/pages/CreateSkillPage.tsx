@@ -130,9 +130,10 @@ export function CreateSkillPage() {
               onClick={() => sk.setMode("ai")}
               className="px-4 py-2 rounded-md text-[13px] font-medium transition-all duration-200"
               style={{
-                background: sk.mode === "ai" ? "rgba(168,85,247,0.15)" : "transparent",
-                color: sk.mode === "ai" ? "#a855f7" : "var(--text-tertiary)",
-                boxShadow: sk.mode === "ai" ? "0 1px 3px rgba(168,85,247,0.15)" : "none",
+                background: sk.mode === "ai" ? "var(--purple-muted)" : "transparent",
+                color: sk.mode === "ai" ? "var(--purple)" : "var(--text-tertiary)",
+                // eslint-disable-next-line vskill/no-raw-color -- intentional: toggle elevation shadow is alpha-only
+                boxShadow: sk.mode === "ai" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
               }}
             >
               <span className="flex items-center gap-1.5">
@@ -146,6 +147,7 @@ export function CreateSkillPage() {
               style={{
                 background: sk.mode === "manual" ? "var(--surface-4, var(--surface-3))" : "transparent",
                 color: sk.mode === "manual" ? "var(--text-primary)" : "var(--text-tertiary)",
+                // eslint-disable-next-line vskill/no-raw-color -- intentional: toggle elevation shadow is alpha-only
                 boxShadow: sk.mode === "manual" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
               }}
             >
@@ -176,9 +178,9 @@ export function CreateSkillPage() {
               <h3 className="text-[13px] font-semibold mb-3 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
                 <div
                   className="w-6 h-6 rounded-md flex items-center justify-center"
-                  style={{ background: "rgba(168,85,247,0.15)" }}
+                  style={{ background: "var(--purple-muted)" }}
                 >
-                  <SparkleIcon size={13} color="#a855f7" />
+                  <SparkleIcon size={13} color="var(--purple)" />
                 </div>
                 Describe Your Skill
               </h3>
@@ -285,7 +287,7 @@ export function CreateSkillPage() {
                     onDismiss={sk.clearAiError}
                   />
                 ) : (
-                  <div className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
+                  <div className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}>
                     {sk.aiError}
                   </div>
                 )}
@@ -308,8 +310,8 @@ export function CreateSkillPage() {
                   disabled={!sk.aiPrompt.trim()}
                   className="px-6 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 flex items-center gap-2"
                   style={{
-                    background: !sk.aiPrompt.trim() ? "var(--surface-3)" : "#a855f7",
-                    color: !sk.aiPrompt.trim() ? "var(--text-tertiary)" : "#fff",
+                    background: !sk.aiPrompt.trim() ? "var(--surface-3)" : "var(--purple)",
+                    color: !sk.aiPrompt.trim() ? "var(--text-tertiary)" : "var(--color-paper)",
                     cursor: !sk.aiPrompt.trim() ? "not-allowed" : "pointer",
                   }}
                 >
@@ -384,7 +386,7 @@ export function CreateSkillPage() {
                           className="px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-150"
                           style={{
                             background: sk.selectedLayout === l.layout ? "var(--accent)" : "var(--surface-3)",
-                            color: sk.selectedLayout === l.layout ? "#fff" : "var(--text-secondary)",
+                            color: sk.selectedLayout === l.layout ? "var(--color-paper)" : "var(--text-secondary)",
                             border: `1px solid ${sk.selectedLayout === l.layout ? "var(--accent)" : "var(--border-subtle)"}`,
                           }}
                         >
@@ -398,7 +400,7 @@ export function CreateSkillPage() {
                           className="px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-150"
                           style={{
                             background: sk.selectedLayout === 3 ? "var(--accent)" : "var(--surface-3)",
-                            color: sk.selectedLayout === 3 ? "#fff" : "var(--text-secondary)",
+                            color: sk.selectedLayout === 3 ? "var(--color-paper)" : "var(--text-secondary)",
                             border: `1px solid ${sk.selectedLayout === 3 ? "var(--accent)" : "var(--border-subtle)"}`,
                           }}
                         >
@@ -454,13 +456,13 @@ export function CreateSkillPage() {
                 <div
                   className="px-4 py-3 rounded-lg text-[12px] animate-fade-in flex items-center justify-between gap-3"
                   style={{
-                    background: "rgba(59,130,246,0.08)",
+                    background: "var(--accent-muted)",
                     color: "var(--text-secondary)",
-                    border: "1px solid rgba(59,130,246,0.2)",
+                    border: "1px solid var(--accent-muted)",
                   }}
                 >
                   <div className="flex items-center gap-2">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
                     </svg>
                     <span>
@@ -472,7 +474,7 @@ export function CreateSkillPage() {
                     <button
                       onClick={sk.applyPluginRecommendation}
                       className="px-3 py-1 rounded-md text-[11px] font-medium"
-                      style={{ background: "#3b82f6", color: "#fff", border: "none", cursor: "pointer" }}
+                      style={{ background: "var(--accent)", color: "var(--color-paper)", border: "none", cursor: "pointer" }}
                     >
                       Use plugin
                     </button>
@@ -662,7 +664,7 @@ export function CreateSkillPage() {
 
               {/* Error */}
               {sk.error && (
-                <div className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.2)" }}>
+                <div className="px-4 py-3 rounded-lg text-[13px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}>
                   {sk.error}
                 </div>
               )}
@@ -675,7 +677,7 @@ export function CreateSkillPage() {
                   className="px-5 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150"
                   style={{
                     background: sk.creating || !sk.name || !sk.description ? "var(--surface-3)" : "var(--accent)",
-                    color: sk.creating || !sk.name || !sk.description ? "var(--text-tertiary)" : "#fff",
+                    color: sk.creating || !sk.name || !sk.description ? "var(--text-tertiary)" : "var(--color-paper)",
                     cursor: sk.creating || !sk.name || !sk.description ? "not-allowed" : "pointer",
                     opacity: sk.creating ? 0.7 : 1,
                   }}

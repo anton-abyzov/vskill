@@ -7,8 +7,8 @@ import { ChangelogViewer } from "../../components/ChangelogViewer";
 import type { VersionEntry, VersionDiff } from "../../types";
 
 const CERT_COLORS: Record<string, { bg: string; text: string }> = {
-  CERTIFIED: { bg: "rgba(212,160,23,0.15)", text: "#d4a017" },
-  VERIFIED: { bg: "rgba(59,130,246,0.15)", text: "#3b82f6" },
+  CERTIFIED: { bg: "var(--yellow-muted)", text: "var(--yellow)" },
+  VERIFIED: { bg: "var(--accent-muted)", text: "var(--accent)" },
   COMMUNITY: { bg: "var(--surface-3)", text: "var(--text-tertiary)" },
 };
 

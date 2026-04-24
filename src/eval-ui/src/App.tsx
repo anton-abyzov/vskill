@@ -22,6 +22,8 @@ import { useWorkspace } from "./hooks/useWorkspace";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { ProjectCommandPalette } from "./components/ProjectCommandPalette";
 import { CreateSkillModal, type CreateSkillMode } from "./components/CreateSkillModal";
+import { MarketplaceDrawer } from "./components/MarketplaceDrawer";
+import { InstallProgressToast, type InstallJob } from "./components/InstallProgressToast";
 import {
   getStudioPreference,
   writeStudioPreference,
@@ -135,6 +137,27 @@ function Shell() {
     window.addEventListener("studio:request-create-skill", onRequestCreate);
     return () => window.removeEventListener("studio:request-create-skill", onRequestCreate);
   }, [openCreateModal]);
+
+  // 0700 phase 2B + 2C: MarketplaceDrawer + InstallProgressToast state.
+  const [marketplaceOpen, setMarketplaceOpen] = useState(false);
+  const [installJob, setInstallJob] = useState<InstallJob | null>(null);
+  useEffect(() => {
+    function onOpenMarketplace() {
+      setMarketplaceOpen(true);
+    }
+    window.addEventListener("studio:open-marketplace", onOpenMarketplace);
+    return () => window.removeEventListener("studio:open-marketplace", onOpenMarketplace);
+  }, []);
+
+  // Collect names of installed plugins so the drawer can gray-out "Installed".
+  const installedPluginNames = useMemo(() => {
+    const set = new Set<string>();
+    // state.skills is the Sidebar source; plugin-scope rows carry pluginName.
+    for (const s of state.skills) {
+      if (s.source === "plugin" && s.pluginName) set.add(s.pluginName);
+    }
+    return set;
+  }, [state.skills]);
   useKeyboardShortcut(
     [
       {
@@ -427,6 +450,35 @@ function Shell() {
         initialMode={initialCreateMode}
         isClaudeCode={activeAgentId === "claude-code"}
         projectRoot={activeProject?.path ?? config?.projectName ?? ""}
+      />
+
+      {/* 0700 phase 2B: MarketplaceDrawer — opened from the AVAILABLE > Plugins
+          section header (via studio:open-marketplace). Lists configured
+          marketplaces + available plugins with one-click install. */}
+      <MarketplaceDrawer
+        open={marketplaceOpen}
+        onClose={() => setMarketplaceOpen(false)}
+        installedNames={installedPluginNames}
+        onInstall={(plugin, marketplace) => {
+          setInstallJob({
+            plugin,
+            marketplace,
+            ref: `${plugin}@${marketplace}`,
+          });
+          setMarketplaceOpen(false);
+        }}
+      />
+
+      {/* 0700 phase 2C: live SSE progress toast while `claude plugin install`
+          runs. Auto-hides ~3s after success or stays pinned on failure. */}
+      <InstallProgressToast
+        job={installJob}
+        onDone={(result) => {
+          if (result.ok) {
+            setTimeout(() => setInstallJob(null), 3000);
+          }
+          // On failure, leave the toast pinned so the user can expand it.
+        }}
       />
     </>
   );

@@ -90,16 +90,28 @@ function SkillRowBase({ skill, isSelected, onSelect, onContextMenu }: Props) {
         transition: "background-color var(--duration-fast, 120ms) var(--ease-standard, ease), box-shadow var(--duration-base, 180ms) var(--ease-standard, ease)",
       }}
     >
-      {/* Provenance dot prefix */}
+      {/* Provenance dot — 0700 phase 2A: when an update is available, the
+          same dot gets a concentric amber ring so one glance tells you both
+          (a) where the skill lives (yellow/green) and (b) that it's stale. */}
       <span
         aria-hidden="true"
+        aria-label={skill.updateAvailable ? "Update available" : undefined}
+        title={
+          skill.updateAvailable
+            ? `Update available${skill.latestVersion ? ` → ${skill.latestVersion}` : ""}`
+            : undefined
+        }
         style={{
-          width: 6,
-          height: 6,
+          width: skill.updateAvailable ? 10 : 6,
+          height: skill.updateAvailable ? 10 : 6,
           borderRadius: "50%",
           background: dotColor,
           display: "inline-block",
           flexShrink: 0,
+          boxShadow: skill.updateAvailable
+            ? "0 0 0 2px var(--color-own, #d97706)"
+            : "none",
+          transition: "box-shadow 180ms ease, width 180ms ease, height 180ms ease",
         }}
       />
 

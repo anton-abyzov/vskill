@@ -209,7 +209,11 @@ const COMBOS: Array<{ name: string; targetAgents: string[] }> = [
   { name: "combo-2-claude-codex-cursor", targetAgents: ["claude-code", "codex", "cursor"] },
   {
     name: "combo-3-all-universal",
-    targetAgents: ["claude-code", "cursor", "github-copilot", "windsurf", "codex", "gemini-cli", "cline"],
+    // 0694 (AC-US1-04 / F-002): use canonical github-copilot-ext id, not the
+    // legacy github-copilot alias. The LEGACY_AGENT_IDS map exists for
+    // external/runtime backward compat — in-repo fixtures should use the
+    // current canonical id so a future alias removal does not silently break.
+    targetAgents: ["claude-code", "cursor", "github-copilot-ext", "windsurf", "codex", "gemini-cli", "cline"],
   },
 ];
 

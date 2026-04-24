@@ -104,7 +104,10 @@ function listSkillDirs(skillsDir: string): string[] {
 }
 
 /** Detect project layout — mirrors scanSkills() logic from skill-scanner.ts */
-function detectProjectLayout(root: string): ProjectLayoutResponse {
+// TODO(0670 T-001): relocate to src/core/project-layout.ts in a follow-up
+// increment. Exported here (approach b) so src/core/skill-generator.ts can
+// import without the full-move diff.
+export function detectProjectLayout(root: string): ProjectLayoutResponse {
   const layouts: DetectedLayout[] = [];
   const allSkills: Array<{ plugin: string; skill: string }> = [];
 
@@ -674,7 +677,10 @@ When a skill includes allowed-tools: Bash (or Read, Write, Edit), the skill body
 - Every step must end with a concrete, complete, copy-pasteable code block — not prose describing what the code would do
 - Include any variable values (paths, URLs, flags) directly in the code block, not as placeholders`;
 
-const BODY_SYSTEM_PROMPT = `You are an expert AI skill engineer in Skill Studio. Given a user's description of what a skill should do, generate the SKILL.md body and metadata (NOT evals).
+// TODO(0670 T-001): relocate to src/core/skill-prompts.ts in a follow-up
+// increment. Exported here (approach b) so src/core/skill-generator.ts can
+// import without the full-move diff.
+export const BODY_SYSTEM_PROMPT = `You are an expert AI skill engineer in Skill Studio. Given a user's description of what a skill should do, generate the SKILL.md body and metadata (NOT evals).
 
 ${SKILL_STUDIO_BEST_PRACTICES}
 
@@ -699,7 +705,8 @@ Return ONLY the JSON object — no code fences, no preamble.
 
 After the JSON, on a new line, write "---REASONING---" followed by a brief explanation of your design choices (why this name, why these trigger phrases, what Skill Studio rules you applied).`;
 
-const EVAL_SYSTEM_PROMPT = `You are an expert AI skill evaluator. Given a skill's name, description, and purpose, generate eval test cases that verify the skill works correctly.
+// TODO(0670 T-001): relocate to src/core/skill-prompts.ts.
+export const EVAL_SYSTEM_PROMPT = `You are an expert AI skill evaluator. Given a skill's name, description, and purpose, generate eval test cases that verify the skill works correctly.
 
 ### Eval Assertions for Action-Oriented Skills (CRITICAL)
 The eval evaluates the LLM text response — it cannot run Bash or call tools. Assertions must check for code/commands present IN the response, not whether they were executed.
@@ -852,14 +859,14 @@ export function buildAgentAwareSystemPrompt(
   return basePrompt + constraintSection;
 }
 
-interface GenerateSkillRequest {
+export interface GenerateSkillRequest {
   prompt: string;
   provider?: ProviderName;
   model?: string;
   targetAgents?: string[];
 }
 
-interface GenerateSkillResult {
+export interface GenerateSkillResult {
   name: string;
   description: string;
   model: string;
@@ -886,7 +893,7 @@ function cleanAndParseJson(raw: string): Record<string, unknown> {
   }
 }
 
-interface BodyResult {
+export interface BodyResult {
   name: string;
   description: string;
   model: string;
@@ -897,11 +904,11 @@ interface BodyResult {
 
 type EvalItem = GenerateSkillResult["evals"][number];
 
-interface EvalsResult {
+export interface EvalsResult {
   evals: EvalItem[];
 }
 
-function parseBodyResponse(raw: string): BodyResult {
+export function parseBodyResponse(raw: string): BodyResult {
   const parts = raw.split("---REASONING---");
   const jsonPart = parts[0].trim();
   const reasoning = parts.length > 1 ? parts[1].trim() : "Skill generated using Skill Studio best practices.";
@@ -920,14 +927,14 @@ function parseBodyResponse(raw: string): BodyResult {
   };
 }
 
-function parseEvalsResponse(raw: string): EvalsResult {
+export function parseEvalsResponse(raw: string): EvalsResult {
   const jsonPart = raw.trim();
   const parsed = cleanAndParseJson(jsonPart);
   const evals = Array.isArray(parsed.evals) ? (parsed.evals as EvalItem[]).slice(0, 10) : [];
   return { evals };
 }
 
-function mergeGenerateResults(
+export function mergeGenerateResults(
   bodySettled: PromiseSettledResult<BodyResult>,
   evalsSettled: PromiseSettledResult<EvalsResult>,
 ): GenerateSkillResult {

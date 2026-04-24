@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useCallback, useEffect, useMemo } from "react";
+import { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useState } from "react";
 import { api, mergeUpdatesIntoSkills } from "./api";
 import type { SkillInfo } from "./types";
 import type { SkillUpdateInfo } from "./api";
@@ -139,9 +139,35 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   // Fetch skills on mount; restore selection from URL hash if present.
   // The update-awareness merge moved to `useSkillUpdates` (0683 T-002) so we
   // no longer fire a duplicate /api/skills/updates here.
+  //
+  // 0698 (fix): track active agent so /api/skills is scoped to the selected
+  // agent's directories. Listens for the `studio:agent-changed` event dispatched
+  // by AgentScopePicker so switching agent refetches without a full reload.
+  const [activeAgent, setActiveAgentInternal] = useState<string | null>(() => {
+    try {
+      const raw = window.localStorage.getItem("vskill.studio.prefs");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { activeAgent?: string };
+      return typeof parsed.activeAgent === "string" ? parsed.activeAgent : null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    function onAgentChanged(e: Event) {
+      if (!(e instanceof CustomEvent)) return;
+      const detail = e.detail as { agentId?: string } | undefined;
+      if (detail?.agentId) setActiveAgentInternal(detail.agentId);
+    }
+    window.addEventListener("studio:agent-changed", onAgentChanged);
+    return () => window.removeEventListener("studio:agent-changed", onAgentChanged);
+  }, []);
+
   const loadSkills = useCallback(() => {
     dispatch({ type: "SET_SKILLS_LOADING", loading: true });
-    api.getSkills()
+    const filter = activeAgent ? { agent: activeAgent } : undefined;
+    api.getSkills(filter)
       .then((skills) => {
         dispatch({ type: "SET_SKILLS", skills });
         // Restore selection from hash: #/skills/<plugin>/<skill>
@@ -156,7 +182,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
       })
       .catch((e) => dispatch({ type: "SET_SKILLS_ERROR", error: e.message }));
-  }, []);
+  }, [activeAgent]);
 
   useEffect(() => { loadSkills(); }, [loadSkills]);
 

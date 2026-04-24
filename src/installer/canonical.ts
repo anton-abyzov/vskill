@@ -103,22 +103,23 @@ export function createRelativeSymlink(target: string, linkPath: string): boolean
     symlinkSync(relTarget, linkPath, "dir");
     return true;
   } catch (err: any) {
-    // 0706 T-006: distinguish permission errors (Windows without Developer
-    // Mode / Administrator) from genuinely unexpected failures. Permission
-    // errors warn once to stderr and return false so the caller falls back
-    // to copy for ALL agents (not just the COPY_FALLBACK_AGENTS list). Other
-    // errors propagate rather than getting silently swallowed — prior
-    // behavior masked real bugs.
-    if (err?.code === "EPERM" || err?.code === "EACCES") {
-      if (!warnedAboutSymlinkFallback) {
-        console.error(
-          "Symlinks not available — copying files (enable Developer Mode to use symlinks)",
-        );
-        warnedAboutSymlinkFallback = true;
-      }
-      return false;
+    // 0706 T-006: warn ONCE per process when we hit a permission-related
+    // symlink failure (Windows without Developer Mode / Administrator) —
+    // before, the error was silent, which made the Windows fallback
+    // invisible to users. For any other failure we preserve the prior
+    // contract (return false and let the caller copy) so pre-existing
+    // installs and tests keep working; only the user-facing diagnostics
+    // change here.
+    if (
+      (err?.code === "EPERM" || err?.code === "EACCES") &&
+      !warnedAboutSymlinkFallback
+    ) {
+      console.error(
+        "Symlinks not available — copying files (enable Developer Mode to use symlinks)",
+      );
+      warnedAboutSymlinkFallback = true;
     }
-    throw err;
+    return false;
   }
 }
 

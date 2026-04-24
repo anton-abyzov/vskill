@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { HashRouter } from "react-router-dom";
 import { App } from "./App";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { runScopeRenameMigration } from "./lib/scope-migration";
@@ -47,10 +48,16 @@ if (typeof window !== "undefined" && window.localStorage) {
   }
 }
 
+// 0703 hotfix: wrap App in HashRouter so `CreateSkillPage` (mounted via a
+// hash-based conditional in App.tsx) can use `useNavigate`/`Link` without
+// blowing up on missing router context. The actual routing tree is a single
+// `/create` branch — StudioLayout owns everything else.
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ThemeProvider>
-      <App />
-    </ThemeProvider>
+    <HashRouter>
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>
+    </HashRouter>
   </StrictMode>,
 );

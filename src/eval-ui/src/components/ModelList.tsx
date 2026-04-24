@@ -184,6 +184,7 @@ export function ModelList({ agent, activeModelId, onSelect, onOpenSettings }: Mo
                   model={model}
                   isActive={model.id === activeModelId}
                   onSelect={() => onSelect(model.id)}
+                  resolvedModel={agent.id === "claude-cli" ? agent.resolvedModel ?? null : null}
                 />
               ))}
             </div>
@@ -198,10 +199,22 @@ interface ModelRowProps {
   model: ModelEntry;
   isActive: boolean;
   onSelect: () => void;
+  resolvedModel?: string | null;
 }
 
-function ModelRow({ model, isActive, onSelect }: ModelRowProps) {
+// 0703 hotfix: the resolved ID from ~/.claude/settings.json describes the
+// Claude Code default when no --model flag is passed. vskill always passes
+// --model <alias>, so showing "routing to claude-opus-4-7" on the Sonnet row
+// teaches the wrong mental model. Gate the sub-line on substring match
+// against the model alias (opus | sonnet | haiku).
+function matchesResolvedAlias(modelId: string, resolvedModel: string | null | undefined): boolean {
+  if (!resolvedModel) return false;
+  return resolvedModel.toLowerCase().includes(modelId.toLowerCase());
+}
+
+function ModelRow({ model, isActive, onSelect, resolvedModel }: ModelRowProps) {
   const metadata = formatMetadata(model);
+  const showResolved = matchesResolvedAlias(model.id, resolvedModel);
   return (
     <button
       type="button"
@@ -212,7 +225,11 @@ function ModelRow({ model, isActive, onSelect }: ModelRowProps) {
       title={model.id}
       style={{
         width: "100%",
-        height: ROW_HEIGHT,
+        // 0703 hotfix: minHeight (not fixed height) so 3-line rows grow
+        // without spilling into neighbours. Safe because useVirtualList only
+        // virtualises at >=80 items and rows with resolvedModel are always
+        // on claude-cli (3 models, non-virtualised).
+        minHeight: ROW_HEIGHT,
         padding: "4px 12px",
         display: "flex",
         flexDirection: "column",
@@ -243,6 +260,18 @@ function ModelRow({ model, isActive, onSelect }: ModelRowProps) {
       >
         {metadata}
       </span>
+      {showResolved && (
+        <span
+          data-testid={`model-row-${model.id}-resolved`}
+          style={{
+            fontSize: 11,
+            fontFamily: "'JetBrains Mono Variable', 'JetBrains Mono', monospace",
+            color: "var(--text-muted, var(--text-tertiary))",
+          }}
+        >
+          routing to {resolvedModel}
+        </span>
+      )}
     </button>
   );
 }

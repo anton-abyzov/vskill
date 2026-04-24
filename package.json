@@ -9,6 +9,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
+    "generate:agents-json": "npx tsx scripts/generate-agents-json.ts",
+    "prebuild": "npm run generate:agents-json",
     "build": "tsc",
     "build:eval-ui": "vite build --config src/eval-ui/vite.config.ts",
     "dev": "tsc --watch",
@@ -47,6 +49,7 @@
   "files": [
     "dist",
     "scripts/preuninstall.cjs",
+    "agents.json",
     "README.md"
   ],
   "devDependencies": {

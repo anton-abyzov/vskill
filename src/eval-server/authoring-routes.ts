@@ -75,12 +75,18 @@ function skillMdScaffold(skillName: string, description: string): string {
 }
 
 function pluginJsonScaffold(pluginName: string, description: string): string {
+  // 0703 follow-up: align with https://code.claude.com/docs/en/plugins-reference
+  // `name` is the only required field. `version` is intentionally omitted so
+  // Claude Code falls back to the git SHA — docs explicitly warn that a fixed
+  // `version: "0.1.0"` is a footgun (users stop receiving updates unless the
+  // author remembers to bump it). `author` is an object per the schema, not a
+  // string; we stub the name so the user only has to fill it in.
   return (
     JSON.stringify(
       {
         name: pluginName,
-        version: "0.1.0",
         description,
+        author: { name: "" },
       },
       null,
       2,

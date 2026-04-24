@@ -170,6 +170,7 @@ function fakeRes(): any {
     writeHead: vi.fn(),
     write: vi.fn(),
     end: vi.fn(),
+    setHeader: vi.fn(),
     headersSent: false,
   };
 }
@@ -289,15 +290,20 @@ describe("T-009: GET /api/skills/:plugin/:skill/versions", () => {
       expect.any(Object),
     );
 
-    // Verify response includes isInstalled enrichment
+    // 0707 T-021: response is now an envelope { versions, count, source }
     const sentData = mocks.sendJson.mock.calls[0][1];
-    expect(sentData).toHaveLength(3);
-    expect(sentData[0].isInstalled).toBeFalsy(); // 2.3.0 not installed
-    expect(sentData[1].isInstalled).toBe(true); // 2.2.0 matches lockfile
-    expect(sentData[2].isInstalled).toBeFalsy(); // 2.1.0 not installed
+    expect(sentData.source).toBe("platform");
+    expect(sentData.count).toBe(3);
+    expect(sentData.versions).toHaveLength(3);
+    expect(sentData.versions[0].isInstalled).toBeFalsy(); // 2.3.0 not installed
+    expect(sentData.versions[1].isInstalled).toBe(true); // 2.2.0 matches lockfile
+    expect(sentData.versions[2].isInstalled).toBeFalsy(); // 2.1.0 not installed
   });
 
-  it("returns 502 when platform API is unreachable", async () => {
+  // 0707 T-021: platform unreachable → 200 empty envelope + X-Skill-VCS header
+  // (was 502). The UI must be able to render local/fixture skills without the
+  // network being healthy.
+  it("returns 200 empty envelope with X-Skill-VCS header when platform is unreachable", async () => {
     mocks.readLockfile.mockReturnValue(LOCK_FIXTURE);
     mocks.parseSource.mockReturnValue({
       type: "marketplace",
@@ -316,15 +322,16 @@ describe("T-009: GET /api/skills/:plugin/:skill/versions", () => {
 
     await handler(req, res, { plugin: "myPlugin", skill: "architect" });
 
+    expect(res.setHeader).toHaveBeenCalledWith("X-Skill-VCS", "unavailable");
     expect(mocks.sendJson).toHaveBeenCalledWith(
       res,
-      { error: "Platform API unavailable" },
-      502,
+      { versions: [], count: 0, source: "none" },
+      200,
       req,
     );
   });
 
-  it("returns 502 when platform API returns non-OK status", async () => {
+  it("returns 200 empty envelope when platform API returns non-OK status", async () => {
     mocks.readLockfile.mockReturnValue(LOCK_FIXTURE);
     mocks.parseSource.mockReturnValue({
       type: "marketplace",
@@ -343,10 +350,11 @@ describe("T-009: GET /api/skills/:plugin/:skill/versions", () => {
 
     await handler(req, res, { plugin: "myPlugin", skill: "architect" });
 
+    expect(res.setHeader).toHaveBeenCalledWith("X-Skill-VCS", "unavailable");
     expect(mocks.sendJson).toHaveBeenCalledWith(
       res,
-      { error: "Platform API unavailable" },
-      502,
+      { versions: [], count: 0, source: "none" },
+      200,
       req,
     );
   });
@@ -378,8 +386,29 @@ describe("T-009: GET /api/skills/:plugin/:skill/versions", () => {
     // Should still proxy using plugin/skill as fallback name
     expect(fetch).toHaveBeenCalled();
     const sentData = mocks.sendJson.mock.calls[0][1];
-    expect(sentData).toHaveLength(1);
-    expect(sentData[0].isInstalled).toBeFalsy();
+    expect(sentData.source).toBe("platform");
+    expect(sentData.count).toBe(1);
+    expect(sentData.versions).toHaveLength(1);
+    expect(sentData.versions[0].isInstalled).toBeFalsy();
+  });
+
+  it("accepts dash-containing plugin slugs (google-workspace/gws)", async () => {
+    mocks.readLockfile.mockReturnValue({ ...LOCK_FIXTURE, skills: {} });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ versions: [] }),
+      }),
+    );
+
+    const req = fakeReq("http://localhost/api/skills/google-workspace/gws/versions");
+    const res = fakeRes();
+
+    await handler(req, res, { plugin: "google-workspace", skill: "gws" });
+
+    const sentData = mocks.sendJson.mock.calls[0][1];
+    expect(sentData).toEqual({ versions: [], count: 0, source: "platform" });
   });
 });
 

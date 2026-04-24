@@ -1,48 +1,87 @@
 import { useState, useEffect, useMemo } from "react";
 import { useStudio } from "../StudioContext";
 import type { SkillInfo } from "../types";
-import { WorkspaceProvider } from "../pages/workspace/WorkspaceContext";
+import type { PanelId } from "../pages/workspace/workspaceTypes";
+import { WorkspaceProvider, useWorkspace } from "../pages/workspace/WorkspaceContext";
 import { VersionHistoryPanel } from "../pages/workspace/VersionHistoryPanel";
-import { SkillWorkspaceInner } from "../pages/workspace/SkillWorkspace";
+import { EditorPanel } from "../pages/workspace/EditorPanel";
+import { TestsPanel } from "../pages/workspace/TestsPanel";
+import { RunPanel } from "../pages/workspace/RunPanel";
+import { ActivationPanel } from "../pages/workspace/ActivationPanel";
+import { HistoryPanel } from "../pages/workspace/HistoryPanel";
+import { LeaderboardPanel } from "../pages/workspace/LeaderboardPanel";
+import { DepsPanel } from "../pages/workspace/DepsPanel";
 import { CreateSkillInline } from "./CreateSkillInline";
 import { EmptyState } from "./EmptyState";
 import { UpdatesPanel } from "../pages/UpdatesPanel";
 import { DetailHeader } from "./DetailHeader";
-import { MetadataTab } from "./MetadataTab";
+import { SkillOverview } from "./SkillOverview";
 import { UpdateAction } from "./UpdateAction";
 
 // ---------------------------------------------------------------------------
-// T-031: Detail-panel host with Overview / Versions tab bar.
-// T-033: Empty-state + load-error hosting.
+// 0707 T-007: Flat 9-tab detail view.
 //
-// RightPanel is the right-hand pane of the redesigned studio layout. When no
-// skill is selected it renders the calm no-selection empty state. When a
-// skill is selected it renders:
+// Before: RightPanel rendered a 2-tab bar (Overview | Versions) and nested
+// `SkillWorkspaceInner` inside the Overview panel, forcing users to scroll
+// past the whole metadata column to reach Editor / Tests / Run / …
 //
-//   [ DetailHeader ]              ← skill name, origin dot, path chip
-//   [ Tab bar: Overview | Versions | Workspace ]
-//   [ Panel body ]                ← MetadataTab / VersionHistoryPanel / SkillWorkspaceInner
+// After: RightPanel exposes all 9 tabs at the same level:
 //
-// The "Workspace" tab is preserved as an escape hatch to the existing 8-tab
-// editor/tests/run flow so no functionality is lost during the phased
-// redesign — only the default tab is now Overview (MetadataTab).
+//   Overview | Editor | Tests | Run | Activation | History | Leaderboard | Deps | Versions
 //
-// Props are optional so unit tests can drive the component in isolation
-// without mounting the full StudioContext / WorkspaceContext tree.
+// Overview mounts the new `SkillOverview` component (responsive metric
+// grid). Every other tab delegates to the existing workspace panel
+// inside a shared WorkspaceProvider, so behavior is identical to what
+// users saw before — only the navigation level changes.
+//
+// URL deep-linking: the `?panel=<id>` query param is now read and written
+// at the RightPanel level so deep-links work regardless of whether the
+// embedded workspace ever mounted.
 // ---------------------------------------------------------------------------
 
-type DetailTab = "overview" | "versions";
+type DetailTab = PanelId | "overview";
+
+const ALL_TABS: DetailTab[] = [
+  "overview",
+  "editor",
+  "tests",
+  "run",
+  "activation",
+  "history",
+  "leaderboard",
+  "deps",
+  "versions",
+];
+
+const TAB_LABELS: Record<DetailTab, string> = {
+  overview: "Overview",
+  editor: "Editor",
+  tests: "Tests",
+  run: "Run",
+  activation: "Activation",
+  history: "History",
+  leaderboard: "Leaderboard",
+  deps: "Deps",
+  versions: "Versions",
+};
+
+function isValidTab(value: unknown): value is DetailTab {
+  return typeof value === "string" && (ALL_TABS as string[]).includes(value);
+}
+
+function readInitialTab(): DetailTab {
+  if (typeof window === "undefined") return "overview";
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = params.get("panel");
+  if (isValidTab(fromQuery)) return fromQuery;
+  return "overview";
+}
 
 interface Props {
   selectedSkillInfo?: SkillInfo | null;
   loadError?: string | null;
   activeDetailTab?: DetailTab;
   onDetailTabChange?: (t: DetailTab) => void;
-  // T-063: Pass-through from App.tsx so the Versions tab and skill-dep
-  // chips in Overview actually render their integrated content instead of
-  // falling back to the "Select a skill from the sidebar…" placeholder
-  // (qa-findings #1 / #12). When present, renderSkillDetail threads them
-  // into the `integrated` bag consumed by both tab panels.
   allSkills?: SkillInfo[];
   onSelectSkill?: (s: { plugin: string; skill: string; origin: "source" | "installed" }) => void;
 }
@@ -122,7 +161,6 @@ export function RightPanel(props: Props = {}) {
     return <EmptyState variant="no-selection" />;
   }
 
-  // Resolve full SkillInfo for the current selection
   const selected = state.selectedSkill;
   const skillInfo = state.skills.find(
     (s) => s.plugin === selected.plugin && s.skill === selected.skill,
@@ -131,7 +169,11 @@ export function RightPanel(props: Props = {}) {
   return (
     <div className="flex flex-col h-full">
       <MobileBackButton />
-      <IntegratedDetailShell skillInfo={skillInfo} allSkills={state.skills} onSelectSkill={(sel) => selectSkill(sel)} />
+      <IntegratedDetailShell
+        skillInfo={skillInfo}
+        allSkills={state.skills}
+        onSelectSkill={(sel) => selectSkill(sel)}
+      />
     </div>
   );
 }
@@ -149,8 +191,6 @@ function renderDetailShell(props: Props) {
   if (props.loadError) {
     return renderErrorState(skill, props.loadError);
   }
-  // T-063: Forward the integrated-mode bag (allSkills + onSelectSkill) so
-  // the Versions tab and skill-dep chips render their live content.
   const integrated =
     props.allSkills && props.onSelectSkill
       ? { allSkills: props.allSkills, onSelectSkill: props.onSelectSkill }
@@ -167,7 +207,21 @@ function IntegratedDetailShell({
   allSkills: SkillInfo[];
   onSelectSkill: (s: { plugin: string; skill: string; origin: "source" | "installed" }) => void;
 }) {
-  const [active, setActive] = useState<DetailTab>("overview");
+  const [active, setActive] = useState<DetailTab>(readInitialTab());
+
+  // Sync active tab to the ?panel= query param so deep links round-trip.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (active === "overview") {
+      params.delete("panel");
+    } else {
+      params.set("panel", active);
+    }
+    const qs = params.toString();
+    const url = `${window.location.pathname}${qs ? "?" + qs : ""}${window.location.hash}`;
+    window.history.replaceState(null, "", url);
+  }, [active]);
 
   const content = useMemo(() => {
     if (!skillInfo) return <EmptyState variant="no-selection" />;
@@ -177,19 +231,12 @@ function IntegratedDetailShell({
   return <div className="flex flex-col h-full" style={{ background: "var(--bg-canvas)" }}>{content}</div>;
 }
 
-// ---------------------------------------------------------------------------
-// Building blocks
-// ---------------------------------------------------------------------------
-const TABS: Array<{ id: DetailTab; label: string }> = [
-  { id: "overview", label: "Overview" },
-  { id: "versions", label: "Versions" },
-];
-
 function renderTabBar(active: DetailTab, onChange?: (t: DetailTab) => void) {
   return (
     <div
       role="tablist"
       aria-label="Detail sections"
+      data-testid="detail-tab-bar"
       style={{
         display: "flex",
         alignItems: "stretch",
@@ -197,34 +244,37 @@ function renderTabBar(active: DetailTab, onChange?: (t: DetailTab) => void) {
         borderBottom: "1px solid var(--border-default)",
         padding: "0 16px",
         background: "var(--bg-canvas)",
+        overflowX: "auto",
       }}
     >
-      {TABS.map((t) => {
-        const isActive = t.id === active;
+      {ALL_TABS.map((t) => {
+        const isActive = t === active;
         return (
           <button
-            key={t.id}
+            key={t}
             type="button"
             role="tab"
             aria-selected={isActive}
             tabIndex={isActive ? 0 : -1}
-            id={`detail-tab-${t.id}`}
-            aria-controls={`detail-panel-${t.id}`}
-            onClick={() => onChange?.(t.id)}
+            id={`detail-tab-${t}`}
+            aria-controls={`detail-panel-${t}`}
+            data-testid={`detail-tab-${t}`}
+            onClick={() => onChange?.(t)}
             style={{
               background: "transparent",
               border: "none",
               borderBottom: isActive ? "2px solid var(--text-primary)" : "2px solid transparent",
-              padding: "10px 4px",
+              padding: "10px 8px",
               marginBottom: -1,
               fontFamily: "var(--font-sans)",
               fontSize: 13,
               fontWeight: isActive ? 500 : 400,
               color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
               cursor: "pointer",
+              whiteSpace: "nowrap",
             }}
           >
-            {t.label}
+            {TAB_LABELS[t]}
           </button>
         );
       })}
@@ -317,42 +367,43 @@ function renderErrorState(skill: SkillInfo, message: string) {
         >
           {message}
         </p>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            type="button"
-            style={{
-              fontFamily: "var(--font-sans)",
-              fontSize: 12,
-              padding: "4px 10px",
-              border: "1px solid var(--border-default)",
-              borderRadius: 4,
-              background: "transparent",
-              color: "var(--text-primary)",
-              cursor: "pointer",
-            }}
-          >
-            Open in editor
-          </button>
-          <button
-            type="button"
-            onClick={() => navigator.clipboard?.writeText(skill.dir)}
-            style={{
-              fontFamily: "var(--font-sans)",
-              fontSize: 12,
-              padding: "4px 10px",
-              border: "1px solid var(--border-default)",
-              borderRadius: 4,
-              background: "transparent",
-              color: "var(--text-primary)",
-              cursor: "pointer",
-            }}
-          >
-            Copy path
-          </button>
-        </div>
       </section>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Panel renderers — Overview mounts SkillOverview directly, every other
+// tab delegates to the existing workspace panels under a shared
+// WorkspaceProvider so their behavior stays intact.
+// ---------------------------------------------------------------------------
+function WorkspacePanel({ active }: { active: DetailTab }) {
+  if (active === "editor") return <EditorPanel />;
+  if (active === "tests") return <TestsPanel />;
+  if (active === "run") return <RunPanel />;
+  if (active === "activation") return <ActivationPanel />;
+  if (active === "history") return <HistoryPanel />;
+  if (active === "leaderboard") return <LeaderboardPanel />;
+  if (active === "deps") return <DepsPanel />;
+  if (active === "versions") return <VersionHistoryPanel />;
+  return null;
+}
+
+/**
+ * Bridges the RightPanel-level active tab into the WorkspaceContext that
+ * the inner panels read via `useWorkspace().state.activePanel`. Only
+ * forwards panel changes when the tab is a panel-mounted one — Overview
+ * intentionally leaves the workspace reducer alone.
+ */
+function WorkspaceTabSync({ active }: { active: DetailTab }) {
+  const { state, dispatch } = useWorkspace();
+  useEffect(() => {
+    if (active === "overview") return;
+    if (state.activePanel !== active) {
+      dispatch({ type: "SET_PANEL", panel: active });
+    }
+  }, [active, state.activePanel, dispatch]);
+  return null;
 }
 
 function renderSkillDetail(
@@ -361,6 +412,37 @@ function renderSkillDetail(
   onChange?: (t: DetailTab) => void,
   integrated?: { allSkills: SkillInfo[]; onSelectSkill: (s: { plugin: string; skill: string; origin: "source" | "installed" }) => void },
 ) {
+  const onNavigate = (panel: PanelId) => {
+    onChange?.(panel);
+  };
+
+  const overviewBody = (
+    <SkillOverview
+      skill={skill}
+      onNavigate={onNavigate}
+      repoUrl={skill.homepage ?? null}
+    />
+  );
+
+  // For all non-overview tabs we wrap in a single WorkspaceProvider so the
+  // inner panels keep their existing state machine. The provider is keyed
+  // on the skill identity so switching skills rebuilds state cleanly.
+  const workspaceBody = integrated != null ? (
+    <WorkspaceProvider
+      key={`${skill.plugin}/${skill.skill}`}
+      plugin={skill.plugin}
+      skill={skill.skill}
+      origin={skill.origin}
+    >
+      <WorkspaceTabSync active={active} />
+      <WorkspacePanel active={active} />
+    </WorkspaceProvider>
+  ) : (
+    <div style={{ padding: 16, fontFamily: "var(--font-sans)", color: "var(--text-secondary)", fontSize: 13 }}>
+      Select a skill from the sidebar to load its {active} view.
+    </div>
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-canvas)" }}>
       <div style={{ padding: 16, paddingBottom: 12 }}>
@@ -375,50 +457,10 @@ function renderSkillDetail(
         role="tabpanel"
         id={`detail-panel-${active}`}
         aria-labelledby={`detail-tab-${active}`}
+        data-testid={`detail-panel-${active}`}
         style={{ flex: 1, minHeight: 0, overflow: "auto" }}
       >
-        {active === "overview" && (
-          <>
-            {MetadataTab({
-              skill,
-              allSkills: integrated?.allSkills ?? [],
-              onSelectSkill: integrated?.onSelectSkill,
-            })}
-            {/* T-0684 (B5 / B6): mount SkillWorkspaceInner so the workspace
-                TabBar (Editor / Tests / Run / Leaderboard / …) is
-                accessible from the default Overview view. The 0674
-                redesign removed the `/skills/:plugin/:skill` workspace
-                route without replacing the navigation surface, which
-                left leaderboard.spec.ts and tests-panel.spec.ts with no
-                way to reach the panels they exercise. hideHeader keeps
-                `getByTestId("detail-header")` matching exactly one
-                element so detail-panel.spec.ts stays green. */}
-            {integrated != null && (
-              <WorkspaceProvider
-                key={`${skill.plugin}/${skill.skill}-workspace`}
-                plugin={skill.plugin}
-                skill={skill.skill}
-                origin={skill.origin}
-              >
-                <div style={{ minHeight: 520, display: "flex", flexDirection: "column" }}>
-                  <SkillWorkspaceInner hideHeader />
-                </div>
-              </WorkspaceProvider>
-            )}
-          </>
-        )}
-        {active === "versions" && integrated != null && (
-          <WorkspaceProvider key={`${skill.plugin}/${skill.skill}-versions`} plugin={skill.plugin} skill={skill.skill} origin={skill.origin}>
-            <div style={{ padding: 16 }}>
-              <VersionHistoryPanel />
-            </div>
-          </WorkspaceProvider>
-        )}
-        {active === "versions" && integrated == null && (
-          <div style={{ padding: 16, fontFamily: "var(--font-sans)", color: "var(--text-secondary)", fontSize: 13 }}>
-            Select a skill from the sidebar to load its version history.
-          </div>
-        )}
+        {active === "overview" ? overviewBody : workspaceBody}
       </div>
     </div>
   );

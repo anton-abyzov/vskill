@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useWorkspace } from "./WorkspaceContext";
+import { useStudio } from "../../StudioContext";
 import { api } from "../../api";
 import { TrendChart } from "../../components/TrendChart";
 import { StatsPanel } from "../../components/StatsPanel";
 import { HistoryPerEval } from "../../components/HistoryPerEval";
+import { VersionBadge } from "../../components/VersionBadge";
 import { computeDiff } from "../../utils/diff";
 import type { DiffLine } from "../../utils/diff";
 import type { HistorySummary, HistoryCompareResult, BenchmarkResult } from "../../types";
@@ -16,6 +18,13 @@ type Tab = "timeline" | "per-eval" | "statistics";
 export function HistoryPanel() {
   const { state, dispatch } = useWorkspace();
   const { plugin, skill } = state;
+  // 0707 T-009: surface the skill's frontmatter version on every run row so
+  // the activation/benchmark log always shows which version was exercised.
+  const { state: studioState } = useStudio();
+  const skillInfoForVersion = studioState.skills.find(
+    (s) => s.plugin === plugin && s.skill === skill,
+  );
+  const currentSkillVersion = skillInfoForVersion?.version ?? null;
   const [tab, setTab] = useState<Tab>("timeline");
   const [filterModel, setFilterModel] = useState("");
   const [filterType, setFilterType] = useState<"" | "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct" | "ai-generate" | "eval-generate">("");
@@ -230,6 +239,8 @@ export function HistoryPanel() {
                         </span>
                       </div>
                       <div className="flex items-center gap-3">
+                        {/* 0707 T-009: VersionBadge for the run's skill version. */}
+                        <VersionBadge version={currentSkillVersion} size="sm" data-testid="history-row-version" />
                         <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>{h.model}</span>
                         {h.totalCost != null && h.totalCost > 0 && (
                           <span className="text-[11px] font-mono" style={{ color: "var(--text-tertiary)" }}>

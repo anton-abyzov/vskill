@@ -30,6 +30,7 @@ import { spawn } from "node:child_process";
 import { resolveCliBinary, enhancedPath } from "../utils/resolve-binary.js";
 import { calculateCost, getBillingMode } from "./pricing.js";
 import { resolveOllamaBaseUrl } from "./env.js";
+import { resolveAnthropicModel } from "./model-resolver.js";
 
 export type BillingMode = "per-token" | "subscription" | "free";
 
@@ -142,21 +143,20 @@ const CLAUDE_CLI_NORMALIZE: Record<string, string> = {
   "claude-haiku-4-5-20251001": "haiku",
 };
 
-const ANTHROPIC_NORMALIZE: Record<string, string> = {
-  "sonnet": "claude-sonnet-4-6",
-  "opus": "claude-opus-4-7",
-  "haiku": "claude-haiku-4-5-20251001",
-  "claude-sonnet": "claude-sonnet-4-6",
-  "claude-opus": "claude-opus-4-7",
-  "claude-haiku": "claude-haiku-4-5-20251001",
-};
-
+// 0711: ANTHROPIC_NORMALIZE used to be a hand-maintained map keyed to specific
+// Sonnet/Opus/Haiku versions, which silently rotted whenever Anthropic shipped
+// a new model. The dated catalog at `anthropic-catalog.ts` is now the source
+// of truth — `resolveAnthropicModel(...)` does the alias / id / env-override
+// dance and surfaces provenance (snapshotDate, status) for callers that want
+// to record what actually ran. The single-line wrapper below preserves the
+// old `(input) → string` signature so we can swap it in without touching
+// every call site at once.
 function normalizeClaudeCliModel(model: string): string {
   return CLAUDE_CLI_NORMALIZE[model] || model;
 }
 
 function normalizeAnthropicModel(model: string): string {
-  return ANTHROPIC_NORMALIZE[model] || model;
+  return resolveAnthropicModel(model).resolvedId || model;
 }
 
 // ---------------------------------------------------------------------------

@@ -85,7 +85,11 @@ export function AgentScopePickerPopover({
   focusedAgentId,
   onFocusAgent,
   onSwitch,
-  onOpenSetup,
+  // onOpenSetup is retained on the prop type for API stability with App.tsx
+  // even though the "Not detected" row no longer renders a Set-Up button.
+  // The setup drawer is still reachable via the `studio:open-setup-drawer`
+  // event listener in App.tsx.
+  onOpenSetup: _onOpenSetup,
   onClose,
 }: AgentScopePickerPopoverProps) {
   const shellRef = useRef<HTMLDivElement>(null);
@@ -184,6 +188,7 @@ export function AgentScopePickerPopover({
             <>
               <div
                 data-testid="agent-scope-not-detected-subheading"
+                title="These agents were not found on this machine. Hover a row to see which folder detection looked for."
                 style={{
                   padding: "10px 14px 4px",
                   fontSize: 10,
@@ -196,11 +201,7 @@ export function AgentScopePickerPopover({
                 {strings.scopePicker.notDetectedSubheading}
               </div>
               {rows.notDetected.map((row) => (
-                <NotDetectedRow
-                  key={row.key}
-                  agent={row.agent}
-                  onSetUp={() => onOpenSetup(row.agent.id)}
-                />
+                <NotDetectedRow key={row.key} agent={row.agent} />
               ))}
             </>
           )}
@@ -364,15 +365,21 @@ function SharedFolderRow({
   );
 }
 
-function NotDetectedRow({
-  agent,
-  onSetUp,
-}: {
-  agent: PickerAgentEntry;
-  onSetUp: () => void;
-}) {
+function NotDetectedRow({ agent }: { agent: PickerAgentEntry }) {
+  // Passive row — no install affordance. The row's `title` tooltip explains
+  // which folder detection looked for so users can see why the agent is
+  // "Not detected" (e.g. `~/.bolt/skills` for bolt.new) without opening a
+  // setup drawer. Remote-only agents get a distinct explanation because no
+  // local folder exists to look for.
+  const rowTitle = agent.isRemoteOnly
+    ? `${agent.displayName} is a web-only product — no local CLI or folder to detect.`
+    : agent.resolvedGlobalDir
+      ? `Looked for ${agent.resolvedGlobalDir} — not found.`
+      : `${agent.displayName} was not found on this machine.`;
   return (
     <div
+      data-testid={`agent-scope-not-detected-row-${agent.id}`}
+      title={rowTitle}
       style={{
         display: "flex",
         alignItems: "center",
@@ -394,13 +401,14 @@ function NotDetectedRow({
         }}
       />
       <span style={{ flex: 1 }}>{agent.displayName}</span>
-      {agent.isRemoteOnly ? (
+      {agent.isRemoteOnly && (
         // 0694 (AC-US4-04): web-only agents have no local install path —
-        // render a "Remote" badge in lieu of the Set up button so users see
+        // render a "Remote" badge with an explanatory tooltip so users see
         // why no install affordance is offered.
         <span
           data-testid={`agent-scope-remote-badge-${agent.id}`}
           aria-label="Remote-only agent"
+          title="Web-only agent — no local CLI to install skills into. Use the agent's web UI to load skills."
           style={{
             background: "color-mix(in srgb, var(--text-tertiary) 18%, transparent)",
             border: "1px solid var(--border-default, var(--border-subtle))",
@@ -414,23 +422,6 @@ function NotDetectedRow({
         >
           Remote
         </span>
-      ) : (
-        <button
-          type="button"
-          data-testid={`agent-scope-set-up-${agent.id}`}
-          onClick={onSetUp}
-          style={{
-            background: "transparent",
-            border: "1px solid var(--border-default, var(--border-subtle))",
-            borderRadius: 4,
-            padding: "2px 8px",
-            color: "var(--text-primary)",
-            fontSize: 11,
-            cursor: "pointer",
-          }}
-        >
-          {strings.scopePicker.setUpCta(agent.displayName)}
-        </button>
       )}
     </div>
   );

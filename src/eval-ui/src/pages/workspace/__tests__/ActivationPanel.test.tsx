@@ -33,6 +33,29 @@ vi.mock("../WorkspaceContext", () => ({
   }),
 }));
 
+// 0707 T-009: ActivationPanel now consults StudioContext to resolve the
+// skill's frontmatter version for the activation-history row VersionBadge.
+vi.mock("../../../StudioContext", () => ({
+  useStudio: () => ({
+    state: {
+      skills: [],
+      selectedSkill: null,
+      mode: "browse",
+      searchQuery: "",
+      skillsLoading: false,
+      skillsError: null,
+      isMobile: false,
+      mobileView: "list",
+    },
+    selectSkill: () => {},
+    clearSelection: () => {},
+    setMode: () => {},
+    setSearch: () => {},
+    refreshSkills: () => {},
+    setMobileView: () => {},
+  }),
+}));
+
 // Mock renderMarkdown (sanitization is handled by the real implementation)
 vi.mock("../../../../utils/renderMarkdown", () => ({
   renderMarkdown: (s: string) => s,

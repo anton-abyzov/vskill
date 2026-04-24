@@ -37,6 +37,10 @@ export interface PickerAgentEntry {
    *  install affordance (Set up button suppressed). Web-only agents like
    *  Devin / bolt.new / v0 / Replit. */
   isRemoteOnly?: boolean;
+  /** Absolute path of the global skills dir that detection looked for.
+   *  Surfaced as a hover tooltip on "Not detected" rows so users understand
+   *  which folder was checked (e.g. `/Users/you/.bolt/skills`). */
+  resolvedGlobalDir?: string;
 }
 
 export interface AgentScopePickerProps {
@@ -78,6 +82,9 @@ export function agentsResponseToPickerEntries(
       // shape so the popover can suppress install affordances. Field is now
       // part of the canonical ServerAgentScopeEntry type.
       isRemoteOnly: a.isRemoteOnly,
+      // Surface the expected global skills dir so Not-detected rows can
+      // explain which folder detection looked for on hover.
+      resolvedGlobalDir: a.resolvedGlobalDir,
     };
   });
 }

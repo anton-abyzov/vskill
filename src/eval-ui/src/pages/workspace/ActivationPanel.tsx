@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { useWorkspace } from "./WorkspaceContext";
+import { useStudio } from "../../StudioContext";
 import { renderMarkdown } from "../../utils/renderMarkdown";
+import { VersionBadge } from "../../components/VersionBadge";
 import type { ActivationResult } from "../../types";
 import type { ActivationHistoryRun } from "./workspaceTypes";
 
@@ -19,6 +21,11 @@ export function ActivationPanel() {
     generatingPrompts, generatingPromptsError,
     activationHistory,
   } = state;
+  // 0707 T-009: read the skill's frontmatter version so every activation-log
+  // row can show a VersionBadge.
+  const { state: studioState } = useStudio();
+  const currentSkillVersion =
+    studioState.skills.find((s) => s.plugin === plugin && s.skill === skill)?.version ?? null;
 
   const [promptsText, setPromptsText] = useState(activationPrompts);
   const [skillDescription, setSkillDescription] = useState<string | null>(null);
@@ -354,6 +361,7 @@ export function ActivationPanel() {
         history={activationHistory}
         expanded={historyExpanded}
         onToggle={() => setHistoryExpanded(!historyExpanded)}
+        skillVersion={currentSkillVersion}
       />
     </div>
   );
@@ -363,10 +371,11 @@ export function ActivationPanel() {
 // Activation History Section
 // ---------------------------------------------------------------------------
 
-function ActivationHistorySection({ history, expanded, onToggle }: {
+function ActivationHistorySection({ history, expanded, onToggle, skillVersion }: {
   history: ActivationHistoryRun[] | null;
   expanded: boolean;
   onToggle: () => void;
+  skillVersion?: string | null;
 }) {
   if (history === null) return null; // not loaded yet
 
@@ -402,7 +411,7 @@ function ActivationHistorySection({ history, expanded, onToggle }: {
           ) : (
             <div className="space-y-2">
               {history.map((run) => (
-                <HistoryRow key={run.id} run={run} />
+                <HistoryRow key={run.id} run={run} skillVersion={skillVersion} />
               ))}
             </div>
           )}
@@ -412,7 +421,7 @@ function ActivationHistorySection({ history, expanded, onToggle }: {
   );
 }
 
-function HistoryRow({ run }: { run: ActivationHistoryRun }) {
+function HistoryRow({ run, skillVersion }: { run: ActivationHistoryRun; skillVersion?: string | null }) {
   const reliability = Math.round(run.summary.reliability * 100);
   const reliabilityColor = reliability >= 80 ? "var(--green)" : reliability >= 60 ? "var(--yellow)" : "var(--red)";
   const verdict = reliability >= 80 ? "Good" : reliability >= 60 ? "Needs Work" : "Poor";
@@ -428,6 +437,8 @@ function HistoryRow({ run }: { run: ActivationHistoryRun }) {
           <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
             {formatRelativeTime(run.timestamp)}
           </span>
+          {/* 0707 T-009: VersionBadge on every activation-log row. */}
+          <VersionBadge version={skillVersion ?? null} size="sm" data-testid="activation-row-version" />
           <span
             className="pill text-[9px] px-1.5"
             style={{ background: "var(--surface-2)", color: "var(--text-tertiary)" }}

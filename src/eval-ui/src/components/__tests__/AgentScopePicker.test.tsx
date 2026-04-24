@@ -63,6 +63,7 @@ const fixtureAgents = [
     globalCount: 0,
     lastSync: null,
     health: "missing" as const,
+    resolvedGlobalDir: "/Users/test/.config/zed/skills",
   },
 ];
 
@@ -218,7 +219,7 @@ describe("0686 T-002: AgentScopePicker trigger + popover", () => {
     container.remove();
   });
 
-  it("Not-detected agents are rendered under a dim 'Not detected' subheading with Set up CTA", async () => {
+  it("Not-detected agents are rendered under a dim 'Not detected' subheading WITHOUT a Set up button, and the row tooltip names the missing folder", async () => {
     const React = await import("react");
     const { createRoot } = await import("react-dom/client");
     const { act } = await import("react");
@@ -245,12 +246,19 @@ describe("0686 T-002: AgentScopePicker trigger + popover", () => {
       "[data-testid='agent-scope-not-detected-subheading']",
     );
     expect(subheading?.textContent).toMatch(/not detected/i);
+    // Set up button is no longer rendered — rows are passive labels.
     const setUpBtn = document.querySelector(
       "[data-testid='agent-scope-set-up-zed']",
-    ) as HTMLButtonElement;
-    expect(setUpBtn).toBeTruthy();
-    act(() => setUpBtn.click());
-    expect(onOpenSetup).toHaveBeenCalledWith("zed");
+    );
+    expect(setUpBtn).toBeFalsy();
+    // The row carries a title tooltip describing which folder was checked.
+    const row = document.querySelector(
+      "[data-testid='agent-scope-not-detected-row-zed']",
+    ) as HTMLElement;
+    expect(row).toBeTruthy();
+    expect(row.getAttribute("title")).toContain("/Users/test/.config/zed/skills");
+    expect(row.getAttribute("title")).toMatch(/not found/i);
+    expect(onOpenSetup).not.toHaveBeenCalled();
     act(() => root.unmount());
     container.remove();
   });
@@ -335,9 +343,13 @@ describe("0686 T-002: AgentScopePicker trigger + popover", () => {
     act(() => trigger.click());
     const badge = document.querySelector(
       "[data-testid='agent-scope-remote-badge-devin']",
-    );
+    ) as HTMLElement;
     expect(badge).toBeTruthy();
     expect(badge?.textContent).toMatch(/remote/i);
+    // The badge must carry an explanatory tooltip so users understand why
+    // no install affordance is offered (AC: hover explanation for REMOTE).
+    expect(badge.getAttribute("title")).toMatch(/web-only/i);
+    expect(badge.getAttribute("title")).toMatch(/no local/i);
     // Install affordance (Set up button) MUST be absent for the remote agent.
     const setUpBtn = document.querySelector(
       "[data-testid='agent-scope-set-up-devin']",

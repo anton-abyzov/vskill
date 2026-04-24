@@ -77,23 +77,31 @@ test.describe("0686 E2E-02 — AgentScopePicker (UI-only smoke)", () => {
 });
 
 test.describe("0686 E2E-03 — Tri-scope sidebar", () => {
-  test("renders OWN + INSTALLED headers always; GLOBAL appears after tri-scope wire-up", async ({
+  // 0709 T-006: the original 2-section layout (OWN + INSTALLED buttons via
+  // `data-testid='sidebar-section-header'`) was replaced by the 0698 T-008
+  // five-bucket structure: two top-level `role="heading"` GroupHeaders
+  // (AVAILABLE / AUTHORING) wrapping NamedScopeSection sub-headers (Project
+  // / Personal / Plugins under AVAILABLE, Skills / Plugins under AUTHORING).
+  // The test now asserts against the new heading structure.
+  test("renders AVAILABLE + AUTHORING group headers and nested scope sub-sections", async ({
     page,
   }) => {
     await gotoStudio(page);
-    const own = page.locator("button[data-testid='sidebar-section-header']", { hasText: "Own" });
-    const installed = page.locator("button[data-testid='sidebar-section-header']", {
-      hasText: "Installed",
+    // 0698 T-008 renders AVAILABLE + AUTHORING as expandable buttons inside
+    // the sidebar. aria-expanded marks them as controls rather than static
+    // headings, so we locate by button role + name.
+    const sidebar = page.locator("[data-testid='sidebar']");
+    const available = sidebar.getByRole("button", { name: /AVAILABLE/ });
+    const authoring = sidebar.getByRole("button", { name: /AUTHORING/ });
+    await expect(available).toBeVisible();
+    await expect(authoring).toBeVisible();
+    // At least one post-0698 sub-scope label (Project / Personal / Skills)
+    // must be present inside the groups — proves the five-bucket layout
+    // actually rendered, not just the top-level wrappers.
+    const post0698Sublabels = sidebar.getByRole("button", {
+      name: /^(Project|Personal|Skills)\b/,
     });
-    await expect(own).toBeVisible();
-    await expect(installed).toBeVisible();
-    // GLOBAL appears once the Sidebar is migrated to ScopeSection × 3.
-    // Soft assertion — absent in the current fallback path.
-    const global = page.locator("button[data-testid='scope-section-header']", {
-      hasText: "Global",
-    });
-    const globalCount = await global.count();
-    expect(globalCount).toBeGreaterThanOrEqual(0);
+    expect(await post0698Sublabels.count()).toBeGreaterThan(0);
   });
 });
 
@@ -143,6 +151,116 @@ test.describe("0686 E2E-05 — Symlink transparency", () => {
     // NOT be present. This spec guards against false positives on legacy
     // servers that don't populate the new SkillInfo fields.
     await expect(page.locator("[data-testid='symlink-chip']")).toHaveCount(0);
+  });
+});
+
+test.describe("NOT-DETECTED UX v2 — no Set-Up button, tooltips present", () => {
+  // Inject a deterministic /api/agents payload that guarantees both a
+  // regular Not-Detected row (with resolvedGlobalDir) and a remote-only
+  // row (bolt.new). The fixture server in CI normally returns all-detected
+  // agents on the dev host, so we mock the response to isolate the UX.
+  const mockedPayload = {
+    agents: [
+      {
+        id: "claude-cli",
+        displayName: "Claude Code",
+        featureSupport: { slashCommands: true, hooks: true, mcp: true, customSystemPrompt: true },
+        isUniversal: true,
+        parentCompany: "Anthropic",
+        detected: true,
+        isDefault: true,
+        localSkillCount: 0,
+        globalSkillCount: 3,
+        resolvedLocalDir: "/tmp/e2e/.claude/skills",
+        resolvedGlobalDir: "/Users/e2e/.claude/skills",
+        lastSync: null,
+        health: "ok",
+      },
+      {
+        id: "zed",
+        displayName: "Zed",
+        featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: false },
+        isUniversal: false,
+        parentCompany: "Zed Industries",
+        detected: false,
+        isDefault: false,
+        localSkillCount: 0,
+        globalSkillCount: 0,
+        resolvedLocalDir: "/tmp/e2e/.zed/skills",
+        resolvedGlobalDir: "/Users/e2e/.config/zed/skills",
+        lastSync: null,
+        health: "missing",
+      },
+      {
+        id: "bolt-new",
+        displayName: "bolt.new",
+        featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: false },
+        isUniversal: false,
+        parentCompany: "StackBlitz",
+        detected: false,
+        isDefault: false,
+        localSkillCount: 0,
+        globalSkillCount: 0,
+        resolvedLocalDir: "/tmp/e2e/.bolt/skills",
+        resolvedGlobalDir: "/Users/e2e/.bolt/skills",
+        lastSync: null,
+        health: "missing",
+        isRemoteOnly: true,
+      },
+    ],
+    suggested: "claude-cli",
+    sharedFolders: [],
+  };
+
+  async function gotoStudioWithMockedAgents(page: Page) {
+    await page.route("**/api/agents**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(mockedPayload),
+      });
+    });
+    await gotoStudio(page);
+  }
+
+  test("Not-detected rows have no Set-Up button and carry a 'Looked for …' title tooltip", async ({
+    page,
+  }) => {
+    await gotoStudioWithMockedAgents(page);
+    const trigger = page.locator("[data-testid='agent-scope-picker-trigger']");
+    await expect(trigger).toBeVisible({ timeout: 10_000 });
+    await trigger.click();
+    await expect(page.locator("[data-testid='agent-scope-picker-popover']")).toBeVisible();
+    // No Set-Up button anywhere in the popover — the whole affordance was removed.
+    const anySetUp = page.locator("[data-testid^='agent-scope-set-up-']");
+    await expect(anySetUp).toHaveCount(0);
+    // The Zed row (regular agent) must exist and carry a "Looked for …" tooltip.
+    const zedRow = page.locator("[data-testid='agent-scope-not-detected-row-zed']");
+    await expect(zedRow).toBeVisible();
+    const zedTitle = await zedRow.getAttribute("title");
+    expect(zedTitle).toContain("/Users/e2e/.config/zed/skills");
+    expect(zedTitle).toMatch(/not found/i);
+    // The bolt.new row (remote-only) must carry the web-only tooltip instead.
+    const boltRow = page.locator("[data-testid='agent-scope-not-detected-row-bolt-new']");
+    await expect(boltRow).toBeVisible();
+    const boltTitle = await boltRow.getAttribute("title");
+    expect(boltTitle).toMatch(/web-only/i);
+  });
+
+  test("Remote badge exposes an explanatory tooltip mentioning 'web-only' and 'no local'", async ({
+    page,
+  }) => {
+    await gotoStudioWithMockedAgents(page);
+    const trigger = page.locator("[data-testid='agent-scope-picker-trigger']");
+    await expect(trigger).toBeVisible({ timeout: 10_000 });
+    await trigger.click();
+    await expect(page.locator("[data-testid='agent-scope-picker-popover']")).toBeVisible();
+    const remoteBadge = page.locator("[data-testid='agent-scope-remote-badge-bolt-new']");
+    await expect(remoteBadge).toBeVisible();
+    const title = await remoteBadge.getAttribute("title");
+    expect(title).toBeTruthy();
+    expect(title!).toMatch(/web-only/i);
+    expect(title!).toMatch(/no local/i);
   });
 });
 

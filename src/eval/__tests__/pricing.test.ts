@@ -24,10 +24,12 @@ describe("pricing engine", () => {
     });
 
     it("calculates cost for anthropic claude-haiku", () => {
-      // Haiku: $0.80/M input, $4/M output
+      // 0711: Haiku 4.5 actual public pricing — $1.00/M input, $5/M output
+      // (https://claude.com/pricing — verified 2026-04-24). Old test value
+      // ($0.80/$4) predated the 4.5 release and was never refreshed.
       const cost = calculateCost("anthropic", "claude-haiku-4-5-20251001", 2000, 1000);
-      // (2000/1M * 0.80) + (1000/1M * 4) = 0.0016 + 0.004 = 0.0056
-      expect(cost).toBeCloseTo(0.0056, 6);
+      // (2000/1M * 1) + (1000/1M * 5) = 0.002 + 0.005 = 0.007
+      expect(cost).toBeCloseTo(0.007, 6);
     });
 
     it("returns null when inputTokens is null", () => {
@@ -77,7 +79,8 @@ describe("pricing engine", () => {
     it("resolves 'haiku' alias to claude-haiku for anthropic", () => {
       const pricing = getProviderPricing("anthropic", "haiku");
       expect(pricing).not.toBeNull();
-      expect(pricing!.inputPerMillion).toBe(0.80);
+      // 0711: refreshed from $0.80 to $1.00 to match Haiku 4.5 published price.
+      expect(pricing!.inputPerMillion).toBe(1);
     });
 
     it("resolves claude-cli aliases via anthropic pricing", () => {

@@ -99,7 +99,19 @@ function Shell() {
   // the Overview / Versions switch in integrated mode. Without this lift,
   // `renderDetailShell` received no `onDetailTabChange` handler and clicking
   // "Versions" was a silent no-op (qa-findings #1).
-  const [activeDetailTab, setActiveDetailTab] = useState<"overview" | "versions">("overview");
+  // 0707 T-007: RightPanel now exposes the full flat 9-tab set, so the
+  // lifted state type widens accordingly.
+  const [activeDetailTab, setActiveDetailTab] = useState<
+    | "overview"
+    | "editor"
+    | "tests"
+    | "run"
+    | "activation"
+    | "history"
+    | "leaderboard"
+    | "deps"
+    | "versions"
+  >("overview");
   // T-064: Shared context-menu anchor for sidebar rows. The actual ContextMenu
   // component is rendered once at the App root; row right-clicks update this
   // state with cursor coords + the target skill.

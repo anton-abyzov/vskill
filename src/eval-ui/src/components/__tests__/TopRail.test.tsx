@@ -23,6 +23,7 @@ vi.mock("../StudioLogo", () => ({
 }));
 
 import { TopRail } from "../TopRail";
+import { strings } from "../../strings";
 
 type ReactEl = { type: unknown; props: Record<string, unknown> };
 
@@ -71,26 +72,29 @@ describe("TopRail", () => {
     expect(text).toContain("vskill");
   });
 
-  it("renders breadcrumb OWN › plugin › skill when a source skill is selected", () => {
+  // 0709 / 0700: keep the retired `OWN` name-drop in the describe prose so
+  // future spelunkers grepping for the old vocabulary land here.
+  it("renders breadcrumb Skills › plugin › skill when a source skill is selected", () => {
     const tree = expand(TopRail({
       projectName: "vskill",
       selected: { plugin: "obsidian-brain", skill: "lint", origin: "source" },
       onOpenPalette: vi.fn(),
     }));
     const text = collectText(tree);
-    expect(text).toContain("Own");
+    expect(text).toContain(strings.scopeLabels.authoringSkills);
     expect(text).toContain("obsidian-brain");
     expect(text).toContain("lint");
   });
 
-  it("renders breadcrumb INSTALLED when an installed skill is selected", () => {
+  // 0709 / 0700: prior vocabulary `INSTALLED`, retained here for grep.
+  it("renders breadcrumb Project when an installed skill is selected", () => {
     const tree = expand(TopRail({
       projectName: "vskill",
       selected: { plugin: "obsidian-brain", skill: "lint", origin: "installed" },
       onOpenPalette: vi.fn(),
     }));
     const text = collectText(tree);
-    expect(text).toContain("Installed");
+    expect(text).toContain(strings.scopeLabels.sourceProject);
   });
 
   it("palette button has aria-label and fires onOpenPalette on click", () => {

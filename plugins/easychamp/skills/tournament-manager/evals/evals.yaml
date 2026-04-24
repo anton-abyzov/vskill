@@ -1,0 +1,103 @@
+# EasyChamp MCP showcase — smoke evals
+#
+# One case per tool (5 total), all runnable in EASYCHAMP_DEMO=1 mode so the
+# showcase works without an EasyChamp API key. Assertions target the tool
+# invocation + response shape, not LLM prose.
+skill_name: tournament-manager
+evals:
+  - id: 1
+    name: generate-league-demo
+    prompt: "Create a basketball league called 'Summer Hoops' with 8 teams, single elimination format."
+    expected_output: >-
+      Calls easychamp_generate_league with the four required fields
+      and reports the returned leagueId + team list back to the user.
+    files: []
+    assertions:
+      - id: "1_1"
+        text: "Invokes the easychamp_generate_league tool exactly once."
+        type: boolean
+      - id: "1_2"
+        text: "Passes name='Summer Hoops', sport='basketball', teamCount=8, format='single_elim' in the tool input."
+        type: boolean
+      - id: "1_3"
+        text: "Reports back a leagueId and at least one team in the response."
+        type: boolean
+    testType: unit
+
+  - id: 2
+    name: generate-tournament-demo
+    prompt: "Create a single-elimination tournament under league lg_demo_001."
+    expected_output: >-
+      Calls easychamp_generate_tournament with leagueId='lg_demo_001'
+      and type='single_elim' and returns the tournamentId to the user.
+    files: []
+    assertions:
+      - id: "2_1"
+        text: "Invokes the easychamp_generate_tournament tool exactly once."
+        type: boolean
+      - id: "2_2"
+        text: "Uses leagueId='lg_demo_001' and type='single_elim' in the tool input."
+        type: boolean
+      - id: "2_3"
+        text: "Surfaces the returned tournamentId back to the user."
+        type: boolean
+    testType: unit
+
+  - id: 3
+    name: generate-bracket-demo
+    prompt: "Generate the bracket for tournament tn_demo_001."
+    expected_output: >-
+      Calls easychamp_generate_bracket with tournamentId='tn_demo_001'
+      and reports the bracketId plus round structure.
+    files: []
+    assertions:
+      - id: "3_1"
+        text: "Invokes the easychamp_generate_bracket tool exactly once."
+        type: boolean
+      - id: "3_2"
+        text: "Uses tournamentId='tn_demo_001' in the tool input."
+        type: boolean
+      - id: "3_3"
+        text: "Reports the number of rounds returned in the response."
+        type: boolean
+    testType: unit
+
+  - id: 4
+    name: create-schedule-demo
+    prompt: "Schedule tournament tn_demo_001 starting 2026-06-01 at Court A and Court B."
+    expected_output: >-
+      Calls easychamp_create_schedule with tournamentId='tn_demo_001',
+      startDate='2026-06-01', venues=['Court A','Court B'] and reports
+      the scheduleId plus at least one match.
+    files: []
+    assertions:
+      - id: "4_1"
+        text: "Invokes the easychamp_create_schedule tool exactly once."
+        type: boolean
+      - id: "4_2"
+        text: "Passes tournamentId, startDate='2026-06-01', and venues=['Court A','Court B'] in the tool input."
+        type: boolean
+      - id: "4_3"
+        text: "Reports the scheduleId and at least one match from the response."
+        type: boolean
+    testType: unit
+
+  - id: 5
+    name: enter-results-demo
+    prompt: "Enter the result for match m_demo_001: home team won 84-77."
+    expected_output: >-
+      Calls easychamp_enter_results with matchId='m_demo_001',
+      homeScore=84, awayScore=77, winner='home' and confirms the match
+      is finalized.
+    files: []
+    assertions:
+      - id: "5_1"
+        text: "Invokes the easychamp_enter_results tool exactly once."
+        type: boolean
+      - id: "5_2"
+        text: "Uses matchId='m_demo_001', homeScore=84, awayScore=77, winner='home' in the tool input."
+        type: boolean
+      - id: "5_3"
+        text: "Confirms the match is finalized in the user-facing response."
+        type: boolean
+    testType: unit

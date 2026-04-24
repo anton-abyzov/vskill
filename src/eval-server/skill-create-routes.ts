@@ -1294,6 +1294,23 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
       );
       if (ac.signal.aborted) return;
       const result = attachSuggestedPlugin(parsed, root);
+      // 0711: emit provenance as a SEPARATE SSE event before `done` so the
+      // GenerateSkillResult schema stays clean (parity tests assert on the
+      // legacy shape). The UI's useCreateSkill listens for the `provenance`
+      // event and stamps aiMeta. Best-effort — never blocks generation.
+      if (wantsSSE && (resolved.provider === "anthropic" || resolved.provider === "claude-cli")) {
+        try {
+          const { resolveAnthropicModel } = await import("../eval/model-resolver.js");
+          const r = resolveAnthropicModel(resolved.model);
+          sendSSE(res, "provenance", {
+            resolvedModelId: r.resolvedId || null,
+            snapshotDate: r.snapshotDate,
+            source: r.source,
+          });
+        } catch {
+          /* provenance is best-effort; never block generation */
+        }
+      }
       if (wantsSSE) sendSSEDone(res, result); else sendJson(res, result, 200, req);
     } catch (err) {
       if (wantsSSE && !ac.signal.aborted) {

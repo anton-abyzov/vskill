@@ -8,11 +8,14 @@
 // Contract:
 //   - Raw keys NEVER appear in any log, error message, toast, or stdout.
 //     Only `redactKey()` output (`****<last-4>`) may be emitted.
-//   - `readKey()` consults `process.env` FIRST, then the in-memory map.
-//     After `mergeStoredKeysIntoEnv()` the map is cleared; subsequent reads
-//     hit process.env directly, minimizing plaintext dwell time.
-//   - `listKeys()` returns { stored, updatedAt } metadata only.
-//   - `removeKey()` is idempotent.
+//   - `readKey()` consults `process.env` FIRST, then the raw-key `memoryMap`.
+//     After `mergeStoredKeysIntoEnv()` the `memoryMap` is cleared; subsequent
+//     reads hit process.env directly, minimizing plaintext dwell time.
+//   - `listKeys()` returns { stored, updatedAt } metadata only. A parallel
+//     `metadataMap` holds `{ updatedAt }` and SURVIVES merge, so listKeys()
+//     stays truthful across a boot cycle without keeping key bytes around.
+//   - `removeKey()` is idempotent; clears memoryMap, metadataMap, and the
+//     process.env entry (post-merge, env is where the live key lives).
 //   - Malformed lines in keys.env never crash parse — they are skipped with
 //     exactly ONE aggregated warning.
 //
@@ -94,6 +97,10 @@ let logger: Logger = defaultLogger;
 let fsImpl: FsFacade = defaultFs;
 let configDirOverride: string | null = null;
 const memoryMap = new Map<ProviderId, Entry>();
+// metadataMap retains `{ updatedAt }` after mergeStoredKeysIntoEnv() clears
+// the raw-key memoryMap. Keeps listKeys() truthful across a boot cycle without
+// extending plaintext dwell time.
+const metadataMap = new Map<ProviderId, { updatedAt: string }>();
 let loaded = false;
 
 // ---------------------------------------------------------------------------
@@ -265,6 +272,7 @@ export async function saveKey(
   }
 
   memoryMap.set(provider, { key, updatedAt });
+  metadataMap.set(provider, { updatedAt });
   return { updatedAt };
 }
 
@@ -290,7 +298,10 @@ export function hasKeySync(provider: ProviderId): boolean {
 
 export async function removeKey(provider: ProviderId): Promise<void> {
   loadIfNeeded();
-  if (!memoryMap.has(provider)) return;
+  // Idempotent: short-circuit only if neither map has the provider AND the
+  // on-disk file won't have it either. Post-merge, memoryMap is empty but
+  // metadataMap is the source of truth for "was it stored?".
+  if (!memoryMap.has(provider) && !metadataMap.has(provider)) return;
   const next = new Map(memoryMap);
   next.delete(provider);
   try {
@@ -302,15 +313,24 @@ export async function removeKey(provider: ProviderId): Promise<void> {
     throw err;
   }
   memoryMap.delete(provider);
+  metadataMap.delete(provider);
+  // Clear the process.env copy too — post-merge, this is where the live key
+  // lives. Without this, a "remove" followed by a readKey() would still
+  // resolve the removed provider from process.env.
+  const descriptor = PROVIDERS.find((p) => p.id === provider);
+  if (descriptor) delete process.env[descriptor.envVarName];
 }
 
 export function listKeys(): ListKeysResponse {
   loadIfNeeded();
   const read = (p: ProviderId): KeyMetadata => {
-    const e = memoryMap.get(p);
-    return e
-      ? { stored: true, updatedAt: e.updatedAt }
-      : { stored: false, updatedAt: null };
+    // memoryMap wins if present (freshest), else fall back to retained
+    // metadata from a prior mergeStoredKeysIntoEnv() call.
+    const live = memoryMap.get(p);
+    if (live) return { stored: true, updatedAt: live.updatedAt };
+    const meta = metadataMap.get(p);
+    if (meta) return { stored: true, updatedAt: meta.updatedAt };
+    return { stored: false, updatedAt: null };
   };
   return {
     anthropic: read("anthropic"),
@@ -332,6 +352,9 @@ export function mergeStoredKeysIntoEnv(): void {
     if (process.env[p.envVarName] === undefined) {
       process.env[p.envVarName] = entry.key;
     }
+    // Retain metadata so listKeys() can report `stored: true` post-merge
+    // without keeping the raw key plaintext around.
+    metadataMap.set(p.id, { updatedAt: entry.updatedAt });
   }
   // Shrink plaintext dwell time.
   memoryMap.clear();
@@ -349,6 +372,7 @@ export interface ResetOptions {
 
 export function resetSettingsStore(opts: ResetOptions = {}): void {
   memoryMap.clear();
+  metadataMap.clear();
   loaded = false;
   logger = opts.logger ?? defaultLogger;
   fsImpl = opts.fs ?? defaultFs;

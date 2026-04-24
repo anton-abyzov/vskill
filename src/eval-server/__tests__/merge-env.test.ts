@@ -84,4 +84,59 @@ describe("mergeStoredKeysIntoEnv (T-007)", () => {
     expect(process.env.OPENAI_API_KEY).toBe("sk-proj-bbb");
     expect(process.env.OPENROUTER_API_KEY).toBe("sk-or-ccc");
   });
+
+  // --------------------------------------------------------------------------
+  // TC-012 (regression): post-merge metadata survives.
+  //
+  // Bug discovered by e2e-0702 verification: at boot the server called
+  // loadIfNeeded() then mergeStoredKeysIntoEnv(), which cleared the entire
+  // in-memory map. Subsequent calls to listKeys() reported stored:false for
+  // every provider, because loaded=true short-circuits re-load and the map
+  // is empty.
+  //
+  // Fix contract: after merge, listKeys() must still report stored:true and
+  // preserve the original updatedAt. readKey() must still resolve to the key
+  // via process.env (merge populated it). hasKeySync() must be true.
+  // --------------------------------------------------------------------------
+  it("TC-012: listKeys reports stored:true + updatedAt after merge", async () => {
+    const saveResult = await store.saveKey("anthropic", "sk-ant-TEST");
+    const originalUpdatedAt = saveResult.updatedAt;
+
+    store.mergeStoredKeysIntoEnv();
+
+    const list = store.listKeys();
+    expect(list.anthropic.stored).toBe(true);
+    expect(list.anthropic.updatedAt).toBe(originalUpdatedAt);
+    expect(list.openai.stored).toBe(false);
+    expect(list.openai.updatedAt).toBeNull();
+    expect(list.openrouter.stored).toBe(false);
+  });
+
+  it("TC-012b: readKey returns value via env fallback after merge", async () => {
+    await store.saveKey("anthropic", "sk-ant-TEST");
+    store.mergeStoredKeysIntoEnv();
+    expect(store.readKey("anthropic")).toBe("sk-ant-TEST");
+  });
+
+  it("TC-012c: hasKeySync returns true after merge", async () => {
+    await store.saveKey("openai", "sk-proj-TEST");
+    store.mergeStoredKeysIntoEnv();
+    expect(store.hasKeySync("openai")).toBe(true);
+  });
+
+  it("TC-012d: listKeys reflects all three providers after merge", async () => {
+    await store.saveKey("anthropic", "sk-ant-a");
+    await store.saveKey("openai", "sk-proj-b");
+    await store.saveKey("openrouter", "sk-or-c");
+
+    store.mergeStoredKeysIntoEnv();
+
+    const list = store.listKeys();
+    expect(list.anthropic.stored).toBe(true);
+    expect(list.openai.stored).toBe(true);
+    expect(list.openrouter.stored).toBe(true);
+    expect(list.anthropic.updatedAt).not.toBeNull();
+    expect(list.openai.updatedAt).not.toBeNull();
+    expect(list.openrouter.updatedAt).not.toBeNull();
+  });
 });

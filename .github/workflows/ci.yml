@@ -155,12 +155,21 @@ jobs:
           # Smoke Fixture
           This file only exists to exercise the install path.
           EOF
-          # Exit-code-only assertion — stderr/stdout don't need to match any
-          # specific string; we just need the process to finish cleanly with
-          # 0 or with a known "no agents detected" error-exit. Run from a
-          # throwaway project root so we never mutate real agents.
+          # Exit-code assertion — the install must finish cleanly (exit 0) or
+          # with a graceful "no agents detected" path. A crash from lsof/ps/
+          # which on Windows MUST fail this step. Run from a throwaway project
+          # root so we never mutate real agents.
           mkdir -p throwaway-project
           cd throwaway-project
-          node ../dist/bin.js install ../fixture-skill/SKILL.md --no-confirm || true
-          # Assert no lsof/ps/which-failure crash: the command completed.
-          echo "install smoke completed with exit=$?"
+          # Use -y (documented flag) to skip prompts. Capture exit code so we
+          # can accept 0 (installed) or 2 (no agents detected) but fail on any
+          # crash or unexpected exit code (AC-US5-02).
+          set +e
+          node ../dist/bin.js install ../fixture-skill/SKILL.md -y
+          smoke_exit=$?
+          set -e
+          echo "install smoke completed with exit=$smoke_exit"
+          if [ "$smoke_exit" -ne 0 ] && [ "$smoke_exit" -ne 2 ]; then
+            echo "::error::install smoke crashed (exit=$smoke_exit) — AC-US5-02 failure"
+            exit 1
+          fi

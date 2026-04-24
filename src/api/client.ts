@@ -11,7 +11,6 @@ const DEFAULT_BASE_URL = "https://verified-skill.com";
 function resolveBaseUrl(): string {
   return process.env.VSKILL_API_BASE || DEFAULT_BASE_URL;
 }
-const BASE_URL = DEFAULT_BASE_URL;
 const VERSION: string = (() => {
   try {
     const require = createRequire(import.meta.url);
@@ -319,7 +318,7 @@ export async function reportInstall(
 
         try {
           const res = await fetch(
-            `${BASE_URL}${skillApiPath(skillName)}/installs`,
+            `${resolveBaseUrl()}${skillApiPath(skillName)}/installs`,
             {
               method: "POST",
               headers: {
@@ -395,7 +394,7 @@ export async function checkUpdates(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const res = await fetch(`${BASE_URL}/api/v1/skills/check-updates`, {
+    const res = await fetch(`${resolveBaseUrl()}/api/v1/skills/check-updates`, {
       method: "POST",
       headers: {
         "User-Agent": "vskill-cli",
@@ -485,7 +484,7 @@ export async function reportInstallBatch(
 
         try {
           const res = await fetch(
-            `${BASE_URL}/api/v1/skills/installs`,
+            `${resolveBaseUrl()}/api/v1/skills/installs`,
             {
               method: "POST",
               headers: {

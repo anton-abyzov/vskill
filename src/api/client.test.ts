@@ -449,6 +449,24 @@ describe("reportInstall", () => {
     }
   });
 
+  it("respects VSKILL_API_BASE env override (F-CR-001)", async () => {
+    const orig = process.env.VSKILL_API_BASE;
+    process.env.VSKILL_API_BASE = "http://localhost:9999";
+    try {
+      mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
+
+      await reportInstall("my-skill");
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:9999/api/v1/skills/my-skill/installs",
+        expect.any(Object),
+      );
+    } finally {
+      if (orig === undefined) delete process.env.VSKILL_API_BASE;
+      else process.env.VSKILL_API_BASE = orig;
+    }
+  });
+
   it("swallows network errors silently", async () => {
     mockFetch.mockRejectedValue(new TypeError("Failed to fetch"));
 
@@ -542,6 +560,24 @@ describe("reportInstallBatch", () => {
   it("skips empty skills array", async () => {
     await reportInstallBatch([]);
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("respects VSKILL_API_BASE env override (F-CR-001)", async () => {
+    const orig = process.env.VSKILL_API_BASE;
+    process.env.VSKILL_API_BASE = "http://localhost:9999";
+    try {
+      mockFetch.mockResolvedValue(jsonResponse({ ok: true, results: [] }));
+
+      await reportInstallBatch([{ skillName: "pm" }]);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:9999/api/v1/skills/installs",
+        expect.any(Object),
+      );
+    } finally {
+      if (orig === undefined) delete process.env.VSKILL_API_BASE;
+      else process.env.VSKILL_API_BASE = orig;
+    }
   });
 
   it("retries once on server error", async () => {
@@ -683,5 +719,23 @@ describe("checkUpdates", () => {
     const callArgs = mockFetch.mock.calls[0];
     const options = callArgs[1];
     expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("respects VSKILL_API_BASE env override (F-CR-001)", async () => {
+    const orig = process.env.VSKILL_API_BASE;
+    process.env.VSKILL_API_BASE = "http://localhost:9999";
+    try {
+      mockFetch.mockResolvedValue(jsonResponse({ results: [] }));
+
+      await checkUpdates([{ name: "pm", currentVersion: "1.0.0" }]);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:9999/api/v1/skills/check-updates",
+        expect.any(Object),
+      );
+    } finally {
+      if (orig === undefined) delete process.env.VSKILL_API_BASE;
+      else process.env.VSKILL_API_BASE = orig;
+    }
   });
 });

@@ -23,6 +23,7 @@ vi.mock("../StudioLogo", () => ({
 }));
 
 import { TopRail } from "../TopRail";
+import { strings } from "../../strings";
 
 type ReactEl = { type: unknown; props: Record<string, unknown> };
 
@@ -71,9 +72,8 @@ describe("TopRail", () => {
     expect(text).toContain("vskill");
   });
 
-  // 0709 T-001 / 0700: breadcrumb origin label for source (own) skills is
-  // `Skills`. Pre-0700 this was `OWN`; keep the old name-drop in the
-  // describe prose so future spelunkers can find this rename.
+  // 0709 / 0700: keep the retired `OWN` name-drop in the describe prose so
+  // future spelunkers grepping for the old vocabulary land here.
   it("renders breadcrumb Skills › plugin › skill when a source skill is selected", () => {
     const tree = expand(TopRail({
       projectName: "vskill",
@@ -81,13 +81,12 @@ describe("TopRail", () => {
       onOpenPalette: vi.fn(),
     }));
     const text = collectText(tree);
-    expect(text).toContain("Skills");
+    expect(text).toContain(strings.scopeLabels.authoringSkills);
     expect(text).toContain("obsidian-brain");
     expect(text).toContain("lint");
   });
 
-  // 0709 T-001 / 0700: breadcrumb origin label for installed skills is
-  // `Project` (previously `INSTALLED`).
+  // 0709 / 0700: prior vocabulary `INSTALLED`, retained here for grep.
   it("renders breadcrumb Project when an installed skill is selected", () => {
     const tree = expand(TopRail({
       projectName: "vskill",
@@ -95,7 +94,7 @@ describe("TopRail", () => {
       onOpenPalette: vi.fn(),
     }));
     const text = collectText(tree);
-    expect(text).toContain("Project");
+    expect(text).toContain(strings.scopeLabels.sourceProject);
   });
 
   it("palette button has aria-label and fires onOpenPalette on click", () => {

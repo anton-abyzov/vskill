@@ -69,6 +69,7 @@ import { MetadataTab } from "../MetadataTab";
 import { DetailHeader } from "../DetailHeader";
 import { RightPanel } from "../RightPanel";
 import { TopRail } from "../TopRail";
+import { strings } from "../../strings";
 import type { SkillInfo } from "../../types";
 
 // ---------------------------------------------------------------------------
@@ -315,11 +316,11 @@ describe("QA: TopRail breadcrumb shape", () => {
     const breadcrumbNav = navs.find((n) => String(n.props["aria-label"] ?? "").toLowerCase() === "breadcrumb");
     expect(breadcrumbNav).toBeTruthy();
 
-    // 0709 T-003 / 0700: the origin label is `Skills` for source skills
-    // (was `Own` pre-0700). CSS may still text-transform it, but the text
-    // node itself is `Skills`.
+    // 0709 / 0700: origin label swapped `Own` → `Skills`. CSS may still
+    // text-transform it uppercase — we assert against the underlying text
+    // node, not the rendered glyphs.
     const text = collectText(breadcrumbNav);
-    expect(text).toContain("Skills");
+    expect(text).toContain(strings.scopeLabels.authoringSkills);
     expect(text).toContain("google-workspace");
     expect(text).toContain("gws");
 

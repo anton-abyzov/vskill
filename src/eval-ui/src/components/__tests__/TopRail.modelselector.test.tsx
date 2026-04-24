@@ -29,6 +29,7 @@ vi.mock("../../theme/useTheme", () => ({
 
 import { TopRail } from "../TopRail";
 import { StatusBar } from "../StatusBar";
+import { strings } from "../../strings";
 
 type ReactEl = { type: unknown; props: Record<string, unknown> };
 
@@ -75,8 +76,8 @@ function collectText(node: unknown): string {
 // T-059 — Breadcrumb segments are clickable and dispatch navigation events
 // ---------------------------------------------------------------------------
 describe("T-059 TopRail — breadcrumb navigation", () => {
-  // 0709 T-002 / 0700: the origin segment for a source skill renders the
-  // `Skills` label (post-0700 vocabulary; was `OWN` before).
+  // 0709 / 0700: retained `OWN` name-drop so grepping the old vocabulary
+  // surfaces this test.
   it("Skills origin segment is a button-like element with an onClick handler", () => {
     const tree = expand(TopRail({
       projectName: "vskill",
@@ -88,7 +89,7 @@ describe("T-059 TopRail — breadcrumb navigation", () => {
       return attrs["data-breadcrumb-segment"] === "origin" && typeof attrs.onClick === "function";
     });
     expect(segments.length).toBe(1);
-    expect(collectText(segments[0])).toContain("Skills");
+    expect(collectText(segments[0])).toContain(strings.scopeLabels.authoringSkills);
   });
 
   it("clicking the ORIGIN segment dispatches studio:navigate-scope with scope=origin", () => {

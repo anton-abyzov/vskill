@@ -77,23 +77,31 @@ test.describe("0686 E2E-02 — AgentScopePicker (UI-only smoke)", () => {
 });
 
 test.describe("0686 E2E-03 — Tri-scope sidebar", () => {
-  test("renders OWN + INSTALLED headers always; GLOBAL appears after tri-scope wire-up", async ({
+  // 0709 T-006: the original 2-section layout (OWN + INSTALLED buttons via
+  // `data-testid='sidebar-section-header'`) was replaced by the 0698 T-008
+  // five-bucket structure: two top-level `role="heading"` GroupHeaders
+  // (AVAILABLE / AUTHORING) wrapping NamedScopeSection sub-headers (Project
+  // / Personal / Plugins under AVAILABLE, Skills / Plugins under AUTHORING).
+  // The test now asserts against the new heading structure.
+  test("renders AVAILABLE + AUTHORING group headers and nested scope sub-sections", async ({
     page,
   }) => {
     await gotoStudio(page);
-    const own = page.locator("button[data-testid='sidebar-section-header']", { hasText: "Own" });
-    const installed = page.locator("button[data-testid='sidebar-section-header']", {
-      hasText: "Installed",
+    // 0698 T-008 renders AVAILABLE + AUTHORING as expandable buttons inside
+    // the sidebar. aria-expanded marks them as controls rather than static
+    // headings, so we locate by button role + name.
+    const sidebar = page.locator("[data-testid='sidebar']");
+    const available = sidebar.getByRole("button", { name: /AVAILABLE/ });
+    const authoring = sidebar.getByRole("button", { name: /AUTHORING/ });
+    await expect(available).toBeVisible();
+    await expect(authoring).toBeVisible();
+    // At least one post-0698 sub-scope label (Project / Personal / Skills)
+    // must be present inside the groups — proves the five-bucket layout
+    // actually rendered, not just the top-level wrappers.
+    const post0698Sublabels = sidebar.getByRole("button", {
+      name: /^(Project|Personal|Skills)\b/,
     });
-    await expect(own).toBeVisible();
-    await expect(installed).toBeVisible();
-    // GLOBAL appears once the Sidebar is migrated to ScopeSection × 3.
-    // Soft assertion — absent in the current fallback path.
-    const global = page.locator("button[data-testid='scope-section-header']", {
-      hasText: "Global",
-    });
-    const globalCount = await global.count();
-    expect(globalCount).toBeGreaterThanOrEqual(0);
+    expect(await post0698Sublabels.count()).toBeGreaterThan(0);
   });
 });
 

@@ -24,6 +24,9 @@ import { ProjectCommandPalette } from "./components/ProjectCommandPalette";
 import { CreateSkillModal, type CreateSkillMode } from "./components/CreateSkillModal";
 import { MarketplaceDrawer } from "./components/MarketplaceDrawer";
 import { InstallProgressToast, type InstallJob } from "./components/InstallProgressToast";
+import { SettingsModal } from "./components/SettingsModal";
+import { useApiKeyErrorToast } from "./hooks/useApiKeyErrorToast";
+import type { CredentialProvider } from "./hooks/useCredentialStorage";
 import {
   getStudioPreference,
   writeStudioPreference,
@@ -233,6 +236,24 @@ function Shell() {
     window.addEventListener("studio:toast", onStudioToast);
     return () => window.removeEventListener("studio:toast", onStudioToast);
   }, [toast]);
+
+  // 0702 T-042: Listen for studio:api-key-error (dispatched by sse.ts on
+  // structured 401 bodies) and surface the provider-scoped toast. The toast's
+  // action dispatches studio:open-settings, which the SettingsModal listener
+  // below picks up.
+  useApiKeyErrorToast();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialProvider, setSettingsInitialProvider] = useState<CredentialProvider | undefined>(undefined);
+  useEffect(() => {
+    function onOpenSettings(e: Event) {
+      if (!(e instanceof CustomEvent)) return;
+      const detail = (e as CustomEvent).detail as { provider?: CredentialProvider } | undefined;
+      setSettingsInitialProvider(detail?.provider);
+      setSettingsOpen(true);
+    }
+    window.addEventListener("studio:open-settings", onOpenSettings);
+    return () => window.removeEventListener("studio:open-settings", onOpenSettings);
+  }, []);
 
   // Keep document.documentElement.style updated so CSS reads the live width.
   useEffect(() => {
@@ -522,6 +543,17 @@ function Shell() {
           });
           setMarketplaceOpen(false);
         }}
+      />
+
+      {/* 0702 T-042: App-level SettingsModal opened by the API-key-error toast.
+          The AgentModelPicker keeps its own footer-triggered SettingsModal
+          for user-initiated opens; this mount handles 401-driven opens so any
+          surface can reach it via the studio:open-settings CustomEvent. */}
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        initialProvider={settingsInitialProvider}
+        onToast={(message) => toast({ message, severity: "info" })}
       />
 
       {/* 0700 phase 2C: live SSE progress toast while `claude plugin install`

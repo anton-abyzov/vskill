@@ -6,6 +6,21 @@ export interface SSEEvent<T = unknown> {
   data: T;
 }
 
+// 0702 T-042: When the server returns 401 with the structured invalid_api_key
+// body, dispatch a studio:api-key-error event so the app-level
+// useApiKeyErrorToast hook can surface a toast pointing at SettingsModal.
+// The error-message branch still fires; this is an additive signal.
+function maybeDispatchApiKeyError(status: number, body: unknown): void {
+  if (status !== 401 || typeof window === "undefined") return;
+  if (!body || typeof body !== "object") return;
+  const b = body as { error?: unknown; provider?: unknown };
+  if (b.error !== "invalid_api_key") return;
+  if (b.provider !== "anthropic" && b.provider !== "openai" && b.provider !== "openrouter") return;
+  window.dispatchEvent(
+    new CustomEvent("studio:api-key-error", { detail: { provider: b.provider } }),
+  );
+}
+
 /**
  * Safe JSON serializer that handles circular references and non-serializable
  * objects (DOM nodes, React fiber refs, class instances) without throwing.
@@ -59,7 +74,14 @@ export function useSSE<T = unknown>() {
 
       if (!res.ok || !res.body) {
         let msg = `HTTP ${res.status}`;
-        try { const j = await res.json(); if (j.error) msg = j.error; } catch {}
+        let parsed: unknown = undefined;
+        try {
+          parsed = await res.json();
+          if (parsed && typeof parsed === "object" && "error" in parsed && typeof (parsed as { error: unknown }).error === "string") {
+            msg = (parsed as { error: string }).error;
+          }
+        } catch {}
+        maybeDispatchApiKeyError(res.status, parsed);
         throw new Error(msg);
       }
 
@@ -159,7 +181,14 @@ export function useMultiSSE(callbacks: MultiSSECallbacks) {
 
       if (!res.ok || !res.body) {
         let msg = `HTTP ${res.status}`;
-        try { const j = await res.json(); if (j.error) msg = j.error; } catch {}
+        let parsed: unknown = undefined;
+        try {
+          parsed = await res.json();
+          if (parsed && typeof parsed === "object" && "error" in parsed && typeof (parsed as { error: unknown }).error === "string") {
+            msg = (parsed as { error: string }).error;
+          }
+        } catch {}
+        maybeDispatchApiKeyError(res.status, parsed);
         throw new Error(msg);
       }
 

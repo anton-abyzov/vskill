@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, mergeUpdatesIntoSkills } from "./api";
 import type { SkillInfo } from "./types";
 import type { SkillUpdateInfo } from "./api";
@@ -25,6 +25,10 @@ export interface StudioState {
   isMobile: boolean;
   mobileView: "list" | "detail";
   updateNotificationDismissed: boolean;
+  // 0704: "<plugin>/<skill>" of the row the sidebar should force-expand and
+  // scroll to on its next render. Cleared by Sidebar via `clearReveal` once
+  // the row is in view so subsequent selections don't re-scroll.
+  revealSkillId: string | null;
 }
 
 const initialState: StudioState = {
@@ -37,6 +41,7 @@ const initialState: StudioState = {
   isMobile: false,
   mobileView: "list",
   updateNotificationDismissed: false,
+  revealSkillId: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -53,7 +58,9 @@ type StudioAction =
   | { type: "SET_SKILLS_LOADING"; loading: boolean }
   | { type: "SET_MOBILE"; isMobile: boolean }
   | { type: "SET_MOBILE_VIEW"; view: "list" | "detail" }
-  | { type: "DISMISS_UPDATE_NOTIFICATION" };
+  | { type: "DISMISS_UPDATE_NOTIFICATION" }
+  | { type: "REVEAL_SKILL"; skill: SelectedSkill }
+  | { type: "CLEAR_REVEAL" };
 
 function studioReducer(state: StudioState, action: StudioAction): StudioState {
   switch (action.type) {
@@ -86,6 +93,16 @@ function studioReducer(state: StudioState, action: StudioAction): StudioState {
       return { ...state, mobileView: action.view };
     case "DISMISS_UPDATE_NOTIFICATION":
       return { ...state, updateNotificationDismissed: true };
+    case "REVEAL_SKILL":
+      return {
+        ...state,
+        selectedSkill: action.skill,
+        revealSkillId: `${action.skill.plugin}/${action.skill.skill}`,
+        mode: "browse",
+        mobileView: state.isMobile ? "detail" : state.mobileView,
+      };
+    case "CLEAR_REVEAL":
+      return { ...state, revealSkillId: null };
     default:
       return state;
   }
@@ -113,6 +130,10 @@ export interface StudioContextValue {
   isRefreshingUpdates: boolean;
   /** Manually re-request `GET /api/skills/updates` (dedup'd). */
   refreshUpdates: () => Promise<void>;
+  /** 0704: explicit reveal — selects + flags sidebar for auto-expand/scroll. */
+  revealSkill: (plugin: string, skill: string) => void;
+  /** 0704: clear the reveal flag once the sidebar has scrolled the row. */
+  clearReveal: () => void;
 }
 
 const StudioCtx = createContext<StudioContextValue | null>(null);
@@ -189,6 +210,29 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   const selectSkill = useCallback((skill: SelectedSkill) => {
     dispatch({ type: "SELECT_SKILL", skill });
     window.location.hash = `/skills/${skill.plugin}/${skill.skill}`;
+  }, []);
+
+  // 0704: explicit reveal — select + flag for sidebar auto-reveal.
+  // useRef so callback reads the LATEST skills list even when invoked from a
+  // setTimeout captured in a stale closure (CreateSkillModal.onCreated waits
+  // 500ms for refreshSkills to land the new row before calling revealSkill).
+  const skillsRef = useRef(state.skills);
+  useEffect(() => { skillsRef.current = state.skills; }, [state.skills]);
+  const revealSkill = useCallback((plugin: string, skillName: string) => {
+    const skills = skillsRef.current;
+    const found = plugin
+      ? skills.find((s) => s.plugin === plugin && s.skill === skillName)
+      : skills.find((s) => s.skill === skillName);
+    const resolvedPlugin = found?.plugin ?? plugin;
+    const origin = found?.origin ?? "source";
+    dispatch({
+      type: "REVEAL_SKILL",
+      skill: { plugin: resolvedPlugin, skill: skillName, origin },
+    });
+    window.location.hash = `/skills/${resolvedPlugin}/${skillName}`;
+  }, []);
+  const clearReveal = useCallback(() => {
+    dispatch({ type: "CLEAR_REVEAL" });
   }, []);
 
   const clearSelection = useCallback(() => {
@@ -269,7 +313,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     outdatedByOrigin,
     isRefreshingUpdates,
     refreshUpdates,
-  }), [effectiveState, selectSkill, clearSelection, setMode, setSearch, setMobileView, loadSkills, updateCount, dismissUpdateNotification, skillUpdates.updates, outdatedByOrigin, isRefreshingUpdates, refreshUpdates]);
+    revealSkill,
+    clearReveal,
+  }), [effectiveState, selectSkill, clearSelection, setMode, setSearch, setMobileView, loadSkills, updateCount, dismissUpdateNotification, skillUpdates.updates, outdatedByOrigin, isRefreshingUpdates, refreshUpdates, revealSkill, clearReveal]);
 
   return <StudioCtx.Provider value={value}>{children}</StudioCtx.Provider>;
 }

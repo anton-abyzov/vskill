@@ -312,8 +312,9 @@ export const api = {
   },
 
   async getLatestBenchmark(plugin: string, skill: string): Promise<BenchmarkResult | null> {
+    // 0704: the server now returns 200 null when no benchmark has been
+    // persisted (instead of 404). res.json() yields null in that case.
     const res = await fetch(`${BASE}/api/skills/${plugin}/${skill}/benchmark/latest`);
-    if (res.status === 404) return null;
     if (!res.ok) {
       const body = await res.json().catch(() => ({ error: res.statusText }));
       throw new ApiError(body.error || `HTTP ${res.status}`, res.status);

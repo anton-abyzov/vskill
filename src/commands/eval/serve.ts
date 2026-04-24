@@ -5,12 +5,12 @@
 import { resolve, basename } from "node:path";
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { execSync } from "node:child_process";
+// 0706 T-007: dropped `execSync` — no more lsof/ps shell-outs (Windows had
+// no lsof, no POSIX ps, which crashed `vskill studio` on Windows).
 import * as net from "node:net";
 import { join } from "node:path";
 import { startEvalServer } from "../../eval-server/eval-server.js";
 import { yellow, dim, red, cyan, bold } from "../../utils/output.js";
-import { createPrompter } from "../../utils/prompts.js";
 import { isSkillCreatorInstalled } from "../../utils/skill-creator-detection.js";
 
 /**
@@ -77,102 +77,44 @@ async function probeVskillServer(port: number): Promise<{ projectName: string | 
   }
 }
 
-/** Find the PID using a port. */
-function findProcessOnPort(port: number): { pid: number; command: string } | null {
-  try {
-    const output = execSync(`lsof -ti:${port}`, { encoding: "utf-8", timeout: 3000 }).trim();
-    const pid = parseInt(output.split("\n")[0], 10);
-    if (!pid) return null;
-    const cmd = execSync(`ps -p ${pid} -o command=`, { encoding: "utf-8", timeout: 3000 }).trim();
-    return { pid, command: cmd.slice(0, 120) };
-  } catch {
-    return null;
-  }
-}
-
-/** Kill a process and wait for the port to actually free up. */
-async function killAndWait(pid: number, port: number): Promise<void> {
-  try { process.kill(pid, "SIGTERM"); } catch { return; }
-
-  // Wait for process to exit
-  const procDeadline = Date.now() + 3000;
-  while (Date.now() < procDeadline) {
-    try { process.kill(pid, 0); } catch { break; } // gone
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  // Force-kill if still alive
-  try { process.kill(pid, 0); process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
-
-  // Wait for port to actually free up (OS may hold it briefly after process exits)
-  const portDeadline = Date.now() + 5000;
-  while (Date.now() < portDeadline) {
-    if (!(await isPortInUse(port))) return;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
-
 /**
- * Handle port conflict — show what's running and ask user to confirm kill.
+ * 0706 T-007: Windows-safe port-conflict handler.
+ *
+ * The prior implementation shelled out to `lsof -ti:${port}` and `ps -p`
+ * to discover which process owned the port. Neither tool exists on
+ * Windows — `vskill studio` crashed there. Replacement strategy:
+ *
+ * 1. HTTP-probe the port with `probeVskillServer(port)` — if it returns
+ *    vskill identity, reuse the existing server (same contract as before).
+ * 2. Otherwise, print the Windows-safe "port in use by a non-vskill
+ *    process — please free it manually" message and exit.
+ *
+ * We drop the PID discovery + kill-and-confirm flow entirely: it didn't
+ * work on Windows, and telling the user "PID 4723 is node.exe" isn't
+ * actionable. The probe alone distinguishes our server from everything
+ * else, which is the only discrimination `vskill studio` needs.
  */
 async function handlePortConflict(port: number, resolvedRoot: string): Promise<void> {
   const existing = await probeVskillServer(port);
-  const proc = findProcessOnPort(port);
-  const prompter = createPrompter();
 
   if (existing) {
     const sameProject = existing.root === resolvedRoot;
-
     console.log(
-      `\n  ${bold("Port")} ${cyan(String(port))} ${bold("is already in use:")}` +
+      `\n  ${bold("Port")} ${cyan(String(port))} ${bold("is already in use by a vskill server:")}` +
       `\n  ${bold("Project:")}  ${cyan(existing.projectName || "unknown")}${sameProject ? dim(" (same project)") : ""}` +
       `\n  ${bold("Root:")}     ${dim(existing.root)}` +
       `\n  ${bold("Model:")}    ${dim(existing.model)}` +
-      (proc ? `\n  ${bold("PID:")}      ${dim(String(proc.pid))}` : "") +
-      "\n",
+      `\n\n  ${dim("Open the browser to:")} ${cyan(`http://localhost:${port}`)}\n`,
     );
-
-    const confirmed = await prompter.promptConfirm(
-      `  Kill it and restart?`,
-      sameProject, // default Y for same project, N for different
-    );
-
-    if (!confirmed) {
-      console.log(dim(`\n  Aborted. Use ${cyan(`vskill eval serve --port ${port + 1}`)} for a different port.\n`));
-      process.exit(0);
-    }
-
-    if (proc) {
-      console.log(dim(`  Stopping process ${proc.pid}...`));
-      await killAndWait(proc.pid, port);
-    }
-    return;
+    // Reuse semantics: exit cleanly so the user can point their browser.
+    process.exit(0);
   }
 
-  // Not a vskill server — unknown process
-  if (proc) {
-    console.log(
-      `\n  ${bold("Port")} ${cyan(String(port))} ${bold("is in use by another process:")}` +
-      `\n  ${bold("PID:")}      ${proc.pid}` +
-      `\n  ${bold("Command:")}  ${dim(proc.command)}` +
-      "\n",
-    );
-
-    const confirmed = await prompter.promptConfirm(`  Kill it and proceed?`, false);
-
-    if (!confirmed) {
-      console.log(dim(`\n  Aborted. Use ${cyan(`vskill eval serve --port ${port + 1}`)} for a different port.\n`));
-      process.exit(0);
-    }
-
-    console.log(dim(`  Stopping process ${proc.pid}...`));
-    await killAndWait(proc.pid, port);
-    return;
-  }
-
-  // Port in use but can't identify the process
+  // Port occupied by a non-vskill process. No PID discovery (Windows can't
+  // do it portably, and the PID wasn't actionable anyway).
   console.error(
-    red(`\n  Port ${port} is in use but the process could not be identified.\n`) +
-    `  ${dim("Try:")} ${cyan(`vskill eval serve --port ${port + 1}`)}\n`,
+    red(`\n  Port ${port} is in use by a non-vskill process — please free it manually.\n`) +
+    `  ${dim("Or pick a different port:")} ${cyan(`vskill eval serve --port ${port + 1}`)}\n`,
   );
   process.exit(1);
 }

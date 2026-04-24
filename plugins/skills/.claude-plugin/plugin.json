@@ -1,7 +1,7 @@
 {
   "name": "skills",
-  "description": "Skill discovery and installation assistant — find and install the right skills for your project",
-  "version": "2.2.0",
+  "description": "Skill discovery, installation, and authoring — find skills with scout, create new universal skills with skill-builder",
+  "version": "2.3.0",
   "author": {
     "name": "Anton Abyzov",
     "email": "anton.abyzov@gmail.com",
@@ -10,5 +10,5 @@
   "homepage": "https://github.com/anton-abyzov/vskill",
   "repository": "https://github.com/anton-abyzov/vskill",
   "license": "MIT",
-  "keywords": ["discovery", "install", "search", "skills", "registry"]
+  "keywords": ["discovery", "install", "search", "skills", "registry", "authoring", "skill-builder"]
 }

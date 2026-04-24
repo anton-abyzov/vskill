@@ -1,5 +1,7 @@
 import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync } from "node:fs";
-import { join, relative, dirname } from "node:path";
+// 0706 T-004: `relative` + `sep` (as pathSep) power the cross-platform
+// path-traversal guard. `path.relative` handles Windows backslash correctly.
+import { join, relative, dirname, sep as pathSep } from "node:path";
 import os from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { ensureFrontmatter, stripClaudeFields } from "./frontmatter.js";
@@ -44,7 +46,13 @@ export function resolveAgentSkillsDir(agent: AgentDefinition, opts: InstallOptio
   }
   const resolved = join(opts.projectRoot, agent.localSkillsDir);
   const normalizedRoot = join(opts.projectRoot, ".");
-  if (resolved !== normalizedRoot && !resolved.startsWith(normalizedRoot + "/")) {
+  // 0706 T-004: switch from `resolved.startsWith(normalizedRoot + "/")` to
+  // `path.relative()`. The old check hardcoded `/` as the separator, which
+  // false-positives on Windows where `path.join` emits `\`. `path.relative`
+  // returns a path starting with `..` iff the target escapes the base —
+  // works correctly on POSIX and win32 without separator juggling.
+  const rel = relative(normalizedRoot, resolved);
+  if (resolved !== normalizedRoot && (rel === ".." || rel.startsWith(".." + pathSep) || rel.startsWith("../"))) {
     throw new Error(
       `Path traversal detected: ${agent.localSkillsDir} resolves above project root ${opts.projectRoot}`,
     );
@@ -68,6 +76,18 @@ export function ensureCanonicalDir(base: string, global: boolean): string {
   return dir;
 }
 
+/**
+ * 0706 T-006: module-scoped flag so we only warn once per process about
+ * missing symlink permissions (Windows without Developer Mode / without
+ * Administrator). Exported `__resetSymlinkWarning` is for tests only.
+ */
+let warnedAboutSymlinkFallback = false;
+
+/** Test-only helper to reset the module-scoped symlink-warning flag. */
+export function __resetSymlinkWarning(): void {
+  warnedAboutSymlinkFallback = false;
+}
+
 export function createRelativeSymlink(target: string, linkPath: string): boolean {
   try {
     const relTarget = relative(dirname(linkPath), target);
@@ -82,8 +102,23 @@ export function createRelativeSymlink(target: string, linkPath: string): boolean
     }
     symlinkSync(relTarget, linkPath, "dir");
     return true;
-  } catch {
-    return false;
+  } catch (err: any) {
+    // 0706 T-006: distinguish permission errors (Windows without Developer
+    // Mode / Administrator) from genuinely unexpected failures. Permission
+    // errors warn once to stderr and return false so the caller falls back
+    // to copy for ALL agents (not just the COPY_FALLBACK_AGENTS list). Other
+    // errors propagate rather than getting silently swallowed — prior
+    // behavior masked real bugs.
+    if (err?.code === "EPERM" || err?.code === "EACCES") {
+      if (!warnedAboutSymlinkFallback) {
+        console.error(
+          "Symlinks not available — copying files (enable Developer Mode to use symlinks)",
+        );
+        warnedAboutSymlinkFallback = true;
+      }
+      return false;
+    }
+    throw err;
   }
 }
 

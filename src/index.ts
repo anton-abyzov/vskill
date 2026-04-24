@@ -157,6 +157,17 @@ program
   });
 
 program
+  .command("diff <skill> <from> <to>")
+  .description("Show multi-file diff between two versions of a skill")
+  .option("--stat", "Summary only (filename +N -M per file + total)")
+  .option("--json", "Machine-readable raw compare response")
+  .option("--files <pattern>", "Glob filter (minimatch)")
+  .action(async (skill: string, from: string, to: string, opts: { stat?: boolean; json?: boolean; files?: string }) => {
+    const { diffCommand } = await import("./commands/diff.js");
+    await diffCommand(skill, from, to, opts);
+  });
+
+program
   .command("blocklist [subcommand] [name]")
   .description("Manage the malicious skills blocklist")
   .action(async (subcommand?: string, name?: string) => {

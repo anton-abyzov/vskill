@@ -1130,13 +1130,13 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     }
   });
 
-  router.delete("/api/settings/keys/:provider", async (req, res) => {
-    const provider = (req as unknown as { params?: { provider?: string } }).params?.provider;
+  router.delete("/api/settings/keys/:provider", async (_req, res, params) => {
+    const provider = params.provider;
     if (typeof provider !== "string" || !isProviderId(provider)) {
       sendJson(res, { error: `unknown provider: ${String(provider)}` }, 400);
       return;
     }
-    await settingsStore.removeKey(provider as ProviderId);
+    await settingsStore.removeKey(provider);
     sendJson(res, { ok: true });
   });
 

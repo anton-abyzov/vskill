@@ -17,9 +17,18 @@ import { execSync, exec } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, delimiter } from "node:path";
-import { promisify } from "node:util";
 
-const execAsync = promisify(exec);
+// 0703 follow-up: hand-rolled promise wrapper for `exec` so we don't have to
+// pull `promisify` from node:util (vite's browser shim exports nothing). The
+// UI bundle never reaches this — the vite config at src/eval-ui/vite.config.ts
+// intercepts `node:*` specifiers with a throwing proxy. Server + vitest
+// imports retain their normal behaviour, so the 0706 tests that mock
+// `node:child_process` still work end-to-end.
+function execPromise(cmd: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    exec(cmd, (err) => (err ? reject(err) : resolve()));
+  });
+}
 
 /**
  * Build a platform-appropriate "is this binary on PATH?" command.
@@ -47,7 +56,7 @@ export function buildDetectCommand(binary: string): string {
  */
 export async function detectBinary(binary: string): Promise<boolean> {
   try {
-    await execAsync(buildDetectCommand(binary));
+    await execPromise(buildDetectCommand(binary));
     return true;
   } catch {
     return false;

@@ -135,12 +135,26 @@ describe("T-033 RightPanel — empty and error states", () => {
 });
 
 // T-031 TAB BAR + INTEGRATION
-describe("T-031 RightPanel — Overview / Versions tab bar", () => {
-  it("renders the DetailHeader and Overview/Versions tab labels when a skill is selected", () => {
+// 0707 T-007 update: layout evolved from 2 tabs (Overview | Versions) to 9
+// flat tabs (Overview | Editor | Tests | Run | Activation | History |
+// Leaderboard | Deps | Versions). The assertions below track that migration.
+describe("T-031 RightPanel — flat 9-tab bar", () => {
+  it("renders the DetailHeader and every tab label when a skill is selected", () => {
     const tree = RightPanel({ selectedSkillInfo: makeSkill() });
     const text = collectText(tree);
-    expect(text).toContain("Overview");
-    expect(text).toContain("Versions");
+    for (const label of [
+      "Overview",
+      "Editor",
+      "Tests",
+      "Run",
+      "Activation",
+      "History",
+      "Leaderboard",
+      "Deps",
+      "Versions",
+    ]) {
+      expect(text).toContain(label);
+    }
   });
 
   it("active tab uses 2px underline via border-bottom (no pill fill)", () => {
@@ -149,20 +163,26 @@ describe("T-031 RightPanel — Overview / Versions tab bar", () => {
       const attrs = el.props as Record<string, unknown>;
       return attrs["role"] === "tab";
     });
-    expect(tabs.length).toBe(2);
+    expect(tabs.length).toBe(9);
     const activeTab = tabs.find((t) => t.props["aria-selected"] === true);
     expect(activeTab).toBeTruthy();
     const style = activeTab!.props.style as Record<string, string>;
     expect(style.borderBottom).toContain("2px");
   });
 
-  it("renders MetadataTab content when activeDetailTab is overview", () => {
+  it("renders the SkillOverview (metric grid) when activeDetailTab is overview", () => {
     const tree = RightPanel({
       selectedSkillInfo: makeSkill({ version: "1.2.3" }),
       activeDetailTab: "overview",
     });
-    const text = collectText(tree);
-    expect(text).toContain("Frontmatter");
-    expect(text).toContain("1.2.3");
+    // The Overview body is a <SkillOverview> element — findAll matches by
+    // component function-type name since findAll here does not recurse into
+    // function components.
+    const overview = findAll(tree, (el) => {
+      if (typeof el.type !== "function") return false;
+      const name = (el.type as { name?: string }).name ?? "";
+      return name === "SkillOverview";
+    });
+    expect(overview.length).toBeGreaterThanOrEqual(1);
   });
 });

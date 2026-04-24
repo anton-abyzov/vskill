@@ -254,12 +254,15 @@ describe("QA: DetailHeader copy button [AC-US3-01]", () => {
 // ---------------------------------------------------------------------------
 describe("QA: RightPanel tab wiring [AC-US3-01, AC-US3-08]", () => {
   it("renders tabs with role='tab' + aria-controls pointing at the panel id", () => {
+    // 0707 T-007: layout expanded from 2 tabs to a flat 9-tab bar.
     const tree = RightPanel({ selectedSkillInfo: makeSkill(), activeDetailTab: "overview" });
     const tabs = findAll(tree, (el) => (el.props as Record<string, unknown>).role === "tab");
-    expect(tabs.length).toBe(2);
+    expect(tabs.length).toBe(9);
     for (const t of tabs) {
       const controls = String(t.props["aria-controls"]);
-      expect(controls).toMatch(/^detail-panel-(overview|versions)$/);
+      expect(controls).toMatch(
+        /^detail-panel-(overview|editor|tests|run|activation|history|leaderboard|deps|versions)$/,
+      );
     }
   });
 

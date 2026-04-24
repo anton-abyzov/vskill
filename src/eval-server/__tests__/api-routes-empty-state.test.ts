@@ -94,7 +94,10 @@ describe("GET /api/skills/:plugin/:skill/evals — 0704 empty-state", () => {
     expect(mocks.loadAndValidateEvals).not.toHaveBeenCalled();
   });
 
-  it("returns the validated EvalsFile with 200 when evals.json exists", async () => {
+  it("returns the validated EvalsFile spread under { exists: true } with 200 when evals.json exists", async () => {
+    // 0707 T-023: response shape now includes `exists: true` so callers can
+    // distinguish "valid evals present" from "missing file" (which still
+    // returns 200 with `exists: false`).
     mocks.existsSync.mockReturnValue(true);
     const evalsFile = { version: 1, evals: [{ id: "e1", prompt: "hi" }] };
     mocks.loadAndValidateEvals.mockReturnValue(evalsFile);
@@ -103,7 +106,47 @@ describe("GET /api/skills/:plugin/:skill/evals — 0704 empty-state", () => {
     await handler(fakeReq, fakeRes, params);
 
     expect(mocks.loadAndValidateEvals).toHaveBeenCalledWith("/root/p/s");
-    expect(mocks.sendJson).toHaveBeenCalledWith(fakeRes, evalsFile, 200, fakeReq);
+    expect(mocks.sendJson).toHaveBeenCalledWith(
+      fakeRes,
+      { exists: true, ...evalsFile },
+      200,
+      fakeReq,
+    );
+  });
+
+  it("returns 422 with validation details when evals.json is malformed", async () => {
+    // 0707 T-023: malformed evals now return 422 (was 400) so the UI can
+    // render a validation error panel distinct from generic 400 responses.
+    mocks.existsSync.mockReturnValue(true);
+    class EvalValidationErrorLocal extends Error {
+      errors: { path: string; message: string }[];
+      constructor(errors: { path: string; message: string }[]) {
+        super("Eval validation failed");
+        this.name = "EvalValidationError";
+        this.errors = errors;
+      }
+    }
+    // Rebind the mocked EvalValidationError class so instanceof check matches
+    const schemaMod = await import("../../eval/schema.js");
+    const validationErr = new (schemaMod as any).EvalValidationError([
+      { path: "evals", message: "required array field" },
+    ]);
+    mocks.loadAndValidateEvals.mockImplementation(() => {
+      throw validationErr;
+    });
+    const handler = captureGetHandler("/api/skills/:plugin/:skill/evals");
+
+    await handler(fakeReq, fakeRes, params);
+
+    expect(mocks.sendJson).toHaveBeenCalledWith(
+      fakeRes,
+      expect.objectContaining({
+        error: expect.any(String),
+        errors: expect.any(Array),
+      }),
+      422,
+      fakeReq,
+    );
   });
 });
 

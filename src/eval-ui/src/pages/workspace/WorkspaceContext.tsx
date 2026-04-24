@@ -186,16 +186,17 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
 
         if (cancelled) return;
 
-        // For evals: 404 = no file (silent), 400 = invalid file (show error)
+        // 0704: server returns 200 { exists: false, evals: [] } when evals.json
+        // is missing, so the fulfilled branch always produces a valid
+        // EvalsFile-shaped body. Rejection only fires for real errors
+        // (400 validation, 500).
         let evalsValue: EvalsFile | null = null;
         let evalsError: string | null = null;
         if (evals.status === "fulfilled") {
           evalsValue = evals.value;
         } else {
           const err = evals.reason as Error & { status?: number };
-          if (err?.status !== 404) {
-            evalsError = err?.message ?? "Failed to load test cases";
-          }
+          evalsError = err?.message ?? "Failed to load test cases";
         }
 
         dispatch({

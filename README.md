@@ -143,7 +143,48 @@ vskill info <skill>         Show detailed skill information
 vskill submit <source>      Submit a skill for verification
 vskill blocklist            Manage blocked malicious skills
 vskill init                 Initialize vskill in a project
+vskill diff <s> <from> <to> Show multi-file diff between two versions
 ```
+
+## Compare skill versions
+
+`vskill diff <skill> <from> <to>` fetches a multi-file diff from
+verified-skill.com and renders it to stdout. The platform-side endpoint
+reuses GitHub's `/compare/A...B` for GitHub-hosted skills, so the full
+bundle (not just `SKILL.md`) is diffed.
+
+```bash
+# Full color diff (respects TTY + NO_COLOR / FORCE_COLOR)
+vskill diff anton-abyzov/vskill/scout 4f2285d 71a9132
+
+# Summary only: `filename +N -M` per file + a totals line
+vskill diff anton-abyzov/vskill/scout 4f2285d 71a9132 --stat
+
+# Machine-readable raw compare response (pretty JSON, no colors)
+vskill diff anton-abyzov/vskill/scout 4f2285d 71a9132 --json | jq '.files[].filename'
+
+# Glob-filter the file list (minimatch)
+vskill diff anton-abyzov/vskill/scout 4f2285d 71a9132 --files "**/SKILL.md"
+```
+
+Flags:
+
+| Flag | Description |
+|:-----|:------------|
+| `--stat` | Summary only — one line per file (`filename +N -M`) plus a totals line |
+| `--json` | Pretty-printed raw compare JSON (platform response, filtered by `--files`). No colors — safe to pipe into `jq`. |
+| `--files <pattern>` | Filter the file list via a `minimatch` glob (e.g. `**/*.md`) |
+
+**Windows compatibility.** `vskill diff` is pure `fetch()` + `process.stdout.write`
+— zero shell-outs to `git`, `diff`, or `less`. Colors use raw ANSI codes
+(`\x1b[32m` / `\x1b[31m` / `\x1b[90m` / `\x1b[0m`) which Windows Terminal,
+PowerShell 7+, and conhost-enabled cmd.exe (Windows 10 1511+) render
+natively. The windows-latest CI install-smoke job (T-008, 0706) exercises
+`diff --help` on every build, so PowerShell and cmd.exe stay first-class.
+
+Golden test case: the `scout` skill between SHAs
+`4f2285d...71a9132` returns 4 files with +590 insertions / -8 deletions.
+See [https://github.com/anton-abyzov/vskill/compare/4f2285d...71a9132](https://github.com/anton-abyzov/vskill/compare/4f2285d...71a9132).
 
 <details>
 <summary><strong>Install flags</strong></summary>

@@ -3,32 +3,27 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // 0706 T-001: platform-aware binary detection helpers.
 // Tests buildDetectCommand() (sync, string builder) and detectBinary()
 // (async wrapper that runs the built command via execAsync).
+//
+// `exec` is the callback-style child_process primitive; `promisify(exec)`
+// wraps it to accept `(cmd, options)` and return a Promise. To test
+// without spawning real processes, we mock `exec` with callback semantics:
+// success → invoke callback with `(null, {stdout, stderr})`; failure →
+// invoke with `(err)`. Real `promisify` is left untouched.
 
-const mockExec = vi.hoisted(() => vi.fn());
-const mockPromisify = vi.hoisted(() => vi.fn((fn: unknown) => {
-  // Return a function that calls mockExec and returns a promise
-  return (...args: unknown[]) => {
-    return new Promise((resolve, reject) => {
-      try {
-        const out = mockExec(...args);
-        resolve(out);
-      } catch (err) {
-        reject(err);
-      }
-    });
-  };
-}));
+type ExecCb = (
+  err: (Error & { code?: string }) | null,
+  value?: { stdout: string; stderr: string },
+) => void;
+
+const mockExec = vi.hoisted(() =>
+  vi.fn<[string, ExecCb], void>((_cmd, cb) => cb(null, { stdout: "", stderr: "" })),
+);
 
 vi.mock("node:child_process", async () => {
   const actual = await vi.importActual<typeof import("node:child_process")>(
     "node:child_process",
   );
   return { ...actual, exec: mockExec };
-});
-
-vi.mock("node:util", async () => {
-  const actual = await vi.importActual<typeof import("node:util")>("node:util");
-  return { ...actual, promisify: mockPromisify };
 });
 
 const { buildDetectCommand, detectBinary } = await import(
@@ -71,19 +66,21 @@ describe("detectBinary (0706 T-001)", () => {
 
   it("returns true when exec resolves", async () => {
     Object.defineProperty(process, "platform", { value: "darwin" });
-    mockExec.mockReturnValueOnce({ stdout: "/usr/local/bin/node", stderr: "" });
+    mockExec.mockImplementationOnce((_cmd, cb) =>
+      cb(null, { stdout: "/usr/local/bin/node", stderr: "" }),
+    );
 
     const result = await detectBinary("node");
 
     expect(result).toBe(true);
-    expect(mockExec).toHaveBeenCalledWith("which node");
+    expect(mockExec).toHaveBeenCalledWith("which node", expect.any(Function));
   });
 
   it("returns false when exec rejects (binary not found)", async () => {
     Object.defineProperty(process, "platform", { value: "darwin" });
-    mockExec.mockImplementationOnce(() => {
-      throw new Error("not found");
-    });
+    mockExec.mockImplementationOnce((_cmd, cb) =>
+      cb(Object.assign(new Error("not found"), { code: 1 })),
+    );
 
     const result = await detectBinary("definitely-not-a-real-bin-xyzzy");
 
@@ -92,11 +89,13 @@ describe("detectBinary (0706 T-001)", () => {
 
   it("uses 'where' on win32", async () => {
     Object.defineProperty(process, "platform", { value: "win32" });
-    mockExec.mockReturnValueOnce({ stdout: "C:\\foo\\node.exe", stderr: "" });
+    mockExec.mockImplementationOnce((_cmd, cb) =>
+      cb(null, { stdout: "C:\\foo\\node.exe", stderr: "" }),
+    );
 
     const result = await detectBinary("node");
 
     expect(result).toBe(true);
-    expect(mockExec).toHaveBeenCalledWith("where node");
+    expect(mockExec).toHaveBeenCalledWith("where node", expect.any(Function));
   });
 });

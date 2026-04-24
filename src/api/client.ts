@@ -453,7 +453,15 @@ export async function compareVersions(
   from: string,
   to: string,
 ): Promise<CompareVersionsResult> {
-  const url = `${resolveBaseUrl()}/api/v1/skills/${skill}/versions/compare?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  // F-CR-006: encode each path segment separately so skill names containing
+  // spaces (` `), `#`, or other reserved characters hit the right endpoint.
+  // Whole-string encoding would escape the `/` separators — so we split first,
+  // encode per segment, then rejoin on an unencoded `/`.
+  const encodedSkill = skill
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/");
+  const url = `${resolveBaseUrl()}/api/v1/skills/${encodedSkill}/versions/compare?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
   const res = await fetch(url, {
     headers: {
       "User-Agent": "vskill-cli",

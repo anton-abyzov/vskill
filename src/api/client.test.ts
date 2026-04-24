@@ -655,6 +655,22 @@ describe("compareVersions", () => {
       /Compare request failed: 404 Not Found/,
     );
   });
+
+  it("F-CR-006: URL-encodes each segment of a hierarchical skill name", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ source: "github", files: [] }),
+    );
+
+    // Skill segments with space, #, and other reserved characters. Expect
+    // per-segment encoding (spaces → %20, # → %23), with unencoded `/`
+    // separators preserved so the request hits the intended route.
+    await compareVersions("a b/c#d/skill e", "1.0.0", "1.0.1");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE_URL}/api/v1/skills/a%20b/c%23d/skill%20e/versions/compare?from=1.0.0&to=1.0.1`,
+      expect.any(Object),
+    );
+  });
 });
 
 describe("checkUpdates", () => {

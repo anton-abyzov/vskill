@@ -76,13 +76,6 @@ const NO_DIVERGENCES_SENTINEL = "No divergences — all targets universal";
 const ANTHROPIC_FALLBACK_SENTINEL =
   "[skill-builder] fallback mode — universal targets not emitted; install vskill for universal support";
 
-/** Security-critical frontmatter fields — surface on any drop/translation. */
-const SECURITY_CRITICAL_FIELDS: ReadonlySet<string> = new Set([
-  "allowed-tools",
-  "context.fork",
-  "model",
-]);
-
 /** Skip reason for non-claude targets under anthropic engine (AC-US2-03). */
 const ANTHROPIC_SKIP_REASON =
   "anthropic-skill-creator engine only supports claude-code";
@@ -172,9 +165,8 @@ interface PerTargetSkip {
 type PerTargetResult = PerTargetEmission | PerTargetSkip;
 
 /**
- * Record a divergence for a security-critical field when the target cannot
- * express it. Callers decide kind (dropped / security-critical-dropped /
- * translated) — this helper just accumulates.
+ * Record a divergence entry. Callers decide kind (dropped / security-
+ * critical-dropped / translated) — this helper just accumulates.
  */
 function pushDivergence(
   acc: DivergenceEntry[],
@@ -185,6 +177,38 @@ function pushDivergence(
   kind: DivergenceEntry["kind"],
 ): void {
   acc.push({ targetId, field, originalValue, translation, kind });
+}
+
+/**
+ * Record security-critical drops (allowed-tools, model) present in the
+ * source but not expressible by the target. Called by every non-claude
+ * emitter so silent loss is impossible.
+ */
+function recordSecurityCriticalDrops(
+  generated: GenerateSkillResult,
+  agentId: string,
+  acc: DivergenceEntry[],
+): void {
+  if (parseAllowedTools(generated.allowedTools).length > 0) {
+    pushDivergence(
+      acc,
+      agentId,
+      "allowed-tools",
+      generated.allowedTools,
+      null,
+      "security-critical-dropped",
+    );
+  }
+  if (generated.model && generated.model.trim() !== "") {
+    pushDivergence(
+      acc,
+      agentId,
+      "model",
+      generated.model,
+      null,
+      "security-critical-dropped",
+    );
+  }
 }
 
 /**
@@ -204,32 +228,23 @@ function emitForUniversal(
     ["description", yamlScalar(generated.description)],
   ];
   const divergences: DivergenceEntry[] = [];
-
   const tools = parseAllowedTools(generated.allowedTools);
 
-  if (agent.id === "opencode") {
-    // OpenCode translates allowed-tools into a permission map.
-    if (tools.length > 0) {
-      const permLines = tools
-        .map((t) => `  ${t.toLowerCase()}: ask`)
-        .join("\n");
-      const permBlock = `\n${permLines}`;
-      entries.push(["permission", permBlock]);
-      const translationSummary = `permission: { ${tools
-        .map((t) => `${t.toLowerCase()}: ask`)
-        .join(", ")} }`;
-      pushDivergence(
-        divergences,
-        agent.id,
-        "allowed-tools",
-        generated.allowedTools,
-        translationSummary,
-        "translated",
-      );
-    }
+  if (agent.id === "opencode" && tools.length > 0) {
+    // OpenCode translates allowed-tools → permission map.
+    const perms = tools.map((t) => `${t.toLowerCase()}: ask`);
+    entries.push(["permission", `\n${perms.map((p) => `  ${p}`).join("\n")}`]);
+    pushDivergence(
+      divergences,
+      agent.id,
+      "allowed-tools",
+      generated.allowedTools,
+      `permission: { ${perms.join(", ")} }`,
+      "translated",
+    );
   } else if (tools.length > 0) {
-    // Other universal agents: drop allowed-tools (most don't enforce tool
-    // allowlists). Security-critical — always record.
+    // Other universal agents: allowed-tools dropped (no tool-allowlist
+    // enforcement). Security-critical — always recorded.
     pushDivergence(
       divergences,
       agent.id,
@@ -240,8 +255,8 @@ function emitForUniversal(
     );
   }
 
-  // `model` field: universal agents (other than claude-code) bind model at
-  // the host level. Record as security-critical when present.
+  // `model`: universal agents (other than claude-code) bind model at the
+  // host level — drop + record as security-critical.
   if (generated.model && generated.model.trim() !== "") {
     pushDivergence(
       divergences,
@@ -255,7 +270,6 @@ function emitForUniversal(
 
   // Schema version tag — T-010 / AC-US6-01.
   entries.push(["x-sw-schema-version", "1"]);
-
   return { kind: "file", entries, divergences };
 }
 
@@ -272,29 +286,8 @@ function emitForNonUniversal(
   agent: AgentDefinition,
 ): PerTargetResult {
   const divergences: DivergenceEntry[] = [];
-
-  // Always record security-critical drops before deciding skip/emit — these
-  // must surface in the report regardless of whether a file is emitted.
-  if (parseAllowedTools(generated.allowedTools).length > 0) {
-    pushDivergence(
-      divergences,
-      agent.id,
-      "allowed-tools",
-      generated.allowedTools,
-      null,
-      "security-critical-dropped",
-    );
-  }
-  if (generated.model && generated.model.trim() !== "") {
-    pushDivergence(
-      divergences,
-      agent.id,
-      "model",
-      generated.model,
-      null,
-      "security-critical-dropped",
-    );
-  }
+  // Record security-critical drops regardless of skip/emit outcome.
+  recordSecurityCriticalDrops(generated, agent.id, divergences);
 
   if (!agent.featureSupport.customSystemPrompt) {
     return {
@@ -304,12 +297,15 @@ function emitForNonUniversal(
     };
   }
 
-  const entries: Array<[string, string]> = [
-    ["name", yamlScalar(generated.name)],
-    ["description", yamlScalar(generated.description)],
-    ["x-sw-schema-version", "1"],
-  ];
-  return { kind: "file", entries, divergences };
+  return {
+    kind: "file",
+    entries: [
+      ["name", yamlScalar(generated.name)],
+      ["description", yamlScalar(generated.description)],
+      ["x-sw-schema-version", "1"],
+    ],
+    divergences,
+  };
 }
 
 /**

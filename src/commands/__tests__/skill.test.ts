@@ -378,6 +378,23 @@ describe("vskill skill import (AC-US3-06)", () => {
     ]);
     expect(exitCode).not.toBe(0);
   });
+
+  it("import with unknown target id exits non-zero", async () => {
+    const fixturePath = join(
+      __dirname,
+      "fixtures/existing-skill/SKILL.md",
+    );
+    const { exitCode } = await invokeSkill([
+      "import",
+      fixturePath,
+      "--targets",
+      "made-up-agent",
+    ]);
+    expect(exitCode).not.toBe(0);
+    const stderr = errSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(stderr).toMatch(/Unknown agent id/);
+    expect(mocks.emitSkill).not.toHaveBeenCalled();
+  });
 });
 
 describe("vskill skill list / publish aliases (AC-US3-07, AC-US3-08)", () => {
@@ -423,12 +440,42 @@ describe("vskill skill info (AC-US3-07)", () => {
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(
       join(skillDir, "SKILL.md"),
-      '---\nname: demo-skill\ndescription: "Demo."\n---\n\n# demo-skill\n',
+      '---\nname: demo-skill\ndescription: "Demo."\nmodel: sonnet\nallowed-tools: Read, Write\n---\n\n# demo-skill\n',
     );
 
     const { exitCode } = await invokeSkill(["info", "demo-skill"]);
     expect(exitCode ?? 0).toBe(0);
     const stdout = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
     expect(stdout).toMatch(/demo-skill/);
+    expect(stdout).toMatch(/Demo\./);
+    expect(stdout).toMatch(/sonnet/);
+    expect(stdout).toMatch(/Read, Write/);
+  });
+
+  it("prints divergence report when one exists beside SKILL.md", async () => {
+    const skillDir = join(tmpDir, ".agents/skills/demo-skill");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      '---\nname: demo-skill\ndescription: "Demo."\n---\n\n# demo-skill\n',
+    );
+    writeFileSync(
+      join(skillDir, "demo-skill-divergence.md"),
+      "# Divergence\n\n- dropped: allowed-tools\n",
+    );
+
+    const { exitCode } = await invokeSkill(["info", "demo-skill"]);
+    expect(exitCode ?? 0).toBe(0);
+    const stdout = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(stdout).toMatch(/Divergence report/);
+    expect(stdout).toMatch(/dropped: allowed-tools/);
+  });
+
+  it("exits non-zero when the skill cannot be located locally", async () => {
+    const { exitCode } = await invokeSkill(["info", "nonexistent-skill"]);
+    expect(exitCode).not.toBe(0);
+    const stderr = errSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(stderr).toMatch(/Skill not found locally/);
   });
 });

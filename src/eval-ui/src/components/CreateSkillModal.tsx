@@ -119,6 +119,22 @@ export function CreateSkillModal({
 
   const pathPreview = computePathPreview(projectRoot, mode, pluginName, skillName);
 
+  function routeToGenerator(): void {
+    // 0698 polish: chain to the existing AI-generation flow at /create with
+    // the destination pre-encoded as query params so the page can surface the
+    // target path in its UI.
+    const params = new URLSearchParams();
+    params.set("mode", mode);
+    params.set("skillName", skillName);
+    if (description.trim()) params.set("description", description.trim());
+    if (pluginName) params.set("pluginName", pluginName);
+    const url = `/#/create?${params.toString()}`;
+    if (typeof window !== "undefined") {
+      window.location.assign(url);
+    }
+    onClose();
+  }
+
   async function onSubmit(): Promise<void> {
     setError(null);
     setSubmitting(true);
@@ -405,11 +421,21 @@ export function CreateSkillModal({
               </button>
               <button
                 type="button"
+                onClick={routeToGenerator}
+                disabled={!canSubmit}
+                style={{ ...secondaryButtonStyle, opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "not-allowed" }}
+                title="Opens the AI generation flow with this destination pre-selected (choose Claude Code, Anthropic API, OpenRouter, or local models)"
+              >
+                ✨ Generate with AI
+              </button>
+              <button
+                type="button"
                 onClick={() => void onSubmit()}
                 disabled={!canSubmit}
                 style={{ ...primaryButtonStyle, opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "not-allowed" }}
+                title="Creates an empty SKILL.md scaffold you can fill in by hand"
               >
-                {submitting ? "Creating…" : "Create skill"}
+                {submitting ? "Creating…" : "Create empty scaffold"}
               </button>
             </>
           )}

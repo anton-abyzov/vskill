@@ -6,6 +6,7 @@ import type { SkillInfo } from "../types";
 import { SkillRowHoverCard } from "./SkillRowHoverCard";
 import { SymlinkChip } from "./SymlinkChip";
 import { UpdateBadge } from "./UpdateBadge";
+import { VersionBadge } from "./VersionBadge";
 void SkillRowHoverCard;
 
 // 0686 T-015 (US-008): SkillInfo carries `isSymlink` + `symlinkTarget` once
@@ -133,19 +134,9 @@ function SkillRowBase({ skill, isSelected, onSelect, onContextMenu }: Props) {
         {skill.skill}
       </span>
 
-      {/* Current version (if any) */}
+      {/* 0707 T-009: reusable VersionBadge (sm) instead of an inline <span>. */}
       {skill.version && (
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            color: "var(--text-secondary)",
-            fontVariantNumeric: "tabular-nums",
-            flexShrink: 0,
-          }}
-        >
-          {skill.version}
-        </span>
+        <VersionBadge version={skill.version} size="sm" showPrefix={false} data-testid="skill-row-version" />
       )}
 
       {/* 0686 US-008: chain-link glyph when the skill was installed via

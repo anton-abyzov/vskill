@@ -443,11 +443,15 @@ export function CreateSkillPage() {
                       writePersistedSelection(nextProvider, nextModel);
                     }}
                     disabled={sk.generating || !aiProviderInfo}
-                    title={providerCaption(aiProvider) || (
+                    // 0704 T-013b: when NO provider is detected the install-
+                    // provider copy wins. `providerCaption(aiProvider)` for
+                    // claude-cli is non-empty and would otherwise short-circuit
+                    // this branch, leaving users without the actionable hint.
+                    title={
                       !aiProviderInfo
                         ? "Install a provider (Ollama / LM Studio / OpenRouter) or run `claude login` to enable model selection."
-                        : undefined
-                    )}
+                        : providerCaption(aiProvider) || undefined
+                    }
                     className="w-full px-3 py-2 rounded-lg text-[13px]"
                     style={inputStyle}
                   >
@@ -471,6 +475,7 @@ export function CreateSkillPage() {
                             href="https://claude.com/settings/usage"
                             target="_blank"
                             rel="noreferrer"
+                            // eslint-disable-next-line vskill/no-raw-color -- CSS-var fallback for legacy themes that pre-date --color-accent
                             style={{ color: "var(--color-accent, #2f6f8f)", textDecoration: "underline" }}
                           >
                             Enable extra usage →
@@ -558,7 +563,9 @@ export function CreateSkillPage() {
                           padding: "4px 10px",
                           fontSize: 12,
                           fontWeight: 500,
+                          // eslint-disable-next-line vskill/no-raw-color -- CSS-var fallback for legacy themes
                           color: "var(--color-paper, #fff)",
+                          // eslint-disable-next-line vskill/no-raw-color -- CSS-var fallback for legacy themes
                           background: "var(--color-accent, #2f6f8f)",
                           borderRadius: 4,
                           textDecoration: "none",
@@ -615,7 +622,9 @@ export function CreateSkillPage() {
                     // 0703 follow-up: primary CTA uses --color-action (blue)
                     // to match the modal's Continue / Create buttons. Old
                     // --purple was too light and read as disabled.
+                    // eslint-disable-next-line vskill/no-raw-color -- CSS-var fallback for legacy themes
                     background: !sk.aiPrompt.trim() ? "var(--surface-3)" : "var(--color-action, #2F5B8E)",
+                    // eslint-disable-next-line vskill/no-raw-color -- CSS-var fallback for legacy themes
                     color: !sk.aiPrompt.trim() ? "var(--text-tertiary)" : "var(--color-action-ink, #FFFFFF)",
                     cursor: !sk.aiPrompt.trim() ? "not-allowed" : "pointer",
                   }}
@@ -984,7 +993,9 @@ export function CreateSkillPage() {
                     // 0703 follow-up: align primary CTAs on the blue action
                     // color. `--accent` was rendering too light to read as
                     // enabled vs disabled at a glance.
+                    // eslint-disable-next-line vskill/no-raw-color -- CSS-var fallback for legacy themes
                     background: sk.creating || !sk.name || !sk.description ? "var(--surface-3)" : "var(--color-action, #2F5B8E)",
+                    // eslint-disable-next-line vskill/no-raw-color -- CSS-var fallback for legacy themes
                     color: sk.creating || !sk.name || !sk.description ? "var(--text-tertiary)" : "var(--color-action-ink, #FFFFFF)",
                     cursor: sk.creating || !sk.name || !sk.description ? "not-allowed" : "pointer",
                     opacity: sk.creating ? 0.7 : 1,

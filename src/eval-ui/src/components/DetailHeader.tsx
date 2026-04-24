@@ -3,6 +3,9 @@ import type { WorkspaceState } from "../pages/workspace/workspaceTypes";
 import type { SkillInfo } from "../types";
 import { passRateColor, passRateBackground } from "../utils/passRateColor";
 import { strings } from "../strings";
+import { VersionBadge } from "./VersionBadge";
+import { AuthorLink } from "./AuthorLink";
+import { SourceFileLink } from "./SourceFileLink";
 
 // T-065: Dispatching a CustomEvent keeps DetailHeader test-mode-friendly
 // (no hook subscription to ToastProvider) while still surfacing a real
@@ -145,11 +148,11 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
         </span>
       </div>
 
-      {/* Row 2: skill name (serif) + version (tabular-nums) */}
+      {/* Row 2: skill name (serif) + VersionBadge (0707 T-008) */}
       <div
         style={{
           display: "flex",
-          alignItems: "baseline",
+          alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
           marginBottom: 8,
@@ -168,18 +171,33 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
         >
           {skill.skill}
         </h2>
-        <span
-          data-testid="detail-header-version"
-          style={{
-            fontFamily: "var(--font-sans)",
-            fontVariantNumeric: "tabular-nums",
-            fontSize: 12,
-            color: "var(--text-secondary)",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {skill.version ?? "—"}
+        {/* 0707 T-008: dedicated VersionBadge replaces the plain-text version. */}
+        <span data-testid="detail-header-version">
+          <VersionBadge version={skill.version ?? null} />
         </span>
+      </div>
+
+      {/* 0707 T-008: byline row — author (link when repoUrl parses) + source
+          file link (blob/HEAD anchor when GitHub, copy-chip otherwise). */}
+      <div
+        data-testid="detail-header-byline"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 10,
+          margin: "0 0 8px",
+          fontFamily: "var(--font-sans)",
+          fontSize: 12,
+          color: "var(--text-secondary)",
+        }}
+      >
+        <AuthorLink author={skill.author ?? null} repoUrl={skill.homepage ?? null} />
+        <SourceFileLink
+          repoUrl={skill.homepage ?? null}
+          skillPath={null}
+          absolutePath={skill.dir}
+        />
       </div>
 
       {/* 0686 T-015 (US-008): "Install method" row — surfaces symlinked /

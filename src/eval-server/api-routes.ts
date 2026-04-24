@@ -24,6 +24,7 @@ import {
 } from "../eval/plugin-scanner.js";
 import { resolveGlobalSkillsDir } from "../eval/path-utils.js";
 import { loadAndValidateEvals, EvalValidationError } from "../eval/schema.js";
+import { ANTHROPIC_CATALOG_SNAPSHOT } from "../eval/anthropic-catalog.js";
 import type { EvalsFile } from "../eval/schema.js";
 import { readBenchmark } from "../eval/benchmark.js";
 import type { BenchmarkResult, BenchmarkCase, BenchmarkAssertionResult } from "../eval/benchmark.js";
@@ -637,21 +638,32 @@ interface ModelOption {
   pricing?: { prompt: number; completion: number };  // USD per 1M tokens
 }
 
-// 0701 — Anthropic API pricing per 1M tokens (input/output only; cache read/write
-// not surfaced in this release).
-// Source: https://www.anthropic.com/pricing — snapshot 2026-04-24. Re-verify annually.
+// 0711 — Anthropic models + pricing now derive from the dated catalog
+// snapshot at `src/eval/anthropic-catalog.ts`. Manual maintenance of this
+// list led to stale prices (Opus 4.7 shown at $15/$75 instead of $5/$25)
+// because three different files held copies of the same fact. The catalog
+// file is the single source of truth; CI fails if its snapshotDate is
+// older than 6 months.
+function buildAnthropicProviderModels(): ModelOption[] {
+  return ANTHROPIC_CATALOG_SNAPSHOT.models
+    .filter((m) => m.status === "active")
+    .map((m) => ({
+      id: m.id,
+      label: `${m.displayName} (API)`,
+      pricing: {
+        prompt: m.pricing.promptUsdPer1M,
+        completion: m.pricing.completionUsdPer1M,
+      },
+    }));
+}
+
 export const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
   "claude-cli": [
     { id: "sonnet", label: "Claude Sonnet" },
     { id: "opus", label: "Claude Opus" },
     { id: "haiku", label: "Claude Haiku" },
   ],
-  "anthropic": [
-    { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (API)", pricing: { prompt: 3, completion: 15 } },
-    { id: "claude-opus-4-7", label: "Claude Opus 4.7 (API)", pricing: { prompt: 15, completion: 75 } },
-    { id: "claude-opus-4-6", label: "Claude Opus 4.6 (API)", pricing: { prompt: 15, completion: 75 } },
-    { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (API)", pricing: { prompt: 1, completion: 5 } },
-  ],
+  "anthropic": buildAnthropicProviderModels(),
   "ollama": [
     { id: "llama3.1:8b", label: "Llama 3.1 8B" },
     { id: "qwen2.5:32b", label: "Qwen 2.5 32B" },
@@ -714,8 +726,18 @@ let lmStudioCache: { available: boolean; models: ModelOption[]; ts: number } | n
 // OpenRouter catalog cache — 10 min TTL per-key (keyed by last-8 of apiKey
 // so two keys don't collide and we never store full keys). Exported as a
 // module const for tests to reset via resetOpenRouterCache().
+//
+// 0710 — `pricing.{prompt,completion}` is canonically USD per 1M tokens
+// (parity with PROVIDER_MODELS["anthropic"]). OpenRouter's upstream values
+// are USD per token and are converted at ingestion in /api/openrouter/models.
 type OpenRouterCacheEntry = {
-  value: Array<{ id: string; name: string; contextWindow?: number; pricing: { prompt: number; completion: number } }>;
+  value: Array<{
+    id: string;
+    name: string;
+    contextWindow?: number;
+    /** USD per 1M tokens (canonical wire unit; converted from per-token at ingestion). */
+    pricing: { prompt: number; completion: number };
+  }>;
   fetchedAt: number;
 };
 export const OPENROUTER_CACHE = new Map<string, OpenRouterCacheEntry>();
@@ -1058,9 +1080,12 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         id: m.id,
         name: m.name || m.id,
         contextWindow: typeof m.context_length === "number" ? m.context_length : undefined,
+        // 0710 — OpenRouter publishes USD per token; canonicalize to USD per 1M
+        // tokens so the wire contract matches PROVIDER_MODELS["anthropic"]
+        // (3, 15, 75, …) and every consumer can assume one unit.
         pricing: {
-          prompt: parseFloat(m.pricing?.prompt || "0"),
-          completion: parseFloat(m.pricing?.completion || "0"),
+          prompt: parseFloat(m.pricing?.prompt || "0") * 1_000_000,
+          completion: parseFloat(m.pricing?.completion || "0") * 1_000_000,
         },
       }));
       OPENROUTER_CACHE.set(cacheKey, { value: models, fetchedAt: now });

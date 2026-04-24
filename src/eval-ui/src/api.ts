@@ -2,6 +2,40 @@
 import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel, VersionEntry, VersionDiff, AgentsResponse, StudioOp, Provenance, TransferEvent, SkillScope, SkillGroup, SkillSource } from "./types";
 
 // ---------------------------------------------------------------------------
+// 0707 T-025: backend envelope types for the four hardened studio endpoints.
+// These describe the wire shapes emitted by `src/eval-server/api-routes.ts`
+// so UI components that need the envelope metadata (`source`, `exists`,
+// `count`) can import them without guessing. Existing high-level getters
+// (e.g. `getSkillVersions`) continue to return the flat collection shape for
+// backward compatibility and unwrap the envelope internally — consumers that
+// want the envelope metadata use the `*Envelope` variants.
+// ---------------------------------------------------------------------------
+
+/** Envelope returned by GET /api/skills/:plugin/:skill/versions. */
+export interface SkillVersionsEnvelope {
+  versions: VersionEntry[];
+  count: number;
+  /** "platform" = live data from Verified-Skill API, "none" = skill has no
+   *  VCS surface (local fixture, platform unreachable). When "none" the
+   *  response also carries header `X-Skill-VCS: unavailable`. */
+  source: "platform" | "none";
+}
+
+/** Envelope returned by GET /api/skills/:plugin/:skill/evals. */
+export type SkillEvalsEnvelope =
+  | ({ exists: true } & EvalsFile)
+  | { exists: false; evals: [] };
+
+/** Envelope returned by GET /api/skills/:plugin/:skill/activation-history. */
+export interface ActivationHistoryEnvelope {
+  runs: Array<Record<string, unknown>>;
+  count: number;
+}
+
+/** Envelope returned by GET /api/skills/:plugin/:skill/benchmark/latest. */
+export type BenchmarkLatestEnvelope = BenchmarkResult | null;
+
+// ---------------------------------------------------------------------------
 // 0698 T-001: scope normalizer + derivation.
 //
 // The eval-server may return either legacy (`own`/`installed`/`global`) or new
@@ -293,8 +327,43 @@ export const api = {
     return fetchJson(`/api/skills/${plugin}/${skill}`);
   },
 
-  getEvals(plugin: string, skill: string): Promise<EvalsFile> {
+  // 0707 T-025: backend envelope is
+  //   200 { exists: false, evals: [] }     when evals.json is missing
+  //   200 { exists: true,  ...EvalsFile }  when valid
+  //   422 { error, errors[] }              when malformed
+  // For backward compatibility this helper returns `EvalsFile` directly —
+  // callers that need `exists: false` vs malformed can use
+  // `getEvalsEnvelope` instead. When `exists: false`, we return a
+  // well-formed but empty EvalsFile so existing consumers don't NPE.
+  async getEvals(plugin: string, skill: string): Promise<EvalsFile> {
+    const env = await fetchJson<SkillEvalsEnvelope | EvalsFile>(
+      `/api/skills/${plugin}/${skill}/evals`,
+    );
+    if (env && typeof env === "object" && "exists" in env) {
+      if (env.exists === false) {
+        return { skill_name: skill, evals: [] } as EvalsFile;
+      }
+      // exists: true — envelope spreads EvalsFile fields on the root.
+      // Strip `exists` before returning to callers.
+      const { exists: _exists, ...rest } = env;
+      return rest as EvalsFile;
+    }
+    // Legacy shape (no `exists` field) — return as-is.
+    return env as EvalsFile;
+  },
+
+  getEvalsEnvelope(
+    plugin: string,
+    skill: string,
+  ): Promise<SkillEvalsEnvelope> {
     return fetchJson(`/api/skills/${plugin}/${skill}/evals`);
+  },
+
+  getActivationHistoryEnvelope(
+    plugin: string,
+    skill: string,
+  ): Promise<ActivationHistoryEnvelope> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/activation-history`);
   },
 
   saveEvals(plugin: string, skill: string, data: EvalsFile): Promise<EvalsFile> {
@@ -499,7 +568,26 @@ export const api = {
   // Version lifecycle (Phase 2)
   // ---------------------------------------------------------------------------
 
-  getSkillVersions(plugin: string, skill: string): Promise<VersionEntry[]> {
+  // 0707 T-025: /versions now returns an envelope
+  // `{ versions, count, source }`. This helper unwraps to the flat
+  // `VersionEntry[]` for backward compatibility with `VersionHistoryPanel`
+  // and other legacy consumers. Use `getSkillVersionsEnvelope` when the
+  // `source` / `X-Skill-VCS` metadata is needed (e.g. to badge a skill as
+  // "no version history").
+  async getSkillVersions(plugin: string, skill: string): Promise<VersionEntry[]> {
+    const env = await fetchJson<SkillVersionsEnvelope | VersionEntry[]>(
+      `/api/skills/${plugin}/${skill}/versions`,
+    );
+    // Tolerate either envelope or legacy array payloads (useful during the
+    // cross-workstream rollout window).
+    if (Array.isArray(env)) return env;
+    return Array.isArray(env.versions) ? env.versions : [];
+  },
+
+  getSkillVersionsEnvelope(
+    plugin: string,
+    skill: string,
+  ): Promise<SkillVersionsEnvelope> {
     return fetchJson(`/api/skills/${plugin}/${skill}/versions`);
   },
 

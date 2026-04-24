@@ -126,6 +126,36 @@ This skill does basic text processing.`;
     expect(deps[0].matchedTools).toContain("sentry_list_issues");
   });
 
+  it("detects EasyChamp tool patterns (custom MCP showcase)", () => {
+    const content = `---
+description: "Tournament manager"
+mcp-deps: [easychamp]
+---
+Use easychamp_generate_league to create a league and easychamp_generate_tournament, easychamp_generate_bracket, easychamp_create_schedule, easychamp_enter_results to manage it.`;
+
+    const deps = detectMcpDependencies(content);
+    expect(deps).toHaveLength(1);
+    expect(deps[0].server).toBe("EasyChamp");
+    expect(deps[0].url).toBe("https://easychamp.com/mcp");
+    expect(deps[0].transport).toBe("stdio");
+    expect(deps[0].matchedTools).toContain("easychamp_generate_league");
+    expect(deps[0].matchedTools).toContain("easychamp_generate_tournament");
+    expect(deps[0].matchedTools).toContain("easychamp_generate_bracket");
+    expect(deps[0].matchedTools).toContain("easychamp_create_schedule");
+    expect(deps[0].matchedTools).toContain("easychamp_enter_results");
+
+    // Config snippet must match the spec shape exactly:
+    // { "easychamp": { "command": "npx", "args": ["-y", "easychamp-mcp"], "env": { "EASYCHAMP_API_KEY": "${EASYCHAMP_API_KEY}" } } }
+    const parsed = JSON.parse(deps[0].configSnippet);
+    expect(parsed.mcpServers).toBeDefined();
+    expect(parsed.mcpServers.easychamp).toBeDefined();
+    expect(parsed.mcpServers.easychamp.command).toBe("npx");
+    expect(parsed.mcpServers.easychamp.args).toEqual(["-y", "easychamp-mcp"]);
+    expect(parsed.mcpServers.easychamp.env).toEqual({
+      EASYCHAMP_API_KEY: "${EASYCHAMP_API_KEY}",
+    });
+  });
+
   it("detects multiple new servers simultaneously", () => {
     const content = `Use notion_create_page for docs, jira_create_issue for bugs, and figma_get_file for design.`;
     const deps = detectMcpDependencies(content);

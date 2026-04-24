@@ -15,11 +15,21 @@ export interface SkillDependency {
   source: "body-reference" | "frontmatter";
 }
 
+interface StdioConfigSnippet {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+}
+
 interface McpRegistryEntry {
   server: string;
   prefixes: string[];
   url: string;
   transport: "http" | "stdio";
+  // Optional override for custom MCPs (e.g. stdio servers launched via npx).
+  // When present, takes precedence over the default `{ type: "http", url }`
+  // shape produced by buildConfigSnippet for HTTP MCPs.
+  configSnippet?: StdioConfigSnippet;
 }
 
 const MCP_REGISTRY: McpRegistryEntry[] = [
@@ -77,11 +87,38 @@ const MCP_REGISTRY: McpRegistryEntry[] = [
     url: "https://mcp.sentry.dev/mcp",
     transport: "http",
   },
+  {
+    // Custom showcase MCP (US-005): demonstrates how a non-HTTP, user-owned
+    // MCP server plugs into the registry. Launched via npx over stdio with
+    // an API-key env var — copied into the user's Claude config verbatim
+    // from `configSnippet`.
+    server: "EasyChamp",
+    prefixes: ["easychamp_"],
+    url: "https://easychamp.com/mcp",
+    transport: "stdio",
+    configSnippet: {
+      command: "npx",
+      args: ["-y", "easychamp-mcp"],
+      env: { EASYCHAMP_API_KEY: "${EASYCHAMP_API_KEY}" },
+    },
+  },
 ];
 
-function buildConfigSnippet(serverKey: string, url: string): string {
+function buildConfigSnippet(entry: McpRegistryEntry): string {
+  const key = entry.server.toLowerCase().replace(/\s+/g, "-");
+
+  // Custom stdio MCPs (e.g. EasyChamp) carry a pre-authored config block.
+  if (entry.transport === "stdio" && entry.configSnippet) {
+    return JSON.stringify(
+      { mcpServers: { [key]: entry.configSnippet } },
+      null,
+      2,
+    );
+  }
+
+  // Default HTTP shape used by the built-in hosted MCPs.
   return JSON.stringify(
-    { mcpServers: { [serverKey.toLowerCase()]: { type: "http", url } } },
+    { mcpServers: { [key]: { type: "http", url: entry.url } } },
     null,
     2,
   );
@@ -151,7 +188,7 @@ export function detectMcpDependencies(content: string): McpDependency[] {
       url: entry.url,
       transport: entry.transport,
       matchedTools: [...new Set(matched)],
-      configSnippet: buildConfigSnippet(entry.server, entry.url),
+      configSnippet: buildConfigSnippet(entry),
     });
   }
 

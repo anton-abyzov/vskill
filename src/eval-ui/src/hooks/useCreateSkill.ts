@@ -222,7 +222,24 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
   const abortRef = useRef<AbortController | null>(null);
 
   // AI generation metadata (stored for history/persistence)
-  const aiMetaRef = useRef<{ prompt: string; provider: string; model: string; reasoning: string } | null>(null);
+  // 0711: AI metadata now records BOTH the alias the user picked AND the
+  // resolved concrete model ID (when the server returns one). Storing the
+  // resolved ID lets future regenerations on a different model produce a
+  // diff instead of looking identical at the alias level.
+  const aiMetaRef = useRef<{
+    prompt: string;
+    provider: string;
+    /** Whatever alias / id the user requested (e.g. "opus", "claude-opus-4-7"). */
+    model: string;
+    /** Catalog-resolved canonical id when the server confirms it; null otherwise. */
+    resolvedModelId?: string | null;
+    /** Catalog snapshot date the resolution was based on. */
+    snapshotDate?: string | null;
+    reasoning: string;
+  } | null>(null);
+  // 0711: server-side `provenance` SSE event lands here so the next `done`
+  // event can fold it into aiMeta. Reset on every new generate run.
+  const provenanceRef = useRef<{ resolvedModelId: string | null; snapshotDate: string | null } | null>(null);
 
   // Draft path tracking for cleanup on plugin change
   const draftDirRef = useRef<string | null>(null);
@@ -329,6 +346,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
     setAiClassifiedError(null);
     setAiProgress([]);
     aiMetaRef.current = null;
+    provenanceRef.current = null;
     if (!aiPrompt.trim()) { setAiError("Describe what your skill should do"); return; }
 
     setGenerating(true);
@@ -377,11 +395,27 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
               const data = JSON.parse(line.slice(6));
               if (currentEvent === "progress") {
                 setAiProgress((prev) => [...prev, { phase: data.phase, message: data.message, timestamp: Date.now() }]);
+              } else if (currentEvent === "provenance") {
+                // 0711: server-side resolved model + snapshot date. Stash on
+                // a ref so the next `done` event includes it in aiMeta. We
+                // don't surface it in the UI directly — it's audit metadata.
+                provenanceRef.current = {
+                  resolvedModelId: typeof data.resolvedModelId === "string" ? data.resolvedModelId : null,
+                  snapshotDate: typeof data.snapshotDate === "string" ? data.snapshotDate : null,
+                };
               } else if (currentEvent === "done" || currentEvent === "complete") {
+                // 0711: aiMeta records the resolved concrete ID + the
+                // catalog snapshot date that produced it (captured from the
+                // separate `provenance` SSE event the server emits before
+                // `done`). Saving both the alias the user picked and the
+                // ID it resolved to lets future regenerations on a newer
+                // model produce a meaningful diff.
                 const meta = {
                   prompt: aiPrompt.trim(),
                   provider: resolveAiConfig().provider,
                   model: resolveAiConfig().model,
+                  resolvedModelId: provenanceRef.current?.resolvedModelId ?? null,
+                  snapshotDate: provenanceRef.current?.snapshotDate ?? null,
                   reasoning: data.reasoning || "",
                 };
 

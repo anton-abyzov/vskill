@@ -132,23 +132,33 @@ describe("T-026 DetailHeader — redesigned header", () => {
     expect(copyBtns.length).toBe(1);
   });
 
-  it("renders version using tabular numbers", () => {
+  it("renders version using tabular numbers (now via VersionBadge — 0707 T-008)", () => {
     const skill = makeSkill({ version: "1.3.0" });
     const tree = DetailHeader({ skill });
-    const tabs = findAll(tree, (el) => {
-      const style = el.props?.style as Record<string, string> | undefined;
-      return !!style && style.fontVariantNumeric === "tabular-nums";
+    // The VersionBadge appears as a function-component element whose props
+    // carry the raw version. Verify the version slot wraps a VersionBadge
+    // call (which internally applies `font-variant-numeric: tabular-nums`).
+    const versionSlot = findAll(tree, (el) => el.props?.["data-testid"] === "detail-header-version")[0];
+    expect(versionSlot).toBeDefined();
+    const badgeCandidates = findAll(versionSlot, (el) => {
+      if (typeof el.type !== "function") return false;
+      const name = (el.type as { name?: string }).name ?? "";
+      return name === "VersionBadge";
     });
-    const anyHasVersion = tabs.some((el) => collectText(el).includes("1.3.0"));
-    expect(anyHasVersion).toBe(true);
+    expect(badgeCandidates.length).toBe(1);
+    expect((badgeCandidates[0].props as { version?: string }).version).toBe("1.3.0");
   });
 
-  it("renders an em-dash placeholder for null version", () => {
+  it("hides the version slot entirely when no version is declared (0707 T-008)", () => {
     const skill = makeSkill({ version: null });
     const tree = DetailHeader({ skill });
-    const text = collectText(tree);
-    // Em-dash for missing version
-    expect(text).toContain("—");
+    // The detail-header-version <span> is still present but VersionBadge
+    // renders null when version is missing — so no "v…" text leaks into
+    // the header, and the plain em-dash is no longer required.
+    const versionSlot = findAll(tree, (el) => el.props?.["data-testid"] === "detail-header-version")[0];
+    expect(versionSlot).toBeDefined();
+    const text = collectText(versionSlot);
+    expect(text).not.toMatch(/v\d/);
   });
 
   it("uses bg-surface background and 1px border-default border (no shadow)", () => {

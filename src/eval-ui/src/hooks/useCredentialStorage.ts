@@ -4,21 +4,24 @@
 // All methods POST/GET/DELETE against /api/settings/keys. Keys are never
 // stored in browser localStorage by this hook — the server is SSoT. The
 // hook returns metadata only, never the raw key.
+//
+// 0702: Storage-mode selection removed. Keys persist server-side to
+// `~/.vskill/keys.env`. Save signature no longer accepts a storage-mode
+// parameter — there is a single storage path.
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from "react";
 
-export type CredentialProvider = "anthropic" | "openrouter";
-export type StorageTier = "browser" | "keychain";
+export type CredentialProvider = "anthropic" | "openai" | "openrouter";
 
 export interface CredentialStatus {
   stored: boolean;
   updatedAt: string | null;
-  tier: StorageTier;
 }
 
 export interface CredentialStorageState {
   anthropic: CredentialStatus;
+  openai: CredentialStatus;
   openrouter: CredentialStatus;
 }
 
@@ -26,14 +29,15 @@ export interface UseCredentialStorageResult {
   state: CredentialStorageState | null;
   loading: boolean;
   error: string | null;
-  save: (provider: CredentialProvider, key: string, tier?: StorageTier) => Promise<{ ok: boolean; warning?: string }>;
+  save: (provider: CredentialProvider, key: string) => Promise<{ ok: boolean; warning?: string }>;
   remove: (provider: CredentialProvider) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
 const INITIAL: CredentialStorageState = {
-  anthropic: { stored: false, updatedAt: null, tier: "browser" },
-  openrouter: { stored: false, updatedAt: null, tier: "browser" },
+  anthropic: { stored: false, updatedAt: null },
+  openai: { stored: false, updatedAt: null },
+  openrouter: { stored: false, updatedAt: null },
 };
 
 export function useCredentialStorage(): UseCredentialStorageResult {
@@ -46,7 +50,7 @@ export function useCredentialStorage(): UseCredentialStorageResult {
     try {
       const resp = await fetch("/api/settings/keys");
       if (!resp.ok) throw new Error(`GET /api/settings/keys returned ${resp.status}`);
-      const data = (await resp.json()) as CredentialStorageState;
+      const data = (await resp.json()) as Partial<CredentialStorageState>;
       setState({ ...INITIAL, ...data });
       setError(null);
     } catch (e) {
@@ -61,11 +65,11 @@ export function useCredentialStorage(): UseCredentialStorageResult {
     void refresh();
   }, [refresh]);
 
-  const save = useCallback(async (provider: CredentialProvider, key: string, tier: StorageTier = "browser") => {
+  const save = useCallback(async (provider: CredentialProvider, key: string) => {
     const resp = await fetch("/api/settings/keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, key, tier }),
+      body: JSON.stringify({ provider, key }),
     });
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({ error: resp.statusText }));

@@ -1,13 +1,19 @@
 // ---------------------------------------------------------------------------
-// SettingsModal — unified surface for API keys + storage tier.
+// SettingsModal — unified surface for API keys.
 //
 // Reachable from AgentModelPicker footer or via Cmd+, . Focus-trapped,
 // ARIA-compliant, motion-bypassed under prefers-reduced-motion.
+//
+// 0702: Storage-mode selection removed. Keys live in a single file at
+// `~/.vskill/keys.env` (server resolves the absolute path via
+// `GET /api/settings/storage-path`). Three providers: anthropic, openai,
+// openrouter (ids sourced from the list-keys response shape).
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useCredentialStorage, type CredentialProvider, type StorageTier } from "../hooks/useCredentialStorage";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useCredentialStorage, type CredentialProvider } from "../hooks/useCredentialStorage";
 import { strings } from "../strings";
+import { MigrationBanner } from "./MigrationBanner";
 
 export interface SettingsModalProps {
   open: boolean;
@@ -16,25 +22,37 @@ export interface SettingsModalProps {
   onToast?: (message: string) => void;
 }
 
-const PROVIDERS: { id: CredentialProvider; name: string; keyIssuanceUrl: string; prefix: string }[] = [
+interface ProviderMeta {
+  id: CredentialProvider;
+  name: string;
+  keyIssuanceUrl: string;
+  prefix: string;
+  placeholder: string;
+}
+
+const PROVIDERS: ProviderMeta[] = [
   {
     id: "anthropic",
     name: strings.providers.anthropic.name,
     keyIssuanceUrl: strings.providers.anthropic.keyIssuanceUrl,
     prefix: strings.providers.anthropic.keyPrefix,
+    placeholder: `Paste ${strings.providers.anthropic.name} key`,
+  },
+  {
+    id: "openai",
+    name: strings.providers.openai.name,
+    keyIssuanceUrl: strings.providers.openai.keyIssuanceUrl,
+    prefix: strings.providers.openai.keyPrefix,
+    placeholder: strings.providers.openai.pastePlaceholder,
   },
   {
     id: "openrouter",
     name: strings.providers.openrouter.name,
     keyIssuanceUrl: strings.providers.openrouter.keyIssuanceUrl,
     prefix: strings.providers.openrouter.keyPrefix,
+    placeholder: `Paste ${strings.providers.openrouter.name} key`,
   },
 ];
-
-function isDarwin(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return /Mac|iPhone|iPad/.test(navigator.platform);
-}
 
 function formatRelative(iso: string): string {
   const delta = Date.now() - new Date(iso).getTime();
@@ -45,17 +63,32 @@ function formatRelative(iso: string): string {
 }
 
 export function SettingsModal({ open, onClose, initialProvider, onToast }: SettingsModalProps) {
-  const { state, save, remove } = useCredentialStorage();
-  const [tier, setTier] = useState<StorageTier>("browser");
+  const { state, save, remove, refresh } = useCredentialStorage();
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
-  const [focusIndex, setFocusIndex] = useState<string | null>(initialProvider ?? "anthropic");
+  const [storagePath, setStoragePath] = useState<string | null>(null);
 
-  // Focus management: trap + initial focus.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await fetch("/api/settings/storage-path");
+        if (!resp.ok) throw new Error(`GET /api/settings/storage-path returned ${resp.status}`);
+        const data = (await resp.json()) as { path: string };
+        if (!cancelled) setStoragePath(data.path ?? null);
+      } catch {
+        if (!cancelled) setStoragePath(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    // Find the first input to focus.
     const t = setTimeout(() => {
       const selector = initialProvider
         ? `input[data-provider="${initialProvider}"]`
@@ -69,7 +102,6 @@ export function SettingsModal({ open, onClose, initialProvider, onToast }: Setti
     };
   }, [open, initialProvider]);
 
-  // Escape + focus trap.
   useEffect(() => {
     if (!open) return;
     const handleKey = (e: KeyboardEvent) => {
@@ -98,9 +130,17 @@ export function SettingsModal({ open, onClose, initialProvider, onToast }: Setti
     return () => document.removeEventListener("keydown", handleKey);
   }, [open, onClose]);
 
-  if (!open) return null;
+  const copyPath = useCallback(async () => {
+    if (!storagePath) return;
+    try {
+      await navigator.clipboard?.writeText?.(storagePath);
+      onToast?.(strings.settings.pathCopied);
+    } catch {
+      // Clipboard denied — no-op.
+    }
+  }, [onToast, storagePath]);
 
-  const darwin = isDarwin();
+  if (!open) return null;
 
   return (
     <div
@@ -143,6 +183,8 @@ export function SettingsModal({ open, onClose, initialProvider, onToast }: Setti
           {strings.settings.title}
         </h2>
 
+        <MigrationBanner onMigrated={() => { void refresh(); }} />
+
         <div
           role="note"
           data-testid="settings-banner"
@@ -169,10 +211,10 @@ export function SettingsModal({ open, onClose, initialProvider, onToast }: Setti
               providerName={p.name}
               keyIssuanceUrl={p.keyIssuanceUrl}
               prefix={p.prefix}
+              placeholder={p.placeholder}
               metadata={state?.[p.id]}
-              tier={tier}
               onSave={async (key) => {
-                const res = await save(p.id, key, tier);
+                const res = await save(p.id, key);
                 onToast?.(strings.settings.keySaved(p.name));
                 return res;
               }}
@@ -185,42 +227,35 @@ export function SettingsModal({ open, onClose, initialProvider, onToast }: Setti
           ))}
         </section>
 
-        <section aria-labelledby="settings-storage-title">
-          <h3 id="settings-storage-title" style={{ fontSize: 13, fontWeight: 600, margin: "0 0 12px 0" }}>
-            {strings.settings.sectionStorage}
-          </h3>
-          {darwin ? (
-            <fieldset style={{ border: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
-                <input
-                  type="radio"
-                  name="storage-tier"
-                  value="browser"
-                  checked={tier === "browser"}
-                  onChange={() => setTier("browser")}
-                />
-                {strings.settings.storageBrowser}
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
-                <input
-                  type="radio"
-                  name="storage-tier"
-                  value="keychain"
-                  checked={tier === "keychain"}
-                  onChange={() => setTier("keychain")}
-                />
-                {strings.settings.storageKeychain}
-              </label>
-            </fieldset>
-          ) : (
-            <div style={{ fontSize: 12, color: "var(--text-muted, var(--text-tertiary))" }}>
-              {strings.settings.storageBrowser}
-              <span title={strings.settings.storageDarwinOnly} style={{ marginLeft: 8 }}>
-                ({strings.settings.storageDarwinOnly})
-              </span>
-            </div>
-          )}
-        </section>
+        <div
+          data-testid="settings-storage-path"
+          style={{
+            fontSize: 11,
+            color: "var(--text-muted, var(--text-tertiary))",
+            fontStyle: "italic",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 12,
+          }}
+        >
+          <span style={{ flex: 1 }}>
+            {storagePath ? strings.settings.storagePath(storagePath) : strings.settings.storagePathFallback}
+          </span>
+          <button
+            type="button"
+            onClick={copyPath}
+            disabled={!storagePath}
+            data-testid="settings-copy-path"
+            style={{
+              ...buttonStyle,
+              opacity: storagePath ? 1 : 0.5,
+              cursor: storagePath ? "pointer" : "not-allowed",
+            }}
+          >
+            {strings.settings.copyPath}
+          </button>
+        </div>
 
         <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end" }}>
           <button
@@ -249,8 +284,8 @@ interface ProviderKeyRowProps {
   providerName: string;
   keyIssuanceUrl: string;
   prefix: string;
-  metadata: { stored: boolean; updatedAt: string | null; tier: StorageTier } | undefined;
-  tier: StorageTier;
+  placeholder: string;
+  metadata: { stored: boolean; updatedAt: string | null } | undefined;
   onSave: (key: string) => Promise<{ ok: boolean; warning?: string }>;
   onRemove: () => Promise<void>;
   inputRef?: React.RefObject<HTMLInputElement | null>;
@@ -261,6 +296,7 @@ function ProviderKeyRow({
   providerName,
   keyIssuanceUrl,
   prefix,
+  placeholder,
   metadata,
   onSave,
   onRemove,
@@ -279,11 +315,13 @@ function ProviderKeyRow({
   const save = useCallback(async () => {
     if (emptyGuard) return;
     setSaving(true);
+    const toSend = trimmed;
+    // Clear input immediately — shrink plaintext dwell time in component state.
+    setValue("");
     try {
-      const res = await onSave(trimmed);
+      const res = await onSave(toSend);
       if (res.warning) setWarning(res.warning);
       else setWarning(null);
-      setValue("");
     } finally {
       setSaving(false);
     }
@@ -338,7 +376,7 @@ function ProviderKeyRow({
             setWarning(null);
           }}
           data-provider={providerId}
-          placeholder={`Paste ${providerName} key`}
+          placeholder={placeholder}
           style={{
             flex: 1,
             padding: "6px 8px",
@@ -357,11 +395,6 @@ function ProviderKeyRow({
           {strings.settings.paste}
         </button>
       </div>
-      {emptyGuard && value.length > 0 && (
-        <div role="status" style={errorStyle}>
-          {strings.settings.enterNonEmpty}
-        </div>
-      )}
       {prefixLooksWrong && (
         <div role="status" data-testid={`prefix-warn-${providerId}`} style={warnStyle}>
           {strings.settings.prefixWarn(providerName)}
@@ -437,11 +470,6 @@ const buttonStyle: React.CSSProperties = {
   color: "var(--text-primary)",
   fontSize: 12,
   cursor: "pointer",
-};
-
-const errorStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: "var(--danger, #b33)",
 };
 
 const warnStyle: React.CSSProperties = {

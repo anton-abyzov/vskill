@@ -185,9 +185,59 @@ export function makeCreateSkillHandler(root: string) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// 0703 hotfix — GET /api/authoring/skill-exists
+//
+// Pre-flight probe used by CreateSkillModal before it redirects to the
+// generator. Mirrors the validation + skillDir resolution from the POST
+// handler but NEVER writes; just returns { exists, path }. Returns 400 on
+// invalid input, 404 when existing-plugin mode targets a missing plugin.
+// ---------------------------------------------------------------------------
+export function makeSkillExistsHandler(root: string) {
+  return async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const mode = url.searchParams.get("mode");
+    const skillName = url.searchParams.get("skillName") ?? undefined;
+    const pluginName = url.searchParams.get("pluginName") ?? undefined;
+
+    if (mode !== "standalone" && mode !== "existing-plugin" && mode !== "new-plugin") {
+      return sendError(res, 400, "invalid-mode", "mode must be 'standalone', 'existing-plugin', or 'new-plugin'");
+    }
+
+    const skillErr = validateKebab(skillName, "skillName");
+    if (skillErr) return sendError(res, 400, "invalid-skill-name", skillErr);
+
+    let skillDir: string;
+    if (mode === "standalone") {
+      skillDir = join(root, "skills", skillName!);
+    } else {
+      const pluginErr = validateKebab(pluginName, "pluginName");
+      if (pluginErr) return sendError(res, 400, "invalid-plugin-name", pluginErr);
+      const pluginDir = join(root, pluginName!);
+      if (mode === "existing-plugin") {
+        const manifestPath = join(pluginDir, ".claude-plugin", "plugin.json");
+        if (!existsSync(manifestPath)) {
+          return sendError(
+            res,
+            404,
+            "plugin-not-found",
+            `Plugin '${pluginName}' not found: ${manifestPath} does not exist`,
+          );
+        }
+      }
+      skillDir = join(pluginDir, "skills", skillName!);
+    }
+
+    sendJson(res, { exists: existsSync(skillDir), path: skillDir }, 200);
+  };
+}
+
 export function registerAuthoringRoutes(router: Router, root: string): void {
   const handler = makeCreateSkillHandler(root);
   router.post("/api/authoring/create-skill", (req, res) => handler(req, res));
+
+  const existsHandler = makeSkillExistsHandler(root);
+  router.get("/api/authoring/skill-exists", (req, res) => existsHandler(req, res));
 
   // Helper endpoint: list authored plugins in the current root so the modal
   // can populate the "existing plugin" dropdown.

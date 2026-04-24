@@ -119,7 +119,41 @@ export function CreateSkillModal({
 
   const pathPreview = computePathPreview(projectRoot, mode, pluginName, skillName);
 
-  function routeToGenerator(): void {
+  async function routeToGenerator(): Promise<void> {
+    // 0703 hotfix: pre-flight uniqueness check before we navigate off. The
+    // "Create empty scaffold" path already handles 409 server-side, but the
+    // AI branch previously redirected blindly and users only discovered the
+    // clash after investing a prompt. Fail fast instead.
+    setError(null);
+    setSubmitting(true);
+    try {
+      const probeParams = new URLSearchParams();
+      probeParams.set("mode", mode);
+      probeParams.set("skillName", skillName);
+      if (pluginName) probeParams.set("pluginName", pluginName);
+      const probeRes = await fetch(`/api/authoring/skill-exists?${probeParams.toString()}`);
+      const probeBody = (await probeRes.json()) as {
+        exists?: boolean;
+        path?: string;
+        error?: string;
+      };
+      if (!probeRes.ok) {
+        setError(probeBody.error ?? `Check failed: ${probeRes.status}`);
+        return;
+      }
+      if (probeBody.exists) {
+        setError(
+          `Skill '${skillName}' already exists${probeBody.path ? ` at ${probeBody.path}` : ""}`,
+        );
+        return;
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return;
+    } finally {
+      setSubmitting(false);
+    }
+
     // 0698 polish: chain to the existing AI-generation flow at /create with
     // the destination pre-encoded as query params so the page can surface the
     // target path in its UI.
@@ -421,7 +455,7 @@ export function CreateSkillModal({
               </button>
               <button
                 type="button"
-                onClick={routeToGenerator}
+                onClick={() => void routeToGenerator()}
                 disabled={!canSubmit}
                 style={{ ...secondaryButtonStyle, opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "not-allowed" }}
                 title="Opens the AI generation flow with this destination pre-selected (choose Claude Code, Anthropic API, OpenRouter, or local models)"

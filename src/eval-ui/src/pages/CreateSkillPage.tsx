@@ -11,6 +11,7 @@ import type { InstalledAgentEntry } from "../components/AgentSelector";
 import {
   readStudioPreferences,
   writeStudioPreference,
+  getStudioPreference,
 } from "../hooks/useStudioPreferences";
 
 // ---------------------------------------------------------------------------
@@ -116,6 +117,14 @@ export function CreateSkillPage() {
   // Installed agents list (loaded from API)
   const [installedAgents, setInstalledAgents] = useState<InstalledAgentEntry[]>([]);
 
+  // 0703 hotfix: active scope agent drives whether the Target Agents section
+  // is shown. A Claude-Code-scoped skill lives in .claude/skills and targets
+  // Claude Code by default — surfacing Cursor / Codex CLI / Copilot rows is
+  // noise. When the user picks a non-Claude scope (e.g. Cursor), the section
+  // reappears so they can still opt into cross-platform targets.
+  const activeAgentId = getStudioPreference<string | null>("activeAgent", null);
+  const showTargetAgents = activeAgentId !== "claude-code";
+
   // Load installed agents from API
   useEffect(() => {
     fetch("/api/agents/installed")
@@ -218,12 +227,18 @@ export function CreateSkillPage() {
   });
 
   // 0698 polish: apply modal-chain prefill once on mount.
+  // 0703 hotfix: also seed aiPrompt from ?description so the Generate button
+  // is enabled on arrival (otherwise the user lands on an empty textarea and
+  // thinks the flow is dead).
   useEffect(() => {
     if (prefill.skillName && !sk.name) {
       sk.setName(toKebab(prefill.skillName));
     }
     if (prefill.description && !sk.description) {
       sk.setDescription(prefill.description);
+    }
+    if (prefill.description && !sk.aiPrompt) {
+      sk.setAiPrompt(prefill.description);
     }
     if (prefill.pluginName && !sk.plugin) {
       sk.setPlugin(toKebab(prefill.pluginName));
@@ -488,8 +503,10 @@ export function CreateSkillPage() {
               </div>
             </div>
 
-            {/* Target Agents (optional) */}
-            {installedAgents.length > 0 && (
+            {/* Target Agents (optional) — hidden when Claude Code is the
+                active scope (0703: Claude-Code-scoped skills don't need
+                cross-platform target-agents). */}
+            {showTargetAgents && installedAgents.length > 0 && (
               <div className="glass-card p-5">
                 <h3 className="text-[13px] font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
                   Target Agents

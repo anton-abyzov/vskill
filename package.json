@@ -81,6 +81,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
     "commander": "^14.0.3",
+    "minimatch": "^9.0.9",
     "simple-git": "~3.33.0"
   }
 }

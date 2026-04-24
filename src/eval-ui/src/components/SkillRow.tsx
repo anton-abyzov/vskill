@@ -64,6 +64,10 @@ function SkillRowBase({ skill, isSelected, onSelect, onContextMenu }: Props) {
       data-testid="skill-row"
       data-selected={isSelected}
       data-origin={skill.origin}
+      // 0704: stable DOM id used by the Sidebar reveal effect to scroll a
+      // just-created skill into view after the sidebar rehydrates with
+      // fresh data.
+      data-skill-id={`${skill.plugin}/${skill.skill}`}
       style={{
         // Layout
         display: "flex",

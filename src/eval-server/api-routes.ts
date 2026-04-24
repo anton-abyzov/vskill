@@ -17,6 +17,10 @@ import { getSkillSemaphore } from "./concurrency.js";
 import { resolveSkillDir } from "./skill-resolver.js";
 import { scanSkills, classifyOrigin, scanSkillsTriScope } from "../eval/skill-scanner.js";
 import type { SkillInfo, SkillScope } from "../eval/skill-scanner.js";
+import {
+  scanInstalledPluginSkills,
+  scanAuthoredPluginSkills,
+} from "../eval/plugin-scanner.js";
 import { resolveGlobalSkillsDir } from "../eval/path-utils.js";
 import { loadAndValidateEvals, EvalValidationError } from "../eval/schema.js";
 import type { EvalsFile } from "../eval/schema.js";
@@ -1191,7 +1195,21 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       }
     }
 
-    const skills = await scanSkillsTriScope(root, { agentId: activeAgent });
+    // 0698 T-002/T-004/T-005: merge legacy tri-scope scan with the two new
+    // plugin scanners (installed plugin cache + authored plugin sources).
+    // scanSkillsTriScope already attaches `scopeV2`/`group`/`source` via
+    // `enrichAndComputePrecedence`. The plugin scanners return rows already
+    // tagged `scopeV2="available-plugin"` / `"authoring-plugin"`.
+    const [triScopeSkills, installedPluginSkills, authoredPluginSkills] = await Promise.all([
+      scanSkillsTriScope(root, { agentId: activeAgent }),
+      Promise.resolve(scanInstalledPluginSkills({ agentId: activeAgent })),
+      Promise.resolve(scanAuthoredPluginSkills({ agentId: activeAgent, projectRoot: root })),
+    ]);
+    const skills: SkillInfo[] = [
+      ...triScopeSkills,
+      ...installedPluginSkills,
+      ...authoredPluginSkills,
+    ];
     const enriched = await Promise.all(
       skills.map(async (s) => {
         let evalCount = 0;

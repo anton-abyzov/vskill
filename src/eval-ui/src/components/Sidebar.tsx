@@ -69,6 +69,70 @@ function scopeOf(s: SkillInfo): "own" | "installed" | "global" {
   return s.origin === "installed" ? "installed" : "own";
 }
 
+// 0698 T-009 (fix): partition by new group+source axes. Buckets map 1:1 to
+// the two-tier sidebar layout: AVAILABLE = (project, personal, plugin);
+// AUTHORING = (project, plugin). Plugin buckets additionally track their
+// `pluginName` for PluginTreeGroup rendering.
+interface FiveScopeBuckets {
+  availableProject: SectionData;
+  availablePersonal: SectionData;
+  availablePlugin: SectionData;
+  authoringProject: SectionData;
+  authoringPlugin: SectionData;
+}
+
+function partitionByGroupSource(
+  skills: SkillInfo[],
+  query: string,
+): FiveScopeBuckets {
+  const bins = {
+    availableProject: [] as SkillInfo[],
+    availablePersonal: [] as SkillInfo[],
+    availablePlugin: [] as SkillInfo[],
+    authoringProject: [] as SkillInfo[],
+    authoringPlugin: [] as SkillInfo[],
+  };
+  for (const s of skills) {
+    // Prefer scopeV2; fall back to deriving from legacy `scope` field so
+    // the UI keeps working if the server hasn't populated the new fields yet.
+    const v2 =
+      s.scopeV2 ??
+      (s.scope === "installed"
+        ? "available-project"
+        : s.scope === "global"
+          ? "available-personal"
+          : "authoring-project");
+    if (v2 === "available-project") bins.availableProject.push(s);
+    else if (v2 === "available-personal") bins.availablePersonal.push(s);
+    else if (v2 === "available-plugin") bins.availablePlugin.push(s);
+    else if (v2 === "authoring-plugin") bins.authoringPlugin.push(s);
+    else bins.authoringProject.push(s);
+  }
+
+  function buildSection(source: SkillInfo[]): SectionData {
+    const filtered = source.filter((s) => matchSkillQuery(s, query));
+    const byPluginMap: Record<string, SkillInfo[]> = {};
+    for (const s of filtered) {
+      // For plugin rows, group by the plugin's real name (pluginName), not
+      // the workspace-level `plugin` dir that the standalone scanner emits.
+      const key = s.pluginName ?? s.plugin;
+      (byPluginMap[key] ||= []).push(s);
+    }
+    const byPlugin = Object.entries(byPluginMap).sort((a, b) =>
+      a[0].localeCompare(b[0]),
+    );
+    return { total: source.length, filtered: filtered.length, byPlugin };
+  }
+
+  return {
+    availableProject: buildSection(bins.availableProject),
+    availablePersonal: buildSection(bins.availablePersonal),
+    availablePlugin: buildSection(bins.availablePlugin),
+    authoringProject: buildSection(bins.authoringProject),
+    authoringPlugin: buildSection(bins.authoringPlugin),
+  };
+}
+
 function partitionTriScope(
   skills: SkillInfo[],
   query: string,
@@ -166,6 +230,13 @@ export function Sidebar({
     () => partitionTriScope(skills, deferredQuery),
     [skills, deferredQuery],
   );
+  // 0698 T-009 (fix): five-bucket partition drives the AVAILABLE (Project /
+  // Personal / Plugins) + AUTHORING (Skills / Plugins) rendering.
+  const five = useMemo(
+    () => partitionByGroupSource(skills, deferredQuery),
+    [skills, deferredQuery],
+  );
+  const isClaudeCode = resolvedAgentId === "claude-code";
   // Keep the legacy 2-section shape callable for the non-tri-scope code
   // path — it's just `own` + (`installed` + `global` merged into installed).
   const { own, installed } = useMemo(
@@ -253,82 +324,155 @@ export function Sidebar({
 
       {!isLoading && !error && triScope && (
         <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-          {/* 0698 T-009: two-tier sidebar — AVAILABLE umbrella wraps Project
-              (legacy "installed") + Personal (legacy "global") sub-sections.
-              AUTHORING umbrella wraps Skills (legacy "own"). Plugins nodes are
-              rendered by T-010 PluginTreeGroup when source data is present.
-              Counts always displayed even when zero. */}
+          {/* 0698 T-009: two-tier sidebar with Anthropic-aligned labels.
+              AVAILABLE → Project / Personal / Plugins (CC only).
+              AUTHORING → Skills / Plugins (CC only).
+              Counts always displayed, including zero. */}
           <GroupHeader
             name={strings.scopeLabels.groupAvailable.toUpperCase()}
-            count={tri.installed.total + tri.global.total}
+            count={
+              five.availableProject.total +
+              five.availablePersonal.total +
+              five.availablePlugin.total
+            }
           />
 
-          <ScopeSection
-            scope="installed"
-            agentId={resolvedAgentId}
-            count={tri.installed.total}
-            filteredCount={query ? tri.installed.filtered : null}
+          <NamedScopeSection
+            label={strings.scopeLabels.sourceProject}
+            storageKey={`vskill-sidebar-${resolvedAgentId}-available-project-collapsed`}
+            count={five.availableProject.total}
+            filteredCount={query ? five.availableProject.filtered : null}
             updateCount={outdatedByScope?.installed ?? outdatedByOrigin?.installed}
           >
-            {tri.installed.filtered === 0 ? (
+            {five.availableProject.filtered === 0 ? (
               <InstalledEmptyState queryActive={!!query} agentId={resolvedAgentId} />
             ) : (
               <SectionList
-                items={tri.installed.byPlugin}
+                items={five.availableProject.byPlugin}
                 selectedKey={selectedKey}
                 onSelect={onSelect}
                 onContextMenu={onContextMenu}
                 useVirtual={useVirtual}
               />
             )}
-          </ScopeSection>
+          </NamedScopeSection>
 
-          <ScopeSection
-            scope="global"
-            agentId={resolvedAgentId}
-            count={tri.global.total}
-            filteredCount={query ? tri.global.filtered : null}
+          <NamedScopeSection
+            label={strings.scopeLabels.sourcePersonal}
+            storageKey={`vskill-sidebar-${resolvedAgentId}-available-personal-collapsed`}
+            count={five.availablePersonal.total}
+            filteredCount={query ? five.availablePersonal.filtered : null}
             updateCount={outdatedByScope?.global}
           >
-            {tri.global.filtered === 0 ? (
+            {five.availablePersonal.filtered === 0 ? (
               <GlobalEmptyState queryActive={!!query} agentId={resolvedAgentId} />
             ) : (
               <SectionList
-                items={tri.global.byPlugin}
+                items={five.availablePersonal.byPlugin}
                 selectedKey={selectedKey}
                 onSelect={onSelect}
                 onContextMenu={onContextMenu}
                 useVirtual={useVirtual}
               />
             )}
-          </ScopeSection>
+          </NamedScopeSection>
+
+          {isClaudeCode && (
+            <NamedScopeSection
+              label={strings.scopeLabels.sourcePlugin}
+              storageKey={`vskill-sidebar-${resolvedAgentId}-available-plugin-collapsed`}
+              count={five.availablePlugin.total}
+              filteredCount={query ? five.availablePlugin.filtered : null}
+            >
+              {five.availablePlugin.filtered === 0 ? (
+                <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--text-secondary)" }}>
+                  No plugin skills installed — run <code>/plugin install</code> in Claude Code.
+                </div>
+              ) : (
+                five.availablePlugin.byPlugin.map(([pluginName, pluginSkills]) => (
+                  <PluginTreeGroup
+                    key={`available-${pluginName}`}
+                    pluginName={pluginName}
+                    skills={pluginSkills}
+                    persistKey={`vskill-plugin-available-${pluginName}-collapsed`}
+                    renderSkill={(skill) => (
+                      <SkillRow
+                        skill={skill}
+                        isSelected={
+                          selectedKey?.plugin === skill.plugin &&
+                          selectedKey?.skill === skill.skill
+                        }
+                        onSelect={() => onSelect(skill)}
+                        onContextMenu={onContextMenu}
+                      />
+                    )}
+                  />
+                ))
+              )}
+            </NamedScopeSection>
+          )}
 
           <BoldDivider />
 
           <GroupHeader
             name={strings.scopeLabels.groupAuthoring.toUpperCase()}
-            count={tri.own.total}
+            count={five.authoringProject.total + five.authoringPlugin.total}
           />
 
-          <ScopeSection
-            scope="own"
-            agentId={resolvedAgentId}
-            count={tri.own.total}
-            filteredCount={query ? tri.own.filtered : null}
+          <NamedScopeSection
+            label={strings.scopeLabels.authoringSkills}
+            storageKey={`vskill-sidebar-${resolvedAgentId}-authoring-project-collapsed`}
+            count={five.authoringProject.total}
+            filteredCount={query ? five.authoringProject.filtered : null}
             updateCount={outdatedByScope?.own ?? outdatedByOrigin?.source}
           >
-            {tri.own.filtered === 0 ? (
+            {five.authoringProject.filtered === 0 ? (
               <OwnEmptyState queryActive={!!query} />
             ) : (
               <SectionList
-                items={tri.own.byPlugin}
+                items={five.authoringProject.byPlugin}
                 selectedKey={selectedKey}
                 onSelect={onSelect}
                 onContextMenu={onContextMenu}
                 useVirtual={useVirtual}
               />
             )}
-          </ScopeSection>
+          </NamedScopeSection>
+
+          {isClaudeCode && (
+            <NamedScopeSection
+              label={strings.scopeLabels.sourcePlugin}
+              storageKey={`vskill-sidebar-${resolvedAgentId}-authoring-plugin-collapsed`}
+              count={five.authoringPlugin.total}
+              filteredCount={query ? five.authoringPlugin.filtered : null}
+            >
+              {five.authoringPlugin.filtered === 0 ? (
+                <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--text-secondary)" }}>
+                  No plugin sources in this project. Add <code>&lt;plugin&gt;/.claude-plugin/plugin.json</code>.
+                </div>
+              ) : (
+                five.authoringPlugin.byPlugin.map(([pluginName, pluginSkills]) => (
+                  <PluginTreeGroup
+                    key={`authoring-${pluginName}`}
+                    pluginName={pluginName}
+                    skills={pluginSkills}
+                    persistKey={`vskill-plugin-authoring-${pluginName}-collapsed`}
+                    renderSkill={(skill) => (
+                      <SkillRow
+                        skill={skill}
+                        isSelected={
+                          selectedKey?.plugin === skill.plugin &&
+                          selectedKey?.skill === skill.skill
+                        }
+                        onSelect={() => onSelect(skill)}
+                        onContextMenu={onContextMenu}
+                      />
+                    )}
+                  />
+                ))
+              )}
+            </NamedScopeSection>
+          )}
         </div>
       )}
 
@@ -366,6 +510,125 @@ export function Sidebar({
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 0698 T-009 (fix): NamedScopeSection — lightweight collapsible section that
+// takes an explicit label + storageKey. Used by the new five-bucket layout so
+// headers can render Anthropic-aligned labels (Project / Personal / Plugins /
+// Skills) without a larger refactor of ScopeSection's scope enum.
+// ---------------------------------------------------------------------------
+
+function readCollapsedSafe(key: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(key) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function NamedScopeSection({
+  label,
+  storageKey,
+  count,
+  filteredCount,
+  updateCount,
+  children,
+}: {
+  label: string;
+  storageKey: string;
+  count: number;
+  filteredCount?: number | null;
+  updateCount?: number;
+  children?: React.ReactNode;
+}) {
+  const [collapsed, setCollapsed] = useState(() => readCollapsedSafe(storageKey));
+  const toggle = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(storageKey, String(next));
+        } catch {
+          /* non-fatal */
+        }
+      }
+      return next;
+    });
+  }, [storageKey]);
+
+  const countLabel =
+    filteredCount != null && filteredCount !== count
+      ? `${filteredCount} of ${count}`
+      : String(count);
+
+  return (
+    <section data-vskill-named-scope={label}>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={!collapsed}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          width: "100%",
+          padding: "6px 12px",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          fontFamily: "var(--font-sans)",
+          textAlign: "left",
+        }}
+      >
+        <span
+          aria-hidden
+          style={{
+            fontSize: 10,
+            color: "var(--text-secondary)",
+            width: 10,
+            display: "inline-block",
+          }}
+        >
+          {collapsed ? "▸" : "▾"}
+        </span>
+        <span
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            color: "var(--text-primary)",
+          }}
+        >
+          {label}
+        </span>
+        <span
+          style={{
+            fontSize: 11,
+            color: "var(--text-tertiary)",
+            fontVariantNumeric: "tabular-nums",
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          ({countLabel})
+        </span>
+        {updateCount != null && updateCount > 0 && (
+          <span
+            style={{
+              marginLeft: "auto",
+              fontSize: 10,
+              color: "var(--color-own, #f59e0b)",
+            }}
+          >
+            {updateCount} update{updateCount !== 1 ? "s" : ""}
+          </span>
+        )}
+      </button>
+      {!collapsed && <div>{children}</div>}
+    </section>
   );
 }
 

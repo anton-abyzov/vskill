@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "vskill-0698",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "dist/index.js",
+        "eval",
+        "serve",
+        "--root",
+        ".",
+        "--port",
+        "3162"
+      ],
+      "port": 3162
+    }
+  ]
+}

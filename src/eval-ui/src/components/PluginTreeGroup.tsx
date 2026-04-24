@@ -25,6 +25,13 @@ export interface PluginTreeGroupProps {
   renderSkill: (skill: SkillInfo) => React.ReactNode;
   /** 0700: optional action slot rendered on the right of the plugin header. */
   headerActionSlot?: React.ReactNode;
+  /**
+   * 0704: transient override — when true, render as expanded regardless of
+   * user preference (initialCollapsed / persisted localStorage). Does NOT
+   * mutate the internal `collapsed` state, so toggling forceOpen off
+   * restores the user's previous choice.
+   */
+  forceOpen?: boolean;
 }
 
 function readInitialCollapsed(key: string | undefined, fallback: boolean): boolean {
@@ -45,11 +52,15 @@ export function PluginTreeGroup({
   persistKey,
   renderSkill,
   headerActionSlot,
+  forceOpen = false,
 }: PluginTreeGroupProps): React.ReactElement {
   const name = pluginName ?? skills[0]?.pluginName ?? "unknown-plugin";
   const [collapsed, setCollapsed] = React.useState(() =>
     readInitialCollapsed(persistKey, initialCollapsed),
   );
+  // 0704: transient override. Internal `collapsed` is untouched so the
+  // user's preference persists when forceOpen turns off.
+  const effectiveCollapsed = forceOpen ? false : collapsed;
 
   const onToggle = React.useCallback(() => {
     setCollapsed((prev) => {
@@ -65,7 +76,7 @@ export function PluginTreeGroup({
     });
   }, [persistKey]);
 
-  const chevron = collapsed ? "▸" : "▾";
+  const chevron = effectiveCollapsed ? "▸" : "▾";
 
   return (
     <div data-vskill-plugin-tree={name} role="group" aria-label={`${name} (${skills.length})`}>
@@ -79,7 +90,7 @@ export function PluginTreeGroup({
       <button
         type="button"
         onClick={onToggle}
-        aria-expanded={!collapsed}
+        aria-expanded={!effectiveCollapsed}
         style={{
           display: "flex",
           alignItems: "center",
@@ -130,7 +141,7 @@ export function PluginTreeGroup({
         </div>
       )}
       </div>
-      {!collapsed && (
+      {!effectiveCollapsed && (
         <div
           className="vskill-plugin-tree-children"
           style={{

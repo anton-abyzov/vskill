@@ -1,5 +1,7 @@
 import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync } from "node:fs";
-import { join, relative, dirname } from "node:path";
+// 0706 T-004: `relative` + `sep` (as pathSep) power the cross-platform
+// path-traversal guard. `path.relative` handles Windows backslash correctly.
+import { join, relative, dirname, sep as pathSep } from "node:path";
 import os from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { ensureFrontmatter, stripClaudeFields } from "./frontmatter.js";
@@ -44,7 +46,13 @@ export function resolveAgentSkillsDir(agent: AgentDefinition, opts: InstallOptio
   }
   const resolved = join(opts.projectRoot, agent.localSkillsDir);
   const normalizedRoot = join(opts.projectRoot, ".");
-  if (resolved !== normalizedRoot && !resolved.startsWith(normalizedRoot + "/")) {
+  // 0706 T-004: switch from `resolved.startsWith(normalizedRoot + "/")` to
+  // `path.relative()`. The old check hardcoded `/` as the separator, which
+  // false-positives on Windows where `path.join` emits `\`. `path.relative`
+  // returns a path starting with `..` iff the target escapes the base —
+  // works correctly on POSIX and win32 without separator juggling.
+  const rel = relative(normalizedRoot, resolved);
+  if (resolved !== normalizedRoot && (rel === ".." || rel.startsWith(".." + pathSep) || rel.startsWith("../"))) {
     throw new Error(
       `Path traversal detected: ${agent.localSkillsDir} resolves above project root ${opts.projectRoot}`,
     );

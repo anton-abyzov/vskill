@@ -188,11 +188,15 @@ describe("0701 T-003: PROVIDER_MODELS anthropic pricing map", () => {
     expect(entry?.pricing).toEqual({ prompt: 3, completion: 15 });
   });
 
-  it("pins Claude Opus 4.7 at $15 / $75 per 1M tokens", () => {
+  it("pins Claude Opus 4.7 at $5 / $25 per 1M tokens", () => {
+    // 0711: refreshed from a stale 0701-era assertion that listed Opus 4.7
+    // at the older Opus 4.0/4.1 price ($15/$75). Anthropic dropped Opus
+    // pricing to $5/$25 with the 4.6/4.7 release on 2026-02-05 — verified
+    // against https://claude.com/pricing on 2026-04-24.
     const entry = PROVIDER_MODELS["anthropic"].find(
       (m) => m.id === "claude-opus-4-7",
     );
-    expect(entry?.pricing).toEqual({ prompt: 15, completion: 75 });
+    expect(entry?.pricing).toEqual({ prompt: 5, completion: 25 });
   });
 
   it("pins Claude Haiku 4.5 at $1 / $5 per 1M tokens", () => {

@@ -1,6 +1,13 @@
 // ---------------------------------------------------------------------------
 // pricing.ts -- centralized pricing table + cost calculator for all providers
+//
+// 0711: Anthropic pricing now derives from the dated catalog snapshot in
+// `anthropic-catalog.ts` so we maintain rates in exactly one place. Other
+// providers still use the inline table below until each gets its own
+// catalog (tracked in 0711 follow-ups).
 // ---------------------------------------------------------------------------
+
+import { ANTHROPIC_CATALOG_SNAPSHOT } from "./anthropic-catalog.js";
 
 export type BillingMode = "per-token" | "subscription" | "free";
 
@@ -14,15 +21,20 @@ export interface ModelPricing {
 // Pricing table — update rates here when providers change pricing
 // ---------------------------------------------------------------------------
 
+function buildAnthropicPricing(): Record<string, ModelPricing> {
+  const out: Record<string, ModelPricing> = {};
+  for (const m of ANTHROPIC_CATALOG_SNAPSHOT.models) {
+    out[m.id] = {
+      inputPerMillion: m.pricing.promptUsdPer1M,
+      outputPerMillion: m.pricing.completionUsdPer1M,
+      updatedAt: ANTHROPIC_CATALOG_SNAPSHOT.snapshotDate,
+    };
+  }
+  return out;
+}
+
 const PRICING: Record<string, Record<string, ModelPricing>> = {
-  anthropic: {
-    "claude-opus-4-7": { inputPerMillion: 5, outputPerMillion: 25, updatedAt: "2026-04-16" },
-    "claude-opus-4-6": { inputPerMillion: 5, outputPerMillion: 25, updatedAt: "2026-04-16" },
-    "claude-opus-4-20250514": { inputPerMillion: 15, outputPerMillion: 75, updatedAt: "2025-05-01" },
-    "claude-sonnet-4-6": { inputPerMillion: 3, outputPerMillion: 15, updatedAt: "2025-05-01" },
-    "claude-sonnet-4-20250514": { inputPerMillion: 3, outputPerMillion: 15, updatedAt: "2025-05-01" },
-    "claude-haiku-4-5-20251001": { inputPerMillion: 0.80, outputPerMillion: 4, updatedAt: "2025-05-01" },
-  },
+  anthropic: buildAnthropicPricing(),
   openai: {
     "o4-mini": { inputPerMillion: 1.10, outputPerMillion: 4.40, updatedAt: "2025-05-01" },
     "gpt-4.1": { inputPerMillion: 2, outputPerMillion: 8, updatedAt: "2025-05-01" },
@@ -40,15 +52,27 @@ const PRICING: Record<string, Record<string, ModelPricing>> = {
 // Model alias maps — resolve shorthand names to pricing table keys
 // ---------------------------------------------------------------------------
 
+// 0711: Anthropic alias resolution lives in `model-resolver.ts` (catalog +
+// env override). Inline this map ONLY for the well-known short aliases that
+// the resolver also accepts — keeps `getPricing()` synchronous and pure for
+// existing callers. Full-ID lookups bypass this map entirely.
+function buildAnthropicAliases(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of ANTHROPIC_CATALOG_SNAPSHOT.models) {
+    for (const a of m.aliases) {
+      // Skip variants with [1m] suffix etc — getPricing keys are bare IDs.
+      if (!out[a]) out[a] = m.id;
+    }
+  }
+  // Legacy compat: vskill historically accepted these display-style strings.
+  out["claude-sonnet"] ??= "claude-sonnet-4-6";
+  out["claude-opus"] ??= "claude-opus-4-7";
+  out["claude-haiku"] ??= "claude-haiku-4-5-20251001";
+  return out;
+}
+
 const MODEL_ALIASES: Record<string, Record<string, string>> = {
-  anthropic: {
-    "sonnet": "claude-sonnet-4-6",
-    "opus": "claude-opus-4-7",
-    "haiku": "claude-haiku-4-5-20251001",
-    "claude-sonnet": "claude-sonnet-4-6",
-    "claude-opus": "claude-opus-4-7",
-    "claude-haiku": "claude-haiku-4-5-20251001",
-  },
+  anthropic: buildAnthropicAliases(),
   openai: {},
   google: {},
 };

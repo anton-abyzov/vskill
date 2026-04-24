@@ -109,6 +109,26 @@ jobs:
       - run: npm run build
       - run: npx vitest run src/commands/diff.test.ts src/api/client.test.ts
 
+  # 0702 T-032 — Cross-platform credential store + `vskill keys` CLI + first-run
+  # onboarding tests. Runs on all three OS so we catch Windows-specific path
+  # handling, chmod-skip, and TTY detection regressions before merge.
+  keys-store-cli:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      - name: FileBackedStore + keys CLI + onboarding tests
+        run: npx vitest run src/eval-server/__tests__/file-backed-store.test.ts src/commands/__tests__/keys.test.ts src/__tests__/first-run-onboarding.test.ts
+
   # 0706 T-008 — Windows compatibility smoke tests for install/update/studio.
   # Verifies the five bug fixes in increment 0706 haven't regressed on
   # Windows (where the original code shelled out to `which`/`lsof`/`ps`).

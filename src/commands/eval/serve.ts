@@ -143,6 +143,11 @@ export async function runEvalServe(
   const effectivePort = port ?? projectPort(resolvedRoot);
   const name = basename(resolvedRoot);
 
+  // 0702 T-041: prompt to configure API key on first run if none detected.
+  // Non-TTY / already-configured → silent skip.
+  const { firstRunOnboarding } = await import("../../first-run-onboarding.js");
+  await firstRunOnboarding();
+
   // Handle port conflicts gracefully
   if (await isPortInUse(effectivePort)) {
     await handlePortConflict(effectivePort, resolvedRoot);

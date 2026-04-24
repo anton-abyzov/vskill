@@ -256,4 +256,13 @@ program
 const { registerSkillCommand } = await import("./commands/skill.js");
 registerSkillCommand(program);
 
+// 0702: vskill keys {set|list|remove|path} — cross-platform API key storage.
+program
+  .command("keys [subcommand] [provider]")
+  .description("Manage API keys stored at ~/.vskill/keys.env (set|list|remove|path)")
+  .action(async (subcommand?: string, provider?: string) => {
+    const { keysCommand } = await import("./commands/keys.js");
+    await keysCommand(subcommand, provider);
+  });
+
 program.parse();

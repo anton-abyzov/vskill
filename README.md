@@ -10,7 +10,7 @@
   <a href="https://www.npmjs.com/package/vskill"><img src="https://img.shields.io/npm/dw/vskill?color=cb3837&logo=npm&label=downloads" alt="downloads" /></a>
   <img src="https://img.shields.io/badge/agents-49_platforms-0969DA" alt="49 agents" />
   <img src="https://img.shields.io/badge/plugins-5-8B5CF6" alt="5 plugins" />
-  <img src="https://img.shields.io/badge/skills-7-10B981" alt="7 skills" />
+  <img src="https://img.shields.io/badge/skills-8-10B981" alt="8 skills" />
   <a href="https://verified-skill.com"><img src="https://img.shields.io/badge/registry-verified--skill.com-F59E0B" alt="registry" /></a>
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" />
 </p>
@@ -124,7 +124,7 @@ Then invoke as `/plugin:skill` in your agent:
 | **mobile** | React Native, Expo, Flutter, SwiftUI, Jetpack Compose, app store | `appstore` |
 | **marketing** | Social media content creation, posting, and engagement across 11 platforms, plus Slack messaging | `social-media-posting` `slack-messaging` |
 | **google-workspace** | Google Workspace CLI (gws) for Drive, Sheets, Docs, Calendar, Chat, Admin | `gws` |
-| **skills** | Skill discovery and recommendations | `scout` |
+| **skills** | Skill discovery, recommendations, and authoring | `scout` `skill-builder` |
 | **productivity** | Expert network survey completion and paid expertise sharing | `survey-passing` |
 
 <br/>
@@ -163,6 +163,28 @@ vskill init                 Initialize vskill in a project
 | `--all` | Install all skills from a repo |
 
 </details>
+
+<br/>
+
+## Skill Authoring
+
+Create and manage universal cross-tool skills with the `vskill skill` command family.
+The bundled `skill-builder` meta-skill drives the flow from inside any supported
+agent host (Claude Code, Cursor, Codex, Gemini CLI, etc.) with an automatic
+path A/B/C fallback chain.
+
+```bash
+vskill skill new --prompt "lint markdown" --targets=claude-code,codex
+vskill skill import ./existing-skill/SKILL.md
+vskill skill list
+vskill skill info skill-builder
+vskill skill publish skill-builder
+```
+
+Every emitted skill carries an `x-sw-schema-version: 1` marker on its frontmatter,
+and ships with a `<name>-divergence.md` report that documents any frontmatter
+fields dropped or translated per target (e.g. `allowed-tools` → OpenCode
+`permission.bash: ask`).
 
 <br/>
 

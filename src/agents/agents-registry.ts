@@ -1,8 +1,11 @@
 /**
- * Agent Registry — 49 AI coding agents with metadata.
+ * Agent Registry — 53 AI coding agents with metadata.
  *
  * Each agent has detection paths, parent company info, and feature support.
  * Used to determine which agents can install/use verified skills.
+ *
+ * Source of truth for the count: `TOTAL_AGENTS` (derived from AGENTS_REGISTRY.length).
+ * The numbers in this header are documentation only; tests assert against TOTAL_AGENTS.
  */
 
 /** Feature support flags for an agent */
@@ -63,9 +66,10 @@ export const LEGACY_AGENT_IDS: Readonly<Record<string, string>> = Object.freeze(
 });
 
 /**
- * Complete registry of 49 AI coding agents.
+ * Complete registry of 53 AI coding agents.
  *
- * 8 universal agents, 41 non-universal agents.
+ * 8 universal agents, 45 non-universal agents.
+ * Use TOTAL_AGENTS for programmatic access to the count.
  */
 export const AGENTS_REGISTRY: AgentDefinition[] = [
   // ----------------------------------------------------------------
@@ -169,7 +173,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
   },
 
   // ----------------------------------------------------------------
-  // Non-universal agents (41)
+  // Non-universal agents (45)
   // ----------------------------------------------------------------
   {
     id: 'antigravity',
@@ -321,7 +325,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     globalSkillsDir: '~/.kiro/skills',
     isUniversal: false,
     detectInstalled: 'which kiro',
-    parentCompany: 'Amazon',
+    parentCompany: 'AWS',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
@@ -657,7 +661,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
 export const TOTAL_AGENTS = AGENTS_REGISTRY.length;
 
 // ---------------------------------------------------------------------------
-// 0693: Non-agent config dirs — co-located here so all known config-dir
+// Non-agent config dirs — co-located here so all known config-dir
 // prefixes have a single audit point alongside AGENTS_REGISTRY.
 //
 // These dirs are *not* agent install targets; they are sibling config dirs

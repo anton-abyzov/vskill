@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * 0693 — Generate agents.json from canonical AGENTS_REGISTRY.
+ * Generate agents.json from canonical AGENTS_REGISTRY.
  *
  * Single source of truth: vskill/src/agents/agents-registry.ts
  *
@@ -9,6 +9,7 @@
  *     version: 1,
  *     generatedAt: ISO timestamp,
  *     agentPrefixes: deduped first-segments of every agent's localSkillsDir,
+ *     agentPathPrefixes: trailing-slash prefixes (e.g. ".github/copilot/"),
  *     nonAgentConfigDirs: NON_AGENT_CONFIG_DIRS (editor/IDE/CI dirs)
  *   }
  *

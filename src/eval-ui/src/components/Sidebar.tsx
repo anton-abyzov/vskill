@@ -5,9 +5,12 @@ import { SidebarSection } from "./SidebarSection";
 import { ScopeSection } from "./ScopeSection";
 import { SidebarSearch, matchSkillQuery } from "./SidebarSearch";
 import { PluginGroup, type SelectedKey } from "./PluginGroup";
+import { PluginTreeGroup } from "./PluginTreeGroup";
+import { GroupHeader } from "./GroupHeader";
 import { SkillRow } from "./SkillRow";
 import { SkeletonRow } from "./SkeletonRow";
 import { useKeyboardShortcut } from "../hooks/useKeyboardShortcut";
+import { strings } from "../strings";
 
 // Virtualization threshold: ADR / scope brief target is 200 rows combined.
 export const VIRTUALIZATION_THRESHOLD = 200;
@@ -250,27 +253,15 @@ export function Sidebar({
 
       {!isLoading && !error && triScope && (
         <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-          <ScopeSection
-            scope="own"
-            agentId={resolvedAgentId}
-            count={tri.own.total}
-            filteredCount={query ? tri.own.filtered : null}
-            updateCount={outdatedByScope?.own ?? outdatedByOrigin?.source}
-          >
-            {tri.own.filtered === 0 ? (
-              <OwnEmptyState queryActive={!!query} />
-            ) : (
-              <SectionList
-                items={tri.own.byPlugin}
-                selectedKey={selectedKey}
-                onSelect={onSelect}
-                onContextMenu={onContextMenu}
-                useVirtual={useVirtual}
-              />
-            )}
-          </ScopeSection>
-
-          <BoldDivider />
+          {/* 0698 T-009: two-tier sidebar — AVAILABLE umbrella wraps Project
+              (legacy "installed") + Personal (legacy "global") sub-sections.
+              AUTHORING umbrella wraps Skills (legacy "own"). Plugins nodes are
+              rendered by T-010 PluginTreeGroup when source data is present.
+              Counts always displayed even when zero. */}
+          <GroupHeader
+            name={strings.scopeLabels.groupAvailable.toUpperCase()}
+            count={tri.installed.total + tri.global.total}
+          />
 
           <ScopeSection
             scope="installed"
@@ -292,8 +283,6 @@ export function Sidebar({
             )}
           </ScopeSection>
 
-          <BoldDivider />
-
           <ScopeSection
             scope="global"
             agentId={resolvedAgentId}
@@ -306,6 +295,33 @@ export function Sidebar({
             ) : (
               <SectionList
                 items={tri.global.byPlugin}
+                selectedKey={selectedKey}
+                onSelect={onSelect}
+                onContextMenu={onContextMenu}
+                useVirtual={useVirtual}
+              />
+            )}
+          </ScopeSection>
+
+          <BoldDivider />
+
+          <GroupHeader
+            name={strings.scopeLabels.groupAuthoring.toUpperCase()}
+            count={tri.own.total}
+          />
+
+          <ScopeSection
+            scope="own"
+            agentId={resolvedAgentId}
+            count={tri.own.total}
+            filteredCount={query ? tri.own.filtered : null}
+            updateCount={outdatedByScope?.own ?? outdatedByOrigin?.source}
+          >
+            {tri.own.filtered === 0 ? (
+              <OwnEmptyState queryActive={!!query} />
+            ) : (
+              <SectionList
+                items={tri.own.byPlugin}
                 selectedKey={selectedKey}
                 onSelect={onSelect}
                 onContextMenu={onContextMenu}

@@ -74,35 +74,13 @@ export function StatusBar({
         fontVariantNumeric: "tabular-nums",
       }}
     >
-      {/* Project path */}
-      <button
-        type="button"
-        onClick={onPathClick}
-        aria-label={projectPath ? `Project path ${projectPath}` : "No project path"}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          background: "transparent",
-          border: "none",
-          padding: 0,
-          color: "var(--text-secondary)",
-          fontFamily: "var(--font-mono)",
-          cursor: onPathClick ? "pointer" : "default",
-          maxWidth: 360,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-        title={projectPath ?? ""}
-      >
-        <Dot color="var(--text-secondary)" />
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-          {projectPath ?? "—"}
-        </span>
-      </button>
-
-      <Sep />
+      {/*
+        0698 T-016: the project path display has been removed from the status
+        bar. The single source of truth for "which project am I in?" is now
+        the ProjectPicker pill in the top-left of StudioLayout. `projectPath`
+        / `onPathClick` props are retained for backward compatibility with
+        existing callers (including snapshot tests) but no longer render.
+      */}
 
       {/* Model */}
       <span title={modelName ?? ""} style={{ fontFamily: "var(--font-mono)" }}>

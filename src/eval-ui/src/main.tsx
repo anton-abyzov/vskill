@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { ThemeProvider } from "./theme/ThemeProvider";
+import { runScopeRenameMigration } from "./lib/scope-migration";
 
 // Variable font bundles — loaded before globals.css so @theme tokens
 // (--font-serif / --font-sans / --font-mono) resolve to present families.
@@ -32,6 +33,17 @@ if (typeof PerformanceObserver !== "undefined") {
     observer.observe({ type: "paint", buffered: true });
   } catch {
     /* paint entry unsupported — smoke spec will skip instead of fail */
+  }
+}
+
+// 0698 T-006: migrate legacy scope-named localStorage keys to new 5-value
+// vocabulary before the Sidebar reads initial collapse state. Idempotent +
+// flag-gated so production users only pay the cost once.
+if (typeof window !== "undefined" && window.localStorage) {
+  try {
+    runScopeRenameMigration(window.localStorage);
+  } catch {
+    /* non-fatal — flag guards subsequent runs */
   }
 }
 

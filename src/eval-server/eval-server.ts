@@ -15,6 +15,9 @@ import { registerSkillCreateRoutes } from "./skill-create-routes.js";
 import { registerSweepRoutes } from "./sweep-routes.js";
 import { registerIntegrationRoutes } from "./integration-routes.js";
 import { registerScopeTransferRoutes } from "../studio/routes/index.js";
+import { registerWorkspaceRoutes } from "./workspace-routes.js";
+import { loadWorkspace, addProject } from "./workspace-store.js";
+import { homedir } from "node:os";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,13 +39,40 @@ const MIME_TYPES: Record<string, string> = {
 
 export interface EvalServerOptions {
   port: number;
-  root: string;
+  /**
+   * 0698 T-013: `root` is now optional. When omitted, the active project is
+   * derived from `~/.vskill/workspace.json`. When provided (e.g. via CLI
+   * `--root`), it continues to work as before — and is auto-seeded into the
+   * workspace as the active project if no workspace exists yet.
+   */
+  root?: string;
   projectName?: string;
+  /** Override the workspace config directory (tests). Defaults to ~/.vskill. */
+  workspaceDir?: string;
 }
 
 export async function startEvalServer(opts: EvalServerOptions): Promise<http.Server> {
   const router = new Router();
-  const { port, root } = opts;
+  const { port } = opts;
+  const workspaceDir =
+    opts.workspaceDir ??
+    process.env.VSKILL_WORKSPACE_DIR ??
+    path.join(homedir(), ".vskill");
+
+  // 0698 T-013: resolve root from (in order): explicit opts.root (CLI --root),
+  // or the active project in workspace.json. Legacy code paths that require a
+  // non-empty root still get one — when there's no workspace and no --root,
+  // we fall back to cwd so the server can boot with a minimal empty state.
+  const root = opts.root ?? resolveActiveRoot(workspaceDir) ?? process.cwd();
+
+  // Register workspace endpoints FIRST so legacy routes can consult the store.
+  registerWorkspaceRoutes(router, { workspaceDir });
+
+  // If --root was passed but workspace is empty, seed it with that project
+  // so CLI parity holds (user sees the same sidebar with multi-project UI).
+  if (opts.root) {
+    seedWorkspaceFromRoot(workspaceDir, opts.root);
+  }
 
   // Register API routes
   registerRoutes(router, root, opts.projectName);
@@ -89,6 +119,35 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
       resolve(server);
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// 0698 T-013: workspace-aware root resolution + CLI --root seed.
+// ---------------------------------------------------------------------------
+
+function resolveActiveRoot(workspaceDir: string): string | null {
+  try {
+    const ws = loadWorkspace(workspaceDir);
+    if (!ws.activeProjectId) return null;
+    const active = ws.projects.find((p) => p.id === ws.activeProjectId);
+    return active ? active.path : null;
+  } catch {
+    return null;
+  }
+}
+
+function seedWorkspaceFromRoot(workspaceDir: string, root: string): void {
+  try {
+    const ws = loadWorkspace(workspaceDir);
+    // Only auto-seed when the workspace is completely empty — otherwise the
+    // existing projects are the source of truth and a CLI `--root` flag is
+    // treated as a one-off session override (resolveActiveRoot handles that
+    // separately by honoring opts.root when present).
+    if (ws.projects.length > 0) return;
+    addProject(workspaceDir, ws, { path: root });
+  } catch {
+    /* non-fatal — workspace is optional */
+  }
 }
 
 async function serveStatic(

@@ -324,6 +324,19 @@ const setupDrawer = {
   fallbackBody: "We don't ship a setup guide for this provider yet.",
 } as const;
 
+// ---------------------------------------------------------------------------
+// 0698 T-007: Anthropic-aligned scope labels (two-tier sidebar).
+// `scopeSection` above remains for 0688 overlap; new UI reads from here.
+// ---------------------------------------------------------------------------
+const scopeLabels = {
+  groupAvailable: "Available",
+  groupAuthoring: "Authoring",
+  sourceProject: "Project",
+  sourcePersonal: "Personal",
+  sourcePlugin: "Plugins",
+  authoringSkills: "Skills",
+} as const;
+
 const setupProviders = {
   anthropic: {
     name: "Anthropic API",
@@ -413,6 +426,8 @@ export const strings = {
   claudeCodeLabel,
   setupDrawer,
   setupProviders,
+  // 0698 surfaces
+  scopeLabels,
 } as const;
 
 export type Strings = typeof strings;

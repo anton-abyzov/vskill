@@ -18,6 +18,9 @@ import { useSetupDrawer } from "./hooks/useSetupDrawer";
 import { AgentScopePicker, agentsResponseToPickerEntries } from "./components/AgentScopePicker";
 import { ClaudeCodeFirstUseBanner } from "./components/ClaudeCodeFirstUseBanner";
 import { useAgentsResponse } from "./hooks/useAgentsResponse";
+import { useWorkspace } from "./hooks/useWorkspace";
+import { ProjectPicker } from "./components/ProjectPicker";
+import { ProjectCommandPalette } from "./components/ProjectCommandPalette";
 import {
   getStudioPreference,
   writeStudioPreference,
@@ -107,6 +110,27 @@ function Shell() {
   const pickerEntries = useMemo(
     () => (agentsResponse.response ? agentsResponseToPickerEntries(agentsResponse.response) : []),
     [agentsResponse.response],
+  );
+
+  // 0698 T-015/T-016: multi-project workspace state + ⌘P command palette.
+  const { workspace, switchProject, addProject, removeProject } = useWorkspace();
+  const [projectPaletteOpen, setProjectPaletteOpen] = useState(false);
+  useKeyboardShortcut(
+    [
+      {
+        key: "p",
+        meta: true,
+        handler: (e) => {
+          // Only handle when focus is inside the studio DOM — otherwise let the
+          // browser's print dialog take over (AC-US1 keyboard shortcut scoping).
+          const activeEl = typeof document !== "undefined" ? document.activeElement : null;
+          if (activeEl && activeEl.tagName === "INPUT") return; // don't hijack inside inputs
+          e?.preventDefault?.();
+          setProjectPaletteOpen((v) => !v);
+        },
+      },
+    ],
+    { enabled: true },
   );
 
   // 0686 T-010 (US-005): Shared SetupDrawer wired at the App root. Any
@@ -254,6 +278,16 @@ function Shell() {
             selected={state.selectedSkill}
             onOpenPalette={() => setPaletteOpen(true)}
             onHome={clearSelection}
+            projectPickerSlot={
+              workspace && workspace.projects.length > 0 ? (
+                <ProjectPicker
+                  workspace={workspace}
+                  onSwitch={switchProject}
+                  onAdd={addProject}
+                  onRemove={removeProject}
+                />
+              ) : undefined
+            }
           />
         }
         sidebar={
@@ -351,6 +385,17 @@ function Shell() {
           />
         </Suspense>
       )}
+      {/* 0698 T-015/T-016: ⌘P project switcher palette. Mounted at root so
+          the global keyboard shortcut can open it from anywhere inside
+          Skill Studio. */}
+      <ProjectCommandPalette
+        open={projectPaletteOpen}
+        projects={workspace?.projects ?? []}
+        onSwitch={(id) => {
+          void switchProject(id);
+        }}
+        onClose={() => setProjectPaletteOpen(false)}
+      />
     </>
   );
 }

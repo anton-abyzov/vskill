@@ -10,7 +10,7 @@
   <a href="https://www.npmjs.com/package/vskill"><img src="https://img.shields.io/npm/dw/vskill?color=cb3837&logo=npm&label=downloads" alt="downloads" /></a>
   <img src="https://img.shields.io/badge/agents-49_platforms-0969DA" alt="49 agents" />
   <img src="https://img.shields.io/badge/plugins-5-8B5CF6" alt="5 plugins" />
-  <img src="https://img.shields.io/badge/skills-7-10B981" alt="7 skills" />
+  <img src="https://img.shields.io/badge/skills-8-10B981" alt="8 skills" />
   <a href="https://verified-skill.com"><img src="https://img.shields.io/badge/registry-verified--skill.com-F59E0B" alt="registry" /></a>
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" />
 </p>

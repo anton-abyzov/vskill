@@ -15,9 +15,9 @@
     },
     {
       "name": "skills",
-      "description": "Skill discovery — find and install the right skills for your project",
+      "description": "Skill discovery and authoring — find skills with scout, create new universal skills with skill-builder",
       "source": "./plugins/skills",
-      "version": "2.2.0",
+      "version": "2.3.0",
       "category": "utility"
     },
     {

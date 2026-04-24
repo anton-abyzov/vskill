@@ -33,6 +33,10 @@ export interface PickerAgentEntry {
    *  All consumer IDs including the current one. */
   sharedFolderGroup?: string[];
   sharedFolderPath?: string;
+  /** 0694 (AC-US4-04): When true, render a "Remote" badge instead of any
+   *  install affordance (Set up button suppressed). Web-only agents like
+   *  Devin / bolt.new / v0 / Replit. */
+  isRemoteOnly?: boolean;
 }
 
 export interface AgentScopePickerProps {
@@ -70,6 +74,10 @@ export function agentsResponseToPickerEntries(
       health: a.health,
       sharedFolderGroup: folder ? folder.consumers : undefined,
       sharedFolderPath: folder ? folder.path : undefined,
+      // 0694 (AC-US4-04): preserve the remote-only flag from the server
+      // shape so the popover can suppress install affordances. Field is now
+      // part of the canonical ServerAgentScopeEntry type.
+      isRemoteOnly: a.isRemoteOnly,
     };
   });
 }

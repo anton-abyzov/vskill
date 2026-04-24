@@ -8,6 +8,7 @@ import {
   detectInstalledAgents,
   filterAgentsByFeatures,
   getAgentCreationProfile,
+  NON_AGENT_CONFIG_DIRS,
 } from "./agents-registry.js";
 
 // ---------------------------------------------------------------------------
@@ -124,7 +125,7 @@ describe("getUniversalAgents", () => {
     expect(ids).toContain("codex");
     expect(ids).toContain("cursor");
     expect(ids).toContain("gemini-cli");
-    expect(ids).toContain("github-copilot");
+    expect(ids).toContain("github-copilot-ext");
     expect(ids).toContain("kimi-cli");
     expect(ids).toContain("opencode");
   });
@@ -285,6 +286,22 @@ describe("detectInstalledAgents", () => {
     const ids = result.map((a) => a.id);
     expect(ids).toContain("cursor");
   });
+
+  // 0694 T-013: detection picks up the new CLI binaries.
+  it("0694 T-013: detects copilot-cli + warp + amazon-q-cli when their binaries are on PATH", async () => {
+    mockExistsSync.mockReturnValue(false);
+    mockExec.mockImplementation(async (cmd: string) => {
+      if (cmd === "which copilot" || cmd === "which warp" || cmd === "which q") {
+        return { stdout: "/usr/local/bin/tool", stderr: "" };
+      }
+      throw new Error("not found");
+    });
+    const result = await detectInstalledAgents();
+    const ids = result.map((a) => a.id);
+    expect(ids).toContain("copilot-cli");
+    expect(ids).toContain("warp");
+    expect(ids).toContain("amazon-q-cli");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -401,5 +418,167 @@ describe("getAgentCreationProfile", () => {
     const guidance = profile!.addGuidance.join(" ");
     expect(guidance).toMatch(/hook/i); // cursor lacks hooks
     expect(guidance).not.toMatch(/slash command/i); // cursor has slashCommands
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0694: isRemoteOnly flag (US-004) — gate web-only agents from local install
+// ---------------------------------------------------------------------------
+describe("AGENTS_REGISTRY — isRemoteOnly (0694 AC-US4-01..03)", () => {
+  it("AC-US4-01: AgentDefinition supports an optional isRemoteOnly boolean", () => {
+    // Type-level check: TS compilation is the real assertion. At runtime,
+    // verify the four web-only entries each set the flag explicitly.
+    const remoteIds = AGENTS_REGISTRY.filter((a) => a.isRemoteOnly === true).map(
+      (a) => a.id,
+    );
+    expect(remoteIds.length).toBeGreaterThan(0);
+  });
+
+  it("AC-US4-02: devin/bolt-new/v0/replit are flagged isRemoteOnly: true", () => {
+    const remoteIds = AGENTS_REGISTRY.filter((a) => a.isRemoteOnly === true)
+      .map((a) => a.id)
+      .sort();
+    expect(remoteIds).toEqual(["bolt-new", "devin", "replit", "v0"]);
+  });
+
+  it("AC-US4-03: getInstallableAgents() excludes isRemoteOnly entries", async () => {
+    const { getInstallableAgents } = await import("./agents-registry.js");
+    const installable = getInstallableAgents();
+    expect(installable.length).toBe(AGENTS_REGISTRY.length - 4);
+    for (const agent of installable) {
+      expect(agent.isRemoteOnly).not.toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0694: LEGACY_AGENT_IDS alias map (US-001) — backward compat for renames
+// ---------------------------------------------------------------------------
+describe("LEGACY_AGENT_IDS + getAgent alias resolution (0694 AC-US1-04)", () => {
+  it("LEGACY_AGENT_IDS maps github-copilot → github-copilot-ext", async () => {
+    const { LEGACY_AGENT_IDS } = await import("./agents-registry.js");
+    expect(LEGACY_AGENT_IDS["github-copilot"]).toBe("github-copilot-ext");
+  });
+
+  it("getAgent('github-copilot') resolves to the renamed entry", () => {
+    const legacy = getAgent("github-copilot");
+    const current = getAgent("github-copilot-ext");
+    expect(legacy).toBeDefined();
+    expect(current).toBeDefined();
+    expect(legacy).toBe(current);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0694: New CLI adapters (US-001/US-002/US-003/US-005)
+// ---------------------------------------------------------------------------
+describe("AGENTS_REGISTRY — new CLI adapters (0694)", () => {
+  it("AC-US1-01: copilot-cli entry has the GitHub Copilot CLI shape", () => {
+    const a = getAgent("copilot-cli");
+    expect(a).toBeDefined();
+    expect(a!.displayName).toBe("GitHub Copilot CLI");
+    expect(a!.localSkillsDir).toBe(".copilot/skills");
+    expect(a!.globalSkillsDir).toBe("~/.copilot/skills");
+    expect(a!.detectInstalled).toBe("which copilot");
+    expect(a!.parentCompany).toBe("GitHub (Microsoft)");
+  });
+
+  it("AC-US1-02: github-copilot-ext is the renamed VS Code extension entry", () => {
+    const a = getAgent("github-copilot-ext");
+    expect(a).toBeDefined();
+    expect(a!.displayName).toBe("GitHub Copilot (VS Code)");
+    expect(a!.localSkillsDir).toBe(".github/copilot/skills");
+  });
+
+  it("AC-US2-01: warp entry exists with correct shape", () => {
+    const a = getAgent("warp");
+    expect(a).toBeDefined();
+    expect(a!.displayName).toBe("Warp");
+    expect(a!.parentCompany).toBe("Warp");
+    expect(a!.detectInstalled).toBe("which warp");
+    expect(a!.localSkillsDir.length).toBeGreaterThan(0);
+    expect(a!.globalSkillsDir.length).toBeGreaterThan(0);
+  });
+
+  it("AC-US3-01: amazon-q-cli entry exists with correct shape", () => {
+    const a = getAgent("amazon-q-cli");
+    expect(a).toBeDefined();
+    expect(a!.displayName).toBe("Amazon Q CLI");
+    expect(a!.parentCompany).toBe("AWS");
+    expect(a!.detectInstalled).toBe("which q");
+  });
+
+  it("AC-US5-01: zed entry exists with .zed/skills local dir", () => {
+    const a = getAgent("zed");
+    expect(a).toBeDefined();
+    expect(a!.displayName).toBe("Zed");
+    expect(a!.localSkillsDir).toBe(".zed/skills");
+    expect(a!.detectInstalled).toBe("which zed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0694 T-012: Integration round-trip — load → resolve install path for the 4
+// new agents (copilot-cli, warp, amazon-q-cli, zed). Asserts each resolves
+// to an absolute, non-tilde path under the agent's expected globalSkillsDir.
+// ---------------------------------------------------------------------------
+describe("0694 T-012: install-path round-trip for new agents", () => {
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+
+  function resolveTilde(p: string): string {
+    return p.startsWith("~/") ? home + p.slice(1) : p;
+  }
+
+  it.each([
+    ["copilot-cli", `${home}/.copilot/skills`],
+    ["warp", `${home}/.warp/skills`],
+    ["amazon-q-cli", `${home}/.aws/amazonq/skills`],
+    ["zed", `${home}/.config/zed/skills`],
+  ])("agent %s resolves globalSkillsDir to %s", (id, expected) => {
+    const agent = getAgent(id);
+    expect(agent).toBeDefined();
+    const resolved = resolveTilde(agent!.globalSkillsDir);
+    expect(resolved).toBe(expected);
+    expect(resolved.startsWith("/") || /^[A-Za-z]:/.test(resolved)).toBe(true);
+  });
+
+  it("each new agent's local + global dirs end with 'skills'", () => {
+    for (const id of ["copilot-cli", "warp", "amazon-q-cli", "zed"]) {
+      const a = getAgent(id);
+      expect(a).toBeDefined();
+      expect(a!.localSkillsDir.endsWith("/skills")).toBe(true);
+      expect(a!.globalSkillsDir.endsWith("/skills")).toBe(true);
+    }
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// 0693: NON_AGENT_CONFIG_DIRS — non-agent config dirs co-located with registry
+// ---------------------------------------------------------------------------
+describe("NON_AGENT_CONFIG_DIRS (0693 AC-US2-01)", () => {
+  it("exports the 8 expected non-agent config dirs", () => {
+    expect(NON_AGENT_CONFIG_DIRS).toEqual([
+      ".specweave",
+      ".vscode",
+      ".idea",
+      ".zed",
+      ".devcontainer",
+      ".github",
+      ".agents",
+      ".agent",
+    ]);
+  });
+
+  it("is frozen (readonly)", () => {
+    expect(Object.isFrozen(NON_AGENT_CONFIG_DIRS)).toBe(true);
+  });
+
+  it("includes editor/IDE/CI dirs that are not agent install targets", () => {
+    expect(NON_AGENT_CONFIG_DIRS).toContain(".vscode");
+    expect(NON_AGENT_CONFIG_DIRS).toContain(".idea");
+    expect(NON_AGENT_CONFIG_DIRS).toContain(".zed");
+    expect(NON_AGENT_CONFIG_DIRS).toContain(".devcontainer");
+    expect(NON_AGENT_CONFIG_DIRS).toContain(".specweave");
   });
 });

@@ -91,4 +91,21 @@ describe("filterAgents", () => {
     const result = filterAgents(allAgents, "");
     expect(result).toEqual(allAgents);
   });
+
+  // 0694 AC-US4-05: filterAgents rejects requesting a remote-only agent by id.
+  it("throws when filtering by a remote-only agent id", () => {
+    const devin = makeAgent({ id: "devin", displayName: "Devin", isRemoteOnly: true });
+    const agents = [claudeAgent, devin];
+    expect(() => filterAgents(agents, ["devin"])).toThrow(/remote-only/);
+  });
+
+  // 0694 AC-US4-05: filterAgents accepts non-remote agents even if remote-only
+  // entries are present in the list.
+  it("does not throw when no remote-only agent is requested", () => {
+    const devin = makeAgent({ id: "devin", displayName: "Devin", isRemoteOnly: true });
+    const agents = [claudeAgent, devin];
+    const result = filterAgents(agents, ["claude-code"]);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("claude-code");
+  });
 });

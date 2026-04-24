@@ -394,22 +394,44 @@ function NotDetectedRow({
         }}
       />
       <span style={{ flex: 1 }}>{agent.displayName}</span>
-      <button
-        type="button"
-        data-testid={`agent-scope-set-up-${agent.id}`}
-        onClick={onSetUp}
-        style={{
-          background: "transparent",
-          border: "1px solid var(--border-default, var(--border-subtle))",
-          borderRadius: 4,
-          padding: "2px 8px",
-          color: "var(--text-primary)",
-          fontSize: 11,
-          cursor: "pointer",
-        }}
-      >
-        {strings.scopePicker.setUpCta(agent.displayName)}
-      </button>
+      {agent.isRemoteOnly ? (
+        // 0694 (AC-US4-04): web-only agents have no local install path —
+        // render a "Remote" badge in lieu of the Set up button so users see
+        // why no install affordance is offered.
+        <span
+          data-testid={`agent-scope-remote-badge-${agent.id}`}
+          aria-label="Remote-only agent"
+          style={{
+            background: "color-mix(in srgb, var(--text-tertiary) 18%, transparent)",
+            border: "1px solid var(--border-default, var(--border-subtle))",
+            borderRadius: 10,
+            padding: "1px 8px",
+            color: "var(--text-secondary)",
+            fontSize: 10,
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+          }}
+        >
+          Remote
+        </span>
+      ) : (
+        <button
+          type="button"
+          data-testid={`agent-scope-set-up-${agent.id}`}
+          onClick={onSetUp}
+          style={{
+            background: "transparent",
+            border: "1px solid var(--border-default, var(--border-subtle))",
+            borderRadius: 4,
+            padding: "2px 8px",
+            color: "var(--text-primary)",
+            fontSize: 11,
+            cursor: "pointer",
+          }}
+        >
+          {strings.scopePicker.setUpCta(agent.displayName)}
+        </button>
+      )}
     </div>
   );
 }
@@ -424,6 +446,16 @@ function StatsPane({
   onSwitch: () => void;
 }) {
   const isActive = agent.id === activeAgentId;
+  // 0694 (AC-US4-04 / F-005): web-only agents have no local install path,
+  // so switching to one would put downstream install flows in a broken
+  // state. Disable the Switch button and surface the reason inline.
+  const isRemoteOnly = agent.isRemoteOnly === true;
+  const switchDisabled = isActive || isRemoteOnly;
+  const switchLabel = isActive
+    ? "Active"
+    : isRemoteOnly
+      ? "Remote-only"
+      : strings.scopePicker.switchCta;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div>
@@ -444,7 +476,7 @@ function StatsPane({
             marginTop: 2,
           }}
         >
-          {healthLabel(agent.health)}
+          {isRemoteOnly ? "Remote service — no local install" : healthLabel(agent.health)}
         </div>
       </div>
       <dl
@@ -467,24 +499,25 @@ function StatsPane({
         type="button"
         data-testid="agent-scope-switch"
         onClick={onSwitch}
-        disabled={isActive}
+        disabled={switchDisabled}
+        title={isRemoteOnly ? "This agent has no local CLI to switch to" : undefined}
         style={{
           alignSelf: "flex-start",
           padding: "8px 14px",
           borderRadius: 6,
           border: "1px solid var(--border-default, var(--border-subtle))",
-          background: isActive
+          background: switchDisabled
             ? "transparent"
             : "color-mix(in srgb, var(--accent-surface) 20%, transparent)",
           color: "var(--text-primary)",
           fontSize: 12,
           fontWeight: 500,
           fontFamily: "var(--font-sans)",
-          cursor: isActive ? "default" : "pointer",
-          opacity: isActive ? 0.5 : 1,
+          cursor: switchDisabled ? "default" : "pointer",
+          opacity: switchDisabled ? 0.5 : 1,
         }}
       >
-        {isActive ? "Active" : strings.scopePicker.switchCta}
+        {switchLabel}
       </button>
     </div>
   );

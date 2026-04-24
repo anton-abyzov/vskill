@@ -39,6 +39,8 @@ export function ProjectPicker({
   const [inputPath, setInputPath] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [hoveredId, setHoveredId] = React.useState<string | null>(null);
+  const [switchHint, setSwitchHint] = React.useState<ProjectConfigRaw | null>(null);
+  const [copied, setCopied] = React.useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   const projects = workspace?.projects ?? [];
@@ -65,7 +67,13 @@ export function ProjectPicker({
     setError(null);
     const trimmed = inputPath.trim();
     if (!trimmed) {
-      setError("Enter an absolute project path");
+      setError("Paste an absolute path (e.g. /Users/you/projects/my-skill)");
+      return;
+    }
+    if (!trimmed.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(trimmed)) {
+      setError(
+        "Path must be absolute. In Terminal, cd to the folder and run: pwd — then paste the result here.",
+      );
       return;
     }
     try {
@@ -73,7 +81,14 @@ export function ProjectPicker({
       setInputPath("");
       setAdding(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const raw = err instanceof Error ? err.message : String(err);
+      if (/does not exist/i.test(raw)) {
+        setError(`Path not found on disk: ${trimmed}`);
+      } else if (/Duplicate/i.test(raw)) {
+        setError("That project is already registered.");
+      } else {
+        setError(raw);
+      }
     }
   }
 
@@ -220,8 +235,15 @@ export function ProjectPicker({
                     onMouseLeave={() => setHoveredId((h) => (h === p.id ? null : h))}
                     onClick={() => {
                       if (stale) return;
-                      void onSwitch(p.id);
-                      setOpen(false);
+                      // The server's skill scanner is tied to the launch --root
+                      // and can't be re-rooted from the browser — so clicking
+                      // a non-active project shows instructions to relaunch
+                      // from there. Active project row is a no-op.
+                      if (isActive) {
+                        setOpen(false);
+                        return;
+                      }
+                      setSwitchHint(p);
                     }}
                     style={{
                       display: "flex",
@@ -496,6 +518,131 @@ export function ProjectPicker({
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Switch-project hint modal. The server's skill scanner is bound to
+          its launch --root, so clicking a non-active project can't retarget
+          it from the browser. Instead we show the exact command the user
+          should run in their terminal. */}
+      {switchHint && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Switch project instructions"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 80,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onClick={() => setSwitchHint(null)}
+        >
+          <div
+            style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.40)" }}
+          />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "relative",
+              width: "min(520px, 92vw)",
+              background: "var(--color-paper, #fff)",
+              border: "1px solid var(--border-default, rgba(0,0,0,0.12))",
+              borderRadius: 10,
+              boxShadow: "0 10px 15px -3px rgba(0,0,0,0.12), 0 20px 40px -8px rgba(0,0,0,0.18)",
+              padding: 18,
+              fontFamily: "var(--font-sans)",
+              color: "var(--text-primary)",
+            }}
+          >
+            <h2
+              style={{
+                margin: 0,
+                fontSize: 16,
+                fontWeight: 600,
+                fontFamily: "var(--font-serif, ui-serif)",
+                marginBottom: 8,
+              }}
+            >
+              Switch to {switchHint.name}
+            </h2>
+            <p
+              style={{
+                fontSize: 13,
+                color: "var(--text-secondary)",
+                lineHeight: 1.5,
+                margin: 0,
+                marginBottom: 12,
+              }}
+            >
+              Skill Studio's skill scanner reads from the folder it was launched in,
+              so switching projects from the browser isn't possible. Quit this server
+              and relaunch from the target folder:
+            </p>
+            <div
+              style={{
+                background: "var(--surface-1, #0f0f10)",
+                color: "var(--text-primary)",
+                padding: "10px 12px",
+                borderRadius: 6,
+                fontFamily: "var(--font-mono)",
+                fontSize: 12,
+                lineHeight: 1.55,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-all",
+                border: "1px solid var(--border-subtle, rgba(255,255,255,0.08))",
+              }}
+            >
+              {`cd "${switchHint.path}" && npx vskill@latest studio`}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(
+                      `cd "${switchHint.path}" && npx vskill@latest studio`,
+                    );
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1600);
+                  } catch {
+                    /* clipboard API not available */
+                  }
+                }}
+                style={{
+                  padding: "7px 14px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  border: "1px solid var(--color-accent, #2f6f8f)",
+                  borderRadius: 6,
+                  background: "var(--color-accent, #2f6f8f)",
+                  color: "#ffffff",
+                  cursor: "pointer",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.12)",
+                }}
+              >
+                {copied ? "Copied!" : "Copy command"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSwitchHint(null)}
+                style={{
+                  padding: "7px 12px",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  border: "1px solid var(--border-default, rgba(0,0,0,0.12))",
+                  borderRadius: 6,
+                  background: "transparent",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

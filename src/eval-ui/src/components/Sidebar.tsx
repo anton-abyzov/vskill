@@ -237,6 +237,40 @@ export function Sidebar({
     [skills, deferredQuery],
   );
   const isClaudeCode = resolvedAgentId === "claude-code";
+
+  // 0698 (polish): AVAILABLE / AUTHORING groups are collapsible. Persist per
+  // agent so users can park their preferred layout (e.g. collapse AVAILABLE to
+  // focus on AUTHORING while building new skills).
+  const [availableCollapsed, setAvailableCollapsed] = useState(() =>
+    readCollapsedSafe(`vskill-sidebar-${resolvedAgentId}-group-available-collapsed`),
+  );
+  const [authoringCollapsed, setAuthoringCollapsed] = useState(() =>
+    readCollapsedSafe(`vskill-sidebar-${resolvedAgentId}-group-authoring-collapsed`),
+  );
+  const toggleAvailable = useCallback(
+    (next: boolean) => {
+      setAvailableCollapsed(next);
+      try {
+        window.localStorage.setItem(
+          `vskill-sidebar-${resolvedAgentId}-group-available-collapsed`,
+          String(next),
+        );
+      } catch { /* non-fatal */ }
+    },
+    [resolvedAgentId],
+  );
+  const toggleAuthoring = useCallback(
+    (next: boolean) => {
+      setAuthoringCollapsed(next);
+      try {
+        window.localStorage.setItem(
+          `vskill-sidebar-${resolvedAgentId}-group-authoring-collapsed`,
+          String(next),
+        );
+      } catch { /* non-fatal */ }
+    },
+    [resolvedAgentId],
+  );
   // Keep the legacy 2-section shape callable for the non-tri-scope code
   // path — it's just `own` + (`installed` + `global` merged into installed).
   const { own, installed } = useMemo(
@@ -330,6 +364,9 @@ export function Sidebar({
               Counts always displayed, including zero. */}
           <GroupHeader
             name={strings.scopeLabels.groupAvailable.toUpperCase()}
+            variant="available"
+            collapsed={availableCollapsed}
+            onToggle={toggleAvailable}
             count={
               five.availableProject.total +
               five.availablePersonal.total +
@@ -337,6 +374,8 @@ export function Sidebar({
             }
           />
 
+          {!availableCollapsed && (
+          <>
           <NamedScopeSection
             label={strings.scopeLabels.sourceProject}
             storageKey={`vskill-sidebar-${resolvedAgentId}-available-project-collapsed`}
@@ -412,13 +451,21 @@ export function Sidebar({
             </NamedScopeSection>
           )}
 
+          </>
+          )}
+
           <BoldDivider />
 
           <GroupHeader
             name={strings.scopeLabels.groupAuthoring.toUpperCase()}
+            variant="authoring"
+            collapsed={authoringCollapsed}
+            onToggle={toggleAuthoring}
             count={five.authoringProject.total + five.authoringPlugin.total}
           />
 
+          {!authoringCollapsed && (
+          <>
           <NamedScopeSection
             label={strings.scopeLabels.authoringSkills}
             storageKey={`vskill-sidebar-${resolvedAgentId}-authoring-project-collapsed`}
@@ -472,6 +519,8 @@ export function Sidebar({
                 ))
               )}
             </NamedScopeSection>
+          )}
+          </>
           )}
         </div>
       )}

@@ -144,6 +144,7 @@ vskill submit <source>      Submit a skill for verification
 vskill blocklist            Manage blocked malicious skills
 vskill init                 Initialize vskill in a project
 vskill diff <s> <from> <to> Show multi-file diff between two versions
+vskill keys <cmd> [provider] Manage LLM API keys (set/list/remove/path)
 ```
 
 ## Compare skill versions
@@ -415,11 +416,88 @@ npx vskill eval generate-all              # Batch-generate for all skills
 
 Previous benchmark results are displayed on the skill detail page without re-running. Per-case pass/fail status, time, and token usage are shown inline.
 
+## API Key Storage
+
+`vskill` stores LLM provider API keys (Anthropic, OpenAI, OpenRouter) at `~/.vskill/keys.env` in dotenv format. One file. Same code path on macOS, Linux, and Windows.
+
+### Storage location
+
+| Platform | Default path | Permissions |
+|:---|:---|:---|
+| macOS   | `~/.vskill/keys.env` | `0600` (owner read/write only) |
+| Linux   | `~/.vskill/keys.env` | `0600` (owner read/write only) |
+| Windows | `%USERPROFILE%\.vskill\keys.env` | NTFS ACL (user-scoped) |
+
+Override the default with `VSKILL_CONFIG_DIR` — useful for CI, hermetic tests, or multi-profile workflows. Example: `VSKILL_CONFIG_DIR=/tmp/test vskill keys set anthropic`.
+
+Get the absolute path at any time:
+```bash
+vskill keys path
+# /Users/you/.vskill/keys.env
+```
+
+### Precedence: real env vars ALWAYS win
+
+If `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY` is already set in your shell (from `direnv`, `1password-cli`, a CI secret, dotfiles, etc.), the stored key in `keys.env` is IGNORED for that provider. Real env vars are never overwritten by vskill's boot-time merge. This is the power-user escape hatch — vskill gets out of your way.
+
+You can verify the resolved source via `vskill keys list`:
+```
+provider    source        key
+anthropic   env var       ****ABCD
+openai      file          ****EFGH
+openrouter  not set
+```
+
+### `vskill keys` subcommands
+
+```bash
+# Interactive masked paste (characters not echoed)
+vskill keys set anthropic
+
+# Piped stdin (dotfiles, provisioning scripts)
+echo "$ANTHROPIC_KEY" | vskill keys set anthropic
+
+# Table with stored/env/not-set status and redacted last-4
+vskill keys list
+
+# Idempotent remove (no error if not present)
+vskill keys remove anthropic
+
+# Print absolute path (same as the Settings modal footer)
+vskill keys path
+```
+
+All four subcommands work identically on macOS, Linux, and Windows (enforced by a 3-OS CI matrix).
+
+### Security model
+
+- Plaintext file, `0600` on POSIX — matches the precedent of `aws`, `kubectl`, and `supabase` credential files. The threat model is "solo developer, local tool, user-home ACLs", NOT "stolen unlocked laptop".
+- Keys are NEVER logged, printed to stdout, or embedded in error messages. Only redacted `****<last-4>` is ever emitted, verified by a log-capture unit test with an injected canary substring.
+- The paste flow in Settings modal clears the input synchronously after POST — the raw key is never held across a React render boundary.
+- If you want encryption at rest, set the provider env vars from your secrets manager (`direnv`, `1password-cli`, `pass`, etc.). The env var precedence rule means vskill will use them transparently and never read `keys.env` for those providers.
+
+### Migration from legacy macOS Keychain tier
+
+Users who stored keys via the previous `vskill-<provider>` Keychain entries get a one-click import banner on first boot of vskill >=0.5.70. Old Keychain entries are retained for 30 days post-import as a rollback safety net; after that you can remove them manually with `security delete-generic-password -s vskill-anthropic -a vskill-user`. Non-Darwin platforms: no-op.
+
+### `.gitignore` suggestion
+
+If you keep dotfiles in a Git repo, add this to `.gitignore`:
+```
+~/.vskill/keys.env
+```
+
+### First-run onboarding
+
+When `vskill studio` starts with no stored key AND no env var set, the terminal prompts you to paste a key BEFORE opening the browser. Paste (masked) + Enter → saved + browser opens. Or decline and get a `vskill keys set <provider>` hint to run later. If ANY provider env var is already set, the prompt is skipped silently — no nagging power users.
+
+<br/>
+
 ## Claude Max/Pro subscription compliance
 
 vSkill Studio does not consume your Max/Pro subscription quota directly. It delegates to the official [Claude Code CLI](https://docs.claude.com/en/docs/claude-code), the sanctioned consumer per Anthropic's April 2026 Terms of Service update. The Claude adapter never reads `~/.claude/credentials*`, `~/.claude/auth*`, or `~/.claude/token*` — a bundled unit test (`src/eval/__tests__/claude-cli-compliance.test.ts`) plus a dist-bundle grep gate (`scripts/check-bundle-compliance.sh`) enforce this on every build.
 
-Issue API keys for direct access at [platform.claude.com/settings/keys](https://platform.claude.com/settings/keys) or [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys). Keys entered in Studio's Settings modal are stored locally on-device only (in-memory + browser localStorage mirror, or macOS Keychain on opt-in) — never synced, never committed to git, never transmitted off-device except to the provider's own API.
+Issue API keys for direct access at [platform.claude.com/settings/keys](https://platform.claude.com/settings/keys), [platform.openai.com/api-keys](https://platform.openai.com/api-keys), or [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys). Keys entered in Studio's Settings modal (or via `vskill keys set`) are stored locally at `~/.vskill/keys.env` with `0600` permissions on POSIX — never synced, never committed to git, never transmitted off-device except to the provider's own API. See [API Key Storage](#api-key-storage) for the full storage model.
 
 ### Model configuration
 
@@ -428,7 +506,9 @@ The eval system supports multiple LLM providers. Switch between them in the eval
 | Provider | Models | Requirements |
 |:---------|:-------|:-------------|
 | **Claude Code (CLI)** | Sonnet, Opus, Haiku | `@anthropic-ai/claude-code` installed on PATH — Studio delegates to your existing Claude Code session. |
-| **Anthropic API** | Claude Sonnet 4.6, Opus 4.6, Haiku 4.5 | `ANTHROPIC_API_KEY` env var |
+| **Anthropic API** | Claude Sonnet 4.6, Opus 4.6, Haiku 4.5 | `ANTHROPIC_API_KEY` env var, or `vskill keys set anthropic` |
+| **OpenAI API** | GPT-4o, GPT-4o-mini, o1-mini | `OPENAI_API_KEY` env var, or `vskill keys set openai` |
+| **OpenRouter** | Any OpenRouter-served model | `OPENROUTER_API_KEY` env var, or `vskill keys set openrouter` |
 | **Ollama** | Any locally installed model | Ollama running at `localhost:11434` |
 | **LM Studio** | Any model loaded in LM Studio | LM Studio running at `localhost:1234` (no API key needed) |
 

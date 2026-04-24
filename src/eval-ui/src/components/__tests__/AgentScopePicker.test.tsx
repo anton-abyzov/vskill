@@ -294,4 +294,56 @@ describe("0686 T-002: AgentScopePicker trigger + popover", () => {
     act(() => root.unmount());
     container.remove();
   });
+
+  // 0694 AC-US4-04: Remote-only agents render a "Remote" badge instead of a
+  // "Set up" button — install affordances must be suppressed.
+  it("AC-US4-04: remote-only agents render Remote badge in lieu of Set up button", async () => {
+    const React = await import("react");
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { AgentScopePicker } = await import("../AgentScopePicker");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const onOpenSetup = vi.fn();
+    const remoteAgents = [
+      ...fixtureAgents,
+      {
+        id: "devin",
+        displayName: "Devin",
+        presence: "absent" as const,
+        installedCount: 0,
+        globalCount: 0,
+        lastSync: null,
+        health: "missing" as const,
+        isRemoteOnly: true,
+      },
+    ];
+    act(() => {
+      root.render(
+        React.createElement(AgentScopePicker, {
+          agents: remoteAgents,
+          activeAgentId: "claude-cli",
+          onActiveAgentChange: vi.fn(),
+          onOpenSetup,
+        }),
+      );
+    });
+    const trigger = container.querySelector(
+      "[data-testid='agent-scope-picker-trigger']",
+    ) as HTMLButtonElement;
+    act(() => trigger.click());
+    const badge = document.querySelector(
+      "[data-testid='agent-scope-remote-badge-devin']",
+    );
+    expect(badge).toBeTruthy();
+    expect(badge?.textContent).toMatch(/remote/i);
+    // Install affordance (Set up button) MUST be absent for the remote agent.
+    const setUpBtn = document.querySelector(
+      "[data-testid='agent-scope-set-up-devin']",
+    );
+    expect(setUpBtn).toBeFalsy();
+    act(() => root.unmount());
+    container.remove();
+  });
 });

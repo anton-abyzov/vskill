@@ -46,7 +46,21 @@ export interface AgentDefinition {
    *  deterministic `~/.config/X/` → `%APPDATA%/X/` fallback. Ignored on
    *  darwin + linux so POSIX hosts retain existing behavior. */
   win32PathOverride?: string;
+  /** 0694 (AC-US4-01): Web-only "agents" with no local CLI. When true,
+   *  install commands MUST refuse and Studio renders a "Remote" badge
+   *  instead of install affordances. The catalog still lists the entry
+   *  so users searching for the brand can discover it. */
+  isRemoteOnly?: boolean;
 }
+
+/** 0694 (AC-US1-04): Backward-compat alias map for renamed agent ids.
+ *  Consumed by `getAgent()` so existing scripts/lockfiles continue to work
+ *  after a rename. Keys are legacy ids, values are current canonical ids. */
+export const LEGACY_AGENT_IDS: Readonly<Record<string, string>> = Object.freeze({
+  // 0694 US-001: split conflated `github-copilot` into VS Code extension
+  // (renamed to `github-copilot-ext`) and standalone CLI (`copilot-cli`).
+  "github-copilot": "github-copilot-ext",
+});
 
 /**
  * Complete registry of 49 AI coding agents.
@@ -108,12 +122,28 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
-    id: 'github-copilot',
-    displayName: 'GitHub Copilot',
+    // 0694 US-001 (AC-US1-02): renamed from `github-copilot`. Targets the
+    // VS Code Copilot extension's skills folder (`.github/copilot/skills/`).
+    // The standalone `copilot` binary uses the new `copilot-cli` entry below.
+    //
+    // VERIFY: VS Code extensions are installed under versioned dirs
+    // (`~/.vscode/extensions/github.copilot-<version>/`), so a stable
+    // unversioned `globalSkillsDir` does not exist for the extension.
+    // Using `~/.config/github-copilot/skills` as a vskill-managed fallback
+    // — independent of the `~/.copilot/` path claimed by `copilot-cli` so
+    // the two adapters do not collide on shared filesystem state.
+    //
+    // detectInstalled uses `which code` (VS Code on PATH) as a necessary-
+    // but-not-sufficient proxy. Many VS Code users will appear "detected"
+    // even without the Copilot extension installed; that is acceptable
+    // because the local `.github/copilot/skills/` folder presence (checked
+    // independently by `buildAgentsResponse`) is the authoritative signal.
+    id: 'github-copilot-ext',
+    displayName: 'GitHub Copilot (VS Code)',
     localSkillsDir: '.github/copilot/skills',
-    globalSkillsDir: '~/.copilot/skills',
+    globalSkillsDir: '~/.config/github-copilot/skills',
     isUniversal: true,
-    detectInstalled: 'which github-copilot',
+    detectInstalled: 'which code',
     parentCompany: 'GitHub (Microsoft)',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -192,6 +222,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: 'which replit',
     parentCompany: 'Replit',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+    isRemoteOnly: true,
   },
   {
     id: 'codebuddy',
@@ -484,6 +515,9 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
   {
+    // 0694 US-004: Devin is a hosted web service — no local CLI to install
+    // skills into. Catalog entry retained for discoverability; isRemoteOnly
+    // suppresses install affordances and shows a "Remote" badge in Studio.
     id: 'devin',
     displayName: 'Devin',
     localSkillsDir: '.devin/skills',
@@ -492,8 +526,10 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: 'which devin',
     parentCompany: 'Cognition',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+    isRemoteOnly: true,
   },
   {
+    // 0694 US-004: bolt.new is a browser-only product. See devin entry above.
     id: 'bolt-new',
     displayName: 'bolt.new',
     localSkillsDir: '.bolt/skills',
@@ -502,8 +538,10 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: 'which bolt',
     parentCompany: 'StackBlitz',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+    isRemoteOnly: true,
   },
   {
+    // 0694 US-004: v0 is a Vercel hosted UI generator. See devin entry above.
     id: 'v0',
     displayName: 'v0',
     localSkillsDir: '.v0/skills',
@@ -512,6 +550,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: 'which v0',
     parentCompany: 'Vercel',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+    isRemoteOnly: true,
   },
   {
     id: 'gpt-pilot',
@@ -553,10 +592,89 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     parentCompany: 'AbanteAI',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
+
+  // ----------------------------------------------------------------
+  // 0694: New CLI adapters (US-001 / US-002 / US-003 / US-005)
+  // ----------------------------------------------------------------
+  {
+    // 0694 US-001 (AC-US1-01): standalone `copilot` binary (GA Apr 2026),
+    // separate from the VS Code Copilot extension above.
+    id: 'copilot-cli',
+    displayName: 'GitHub Copilot CLI',
+    localSkillsDir: '.copilot/skills',
+    globalSkillsDir: '~/.copilot/skills',
+    isUniversal: false,
+    detectInstalled: 'which copilot',
+    parentCompany: 'GitHub (Microsoft)',
+    featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
+  },
+  {
+    // 0694 US-002 (AC-US2-01): Warp Terminal "Oz" Agent Mode.
+    // VERIFY: docs.warp.dev/agent-platform did not document a skills/rules
+    // path at the time of this entry; using community-default `.warp/skills`
+    // and `~/.warp/skills` until vendor confirms a canonical location.
+    id: 'warp',
+    displayName: 'Warp',
+    localSkillsDir: '.warp/skills',
+    globalSkillsDir: '~/.warp/skills',
+    isUniversal: false,
+    detectInstalled: 'which warp',
+    parentCompany: 'Warp',
+    featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
+  },
+  {
+    // 0694 US-003 (AC-US3-01): Amazon Q Developer CLI (`q` binary).
+    // Confirmed binary name from github.com/aws/amazon-q-developer-cli.
+    // VERIFY: skills dir convention not documented at time of entry; using
+    // `~/.aws/amazonq/skills` (matches `~/.aws/amazonq` config root pattern).
+    id: 'amazon-q-cli',
+    displayName: 'Amazon Q CLI',
+    localSkillsDir: '.amazonq/skills',
+    globalSkillsDir: '~/.aws/amazonq/skills',
+    isUniversal: false,
+    detectInstalled: 'which q',
+    parentCompany: 'AWS',
+    featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
+  },
+  {
+    // 0694 US-005 (AC-US5-01): Zed editor agent panel.
+    // Schema parity with specweave/src/adapters/registry.yaml (id: zed,
+    // .zed/skills, MCP support). VERIFY: zed.dev/docs/ai/agent-panel does
+    // not document a skills dir; following the .zed/ + .zed/skills/
+    // convention used elsewhere in the registry.
+    id: 'zed',
+    displayName: 'Zed',
+    localSkillsDir: '.zed/skills',
+    globalSkillsDir: '~/.config/zed/skills',
+    isUniversal: false,
+    detectInstalled: 'which zed',
+    parentCompany: 'Zed Industries',
+    featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
+  },
 ];
 
 /** Total number of registered agents */
 export const TOTAL_AGENTS = AGENTS_REGISTRY.length;
+
+// ---------------------------------------------------------------------------
+// 0693: Non-agent config dirs — co-located here so all known config-dir
+// prefixes have a single audit point alongside AGENTS_REGISTRY.
+//
+// These dirs are *not* agent install targets; they are sibling config dirs
+// that the skill scanner / path validator must still recognize as
+// "installed-style" first-segments (e.g., to avoid treating files inside
+// .vscode or .github as user-authored skills).
+// ---------------------------------------------------------------------------
+export const NON_AGENT_CONFIG_DIRS = Object.freeze([
+  ".specweave",
+  ".vscode",
+  ".idea",
+  ".zed",
+  ".devcontainer",
+  ".github",
+  ".agents",
+  ".agent",
+] as const);
 
 // ---------------------------------------------------------------------------
 // Agent Creation Profile
@@ -652,13 +770,27 @@ export function getNonUniversalAgents(): AgentDefinition[] {
 }
 
 /**
- * Gets a single agent by ID.
+ * Gets a single agent by ID. Honors `LEGACY_AGENT_IDS` so callers using a
+ * renamed legacy id (e.g. `github-copilot`) still resolve to the current
+ * canonical entry (e.g. `github-copilot-ext`).
  *
- * @param id - Agent identifier
+ * @param id - Agent identifier (current or legacy alias)
  * @returns The agent definition, or undefined if not found
  */
 export function getAgent(id: string): AgentDefinition | undefined {
-  return AGENTS_REGISTRY.find((a) => a.id === id);
+  const canonical = LEGACY_AGENT_IDS[id] ?? id;
+  return AGENTS_REGISTRY.find((a) => a.id === canonical);
+}
+
+/**
+ * 0694 (AC-US4-03): Returns agents that can be installed locally.
+ * Excludes any entry flagged `isRemoteOnly: true` (web-only tools like
+ * Devin / bolt.new / v0 / Replit). Used by `vskill add`, the Studio
+ * AgentScopePicker install affordances, and any caller that needs the
+ * "real" installable agent list.
+ */
+export function getInstallableAgents(): AgentDefinition[] {
+  return AGENTS_REGISTRY.filter((a) => a.isRemoteOnly !== true);
 }
 
 /**

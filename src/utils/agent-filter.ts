@@ -39,5 +39,18 @@ export function filterAgents(
   }
 
   const requested = new Set(ids);
-  return agents.filter((a) => requested.has(a.id));
+  const matched = agents.filter((a) => requested.has(a.id));
+
+  // 0694 (AC-US4-05): web-only agents (Devin, bolt.new, v0, Replit) cannot
+  // be installed locally — they have no CLI/config dir. Reject explicitly
+  // rather than silently writing skills to a path the agent will never read.
+  const remoteOnly = matched.filter((a) => a.isRemoteOnly === true);
+  if (remoteOnly.length > 0) {
+    const ids = remoteOnly.map((a) => a.id).join(", ");
+    throw new Error(
+      `Cannot install to remote-only agent(s): ${ids}. These tools run as hosted web services and have no local skills directory.`,
+    );
+  }
+
+  return matched;
 }

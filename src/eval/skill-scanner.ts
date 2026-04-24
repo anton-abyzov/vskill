@@ -15,7 +15,11 @@
 import type { Dirent } from "node:fs";
 import { readdirSync, existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { join, basename, dirname, relative, sep } from "node:path";
-import { AGENTS_REGISTRY, type AgentDefinition } from "../agents/agents-registry.js";
+import {
+  AGENTS_REGISTRY,
+  NON_AGENT_CONFIG_DIRS,
+  type AgentDefinition,
+} from "../agents/agents-registry.js";
 import { resolveGlobalSkillsDir } from "./path-utils.js";
 
 /** Scope classification — where a skill lives in the three-part world. */
@@ -50,13 +54,9 @@ export interface SkillInfo {
 // directory (installed/consumed) vs. a user's own project (source/editable).
 // ---------------------------------------------------------------------------
 
-/** Extra known config dirs not covered by agents-registry localSkillsDir. */
-const EXTRA_CONFIG_DIRS = [
-  ".specweave", ".vscode", ".idea", ".zed", ".devcontainer",
-  ".github", ".agents", ".agent",
-];
-
-/** Lazily built set of all known agent config directory prefixes. */
+/** Lazily built set of all known agent config directory prefixes.
+ *  Union of agent localSkillsDir first-segments + NON_AGENT_CONFIG_DIRS
+ *  (the canonical non-agent config dirs co-located in agents-registry). */
 let _installedPrefixes: Set<string> | null = null;
 
 function getInstalledPrefixes(): Set<string> {
@@ -67,7 +67,7 @@ function getInstalledPrefixes(): Set<string> {
     const first = agent.localSkillsDir.split("/")[0];
     if (first) prefixes.add(first);
   }
-  for (const dir of EXTRA_CONFIG_DIRS) {
+  for (const dir of NON_AGENT_CONFIG_DIRS) {
     prefixes.add(dir);
   }
   _installedPrefixes = prefixes;

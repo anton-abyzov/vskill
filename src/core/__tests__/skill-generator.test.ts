@@ -301,6 +301,74 @@ describe("generateSkill() — T-001 extracted module", () => {
     });
   });
 
+  describe("abort signal", () => {
+    it("throws when the AbortSignal is already aborted before LLM calls settle", async () => {
+      mocks.llmCalls.length = 0;
+      const ac = new AbortController();
+      ac.abort(new Error("user cancelled"));
+      await expect(
+        generateSkill(
+          {
+            prompt: SAMPLE_PROMPT,
+            targetAgents: ["claude-code"],
+            provider: "claude-cli",
+            model: "sonnet",
+          },
+          { root: TEMP_ROOT, abortSignal: ac.signal },
+        ),
+      ).rejects.toThrow(/cancelled|aborted/);
+    });
+
+    it("falls back to a generic error when AbortSignal has no reason", async () => {
+      mocks.llmCalls.length = 0;
+      const ac = new AbortController();
+      ac.abort();
+      await expect(
+        generateSkill(
+          {
+            prompt: SAMPLE_PROMPT,
+            targetAgents: ["claude-code"],
+            provider: "claude-cli",
+            model: "sonnet",
+          },
+          { root: TEMP_ROOT, abortSignal: ac.signal },
+        ),
+      ).rejects.toThrow(/aborted/i);
+    });
+  });
+
+  describe("existing plugins prompt injection", () => {
+    it("includes the existing plugin list in the body user prompt when plugins are present", async () => {
+      // Seed a fake plugin layout in a temp root (layout 2: root/plugins/<name>/skills/<skill>/SKILL.md)
+      const seedRoot = "/tmp/vskill-skill-generator-test-root-with-plugins";
+      const pluginDir = `${seedRoot}/plugins/markdown-tools/skills/lint`;
+      mkdirSync(pluginDir, { recursive: true });
+      // SKILL.md needs to be present for listSkillDirs to pick it up
+      const fs = await import("node:fs");
+      fs.writeFileSync(
+        `${pluginDir}/SKILL.md`,
+        "---\nname: lint\ndescription: dummy\n---\n\nbody\n",
+        "utf-8",
+      );
+
+      mocks.llmCalls.length = 0;
+      await generateSkill(
+        {
+          prompt: SAMPLE_PROMPT,
+          targetAgents: ["claude-code"],
+          provider: "claude-cli",
+          model: "sonnet",
+        },
+        { root: seedRoot },
+      );
+
+      const bodyCall = mocks.llmCalls.find((c) => c.role === "body");
+      expect(bodyCall).toBeDefined();
+      expect(bodyCall!.userPrompt).toContain("Existing plugins in this project:");
+      expect(bodyCall!.userPrompt).toContain("markdown-tools");
+    });
+  });
+
   describe("LLM client configuration", () => {
     it("uses the provided provider + model for body client", async () => {
       mocks.llmCalls.length = 0;

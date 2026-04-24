@@ -1,5 +1,5 @@
 // API client for the eval server
-import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel, VersionEntry, VersionDiff, AgentsResponse } from "./types";
+import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel, VersionEntry, VersionDiff, AgentsResponse, StudioOp, Provenance, TransferEvent } from "./types";
 
 const BASE = "";
 
@@ -118,6 +118,30 @@ export function normalizeSkillInfo(raw: unknown): SkillInfo {
     sizeBytes: coerceNumberOrNull(r.sizeBytes),
     sourceAgent: coerceStringOrNull(r.sourceAgent),
   };
+
+  // 0688: provenance sidecar passthrough — only when the server populated it
+  // for an OWN-scope skill. Any malformed shape is coerced to null rather
+  // than propagating garbage to the UI.
+  if (r.provenance && typeof r.provenance === "object") {
+    const p = r.provenance as Record<string, unknown>;
+    if (
+      (p.promotedFrom === "installed" || p.promotedFrom === "global") &&
+      typeof p.sourcePath === "string" &&
+      typeof p.promotedAt === "number"
+    ) {
+      info.provenance = {
+        promotedFrom: p.promotedFrom,
+        sourcePath: p.sourcePath,
+        promotedAt: p.promotedAt,
+        sourceSkillVersion:
+          typeof p.sourceSkillVersion === "string" ? p.sourceSkillVersion : undefined,
+      };
+    } else {
+      info.provenance = null;
+    }
+  } else if (r.provenance === null) {
+    info.provenance = null;
+  }
 
   // Preserve optional version-update fields passthrough (merged later by
   // mergeUpdatesIntoSkills — see bottom of file).
@@ -432,7 +456,169 @@ export const api = {
       return [];
     }
   },
+
+  // ---------------------------------------------------------------------------
+  // 0688: Studio scope-transfer endpoints (T-018)
+  //
+  // promote / test-install / revert are POST-initiated SSE streams. Each
+  // returns a Promise that resolves with the final TransferEvent of type
+  // "done" (or rejects on `error` / HTTP error). Per-event progress is
+  // delivered via the optional `onEvent` callback so the caller can drive
+  // FLIP captures, refresh, and toast emission at the right moments.
+  // ---------------------------------------------------------------------------
+
+  promoteSkill(
+    plugin: string,
+    skill: string,
+    opts?: { overwrite?: boolean; onEvent?: (evt: TransferEvent) => void; signal?: AbortSignal },
+  ): Promise<Extract<TransferEvent, { type: "done" }>> {
+    const qs = opts?.overwrite ? "?overwrite=true" : "";
+    return runTransferSSE(
+      `/api/skills/${plugin}/${skill}/promote${qs}`,
+      opts?.onEvent,
+      opts?.signal,
+    );
+  },
+
+  testInstallSkill(
+    plugin: string,
+    skill: string,
+    opts?: {
+      dest?: "installed" | "global";
+      overwrite?: boolean;
+      onEvent?: (evt: TransferEvent) => void;
+      signal?: AbortSignal;
+    },
+  ): Promise<Extract<TransferEvent, { type: "done" }>> {
+    const params = new URLSearchParams();
+    if (opts?.dest === "global") params.set("dest", "global");
+    if (opts?.overwrite) params.set("overwrite", "true");
+    const qs = params.toString();
+    return runTransferSSE(
+      `/api/skills/${plugin}/${skill}/test-install${qs ? "?" + qs : ""}`,
+      opts?.onEvent,
+      opts?.signal,
+    );
+  },
+
+  revertSkill(
+    plugin: string,
+    skill: string,
+    opts?: { onEvent?: (evt: TransferEvent) => void; signal?: AbortSignal },
+  ): Promise<Extract<TransferEvent, { type: "done" }>> {
+    return runTransferSSE(
+      `/api/skills/${plugin}/${skill}/revert`,
+      opts?.onEvent,
+      opts?.signal,
+    );
+  },
+
+  listStudioOps(opts?: { before?: number; limit?: number }): Promise<StudioOp[]> {
+    const params = new URLSearchParams();
+    if (opts?.before != null) params.set("before", String(opts.before));
+    if (opts?.limit != null) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    return fetchJson<StudioOp[]>(`/api/studio/ops${qs ? "?" + qs : ""}`);
+  },
+
+  deleteStudioOp(id: string): Promise<{ ok: boolean }> {
+    return fetchJson(`/api/studio/ops/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+
+  /**
+   * Open a long-lived SSE stream of new StudioOp events. Returns a native
+   * EventSource — caller is responsible for closing it. Listen on the "op"
+   * event for new entries and "heartbeat" for keepalive.
+   */
+  studioOpsStream(): EventSource {
+    return new EventSource(`${BASE}/api/studio/ops/stream`);
+  },
 };
+
+// ---------------------------------------------------------------------------
+// 0688: Internal SSE-POST helper for the three transfer endpoints.
+//
+// Mirrors the parser in src/eval-ui/src/sse.ts but resolves a single Promise
+// instead of accumulating React state. Each transfer is a one-shot with a
+// well-defined event sequence; surfacing it as Promise<done> + onEvent
+// callback maps cleanly onto the orchestration in useScopeTransfer.
+// ---------------------------------------------------------------------------
+export async function runTransferSSE(
+  url: string,
+  onEvent?: (evt: TransferEvent) => void,
+  signal?: AbortSignal,
+): Promise<Extract<TransferEvent, { type: "done" }>> {
+  const res = await fetch(`${BASE}${url}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    signal,
+  });
+
+  if (!res.ok || !res.body) {
+    let msg = `HTTP ${res.status}`;
+    let code: string | undefined;
+    try {
+      const j = await res.json();
+      if (j.error) msg = j.error;
+      if (typeof j.code === "string") code = j.code;
+    } catch {}
+    const err = new ApiError(msg, res.status) as ApiError & { code?: string };
+    if (code) err.code = code;
+    throw err;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let currentEvent = "";
+  let doneEvent: Extract<TransferEvent, { type: "done" }> | null = null;
+  let errorEvent: Extract<TransferEvent, { type: "error" }> | null = null;
+
+  while (true) {
+    const { done: readerDone, value } = await reader.read();
+    if (readerDone) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.startsWith("event: ")) {
+        currentEvent = line.slice(7).trim();
+      } else if (line.startsWith("data: ")) {
+        let payload: Record<string, unknown> = {};
+        try {
+          payload = JSON.parse(line.slice(6));
+        } catch {
+          currentEvent = "";
+          continue;
+        }
+        if (
+          currentEvent === "started" ||
+          currentEvent === "copied" ||
+          currentEvent === "deleted" ||
+          currentEvent === "indexed" ||
+          currentEvent === "done" ||
+          currentEvent === "error"
+        ) {
+          const evt = { type: currentEvent, ...payload } as TransferEvent;
+          onEvent?.(evt);
+          if (evt.type === "done") doneEvent = evt;
+          if (evt.type === "error") errorEvent = evt;
+        }
+        currentEvent = "";
+      }
+    }
+  }
+
+  if (errorEvent) {
+    const err = new ApiError(errorEvent.message, 500) as ApiError & { code?: string };
+    err.code = errorEvent.code;
+    throw err;
+  }
+  if (!doneEvent) {
+    throw new ApiError("Transfer stream ended without 'done' event", 500);
+  }
+  return doneEvent;
+}
 
 export interface SkillUpdateInfo {
   name: string;

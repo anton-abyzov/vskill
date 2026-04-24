@@ -1,5 +1,56 @@
 // Types mirroring backend API shapes (no backend imports to avoid tsconfig clash)
 
+// ---------------------------------------------------------------------------
+// 0688: Studio scope-transfer — mirrored from src/studio/types.ts.
+// Keep these shapes in sync manually (existing client/server pattern).
+// ---------------------------------------------------------------------------
+
+export type SkillScope = "own" | "installed" | "global";
+
+export type StudioOpName =
+  | "promote"
+  | "revert"
+  | "test-install"
+  | "skill-create"
+  | "skill-edit"
+  | "skill-delete"
+  | "model-config-change";
+
+export interface StudioOp {
+  id: string;
+  ts: number;
+  op: StudioOpName;
+  skillId?: string;
+  fromScope?: SkillScope;
+  toScope?: SkillScope;
+  paths?: { source: string; dest: string };
+  actor: "studio-ui";
+  details?: Record<string, unknown>;
+}
+
+export interface Provenance {
+  promotedFrom: "installed" | "global";
+  sourcePath: string;
+  promotedAt: number;
+  sourceSkillVersion?: string;
+}
+
+export type TransferEvent =
+  | {
+      type: "started";
+      opId: string;
+      skillId: string;
+      fromScope: string;
+      toScope: string;
+      sourcePath: string;
+      destPath: string;
+    }
+  | { type: "copied"; filesWritten: number }
+  | { type: "deleted"; filesDeleted: number }
+  | { type: "indexed" }
+  | { type: "done"; opId: string; destPath: string }
+  | { type: "error"; code: string; message: string };
+
 export interface Assertion {
   id: string;
   text: string;
@@ -86,6 +137,13 @@ export interface SkillInfo {
   sizeBytes?: number | null;
   /** For `origin: "installed"` / tri-scope `installed` + `global` — the agent id whose config owns this skill (e.g. "claude-code"). null for `own` scope. */
   sourceAgent?: string | null;
+  /**
+   * 0688: Provenance sidecar — present when this OWN skill was created via
+   * "Promote to OWN" (copied from an INSTALLED/GLOBAL skill) and a
+   * `.vskill-meta.json` sidecar exists in the skill dir. `null` for skills
+   * authored from scratch. Populated by the scanner.
+   */
+  provenance?: Provenance | null;
   // -------------------------------------------------------------------------
   // 0686: tri-scope sidebar + symlink transparency.
   //
@@ -141,6 +199,10 @@ export interface AgentScopeEntry {
   resolvedGlobalDir: string;
   lastSync: string | null;
   health: "ok" | "stale" | "missing";
+  // 0694 (AC-US4-04): web-only agents (Devin, bolt.new, v0, Replit) carry
+  // this flag so the UI renders a "Remote" badge and suppresses install
+  // affordances. Optional so older server payloads don't fail typecheck.
+  isRemoteOnly?: boolean;
 }
 
 export interface AgentsResponse {

@@ -447,6 +447,34 @@ If you previously read `frontmatter.tags` or `frontmatter['target-agents']` at t
 
 <br/>
 
+## Studio operations log (`studio-ops.jsonl`)
+
+Every file-changing action taken by vskill studio (skill promote, test-install, revert, skill create/edit/delete, model-config changes) is written as a single newline-terminated JSON line to:
+
+```
+~/.vskill/studio-ops.jsonl
+```
+
+The log is append-only. Each line conforms to the `StudioOp` shape:
+
+```json
+{"id":"<nanoid>","ts":1735123200000,"op":"promote","skillId":"<plugin>/<skill>","fromScope":"installed","toScope":"own","paths":{"source":"<abs>","dest":"<abs>"},"actor":"studio-ui"}
+```
+
+Open the drawer from the StatusBar ops-count chip (or press the chip from the keyboard) to browse the log live — new ops are pushed via SSE and prepended to the virtualized list.
+
+**Tombstones (soft-delete).** Dismissing an op from the drawer appends a tombstone line `{"id":"<id>","tombstone":true}`. The UI hides tombstoned entries on read; the raw log still shows both the original op and the tombstone, preserving the audit trail.
+
+**Manual rotation.** The log has no automatic rotation or compaction yet — if it grows large, rotate by hand:
+
+```bash
+mv ~/.vskill/studio-ops.jsonl ~/.vskill/studio-ops.jsonl.bak
+```
+
+The studio will re-create the file on the next write. A dedicated rotation / retention policy may land in a later increment once we have usage data.
+
+<br/>
+
 ## Contributing
 
 Submit your skill for verification:

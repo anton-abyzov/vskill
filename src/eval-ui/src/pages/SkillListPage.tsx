@@ -82,8 +82,55 @@ export function SkillListPage() {
         </div>
       )}
 
+      {/* 0699: Empty-state CTA — prominent Create-First-Skill card with a
+          brief note about where model selection lives. Reinforces the model
+          support Anton wants visible: Pro/Max via Claude Code CLI, Anthropic
+          API key, OpenRouter, and LM Studio. */}
+      {!loading && !error && skills.length === 0 && (
+        <div
+          className="glass-card p-8 flex flex-col items-center text-center"
+          style={{ border: "1px dashed var(--border-subtle)" }}
+          data-testid="skill-list-empty-cta"
+        >
+          <h3
+            className="text-[18px] font-semibold mb-2"
+            style={{ color: "var(--text-primary)" }}
+          >
+            No skills yet
+          </h3>
+          <p
+            className="text-[13px] mb-5 max-w-md"
+            style={{ color: "var(--text-tertiary)" }}
+          >
+            Author your first skill with vskill Studio. Pick a model — Claude
+            Code (Pro/Max subscription), Anthropic API key, OpenRouter, or LM
+            Studio — and the generator handles the rest.
+          </p>
+          <Link
+            to="/create"
+            className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-[14px] font-medium transition-all duration-150"
+            style={{ background: "var(--accent)", color: "var(--color-paper)" }}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Create Your First Skill
+          </Link>
+        </div>
+      )}
+
       {/* Skill groups */}
-      {!loading && (
+      {!loading && skills.length > 0 && (
         <div className="space-y-8 stagger-children">
           {Object.entries(grouped).map(([plugin, pluginSkills]) => (
             <div key={plugin}>

@@ -333,15 +333,20 @@ export function MarketplaceDrawer({
                           flexShrink: 0,
                           padding: "5px 12px",
                           fontSize: 12,
-                          fontWeight: 500,
-                          border: "none",
+                          fontWeight: 600,
+                          border: installed ? "none" : "1px solid var(--color-action, #2F5B8E)",
                           borderRadius: 4,
                           background: installed
                             ? "var(--surface-2, rgba(0,0,0,0.05))"
-                            : "var(--color-accent, #2f6f8f)",
-                          color: installed ? "var(--text-tertiary)" : "var(--color-paper, #fff)",
+                            : "var(--color-action, #2F5B8E)",
+                          color: installed
+                            ? "var(--text-tertiary)"
+                            : "var(--color-action-ink, #FFFFFF)",
                           cursor: installed ? "default" : "pointer",
                           fontFamily: "inherit",
+                          boxShadow: installed
+                            ? "none"
+                            : "0 1px 2px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.12)",
                         }}
                       >
                         {installed ? "Installed" : "Install"}
@@ -466,13 +471,14 @@ function AddMarketplaceForm({ onAdded }: { onAdded: () => void }): React.ReactEl
           style={{
             padding: "6px 14px",
             fontSize: 12,
-            fontWeight: 500,
-            border: "none",
+            fontWeight: 600,
+            border: "1px solid var(--color-action, #2F5B8E)",
             borderRadius: 4,
-            background: "var(--color-accent, #2f6f8f)",
-            color: "var(--color-paper, #fff)",
+            background: "var(--color-action, #2F5B8E)",
+            color: "var(--color-action-ink, #FFFFFF)",
             cursor: busy || !source.trim() ? "not-allowed" : "pointer",
             opacity: busy || !source.trim() ? 0.5 : 1,
+            boxShadow: "0 1px 2px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.12)",
             fontFamily: "inherit",
           }}
         >

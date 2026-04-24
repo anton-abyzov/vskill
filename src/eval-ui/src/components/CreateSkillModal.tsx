@@ -559,13 +559,13 @@ const primaryButtonStyle: React.CSSProperties = {
   padding: "8px 16px",
   fontSize: 13,
   fontWeight: 600,
-  border: "1px solid var(--color-accent, #2f6f8f)",
+  border: "1px solid var(--color-action, #2F5B8E)",
   borderRadius: 6,
-  background: "var(--color-accent, #2f6f8f)",
-  color: "#ffffff",
+  background: "var(--color-action, #2F5B8E)",
+  color: "var(--color-action-ink, #FFFFFF)",
   cursor: "pointer",
   fontFamily: "inherit",
-  boxShadow: "0 1px 2px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.12)",
+  boxShadow: "0 1px 2px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.12)",
   letterSpacing: "0.01em",
 };
 

@@ -99,11 +99,12 @@ export function PluginTreeGroup({
           aria-hidden
           className="vskill-chevron tabular-nums"
           style={{
-            width: 12,
+            width: 16,
             display: "inline-block",
             textAlign: "center",
-            fontSize: 10,
-            color: "var(--text-secondary)",
+            fontSize: 14,
+            fontWeight: 700,
+            color: "var(--color-ink, var(--text-primary))",
           }}
         >
           {chevron}

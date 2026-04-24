@@ -301,7 +301,7 @@ export function ProjectPicker({
                             aria-label="Active"
                             style={{
                               fontSize: 10,
-                              color: "var(--color-accent, #2f6f8f)",
+                              color: "var(--color-action, #2F5B8E)",
                               letterSpacing: "0.05em",
                               textTransform: "uppercase",
                               fontWeight: 600,
@@ -419,12 +419,12 @@ export function ProjectPicker({
                   fontFamily: "var(--font-sans)",
                   fontSize: 13,
                   fontWeight: 500,
-                  color: "var(--color-accent, #2f6f8f)",
+                  color: "var(--color-action, #2F5B8E)",
                   transition: "background-color 120ms ease",
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor =
-                    "color-mix(in oklch, var(--color-accent, #2f6f8f) 10%, transparent)";
+                    "color-mix(in oklch, var(--color-action, #2F5B8E) 10%, transparent)";
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.backgroundColor = "transparent";
@@ -502,7 +502,7 @@ export function ProjectPicker({
                       fontSize: 12,
                       border: "none",
                       borderRadius: 4,
-                      background: "var(--color-accent, #2f6f8f)",
+                      background: "var(--color-action, #2F5B8E)",
                       color: "var(--color-paper, #fff)",
                       cursor: "pointer",
                       fontWeight: 500,
@@ -616,9 +616,9 @@ export function ProjectPicker({
                   padding: "7px 14px",
                   fontSize: 13,
                   fontWeight: 600,
-                  border: "1px solid var(--color-accent, #2f6f8f)",
+                  border: "1px solid var(--color-action, #2F5B8E)",
                   borderRadius: 6,
-                  background: "var(--color-accent, #2f6f8f)",
+                  background: "var(--color-action, #2F5B8E)",
                   color: "#ffffff",
                   cursor: "pointer",
                   boxShadow: "0 1px 2px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.12)",

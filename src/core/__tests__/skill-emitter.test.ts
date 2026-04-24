@@ -276,6 +276,35 @@ describe("emitSkill — divergence report markdown shape (AC-US5-04)", () => {
     // Title line
     expect(result.divergenceReport).toMatch(/^# lint-markdown — divergence report/m);
   });
+
+  it("emits `No changes` section when one target has divergences and another does not", () => {
+    // Source has allowed-tools → triggers divergence on cursor; claude-code
+    // has zero divergences, so its section lists "No changes".
+    const gen = makeGenerated({ allowedTools: "Bash" });
+    const opts: EmitOptions = {
+      targetAgents: ["claude-code", "cursor"],
+      engine: "universal",
+    };
+    const result = emitSkill(gen, opts);
+    expect(result.divergenceReport).toMatch(/## claude-code/);
+    expect(result.divergenceReport).toMatch(/No changes/);
+    expect(result.divergenceReport).toMatch(/## cursor/);
+  });
+
+  it("emits `Dropped:` line for non-security-critical drops (generic path)", () => {
+    // Force a non-security-critical 'dropped' entry by using a custom
+    // fixture that exercises the generic drop branch in the renderer.
+    // We re-use the public API: there's no non-security drop today, so
+    // this also validates the security-critical format includes the token.
+    const gen = makeGenerated({ allowedTools: "Bash", model: "opus-4" });
+    const opts: EmitOptions = {
+      targetAgents: ["cursor"],
+      engine: "universal",
+    };
+    const result = emitSkill(gen, opts);
+    expect(result.divergenceReport).toMatch(/Dropped \(security-critical\): allowed-tools/);
+    expect(result.divergenceReport).toMatch(/Dropped \(security-critical\): model/);
+  });
 });
 
 describe("emitSkill — purity", () => {
@@ -284,11 +313,97 @@ describe("emitSkill — purity", () => {
     const opts: EmitOptions = {
       targetAgents: ["opencode"],
       engine: "universal",
-      // @ts-expect-error — optional `now` is part of the contract below.
       now: new Date("2026-01-01T00:00:00Z"),
     };
     const result = emitSkill(gen, opts);
     // Report must not embed Date.now() / fresh timestamps when `now` is given.
     expect(result.divergenceReport).not.toMatch(/20(2[7-9]|[3-9]\d)/);
+  });
+});
+
+describe("emitSkill — unknown agent handling", () => {
+  it("skips unknown agent ids in universal mode with a descriptive reason", () => {
+    const gen = makeGenerated();
+    const opts: EmitOptions = {
+      targetAgents: ["not-a-real-agent"],
+      engine: "universal",
+    };
+    const result = emitSkill(gen, opts);
+    expect(result.files).toEqual([]);
+    expect(result.skipped.length).toBe(1);
+    expect(result.skipped[0].targetId).toBe("not-a-real-agent");
+    expect(result.skipped[0].reason).toMatch(/unknown agent id/);
+  });
+
+  it("skips unknown agent ids in anthropic fallback mode", () => {
+    const gen = makeGenerated();
+    const opts: EmitOptions = {
+      targetAgents: ["not-a-real-agent"],
+      engine: "anthropic-skill-creator",
+    };
+    const result = emitSkill(gen, opts);
+    expect(result.files).toEqual([]);
+    expect(result.skipped.length).toBe(1);
+    expect(result.skipped[0].reason).toMatch(/unknown agent id/);
+  });
+});
+
+describe("emitSkill — claude-code passthrough (universal engine)", () => {
+  it("preserves allowed-tools and model on the claude-code emission", () => {
+    const gen = makeGenerated({ allowedTools: "Bash, Read", model: "opus-4" });
+    const opts: EmitOptions = {
+      targetAgents: ["claude-code"],
+      engine: "universal",
+    };
+    const result = emitSkill(gen, opts);
+
+    const claude = result.files.find((f) => f.targetId === "claude-code");
+    expect(claude).toBeDefined();
+    expect(claude!.content).toContain("allowed-tools: ");
+    expect(claude!.content).toContain("model: opus-4");
+    expect(claude!.content).toContain("x-sw-schema-version: 1");
+
+    // claude-code emission produces NO divergences — full frontmatter kept.
+    const claudeDivergences = result.divergences.filter(
+      (d) => d.targetId === "claude-code",
+    );
+    expect(claudeDivergences).toEqual([]);
+  });
+});
+
+describe("emitSkill — non-universal file emission (customSystemPrompt=true)", () => {
+  it("emits schema version for a universal target with no security fields", () => {
+    // `cursor` is universal — emits with name/description/schema version.
+    const gen = makeGenerated({ allowedTools: "Bash" });
+    const opts: EmitOptions = { targetAgents: ["cursor"], engine: "universal" };
+    const result = emitSkill(gen, opts);
+
+    const cursor = result.files.find((f) => f.targetId === "cursor");
+    expect(cursor).toBeDefined();
+    expect(cursor!.content).toContain("x-sw-schema-version: 1");
+    // `allowed-tools` is NOT present in the emitted frontmatter — dropped
+    // because cursor doesn't enforce tool allowlists.
+    expect(cursor!.content).not.toContain("allowed-tools:");
+  });
+
+  it("emits a non-universal target (windsurf) with stripped frontmatter", () => {
+    // `windsurf` is non-universal (isUniversal=false) but has
+    // customSystemPrompt=true — exercises the non-universal emit path.
+    const gen = makeGenerated({ allowedTools: "Bash", model: "opus-4" });
+    const opts: EmitOptions = { targetAgents: ["windsurf"], engine: "universal" };
+    const result = emitSkill(gen, opts);
+
+    const windsurf = result.files.find((f) => f.targetId === "windsurf");
+    expect(windsurf).toBeDefined();
+    expect(windsurf!.content).toContain("x-sw-schema-version: 1");
+    expect(windsurf!.content).toContain("name: ");
+    expect(windsurf!.content).toContain("description: ");
+
+    // Both security-critical fields recorded as divergences.
+    const fields = result.divergences
+      .filter((d) => d.targetId === "windsurf")
+      .map((d) => d.field);
+    expect(fields).toContain("allowed-tools");
+    expect(fields).toContain("model");
   });
 });

@@ -164,12 +164,24 @@ jobs:
           # Use -y (documented flag) to skip prompts. Capture exit code so we
           # can accept 0 (installed) or 2 (no agents detected) but fail on any
           # crash or unexpected exit code (AC-US5-02).
+          # 0706 F-01 hardening: also assert output matches one of the
+          # known-good branches. Exit-code-only lets a silent crash that
+          # happens to exit 0 slip through.
           set +e
-          node ../dist/bin.js install ../fixture-skill/SKILL.md -y
+          node ../dist/bin.js install ../fixture-skill/SKILL.md -y > install.out 2>&1
           smoke_exit=$?
           set -e
+          cat install.out
           echo "install smoke completed with exit=$smoke_exit"
           if [ "$smoke_exit" -ne 0 ] && [ "$smoke_exit" -ne 2 ]; then
             echo "::error::install smoke crashed (exit=$smoke_exit) — AC-US5-02 failure"
+            exit 1
+          fi
+          # Output-shape check — must match a known graceful outcome. If the
+          # CLI ever swallows an error and exits 0 without producing any of
+          # these markers, the test still fails loudly.
+          if ! grep -Eq "Skill .* not found in registry|no agents detected|installed|Use owner/repo for GitHub installs|Looking up skill in registry" install.out; then
+            echo "::error::install smoke exited cleanly but output matches no known branch — likely silent failure (AC-US5-02)"
+            cat install.out
             exit 1
           fi

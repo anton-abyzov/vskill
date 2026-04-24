@@ -761,7 +761,14 @@ function NamedScopeSection({
           </span>
         )}
       </button>
-      {!collapsed && <div>{children}</div>}
+      {!collapsed && (
+        // 0700 polish: indent children so plugin headers + skill rows sit
+        // visually nested under the section label (which starts ~28px in
+        // from the left after the chevron + gap). Without this padding the
+        // legacy `PluginGroup` kickers (e.g. ".CLAUDE (2)") and their skill
+        // rows creep back to the left edge, breaking the nested hierarchy.
+        <div style={{ paddingLeft: 18 }}>{children}</div>
+      )}
     </section>
   );
 }

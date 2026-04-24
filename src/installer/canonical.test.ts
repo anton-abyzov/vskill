@@ -26,7 +26,14 @@ vi.mock("node:fs", async (importOriginal) => {
     ...original,
     symlinkSync: ((...args: any[]) => {
       if (getForceSymlinkFailure()) {
-        throw new Error("Mocked EPERM: symlink creation not permitted");
+        // 0706 T-006: createRelativeSymlink now inspects err.code to tell
+        // permission failures (EPERM/EACCES — Windows without Developer Mode)
+        // apart from genuinely unexpected errors. The test simulates the
+        // Windows-no-Developer-Mode case, so we must stamp .code = "EPERM"
+        // or else the real error would (correctly) propagate.
+        const e: any = new Error("Mocked EPERM: symlink creation not permitted");
+        e.code = "EPERM";
+        throw e;
       }
       return (original.symlinkSync as Function)(...args);
     }),
@@ -145,14 +152,22 @@ describe("canonical installer", () => {
       expect(target).toBe(join("..", "..", ".agents", "skills", "my-skill"));
     });
 
-    it("returns false when symlink creation fails", () => {
-      // Target doesn't exist, but we mock fs to throw EPERM
-      const result = createRelativeSymlink(
-        "/nonexistent/path",
-        "/also/nonexistent",
-      );
+    it("returns false when symlink creation fails with EPERM (permission)", () => {
+      // 0706 T-006: createRelativeSymlink returns false only for EPERM/EACCES;
+      // other errors propagate. Use the module-level mock hook to simulate
+      // EPERM for this one call.
+      setForceSymlinkFailure(true);
+      try {
+        const canonicalDir = join(tempDir, ".agents", "skills", "perm-test");
+        const agentDir = join(tempDir, ".cursor", "skills", "perm-test");
+        mkdirSync(canonicalDir, { recursive: true });
+        mkdirSync(join(tempDir, ".cursor", "skills"), { recursive: true });
 
-      expect(result).toBe(false);
+        const result = createRelativeSymlink(canonicalDir, agentDir);
+        expect(result).toBe(false);
+      } finally {
+        setForceSymlinkFailure(false);
+      }
     });
   });
 

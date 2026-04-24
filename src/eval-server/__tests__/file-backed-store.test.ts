@@ -251,6 +251,103 @@ describe("FileBackedStore — lenient parser (T-004)", () => {
   });
 });
 
+describe("FileBackedStore — post-merge listKeys retention (T-071 DEFECT 1)", () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = makeTmpDir();
+    // Clear any process.env provider vars to isolate the test.
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+  });
+
+  afterEach(() => {
+    store.resetSettingsStore();
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+    cleanup(tmp);
+  });
+
+  it("TC-071a: listKeys reports stored:true for all providers after mergeStoredKeysIntoEnv()", async () => {
+    // Seed an on-disk keys.env with two providers (simulating post-restart boot).
+    const keysFile = path.join(tmp, "keys.env");
+    fs.mkdirSync(tmp, { recursive: true });
+    fs.writeFileSync(
+      keysFile,
+      "ANTHROPIC_API_KEY=sk-ant-persist-post-restart\n" +
+        "OPENAI_API_KEY=sk-proj-persist-post-restart\n",
+    );
+
+    // Fresh boot: new store, merge, then listKeys (exactly the flow boot takes).
+    store.resetSettingsStore({ configDir: tmp });
+    store.mergeStoredKeysIntoEnv();
+
+    const list = store.listKeys();
+    expect(list.anthropic.stored).toBe(true);
+    expect(list.openai.stored).toBe(true);
+    expect(list.openrouter.stored).toBe(false); // not on disk
+    expect(list.anthropic.updatedAt).toBeTruthy();
+    expect(list.openai.updatedAt).toBeTruthy();
+    expect(list.openrouter.updatedAt).toBe(null);
+  });
+
+  it("TC-071b: saveKey after mergeStoredKeysIntoEnv() still shows up in listKeys", async () => {
+    // First: seed on-disk, merge, confirm listKeys finds it.
+    const keysFile = path.join(tmp, "keys.env");
+    fs.mkdirSync(tmp, { recursive: true });
+    fs.writeFileSync(keysFile, "ANTHROPIC_API_KEY=sk-ant-already-stored\n");
+    store.resetSettingsStore({ configDir: tmp });
+    store.mergeStoredKeysIntoEnv();
+
+    // Now save a NEW provider after the merge has happened.
+    await store.saveKey("openrouter", "sk-or-saved-post-merge");
+
+    const list = store.listKeys();
+    expect(list.anthropic.stored).toBe(true);
+    expect(list.openrouter.stored).toBe(true);
+    expect(list.openrouter.updatedAt).toBeTruthy();
+  });
+
+  it("TC-071c: removeKey after mergeStoredKeysIntoEnv() flips listKeys to stored:false", async () => {
+    const keysFile = path.join(tmp, "keys.env");
+    fs.mkdirSync(tmp, { recursive: true });
+    fs.writeFileSync(keysFile, "ANTHROPIC_API_KEY=sk-ant-to-remove\n");
+    store.resetSettingsStore({ configDir: tmp });
+    store.mergeStoredKeysIntoEnv();
+
+    // Confirm merged state reports stored:true.
+    expect(store.listKeys().anthropic.stored).toBe(true);
+
+    // Remove via public API.
+    await store.removeKey("anthropic");
+
+    // listKeys must now report stored:false.
+    expect(store.listKeys().anthropic.stored).toBe(false);
+    expect(store.listKeys().anthropic.updatedAt).toBe(null);
+  });
+
+  it("TC-071d: security invariant — raw plaintext NOT retained in settings-store memory after merge", async () => {
+    // After merge, the in-memory structure must not contain plaintext keys.
+    // We verify this by stringifying whatever state we can observe: readKey()
+    // should resolve from process.env, not from a retained raw-key map.
+    const rawKey = "sk-ant-CANARY-DWELL-XYZ-plaintext";
+    const keysFile = path.join(tmp, "keys.env");
+    fs.mkdirSync(tmp, { recursive: true });
+    fs.writeFileSync(keysFile, `ANTHROPIC_API_KEY=${rawKey}\n`);
+    store.resetSettingsStore({ configDir: tmp });
+    store.mergeStoredKeysIntoEnv();
+
+    // Remove the env var — if raw plaintext were still in memory, readKey
+    // would return it. After merge-then-env-clear, readKey must return null.
+    delete process.env.ANTHROPIC_API_KEY;
+    expect(store.readKey("anthropic")).toBe(null);
+    // But listKeys still reports stored:true (metadata retained).
+    expect(store.listKeys().anthropic.stored).toBe(true);
+  });
+});
+
 describe("FileBackedStore — redacted logging (T-005)", () => {
   let tmp: string;
 

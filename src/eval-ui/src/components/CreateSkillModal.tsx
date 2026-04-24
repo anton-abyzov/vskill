@@ -556,15 +556,17 @@ function inputStyle(valid: boolean): React.CSSProperties {
 }
 
 const primaryButtonStyle: React.CSSProperties = {
-  padding: "7px 14px",
+  padding: "8px 16px",
   fontSize: 13,
-  fontWeight: 500,
-  border: "none",
+  fontWeight: 600,
+  border: "1px solid var(--color-accent, #2f6f8f)",
   borderRadius: 6,
   background: "var(--color-accent, #2f6f8f)",
-  color: "var(--color-paper, #fff)",
+  color: "#ffffff",
   cursor: "pointer",
   fontFamily: "inherit",
+  boxShadow: "0 1px 2px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.12)",
+  letterSpacing: "0.01em",
 };
 
 const secondaryButtonStyle: React.CSSProperties = {

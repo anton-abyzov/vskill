@@ -450,6 +450,28 @@ function Shell() {
         initialMode={initialCreateMode}
         isClaudeCode={activeAgentId === "claude-code"}
         projectRoot={activeProject?.path ?? config?.projectName ?? ""}
+        onCreated={(result) => {
+          // 0700 polish: open the new skill by default so the user sees their
+          // creation immediately. The sidebar's SWR cache was invalidated
+          // by the modal; refreshSkills() triggers a fresh /api/skills fetch.
+          // Once the new skill lands in state we call selectSkill() — which
+          // drives both the hash and the detail panel without needing the
+          // route to match (selectSkill works off in-memory state).
+          const plugin = result.pluginName ?? "";
+          refreshSkills();
+          // Give StudioContext one tick to fold the refetched skills into
+          // state before we pick the new one out. selectSkill needs the
+          // origin, which the modal doesn't know, so infer from mode:
+          // standalone / new-plugin / existing-plugin all produce authored
+          // skills (origin = "source").
+          setTimeout(() => {
+            selectSkill({
+              plugin,
+              skill: result.skillName,
+              origin: "source",
+            });
+          }, 500);
+        }}
       />
 
       {/* 0700 phase 2B: MarketplaceDrawer — opened from the AVAILABLE > Plugins

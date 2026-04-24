@@ -16,7 +16,7 @@ import { registerSweepRoutes } from "./sweep-routes.js";
 import { registerIntegrationRoutes } from "./integration-routes.js";
 import { registerScopeTransferRoutes } from "../studio/routes/index.js";
 import { registerWorkspaceRoutes } from "./workspace-routes.js";
-import { loadWorkspace, addProject } from "./workspace-store.js";
+import { loadWorkspace, addProject, setActiveProject, projectIdFromPath } from "./workspace-store.js";
 import { registerAuthoringRoutes } from "./authoring-routes.js";
 import { registerPluginCliRoutes } from "./plugin-cli-routes.js";
 import { homedir } from "node:os";
@@ -142,13 +142,26 @@ function resolveActiveRoot(workspaceDir: string): string | null {
 
 function seedWorkspaceFromRoot(workspaceDir: string, root: string): void {
   try {
-    const ws = loadWorkspace(workspaceDir);
-    // Only auto-seed when the workspace is completely empty — otherwise the
-    // existing projects are the source of truth and a CLI `--root` flag is
-    // treated as a one-off session override (resolveActiveRoot handles that
-    // separately by honoring opts.root when present).
-    if (ws.projects.length > 0) return;
-    addProject(workspaceDir, ws, { path: root });
+    let ws = loadWorkspace(workspaceDir);
+    // When `vskill studio` is invoked with an explicit `--root` (or the
+    // CLI-default of cwd), that project should become the active one even if
+    // the workspace already has other registered projects. Otherwise the user
+    // sees a stale "fixtures" pill top-left just because an earlier session
+    // pinned it — confusing and wrong.
+    const existing = ws.projects.find((p) => p.path === root);
+    if (existing) {
+      if (ws.activeProjectId !== existing.id) {
+        setActiveProject(workspaceDir, ws, existing.id);
+      }
+      return;
+    }
+    ws = addProject(workspaceDir, ws, { path: root });
+    // addProject auto-activates the first add, but when there are already
+    // other projects it leaves the existing active alone. Force-activate.
+    const id = projectIdFromPath(root);
+    if (ws.activeProjectId !== id) {
+      setActiveProject(workspaceDir, ws, id);
+    }
   } catch {
     /* non-fatal — workspace is optional */
   }

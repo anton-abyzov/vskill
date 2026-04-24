@@ -88,7 +88,10 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
     }
   }, [skill.dir]);
 
-  const originLabel = skill.origin === "installed" ? "Installed" : "Own";
+  // 0700 polish: match the sidebar + top-rail vocabulary — Anthropic-aligned
+  // labels ("Project" for installed, "Skills" for authored) instead of the
+  // legacy Own/Installed.
+  const originLabel = skill.origin === "installed" ? "Project" : "Skills";
   const originColor = skill.origin === "installed" ? "var(--status-installed)" : "var(--status-own)";
 
   return (

@@ -46,10 +46,15 @@ function dispatchNavigateScope(
  *   - breadcrumb    — Inter Tight 400, plugin name in meta style, skill name in primary.
  */
 export function TopRail({ projectName, selected, onOpenPalette, onHome, projectPickerSlot, onRequestCreateSkill }: Props) {
+  // 0700 polish: breadcrumb origin label — use Anthropic-aligned vocabulary
+  // ("Project" for installed skills the current agent consumes in its
+  // `.claude/skills/`, "Skills" for user-authored) to match the Sidebar
+  // group headers. Keeps the top and side in sync so the user never sees
+  // conflicting labels for the same skill.
   const originLabel = selected
     ? selected.origin === "installed"
-      ? "Installed"
-      : "Own"
+      ? "Project"
+      : "Skills"
     : null;
 
   return (

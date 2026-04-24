@@ -32,6 +32,47 @@ export function buildGenerateRequestBody(input: GenerateRequestInput): Record<st
   return body;
 }
 
+// ---------------------------------------------------------------------------
+// 0703 follow-up: placement-pinning decision helper.
+//
+// The AI backend returns `data.name` and `data.suggestedPlugin`. When the
+// user has already specified a skill name / plugin destination (via URL
+// prefill from the CreateSkillModal, or by typing in the form before
+// clicking Generate), those explicit choices MUST win over the AI's
+// suggestion. Otherwise skill `test-plugin-skill` + plugin `test-plugin`
+// silently becomes `task-skill-announcer` in some pre-existing plugin
+// like `frontend` — exactly the "it landed in the wrong place" bug users
+// reported.
+//
+// Pure function so it is trivial to unit-test without driving the SSE
+// stream end-to-end.
+// ---------------------------------------------------------------------------
+export interface PinningInput {
+  userName: string;
+  userPlugin: string;     // selected plugin id ("" | "__new__" | <name>)
+  userNewPlugin: string;  // typed new plugin name
+  aiName: string | undefined;
+  aiSuggestedPlugin: { plugin: string; layout?: 1 | 2 } | null | undefined;
+}
+
+export interface PinningDecision {
+  applyName: string | null;                          // null → keep user's
+  applySuggestedPlugin: boolean;                     // false → keep user's
+  suggestedPluginValue: { plugin: string; layout?: 1 | 2 } | null;
+}
+
+export function decideGenerationPinning(input: PinningInput): PinningDecision {
+  const userPinnedName = input.userName.trim().length > 0;
+  const userPinnedPlugin =
+    input.userPlugin.trim().length > 0 || input.userNewPlugin.trim().length > 0;
+
+  return {
+    applyName: userPinnedName ? null : input.aiName ?? null,
+    applySuggestedPlugin: !userPinnedPlugin && !!input.aiSuggestedPlugin?.plugin,
+    suggestedPluginValue: userPinnedPlugin ? null : (input.aiSuggestedPlugin ?? null),
+  };
+}
+
 export function toKebab(s: string, trim = true): string {
   let r = s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   if (trim) r = r.replace(/^-+|-+$/g, "");
@@ -192,6 +233,18 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
   // Plugin recommendation
   const [showPluginRecommendation, setShowPluginRecommendation] = useState(false);
 
+  // 0703 follow-up: track user-pinned placement (name / plugin / newPlugin)
+  // via refs so handleGenerate can read the CURRENT values without stale
+  // closure. When the user arrives with explicit URL params (or has typed a
+  // name / picked a plugin before clicking Generate), the AI must not
+  // silently overwrite their choice.
+  const nameRef = useRef(name);
+  const pluginRef = useRef(plugin);
+  const newPluginRef = useRef(newPlugin);
+  useEffect(() => { nameRef.current = name; }, [name]);
+  useEffect(() => { pluginRef.current = plugin; }, [plugin]);
+  useEffect(() => { newPluginRef.current = newPlugin; }, [newPlugin]);
+
   // ---------------------------------------------------------------------------
   // Effects
   // ---------------------------------------------------------------------------
@@ -332,7 +385,21 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
                   reasoning: data.reasoning || "",
                 };
 
-                setName(data.name);
+                // 0703 follow-up: respect user-pinned placement via the
+                // pure `decideGenerationPinning` helper (see tests for the
+                // full decision matrix). If the user arrived with a skill
+                // name / plugin in the URL, those values win over the AI's.
+                const pinning = decideGenerationPinning({
+                  userName: nameRef.current,
+                  userPlugin: pluginRef.current,
+                  userNewPlugin: newPluginRef.current,
+                  aiName: data.name,
+                  aiSuggestedPlugin: data.suggestedPlugin && data.suggestedPlugin.plugin
+                    ? { plugin: data.suggestedPlugin.plugin, layout: data.suggestedPlugin.layout }
+                    : null,
+                });
+
+                if (pinning.applyName !== null) setName(pinning.applyName);
                 setDescription(data.description);
                 setModel(data.model || "");
                 setAllowedTools(data.allowedTools || "");
@@ -341,14 +408,14 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
                 aiMetaRef.current = meta;
                 setMode("manual");
 
-                // Apply suggested plugin from backend
-                // Contract: suggestedPlugin: { plugin, layout, confidence, reason } | null
-                if (data.suggestedPlugin && typeof data.suggestedPlugin === "object" && data.suggestedPlugin.plugin) {
-                  const sp = data.suggestedPlugin as { plugin: string; layout?: 1 | 2; confidence?: string; reason?: string };
+                // Apply suggested plugin from backend — ONLY when the user
+                // has not already pinned a destination (the helper answers
+                // that in `applySuggestedPlugin`).
+                if (pinning.applySuggestedPlugin && pinning.suggestedPluginValue) {
+                  const sp = pinning.suggestedPluginValue;
                   const allPlugins = layout?.detectedLayouts.flatMap((d) => d.existingPlugins) ?? [];
                   if (allPlugins.includes(sp.plugin)) {
                     setPlugin(sp.plugin);
-                    // Use layout from the suggestion if provided, otherwise scan
                     if (sp.layout && (sp.layout === 1 || sp.layout === 2)) {
                       setSelectedLayout(sp.layout);
                     } else {
@@ -364,8 +431,15 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
                     setPlugin("__new__");
                     setNewPlugin(sp.plugin);
                   }
-                } else if (selectedLayout === 3 && pluginLayoutInfo) {
-                  // Fallback: show plugin recommendation if on layout 3
+                } else if (
+                  !pinning.applySuggestedPlugin &&
+                  pluginRef.current.trim().length === 0 &&
+                  newPluginRef.current.trim().length === 0 &&
+                  selectedLayout === 3 &&
+                  pluginLayoutInfo
+                ) {
+                  // Fallback: show plugin recommendation if user is on
+                  // layout 3 AND has no pinned plugin AND no suggestion arrived.
                   setShowPluginRecommendation(true);
                 }
 

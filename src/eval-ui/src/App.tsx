@@ -334,15 +334,23 @@ function Shell() {
 
   const onCreateRoute = useIsCreateRoute();
 
-  if (onCreateRoute) {
-    // 0703 hotfix: full-page takeover for the Generate-with-AI landing. No
-    // sidebar/topRail — this is a focused task flow; cancel returns to "/".
-    return (
-      <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
-        <CreateSkillPage />
-      </Suspense>
-    );
-  }
+  // 0703 follow-up: keep StudioLayout chrome (TopRail, sidebar, ⌘K, brand)
+  // visible when CreateSkillPage is active, so users don't feel teleported to
+  // a standalone page and still have escape hatches. The page renders in the
+  // main slot instead of replacing the whole tree.
+  const mainContent = onCreateRoute ? (
+    <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
+      <CreateSkillPage />
+    </Suspense>
+  ) : (
+    <RightPanel
+      selectedSkillInfo={selectedInfo}
+      activeDetailTab={activeDetailTab}
+      onDetailTabChange={setActiveDetailTab}
+      allSkills={state.skills}
+      onSelectSkill={onSelect}
+    />
+  );
 
   return (
     <>
@@ -407,15 +415,7 @@ function Shell() {
         resizeHandle={
           <ResizeHandle initialWidth={sidebarWidth ?? DEFAULT_SIDEBAR_WIDTH} onChange={setSidebarWidth} />
         }
-        main={
-          <RightPanel
-            selectedSkillInfo={selectedInfo}
-            activeDetailTab={activeDetailTab}
-            onDetailTabChange={setActiveDetailTab}
-            allSkills={state.skills}
-            onSelectSkill={onSelect}
-          />
-        }
+        main={mainContent}
         statusBar={
           <StatusBar
             projectPath={config?.root ?? null}

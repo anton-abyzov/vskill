@@ -14,6 +14,7 @@ import { registerModelCompareRoutes } from "./model-compare-routes.js";
 import { registerSkillCreateRoutes } from "./skill-create-routes.js";
 import { registerSweepRoutes } from "./sweep-routes.js";
 import { registerIntegrationRoutes } from "./integration-routes.js";
+import { registerScopeTransferRoutes } from "../studio/routes/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,6 +51,7 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
   registerSkillCreateRoutes(router, root);
   registerSweepRoutes(router, root);
   registerIntegrationRoutes(router, root);
+  registerScopeTransferRoutes(router, root);
 
   // Static asset directory
   const staticDir = path.resolve(__dirname, "../eval-ui");

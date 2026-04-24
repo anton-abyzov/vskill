@@ -114,6 +114,10 @@ export interface AgentScopeEntry {
   resolvedGlobalDir: string;
   lastSync: string | null;
   health: "ok" | "stale" | "missing";
+  // 0694 (AC-US4-04): web-only agents (Devin, bolt.new, v0, Replit) have no
+  // local install path. UI uses this to render a "Remote" badge and suppress
+  // install/active affordances. Optional so older clients ignore the field.
+  isRemoteOnly?: boolean;
 }
 
 export interface AgentsResponse {
@@ -217,7 +221,12 @@ export async function buildAgentsResponse(
     const globalExists = existsSync(resolvedGlobalDir);
     const binaryDetected = detectedBinaries.has(agent.id);
 
-    const hasPresence = localExists || globalExists || binaryDetected;
+    // 0694 (AC-US4-04): remote-only agents (Devin, bolt.new, v0, Replit) have
+    // no local CLI to detect. Surface them in the catalog so the UI can render
+    // a "Remote" badge and suppress install affordances. Without this, the
+    // presence filter below would drop them and the badge code path would be
+    // unreachable in production.
+    const hasPresence = localExists || globalExists || binaryDetected || agent.isRemoteOnly === true;
     if (!hasPresence) continue;
 
     const localSkillCount = countSkillsIn(resolvedLocalDir);
@@ -238,6 +247,9 @@ export async function buildAgentsResponse(
       featureSupport: agent.featureSupport,
       isUniversal: agent.isUniversal,
       parentCompany: agent.parentCompany,
+      // Remote-only agents are always "detected" in the catalog sense — the
+      // service exists, just not locally. UI keys off isRemoteOnly to render
+      // the appropriate affordance (badge, not install button).
       detected: hasPresence,
       isDefault,
       localSkillCount,
@@ -246,6 +258,9 @@ export async function buildAgentsResponse(
       resolvedGlobalDir,
       lastSync,
       health,
+      // 0694 (AC-US4-04): propagate the flag so the UI can render a "Remote"
+      // badge for web-only agents (suppresses install affordances).
+      isRemoteOnly: agent.isRemoteOnly,
     });
   }
 

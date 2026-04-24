@@ -42,6 +42,30 @@ import { strings } from "./strings";
 // T-039: CommandPalette is lazy-loaded so it stays out of the initial bundle.
 const CommandPalette = lazy(() => import("./components/CommandPalette"));
 
+// 0703 hotfix: lazy-load CreateSkillPage because it is only mounted when the
+// hash is `/create` (the modal's Generate-with-AI branch). Keeping it out of
+// the initial bundle preserves home-page LCP.
+const CreateSkillPage = lazy(() =>
+  import("./pages/CreateSkillPage").then((m) => ({ default: m.CreateSkillPage })),
+);
+
+function useIsCreateRoute(): boolean {
+  const [onCreate, setOnCreate] = useState<boolean>(() =>
+    typeof window !== "undefined" && window.location.hash.startsWith("#/create"),
+  );
+  useEffect(() => {
+    function onHashChange(): void {
+      setOnCreate(window.location.hash.startsWith("#/create"));
+    }
+    window.addEventListener("hashchange", onHashChange);
+    // Fire once on mount — Vite HMR + some navigation paths (window.location
+    // .assign before listener attach) need the sync read.
+    onHashChange();
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+  return onCreate;
+}
+
 export function App() {
   return (
     <ConfigProvider>
@@ -307,6 +331,18 @@ function Shell() {
         }),
     },
   ]);
+
+  const onCreateRoute = useIsCreateRoute();
+
+  if (onCreateRoute) {
+    // 0703 hotfix: full-page takeover for the Generate-with-AI landing. No
+    // sidebar/topRail — this is a focused task flow; cancel returns to "/".
+    return (
+      <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
+        <CreateSkillPage />
+      </Suspense>
+    );
+  }
 
   return (
     <>

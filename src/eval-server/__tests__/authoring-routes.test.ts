@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
-import { makeCreateSkillHandler } from "../authoring-routes.js";
+import { makeCreateSkillHandler, makeSkillExistsHandler } from "../authoring-routes.js";
 
 class FakeReq extends EventEmitter {
   headers: Record<string, string> = {};
@@ -189,5 +189,93 @@ describe("POST /api/authoring/create-skill — validation", () => {
     await h(req as any, res as any);
     expect(res.statusCode).toBe(400);
     expect((res.json as { code: string }).code).toBe("invalid-plugin-name");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0703 hotfix — GET /api/authoring/skill-exists (pre-flight duplicate check
+// for the "Generate with AI" branch of CreateSkillModal)
+// ---------------------------------------------------------------------------
+
+class FakeGetReq {
+  headers: Record<string, string> = {};
+  method = "GET";
+  url: string;
+  constructor(path: string) {
+    this.url = path;
+  }
+}
+
+describe("0703 — GET /api/authoring/skill-exists", () => {
+  it("returns exists:false for a fresh standalone skill name", async () => {
+    const h = makeSkillExistsHandler(root);
+    const req = new FakeGetReq("/api/authoring/skill-exists?mode=standalone&skillName=anton-greet");
+    const res = new FakeRes();
+    await h(req as any, res as any);
+    expect(res.statusCode).toBe(200);
+    const body = res.json as { exists: boolean; path: string };
+    expect(body.exists).toBe(false);
+    expect(body.path).toContain("skills/anton-greet");
+  });
+
+  it("returns exists:true when the standalone skill dir is already on disk", async () => {
+    mkdirSync(join(root, "skills", "anton-greet"), { recursive: true });
+    writeFileSync(join(root, "skills", "anton-greet", "SKILL.md"), "# existing");
+
+    const h = makeSkillExistsHandler(root);
+    const req = new FakeGetReq("/api/authoring/skill-exists?mode=standalone&skillName=anton-greet");
+    const res = new FakeRes();
+    await h(req as any, res as any);
+    expect(res.statusCode).toBe(200);
+    const body = res.json as { exists: boolean; path: string };
+    expect(body.exists).toBe(true);
+    expect(body.path).toContain("skills/anton-greet");
+  });
+
+  it("returns exists:true for existing-plugin mode when the skill dir is there", async () => {
+    mkdirSync(join(root, "my-plugin", ".claude-plugin"), { recursive: true });
+    writeFileSync(
+      join(root, "my-plugin", ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "my-plugin", version: "0.0.1" }),
+    );
+    mkdirSync(join(root, "my-plugin", "skills", "greeter"), { recursive: true });
+
+    const h = makeSkillExistsHandler(root);
+    const req = new FakeGetReq(
+      "/api/authoring/skill-exists?mode=existing-plugin&pluginName=my-plugin&skillName=greeter",
+    );
+    const res = new FakeRes();
+    await h(req as any, res as any);
+    expect(res.statusCode).toBe(200);
+    expect((res.json as { exists: boolean }).exists).toBe(true);
+  });
+
+  it("returns 404 plugin-not-found when existing-plugin mode targets a missing plugin", async () => {
+    const h = makeSkillExistsHandler(root);
+    const req = new FakeGetReq(
+      "/api/authoring/skill-exists?mode=existing-plugin&pluginName=ghost&skillName=foo",
+    );
+    const res = new FakeRes();
+    await h(req as any, res as any);
+    expect(res.statusCode).toBe(404);
+    expect((res.json as { code: string }).code).toBe("plugin-not-found");
+  });
+
+  it("returns 400 invalid-skill-name for non-kebab inputs", async () => {
+    const h = makeSkillExistsHandler(root);
+    const req = new FakeGetReq("/api/authoring/skill-exists?mode=standalone&skillName=BAD%20NAME");
+    const res = new FakeRes();
+    await h(req as any, res as any);
+    expect(res.statusCode).toBe(400);
+    expect((res.json as { code: string }).code).toBe("invalid-skill-name");
+  });
+
+  it("returns 400 invalid-mode for unknown mode", async () => {
+    const h = makeSkillExistsHandler(root);
+    const req = new FakeGetReq("/api/authoring/skill-exists?mode=bogus&skillName=foo");
+    const res = new FakeRes();
+    await h(req as any, res as any);
+    expect(res.statusCode).toBe(400);
+    expect((res.json as { code: string }).code).toBe("invalid-mode");
   });
 });

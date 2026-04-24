@@ -612,8 +612,11 @@ export function CreateSkillPage() {
                   disabled={!sk.aiPrompt.trim()}
                   className="px-6 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 flex items-center gap-2"
                   style={{
-                    background: !sk.aiPrompt.trim() ? "var(--surface-3)" : "var(--purple)",
-                    color: !sk.aiPrompt.trim() ? "var(--text-tertiary)" : "var(--color-paper)",
+                    // 0703 follow-up: primary CTA uses --color-action (blue)
+                    // to match the modal's Continue / Create buttons. Old
+                    // --purple was too light and read as disabled.
+                    background: !sk.aiPrompt.trim() ? "var(--surface-3)" : "var(--color-action, #2F5B8E)",
+                    color: !sk.aiPrompt.trim() ? "var(--text-tertiary)" : "var(--color-action-ink, #FFFFFF)",
                     cursor: !sk.aiPrompt.trim() ? "not-allowed" : "pointer",
                   }}
                 >
@@ -978,8 +981,11 @@ export function CreateSkillPage() {
                   disabled={sk.creating || !sk.name || !sk.description}
                   className="px-5 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150"
                   style={{
-                    background: sk.creating || !sk.name || !sk.description ? "var(--surface-3)" : "var(--accent)",
-                    color: sk.creating || !sk.name || !sk.description ? "var(--text-tertiary)" : "var(--color-paper)",
+                    // 0703 follow-up: align primary CTAs on the blue action
+                    // color. `--accent` was rendering too light to read as
+                    // enabled vs disabled at a glance.
+                    background: sk.creating || !sk.name || !sk.description ? "var(--surface-3)" : "var(--color-action, #2F5B8E)",
+                    color: sk.creating || !sk.name || !sk.description ? "var(--text-tertiary)" : "var(--color-action-ink, #FFFFFF)",
                     cursor: sk.creating || !sk.name || !sk.description ? "not-allowed" : "pointer",
                     opacity: sk.creating ? 0.7 : 1,
                   }}

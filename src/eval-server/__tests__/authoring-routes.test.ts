@@ -114,10 +114,16 @@ describe("POST /api/authoring/create-skill — new-plugin", () => {
 
     const manifest = JSON.parse(readFileSync(body.manifestPath, "utf8")) as {
       name: string;
-      version: string;
+      version?: string;
+      author?: { name: string };
     };
     expect(manifest.name).toBe("my-first-plugin");
-    expect(manifest.version).toBe("0.1.0");
+    // 0703 follow-up: version is intentionally omitted so Claude Code falls
+    // back to git SHA (per plugins-reference docs — avoids "forgot to bump"
+    // footgun). Confirm we do NOT emit a hardcoded version.
+    expect(manifest.version).toBeUndefined();
+    // 0703 follow-up: author is an object-shaped stub per schema.
+    expect(manifest.author).toEqual({ name: "" });
   });
 
   it("rejects if the plugin directory already exists (409)", async () => {

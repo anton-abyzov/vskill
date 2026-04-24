@@ -70,19 +70,24 @@ describe("0686 Sidebar tri-scope rendering", () => {
     });
 
     const text = container.textContent ?? "";
-    const iOwn = text.indexOf("Own");
-    const iInstalled = text.indexOf("Installed");
-    const iGlobal = text.indexOf("Global");
-    // 0698 T-009: new two-tier order is AVAILABLE (Installed, Global) first,
-    // then AUTHORING (Own). The legacy sub-section labels still render inside
-    // the ScopeSections — but their order has flipped.
-    expect(iInstalled).toBeGreaterThanOrEqual(0);
-    expect(iGlobal).toBeGreaterThan(iInstalled);
-    expect(iOwn).toBeGreaterThan(iGlobal);
+    // 0698 T-009 (fix): sub-section labels are now Anthropic-aligned
+    // (Project / Personal / Skills) and live under AVAILABLE / AUTHORING
+    // group headers. Order: AVAILABLE(Project, Personal) → AUTHORING(Skills).
+    // Labels are rendered as "Project" etc. (textContent is pre-CSS-uppercase).
+    const iProject = text.indexOf("Project");
+    const iPersonal = text.indexOf("Personal");
+    const iSkills = text.indexOf("Skills");
+    const iAvailable = text.indexOf("AVAILABLE");
+    const iAuthoring = text.indexOf("AUTHORING");
+    expect(iAvailable).toBeGreaterThanOrEqual(0);
+    expect(iAuthoring).toBeGreaterThan(iAvailable);
+    expect(iProject).toBeGreaterThan(iAvailable);
+    expect(iPersonal).toBeGreaterThan(iProject);
+    expect(iSkills).toBeGreaterThan(iAuthoring);
 
     // Counts
-    expect(text).toContain("(2)"); // own
-    expect(text).toContain("(1)"); // installed (and global)
+    expect(text).toContain("(2)"); // own → Skills
+    expect(text).toContain("(1)"); // installed → Project (and global → Personal)
 
     act(() => root.unmount());
     container.remove();

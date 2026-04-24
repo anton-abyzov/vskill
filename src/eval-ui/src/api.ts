@@ -128,9 +128,16 @@ export function normalizeSkillInfo(raw: unknown): SkillInfo {
     installMethod = scope === "own" ? "authored" : "copied";
   }
 
-  // 0698 T-001: derive new scope vocabulary from whatever the server sent
-  // (legacy or new). Group/source are derived deterministically.
-  const scopeV2 = normalizeSkillScope(r.scope);
+  // 0698 T-001: derive new scope vocabulary.
+  // IMPORTANT: prefer the server-supplied `scopeV2` when present — plugin
+  // scanners emit `scope: "installed"` for wire-compat but tag `scopeV2:
+  // "available-plugin"` to distinguish plugin-cache skills from project skills.
+  // The legacy `scope` field only tells us own/installed/global, which is
+  // insufficient to distinguish plugin vs project vs personal at the UI layer.
+  const scopeV2 =
+    typeof r.scopeV2 === "string" && NEW_SCOPES.has(r.scopeV2 as SkillScope)
+      ? (r.scopeV2 as SkillScope)
+      : normalizeSkillScope(r.scope);
   const group = deriveScopeGroup(scopeV2);
   const source = deriveScopeSource(scopeV2);
 

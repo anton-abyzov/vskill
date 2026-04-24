@@ -315,10 +315,11 @@ describe("QA: TopRail breadcrumb shape", () => {
     const breadcrumbNav = navs.find((n) => String(n.props["aria-label"] ?? "").toLowerCase() === "breadcrumb");
     expect(breadcrumbNav).toBeTruthy();
 
-    // The origin label is "Own" in the text node; CSS `text-transform:
-    // uppercase` displays it as OWN — we assert on the underlying text.
+    // 0709 T-003 / 0700: the origin label is `Skills` for source skills
+    // (was `Own` pre-0700). CSS may still text-transform it, but the text
+    // node itself is `Skills`.
     const text = collectText(breadcrumbNav);
-    expect(text).toContain("Own");
+    expect(text).toContain("Skills");
     expect(text).toContain("google-workspace");
     expect(text).toContain("gws");
 

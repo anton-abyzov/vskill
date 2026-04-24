@@ -75,7 +75,9 @@ function collectText(node: unknown): string {
 // T-059 — Breadcrumb segments are clickable and dispatch navigation events
 // ---------------------------------------------------------------------------
 describe("T-059 TopRail — breadcrumb navigation", () => {
-  it("OWN segment is a button-like element with an onClick handler", () => {
+  // 0709 T-002 / 0700: the origin segment for a source skill renders the
+  // `Skills` label (post-0700 vocabulary; was `OWN` before).
+  it("Skills origin segment is a button-like element with an onClick handler", () => {
     const tree = expand(TopRail({
       projectName: "vskill",
       selected: { plugin: "google-workspace", skill: "gws", origin: "source" },
@@ -86,7 +88,7 @@ describe("T-059 TopRail — breadcrumb navigation", () => {
       return attrs["data-breadcrumb-segment"] === "origin" && typeof attrs.onClick === "function";
     });
     expect(segments.length).toBe(1);
-    expect(collectText(segments[0])).toContain("Own");
+    expect(collectText(segments[0])).toContain("Skills");
   });
 
   it("clicking the ORIGIN segment dispatches studio:navigate-scope with scope=origin", () => {

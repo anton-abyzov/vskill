@@ -71,26 +71,31 @@ describe("TopRail", () => {
     expect(text).toContain("vskill");
   });
 
-  it("renders breadcrumb OWN › plugin › skill when a source skill is selected", () => {
+  // 0709 T-001 / 0700: breadcrumb origin label for source (own) skills is
+  // `Skills`. Pre-0700 this was `OWN`; keep the old name-drop in the
+  // describe prose so future spelunkers can find this rename.
+  it("renders breadcrumb Skills › plugin › skill when a source skill is selected", () => {
     const tree = expand(TopRail({
       projectName: "vskill",
       selected: { plugin: "obsidian-brain", skill: "lint", origin: "source" },
       onOpenPalette: vi.fn(),
     }));
     const text = collectText(tree);
-    expect(text).toContain("Own");
+    expect(text).toContain("Skills");
     expect(text).toContain("obsidian-brain");
     expect(text).toContain("lint");
   });
 
-  it("renders breadcrumb INSTALLED when an installed skill is selected", () => {
+  // 0709 T-001 / 0700: breadcrumb origin label for installed skills is
+  // `Project` (previously `INSTALLED`).
+  it("renders breadcrumb Project when an installed skill is selected", () => {
     const tree = expand(TopRail({
       projectName: "vskill",
       selected: { plugin: "obsidian-brain", skill: "lint", origin: "installed" },
       onOpenPalette: vi.fn(),
     }));
     const text = collectText(tree);
-    expect(text).toContain("Installed");
+    expect(text).toContain("Project");
   });
 
   it("palette button has aria-label and fires onOpenPalette on click", () => {

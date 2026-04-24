@@ -21,6 +21,7 @@ import { useAgentsResponse } from "./hooks/useAgentsResponse";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { ProjectCommandPalette } from "./components/ProjectCommandPalette";
+import { CreateSkillModal, type CreateSkillMode } from "./components/CreateSkillModal";
 import {
   getStudioPreference,
   writeStudioPreference,
@@ -113,8 +114,27 @@ function Shell() {
   );
 
   // 0698 T-015/T-016: multi-project workspace state + ⌘P command palette.
-  const { workspace, switchProject, addProject, removeProject } = useWorkspace();
+  const { workspace, switchProject, addProject, removeProject, activeProject } = useWorkspace();
   const [projectPaletteOpen, setProjectPaletteOpen] = useState(false);
+
+  // 0698 polish: CreateSkillModal — opened from TopRail "+ New Skill" or from
+  // AUTHORING group header "+" (with pre-selected mode via initialCreateMode).
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [initialCreateMode, setInitialCreateMode] = useState<CreateSkillMode>("standalone");
+  const openCreateModal = useCallback((mode: CreateSkillMode = "standalone") => {
+    setInitialCreateMode(mode);
+    setCreateModalOpen(true);
+  }, []);
+  useEffect(() => {
+    // Listen for bubbling requests from elsewhere (e.g. AUTHORING header).
+    function onRequestCreate(e: Event) {
+      if (!(e instanceof CustomEvent)) return;
+      const detail = e.detail as { mode?: CreateSkillMode } | undefined;
+      openCreateModal(detail?.mode ?? "standalone");
+    }
+    window.addEventListener("studio:request-create-skill", onRequestCreate);
+    return () => window.removeEventListener("studio:request-create-skill", onRequestCreate);
+  }, [openCreateModal]);
   useKeyboardShortcut(
     [
       {
@@ -278,6 +298,7 @@ function Shell() {
             selected={state.selectedSkill}
             onOpenPalette={() => setPaletteOpen(true)}
             onHome={clearSelection}
+            onRequestCreateSkill={() => openCreateModal("standalone")}
             projectPickerSlot={
               workspace && workspace.projects.length > 0 ? (
                 <ProjectPicker
@@ -395,6 +416,17 @@ function Shell() {
           void switchProject(id);
         }}
         onClose={() => setProjectPaletteOpen(false)}
+      />
+
+      {/* 0698 polish: Create Skill modal — opened from top-rail button or
+          from AUTHORING group header "+" via the studio:request-create-skill
+          event. Pre-selected mode comes from the caller's context. */}
+      <CreateSkillModal
+        open={createModalOpen}
+        onClose={() => setCreateModalOpen(false)}
+        initialMode={initialCreateMode}
+        isClaudeCode={activeAgentId === "claude-code"}
+        projectRoot={activeProject?.path ?? config?.projectName ?? ""}
       />
     </>
   );

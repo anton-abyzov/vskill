@@ -17,6 +17,7 @@ import { registerIntegrationRoutes } from "./integration-routes.js";
 import { registerScopeTransferRoutes } from "../studio/routes/index.js";
 import { registerWorkspaceRoutes } from "./workspace-routes.js";
 import { loadWorkspace, addProject } from "./workspace-store.js";
+import { registerAuthoringRoutes } from "./authoring-routes.js";
 import { homedir } from "node:os";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -82,6 +83,7 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
   registerSweepRoutes(router, root);
   registerIntegrationRoutes(router, root);
   registerScopeTransferRoutes(router, root);
+  registerAuthoringRoutes(router, root);
 
   // Static asset directory
   const staticDir = path.resolve(__dirname, "../eval-ui");

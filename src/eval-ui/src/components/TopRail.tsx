@@ -11,6 +11,8 @@ interface Props {
   /** 0698 T-016: optional slot for the multi-project picker pill next to the logo.
    *  When provided, renders instead of the legacy projectName inline label. */
   projectPickerSlot?: ReactNode;
+  /** 0698 polish: opens the Create Skill modal. When omitted, button is hidden. */
+  onRequestCreateSkill?: () => void;
   /**
    * 0686 T-001 (US-001): called when the user activates the "Skill Studio"
    * logo. App.tsx uses this to clear any selected skill so the detail pane
@@ -43,7 +45,7 @@ function dispatchNavigateScope(
  *   - project name  — Inter Tight 400, --text-secondary.
  *   - breadcrumb    — Inter Tight 400, plugin name in meta style, skill name in primary.
  */
-export function TopRail({ projectName, selected, onOpenPalette, onHome, projectPickerSlot }: Props) {
+export function TopRail({ projectName, selected, onOpenPalette, onHome, projectPickerSlot, onRequestCreateSkill }: Props) {
   const originLabel = selected
     ? selected.origin === "installed"
       ? "Installed"
@@ -153,6 +155,49 @@ export function TopRail({ projectName, selected, onOpenPalette, onHome, projectP
         data-toprail-right="true"
         style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
       >
+        {/* 0698 polish: primary Create Skill CTA — highest-intent action
+            gets the strongest visual treatment. */}
+        {onRequestCreateSkill && (
+          <button
+            type="button"
+            data-slot="create-skill-button"
+            onClick={onRequestCreateSkill}
+            aria-label="Create a new skill"
+            title="Create a new skill"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              height: 28,
+              padding: "0 12px",
+              borderRadius: 6,
+              border: "none",
+              background: "var(--color-accent, #2f6f8f)",
+              color: "var(--color-paper, #fff)",
+              fontSize: 12,
+              fontWeight: 600,
+              fontFamily: "var(--font-sans)",
+              cursor: "pointer",
+              letterSpacing: "0.01em",
+            }}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            New Skill
+          </button>
+        )}
         {/* 0682: AgentModelPicker replaces the legacy flat ModelSelector.
             Two-pane agent + model chooser with searchable OpenRouter catalog,
             unified Settings modal, and Claude Code auto-default. */}

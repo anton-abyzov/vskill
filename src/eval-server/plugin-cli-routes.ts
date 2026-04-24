@@ -18,6 +18,10 @@
 // ---------------------------------------------------------------------------
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { spawn } from "node:child_process";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import {
@@ -61,6 +65,141 @@ export function registerPluginCliRoutes(router: Router, root: string): void {
     } catch (err) {
       sendError(res, 500, "unexpected", err instanceof Error ? err.message : String(err));
     }
+  });
+
+  // GET /api/plugins/marketplaces/:name — read the cached marketplace.json
+  // for a specific marketplace and return its catalog of available plugins.
+  // (0700 phase 2B: powers the Marketplace browser drawer.)
+  router.get("/api/plugins/marketplaces/:name", (_req, res, params) => {
+    const name = params.name;
+    if (!/^[a-z0-9][\w.-]*$/i.test(name)) {
+      return sendError(res, 400, "invalid-name", `Invalid marketplace name: ${name}`);
+    }
+    const cachePath = join(
+      homedir(),
+      ".claude",
+      "plugins",
+      "marketplaces",
+      name,
+      ".claude-plugin",
+      "marketplace.json",
+    );
+    if (!existsSync(cachePath)) {
+      return sendError(res, 404, "not-found", `Marketplace '${name}' not cached locally`);
+    }
+    try {
+      const raw = readFileSync(cachePath, "utf8");
+      const data = JSON.parse(raw) as {
+        name?: string;
+        description?: string;
+        plugins?: Array<{
+          name?: string;
+          description?: string;
+          version?: string;
+          category?: string;
+          author?: { name?: string };
+        }>;
+      };
+      const plugins = (data.plugins ?? []).map((p) => ({
+        name: p.name ?? "unknown",
+        description: p.description ?? "",
+        version: p.version ?? "",
+        category: p.category ?? "",
+        author: p.author?.name ?? "",
+      }));
+      sendJson(res, {
+        name: data.name ?? name,
+        description: data.description ?? "",
+        plugins,
+      });
+    } catch (err) {
+      sendError(res, 500, "parse-failed", err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  // POST /api/plugins/install/stream — SSE-streaming install. Sends incremental
+  // `data: {"line": "..."}` events as stdout arrives, then `data: {"done": true, "ok": <bool>, "code": <n>}`.
+  // (0700 phase 2C: powers the progress toast/drawer during slow network ops.)
+  router.post("/api/plugins/install/stream", async (req, res) => {
+    const body = await safeReadBody(req);
+    const plugin = typeof body.plugin === "string" ? body.plugin : "";
+    if (!PLUGIN_REF.test(plugin)) {
+      return sendError(res, 400, "invalid-plugin-ref", `Invalid plugin reference: ${plugin}`);
+    }
+    const scope = body.scope;
+    if (scope !== undefined && !isValidScope(scope)) {
+      return sendError(res, 400, "invalid-scope", `Invalid scope: ${scope}`);
+    }
+    // SSE setup
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    function send(event: object): void {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    }
+
+    const args = ["plugin", "install", plugin, ...(scope ? ["--scope", scope] : [])];
+    const child = spawn("claude", args, { cwd: root, env: process.env });
+
+    send({ type: "start", plugin, scope: scope ?? "user" });
+
+    function streamLines(chunk: Buffer, kind: "stdout" | "stderr"): void {
+      const text = chunk.toString("utf8");
+      for (const line of text.split(/\r?\n/)) {
+        if (line.length > 0) send({ type: kind, line });
+      }
+    }
+
+    child.stdout.on("data", (chunk) => streamLines(chunk, "stdout"));
+    child.stderr.on("data", (chunk) => streamLines(chunk, "stderr"));
+    child.on("close", (code) => {
+      send({ type: "done", ok: code === 0, code });
+      res.end();
+    });
+    child.on("error", (err) => {
+      send({ type: "error", error: err.message });
+      res.end();
+    });
+
+    // Kill if client disconnects
+    req.on("close", () => {
+      if (!child.killed) child.kill("SIGTERM");
+    });
+  });
+
+  // POST /api/plugins/marketplaces — add a marketplace (owner/repo, URL, or path)
+  router.post("/api/plugins/marketplaces", async (req, res) => {
+    const body = await safeReadBody(req);
+    const source = typeof body.source === "string" ? body.source.trim() : "";
+    if (!source) {
+      return sendError(res, 400, "invalid-source", "source is required");
+    }
+    // Permissive validation — `claude plugin marketplace add` accepts
+    // owner/repo, URLs, and filesystem paths. Reject only obviously dangerous
+    // shell metacharacters.
+    if (/[\s;&|`$(){}[\]<>]/.test(source)) {
+      return sendError(res, 400, "invalid-source", "source contains forbidden characters");
+    }
+    const result = await runClaudePlugin(["marketplace", "add", source], {
+      cwd: root,
+      timeout: 30_000,
+    });
+    if (result.code !== 0) {
+      return sendJson(
+        res,
+        {
+          ok: false,
+          code: "claude-cli-failed",
+          error: result.stderr.trim() || result.stdout.trim() || "add failed",
+        },
+        500,
+      );
+    }
+    sendJson(res, { ok: true, stdout: result.stdout });
   });
 
   // GET /api/plugins/marketplaces — list configured marketplaces

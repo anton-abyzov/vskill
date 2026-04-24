@@ -446,9 +446,32 @@ export function Sidebar({
               count={five.availablePlugin.total}
               filteredCount={query ? five.availablePlugin.filtered : null}
             >
+              {/* 0700 phase 2B: "Browse" entry point → opens MarketplaceDrawer. */}
+              <button
+                type="button"
+                onClick={() =>
+                  window.dispatchEvent(new CustomEvent("studio:open-marketplace"))
+                }
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  margin: "4px 14px 6px",
+                  padding: "4px 8px",
+                  fontSize: 11,
+                  fontWeight: 500,
+                  border: "1px dashed var(--color-accent, #2f6f8f)",
+                  borderRadius: 4,
+                  background: "transparent",
+                  color: "var(--color-accent, #2f6f8f)",
+                  cursor: "pointer",
+                }}
+              >
+                <span aria-hidden>🛒</span> Browse marketplaces…
+              </button>
               {five.availablePlugin.filtered === 0 ? (
                 <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--text-secondary)" }}>
-                  No plugin skills installed — run <code>/plugin install</code> in Claude Code.
+                  No plugin skills installed yet.
                 </div>
               ) : (
                 five.availablePlugin.byPlugin.map(([pluginName, pluginSkills]) => (

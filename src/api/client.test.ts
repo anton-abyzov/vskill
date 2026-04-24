@@ -7,6 +7,7 @@ import {
   reportInstall,
   reportInstallBatch,
   checkUpdates,
+  compareVersions,
 } from "./client.js";
 import type { SubmissionRequest, CheckUpdateItem } from "./client.js";
 
@@ -569,6 +570,54 @@ describe("reportInstallBatch", () => {
     const callArgs = mockFetch.mock.calls[0];
     const options = callArgs[1];
     expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe("compareVersions", () => {
+  it("builds the correct URL with encoded from/to args", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ source: "github", files: [] }),
+    );
+
+    await compareVersions("owner/repo/skill", "1.0.0", "feat/branch#1");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE_URL}/api/v1/skills/owner/repo/skill/versions/compare?from=1.0.0&to=feat%2Fbranch%231`,
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "User-Agent": "vskill-cli",
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+  });
+
+  it("respects VSKILL_API_BASE env override", async () => {
+    const orig = process.env.VSKILL_API_BASE;
+    process.env.VSKILL_API_BASE = "http://localhost:9999";
+    try {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ source: "github", files: [] }),
+      );
+
+      await compareVersions("my-skill", "1.0.0", "2.0.0");
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:9999/api/v1/skills/my-skill/versions/compare?from=1.0.0&to=2.0.0",
+        expect.any(Object),
+      );
+    } finally {
+      if (orig === undefined) delete process.env.VSKILL_API_BASE;
+      else process.env.VSKILL_API_BASE = orig;
+    }
+  });
+
+  it("throws on non-ok response", async () => {
+    mockFetch.mockResolvedValue(errorResponse(404, "Not Found", "no such skill"));
+
+    await expect(compareVersions("missing", "1.0.0", "2.0.0")).rejects.toThrow(
+      /Compare request failed: 404 Not Found/,
+    );
   });
 });
 

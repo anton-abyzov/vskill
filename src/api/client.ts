@@ -4,7 +4,14 @@
 
 import { createRequire } from "node:module";
 
-const BASE_URL = "https://verified-skill.com";
+// Base URL is overridable via `VSKILL_API_BASE` so tests (and hermetic CI runs)
+// can point the CLI at a mock server without touching the production host.
+// Resolved lazily so test env mutation is always picked up.
+const DEFAULT_BASE_URL = "https://verified-skill.com";
+function resolveBaseUrl(): string {
+  return process.env.VSKILL_API_BASE || DEFAULT_BASE_URL;
+}
+const BASE_URL = DEFAULT_BASE_URL;
 const VERSION: string = (() => {
   try {
     const require = createRequire(import.meta.url);
@@ -102,7 +109,7 @@ async function apiRequest<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
-  const url = `${BASE_URL}${path}`;
+  const url = `${resolveBaseUrl()}${path}`;
   const res = await fetch(url, {
     ...options,
     headers: {
@@ -414,6 +421,53 @@ export async function checkUpdates(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Multi-file version compare (0705 / AC-US4-01..AC-US4-06)
+// ---------------------------------------------------------------------------
+
+export type CompareFile = {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  patch?: string;
+};
+
+export type CompareVersionsResult = {
+  source: "github" | "local-content";
+  baseSha?: string;
+  headSha?: string;
+  files: CompareFile[];
+  githubCompareUrl?: string;
+};
+
+/**
+ * Fetch a multi-file diff between two versions of a skill.
+ * Hits the platform `/versions/compare?from=X&to=Y` endpoint which returns
+ * GitHub-backed compare data when both versions have valid SHAs (source:"github"),
+ * or an LCS fallback on SKILL.md alone (source:"local-content").
+ */
+export async function compareVersions(
+  skill: string,
+  from: string,
+  to: string,
+): Promise<CompareVersionsResult> {
+  const url = `${resolveBaseUrl()}/api/v1/skills/${skill}/versions/compare?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "vskill-cli",
+      "Content-Type": "application/json",
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `Compare request failed: ${res.status} ${res.statusText}${body ? ` - ${body.slice(0, 200)}` : ""}`,
+    );
+  }
+  return (await res.json()) as CompareVersionsResult;
 }
 
 export async function reportInstallBatch(

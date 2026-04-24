@@ -86,16 +86,20 @@ describe("createRelativeSymlink (0706 T-006)", () => {
     expect(stderrSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("propagates non-permission errors instead of silently swallowing", () => {
+  it("returns false (and does NOT warn) on non-permission errors", () => {
+    // Behavior contract: only EPERM/EACCES are user-actionable (the
+    // Windows Developer Mode hint). For ENOENT/EIO/EEXIST etc. we preserve
+    // prior "silent false" semantics so the caller's copy fallback still
+    // runs — changing this would regress existing installers that rely on
+    // the fallback path.
     const eio: any = new Error("I/O error");
     eio.code = "EIO";
     mockSymlinkSync.mockImplementation(() => {
       throw eio;
     });
 
-    expect(() =>
-      createRelativeSymlink("/canonical/foo", "/agents/cursor/foo"),
-    ).toThrowError("I/O error");
+    const ok = createRelativeSymlink("/canonical/foo", "/agents/cursor/foo");
+    expect(ok).toBe(false);
     expect(stderrSpy).not.toHaveBeenCalled();
   });
 

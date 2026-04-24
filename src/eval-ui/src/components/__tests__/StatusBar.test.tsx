@@ -80,7 +80,7 @@ describe("StatusBar — theme toggle + path/model/health", () => {
     container.remove();
   });
 
-  it("renders project path and model name", async () => {
+  it("renders model name (project path removed in 0698 T-016 — now in ProjectPicker)", async () => {
     const React = await import("react");
     const { createRoot } = await import("react-dom/client");
     const { act } = await import("react");
@@ -105,7 +105,10 @@ describe("StatusBar — theme toggle + path/model/health", () => {
       );
     });
 
-    expect(container.textContent).toContain("/Users/foo/work");
+    // 0698 T-016: project path is no longer rendered (single source of truth
+    // is the top-left ProjectPicker pill). The prop is still accepted for
+    // backward compatibility but ignored visually.
+    expect(container.textContent).not.toContain("/Users/foo/work");
     expect(container.textContent).toContain("claude-sonnet-4.5");
 
     act(() => root.unmount());

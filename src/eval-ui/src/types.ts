@@ -5,7 +5,36 @@
 // Keep these shapes in sync manually (existing client/server pattern).
 // ---------------------------------------------------------------------------
 
-export type SkillScope = "own" | "installed" | "global";
+/**
+ * 0688 legacy tri-scope vocabulary. Used by StudioOp + scope-transfer routes.
+ * 0698 introduces a new five-value `SkillScope` (below) aligned with Anthropic
+ * docs; 0688 internals continue to operate on this legacy union and translate
+ * at the api.ts boundary via `normalizeSkillScope`.
+ */
+export type LegacyTriScope = "own" | "installed" | "global";
+
+/**
+ * 0698 T-001: scope union aligned with Anthropic docs vocabulary
+ * (https://code.claude.com/docs/en/skills, /plugins).
+ *
+ * Two orthogonal axes encoded in the string:
+ *   group:  "available" | "authoring"
+ *   source: "project"   | "personal"  | "plugin"
+ *
+ * Five valid combinations (personal + authoring is invalid — never emitted).
+ */
+export type SkillScope =
+  | "available-project"
+  | "available-personal"
+  | "available-plugin"
+  | "authoring-project"
+  | "authoring-plugin";
+
+/** 0698 T-001: derived from SkillScope — top-level sidebar group. */
+export type SkillGroup = "available" | "authoring";
+
+/** 0698 T-001: derived from SkillScope — sub-section / source badge. */
+export type SkillSource = "project" | "personal" | "plugin";
 
 export type StudioOpName =
   | "promote"
@@ -21,8 +50,8 @@ export interface StudioOp {
   ts: number;
   op: StudioOpName;
   skillId?: string;
-  fromScope?: SkillScope;
-  toScope?: SkillScope;
+  fromScope?: LegacyTriScope;
+  toScope?: LegacyTriScope;
   paths?: { source: string; dest: string };
   actor: "studio-ui";
   details?: Record<string, unknown>;
@@ -157,6 +186,34 @@ export interface SkillInfo {
   // -------------------------------------------------------------------------
   /** OWN (user-authored, outside any wrapper) / INSTALLED (agent's project-local) / GLOBAL (agent's home). */
   scope?: "own" | "installed" | "global";
+  /**
+   * 0698 T-001: new scope union aligned with Anthropic docs vocabulary.
+   * Coexists with legacy `scope` during 0688 overlap. T-007 ripples consumers
+   * to read `scopeV2` (and eventually swap names). Set by `normalizeSkillInfo`.
+   */
+  scopeV2?: SkillScope;
+  /** 0698 T-001: derived from scopeV2 — split for sidebar grouping. */
+  group?: SkillGroup;
+  /** 0698 T-001: derived from scopeV2 — split for source badge / sub-section. */
+  source?: SkillSource;
+  /** 0698 T-001: plugin metadata (set when source === "plugin"). */
+  pluginName?: string | null;
+  /** 0698 T-001: namespaced display label e.g. "anthropic-skills:pdf". */
+  pluginNamespace?: string | null;
+  /** 0698 T-001: marketplace folder name (AVAILABLE > Plugins only). */
+  pluginMarketplace?: string | null;
+  /** 0698 T-001: absolute path to plugin.json (AUTHORING > Plugins only). */
+  pluginManifestPath?: string | null;
+  /** 0698 T-001: plugin version dir (AVAILABLE > Plugins, when present). */
+  pluginVersion?: string | null;
+  /**
+   * 0698 T-001/T-002: precedence within AVAILABLE for shadow detection.
+   * personal=1, project=2 (lower wins). plugin=-1 (orthogonal — never shadowed).
+   * Computed by the scanner precedence pass.
+   */
+  precedenceRank?: number;
+  /** 0698 T-001/T-002: when this skill is shadowed by a higher-precedence one in AVAILABLE, which scope wins. `null` for the winner; `undefined` for AUTHORING/plugin. */
+  shadowedBy?: SkillScope | null;
   /** `fs.lstatSync(dir).isSymbolicLink()` at scan time. */
   isSymlink?: boolean;
   /** Absolute realpath of the symlink target. `null` when not a symlink, or when a cycle was detected. */

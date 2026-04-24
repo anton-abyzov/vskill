@@ -1,5 +1,51 @@
 // API client for the eval server
-import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel, VersionEntry, VersionDiff, AgentsResponse, StudioOp, Provenance, TransferEvent } from "./types";
+import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel, VersionEntry, VersionDiff, AgentsResponse, StudioOp, Provenance, TransferEvent, SkillScope, SkillGroup, SkillSource } from "./types";
+
+// ---------------------------------------------------------------------------
+// 0698 T-001: scope normalizer + derivation.
+//
+// The eval-server may return either legacy (`own`/`installed`/`global`) or new
+// (5-value `SkillScope`) scope strings during the 0688 overlap. This boundary
+// helper translates legacy → new so all UI consumers can rely on the new
+// vocabulary. Unknown / missing input falls back to `"authoring-project"` —
+// the safest default (visible to the user as their workspace, not silently
+// promoted into AVAILABLE).
+// ---------------------------------------------------------------------------
+
+const LEGACY_SCOPE_MAP: Record<string, SkillScope> = {
+  own: "authoring-project",
+  installed: "available-project",
+  global: "available-personal",
+};
+
+const NEW_SCOPES: ReadonlySet<SkillScope> = new Set<SkillScope>([
+  "available-project",
+  "available-personal",
+  "available-plugin",
+  "authoring-project",
+  "authoring-plugin",
+]);
+
+export function normalizeSkillScope(raw: unknown): SkillScope {
+  if (typeof raw === "string") {
+    if (NEW_SCOPES.has(raw as SkillScope)) return raw as SkillScope;
+    if (Object.prototype.hasOwnProperty.call(LEGACY_SCOPE_MAP, raw)) {
+      return LEGACY_SCOPE_MAP[raw];
+    }
+  }
+  return "authoring-project";
+}
+
+export function deriveScopeGroup(scope: SkillScope): SkillGroup {
+  return scope.startsWith("available-") ? "available" : "authoring";
+}
+
+export function deriveScopeSource(scope: SkillScope): SkillSource {
+  // Suffix after the first hyphen — guaranteed to be one of project/personal/plugin
+  // by the SkillScope union definition.
+  const idx = scope.indexOf("-");
+  return scope.slice(idx + 1) as SkillSource;
+}
 
 const BASE = "";
 
@@ -82,6 +128,26 @@ export function normalizeSkillInfo(raw: unknown): SkillInfo {
     installMethod = scope === "own" ? "authored" : "copied";
   }
 
+  // 0698 T-001: derive new scope vocabulary from whatever the server sent
+  // (legacy or new). Group/source are derived deterministically.
+  const scopeV2 = normalizeSkillScope(r.scope);
+  const group = deriveScopeGroup(scopeV2);
+  const source = deriveScopeSource(scopeV2);
+
+  // 0698 T-001: precedence + shadowing metadata (server-computed).
+  // precedenceRank: number-or-undefined (server may omit during transition).
+  // shadowedBy: SkillScope | null when AVAILABLE; undefined for AUTHORING/plugin.
+  const precedenceRank =
+    typeof r.precedenceRank === "number" ? r.precedenceRank : undefined;
+  let shadowedBy: SkillScope | null | undefined;
+  if (r.shadowedBy === null) {
+    shadowedBy = null;
+  } else if (typeof r.shadowedBy === "string" && NEW_SCOPES.has(r.shadowedBy as SkillScope)) {
+    shadowedBy = r.shadowedBy as SkillScope;
+  } else {
+    shadowedBy = undefined;
+  }
+
   const info: SkillInfo = {
     plugin: typeof r.plugin === "string" ? r.plugin : "",
     skill: typeof r.skill === "string" ? r.skill : "",
@@ -98,11 +164,22 @@ export function normalizeSkillInfo(raw: unknown): SkillInfo {
         : "missing",
     lastBenchmark: typeof r.lastBenchmark === "string" ? r.lastBenchmark : null,
     origin,
-    // 0686 tri-scope + symlink fields
+    // 0686 tri-scope + symlink fields (legacy — kept for 0688 overlap)
     scope,
     isSymlink: typeof r.isSymlink === "boolean" ? r.isSymlink : false,
     symlinkTarget: coerceStringOrNull(r.symlinkTarget),
     installMethod,
+    // 0698 T-001: new scope vocabulary + derivations + plugin metadata
+    scopeV2,
+    group,
+    source,
+    pluginName: coerceStringOrNull(r.pluginName),
+    pluginNamespace: coerceStringOrNull(r.pluginNamespace),
+    pluginMarketplace: coerceStringOrNull(r.pluginMarketplace),
+    pluginManifestPath: coerceStringOrNull(r.pluginManifestPath),
+    pluginVersion: coerceStringOrNull(r.pluginVersion),
+    precedenceRank,
+    shadowedBy,
     // T-025: frontmatter + filesystem fields (all | null)
     description: coerceStringOrNull(r.description),
     version: coerceStringOrNull(r.version),

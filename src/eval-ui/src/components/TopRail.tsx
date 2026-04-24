@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { SelectedSkill } from "../StudioContext";
 import { AgentModelPicker } from "./AgentModelPicker";
 import { StudioLogo } from "./StudioLogo";
@@ -7,6 +8,9 @@ interface Props {
   projectName: string | null;
   selected: SelectedSkill | null;
   onOpenPalette: () => void;
+  /** 0698 T-016: optional slot for the multi-project picker pill next to the logo.
+   *  When provided, renders instead of the legacy projectName inline label. */
+  projectPickerSlot?: ReactNode;
   /**
    * 0686 T-001 (US-001): called when the user activates the "Skill Studio"
    * logo. App.tsx uses this to clear any selected skill so the detail pane
@@ -39,7 +43,7 @@ function dispatchNavigateScope(
  *   - project name  — Inter Tight 400, --text-secondary.
  *   - breadcrumb    — Inter Tight 400, plugin name in meta style, skill name in primary.
  */
-export function TopRail({ projectName, selected, onOpenPalette, onHome }: Props) {
+export function TopRail({ projectName, selected, onOpenPalette, onHome, projectPickerSlot }: Props) {
   const originLabel = selected
     ? selected.origin === "installed"
       ? "Installed"
@@ -61,22 +65,33 @@ export function TopRail({ projectName, selected, onOpenPalette, onHome }: Props)
       {/* Logo block — 0686 T-001: logo is now a StudioLogo home-link. */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
         <StudioLogo onHome={onHome} />
-        {projectName && (
-          <span
-            title={projectName}
-            style={{
-              fontSize: 12,
-              color: "var(--text-secondary)",
-              borderLeft: "1px solid var(--border-default)",
-              paddingLeft: 10,
-              maxWidth: 220,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {projectName}
-          </span>
+        {projectPickerSlot ? (
+          <div style={{
+            borderLeft: "1px solid var(--border-default)",
+            paddingLeft: 10,
+            display: "flex",
+            alignItems: "center",
+          }}>
+            {projectPickerSlot}
+          </div>
+        ) : (
+          projectName && (
+            <span
+              title={projectName}
+              style={{
+                fontSize: 12,
+                color: "var(--text-secondary)",
+                borderLeft: "1px solid var(--border-default)",
+                paddingLeft: 10,
+                maxWidth: 220,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {projectName}
+            </span>
+          )
         )}
       </div>
 

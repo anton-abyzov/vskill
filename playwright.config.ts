@@ -13,5 +13,10 @@ export default defineConfig({
     port: 3077,
     reuseExistingServer: !process.env.CI,
     timeout: 10_000,
+    // 0698 T-017: isolate the workspace registry so E2E runs do NOT touch the
+    // developer's real ~/.vskill/workspace.json.
+    env: {
+      VSKILL_WORKSPACE_DIR: "/tmp/vskill-e2e-workspace",
+    },
   },
 });

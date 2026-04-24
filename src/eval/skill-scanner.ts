@@ -25,6 +25,20 @@ import { resolveGlobalSkillsDir } from "./path-utils.js";
 /** Scope classification — where a skill lives in the three-part world. */
 export type SkillScope = "own" | "installed" | "global";
 
+/**
+ * 0698 T-001: new scope vocabulary aligned with Anthropic docs.
+ * Coexists with legacy `SkillScope`; api.ts boundary normalizer translates.
+ */
+export type SkillScopeV2 =
+  | "available-project"
+  | "available-personal"
+  | "available-plugin"
+  | "authoring-project"
+  | "authoring-plugin";
+
+export type SkillGroup = "available" | "authoring";
+export type SkillSource = "project" | "personal" | "plugin";
+
 /** How the skill ended up on disk: authored in-project, copied from a cache,
  *  or symlinked to a canonical source (typically a plugin cache). */
 export type SkillInstallMethod = "authored" | "copied" | "symlinked";
@@ -47,6 +61,100 @@ export interface SkillInfo {
   /** 0686 sourceAgent — the registry agent id whose scope owns this skill.
    *  null for own-scope skills. */
   sourceAgent?: string | null;
+  // -------------------------------------------------------------------------
+  // 0698 T-001/T-002: new scope vocabulary + derivations + precedence.
+  // scopeV2 is the Anthropic-aligned 5-value union. group/source are derived.
+  // precedenceRank orders within AVAILABLE (personal=1, project=2, plugin=-1).
+  // shadowedBy is set on the loser when same skill name appears in multiple
+  // AVAILABLE scopes; null on the winner; undefined for AUTHORING/plugin rows.
+  // -------------------------------------------------------------------------
+  scopeV2?: SkillScopeV2;
+  group?: SkillGroup;
+  source?: SkillSource;
+  precedenceRank?: number;
+  shadowedBy?: SkillScopeV2 | null;
+  /** 0698 T-004/T-005 plugin metadata — set when source === "plugin". */
+  pluginName?: string | null;
+  pluginNamespace?: string | null;
+  pluginMarketplace?: string | null;
+  pluginManifestPath?: string | null;
+  pluginVersion?: string | null;
+}
+
+/** 0698 T-002: translate legacy scope → new 5-value vocabulary. */
+function legacyToV2(legacy: SkillScope): SkillScopeV2 {
+  if (legacy === "installed") return "available-project";
+  if (legacy === "global") return "available-personal";
+  return "authoring-project"; // "own"
+}
+
+function groupFor(v2: SkillScopeV2): SkillGroup {
+  return v2.startsWith("available-") ? "available" : "authoring";
+}
+
+function sourceFor(v2: SkillScopeV2): SkillSource {
+  return v2.slice(v2.indexOf("-") + 1) as SkillSource;
+}
+
+function precedenceRankFor(v2: SkillScopeV2): number {
+  // Anthropic precedence: personal > project. Plugins orthogonal (-1).
+  // Lower wins within AVAILABLE.
+  if (v2 === "available-personal") return 1;
+  if (v2 === "available-project") return 2;
+  if (v2 === "available-plugin") return -1;
+  if (v2 === "authoring-plugin") return -1;
+  return 3; // authoring-project (no shadowing competition)
+}
+
+/** 0698 T-002: enrich a list of scanned skills with scopeV2/group/source/
+ *  precedenceRank, then compute shadowing within AVAILABLE (same name collisions).
+ *  Plugin-scope skills are orthogonal (never shadowed, never shadow).
+ *  AUTHORING skills never get a shadowedBy.
+ */
+function enrichAndComputePrecedence(skills: SkillInfo[]): SkillInfo[] {
+  // Phase 1: fill scopeV2, group, source, precedenceRank.
+  const enriched = skills.map((s) => {
+    const legacy: SkillScope = s.scope ?? "own";
+    const scopeV2 = legacyToV2(legacy);
+    return {
+      ...s,
+      scopeV2,
+      group: groupFor(scopeV2),
+      source: sourceFor(scopeV2),
+      precedenceRank: precedenceRankFor(scopeV2),
+    };
+  });
+
+  // Phase 2: group AVAILABLE non-plugin entries by skill name, pick a winner,
+  // set shadowedBy on losers / null on winners.
+  const availableByName = new Map<string, SkillInfo[]>();
+  for (const s of enriched) {
+    if (s.group !== "available") continue;
+    if (s.source === "plugin") continue; // orthogonal
+    const bucket = availableByName.get(s.skill) ?? [];
+    bucket.push(s);
+    availableByName.set(s.skill, bucket);
+  }
+
+  for (const group of availableByName.values()) {
+    // Lowest precedenceRank wins.
+    const sorted = [...group].sort((a, b) => (a.precedenceRank ?? 99) - (b.precedenceRank ?? 99));
+    const winner = sorted[0];
+    winner.shadowedBy = null;
+    for (let i = 1; i < sorted.length; i++) {
+      sorted[i].shadowedBy = winner.scopeV2 ?? null;
+    }
+  }
+
+  // Phase 3: winners in AVAILABLE that weren't in any collision still need
+  // shadowedBy=null explicitly. Plugin and AUTHORING entries leave it undefined.
+  for (const s of enriched) {
+    if (s.group === "available" && s.source !== "plugin" && s.shadowedBy === undefined) {
+      s.shadowedBy = null;
+    }
+  }
+
+  return enriched;
 }
 
 // ---------------------------------------------------------------------------
@@ -260,7 +368,8 @@ export async function scanSkillsTriScope(
     }
   }
 
-  return results;
+  // 0698 T-002: enrich with new scope vocabulary + compute precedence/shadowing
+  return enrichAndComputePrecedence(results);
 }
 
 /** Convert a globalSkillsDir pattern like `~/.claude/skills` to just the

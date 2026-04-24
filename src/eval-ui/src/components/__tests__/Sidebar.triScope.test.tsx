@@ -73,9 +73,12 @@ describe("0686 Sidebar tri-scope rendering", () => {
     const iOwn = text.indexOf("Own");
     const iInstalled = text.indexOf("Installed");
     const iGlobal = text.indexOf("Global");
-    expect(iOwn).toBeGreaterThanOrEqual(0);
-    expect(iInstalled).toBeGreaterThan(iOwn);
+    // 0698 T-009: new two-tier order is AVAILABLE (Installed, Global) first,
+    // then AUTHORING (Own). The legacy sub-section labels still render inside
+    // the ScopeSections — but their order has flipped.
+    expect(iInstalled).toBeGreaterThanOrEqual(0);
     expect(iGlobal).toBeGreaterThan(iInstalled);
+    expect(iOwn).toBeGreaterThan(iGlobal);
 
     // Counts
     expect(text).toContain("(2)"); // own
@@ -103,8 +106,12 @@ describe("0686 Sidebar tri-scope rendering", () => {
       );
     });
 
+    // 0698 T-009: two-tier restructure — only ONE bold divider now, between
+    // the AVAILABLE group (Installed + Global wrapped together) and the
+    // AUTHORING group (Own). Sub-sections inside AVAILABLE no longer have a
+    // divider between them because the GroupHeader provides the visual group.
     const dividers = container.querySelectorAll("[data-testid='scope-bold-divider']");
-    expect(dividers.length).toBe(2);
+    expect(dividers.length).toBe(1);
     const d0 = dividers[0] as HTMLElement;
     expect(d0.style.height).toBe("3px");
     expect(d0.style.background).toContain("--color-rule");

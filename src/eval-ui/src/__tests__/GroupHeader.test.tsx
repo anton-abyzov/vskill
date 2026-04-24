@@ -29,11 +29,13 @@ describe("GroupHeader (0698 T-008)", () => {
     expect(html).toContain('aria-level="3"');
   });
 
-  it("uses uppercase tracking and muted styling (small-caps visual intent)", () => {
+  it("uses uppercase + letter-spacing + serif styling (small-caps visual intent)", () => {
+    // 0698 polish: GroupHeader moved from Tailwind classes to inline styles so
+    // variant tint + sticky positioning are controllable. Assert visual intent.
     const html = renderToStaticMarkup(<GroupHeader name="AUTHORING" count={5} />);
-    expect(html).toContain("uppercase");
-    expect(html).toContain("tracking-wide");
-    expect(html).toContain("text-muted-foreground");
+    expect(html).toContain("text-transform:uppercase");
+    expect(html).toContain("letter-spacing:");
+    expect(html).toContain("position:sticky");
   });
 
   it("matches stored snapshot (regression guard)", () => {

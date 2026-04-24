@@ -70,14 +70,58 @@ export function PluginTreeGroup({
         type="button"
         onClick={onToggle}
         aria-expanded={!collapsed}
-        className="flex items-center gap-1 w-full px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          width: "100%",
+          padding: "4px 10px 4px 18px",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          textAlign: "left",
+          color: "var(--text-primary)",
+          fontSize: 12,
+          fontWeight: 500,
+        }}
       >
-        <span aria-hidden className="vskill-chevron tabular-nums w-3 text-center">{chevron}</span>
-        <span className="vskill-plugin-name font-mono">{name}</span>
-        <span className="vskill-plugin-count tabular-nums ml-auto">({skills.length})</span>
+        <span
+          aria-hidden
+          className="vskill-chevron tabular-nums"
+          style={{
+            width: 12,
+            display: "inline-block",
+            textAlign: "center",
+            fontSize: 10,
+            color: "var(--text-secondary)",
+          }}
+        >
+          {chevron}
+        </span>
+        <span className="vskill-plugin-name" style={{ fontFamily: "var(--font-mono)" }}>
+          {name}
+        </span>
+        <span
+          className="vskill-plugin-count tabular-nums"
+          style={{
+            marginLeft: "auto",
+            fontSize: 11,
+            color: "var(--text-tertiary)",
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          ({skills.length})
+        </span>
       </button>
       {!collapsed && (
-        <div className="vskill-plugin-tree-children pl-4">
+        <div
+          className="vskill-plugin-tree-children"
+          style={{
+            paddingLeft: 36, // chevron(12) + gap(6) + px-left(18) = 36px flush under plugin name
+            borderLeft: "1px solid var(--border-subtle, rgba(128,128,128,0.2))",
+            marginLeft: 24, // aligns the guide rail with the chevron column
+          }}
+        >
           {skills.map((s) => (
             <div
               key={`${s.pluginNamespace ?? s.skill}`}

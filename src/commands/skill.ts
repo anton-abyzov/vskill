@@ -31,89 +31,35 @@ import { isSkillCreatorInstalled } from "../utils/skill-creator-detection.js";
 import { bold, cyan, dim, green, red, yellow } from "../utils/output.js";
 import { listCommand } from "./list.js";
 import { submitCommand } from "./submit.js";
+import {
+  emitSkill as realEmitSkill,
+  type EmitOptions,
+  type EmittedFileDescriptor,
+  type DivergenceEntry,
+  type EmitResult,
+  type EngineMode,
+} from "../core/skill-emitter.js";
 
-// ---------------------------------------------------------------------------
-// Local emitter stub
-//
-// TODO(merge): remove local declaration after Chain D merges its full
-// src/core/skill-emitter.ts implementation. The type names below mirror the
-// pinned contract so swapping the import is a one-line delta. The runtime
-// stub produces a single file per target with body unchanged — good enough
-// for CLI unit tests (they mock this) and for an end-to-end smoke test; the
-// real divergence machinery lives in Chain D.
-// ---------------------------------------------------------------------------
+// Re-export emitter types so existing callers/tests don't need to change their import paths.
+export type {
+  EmitOptions,
+  EmittedFileDescriptor,
+  DivergenceEntry,
+  EmitResult,
+  EngineMode,
+};
 
-export type EngineMode = "universal" | "anthropic-skill-creator";
-
-export interface EmitOptions {
-  targetAgents: string[];
-  engine: EngineMode;
-}
-
-export interface EmittedFileDescriptor {
-  targetId: string;
-  relativePath: string;
-  content: string;
-}
-
-export interface DivergenceEntry {
-  targetId: string;
-  field: string;
-  originalValue: unknown;
-  translation: string | null;
-  kind: "dropped" | "translated" | "security-critical-dropped";
-}
-
-export interface EmitResult {
-  files: EmittedFileDescriptor[];
-  divergences: DivergenceEntry[];
-  skipped: Array<{ targetId: string; reason: string }>;
-  divergenceReport: string;
-}
-
-type EmitSkillFn = (
-  generated: GenerateSkillResult,
-  options: EmitOptions,
-) => EmitResult;
-
-function defaultEmitSkillStub(
-  generated: GenerateSkillResult,
-  options: EmitOptions,
-): EmitResult {
-  const slug = generated.name || "skill";
-  const files: EmittedFileDescriptor[] = options.targetAgents.map((id) => ({
-    targetId: id,
-    relativePath: `.agents/skills/${slug}/SKILL.md`,
-    content: buildStubSkillMd(generated),
-  }));
-  return {
-    files,
-    divergences: [],
-    skipped: [],
-    divergenceReport: `# Divergence report for ${slug}\n\n(Chain D stub — no divergences tracked yet.)\n`,
-  };
-}
-
-function buildStubSkillMd(generated: GenerateSkillResult): string {
-  const { name, description, model, allowedTools, body } = generated;
-  const fm: string[] = ["---"];
-  if (description) fm.push(`description: ${JSON.stringify(description)}`);
-  if (allowedTools) fm.push(`allowed-tools: ${allowedTools}`);
-  if (model) fm.push(`model: ${model}`);
-  fm.push(`name: ${name}`);
-  fm.push("---", "");
-  return `${fm.join("\n")}${body || ""}\n`;
-}
+type EmitSkillFn = typeof realEmitSkill;
 
 /**
- * Tests inject their own mock via this setter instead of using `vi.mock()`
- * on a path that may not resolve during TS compile. When Chain D merges,
- * this setter disappears along with the stub above.
+ * Tests inject a mock via this setter instead of `vi.mock()` on the module
+ * path (which is awkward for the ESM-dist-resolver setup). In production the
+ * default is the real `emitSkill` from `src/core/skill-emitter.ts`.
  */
-let emitSkillImpl: EmitSkillFn = defaultEmitSkillStub;
+let emitSkillImpl: EmitSkillFn = realEmitSkill;
 
 export function __setEmitSkillForTest(fn: EmitSkillFn | null): void {
-  emitSkillImpl = fn ?? defaultEmitSkillStub;
+  emitSkillImpl = fn ?? realEmitSkill;
 }
 
 // ---------------------------------------------------------------------------

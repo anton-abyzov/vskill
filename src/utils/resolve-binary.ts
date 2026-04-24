@@ -13,10 +13,46 @@
 // enhanced PATH for child processes.
 // ---------------------------------------------------------------------------
 
-import { execSync } from "node:child_process";
+import { execSync, exec } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, delimiter } from "node:path";
+import { promisify } from "node:util";
+
+const execAsync = promisify(exec);
+
+/**
+ * Build a platform-appropriate "is this binary on PATH?" command.
+ *
+ * On Windows, `cmd.exe` doesn't know about `which` — the equivalent is
+ * `where`. On macOS/Linux, `which` is the canonical choice. This helper
+ * keeps the branching in one place so callers don't duplicate the check.
+ *
+ * 0706 T-001: foundation for platform-aware agent detection.
+ */
+export function buildDetectCommand(binary: string): string {
+  return process.platform === "win32" ? `where ${binary}` : `which ${binary}`;
+}
+
+/**
+ * Async "is this binary on PATH?" probe. Returns true when the binary is
+ * found via `which`/`where`, false otherwise. Never throws — non-zero exit
+ * codes and spawn failures both resolve to `false`.
+ *
+ * Intended for use inside agent-registry `detectInstalled` functions where
+ * a one-shot "present or not" answer is enough.
+ *
+ * 0706 T-001: replaces ad-hoc `exec("which X")` strings in agents-registry.ts
+ * so Windows installs can detect agents without piping through shell.
+ */
+export async function detectBinary(binary: string): Promise<boolean> {
+  try {
+    await execAsync(buildDetectCommand(binary));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Cache resolved paths to avoid repeated lookups within a session */
 const resolvedCache = new Map<string, string>();

@@ -8,6 +8,15 @@
  * The numbers in this header are documentation only; tests assert against TOTAL_AGENTS.
  */
 
+// 0706 T-002 / T-003: imports for function-based detectInstalled.
+// `detectBinary` is the platform-aware replacement for literal "which <bin>"
+// strings that fail on Windows cmd.exe. Named imports from node:fs/os/path
+// let vitest mock the probes in unit tests without default-export shenanigans.
+import { join as joinPath } from "node:path";
+import { existsSync as fsExistsSync, readdirSync as fsReaddirSync } from "node:fs";
+import { homedir as osHomedir } from "node:os";
+import { detectBinary } from "../utils/resolve-binary.js";
+
 /** Feature support flags for an agent */
 export interface FeatureSupport {
   /** Supports slash commands */
@@ -32,8 +41,19 @@ export interface AgentDefinition {
   globalSkillsDir: string;
   /** Whether this agent supports the universal skill format */
   isUniversal: boolean;
-  /** Shell command to detect if the agent is installed */
-  detectInstalled: string;
+  /** Detect whether the agent is installed.
+   *
+   * 0706 T-002: historically this was a literal shell string (e.g. `'which
+   * claude'`) executed through `exec()`. That pipes through `cmd.exe` on
+   * Windows where `which`, `~`, `&&`, `2>/dev/null`, etc. don't exist, so
+   * detection returned empty on Windows. New preferred form is a function
+   * that returns a boolean (using `detectBinary()` + direct fs probes).
+   *
+   * The string form is retained as a legacy escape hatch so this change is
+   * non-breaking for any external consumer who built their own registry
+   * row with a shell string. `detectInstalledAgents()` handles both shapes.
+   */
+  detectInstalled: string | (() => Promise<boolean>);
   /** Parent company or organization */
   parentCompany: string;
   /** Feature support matrix */
@@ -81,7 +101,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.amp/skills',
     globalSkillsDir: '~/.config/agents/skills',
     isUniversal: true,
-    detectInstalled: 'which amp',
+    detectInstalled: () => detectBinary('amp'),
     parentCompany: 'Sourcegraph',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -91,7 +111,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.cline/skills',
     globalSkillsDir: '~/.cline/skills',
     isUniversal: true,
-    detectInstalled: 'which cline',
+    detectInstalled: () => detectBinary('cline'),
     parentCompany: 'Cline',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -101,7 +121,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.codex/skills',
     globalSkillsDir: '~/.codex/skills',
     isUniversal: true,
-    detectInstalled: 'which codex',
+    detectInstalled: () => detectBinary('codex'),
     parentCompany: 'OpenAI',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -111,7 +131,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.cursor/skills',
     globalSkillsDir: '~/.cursor/skills',
     isUniversal: true,
-    detectInstalled: 'which cursor',
+    detectInstalled: () => detectBinary('cursor'),
     parentCompany: 'Anysphere',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -121,7 +141,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.gemini/skills',
     globalSkillsDir: '~/.gemini/skills',
     isUniversal: true,
-    detectInstalled: 'which gemini',
+    detectInstalled: () => detectBinary('gemini'),
     parentCompany: 'Google',
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -136,7 +156,22 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.github/copilot/skills',
     globalSkillsDir: '~/.config/github-copilot/skills',
     isUniversal: true,
-    detectInstalled: 'which code && ls ~/.vscode/extensions/github.copilot-* 2>/dev/null',
+    // 0706 T-003: pure-Node detection — the old shell pipe
+    // (`which code && ls ~/.vscode/extensions/github.copilot-* 2>/dev/null`)
+    // can't run on Windows cmd.exe (no `which`, no `~`, no `&&`, no
+    // `2>/dev/null`). Replace with a portable probe: VS Code on PATH AND
+    // at least one `github.copilot-*` dir under `~/.vscode/extensions`.
+    detectInstalled: async () => {
+      if (!(await detectBinary('code'))) return false;
+      const extDir = joinPath(osHomedir(), '.vscode', 'extensions');
+      if (!fsExistsSync(extDir)) return false;
+      try {
+        const entries = fsReaddirSync(extDir);
+        return entries.some((e) => e.startsWith('github.copilot-'));
+      } catch {
+        return false;
+      }
+    },
     parentCompany: 'GitHub (Microsoft)',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -146,7 +181,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.kimi/skills',
     globalSkillsDir: '~/.config/agents/skills',
     isUniversal: true,
-    detectInstalled: 'which kimi',
+    detectInstalled: () => detectBinary('kimi'),
     parentCompany: 'Moonshot AI',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -156,7 +191,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.opencode/skills',
     globalSkillsDir: '~/.config/opencode/skills',
     isUniversal: true,
-    detectInstalled: 'which opencode',
+    detectInstalled: () => detectBinary('opencode'),
     parentCompany: 'Community',
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -170,7 +205,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.agent/skills',
     globalSkillsDir: '~/.gemini/antigravity/skills',
     isUniversal: false,
-    detectInstalled: 'which antigravity',
+    detectInstalled: () => detectBinary('antigravity'),
     parentCompany: 'Google',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -180,7 +215,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.augment/skills',
     globalSkillsDir: '~/.augment/skills',
     isUniversal: false,
-    detectInstalled: 'which augment',
+    detectInstalled: () => detectBinary('augment'),
     parentCompany: 'Augment',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -190,7 +225,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.claude/skills',
     globalSkillsDir: '~/.claude/skills',
     isUniversal: false,
-    detectInstalled: 'which claude',
+    detectInstalled: () => detectBinary('claude'),
     parentCompany: 'Anthropic',
     featureSupport: { slashCommands: true, hooks: true, mcp: true, customSystemPrompt: true },
     pluginCacheDir: '~/.claude/plugins/cache',
@@ -202,7 +237,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.openclaw/skills',
     globalSkillsDir: '~/.openclaw/skills',
     isUniversal: false,
-    detectInstalled: 'which openclaw',
+    detectInstalled: () => detectBinary('openclaw'),
     parentCompany: 'Community',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -212,7 +247,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.replit/skills',
     globalSkillsDir: '~/.config/agents/skills',
     isUniversal: false,
-    detectInstalled: 'which replit',
+    detectInstalled: () => detectBinary('replit'),
     parentCompany: 'Replit',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
     isRemoteOnly: true,
@@ -223,7 +258,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.codebuddy/skills',
     globalSkillsDir: '~/.codebuddy/skills',
     isUniversal: false,
-    detectInstalled: 'which codebuddy',
+    detectInstalled: () => detectBinary('codebuddy'),
     parentCompany: 'CodeBuddy',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -233,7 +268,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.commandcode/skills',
     globalSkillsDir: '~/.commandcode/skills',
     isUniversal: false,
-    detectInstalled: 'which command-code',
+    detectInstalled: () => detectBinary('command-code'),
     parentCompany: 'Command',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -243,7 +278,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.continue/skills',
     globalSkillsDir: '~/.continue/skills',
     isUniversal: false,
-    detectInstalled: 'which continue',
+    detectInstalled: () => detectBinary('continue'),
     parentCompany: 'Continue',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -253,7 +288,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.crush/skills',
     globalSkillsDir: '~/.config/crush/skills',
     isUniversal: false,
-    detectInstalled: 'which crush',
+    detectInstalled: () => detectBinary('crush'),
     parentCompany: 'Crush',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -263,7 +298,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.factory/skills',
     globalSkillsDir: '~/.factory/skills',
     isUniversal: false,
-    detectInstalled: 'which droid',
+    detectInstalled: () => detectBinary('droid'),
     parentCompany: 'Factory',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -273,7 +308,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.goose/skills',
     globalSkillsDir: '~/.config/goose/skills',
     isUniversal: false,
-    detectInstalled: 'which goose',
+    detectInstalled: () => detectBinary('goose'),
     parentCompany: 'Block',
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -283,7 +318,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.junie/skills',
     globalSkillsDir: '~/.junie/skills',
     isUniversal: false,
-    detectInstalled: 'which junie',
+    detectInstalled: () => detectBinary('junie'),
     parentCompany: 'JetBrains',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -293,7 +328,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.iflow/skills',
     globalSkillsDir: '~/.iflow/skills',
     isUniversal: false,
-    detectInstalled: 'which iflow',
+    detectInstalled: () => detectBinary('iflow'),
     parentCompany: 'iFlow',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -303,7 +338,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.kilocode/skills',
     globalSkillsDir: '~/.kilocode/skills',
     isUniversal: false,
-    detectInstalled: 'which kilocode',
+    detectInstalled: () => detectBinary('kilocode'),
     parentCompany: 'Kilo Code',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -313,7 +348,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.kiro/skills',
     globalSkillsDir: '~/.kiro/skills',
     isUniversal: false,
-    detectInstalled: 'which kiro',
+    detectInstalled: () => detectBinary('kiro'),
     parentCompany: 'AWS',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -323,7 +358,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.kode/skills',
     globalSkillsDir: '~/.kode/skills',
     isUniversal: false,
-    detectInstalled: 'which kode',
+    detectInstalled: () => detectBinary('kode'),
     parentCompany: 'Kode',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -333,7 +368,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.mcpjam/skills',
     globalSkillsDir: '~/.mcpjam/skills',
     isUniversal: false,
-    detectInstalled: 'which mcpjam',
+    detectInstalled: () => detectBinary('mcpjam'),
     parentCompany: 'MCPJam',
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: false },
   },
@@ -343,7 +378,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.vibe/skills',
     globalSkillsDir: '~/.vibe/skills',
     isUniversal: false,
-    detectInstalled: 'which vibe',
+    detectInstalled: () => detectBinary('vibe'),
     parentCompany: 'Mistral AI',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -353,7 +388,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.mux/skills',
     globalSkillsDir: '~/.mux/skills',
     isUniversal: false,
-    detectInstalled: 'which mux',
+    detectInstalled: () => detectBinary('mux'),
     parentCompany: 'Mux',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -363,7 +398,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.openhands/skills',
     globalSkillsDir: '~/.openhands/skills',
     isUniversal: false,
-    detectInstalled: 'which openhands',
+    detectInstalled: () => detectBinary('openhands'),
     parentCompany: 'All Hands AI',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -373,7 +408,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.pi/skills',
     globalSkillsDir: '~/.pi/agent/skills',
     isUniversal: false,
-    detectInstalled: 'which pi',
+    detectInstalled: () => detectBinary('pi'),
     parentCompany: 'Pi',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -383,7 +418,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.qoder/skills',
     globalSkillsDir: '~/.qoder/skills',
     isUniversal: false,
-    detectInstalled: 'which qoder',
+    detectInstalled: () => detectBinary('qoder'),
     parentCompany: 'Qoder',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -393,7 +428,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.qwen/skills',
     globalSkillsDir: '~/.qwen/skills',
     isUniversal: false,
-    detectInstalled: 'which qwen-code',
+    detectInstalled: () => detectBinary('qwen-code'),
     parentCompany: 'Alibaba',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -403,7 +438,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.roo/skills',
     globalSkillsDir: '~/.roo/skills',
     isUniversal: false,
-    detectInstalled: 'which roo',
+    detectInstalled: () => detectBinary('roo'),
     parentCompany: 'Roo',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -413,7 +448,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.trae/skills',
     globalSkillsDir: '~/.trae/skills',
     isUniversal: false,
-    detectInstalled: 'which trae',
+    detectInstalled: () => detectBinary('trae'),
     parentCompany: 'ByteDance',
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -423,7 +458,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.trae-cn/skills',
     globalSkillsDir: '~/.trae-cn/skills',
     isUniversal: false,
-    detectInstalled: 'which trae-cn',
+    detectInstalled: () => detectBinary('trae-cn'),
     parentCompany: 'ByteDance',
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -433,7 +468,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.windsurf/skills',
     globalSkillsDir: '~/.codeium/windsurf/skills',
     isUniversal: false,
-    detectInstalled: 'which windsurf',
+    detectInstalled: () => detectBinary('windsurf'),
     parentCompany: 'Codeium',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -443,7 +478,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.zencoder/skills',
     globalSkillsDir: '~/.zencoder/skills',
     isUniversal: false,
-    detectInstalled: 'which zencoder',
+    detectInstalled: () => detectBinary('zencoder'),
     parentCompany: 'ZenCoder',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -453,7 +488,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.neovate/skills',
     globalSkillsDir: '~/.neovate/skills',
     isUniversal: false,
-    detectInstalled: 'which neovate',
+    detectInstalled: () => detectBinary('neovate'),
     parentCompany: 'Neovate',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -463,7 +498,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.pochi/skills',
     globalSkillsDir: '~/.pochi/skills',
     isUniversal: false,
-    detectInstalled: 'which pochi',
+    detectInstalled: () => detectBinary('pochi'),
     parentCompany: 'Pochi',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -473,7 +508,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.adal/skills',
     globalSkillsDir: '~/.adal/skills',
     isUniversal: false,
-    detectInstalled: 'which adal',
+    detectInstalled: () => detectBinary('adal'),
     parentCompany: 'Adal',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -483,7 +518,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.cortex/skills',
     globalSkillsDir: '~/.snowflake/cortex/skills',
     isUniversal: false,
-    detectInstalled: 'which cortex',
+    detectInstalled: () => detectBinary('cortex'),
     parentCompany: 'Cortex',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -493,7 +528,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.aider/skills',
     globalSkillsDir: '~/.aider/skills',
     isUniversal: false,
-    detectInstalled: 'which aider',
+    detectInstalled: () => detectBinary('aider'),
     parentCompany: 'Aider',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -503,7 +538,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.tabnine/skills',
     globalSkillsDir: '~/.tabnine/skills',
     isUniversal: false,
-    detectInstalled: 'which tabnine',
+    detectInstalled: () => detectBinary('tabnine'),
     parentCompany: 'Tabnine',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -516,7 +551,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.devin/skills',
     globalSkillsDir: '~/.devin/skills',
     isUniversal: false,
-    detectInstalled: 'which devin',
+    detectInstalled: () => detectBinary('devin'),
     parentCompany: 'Cognition',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
     isRemoteOnly: true,
@@ -528,7 +563,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.bolt/skills',
     globalSkillsDir: '~/.bolt/skills',
     isUniversal: false,
-    detectInstalled: 'which bolt',
+    detectInstalled: () => detectBinary('bolt'),
     parentCompany: 'StackBlitz',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
     isRemoteOnly: true,
@@ -540,7 +575,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.v0/skills',
     globalSkillsDir: '~/.v0/skills',
     isUniversal: false,
-    detectInstalled: 'which v0',
+    detectInstalled: () => detectBinary('v0'),
     parentCompany: 'Vercel',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
     isRemoteOnly: true,
@@ -551,7 +586,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.gpt-pilot/skills',
     globalSkillsDir: '~/.gpt-pilot/skills',
     isUniversal: false,
-    detectInstalled: 'which gpt-pilot',
+    detectInstalled: () => detectBinary('gpt-pilot'),
     parentCompany: 'Pythagora',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -561,7 +596,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.plandex/skills',
     globalSkillsDir: '~/.plandex/skills',
     isUniversal: false,
-    detectInstalled: 'which plandex',
+    detectInstalled: () => detectBinary('plandex'),
     parentCompany: 'Plandex',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -571,7 +606,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.sweep/skills',
     globalSkillsDir: '~/.sweep/skills',
     isUniversal: false,
-    detectInstalled: 'which sweep',
+    detectInstalled: () => detectBinary('sweep'),
     parentCompany: 'Sweep AI',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -581,7 +616,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.mentat/skills',
     globalSkillsDir: '~/.mentat/skills',
     isUniversal: false,
-    detectInstalled: 'which mentat',
+    detectInstalled: () => detectBinary('mentat'),
     parentCompany: 'AbanteAI',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
   },
@@ -597,7 +632,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.copilot/skills',
     globalSkillsDir: '~/.copilot/skills',
     isUniversal: false,
-    detectInstalled: 'which copilot',
+    detectInstalled: () => detectBinary('copilot'),
     parentCompany: 'GitHub (Microsoft)',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -611,7 +646,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.warp/skills',
     globalSkillsDir: '~/.warp/skills',
     isUniversal: false,
-    detectInstalled: 'which warp',
+    detectInstalled: () => detectBinary('warp'),
     parentCompany: 'Warp',
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -625,7 +660,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.amazonq/skills',
     globalSkillsDir: '~/.aws/amazonq/skills',
     isUniversal: false,
-    detectInstalled: 'which q',
+    detectInstalled: () => detectBinary('q'),
     parentCompany: 'AWS',
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -640,7 +675,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.zed/skills',
     globalSkillsDir: '~/.config/zed/skills',
     isUniversal: false,
-    detectInstalled: 'which zed',
+    detectInstalled: () => detectBinary('zed'),
     parentCompany: 'Zed Industries',
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
@@ -826,11 +861,26 @@ export async function detectInstalledAgents(): Promise<AgentDefinition[]> {
       // so the Tier 2 directory fallback would false-positive without this guard.
       if (agent.isRemoteOnly === true) return;
 
-      // Tier 1: CLI binary detection
+      // Tier 1: CLI binary detection.
+      //
+      // 0706 T-002: `detectInstalled` can be a legacy shell string (e.g.
+      // `'which claude'`) OR a function returning `Promise<boolean>`. Strings
+      // still go through exec (kept for backward compat with any external
+      // consumer that built rows the old way); functions are called directly
+      // — they own their own platform branching via `detectBinary()`.
       try {
-        await execAsync(agent.detectInstalled);
-        results.push(agent);
-        return;
+        const detector = agent.detectInstalled;
+        if (typeof detector === 'function') {
+          const ok = await detector();
+          if (ok) {
+            results.push(agent);
+            return;
+          }
+        } else {
+          await execAsync(detector);
+          results.push(agent);
+          return;
+        }
       } catch {
         // Binary not found — try directory fallback
       }

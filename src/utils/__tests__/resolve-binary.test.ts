@@ -8,6 +8,9 @@ const mockHomedir = vi.hoisted(() => vi.fn());
 
 vi.mock("node:child_process", () => ({
   execSync: mockExecSync,
+  // 0706 T-001: resolve-binary.ts now also imports `exec` for detectBinary().
+  // These tests only exercise execSync-based paths, so a noop stub is sufficient.
+  exec: vi.fn(),
 }));
 
 vi.mock("node:fs", () => ({

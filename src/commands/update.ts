@@ -3,7 +3,8 @@
 // ---------------------------------------------------------------------------
 
 import { unlinkSync, rmdirSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+// 0706 T-005: `relative` + `sep` for cross-platform ghost-file cleanup guard.
+import { join, resolve, relative, sep as pathSep } from "node:path";
 import { readLockfile, writeLockfile } from "../lockfile/index.js";
 import { ensureSkillMdNaming } from "../installer/migrate.js";
 import { installSymlink } from "../installer/canonical.js";
@@ -39,8 +40,16 @@ function cleanupGhostFiles(
   for (const file of oldFiles) {
     if (!newSet.has(file)) {
       const target = resolve(skillDir, file);
-      // Guard: never delete outside the skill directory
-      if (!target.startsWith(resolvedBase + "/") && target !== resolvedBase) continue;
+      // 0706 T-005: cross-platform "is target inside resolvedBase?" check.
+      // The old `target.startsWith(resolvedBase + "/")` was POSIX-only and
+      // silently no-op'd on Windows (which uses `\`), leaving stale files
+      // behind. `path.relative` returns "" when equal and a leading ".."
+      // iff the target escapes the base — portable across separators.
+      const rel = relative(resolvedBase, target);
+      const insideBase =
+        target === resolvedBase ||
+        (rel !== "" && rel !== ".." && !rel.startsWith(".." + pathSep) && !rel.startsWith("../"));
+      if (!insideBase && target !== resolvedBase) continue;
       try {
         unlinkSync(target);
       } catch {
@@ -53,7 +62,11 @@ function cleanupGhostFiles(
   for (const file of oldFiles) {
     if (!newSet.has(file)) {
       const dir = resolve(skillDir, file, "..");
-      if (dir !== resolvedBase && dir.startsWith(resolvedBase + "/")) {
+      // 0706 T-005: same path.relative swap for the dir-cleanup guard.
+      const rel = relative(resolvedBase, dir);
+      const strictlyInside =
+        rel !== "" && rel !== ".." && !rel.startsWith(".." + pathSep) && !rel.startsWith("../");
+      if (dir !== resolvedBase && strictlyInside) {
         dirsToCheck.add(dir);
       }
     }

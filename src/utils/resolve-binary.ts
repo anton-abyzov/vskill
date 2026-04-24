@@ -13,10 +13,55 @@
 // enhanced PATH for child processes.
 // ---------------------------------------------------------------------------
 
-import { execSync } from "node:child_process";
+import { execSync, exec } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, delimiter } from "node:path";
+
+// 0703 follow-up: hand-rolled promise wrapper for `exec` so we don't have to
+// pull `promisify` from node:util (vite's browser shim exports nothing). The
+// UI bundle never reaches this — the vite config at src/eval-ui/vite.config.ts
+// intercepts `node:*` specifiers with a throwing proxy. Server + vitest
+// imports retain their normal behaviour, so the 0706 tests that mock
+// `node:child_process` still work end-to-end.
+function execPromise(cmd: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    exec(cmd, (err) => (err ? reject(err) : resolve()));
+  });
+}
+
+/**
+ * Build a platform-appropriate "is this binary on PATH?" command.
+ *
+ * On Windows, `cmd.exe` doesn't know about `which` — the equivalent is
+ * `where`. On macOS/Linux, `which` is the canonical choice. This helper
+ * keeps the branching in one place so callers don't duplicate the check.
+ *
+ * 0706 T-001: foundation for platform-aware agent detection.
+ */
+export function buildDetectCommand(binary: string): string {
+  return process.platform === "win32" ? `where ${binary}` : `which ${binary}`;
+}
+
+/**
+ * Async "is this binary on PATH?" probe. Returns true when the binary is
+ * found via `which`/`where`, false otherwise. Never throws — non-zero exit
+ * codes and spawn failures both resolve to `false`.
+ *
+ * Intended for use inside agent-registry `detectInstalled` functions where
+ * a one-shot "present or not" answer is enough.
+ *
+ * 0706 T-001: replaces ad-hoc `exec("which X")` strings in agents-registry.ts
+ * so Windows installs can detect agents without piping through shell.
+ */
+export async function detectBinary(binary: string): Promise<boolean> {
+  try {
+    await execPromise(buildDetectCommand(binary));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Cache resolved paths to avoid repeated lookups within a session */
 const resolvedCache = new Map<string, string>();

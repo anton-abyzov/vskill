@@ -241,4 +241,8 @@ program
     await outdatedCommand(opts);
   });
 
+// 0670: vskill skill {new|import|list|info|publish} — skill-builder workflow.
+const { registerSkillCommand } = await import("./commands/skill.js");
+registerSkillCommand(program);
+
 program.parse();

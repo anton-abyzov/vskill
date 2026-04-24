@@ -7,14 +7,14 @@ import { join, basename, resolve, sep } from "node:path";
 import type { Router } from "./router.js";
 import { isSkillCreatorInstalled } from "../utils/skill-creator-detection.js";
 import { sendJson, readBody } from "./router.js";
-import { createLlmClient } from "../eval/llm.js";
 import type { ProviderName } from "../eval/llm.js";
 import { detectAvailableProviders } from "./api-routes.js";
-import { initSSE, sendSSE, sendSSEDone, withHeartbeat } from "./sse-helpers.js";
+import { initSSE, sendSSE, sendSSEDone } from "./sse-helpers.js";
 import { classifyError } from "./error-classifier.js";
 import { writeHistoryEntry } from "../eval/benchmark-history.js";
 import { getAgentCreationProfile } from "../agents/agents-registry.js";
 import type { AgentCreationProfile } from "../agents/agents-registry.js";
+import { generateSkill } from "../core/skill-generator.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -987,6 +987,71 @@ function parseGenerateResponse(raw: string): GenerateSkillResult {
 }
 
 // ---------------------------------------------------------------------------
+// 0670 T-002 — transport-layer helpers for POST /api/skills/generate
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve + validate { provider, model } against detectAvailableProviders()
+ * (0678 contract — see AC-US2-01..05). Returns either a resolved pair or a
+ * 400 payload; callers send the payload as plain JSON (NOT SSE).
+ */
+interface ResolvedProviderModel {
+  ok: true;
+  provider: string;
+  model: string;
+}
+interface ProviderModelError {
+  ok: false;
+  error: "unknown_provider" | "unknown_model";
+  validProviders?: string[];
+  validModels?: string[];
+}
+
+/**
+ * Merge generator output with a `suggestedPlugin` computed from the existing
+ * plugins on disk. Kept out of src/core/skill-generator.ts so the generator
+ * stays pure (no filesystem access for plugin suggestion).
+ */
+function attachSuggestedPlugin(parsed: GenerateSkillResult, root: string) {
+  const tags = parsed.description
+    ? parsed.description.toLowerCase().split(/[,;]+/).map((s) => s.trim()).filter(Boolean)
+    : [];
+  const suggestedPlugin = matchExistingPlugin(parsed.name, parsed.description, tags, root);
+  return { ...parsed, suggestedPlugin };
+}
+
+async function resolveProviderModel(
+  requestedProvider: string | undefined,
+  requestedModel: string | undefined,
+): Promise<ResolvedProviderModel | ProviderModelError> {
+  // Both absent → legacy default (no probe).
+  if (!requestedProvider && !requestedModel) {
+    return { ok: true, provider: "claude-cli", model: "sonnet" };
+  }
+
+  const detected = await detectAvailableProviders();
+  const requested = requestedProvider || "claude-cli";
+  const match = detected.find((p) => p.id === requested);
+  if (!match) {
+    return {
+      ok: false,
+      error: "unknown_provider",
+      validProviders: detected.map((p) => p.id),
+    };
+  }
+
+  const validModelIds = match.models.map((m) => m.id);
+  if (requestedModel !== undefined) {
+    if (!validModelIds.includes(requestedModel)) {
+      return { ok: false, error: "unknown_model", validModels: validModelIds };
+    }
+    return { ok: true, provider: requested, model: requestedModel };
+  }
+  // Provider given, model omitted — pick the first model id for that provider.
+  return { ok: true, provider: requested, model: validModelIds[0] ?? "sonnet" };
+}
+
+// ---------------------------------------------------------------------------
 // Route registration
 // ---------------------------------------------------------------------------
 
@@ -1199,170 +1264,44 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
   });
 
   // POST /api/skills/generate — AI-assisted skill generation (parallel body + evals)
+  // 0670 T-002: thin wrapper over src/core/skill-generator.ts:generateSkill.
   router.post("/api/skills/generate", async (req, res) => {
     const body = (await readBody(req)) as GenerateSkillRequest;
-
-    if (!body.prompt || !body.prompt.trim()) {
-      sendJson(res, { error: "Describe what your skill should do" }, 400, req);
-      return;
+    if (!body.prompt || !body.prompt.trim())
+      return sendJson(res, { error: "Describe what your skill should do" }, 400, req);
+    if (body.prompt.length > 50000)
+      return sendJson(res, { error: "Prompt is too long (max 50,000 characters)" }, 400, req);
+    const resolved = await resolveProviderModel(body.provider, body.model);
+    if (!resolved.ok) {
+      const payload: Record<string, unknown> = { error: resolved.error };
+      if (resolved.validProviders) payload.validProviders = resolved.validProviders;
+      if (resolved.validModels) payload.validModels = resolved.validModels;
+      return sendJson(res, payload, 400, req);
     }
-
-    if (body.prompt.length > 50000) {
-      sendJson(res, { error: "Prompt is too long (max 50,000 characters)" }, 400, req);
-      return;
-    }
-
     const wantsSSE = req.headers.accept?.includes("text/event-stream") ||
       (req.url ? new URL(req.url, "http://localhost").searchParams.has("sse") : false);
-
-    let aborted = false;
-    res.on("close", () => { aborted = true; });
-
-    // ---------------------------------------------------------------------
-    // 0678: Resolve + validate { provider, model } before any SSE setup.
-    //
-    // Contract (see AC-US2-01..05):
-    //   - Both absent → { provider: "claude-cli", model: "sonnet" } (legacy
-    //     default preserved so existing callers are not broken).
-    //   - provider present + model absent → fill model with first detected
-    //     model id for that provider.
-    //   - provider unknown → 400 { error: "unknown_provider", validProviders }.
-    //   - provider known + model unknown → 400 { error: "unknown_model",
-    //     validModels }.
-    //
-    // Validation uses the shared detectAvailableProviders() cache from
-    // api-routes.ts — no extra probes per request (see ADR-0678-01).
-    //
-    // IMPORTANT: validation must run BEFORE initSSE() — a 400 needs a plain
-    // JSON response, not an SSE stream.
-    // ---------------------------------------------------------------------
-    const bothAbsent = !body.provider && !body.model;
-    let resolvedProvider: string;
-    let resolvedModel: string;
-
-    if (bothAbsent) {
-      resolvedProvider = "claude-cli";
-      resolvedModel = "sonnet";
-    } else {
-      const detected = await detectAvailableProviders();
-      const detectedIds = detected.map((p) => p.id);
-      const requestedProvider = body.provider || "claude-cli";
-
-      const match = detected.find((p) => p.id === requestedProvider);
-      if (!match) {
-        sendJson(res, {
-          error: "unknown_provider",
-          validProviders: detectedIds,
-        }, 400, req);
-        return;
-      }
-
-      const validModelIds = match.models.map((m) => m.id);
-      if (body.model !== undefined) {
-        if (!validModelIds.includes(body.model)) {
-          sendJson(res, {
-            error: "unknown_model",
-            validModels: validModelIds,
-          }, 400, req);
-          return;
-        }
-        resolvedModel = body.model;
-      } else {
-        // Provider given, model omitted — pick the first model id for that
-        // provider. claude-cli's first model stays "sonnet" by construction.
-        resolvedModel = validModelIds[0] ?? "sonnet";
-      }
-      resolvedProvider = requestedProvider;
-    }
-
+    const ac = new AbortController();
+    res.on("close", () => ac.abort());
     if (wantsSSE) initSSE(res, req);
-
-    const providerName = resolvedProvider;
-
     try {
-      if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "preparing", message: "Building prompt..." });
-
-      // Body generation: capable model (user-specified or default).
-      // 0678: pass the validated pair so selection actually reaches dispatch.
-      const bodyClient = createLlmClient({
-        provider: resolvedProvider as ProviderName,
-        model: resolvedModel,
-      });
-
-      // Eval generation: fast/cheap model (configurable via VSKILL_EVAL_GEN_MODEL, default haiku).
-      // Eval client stays on the cheap model regardless of the body choice — this is
-      // intentional (cost amortization) and independent of the 0678 source-model picker.
-      const evalModel = process.env.VSKILL_EVAL_GEN_MODEL || "haiku";
-      const evalClient = createLlmClient({
-        provider: resolvedProvider as ProviderName,
-        model: evalModel,
-      });
-
-      // Detect existing plugins to inject into the body prompt for LLM-based category matching
-      const layout = detectProjectLayout(root);
-      const existingPlugins = [...new Set(layout.detectedLayouts.flatMap(d => d.existingPlugins))];
-      const pluginContext = existingPlugins.length > 0
-        ? `\n\nExisting plugins in this project: ${JSON.stringify(existingPlugins)}. Include a "suggestedPlugin" field in your JSON response with the best-matching plugin name from this list, or a new kebab-case name if none fit.`
-        : `\n\nInclude a "suggestedPlugin" field in your JSON response with a suggested kebab-case plugin/category name for this skill.`;
-
-      const bodyPrompt = `Generate a skill definition (body and metadata only, NO evals) for:\n\n${body.prompt.trim()}\n\nApply Skill Studio best practices. Return the JSON object followed by ---REASONING--- and your explanation.${pluginContext}`;
-      const evalPrompt = `Generate eval test cases for this skill:\n\n${body.prompt.trim()}\n\nReturn only the JSON object with an "evals" array.`;
-
-      // Agent-aware prompt augmentation: append constraints for non-Claude agents
-      const effectiveSystemPrompt = buildAgentAwareSystemPrompt(BODY_SYSTEM_PROMPT, body.targetAgents);
-
-      // Emit SSE events for both parallel phases
-      if (wantsSSE && !aborted) {
-        sendSSE(res, "progress", { phase: "generating-body", message: "Generating skill body..." });
-        sendSSE(res, "progress", { phase: "generating-evals", message: "Generating evals..." });
-      }
-
-      // Launch both calls in parallel
-      const bodyCall = wantsSSE
-        ? withHeartbeat(res, undefined, "generating-body", "Generating body", () => bodyClient.generate(effectiveSystemPrompt, bodyPrompt))
-        : bodyClient.generate(effectiveSystemPrompt, bodyPrompt);
-
-      const evalCall = wantsSSE
-        ? withHeartbeat(res, undefined, "generating-evals", "Generating evals", () => evalClient.generate(EVAL_SYSTEM_PROMPT, evalPrompt))
-        : evalClient.generate(EVAL_SYSTEM_PROMPT, evalPrompt);
-
-      const [bodySettled, evalsSettled] = await Promise.allSettled([
-        bodyCall.then((r) => parseBodyResponse(r.text)),
-        evalCall.then((r) => parseEvalsResponse(r.text)),
-      ]);
-
-      if (aborted) return;
-
-      if (wantsSSE && !aborted) sendSSE(res, "progress", { phase: "parsing", message: "Merging results..." });
-
-      const parsed = mergeGenerateResults(bodySettled, evalsSettled);
-
-      // Match against existing plugins
-      const tags = parsed.description
-        ? parsed.description.toLowerCase().split(/[,;]+/).map((s: string) => s.trim()).filter(Boolean)
-        : [];
-      const suggestedPlugin = matchExistingPlugin(
-        parsed.name,
-        parsed.description,
-        tags,
-        root,
+      const parsed = await generateSkill(
+        { ...body, provider: resolved.provider as ProviderName, model: resolved.model },
+        {
+          root,
+          abortSignal: ac.signal,
+          onProgress: wantsSSE ? (e) => { if (!ac.signal.aborted) sendSSE(res, "progress", e); } : undefined,
+        },
       );
-
-      const result = { ...parsed, suggestedPlugin };
-
-      if (wantsSSE && !aborted) {
-        sendSSEDone(res, result);
-      } else {
-        sendJson(res, result, 200, req);
-      }
+      if (ac.signal.aborted) return;
+      const result = attachSuggestedPlugin(parsed, root);
+      if (wantsSSE) sendSSEDone(res, result); else sendJson(res, result, 200, req);
     } catch (err) {
-      if (wantsSSE && !aborted) {
-        sendSSE(res, "error", classifyError(err, providerName));
+      if (wantsSSE && !ac.signal.aborted) {
+        sendSSE(res, "error", classifyError(err, resolved.provider));
         res.end();
       } else {
         const msg = (err as Error).message;
-        const status = msg.includes("not valid JSON") ? 422 : 500;
-        sendJson(res, { error: msg }, status, req);
+        sendJson(res, { error: msg }, msg.includes("not valid JSON") ? 422 : 500, req);
       }
     }
   });

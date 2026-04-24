@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useSWR } from "../hooks/useSWR";
 import { Virtuoso } from "react-virtuoso";
 import type { SkillInfo } from "../types";
@@ -55,6 +55,15 @@ interface Props {
    * from the server's AgentsResponse shape.
    */
   topSlot?: React.ReactNode;
+  /**
+   * 0704: when set, force-open the matching section + subtree on the next
+   * render and scroll the matching row into view. Cleared via
+   * `onRevealComplete` once the scroll fires so later selections don't
+   * trigger another scroll.
+   */
+  revealSkillId?: string | null;
+  /** 0704: called after Sidebar scrolls the reveal target into view. */
+  onRevealComplete?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +222,8 @@ export function Sidebar({
   activeAgentId,
   outdatedByScope,
   topSlot,
+  revealSkillId,
+  onRevealComplete,
 }: Props) {
   // 0686 T-007 (US-003): Tri-scope mode is enabled when the caller passes
   // an active agent OR when any incoming skill carries a `scope` field
@@ -346,6 +357,37 @@ export function Sidebar({
     },
     [flatSkills, currentIndex, onSelect],
   );
+
+  // 0704: derive which bucket a reveal target lives in so we know which
+  // ancestors to force-open. `null` when no reveal is active.
+  const revealTarget = useMemo(() => {
+    if (!revealSkillId) return null;
+    const [plugin, skill] = revealSkillId.split("/");
+    if (!plugin || !skill) return null;
+    const match = skills.find((s) => s.plugin === plugin && s.skill === skill);
+    if (!match) {
+      return { plugin, skill, bucket: null as "project" | "plugin" | null, pluginName: null as string | null };
+    }
+    const bucket: "project" | "plugin" =
+      (match as { source?: string }).source === "plugin" ? "plugin" : "project";
+    const pluginName =
+      bucket === "plugin" ? ((match as { pluginName?: string }).pluginName ?? plugin) : null;
+    return { plugin, skill, bucket, pluginName };
+  }, [revealSkillId, skills]);
+
+  // 0704: scroll the reveal row into view once it exists in the DOM.
+  // Re-runs on `skills` changes so a just-added skill is caught on the
+  // rehydrate tick. Clears via onRevealComplete only when scroll runs.
+  useEffect(() => {
+    if (!revealSkillId) return;
+    const safe = typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? CSS.escape(revealSkillId)
+      : revealSkillId.replace(/["\\]/g, "\\$&");
+    const row = document.querySelector<HTMLElement>(`[data-skill-id="${safe}"]`);
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    onRevealComplete?.();
+  }, [revealSkillId, onRevealComplete, skills]);
 
   useKeyboardShortcut(
     [
@@ -513,7 +555,7 @@ export function Sidebar({
           <GroupHeader
             name={strings.scopeLabels.groupAuthoring.toUpperCase()}
             variant="authoring"
-            collapsed={authoringCollapsed}
+            collapsed={revealTarget ? false : authoringCollapsed}
             onToggle={toggleAuthoring}
             count={five.authoringProject.total + five.authoringPlugin.total}
             action={{
@@ -547,7 +589,7 @@ export function Sidebar({
             }}
           />
 
-          {!authoringCollapsed && (
+          {(!authoringCollapsed || revealTarget) && (
           <>
           <NamedScopeSection
             label={strings.scopeLabels.authoringSkills}
@@ -555,6 +597,7 @@ export function Sidebar({
             count={five.authoringProject.total}
             filteredCount={query ? five.authoringProject.filtered : null}
             updateCount={outdatedByScope?.own ?? outdatedByOrigin?.source}
+            forceOpen={revealTarget?.bucket === "project"}
           >
             {five.authoringProject.filtered === 0 ? (
               <OwnEmptyState queryActive={!!query} />
@@ -575,6 +618,7 @@ export function Sidebar({
               storageKey={`vskill-sidebar-${resolvedAgentId}-authoring-plugin-collapsed`}
               count={five.authoringPlugin.total}
               filteredCount={query ? five.authoringPlugin.filtered : null}
+              forceOpen={revealTarget?.bucket === "plugin"}
             >
               {five.authoringPlugin.filtered === 0 ? (
                 <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--text-secondary)" }}>
@@ -587,6 +631,7 @@ export function Sidebar({
                     pluginName={pluginName}
                     skills={pluginSkills}
                     persistKey={`vskill-plugin-authoring-${pluginName}-collapsed`}
+                    forceOpen={revealTarget?.bucket === "plugin" && revealTarget.pluginName === pluginName}
                     renderSkill={(skill) => (
                       <SkillRow
                         skill={skill}
@@ -668,6 +713,7 @@ function NamedScopeSection({
   filteredCount,
   updateCount,
   children,
+  forceOpen = false,
 }: {
   label: string;
   storageKey: string;
@@ -675,8 +721,16 @@ function NamedScopeSection({
   filteredCount?: number | null;
   updateCount?: number;
   children?: React.ReactNode;
+  /**
+   * 0704: transient override — render expanded regardless of persisted
+   * state. Does not touch localStorage so the user's preference is
+   * restored once forceOpen goes false.
+   */
+  forceOpen?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(() => readCollapsedSafe(storageKey));
+  // 0704: forceOpen overrides collapsed without mutating it.
+  const effectiveCollapsed = forceOpen ? false : collapsed;
   const toggle = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
@@ -701,7 +755,7 @@ function NamedScopeSection({
       <button
         type="button"
         onClick={toggle}
-        aria-expanded={!collapsed}
+        aria-expanded={!effectiveCollapsed}
         style={{
           display: "flex",
           alignItems: "center",
@@ -726,7 +780,7 @@ function NamedScopeSection({
             textAlign: "center",
           }}
         >
-          {collapsed ? "▸" : "▾"}
+          {effectiveCollapsed ? "▸" : "▾"}
         </span>
         <span
           style={{
@@ -761,7 +815,7 @@ function NamedScopeSection({
           </span>
         )}
       </button>
-      {!collapsed && (
+      {!effectiveCollapsed && (
         // 0700 polish: indent children so plugin headers + skill rows sit
         // visually nested under the section label (which starts ~28px in
         // from the left after the chevron + gap). Without this padding the

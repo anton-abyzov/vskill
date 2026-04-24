@@ -5,6 +5,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { join, resolve, dirname } from "node:path";
+import { homedir } from "node:os";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import { initSSE, sendSSE, sendSSEDone, withHeartbeat, startDynamicHeartbeat } from "./sse-helpers.js";
@@ -631,19 +632,23 @@ function computeBenchmarkStatus(
 interface ModelOption {
   id: string;       // raw model id passed to the provider
   label: string;    // human-readable display name
+  pricing?: { prompt: number; completion: number };  // USD per 1M tokens
 }
 
-const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
+// 0701 — Anthropic API pricing per 1M tokens (input/output only; cache read/write
+// not surfaced in this release).
+// Source: https://www.anthropic.com/pricing — snapshot 2026-04-24. Re-verify annually.
+export const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
   "claude-cli": [
     { id: "sonnet", label: "Claude Sonnet" },
     { id: "opus", label: "Claude Opus" },
     { id: "haiku", label: "Claude Haiku" },
   ],
   "anthropic": [
-    { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (API)" },
-    { id: "claude-opus-4-7", label: "Claude Opus 4.7 (API)" },
-    { id: "claude-opus-4-6", label: "Claude Opus 4.6 (API)" },
-    { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (API)" },
+    { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (API)", pricing: { prompt: 3, completion: 15 } },
+    { id: "claude-opus-4-7", label: "Claude Opus 4.7 (API)", pricing: { prompt: 15, completion: 75 } },
+    { id: "claude-opus-4-6", label: "Claude Opus 4.6 (API)", pricing: { prompt: 15, completion: 75 } },
+    { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (API)", pricing: { prompt: 1, completion: 5 } },
   ],
   "ollama": [
     { id: "llama3.1:8b", label: "Llama 3.1 8B" },
@@ -837,17 +842,37 @@ function isBinaryOnPath(name: string): boolean {
   }
 }
 
+// 0701 — Read the active Claude Code model from ~/.claude/settings.json so the
+// Studio picker can surface "routing to claude-opus-4-7[1m]" under the generic
+// Claude Code rows. Returns null on any read/parse failure — callers fall back
+// to generic aliases. Re-read on every call (no caching) so toggling /model in
+// Claude Code is reflected on the next picker open.
+export function resolveClaudeCodeModel(): string | null {
+  try {
+    const path = join(homedir(), ".claude", "settings.json");
+    const raw = readFileSync(path, "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const model = (parsed as { model?: unknown }).model;
+    return typeof model === "string" && model.length > 0 ? model : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function detectAvailableProviders(): Promise<Array<{
   id: ProviderName;
   label: string;
   available: boolean;
   models: ModelOption[];
+  resolvedModel?: string | null;
 }>> {
   const providers: Array<{
     id: ProviderName;
     label: string;
     available: boolean;
     models: ModelOption[];
+    resolvedModel?: string | null;
   }> = [];
 
   // Claude CLI — delegates to the `claude` binary; the CLI owns session auth.
@@ -857,6 +882,7 @@ export async function detectAvailableProviders(): Promise<Array<{
     label: "Use current Claude Code session",
     available: true,
     models: PROVIDER_MODELS["claude-cli"],
+    resolvedModel: resolveClaudeCodeModel(),
   });
 
   // Anthropic API — available if ANTHROPIC_API_KEY is set OR a key is in the

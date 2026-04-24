@@ -75,8 +75,13 @@ describe("AGENTS_REGISTRY — required fields", () => {
 
       expect(typeof agent.isUniversal).toBe("boolean");
 
-      expect(typeof agent.detectInstalled).toBe("string");
-      expect(agent.detectInstalled.length).toBeGreaterThan(0);
+      // 0706 T-002: detectInstalled is now `string | (() => Promise<boolean>)`.
+      // Strings are retained as a legacy escape hatch; functions are the new
+      // preferred shape (Windows-safe, no shell pipe).
+      expect(["string", "function"]).toContain(typeof agent.detectInstalled);
+      if (typeof agent.detectInstalled === "string") {
+        expect(agent.detectInstalled.length).toBeGreaterThan(0);
+      }
 
       expect(typeof agent.parentCompany).toBe("string");
       expect(agent.parentCompany.length).toBeGreaterThan(0);
@@ -192,8 +197,26 @@ describe("detectInstalledAgents", () => {
   );
   const mockExistsSync = vi.hoisted(() => vi.fn().mockReturnValue(false));
 
+  // 0706 T-002 follow-up: the real `child_process.exec` is callback-style
+  // (`exec(cmd, cb)`); the hand-rolled `execPromise` in resolve-binary.ts
+  // drives it that way. When 0706 migrated `detectInstalled` rows to
+  // `() => detectBinary(bin)`, those functions started calling
+  // `exec(cmd, callback)` rather than the promise-returning `promisify(exec)`.
+  // The adapter below lets the existing promise-shaped `mockExec` satisfy
+  // BOTH call patterns: plain `mockExec(cmd)` returns a promise (legacy
+  // detectInstalled-as-string path); `mockExec(cmd, cb)` forwards the
+  // promise result through the callback (new detectBinary path).
   vi.mock("node:child_process", () => ({
-    exec: mockExec,
+    exec: (cmd: string, cb?: (err: Error | null, out?: unknown) => void) => {
+      const p = mockExec(cmd);
+      if (typeof cb === "function") {
+        Promise.resolve(p)
+          .then((out) => cb(null, out))
+          .catch((err) => cb(err));
+        return;
+      }
+      return p;
+    },
   }));
 
   vi.mock("node:util", () => ({
@@ -253,6 +276,15 @@ describe("detectInstalledAgents", () => {
   it("returns all locally-installable agents when all commands succeed", async () => {
     // Make all commands succeed
     mockExec.mockResolvedValue({ stdout: "/usr/local/bin/tool", stderr: "" });
+    // 0706 T-003: github-copilot-ext detection is now a pure-Node function
+    // that checks `fs.existsSync(~/.vscode/extensions)`. Turn existsSync on
+    // here so the copilot row is counted alongside the CLI-only agents.
+    mockExistsSync.mockReturnValue(true);
+    // The copilot function also calls readdirSync — the registry imports
+    // it via a named alias, but this test mocks node:fs's `existsSync` only.
+    // Since `readdirSync` isn't in the mock, the actual call would hit the
+    // real fs which probably throws. The function catches that and returns
+    // false. So we exclude copilot from the expected count.
 
     const result = await detectInstalledAgents();
     // F-008: isRemoteOnly entries are short-circuited and never returned.
@@ -497,7 +529,8 @@ describe("AGENTS_REGISTRY — new CLI adapters (0694)", () => {
     expect(a!.displayName).toBe("GitHub Copilot CLI");
     expect(a!.localSkillsDir).toBe(".copilot/skills");
     expect(a!.globalSkillsDir).toBe("~/.copilot/skills");
-    expect(a!.detectInstalled).toBe("which copilot");
+    // 0706 T-002: detectInstalled migrated from string to function.
+    expect(typeof a!.detectInstalled).toBe("function");
     expect(a!.parentCompany).toBe("GitHub (Microsoft)");
   });
 
@@ -513,7 +546,8 @@ describe("AGENTS_REGISTRY — new CLI adapters (0694)", () => {
     expect(a).toBeDefined();
     expect(a!.displayName).toBe("Warp");
     expect(a!.parentCompany).toBe("Warp");
-    expect(a!.detectInstalled).toBe("which warp");
+    // 0706 T-002: detectInstalled migrated from string to function.
+    expect(typeof a!.detectInstalled).toBe("function");
     expect(a!.localSkillsDir.length).toBeGreaterThan(0);
     expect(a!.globalSkillsDir.length).toBeGreaterThan(0);
   });
@@ -523,7 +557,8 @@ describe("AGENTS_REGISTRY — new CLI adapters (0694)", () => {
     expect(a).toBeDefined();
     expect(a!.displayName).toBe("Amazon Q CLI");
     expect(a!.parentCompany).toBe("AWS");
-    expect(a!.detectInstalled).toBe("which q");
+    // 0706 T-002: detectInstalled migrated from string to function.
+    expect(typeof a!.detectInstalled).toBe("function");
   });
 
   it("AC-US5-01: zed entry exists with .zed/skills local dir", () => {
@@ -531,7 +566,8 @@ describe("AGENTS_REGISTRY — new CLI adapters (0694)", () => {
     expect(a).toBeDefined();
     expect(a!.displayName).toBe("Zed");
     expect(a!.localSkillsDir).toBe(".zed/skills");
-    expect(a!.detectInstalled).toBe("which zed");
+    // 0706 T-002: detectInstalled migrated from string to function.
+    expect(typeof a!.detectInstalled).toBe("function");
   });
 });
 
@@ -611,8 +647,17 @@ describe("AGENTS_REGISTRY \u2014 0694 follow-ups", () => {
   });
 
   it("F-005: github-copilot-ext detection chains binary check + extension dir glob", () => {
+    // 0706 T-003: the detection logic is now a pure-Node function rather
+    // than a shell pipe. After TS→JS compilation, identifier names may be
+    // mangled (e.g. `detectBinary` → `(0,__resolve_binary_js).detectBinary`),
+    // so we assert on the user-visible string literals that survive: the
+    // binary name `'code'` and the extension-dir prefix `github.copilot-`.
     const detect = getAgent("github-copilot-ext")?.detectInstalled;
-    expect(detect).toContain("which code");
-    expect(detect).toContain("~/.vscode/extensions/github.copilot-");
+    expect(typeof detect).toBe("function");
+    const src = (detect as Function).toString();
+    // Accept either quote style — vite-ssr transforms may re-emit literals
+    // in double quotes while the original source uses single quotes.
+    expect(src.includes("'code'") || src.includes('"code"')).toBe(true);
+    expect(src).toContain("github.copilot-");
   });
 });

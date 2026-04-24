@@ -660,9 +660,20 @@ const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
     { id: "o4-mini", label: "OpenAI o4-mini" },
   ],
   "openrouter": [
+    // Anthropic via OpenRouter
+    { id: "anthropic/claude-opus-4", label: "Claude Opus 4 (via OpenRouter)" },
     { id: "anthropic/claude-sonnet-4", label: "Claude Sonnet 4 (via OpenRouter)" },
-    { id: "meta-llama/llama-3.1-70b-instruct", label: "Llama 3.1 70B" },
+    { id: "anthropic/claude-haiku-4", label: "Claude Haiku 4 (via OpenRouter)" },
+    // OpenAI via OpenRouter (0698 polish — Anton wants OpenAI first-class)
+    { id: "openai/gpt-5", label: "GPT-5 (via OpenRouter)" },
+    { id: "openai/gpt-5-mini", label: "GPT-5 mini (via OpenRouter)" },
+    { id: "openai/o4-mini", label: "o4-mini (via OpenRouter)" },
+    { id: "openai/o3", label: "OpenAI o3 (via OpenRouter)" },
+    { id: "openai/gpt-4.1", label: "GPT-4.1 (via OpenRouter)" },
+    // Google + Meta
     { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro (via OpenRouter)" },
+    { id: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash (via OpenRouter)" },
+    { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B (via OpenRouter)" },
   ],
   // LM Studio's default model list is empty because the actual list depends on
   // what models the user has loaded. The probe at probeLmStudio() populates

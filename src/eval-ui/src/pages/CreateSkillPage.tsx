@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useCreateSkill, toKebab } from "../hooks/useCreateSkill";
 import { useConfig } from "../ConfigContext";
@@ -23,6 +23,40 @@ const inputStyle = {
   border: "1px solid var(--border-subtle)",
 };
 
+// 0698 polish: detect Claude-Max-quota-exhaustion server error so we can
+// surface an actionable banner ("Enable extra usage →") instead of a red
+// wall of API error text.
+function isQuotaExhaustedError(msg: string | null | undefined): boolean {
+  if (!msg) return false;
+  return /API usage limits|usage limit/i.test(msg) && /regain access|reset/i.test(msg);
+}
+
+function quotaResetWindow(msg: string): string {
+  const m = msg.match(/regain access on ([^"\\]+?)(?:\s*UTC)?["\\]/i) ?? msg.match(/regain access on ([^"\\]+)/i);
+  if (m) return `Resets ${m[1].trim()} UTC`;
+  return "Quota resets at the start of your next billing period";
+}
+
+// 0698 polish: per-provider caption. Keep short — this renders inline under
+// the Provider select AND as the <option> / <select> title attribute so
+// hovering the dropdown shows the same info.
+function providerCaption(providerId: string): string {
+  switch (providerId) {
+    case "claude-cli":
+      return "Uses your logged-in Claude Code session (Pro/Max subscription). No API key. When your quota runs out, excess usage is billed at API rates if you've enabled extra usage.";
+    case "anthropic":
+      return "Direct Anthropic API — pay-per-token. Full Opus / Sonnet / Haiku catalog. Requires ANTHROPIC_API_KEY.";
+    case "openrouter":
+      return "One API key → 300+ models from Anthropic, OpenAI (GPT-5 / o4-mini), Google (Gemini), Meta (Llama) and more. Same prices as direct.";
+    case "ollama":
+      return "Local models on your machine (Llama, Qwen, Mistral, etc.). Zero cost, zero data leaves your laptop.";
+    case "lm-studio":
+      return "Local models via LM Studio's OpenAI-compatible server. Works offline. Pick any model you've loaded in LM Studio.";
+    default:
+      return "";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Sparkle icon for AI mode
 // ---------------------------------------------------------------------------
@@ -42,6 +76,22 @@ function SparkleIcon({ size = 14, color = "currentColor" }: { size?: number; col
 export function CreateSkillPage() {
   const navigate = useNavigate();
   const { config } = useConfig();
+
+  // 0698 polish: accept ?mode=&skillName=&description=&pluginName= from the
+  // CreateSkillModal's "Generate with AI" chain. Read from hash-based query.
+  const prefill = React.useMemo(() => {
+    if (typeof window === "undefined") return {} as Record<string, string>;
+    const hash = window.location.hash;
+    const qIdx = hash.indexOf("?");
+    if (qIdx === -1) return {} as Record<string, string>;
+    const params = new URLSearchParams(hash.slice(qIdx + 1));
+    const out: Record<string, string> = {};
+    for (const key of ["mode", "skillName", "description", "pluginName"]) {
+      const v = params.get(key);
+      if (v) out[key] = v;
+    }
+    return out;
+  }, []);
 
   // ---------------------------------------------------------------------------
   // 0678 — Source-model picker state
@@ -166,6 +216,21 @@ export function CreateSkillPage() {
     onCreated: (plugin, skill) => navigate(`/skills/${plugin}/${skill}`),
     resolveAiConfigOverride,
   });
+
+  // 0698 polish: apply modal-chain prefill once on mount.
+  useEffect(() => {
+    if (prefill.skillName && !sk.name) {
+      sk.setName(toKebab(prefill.skillName));
+    }
+    if (prefill.description && !sk.description) {
+      sk.setDescription(prefill.description);
+    }
+    if (prefill.pluginName && !sk.plugin) {
+      sk.setPlugin(toKebab(prefill.pluginName));
+    }
+    // Intentionally fire only on mount — prefill is derived from the URL.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Provider info for AI model picker
   const aiProviderInfo = config?.providers.find((p) => p.id === aiProvider && p.available);
@@ -363,18 +428,42 @@ export function CreateSkillPage() {
                       writePersistedSelection(nextProvider, nextModel);
                     }}
                     disabled={sk.generating || !aiProviderInfo}
-                    title={
+                    title={providerCaption(aiProvider) || (
                       !aiProviderInfo
                         ? "Install a provider (Ollama / LM Studio / OpenRouter) or run `claude login` to enable model selection."
                         : undefined
-                    }
+                    )}
                     className="w-full px-3 py-2 rounded-lg text-[13px]"
                     style={inputStyle}
                   >
                     {config?.providers.filter((p) => p.available).map((p) => (
-                      <option key={p.id} value={p.id}>{p.label}</option>
+                      <option key={p.id} value={p.id} title={providerCaption(p.id)}>{p.label}</option>
                     ))}
                   </select>
+                  {/* 0698 polish: provider caption + quota link. Hover tooltip
+                      already lives on the select; this inline caption makes
+                      the current provider's terms visible without hovering. */}
+                  {providerCaption(aiProvider) && (
+                    <div
+                      className="mt-1.5 text-[11px]"
+                      style={{ color: "var(--text-tertiary)", lineHeight: 1.5 }}
+                    >
+                      {providerCaption(aiProvider)}
+                      {aiProvider === "claude-cli" && (
+                        <>
+                          {" "}
+                          <a
+                            href="https://claude.com/settings/usage"
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ color: "var(--color-accent, #2f6f8f)", textDecoration: "underline" }}
+                          >
+                            Enable extra usage →
+                          </a>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex-1">
                   <label className="text-[11px] font-medium uppercase tracking-wider mb-2 block" style={{ color: "var(--text-tertiary)" }}>
@@ -426,7 +515,57 @@ export function CreateSkillPage() {
             {/* Error */}
             {sk.aiError && (
               <div>
-                {sk.aiClassifiedError ? (
+                {isQuotaExhaustedError(sk.aiError) ? (
+                  <div
+                    className="px-4 py-3 rounded-lg text-[13px]"
+                    style={{
+                      background: "var(--yellow-muted)",
+                      color: "var(--text-primary)",
+                      border: "1px solid var(--yellow)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                      Your Claude Max subscription quota is exhausted
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 8 }}>
+                      {quotaResetWindow(sk.aiError)}. Switch to another provider (Anthropic API, OpenRouter, or a local model) or enable extra usage to continue past your monthly quota.
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <a
+                        href="https://claude.com/settings/usage"
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          padding: "4px 10px",
+                          fontSize: 12,
+                          fontWeight: 500,
+                          color: "var(--color-paper, #fff)",
+                          background: "var(--color-accent, #2f6f8f)",
+                          borderRadius: 4,
+                          textDecoration: "none",
+                        }}
+                      >
+                        Enable extra usage →
+                      </a>
+                      <button
+                        onClick={sk.clearAiError}
+                        style={{
+                          padding: "4px 10px",
+                          fontSize: 12,
+                          color: "var(--text-primary)",
+                          background: "transparent",
+                          border: "1px solid var(--border-default)",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                ) : sk.aiClassifiedError ? (
                   <ErrorCard
                     error={sk.aiClassifiedError}
                     onRetry={sk.handleGenerate}

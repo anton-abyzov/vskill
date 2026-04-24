@@ -147,7 +147,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     localSkillsDir: '.github/copilot/skills',
     globalSkillsDir: '~/.config/github-copilot/skills',
     isUniversal: true,
-    detectInstalled: 'which code',
+    detectInstalled: 'which code && ls ~/.vscode/extensions/github.copilot-* 2>/dev/null',
     parentCompany: 'GitHub (Microsoft)',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },

@@ -582,3 +582,19 @@ describe("NON_AGENT_CONFIG_DIRS (0693 AC-US2-01)", () => {
     expect(NON_AGENT_CONFIG_DIRS).toContain(".specweave");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 0694 follow-ups (F-003, F-005)
+// ---------------------------------------------------------------------------
+describe("AGENTS_REGISTRY \u2014 0694 follow-ups", () => {
+  it("F-003: kiro-cli and amazon-q-cli share parentCompany 'AWS'", () => {
+    expect(getAgent("kiro-cli")?.parentCompany).toBe("AWS");
+    expect(getAgent("amazon-q-cli")?.parentCompany).toBe("AWS");
+  });
+
+  it("F-005: github-copilot-ext detection chains binary check + extension dir glob", () => {
+    const detect = getAgent("github-copilot-ext")?.detectInstalled;
+    expect(detect).toContain("which code");
+    expect(detect).toContain("~/.vscode/extensions/github.copilot-");
+  });
+});

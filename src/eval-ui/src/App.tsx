@@ -80,7 +80,7 @@ export function App() {
 }
 
 function Shell() {
-  const { state, selectSkill, clearSelection, refreshSkills, outdatedByOrigin } = useStudio();
+  const { state, selectSkill, clearSelection, refreshSkills, outdatedByOrigin, revealSkill, clearReveal } = useStudio();
   const { config } = useConfig();
   const { mode, resolvedTheme, setTheme } = useTheme();
   const { toast } = useToast();
@@ -393,6 +393,8 @@ function Shell() {
             onContextMenu={openContextMenu}
             outdatedByOrigin={outdatedByOrigin}
             activeAgentId={activeAgentId}
+            revealSkillId={state.revealSkillId}
+            onRevealComplete={clearReveal}
             topSlot={
               agentsResponse.status === "ready" && pickerEntries.length > 0 ? (
                 <>
@@ -487,25 +489,20 @@ function Shell() {
         isClaudeCode={activeAgentId === "claude-code"}
         projectRoot={activeProject?.path ?? config?.projectName ?? ""}
         onCreated={(result) => {
-          // 0700 polish: open the new skill by default so the user sees their
-          // creation immediately. The sidebar's SWR cache was invalidated
-          // by the modal; refreshSkills() triggers a fresh /api/skills fetch.
-          // Once the new skill lands in state we call selectSkill() — which
-          // drives both the hash and the detail panel without needing the
-          // route to match (selectSkill works off in-memory state).
-          const plugin = result.pluginName ?? "";
+          // 0704: use revealSkill (not selectSkill) so the sidebar
+          // force-expands ancestors and scrolls the new row into view.
+          // Manual row clicks still go through selectSkill, which does NOT
+          // force-expand — only explicit creation flows reveal.
+          //
+          // For standalone skills the modal returns pluginName=null, so we
+          // pass "" and revealSkill resolves the actual plugin by skillName
+          // against the latest state.skills list (via useRef inside the
+          // context) — this works because refreshSkills() below has already
+          // queued a fetch whose result will land before the setTimeout
+          // callback fires.
           refreshSkills();
-          // Give StudioContext one tick to fold the refetched skills into
-          // state before we pick the new one out. selectSkill needs the
-          // origin, which the modal doesn't know, so infer from mode:
-          // standalone / new-plugin / existing-plugin all produce authored
-          // skills (origin = "source").
           setTimeout(() => {
-            selectSkill({
-              plugin,
-              skill: result.skillName,
-              origin: "source",
-            });
+            revealSkill(result.pluginName ?? "", result.skillName);
           }, 500);
         }}
       />

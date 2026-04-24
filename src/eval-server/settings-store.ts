@@ -1,56 +1,119 @@
 // ---------------------------------------------------------------------------
-// settings-store.ts — Tiered API key storage for vSkill Studio (0682 / US-004).
+// settings-store.ts — File-backed credential store for vSkill Studio.
 //
-// Two tiers:
-//   - "browser"   (default, all platforms) — in-memory map keyed by provider.
-//                 The browser mirrors the write into localStorage so a page
-//                 reload does not require re-entry.
-//   - "keychain"  (Darwin opt-in) — shells out to the `security` binary to
-//                 store under `vskill-<provider>`. No native-module dep.
+// Single on-disk file at `<configDir>/keys.env` (default configDir:
+// `~/.vskill`, overridable via VSKILL_CONFIG_DIR). KEY=VALUE dotenv format.
+// Atomic write via temp-file + rename; POSIX writes explicit 0600.
 //
 // Contract:
-//   - Keys NEVER appear in any log, error, toast, network URL, or stdout.
-//     The only redacted form ever emitted is `****<last-4>` via `redactKey`.
-//   - `listKeys()` returns metadata only (stored boolean, updatedAt, tier).
+//   - Raw keys NEVER appear in any log, error message, toast, or stdout.
+//     Only `redactKey()` output (`****<last-4>`) may be emitted.
+//   - `readKey()` consults `process.env` FIRST, then the in-memory map.
+//     After `mergeStoredKeysIntoEnv()` the map is cleared; subsequent reads
+//     hit process.env directly, minimizing plaintext dwell time.
+//   - `listKeys()` returns { stored, updatedAt } metadata only.
 //   - `removeKey()` is idempotent.
-//   - Tier switch (setTier) wipes the old tier's entry and re-saves into the
-//     new tier so the live state stays coherent.
+//   - Malformed lines in keys.env never crash parse — they are skipped with
+//     exactly ONE aggregated warning.
 //
-// Tests inject a fake logger + a fake spawn factory so the Darwin path is
-// exercisable on any host. See __tests__/settings-store.test.ts.
+// Tests inject `{logger, fs, configDir}` via `resetSettingsStore(opts)`.
 // ---------------------------------------------------------------------------
 
-import * as childProcess from "node:child_process";
-import type { SpawnOptions } from "node:child_process";
+import * as nodeFs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import {
+  PROVIDERS,
+  type ProviderDescriptor,
+  type ProviderId,
+} from "./providers.js";
 
-// Lazy accessor — some test files mock `node:child_process` without re-
-// exporting `spawn`. Reading through the namespace at call time avoids
-// touching the mock at module-load time, so those tests keep passing.
-const realSpawn: typeof childProcess.spawn = ((...args: Parameters<typeof childProcess.spawn>) =>
-  (childProcess.spawn as unknown as (...a: unknown[]) => ReturnType<typeof childProcess.spawn>)(
-    ...args,
-  )) as typeof childProcess.spawn;
-
-export type Provider = "anthropic" | "openrouter";
-export type Tier = "browser" | "keychain";
+export type Provider = ProviderId;
+export type { ProviderId } from "./providers.js";
 
 export interface KeyMetadata {
   stored: boolean;
   updatedAt: string | null;
-  tier: Tier;
 }
 
 export interface ListKeysResponse {
   anthropic: KeyMetadata;
+  openai: KeyMetadata;
   openrouter: KeyMetadata;
 }
 
-export class UnsupportedTierError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "UnsupportedTierError";
-  }
+export interface Logger {
+  warn: (msg: string) => void;
+  error: (msg: string) => void;
 }
+
+interface FsFacade {
+  writeFileSync: typeof nodeFs.writeFileSync;
+  renameSync: typeof nodeFs.renameSync;
+  chmodSync: typeof nodeFs.chmodSync;
+  readFileSync: typeof nodeFs.readFileSync;
+  existsSync: typeof nodeFs.existsSync;
+  unlinkSync: typeof nodeFs.unlinkSync;
+  mkdirSync: typeof nodeFs.mkdirSync;
+  statSync: typeof nodeFs.statSync;
+}
+
+interface Entry {
+  key: string;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Module-level state. Tests reset via `resetSettingsStore()`.
+// ---------------------------------------------------------------------------
+
+const defaultLogger: Logger = {
+  warn: (m) => console.warn(m),
+  error: (m) => console.error(m),
+};
+
+// Wrappers read through the nodeFs namespace at CALL time so test files that
+// mock `node:fs` without exporting every member (e.g. comparison-sse-events
+// which only mocks existsSync/readFileSync/writeFileSync) don't fail at
+// module-load time. Direct property access happens only inside the call.
+const defaultFs: FsFacade = {
+  writeFileSync: (...args) => nodeFs.writeFileSync(...(args as Parameters<typeof nodeFs.writeFileSync>)),
+  renameSync: (...args) => nodeFs.renameSync(...(args as Parameters<typeof nodeFs.renameSync>)),
+  chmodSync: (...args) => nodeFs.chmodSync(...(args as Parameters<typeof nodeFs.chmodSync>)),
+  readFileSync: ((...args: unknown[]) =>
+    (nodeFs.readFileSync as unknown as (...a: unknown[]) => unknown)(...args)) as typeof nodeFs.readFileSync,
+  existsSync: (...args) => nodeFs.existsSync(...(args as Parameters<typeof nodeFs.existsSync>)),
+  unlinkSync: (...args) => nodeFs.unlinkSync(...(args as Parameters<typeof nodeFs.unlinkSync>)),
+  mkdirSync: ((...args: unknown[]) =>
+    (nodeFs.mkdirSync as unknown as (...a: unknown[]) => unknown)(...args)) as typeof nodeFs.mkdirSync,
+  statSync: ((...args: unknown[]) =>
+    (nodeFs.statSync as unknown as (...a: unknown[]) => unknown)(...args)) as typeof nodeFs.statSync,
+};
+
+let logger: Logger = defaultLogger;
+let fsImpl: FsFacade = defaultFs;
+let configDirOverride: string | null = null;
+const memoryMap = new Map<ProviderId, Entry>();
+let loaded = false;
+
+// ---------------------------------------------------------------------------
+// Path resolution
+// ---------------------------------------------------------------------------
+
+function resolveConfigDir(): string {
+  if (configDirOverride) return configDirOverride;
+  const fromEnv = process.env.VSKILL_CONFIG_DIR;
+  if (fromEnv && fromEnv.length > 0) return fromEnv;
+  return path.join(os.homedir(), ".vskill");
+}
+
+export function getKeysFilePath(): string {
+  return path.join(resolveConfigDir(), "keys.env");
+}
+
+// ---------------------------------------------------------------------------
+// Redaction
+// ---------------------------------------------------------------------------
 
 export function redactKey(key: string): string {
   if (!key || key.length <= 4) return "****";
@@ -58,84 +121,116 @@ export function redactKey(key: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Module-level state (per-process). Tests call `resetSettingsStore()`.
+// Parser — lenient, single aggregated warning
 // ---------------------------------------------------------------------------
 
-interface Entry {
-  key: string;
-  updatedAt: string;
-  tier: Tier;
-}
+function parseFile(contents: string): {
+  entries: Map<ProviderId, Entry>;
+  malformedCount: number;
+} {
+  const entries = new Map<ProviderId, Entry>();
+  let malformedCount = 0;
 
-const store = new Map<Provider, Entry>();
-let currentTier: Tier = "browser";
+  // Strip BOM.
+  const stripped = contents.replace(/^\uFEFF/, "");
+  const lines = stripped.split(/\r?\n/);
 
-// Injectable logger + spawn for tests.
-type Logger = {
-  warn: (msg: string) => void;
-  error: (msg: string) => void;
-};
-let logger: Logger = {
-  warn: (m) => console.warn(m),
-  error: (m) => console.error(m),
-};
-let spawn: typeof realSpawn = realSpawn;
-let platformOverride: NodeJS.Platform | null = null;
+  const envToId = new Map<string, ProviderId>(
+    PROVIDERS.map((p) => [p.envVarName, p.id]),
+  );
 
-export function _setLogger(l: Logger): void {
-  logger = l;
-}
-export function _setSpawn(s: typeof realSpawn): void {
-  spawn = s;
-}
-export function _setPlatformOverride(p: NodeJS.Platform | null): void {
-  platformOverride = p;
-}
-export function resetSettingsStore(): void {
-  store.clear();
-  currentTier = "browser";
-  platformOverride = null;
-  logger = {
-    warn: (m) => console.warn(m),
-    error: (m) => console.error(m),
-  };
-  spawn = realSpawn;
-}
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (line.length === 0) continue;
+    if (line.startsWith("#")) continue;
 
-function getPlatform(): NodeJS.Platform {
-  return platformOverride ?? process.platform;
-}
-
-// ---------------------------------------------------------------------------
-// Tier management
-// ---------------------------------------------------------------------------
-
-export function getTier(): Tier {
-  return currentTier;
-}
-
-export async function setTier(tier: Tier): Promise<void> {
-  if (tier === "keychain" && getPlatform() !== "darwin") {
-    throw new UnsupportedTierError(
-      "macOS Keychain tier is only supported on Darwin",
-    );
-  }
-  if (tier === currentTier) return;
-
-  // Move every stored key into the new tier.
-  const entries = Array.from(store.entries());
-  for (const [provider, entry] of entries) {
-    if (tier === "keychain") {
-      await keychainAdd(provider, entry.key);
-      store.set(provider, { ...entry, tier });
-    } else {
-      // Switching browser → keychain → browser is also supported; clear the
-      // keychain entry so it doesn't linger.
-      await keychainDelete(provider).catch(() => {});
-      store.set(provider, { ...entry, tier });
+    try {
+      const eq = line.indexOf("=");
+      if (eq <= 0) {
+        malformedCount++;
+        continue;
+      }
+      const name = line.slice(0, eq).trim();
+      const value = line.slice(eq + 1).trim();
+      if (name.length === 0 || value.length === 0) {
+        malformedCount++;
+        continue;
+      }
+      const pid = envToId.get(name);
+      if (!pid) {
+        // Unknown env var name — skip silently (not "malformed", just
+        // unrelated). Do NOT count toward malformedCount.
+        continue;
+      }
+      entries.set(pid, { key: value, updatedAt: new Date().toISOString() });
+    } catch {
+      malformedCount++;
     }
   }
-  currentTier = tier;
+
+  return { entries, malformedCount };
+}
+
+function loadIfNeeded(): void {
+  if (loaded) return;
+  loaded = true;
+  const filePath = getKeysFilePath();
+  if (!fsImpl.existsSync(filePath)) return;
+  try {
+    const contents = fsImpl.readFileSync(filePath, "utf8");
+    const { entries, malformedCount } = parseFile(contents as string);
+    for (const [pid, entry] of entries) memoryMap.set(pid, entry);
+    if (malformedCount > 0) {
+      logger.warn(
+        `[settings-store] ${malformedCount} malformed line(s) in ${filePath} were skipped`,
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      `[settings-store] failed to read ${filePath}: ${(err as Error).message}`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Serialization
+// ---------------------------------------------------------------------------
+
+function serialize(entries: Map<ProviderId, Entry>): string {
+  const lines: string[] = [
+    "# vskill credentials — do not commit. Managed by `vskill keys` or Skill Studio Settings.",
+  ];
+  for (const p of PROVIDERS) {
+    const entry = entries.get(p.id);
+    if (entry) lines.push(`${p.envVarName}=${entry.key}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+function atomicWrite(contents: string): void {
+  const filePath = getKeysFilePath();
+  const dir = path.dirname(filePath);
+  fsImpl.mkdirSync(dir, { recursive: true });
+  const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    fsImpl.writeFileSync(tmpPath, contents, "utf8");
+    if (process.platform !== "win32") {
+      try {
+        fsImpl.chmodSync(tmpPath, 0o600);
+      } catch {
+        /* non-fatal; rename will still proceed */
+      }
+    }
+    fsImpl.renameSync(tmpPath, filePath);
+  } catch (err) {
+    // Clean up tmp if present.
+    try {
+      if (fsImpl.existsSync(tmpPath)) fsImpl.unlinkSync(tmpPath);
+    } catch {
+      /* swallow */
+    }
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -143,114 +238,119 @@ export async function setTier(tier: Tier): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function saveKey(
-  provider: Provider,
+  provider: ProviderId,
   key: string,
-  tier: Tier = currentTier,
-): Promise<{ updatedAt: string; tier: Tier }> {
+): Promise<{ updatedAt: string }> {
   if (!key || typeof key !== "string" || key.trim().length === 0) {
     throw new Error("key must be non-empty string");
   }
-  if (tier === "keychain" && getPlatform() !== "darwin") {
-    throw new UnsupportedTierError(
-      "macOS Keychain tier is only supported on Darwin",
-    );
-  }
+  loadIfNeeded();
 
+  // Build the full entry set: current memory snapshot + new entry.
   const updatedAt = new Date().toISOString();
+  const next = new Map(memoryMap);
+  next.set(provider, { key, updatedAt });
+
   try {
-    if (tier === "keychain") {
-      await keychainAdd(provider, key);
-    }
-    store.set(provider, { key, updatedAt, tier });
-    currentTier = tier;
-    return { updatedAt, tier };
+    atomicWrite(serialize(next));
   } catch (err) {
-    // NEVER log the raw key — only the redacted form.
+    // NEVER include the raw key in the error message.
+    const redacted = redactKey(key);
     logger.error(
-      `[settings-store] saveKey(${provider}, ${redactKey(key)}) failed: ${(err as Error).message}`,
+      `[settings-store] saveKey(${provider}, ${redacted}) failed: ${(err as Error).message}`,
     );
-    throw err;
+    throw new Error(
+      `saveKey(${provider}, ${redacted}) failed: ${(err as Error).message}`,
+    );
   }
+
+  memoryMap.set(provider, { key, updatedAt });
+  return { updatedAt };
 }
 
-export function readKey(provider: Provider): string | null {
-  return store.get(provider)?.key ?? null;
+export function readKey(provider: ProviderId): string | null {
+  loadIfNeeded();
+  const descriptor = PROVIDERS.find(
+    (p) => p.id === provider,
+  ) as ProviderDescriptor | undefined;
+  if (descriptor) {
+    const fromEnv = process.env[descriptor.envVarName];
+    if (fromEnv && fromEnv.length > 0) return fromEnv;
+  }
+  return memoryMap.get(provider)?.key ?? null;
 }
 
-/** Synchronous accessor used by detectAvailableProviders — safe, same semantics. */
-export function readKeySync(provider: Provider): string | null {
+export function readKeySync(provider: ProviderId): string | null {
   return readKey(provider);
 }
 
-/** Has-key predicate exposed for synchronous availability checks. */
-export function hasKeySync(provider: Provider): boolean {
-  return store.has(provider);
+export function hasKeySync(provider: ProviderId): boolean {
+  return readKey(provider) !== null;
 }
 
-export async function removeKey(provider: Provider): Promise<void> {
-  const entry = store.get(provider);
-  if (!entry) return;
-  if (entry.tier === "keychain") {
-    try {
-      await keychainDelete(provider);
-    } catch (err) {
-      logger.warn(
-        `[settings-store] keychain remove for ${provider} failed: ${(err as Error).message}`,
-      );
-    }
+export async function removeKey(provider: ProviderId): Promise<void> {
+  loadIfNeeded();
+  if (!memoryMap.has(provider)) return;
+  const next = new Map(memoryMap);
+  next.delete(provider);
+  try {
+    atomicWrite(serialize(next));
+  } catch (err) {
+    logger.error(
+      `[settings-store] removeKey(${provider}) failed: ${(err as Error).message}`,
+    );
+    throw err;
   }
-  store.delete(provider);
+  memoryMap.delete(provider);
 }
 
 export function listKeys(): ListKeysResponse {
-  const read = (p: Provider): KeyMetadata => {
-    const e = store.get(p);
+  loadIfNeeded();
+  const read = (p: ProviderId): KeyMetadata => {
+    const e = memoryMap.get(p);
     return e
-      ? { stored: true, updatedAt: e.updatedAt, tier: e.tier }
-      : { stored: false, updatedAt: null, tier: currentTier };
+      ? { stored: true, updatedAt: e.updatedAt }
+      : { stored: false, updatedAt: null };
   };
-  return { anthropic: read("anthropic"), openrouter: read("openrouter") };
+  return {
+    anthropic: read("anthropic"),
+    openai: read("openai"),
+    openrouter: read("openrouter"),
+  };
 }
 
 // ---------------------------------------------------------------------------
-// Darwin Keychain bridge via `security` binary.
+// Boot-time env merge
 // ---------------------------------------------------------------------------
 
-function keychainAdd(provider: Provider, key: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const args = [
-      "add-generic-password",
-      "-s",
-      `vskill-${provider}`,
-      "-a",
-      "vskill-user",
-      "-w",
-      key,
-      "-U",
-    ];
-    const opts: SpawnOptions = { stdio: ["ignore", "pipe", "pipe"] };
-    const child = spawn("security", args, opts);
-    let stderr = "";
-    child.stderr?.on("data", (d) => (stderr += String(d)));
-    child.on("error", (err) => reject(err));
-    child.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`security add-generic-password exited ${code}: ${stderr.slice(0, 200)}`));
-    });
-  });
+export function mergeStoredKeysIntoEnv(): void {
+  loadIfNeeded();
+  for (const p of PROVIDERS) {
+    const entry = memoryMap.get(p.id);
+    if (!entry) continue;
+    // Nullish coalescing: real env vars always win.
+    if (process.env[p.envVarName] === undefined) {
+      process.env[p.envVarName] = entry.key;
+    }
+  }
+  // Shrink plaintext dwell time.
+  memoryMap.clear();
 }
 
-function keychainDelete(provider: Provider): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      "security",
-      ["delete-generic-password", "-s", `vskill-${provider}`, "-a", "vskill-user"],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
-    child.on("error", (err) => reject(err));
-    child.on("close", (code) => {
-      if (code === 0 || code === 44) resolve(); // 44 = not found, idempotent
-      else resolve(); // be lenient — delete must not block removeKey
-    });
-  });
+// ---------------------------------------------------------------------------
+// Test DI hook
+// ---------------------------------------------------------------------------
+
+export interface ResetOptions {
+  logger?: Logger;
+  fs?: FsFacade;
+  configDir?: string | null;
+}
+
+export function resetSettingsStore(opts: ResetOptions = {}): void {
+  memoryMap.clear();
+  loaded = false;
+  logger = opts.logger ?? defaultLogger;
+  fsImpl = opts.fs ?? defaultFs;
+  configDirOverride = opts.configDir ?? null;
 }

@@ -22,6 +22,13 @@ export interface GroupHeaderProps {
   collapsed?: boolean;
   /** Click handler — receives the next collapsed value. */
   onToggle?: (next: boolean) => void;
+  /** Optional primary action rendered on the right side (e.g. "+ Create"). */
+  action?: {
+    label: string;
+    title?: string;
+    onClick: () => void;
+    icon?: React.ReactNode;
+  };
 }
 
 export function GroupHeader({
@@ -31,6 +38,7 @@ export function GroupHeader({
   variant,
   collapsed,
   onToggle,
+  action,
 }: GroupHeaderProps): React.ReactElement {
   const accent =
     variant === "authoring"
@@ -101,6 +109,17 @@ export function GroupHeader({
       >
         ({count})
       </span>
+      {action && (
+        <span style={{ marginLeft: "auto" }}>
+          <ActionButton
+            label={action.label}
+            title={action.title}
+            icon={action.icon}
+            onClick={action.onClick}
+            accent={accent}
+          />
+        </span>
+      )}
     </>
   );
 
@@ -129,5 +148,61 @@ export function GroupHeader({
     >
       {inner}
     </div>
+  );
+}
+
+// ActionButton renders as a visible-on-hover secondary affordance inside the
+// group header. Stops click propagation so clicking "+" doesn't collapse the
+// group.
+function ActionButton({
+  label,
+  title,
+  icon,
+  onClick,
+  accent,
+}: {
+  label: string;
+  title?: string;
+  icon?: React.ReactNode;
+  onClick: () => void;
+  accent: string;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={title ?? label}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 4,
+        height: 22,
+        padding: "0 7px",
+        border: `1px solid ${accent}`,
+        background: "transparent",
+        color: accent,
+        borderRadius: 4,
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: "0.04em",
+        textTransform: "uppercase",
+        cursor: "pointer",
+        fontFamily: "inherit",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = `color-mix(in oklch, ${accent} 15%, transparent)`;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+      }}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }

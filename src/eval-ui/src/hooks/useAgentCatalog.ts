@@ -34,6 +34,10 @@ export interface AgentEntry {
   models: ModelEntry[];
   catalogAgeMs?: number;
   cacheStale?: boolean;
+  // 0701 — Present on the claude-cli entry when ~/.claude/settings.json has a
+  // `model` field. The Studio picker surfaces this under the generic alias so
+  // the user can tell which concrete model will actually serve the session.
+  resolvedModel?: string | null;
 }
 
 export interface AgentCatalog {
@@ -51,7 +55,14 @@ interface ServerConfigResponse {
     id: string;
     label: string;
     available: boolean;
-    models: Array<{ id: string; label: string }>;
+    // 0701 — resolvedModel populated on the claude-cli provider only.
+    resolvedModel?: string | null;
+    models: Array<{
+      id: string;
+      label: string;
+      // 0701 — pricing populated on per-token providers (anthropic, openrouter).
+      pricing?: { prompt: number; completion: number };
+    }>;
   }>;
   detection?: {
     wrapperFolders: Record<string, boolean>;
@@ -143,6 +154,9 @@ function toAgentEntry(
     id: m.id,
     displayName: m.label,
     billingMode: BILLING_BY_AGENT[raw.id] ?? "per-token",
+    // 0701 — forward server-provided pricing (anthropic's static map) so
+    // ModelList.formatMetadata renders real $ amounts instead of $0.00.
+    ...(m.pricing ? { pricing: m.pricing } : {}),
   }));
   return {
     id: raw.id,
@@ -154,6 +168,9 @@ function toAgentEntry(
     available: raw.available,
     ctaType: raw.available ? null : CTA_BY_AGENT[raw.id] ?? null,
     models,
+    // 0701 — resolvedModel is only meaningful for claude-cli; pass through
+    // whatever the server sent (string | null | undefined).
+    resolvedModel: raw.resolvedModel ?? null,
   };
 }
 

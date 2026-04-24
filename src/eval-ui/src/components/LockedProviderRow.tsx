@@ -19,9 +19,13 @@ export interface LockedProviderRowProps {
   label: string;
   onActivate: () => void;
   installUrl?: string;
+  // 0701 — hover-revealed detail for CTAs whose short label hides the real
+  // action (e.g. LM Studio's "Start LM Studio server" needs to explain that
+  // the server is inside the already-installed app, under Developer).
+  tooltip?: string;
 }
 
-export function LockedProviderRow({ variant, label, onActivate, installUrl }: LockedProviderRowProps) {
+export function LockedProviderRow({ variant, label, onActivate, installUrl, tooltip }: LockedProviderRowProps) {
   function handleClick(e: MouseEvent<HTMLButtonElement>) {
     e.stopPropagation();
     if (variant === "cli-install" && installUrl) {
@@ -52,6 +56,7 @@ export function LockedProviderRow({ variant, label, onActivate, installUrl }: Lo
         cursor: "pointer",
       }}
       aria-label={label}
+      {...(tooltip ? { title: tooltip } : {})}
     >
       {label}
     </button>

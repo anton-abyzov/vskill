@@ -47,7 +47,7 @@ export interface LlmClient {
   readonly model: string;
 }
 
-export type ProviderName = "anthropic" | "claude-cli" | "codex-cli" | "gemini-cli" | "lm-studio" | "ollama" | "openrouter";
+export type ProviderName = "anthropic" | "claude-cli" | "codex-cli" | "gemini-cli" | "lm-studio" | "ollama" | "openai" | "openrouter";
 
 function detectProvider(): ProviderName {
   return "claude-cli";
@@ -85,6 +85,7 @@ export function estimateDurationSec(
     "gemini-cli":  [8, 20],
     "ollama":      [5, 30],
     "lm-studio":   [5, 30],
+    "openai":      [4, 15],
     "openrouter":  [4, 15],
   };
   const [lo, hi] = perCall[provider] ?? [5, 20];
@@ -113,11 +114,13 @@ export function createLlmClient(overrides?: LlmOverrides): LlmClient {
       return createOllamaClient(modelOverride);
     case "lm-studio":
       return createLmStudioClient(modelOverride);
+    case "openai":
+      return createOpenAIClient(modelOverride);
     case "openrouter":
       return createOpenRouterClient(modelOverride);
     default:
       throw new Error(
-        `Unknown VSKILL_EVAL_PROVIDER: "${provider}". Use "claude-cli", "codex-cli", "gemini-cli", "anthropic", "ollama", "lm-studio", or "openrouter".`,
+        `Unknown VSKILL_EVAL_PROVIDER: "${provider}". Use "claude-cli", "codex-cli", "gemini-cli", "anthropic", "openai", "ollama", "lm-studio", or "openrouter".`,
       );
   }
 }
@@ -207,6 +210,70 @@ function createAnthropicClient(modelOverride?: string): LlmClient {
           outputTokens,
           cost: calculateCost("anthropic", model, inputTokens, outputTokens),
           billingMode: getBillingMode("anthropic"),
+        };
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Provider: OpenAI API (0702 T-022)
+//
+// Mirrors createAnthropicClient. Env var: OPENAI_API_KEY. Default model
+// gpt-4o-mini (cheap). Override via VSKILL_EVAL_MODEL or modelOverride arg.
+// OPENAI_BASE_URL is honored by the openai SDK natively (used by tests).
+// ---------------------------------------------------------------------------
+function createOpenAIClient(modelOverride?: string): LlmClient {
+  const DEFAULT_MODEL = "gpt-4o-mini";
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "OPENAI_API_KEY is not set. Visit https://platform.openai.com/api-keys to get your key, then run:\n  export OPENAI_API_KEY=sk-proj-...\n\nOr use a different provider:\n  export VSKILL_EVAL_PROVIDER=claude-cli",
+    );
+  }
+
+  const model = modelOverride || process.env.VSKILL_EVAL_MODEL || DEFAULT_MODEL;
+  let clientInstance: any = null;
+
+  return {
+    model,
+    async generate(systemPrompt: string, userPrompt: string): Promise<GenerateResult> {
+      if (!clientInstance) {
+        const { default: OpenAI } = await import("openai");
+        const baseURL = process.env.OPENAI_BASE_URL;
+        clientInstance = new OpenAI(baseURL ? { apiKey, baseURL } : { apiKey });
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), getTimeoutMs());
+      const start = Date.now();
+      try {
+        const response = await clientInstance.chat.completions.create(
+          {
+            model,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt },
+            ],
+            max_tokens: 4096,
+          },
+          { signal: controller.signal },
+        );
+        const durationMs = Date.now() - start;
+
+        const text = response.choices?.[0]?.message?.content ?? "";
+        const inputTokens = response.usage?.prompt_tokens ?? null;
+        const outputTokens = response.usage?.completion_tokens ?? null;
+        return {
+          text,
+          durationMs,
+          inputTokens,
+          outputTokens,
+          cost: calculateCost("openai", model, inputTokens, outputTokens),
+          billingMode: getBillingMode("openai"),
         };
       } finally {
         clearTimeout(timeout);

@@ -27,6 +27,8 @@ const PRICING: Record<string, Record<string, ModelPricing>> = {
     "o4-mini": { inputPerMillion: 1.10, outputPerMillion: 4.40, updatedAt: "2025-05-01" },
     "gpt-4.1": { inputPerMillion: 2, outputPerMillion: 8, updatedAt: "2025-05-01" },
     "gpt-4.1-mini": { inputPerMillion: 0.40, outputPerMillion: 1.60, updatedAt: "2025-05-01" },
+    "gpt-4o": { inputPerMillion: 2.50, outputPerMillion: 10, updatedAt: "2026-04-24" },
+    "gpt-4o-mini": { inputPerMillion: 0.15, outputPerMillion: 0.60, updatedAt: "2026-04-24" },
   },
   google: {
     "gemini-2.5-pro": { inputPerMillion: 1.25, outputPerMillion: 10, updatedAt: "2025-05-01" },
@@ -64,8 +66,10 @@ const PROVIDER_PRICING_MAP: Record<string, string> = {
 
 const BILLING_MODES: Record<string, BillingMode> = {
   "anthropic": "per-token",
+  "openai": "per-token",
   "openrouter": "per-token",
   "ollama": "free",
+  "lm-studio": "free",
   "claude-cli": "subscription",
   "codex-cli": "subscription",
   "gemini-cli": "free",

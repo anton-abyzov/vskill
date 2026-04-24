@@ -224,7 +224,16 @@ const providers = {
   copilot: { name: "GitHub Copilot", caption: "GitHub Copilot CLI.", installCta: "Install Copilot →" },
   zed: { name: "Zed", caption: "Zed editor.", installCta: "Install Zed →" },
   ollama: { name: "Ollama", caption: "Local models, free.", startServiceCta: "Start service →" },
-  lmStudio: { name: "LM Studio", caption: "Local models, free.", startServiceCta: "Start service →" },
+  // 0701: LM Studio's CTA used to say "Start service →" which conflated
+  // installing the app with starting its built-in OpenAI-compatible HTTP
+  // server. Split the copy so users who already have the app know exactly
+  // which step is missing (Developer tab → Start Server).
+  lmStudio: {
+    name: "LM Studio",
+    caption: "Local models, free.",
+    startServiceCta: "Start LM Studio server →",
+    startServiceTooltip: "Open LM Studio → Developer tab → Start Server (default port 1234).",
+  },
 } as const;
 
 const models = {

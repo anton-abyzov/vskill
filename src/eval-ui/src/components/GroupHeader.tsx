@@ -84,10 +84,12 @@ export function GroupHeader({
         <span
           aria-hidden
           style={{
-            fontSize: 10,
-            color: "var(--text-secondary)",
-            width: 10,
+            fontSize: 15,
+            fontWeight: 700,
+            color: accent,
+            width: 16,
             display: "inline-block",
+            textAlign: "center",
             letterSpacing: 0,
             textTransform: "none",
           }}

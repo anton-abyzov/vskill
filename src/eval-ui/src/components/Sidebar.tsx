@@ -718,10 +718,12 @@ function NamedScopeSection({
         <span
           aria-hidden
           style={{
-            fontSize: 10,
-            color: "var(--text-secondary)",
-            width: 10,
+            fontSize: 14,
+            fontWeight: 700,
+            color: "var(--color-ink, var(--text-primary))",
+            width: 16,
             display: "inline-block",
+            textAlign: "center",
           }}
         >
           {collapsed ? "▸" : "▾"}

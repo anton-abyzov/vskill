@@ -176,14 +176,15 @@ export function TopRail({ projectName, selected, onOpenPalette, onHome, projectP
               height: 28,
               padding: "0 12px",
               borderRadius: 6,
-              border: "none",
-              background: "var(--color-accent, #2f6f8f)",
-              color: "var(--color-paper, #fff)",
+              border: "1px solid var(--color-action, #2F5B8E)",
+              background: "var(--color-action, #2F5B8E)",
+              color: "var(--color-action-ink, #FFFFFF)",
               fontSize: 12,
               fontWeight: 600,
               fontFamily: "var(--font-sans)",
               cursor: "pointer",
               letterSpacing: "0.01em",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.12)",
             }}
           >
             <svg

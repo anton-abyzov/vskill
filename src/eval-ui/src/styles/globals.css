@@ -15,6 +15,12 @@
   --color-installed: #2F6A4A;
   --color-own: #8A5A1F;
   --color-focus: #3B6EA8;
+  /* 0700 polish — primary-action token for CTAs (solid button fill).
+     The accent tan reads as "muted/disabled" when used as a button background
+     against paper. This token is deliberately saturated + high-contrast. */
+  --color-action: #2F5B8E;
+  --color-action-hover: #264A73;
+  --color-action-ink: #FFFFFF;
 
   --font-serif: "Source Serif 4 Variable", "Source Serif 4", Georgia, serif;
   --font-sans: "Inter Tight Variable", "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -37,6 +43,9 @@
   --color-installed: #2F6A4A;
   --color-own: #8A5A1F;
   --color-focus: #3B6EA8;
+  --color-action: #2F5B8E;
+  --color-action-hover: #264A73;
+  --color-action-ink: #FFFFFF;
 }
 
 [data-theme="dark"] {
@@ -50,6 +59,9 @@
   --color-installed: #86C9A5;
   --color-own: #E6B877;
   --color-focus: #7CA8D9;
+  --color-action: #4A82C8;
+  --color-action-hover: #6093D6;
+  --color-action-ink: #0B1420;
 }
 
 /* High-contrast overlay — tightens text vs background separation. */

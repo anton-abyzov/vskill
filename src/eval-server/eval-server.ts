@@ -1,6 +1,17 @@
 // ---------------------------------------------------------------------------
 // eval-server.ts -- HTTP server for the eval UI
+//
+// DO NOT REORDER the `./boot-preflight.js` import below — it MUST be the
+// first import in this file so `mergeStoredKeysIntoEnv()` runs before any
+// provider module (Anthropic / OpenAI / OpenRouter SDK) captures
+// `process.env.*_API_KEY` at module-load time. Moving it lower (or guarding
+// it) silently breaks stored-key-only boots. See 0702 T-020/T-021.
 // ---------------------------------------------------------------------------
+
+// Side-effect import: populates process.env.*_API_KEY from the file-backed
+// settings store BEFORE any downstream module reads those env vars. Must
+// remain the first import — do not reorder.
+import "./boot-preflight.js";
 
 import * as http from "node:http";
 import * as fs from "node:fs";

@@ -46,6 +46,8 @@ import { AGENTS_REGISTRY, detectInstalledAgents } from "../agents/agents-registr
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { resolveOllamaBaseUrl } from "../eval/env.js";
 import * as settingsStore from "./settings-store.js";
+import { PROVIDERS, isProviderId, getProviderById, type ProviderId } from "./providers.js";
+import { DarwinKeychainMigrator } from "./darwin-migrator.js";
 import { loadStudioSelection, saveStudioSelection } from "./studio-json.js";
 
 // ---------------------------------------------------------------------------
@@ -664,6 +666,13 @@ export const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
     { id: "o3", label: "OpenAI o3" },
     { id: "o4-mini", label: "OpenAI o4-mini" },
   ],
+  "openai": [
+    { id: "gpt-4o-mini", label: "GPT-4o mini (API)", pricing: { prompt: 0.15, completion: 0.60 } },
+    { id: "gpt-4o", label: "GPT-4o (API)", pricing: { prompt: 2.50, completion: 10 } },
+    { id: "gpt-4.1", label: "GPT-4.1 (API)", pricing: { prompt: 2, completion: 8 } },
+    { id: "gpt-4.1-mini", label: "GPT-4.1 mini (API)", pricing: { prompt: 0.40, completion: 1.60 } },
+    { id: "o4-mini", label: "o4-mini (API)", pricing: { prompt: 1.10, completion: 4.40 } },
+  ],
   "openrouter": [
     // Anthropic via OpenRouter
     { id: "anthropic/claude-opus-4", label: "Claude Opus 4 (via OpenRouter)" },
@@ -886,7 +895,7 @@ export async function detectAvailableProviders(): Promise<Array<{
   });
 
   // Anthropic API — available if ANTHROPIC_API_KEY is set OR a key is in the
-  // settings-store (browser tier or Darwin keychain).
+  // settings-store. After 0702 the tier concept is gone; storage is file-only.
   providers.push({
     id: "anthropic",
     label: "Anthropic API",
@@ -894,6 +903,16 @@ export async function detectAvailableProviders(): Promise<Array<{
       !!process.env.ANTHROPIC_API_KEY ||
       settingsStore.hasKeySync("anthropic"),
     models: PROVIDER_MODELS["anthropic"],
+  });
+
+  // OpenAI API — available if OPENAI_API_KEY is set OR a key is stored (0702 T-023).
+  providers.push({
+    id: "openai",
+    label: "OpenAI API",
+    available:
+      !!process.env.OPENAI_API_KEY ||
+      settingsStore.hasKeySync("openai"),
+    models: PROVIDER_MODELS["openai"],
   });
 
   // OpenRouter — available if OPENROUTER_API_KEY is set OR a key is stored.
@@ -1065,6 +1084,12 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     sendJson(res, settingsStore.listKeys());
   });
 
+  // 0702 T-024: expose the absolute keys.env path for the Settings footer +
+  // "Copy path" button. Key contents are NEVER returned — path only.
+  router.get("/api/settings/storage-path", async (_req, res) => {
+    sendJson(res, { path: settingsStore.getKeysFilePath() });
+  });
+
   router.post("/api/settings/keys", async (req, res) => {
     // Reject any request that smuggles the key in a query-string — JSON body only.
     const url = (req as unknown as { url?: string }).url || "";
@@ -1075,33 +1100,28 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     const body = (await readBody(req)) as {
       provider?: string;
       key?: string;
-      tier?: "browser" | "keychain";
     };
     if (!body.key || typeof body.key !== "string" || body.key.trim().length === 0) {
       sendJson(res, { error: "key must be non-empty string" }, 400);
       return;
     }
-    if (body.provider !== "anthropic" && body.provider !== "openrouter") {
+    if (typeof body.provider !== "string" || !isProviderId(body.provider)) {
       sendJson(res, { error: `unknown provider: ${String(body.provider)}` }, 400);
       return;
     }
+    const providerId = body.provider as ProviderId;
     try {
-      const saved = await settingsStore.saveKey(
-        body.provider,
-        body.key.trim(),
-        body.tier ?? "browser",
-      );
-      // Prefix hint — non-blocking, purely informational
-      let warning: string | undefined;
-      if (body.provider === "anthropic" && !body.key.startsWith("sk-ant-")) {
-        warning = "key doesn't match typical Anthropic prefix sk-ant-";
-      } else if (body.provider === "openrouter" && !body.key.startsWith("sk-or-")) {
-        warning = "key doesn't match typical OpenRouter prefix sk-or-";
-      }
+      const saved = await settingsStore.saveKey(providerId, body.key.trim());
+      // Prefix hint — non-blocking, purely informational. Sourced from PROVIDERS
+      // so adding a provider later automatically extends the warning.
+      const descriptor = getProviderById(providerId);
+      const warning =
+        descriptor.keyPrefix && !body.key.startsWith(descriptor.keyPrefix)
+          ? `key doesn't match typical ${descriptor.label} prefix ${descriptor.keyPrefix}`
+          : undefined;
       sendJson(res, {
         ok: true,
         updatedAt: saved.updatedAt,
-        tier: saved.tier,
         available: true,
         ...(warning ? { warning } : {}),
       });
@@ -1112,12 +1132,48 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   router.delete("/api/settings/keys/:provider", async (req, res) => {
     const provider = (req as unknown as { params?: { provider?: string } }).params?.provider;
-    if (provider !== "anthropic" && provider !== "openrouter") {
+    if (typeof provider !== "string" || !isProviderId(provider)) {
       sendJson(res, { error: `unknown provider: ${String(provider)}` }, 400);
       return;
     }
-    await settingsStore.removeKey(provider);
+    await settingsStore.removeKey(provider as ProviderId);
     sendJson(res, { ok: true });
+  });
+
+  // Migration — one-shot copy from pre-0702 macOS Keychain into the file store.
+  // Non-Darwin platforms short-circuit inside the migrator (no spawn).
+  router.get("/api/settings/migration-status", async (_req, res) => {
+    try {
+      const migrator = new DarwinKeychainMigrator();
+      const availability = await migrator.available();
+      sendJson(res, {
+        hasLegacyKeys: availability.hasLegacyKeys,
+        providers: availability.providers,
+        ackStatus: availability.ackStatus ?? null,
+      });
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 500);
+    }
+  });
+
+  router.post("/api/settings/migration/perform", async (_req, res) => {
+    try {
+      const migrator = new DarwinKeychainMigrator();
+      const result = await migrator.migrate();
+      sendJson(res, { migrated: result.migrated });
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 500);
+    }
+  });
+
+  router.post("/api/settings/migration/acknowledge", async (_req, res) => {
+    try {
+      const migrator = new DarwinKeychainMigrator();
+      await migrator.acknowledge();
+      sendJson(res, { ok: true });
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 500);
+    }
   });
 
   // Config — expose current provider/model + available providers + project
@@ -1334,7 +1390,17 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     return skill;
   }
 
-  // T-009: Versions proxy route
+  // T-009 (proxy) + 0707 T-021 (harden): Versions endpoint
+  //
+  // Envelope:  { versions: VersionEntry[], count: number, source: "platform" | "none" }
+  //   - source:"platform" → remote Verified-Skill platform responded
+  //   - source:"none"     → skill has no VCS surface (local fixture, platform
+  //                         unreachable, or platform returned non-OK). In this
+  //                         case the `X-Skill-VCS: unavailable` response header
+  //                         is also emitted so the UI can badge the skill as
+  //                         "no version history" without treating it as an error.
+  //
+  // Never returns 5xx for the "no VCS surface" case — that is normal empty state.
   router.get("/api/skills/:plugin/:skill/versions", async (req, res, params) => {
     const fullName = resolveSkillApiName(params.skill);
     const parts = fullName.split("/");
@@ -1342,29 +1408,50 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       ? `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}/versions`
       : `/api/v1/skills/${encodeURIComponent(fullName)}/versions`;
 
+    const emptyEnvelope = () => {
+      res.setHeader("X-Skill-VCS", "unavailable");
+      sendJson(res, { versions: [], count: 0, source: "none" }, 200, req);
+    };
+
+    let fetchResp: Response;
     try {
-      const resp = await fetch(`${PLATFORM_BASE}${apiPath}`, {
+      fetchResp = await fetch(`${PLATFORM_BASE}${apiPath}`, {
         signal: AbortSignal.timeout(10_000),
       });
-      if (!resp.ok) {
-        sendJson(res, { error: "Platform API unavailable" }, 502, req);
-        return;
-      }
-      const data = (await resp.json()) as { versions?: unknown[] };
-      const versions = Array.isArray(data.versions) ? data.versions : [];
-
-      // Enrich with isInstalled from lockfile
-      const lock = readLockfile();
-      const installedVersion = lock?.skills[params.skill]?.version;
-      const enriched = versions.map((v: any) => ({
-        ...v,
-        isInstalled: installedVersion ? v.version === installedVersion : undefined,
-      }));
-
-      sendJson(res, enriched, 200, req);
     } catch {
-      sendJson(res, { error: "Platform API unavailable" }, 502, req);
+      // Network failure / timeout / no VCS surface → empty envelope, not 502.
+      emptyEnvelope();
+      return;
     }
+
+    if (!fetchResp.ok) {
+      emptyEnvelope();
+      return;
+    }
+
+    let data: { versions?: unknown[] };
+    try {
+      data = (await fetchResp.json()) as { versions?: unknown[] };
+    } catch {
+      emptyEnvelope();
+      return;
+    }
+    const versions = Array.isArray(data.versions) ? data.versions : [];
+
+    // Enrich with isInstalled from lockfile
+    const lock = readLockfile();
+    const installedVersion = lock?.skills[params.skill]?.version;
+    const enriched = versions.map((v: any) => ({
+      ...v,
+      isInstalled: installedVersion ? v.version === installedVersion : undefined,
+    }));
+
+    sendJson(
+      res,
+      { versions: enriched, count: enriched.length, source: "platform" },
+      200,
+      req,
+    );
   });
 
   // T-010: Diff proxy route
@@ -1658,6 +1745,18 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   });
 
   // Get evals.json
+  //
+  // Envelope (0707 T-023 / T-025):
+  //   200 { exists: false, evals: [] }      when evals.json is missing
+  //   200 { exists: true,  ...EvalsFile }   when valid (evals[], skill_name, …)
+  //   422 { error, errors[] }               when malformed / fails schema
+  //   500 { error }                         only for unexpected I/O failures
+  //
+  // "missing" must be distinguishable from "malformed" so the UI can render
+  // the former as an empty-state CTA ("Create evals") and the latter as a
+  // validation error panel. The earlier 400 status conflated malformed with
+  // generic client errors — 422 Unprocessable Entity is the correct semantic
+  // for well-formed requests whose payload fails validation.
   router.get("/api/skills/:plugin/:skill/evals", async (req, res, params) => {
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const evalsPath = join(skillDir, "evals", "evals.json");
@@ -1669,10 +1768,11 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     }
     try {
       const evals = loadAndValidateEvals(skillDir);
-      sendJson(res, evals, 200, req);
+      sendJson(res, { exists: true, ...evals }, 200, req);
     } catch (err) {
       if (err instanceof EvalValidationError) {
-        sendJson(res, { error: err.message, errors: err.errors }, 400, req);
+        // 0707 T-023: malformed → 422 (was 400).
+        sendJson(res, { error: err.message, errors: err.errors }, 422, req);
       } else {
         sendJson(res, { error: String((err as Error).message) }, 500, req);
       }
@@ -2394,6 +2494,14 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   });
 
   // Get latest benchmark
+  //
+  // Envelope (0707 T-022 / T-025):
+  //   200 null                 when no benchmark has been persisted
+  //   200 <BenchmarkResult>    when a benchmark exists
+  //
+  // Always 200 — a missing benchmark is normal empty state, not an error.
+  // Works for any plugin slug (including dashes like `google-workspace`)
+  // because routing uses `[^/]+` groups (see router.ts T-020).
   router.get("/api/skills/:plugin/:skill/benchmark/latest", async (req, res, params) => {
     // 0704: always 200; body null = no benchmark persisted yet.
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
@@ -2537,10 +2645,32 @@ Return ONLY the JSON lines, no other text.`;
   });
 
   // List activation test history (summaries only)
+  //
+  // Envelope (0707 T-024 / T-025):
+  //   200 { runs: [],     count: 0 }          when the history log doesn't
+  //                                           exist / the skill has never been
+  //                                           activation-tested. listActivation-
+  //                                           Runs() catches ENOENT internally
+  //                                           and returns [] — see activation-
+  //                                           history.ts readHistoryFile().
+  //   200 { runs: [...],  count: <N> }        when entries exist
+  //   500 { error }                           only for unexpected I/O failures
+  //                                           (ENOENT is explicitly not one)
   router.get("/api/skills/:plugin/:skill/activation-history", async (req, res, params) => {
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
-    const runs = await listActivationRuns(skillDir);
-    sendJson(res, { runs }, 200, req);
+    try {
+      const runs = await listActivationRuns(skillDir);
+      sendJson(res, { runs, count: runs.length }, 200, req);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === "ENOENT") {
+        // Defensive — listActivationRuns already swallows ENOENT, but in case
+        // a future refactor propagates it we still return the empty envelope.
+        sendJson(res, { runs: [], count: 0 }, 200, req);
+        return;
+      }
+      sendJson(res, { error: (err as Error).message }, 500, req);
+    }
   });
 
   // Get full activation test run by ID

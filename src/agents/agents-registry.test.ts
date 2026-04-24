@@ -250,12 +250,14 @@ describe("detectInstalledAgents", () => {
     expect(ids).toEqual(sorted);
   });
 
-  it("returns all agents when all commands succeed", async () => {
+  it("returns all locally-installable agents when all commands succeed", async () => {
     // Make all commands succeed
     mockExec.mockResolvedValue({ stdout: "/usr/local/bin/tool", stderr: "" });
 
     const result = await detectInstalledAgents();
-    expect(result.length).toBe(TOTAL_AGENTS);
+    // F-008: isRemoteOnly entries are short-circuited and never returned.
+    const remoteOnlyCount = AGENTS_REGISTRY.filter((a) => a.isRemoteOnly === true).length;
+    expect(result.length).toBe(TOTAL_AGENTS - remoteOnlyCount);
   });
 
   it("does NOT detect agent when only parent config dir exists (no false positives)", async () => {
@@ -285,6 +287,22 @@ describe("detectInstalledAgents", () => {
     const result = await detectInstalledAgents();
     const ids = result.map((a) => a.id);
     expect(ids).toContain("cursor");
+  });
+
+  // 0694 review-iter3 F-008: isRemoteOnly agents (devin, bolt-new, v0, replit)
+  // must never appear in detectInstalledAgents() — even if their globalSkillsDir
+  // exists. Replit in particular shares `~/.config/agents/skills` with kimi-cli
+  // and amp, so the Tier 2 fallback would otherwise false-positive whenever a
+  // universal CLI populated that directory.
+  it("F-008: detectInstalledAgents() skips isRemoteOnly agents even if their config dirs exist", async () => {
+    mockExec.mockRejectedValue(new Error("not found")); // no CLI binaries
+    mockExistsSync.mockReturnValue(true); // every globalSkillsDir reports present
+    const result = await detectInstalledAgents();
+    const ids = result.map((a) => a.id);
+    expect(ids).not.toContain("replit");
+    expect(ids).not.toContain("devin");
+    expect(ids).not.toContain("bolt-new");
+    expect(ids).not.toContain("v0");
   });
 
   // 0694 T-013: detection picks up the new CLI binaries.

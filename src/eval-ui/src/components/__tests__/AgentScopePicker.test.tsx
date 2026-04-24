@@ -346,4 +346,57 @@ describe("0686 T-002: AgentScopePicker trigger + popover", () => {
     act(() => root.unmount());
     container.remove();
   });
+
+  // 0694 (AC-US4-04 / F-005): note — remote-only rows render as non-clickable
+  // <div>s in the NotDetected section, so a user cannot focus them through
+  // normal interaction. The StatsPane Switch-disabled path in
+  // AgentScopePicker.Popover.tsx is defense-in-depth for any future code path
+  // that could programmatically set focusedAgentId to a remote-only agent
+  // (e.g., URL-driven deep linking). The visible UI guard is the absence of
+  // a clickable row, asserted indirectly by the badge test above.
+
+  // 0694 review-iter3 F-007: lock in the StatsPane Switch-disabled defense by
+  // rendering AgentScopePickerPopover directly with a remote-only focusedAgentId.
+  it("F-007: Switch button is disabled when focused agent is isRemoteOnly", async () => {
+    const React = await import("react");
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { AgentScopePickerPopover } = await import("../AgentScopePicker.Popover");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const remoteAgents = [
+      ...fixtureAgents,
+      {
+        id: "devin",
+        displayName: "Devin",
+        presence: "absent" as const,
+        installedCount: 0,
+        globalCount: 0,
+        lastSync: null,
+        health: "missing" as const,
+        isRemoteOnly: true,
+      },
+    ];
+    act(() => {
+      root.render(
+        React.createElement(AgentScopePickerPopover, {
+          agents: remoteAgents,
+          activeAgentId: "claude-cli",
+          focusedAgentId: "devin",
+          onFocusAgent: vi.fn(),
+          onSwitch: vi.fn(),
+          onOpenSetup: vi.fn(),
+          onClose: vi.fn(),
+        }),
+      );
+    });
+    const switchBtn = document.querySelector(
+      "[data-testid='agent-scope-switch']",
+    ) as HTMLButtonElement | null;
+    expect(switchBtn).toBeTruthy();
+    expect(switchBtn?.disabled).toBe(true);
+    act(() => root.unmount());
+    container.remove();
+  });
 });

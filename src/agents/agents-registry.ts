@@ -126,22 +126,11 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
-    // 0694 US-001 (AC-US1-02): renamed from `github-copilot`. Targets the
-    // VS Code Copilot extension's skills folder (`.github/copilot/skills/`).
-    // The standalone `copilot` binary uses the new `copilot-cli` entry below.
-    //
-    // VERIFY: VS Code extensions are installed under versioned dirs
-    // (`~/.vscode/extensions/github.copilot-<version>/`), so a stable
-    // unversioned `globalSkillsDir` does not exist for the extension.
-    // Using `~/.config/github-copilot/skills` as a vskill-managed fallback
-    // — independent of the `~/.copilot/` path claimed by `copilot-cli` so
-    // the two adapters do not collide on shared filesystem state.
-    //
-    // detectInstalled uses `which code` (VS Code on PATH) as a necessary-
-    // but-not-sufficient proxy. Many VS Code users will appear "detected"
-    // even without the Copilot extension installed; that is acceptable
-    // because the local `.github/copilot/skills/` folder presence (checked
-    // independently by `buildAgentsResponse`) is the authoritative signal.
+    // 0694 US-001 (AC-US1-02): renamed from `github-copilot` to free that ID
+    // for the standalone `copilot-cli` entry below. VS Code extensions live
+    // under versioned dirs (`~/.vscode/extensions/github.copilot-<version>/`),
+    // so `globalSkillsDir` uses a vskill-managed fallback. POSIX-only — a
+    // Windows-equivalent extension glob is still TODO.
     id: 'github-copilot-ext',
     displayName: 'GitHub Copilot (VS Code)',
     localSkillsDir: '.github/copilot/skills',
@@ -832,6 +821,11 @@ export async function detectInstalledAgents(): Promise<AgentDefinition[]> {
 
   await Promise.allSettled(
     AGENTS_REGISTRY.map(async (agent) => {
+      // Remote-only agents (devin, bolt-new, v0, replit) have no local install
+      // surface. Several share `~/.config/agents/skills` with universal CLIs,
+      // so the Tier 2 directory fallback would false-positive without this guard.
+      if (agent.isRemoteOnly === true) return;
+
       // Tier 1: CLI binary detection
       try {
         await execAsync(agent.detectInstalled);

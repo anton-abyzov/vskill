@@ -1636,7 +1636,9 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const evalsPath = join(skillDir, "evals", "evals.json");
     if (!existsSync(evalsPath)) {
-      sendJson(res, { error: "No evals.json found" }, 404, req);
+      // 0704: 200 empty-state sentinel (was 404) — "no evals.json yet" is
+      // authoring empty state, not an error the client has to filter.
+      sendJson(res, { exists: false, evals: [] }, 200, req);
       return;
     }
     try {
@@ -2367,13 +2369,10 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Get latest benchmark
   router.get("/api/skills/:plugin/:skill/benchmark/latest", async (req, res, params) => {
+    // 0704: always 200; body null = no benchmark persisted yet.
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const benchmark = await readBenchmark(skillDir);
-    if (!benchmark) {
-      sendJson(res, { error: "No benchmark found" }, 404, req);
-      return;
-    }
-    sendJson(res, benchmark, 200, req);
+    sendJson(res, benchmark ?? null, 200, req);
   });
 
   // Run activation test (SSE)

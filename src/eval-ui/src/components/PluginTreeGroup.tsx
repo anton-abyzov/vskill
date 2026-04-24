@@ -23,6 +23,8 @@ export interface PluginTreeGroupProps {
   persistKey?: string;
   /** Render a single skill row — caller decides row styling. */
   renderSkill: (skill: SkillInfo) => React.ReactNode;
+  /** 0700: optional action slot rendered on the right of the plugin header. */
+  headerActionSlot?: React.ReactNode;
 }
 
 function readInitialCollapsed(key: string | undefined, fallback: boolean): boolean {
@@ -42,6 +44,7 @@ export function PluginTreeGroup({
   initialCollapsed = false,
   persistKey,
   renderSkill,
+  headerActionSlot,
 }: PluginTreeGroupProps): React.ReactElement {
   const name = pluginName ?? skills[0]?.pluginName ?? "unknown-plugin";
   const [collapsed, setCollapsed] = React.useState(() =>
@@ -66,6 +69,13 @@ export function PluginTreeGroup({
 
   return (
     <div data-vskill-plugin-tree={name} role="group" aria-label={`${name} (${skills.length})`}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          paddingRight: 6,
+        }}
+      >
       <button
         type="button"
         onClick={onToggle}
@@ -74,8 +84,8 @@ export function PluginTreeGroup({
           display: "flex",
           alignItems: "center",
           gap: 6,
-          width: "100%",
-          padding: "4px 10px 4px 18px",
+          flex: 1,
+          padding: "4px 4px 4px 18px",
           background: "transparent",
           border: "none",
           cursor: "pointer",
@@ -113,6 +123,12 @@ export function PluginTreeGroup({
           ({skills.length})
         </span>
       </button>
+      {headerActionSlot && (
+        <div style={{ display: "inline-flex", alignItems: "center", flexShrink: 0 }}>
+          {headerActionSlot}
+        </div>
+      )}
+      </div>
       {!collapsed && (
         <div
           className="vskill-plugin-tree-children"

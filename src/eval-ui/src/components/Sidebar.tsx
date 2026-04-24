@@ -1,4 +1,5 @@
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
+import { useSWR } from "../hooks/useSWR";
 import { Virtuoso } from "react-virtuoso";
 import type { SkillInfo } from "../types";
 import { SidebarSection } from "./SidebarSection";
@@ -6,6 +7,7 @@ import { ScopeSection } from "./ScopeSection";
 import { SidebarSearch, matchSkillQuery } from "./SidebarSearch";
 import { PluginGroup, type SelectedKey } from "./PluginGroup";
 import { PluginTreeGroup } from "./PluginTreeGroup";
+import { PluginActionMenu } from "./PluginActionMenu";
 import { GroupHeader } from "./GroupHeader";
 import { SkillRow } from "./SkillRow";
 import { SkeletonRow } from "./SkeletonRow";
@@ -238,6 +240,27 @@ export function Sidebar({
   );
   const isClaudeCode = resolvedAgentId === "claude-code";
 
+  // 0700: fetch installed plugin list so the per-plugin "⋯" action menu
+  // knows whether to show Enable vs Disable. SWR keeps this shared with
+  // PluginActionMenu which invalidates "plugins" after mutations.
+  const { data: pluginListData } = useSWR<{
+    plugins: Array<{ name: string; marketplace: string; enabled: boolean; scope: string }>;
+  }>(
+    "plugins",
+    () => fetch("/api/plugins").then((r) => r.json()),
+    { enabled: isClaudeCode, ttl: 60_000 },
+  );
+  const pluginEnabledByName = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const p of pluginListData?.plugins ?? []) {
+      // When a plugin is installed at multiple scopes, treat it as enabled if
+      // ANY scope has it enabled (the UI action targets the default scope).
+      const prev = map.get(p.name);
+      map.set(p.name, Boolean(prev) || Boolean(p.enabled));
+    }
+    return map;
+  }, [pluginListData?.plugins]);
+
   // 0698 (polish): AVAILABLE / AUTHORING groups are collapsible. Persist per
   // agent so users can park their preferred layout (e.g. collapse AVAILABLE to
   // focus on AUTHORING while building new skills).
@@ -434,6 +457,14 @@ export function Sidebar({
                     pluginName={pluginName}
                     skills={pluginSkills}
                     persistKey={`vskill-plugin-available-${pluginName}-collapsed`}
+                    headerActionSlot={
+                      isClaudeCode ? (
+                        <PluginActionMenu
+                          pluginName={pluginName}
+                          enabled={pluginEnabledByName.get(pluginName) ?? true}
+                        />
+                      ) : undefined
+                    }
                     renderSkill={(skill) => (
                       <SkillRow
                         skill={skill}

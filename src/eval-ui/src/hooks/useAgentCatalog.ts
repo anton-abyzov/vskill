@@ -351,11 +351,24 @@ export function useAgentCatalog(opts?: {
   }, [loadBase]);
 
   const setActive = useCallback(async (agentId: string, modelId: string) => {
-    const resp = await fetch("/api/config", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: agentId, model: modelId }),
-    });
+    // 0682 F-002 (review iter 3): wrap the entire fetch in try/catch so
+    // network drops (DNS, offline, server crash) surface through
+    // onSetActiveError instead of vanishing silently. Pre-fix only the
+    // HTTP-error path was caught; a thrown fetch left the popover closed
+    // with no user-visible signal.
+    let resp: Response;
+    try {
+      resp = await fetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: agentId, model: modelId }),
+      });
+    } catch (e) {
+      onSetActiveErrorRef.current?.(
+        `Network error while setting ${agentId}: ${(e as Error).message}`,
+      );
+      return;
+    }
     if (resp.ok) {
       setCatalog((prev) => prev ? { ...prev, activeAgent: agentId, activeModel: modelId } : prev);
       return;

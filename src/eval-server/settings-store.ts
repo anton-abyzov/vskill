@@ -97,6 +97,13 @@ let logger: Logger = defaultLogger;
 let fsImpl: FsFacade = defaultFs;
 let configDirOverride: string | null = null;
 const memoryMap = new Map<ProviderId, Entry>();
+// 0682 F-002 (review iter 2): tracks env-var names mutated by
+// mergeStoredKeysIntoEnv(). removeKey() only deletes process.env entries
+// that are in this set, preserving real env vars set by the operator's
+// shell. Pre-fix removeKey() unconditionally wiped process.env even when
+// the live value originated from a real env (not the file store) — clicking
+// Remove in Settings could mute a key the operator deliberately exported.
+const envVarsMutatedByMerge = new Set<string>();
 // metadataMap retains `{ updatedAt }` after mergeStoredKeysIntoEnv() clears
 // the raw-key memoryMap. Keeps listKeys() truthful across a boot cycle without
 // extending plaintext dwell time.
@@ -317,8 +324,15 @@ export async function removeKey(provider: ProviderId): Promise<void> {
   // Clear the process.env copy too — post-merge, this is where the live key
   // lives. Without this, a "remove" followed by a readKey() would still
   // resolve the removed provider from process.env.
+  // 0682 F-002 (review iter 2): only delete process.env entries that
+  // mergeStoredKeysIntoEnv() actually mutated. Real env vars set by the
+  // operator's shell must survive removeKey() — they belong to the user's
+  // environment, not the vskill file store.
   const descriptor = PROVIDERS.find((p) => p.id === provider);
-  if (descriptor) delete process.env[descriptor.envVarName];
+  if (descriptor && envVarsMutatedByMerge.has(descriptor.envVarName)) {
+    delete process.env[descriptor.envVarName];
+    envVarsMutatedByMerge.delete(descriptor.envVarName);
+  }
 }
 
 export function listKeys(): ListKeysResponse {
@@ -351,6 +365,10 @@ export function mergeStoredKeysIntoEnv(): void {
     // Nullish coalescing: real env vars always win.
     if (process.env[p.envVarName] === undefined) {
       process.env[p.envVarName] = entry.key;
+      // 0682 F-002 (review iter 2): track that this env var came from the
+      // file store, so removeKey() can safely delete it later WITHOUT
+      // touching real env vars set by the operator's shell.
+      envVarsMutatedByMerge.add(p.envVarName);
     }
     // Retain metadata so listKeys() can report `stored: true` post-merge
     // without keeping the raw key plaintext around.
@@ -373,6 +391,7 @@ export interface ResetOptions {
 export function resetSettingsStore(opts: ResetOptions = {}): void {
   memoryMap.clear();
   metadataMap.clear();
+  envVarsMutatedByMerge.clear();
   loaded = false;
   logger = opts.logger ?? defaultLogger;
   fsImpl = opts.fs ?? defaultFs;

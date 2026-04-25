@@ -22,7 +22,10 @@ export const PROVIDERS: readonly ProviderDescriptor[] = [
     id: "anthropic",
     envVarName: "ANTHROPIC_API_KEY",
     keyPrefix: "sk-ant-",
-    keyIssuanceUrl: "https://console.anthropic.com/settings/keys",
+    // 0682 F-001 (review iter 2): platform.claude.com is the post-T-014
+    // canonical host. UI strings.ts already moved; this server descriptor
+    // is consumed by the `vskill keys` CLI, so the two surfaces must agree.
+    keyIssuanceUrl: "https://platform.claude.com/settings/keys",
     label: "Anthropic",
   },
   {

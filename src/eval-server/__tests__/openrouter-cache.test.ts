@@ -37,4 +37,19 @@ describe("OPENROUTER_CACHE — 10-minute TTL per API key", () => {
     expect(now - freshEntry.fetchedAt < 600_000).toBe(true);
     expect(now - staleEntry.fetchedAt >= 600_000).toBe(true);
   });
+
+  it("0682 F-003: evictOldestOpenRouterCacheIfFull() bounds the cache size", async () => {
+    const { evictOldestOpenRouterCacheIfFull } = await import("../api-routes");
+    // Pump 20 entries (over the 16-entry cap).
+    const now = Date.now();
+    for (let i = 0; i < 20; i++) {
+      OPENROUTER_CACHE.set(`key${i}`, { value: [], fetchedAt: now });
+      evictOldestOpenRouterCacheIfFull();
+    }
+    expect(OPENROUTER_CACHE.size).toBeLessThanOrEqual(16);
+    // The earliest-inserted key (key0) should have been evicted.
+    expect(OPENROUTER_CACHE.has("key0")).toBe(false);
+    // The latest insertion should still be there.
+    expect(OPENROUTER_CACHE.has("key19")).toBe(true);
+  });
 });

@@ -797,6 +797,18 @@ type OpenRouterCacheEntry = {
   fetchedAt: number;
 };
 export const OPENROUTER_CACHE = new Map<string, OpenRouterCacheEntry>();
+// 0682 F-003 (review iter 2): cap the cache size so a long-running
+// multi-tenant server doesn't accumulate one ~30KB entry per distinct API
+// key seen since boot. 16 entries is plenty for any realistic deployment
+// (single-developer + occasional team-shared studio); FIFO eviction keeps
+// the cap simple — true LRU isn't worth the bookkeeping cost.
+const OPENROUTER_CACHE_MAX_ENTRIES = 16;
+export function evictOldestOpenRouterCacheIfFull(): void {
+  if (OPENROUTER_CACHE.size <= OPENROUTER_CACHE_MAX_ENTRIES) return;
+  // Map iteration order is insertion order — first key is oldest.
+  const firstKey = OPENROUTER_CACHE.keys().next().value;
+  if (firstKey !== undefined) OPENROUTER_CACHE.delete(firstKey);
+}
 export function resetOpenRouterCache(): void {
   OPENROUTER_CACHE.clear();
 }
@@ -1145,6 +1157,9 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         },
       }));
       OPENROUTER_CACHE.set(cacheKey, { value: models, fetchedAt: now });
+      // 0682 F-003 (review iter 2): bound cache size to avoid unbounded
+      // growth on long-running shared servers.
+      evictOldestOpenRouterCacheIfFull();
       res.setHeader?.("X-Vskill-Catalog-Age", "0");
       sendJson(res, { models, ageSec: 0 });
     } catch (err) {
@@ -1333,6 +1348,24 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // Update config — change provider/model at runtime and persist atomically.
   router.post("/api/config", async (req, res) => {
     const body = (await readBody(req)) as { provider?: ProviderName; model?: string };
+
+    // 0682 F-001 (review iter 3): validate the incoming provider against the
+    // ProviderName union BEFORE mutating currentOverrides. Pre-fix, an
+    // unknown provider was eagerly applied and only caught downstream by
+    // `getClient()`, where a hard reset to claude-cli destroyed any prior
+    // valid in-memory selection. Now: reject early with 400 and leave the
+    // existing selection intact.
+    if (body.provider !== undefined && !isKnownProviderName(body.provider)) {
+      sendJson(res, { error: `unknown provider: ${String(body.provider)}` }, 400, req);
+      return;
+    }
+
+    // 0682 F-001 (review iter 3): snapshot the prior selection so we can
+    // restore it on validation failure, rather than zapping everything to
+    // the default. Spec semantics: a failed POST should leave the previous
+    // good state intact.
+    const priorOverrides = { ...currentOverrides };
+
     if (body.provider) currentOverrides.provider = body.provider;
     if (body.model) currentOverrides.model = body.model;
     // If provider changed but no model, clear model override so it uses the provider default
@@ -1358,9 +1391,10 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       }
       sendJson(res, { provider: currentOverrides.provider || null, model: getEffectiveRawModel(), providers });
     } catch (err) {
-      // Revert to safe default (not empty — empty triggers auto-detection which
-      // picks ollama inside Claude Code sessions instead of claude-cli)
-      currentOverrides = { provider: "claude-cli" };
+      // 0682 F-001 (review iter 3): revert to the prior good selection, NOT
+      // the hard-coded claude-cli default. Pre-fix any failed POST silently
+      // wiped the user's prior valid choice.
+      currentOverrides = priorOverrides;
       sendJson(res, { error: (err as Error).message }, 400, req);
     }
   });

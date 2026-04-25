@@ -111,6 +111,11 @@ export async function removeCommand(
   // 0724 T-007: replace the legacy free-form "Plugin uninstalled: foo@m" log
   // with the structured per-agent report shared with enable/disable. Behaviour
   // (subprocess invocation, on-disk cleanup, lockfile mutation) is unchanged.
+  //
+  // F-004 fix: 0724 introduced multi-scope enable/disable, so a skill
+  // originally installed at project scope can have a separate user-scope
+  // enable. Walk both scopes during remove so we don't leave a dangling
+  // enabledPlugins entry that `vskill cleanup` would later flag as stale.
   let pluginId: string | null = null;
   let pluginUninstallOk: boolean | null = null;
   let scope: "user" | "project" = "user";
@@ -118,12 +123,45 @@ export async function removeCommand(
     pluginId = resolvePluginId(skillName, skillEntry);
     scope = skillEntry.scope ?? "user";
     if (pluginId) {
+      // F-002 fix: only walk scopes where the plugin is actually enabled
+      // (read settings.json once per scope first). This way an "uninstall
+      // failed" result truly means the claude CLI failed — not just that
+      // the plugin wasn't registered at that scope.
+      const cwd = process.cwd();
+      const scopeStates: Array<{ s: "user" | "project"; enabled: boolean }> = [
+        { s: "user", enabled: false },
+        { s: "project", enabled: false },
+      ];
       try {
-        claudePluginUninstall(pluginId, scope);
-        pluginUninstallOk = true;
+        scopeStates[0].enabled = isPluginEnabled(pluginId, { scope: "user" });
       } catch {
-        pluginUninstallOk = false;
+        /* settings.json missing -> treat as not enabled */
       }
+      try {
+        scopeStates[1].enabled = isPluginEnabled(pluginId, {
+          scope: "project",
+          projectDir: cwd,
+        });
+      } catch {
+        /* settings.json missing -> treat as not enabled */
+      }
+
+      let anyAttempted = false;
+      let allOk = true;
+      for (const { s, enabled } of scopeStates) {
+        if (!enabled) continue;
+        anyAttempted = true;
+        try {
+          claudePluginUninstall(
+            pluginId,
+            s,
+            s === "project" ? { cwd } : undefined,
+          );
+        } catch {
+          allOk = false;
+        }
+      }
+      pluginUninstallOk = anyAttempted ? allOk : null;
     }
   }
 

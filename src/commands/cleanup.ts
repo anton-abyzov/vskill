@@ -50,15 +50,18 @@ export async function cleanupCommand(opts: CleanupOptions = {}): Promise<void> {
 
   console.log(bold("Cleaning up stale plugin entries...\n"));
 
-  // Capture pre-mutation counts for the reconciliation summary.
-  const userStale = purgeStalePlugins({ scope: "user" }, skills);
-  const projectStale = purgeStalePlugins(
-    { scope: "project", projectDir: process.cwd() },
-    skills,
-  );
-
-  // Uninstall stale plugins via claude CLI
+  // Uninstall stale plugins via claude CLI. Counts of "actually removed"
+  // come from the result list (F-002 fix): a stale id detected by
+  // purgeStalePlugins may still fail to uninstall via the CLI (e.g. the
+  // plugin was registered out-of-band and claude has no record), and we
+  // shouldn't claim it as removed in the reconciliation summary.
   const results = uninstallStalePlugins(skills);
+  const userStaleRemoved = results.filter(
+    (r) => r.scope === "user" && r.ok,
+  ).length;
+  const projectStaleRemoved = results.filter(
+    (r) => r.scope === "project" && r.ok,
+  ).length;
   if (results.length > 0) {
     console.log(
       green(`Removing ${results.length} stale plugin${results.length === 1 ? "" : "s"}:\n`),
@@ -102,7 +105,7 @@ export async function cleanupCommand(opts: CleanupOptions = {}): Promise<void> {
 
   // 0724 T-008 AC-US7-03: reconciliation summary
   console.log(
-    `\n${green(`${userStale.length}`)} stale entries removed from user scope, ${green(`${projectStale.length}`)} from project scope, ${dim(`${inSyncCount}`)} in-sync skills left untouched.`,
+    `\n${green(`${userStaleRemoved}`)} stale entries removed from user scope, ${green(`${projectStaleRemoved}`)} from project scope, ${dim(`${inSyncCount}`)} in-sync skills left untouched.`,
   );
 
   // Show remaining enabled plugins

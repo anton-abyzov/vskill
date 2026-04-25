@@ -13,7 +13,7 @@ import { useAgentCatalog } from "../hooks/useAgentCatalog";
 import { AgentList } from "./AgentList";
 import { ModelList } from "./ModelList";
 import { SettingsModal } from "./SettingsModal";
-import { LockIcon } from "./LockedProviderRow";
+// 0682 F-004 (review iter 3): LockIcon import was unused — dropped.
 import { strings } from "../strings";
 import type { CredentialProvider } from "../hooks/useCredentialStorage";
 

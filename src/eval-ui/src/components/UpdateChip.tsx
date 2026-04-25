@@ -30,9 +30,10 @@ export function UpdateChip({ skillId, trackedForUpdates }: Props) {
   // `useContext` throws. We swallow that one narrow failure and fall back to
   // "no push entry"; inside a real render tree the hook returns the provider
   // value normally. `trackedForUpdates` still governs the not-tracked dot.
-  let ctx: { updatesById: ReadonlyMap<string, { version: string; diffSummary?: string }> } | null = null;
+  type Ctx = { updatesById: ReadonlyMap<string, { version: string; diffSummary?: string }> } | null;
+  let ctx: Ctx = null;
   try {
-    ctx = useContext(StudioContext) as typeof ctx;
+    ctx = useContext(StudioContext) as unknown as Ctx;
   } catch {
     ctx = null;
   }

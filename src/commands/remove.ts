@@ -9,12 +9,18 @@ import { resolveTilde } from "../utils/paths.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { readLockfile, removeSkillFromLock } from "../lockfile/index.js";
 import { claudePluginUninstall } from "../utils/claude-plugin.js";
+import {
+  buildPerAgentReport,
+  resolvePluginId,
+} from "../lib/skill-lifecycle.js";
 import { bold, green, red, yellow, dim } from "../utils/output.js";
 
 interface RemoveOptions {
   global?: boolean;
   local?: boolean;
   force?: boolean;
+  /** 0724 T-007: structured JSON output (matches enable/disable shape). */
+  json?: boolean;
 }
 
 async function confirm(message: string): Promise<boolean> {
@@ -102,19 +108,49 @@ export async function removeCommand(
   }
 
   // Uninstall marketplace plugin via claude CLI (handles settings.json + cache)
-  if (skillEntry?.pluginDir && skillEntry.marketplace) {
-    const pluginId = `${skillName}@${skillEntry.marketplace}`;
-    const scope = skillEntry.scope ?? "user";
-    try {
-      claudePluginUninstall(pluginId, scope);
-      console.log(dim(`Plugin uninstalled: ${pluginId}`));
-    } catch {
-      console.log(yellow(`Plugin ${pluginId} may still be registered in Claude Code settings.`));
-      console.log(dim(`  Run: claude plugin uninstall ${pluginId}`));
+  // 0724 T-007: replace the legacy free-form "Plugin uninstalled: foo@m" log
+  // with the structured per-agent report shared with enable/disable. Behaviour
+  // (subprocess invocation, on-disk cleanup, lockfile mutation) is unchanged.
+  let pluginId: string | null = null;
+  let pluginUninstallOk: boolean | null = null;
+  let scope: "user" | "project" = "user";
+  if (skillEntry) {
+    pluginId = resolvePluginId(skillName, skillEntry);
+    scope = skillEntry.scope ?? "user";
+    if (pluginId) {
+      try {
+        claudePluginUninstall(pluginId, scope);
+        pluginUninstallOk = true;
+      } catch {
+        pluginUninstallOk = false;
+      }
     }
   }
 
-  // Summary
+  const action = pluginUninstallOk === true ? "disabled" : "not-applicable";
+  const perAgent = buildPerAgentReport({
+    skill: skillName,
+    scope,
+    action,
+    agents,
+  });
+
+  if (opts.json) {
+    console.log(
+      JSON.stringify({
+        skill: skillName,
+        scope,
+        pluginId,
+        pluginUninstallOk,
+        removedCount,
+        removedFrom,
+        perAgent: perAgent.map(({ line: _line, ...rest }) => rest),
+      }),
+    );
+    return;
+  }
+
+  // Summary (human-readable)
   if (removedCount > 0) {
     console.log(
       green(`\nRemoved ${bold(skillName)} from ${removedCount} location${removedCount === 1 ? "" : "s"}:\n`),
@@ -124,6 +160,18 @@ export async function removeCommand(
     }
   } else {
     console.log(dim(`\nNo installed files found for "${skillName}".`));
+  }
+
+  if (perAgent.length > 0) {
+    console.log("");
+    for (const r of perAgent) console.log(`  ${dim(">")} ${r.line}`);
+  }
+
+  if (pluginId && pluginUninstallOk === false) {
+    console.log(
+      yellow(`\nPlugin ${pluginId} may still be registered in Claude Code settings.`),
+    );
+    console.log(dim(`  Run: claude plugin uninstall ${pluginId}`));
   }
 
   if (skillEntry) {

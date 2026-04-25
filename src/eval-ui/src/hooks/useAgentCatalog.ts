@@ -223,6 +223,10 @@ export interface UseAgentCatalogResult {
   status: CatalogStatus;
   catalog: AgentCatalog | null;
   error: string | null;
+  // 0682 CR-0682-M3 — non-null when /api/openrouter/models hydration failed
+  // for a non-key reason (5xx, network drop). ModelList can render an inline
+  // retry hint instead of showing an empty list with no explanation.
+  openRouterError: string | null;
   focusAgent: (agentId: string) => void;
   refresh: () => void;
   activeAgentId: string | null;
@@ -230,12 +234,33 @@ export interface UseAgentCatalogResult {
   setActive: (agentId: string, modelId: string) => Promise<void>;
 }
 
-export function useAgentCatalog(opts?: { onStaleCatalog?: (agentId: string, ageMs: number) => void }): UseAgentCatalogResult {
+export function useAgentCatalog(opts?: {
+  onStaleCatalog?: (agentId: string, ageMs: number) => void;
+  // 0682 CR-002 — Surfaces non-OK POST /api/config responses (e.g. 4xx for
+  // missing API key) so the UI can render a toast. Pre-fix, setActive()
+  // silently dropped errors and the popover closed with no signal.
+  onSetActiveError?: (message: string) => void;
+}): UseAgentCatalogResult {
   const [catalog, setCatalog] = useState<AgentCatalog | null>(null);
   const [status, setStatus] = useState<CatalogStatus>("loading");
   const [error, setError] = useState<string | null>(null);
+  // 0682 CR-0682-M3 — Surfaces hydrate-fetch failures via the catalog state
+  // so ModelList can render an inline retry CTA. Pre-fix the empty catch
+  // swallowed network errors with no signal whatsoever.
+  const [openRouterError, setOpenRouterError] = useState<string | null>(null);
   const focusedRef = useRef<string | null>(null);
   const openRouterFetchedAtRef = useRef<number>(0);
+  // 0682 CR-0682-M2 — Stable refs for the opts callbacks. Consumers pass
+  // `opts` as an inline object literal each render; depending on `opts`
+  // directly inside useCallback would churn function identities and force
+  // every consumer that closes over them (e.g. AgentModelPicker keydown
+  // effect) to re-subscribe each render. Refs decouple identity from value.
+  const onStaleRef = useRef(opts?.onStaleCatalog);
+  const onSetActiveErrorRef = useRef(opts?.onSetActiveError);
+  useEffect(() => {
+    onStaleRef.current = opts?.onStaleCatalog;
+    onSetActiveErrorRef.current = opts?.onSetActiveError;
+  }, [opts?.onStaleCatalog, opts?.onSetActiveError]);
 
   const loadBase = useCallback(async () => {
     try {
@@ -268,9 +293,19 @@ export function useAgentCatalog(opts?: { onStaleCatalog?: (agentId: string, ageM
     if (now - openRouterFetchedAtRef.current < 5 * 60_000) return;
     try {
       const resp = await fetch("/api/openrouter/models");
-      if (!resp.ok) return;
+      if (!resp.ok) {
+        // 0682 CR-0682-M3 — 400 (no key) is an expected silent state because
+        // the agent.available CTA covers it. 5xx + other 4xx are real
+        // failures that previously vanished into the empty catch — surface
+        // them via openRouterError so ModelList can render a retry hint.
+        if (resp.status !== 400) {
+          setOpenRouterError(`OpenRouter catalog fetch failed (${resp.status})`);
+        }
+        return;
+      }
       const data = (await resp.json()) as OpenRouterModelsResponse;
       openRouterFetchedAtRef.current = now;
+      setOpenRouterError(null);
       setCatalog((prev) => {
         if (!prev) return prev;
         const next = prev.agents.map((a) => {
@@ -292,13 +327,18 @@ export function useAgentCatalog(opts?: { onStaleCatalog?: (agentId: string, ageM
         });
         return { ...prev, agents: next };
       });
-      if (data.stale && opts?.onStaleCatalog) {
-        opts.onStaleCatalog("openrouter", (data.ageSec ?? 0) * 1000);
-      }
-    } catch {
-      // Silent — the UI handles missing catalog as "add key" CTA.
+      // 0682 CR-003 — AC-US3-03: surface staleness whenever ageSec > 600
+      // (10 min), regardless of whether the server flagged stale=true.
+      // Pre-fix the toast only fired on upstream-failure-served-from-cache;
+      // an in-cache hit older than 10 min would silently slip past the AC.
+      const ageSec = data.ageSec ?? 0;
+      const isStale = data.stale === true || ageSec > 600;
+      if (isStale) onStaleRef.current?.("openrouter", ageSec * 1000);
+    } catch (e) {
+      // 0682 CR-0682-M3 — Surface network/throw errors instead of swallowing.
+      setOpenRouterError(`OpenRouter catalog unreachable: ${(e as Error).message}`);
     }
-  }, [opts]);
+  }, []);
 
   const focusAgent = useCallback((agentId: string) => {
     focusedRef.current = agentId;
@@ -318,13 +358,28 @@ export function useAgentCatalog(opts?: { onStaleCatalog?: (agentId: string, ageM
     });
     if (resp.ok) {
       setCatalog((prev) => prev ? { ...prev, activeAgent: agentId, activeModel: modelId } : prev);
+      return;
     }
+    // 0682 CR-002 — Surface non-OK responses through onSetActiveError so the
+    // picker can toast. Pre-fix the popover closed with no user-visible
+    // signal that the selection was rejected.
+    // 0682 CR-0682-M2 — Use the stable ref so this callback's identity stays
+    // constant even when consumers pass `opts` as an inline literal.
+    let message = `Failed to set ${agentId} (${resp.status})`;
+    try {
+      const body = await resp.json();
+      if (body && typeof body.error === "string") message = body.error;
+    } catch {
+      /* keep generic message */
+    }
+    onSetActiveErrorRef.current?.(message);
   }, []);
 
   return {
     status,
     catalog,
     error,
+    openRouterError,
     focusAgent,
     refresh,
     activeAgentId: catalog?.activeAgent ?? null,

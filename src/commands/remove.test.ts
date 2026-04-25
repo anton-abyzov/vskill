@@ -207,4 +207,31 @@ describe("removeCommand", () => {
     // But lockfile should still be updated
     expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("sw");
   });
+
+  // 0724 T-007 ----------------------------------------------------------
+  it("0724 T-007: emits structured per-agent JSON when --json passed", async () => {
+    mockReadLockfile.mockReturnValue(
+      makeLockfile({
+        sw: {
+          version: "1.0.0",
+          sha: "abc123",
+          tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z",
+          source: "local:/path",
+        },
+      }),
+    );
+    mockExistsSync.mockReturnValue(false);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await removeCommand("sw", { force: true, json: true });
+
+    const last = logSpy.mock.calls[logSpy.mock.calls.length - 1];
+    const parsed = JSON.parse(last.join(" "));
+    expect(parsed.skill).toBe("sw");
+    expect(parsed).toHaveProperty("perAgent");
+    expect(Array.isArray(parsed.perAgent)).toBe(true);
+    expect(parsed.perAgent.length).toBeGreaterThanOrEqual(1);
+    logSpy.mockRestore();
+  });
 });

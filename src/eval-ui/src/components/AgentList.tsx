@@ -19,10 +19,24 @@ export interface AgentListProps {
   onOpenSettings: (providerTab?: string) => void;
 }
 
+// 0682 CR-004 — Canonical Claude Code ids. The picker is fed by
+// useAgentCatalog/`/api/config` which only emits `claude-cli`, but
+// ClaudeCodeFirstUseBanner.tsx + AgentRow have historically accepted both.
+// Centralising the Set here ensures the divider-grouping check, the row
+// rendering check, and the billing-label check all agree — preventing the
+// asymmetric bug where a `claude-code`-driven row would have rendered
+// BELOW the Ollama/LM Studio divider.
+export const CLAUDE_CODE_IDS: ReadonlySet<string> = new Set(["claude-cli", "claude-code"]);
+
+function isClaudeCodeId(id: string): boolean {
+  return CLAUDE_CODE_IDS.has(id);
+}
+
 // Providers above the divider (cloud / agentic editors).
 // Below-divider: Ollama + LM Studio (locally installed).
 const ABOVE_DIVIDER = new Set([
   "claude-cli",
+  "claude-code", // 0682 CR-004 — accept both ids; renderer handles either path
   "anthropic",
   "openai",
   "openrouter",
@@ -120,7 +134,9 @@ function AgentRow({ agent, isActive, isFocused, onFocus, onSelect, onOpenSetting
   // 0686 T-012: Claude Code row stacks a billing caption under the agent
   // name, so fixed 36px clips the second line. Other rows keep 36px exactly
   // for visual continuity.
-  const isClaudeCode = agent.id === "claude-cli" || agent.id === "claude-code";
+  // 0682 CR-004 — uses centralised CLAUDE_CODE_IDS so this check stays in
+  // sync with ABOVE_DIVIDER and the billing-label gate below.
+  const isClaudeCode = isClaudeCodeId(agent.id);
   const rowStyle: React.CSSProperties = {
     minHeight: 36,
     height: isClaudeCode ? "auto" : 36,
@@ -201,7 +217,8 @@ function AgentRow({ agent, isActive, isFocused, onFocus, onSelect, onOpenSetting
             (runtime id in useAgentCatalog) and `claude-code` (server
             AgentsResponse id) so whichever surface drives the picker, the
             label still fires. */}
-        {(agent.id === "claude-cli" || agent.id === "claude-code") && (
+        {/* 0682 CR-004 — centralised CLAUDE_CODE_IDS check. */}
+        {isClaudeCodeId(agent.id) && (
           <span
             data-testid="claude-code-billing-label"
             title={strings.claudeCodeLabel.tooltip}

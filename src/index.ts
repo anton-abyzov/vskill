@@ -34,10 +34,42 @@ program
   .option("--copy", "Install as independent copies instead of symlinks (default: symlink)")
   .option("--select", "Interactively select skills and agents (default: install all)")
   .option("--only-skills <names>", "Only install specific skills from a plugin (comma-separated)")
+  // 0724 T-006: opt out of the claude-plugin enable step (file extraction + lockfile only)
+  .option("--no-enable", "Install skill files + lockfile entry but skip claude plugin install (skill is on disk but not enabled)")
+  // 0724 T-006: explicit user|project scope (mirrors enable/disable). Default behaviour preserved when neither is passed.
+  .option("--scope <scope>", "Plugin enable scope: user|project (default mirrors --global)")
+  // 0724 T-006: dry-run preview of the would-be invocations
+  .option("--dry-run", "Preview install / enable invocations without executing them")
   .option("-y, --yes", "Skip all prompts, use defaults (all skills, all agents, project scope, symlink)")
   .action(async (source: string | undefined, opts) => {
     const { addCommand } = await import("./commands/add.js");
     await addCommand(source, opts);
+  });
+
+// 0724 T-002: enable a previously-installed skill (flip enabledPlugins back on).
+program
+  .command("enable <name>")
+  .description("Enable a previously-installed skill in Claude Code (flip enabledPlugins on)")
+  .option("--scope <scope>", "Settings scope: user|project (default: user)", "user")
+  .option("--dry-run", "Print the claude plugin install invocation without running it")
+  .option("-V, --verbose", "Verbose output (resolved paths, exit codes)")
+  .option("--json", "Emit machine-readable JSON")
+  .action(async (name: string, opts) => {
+    const { enableCommand } = await import("./commands/enable.js");
+    await enableCommand(name, opts);
+  });
+
+// 0724 T-002: disable an installed skill without removing files.
+program
+  .command("disable <name>")
+  .description("Disable a skill in Claude Code (remove enabledPlugins entry; on-disk files untouched)")
+  .option("--scope <scope>", "Settings scope: user|project (default: user)", "user")
+  .option("--dry-run", "Print the claude plugin uninstall invocation without running it")
+  .option("-V, --verbose", "Verbose output (resolved paths, exit codes)")
+  .option("--json", "Emit machine-readable JSON")
+  .action(async (name: string, opts) => {
+    const { disableCommand } = await import("./commands/disable.js");
+    await disableCommand(name, opts);
   });
 
 program
@@ -61,6 +93,8 @@ program
   .command("list")
   .description("List installed skills or detected agents")
   .option("--agents", "Show all 39 known agents with installed status")
+  // 0724 T-005: per-scope enable status table joining lockfile with settings.json reads.
+  .option("--installed", "Show installed skills with enabled/disabled status per scope")
   .option("--json", "Output as JSON")
   .action(async (opts) => {
     const { listCommand } = await import("./commands/list.js");
@@ -73,6 +107,8 @@ program
   .option("--global", "Only remove from global agent directories")
   .option("--local", "Only remove from local agent directories")
   .option("--force", "Skip confirmation and proceed even if not in lockfile")
+  // 0724 T-007: structured per-agent JSON output (matches enable/disable shape).
+  .option("--json", "Emit machine-readable JSON of the per-agent action report")
   .action(async (skillName: string, opts) => {
     const { removeCommand } = await import("./commands/remove.js");
     await removeCommand(skillName, opts);
@@ -222,9 +258,11 @@ program
 program
   .command("cleanup")
   .description("Remove stale plugin entries from settings.json and orphaned cache")
-  .action(async () => {
+  // 0724 T-008: preview the would-be uninstall invocations + reconciliation summary.
+  .option("--dry-run", "Preview stale plugin uninstalls without executing them")
+  .action(async (opts) => {
     const { cleanupCommand } = await import("./commands/cleanup.js");
-    await cleanupCommand();
+    await cleanupCommand(opts);
   });
 
 program

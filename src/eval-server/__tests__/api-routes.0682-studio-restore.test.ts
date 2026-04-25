@@ -151,6 +151,44 @@ describe("0682 F-001: studio.json is restored on first /api/config request", () 
     expect(body.provider).toBe("claude-cli");
   });
 
+  it("CR-0682-M1: malformed studio.json does not throw; load is treated as miss + studioLoaded=true", async () => {
+    // Write garbage that loadStudioSelection() handles gracefully (warns,
+    // returns null). The flag should still flip to true so we don't spin
+    // re-loading the same broken file every request.
+    const root = mkdtempSync(join(tmpdir(), "vskill-0682-malformed-"));
+    tempDirs.push(root);
+    mkdirSync(join(root, ".vskill"), { recursive: true });
+    writeFileSync(join(root, ".vskill", "studio.json"), "{ not json", "utf8");
+
+    const { registerRoutes } = await import("../api-routes.js");
+    const router = makeRouter();
+    registerRoutes(router as unknown as Parameters<typeof registerRoutes>[0], root);
+
+    const handler = router.routes.get("GET /api/config")!;
+    const res = makeRes();
+    await handler({}, res);
+
+    // Falls back to default — no crash.
+    const body = res.body as { provider: string | null };
+    expect(body.provider).toBe("claude-cli");
+  });
+
+  it("CR-001: rejects an unknown activeAgent and falls back to claude-cli", async () => {
+    const root = makeRoot({ activeAgent: "definitely-not-a-provider", activeModel: "x/y" });
+    const { registerRoutes } = await import("../api-routes.js");
+    const router = makeRouter();
+    registerRoutes(router as unknown as Parameters<typeof registerRoutes>[0], root);
+
+    const handler = router.routes.get("GET /api/config")!;
+    const res = makeRes();
+    await handler({}, res);
+
+    const body = res.body as { provider: string | null };
+    // Pre-CR-001 the bogus provider would have flowed through unchallenged.
+    // Now it should fall back to the safe claude-cli default.
+    expect(body.provider).toBe("claude-cli");
+  });
+
   it("does NOT re-load studio.json on subsequent calls (idempotency)", async () => {
     const root = makeRoot({ activeAgent: "openrouter", activeModel: "x/y" });
     const { registerRoutes } = await import("../api-routes.js");

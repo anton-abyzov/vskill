@@ -232,6 +232,110 @@ describe("useAgentCatalog — OpenRouter hydration with SWR", () => {
   });
 });
 
+describe("useAgentCatalog — CR-003: age-based stale-catalog toast", () => {
+  it("invokes onStaleCatalog when ageSec > 600 even without server stale flag", async () => {
+    const fetchSpy = vi.fn(async (url: RequestInfo | URL) => {
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.endsWith("/api/config")) {
+        return new Response(JSON.stringify(baseConfig()), { status: 200 });
+      }
+      if (u.endsWith("/api/openrouter/models")) {
+        // ageSec=900s (>600), stale flag NOT set — pre-CR-003 this would
+        // have silently skipped onStaleCatalog. Now we should still toast.
+        return new Response(JSON.stringify({ models: [], ageSec: 900 }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const onStale = vi.fn();
+    const { getHandle } = await renderHook({ onStaleCatalog: onStale });
+    const h = getHandle();
+    const { act } = await import("react");
+    await act(async () => {
+      h.focusAgent("openrouter");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onStale).toHaveBeenCalledWith("openrouter", 900_000);
+  });
+});
+
+describe("useAgentCatalog — CR-002: setActive surfaces non-OK responses", () => {
+  it("calls onSetActiveError when POST /api/config returns 4xx", async () => {
+    const fetchSpy = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.endsWith("/api/config") && (!init || init.method !== "POST")) {
+        return new Response(JSON.stringify(baseConfig()), { status: 200 });
+      }
+      if (u.endsWith("/api/config") && init?.method === "POST") {
+        return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY missing" }), { status: 400 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    const onSetActiveError = vi.fn();
+    const { getHandle } = await renderHook({ onSetActiveError });
+    const h = getHandle();
+    const { act } = await import("react");
+    await act(async () => {
+      await h.setActive("anthropic", "haiku");
+    });
+    expect(onSetActiveError).toHaveBeenCalledWith("ANTHROPIC_API_KEY missing");
+    // Catalog should NOT have updated to the rejected selection.
+    const updated = getHandle();
+    expect(updated.catalog?.activeAgent).toBe("claude-cli");
+  });
+});
+
+describe("useAgentCatalog — CR-0682-M3: openRouterError surfaces non-key fetch failures", () => {
+  it("sets openRouterError on a 500 from /api/openrouter/models", async () => {
+    const fetchSpy = vi.fn(async (url: RequestInfo | URL) => {
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.endsWith("/api/config")) {
+        return new Response(JSON.stringify(baseConfig()), { status: 200 });
+      }
+      if (u.endsWith("/api/openrouter/models")) {
+        return new Response("upstream broken", { status: 500 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    const { getHandle } = await renderHook();
+    const h = getHandle();
+    const { act } = await import("react");
+    await act(async () => {
+      h.focusAgent("openrouter");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getHandle().openRouterError).toMatch(/500/);
+  });
+
+  it("does NOT set openRouterError on a 400 (no key) — agent CTA covers it", async () => {
+    const fetchSpy = vi.fn(async (url: RequestInfo | URL) => {
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.endsWith("/api/config")) {
+        return new Response(JSON.stringify(baseConfig()), { status: 200 });
+      }
+      if (u.endsWith("/api/openrouter/models")) {
+        return new Response(JSON.stringify({ error: "OPENROUTER_API_KEY not configured" }), { status: 400 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    const { getHandle } = await renderHook();
+    const h = getHandle();
+    const { act } = await import("react");
+    await act(async () => {
+      h.focusAgent("openrouter");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getHandle().openRouterError).toBeNull();
+  });
+});
+
 describe("useAgentCatalog — setActive POSTs config + updates catalog", () => {
   it("POSTs /api/config and reflects the new active agent/model on success", async () => {
     const fetchSpy = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {

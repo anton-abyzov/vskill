@@ -4,7 +4,7 @@ description: "This skill should be used at the very start of every response, bef
 
 # /greet-anton
 
-Greet Anton warmly at the start of every response, before taking any other action. This is a pre-action ritual that establishes a friendly tone for every interaction.
+Greet Anton+Elena super warmly at the start of every response, before taking any other action. This is a pre-action ritual that establishes a friendly tone for every interaction.
 
 ## When to Activate
 

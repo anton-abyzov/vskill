@@ -109,3 +109,19 @@ describe("serve.ts uses no lsof/ps (0706 T-007)", () => {
     expect(src).not.toMatch(/execSync\(`ps -p/);
   });
 });
+
+describe("port-conflict message is actionable", () => {
+  it("message text in serve.ts includes a kill hint for both reuse and non-vskill branches", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(
+      new URL("../serve.ts", import.meta.url),
+      "utf8",
+    );
+    // Both branches must expose how to free the port — Unix and Windows
+    // commands as printable strings (no shell-out from vskill itself).
+    expect(src).toMatch(/lsof -ti:/);
+    expect(src).toMatch(/taskkill \/F \/PID/);
+    // The reuse branch must offer the kill hint, not just "open browser".
+    expect(src).toMatch(/restart|kill/i);
+  });
+});

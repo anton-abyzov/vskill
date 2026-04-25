@@ -628,6 +628,26 @@ export function resetStudioRestoreState(): void {
   studioLoaded = false;
 }
 
+// 0682 CR-001 — Known ProviderName values, used to validate the activeAgent
+// string read from .vskill/studio.json before assigning into currentOverrides.
+// studio-json.ts only checks `typeof activeAgent === "string"`; without this
+// gate a corrupt or version-mismatched file would flow an unknown provider
+// into getClient() / PROVIDER_MODELS and produce undefined-key lookups.
+const KNOWN_PROVIDER_NAMES: ReadonlySet<ProviderName> = new Set<ProviderName>([
+  "anthropic",
+  "claude-cli",
+  "codex-cli",
+  "gemini-cli",
+  "lm-studio",
+  "ollama",
+  "openai",
+  "openrouter",
+]);
+
+function isKnownProviderName(s: string): s is ProviderName {
+  return KNOWN_PROVIDER_NAMES.has(s as ProviderName);
+}
+
 /** Return the effective raw model ID (suitable for round-tripping via the API). */
 function getEffectiveRawModel(): string {
   if (currentOverrides.model) return currentOverrides.model;
@@ -1248,11 +1268,38 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     // `{ provider: "claude-cli" }` would make the prior guard permanently
     // false, silently discarding the persisted selection on every boot.
     if (!studioLoaded) {
-      studioLoaded = true;
-      const stored = loadStudioSelection(root);
-      if (stored) {
-        currentOverrides.provider = stored.activeAgent as ProviderName;
-        if (stored.activeModel) currentOverrides.model = stored.activeModel;
+      // 0682 CR-0682-M1 — Wrap loadStudioSelection() in its own try/catch
+      // and set `studioLoaded = true` ONLY after the load attempt completes.
+      // Pre-fix the flag was flipped before the call, so any thrown error
+      // (fs, permissions, malformed JSON path inside the loader) would
+      // permanently mask studio.json for the process lifetime — exactly the
+      // same class of bug as the F-001 it tried to remedy. Now: on success
+      // OR clean miss, mark loaded; on thrown error, log and leave the flag
+      // unset so the next request retries.
+      try {
+        const stored = loadStudioSelection(root);
+        if (stored) {
+          // 0682 CR-001 — Validate the persisted activeAgent against the
+          // ProviderName union before mutating currentOverrides. A tampered
+          // or version-mismatched studio.json (e.g. "unknown", "claude-code",
+          // or arbitrary text) silently falls back to the claude-cli default
+          // rather than poisoning getClient() lookups downstream.
+          if (isKnownProviderName(stored.activeAgent)) {
+            currentOverrides.provider = stored.activeAgent;
+            if (stored.activeModel) currentOverrides.model = stored.activeModel;
+          } else {
+            console.warn(
+              `[studio.json] Ignoring unknown activeAgent "${stored.activeAgent}" — falling back to claude-cli`,
+            );
+          }
+        }
+        studioLoaded = true;
+      } catch (e) {
+        console.warn(
+          `[studio.json] load failed: ${(e as Error).message} — will retry on next /api/config request`,
+        );
+        // Intentionally leave studioLoaded=false so transient FS errors don't
+        // permanently mask the persisted selection.
       }
     }
     try {

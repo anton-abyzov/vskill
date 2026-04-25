@@ -14,6 +14,8 @@ import { writeHistoryEntry } from "../eval/benchmark-history.js";
 import { loadAndValidateEvals } from "../eval/schema.js";
 import { initSSE, sendSSE, sendSSEDone, withHeartbeat } from "./sse-helpers.js";
 import { classifyError } from "./error-classifier.js";
+import { extractFrontmatterVersion, bumpPatch, setFrontmatterVersion } from "../utils/version.js";
+import { submitSkillUpdateEvent } from "./platform-proxy.js";
 
 export function registerImproveRoutes(router: Router, root: string): void {
   // POST /api/skills/:plugin/:skill/improve
@@ -319,6 +321,17 @@ After the improved content, on a new line, write "---REASONING---" followed by a
   });
 
   // POST /api/skills/:plugin/:skill/apply-improvement
+  //
+  // Bumps the frontmatter `version:` field BEFORE writing so every applied
+  // improvement is a distinct release. Resolution rules:
+  //   1. If the incoming improved content already declares a version >= the
+  //      previous version, preserve it verbatim (user/LLM picked a number).
+  //   2. Otherwise, take the previous frontmatter version (or "1.0.0" default)
+  //      and bump the patch component, then splice it into the content.
+  //
+  // After write, attempt to submit a `SkillUpdateEvent` to the platform's
+  // internal publish queue. This is a no-op in production where the studio
+  // doesn't carry INTERNAL_BROADCAST_KEY — see platform-proxy.submitSkillUpdateEvent.
   router.post("/api/skills/:plugin/:skill/apply-improvement", async (req, res, params) => {
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const skillMdPath = join(skillDir, "SKILL.md");
@@ -331,8 +344,31 @@ After the improved content, on a new line, write "---REASONING---" followed by a
     }
 
     try {
-      writeFileSync(skillMdPath, body.content, "utf-8");
-      sendJson(res, { ok: true }, 200, req);
+      const previousContent = existsSync(skillMdPath)
+        ? readFileSync(skillMdPath, "utf-8")
+        : "";
+      const previousVersion = extractFrontmatterVersion(previousContent) ?? "1.0.0";
+      const incomingVersion = extractFrontmatterVersion(body.content);
+
+      const nextVersion = (incomingVersion && compareSemver(incomingVersion, previousVersion) > 0)
+        ? incomingVersion
+        : bumpPatch(previousVersion);
+
+      const finalContent = setFrontmatterVersion(body.content, nextVersion);
+      writeFileSync(skillMdPath, finalContent, "utf-8");
+
+      const submitResult = await submitSkillUpdateEvent({
+        skillId: `${params.plugin}/${params.skill}`,
+        version: nextVersion,
+        diffSummary: `apply-improvement: ${previousVersion} → ${nextVersion}`,
+      });
+
+      sendJson(res, {
+        ok: true,
+        version: nextVersion,
+        previousVersion,
+        publish: submitResult,
+      }, 200, req);
     } catch (err) {
       sendJson(
         res,
@@ -342,4 +378,18 @@ After the improved content, on a new line, write "---REASONING---" followed by a
       );
     }
   });
+}
+
+// Lightweight semver comparator — returns >0, 0, or <0. Falls back to string
+// compare for non-semver inputs so we never throw on malformed user input.
+function compareSemver(a: string, b: string): number {
+  const re = /^(\d+)\.(\d+)\.(\d+)$/;
+  const ma = a.match(re); const mb = b.match(re);
+  if (!ma || !mb) return a.localeCompare(b);
+  for (let i = 1; i <= 3; i++) {
+    const da = parseInt(ma[i], 10);
+    const db = parseInt(mb[i], 10);
+    if (da !== db) return da - db;
+  }
+  return 0;
 }

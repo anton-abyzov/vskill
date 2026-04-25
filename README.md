@@ -133,11 +133,15 @@ Then invoke as `/plugin:skill` in your agent:
 
 ```
 vskill install <source>     Install skill after security scan
+vskill enable <skill>       Enable a previously-installed skill in Claude Code
+vskill disable <skill>      Disable a skill (keep files on disk; flip the toggle)
 vskill find <query>         Search the verified-skill.com registry
 vskill scan <path>          Run security scan without installing
 vskill list                 Show installed skills with status
+vskill list --installed     Per-scope enabled/disabled status table
 vskill remove <skill>       Remove an installed skill
 vskill update [skill]       Update with diff scanning (--all for everything)
+vskill cleanup              Remove stale plugin entries and orphaned cache
 vskill audit [path]         Full project security audit with LLM analysis
 vskill info <skill>         Show detailed skill information
 vskill submit <source>      Submit a skill for verification
@@ -145,6 +149,108 @@ vskill blocklist            Manage blocked malicious skills
 vskill init                 Initialize vskill in a project
 vskill diff <s> <from> <to> Show multi-file diff between two versions
 vskill keys <cmd> [provider] Manage LLM API keys (set/list/remove/path)
+```
+
+## Enable / Disable
+
+`vskill install` extracts a skill's files and (when the source is a Claude
+Code marketplace plugin) registers the plugin in `~/.claude/settings.json`'s
+`enabledPlugins`. Once installed, you can toggle it without re-downloading:
+
+```bash
+# Disable a skill — keeps files on disk, just removes the enabledPlugins entry.
+vskill disable foo
+
+# Re-enable later — same plugin id, no network round-trip.
+vskill enable foo
+
+# Project-scope toggle (writes <cwd>/.claude/settings.json instead of ~/).
+vskill enable foo --scope project
+
+# Preview what would happen (prints the exact `claude plugin install/uninstall`
+# invocation, no subprocess spawn).
+vskill enable foo --dry-run
+vskill disable foo --dry-run
+
+# Verbose — shows resolved binary path + scope + cwd.
+vskill enable foo --verbose
+
+# Machine-readable JSON.
+vskill enable foo --json
+```
+
+Both commands wrap `claude plugin install/uninstall` per
+[ADR 0724-01](../../.specweave/docs/internal/architecture/adr/0724-01-skill-enable-disable-via-claude-cli.md)
+— vskill never writes `settings.json` directly. The commands are
+**idempotent**: running `vskill enable foo` twice prints
+`foo already enabled in user scope` on the second run and exits 0.
+
+### Install with `--no-enable`
+
+For CI pipelines that want the files on disk and the lockfile entry written
+but **not** the plugin registered:
+
+```bash
+vskill install anton-abyzov/skill-foo --no-enable
+# … later, when you actually want it active:
+vskill enable foo
+```
+
+### `vskill list --installed`
+
+Joins `vskill.lock` with `enabledPlugins` reads at user and project scope:
+
+```
+$ vskill list --installed
+
+Installed Skills (3)
+
+Skill   Version  Source                       User Scope  Project Scope
+foo     1.0.0    marketplace:o/r#foo          enabled     disabled
+bar     2.1.0    marketplace:o/r#bar          disabled    enabled
+baz     0.1.0    github:o/r#baz               n/a         n/a
+```
+
+The `n/a` rows are auto-discovered skills (no `marketplace` field in their
+lockfile entry) — there's nothing to toggle for them; agents pick them up
+directly from their `localSkillsDir`/`globalSkillsDir` on the filesystem.
+
+JSON output (`--installed --json`) emits one object per skill with
+`{name, version, source, enabledUser, enabledProject, autoDiscovered}` —
+suitable for piping into `jq`.
+
+### Multi-agent surface awareness
+
+When you have Claude Code AND Cursor AND Codex CLI installed, both
+`install` and `enable` print a per-agent line so you know exactly which
+surface received the registration:
+
+```
+$ vskill enable foo
+
+Enabled foo (foo@m) in user scope.
+  > Claude Code (user) — enabled via claude CLI
+  > Cursor — auto-discovers from .cursor/skills (no plugin enable needed)
+  > Codex CLI — auto-discovers from .codex/skills (no plugin enable needed)
+```
+
+For non-Claude-Code agents that auto-discover from disk, there is nothing
+to toggle — the skill is live the moment its files exist in the agent's
+`localSkillsDir`/`globalSkillsDir`. To stop loading, run
+`vskill remove <name>`.
+
+### `vskill cleanup --dry-run`
+
+Preview which stale `enabledPlugins` entries would be removed before
+running the real cleanup:
+
+```bash
+vskill cleanup --dry-run
+# Dry-run — preview of stale plugin uninstalls:
+#   > claude plugin uninstall --scope user -- old-foo@m
+#   > claude plugin uninstall --scope project -- old-bar@m
+#
+# 2 stale entries removed from user scope, 0 from project scope, 5 in-sync skills left untouched.
 ```
 
 ## Compare skill versions
@@ -203,6 +309,9 @@ See [https://github.com/anton-abyzov/vskill/compare/4f2285d...71a9132](https://g
 | `--force` | Install even if blocklisted |
 | `--cwd <path>` | Override project root |
 | `--all` | Install all skills from a repo |
+| `--no-enable` | Install files + lockfile entry, but skip `claude plugin install` |
+| `--scope <scope>` | Plugin enable scope: `user` or `project` |
+| `--dry-run` | Preview install / enable invocations without executing |
 
 </details>
 

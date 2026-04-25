@@ -7,14 +7,22 @@ import {
   detectInstalledAgents,
   AGENTS_REGISTRY,
 } from "../agents/agents-registry.js";
+import { isPluginEnabled } from "../settings/index.js";
+import { resolvePluginId } from "../lib/skill-lifecycle.js";
 import { bold, green, red, dim, cyan, yellow, table } from "../utils/output.js";
 
 interface ListOptions {
   agents?: boolean;
+  /** 0724 T-005: per-scope enable status table. */
+  installed?: boolean;
   json?: boolean;
 }
 
 export async function listCommand(opts: ListOptions): Promise<void> {
+  if (opts.installed) {
+    await listInstalledWithStatus(opts.json);
+    return;
+  }
   if (opts.agents) {
     await listAgents(opts.json);
   } else {
@@ -121,5 +129,108 @@ async function listSkills(json?: boolean): Promise<void> {
     }
   }
 
+  console.log(table(headers, rows));
+}
+
+// ---------------------------------------------------------------------------
+// 0724 T-005: vskill list --installed
+//
+// Joins vskill.lock with `enabledPlugins` reads at user scope and project
+// scope (cwd), producing a table or JSON array with explicit
+// `enabled / disabled / n/a` per scope.
+// ---------------------------------------------------------------------------
+
+interface InstalledRow {
+  name: string;
+  version: string;
+  source: string;
+  enabledUser: boolean;
+  enabledProject: boolean;
+  autoDiscovered: boolean;
+}
+
+async function listInstalledWithStatus(json?: boolean): Promise<void> {
+  const lock = readLockfile();
+
+  if (!lock) {
+    console.log(
+      yellow("No vskill.lock found. Run ") +
+        cyan("vskill install") +
+        yellow(" first."),
+    );
+    process.exit(1);
+    return;
+  }
+
+  const skillNames = Object.keys(lock.skills);
+  const cwd = process.cwd();
+
+  const rowsData: InstalledRow[] = skillNames.map((name) => {
+    const entry = lock.skills[name];
+    const pluginId = resolvePluginId(name, entry);
+    if (pluginId === null) {
+      return {
+        name,
+        version: entry.version || "-",
+        source: entry.source || "-",
+        enabledUser: false,
+        enabledProject: false,
+        autoDiscovered: true,
+      };
+    }
+    let enabledUser = false;
+    let enabledProject = false;
+    try {
+      enabledUser = isPluginEnabled(pluginId, { scope: "user" });
+    } catch {
+      enabledUser = false;
+    }
+    try {
+      enabledProject = isPluginEnabled(pluginId, {
+        scope: "project",
+        projectDir: cwd,
+      });
+    } catch {
+      enabledProject = false;
+    }
+    return {
+      name,
+      version: entry.version || "-",
+      source: entry.source || "-",
+      enabledUser,
+      enabledProject,
+      autoDiscovered: false,
+    };
+  });
+
+  if (json) {
+    console.log(JSON.stringify(rowsData, null, 2));
+    return;
+  }
+
+  if (rowsData.length === 0) {
+    console.log(dim("No skills installed yet."));
+    console.log(
+      dim(`Run ${cyan("vskill install <owner/repo>")} to install a skill.`),
+    );
+    return;
+  }
+
+  console.log(bold(`Installed Skills (${rowsData.length})\n`));
+
+  const headers = ["Skill", "Version", "Source", "User Scope", "Project Scope"];
+  const rows = rowsData.map((r) => {
+    const userCell = r.autoDiscovered
+      ? dim("n/a")
+      : r.enabledUser
+        ? green("enabled")
+        : red("disabled");
+    const projectCell = r.autoDiscovered
+      ? dim("n/a")
+      : r.enabledProject
+        ? green("enabled")
+        : red("disabled");
+    return [bold(r.name), r.version, dim(r.source), userCell, projectCell];
+  });
   console.log(table(headers, rows));
 }

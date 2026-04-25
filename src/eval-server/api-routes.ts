@@ -830,10 +830,13 @@ async function probeOllama(): Promise<{ available: boolean; models: ModelOption[
     const baseUrl = resolveOllamaBaseUrl(process.env);
     const resp = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(500) });
     if (resp.ok) {
-      available = true;
       const data = await resp.json() as { models?: Array<{ name: string }> };
+      // Only mark available after JSON parses cleanly — protects against 200-with-bad-body proxies.
+      available = true;
       if (data.models?.length) {
-        models = data.models.map((m) => ({ id: m.name, label: m.name }));
+        models = data.models
+          .filter((m): m is { name: string } => typeof m?.name === "string" && m.name.length > 0)
+          .map((m) => ({ id: m.name, label: m.name }));
       }
     }
   } catch { /* ollama not running */ }
@@ -858,10 +861,16 @@ async function probeLmStudio(): Promise<{ available: boolean; models: ModelOptio
     const baseUrl = process.env.LM_STUDIO_BASE_URL || "http://localhost:1234/v1";
     const resp = await fetch(`${baseUrl}/models`, { signal: AbortSignal.timeout(500) });
     if (resp.ok) {
-      available = true;
       const data = await resp.json() as { data?: Array<{ id: string }> };
+      // Only mark available after JSON parses cleanly — protects against 200-with-bad-body proxies.
+      available = true;
       if (data.data?.length) {
-        models = data.data.map((m) => ({ id: m.id, label: m.id }));
+        // Alphabetical sort honors AC-US3-01 (group children ordered alphabetically
+        // in the dropdown). LM Studio returns models in load-order, which is unstable.
+        models = data.data
+          .filter((m): m is { id: string } => typeof m?.id === "string" && m.id.length > 0)
+          .map((m) => ({ id: m.id, label: m.id }))
+          .sort((a, b) => a.id.localeCompare(b.id));
       }
     }
   } catch { /* lm studio not running */ }

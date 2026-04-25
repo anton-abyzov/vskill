@@ -74,9 +74,11 @@ describe("detectAvailableProviders — LM Studio detection", () => {
     expect(lm).toBeDefined();
     expect(lm!.available).toBe(true);
     expect(lm!.label).toMatch(/LM Studio/i);
+    // Alphabetical order per AC-US3-01: probe sorts by id.localeCompare regardless
+    // of LM Studio's load order, so 'llama-...' precedes 'qwen...' here.
     expect(lm!.models.map((m) => m.id)).toEqual([
-      "qwen2.5-coder-7b",
       "llama-3.2-3b-instruct",
+      "qwen2.5-coder-7b",
     ]);
   });
 

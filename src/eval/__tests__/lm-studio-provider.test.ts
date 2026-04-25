@@ -163,7 +163,9 @@ describe("LM Studio provider", () => {
   });
 
   it("throws on HTTP 500 with status code and first 200 chars of body", async () => {
-    const longBody = "X".repeat(500);
+    // Use a recognizable pattern so we can pin the slice boundary precisely
+    // per AC-US1-04 (first 200 chars of body, not just "some truncation").
+    const longBody = "A".repeat(500);
     fetchSpy.mockResolvedValue(
       mockLmStudioResponse({ status: 500, body: longBody }),
     );
@@ -174,9 +176,10 @@ describe("LM Studio provider", () => {
     } catch (err) {
       const msg = (err as Error).message;
       expect(msg).toContain("500");
-      // Message should contain only the first 200 chars of body (not all 500)
-      // We assert length of the body-preview portion
-      expect(msg.length).toBeLessThan(600);
+      // Pin the contract: exactly 200 'A's must be present, and NOT 201.
+      // This proves the slice is at the documented boundary, not just "trimmed somewhere".
+      expect(msg).toContain("A".repeat(200));
+      expect(msg).not.toContain("A".repeat(201));
     }
   });
 

@@ -103,9 +103,7 @@ function makeConfig(lm: ProviderInfo | null, activeProvider?: string, activeMode
     { id: "claude-cli", label: "Claude CLI", available: true, models: [{ id: "sonnet", label: "Claude Sonnet" }] },
     { id: "ollama", label: "Ollama (local, free)", available: false, models: [] },
   ];
-  // Cast to any at the array boundary because the api.ts ProviderInfo union
-  // does not include "lm-studio" yet (by design — the ID flows over JSON).
-  const providers = (lm ? [...base, lm] : base) as unknown as ProviderInfo[];
+  const providers: ProviderInfo[] = lm ? [...base, lm] : base;
   return {
     provider: activeProvider ?? null,
     model: activeModel ?? "sonnet",
@@ -122,7 +120,7 @@ function makeConfig(lm: ProviderInfo | null, activeProvider?: string, activeMode
 describe("LM Studio config shape — surfaces in providers array", () => {
   it("passes lm-studio provider through the config object intact", () => {
     const lm: ProviderInfo = {
-      id: "lm-studio" as ProviderInfo["id"],
+      id: "lm-studio",
       label: "LM Studio (local, free)",
       available: true,
       models: [
@@ -150,7 +148,7 @@ describe("LM Studio config shape — surfaces in providers array", () => {
 describe("RunPanel — lm-studio provider cost label", () => {
   it("shows 'Cost: Free' when config.provider === 'lm-studio'", () => {
     configRef.current = makeConfig(
-      { id: "lm-studio" as ProviderInfo["id"], label: "LM Studio", available: true, models: [{ id: "qwen", label: "qwen" }] },
+      { id: "lm-studio", label: "LM Studio", available: true, models: [{ id: "qwen", label: "qwen" }] },
       "lm-studio",
       "qwen",
     );
@@ -174,7 +172,7 @@ describe("RunPanel — lm-studio provider cost label", () => {
 describe("ComparisonPage — 'Local' tag for local providers", () => {
   it("shows a 'Local' tag when config.provider === 'lm-studio'", () => {
     configRef.current = makeConfig(
-      { id: "lm-studio" as ProviderInfo["id"], label: "LM Studio", available: true, models: [{ id: "qwen", label: "qwen" }] },
+      { id: "lm-studio", label: "LM Studio", available: true, models: [{ id: "qwen", label: "qwen" }] },
       "lm-studio",
       "qwen",
     );

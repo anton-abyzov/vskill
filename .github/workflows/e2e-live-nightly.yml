@@ -1,0 +1,106 @@
+# 0727 US-005 / AC-US5-03 — Nightly live-wire E2E for the skill-update push
+# pipeline. Default PR lane is unaffected: this workflow runs only on the
+# scheduled cron (06:00 UTC daily) and on `workflow_dispatch` for ad-hoc
+# operator runs.
+#
+# Why a separate workflow:
+#   - The live spec boots `npx wrangler dev` and a real Postgres, which is
+#     ~2 min of cold-start cost. Running it on every PR would tax the queue.
+#   - Live failures are operator signals (DB drift, wrangler upgrade
+#     surprise), not "this PR breaks", so a daily lane is the right granularity.
+#   - The default `ci.yml` still runs the stubbed `default` Playwright
+#     project — fast, deterministic.
+
+name: E2E Live (nightly)
+
+on:
+  schedule:
+    # 06:00 UTC daily — outside US business hours, sub-15min queue idle.
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  live-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vskill_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      E2E_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/vskill_e2e
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/vskill_e2e
+      GITHUB_WEBHOOK_SECRET: test-secret-for-e2e
+      INTERNAL_BROADCAST_KEY: test-broadcast-key
+      PLAYWRIGHT_RUN_LIVE: "1"
+
+    steps:
+      # vskill is the workflow's host repo; check it out at ./vskill so that
+      # ../vskill-platform resolves correctly (matches the umbrella layout
+      # `repositories/anton-abyzov/{vskill,vskill-platform}`). Without this,
+      # default checkout puts vskill at $GITHUB_WORKSPACE root and
+      # `working-directory: ../vskill-platform` escapes the workspace.
+      - name: Checkout vskill
+        uses: actions/checkout@v4
+        with:
+          path: vskill
+
+      - name: Checkout vskill-platform (sibling repo)
+        uses: actions/checkout@v4
+        with:
+          repository: anton-abyzov/vskill-platform
+          path: vskill-platform
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            vskill/package-lock.json
+            vskill-platform/package-lock.json
+
+      - name: Install root deps (vskill)
+        working-directory: vskill
+        run: npm ci
+
+      - name: Install platform deps (vskill-platform)
+        working-directory: vskill-platform
+        run: npm ci
+
+      - name: Reset + seed E2E database
+        working-directory: vskill-platform
+        run: npm run e2e:db-reset
+
+      - name: Build vskill (CLI + eval-ui)
+        working-directory: vskill
+        run: |
+          npm run build
+          npm run build:eval-ui
+
+      - name: Install Playwright browsers
+        working-directory: vskill
+        run: npx playwright install --with-deps chromium
+
+      - name: Run live E2E
+        working-directory: vskill
+        run: npx playwright test --project=live
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-live
+          path: vskill/playwright-report/
+          retention-days: 7

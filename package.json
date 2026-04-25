@@ -65,6 +65,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
+    "@vitest/coverage-v8": "^3.2.4",
     "axe-core": "^4.11.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

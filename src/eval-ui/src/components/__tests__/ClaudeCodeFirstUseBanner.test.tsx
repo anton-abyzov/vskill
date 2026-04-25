@@ -61,7 +61,7 @@ describe("0686 T-012: ClaudeCodeFirstUseBanner", () => {
     );
     expect(banner).toBeTruthy();
     expect(banner?.textContent ?? "").toContain(
-      "Claude Code uses your Pro/Max subscription",
+      "Claude Code uses your existing session",
     );
     expect(banner?.textContent ?? "").toContain("No API key needed");
     // Must NOT include a numeric cap value (AC-US6-04).

@@ -319,16 +319,16 @@ const scopeSection = {
 
 const claudeCodeLabel = {
   /** Exact compact label rendered on the Claude Code row in AgentModelPicker
-   *  and referenced by the AgentScopePicker stats pane. AC-US6-01 pins the
-   *  wording — do not paraphrase. */
-  compactLabel: "Covered by Max/Pro · overflow billed at API rates",
+   *  and referenced by the AgentScopePicker stats pane. AC-US5-01 (0682) bans
+   *  "Max/Pro" and "subscription" in picker / Settings / StatusBar surfaces. */
+  compactLabel: "Uses your Claude Code session · overflow billed at API rates",
   tooltip:
-    "Your Claude Code CLI usage runs under your Pro/Max subscription quota. " +
-    "If you've enabled extra usage in your account settings, excess usage continues " +
-    "at standard API rates. Run /usage in Claude Code or visit claude.com Settings → " +
-    "Usage to see remaining quota — vskill can't display it directly.",
+    "vSkill delegates to the `claude` CLI — your existing Claude Code session " +
+    "handles quota. If you've enabled extra usage in your account settings, " +
+    "excess runs at standard API rates. Run /usage in Claude Code or visit " +
+    "claude.com Settings → Usage to see remaining quota — vskill can't display it directly.",
   firstUseBanner:
-    "Claude Code uses your Pro/Max subscription. No API key needed — vskill just " +
+    "Claude Code uses your existing session. No API key needed — vskill just " +
     "runs the official claude binary on your behalf.",
   learnMore: "Learn more",
 } as const;
@@ -416,9 +416,9 @@ const setupProviders = {
   claudeCode: {
     name: "Claude Code",
     description:
-      "No API key needed if you're logged into Claude Code. vskill just runs the official claude binary on your behalf under your Pro/Max subscription.",
+      "No API key needed if you're logged into Claude Code. vskill just runs the official claude binary on your behalf — your existing Claude Code session handles quota.",
     loginHint:
-      "If you're not logged in, run claude in your terminal and authenticate with your Pro/Max account.",
+      "If you're not logged in, run claude in your terminal and authenticate with your Anthropic account.",
     learnMoreUrl: "https://docs.claude.com/en/docs/claude-code",
   },
 } as const;

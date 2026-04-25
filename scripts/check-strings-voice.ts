@@ -21,8 +21,8 @@
  * ADR refs: US-010 (tone/voice), tasks.md T-035/T-036.
  */
 
-import { readFileSync, statSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { resolve, sep, join } from "node:path";
 
 export interface VoiceViolation {
   file: string;
@@ -59,47 +59,93 @@ const LINE_ALLOWLIST = [
   'subscriptionBilling: "· subscription"',
 ];
 
+// 0682 F-003 — Scan the entire `src/eval-ui/src/**` and `src/eval-server/**`
+// subtrees, not just `strings.ts`. AC-US5-01(f) requires lint failure when
+// `Max/Pro` / `subscription` appear anywhere in those subtrees, with allowance
+// for `README.md` and `docs/**`.
+//
+// Pre-fix TARGETS was just ["src/eval-ui/src/strings.ts"], which silently
+// passed even if a regression introduced "Max/Pro" in StatusBar.tsx or
+// api-routes.ts.
 const TARGETS = ["src/eval-ui/src/strings.ts"];
+const TARGET_DIRS = ["src/eval-ui/src", "src/eval-server"];
+const SCAN_EXTENSIONS = [".ts", ".tsx"];
+const SCAN_EXCLUDED_DIRS = new Set(["node_modules", "__tests__", "dist", ".turbo"]);
+
+function listFiles(dir: string, out: string[]): void {
+  let entries: ReturnType<typeof readdirSync>;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return; // Missing directory — fine for fixtures or partial repos.
+  }
+  for (const entry of entries) {
+    const abs = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (SCAN_EXCLUDED_DIRS.has(entry.name)) continue;
+      listFiles(abs, out);
+      continue;
+    }
+    if (entry.isFile() && SCAN_EXTENSIONS.some((ext) => entry.name.endsWith(ext))) {
+      out.push(abs);
+    }
+  }
+}
+
+function scanFile(abs: string, violations: VoiceViolation[]): void {
+  let content: string;
+  try {
+    content = readFileSync(abs, "utf8");
+  } catch {
+    return;
+  }
+  const lines = content.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (LINE_ALLOWLIST.some((needle) => line.includes(needle))) continue;
+    const trimmed = line.trim();
+    if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+    for (const { label, re } of FORBIDDEN) {
+      const localRe = new RegExp(re.source, re.flags);
+      let m: RegExpExecArray | null;
+      while ((m = localRe.exec(line)) !== null) {
+        violations.push({
+          file: abs,
+          line: i + 1,
+          column: m.index + 1,
+          label,
+          snippet: line.trim().slice(0, 200),
+        });
+        if (m.index === localRe.lastIndex) localRe.lastIndex++;
+      }
+    }
+  }
+}
 
 export function scanForVoiceViolations(rootDir: string): VoiceViolation[] {
   const violations: VoiceViolation[] = [];
+  // Required-target gate — strings.ts must exist (configuration error
+  // surfaces as exit code 2 from the CLI path). Once verified, fall through
+  // to the full-tree scan.
   for (const rel of TARGETS) {
     const abs = resolve(rootDir, rel);
     try {
       statSync(abs);
     } catch {
-      // Surface as a separate condition (exit code 2) in CLI path.
       throw new Error(
         `check-strings-voice: target file not found: ${abs}. Expected ${rel} relative to repo root.`,
       );
     }
-    const content = readFileSync(abs, "utf8");
-    const lines = content.split(/\r?\n/);
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i] ?? "";
-      // Skip lines that document the AC itself (this script's own scan
-      // would otherwise flag the comment that explains the rule).
-      if (LINE_ALLOWLIST.some((needle) => line.includes(needle))) continue;
-      // The strings.ts header / block comments often quote the banned
-      // strings to explain the rule — treat any line that's purely a
-      // comment as allowlisted (TS line comments only, not block contents).
-      const trimmed = line.trim();
-      if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
-      for (const { label, re } of FORBIDDEN) {
-        // Use a fresh RegExp with global flag; `re.lastIndex` would leak.
-        const localRe = new RegExp(re.source, re.flags);
-        let m: RegExpExecArray | null;
-        while ((m = localRe.exec(line)) !== null) {
-          violations.push({
-            file: abs,
-            line: i + 1,
-            column: m.index + 1,
-            label,
-            snippet: line.trim().slice(0, 200),
-          });
-          if (m.index === localRe.lastIndex) localRe.lastIndex++;
-        }
-      }
+  }
+  const seen = new Set<string>();
+  for (const rel of TARGET_DIRS) {
+    const abs = resolve(rootDir, rel);
+    const files: string[] = [];
+    listFiles(abs, files);
+    for (const f of files) {
+      if (seen.has(f)) continue;
+      seen.add(f);
+      scanFile(f, violations);
     }
   }
   return violations;

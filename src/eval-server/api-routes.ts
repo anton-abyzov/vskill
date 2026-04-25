@@ -607,6 +607,27 @@ export function buildSkillMetadata(
 // ---------------------------------------------------------------------------
 let currentOverrides: LlmOverrides = { provider: "claude-cli" };
 
+// 0682 F-001 — Tracks whether the persistent studio.json selection has been
+// loaded for this process lifetime. Initialized to false; set to true once
+// loadStudioSelection(root) has been attempted (regardless of whether a file
+// existed). Without this flag, the prior gate `if (!currentOverrides.provider)`
+// was permanently false (the default `{ provider: "claude-cli" }` already
+// populates `provider`), so the persisted selection at .vskill/studio.json
+// was silently discarded on every server boot — a CRITICAL regression of
+// AC-US1-03 / FR-005.
+let studioLoaded = false;
+
+/**
+ * 0682 F-001 — Test helper. Resets `currentOverrides` to the default and
+ * clears the `studioLoaded` flag so subsequent /api/config calls re-attempt
+ * loadStudioSelection. Production code never needs this; it exists solely so
+ * vitest can simulate a fresh server boot per-case.
+ */
+export function resetStudioRestoreState(): void {
+  currentOverrides = { provider: "claude-cli" };
+  studioLoaded = false;
+}
+
 /** Return the effective raw model ID (suitable for round-tripping via the API). */
 function getEffectiveRawModel(): string {
   if (currentOverrides.model) return currentOverrides.model;
@@ -1221,8 +1242,13 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // (e.g. "claude-sonnet"). The frontend round-trips config.model back to
   // generate-evals and other endpoints, so it must be a valid CLI model ID.
   router.get("/api/config", async (_req, res) => {
-    // On first load (no currentOverrides), try to restore from .vskill/studio.json.
-    if (!currentOverrides.provider) {
+    // 0682 F-001 — Boot-time restoration of .vskill/studio.json selection.
+    // Use a dedicated `studioLoaded` flag rather than checking
+    // `!currentOverrides.provider` because the module default
+    // `{ provider: "claude-cli" }` would make the prior guard permanently
+    // false, silently discarding the persisted selection on every boot.
+    if (!studioLoaded) {
+      studioLoaded = true;
       const stored = loadStudioSelection(root);
       if (stored) {
         currentOverrides.provider = stored.activeAgent as ProviderName;

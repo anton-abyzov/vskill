@@ -82,6 +82,37 @@ test.describe("0682 — Agent + Model picker", () => {
     expect(elapsed).toBeLessThan(15_000);
   });
 
+  // 0682 F-002 — Keyboard nav must walk BOTH panes. ↑↓ in the model pane
+  // walks rows; Enter selects the row at the focused index (NOT models[0]
+  // unconditionally). AC-US2-04.
+  test("Scenario 4: keyboard nav inside model pane selects the focused row, not models[0]", async ({ page }) => {
+    await waitForStudioReady(page);
+    await page.keyboard.press(`${mod()}+K`);
+    await page.waitForSelector("[data-testid='agent-list']", { timeout: 2000 });
+
+    // Move focus into the model pane via Right Arrow.
+    await page.keyboard.press("ArrowRight");
+
+    // Walk down twice in the model pane. First non-empty agent (likely
+    // Claude Code in the test env) has 3+ models so we can land on the
+    // third row. Each ArrowDown advances focusedModelIndex by 1.
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+
+    // The focused row should carry data-focused="true" — not the first one.
+    const focusedRows = await page.locator("[data-testid^='model-row-'][data-focused='true']").count();
+    expect(focusedRows).toBe(1);
+
+    // Capture the focused row's data-testid to confirm it's not the first
+    // model row in the list.
+    const allRows = page.locator("[data-testid^='model-row-']");
+    const allCount = await allRows.count();
+    expect(allCount).toBeGreaterThanOrEqual(3);
+    const firstId = await allRows.nth(0).getAttribute("data-testid");
+    const focusedId = await page.locator("[data-testid^='model-row-'][data-focused='true']").first().getAttribute("data-testid");
+    expect(focusedId).not.toBe(firstId);
+  });
+
   test("StatusBar shows per-provider lock glyphs", async ({ page }) => {
     await waitForStudioReady(page);
     // The StatusBar receives the providers prop only after /api/config has

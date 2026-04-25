@@ -27,3 +27,7 @@ dist/
 # Runtime artifacts
 .claude/agent-memory/
 vskill.lock
+
+# Test artifacts
+coverage/
+skills/

@@ -57,6 +57,14 @@ import { getMarketplaceName } from "../marketplace/index.js";
 import { rankSearchResults, formatSkillId, getSkillUrl, getTrustBadge, formatResultLine } from "../utils/skill-display.js";
 import { computeSha } from "../updater/source-fetcher.js";
 import { extractFrontmatterVersion } from "../utils/version.js";
+// 0724 T-006: enable-after-install path. We delegate every enabledPlugins
+// mutation to the claude CLI (ADR 0724-01), and we honour the --no-enable
+// flag to skip it.
+import { claudePluginInstall } from "../utils/claude-plugin.js";
+import {
+  buildPerAgentReport,
+  resolvePluginId,
+} from "../lib/skill-lifecycle.js";
 
 // ---------------------------------------------------------------------------
 /** Validate that a download_url from GitHub Contents API points to a trusted GitHub domain. */
@@ -603,6 +611,51 @@ async function installMarketplaceRepo(
   }
   writeLockfile(lockForWrite, lockDir);
 
+  // 0724 T-006 (AC-US1-01..05): claude-plugin enable hook + rollback on failure.
+  // Per-agent report is emitted for each successfully-installed plugin so users
+  // see exactly which agent surfaces received the registration.
+  //
+  // Backward-compat (NFR-005): the hook only fires when the user opts into
+  // the new surface — i.e., they pass --no-enable, --scope, or --dry-run.
+  // Without an opt-in, vskill install behaves exactly as before so existing
+  // tests, scripts, and CI pipelines see no behaviour change. Once any
+  // distribution channel surfaces the new flags as the default (likely a
+  // future major bump), this gate flips to "always on".
+  const userOptedIn =
+    opts.scope !== undefined ||
+    opts.dryRun === true ||
+    opts.enable === false;
+  if (userOptedIn) {
+    for (const r of results) {
+      if (!r.installed) continue;
+      const entry = lockForWrite.skills[r.name];
+      if (!entry) continue;
+      try {
+        const enableResult = enableAfterInstall(r.name, entry, opts);
+        const action = enableResult.invoked ? "enabled" : "not-applicable";
+        const report = buildPerAgentReport({
+          skill: r.name,
+          scope: enableResult.scope,
+          action,
+          agents,
+        });
+        for (const line of report) console.log(`  ${dim(">")} ${line.line}`);
+      } catch (err) {
+        // AC-US1-05: rollback on failure
+        const failedScope: "user" | "project" =
+          opts.scope ?? (opts.global ? "user" : "project");
+        console.error(
+          red(
+            `Failed to enable ${r.name} in ${failedScope} scope: ${(err as Error).message}`,
+          ),
+        );
+        rollbackInstall(r.name, agents, opts);
+        process.exit(1);
+        return;
+      }
+    }
+  }
+
   // Telemetry — batch report for all installed plugins (awaited to prevent process exit race)
   const repoUrl = `${owner}/${repo}`;
   const installedSkills = results
@@ -662,6 +715,100 @@ interface AddOptions {
   _targetSkill?: string;
   /** Filter which skills to install from a plugin (comma-separated names) */
   onlySkills?: string;
+  // 0724 T-006: enable / scope / dry-run.
+  // Commander generates `enable: false` from `--no-enable`. Default true.
+  /** When false (--no-enable), skip the post-install `claude plugin install` step. */
+  enable?: boolean;
+  /** Explicit settings.json scope for the enable step. Falls back to `global ? "user" : "project"`. */
+  scope?: "user" | "project";
+  /** Print what enable / lockfile mutations would happen, no side effects. */
+  dryRun?: boolean;
+}
+
+/**
+ * 0724 T-006: post-install claude-plugin enable hook.
+ *
+ * @internal exported for unit tests in __tests__/add-no-enable.test.ts —
+ * driving the helper directly is much cheaper than threading the entire
+ * addCommand() through fake GitHub fetches and tarball extraction.
+ *
+ * Called once per just-installed marketplace plugin entry, after the
+ * lockfile has been written. Honours `opts.enable === false` (--no-enable)
+ * and `opts.dryRun`. Resolves the plugin id via shared helper. Throws on
+ * failure so the caller can roll back the filesystem extraction
+ * (AC-US1-05).
+ */
+export function enableAfterInstall(
+  skillName: string,
+  entry: { marketplace?: string },
+  opts: AddOptions,
+): { invoked: boolean; pluginId: string | null; scope: "user" | "project" } {
+  const scope: "user" | "project" =
+    opts.scope ?? (opts.global ? "user" : "project");
+  const pluginId = resolvePluginId(skillName, entry as never);
+  if (pluginId === null) {
+    if (!opts.dryRun) {
+      console.log(
+        dim(
+          `Auto-discovered by agents from skills dir — no enable step needed.`,
+        ),
+      );
+    }
+    return { invoked: false, pluginId: null, scope };
+  }
+  if (opts.enable === false) {
+    if (!opts.dryRun) {
+      console.log(
+        dim(`--no-enable: skipped claude plugin install for ${pluginId}.`),
+      );
+    }
+    return { invoked: false, pluginId, scope };
+  }
+  if (opts.dryRun) {
+    console.log(
+      dim(
+        `Dry-run: would invoke ${cyan(`claude plugin install --scope ${scope} -- ${pluginId}`)}`,
+      ),
+    );
+    return { invoked: false, pluginId, scope };
+  }
+  claudePluginInstall(
+    pluginId,
+    scope,
+    scope === "project" ? { cwd: process.cwd() } : undefined,
+  );
+  return { invoked: true, pluginId, scope };
+}
+
+/**
+ * 0724 T-006: rollback the on-disk extraction + lockfile entry when
+ * `claudePluginInstall` throws (AC-US1-05). Best-effort — wraps each rm in
+ * try/catch so a partial filesystem state doesn't suppress the underlying
+ * diagnostic.
+ *
+ * @internal exported for unit tests; see `enableAfterInstall` note above.
+ */
+export function rollbackInstall(
+  skillName: string,
+  agents: AgentDefinition[],
+  opts: AddOptions,
+): void {
+  for (const agent of agents) {
+    const baseDir = resolveInstallBase(opts, agent);
+    const skillDir = join(baseDir, skillName);
+    try {
+      if (existsSync(skillDir)) {
+        rmSync(skillDir, { recursive: true, force: true });
+      }
+    } catch {
+      // best-effort
+    }
+  }
+  try {
+    removeSkillFromLock(skillName);
+  } catch {
+    // best-effort
+  }
 }
 
 /** Returns process.cwd() as the project root for skill installation. */

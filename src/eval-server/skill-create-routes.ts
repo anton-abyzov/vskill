@@ -15,6 +15,8 @@ import { writeHistoryEntry } from "../eval/benchmark-history.js";
 import { getAgentCreationProfile } from "../agents/agents-registry.js";
 import type { AgentCreationProfile } from "../agents/agents-registry.js";
 import { generateSkill } from "../core/skill-generator.js";
+import { extractFrontmatterVersion, bumpPatch, setFrontmatterVersion } from "../utils/version.js";
+import { submitSkillUpdateEvent } from "./platform-proxy.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,6 +51,19 @@ interface CreateSkillRequest {
   model?: string;
   allowedTools?: string;
   body: string;
+  /**
+   * Explicit `version:` to emit in SKILL.md frontmatter. When omitted:
+   *   - mode="create" → defaults to "1.0.0"
+   *   - mode="update" → existing version is read from disk and patch-bumped
+   */
+  version?: string;
+  /**
+   * "create" (default) → fail with 409 if SKILL.md already exists (preserves
+   * the legacy guard that prevents accidental overwrite).
+   * "update" → overwrite the existing SKILL.md with the new content, bumping
+   * the patch version unless `version` is explicitly provided.
+   */
+  mode?: "create" | "update";
   /**
    * Spec-compliant (agentskills.io/specification): emitted under `metadata.tags`
    * in SKILL.md frontmatter, NEVER at the top level. Optional.
@@ -209,6 +224,12 @@ function buildSkillMd(data: CreateSkillRequest): string {
   const lines: string[] = ["---"];
   // Description — always quote to handle special chars
   lines.push(`description: "${data.description.replace(/"/g, '\\"')}"`);
+  // Version — emitted only when supplied (callers pass "1.0.0" for new skills
+  // and the bumped value for updates). Keeping it conditional preserves the
+  // golden-file fixtures for existing tests that don't pass a version.
+  if (data.version?.trim()) {
+    lines.push(`version: "${data.version.trim()}"`);
+  }
   if (data.allowedTools?.trim()) {
     lines.push(`allowed-tools: ${data.allowedTools.trim()}`);
   }
@@ -1093,12 +1114,34 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
     }
 
     const targetDir = computeSkillDir(root, body.layout, body.plugin || "", body.name);
+    const skillMdPath = join(targetDir, "SKILL.md");
 
-    // Check if already exists (allow overwriting drafts — draft.json indicates auto-saved draft)
+    // Check if already exists. Three legitimate ways to overwrite:
+    //   1. draft.json marker → finalizing an auto-saved draft
+    //   2. mode === "update" → caller intentionally wants to overwrite
+    //   3. (otherwise) → 409 Conflict (legacy guard)
     const isDraftFinalize = existsSync(join(targetDir, "draft.json"));
-    if (existsSync(join(targetDir, "SKILL.md")) && !isDraftFinalize) {
+    const isUpdateMode = body.mode === "update";
+    const skillExists = existsSync(skillMdPath);
+
+    if (skillExists && !isDraftFinalize && !isUpdateMode) {
       sendJson(res, { error: `Skill already exists at ${targetDir}` }, 409, req);
       return;
+    }
+
+    // Resolve the version to emit in SKILL.md.
+    //   - explicit body.version always wins
+    //   - update mode reads the existing version + bumps patch
+    //   - everything else defaults to "1.0.0"
+    let resolvedVersion: string;
+    if (body.version?.trim()) {
+      resolvedVersion = body.version.trim();
+    } else if (skillExists && isUpdateMode) {
+      const existing = readFileSync(skillMdPath, "utf-8");
+      const previous = extractFrontmatterVersion(existing) ?? "1.0.0";
+      resolvedVersion = bumpPatch(previous);
+    } else {
+      resolvedVersion = "1.0.0";
     }
 
     try {
@@ -1106,9 +1149,8 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
       mkdirSync(targetDir, { recursive: true });
       mkdirSync(join(targetDir, "evals"), { recursive: true });
 
-      // Write SKILL.md
-      const content = buildSkillMd(body);
-      const skillMdPath = join(targetDir, "SKILL.md");
+      // Write SKILL.md (with the resolved version injected into the request)
+      const content = buildSkillMd({ ...body, version: resolvedVersion });
       writeFileSync(skillMdPath, content, "utf-8");
 
       // Write evals.json if provided (from AI generation)
@@ -1155,13 +1197,30 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
         }
       }
 
+      // In update mode, attempt to publish the new version to the platform's
+      // queue so SSE subscribers see it without waiting for the 10-min scanner.
+      // No-op when INTERNAL_BROADCAST_KEY is not configured (production studio).
+      let publishResult: Awaited<ReturnType<typeof submitSkillUpdateEvent>> | undefined;
+      if (skillExists && isUpdateMode) {
+        const pluginForId = body.layout === 3 ? (basename(root) || "default") : (body.plugin || "default");
+        publishResult = await submitSkillUpdateEvent({
+          skillId: `${pluginForId}/${body.name}`,
+          version: resolvedVersion,
+          diffSummary: `skills/create update mode: ${body.name} → ${resolvedVersion}`,
+        });
+      }
+
+      const isUpdate = skillExists && isUpdateMode;
       sendJson(res, {
         ok: true,
         plugin: body.layout === 3 ? (basename(root) || "default") : body.plugin,
         skill: body.name,
         dir: targetDir,
         skillMdPath,
-      }, 201, req);
+        version: resolvedVersion,
+        updated: isUpdate,
+        ...(publishResult ? { publish: publishResult } : {}),
+      }, isUpdate ? 200 : 201, req);
     } catch (err) {
       // On failure, do NOT delete draftDir — preserve user's work
       sendJson(res, { error: `Failed to create skill: ${(err as Error).message}` }, 500, req);

@@ -94,6 +94,17 @@ async function probeVskillServer(port: number): Promise<{ projectName: string | 
  * actionable. The probe alone distinguishes our server from everything
  * else, which is the only discrimination `vskill studio` needs.
  */
+function killHint(port: number): string {
+  // Printable strings only — vskill itself doesn't shell out (Windows-safe).
+  // Show both Unix and Windows so the user can copy whichever applies.
+  const unix = `lsof -ti:${port} | xargs kill`;
+  const win = `for /f "tokens=5" %a in ('netstat -ano ^| findstr :${port}') do taskkill /F /PID %a`;
+  return (
+    `  ${dim("To free the port (macOS/Linux):")} ${cyan(unix)}\n` +
+    `  ${dim("To free the port (Windows):    ")} ${cyan(win)}\n`
+  );
+}
+
 async function handlePortConflict(port: number, resolvedRoot: string): Promise<void> {
   const existing = await probeVskillServer(port);
 
@@ -104,17 +115,23 @@ async function handlePortConflict(port: number, resolvedRoot: string): Promise<v
       `\n  ${bold("Project:")}  ${cyan(existing.projectName || "unknown")}${sameProject ? dim(" (same project)") : ""}` +
       `\n  ${bold("Root:")}     ${dim(existing.root)}` +
       `\n  ${bold("Model:")}    ${dim(existing.model)}` +
-      `\n\n  ${dim("Open the browser to:")} ${cyan(`http://localhost:${port}`)}\n`,
+      `\n\n  ${dim("Open the browser to:")} ${cyan(`http://localhost:${port}`)}` +
+      `\n\n  ${dim("Or restart fresh — kill the existing server, then re-run vskill studio:")}\n` +
+      killHint(port) +
+      "\n",
     );
     // Reuse semantics: exit cleanly so the user can point their browser.
     process.exit(0);
   }
 
   // Port occupied by a non-vskill process. No PID discovery (Windows can't
-  // do it portably, and the PID wasn't actionable anyway).
+  // do it portably, and the PID wasn't actionable anyway). Print kill hints
+  // for both platforms so the user can free the port without leaving the
+  // terminal.
   console.error(
-    red(`\n  Port ${port} is in use by a non-vskill process — please free it manually.\n`) +
-    `  ${dim("Or pick a different port:")} ${cyan(`vskill eval serve --port ${port + 1}`)}\n`,
+    red(`\n  Port ${port} is in use by a non-vskill process — please free it manually.\n\n`) +
+    killHint(port) +
+    `\n  ${dim("Or pick a different port:")} ${cyan(`vskill eval serve --port ${port + 1}`)}\n`,
   );
   process.exit(1);
 }

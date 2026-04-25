@@ -33,6 +33,7 @@
 
 import * as http from "node:http";
 import * as https from "node:https";
+import { randomUUID } from "node:crypto";
 
 const DEFAULT_PLATFORM_URL = "https://verified-skill.com";
 
@@ -168,4 +169,84 @@ export function proxyToPlatform(
     // Forward the request body (if any) — req is a readable stream.
     req.pipe(upstreamReq);
   });
+}
+
+// ---------------------------------------------------------------------------
+// submitSkillUpdateEvent — push a SkillUpdateEvent to the platform's internal
+// publish queue (POST /api/v1/internal/skills/publish). Used by the studio
+// after apply-improvement / create-update so the platform UpdateHub fans out
+// the new version to SSE subscribers without waiting for the 10-min scanner.
+//
+// Requires INTERNAL_BROADCAST_KEY env on both sides (eval-server + platform).
+// In production the studio doesn't carry the key, so this degrades to a no-op
+// returning { submitted: false, reason: "no_internal_key" } — the caller logs
+// a hint that the user should `git push` so the scanner picks the change up.
+//
+// The publish endpoint (vskill-platform/src/app/api/v1/internal/skills/publish)
+// validates `skillId` (UUID), `version`, `gitSha`, `publishedAt`, `eventId`.
+// For local-dev with INTERNAL_BROADCAST_KEY set, callers can pass any string
+// skillId (e.g. "<plugin>/<skill>") — the DO accepts the event but SSE filters
+// based on UUID won't match. That's fine for the integration test path.
+// ---------------------------------------------------------------------------
+
+export interface SubmitSkillUpdateEventInput {
+  skillId: string;
+  version: string;
+  gitSha?: string;
+  publishedAt?: string;
+  diffSummary?: string;
+}
+
+export type SubmitSkillUpdateEventResult =
+  | { submitted: true; status: number; eventId: string }
+  | { submitted: false; reason: "no_internal_key" | "platform_error"; status?: number; message?: string };
+
+export async function submitSkillUpdateEvent(
+  input: SubmitSkillUpdateEventInput,
+  opts: { baseUrl?: string; internalKey?: string; fetchImpl?: typeof fetch } = {},
+): Promise<SubmitSkillUpdateEventResult> {
+  const internalKey = opts.internalKey ?? process.env.INTERNAL_BROADCAST_KEY;
+  if (!internalKey) {
+    return { submitted: false, reason: "no_internal_key" };
+  }
+
+  const baseUrl = opts.baseUrl ?? getPlatformBaseUrl();
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const eventId = randomUUID();
+  const event = {
+    type: "skill.updated" as const,
+    eventId,
+    skillId: input.skillId,
+    version: input.version,
+    gitSha: input.gitSha ?? `local-${Date.now().toString(16)}`,
+    publishedAt: input.publishedAt ?? new Date().toISOString(),
+    ...(input.diffSummary ? { diffSummary: input.diffSummary } : {}),
+  };
+
+  try {
+    const resp = await fetchImpl(`${baseUrl}/api/v1/internal/skills/publish`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Key": internalKey,
+      },
+      body: JSON.stringify(event),
+    });
+    if (resp.ok) {
+      return { submitted: true, status: resp.status, eventId };
+    }
+    const text = await resp.text().catch(() => "");
+    return {
+      submitted: false,
+      reason: "platform_error",
+      status: resp.status,
+      message: text || resp.statusText,
+    };
+  } catch (err) {
+    return {
+      submitted: false,
+      reason: "platform_error",
+      message: (err as Error).message,
+    };
+  }
 }

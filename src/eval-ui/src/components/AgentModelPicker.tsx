@@ -32,6 +32,9 @@ export function AgentModelPicker({ onToast }: AgentModelPickerProps) {
       const minutes = Math.round(ageMs / 60_000);
       onToast?.(`Using cached ${agentId} catalog (${minutes} min old)`);
     },
+    // 0682 CR-002 — Forward setActive() failures to the host's toast channel
+    // so the user sees why their selection didn't stick (e.g. missing key).
+    onSetActiveError: (message) => onToast?.(message),
   });
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);

@@ -60,3 +60,34 @@ export function resolveVersion(opts: {
 
   return "1.0.0";
 }
+
+/**
+ * Set or insert the `version:` field inside SKILL.md frontmatter.
+ *
+ * Behavior:
+ *  - If frontmatter exists and contains `version:` → replace its value.
+ *  - If frontmatter exists but has no `version:` → insert as the first field.
+ *  - If no frontmatter at all → prepend a minimal `---\nversion: "X"\n---` block.
+ *
+ * The version is always emitted quoted to match the convention used by
+ * skill-create-routes' buildSkillMd emitter and to keep YAML parsers happy
+ * for non-numeric semver strings.
+ */
+export function setFrontmatterVersion(content: string, version: string): string {
+  const fmMatch = content.match(/^(---\s*\n)([\s\S]*?)(\n---)/);
+  if (!fmMatch) {
+    return `---\nversion: "${version}"\n---\n\n${content}`;
+  }
+
+  const [, openFence, body, closeFence] = fmMatch;
+  const versionLineRe = /^version:\s*"?[^\n]*"?\s*$/m;
+  let newBody: string;
+  if (versionLineRe.test(body)) {
+    newBody = body.replace(versionLineRe, `version: "${version}"`);
+  } else {
+    // Insert version as the first frontmatter line so it's stable + obvious.
+    newBody = `version: "${version}"\n${body}`;
+  }
+
+  return content.replace(fmMatch[0], `${openFence}${newBody}${closeFence}`);
+}

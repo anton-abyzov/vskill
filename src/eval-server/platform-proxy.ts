@@ -1,9 +1,10 @@
 // ---------------------------------------------------------------------------
 // platform-proxy.ts — forward unhandled /api/v1/skills/* requests from the
 // Skill Studio (eval-server, port-hashed e.g. 3162) to the vskill-platform
-// (Next.js / Cloudflare Worker, default http://localhost:3017 in dev).
+// (default https://verified-skill.com — the production worker — for parity
+//  with src/api/client.ts:10 DEFAULT_BASE_URL).
 //
-// Why this exists (0712 US-003 follow-up T-016A/B):
+// Why this exists (0712 US-003 follow-up T-016A/B; default re-targeted in 0725):
 //   The studio frontend (src/eval-ui) issues *relative* fetches such as
 //   `/api/v1/skills/check-updates` and `/api/v1/skills/stream`. Those land
 //   on the eval-server itself, which has no handler for them and returns
@@ -16,7 +17,9 @@
 //
 // Design notes:
 //   - Target URL is configurable via `VSKILL_PLATFORM_URL` env (default
-//     `http://localhost:3017`). Must include scheme + host + port.
+//     `https://verified-skill.com`). Local-platform devs running their own
+//     `wrangler dev` opt back in via `VSKILL_PLATFORM_URL=http://localhost:3017`.
+//     Must include scheme + host (port optional for https).
 //   - Method, headers (minus hop-by-hop), query string, and request body
 //     stream are forwarded verbatim. Response status, headers, and body
 //     stream are piped back so SSE (`text/event-stream`) connections stay
@@ -31,7 +34,7 @@
 import * as http from "node:http";
 import * as https from "node:https";
 
-const DEFAULT_PLATFORM_URL = "http://localhost:3017";
+const DEFAULT_PLATFORM_URL = "https://verified-skill.com";
 
 // Hop-by-hop headers per RFC 2616 §13.5.1 — never forward these on a proxy.
 const HOP_BY_HOP = new Set([

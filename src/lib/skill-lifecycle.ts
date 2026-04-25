@@ -81,10 +81,14 @@ export interface BuildPerAgentReportOptions {
  * Format: `<skillName>@<marketplace>`. Returns `null` when the lockfile
  * entry has no `marketplace` field (or it is empty), which signals that the
  * skill is auto-discovered and there is no plugin entry to enable / disable.
+ *
+ * Parameter type is narrowed to `Pick<SkillLockEntry, 'marketplace'>` so
+ * callers that only have a partial entry shape (e.g. enableAfterInstall in
+ * add.ts) don't need to cast — the function only ever reads `marketplace`.
  */
 export function resolvePluginId(
   skillName: string,
-  entry: SkillLockEntry,
+  entry: Pick<SkillLockEntry, "marketplace">,
 ): string | null {
   if (!entry.marketplace || entry.marketplace.length === 0) {
     return null;

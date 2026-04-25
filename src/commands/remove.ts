@@ -9,6 +9,7 @@ import { resolveTilde } from "../utils/paths.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { readLockfile, removeSkillFromLock } from "../lockfile/index.js";
 import { claudePluginUninstall } from "../utils/claude-plugin.js";
+import { isPluginEnabled } from "../settings/index.js";
 import {
   buildPerAgentReport,
   resolvePluginId,

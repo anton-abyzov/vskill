@@ -122,4 +122,37 @@ describe("cleanupCommand --dry-run", () => {
     const out = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
     expect(out).toMatch(/0 stale entries removed/);
   });
+
+  // ---- AC-US7-04 (explicit): lockfile-only skill name never appears -----
+  // Belt-and-braces protection for the "user manually disabled but kept the
+  // file on disk" path. Two lockfile skills, only one in enabledPlugins.
+  // The lockfile-only one (`manually_disabled@m`) must NOT appear in the
+  // dry-run uninstall output, and the in-sync count must reflect both
+  // lockfile entries staying put.
+  it("AC-US7-04: lockfile-only skill name is absent from dry-run uninstall lines", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {
+        active_skill: { marketplace: "m" },
+        manually_disabled: { marketplace: "m" },
+      },
+      createdAt: "",
+      updatedAt: "",
+    });
+    // purgeStalePlugins only returns ids that appear in enabledPlugins
+    // without lockfile backing. Both lockfile skills have backing, so the
+    // function returns nothing for both scopes — exactly the AC-US7-04
+    // protective semantics.
+    mockPurgeStalePlugins.mockReturnValue([]);
+
+    await cleanupCommand({ dryRun: true });
+
+    expect(mockUninstallStalePlugins).not.toHaveBeenCalled();
+    expect(mockClaudePluginUninstall).not.toHaveBeenCalled();
+    const out = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    // The protected skill must never surface as a removal candidate.
+    expect(out).not.toMatch(/manually_disabled@m/);
+    expect(out).toMatch(/0 stale entries removed/);
+  });
 });

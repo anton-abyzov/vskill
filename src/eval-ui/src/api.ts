@@ -277,7 +277,7 @@ export interface ModelOption {
 }
 
 export interface ProviderInfo {
-  id: "claude-cli" | "anthropic" | "ollama" | "openrouter" | "gemini-cli" | "codex-cli";
+  id: "claude-cli" | "anthropic" | "ollama" | "openrouter" | "gemini-cli" | "codex-cli" | "lm-studio" | "openai";
   label: string;
   available: boolean;
   models: ModelOption[];

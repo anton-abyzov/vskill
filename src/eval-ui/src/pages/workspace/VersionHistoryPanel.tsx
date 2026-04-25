@@ -4,6 +4,7 @@ import { useStudio } from "../../StudioContext";
 import { api } from "../../api";
 import { useSWR, mutate } from "../../hooks/useSWR";
 import { ChangelogViewer } from "../../components/ChangelogViewer";
+import { buildSubmitUrl } from "../../utils/submit-url";
 import type { VersionEntry, VersionDiff } from "../../types";
 
 const CERT_COLORS: Record<string, { bg: string; text: string }> = {
@@ -20,7 +21,14 @@ function truncate(s: string | null, max: number): string {
 export function VersionHistoryPanel() {
   const { state } = useWorkspace();
   const { plugin, skill } = state;
-  const { refreshSkills, updateCount } = useStudio();
+  const studio = useStudio();
+  const { refreshSkills, updateCount } = studio;
+  // 0729: lookup the SkillInfo so the empty state can branch on origin and
+  // build a submit URL pre-filled with the skill's repoUrl/homepage.
+  const skillInfo = useMemo(
+    () => studio.state.skills.find((s) => s.plugin === plugin && s.skill === skill) ?? null,
+    [studio.state.skills, plugin, skill],
+  );
 
   // Fetch versions
   const swrKey = `versions/${plugin}/${skill}`;
@@ -173,8 +181,48 @@ export function VersionHistoryPanel() {
   }
 
   if (!versions || versions.length === 0) {
+    // 0729: source-origin skills get an actionable empty state with a CTA
+    // pointing at verified-skill.com/submit. Anything else (installed plugin /
+    // global skills the user doesn't author) keeps the legacy minimal line.
+    const isSource = skillInfo?.origin === "source";
+    if (isSource) {
+      const submitUrl = buildSubmitUrl(skillInfo?.homepage ?? null);
+      return (
+        <div
+          className="flex flex-col items-center justify-center h-full py-16 px-8"
+          data-testid="versions-empty-state-local"
+        >
+          <div
+            className="text-[14px] font-semibold mb-2"
+            style={{ color: "var(--text-primary)" }}
+          >
+            No published versions yet
+          </div>
+          <div
+            className="text-[13px] text-center mb-5 max-w-md"
+            style={{ color: "var(--text-tertiary)", lineHeight: 1.5 }}
+          >
+            This skill is local-only — the version history shown here is sourced from
+            verified-skill.com. Submit your skill to start tracking versions and share
+            it with others.
+          </div>
+          <a
+            href={submitUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-primary text-[12px]"
+            data-testid="versions-empty-state-cta"
+          >
+            Submit on verified-skill.com
+          </a>
+        </div>
+      );
+    }
     return (
-      <div className="flex flex-col items-center justify-center h-full py-16">
+      <div
+        className="flex flex-col items-center justify-center h-full py-16"
+        data-testid="versions-empty-state-installed"
+      >
         <div className="text-[13px]" style={{ color: "var(--text-tertiary)" }}>
           No version history available
         </div>

@@ -1,7 +1,7 @@
 {
   "name": "mobile",
   "description": "iOS/macOS app deployment via asc CLI — a lightweight fastlane alternative for TestFlight, App Store submission, signing, metadata, and analytics",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "author": {
     "name": "Anton Abyzov",
     "email": "anton.abyzov@gmail.com",

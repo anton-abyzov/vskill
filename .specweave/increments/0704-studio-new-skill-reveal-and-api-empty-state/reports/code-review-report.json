@@ -1,0 +1,165 @@
+{
+  "version": "1.1",
+  "scope": "increment 0704-studio-new-skill-reveal-and-api-empty-state",
+  "date": "2026-04-24",
+  "reviewers": ["logic", "security", "types", "silent-failures", "spec-compliance", "tests", "comments"],
+  "gateCheck": { "passed": true, "reason": null },
+  "summary": {
+    "total": 7,
+    "critical": 0,
+    "high": 0,
+    "medium": 3,
+    "low": 3,
+    "info": 1
+  },
+  "validation": {
+    "performed": false,
+    "preValidation": { "critical": 0, "high": 0 },
+    "postValidation": { "critical": 0, "high": 0 },
+    "rejected": 0
+  },
+  "findings": [
+    {
+      "id": "M-001",
+      "severity": "MEDIUM",
+      "reviewer": "logic",
+      "file": "repositories/anton-abyzov/vskill/src/eval-ui/src/StudioContext.tsx",
+      "line": "229-237 (at commit 53eabed)",
+      "title": "revealSkill with empty plugin writes #/skills//<name> when skills list hasn't rehydrated",
+      "description": "At the state shipped in commit 53eabed, revealSkill('', 'my-skill') falls through to `resolvedPlugin = found?.plugin ?? plugin` where `plugin = ''`. If refreshSkills() hasn't landed yet, `found` is undefined and the code dispatches REVEAL_SKILL with plugin='' and sets window.location.hash = '#/skills//my-skill'. This breaks the Sidebar data-skill-id matcher (looks for ''/'my-skill'), defeats AC-US1-04 (URL hash must match #/skills/{plugin}/{skill}), and produces an invalid hash that the rehydrate regex won't parse. The App.tsx onCreated handler explicitly passes `result.pluginName ?? ''` for standalone skills, making this reachable in practice. NOTE: this is already fixed in an uncommitted diff (F-001/F-002 guards) — the fix needs to be committed to be part of 0704.",
+      "suggestion": "Commit the already-prepared F-001/F-002 hardening in StudioContext.tsx that (a) restricts the empty-plugin fallback to `s.source !== 'plugin'` and (b) bails out with a console.warn when no plugin can be resolved. Without this commit, the hash-based reveal rehydration in Sidebar silently fails for freshly-created standalone skills."
+    },
+    {
+      "id": "M-002",
+      "severity": "MEDIUM",
+      "reviewer": "spec-compliance",
+      "file": ".specweave/increments/0704-studio-new-skill-reveal-and-api-empty-state/rubric.md",
+      "line": "1-13",
+      "title": "Rubric is still a template — closure gate will fail",
+      "description": "The rubric.md file is the auto-generated template with `status: template` and no criteria. Closure gates consume rubric criteria (evaluator: sw:code-reviewer / sw:grill / etc.) — leaving this as a template means the closure-validator has nothing to pass/fail against. Spec AC list is well-defined (AC-US1-01..05, AC-US2-01..06) so rubric criteria can be generated mechanically from them.",
+      "suggestion": "Run sw-planner or manually populate rubric.md with one criterion per AC, assigning evaluators (sw:code-reviewer for structural checks, sw:grill for behavioral invariants). Change `status: template` to `status: active`."
+    },
+    {
+      "id": "M-003",
+      "severity": "MEDIUM",
+      "reviewer": "tests",
+      "file": "repositories/anton-abyzov/vskill/src/eval-ui/src/components/__tests__/Sidebar.reveal.test.tsx",
+      "line": "88-218",
+      "title": "AC-US1-05 (manual row clicks do NOT force-expand ancestors) has no dedicated test",
+      "description": "The spec adds AC-US1-05 as a regression guard: 'Regular row clicks (user navigating within the sidebar) do NOT force-expand ancestors — only explicit reveal triggers expand collapsed ancestors.' The committed test suite covers (a) reveal expands ancestors, (b) reveal scrolls, (c) no scroll when revealSkillId=null — but no test calls `selectSkill(...)` on a collapsed sidebar and asserts the ancestors stay collapsed. The implementation looks correct (revealSkillId is the only trigger), but AC-US1-05 is a behavioural contract and a regression here would be hard to spot. Tasks.md T-012 lists AC-US1-05 as satisfied by this file — not backed by an assertion.",
+      "suggestion": "Add a third case to Sidebar.reveal.test.tsx: render Sidebar with revealSkillId=null and AUTHORING collapsed, dispatch onSelect for a skill, assert the AUTHORING group stays collapsed (`getByText('AUTHORING')`'s parent has aria-expanded='false' and the child plugin tree does not appear in the DOM)."
+    },
+    {
+      "id": "L-001",
+      "severity": "LOW",
+      "reviewer": "types",
+      "file": "repositories/anton-abyzov/vskill/src/eval-ui/src/components/Sidebar.tsx",
+      "line": "361-373",
+      "title": "revealTarget uses `as { source?: string }` / `as { pluginName?: string }` type assertions instead of extending SkillInfo",
+      "description": "The revealTarget useMemo casts SkillInfo to `{ source?: string }` and `{ pluginName?: string }` to pull fields that already exist on the canonical type (as evidenced by Sidebar.reveal.test.tsx's test fixtures: `source: 'plugin' | 'project'`, `pluginName: string | null`). These assertions hide the real shape from the type system — if the SkillInfo contract changes, the cast will silently drift. Low severity because the test fixtures prove the runtime shape matches; it's a defensive-cast smell rather than a bug.",
+      "suggestion": "Either update SkillInfo to explicitly type `source?: 'plugin' | 'project'` and `pluginName?: string | null`, or import the proper subtype. Remove the inline `as { ... }` casts."
+    },
+    {
+      "id": "L-002",
+      "severity": "LOW",
+      "reviewer": "logic",
+      "file": "repositories/anton-abyzov/vskill/src/eval-ui/src/components/Sidebar.tsx",
+      "line": "374-389",
+      "title": "Reveal effect never clears revealSkillId when the row is not yet in the DOM",
+      "description": "The useEffect queries `[data-skill-id=...]` and returns early when the row is missing, without calling onRevealComplete. If the matching skill never appears in state (e.g. refreshSkills races with the reveal request and the skill was created under a plugin filter the user has hidden, or the skill was deleted between create and reveal), revealSkillId stays set indefinitely, keeping AUTHORING force-open. Next render triggers the effect again via the `skills` dependency; if the row appears, scroll fires — good. If it never appears, the force-open sticks until the next SELECT_SKILL or page reload. Minor because the effect self-corrects on any skills change, but worth a cap.",
+      "suggestion": "Add a timeout fallback (e.g. setTimeout 2000ms) that calls onRevealComplete if the row still hasn't been found, or clear revealSkillId on unmount / when a different skill is selected. Alternatively document the escape-hatch explicitly in the code comment."
+    },
+    {
+      "id": "L-003",
+      "severity": "LOW",
+      "reviewer": "silent-failures",
+      "file": "repositories/anton-abyzov/vskill/src/eval-ui/src/pages/workspace/WorkspaceContext.tsx",
+      "line": "186-199 (post-diff)",
+      "title": "Consumer comment accurate but silent-fail branch no longer exists — verify no other consumers still rely on 404",
+      "description": "The WorkspaceContext diff correctly drops the `err?.status !== 404` guard and promotes any rejection to `evalsError`. The comment says 'Rejection only fires for real errors (400 validation, 500)'. However, the api-routes-empty-state.test.ts confirms malformed evals now return 422, not 400 — the comment should mention 422. Additionally, worth grepping for any other consumer still short-circuiting on status===404 for evals/benchmark to ensure no dead branch remains.",
+      "suggestion": "Update comment in WorkspaceContext.tsx to say `400/422 validation, 500`. Run `grep -rn 'status === 404' src/eval-ui/src` to confirm no other evals/benchmark callsite still relies on the dropped branch."
+    },
+    {
+      "id": "I-001",
+      "severity": "INFO",
+      "reviewer": "comments",
+      "file": "repositories/anton-abyzov/vskill/src/eval-ui/src/components/Sidebar.tsx",
+      "line": "386-388",
+      "title": "CSS.escape fallback regex is narrower than CSS spec",
+      "description": "The fallback `revealSkillId.replace(/[\"\\\\]/g, '\\\\$&')` escapes only `\"` and `\\`. Real CSS.escape also handles `[`, `]`, `]`, `:`, `.`, `#`, `>`, whitespace, and leading digits. skill/plugin slugs generated by vskill are [a-z0-9-]+ in practice so this is fine, but a plugin name containing a `.` (like the `.CLAUDE` fixture in the tests!) or `:` would break the selector in browsers where CSS is undefined (very old JSDOM or stripped environments). Non-issue in production but worth a note.",
+      "suggestion": "If the fallback is kept, expand the regex to `/[\"\\\\.:\\[\\]#>\\s]/g`, or require CSS.escape (all modern browsers + JSDOM ≥16 have it). The `.CLAUDE/scout` test fixture would surface the gap if JSDOM ever drops CSS.escape."
+    }
+  ],
+  "perFile": [
+    {
+      "file": "repositories/anton-abyzov/vskill/src/eval-server/api-routes.ts",
+      "issues": 0,
+      "topSeverity": null,
+      "notes": "Clean diff. 200-sentinel change is minimal, well-commented, and paired with test coverage in api-routes-empty-state.test.ts."
+    },
+    {
+      "file": "repositories/anton-abyzov/vskill/src/eval-ui/src/api.ts",
+      "issues": 0,
+      "topSeverity": null,
+      "notes": "Correct removal of dead 404 branch after server-side change. Client still throws ApiError on !res.ok for real errors."
+    },
+    {
+      "file": "repositories/anton-abyzov/vskill/src/eval-ui/src/StudioContext.tsx",
+      "issues": 1,
+      "topSeverity": "MEDIUM",
+      "notes": "M-001: empty-plugin branch can produce invalid hash. Already fixed in uncommitted diff — commit the fix as part of 0704."
+    },
+    {
+      "file": "repositories/anton-abyzov/vskill/src/eval-ui/src/components/Sidebar.tsx",
+      "issues": 3,
+      "topSeverity": "LOW",
+      "notes": "L-001 (type asserts), L-002 (no row-not-found timeout), I-001 (CSS.escape fallback). Core logic correct and well-tested."
+    },
+    {
+      "file": "repositories/anton-abyzov/vskill/src/eval-ui/src/components/PluginTreeGroup.tsx",
+      "issues": 0,
+      "topSeverity": null,
+      "notes": "forceOpen prop is a clean addition. Internal collapsed state untouched, verified by PluginTreeGroup.forceOpen.test.tsx."
+    },
+    {
+      "file": "repositories/anton-abyzov/vskill/src/eval-ui/src/pages/SkillDetailPage.tsx",
+      "issues": 0,
+      "topSeverity": null,
+      "notes": "Dead 404 branch removed. ApiError import cleaned up."
+    },
+    {
+      "file": "repositories/anton-abyzov/vskill/src/eval-ui/src/pages/workspace/WorkspaceContext.tsx",
+      "issues": 1,
+      "topSeverity": "LOW",
+      "notes": "L-003: comment mentions 400 but server now returns 422 for validation."
+    },
+    {
+      "file": "repositories/anton-abyzov/vskill/src/eval-ui/src/App.tsx",
+      "issues": 0,
+      "topSeverity": null,
+      "notes": "onCreated rewired to revealSkill. setTimeout 500ms preserved per FR-004."
+    },
+    {
+      "file": ".specweave/increments/0704-studio-new-skill-reveal-and-api-empty-state/rubric.md",
+      "issues": 1,
+      "topSeverity": "MEDIUM",
+      "notes": "M-002: template not populated. Closure gate will block."
+    }
+  ],
+  "recommendations": [
+    "Commit the uncommitted StudioContext hardening (F-001/F-002 guards) — this is the highest-impact fix and closes the only functional-severity gap in the increment.",
+    "Populate rubric.md with criteria derived from AC-US1-01..05 and AC-US2-01..06 so sw:done closure gates have something to evaluate.",
+    "Add a negative test for AC-US1-05 (manual selectSkill does not force-expand ancestors) — the implementation is correct but the contract is untested.",
+    "Replace inline `as { source?: string }` casts in Sidebar.tsx with proper SkillInfo field typing. The test fixtures prove the runtime shape, so the types should reflect it."
+  ],
+  "reviewerStatus": {
+    "logic": "REVIEW_COMPLETE (2 findings)",
+    "security": "REVIEW_COMPLETE (0 findings — no auth/input/secret surface touched)",
+    "types": "REVIEW_COMPLETE (1 finding)",
+    "silent-failures": "REVIEW_COMPLETE (1 finding)",
+    "spec-compliance": "REVIEW_COMPLETE (1 finding — rubric template)",
+    "tests": "REVIEW_COMPLETE (1 finding — AC-US1-05 gap)",
+    "comments": "REVIEW_COMPLETE (1 finding — CSS.escape fallback)",
+    "performance": "SKIPPED (no perf-sensitive code paths — UI effects + 200-sentinel JSON)"
+  }
+}

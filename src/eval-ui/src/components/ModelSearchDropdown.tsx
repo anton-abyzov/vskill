@@ -56,9 +56,7 @@ export function ModelSearchDropdown({ value, onChange }: Props) {
   function formatPricing(model: OpenRouterModel): string {
     const prompt = model.pricing?.prompt;
     if (prompt == null || prompt === 0) return "Free";
-    // Price per 1M tokens
-    const perMillion = prompt * 1_000_000;
-    return `$${perMillion.toFixed(2)}/1M`;
+    return `$${prompt.toFixed(2)}/1M`; // unit per OpenRouterModel.pricing JSDoc
   }
 
   return (

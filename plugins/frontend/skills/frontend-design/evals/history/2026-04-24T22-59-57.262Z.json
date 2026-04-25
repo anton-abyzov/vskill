@@ -1,0 +1,60 @@
+{
+  "timestamp": "2026-04-24T22:59:57.262Z",
+  "model": "opus",
+  "skill_name": "frontend-design",
+  "cases": [
+    {
+      "eval_id": 5,
+      "eval_name": "responsive-verification",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0,
+      "durationMs": 12049,
+      "tokens": null,
+      "inputTokens": null,
+      "outputTokens": null,
+      "cost": null,
+      "billingMode": "subscription",
+      "output": "The file `src/components/Hero.tsx` doesn't exist in this repo. Could you double-check the path? A few options:\n\n1. Share the actual path (or paste the component contents) and I'll fix the responsive layout.\n2. If it's in a different repo under the umbrella, point me to that location.\n\nAlso worth flagging: this repo (`vskill`) has an active SpecWeave increment (`0670-skill-builder-universal`) with strict TDD enforced, and the hook reminders say SKILL FIRST. If `Hero.tsx` is meant to be new work in *this* repo, it should go through `/sw:increment` rather than a direct edit. If it lives in a different project, that's fine — just point me at it.",
+      "assertions": [
+        {
+          "id": "reads-existing",
+          "text": "Reads the existing Hero.tsx file before making changes (doesn't rewrite from scratch without understanding current code)",
+          "pass": false,
+          "reasoning": "The output does not read the Hero.tsx file. Instead, it claims the file doesn't exist and asks the user to provide the path or contents. While this is a reasonable response if the file truly doesn't exist, it does not satisfy the assertion of reading the existing file before making changes."
+        },
+        {
+          "id": "responsive-fix",
+          "text": "Addresses responsive layout issues using media queries, flexbox/grid adjustments, or responsive utility classes",
+          "pass": false,
+          "reasoning": "The output does not address responsive layout issues. Instead, it reports that the file doesn't exist and asks for clarification on the path. No media queries, flexbox/grid adjustments, or responsive utility classes are provided."
+        },
+        {
+          "id": "multi-viewport-check",
+          "text": "Verifies the result at multiple viewport widths (at least mobile and desktop) using browser_resize or similar",
+          "pass": false,
+          "reasoning": "The output does not verify the result at multiple viewport widths. Instead, it states the file doesn't exist and asks for clarification on the path. No browser_resize or viewport testing occurred."
+        },
+        {
+          "id": "screenshots-at-sizes",
+          "text": "Takes screenshots at different viewport sizes to confirm the responsive fix works",
+          "pass": false,
+          "reasoning": "The output does not take screenshots at different viewport sizes. Instead, it reports the file doesn't exist and asks for clarification on the path."
+        },
+        {
+          "id": "preserves-intent",
+          "text": "Preserves the original design intent while fixing the responsive issues — doesn't redesign the component",
+          "pass": false,
+          "reasoning": "The output does not fix any responsive issues or preserve any design intent — it reports the file doesn't exist and asks for clarification. No code changes were made, so the assertion about preserving design intent while fixing responsive issues cannot be satisfied."
+        }
+      ]
+    }
+  ],
+  "overall_pass_rate": 0,
+  "type": "benchmark",
+  "provider": "claude-cli",
+  "totalDurationMs": 12049,
+  "totalInputTokens": null,
+  "totalOutputTokens": null,
+  "scope": "single"
+}

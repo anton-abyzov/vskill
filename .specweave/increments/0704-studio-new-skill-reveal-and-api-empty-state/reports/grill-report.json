@@ -1,0 +1,124 @@
+{
+  "version": "1.1",
+  "incrementId": "0704-studio-new-skill-reveal-and-api-empty-state",
+  "timestamp": "2026-04-24T21:55:00.000Z",
+  "verdict": "PASS",
+  "shipReadiness": "READY",
+  "threshold": 70,
+  "summary": {
+    "totalFindings": 1,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "suppressed": 0
+  },
+  "acCompliance": {
+    "totalACs": 11,
+    "passed": 11,
+    "failed": 0,
+    "scopeCreep": [],
+    "results": [
+      {
+        "acId": "AC-US1-01",
+        "status": "pass",
+        "evidence": "Sidebar.tsx:565 GroupHeader.collapsed={revealTarget ? false : authoringCollapsed}. Sidebar.tsx:607 NamedScopeSection forceOpen={revealTarget?.bucket === 'project'}. Sidebar.tsx:392-395 scrollIntoView({behavior:'smooth',block:'nearest'}) on [data-skill-id]. Verified by Sidebar.reveal.test.tsx:140-178 (project bucket)."
+      },
+      {
+        "acId": "AC-US1-02",
+        "status": "pass",
+        "evidence": "Sidebar.tsx:628 NamedScopeSection (Plugins bucket) forceOpen={revealTarget?.bucket === 'plugin'}. Sidebar.tsx:641 PluginTreeGroup forceOpen matches both bucket and pluginName. Verified by Sidebar.reveal.test.tsx:88-138 (plugin bucket end-to-end with AUTHORING + plugin-subtree localStorage seeded collapsed)."
+      },
+      {
+        "acId": "AC-US1-03",
+        "status": "pass",
+        "evidence": "PluginTreeGroup.tsx: forceOpen overrides via 'effectiveCollapsed = forceOpen ? false : collapsed' — no setCollapsed / setItem on reveal path. Sidebar.reveal.test.tsx:131-134 asserts all four localStorage keys unchanged after reveal. PluginTreeGroup.forceOpen.test.tsx (3 tests) asserts no localStorage.setItem during mount with forceOpen=true."
+      },
+      {
+        "acId": "AC-US1-04",
+        "status": "pass",
+        "evidence": "StudioContext.tsx:260-264 REVEAL_SKILL sets selectedSkill AND revealSkillId, then writes window.location.hash = `/skills/${resolvedPlugin}/${skillName}`. F-001 guard at :249-257 bails out when plugin is empty AND found=undefined (prevents invalid `#/skills//<name>` hash). Verified by StudioContext.reveal.test.tsx (4 tests)."
+      },
+      {
+        "acId": "AC-US1-05",
+        "status": "pass",
+        "evidence": "Architectural invariant: only REVEAL_SKILL sets revealSkillId (StudioContext.tsx:96-103). selectSkill dispatches SELECT_SKILL which does NOT touch revealSkillId. Regular row onSelect -> selectSkill -> revealSkillId stays null -> revealTarget is null -> forceOpen is false on all NamedScopeSection + PluginTreeGroup + GroupHeader. Negative-assertion test at Sidebar.reveal.test.tsx:180-217 (revealSkillId=null + AUTHORING collapsed => row not in DOM, scrollIntoView never called). Rubric waiver M-003 acknowledged."
+      },
+      {
+        "acId": "AC-US2-01",
+        "status": "pass",
+        "evidence": "api-routes.ts:1776-1780 `if (!existsSync(evalsPath)) sendJson(res, { exists: false, evals: [] }, 200, req)`. Verified by api-routes-empty-state.test.ts:82-95."
+      },
+      {
+        "acId": "AC-US2-02",
+        "status": "pass",
+        "evidence": "api-routes.ts:1783-1784 returns `{ exists: true, ...evals }` (envelope update from 0707 T-023). api.ts:338-352 tolerates both envelope-with-exists and legacy EvalsFile shapes. Verified by api-routes-empty-state.test.ts:97-115."
+      },
+      {
+        "acId": "AC-US2-03",
+        "status": "pass",
+        "evidence": "api-routes.ts:2518-2523 `sendJson(res, benchmark ?? null, 200, req)` — always 200, body is null when readBenchmark returns null. Verified by api-routes-empty-state.test.ts:163-170."
+      },
+      {
+        "acId": "AC-US2-04",
+        "status": "pass",
+        "evidence": "api.ts:383-392 getLatestBenchmark no longer short-circuits on 404 — `res.json()` now yields null directly when server returns 200 null. ApiError thrown only on !res.ok (i.e., 4xx/5xx real errors). Verified by api-routes-empty-state.test.ts:172-180."
+      },
+      {
+        "acId": "AC-US2-05",
+        "status": "pass",
+        "evidence": "SkillDetailPage.tsx:54-62 — 404-early-return branch dropped. WorkspaceContext.tsx:181-194 — Promise.allSettled fulfilled branch returns EvalsFile shape unchanged; rejection only fires on real errors. BenchmarkPage + HistoryPerEval consume .catch(()=>...) which is shape-agnostic. Full suite 469/469 tests green in eval-ui/__tests__/ + eval-ui/pages/__tests__/ per rubric G-H2."
+      },
+      {
+        "acId": "AC-US2-06",
+        "status": "pass",
+        "evidence": "Both handler branches return 200 in the missing-file path (api-routes.ts:1776-1780, 2518-2523). Integration tests prove the status codes; manual smoke-test gate G-H1 marked PASS in rubric."
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "G-L-001",
+      "title": "Stale comment refers to 400 validation but server returns 422",
+      "severity": "low",
+      "confidence": 85,
+      "category": "maintainability",
+      "file": "src/eval-ui/src/pages/workspace/WorkspaceContext.tsx:189-192",
+      "issue": "The in-code comment says 'Rejection only fires for real errors (400 validation, 500).' 0707 T-023 changed malformed-evals responses to 422 (api-routes.ts:1788). The comment now misleads any reader debugging an evals rejection — they'll look for a 400 handler that never fires.",
+      "suggestion": "Update the comment to read '422 validation / 500 I/O' to match the current server contract.",
+      "impact": "Minor maintainability drift. No runtime behavior change. Catches attention during future debugging sessions."
+    }
+  ],
+  "scopeReviewed": {
+    "filesExamined": 9,
+    "commits": [
+      "0e91f37 — API 200 sentinel for missing evals/benchmark",
+      "78997bf — drop dead 404 branches in client",
+      "53eabed — add revealSkill/clearReveal to StudioContext",
+      "7172108 — PluginTreeGroup forceOpen prop",
+      "c360a46 — Sidebar reveal effect + forceOpen passthrough",
+      "bd4e67e — wire onCreated to revealSkill",
+      "5269f97 — studio no-setup picker rows + 0704/0709 test-drift cleanup (partial)"
+    ],
+    "testsRun": {
+      "api-routes-empty-state.test.ts": "5/5 passed",
+      "StudioContext.reveal.test.tsx": "4/4 passed",
+      "Sidebar.reveal.test.tsx": "3/3 passed",
+      "PluginTreeGroup.forceOpen.test.tsx": "3/3 passed",
+      "pages-no-raw-color.test.ts": "2/2 passed (T-013a preconditions)",
+      "CreateSkillPage.picker.test.tsx": "5/5 passed (T-013b preconditions)"
+    },
+    "totalTestsVerified": 22
+  },
+  "phase0Notes": [
+    "All 11 ACs extracted from spec.md and independently verified against committed code. No scope creep detected.",
+    "M-001 (code-review MEDIUM on empty-plugin hash bug) — VERIFIED COMMITTED in StudioContext.tsx:249-257. Rubric waiver's statement 'Cannot be committed as part of 0704 closure per task scope' is OUTDATED — the guard is now in the current HEAD. The waiver narrative is historically accurate but should be updated post-closure.",
+    "M-002 (rubric template) — VERIFIED RESOLVED. Rubric status is 'active' with 13 populated gates.",
+    "M-003 (AC-US1-05 test gap) — Rubric's 'false positive' claim accepted. The negative assertion at Sidebar.reveal.test.tsx:180-217 combined with the architectural invariant (only REVEAL_SKILL touches revealSkillId, selectSkill does not) provides sufficient regression coverage. A dedicated click-through test would strengthen the guarantee but is not blocking."
+  ],
+  "recommendations": [
+    "Fix L-003 comment drift in WorkspaceContext.tsx:189-192 (one-line edit).",
+    "Consider adding an explicit AC-US1-05 click-through test in a follow-up: render Sidebar with AUTHORING collapsed, invoke onSelect via the row, assert AUTHORING remains aria-expanded=false. Not blocking, but would harden the contract.",
+    "Consider expanding the CSS.escape fallback regex in Sidebar.tsx:389-391 (I-001 from code-review) to cover the full set of CSS special chars — the `.CLAUDE/scout` test fixture already exercises a `.` slug that would break in environments lacking CSS.escape. Not reachable in modern browsers/JSDOM; follow-up polish."
+  ]
+}

@@ -528,11 +528,13 @@ function Shell() {
           // force-expand — only explicit creation flows reveal.
           //
           // For standalone skills the modal returns pluginName=null, so we
-          // pass "" and revealSkill resolves the actual plugin by skillName
-          // against the latest state.skills list (via useRef inside the
-          // context) — this works because refreshSkills() below has already
-          // queued a fetch whose result will land before the setTimeout
-          // callback fires.
+          // pass "" — StudioContext.revealSkill then resolves a project/
+          // personal match by skillName against the latest skills list
+          // (plugin-sourced matches are excluded to avoid slug collisions).
+          // If the refreshSkills() fetch below has not landed by the time
+          // the 500ms timer fires, revealSkill safely no-ops rather than
+          // mutating the hash with an empty plugin. Plugin-owned skills
+          // always pass pluginName explicitly and hit the exact-match path.
           refreshSkills();
           setTimeout(() => {
             revealSkill(result.pluginName ?? "", result.skillName);

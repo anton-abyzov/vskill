@@ -122,7 +122,27 @@ export function CreateSkillPage() {
   // Claude Code by default — surfacing Cursor / Codex CLI / Copilot rows is
   // noise. When the user picks a non-Claude scope (e.g. Cursor), the section
   // reappears so they can still opt into cross-platform targets.
-  const activeAgentId = getStudioPreference<string | null>("activeAgent", null);
+  //
+  // 0703 closure F-002 fix: subscribe to `studio:agent-changed` (CustomEvent
+  // dispatched by App.tsx whenever the picker changes the active agent) and
+  // `storage` (cross-tab sync). Without these, this page reads activeAgent
+  // once at mount and never reflects subsequent picker changes — latent today
+  // because the page is short-lived in current routing, but breaks under any
+  // long-lived container (e.g. tab-switch keep-alive).
+  const [activeAgentId, setActiveAgentId] = useState<string | null>(() =>
+    getStudioPreference<string | null>("activeAgent", null),
+  );
+  useEffect(() => {
+    function syncFromPrefs(): void {
+      setActiveAgentId(getStudioPreference<string | null>("activeAgent", null));
+    }
+    window.addEventListener("studio:agent-changed", syncFromPrefs);
+    window.addEventListener("storage", syncFromPrefs);
+    return () => {
+      window.removeEventListener("studio:agent-changed", syncFromPrefs);
+      window.removeEventListener("storage", syncFromPrefs);
+    };
+  }, []);
   const showTargetAgents = activeAgentId !== "claude-code";
 
   // Load installed agents from API
@@ -221,9 +241,17 @@ export function CreateSkillPage() {
     return { provider: aiProvider, model: aiModel };
   }, [aiProvider, aiModel]);
 
+  // Modal-chain handoff: `?mode=standalone` means the user explicitly chose
+  // a root `skills/` placement on the previous step. Pin layout 3 so the
+  // layout-detection effect does not silently pull in the project's first
+  // existing plugin (e.g. easychamp) and so AI generation can't reroute the
+  // skill into a plugin either.
+  const forceLayout = prefill.mode === "standalone" ? 3 : undefined;
+
   const sk = useCreateSkill({
     onCreated: (plugin, skill) => navigate(`/skills/${plugin}/${skill}`),
     resolveAiConfigOverride,
+    forceLayout,
   });
 
   // 0698 polish: apply modal-chain prefill once on mount.
@@ -275,7 +303,7 @@ export function CreateSkillPage() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="px-10 py-8 max-w-6xl">
+    <div className="px-4 py-6 sm:px-6 sm:py-7 lg:px-10 lg:py-8 max-w-6xl">
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center gap-2 text-[12px] mb-3" style={{ color: "var(--text-tertiary)" }}>
@@ -283,8 +311,8 @@ export function CreateSkillPage() {
           <span>/</span>
           <span style={{ color: "var(--text-secondary)" }}>New Skill</span>
         </div>
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <h2 className="text-[22px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
               Create a New Skill
             </h2>
@@ -295,7 +323,7 @@ export function CreateSkillPage() {
 
           {/* Mode toggle */}
           <div
-            className="inline-flex rounded-lg p-1"
+            className="inline-flex rounded-lg p-1 self-start sm:self-auto sm:flex-shrink-0"
             style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
           >
             <button
@@ -342,7 +370,7 @@ export function CreateSkillPage() {
       {/* AI-ASSISTED MODE                                                  */}
       {/* ================================================================= */}
       {!sk.layoutLoading && sk.layout && sk.mode === "ai" && (
-        <div className="flex gap-6 animate-fade-in">
+        <div className="flex flex-col lg:flex-row gap-6 animate-fade-in">
           {/* Left: AI prompt panel */}
           <div className="flex-1 min-w-0 space-y-5">
             {/* Describe your skill */}
@@ -421,7 +449,7 @@ export function CreateSkillPage() {
               )}
 
               <div
-                className="flex gap-4"
+                className="flex flex-col sm:flex-row gap-4"
                 title={
                   !aiProviderInfo
                     ? "Install a provider (Ollama / LM Studio / OpenRouter) or run `claude login` to enable model selection."
@@ -643,8 +671,8 @@ export function CreateSkillPage() {
           </div>
 
           {/* Right: Preview */}
-          <div className="w-[340px] flex-shrink-0">
-            <div className="sticky top-8">
+          <div className="w-full lg:w-[340px] lg:flex-shrink-0">
+            <div className="lg:sticky lg:top-8">
               <div className="glass-card p-4">
                 <h3 className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--text-tertiary)" }}>
                   SKILL.md Preview
@@ -672,7 +700,7 @@ export function CreateSkillPage() {
       {/* ================================================================= */}
       {!sk.layoutLoading && sk.layout && sk.mode === "manual" && (
         <div className="animate-fade-in">
-          <div className="flex gap-6">
+          <div className="flex flex-col lg:flex-row gap-6">
             {/* Left: Form */}
             <div className="flex-1 min-w-0 space-y-5">
               {/* Location section */}
@@ -760,6 +788,8 @@ export function CreateSkillPage() {
                   background: "var(--surface-0)",
                   color: "var(--text-tertiary)",
                   border: "1px solid var(--border-subtle)",
+                  wordBreak: "break-all",
+                  lineHeight: 1.55,
                 }}>
                   {sk.pathPreview}
                 </div>
@@ -768,14 +798,14 @@ export function CreateSkillPage() {
               {/* Plugin recommendation */}
               {sk.showPluginRecommendation && sk.pluginLayoutInfo && sk.selectedLayout === 3 && (
                 <div
-                  className="px-4 py-3 rounded-lg text-[12px] animate-fade-in flex items-center justify-between gap-3"
+                  className="px-4 py-3 rounded-lg text-[12px] animate-fade-in flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
                   style={{
                     background: "var(--accent-muted)",
                     color: "var(--text-secondary)",
                     border: "1px solid var(--accent-muted)",
                   }}
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-start gap-2 min-w-0">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
                     </svg>
@@ -845,7 +875,7 @@ export function CreateSkillPage() {
                 </div>
 
                 {/* Model + Allowed tools (side by side) */}
-                <div className="flex gap-4 mb-4">
+                <div className="flex flex-col sm:flex-row gap-4 mb-4">
                   <div className="flex-1">
                     <label className="text-[11px] font-medium uppercase tracking-wider mb-2 block" style={{ color: "var(--text-tertiary)" }}>
                       Model
@@ -1014,8 +1044,8 @@ export function CreateSkillPage() {
             </div>
 
             {/* Right: Preview */}
-            <div className="w-[340px] flex-shrink-0">
-              <div className="sticky top-8">
+            <div className="w-full lg:w-[340px] lg:flex-shrink-0">
+              <div className="lg:sticky lg:top-8">
                 <div className="glass-card p-4">
                   <h3 className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--text-tertiary)" }}>
                     SKILL.md Preview

@@ -134,9 +134,23 @@ export interface StudioContextValue {
   revealSkill: (plugin: string, skill: string) => void;
   /** 0704: clear the reveal flag once the sidebar has scrolled the row. */
   clearReveal: () => void;
+  /** 0708 T-040: push-pipeline update store keyed by `<plugin>/<skill>`. */
+  updatesById: ReadonlyMap<string, import("./types/skill-update").UpdateStoreEntry>;
+  /** 0708: count of entries in the push store. */
+  pushUpdateCount: number;
+  /** 0708: SSE connection status — `"connecting" | "connected" | "fallback"`. */
+  updateStreamStatus: import("./types/skill-update").StreamStatus;
+  /** 0708: dismiss a push-store entry (e.g. after user installs the update). */
+  dismissPushUpdate: (skillId: string) => void;
 }
 
-const StudioCtx = createContext<StudioContextValue | null>(null);
+// 0708: exported (named `StudioContext`) so leaf components like `UpdateChip`
+// can read the value with `useContext` and render a safe fallback when they
+// are rendered outside a provider (e.g. in unit tests that exercise parents
+// via a pure walker). `useStudio()` remains the throwing accessor for
+// components that require the provider.
+export const StudioContext = createContext<StudioContextValue | null>(null);
+const StudioCtx = StudioContext;
 
 export function useStudio(): StudioContextValue {
   const ctx = useContext(StudioCtx);
@@ -220,9 +234,27 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { skillsRef.current = state.skills; }, [state.skills]);
   const revealSkill = useCallback((plugin: string, skillName: string) => {
     const skills = skillsRef.current;
+    // When `plugin` is empty, this is a standalone-skill reveal (App.tsx
+    // passes `result.pluginName ?? ""`). Restrict the fallback match to
+    // non-plugin-sourced skills so we don't reveal the wrong row if two
+    // plugins happen to own a skill with the same slug. (F-002)
     const found = plugin
       ? skills.find((s) => s.plugin === plugin && s.skill === skillName)
-      : skills.find((s) => s.skill === skillName);
+      : skills.find((s) => s.skill === skillName && s.source !== "plugin");
+    // F-001: If caller passed an empty plugin AND we can't resolve one from
+    // state yet (skills refetch hasn't landed), bail out instead of writing
+    // `#/skills//skillName`. An empty plugin token breaks the Sidebar
+    // reveal matcher AND the rehydrate hash regex, silently defeating the
+    // reveal. Caller should retry after the next refreshSkills tick.
+    if (!plugin && !found) {
+      if (typeof console !== "undefined") {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[StudioContext] revealSkill: no plugin provided and skill "${skillName}" not yet in state — skipping reveal`,
+        );
+      }
+      return;
+    }
     const resolvedPlugin = found?.plugin ?? plugin;
     const origin = found?.origin ?? "source";
     dispatch({
@@ -258,10 +290,30 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: "DISMISS_UPDATE_NOTIFICATION" });
   }, []);
 
-  // 0683 T-002: shared polling hook owns the /api/skills/updates call. Every
-  // consumer (SkillRow glyph, SidebarSection chip, TopRail bell, RightPanel
-  // UpdateAction) reads through this single source of truth.
-  const skillUpdates = useSkillUpdates();
+  // 0683 T-002 + 0708 T-040: shared hook owns polling (/api/skills/updates)
+  // AND the push-pipeline EventSource (/api/v1/skills/stream). Pass the
+  // installed-skill list so UpdateHub fans out only skills this user has
+  // installed (AC-US5-08). ID format is `<plugin>/<skill>` — the platform's
+  // SSE endpoint maps these to internal Skill.id UUIDs server-side.
+  const installedSkillIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const s of state.skills) {
+      if (s.origin === "installed") ids.push(`${s.plugin}/${s.skill}`);
+    }
+    return ids;
+  }, [state.skills]);
+  // 0708 wrap-up: the SSE filter is scoped to installed skills (AC-US5-08),
+  // but the not-tracked dot (AC-US5-09) needs tracking state for ALL
+  // visible skills — including source-origin ones in dev/E2E. We pass the
+  // wider list separately so reconciliation can populate `trackedForUpdates`
+  // without affecting the SSE subscription.
+  const allSkillIds = useMemo(() => {
+    return state.skills.map((s) => `${s.plugin}/${s.skill}`);
+  }, [state.skills]);
+  const skillUpdates = useSkillUpdates({
+    skillIds: installedSkillIds,
+    trackingSkillIds: allSkillIds,
+  });
 
   // Re-merge the raw skills with the latest update list on every change.
   // `mergeUpdatesIntoSkills` only writes fields when an entry exists, so we
@@ -270,11 +322,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   // flag forever.
   const mergedSkills = useMemo<SkillInfo[]>(() => {
     const reset = state.skills.map((s) => {
-      if (!s.updateAvailable && s.latestVersion === undefined) return s;
+      if (!s.updateAvailable && s.latestVersion === undefined && s.trackedForUpdates === undefined) return s;
       const copy: SkillInfo = { ...s };
       delete copy.updateAvailable;
       delete copy.currentVersion;
       delete copy.latestVersion;
+      // 0708 wrap-up: also reset trackedForUpdates so a skill that has lost
+      // its sourceRepoUrl on the server stops showing the "tracked" badge.
+      delete copy.trackedForUpdates;
       return copy;
     });
     return mergeUpdatesIntoSkills(reset, skillUpdates.updates);
@@ -315,7 +370,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     refreshUpdates,
     revealSkill,
     clearReveal,
-  }), [effectiveState, selectSkill, clearSelection, setMode, setSearch, setMobileView, loadSkills, updateCount, dismissUpdateNotification, skillUpdates.updates, outdatedByOrigin, isRefreshingUpdates, refreshUpdates, revealSkill, clearReveal]);
+    updatesById: skillUpdates.updatesById,
+    pushUpdateCount: skillUpdates.pushUpdateCount,
+    updateStreamStatus: skillUpdates.status,
+    dismissPushUpdate: skillUpdates.dismiss,
+  }), [effectiveState, selectSkill, clearSelection, setMode, setSearch, setMobileView, loadSkills, updateCount, dismissUpdateNotification, skillUpdates.updates, outdatedByOrigin, isRefreshingUpdates, refreshUpdates, revealSkill, clearReveal, skillUpdates.updatesById, skillUpdates.pushUpdateCount, skillUpdates.status, skillUpdates.dismiss]);
 
   return <StudioCtx.Provider value={value}>{children}</StudioCtx.Provider>;
 }

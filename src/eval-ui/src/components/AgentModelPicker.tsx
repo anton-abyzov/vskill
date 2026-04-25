@@ -296,7 +296,7 @@ function PopoverShell({ children, reducedMotion, onClickOutside }: PopoverShellP
         top: 56,
         left: "50%",
         transform: "translateX(-50%)",
-        width: 600,
+        width: 720,
         background: "var(--bg-surface, var(--surface-1))",
         border: "1px solid var(--border-default, var(--border-subtle))",
         borderRadius: 8,

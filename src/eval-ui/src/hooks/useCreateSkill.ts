@@ -103,6 +103,14 @@ export interface UseCreateSkillOptions {
   onCreated: (plugin: string, skill: string) => void;
   /** Optional: override AI provider resolution (for page with explicit dropdowns) */
   resolveAiConfigOverride?: () => { provider: string; model: string };
+  /**
+   * Pin the skill placement to a specific layout regardless of project
+   * detection. Used when the user arrives from the CreateSkillModal having
+   * already chosen a destination — e.g. `mode=standalone` must produce a
+   * root `skills/` placement (layout 3) and never quietly default to the
+   * project's first existing plugin once layout detection resolves.
+   */
+  forceLayout?: 1 | 2 | 3;
 }
 
 // ---------------------------------------------------------------------------
@@ -180,7 +188,7 @@ export interface UseCreateSkillReturn {
 // Hook
 // ---------------------------------------------------------------------------
 
-export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreateSkillOptions): UseCreateSkillReturn {
+export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout }: UseCreateSkillOptions): UseCreateSkillReturn {
   // Mode toggle
   const [mode, setMode] = useState<"manual" | "ai">("ai");
 
@@ -193,7 +201,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
 
   // Form state
   const [name, setName] = useState("");
-  const [selectedLayout, setSelectedLayout] = useState<1 | 2 | 3>(3);
+  const [selectedLayout, setSelectedLayout] = useState<1 | 2 | 3>(forceLayout ?? 3);
   const [plugin, setPlugin] = useState("");
   const [newPlugin, setNewPlugin] = useState("");
   const [description, setDescription] = useState("");
@@ -266,18 +274,22 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
   // Effects
   // ---------------------------------------------------------------------------
 
-  // Load layout on mount
+  // Load layout on mount. When `forceLayout` is set the caller has already
+  // committed to a destination (e.g. modal-chain "Standalone skill") — we
+  // still want the detection result available for the path preview, but we
+  // must not stomp on the user's pinned layout or auto-pick a plugin.
   useEffect(() => {
     api.getProjectLayout()
       .then((l) => {
         setLayout(l);
+        if (forceLayout) return;
         setSelectedLayout(l.suggestedLayout);
         const suggested = l.detectedLayouts.find((d) => d.layout === l.suggestedLayout);
         if (suggested?.existingPlugins.length) setPlugin(suggested.existingPlugins[0]);
       })
       .catch(() => {})
       .finally(() => setLayoutLoading(false));
-  }, []);
+  }, [forceLayout]);
 
   // Auto-focus prompt when switching to AI mode
   useEffect(() => {
@@ -444,8 +456,15 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
 
                 // Apply suggested plugin from backend — ONLY when the user
                 // has not already pinned a destination (the helper answers
-                // that in `applySuggestedPlugin`).
-                if (pinning.applySuggestedPlugin && pinning.suggestedPluginValue) {
+                // that in `applySuggestedPlugin`). When `forceLayout === 3`
+                // the user explicitly chose Standalone in the modal, so even
+                // the AI's suggestion must not pull the skill into a plugin.
+                if (forceLayout === 3) {
+                  // Standalone is sticky — keep layout 3 and clear any plugin.
+                  setSelectedLayout(3);
+                  setPlugin("");
+                  setNewPlugin("");
+                } else if (pinning.applySuggestedPlugin && pinning.suggestedPluginValue) {
                   const sp = pinning.suggestedPluginValue;
                   const allPlugins = layout?.detectedLayouts.flatMap((d) => d.existingPlugins) ?? [];
                   if (allPlugins.includes(sp.plugin)) {
@@ -513,7 +532,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride }: UseCreate
       setGenerating(false);
       abortRef.current = null;
     }
-  }, [aiPrompt, resolveAiConfig, selectedLayout, pluginLayoutInfo, effectivePlugin, layout, targetAgents]);
+  }, [aiPrompt, resolveAiConfig, selectedLayout, pluginLayoutInfo, effectivePlugin, layout, targetAgents, forceLayout]);
 
   const handleCreate = useCallback(async () => {
     setError(null);

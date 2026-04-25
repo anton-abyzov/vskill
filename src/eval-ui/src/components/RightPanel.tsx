@@ -17,6 +17,7 @@ import { UpdatesPanel } from "../pages/UpdatesPanel";
 import { DetailHeader } from "./DetailHeader";
 import { SkillOverview } from "./SkillOverview";
 import { UpdateAction } from "./UpdateAction";
+import { CheckNowButton } from "./CheckNowButton";
 
 // ---------------------------------------------------------------------------
 // 0707 T-007: Flat 9-tab detail view.
@@ -452,6 +453,19 @@ function renderSkillDetail(
           header when an update is pending, so it is visible regardless of
           which tab is active. Returns null when no update is available. */}
       <UpdateAction skill={skill} />
+      {/* 0708 T-073/T-074 + wrap-up: per-skill "Check now" rescan button.
+          Renders only for tracked skills (sourceRepoUrl present) per
+          AC-US8-04. Placed alongside UpdateAction so users can manually
+          probe the upstream repo without leaving the detail view. */}
+      {skill.origin === "installed" && (
+        <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--border-default)" }}>
+          <CheckNowButton
+            plugin={skill.plugin}
+            skill={skill.skill}
+            trackedForUpdates={skill.trackedForUpdates}
+          />
+        </div>
+      )}
       {renderTabBar(active, onChange)}
       <div
         role="tabpanel"

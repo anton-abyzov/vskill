@@ -14,6 +14,7 @@ import { LockedProviderRow } from "./LockedProviderRow";
 const ROW_HEIGHT = 44;
 const VIEWPORT_HEIGHT = 352; // 8 rows
 const DEBOUNCE_MS = 60;
+const LIST_WIDTH = 480;
 
 export interface ModelListProps {
   agent: AgentEntry;
@@ -80,7 +81,7 @@ export function ModelList({ agent, activeModelId, onSelect, onOpenSettings }: Mo
       <div
         data-testid="openrouter-empty-card"
         style={{
-          width: 360,
+          width: LIST_WIDTH,
           padding: 20,
           display: "flex",
           flexDirection: "column",
@@ -123,7 +124,7 @@ export function ModelList({ agent, activeModelId, onSelect, onOpenSettings }: Mo
       role="listbox"
       aria-label="Model"
       data-testid="model-list"
-      style={{ width: 360, display: "flex", flexDirection: "column" }}
+      style={{ width: LIST_WIDTH, display: "flex", flexDirection: "column" }}
     >
       {agent.id === "openrouter" && (
         <div style={{ padding: 8, borderBottom: "1px solid var(--border-default, var(--border-subtle))" }}>
@@ -202,19 +203,27 @@ interface ModelRowProps {
   resolvedModel?: string | null;
 }
 
-// 0703 hotfix: the resolved ID from ~/.claude/settings.json describes the
-// Claude Code default when no --model flag is passed. vskill always passes
-// --model <alias>, so showing "routing to claude-opus-4-7" on the Sonnet row
-// teaches the wrong mental model. Gate the sub-line on substring match
-// against the model alias (opus | sonnet | haiku).
-function matchesResolvedAlias(modelId: string, resolvedModel: string | null | undefined): boolean {
-  if (!resolvedModel) return false;
-  return resolvedModel.toLowerCase().includes(modelId.toLowerCase());
+// Decide which concrete model ID to surface beneath the alias label.
+// Precedence:
+//   1. settings.json value (only when the alias matches it) — that is the
+//      user's explicit Claude Code choice and may include suffixes like [1m].
+//   2. Catalog lookup carried on the model entry — gives every alias row
+//      (sonnet, opus, haiku) a truthful concrete dated ID.
+function pickResolvedDisplay(
+  modelId: string,
+  resolvedModel: string | null | undefined,
+  resolvedId: string | undefined,
+): string | null {
+  if (resolvedModel && resolvedModel.toLowerCase().includes(modelId.toLowerCase())) {
+    return resolvedModel;
+  }
+  return resolvedId ?? null;
 }
 
 function ModelRow({ model, isActive, onSelect, resolvedModel }: ModelRowProps) {
   const metadata = formatMetadata(model);
-  const showResolved = matchesResolvedAlias(model.id, resolvedModel);
+  const resolvedDisplay = pickResolvedDisplay(model.id, resolvedModel, model.resolvedId);
+  const showResolved = resolvedDisplay !== null;
   return (
     <button
       type="button"
@@ -269,7 +278,7 @@ function ModelRow({ model, isActive, onSelect, resolvedModel }: ModelRowProps) {
             color: "var(--text-muted, var(--text-tertiary))",
           }}
         >
-          routing to {resolvedModel}
+          routing to {resolvedDisplay}
         </span>
       )}
     </button>

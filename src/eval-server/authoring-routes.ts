@@ -217,6 +217,15 @@ export function makeSkillExistsHandler(root: string) {
     if (mode === "standalone") {
       skillDir = join(root, "skills", skillName!);
     } else {
+      // Both "existing-plugin" and "new-plugin" share pluginName validation +
+      // pluginDir/skillDir derivation. The branches differ only in whether the
+      // plugin manifest must already exist:
+      //   - existing-plugin → manifest MUST exist (404 if missing)
+      //   - new-plugin     → manifest may NOT exist yet (probe just checks
+      //                       whether <pluginDir>/skills/<skillName> is taken)
+      // The "new-plugin" path has no explicit branch below — it simply skips
+      // the manifest-presence check and proceeds to the shared skillDir
+      // derivation. Intentional, not a silent fallthrough.
       const pluginErr = validateKebab(pluginName, "pluginName");
       if (pluginErr) return sendError(res, 400, "invalid-plugin-name", pluginErr);
       const pluginDir = join(root, pluginName!);
@@ -234,6 +243,11 @@ export function makeSkillExistsHandler(root: string) {
       skillDir = join(pluginDir, "skills", skillName!);
     }
 
+    // TOCTOU note: this probe + the subsequent POST /create-skill is a
+    // check-then-act that is technically race-prone. Acceptable for a
+    // single-user local Studio process — if a concurrent writer creates the
+    // dir between probe and POST, the POST handler's own collision check is
+    // the authoritative gate (returns 409). No multi-tenant exposure.
     sendJson(res, { exists: existsSync(skillDir), path: skillDir }, 200);
   };
 }

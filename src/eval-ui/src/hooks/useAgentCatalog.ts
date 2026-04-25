@@ -17,8 +17,11 @@ export interface ModelEntry {
   id: string;
   displayName: string;
   contextWindow?: number;
+  /** USD per 1M tokens (canonical wire unit — see 0701 for Anthropic, 0710 for OpenRouter). */
   pricing?: { prompt: number; completion: number };
   billingMode: "per-token" | "subscription" | "free";
+  /** Concrete model the alias resolves to (e.g. `sonnet` → `claude-sonnet-4-6`). */
+  resolvedId?: string;
 }
 
 export interface AgentEntry {
@@ -62,6 +65,8 @@ interface ServerConfigResponse {
       label: string;
       // 0701 — pricing populated on per-token providers (anthropic, openrouter).
       pricing?: { prompt: number; completion: number };
+      // Concrete dated/canonical Anthropic ID this alias resolves to (claude-cli only).
+      resolvedId?: string;
     }>;
   }>;
   detection?: {
@@ -86,6 +91,7 @@ interface OpenRouterModelsResponse {
 const AGENT_ORDER = [
   "claude-cli",
   "anthropic",
+  "openai",
   "openrouter",
   "cursor",
   "codex-cli",
@@ -115,6 +121,7 @@ const BINARY_BY_AGENT: Record<string, string | null> = {
 const CTA_BY_AGENT: Record<string, CtaType> = {
   "claude-cli": "cli-install",
   "anthropic": "api-key",
+  "openai": "api-key",
   "openrouter": "api-key",
   "cursor": "cli-install",
   "codex-cli": "cli-install",
@@ -128,6 +135,7 @@ const CTA_BY_AGENT: Record<string, CtaType> = {
 const BILLING_BY_AGENT: Record<string, ModelEntry["billingMode"]> = {
   "claude-cli": "subscription",
   "anthropic": "per-token",
+  "openai": "per-token",
   "openrouter": "per-token",
   "cursor": "subscription",
   "codex-cli": "subscription",
@@ -157,6 +165,7 @@ function toAgentEntry(
     // 0701 — forward server-provided pricing (anthropic's static map) so
     // ModelList.formatMetadata renders real $ amounts instead of $0.00.
     ...(m.pricing ? { pricing: m.pricing } : {}),
+    ...(m.resolvedId ? { resolvedId: m.resolvedId } : {}),
   }));
   return {
     id: raw.id,
@@ -178,6 +187,7 @@ function displayNameFor(id: string, fallback: string): string {
   const map: Record<string, string> = {
     "claude-cli": "Claude Code",
     "anthropic": "Anthropic API",
+    "openai": "OpenAI API",
     "openrouter": "OpenRouter",
     "cursor": "Cursor",
     "codex-cli": "Codex CLI",

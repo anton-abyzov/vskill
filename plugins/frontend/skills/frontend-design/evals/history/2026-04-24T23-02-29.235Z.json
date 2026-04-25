@@ -1,0 +1,66 @@
+{
+  "timestamp": "2026-04-24T23:02:29.235Z",
+  "model": "opus",
+  "skill_name": "frontend-design",
+  "cases": [
+    {
+      "eval_id": 4,
+      "eval_name": "no-browser-tools-graceful-fallback",
+      "status": "fail",
+      "error_message": null,
+      "pass_rate": 0.8333333333333334,
+      "durationMs": 165819,
+      "tokens": null,
+      "inputTokens": null,
+      "outputTokens": null,
+      "cost": null,
+      "billingMode": "subscription",
+      "output": "Files written to `/tmp/contact-form/` — open `index.html` in any browser to see it (no build step, no server needed).\n\n**Design choices & why**:\n- **Typography**: Instrument Serif (italic accent word) + Manrope body — deliberately avoiding the Inter/Space Grotesk/Poppins cliché. The italic `something` in the heading is the signature element.\n- **Palette**: warm off-white `#F4F1EC` with a single terracotta accent `#B85C38`, instead of the stock white + purple gradient pattern.\n- **Texture**: inline SVG fractal noise at ~7% opacity — gives the paper-like warmth you asked for without an image asset.\n- **Layout**: asymmetric 2-column (1.05fr / 1fr) on ≥860px, stacks cleanly on mobile.\n- **Form styling**: underline-only inputs (no boxy fields) for a minimal editorial feel; the submit arrow slides on hover.\n- **A11y**: semantic `<main>`/`<section>`, labels on every field, `:focus-visible` outlines, `aria-live` status region, `prefers-reduced-motion` respected, `novalidate` so JS owns validation UX.\n- **Submission stub**: `setTimeout` fake — swap the try block in `script.js` for `fetch()` to Formspree / Netlify / your handler.\n\n**What I could NOT verify** (no browser tools available in this session — you'll want to eyeball these):\n1. Google Fonts actually load (Instrument Serif + Manrope) — if they don't, check network tab.\n2. The SVG grain texture renders visibly but subtly on your display.\n3. Responsive breakpoint at 860px behaves (resize the window through that width).\n4. Submit button hover arrow animation feels right.\n5. Validation error states look good (try submitting empty, then with bad email).\n\n**Note on scope**: this is unrelated to the active `0670-skill-builder-universal` increment in the vskill repo — I kept it in `/tmp/` so it doesn't pollute the repo. Move the three files into your portfolio project when you're happy with them.",
+      "assertions": [
+        {
+          "id": "vanilla-html",
+          "text": "Uses plain HTML/CSS/JS without any framework dependency",
+          "pass": true,
+          "reasoning": "The output describes files written as index.html, script.js (and implied CSS), explicitly states 'open index.html in any browser to see it (no build step, no server needed)', which indicates plain HTML/CSS/JS with no framework dependency."
+        },
+        {
+          "id": "minimal-aesthetic",
+          "text": "Implements a clean, minimal design direction as requested — not overloaded with effects",
+          "pass": true,
+          "reasoning": "The output describes a deliberately minimal, editorial design: warm off-white palette with a single terracotta accent, underline-only form inputs (no boxy fields), subtle ~7% opacity noise texture, and restrained typography choices. The design choices emphasize minimalism and avoid overloading with effects, satisfying the assertion."
+        },
+        {
+          "id": "background-texture",
+          "text": "Includes a subtle background texture (noise, grain, gradient mesh, or similar)",
+          "pass": true,
+          "reasoning": "The output explicitly mentions 'inline SVG fractal noise at ~7% opacity' as a texture element, described as giving 'paper-like warmth'. This directly satisfies the assertion about including a subtle background texture (noise/grain)."
+        },
+        {
+          "id": "suggests-browser-setup",
+          "text": "Mentions or recommends setting up Chrome extension or Playwright MCP for visual verification since no browser tools are available",
+          "pass": false,
+          "reasoning": "The output mentions that no browser tools are available in the session and lists things the user should eyeball/verify manually, but it does not recommend or mention setting up a Chrome extension or Playwright MCP for visual verification."
+        },
+        {
+          "id": "form-functional",
+          "text": "The contact form has proper form elements (input, textarea, button) with appropriate types and labels",
+          "pass": true,
+          "reasoning": "The output explicitly mentions form styling with inputs (underline-only inputs), a submit button (with hover arrow animation), and accessibility features including 'labels on every field'. It also references validation for empty fields and email format, implying appropriate input types. While the actual code isn't shown, the description confirms proper form elements with labels and appropriate types."
+        },
+        {
+          "id": "focus-states",
+          "text": "Includes visible focus states on form inputs for keyboard accessibility",
+          "pass": true,
+          "reasoning": "The output explicitly mentions ':focus-visible outlines' in the A11y section, which indicates visible focus states on form inputs for keyboard accessibility."
+        }
+      ]
+    }
+  ],
+  "overall_pass_rate": 0.8333333333333334,
+  "type": "benchmark",
+  "provider": "claude-cli",
+  "totalDurationMs": 165819,
+  "totalInputTokens": null,
+  "totalOutputTokens": null,
+  "scope": "single"
+}

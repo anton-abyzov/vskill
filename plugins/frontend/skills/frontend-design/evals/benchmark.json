@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-04-24T23:03:58.540Z",
+  "model": "opus",
+  "skill_name": "frontend-design",
+  "cases": [
+    {
+      "eval_id": 2,
+      "eval_name": "dashboard-with-verification-loop",
+      "status": "error",
+      "error_message": "Claude CLI timed out after 300s",
+      "pass_rate": 0,
+      "assertions": []
+    }
+  ],
+  "overall_pass_rate": 0,
+  "type": "benchmark",
+  "provider": "claude-cli",
+  "totalDurationMs": 0,
+  "totalInputTokens": null,
+  "totalOutputTokens": null,
+  "scope": "single"
+}

@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useSWR } from "../hooks/useSWR";
 import { Virtuoso } from "react-virtuoso";
 import type { SkillInfo } from "../types";
@@ -368,23 +368,30 @@ export function Sidebar({
     if (!match) {
       return { plugin, skill, bucket: null as "project" | "plugin" | null, pluginName: null as string | null };
     }
-    const bucket: "project" | "plugin" =
-      (match as { source?: string }).source === "plugin" ? "plugin" : "project";
-    const pluginName =
-      bucket === "plugin" ? ((match as { pluginName?: string }).pluginName ?? plugin) : null;
+    const bucket: "project" | "plugin" = match.source === "plugin" ? "plugin" : "project";
+    const pluginName = bucket === "plugin" ? (match.pluginName ?? plugin) : null;
     return { plugin, skill, bucket, pluginName };
   }, [revealSkillId, skills]);
 
   // 0704: scroll the reveal row into view once it exists in the DOM.
   // Re-runs on `skills` changes so a just-added skill is caught on the
   // rehydrate tick. Clears via onRevealComplete only when scroll runs.
+  // F-003: guard with `lastScrolledId` so that if `skills` mutates again
+  // before CLEAR_REVEAL settles (SWR refetch, poll tick), we don't fire
+  // scrollIntoView + onRevealComplete a second time for the same reveal.
+  const lastScrolledId = useRef<string | null>(null);
   useEffect(() => {
-    if (!revealSkillId) return;
+    if (!revealSkillId) {
+      lastScrolledId.current = null;
+      return;
+    }
+    if (lastScrolledId.current === revealSkillId) return;
     const safe = typeof CSS !== "undefined" && typeof CSS.escape === "function"
       ? CSS.escape(revealSkillId)
       : revealSkillId.replace(/["\\]/g, "\\$&");
     const row = document.querySelector<HTMLElement>(`[data-skill-id="${safe}"]`);
     if (!row) return;
+    lastScrolledId.current = revealSkillId;
     row.scrollIntoView({ behavior: "smooth", block: "nearest" });
     onRevealComplete?.();
   }, [revealSkillId, onRevealComplete, skills]);

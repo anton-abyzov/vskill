@@ -145,7 +145,7 @@ function stubFetch(response: { ok: boolean; status?: number; body: unknown }): v
 }
 
 describe("0703 — CreateSkillModal Generate-with-AI pre-check", () => {
-  it("AC-US2-04: shows error and does NOT navigate when skill already exists", async () => {
+  it("AC-US2-03 (exists branch): shows error and does NOT navigate when skill already exists", async () => {
     stubFetch({
       ok: true,
       body: { exists: true, path: "/tmp/proj/skills/anton-greet" },
@@ -169,7 +169,7 @@ describe("0703 — CreateSkillModal Generate-with-AI pre-check", () => {
     }
   });
 
-  it("AC-US2-05: navigates to /#/create when the skill name is free", async () => {
+  it("AC-US2-03 (free branch): navigates to /#/create when the skill name is free", async () => {
     stubFetch({
       ok: true,
       body: { exists: false, path: "/tmp/proj/skills/anton-greet" },
@@ -181,11 +181,13 @@ describe("0703 — CreateSkillModal Generate-with-AI pre-check", () => {
       await typeSkillName(h.container, "anton-greet");
       await clickGenerateWithAi(h.container);
 
-      expect(assignMock).toHaveBeenCalledTimes(1);
-      const navUrl = String(assignMock.mock.calls[0][0]);
-      expect(navUrl).toContain("/#/create");
-      expect(navUrl).toContain("skillName=anton-greet");
-      expect(navUrl).toContain("mode=standalone");
+      // 0703 closure F-001 fix: navigation now uses `window.location.hash`
+      // instead of `location.assign('/#...')` so it works under any base path.
+      expect(assignMock).not.toHaveBeenCalled();
+      const navHash = String(window.location.hash);
+      expect(navHash).toMatch(/^#\/create/);
+      expect(navHash).toContain("skillName=anton-greet");
+      expect(navHash).toContain("mode=standalone");
     } finally {
       h.unmount();
     }

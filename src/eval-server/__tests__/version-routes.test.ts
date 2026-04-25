@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   parseSource: vi.fn(),
   execSync: vi.fn(),
   fetch: vi.fn(),
+  resolveSkillApiNameImpl: vi.fn(),
 }));
 
 vi.mock("../router.js", async (importOriginal) => {
@@ -44,6 +45,11 @@ vi.mock("../../lockfile/lockfile.js", () => ({
 
 vi.mock("../../resolvers/source-resolver.js", () => ({
   parseSource: mocks.parseSource,
+}));
+
+vi.mock("../skill-name-resolver.js", () => ({
+  resolveSkillApiName: mocks.resolveSkillApiNameImpl,
+  resetResolverCache: vi.fn(),
 }));
 
 // Stub everything else registerRoutes depends on
@@ -211,6 +217,8 @@ describe("T-009: GET /api/skills/:plugin/:skill/versions", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    // Default: resolver returns the bare skill name; individual tests can override.
+    mocks.resolveSkillApiNameImpl.mockImplementation(async (skill: string) => skill);
     const handlers = captureHandlers();
     handler = handlers.get["/api/skills/:plugin/:skill/versions"];
   });
@@ -249,6 +257,7 @@ describe("T-009: GET /api/skills/:plugin/:skill/versions", () => {
       repo: "skills",
       pluginName: "architect",
     });
+    mocks.resolveSkillApiNameImpl.mockResolvedValue("anthropics/skills/architect");
 
     const platformVersions = {
       versions: [
@@ -311,6 +320,7 @@ describe("T-009: GET /api/skills/:plugin/:skill/versions", () => {
       repo: "skills",
       pluginName: "architect",
     });
+    mocks.resolveSkillApiNameImpl.mockResolvedValue("anthropics/skills/architect");
 
     vi.stubGlobal(
       "fetch",
@@ -339,6 +349,7 @@ describe("T-009: GET /api/skills/:plugin/:skill/versions", () => {
       repo: "skills",
       pluginName: "architect",
     });
+    mocks.resolveSkillApiNameImpl.mockResolvedValue("anthropics/skills/architect");
 
     vi.stubGlobal(
       "fetch",
@@ -410,6 +421,41 @@ describe("T-009: GET /api/skills/:plugin/:skill/versions", () => {
     const sentData = mocks.sendJson.mock.calls[0][1];
     expect(sentData).toEqual({ versions: [], count: 0, source: "platform" });
   });
+
+  // ---------------------------------------------------------------------------
+  // 0714: authored-skill proxy contract — fetches the hierarchical platform path
+  // even when the lockfile has no entry, exercising AC-US1-02 / AC-US2-02.
+  // ---------------------------------------------------------------------------
+  it("0714: authored skill proxies to /api/v1/skills/{owner}/{repo}/{skill}/versions", async () => {
+    mocks.readLockfile.mockReturnValue(null); // No lockfile entry — authored path.
+    mocks.resolveSkillApiNameImpl.mockResolvedValue("anton-abyzov/vskill/appstore");
+
+    const platformVersions = {
+      versions: [
+        { version: "1.0.1", certTier: "CERTIFIED", createdAt: "2026-04-05", diffSummary: "Content updated" },
+        { version: "1.0.0", certTier: "VERIFIED", createdAt: "2026-04-05", diffSummary: null },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => platformVersions }),
+    );
+
+    const req = fakeReq("http://localhost/api/skills/mobile/appstore/versions");
+    const res = fakeRes();
+
+    await handler(req, res, { plugin: "mobile", skill: "appstore" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/skills/anton-abyzov/vskill/appstore/versions"),
+      expect.any(Object),
+    );
+
+    const sentData = mocks.sendJson.mock.calls[0][1];
+    expect(sentData.source).toBe("platform");
+    expect(sentData.count).toBe(2);
+    expect(sentData.versions.map((v: any) => v.version)).toEqual(["1.0.1", "1.0.0"]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -421,8 +467,33 @@ describe("T-010: GET /api/skills/:plugin/:skill/versions/diff", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    mocks.resolveSkillApiNameImpl.mockImplementation(async (skill: string) => skill);
     const handlers = captureHandlers();
     handler = handlers.get["/api/skills/:plugin/:skill/versions/diff"];
+  });
+
+  // 0714: authored-skill proxy contract for diff endpoint (AC-US2-01).
+  it("0714: authored skill proxies diff to /api/v1/skills/{owner}/{repo}/{skill}/versions/diff", async () => {
+    mocks.readLockfile.mockReturnValue(null);
+    mocks.resolveSkillApiNameImpl.mockResolvedValue("anton-abyzov/vskill/appstore");
+
+    const platformDiff = { from: "1.0.0", to: "1.0.1", diffSummary: "Content updated", contentDiff: "" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => platformDiff }),
+    );
+
+    const req = fakeReq(
+      "http://localhost/api/skills/mobile/appstore/versions/diff?from=1.0.0&to=1.0.1",
+    );
+    const res = fakeRes();
+
+    await handler(req, res, { plugin: "mobile", skill: "appstore" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/skills/anton-abyzov/vskill/appstore/versions/diff?"),
+      expect.any(Object),
+    );
   });
 
   it("is registered as a route", () => {
@@ -515,6 +586,7 @@ describe("T-010: GET /api/skills/:plugin/:skill/versions/diff", () => {
       repo: "skills",
       pluginName: "architect",
     });
+    mocks.resolveSkillApiNameImpl.mockResolvedValue("anthropics/skills/architect");
 
     vi.stubGlobal(
       "fetch",

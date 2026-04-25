@@ -71,7 +71,14 @@ function subscribe(type: DataEventType, cb: Listener): () => void {
     refCount--;
     if (refCount <= 0) {
       refCount = 0;
-      closeConnection();
+      // Defer the close so React StrictMode's synthetic dispose-then-remount
+      // doesn't tear down the singleton between cleanup and the next mount —
+      // otherwise the EventSource shows up as "(canceled)" on every page load
+      // in dev. If a new subscriber arrives before the microtask runs, we
+      // bail out and keep the existing connection.
+      queueMicrotask(() => {
+        if (refCount <= 0) closeConnection();
+      });
     }
   };
 }

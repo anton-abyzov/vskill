@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useMemo, useRef, useState } from "react";
 import { useStudio } from "../StudioContext";
 import updateBellIcon from "../assets/icons/update-bell.svg";
 
@@ -18,7 +18,20 @@ export function UpdateBell() {
     isRefreshingUpdates,
     refreshUpdates,
     selectSkill,
+    updatesById,
   } = useStudio();
+
+  // 0708 AC-US5-03: project push-store entries → short-name-keyed diff
+  // summaries so UpdateDropdown can render the one-liner under each row.
+  // `updates[].name` is "<plugin>/<skill>"; updatesById keys match.
+  const diffSummariesById = useMemo(() => {
+    if (!updatesById || updatesById.size === 0) return undefined;
+    const out = new Map<string, string>();
+    for (const [id, entry] of updatesById) {
+      if (entry.diffSummary) out.set(id, entry.diffSummary);
+    }
+    return out.size > 0 ? out : undefined;
+  }, [updatesById]);
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
 
@@ -100,6 +113,7 @@ export function UpdateBell() {
           <UpdateDropdown
             updates={updates}
             isRefreshing={isRefreshingUpdates}
+            diffSummariesById={diffSummariesById}
             onRefresh={() => refreshUpdates()}
             onSelectSkill={(u) => {
               const parts = u.name.split("/");

@@ -40,10 +40,10 @@ interface Props {
    */
   outdatedByOrigin?: { source: number; installed: number };
   /**
-   * 0686 T-007 (US-003): active agent id — drives tri-scope rendering and
-   * scopes the ScopeSection localStorage keys. When omitted, Sidebar
-   * keeps its legacy 2-section (Own / Installed) layout so this change
-   * is a no-op for callers that haven't opted in yet.
+   * 0686 T-007 (US-003) / 0698: active agent id — scopes the per-section
+   * collapse storage keys (`vskill-sidebar-<agentId>-<scope>-collapsed`).
+   * When omitted, Sidebar keeps its legacy 2-section (Own / Installed)
+   * layout so this change is a no-op for callers that haven't opted in.
    */
   activeAgentId?: string | null;
   /**
@@ -704,7 +704,9 @@ export function Sidebar({
 // 0698 T-009 (fix): NamedScopeSection — lightweight collapsible section that
 // takes an explicit label + storageKey. Used by the new five-bucket layout so
 // headers can render Anthropic-aligned labels (Project / Personal / Plugins /
-// Skills) without a larger refactor of ScopeSection's scope enum.
+// Skills). This is the live tri-scope rendering primitive; the original 0686
+// `ScopeSection` (own/installed/global) was deleted 2026-04-25 after 0698
+// superseded its scope enum.
 // ---------------------------------------------------------------------------
 
 function readCollapsedSafe(key: string): boolean {

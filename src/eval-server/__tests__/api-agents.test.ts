@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 describe("buildAgentsResponse — presence + counts", () => {
-  it("returns only agents with presence (local folder, global folder, or binary)", async () => {
+  it("returns agents with presence (local folder, global folder, or binary) plus remote-only entries", async () => {
     // .claude/ exists in project → claude-code detected
     writeSkill(tmpRoot, ".claude/skills/c1");
     // ~/.cursor/skills exists in fake home → cursor detected (via global)
@@ -48,8 +48,24 @@ describe("buildAgentsResponse — presence + counts", () => {
     const ids = resp.agents.map((a) => a.id).sort();
     expect(ids).toContain("claude-code");
     expect(ids).toContain("cursor");
-    // No other agent should appear — none of their paths exist
-    expect(ids.filter((id) => id !== "claude-code" && id !== "cursor")).toEqual([]);
+
+    // Per 0694: remote-only agents are surfaced in the catalog; their availability is signaled by detection state, not filtering
+    // (AC-US4-02 / AC-US4-04: bolt-new, devin, replit, v0 carry isRemoteOnly: true and must always appear so Studio can render the
+    // "Remote" badge instead of install affordances).
+    expect(ids).toContain("bolt-new");
+    expect(ids).toContain("devin");
+    expect(ids).toContain("replit");
+    expect(ids).toContain("v0");
+
+    // No agent outside {claude-code, cursor, remote-only set} should appear — none of their paths exist
+    const allowed = new Set(["claude-code", "cursor", "bolt-new", "devin", "replit", "v0"]);
+    expect(ids.filter((id) => !allowed.has(id))).toEqual([]);
+
+    // Remote-only entries must be flagged so the UI keys off isRemoteOnly, not off id-matching
+    for (const remoteId of ["bolt-new", "devin", "replit", "v0"]) {
+      const entry = resp.agents.find((a) => a.id === remoteId);
+      expect(entry?.isRemoteOnly).toBe(true);
+    }
   });
 
   it("includes binary-detected agents even when no folders exist", async () => {

@@ -658,8 +658,9 @@ export function parseSkillFrontmatter(content: string): Record<string, string | 
   // consumers (`fm.tags`, `fm["target-agents"]`) keep working post-migration.
   // A top-level value with the same name takes precedence over the nested
   // one. Non-allow-listed children stay nested-only — see SURFACED_METADATA_KEYS.
-  // 0679 review iter-4 F-003: defensive-copy arrays so a future consumer
-  // mutating `fm.tags` cannot accidentally mutate the nested `fm.metadata.tags`.
+  // 0679 review iter-4 F-003 + grill G-002: defensive-copy arrays on BOTH
+  // sides (root surfacing and the nested `fm.metadata.<key>`) so neither
+  // path can accidentally mutate the other.
   const merged: Record<string, string | string[] | Record<string, string | string[]>> = { ...rootOut };
   for (const [k, v] of Object.entries(metaOut)) {
     if (SURFACED_METADATA_KEYS.has(k) && !(k in merged)) {
@@ -667,7 +668,11 @@ export function parseSkillFrontmatter(content: string): Record<string, string | 
     }
   }
   if (Object.keys(metaOut).length > 0) {
-    merged.metadata = metaOut;
+    const metaCopy: Record<string, string | string[]> = {};
+    for (const [k, v] of Object.entries(metaOut)) {
+      metaCopy[k] = Array.isArray(v) ? [...v] : v;
+    }
+    merged.metadata = metaCopy;
   }
   return merged;
 }

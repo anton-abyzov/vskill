@@ -45,7 +45,15 @@ vi.mock("../../StudioContext", () => ({
     setSearch: () => {},
     refreshSkills: () => {},
     setMobileView: () => {},
+    updatesById: new Map(),
+    pushUpdateCount: 0,
+    updateStreamStatus: "fallback",
+    dismissPushUpdate: () => {},
   }),
+}));
+
+vi.mock("../CheckNowButton", () => ({
+  CheckNowButton: () => null,
 }));
 
 // Replace UpdateAction with a stub so this test only verifies mount ordering.

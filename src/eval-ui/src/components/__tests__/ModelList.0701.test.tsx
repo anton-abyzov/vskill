@@ -112,3 +112,48 @@ describe("0701 T-007: Anthropic price rendering", () => {
     expect(container.textContent).toMatch(/200k ctx · \$3\.00 \/ \$15\.00 per 1M tokens/);
   });
 });
+
+// 0710 — OpenRouter rows reuse the same per-1M code path as Anthropic.
+// Once the server canonicalizes pricing units, ModelList renders OpenRouter
+// rows correctly with no source change to ModelList itself.
+describe("0710: ModelList renders OpenRouter rows with per-1M values", () => {
+  function openRouterAgent(model: ModelEntry): AgentEntry {
+    return {
+      id: "openrouter",
+      displayName: "OpenRouter",
+      available: true,
+      wrapperFolder: null,
+      wrapperFolderPresent: false,
+      binaryAvailable: true,
+      endpointReachable: null,
+      ctaType: null,
+      models: [model],
+    } as AgentEntry;
+  }
+
+  it("renders $1.25 / $5.00 per 1M tokens for an OpenRouter model on the per-token path", async () => {
+    const agent = openRouterAgent({
+      id: "openrouter/test-model",
+      displayName: "OR Test",
+      billingMode: "per-token",
+      pricing: { prompt: 1.25, completion: 5 }, // server-canonicalized per-1M
+      contextWindow: 200_000,
+    } as ModelEntry);
+    const container = await renderModelList(agent, "openrouter/test-model");
+    expect(container.textContent).toMatch(/200k ctx · \$1\.25 \/ \$5\.00 per 1M tokens/);
+  });
+
+  it("does not render '$0.00' when given non-zero per-1M values (proves units match)", async () => {
+    const agent = openRouterAgent({
+      id: "openrouter/sonnet-mirror",
+      displayName: "OR Sonnet Mirror",
+      billingMode: "per-token",
+      pricing: { prompt: 3, completion: 15 },
+    } as ModelEntry);
+    const container = await renderModelList(agent, "openrouter/sonnet-mirror");
+    const text = container.textContent ?? "";
+    // Must show the real Sonnet-class price, not the $0.00 regression.
+    expect(text).toMatch(/\$3\.00 \/ \$15\.00/);
+    expect(text).not.toMatch(/\$0\.00 \/ \$0\.00/);
+  });
+});

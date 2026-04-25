@@ -26,13 +26,16 @@ export type ContextMenuAction =
   | "duplicate"
   | "run-benchmark"
   | "update"
-  | "uninstall";
+  | "uninstall"
+  | "delete";
 
 export interface ContextMenuItem {
   action: ContextMenuAction;
   label: string;
   /** When true, item is visually disabled and cannot be invoked. */
   disabled?: boolean;
+  /** Tooltip text — rendered on the menuitem's `title` attribute. */
+  title?: string;
 }
 
 export interface ContextMenuState {
@@ -64,12 +67,20 @@ export function itemsForSkill(skill: SkillInfo): ContextMenuItem[] {
       ...base,
       { action: "edit", label: a.edit },
       { action: "duplicate", label: a.duplicate },
+      { action: "delete", label: a.delete },
     ];
   }
-  // installed
+  // installed (plugin/global)
   const out = [...base];
   if (skill.updateAvailable) out.push({ action: "update", label: a.update });
   out.push({ action: "uninstall", label: a.uninstall });
+  // 0722: still surface Delete so the user understands why it's unavailable.
+  out.push({
+    action: "delete",
+    label: a.delete,
+    disabled: true,
+    title: a.deletePluginTooltip,
+  });
   return out;
 }
 
@@ -185,6 +196,7 @@ export function ContextMenu({ state, onClose, onAction, itemsOverride }: Props) 
           key={item.action}
           role="menuitem"
           aria-disabled={item.disabled || undefined}
+          title={item.title || undefined}
           data-action={item.action}
           data-selected={i === cursor || undefined}
           onMouseEnter={() => setCursor(i)}

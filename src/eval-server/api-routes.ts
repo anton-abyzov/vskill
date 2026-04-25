@@ -13,6 +13,7 @@ import { dataEventBus, emitDataEvent } from "./data-events.js";
 import { classifyError } from "./error-classifier.js";
 import { readLockfile } from "../lockfile/lockfile.js";
 import { parseSource } from "../resolvers/source-resolver.js";
+import { resolveSkillApiName as resolveSkillApiNameImpl } from "./skill-name-resolver.js";
 import { runBenchmarkSSE, runSingleCaseSSE, assembleBulkResult } from "./benchmark-runner.js";
 import { getSkillSemaphore } from "./concurrency.js";
 import { resolveSkillDir } from "./skill-resolver.js";
@@ -24,7 +25,7 @@ import {
 } from "../eval/plugin-scanner.js";
 import { resolveGlobalSkillsDir } from "../eval/path-utils.js";
 import { loadAndValidateEvals, EvalValidationError } from "../eval/schema.js";
-import { ANTHROPIC_CATALOG_SNAPSHOT } from "../eval/anthropic-catalog.js";
+import { ANTHROPIC_CATALOG_SNAPSHOT, findAnthropicModel } from "../eval/anthropic-catalog.js";
 import type { EvalsFile } from "../eval/schema.js";
 import { readBenchmark } from "../eval/benchmark.js";
 import type { BenchmarkResult, BenchmarkCase, BenchmarkAssertionResult } from "../eval/benchmark.js";
@@ -636,6 +637,10 @@ interface ModelOption {
   id: string;       // raw model id passed to the provider
   label: string;    // human-readable display name
   pricing?: { prompt: number; completion: number };  // USD per 1M tokens
+  // Concrete dated/canonical Anthropic ID this alias resolves to via the
+  // catalog snapshot. Populated only on claude-cli rows so the picker can
+  // surface "routing to claude-sonnet-4-6" under each generic alias.
+  resolvedId?: string;
 }
 
 // 0711 — Anthropic models + pricing now derive from the dated catalog
@@ -657,11 +662,21 @@ function buildAnthropicProviderModels(): ModelOption[] {
     }));
 }
 
+function aliasInfo(alias: string, fallbackLabel: string): { label: string; resolvedId?: string } {
+  const entry = findAnthropicModel(alias);
+  if (!entry) return { label: fallbackLabel };
+  return { label: entry.displayName, resolvedId: entry.id };
+}
+
 export const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
+  // Opus first so it is the default when no override is set
+  // (getEffectiveRawModel returns models[0]). Labels come from the catalog so
+  // the picker shows the exact dated version (e.g. "Claude Opus 4.7"), not the
+  // bare family name — keeps the Studio truthful when a model is bumped.
   "claude-cli": [
-    { id: "sonnet", label: "Claude Sonnet" },
-    { id: "opus", label: "Claude Opus" },
-    { id: "haiku", label: "Claude Haiku" },
+    { id: "opus", ...aliasInfo("opus", "Claude Opus") },
+    { id: "sonnet", ...aliasInfo("sonnet", "Claude Sonnet") },
+    { id: "haiku", ...aliasInfo("haiku", "Claude Haiku") },
   ],
   "anthropic": buildAnthropicProviderModels(),
   "ollama": [
@@ -1402,17 +1417,13 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   const PLATFORM_BASE = "https://verified-skill.com";
 
-  /** Resolve plugin/skill to full hierarchical API name using lockfile source. */
-  function resolveSkillApiName(skill: string): string {
-    const lock = readLockfile();
-    if (!lock) return skill;
-    const entry = lock.skills[skill];
-    if (!entry?.source) return skill;
-    const parsed = parseSource(entry.source);
-    if (parsed.type === "github" || parsed.type === "github-plugin" || parsed.type === "marketplace") {
-      return `${parsed.owner}/${parsed.repo}/${skill}`;
-    }
-    return skill;
+  /**
+   * Resolve plugin/skill to full hierarchical API name. Lockfile path first
+   * (installed skills); falls back to authored-skill discovery on disk +
+   * git remote parse for skills authored in this repo. See skill-name-resolver.ts.
+   */
+  function resolveSkillApiName(skill: string): Promise<string> {
+    return resolveSkillApiNameImpl(skill, root);
   }
 
   // T-009 (proxy) + 0707 T-021 (harden): Versions endpoint
@@ -1427,7 +1438,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   //
   // Never returns 5xx for the "no VCS surface" case — that is normal empty state.
   router.get("/api/skills/:plugin/:skill/versions", async (req, res, params) => {
-    const fullName = resolveSkillApiName(params.skill);
+    const fullName = await resolveSkillApiName(params.skill);
     const parts = fullName.split("/");
     const apiPath = parts.length === 3
       ? `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}/versions`
@@ -1490,11 +1501,11 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       return;
     }
 
-    const fullName = resolveSkillApiName(params.skill);
+    const fullName = await resolveSkillApiName(params.skill);
     const parts = fullName.split("/");
     const basePath = parts.length === 3
-      ? `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}/versions`
-      : `/api/v1/skills/${encodeURIComponent(fullName)}/versions`;
+      ? `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}/versions/diff`
+      : `/api/v1/skills/${encodeURIComponent(fullName)}/versions/diff`;
 
     try {
       const resp = await fetch(
@@ -1749,7 +1760,10 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       return;
     }
     try {
-      rmSync(skillDir, { recursive: true, force: true });
+      // 0722: route to OS trash (Trash / Recycle Bin / XDG) instead of hard delete
+      // so accidental deletes are recoverable from the user's native Trash app.
+      const trash = (await import("trash")).default;
+      await trash([skillDir]);
       sendJson(res, { ok: true, deleted: `${params.plugin}/${params.skill}` }, 200, req);
     } catch (err) {
       sendJson(res, { error: `Failed to delete skill: ${(err as Error).message}` }, 500, req);

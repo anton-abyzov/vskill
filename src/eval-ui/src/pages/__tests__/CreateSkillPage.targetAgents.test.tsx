@@ -157,7 +157,7 @@ async function mountPage(): Promise<{ container: HTMLElement; unmount: () => voi
 }
 
 describe("0703 — Target Agents scoping to active scope agent", () => {
-  it("AC-US5-01: hides Cursor / Codex CLI / Copilot rows when activeAgent is claude-code", async () => {
+  it("AC-US6-01: hides Cursor / Codex CLI / Copilot rows when activeAgent is claude-code", async () => {
     localStorage.setItem("vskill.studio.prefs", JSON.stringify({ activeAgent: "claude-code" }));
     const h = await mountPage();
     try {
@@ -175,7 +175,7 @@ describe("0703 — Target Agents scoping to active scope agent", () => {
     }
   });
 
-  it("AC-US5-02: shows all universal agents when activeAgent is NOT claude-code", async () => {
+  it("AC-US6-02: shows all universal agents when activeAgent is NOT claude-code", async () => {
     localStorage.setItem("vskill.studio.prefs", JSON.stringify({ activeAgent: "cursor" }));
     const h = await mountPage();
     try {

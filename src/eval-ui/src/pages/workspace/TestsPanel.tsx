@@ -251,25 +251,47 @@ export function TestsPanel() {
     <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", height: "100%", overflow: "hidden" }}>
       {/* Left: Case list */}
       <div className="overflow-auto" style={{ borderRight: "1px solid var(--border-subtle)", background: "var(--surface-1)" }}>
-        <div className="px-3 py-2 flex items-center justify-between" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-          <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>
+        <div
+          className="px-3 py-2"
+          style={{
+            borderBottom: "1px solid var(--border-subtle)",
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            rowGap: 6,
+            columnGap: 8,
+          }}
+        >
+          <span
+            className="text-[10px] font-semibold uppercase tracking-wider"
+            style={{ color: "var(--text-tertiary)", flex: "1 1 auto", minWidth: 0 }}
+          >
             Test Cases ({cases.length})
           </span>
-          <div className="flex items-center gap-1.5">
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 6,
+              marginLeft: "auto",
+              flexShrink: 0,
+            }}
+          >
             {isAnyRunning ? (
               <button
                 onClick={cancelAll}
                 className="btn text-[10px] px-2 py-0.5"
-                style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}
+                style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)", whiteSpace: "nowrap" }}
               >
                 Cancel All
               </button>
             ) : (
               <>
-                <button onClick={() => runAll("benchmark")} disabled={cases.length === 0 || isReadOnly} className="btn btn-primary text-[10px] px-2 py-0.5">
+                <button onClick={() => runAll("benchmark")} disabled={cases.length === 0 || isReadOnly} className="btn btn-primary text-[10px] px-2 py-0.5" style={{ whiteSpace: "nowrap" }}>
                   Run All
                 </button>
-                <button onClick={() => runAll("comparison")} disabled={cases.length === 0 || isReadOnly} className="btn btn-purple text-[10px] px-2 py-0.5">
+                <button onClick={() => runAll("comparison")} disabled={cases.length === 0 || isReadOnly} className="btn btn-secondary text-[10px] px-2 py-0.5" style={{ whiteSpace: "nowrap" }}>
                   Compare All
                 </button>
               </>
@@ -499,10 +521,33 @@ function CaseDetail({
 
   return (
     <div className="p-5 animate-fade-in" key={evalCase.id}>
-      {/* Title + actions */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <span className="text-[16px] font-semibold" style={{ color: "var(--text-primary)" }}>
+      {/* Title + actions — wraps to two rows on narrow detail panes so the
+          title never gets squeezed into one-word-per-line. */}
+      <div
+        className="mb-4"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          rowGap: 8,
+          columnGap: 12,
+        }}
+      >
+        <div
+          className="flex items-center gap-2"
+          style={{ flex: "1 1 240px", minWidth: 0 }}
+        >
+          <span
+            className="text-[16px] font-semibold"
+            title={`#${evalCase.id} ${evalCase.name}`}
+            style={{
+              color: "var(--text-primary)",
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
             #{evalCase.id} {evalCase.name}
           </span>
           {isReadOnly ? (
@@ -546,29 +591,38 @@ function CaseDetail({
           )}
           <StatusPill result={result} />
         </div>
-        <div className="flex items-center gap-2">
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 8,
+            marginLeft: "auto",
+            flexShrink: 0,
+          }}
+        >
           {caseStatus === "running" || caseStatus === "queued" ? (
-            <button onClick={() => onCancel(evalCase.id)} className="btn text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)" }}>
+            <button onClick={() => onCancel(evalCase.id)} className="btn text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)", whiteSpace: "nowrap" }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4 }}><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
               Cancel
             </button>
           ) : (
             <>
-              <button onClick={() => onRun(evalCase.id)} disabled={isReadOnly} className="btn btn-primary text-[12px]">
+              <button onClick={() => onRun(evalCase.id)} disabled={isReadOnly} className="btn btn-primary text-[12px]" style={{ whiteSpace: "nowrap" }}>
                 Run
               </button>
-              <button onClick={() => onCompare(evalCase.id)} disabled={isReadOnly} className="btn btn-purple text-[12px]">
+              <button onClick={() => onCompare(evalCase.id)} disabled={isReadOnly} className="btn btn-secondary text-[12px]" style={{ whiteSpace: "nowrap" }}>
                 A/B Compare
               </button>
             </>
           )}
           {hasFails && !isReadOnly && caseStatus !== "running" && caseStatus !== "queued" && (
-            <button onClick={() => onImprove(evalCase.id)} className="btn btn-secondary text-[12px]">
+            <button onClick={() => onImprove(evalCase.id)} className="btn btn-secondary text-[12px]" style={{ whiteSpace: "nowrap" }}>
               Fix with AI
             </button>
           )}
           {!isReadOnly && caseStatus !== "running" && caseStatus !== "queued" && (
-            <button onClick={deleteCase} className="btn btn-ghost text-[12px]" style={{ color: "var(--red)" }}>
+            <button onClick={deleteCase} className="btn btn-ghost text-[12px]" aria-label="Delete test case" title="Delete test case" style={{ color: "var(--red)" }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
             </button>
           )}

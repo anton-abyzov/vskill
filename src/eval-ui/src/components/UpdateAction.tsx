@@ -28,7 +28,7 @@ const SSE_TIMEOUT_MS = 60_000;
  * not `true`.
  */
 export function UpdateAction({ skill }: Props) {
-  const { refreshUpdates } = useStudio();
+  const { refreshUpdates, dismissPushUpdate } = useStudio();
   const { toast } = useToast();
   const [status, setStatus] = useState<ActionStatus>("idle");
   const [progressStatus, setProgressStatus] = useState<string | null>(null);
@@ -69,6 +69,10 @@ export function UpdateAction({ skill }: Props) {
         setStatus("done");
         setProgressStatus(null);
         void refreshUpdates();
+        // 0708 T-039: clear the push-store entry so the blue UpdateChip dot
+        // and the bell count for this skill vanish immediately — without
+        // waiting for the next outdated poll to land.
+        dismissPushUpdate(`${skill.plugin}/${skill.skill}`);
         toast({ message: `Updated ${skill.skill}.`, severity: "success", durationMs: 4000 });
         resolve();
       });
@@ -82,7 +86,7 @@ export function UpdateAction({ skill }: Props) {
         reject(new Error(message));
       });
     });
-  }, [skill, refreshUpdates, toast]);
+  }, [skill, refreshUpdates, dismissPushUpdate, toast]);
 
   const action = useOptimisticAction<[], Snapshot>({
     snapshot: () => ({ status }),

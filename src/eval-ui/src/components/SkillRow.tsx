@@ -6,6 +6,7 @@ import type { SkillInfo } from "../types";
 import { SkillRowHoverCard } from "./SkillRowHoverCard";
 import { SymlinkChip } from "./SymlinkChip";
 import { UpdateBadge } from "./UpdateBadge";
+import { UpdateChip } from "./UpdateChip";
 import { VersionBadge } from "./VersionBadge";
 void SkillRowHoverCard;
 
@@ -147,6 +148,15 @@ function SkillRowBase({ skill, isSelected, onSelect, onContextMenu }: Props) {
 
       {/* 0683 US-001: subtle ↑ glyph replaces the old "update" pill. */}
       <UpdateBadge skill={skill} />
+
+      {/* 0708 T-037/T-038: blue update dot (SSE push) or dim gray not-tracked
+          dot. `trackedForUpdates` is a 0708 addition to SkillInfo; payloads
+          that predate 0708 omit it, so `undefined` is treated as "assume
+          tracked" to avoid spamming the not-tracked dot on legacy rows. */}
+      <UpdateChip
+        skillId={`${skill.plugin}/${skill.skill}`}
+        trackedForUpdates={skill.trackedForUpdates ?? true}
+      />
     </button>
   );
 }

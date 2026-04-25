@@ -1,0 +1,54 @@
+{
+  "combo": "combo-3-all-universal",
+  "prompt": "lint markdown files",
+  "targetAgents": [
+    "claude-code",
+    "cursor",
+    "github-copilot-ext",
+    "windsurf",
+    "codex",
+    "gemini-cli",
+    "cline"
+  ],
+  "responseStatus": 200,
+  "contentType": "text/event-stream",
+  "eventSequence": [
+    "progress",
+    "progress",
+    "progress",
+    "progress",
+    "progress",
+    "done"
+  ],
+  "firstFrameByEventType": {
+    "progress": {
+      "phase": "preparing",
+      "message": "Building prompt..."
+    },
+    "done": {
+      "name": "lint-markdown-files",
+      "description": "Lint markdown files for style and structure issues",
+      "model": "claude-sonnet-4-5",
+      "allowedTools": "Read, Glob, Grep, Bash",
+      "body": "# Lint Markdown Files\n\nUse this skill to lint markdown files in a project.\n",
+      "reasoning": "Generated using Skill Studio best practices for the markdown-lint domain.",
+      "evals": [
+        {
+          "id": 1,
+          "name": "lints a malformed heading",
+          "prompt": "Lint this file: # Bad Heading",
+          "expected_output": "warning about heading format",
+          "assertions": [
+            {
+              "id": "a1",
+              "text": "output mentions heading",
+              "type": "contains"
+            }
+          ]
+        }
+      ],
+      "suggestedPlugin": null
+    }
+  },
+  "totalFrames": 6
+}

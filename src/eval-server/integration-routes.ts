@@ -89,6 +89,14 @@ export function registerIntegrationRoutes(router: Router, root: string): void {
   router.get("/api/credentials/:plugin/:skill", async (req, res, params) => {
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
 
+    // Skills without evals/evals.json have no integration-test credentials.
+    // Return empty list with 200 — a missing evals file is a valid state, not
+    // a client error. Malformed evals.json still surfaces as 400 below.
+    if (!existsSync(join(skillDir, "evals", "evals.json"))) {
+      sendJson(res, { credentials: [] }, 200, req);
+      return;
+    }
+
     try {
       // Load evals and collect all requiredCredentials from integration tests
       const evalsFile = loadAndValidateEvals(skillDir);

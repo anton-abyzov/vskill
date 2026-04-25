@@ -11,6 +11,12 @@ interface Props {
   onClose: () => void;
   /** DOM node the popover is anchored to — used to return focus on close. */
   anchorRef?: React.RefObject<HTMLElement | null>;
+  /**
+   * 0708 AC-US5-03: diff summaries keyed by `<plugin>/<skill>`, sourced
+   * from the push update store. When a row's `name` matches a key, the
+   * one-line summary is rendered below the version transition.
+   */
+  diffSummariesById?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -31,6 +37,7 @@ export default function UpdateDropdown({
   onViewAll,
   onClose,
   anchorRef,
+  diffSummariesById,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const firstItemRef = useRef<HTMLButtonElement>(null);
@@ -140,6 +147,7 @@ export default function UpdateDropdown({
           {outdated.map((u, i) => {
             const bump = u.latest ? classifyBump(u.installed, u.latest) : "patch";
             const c = BUMP_COLORS[bump];
+            const diff = diffSummariesById?.get(u.name);
             return (
               <li key={u.name} style={{ margin: 0 }}>
                 <button
@@ -150,7 +158,7 @@ export default function UpdateDropdown({
                   onClick={() => onSelectSkill(u)}
                   style={{
                     display: "flex",
-                    alignItems: "center",
+                    alignItems: "flex-start",
                     gap: 8,
                     width: "100%",
                     padding: "6px 8px",
@@ -174,20 +182,62 @@ export default function UpdateDropdown({
                       borderRadius: "50%",
                       background: c.text,
                       flexShrink: 0,
+                      marginTop: 4,
                     }}
                   />
-                  <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {u.name}
-                  </span>
                   <span
                     style={{
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 10,
-                      color: "var(--text-secondary)",
-                      fontVariantNumeric: "tabular-nums",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 2,
+                      minWidth: 0,
+                      flex: 1,
                     }}
                   >
-                    {u.installed} → {u.latest ?? "?"}
+                    <span
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        minWidth: 0,
+                      }}
+                    >
+                      <span
+                        style={{
+                          minWidth: 0,
+                          flex: 1,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {u.name}
+                      </span>
+                      <span
+                        style={{
+                          fontFamily: "var(--font-mono)",
+                          fontSize: 10,
+                          color: "var(--text-secondary)",
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {u.installed} → {u.latest ?? "?"}
+                      </span>
+                    </span>
+                    {diff && (
+                      <span
+                        data-testid="update-dropdown-diff-summary"
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-secondary)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {diff}
+                      </span>
+                    )}
                   </span>
                 </button>
               </li>

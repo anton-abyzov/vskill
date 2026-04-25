@@ -47,6 +47,18 @@ function dispatchToast(message: string, severity: "info" | "error" = "info"): vo
 }
 
 /**
+ * 0722: ask the App to open the delete-confirmation dialog. App.tsx owns the
+ * actual ConfirmDialog + usePendingDeletion wiring; this router stays
+ * hook-free so it can be unit-tested without React.
+ */
+function dispatchRequestDelete(skill: SkillInfo): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("studio:request-delete", { detail: { skill } }),
+  );
+}
+
+/**
  * Side-effecting router for context-menu actions. Returns nothing — all
  * outputs happen via `navigator.clipboard` and `studio:toast` events.
  *
@@ -87,6 +99,10 @@ export function handleContextMenuAction(
       // for this plumbing increment. Emit a stub toast so the action is
       // acknowledged rather than silently dropped.
       dispatchToast(strings.actions.editPlaceholder ?? "Uninstall requires confirmation.", "info");
+      return;
+    case "delete":
+      // 0722: open the ConfirmDialog. App.tsx listens for studio:request-delete.
+      dispatchRequestDelete(skill);
       return;
     default:
       return;

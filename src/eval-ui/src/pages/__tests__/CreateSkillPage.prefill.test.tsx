@@ -21,6 +21,7 @@ const setAiPromptMock = vi.fn();
 const setNameMock = vi.fn();
 const setDescriptionMock = vi.fn();
 const setPluginMock = vi.fn();
+const useCreateSkillOptionsSpy = vi.fn();
 
 vi.mock("../../ConfigContext", () => ({
   useConfig: () => ({
@@ -46,7 +47,9 @@ vi.mock("../../ConfigContext", () => ({
 
 vi.mock("../../hooks/useCreateSkill", () => ({
   toKebab: (s: string) => s.toLowerCase().replace(/[^a-z0-9-]+/g, "-"),
-  useCreateSkill: () => ({
+  useCreateSkill: (opts?: unknown) => {
+    useCreateSkillOptionsSpy(opts);
+    return ({
     mode: "ai",
     setMode: vi.fn(),
     layoutLoading: false,
@@ -97,7 +100,8 @@ vi.mock("../../hooks/useCreateSkill", () => ({
     creating: false,
     error: null,
     draftSaved: false,
-  }),
+  });
+  },
 }));
 
 vi.mock("react-router-dom", async (importOriginal) => {
@@ -121,6 +125,7 @@ beforeEach(() => {
   setNameMock.mockClear();
   setDescriptionMock.mockClear();
   setPluginMock.mockClear();
+  useCreateSkillOptionsSpy.mockClear();
 });
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -170,6 +175,39 @@ describe("0703 — CreateSkillPage URL prefill populates aiPrompt", () => {
     const h = await mountWithHash("#/create?mode=standalone&skillName=anton-greet");
     try {
       expect(setAiPromptMock).not.toHaveBeenCalled();
+    } finally {
+      h.unmount();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Standalone-mode regression — when the modal hands off `mode=standalone`,
+// the page MUST pin layout 3 via `forceLayout`. Without this, the project's
+// layout-detection effect inside useCreateSkill silently picks the project's
+// first existing plugin (e.g. easychamp) and the skill ends up nested under
+// it instead of at root `skills/`.
+// ---------------------------------------------------------------------------
+describe("CreateSkillPage — mode=standalone pins layout 3", () => {
+  it("passes forceLayout=3 to useCreateSkill when ?mode=standalone", async () => {
+    const h = await mountWithHash("#/create?mode=standalone&skillName=anton-greet");
+    try {
+      const calls = useCreateSkillOptionsSpy.mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      const opts = calls[0][0] as { forceLayout?: 1 | 2 | 3 };
+      expect(opts.forceLayout).toBe(3);
+    } finally {
+      h.unmount();
+    }
+  });
+
+  it("does NOT set forceLayout when mode is omitted or non-standalone", async () => {
+    const h = await mountWithHash("#/create?skillName=anton-greet");
+    try {
+      const calls = useCreateSkillOptionsSpy.mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      const opts = calls[0][0] as { forceLayout?: 1 | 2 | 3 };
+      expect(opts.forceLayout).toBeUndefined();
     } finally {
       h.unmount();
     }

@@ -111,39 +111,32 @@ export function AiEditBar() {
       </div>
 
       <div className="px-4 py-3">
-        {/* Instruction input + model picker + submit */}
+        {/* Instruction input on its own row (full width); provider/model/submit beneath. */}
         {!aiEditResult && (<>
-          <div className="flex items-end gap-2.5">
-            <div className="flex-1">
-              <textarea
-                ref={textareaRef}
-                value={instruction}
-                onChange={(e) => setInstruction(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="e.g., Add an error handling section..."
-                disabled={aiEditLoading}
-                rows={1}
-                className="w-full resize-none outline-none"
-                style={{
-                  background: "var(--surface-0)",
-                  color: "var(--text-primary)",
-                  border: "1px solid var(--border-subtle)",
-                  borderRadius: 6,
-                  padding: "8px 12px",
-                  fontSize: 12.5,
-                  lineHeight: 1.5,
-                  fontFamily: "var(--font-mono, 'JetBrains Mono', ui-monospace, monospace)",
-                  minHeight: 36,
-                  maxHeight: 96,
-                }}
-                onInput={(e) => {
-                  const el = e.currentTarget;
-                  el.style.height = "auto";
-                  el.style.height = Math.min(el.scrollHeight, 96) + "px";
-                }}
-              />
-            </div>
-            <div style={{ minWidth: 100 }}>
+          <textarea
+            ref={textareaRef}
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="e.g., Add an error handling section..."
+            disabled={aiEditLoading}
+            rows={4}
+            className="w-full resize-y outline-none"
+            style={{
+              background: "var(--surface-0)",
+              color: "var(--text-primary)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: 6,
+              padding: "10px 12px",
+              fontSize: 12.5,
+              lineHeight: 1.5,
+              fontFamily: "var(--font-mono, 'JetBrains Mono', ui-monospace, monospace)",
+              minHeight: 96,
+              maxHeight: 240,
+            }}
+          />
+          <div className="flex items-end gap-2.5 mt-2">
+            <div style={{ minWidth: 200 }}>
               <label className="text-[10px] font-medium mb-0.5 block" style={{ color: "var(--text-tertiary)" }}>Provider</label>
               <select
                 className="input-field text-[11px] py-1"
@@ -161,7 +154,7 @@ export function AiEditBar() {
                 ))}
               </select>
             </div>
-            <div style={{ minWidth: 80 }}>
+            <div style={{ minWidth: 200 }}>
               <label className="text-[10px] font-medium mb-0.5 block" style={{ color: "var(--text-tertiary)" }}>Model</label>
               <select
                 className="input-field text-[11px] py-1"
@@ -175,6 +168,7 @@ export function AiEditBar() {
                 ))}
               </select>
             </div>
+            <div className="flex-1" />
             {aiEditLoading ? (
               <button
                 onClick={cancelAiEdit}

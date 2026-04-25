@@ -227,6 +227,14 @@ export interface SkillInfo {
   currentVersion?: string;
   latestVersion?: string;
   pinnedVersion?: string;
+  /**
+   * 0708 AC-US6-03: true when the platform has a `sourceRepoUrl` recorded
+   * for this skill (live SSE updates flow); false when the upstream is
+   * unknown and the user must run `vskill outdated` manually. Omitted for
+   * payloads that predate 0708 — callers should treat `undefined` as
+   * "assume tracked" to avoid spamming the not-tracked dot.
+   */
+  trackedForUpdates?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -710,6 +718,7 @@ export interface CredentialStatus {
 export interface OpenRouterModel {
   id: string;
   name: string;
+  /** USD per 1M tokens (canonical wire unit; canonicalized server-side at /api/openrouter/models — see 0710). */
   pricing: { prompt: number; completion: number };
 }
 

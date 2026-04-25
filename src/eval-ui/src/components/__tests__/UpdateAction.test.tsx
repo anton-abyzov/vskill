@@ -4,8 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Stub StudioContext so UpdateAction doesn't need the provider tree.
 const refreshUpdatesSpy = vi.fn(() => Promise.resolve());
+const dismissPushUpdateSpy = vi.fn();
 vi.mock("../../StudioContext", () => ({
-  useStudio: () => ({ refreshUpdates: refreshUpdatesSpy }),
+  useStudio: () => ({
+    refreshUpdates: refreshUpdatesSpy,
+    dismissPushUpdate: dismissPushUpdateSpy,
+  }),
 }));
 
 // Shared mock EventSource — tests grab it off the spy and drive events manually.
@@ -112,6 +116,7 @@ describe("UpdateAction (0683 T-009)", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: false });
     refreshUpdatesSpy.mockClear();
+    dismissPushUpdateSpy.mockClear();
     lastES = null;
   });
   afterEach(() => {
@@ -173,6 +178,28 @@ describe("UpdateAction (0683 T-009)", () => {
       const toasts = document.querySelectorAll("[data-testid='toast-item']");
       const texts = Array.from(toasts).map((t) => t.textContent).join(" | ");
       expect(texts).toContain("Updated skill-x.");
+    } finally {
+      h.unmount();
+    }
+  });
+
+  it("0708 T-039: on 'done' also dismisses the push-store entry for this skill", async () => {
+    const h = await mountAction({
+      plugin: "anthropic-skills",
+      skill: "pdf",
+      updateAvailable: true,
+      currentVersion: "1.0.0",
+      latestVersion: "2.0.0",
+    });
+    try {
+      const btn = h.container.querySelector("[data-testid='update-action-button']") as HTMLButtonElement;
+      await h.act(async () => { btn.click(); await flushMicrotasks(); });
+      await h.act(async () => {
+        lastES!.emit("done");
+        await flushMicrotasks();
+      });
+      expect(dismissPushUpdateSpy).toHaveBeenCalledTimes(1);
+      expect(dismissPushUpdateSpy).toHaveBeenCalledWith("anthropic-skills/pdf");
     } finally {
       h.unmount();
     }

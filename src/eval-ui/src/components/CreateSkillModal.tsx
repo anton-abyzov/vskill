@@ -162,9 +162,14 @@ export function CreateSkillModal({
     params.set("skillName", skillName);
     if (description.trim()) params.set("description", description.trim());
     if (pluginName) params.set("pluginName", pluginName);
-    const url = `/#/create?${params.toString()}`;
+    // 0703 closure F-001 fix: use `location.hash` instead of `location.assign('/#...')`.
+    // The hard-coded `/` prefix worked fine when eval-ui is served at root, but
+    // breaks if ever mounted under a subpath (reverse proxy, monorepo sub-app).
+    // Setting `location.hash` is the idiomatic way to navigate within a HashRouter
+    // app and is subpath-agnostic.
+    const hash = `#/create?${params.toString()}`;
     if (typeof window !== "undefined") {
-      window.location.assign(url);
+      window.location.hash = hash;
     }
     onClose();
   }

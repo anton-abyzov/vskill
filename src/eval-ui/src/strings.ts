@@ -95,6 +95,11 @@ const actions = {
   uninstall: "Uninstall",
   retry: "Retry",
   editPlaceholder: "Edit lands with 0675. Open the file in your editor.",
+  // 0722: delete a user-owned skill via OS trash.
+  delete: "Delete",
+  deletePluginTooltip:
+    "Plugin skills are managed by their owning plugin — uninstall the plugin to remove.",
+  undo: "Undo",
 } as const;
 
 // ---------------------------------------------------------------------------

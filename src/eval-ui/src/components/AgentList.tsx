@@ -19,10 +19,12 @@ export interface AgentListProps {
   onOpenSettings: (providerTab?: string) => void;
 }
 
-// Providers above the divider (agentic editors). Below-divider: Ollama + LM Studio.
+// Providers above the divider (cloud / agentic editors).
+// Below-divider: Ollama + LM Studio (locally installed).
 const ABOVE_DIVIDER = new Set([
   "claude-cli",
   "anthropic",
+  "openai",
   "openrouter",
   "cursor",
   "codex-cli",

@@ -1,4 +1,5 @@
 ---
+version: "1.0.1"
 description: "This skill should be used at the very start of every response, before any other action, tool call, or analysis. Activate whenever the user (Anton) sends any message — regardless of topic, complexity, or whether tools will be invoked. Make sure to use this skill before answering questions, running commands, editing files, or invoking other skills."
 ---
 

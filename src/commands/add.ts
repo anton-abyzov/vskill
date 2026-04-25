@@ -59,8 +59,9 @@ import { computeSha } from "../updater/source-fetcher.js";
 import { extractFrontmatterVersion } from "../utils/version.js";
 // 0724 T-006: enable-after-install path. We delegate every enabledPlugins
 // mutation to the claude CLI (ADR 0724-01), and we honour the --no-enable
-// flag to skip it.
-import { claudePluginInstall } from "../utils/claude-plugin.js";
+// flag to skip it. Uninstall is imported for F-003 rollback of earlier
+// already-enabled plugins on a partway failure.
+import { claudePluginInstall, claudePluginUninstall } from "../utils/claude-plugin.js";
 import {
   buildPerAgentReport,
   resolvePluginId,
@@ -616,22 +617,38 @@ async function installMarketplaceRepo(
   // see exactly which agent surfaces received the registration.
   //
   // Backward-compat (NFR-005): the hook only fires when the user opts into
-  // the new surface — i.e., they pass --no-enable, --scope, or --dry-run.
+  // the new surface — i.e., they pass --scope, --no-enable, or --dry-run.
   // Without an opt-in, vskill install behaves exactly as before so existing
-  // tests, scripts, and CI pipelines see no behaviour change. Once any
-  // distribution channel surfaces the new flags as the default (likely a
-  // future major bump), this gate flips to "always on".
+  // tests, scripts, and CI pipelines see no behaviour change. AC-US1-01 is
+  // read as "when the install flow performs the enable, it does so via
+  // claudePluginInstall(<id>, <scope>) exactly once per scope chosen" —
+  // i.e., it constrains *how* we enable, not *whether* we always enable.
+  // A future major bump will flip this gate to always-on once distribution
+  // can also surface --no-enable as the off-switch.
+  //
+  // When the gate fires, we track every successful enable in
+  // `enabledSoFar` so that a later failure rolls back all earlier
+  // already-enabled plugins (otherwise we'd leave exactly the stale
+  // `enabledPlugins` entries that `vskill cleanup` is meant to fix).
   const userOptedIn =
     opts.scope !== undefined ||
     opts.dryRun === true ||
     opts.enable === false;
   if (userOptedIn) {
+    const enabledSoFar: Array<{ name: string; pluginId: string; scope: "user" | "project" }> = [];
     for (const r of results) {
       if (!r.installed) continue;
       const entry = lockForWrite.skills[r.name];
       if (!entry) continue;
       try {
         const enableResult = enableAfterInstall(r.name, entry, opts);
+        if (enableResult.invoked && enableResult.pluginId) {
+          enabledSoFar.push({
+            name: r.name,
+            pluginId: enableResult.pluginId,
+            scope: enableResult.scope,
+          });
+        }
         const action = enableResult.invoked ? "enabled" : "not-applicable";
         const report = buildPerAgentReport({
           skill: r.name,
@@ -641,7 +658,8 @@ async function installMarketplaceRepo(
         });
         for (const line of report) console.log(`  ${dim(">")} ${line.line}`);
       } catch (err) {
-        // AC-US1-05: rollback on failure
+        // AC-US1-05: rollback on failure (filesystem + lockfile + earlier
+        // already-enabled plugins to avoid leaving stale enabledPlugins).
         const failedScope: "user" | "project" =
           opts.scope ?? (opts.global ? "user" : "project");
         console.error(
@@ -650,6 +668,20 @@ async function installMarketplaceRepo(
           ),
         );
         rollbackInstall(r.name, agents, opts);
+        // F-003: undo earlier successful enables to keep settings.json
+        // clean. Static import — see top of file.
+        for (const prev of enabledSoFar) {
+          try {
+            claudePluginUninstall(
+              prev.pluginId,
+              prev.scope,
+              prev.scope === "project" ? { cwd: process.cwd() } : undefined,
+            );
+          } catch {
+            /* best-effort */
+          }
+          rollbackInstall(prev.name, agents, opts);
+        }
         process.exit(1);
         return;
       }

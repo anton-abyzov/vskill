@@ -55,8 +55,13 @@ vi.mock("node:path", async () => {
 // Mock node:child_process
 // ---------------------------------------------------------------------------
 const mockExecSync = vi.fn();
+const mockExecFileSync = vi.fn();
 vi.mock("node:child_process", () => ({
   execSync: (...args: unknown[]) => mockExecSync(...args),
+  // 0724 T-006 (F-001 fix): the new claude-plugin enable hook calls
+  // execFileSync; without this mock the hook would crash in CI tests that
+  // don't have `claude` on PATH.
+  execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
 }));
 
 // ---------------------------------------------------------------------------

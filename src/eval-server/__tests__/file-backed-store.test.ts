@@ -310,6 +310,30 @@ describe("FileBackedStore — post-merge listKeys retention (T-071 DEFECT 1)", (
     expect(list.openrouter.updatedAt).toBeTruthy();
   });
 
+  it("0682 F-002: removeKey preserves real env vars set by the operator's shell", async () => {
+    // Simulate the scenario:
+    //   1. Operator exports ANTHROPIC_API_KEY=sk-ant-real in their shell
+    //      (this is the "real" env var, never touches the file store).
+    //   2. User saves a DIFFERENT provider via Settings (file store gains
+    //      one entry — say openai). mergeStoredKeysIntoEnv runs at boot.
+    //   3. User clicks Remove on the openai entry.
+    //   4. The real ANTHROPIC_API_KEY in process.env MUST survive — it
+    //      belongs to the operator's environment, not the file store.
+    process.env.ANTHROPIC_API_KEY = "sk-ant-real-from-shell";
+    store.resetSettingsStore({ configDir: tmp });
+    await store.saveKey("openai", "sk-proj-stored-only");
+    store.mergeStoredKeysIntoEnv();
+    // Confirm preconditions: file-store key landed in env, real env var unchanged.
+    expect(process.env.OPENAI_API_KEY).toBe("sk-proj-stored-only");
+    expect(process.env.ANTHROPIC_API_KEY).toBe("sk-ant-real-from-shell");
+
+    await store.removeKey("openai");
+    // file-store-derived env var cleared:
+    expect(process.env.OPENAI_API_KEY).toBeUndefined();
+    // real env var preserved:
+    expect(process.env.ANTHROPIC_API_KEY).toBe("sk-ant-real-from-shell");
+  });
+
   it("TC-071c: removeKey after mergeStoredKeysIntoEnv() flips listKeys to stored:false", async () => {
     const keysFile = path.join(tmp, "keys.env");
     fs.mkdirSync(tmp, { recursive: true });

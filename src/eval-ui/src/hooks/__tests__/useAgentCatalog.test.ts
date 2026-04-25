@@ -261,6 +261,35 @@ describe("useAgentCatalog — CR-003: age-based stale-catalog toast", () => {
   });
 });
 
+describe("useAgentCatalog — F-002 (review iter 3): setActive surfaces network errors", () => {
+  it("calls onSetActiveError when fetch throws (e.g. offline)", async () => {
+    let baseLoaded = false;
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.endsWith("/api/config") && (!init || init.method !== "POST")) {
+        baseLoaded = true;
+        return new Response(JSON.stringify(baseConfig()), { status: 200 });
+      }
+      // Simulate a network drop on the POST.
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch;
+
+    const onSetActiveError = vi.fn();
+    const { getHandle } = await renderHook({ onSetActiveError });
+    const h = getHandle();
+    expect(baseLoaded).toBe(true);
+    const { act } = await import("react");
+    await act(async () => {
+      await h.setActive("anthropic", "haiku");
+    });
+    expect(onSetActiveError).toHaveBeenCalled();
+    const message = onSetActiveError.mock.calls[0]![0] as string;
+    expect(message).toMatch(/Network error/i);
+    // Catalog NOT updated to the rejected selection.
+    expect(getHandle().catalog?.activeAgent).toBe("claude-cli");
+  });
+});
+
 describe("useAgentCatalog — CR-002: setActive surfaces non-OK responses", () => {
   it("calls onSetActiveError when POST /api/config returns 4xx", async () => {
     const fetchSpy = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {

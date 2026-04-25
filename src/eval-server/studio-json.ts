@@ -76,10 +76,21 @@ export async function saveStudioSelection(
     mkdirSync(dir, { recursive: true });
   }
 
-  // Sweep orphan .tmp siblings from a prior crash.
+  // 0682 F-004 (review iter 2): use a per-pid suffix in the tmp filename so
+  // concurrent writers (multiple processes, or re-entrant calls) don't
+  // delete each other's in-flight tmps. The orphan sweep skips files
+  // matching this pid prefix to avoid racing against an in-flight write
+  // we ourselves are about to land.
+  const pidSuffix = `pid${process.pid}.`;
+  // Sweep orphan .tmp siblings from a prior crash, but skip our own pid's
+  // tmps — those are either ours-in-flight (next call) or from a concurrent
+  // call by the same process and either way are not "orphans".
   try {
     for (const entry of readdirSync(dir)) {
-      if (entry.startsWith(`${STUDIO_FILE}.tmp.`)) {
+      if (
+        entry.startsWith(`${STUDIO_FILE}.tmp.`) &&
+        !entry.includes(pidSuffix)
+      ) {
         try {
           unlinkSync(join(dir, entry));
         } catch { /* best-effort */ }
@@ -87,7 +98,10 @@ export async function saveStudioSelection(
     }
   } catch { /* best-effort */ }
 
-  const tmpPath = join(dir, `${STUDIO_FILE}.tmp.${randomBytes(4).toString("hex")}`);
+  const tmpPath = join(
+    dir,
+    `${STUDIO_FILE}.tmp.${pidSuffix}${randomBytes(4).toString("hex")}`,
+  );
   const finalPath = studioPath(root);
   writeFileSync(tmpPath, JSON.stringify(selection, null, 2), "utf8");
   try {

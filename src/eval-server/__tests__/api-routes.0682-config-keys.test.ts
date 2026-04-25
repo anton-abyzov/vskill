@@ -144,6 +144,31 @@ describe("0682 F-005: /api/config POST updates currentOverrides and persists", (
     else process.env.ANTHROPIC_API_KEY = originalAnthropic;
   });
 
+  it("F-001 (review iter 3): rejects unknown providers with 400 and preserves prior selection", async () => {
+    const root = makeRoot();
+    const { registerRoutes } = await import("../api-routes.js");
+    const router = makeRouter();
+    registerRoutes(router as any, root);
+    const post = router.routes.get("POST /api/config")!;
+    const get = router.routes.get("GET /api/config")!;
+
+    const req = makeReq();
+    const chunks = [Buffer.from(JSON.stringify({ provider: "totally-fake-agent", model: "x" }))];
+    req.on = (ev: string, cb: (buf?: unknown) => void) => {
+      if (ev === "data") chunks.forEach((c) => cb(c));
+      if (ev === "end") cb();
+    };
+    const res = makeRes();
+    await post(req, res);
+    expect(res.statusCode).toBe(400);
+    expect((res.body as any).error).toMatch(/unknown provider/);
+
+    // The prior selection should still be in place — claude-cli default.
+    const getRes = makeRes();
+    await get(makeReq(), getRes);
+    expect((getRes.body as any).provider).toBe("claude-cli");
+  });
+
   it("accepts provider+model and reflects them on the next GET", async () => {
     const root = makeRoot();
     const { registerRoutes } = await import("../api-routes.js");

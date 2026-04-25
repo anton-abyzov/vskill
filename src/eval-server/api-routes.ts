@@ -434,16 +434,51 @@ const EMPTY_METADATA: SkillMetadataFields = {
 };
 
 /**
+ * Allow-list of metadata children that may be surfaced at the top level
+ * during the metadata-nesting migration. Surfacing is intentional for these
+ * keys (existing consumers read them as `fm.<key>`); other metadata children
+ * stay nested under `fm.metadata.<key>` only, so they cannot accidentally
+ * shadow future top-level fields. (0679 review F-004.)
+ *
+ * Includes every key that `buildSkillMetadata` (below) reads at the root, so
+ * that if a future hand-edit moves them under `metadata:` per the spec, the
+ * /api/skills payload still recovers them.
+ */
+const SURFACED_METADATA_KEYS = new Set([
+  // Spec-required keys (agentskills.io/specification — `metadata:` block)
+  "tags",
+  "target-agents",
+  "version",
+  "homepage",
+  "category",
+  "author",
+  "license",
+  // Dependency keys read by buildSkillMetadata. Both kebab-case (canonical)
+  // and camelCase (legacy SKILL.md) are surfaced so the migration is total.
+  "skill-deps",
+  "skillDeps",
+  "deps",
+  "mcp-deps",
+  "mcpDeps",
+  "mcpDependencies",
+  // Path / file metadata
+  "entryPoint",
+  "entry-point",
+]);
+
+/**
  * Minimal YAML frontmatter parser — handles scalars and arrays (inline [a, b]
- * or YAML list form). We intentionally avoid pulling gray-matter into the
+ * or YAML list form), folded scalars (`key: >` + indented continuation), and
+ * the `metadata:` block. We intentionally avoid pulling gray-matter into the
  * eval-server bundle; SKILL.md frontmatter is a well-bounded subset.
  *
  * 0679: also recognizes the canonical agentskills.io shape where `tags` and
- * `target-agents` are nested under a `metadata:` block. Children of
- * `metadata:` are surfaced both as top-level keys (`fm.tags`) AND under
- * `metadata.<key>` (e.g., `fm.metadata.tags`), so existing consumers that
- * read `fm.tags` keep working without changes. If a SKILL.md somehow has BOTH
- * a top-level `tags:` AND a `metadata.tags:` (hand-edited transitional file),
+ * `target-agents` are nested under a `metadata:` block. Allow-listed children
+ * of `metadata:` (see SURFACED_METADATA_KEYS) are surfaced both as top-level
+ * keys (`fm.tags`) AND under `metadata.<key>` (e.g., `fm.metadata.tags`), so
+ * existing consumers that read `fm.tags` keep working without changes. Other
+ * metadata children stay nested-only. If a SKILL.md somehow has BOTH a
+ * top-level `tags:` AND a `metadata.tags:` (hand-edited transitional file),
  * the top-level value wins — explicit beats nested.
  */
 export function parseSkillFrontmatter(content: string): Record<string, string | string[] | Record<string, string | string[]>> {
@@ -456,6 +491,12 @@ export function parseSkillFrontmatter(content: string): Record<string, string | 
   let currentKey: string | null = null;
   let currentList: string[] | null = null;
   let currentScope: "root" | "metadata" = "root";
+  // Folded-scalar (`key: >`) / literal-scalar (`key: |`) accumulator.
+  // While active, indented continuation lines are joined into a single value.
+  let foldedKey: string | null = null;
+  let foldedScope: "root" | "metadata" | null = null;
+  let foldedLines: string[] = [];
+  let foldedKind: ">" | "|" | null = null;
 
   const stripQuotes = (s: string) => s.trim().replace(/^["']|["']$/g, "");
 
@@ -466,6 +507,23 @@ export function parseSkillFrontmatter(content: string): Record<string, string | 
     }
     currentKey = null;
     currentList = null;
+    // 0679 review F-005: keep currentScope coherent with the cleared list.
+    currentScope = scope;
+  };
+
+  const flushFolded = () => {
+    if (!foldedKey) return;
+    // Folded (`>`): join with single spaces, collapsing blank lines to "\n".
+    // Literal (`|`): preserve newlines.
+    const joined = foldedKind === "|"
+      ? foldedLines.join("\n").trim()
+      : foldedLines.map((l) => l.trim()).filter(Boolean).join(" ").trim();
+    const target = foldedScope === "metadata" ? metaOut : rootOut;
+    target[foldedKey] = joined;
+    foldedKey = null;
+    foldedScope = null;
+    foldedLines = [];
+    foldedKind = null;
   };
 
   const writeScalar = (key: string, value: string) => {
@@ -474,16 +532,34 @@ export function parseSkillFrontmatter(content: string): Record<string, string | 
   };
 
   for (const line of lines) {
+    // While accumulating a folded/literal scalar, any indented continuation
+    // line belongs to the scalar; an empty line is a paragraph break.
+    if (foldedKey) {
+      if (line.trim() === "") {
+        foldedLines.push("");
+        continue;
+      }
+      if (/^ {2,}/.test(line)) {
+        foldedLines.push(line.replace(/^ +/, ""));
+        continue;
+      }
+      // Non-indented line — fold ends, fall through to normal processing.
+      flushFolded();
+    }
+
     if (line.trim() === "") continue;
 
-    // Metadata-nested list item (4+ spaces indent): `    - value`
+    // Metadata-nested list item (exactly 4 spaces indent): `    - value`
     const nestedListItem = line.match(/^ {4}-\s+(.+)$/);
     if (nestedListItem && currentKey && currentList && currentScope === "metadata") {
       currentList.push(stripQuotes(nestedListItem[1]));
       continue;
     }
-    // Root-level list item (any leading whitespace ≤ 2): `  - value` or `- value`
-    const rootListItem = line.match(/^ {0,2}-\s+(.+)$/);
+    // Root-level list item — accept either `  - value` (2-space, YAML-conventional
+    // for top-level keys followed by indented list) or `- value` (0-space, also
+    // valid YAML). Reject 1-space and 3+ space (malformed) for symmetry with
+    // the strict 2-space metadata-child rule. (0679 review F-002.)
+    const rootListItem = line.match(/^(?:|  )-\s+(.+)$/);
     if (rootListItem && currentKey && currentList && currentScope === "root") {
       currentList.push(stripQuotes(rootListItem[1]));
       continue;
@@ -499,6 +575,16 @@ export function parseSkillFrontmatter(content: string): Record<string, string | 
       currentKey = key;
       if (!rawValue) {
         currentList = [];
+        continue;
+      }
+      // Folded / literal scalar inside metadata.
+      if (rawValue === ">" || rawValue === "|") {
+        foldedKey = key;
+        foldedScope = "metadata";
+        foldedLines = [];
+        foldedKind = rawValue;
+        currentKey = null;
+        currentList = null;
         continue;
       }
       const arrayMatch = rawValue.match(/^\[(.*)\]$/);
@@ -522,6 +608,15 @@ export function parseSkillFrontmatter(content: string): Record<string, string | 
     const rawValue = kv[2].trim();
 
     if (key === "metadata") {
+      // 0679 review F-002 + iter-3 F-001: `metadata: <inline-scalar>` is a
+      // malformed file. We open the block (subsequent indented children land
+      // under `metadata`) AND preserve the inline value at a sentinel
+      // top-level key (`metadata-inline`) so callers can detect the mistake
+      // instead of silently losing data. The post-merge step (below) removes
+      // any chance of the block contents overwriting the inline value.
+      if (rawValue && rawValue !== ">" && rawValue !== "|") {
+        rootOut["metadata-inline"] = stripQuotes(rawValue);
+      }
       // Entering the metadata block; subsequent indented children are nested.
       scope = "metadata";
       currentScope = "metadata";
@@ -538,6 +633,16 @@ export function parseSkillFrontmatter(content: string): Record<string, string | 
       currentList = [];
       continue;
     }
+    // 0679 review F-001: folded (`>`) and literal (`|`) scalars at root.
+    if (rawValue === ">" || rawValue === "|") {
+      foldedKey = key;
+      foldedScope = "root";
+      foldedLines = [];
+      foldedKind = rawValue;
+      currentKey = null;
+      currentList = null;
+      continue;
+    }
     const arrayMatch = rawValue.match(/^\[(.*)\]$/);
     if (arrayMatch) {
       rootOut[key] = arrayMatch[1].split(",").map(stripQuotes).filter(Boolean);
@@ -550,13 +655,17 @@ export function parseSkillFrontmatter(content: string): Record<string, string | 
     }
   }
   flushList();
+  flushFolded();
 
-  // Surface metadata children at the top level so existing consumers
-  // (`fm.tags`, `fm["target-agents"]`) keep working post-migration. A
-  // top-level value with the same name takes precedence over the nested one.
+  // Surface allow-listed metadata children at the top level so existing
+  // consumers (`fm.tags`, `fm["target-agents"]`) keep working post-migration.
+  // A top-level value with the same name takes precedence over the nested
+  // one. Non-allow-listed children stay nested-only — see SURFACED_METADATA_KEYS.
   const merged: Record<string, string | string[] | Record<string, string | string[]>> = { ...rootOut };
   for (const [k, v] of Object.entries(metaOut)) {
-    if (!(k in merged)) merged[k] = v;
+    if (SURFACED_METADATA_KEYS.has(k) && !(k in merged)) {
+      merged[k] = v;
+    }
   }
   if (Object.keys(metaOut).length > 0) {
     merged.metadata = metaOut;

@@ -27,7 +27,7 @@
  *   2 — configuration error (no files found is fine; exit 0 with a notice)
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -51,6 +51,33 @@ const EXCLUDE_PATH_SUBSTRINGS = [
   `__tests__${sep}fixtures`,
 ];
 
+/**
+ * Hidden directories we always skip (deny-list). Agent-specific hidden dirs
+ * (`.claude`, `.cursor`, `.continue`, `.zed`, `.gemini`, `.roo`, etc.) are
+ * intentionally NOT in this list — those are where ecosystem skills live.
+ *
+ * 0679 review F-002: previous logic used a hardcoded allow-list of known
+ * agent dirs, which silently dropped SKILL.md files from any newer agent
+ * ecosystem. The deny-list approach inverts the default to "scan unless
+ * explicitly noisy" so future ecosystems are covered automatically.
+ */
+const HIDDEN_DENY_LIST = new Set([
+  ".git",
+  ".vscode",
+  ".idea",
+  ".cache",
+  ".turbo",
+  ".next",
+  ".nuxt",
+  ".svelte-kit",
+  ".docusaurus",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  ".venv",
+  ".tox",
+]);
+
 function walk(dir: string, out: string[]): void {
   let entries;
   try {
@@ -59,11 +86,9 @@ function walk(dir: string, out: string[]): void {
     return;
   }
   for (const entry of entries) {
-    if (entry.name.startsWith(".") && entry.name !== ".claude" && entry.name !== ".cursor" &&
-        entry.name !== ".windsurf" && entry.name !== ".codex" && entry.name !== ".agents" &&
-        entry.name !== ".agent" && entry.name !== ".aider" && entry.name !== ".kiro" &&
-        entry.name !== ".openclaw" && entry.name !== ".pi") {
-      // Hidden dirs like .git, .vscode — skip. Agent-specific hidden dirs are kept.
+    // Skip noisy hidden dirs only; descend into agent-specific hidden dirs
+    // like `.claude` / `.cursor` / `.continue` / `.zed` / `.gemini` etc.
+    if (entry.name.startsWith(".") && HIDDEN_DENY_LIST.has(entry.name)) {
       continue;
     }
     if (EXCLUDE_DIRS.has(entry.name)) continue;
@@ -192,7 +217,3 @@ if (invokedAsScript) {
 }
 
 export { findSkillFiles, validateBuiltin, validateWithSkillsRef, isSkillsRefAvailable, main };
-
-// Reference statSync so tree-shaking does not drop the import (used transitively
-// through walk() -> readdirSync, which stats each entry via withFileTypes).
-void statSync;

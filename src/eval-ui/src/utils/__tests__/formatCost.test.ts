@@ -26,8 +26,11 @@ describe("formatCost", () => {
     expect(formatCost(null, "free")).toBe("Free");
   });
 
-  it("returns Subscription for subscription billing mode", () => {
-    expect(formatCost(null, "subscription")).toBe("Subscription");
+  it("returns Included for subscription billing mode (0682 AC-US5-01 reframe)", () => {
+    // 0682 / Anthropic April 2026 ToS — return value avoids "Subscription"
+    // and "Max/Pro" in user-rendered copy. Internal billingMode enum still
+    // uses "subscription" as the discriminant.
+    expect(formatCost(null, "subscription")).toBe("Included"); // voice-allow — programmer enum value
   });
 
   it("formats very small costs with enough precision", () => {

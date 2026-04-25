@@ -465,7 +465,7 @@ export function CreateSkillModal({
                 style={{ ...secondaryButtonStyle, opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "not-allowed" }}
                 title="Opens the AI generation flow with this destination pre-selected (choose Claude Code, Anthropic API, OpenRouter, or local models)"
               >
-                ✨ Generate with AI
+                Generate with AI
               </button>
               <button
                 type="button"

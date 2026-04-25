@@ -40,10 +40,31 @@
       "source": "./plugins/google-workspace",
       "version": "0.1.0",
       "category": "utility"
+    },
+    {
+      "name": "frontend",
+      "description": "Frontend development — visual design with browser verification, Figma-to-code workflows, Code Connect publishing, design tokens, and design system integration across React, Vue, SwiftUI, and Compose",
+      "source": "./plugins/frontend",
+      "version": "0.1.0",
+      "category": "development"
+    },
+    {
+      "name": "easychamp",
+      "description": "EasyChamp tournament management — create sports leagues and tournaments, build brackets, schedule matches with venues, and record results. Backed by the EasyChamp MCP server.",
+      "source": "./plugins/easychamp",
+      "version": "1.0.0",
+      "category": "domain"
+    },
+    {
+      "name": "personal",
+      "description": "Personal knowledge and finance automation — autonomous Obsidian vault management (PARA + LLM Wiki) and end-to-end corporate/personal tax preparation from Xero, bank statements, and Google Drive",
+      "source": "./plugins/personal",
+      "version": "1.0.0",
+      "category": "productivity"
     }
   ],
   "metadata": {
-    "version": "2.3.0",
+    "version": "2.4.0",
     "description": "Universal AI skills library — domain expertise for any AI coding tool"
   }
 }

@@ -1,0 +1,14 @@
+{
+  "name": "personal",
+  "description": "Personal knowledge and finance automation — autonomous Obsidian vault management (PARA + LLM Wiki) and end-to-end corporate/personal tax preparation from Xero, bank statements, and Google Drive.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Anton Abyzov",
+    "email": "anton.abyzov@gmail.com",
+    "url": "https://github.com/anton-abyzov/vskill"
+  },
+  "homepage": "https://github.com/anton-abyzov/vskill",
+  "repository": "https://github.com/anton-abyzov/vskill",
+  "license": "MIT",
+  "keywords": ["obsidian", "vault", "knowledge-management", "para", "wiki", "tax", "tax-preparation", "xero", "personal-finance"]
+}

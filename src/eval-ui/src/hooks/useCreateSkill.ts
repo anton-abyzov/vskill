@@ -53,6 +53,13 @@ export interface PinningInput {
   userNewPlugin: string;  // typed new plugin name
   aiName: string | undefined;
   aiSuggestedPlugin: { plugin: string; layout?: 1 | 2 } | null | undefined;
+  /**
+   * When set to 3, the user explicitly chose Standalone in the modal — the AI
+   * must NEVER reroute the skill into a plugin even if it returns a
+   * `suggestedPlugin`. layout 1/2 do not block on their own; user-pinning
+   * (userPlugin / userNewPlugin) handles those cases.
+   */
+  forceLayout?: 1 | 2 | 3;
 }
 
 export interface PinningDecision {
@@ -65,11 +72,16 @@ export function decideGenerationPinning(input: PinningInput): PinningDecision {
   const userPinnedName = input.userName.trim().length > 0;
   const userPinnedPlugin =
     input.userPlugin.trim().length > 0 || input.userNewPlugin.trim().length > 0;
+  // Standalone is sticky — once the user picks a root `skills/` placement on
+  // the modal step, no AI suggestion may pull the skill into a plugin.
+  const standaloneLocked = input.forceLayout === 3;
 
   return {
     applyName: userPinnedName ? null : input.aiName ?? null,
-    applySuggestedPlugin: !userPinnedPlugin && !!input.aiSuggestedPlugin?.plugin,
-    suggestedPluginValue: userPinnedPlugin ? null : (input.aiSuggestedPlugin ?? null),
+    applySuggestedPlugin:
+      !standaloneLocked && !userPinnedPlugin && !!input.aiSuggestedPlugin?.plugin,
+    suggestedPluginValue:
+      standaloneLocked || userPinnedPlugin ? null : (input.aiSuggestedPlugin ?? null),
   };
 }
 
@@ -182,6 +194,14 @@ export interface UseCreateSkillReturn {
   creating: boolean;
   error: string | null;
   handleCreate: () => void;
+
+  /**
+   * True when the user arrived from the modal with mode=standalone — the
+   * layout/plugin pickers must be locked to prevent accidental rerouting
+   * into a plugin. The page renders a clear "Standalone skill" lock indicator
+   * instead of the layout selector when this is true.
+   */
+  standaloneLocked: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -443,6 +463,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
                   aiSuggestedPlugin: data.suggestedPlugin && data.suggestedPlugin.plugin
                     ? { plugin: data.suggestedPlugin.plugin, layout: data.suggestedPlugin.layout }
                     : null,
+                  forceLayout,
                 });
 
                 if (pinning.applyName !== null) setName(pinning.applyName);
@@ -493,6 +514,10 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
                 ) {
                   // Fallback: show plugin recommendation if user is on
                   // layout 3 AND has no pinned plugin AND no suggestion arrived.
+                  // Standalone-mode-locked sessions (forceLayout === 3) never
+                  // reach this branch because the preceding `if (forceLayout === 3)`
+                  // path matches first, so the user-explicit "Standalone" choice
+                  // from the modal stays sticky and the nudge banner stays hidden.
                   setShowPluginRecommendation(true);
                 }
 
@@ -590,5 +615,6 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
     showPluginRecommendation, setShowPluginRecommendation,
     pluginLayoutInfo, applyPluginRecommendation,
     creating, error, handleCreate,
+    standaloneLocked: forceLayout === 3,
   };
 }

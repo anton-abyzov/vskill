@@ -303,7 +303,7 @@ export function CreateSkillPage() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="px-4 py-6 sm:px-6 sm:py-7 lg:px-10 lg:py-8 max-w-6xl">
+    <div className="px-4 py-6 sm:px-6 sm:py-7 lg:px-10 lg:py-8 max-w-6xl mx-auto w-full overflow-x-hidden">
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center gap-2 text-[12px] mb-3" style={{ color: "var(--text-tertiary)" }}>
@@ -313,9 +313,24 @@ export function CreateSkillPage() {
         </div>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <h2 className="text-[22px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
-              Create a New Skill
-            </h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-[22px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
+                Create a New Skill
+              </h2>
+              {sk.standaloneLocked && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider px-2 py-0.5 rounded whitespace-nowrap"
+                  style={{
+                    background: "var(--accent-muted)",
+                    color: "var(--accent)",
+                    border: "1px solid var(--accent-muted)",
+                  }}
+                  title="You chose Standalone in the previous step. Plugin selection is disabled."
+                >
+                  Standalone
+                </span>
+              )}
+            </div>
             <p className="text-[13px] mt-1" style={{ color: "var(--text-tertiary)" }}>
               Define your skill's metadata, content, and placement
             </p>
@@ -323,8 +338,10 @@ export function CreateSkillPage() {
 
           {/* Mode toggle */}
           <div
-            className="inline-flex rounded-lg p-1 self-start sm:self-auto sm:flex-shrink-0"
+            className="inline-flex rounded-lg p-1 self-start sm:self-auto sm:flex-shrink-0 max-w-full"
             style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+            role="tablist"
+            aria-label="Creation mode"
           >
             <button
               onClick={() => sk.setMode("ai")}
@@ -671,7 +688,7 @@ export function CreateSkillPage() {
           </div>
 
           {/* Right: Preview */}
-          <div className="w-full lg:w-[340px] lg:flex-shrink-0">
+          <div className="w-full lg:w-[340px] lg:flex-shrink-0 min-w-0">
             <div className="lg:sticky lg:top-8">
               <div className="glass-card p-4">
                 <h3 className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--text-tertiary)" }}>
@@ -705,98 +722,127 @@ export function CreateSkillPage() {
             <div className="flex-1 min-w-0 space-y-5">
               {/* Location section */}
               <div className="glass-card p-5">
-                <h3 className="text-[13px] font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
-                  Location
-                </h3>
-
-                {/* Layout selector */}
-                {sk.creatableLayouts.length > 1 && (
-                  <div className="mb-4">
-                    <label className="text-[11px] font-medium uppercase tracking-wider mb-2 block" style={{ color: "var(--text-tertiary)" }}>
-                      Layout
-                    </label>
-                    <div className="flex gap-2">
-                      {sk.creatableLayouts.map((l) => (
-                        <button
-                          key={l.layout}
-                          onClick={() => {
-                            sk.setSelectedLayout(l.layout as 1 | 2 | 3);
-                            const firstPlugin = l.existingPlugins[0];
-                            sk.setPlugin(firstPlugin || "");
-                            sk.setNewPlugin("");
-                          }}
-                          className="px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-150"
-                          style={{
-                            background: sk.selectedLayout === l.layout ? "var(--accent)" : "var(--surface-3)",
-                            color: sk.selectedLayout === l.layout ? "var(--color-paper)" : "var(--text-secondary)",
-                            border: `1px solid ${sk.selectedLayout === l.layout ? "var(--accent)" : "var(--border-subtle)"}`,
-                          }}
-                        >
-                          {l.label}
-                        </button>
-                      ))}
-                      {/* Also offer layouts that don't exist yet */}
-                      {!sk.creatableLayouts.find((l) => l.layout === 3) && (
-                        <button
-                          onClick={() => { sk.setSelectedLayout(3); sk.setPlugin(""); }}
-                          className="px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-150"
-                          style={{
-                            background: sk.selectedLayout === 3 ? "var(--accent)" : "var(--surface-3)",
-                            color: sk.selectedLayout === 3 ? "var(--color-paper)" : "var(--text-secondary)",
-                            border: `1px solid ${sk.selectedLayout === 3 ? "var(--accent)" : "var(--border-subtle)"}`,
-                          }}
-                        >
-                          Root skills/
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Plugin selector (for layout 1 & 2) */}
-                {sk.selectedLayout !== 3 && (
-                  <div className="mb-4">
-                    <label className="text-[11px] font-medium uppercase tracking-wider mb-2 block" style={{ color: "var(--text-tertiary)" }}>
-                      Plugin
-                    </label>
-                    <select
-                      value={sk.plugin}
-                      onChange={(e) => { sk.setPlugin(e.target.value); sk.setNewPlugin(""); }}
-                      className="w-full px-3 py-2 rounded-lg text-[13px]"
-                      style={inputStyle}
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                  <h3 className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                    Location
+                  </h3>
+                  {sk.standaloneLocked && (
+                    <span
+                      className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-md whitespace-nowrap"
+                      style={{
+                        background: "var(--accent-muted)",
+                        color: "var(--accent)",
+                        border: "1px solid var(--accent-muted)",
+                      }}
+                      title="You chose Standalone in the previous step. To change, go back and pick a different destination."
                     >
-                      {sk.availablePlugins.map((p) => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
-                      <option value="__new__">+ New plugin...</option>
-                    </select>
-                    {sk.plugin === "__new__" && (
-                      <input
-                        type="text"
-                        value={sk.newPlugin}
-                        onChange={(e) => sk.setNewPlugin(toKebab(e.target.value))}
-                        placeholder="my-plugin"
-                        className="w-full mt-2 px-3 py-2 rounded-lg text-[13px]"
-                        style={inputStyle}
-                      />
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                      </svg>
+                      Standalone skill
+                    </span>
+                  )}
+                </div>
+
+                {sk.standaloneLocked ? (
+                  <p className="text-[12px] mb-3" style={{ color: "var(--text-tertiary)", lineHeight: 1.5 }}>
+                    Lives at <code style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>&lt;project&gt;/skills/{"<name>"}/SKILL.md</code> — works with every agent. No plugin selected.
+                  </p>
+                ) : (
+                  <>
+                    {/* Layout selector */}
+                    {sk.creatableLayouts.length > 1 && (
+                      <div className="mb-4">
+                        <label className="text-[11px] font-medium uppercase tracking-wider mb-2 block" style={{ color: "var(--text-tertiary)" }}>
+                          Layout
+                        </label>
+                        <div className="flex gap-2 flex-wrap">
+                          {sk.creatableLayouts.map((l) => (
+                            <button
+                              key={l.layout}
+                              onClick={() => {
+                                sk.setSelectedLayout(l.layout as 1 | 2 | 3);
+                                const firstPlugin = l.existingPlugins[0];
+                                sk.setPlugin(firstPlugin || "");
+                                sk.setNewPlugin("");
+                              }}
+                              className="px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-150 whitespace-nowrap"
+                              style={{
+                                background: sk.selectedLayout === l.layout ? "var(--accent)" : "var(--surface-3)",
+                                color: sk.selectedLayout === l.layout ? "var(--color-paper)" : "var(--text-secondary)",
+                                border: `1px solid ${sk.selectedLayout === l.layout ? "var(--accent)" : "var(--border-subtle)"}`,
+                              }}
+                            >
+                              {l.label}
+                            </button>
+                          ))}
+                          {/* Also offer layouts that don't exist yet */}
+                          {!sk.creatableLayouts.find((l) => l.layout === 3) && (
+                            <button
+                              onClick={() => { sk.setSelectedLayout(3); sk.setPlugin(""); }}
+                              className="px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-150 whitespace-nowrap"
+                              style={{
+                                background: sk.selectedLayout === 3 ? "var(--accent)" : "var(--surface-3)",
+                                color: sk.selectedLayout === 3 ? "var(--color-paper)" : "var(--text-secondary)",
+                                border: `1px solid ${sk.selectedLayout === 3 ? "var(--accent)" : "var(--border-subtle)"}`,
+                              }}
+                            >
+                              Root skills/
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     )}
-                  </div>
+
+                    {/* Plugin selector (for layout 1 & 2) */}
+                    {sk.selectedLayout !== 3 && (
+                      <div className="mb-4">
+                        <label className="text-[11px] font-medium uppercase tracking-wider mb-2 block" style={{ color: "var(--text-tertiary)" }}>
+                          Plugin
+                        </label>
+                        <select
+                          value={sk.plugin}
+                          onChange={(e) => { sk.setPlugin(e.target.value); sk.setNewPlugin(""); }}
+                          className="w-full px-3 py-2 rounded-lg text-[13px]"
+                          style={inputStyle}
+                        >
+                          {sk.availablePlugins.map((p) => (
+                            <option key={p} value={p}>{p}</option>
+                          ))}
+                          <option value="__new__">+ New plugin...</option>
+                        </select>
+                        {sk.plugin === "__new__" && (
+                          <input
+                            type="text"
+                            value={sk.newPlugin}
+                            onChange={(e) => sk.setNewPlugin(toKebab(e.target.value))}
+                            placeholder="my-plugin"
+                            className="w-full mt-2 px-3 py-2 rounded-lg text-[13px]"
+                            style={inputStyle}
+                          />
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {/* Path preview */}
-                <div className="px-3 py-2 rounded-lg text-[11px] font-mono" style={{
+                <div className="px-3 py-2 rounded-lg text-[11px] font-mono overflow-x-auto" style={{
                   background: "var(--surface-0)",
                   color: "var(--text-tertiary)",
                   border: "1px solid var(--border-subtle)",
                   wordBreak: "break-all",
+                  overflowWrap: "anywhere",
                   lineHeight: 1.55,
                 }}>
                   {sk.pathPreview}
                 </div>
               </div>
 
-              {/* Plugin recommendation */}
-              {sk.showPluginRecommendation && sk.pluginLayoutInfo && sk.selectedLayout === 3 && (
+              {/* Plugin recommendation — never shown when the user explicitly
+                  chose Standalone in the modal (standaloneLocked === true). */}
+              {!sk.standaloneLocked && sk.showPluginRecommendation && sk.pluginLayoutInfo && sk.selectedLayout === 3 && (
                 <div
                   className="px-4 py-3 rounded-lg text-[12px] animate-fade-in flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
                   style={{
@@ -1044,7 +1090,7 @@ export function CreateSkillPage() {
             </div>
 
             {/* Right: Preview */}
-            <div className="w-full lg:w-[340px] lg:flex-shrink-0">
+            <div className="w-full lg:w-[340px] lg:flex-shrink-0 min-w-0">
               <div className="lg:sticky lg:top-8">
                 <div className="glass-card p-4">
                   <h3 className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--text-tertiary)" }}>

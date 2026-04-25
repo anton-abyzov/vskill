@@ -7,11 +7,17 @@
  *
  * @param cost - Dollar cost (null = unavailable)
  * @param billingMode - "per-token" | "subscription" | "free"
- * @returns Formatted string: "$0.0042", "N/A", "Free", "Subscription"
+ * @returns Formatted string: "$0.0042", "N/A", "Free", "Included"
+ *
+ * 0682 AC-US5-01 / F-003: the user-facing return value for the
+ * subscription-billing case is "Included" (per Anthropic's April 2026 ToS
+ * reframe — the picker copy avoids "Max/Pro" / "subscription"). The internal
+ * billingMode comparison is allowed because it's a programmer-side enum
+ * matched against ModelEntry["billingMode"], not user-rendered copy.
  */
 export function formatCost(cost: number | null, billingMode?: string): string {
   if (billingMode === "free") return "Free";
-  if (billingMode === "subscription" && cost == null) return "Subscription";
+  if (billingMode === "subscription" && cost == null) return "Included"; // voice-allow — internal enum compare; return is user-facing copy
   if (cost == null) return "N/A";
 
   if (cost >= 1) {

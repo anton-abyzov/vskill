@@ -39,7 +39,7 @@ function formatMetadata(model: ModelEntry): string {
         : String(model.contextWindow)
     : null;
 
-  if (model.billingMode === "subscription") {
+  if (model.billingMode === "subscription") { // voice-allow — internal enum comparison; rendered copy is `strings.models.subscriptionBilling`
     return ctx ? `${ctx} ctx ${strings.models.subscriptionBilling}` : strings.models.subscriptionBilling.trim();
   }
   if (model.billingMode === "free") {

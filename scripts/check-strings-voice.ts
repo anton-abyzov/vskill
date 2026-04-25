@@ -92,6 +92,21 @@ function listFiles(dir: string, out: string[]): void {
   }
 }
 
+// 0682 F-003 — Per-line marker that lets programmer code (boolean
+// coercion, internal enum keys) opt out of the user-facing voice lint
+// without weakening the rule for actual copy. Mirrors the existing
+// `LINE_ALLOWLIST` philosophy.
+const VOICE_ALLOW_MARKER = "voice-allow";
+
+function isJsBooleanCoercion(line: string, idx: number): boolean {
+  // `!!` followed by an identifier-start, `(`, or `.` is the JS boolean-
+  // coercion pattern (`!!foo`, `!!(x)`, `!!.bar`). User-facing copy never
+  // looks like this; programmer code does. Skip the multi-exclamation
+  // label for these positions only — `!!`-in-prose is still flagged.
+  const next = line[idx + 2] ?? "";
+  return /[a-zA-Z_$(.]/.test(next);
+}
+
 function scanFile(abs: string, violations: VoiceViolation[]): void {
   let content: string;
   try {
@@ -100,15 +115,36 @@ function scanFile(abs: string, violations: VoiceViolation[]): void {
     return;
   }
   const lines = content.split(/\r?\n/);
+  let inJsxBlockComment = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
     if (LINE_ALLOWLIST.some((needle) => line.includes(needle))) continue;
+    if (line.includes(VOICE_ALLOW_MARKER)) continue;
     const trimmed = line.trim();
     if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+    // 0682 F-003 — Track JSX block-comment state across lines: `{/* ... */}`.
+    // Multi-line JSX comments often contain user copy excerpts that aren't
+    // shipped; skip them entirely.
+    if (inJsxBlockComment) {
+      if (line.includes("*/}")) inJsxBlockComment = false;
+      continue;
+    }
+    if (trimmed.startsWith("{/*")) {
+      // Single-line: `{/* … */}` — skip; multi-line: enter block state.
+      if (!line.includes("*/}")) inJsxBlockComment = true;
+      continue;
+    }
     for (const { label, re } of FORBIDDEN) {
       const localRe = new RegExp(re.source, re.flags);
       let m: RegExpExecArray | null;
       while ((m = localRe.exec(line)) !== null) {
+        // 0682 F-003 — Skip JS boolean-coercion `!!ident` so the broader
+        // src-tree scan doesn't drown CI in false positives. Real
+        // exclamation-in-copy regressions (e.g. "All set!!") still fire.
+        if (label === "multi-exclamation (!!)" && isJsBooleanCoercion(line, m.index)) {
+          if (m.index === localRe.lastIndex) localRe.lastIndex++;
+          continue;
+        }
         violations.push({
           file: abs,
           line: i + 1,

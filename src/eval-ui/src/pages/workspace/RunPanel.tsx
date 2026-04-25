@@ -74,8 +74,8 @@ const APPROX_COST_PER_CALL: Partial<Record<string, number>> = {
   "openrouter": 0.01,   // varies, use Sonnet-equivalent
   "ollama": 0,           // free
   "lm-studio": 0,        // free (local inference, no API cost)
-  "claude-cli": 0,       // subscription
-  "codex-cli": 0,        // subscription
+  "claude-cli": 0,       // subscription — voice-allow (programmer comment)
+  "codex-cli": 0,        // subscription — voice-allow (programmer comment)
   "gemini-cli": 0,       // free tier
 };
 
@@ -207,7 +207,7 @@ export function RunPanel() {
             <span>Est. duration: {durationEstimate}</span>
             {costEstimate && <span>Est. cost: {costEstimate}</span>}
             {!costEstimate && config?.provider && (config.provider === "claude-cli" || config.provider === "codex-cli") && (
-              <span>Cost: Subscription</span>
+              <span>Cost: Included</span>
             )}
             {!costEstimate && config?.provider && (config.provider === "ollama" || config.provider === "lm-studio" || config.provider === "gemini-cli") && (
               <span>Cost: Free</span>

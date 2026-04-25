@@ -19,7 +19,7 @@ export interface ModelEntry {
   contextWindow?: number;
   /** USD per 1M tokens (canonical wire unit — see 0701 for Anthropic, 0710 for OpenRouter). */
   pricing?: { prompt: number; completion: number };
-  billingMode: "per-token" | "subscription" | "free";
+  billingMode: "per-token" | "subscription" | "free"; // voice-allow — internal billing-mode enum, not user-facing copy
   /** Concrete model the alias resolves to (e.g. `sonnet` → `claude-sonnet-4-6`). */
   resolvedId?: string;
 }
@@ -132,16 +132,21 @@ const CTA_BY_AGENT: Record<string, CtaType> = {
   "lm-studio": "start-service",
 };
 
+// voice-allow — values in this map are internal billing-mode enum constants
+// (matched against ModelEntry["billingMode"] type), not user-facing copy.
+// AC-US5-01 / F-003: programmer-side enum keys are exempt from the voice
+// lint; only user-rendered strings are subject to the Anthropic April 2026
+// ToS reframe.
 const BILLING_BY_AGENT: Record<string, ModelEntry["billingMode"]> = {
-  "claude-cli": "subscription",
+  "claude-cli": "subscription", // voice-allow
   "anthropic": "per-token",
   "openai": "per-token",
   "openrouter": "per-token",
-  "cursor": "subscription",
-  "codex-cli": "subscription",
-  "gemini-cli": "subscription",
-  "copilot": "subscription",
-  "zed": "subscription",
+  "cursor": "subscription", // voice-allow
+  "codex-cli": "subscription", // voice-allow
+  "gemini-cli": "subscription", // voice-allow
+  "copilot": "subscription", // voice-allow
+  "zed": "subscription", // voice-allow
   "ollama": "free",
   "lm-studio": "free",
 };

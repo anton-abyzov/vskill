@@ -3,7 +3,10 @@ import { useSWR } from "../hooks/useSWR";
 import { Virtuoso } from "react-virtuoso";
 import type { SkillInfo } from "../types";
 import { SidebarSection } from "./SidebarSection";
-import { ScopeSection } from "./ScopeSection";
+// ScopeSection (0686 T-007/T-009 OWN/INSTALLED/GLOBAL primitive) was deleted
+// 2026-04-25: superseded by 0698-studio-multiproject-anthropic-scopes (which
+// replaced the tri-scope model with AVAILABLE/AUTHORING groups rendered via
+// GroupHeader + NamedScopeSection below). See plan.md for the F-001 resolution.
 import { SidebarSearch, matchSkillQuery } from "./SidebarSearch";
 import { PluginGroup, type SelectedKey } from "./PluginGroup";
 import { PluginTreeGroup } from "./PluginTreeGroup";

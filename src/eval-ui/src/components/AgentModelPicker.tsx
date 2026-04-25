@@ -38,6 +38,10 @@ export function AgentModelPicker({ onToast }: AgentModelPickerProps) {
   const [settingsInitial, setSettingsInitial] = useState<CredentialProvider | undefined>();
   const [focusedAgent, setFocusedAgent] = useState<string | null>(null);
   const [pane, setPane] = useState<"agents" | "models">("agents");
+  // 0682 F-002 — Focused row in the model pane. Reset to 0 whenever the
+  // focused agent changes or the popover (re)opens. Driven by ↑↓ when
+  // pane === "models"; consumed by ModelList for aria-selected + visual focus.
+  const [focusedModelIndex, setFocusedModelIndex] = useState(0);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -54,10 +58,17 @@ export function AgentModelPicker({ onToast }: AgentModelPickerProps) {
     [agents, focusedAgent],
   );
 
+  // 0682 F-002 — Reset model focus to 0 when the focused agent changes so
+  // ↑↓ navigation in the model pane always starts at the top of the new list.
+  useEffect(() => {
+    setFocusedModelIndex(0);
+  }, [focusedAgent]);
+
   const openPopover = useCallback(() => {
     setOpen(true);
     setPane("agents");
     setFocusedAgent(catalog?.activeAgent ?? agents[0]?.id ?? null);
+    setFocusedModelIndex(0);
   }, [catalog, agents]);
 
   const closePopover = useCallback(() => {
@@ -101,6 +112,13 @@ export function AgentModelPicker({ onToast }: AgentModelPickerProps) {
       if (e.key === "ArrowRight" && pane === "agents") {
         e.preventDefault();
         setPane("models");
+        // 0682 F-002 — Preserve last index when re-entering the models pane;
+        // clamp into range in case the focused agent changed (different list
+        // length) since the last visit.
+        setFocusedModelIndex((prev) => {
+          const max = (focusedEntry?.models.length ?? 1) - 1;
+          return Math.max(0, Math.min(prev, Math.max(0, max)));
+        });
         return;
       }
       if (e.key === "ArrowLeft" && pane === "models") {
@@ -112,9 +130,17 @@ export function AgentModelPicker({ onToast }: AgentModelPickerProps) {
         e.preventDefault();
         if (pane === "agents" && focusedEntry) {
           setPane("models");
-        } else if (pane === "models" && focusedEntry && focusedEntry.models[0]) {
-          void setActive(focusedEntry.id, focusedEntry.models[0].id);
-          closePopover();
+          setFocusedModelIndex(0);
+        } else if (pane === "models" && focusedEntry) {
+          // 0682 F-002 — Pick the row at focusedModelIndex (clamped), not
+          // models[0] unconditionally. Pre-fix this always selected the
+          // first model regardless of which row the user navigated to.
+          const idx = Math.max(0, Math.min(focusedEntry.models.length - 1, focusedModelIndex));
+          const model = focusedEntry.models[idx];
+          if (model) {
+            void setActive(focusedEntry.id, model.id);
+            closePopover();
+          }
         }
         return;
       }
@@ -127,12 +153,22 @@ export function AgentModelPicker({ onToast }: AgentModelPickerProps) {
           setFocusedAgent(next.id);
           focusAgent(next.id);
         }
+        return;
       }
-      // In "models" pane, selection moves within the sub-list — delegated to ModelList via keyboard events on its rows.
+      // 0682 F-002 — Walk the model list when pane === "models". Pre-fix
+      // this branch was a no-op and Enter always selected models[0].
+      if (pane === "models" && focusedEntry) {
+        const len = focusedEntry.models.length;
+        if (len === 0) return;
+        setFocusedModelIndex((prev) => {
+          const next = prev + dir;
+          return Math.max(0, Math.min(len - 1, next));
+        });
+      }
     }
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [open, pane, agents, focusedAgent, focusedEntry, closePopover, focusAgent, setActive]);
+  }, [open, pane, agents, focusedAgent, focusedEntry, focusedModelIndex, closePopover, focusAgent, setActive]);
 
   const handleOpenSettings = useCallback((providerTab?: string) => {
     if (providerTab === "anthropic" || providerTab === "openrouter") {
@@ -215,6 +251,7 @@ export function AgentModelPicker({ onToast }: AgentModelPickerProps) {
                 <ModelList
                   agent={focusedEntry}
                   activeModelId={catalog?.activeModel ?? null}
+                  focusedIndex={pane === "models" ? focusedModelIndex : -1}
                   onSelect={(modelId) => {
                     void setActive(focusedEntry.id, modelId);
                     closePopover();

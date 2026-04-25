@@ -2,19 +2,19 @@
 // ---------------------------------------------------------------------------
 // 0677 — LM Studio UI smoke tests.
 //
-// Covers AC-US3-01 / 02 / 03 / 04 + AC-US4-03:
-//   (a) ModelSelector renders an "LM Studio" group with its probe-supplied
-//       models (ordered as the server returns them) when detection surfaces
-//       LM Studio in the config.providers array.
-//   (b) When LM Studio is detected but models is empty, the group still
-//       renders with a single disabled placeholder child so users know to
-//       load a model.
-//   (c) When LM Studio is absent from providers, no LM Studio group renders
-//       at all.
+// 0682 update (F-004): the legacy ModelSelector component was deleted in
+// favour of AgentModelPicker. The original ModelSelector LM Studio tests
+// (a/b/c below) are now covered by:
+//   - useAgentCatalog config-merge tests (AgentModelPicker.test.tsx)
+//   - api-routes config tests for the lm-studio provider entry
+// This file retains only the RunPanel and ComparisonPage parity coverage,
+// which is independent of which picker component renders.
 //
-// Covers surgical RunPanel edits:
+// Retained coverage:
 //   (d) When the active provider is lm-studio, the RunPanel surfaces a free
 //       cost label parallel to the Ollama / Gemini-CLI treatment.
+//   (e) ComparisonPage shows a "Local" tag when the active provider is a
+//       local server (lm-studio or ollama).
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi } from "vitest";
@@ -23,8 +23,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ConfigResponse, ProviderInfo } from "../api";
 
 // ---------------------------------------------------------------------------
-// useConfig() mock — returns a ConfigResponse with LM Studio under various
-// conditions. Each test stubs it before importing ModelSelector.
+// useConfig() mock — returns a ConfigResponse with the LM Studio provider
+// active so RunPanel / ComparisonPage can read config.provider.
 // ---------------------------------------------------------------------------
 
 const configRef: { current: ConfigResponse | null } = { current: null };
@@ -91,7 +91,6 @@ vi.mock("../pages/workspace/WorkspaceContext", () => {
   };
 });
 
-const { ModelSelector } = await import("../components/ModelSelector");
 const { RunPanel } = await import("../pages/workspace/RunPanel");
 const { ComparisonPage } = await import("../pages/ComparisonPage");
 
@@ -116,72 +115,12 @@ function makeConfig(lm: ProviderInfo | null, activeProvider?: string, activeMode
   };
 }
 
-/** Force the dropdown to be "open" by pre-computing the markup with the useState initial value. */
-function renderSelectorOpen(): string {
-  // The component renders the dropdown list when `open` is true. Since the
-  // initial state is `open=false`, we emulate the click by directly rendering
-  // the inner list. For a smoke check, we render the component twice — once
-  // closed, once manually "opened" via a wrapper that triggers the click.
-  // Simpler approach: render and match the full tree (the current-label
-  // button + — after our assertion — check that config.providers includes
-  // LM Studio so the dropdown will list it when opened). To keep the smoke
-  // test deterministic, we assert against the selector's rendered button
-  // plus a separate direct assertion on the providers array shape the
-  // dropdown uses.
-  return renderToStaticMarkup(<ModelSelector />);
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("ModelSelector — LM Studio rendering", () => {
-  // -------------------------------------------------------------------------
-  // AC-US3-04: no LM Studio group when detection does not return it
-  // -------------------------------------------------------------------------
-
-  it("renders without an 'LM Studio' label when provider absent from config", () => {
-    configRef.current = makeConfig(null);
-    const markup = renderSelectorOpen();
-    expect(markup).not.toMatch(/LM Studio/i);
-  });
-
-  // -------------------------------------------------------------------------
-  // AC-US3-01 / AC-US4-03: LM Studio group with models appears when detected
-  // -------------------------------------------------------------------------
-
-  it("surfaces LM Studio label when present in config.providers (with models)", () => {
-    // The collapsed trigger shows the currently active label, not the full
-    // dropdown — so to smoke-test the data wiring we assert:
-    //   1. The ModelSelector reads config.providers
-    //   2. When lm-studio is the active provider, its model appears on the
-    //      trigger button (the findCurrentLabel() path)
-    configRef.current = makeConfig(
-      {
-        id: "lm-studio" as ProviderInfo["id"],
-        label: "LM Studio (local, free)",
-        available: true,
-        models: [
-          { id: "qwen2.5-coder-7b", label: "qwen2.5-coder-7b" },
-          { id: "llama-3.2-3b-instruct", label: "llama-3.2-3b-instruct" },
-        ],
-      },
-      "lm-studio",
-      "qwen2.5-coder-7b",
-    );
-    const markup = renderSelectorOpen();
-    // The collapsed trigger reads findCurrentLabel, which walks providers
-    // until it finds a matching id+model → returns model.label.
-    expect(markup).toContain("qwen2.5-coder-7b");
-  });
-
-  // -------------------------------------------------------------------------
-  // Data-shape smoke — the component's render tree must include an entry
-  // for LM Studio in the mapped providers. We verify this by asserting
-  // config.providers round-trips through the mocked useConfig hook.
-  // -------------------------------------------------------------------------
-
-  it("passes lm-studio provider through the config hook used by ModelSelector", () => {
+describe("LM Studio config shape — surfaces in providers array", () => {
+  it("passes lm-studio provider through the config object intact", () => {
     const lm: ProviderInfo = {
       id: "lm-studio" as ProviderInfo["id"],
       label: "LM Studio (local, free)",
@@ -191,27 +130,16 @@ describe("ModelSelector — LM Studio rendering", () => {
       ],
     };
     configRef.current = makeConfig(lm);
-    // Re-read through the mocked hook — proves the id flows intact.
     const cfg = configRef.current!;
     const found = cfg.providers.find((p) => p.id === "lm-studio");
     expect(found).toBeDefined();
     expect(found!.models.map((m) => m.id)).toEqual(["qwen2.5-coder-7b"]);
   });
 
-  // -------------------------------------------------------------------------
-  // AC-US3-03: LM Studio reported but models list is empty — renders
-  // available=true with empty models (UI should handle the empty-array case
-  // without crashing).
-  // -------------------------------------------------------------------------
-
-  it("handles an empty LM Studio model list without crashing", () => {
-    configRef.current = makeConfig({
-      id: "lm-studio" as ProviderInfo["id"],
-      label: "LM Studio (local, free)",
-      available: true,
-      models: [],
-    });
-    expect(() => renderSelectorOpen()).not.toThrow();
+  it("omits lm-studio when not detected", () => {
+    configRef.current = makeConfig(null);
+    const found = configRef.current!.providers.find((p) => p.id === "lm-studio");
+    expect(found).toBeUndefined();
   });
 });
 

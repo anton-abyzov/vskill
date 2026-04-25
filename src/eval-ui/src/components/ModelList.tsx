@@ -19,6 +19,13 @@ const LIST_WIDTH = 480;
 export interface ModelListProps {
   agent: AgentEntry;
   activeModelId: string | null;
+  /**
+   * 0682 F-002 — Index of the keyboard-focused row in the filtered model
+   * list. Pass -1 (or omit) when keyboard focus is in another pane. Drives
+   * visual focus styling + aria-selected on ModelRow so keyboard nav and
+   * screen readers stay in sync with the AgentModelPicker's pane state.
+   */
+  focusedIndex?: number;
   onSelect: (modelId: string) => void;
   onOpenSettings: (providerTab?: string) => void;
 }
@@ -57,7 +64,7 @@ function rankFiltered(models: ModelEntry[], q: string): ModelEntry[] {
   });
 }
 
-export function ModelList({ agent, activeModelId, onSelect, onOpenSettings }: ModelListProps) {
+export function ModelList({ agent, activeModelId, focusedIndex = -1, onSelect, onOpenSettings }: ModelListProps) {
   const [rawQuery, setRawQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -179,15 +186,19 @@ export function ModelList({ agent, activeModelId, onSelect, onOpenSettings }: Mo
         <div {...v.containerProps}>
           <div style={{ height: v.virtualised ? v.totalHeight : "auto", position: "relative" }}>
             <div style={{ transform: v.virtualised ? `translateY(${v.offsetTop}px)` : undefined }}>
-              {filtered.slice(v.visibleStart, v.visibleEnd).map((model) => (
-                <ModelRow
-                  key={model.id}
-                  model={model}
-                  isActive={model.id === activeModelId}
-                  onSelect={() => onSelect(model.id)}
-                  resolvedModel={agent.id === "claude-cli" ? agent.resolvedModel ?? null : null}
-                />
-              ))}
+              {filtered.slice(v.visibleStart, v.visibleEnd).map((model, i) => {
+                const absIndex = v.visibleStart + i;
+                return (
+                  <ModelRow
+                    key={model.id}
+                    model={model}
+                    isActive={model.id === activeModelId}
+                    isFocused={focusedIndex === absIndex}
+                    onSelect={() => onSelect(model.id)}
+                    resolvedModel={agent.id === "claude-cli" ? agent.resolvedModel ?? null : null}
+                  />
+                );
+              })}
             </div>
           </div>
         </div>
@@ -199,6 +210,10 @@ export function ModelList({ agent, activeModelId, onSelect, onOpenSettings }: Mo
 interface ModelRowProps {
   model: ModelEntry;
   isActive: boolean;
+  // 0682 F-002 — Whether this row currently owns keyboard focus inside the
+  // AgentModelPicker model pane. Distinct from `isActive` (which means
+  // "currently selected as the live model in catalog state").
+  isFocused?: boolean;
   onSelect: () => void;
   resolvedModel?: string | null;
 }
@@ -220,16 +235,27 @@ function pickResolvedDisplay(
   return resolvedId ?? null;
 }
 
-function ModelRow({ model, isActive, onSelect, resolvedModel }: ModelRowProps) {
+function ModelRow({ model, isActive, isFocused, onSelect, resolvedModel }: ModelRowProps) {
   const metadata = formatMetadata(model);
   const resolvedDisplay = pickResolvedDisplay(model.id, resolvedModel, model.resolvedId);
   const showResolved = resolvedDisplay !== null;
+  // 0682 F-002 — Visual focus ring layered on top of the active styling.
+  // Active = picked-from-state; Focused = keyboard-cursor-currently-here.
+  const background = isActive
+    ? "color-mix(in srgb, var(--accent, var(--color-accent)) 10%, transparent)"
+    : isFocused
+      ? "var(--surface-muted, var(--surface-3))"
+      : "transparent";
+  const borderLeft = isActive
+    ? "1px solid var(--accent, var(--color-accent))"
+    : "1px solid transparent";
   return (
     <button
       type="button"
       role="option"
       aria-selected={isActive}
       data-testid={`model-row-${model.id}`}
+      data-focused={isFocused || undefined}
       onClick={onSelect}
       title={model.id}
       style={{
@@ -245,12 +271,8 @@ function ModelRow({ model, isActive, onSelect, resolvedModel }: ModelRowProps) {
         alignItems: "flex-start",
         justifyContent: "center",
         gap: 2,
-        background: isActive
-          ? "color-mix(in srgb, var(--accent, var(--color-accent)) 10%, transparent)"
-          : "transparent",
-        borderLeft: isActive
-          ? "1px solid var(--accent, var(--color-accent))"
-          : "1px solid transparent",
+        background,
+        borderLeft,
         cursor: "pointer",
         fontFamily: "'Inter Tight Variable', 'Inter Tight', system-ui, sans-serif",
         textAlign: "left",

@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { Router } from "./router.js";
 import { sendJson } from "./router.js";
 import { registerRoutes } from "./api-routes.js";
+import { proxyToPlatform, shouldProxyToPlatform } from "./platform-proxy.js";
 import { registerImproveRoutes } from "./improve-routes.js";
 import { registerModelCompareRoutes } from "./model-compare-routes.js";
 import { registerSkillCreateRoutes } from "./skill-create-routes.js";
@@ -117,6 +118,17 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
     // Try API routes first
     const handled = await router.handle(req, res);
     if (handled) return;
+
+    // 0712 US-003 T-016B: forward platform-owned API surface (`/api/v1/skills/*`
+    // — check-updates, stream, etc.) to the vskill-platform process. The
+    // studio frontend issues these as relative URLs; in production they
+    // resolve via same-origin to the platform, but in dev the studio is
+    // served by this eval-server (port-hashed, e.g. 3162) and would otherwise
+    // 404. Target is `VSKILL_PLATFORM_URL` (default http://localhost:3017).
+    if (shouldProxyToPlatform(req.url)) {
+      await proxyToPlatform(req, res);
+      return;
+    }
 
     // 404 for unknown API routes
     if (req.url?.startsWith("/api/")) {

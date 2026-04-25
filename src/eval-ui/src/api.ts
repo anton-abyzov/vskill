@@ -616,6 +616,24 @@ export const api = {
     return es;
   },
 
+  /**
+   * 0708 AC-US8-01: request an upstream rescan for a tracked skill. The
+   * server enqueues a `scan-high` job and returns `{jobId}` (HTTP 202). Actual
+   * result arrives later via the same `skill.updated` SSE channel the Studio
+   * is already subscribed to — see `CheckNowButton` for the spinner contract.
+   */
+  async rescanSkill(plugin: string, skill: string): Promise<{ jobId: string }> {
+    const id = `${plugin}/${skill}`;
+    const res = await fetch(`${BASE}/api/v1/skills/${encodeURIComponent(id)}/rescan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) {
+      throw new Error(`rescan failed: HTTP ${res.status}`);
+    }
+    return (await res.json()) as { jobId: string };
+  },
+
   // ---------------------------------------------------------------------------
   // Skill updates (version awareness)
   // ---------------------------------------------------------------------------
@@ -625,6 +643,68 @@ export const api = {
       const res = await fetch(`${BASE}/api/skills/updates`);
       if (!res.ok) return [];
       return await res.json();
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * 0708 T-059: Reconciliation endpoint. Returns the set of updates visible
+   * from the server for the given skill IDs — used by `useSkillUpdates` when
+   * (a) SSE fallback poll is active, or (b) a `gone` frame / 409 arrives and
+   * the hook needs to resync without trusting the SSE stream.
+   *
+   * Shape matches `UpdateStoreEntry` so the hook can merge results directly.
+   */
+  async checkSkillUpdates(skillIds: string[]): Promise<Array<{
+    skillId: string;
+    version: string;
+    eventId: string;
+    publishedAt: string;
+    diffSummary?: string;
+    trackedForUpdates?: boolean;
+    updateAvailable?: boolean;
+    installed?: string;
+    latest?: string;
+    name?: string;
+  }>> {
+    if (skillIds.length === 0) return [];
+    try {
+      // 0712 US-003 T-016D: the vskill-platform's `/api/v1/skills/check-updates`
+      // endpoint is POST-only — sending GET returns 405 Method Not Allowed
+      // (verified end-to-end against `wrangler dev` on port 3017). Send the
+      // skill list as a JSON body. The proxy in `src/eval-server/platform-proxy.ts`
+      // forwards the body verbatim, and the response shape is the
+      // `{results: [...]}` envelope handled below.
+      const res = await fetch(`${BASE}/api/v1/skills/check-updates`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ skills: [...skillIds].sort() }),
+      });
+      if (!res.ok) return [];
+      const body = await res.json().catch(() => null);
+      // 0708 wrap-up: accept both the flat-array shape (legacy reconcile
+      // contract) AND the `{results: [...]}` envelope used by the platform's
+      // POST /skills/check-updates handler. The latter carries the
+      // `trackedForUpdates` flag that drives AC-US5-09.
+      if (Array.isArray(body)) return body;
+      if (body && typeof body === "object" && Array.isArray((body as { results?: unknown[] }).results)) {
+        return (body as { results: Array<Record<string, unknown>> }).results.map((r) => ({
+          skillId: typeof r.skillId === "string" ? r.skillId : (typeof r.name === "string" ? r.name : ""),
+          version: typeof r.version === "string" ? r.version : (typeof r.latest === "string" ? r.latest : ""),
+          eventId: typeof r.eventId === "string" ? r.eventId : "",
+          publishedAt: typeof r.publishedAt === "string" ? r.publishedAt : "",
+          diffSummary: typeof r.diffSummary === "string" ? r.diffSummary : undefined,
+          trackedForUpdates:
+            typeof r.trackedForUpdates === "boolean" ? r.trackedForUpdates : undefined,
+          updateAvailable:
+            typeof r.updateAvailable === "boolean" ? r.updateAvailable : undefined,
+          installed: typeof r.installed === "string" ? r.installed : undefined,
+          latest: typeof r.latest === "string" ? r.latest : undefined,
+          name: typeof r.name === "string" ? r.name : undefined,
+        }));
+      }
+      return [];
     } catch {
       return [];
     }
@@ -798,6 +878,14 @@ export interface SkillUpdateInfo {
   installed: string;
   latest: string | null;
   updateAvailable: boolean;
+  /**
+   * 0708 AC-US5-09: Server-reported tracking state. `true` when the platform
+   * has a `sourceRepoUrl` recorded for the skill; `false` means the user must
+   * run `vskill outdated` manually. Optional for legacy compat — when absent,
+   * consumers default to "tracked" (avoids spamming the not-tracked dot on
+   * payloads that predate 0708).
+   */
+  trackedForUpdates?: boolean;
 }
 
 /**
@@ -821,11 +909,19 @@ export function mergeUpdatesIntoSkills(
   return skills.map((s) => {
     const u = lookup.get(s.skill);
     if (!u) return s;
-    return {
+    const merged: SkillInfo = {
       ...s,
       updateAvailable: u.updateAvailable,
       currentVersion: u.installed,
       latestVersion: u.latest ?? undefined,
     };
+    // 0708 AC-US5-09: surface server-reported tracking state so the
+    // SidebarSection / RightPanel can render the "not tracked" dot. Only
+    // propagate when the server actually returned the field — preserves
+    // legacy "tracked by default" behaviour for older payloads.
+    if (typeof u.trackedForUpdates === "boolean") {
+      merged.trackedForUpdates = u.trackedForUpdates;
+    }
+    return merged;
   });
 }

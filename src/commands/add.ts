@@ -670,6 +670,16 @@ async function installMarketplaceRepo(
         rollbackInstall(r.name, agents, opts);
         // F-003: undo earlier successful enables to keep settings.json
         // clean. Static import — see top of file.
+        //
+        // Invariant: every plugin in `enabledSoFar` was installed in this
+        // single addCommand invocation, so they all share the same `opts`
+        // (and therefore the same effective install base resolved by
+        // resolveInstallBase). The captured `prev.scope` is what the enable
+        // hook actually used, which equals what add.ts computes today from
+        // the shared opts. If a future change introduces per-plugin scope
+        // override during a batch install, this loop must capture and
+        // replay each prev's installBase too — otherwise on-disk rollback
+        // would target the wrong path.
         for (const prev of enabledSoFar) {
           try {
             claudePluginUninstall(

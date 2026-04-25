@@ -558,8 +558,9 @@ export function parseSkillFrontmatter(content: string): Record<string, string | 
     // Root-level list item — accept either `  - value` (2-space, YAML-conventional
     // for top-level keys followed by indented list) or `- value` (0-space, also
     // valid YAML). Reject 1-space and 3+ space (malformed) for symmetry with
-    // the strict 2-space metadata-child rule. (0679 review F-002.)
-    const rootListItem = line.match(/^(?:|  )-\s+(.+)$/);
+    // the strict 2-space metadata-child rule. (0679 review F-002 iter-1, regex
+    // readability cleanup iter-4 F-002: `(?:  )?-` is the conventional form.)
+    const rootListItem = line.match(/^(?:  )?-\s+(.+)$/);
     if (rootListItem && currentKey && currentList && currentScope === "root") {
       currentList.push(stripQuotes(rootListItem[1]));
       continue;
@@ -661,10 +662,12 @@ export function parseSkillFrontmatter(content: string): Record<string, string | 
   // consumers (`fm.tags`, `fm["target-agents"]`) keep working post-migration.
   // A top-level value with the same name takes precedence over the nested
   // one. Non-allow-listed children stay nested-only — see SURFACED_METADATA_KEYS.
+  // 0679 review iter-4 F-003: defensive-copy arrays so a future consumer
+  // mutating `fm.tags` cannot accidentally mutate the nested `fm.metadata.tags`.
   const merged: Record<string, string | string[] | Record<string, string | string[]>> = { ...rootOut };
   for (const [k, v] of Object.entries(metaOut)) {
     if (SURFACED_METADATA_KEYS.has(k) && !(k in merged)) {
-      merged[k] = v;
+      merged[k] = Array.isArray(v) ? [...v] : v;
     }
   }
   if (Object.keys(metaOut).length > 0) {

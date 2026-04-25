@@ -125,6 +125,34 @@ describe("getPlatformBaseUrl", () => {
     expect(getPlatformBaseUrl()).toBe("http://example.test:9999");
     process.env.VSKILL_PLATFORM_URL = `http://127.0.0.1:${fakePort}`;
   });
+  // 0725 AC-US1-01/03: when VSKILL_PLATFORM_URL is unset, the proxy must
+  // default to the production worker (https://verified-skill.com), mirroring
+  // src/api/client.ts:10 DEFAULT_BASE_URL. Hermetic — no live network call.
+  it("defaults to https://verified-skill.com when VSKILL_PLATFORM_URL is unset", () => {
+    const original = process.env.VSKILL_PLATFORM_URL;
+    delete process.env.VSKILL_PLATFORM_URL;
+    try {
+      expect(getPlatformBaseUrl()).toBe("https://verified-skill.com");
+    } finally {
+      if (typeof original !== "undefined") {
+        process.env.VSKILL_PLATFORM_URL = original;
+      }
+    }
+  });
+  // 0725 AC-US1-01: empty-string env also falls through to the production default.
+  it("defaults to https://verified-skill.com when VSKILL_PLATFORM_URL is empty", () => {
+    const original = process.env.VSKILL_PLATFORM_URL;
+    process.env.VSKILL_PLATFORM_URL = "";
+    try {
+      expect(getPlatformBaseUrl()).toBe("https://verified-skill.com");
+    } finally {
+      if (typeof original !== "undefined") {
+        process.env.VSKILL_PLATFORM_URL = original;
+      } else {
+        delete process.env.VSKILL_PLATFORM_URL;
+      }
+    }
+  });
 });
 
 describe("proxyToPlatform — request forwarding", () => {

@@ -119,12 +119,15 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
     const handled = await router.handle(req, res);
     if (handled) return;
 
-    // 0712 US-003 T-016B: forward platform-owned API surface (`/api/v1/skills/*`
-    // — check-updates, stream, etc.) to the vskill-platform process. The
-    // studio frontend issues these as relative URLs; in production they
-    // resolve via same-origin to the platform, but in dev the studio is
-    // served by this eval-server (port-hashed, e.g. 3162) and would otherwise
-    // 404. Target is `VSKILL_PLATFORM_URL` (default http://localhost:3017).
+    // 0712 US-003 T-016B (default re-targeted in 0725): forward platform-owned
+    // API surface (`/api/v1/skills/*` — check-updates, stream, etc.) to the
+    // vskill-platform process. The studio frontend issues these as relative
+    // URLs; in production they resolve via same-origin to the platform, but in
+    // dev the studio is served by this eval-server (port-hashed, e.g. 3162)
+    // and would otherwise 404. Target is `VSKILL_PLATFORM_URL` (default
+    // https://verified-skill.com — production worker; mirrors api/client.ts
+    // DEFAULT_BASE_URL). Local-platform devs override via
+    // `VSKILL_PLATFORM_URL=http://localhost:3017`.
     if (shouldProxyToPlatform(req.url)) {
       await proxyToPlatform(req, res);
       return;

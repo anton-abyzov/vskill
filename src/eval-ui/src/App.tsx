@@ -222,15 +222,21 @@ function Shell() {
   // connecting?", AgentScopePicker "Set up...", scope empty states) opens
   // it via a `studio:open-setup-drawer` CustomEvent carrying `{ provider }`.
   const setupDrawer = useSetupDrawer();
+  // 0686 F-001 fix: depend on the stable `open` callback rather than the
+  // hook result object so the listener is bound exactly once per `open`
+  // identity change (which is `useCallback([])` → never). Avoids the
+  // teardown/rebind churn and the one-microtask race window where a
+  // dispatched CustomEvent could be dropped between unbind and rebind.
+  const openSetup = setupDrawer.open;
   useEffect(() => {
     function onOpenSetup(e: Event) {
       if (!(e instanceof CustomEvent)) return;
       const detail = e.detail as { provider?: string } | undefined;
-      if (detail?.provider) setupDrawer.open(detail.provider);
+      if (detail?.provider) openSetup(detail.provider);
     }
     window.addEventListener("studio:open-setup-drawer", onOpenSetup);
     return () => window.removeEventListener("studio:open-setup-drawer", onOpenSetup);
-  }, [setupDrawer]);
+  }, [openSetup]);
   const closeContextMenu = useCallback(() => {
     setContextMenuState(closedContextMenuState);
   }, []);

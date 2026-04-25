@@ -14,7 +14,7 @@
 //     keys. Production silently renders the fallback via the registry.
 // ---------------------------------------------------------------------------
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { SETUP_PROVIDER_CONTENT } from "../components/SetupDrawer.providers";
 
 export interface UseSetupDrawerResult {
@@ -62,5 +62,14 @@ export function useSetupDrawer(): UseSetupDrawerResult {
     }
   }, []);
 
-  return { open, close, isOpen, providerKey };
+  // 0686 F-001 fix: memoize the return object so consumers that bind effects
+  // to the hook result (e.g., App.tsx's `studio:open-setup-drawer` listener
+  // mount in a useEffect dep array) don't re-bind on every parent render. The
+  // four fields are referentially stable across renders that don't touch
+  // isOpen/providerKey; identity only flips when those state values change,
+  // which is the correct re-bind trigger.
+  return useMemo(
+    () => ({ open, close, isOpen, providerKey }),
+    [open, close, isOpen, providerKey],
+  );
 }

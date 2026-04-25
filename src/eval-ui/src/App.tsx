@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StudioProvider, useStudio } from "./StudioContext";
 import { ConfigProvider, useConfig } from "./ConfigContext";
 import { StudioLayout } from "./components/StudioLayout";
@@ -13,6 +13,8 @@ import { ToastProvider, useToast } from "./components/ToastProvider";
 import { ShortcutModal } from "./components/ShortcutModal";
 import { ContextMenu } from "./components/ContextMenu";
 import type { ContextMenuState } from "./components/ContextMenu";
+import { ConfirmDialog, getTrashLabel } from "./components/ConfirmDialog";
+import { usePendingDeletion } from "./hooks/usePendingDeletion";
 import { SetupDrawer } from "./components/SetupDrawer";
 import { useSetupDrawer } from "./hooks/useSetupDrawer";
 import { AgentScopePicker, agentsResponseToPickerEntries } from "./components/AgentScopePicker";
@@ -272,6 +274,102 @@ function Shell() {
     document.documentElement.style.setProperty("--sidebar-width", `${sidebarWidth}px`);
   }, [sidebarWidth]);
 
+  // ---------------------------------------------------------------------------
+  // 0722: Skill delete flow (ConfirmDialog + 10s Undo + OS trash)
+  // ---------------------------------------------------------------------------
+  const [pendingDeleteSkill, setPendingDeleteSkill] = useState<SkillInfo | null>(null);
+  const [hiddenSkillKeys, setHiddenSkillKeys] = useState<Set<string>>(() => new Set());
+  const firstDeleteShownRef = useRef(false);
+  const trashLabel = useMemo(() => getTrashLabel(), []);
+  const keyOf = useCallback(
+    (s: { plugin: string; skill: string }) => `${s.plugin}/${s.skill}`,
+    [],
+  );
+  const optimisticHide = useCallback(
+    (s: { plugin: string; skill: string }) => {
+      setHiddenSkillKeys((set) => {
+        const next = new Set(set);
+        next.add(keyOf(s));
+        return next;
+      });
+    },
+    [keyOf],
+  );
+  const optimisticRestore = useCallback(
+    (s: { plugin: string; skill: string }) => {
+      setHiddenSkillKeys((set) => {
+        const next = new Set(set);
+        next.delete(keyOf(s));
+        return next;
+      });
+    },
+    [keyOf],
+  );
+  const pendingDeletion = usePendingDeletion({
+    delayMs: 10_000,
+    onCommit: (s) => {
+      refreshSkills();
+      // Clear the hidden-key once refreshSkills has dropped the entry from
+      // state.skills; harmless if it lingers a render frame.
+      optimisticRestore(s);
+    },
+    onFailure: (s, err) => {
+      optimisticRestore(s);
+      toast({
+        message: `Couldn't delete ${s.skill}: ${err.message}`,
+        severity: "error",
+        durationMs: 0,
+        action: {
+          label: strings.actions.retry,
+          onInvoke: () => {
+            optimisticHide(s);
+            pendingDeletion.enqueueDelete(s);
+          },
+        },
+      });
+    },
+  });
+  useEffect(() => {
+    function onRequestDelete(e: Event) {
+      if (!(e instanceof CustomEvent)) return;
+      const detail = (e as CustomEvent).detail as { skill?: SkillInfo } | undefined;
+      if (detail?.skill) setPendingDeleteSkill(detail.skill);
+    }
+    window.addEventListener("studio:request-delete", onRequestDelete);
+    return () => window.removeEventListener("studio:request-delete", onRequestDelete);
+  }, []);
+  const handleConfirmDelete = useCallback(() => {
+    const skill = pendingDeleteSkill;
+    setPendingDeleteSkill(null);
+    if (!skill) return;
+    const target = { plugin: skill.plugin, skill: skill.skill };
+    optimisticHide(target);
+    pendingDeletion.enqueueDelete(target);
+    const sessionPrefix = !firstDeleteShownRef.current
+      ? `Sent to your ${trashLabel}. Open Trash to restore. `
+      : "";
+    firstDeleteShownRef.current = true;
+    toast({
+      message: `${sessionPrefix}Deleted ${skill.skill}`,
+      severity: "info",
+      durationMs: 10_000,
+      action: {
+        label: strings.actions.undo,
+        onInvoke: () => {
+          pendingDeletion.cancelDelete(keyOf(target));
+          optimisticRestore(target);
+        },
+      },
+    });
+  }, [pendingDeleteSkill, optimisticHide, optimisticRestore, pendingDeletion, toast, trashLabel, keyOf]);
+  const handleCancelDelete = useCallback(() => {
+    setPendingDeleteSkill(null);
+  }, []);
+  const visibleSkills = useMemo(
+    () => state.skills.filter((s) => !hiddenSkillKeys.has(keyOf(s))),
+    [state.skills, hiddenSkillKeys, keyOf],
+  );
+
   const selectedInfo = useMemo(() => {
     if (!state.selectedSkill) return null;
     return state.skills.find(
@@ -413,7 +511,7 @@ function Shell() {
         }
         sidebar={
           <Sidebar
-            skills={state.skills}
+            skills={visibleSkills}
             selectedKey={
               state.selectedSkill
                 ? { plugin: state.selectedSkill.plugin, skill: state.selectedSkill.skill }
@@ -580,6 +678,19 @@ function Shell() {
           }
           // On failure, leave the toast pinned so the user can expand it.
         }}
+      />
+
+      {/* 0722: skill delete confirmation. Opened by studio:request-delete
+          events from the context-menu router and DetailHeader trash button. */}
+      <ConfirmDialog
+        open={pendingDeleteSkill !== null}
+        title={pendingDeleteSkill ? `Delete "${pendingDeleteSkill.skill}"?` : ""}
+        body={`It will be sent to your ${trashLabel}. You can recover it from there.`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="destructive"
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
       />
     </>
   );

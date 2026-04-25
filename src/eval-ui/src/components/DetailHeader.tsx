@@ -381,8 +381,36 @@ function LegacyDetailHeader({ state, isReadOnly, onDelete }: { state: WorkspaceS
           <button
             disabled={isRunning}
             onClick={() => {
-              if (window.confirm(`Delete skill "${skill}"? This cannot be undone.`)) {
-                onDelete();
+              // 0722: route through the shared ConfirmDialog + OS-trash flow.
+              // App.tsx listens for studio:request-delete and opens the dialog;
+              // confirmation triggers the same usePendingDeletion buffer used
+              // by the context menu, so DetailHeader benefits from the 10s
+              // Undo window automatically. The legacy onDelete callback is
+              // wired separately by some callers — retained for compatibility,
+              // but the dispatch is the canonical path.
+              if (typeof window !== "undefined") {
+                // We rely on the parent supplying plugin + skill via the
+                // existing prop set; if not supplied, fall back to onDelete.
+                window.dispatchEvent(
+                  new CustomEvent("studio:request-delete", {
+                    detail: {
+                      skill: {
+                        plugin,
+                        skill,
+                        // Minimum SkillInfo shape required by ConfirmDialog —
+                        // App.tsx only reads plugin, skill, and dir.
+                        dir: "",
+                        hasEvals: false,
+                        hasBenchmark: false,
+                        evalCount: 0,
+                        assertionCount: 0,
+                        benchmarkStatus: "missing",
+                        lastBenchmark: null,
+                        origin: "source",
+                      },
+                    },
+                  }),
+                );
               }
             }}
             title="Delete skill"

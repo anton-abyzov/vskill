@@ -577,6 +577,13 @@ function createOpenRouterClient(modelOverride?: string): LlmClient {
 // "lm-studio" is safe to hardcode. Forks that do enforce it can override via
 // a future LM_STUDIO_API_KEY env var (not wired in this increment per
 // ADR-0677-02).
+//
+// IMPORTANT — env binding timing: `process.env.LM_STUDIO_BASE_URL` is read
+// once when `createLmStudioClient()` is called (at provider-selection time),
+// not on each `generate()` invocation. Tests that mutate the env after
+// construction will not see the change. To re-bind, re-create the client.
+// The detection probe `probeLmStudio()` in api-routes.ts reads the env at
+// probe time, which is sufficient for the integration-layer test pattern.
 // ---------------------------------------------------------------------------
 function createLmStudioClient(modelOverride?: string): LlmClient {
   const baseUrl = process.env.LM_STUDIO_BASE_URL || "http://localhost:1234/v1";

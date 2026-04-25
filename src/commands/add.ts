@@ -777,7 +777,7 @@ export function enableAfterInstall(
 ): { invoked: boolean; pluginId: string | null; scope: "user" | "project" } {
   const scope: "user" | "project" =
     opts.scope ?? (opts.global ? "user" : "project");
-  const pluginId = resolvePluginId(skillName, entry as never);
+  const pluginId = resolvePluginId(skillName, entry);
   if (pluginId === null) {
     if (!opts.dryRun) {
       console.log(

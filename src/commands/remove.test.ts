@@ -43,6 +43,21 @@ vi.mock("../utils/paths.js", () => ({
     p.startsWith("~/") ? `/home/testuser${p.slice(1)}` : p,
 }));
 
+// ---------------------------------------------------------------------------
+// Mock settings / claude-plugin (F-002 multi-scope path)
+// ---------------------------------------------------------------------------
+const mockIsPluginEnabled = vi.fn();
+const mockClaudePluginUninstall = vi.fn();
+
+vi.mock("../settings/index.js", () => ({
+  isPluginEnabled: (...args: unknown[]) => mockIsPluginEnabled(...args),
+}));
+
+vi.mock("../utils/claude-plugin.js", () => ({
+  claudePluginUninstall: (...args: unknown[]) =>
+    mockClaudePluginUninstall(...args),
+}));
+
 // Import after mocks
 const { removeCommand } = await import("./remove.js");
 
@@ -81,6 +96,9 @@ function makeLockfile(skills: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockDetectInstalledAgents.mockResolvedValue(MOCK_AGENTS);
+  // Default: no plugin registered anywhere — auto-discovered fixtures
+  // short-circuit the F-002 multi-scope path. Marketplace tests override.
+  mockIsPluginEnabled.mockReturnValue(false);
 });
 
 describe("removeCommand", () => {
@@ -206,6 +224,60 @@ describe("removeCommand", () => {
     expect(mockRmSync).not.toHaveBeenCalled();
     // But lockfile should still be updated
     expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("sw");
+  });
+
+  // 0724 F-002 regression — marketplace plugin path (multi-scope uninstall)
+  // Reason this test exists: prior fixtures had no `marketplace` field, so
+  // resolvePluginId() always returned null and the multi-scope block in
+  // remove.ts was unexercised. That coverage gap let an unimported
+  // `isPluginEnabled` symbol slip through (F-001). This test pins the
+  // marketplace path and asserts the F-002 contract: only enabled scopes
+  // are uninstalled, and the JSON envelope reports pluginId/pluginUninstallOk.
+  it("0724 F-002: marketplace plugin enabled at user-only scope uninstalls user only", async () => {
+    mockReadLockfile.mockReturnValue(
+      makeLockfile({
+        foo: {
+          version: "1.0.0",
+          sha: "abc123",
+          tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z",
+          source: "marketplace:specweave",
+          marketplace: "specweave",
+          scope: "user",
+        },
+      }),
+    );
+    mockExistsSync.mockReturnValue(false);
+    // Plugin registered at user scope only — F-002 should walk both scopes
+    // but only invoke uninstall for the enabled one.
+    mockIsPluginEnabled.mockImplementation(
+      (_id: string, opts: { scope: string }) => opts.scope === "user",
+    );
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await removeCommand("foo", { force: true, json: true });
+
+    // Walked both scopes, called uninstall only for user
+    expect(mockIsPluginEnabled).toHaveBeenCalledWith("foo@specweave", {
+      scope: "user",
+    });
+    expect(mockIsPluginEnabled).toHaveBeenCalledWith(
+      "foo@specweave",
+      expect.objectContaining({ scope: "project" }),
+    );
+    expect(mockClaudePluginUninstall).toHaveBeenCalledTimes(1);
+    expect(mockClaudePluginUninstall).toHaveBeenCalledWith(
+      "foo@specweave",
+      "user",
+      undefined,
+    );
+
+    // JSON envelope reports the marketplace contract
+    const last = logSpy.mock.calls[logSpy.mock.calls.length - 1];
+    const parsed = JSON.parse(last.join(" "));
+    expect(parsed.pluginId).toBe("foo@specweave");
+    expect(parsed.pluginUninstallOk).toBe(true);
+    logSpy.mockRestore();
   });
 
   // 0724 T-007 ----------------------------------------------------------

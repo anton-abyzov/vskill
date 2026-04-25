@@ -41,6 +41,23 @@ export async function disableCommand(
   skillName: string,
   opts: DisableOptions,
 ): Promise<void> {
+  // F-006 fix: Commander accepts any string for --scope <scope> (no built-in
+  // choices on action callbacks). Validate at the entry point so a typo like
+  // `--scope projet` errors loudly instead of silently routing to user scope.
+  if (
+    opts.scope !== undefined &&
+    opts.scope !== "user" &&
+    opts.scope !== "project"
+  ) {
+    const msg = `Invalid --scope "${opts.scope}". Allowed values: user, project.`;
+    if (opts.json) {
+      console.log(JSON.stringify({ error: msg }));
+    } else {
+      console.error(red(msg));
+    }
+    process.exit(1);
+    return;
+  }
   const scope: "user" | "project" = opts.scope ?? "user";
 
   // ----- 1. Validate skill is in lockfile --------------------------------

@@ -225,4 +225,29 @@ describe("enableCommand", () => {
     const out = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
     expect(out).toMatch(/auto-discover/i);
   });
+
+  // ---- F-006: invalid --scope rejected at entry --------------------------
+  // Commander's --scope <scope> is unvalidated; without this guard a typo
+  // like `--scope projet` silently routed to the user-scope settings file.
+  it("F-006: invalid --scope value exits with error before any side effects", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation(() => undefined as never);
+
+    await enableCommand("foo", {
+      scope: "projet" as unknown as "user" | "project",
+    });
+
+    expect(errSpy).toHaveBeenCalled();
+    const errOut = errSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(errOut).toMatch(/Invalid --scope/);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    // No lockfile read, no install attempt
+    expect(mockReadLockfile).not.toHaveBeenCalled();
+    expect(mockClaudePluginInstall).not.toHaveBeenCalled();
+
+    errSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });

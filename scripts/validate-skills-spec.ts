@@ -144,7 +144,16 @@ function main(): number {
   }
 
   const useRef = isSkillsRefAvailable();
-  console.log(`[validate-skills-spec] Validator: ${useRef ? "skills-ref (external)" : "built-in (agentskills.io/specification — tags/target-agents nesting only)"}`);
+  if (useRef) {
+    console.log(`[validate-skills-spec] Validator: skills-ref (external)`);
+  } else {
+    // 0679 F-003: built-in fallback only enforces the tags/target-agents
+    // nesting rule. Loud warning so CI maintainers don't mistake a green
+    // run for full agentskills.io/specification coverage.
+    console.warn(`[validate-skills-spec] WARNING: skills-ref not installed — only the tags/target-agents nesting rule is enforced.`);
+    console.warn(`[validate-skills-spec] WARNING: install skills-ref for full spec coverage: npm i -D skills-ref`);
+    console.log(`[validate-skills-spec] Validator: built-in (agentskills.io/specification — tags/target-agents nesting only)`);
+  }
   console.log(`[validate-skills-spec] Files: ${files.length}`);
 
   const allViolations: Violation[] = [];

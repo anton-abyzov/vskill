@@ -437,52 +437,131 @@ const EMPTY_METADATA: SkillMetadataFields = {
  * Minimal YAML frontmatter parser — handles scalars and arrays (inline [a, b]
  * or YAML list form). We intentionally avoid pulling gray-matter into the
  * eval-server bundle; SKILL.md frontmatter is a well-bounded subset.
+ *
+ * 0679: also recognizes the canonical agentskills.io shape where `tags` and
+ * `target-agents` are nested under a `metadata:` block. Children of
+ * `metadata:` are surfaced both as top-level keys (`fm.tags`) AND under
+ * `metadata.<key>` (e.g., `fm.metadata.tags`), so existing consumers that
+ * read `fm.tags` keep working without changes. If a SKILL.md somehow has BOTH
+ * a top-level `tags:` AND a `metadata.tags:` (hand-edited transitional file),
+ * the top-level value wins — explicit beats nested.
  */
-export function parseSkillFrontmatter(content: string): Record<string, string | string[]> {
+export function parseSkillFrontmatter(content: string): Record<string, string | string[] | Record<string, string | string[]>> {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return {};
   const lines = match[1].split("\n");
-  const out: Record<string, string | string[]> = {};
+  const rootOut: Record<string, string | string[]> = {};
+  const metaOut: Record<string, string | string[]> = {};
+  let scope: "root" | "metadata" = "root";
   let currentKey: string | null = null;
   let currentList: string[] | null = null;
+  let currentScope: "root" | "metadata" = "root";
 
   const stripQuotes = (s: string) => s.trim().replace(/^["']|["']$/g, "");
 
+  const flushList = () => {
+    if (currentKey && currentList) {
+      const target = currentScope === "metadata" ? metaOut : rootOut;
+      target[currentKey] = currentList;
+    }
+    currentKey = null;
+    currentList = null;
+  };
+
+  const writeScalar = (key: string, value: string) => {
+    const target = scope === "metadata" ? metaOut : rootOut;
+    target[key] = value;
+  };
+
   for (const line of lines) {
-    const listItem = line.match(/^\s+-\s+(.+)$/);
-    if (listItem && currentKey && currentList) {
-      currentList.push(stripQuotes(listItem[1]));
+    if (line.trim() === "") continue;
+
+    // Metadata-nested list item (4+ spaces indent): `    - value`
+    const nestedListItem = line.match(/^ {4}-\s+(.+)$/);
+    if (nestedListItem && currentKey && currentList && currentScope === "metadata") {
+      currentList.push(stripQuotes(nestedListItem[1]));
       continue;
     }
+    // Root-level list item (any leading whitespace ≤ 2): `  - value` or `- value`
+    const rootListItem = line.match(/^ {0,2}-\s+(.+)$/);
+    if (rootListItem && currentKey && currentList && currentScope === "root") {
+      currentList.push(stripQuotes(rootListItem[1]));
+      continue;
+    }
+
+    // Metadata child key: `  key:` or `  key: value` (exactly 2-space indent)
+    const metaChild = line.match(/^ {2}([\w-]+):\s*(.*)$/);
+    if (scope === "metadata" && metaChild) {
+      flushList();
+      const key = metaChild[1];
+      const rawValue = metaChild[2].trim();
+      currentScope = "metadata";
+      currentKey = key;
+      if (!rawValue) {
+        currentList = [];
+        continue;
+      }
+      const arrayMatch = rawValue.match(/^\[(.*)\]$/);
+      if (arrayMatch) {
+        metaOut[key] = arrayMatch[1].split(",").map(stripQuotes).filter(Boolean);
+        currentList = null;
+        currentKey = null;
+      } else {
+        metaOut[key] = stripQuotes(rawValue);
+        currentList = null;
+        currentKey = null;
+      }
+      continue;
+    }
+
+    // Top-level key: `key:` or `key: value` (no leading whitespace)
     const kv = line.match(/^([\w-]+):\s*(.*)$/);
     if (!kv) continue;
-    // Flush pending list
-    if (currentKey && currentList) {
-      out[currentKey] = currentList;
-      currentList = null;
-    }
+    flushList();
     const key = kv[1];
     const rawValue = kv[2].trim();
+
+    if (key === "metadata") {
+      // Entering the metadata block; subsequent indented children are nested.
+      scope = "metadata";
+      currentScope = "metadata";
+      currentKey = null;
+      currentList = null;
+      continue;
+    }
+
+    // Any unindented key resets scope back to root.
+    scope = "root";
+    currentScope = "root";
     currentKey = key;
     if (!rawValue) {
-      // Next lines may be a YAML list
       currentList = [];
       continue;
     }
     const arrayMatch = rawValue.match(/^\[(.*)\]$/);
     if (arrayMatch) {
-      out[key] = arrayMatch[1]
-        .split(",")
-        .map(stripQuotes)
-        .filter(Boolean);
+      rootOut[key] = arrayMatch[1].split(",").map(stripQuotes).filter(Boolean);
       currentList = null;
+      currentKey = null;
     } else {
-      out[key] = stripQuotes(rawValue);
+      writeScalar(key, stripQuotes(rawValue));
       currentList = null;
+      currentKey = null;
     }
   }
-  if (currentKey && currentList) out[currentKey] = currentList;
-  return out;
+  flushList();
+
+  // Surface metadata children at the top level so existing consumers
+  // (`fm.tags`, `fm["target-agents"]`) keep working post-migration. A
+  // top-level value with the same name takes precedence over the nested one.
+  const merged: Record<string, string | string[] | Record<string, string | string[]>> = { ...rootOut };
+  for (const [k, v] of Object.entries(metaOut)) {
+    if (!(k in merged)) merged[k] = v;
+  }
+  if (Object.keys(metaOut).length > 0) {
+    merged.metadata = metaOut;
+  }
+  return merged;
 }
 
 function toStringOrNull(v: unknown): string | null {
@@ -569,7 +648,7 @@ export function buildSkillMetadata(
   if (!existsSync(skillMd)) {
     return { ...EMPTY_METADATA, sourceAgent: deriveSourceAgent(skillDir, root, origin) };
   }
-  let fm: Record<string, string | string[]> = {};
+  let fm: Record<string, string | string[] | Record<string, string | string[]>> = {};
   try {
     const content = readFileSync(skillMd, "utf8");
     fm = parseSkillFrontmatter(content);
@@ -2681,13 +2760,21 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       const skillMdPath = join(skillDir, "SKILL.md");
       const skillContent = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
 
-      // Extract description, name, and tags from frontmatter
+      // Extract description, name, and tags from frontmatter.
+      // 0679 F-001: route through parseSkillFrontmatter so the metadata-nested
+      // tags shape (per agentskills.io/specification) is honored. Direct regex
+      // missed indented `metadata.tags:` and silently produced an empty array.
       const description = extractDescription(skillContent);
-      const nameMatch = skillContent.match(/^---[\s\S]*?name:\s*(\S+)[\s\S]*?---/);
-      const tagsMatch = skillContent.match(/^---[\s\S]*?tags:\s*(.+)[\s\S]*?---/m);
+      const fm = parseSkillFrontmatter(skillContent);
+      const fmName = fm.name;
+      const fmTags = fm.tags;
       const meta: SkillMeta = {
-        name: nameMatch ? nameMatch[1] : params.skill,
-        tags: tagsMatch ? tagsMatch[1].split(",").map((t: string) => t.trim()).filter(Boolean) : [],
+        name: typeof fmName === "string" && fmName.trim().length > 0 ? fmName.trim() : params.skill,
+        tags: Array.isArray(fmTags)
+          ? fmTags.filter((t): t is string => typeof t === "string" && t.length > 0)
+          : (typeof fmTags === "string"
+            ? fmTags.split(",").map((t) => t.trim()).filter(Boolean)
+            : []),
       };
 
       // Use per-request model overrides if provided, fall back to global config

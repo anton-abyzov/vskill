@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 
-import { buildSkillMdForTest, parseFrontmatterForTest } from "../skill-create-routes.js";
+import { buildSkillMdForTest, parseFrontmatterForTest } from "./helpers/skill-md-test-helpers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(__dirname, "fixtures");
@@ -59,22 +59,25 @@ describe("SKILL.md spec compliance (0679) — golden-file frontmatter shape", ()
     expect(fm["target-agents"]).toBeUndefined();
   });
 
-  it("preserves existing top-level fields (description, allowed-tools, model) in position (AC-US1-03)", () => {
+  it("preserves existing top-level fields (name, description, allowed-tools, model) in position (AC-US1-03)", () => {
     const out = buildSkillMdForTest(FIXED_INPUT);
     const fm = parseFrontmatterForTest(out);
 
+    expect(fm.name).toBe(FIXED_INPUT.name);
     expect(fm.description).toBe(FIXED_INPUT.description);
     expect(fm["allowed-tools"]).toBe(FIXED_INPUT.allowedTools);
     expect(fm.model).toBe(FIXED_INPUT.model);
 
-    // Line ordering: description → allowed-tools → model → metadata.
+    // Line ordering: name → description → allowed-tools → model → metadata.
     // This locks the emitter's key order so golden diffs stay minimal.
     const frontmatterBlock = out.split("---\n")[1];
+    const nameIdx = frontmatterBlock.indexOf("name:");
     const descIdx = frontmatterBlock.indexOf("description:");
     const toolsIdx = frontmatterBlock.indexOf("allowed-tools:");
     const modelIdx = frontmatterBlock.indexOf("model:");
     const metaIdx = frontmatterBlock.indexOf("metadata:");
-    expect(descIdx).toBeGreaterThanOrEqual(0);
+    expect(nameIdx).toBeGreaterThanOrEqual(0);
+    expect(descIdx).toBeGreaterThan(nameIdx);
     expect(toolsIdx).toBeGreaterThan(descIdx);
     expect(modelIdx).toBeGreaterThan(toolsIdx);
     expect(metaIdx).toBeGreaterThan(modelIdx);

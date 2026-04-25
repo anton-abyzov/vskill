@@ -236,12 +236,10 @@ function buildSkillMd(data: CreateSkillRequest): string {
     .replace(/[\r\n]+/g, " ")
     .replace(/"/g, '\\"');
   lines.push(`description: "${safeDescription}"`);
-  // Version — emitted only when supplied (callers pass "1.0.0" for new skills
-  // and the bumped value for updates). Keeping it conditional preserves the
-  // golden-file fixtures for existing tests that don't pass a version.
-  if (data.version?.trim()) {
-    lines.push(`version: "${data.version.trim()}"`);
-  }
+  // 0728: Version is ALWAYS emitted. Defaults to "1.0.0" so no caller can
+  // produce a versionless SKILL.md. Explicit values from callers win.
+  const resolvedVersion = data.version?.trim() || "1.0.0";
+  lines.push(`version: "${resolvedVersion}"`);
   if (data.allowedTools?.trim()) {
     lines.push(`allowed-tools: ${data.allowedTools.trim()}`);
   }
@@ -288,6 +286,8 @@ export interface BuildSkillMdInput {
   plugin: string;
   layout: 1 | 2 | 3;
   description: string;
+  /** Frontmatter `version:`. Defaults to "1.0.0" when omitted or empty. */
+  version?: string;
   model?: string;
   allowedTools?: string;
   body: string;
@@ -1274,7 +1274,22 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
     }
 
     const targetDir = computeSkillDir(root, body.layout, body.plugin || "", body.name);
+    const skillMdPath = join(targetDir, "SKILL.md");
     const files: string[] = [];
+
+    // 0728: Resolve version BEFORE writing. Three-tier precedence:
+    //   1. Explicit body.version (caller wins).
+    //   2. Existing on-disk version when re-saving an iteration draft —
+    //      preserve so AI iteration doesn't downgrade work-in-progress.
+    //   3. Default "1.0.0" for fresh drafts.
+    let resolvedVersion: string;
+    if (body.version?.trim()) {
+      resolvedVersion = body.version.trim();
+    } else if (existsSync(skillMdPath)) {
+      resolvedVersion = extractFrontmatterVersion(readFileSync(skillMdPath, "utf-8")) ?? "1.0.0";
+    } else {
+      resolvedVersion = "1.0.0";
+    }
 
     try {
       // Create directories (overwrites allowed for re-generation)
@@ -1283,8 +1298,7 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
       mkdirSync(join(targetDir, "evals", "history"), { recursive: true });
 
       // Write SKILL.md
-      const content = buildSkillMd(body);
-      const skillMdPath = join(targetDir, "SKILL.md");
+      const content = buildSkillMd({ ...body, version: resolvedVersion });
       writeFileSync(skillMdPath, content, "utf-8");
       files.push("SKILL.md");
 

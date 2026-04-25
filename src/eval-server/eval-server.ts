@@ -31,6 +31,7 @@ import { registerWorkspaceRoutes } from "./workspace-routes.js";
 import { loadWorkspace, addProject, setActiveProject, projectIdFromPath } from "./workspace-store.js";
 import { registerAuthoringRoutes } from "./authoring-routes.js";
 import { registerPluginCliRoutes } from "./plugin-cli-routes.js";
+import { checkDistFreshness } from "./check-dist-freshness.js";
 import { homedir } from "node:os";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -145,6 +146,15 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
 
   return new Promise((resolve) => {
     server.listen(port, () => {
+      // 0728: Warn when running compiled bundle predates source edits.
+      // pkgRoot is two levels up from __dirname (dist/eval-server/ or src/eval-server/).
+      const pkgRoot = path.resolve(__dirname, "..", "..");
+      const freshness = checkDistFreshness(pkgRoot);
+      if (freshness.stale) {
+        console.log(
+          `\n  \x1b[33m⚠️  Stale dist detected (${freshness.details}) — run \`npm run build\` and restart\x1b[0m`,
+        );
+      }
       console.log(`\n  Skill Studio: http://localhost:${port}\n`);
       resolve(server);
     });

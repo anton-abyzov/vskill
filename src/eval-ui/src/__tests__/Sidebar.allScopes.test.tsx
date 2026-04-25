@@ -4,7 +4,7 @@
 //
 // Renders Sidebar with tri-scope data and verifies the GroupHeader wrappers
 // for AVAILABLE and AUTHORING appear with correct counts. Verifies legacy
-// labels are still present in the underlying ScopeSection content (full
+// labels are still present in the underlying NamedScopeSection content (full
 // rename ripple is a later pass).
 // ---------------------------------------------------------------------------
 

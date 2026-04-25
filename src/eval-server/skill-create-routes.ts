@@ -8,7 +8,7 @@ import type { Router } from "./router.js";
 import { isSkillCreatorInstalled } from "../utils/skill-creator-detection.js";
 import { sendJson, readBody } from "./router.js";
 import type { ProviderName } from "../eval/llm.js";
-import { detectAvailableProviders } from "./api-routes.js";
+import { detectAvailableProviders, parseSkillFrontmatter } from "./api-routes.js";
 import { initSSE, sendSSE, sendSSEDone } from "./sse-helpers.js";
 import { classifyError } from "./error-classifier.js";
 import { writeHistoryEntry } from "../eval/benchmark-history.js";
@@ -218,12 +218,24 @@ export function detectProjectLayout(root: string): ProjectLayoutResponse {
  * level. See 0679-skills-spec-compliance for the increment that introduced
  * this shape and the golden-file guardrails.
  *
- * Key order is stabilized: description → allowed-tools → model → metadata.
+ * Key order is stabilized: name → description → allowed-tools → model → metadata.
+ *
+ * 0679 F-005: `name:` is emitted at the top level when `data.name` is set.
+ * The body's `# /<name>` heading remains as a human-readable signpost; the
+ * frontmatter `name:` is what spec-aware tooling and validators consume.
  */
 function buildSkillMd(data: CreateSkillRequest): string {
   const lines: string[] = ["---"];
-  // Description — always quote to handle special chars
-  lines.push(`description: "${data.description.replace(/"/g, '\\"')}"`);
+  if (data.name?.trim()) {
+    lines.push(`name: ${data.name.trim()}`);
+  }
+  // Description — always quote to handle special chars.
+  // Newlines inside descriptions break YAML parsers, so collapse them to a
+  // single space before escaping double quotes.
+  const safeDescription = data.description
+    .replace(/[\r\n]+/g, " ")
+    .replace(/"/g, '\\"');
+  lines.push(`description: "${safeDescription}"`);
   // Version — emitted only when supplied (callers pass "1.0.0" for new skills
   // and the bumped value for updates). Keeping it conditional preserves the
   // golden-file fixtures for existing tests that don't pass a version.
@@ -288,6 +300,9 @@ export interface BuildSkillMdInput {
  * The underlying function is the source of truth; this export exists so
  * golden-file tests and the CI validator can exercise the emitter without
  * touching the HTTP route.
+ *
+ * @internal — tests must import from `__tests__/helpers/skill-md-test-helpers.ts`,
+ *   not from this module. Production code MUST NOT call this.
  */
 export function buildSkillMdForTest(data: BuildSkillMdInput): string {
   return buildSkillMd(data as CreateSkillRequest);
@@ -301,6 +316,10 @@ export function buildSkillMdForTest(data: BuildSkillMdInput): string {
  *
  * This is intentionally narrow. For general YAML, callers should use a real
  * parser. Exported solely to avoid adding a YAML dep to the test target.
+ *
+ * @internal — production reads MUST go through `parseSkillFrontmatter`
+ *   in api-routes.ts. Tests must import this via
+ *   `__tests__/helpers/skill-md-test-helpers.ts`.
  */
 export function parseFrontmatterForTest(content: string): Record<string, unknown> & { metadata: Record<string, unknown> } {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
@@ -554,15 +573,25 @@ export function matchExistingPlugin(
         const mdPath = join(skillsDirPath, skillDir, "SKILL.md");
         try {
           const content = readFileSync(mdPath, "utf-8");
-          const tagsMatch = content.match(/^---[\s\S]*?tags:\s*(.+)[\s\S]*?---/m);
-          if (tagsMatch) {
-            for (const t of tagsMatch[1].split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)) {
-              tags.add(t);
-            }
+          // 0679 F-001: route through parseSkillFrontmatter so the canonical
+          // metadata-nested tags shape (per agentskills.io/specification) is
+          // honored. The legacy regex (`^---[\s\S]*?tags:\s*(.+)`) only saw
+          // top-level `tags:` and silently produced empty tags for newly
+          // emitted SKILL.md files — a silent plugin-matching regression.
+          const fm = parseSkillFrontmatter(content);
+          const fmTags = fm.tags;
+          const tagList: string[] = Array.isArray(fmTags)
+            ? fmTags.filter((t): t is string => typeof t === "string")
+            : (typeof fmTags === "string"
+              ? fmTags.split(",")
+              : []);
+          for (const raw of tagList) {
+            const t = raw.trim().toLowerCase();
+            if (t) tags.add(t);
           }
-          const descMatch = content.match(/^---[\s\S]*?description:\s*"([^"]+)"[\s\S]*?---/);
-          if (descMatch) {
-            for (const w of descMatch[1].toLowerCase().split(/\s+/).filter((w) => w.length > 3)) {
+          const fmDesc = fm.description;
+          if (typeof fmDesc === "string") {
+            for (const w of fmDesc.toLowerCase().split(/\s+/).filter((w) => w.length > 3)) {
               keywords.add(w);
             }
           }

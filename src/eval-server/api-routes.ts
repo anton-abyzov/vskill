@@ -526,11 +526,6 @@ export function parseSkillFrontmatter(content: string): Record<string, string | 
     foldedKind = null;
   };
 
-  const writeScalar = (key: string, value: string) => {
-    const target = scope === "metadata" ? metaOut : rootOut;
-    target[key] = value;
-  };
-
   for (const line of lines) {
     // While accumulating a folded/literal scalar, any indented continuation
     // line belongs to the scalar; an empty line is a paragraph break.
@@ -650,7 +645,8 @@ export function parseSkillFrontmatter(content: string): Record<string, string | 
       currentList = null;
       currentKey = null;
     } else {
-      writeScalar(key, stripQuotes(rawValue));
+      // scope is "root" here — set just above. Top-level scalar.
+      rootOut[key] = stripQuotes(rawValue);
       currentList = null;
       currentKey = null;
     }

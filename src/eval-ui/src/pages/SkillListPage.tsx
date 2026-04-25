@@ -103,8 +103,8 @@ export function SkillListPage() {
             style={{ color: "var(--text-tertiary)" }}
           >
             Author your first skill with vskill Studio. Pick a model — Claude
-            Code (Pro/Max subscription), Anthropic API key, OpenRouter, or LM
-            Studio — and the generator handles the rest.
+            Code (uses your existing session), Anthropic API key, OpenRouter,
+            or LM Studio — and the generator handles the rest.
           </p>
           <Link
             to="/create"

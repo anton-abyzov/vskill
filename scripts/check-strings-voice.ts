@@ -43,6 +43,20 @@ const FORBIDDEN: Array<{ label: string; re: RegExp }> = [
     re: /[\u{1F389}\u{2728}\u{1F680}\u{2705}\u{1F38A}\u{1F525}\u{1F64C}\u{2B50}\u{1F4AB}\u{1F973}]/gu,
   },
   { label: "multi-exclamation (!!)", re: /!{2,}/g },
+  // 0682 AC-US5-01 — Anthropic April 2026 ToS reframe. "Max/Pro" /
+  // "Pro/Max" / "subscription" are banned in user-facing copy. The single
+  // legitimate use is `models.subscriptionBilling` (a price-row suffix);
+  // that line is allowlisted via `VOICE_ALLOW` per-line markers below.
+  { label: "Max/Pro", re: /\bMax\/Pro\b/gi },
+  { label: "Pro/Max", re: /\bPro\/Max\b/gi },
+  { label: "subscription", re: /\bsubscription\b/gi },
+];
+
+// Lines containing one of these literal substrings are exempt from the
+// banned-word scan. Each entry corresponds to a documented carve-out.
+const LINE_ALLOWLIST = [
+  // models.subscriptionBilling — billing-mode token, AC-US2-03.
+  'subscriptionBilling: "· subscription"',
 ];
 
 const TARGETS = ["src/eval-ui/src/strings.ts"];
@@ -63,6 +77,14 @@ export function scanForVoiceViolations(rootDir: string): VoiceViolation[] {
     const lines = content.split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i] ?? "";
+      // Skip lines that document the AC itself (this script's own scan
+      // would otherwise flag the comment that explains the rule).
+      if (LINE_ALLOWLIST.some((needle) => line.includes(needle))) continue;
+      // The strings.ts header / block comments often quote the banned
+      // strings to explain the rule — treat any line that's purely a
+      // comment as allowlisted (TS line comments only, not block contents).
+      const trimmed = line.trim();
+      if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
       for (const { label, re } of FORBIDDEN) {
         // Use a fresh RegExp with global flag; `re.lastIndex` would leak.
         const localRe = new RegExp(re.source, re.flags);

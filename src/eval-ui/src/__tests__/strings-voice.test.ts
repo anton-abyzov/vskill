@@ -8,6 +8,11 @@
  *   - No "!!" anywhere.
  *   - Success toasts are ≤ 5 words.
  *
+ * Also enforces 0682 AC-US5-01:
+ *   - "Max/Pro" and "Pro/Max" are banned everywhere in `strings.ts`.
+ *   - "subscription" is banned everywhere except the single allowlisted
+ *     model-row billing-mode token (`models.subscriptionBilling`).
+ *
  * Runs under Vitest. See also `scripts/check-strings-voice.ts` (T-036) which
  * runs the same regex pass from CI over the raw file source.
  */
@@ -68,7 +73,21 @@ const FORBIDDEN_PHRASES: Array<{ label: string; re: RegExp }> = [
   { label: "uh-oh", re: /\buh[- ]?oh\b/i },
   { label: "awesome", re: /\bawesome\b/i },
   { label: "blazing-fast", re: /\bblazing[ -]?fast\b/i },
+  // 0682 AC-US5-01: ban Max/Pro language outright. The Anthropic April 2026
+  // ToS update means vskill cannot imply it consumes Max/Pro subscription
+  // quota; we delegate to the `claude` CLI which owns session auth.
+  { label: "Max/Pro", re: /\bMax\/Pro\b/i },
+  { label: "Pro/Max", re: /\bPro\/Max\b/i },
 ];
+
+// 0682 AC-US5-01: ban "subscription" in user-facing strings except the
+// single allowlisted billing-mode token (`models.subscriptionBilling = "·
+// subscription"`) which appears as a price-row suffix on Claude Code /
+// Cursor / Codex / Gemini / Copilot / Zed model rows. Anything else that
+// reads "subscription" implies subscription scraping and is rejected.
+const SUBSCRIPTION_ALLOWLIST_PATHS = new Set<string>([
+  "models.subscriptionBilling",
+]);
 
 // Celebration emoji set. Anthropic voice = restrained, so we ban the
 // confetti/rocket cohort explicitly (informational arrows / check glyphs
@@ -110,6 +129,23 @@ describe("strings-voice (T-035 / AC-US10-01..06)", () => {
   it("no string contains '!!' (two or more consecutive exclamation marks)", () => {
     const offenders = LEAVES.filter((l) => /!!+/.test(l.value));
     expect(offenders).toEqual([]);
+  });
+
+  // 0682 AC-US5-01 — "subscription" with a single allowlisted carve-out.
+  it('no string contains "subscription" outside the model billing-mode allowlist', () => {
+    const re = /\bsubscription\b/i;
+    const offenders = LEAVES.filter(
+      (l) =>
+        re.test(l.value) && !SUBSCRIPTION_ALLOWLIST_PATHS.has(l.path),
+    );
+    expect(
+      offenders,
+      'Anthropic ToS (April 2026) — "subscription" is banned in picker / ' +
+        'Settings / StatusBar / setup copy. Allowlisted only at: ' +
+        Array.from(SUBSCRIPTION_ALLOWLIST_PATHS).join(", ") +
+        ".\nOffenders:\n" +
+        offenders.map((o) => `  ${o.path}: ${JSON.stringify(o.value)}`).join("\n"),
+    ).toEqual([]);
   });
 
   it("success toasts are ≤ 5 words", () => {

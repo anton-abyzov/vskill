@@ -79,7 +79,7 @@ export function ClaudeCodeFirstUseBanner({
     <div
       data-testid="claude-code-first-use-banner"
       role="note"
-      aria-label="Claude Code subscription info"
+      aria-label="Claude Code session info"
       style={{
         display: "flex",
         alignItems: "flex-start",

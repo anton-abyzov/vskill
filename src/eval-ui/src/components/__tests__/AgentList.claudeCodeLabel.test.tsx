@@ -7,7 +7,9 @@ import type { AgentEntry } from "../../hooks/useAgentCatalog";
 // ---------------------------------------------------------------------------
 // 0686 T-012 (US-006): AgentList Claude Code compact label + tooltip.
 //
-// AC-US6-01 Compact row label: "Covered by Max/Pro · overflow billed at API rates"
+// AC-US6-01 Compact row label (post-0682 AC-US5-01 reframe): banishes
+//           "Max/Pro" / "subscription" from picker copy. New label points at
+//           the user's existing Claude Code session.
 // AC-US6-02 Tooltip on hover: exact verified copy (attached via `title` attr
 //           so browsers + AT surface it consistently).
 //
@@ -32,7 +34,7 @@ function fixture(overrides: Partial<AgentEntry>): AgentEntry {
 }
 
 describe("0686 T-012: AgentList Claude Code row billing label", () => {
-  it("renders the EXACT compact Max/Pro label on the claude-cli row", async () => {
+  it("renders the EXACT compact Claude Code session label on the claude-cli row", async () => {
     const React = await import("react");
     const { createRoot } = await import("react-dom/client");
     const { act } = await import("react");
@@ -61,14 +63,14 @@ describe("0686 T-012: AgentList Claude Code row billing label", () => {
     // by both outerHTML text and a scoped data-testid so the regex can't
     // drift without a test failure.
     expect(row.textContent).toContain(
-      "Covered by Max/Pro · overflow billed at API rates",
+      "Uses your Claude Code session · overflow billed at API rates",
     );
     const caption = row.querySelector(
       "[data-testid='claude-code-billing-label']",
     ) as HTMLElement;
     expect(caption).toBeTruthy();
     expect(caption.textContent).toBe(
-      "Covered by Max/Pro · overflow billed at API rates",
+      "Uses your Claude Code session · overflow billed at API rates",
     );
     act(() => root.unmount());
     container.remove();
@@ -100,7 +102,7 @@ describe("0686 T-012: AgentList Claude Code row billing label", () => {
     ) as HTMLElement;
     const title = caption.getAttribute("title") ?? "";
     expect(title).toContain(
-      "Your Claude Code CLI usage runs under your Pro/Max subscription quota",
+      "vSkill delegates to the `claude` CLI — your existing Claude Code session handles quota",
     );
     expect(title).toContain("/usage");
     // Must NOT mention a numeric quota value (AC-US6-04).

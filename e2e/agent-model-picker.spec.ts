@@ -24,6 +24,15 @@ function mod(): "Meta" | "Control" {
 async function waitForStudioReady(page: Page) {
   await page.goto("/");
   await page.waitForSelector("[data-testid='agent-model-picker-trigger']", { timeout: 10_000 });
+  // The trigger renders "Loading…" until /api/config resolves and the
+  // useAgentCatalog hook hydrates. Wait for the catalog to populate so
+  // assertions against the trigger label and the StatusBar providers
+  // segment can run against a hydrated DOM.
+  await page
+    .locator("[data-testid='agent-model-picker-trigger']")
+    .filter({ hasNotText: /Loading/i })
+    .first()
+    .waitFor({ timeout: 10_000 });
 }
 
 test.describe("0682 — Agent + Model picker", () => {
@@ -33,10 +42,18 @@ test.describe("0682 — Agent + Model picker", () => {
     // the string "Claude" — within 2 seconds of hydration.
     const triggerText = await page.locator("[data-testid='agent-model-picker-trigger']").textContent();
     expect(triggerText).toMatch(/Claude|Use current/i);
-    // There must be no Max/Pro language anywhere in the rendered doc.
+    // AC-US5-01: "Max/Pro" and "subscription" must not appear in picker /
+    // Settings / StatusBar copy. The "· subscription" pricing suffix on
+    // ModelList rows is the documented exception (whitelisted in voice-lint).
     const body = await page.locator("body").textContent();
     expect(body ?? "").not.toMatch(/Max\/Pro/i);
-    expect(body ?? "").not.toMatch(/\bsubscription\b/);
+    expect(body ?? "").not.toMatch(/Pro\/Max/i);
+    // Strip the whitelisted billing-mode tokens before scanning for
+    // "subscription" elsewhere in the doc.
+    const bodyMinusWhitelist = (body ?? "")
+      .replace(/·\s*subscription/gi, "")
+      .replace(/Subscription(?![\w-])/g, "");
+    expect(bodyMinusWhitelist).not.toMatch(/\bsubscription\b/i);
   });
 
   test("Scenario 2: Cmd+K opens picker with ready-state panes and footer", async ({ page }) => {
@@ -67,9 +84,19 @@ test.describe("0682 — Agent + Model picker", () => {
 
   test("StatusBar shows per-provider lock glyphs", async ({ page }) => {
     await waitForStudioReady(page);
-    // At least one provider glyph should render.
+    // The StatusBar receives the providers prop only after /api/config has
+    // resolved AND the App's effect that sets `config` has flushed. Wait
+    // explicitly for the providers segment (or its narrow-viewport summary
+    // collapse) to appear before counting glyphs. AC-US6-01 mandates a
+    // glyph per provider above 640px; AC-US6-03 collapses below 640px.
+    await page
+      .locator("[data-testid='providers-segment']")
+      .first()
+      .waitFor({ timeout: 5_000 });
     const glyphs = page.locator("[data-testid^='provider-glyph-']");
-    const count = await glyphs.count();
-    expect(count).toBeGreaterThan(0);
+    const summary = page.locator("[data-testid='providers-summary']");
+    const glyphCount = await glyphs.count();
+    const summaryCount = await summary.count();
+    expect(glyphCount + summaryCount).toBeGreaterThan(0);
   });
 });

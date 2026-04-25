@@ -138,7 +138,7 @@ test.describe("0686 E2E-04 — SetupDrawer", () => {
     const body = page.locator("[data-testid='setup-drawer-body']");
     await expect(body).toBeVisible();
     await expect(body).toContainText("No API key needed");
-    await expect(body).toContainText("Covered by Max/Pro · overflow billed at API rates");
+    await expect(body).toContainText("Uses your Claude Code session · overflow billed at API rates");
     const bodyText = (await body.textContent()) ?? "";
     expect(bodyText).not.toMatch(/\d+\s*(hours?|cap|requests?|daily)/i);
   });

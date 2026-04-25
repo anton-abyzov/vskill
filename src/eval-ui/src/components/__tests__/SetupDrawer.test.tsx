@@ -211,10 +211,10 @@ describe("0686 T-011: SetupDrawer per-provider content", () => {
     unmount();
   });
 
-  it("Claude Code view says 'No API key needed' and quotes the exact Max/Pro compact label", async () => {
+  it("Claude Code view says 'No API key needed' and quotes the exact session compact label", async () => {
     const { body, html, unmount } = await render("claude-code");
     expect(body).toContain("No API key needed");
-    expect(body).toContain("Covered by Max/Pro · overflow billed at API rates");
+    expect(body).toContain("Uses your Claude Code session · overflow billed at API rates");
     // AC-US6-04 — NO numeric quota values.
     expect(body).not.toMatch(/\d+\s*(hours?|cap|requests?|daily)/i);
     // No API key envs since claude-code runs the CLI.

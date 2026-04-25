@@ -44,7 +44,7 @@ function quotaResetWindow(msg: string): string {
 function providerCaption(providerId: string): string {
   switch (providerId) {
     case "claude-cli":
-      return "Uses your logged-in Claude Code session (Pro/Max subscription). No API key. When your quota runs out, excess usage is billed at API rates if you've enabled extra usage.";
+      return "Uses your logged-in Claude Code session — your existing CLI session handles quota. No API key needed. Overflow runs at standard API rates if extra usage is enabled in your account settings.";
     case "anthropic":
       return "Direct Anthropic API — pay-per-token. Full Opus / Sonnet / Haiku catalog. Requires ANTHROPIC_API_KEY.";
     case "openrouter":
@@ -575,7 +575,7 @@ export function CreateSkillPage() {
                     }}
                   >
                     <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                      Your Claude Max subscription quota is exhausted
+                      Your Claude Code session quota is exhausted
                     </div>
                     <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 8 }}>
                       {quotaResetWindow(sk.aiError)}. Switch to another provider (Anthropic API, OpenRouter, or a local model) or enable extra usage to continue past your monthly quota.

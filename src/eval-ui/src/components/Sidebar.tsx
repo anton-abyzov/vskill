@@ -993,7 +993,7 @@ function InstalledEmptyState({
       }
       body={
         <>
-          Run <Mono>vskill install &lt;plugin&gt;</Mono> to add one.
+          Run <Mono>vskill install &lt;skill&gt;</Mono> to add one.
         </>
       }
     />
@@ -1022,7 +1022,7 @@ function GlobalEmptyState({
       headline={`No global skills for ${agentId}.`}
       body={
         <>
-          Run <Mono>vskill install --global &lt;plugin&gt;</Mono> to add one.
+          Run <Mono>vskill install --global &lt;skill&gt;</Mono> to add one.
         </>
       }
     />

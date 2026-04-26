@@ -29,7 +29,7 @@ const sidebar = {
   emptyOwnHeadline: "No skills yet.",
   emptyOwnBody: "Run vskill new <name> to create one.",
   emptyInstalledHeadline: "No installed skills.",
-  emptyInstalledBody: "Run vskill install <plugin> to add one.",
+  emptyInstalledBody: "Run vskill install <skill> to add one.",
   emptyFilteredHeadline: "No matches in this section.",
   emptyFilteredBody: "Clear the search or try another query.",
   loadErrorHeadline: "Couldn't load skills.",

@@ -267,7 +267,12 @@ export async function scanSkills(root: string): Promise<SkillInfo[]> {
 
   if (!existsSync(root)) return skills;
 
-  // Layout 4: root IS the skill directory itself → {root}/SKILL.md
+  // Layout 4: root IS the skill directory itself → {root}/SKILL.md.
+  // Authoring projects (e.g. `vskill new`) put a SKILL.md at the project root
+  // AND may also have skills installed under `.claude/skills/...` from
+  // `vskill install`. We must NOT early-return after the self-skill — the
+  // remaining layouts below pick up the installed copies (Layout 1 walks
+  // `.claude` as a "plugin" subdir and finds its `skills/` children).
   if (existsSync(join(root, "SKILL.md"))) {
     const skillName = basename(root);
     const parent = basename(dirname(root));
@@ -287,7 +292,6 @@ export async function scanSkills(root: string): Promise<SkillInfo[]> {
       hasBenchmark,
       origin: classifyOrigin(root, root),
     });
-    return skills;
   }
 
   // Layout 3: root-level skills/ directory → {root}/skills/{skill}/SKILL.md

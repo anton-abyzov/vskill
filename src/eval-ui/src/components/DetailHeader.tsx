@@ -173,7 +173,11 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
         </h2>
         {/* 0707 T-008: dedicated VersionBadge replaces the plain-text version. */}
         <span data-testid="detail-header-version">
-          <VersionBadge version={skill.version ?? null} />
+          <VersionBadge
+            version={skill.resolvedVersion ?? skill.version ?? null}
+            source={skill.versionSource}
+            pluginName={skill.pluginName ?? null}
+          />
         </span>
       </div>
 

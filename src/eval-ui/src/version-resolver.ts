@@ -32,6 +32,12 @@ function pick(value: string | null | undefined): string | null {
   const trimmed = value.trim();
   if (trimmed === "") return null;
   if (!SEMVER_RE.test(trimmed)) return null;
+  // 0756: "0.0.0" is the studio's own placeholder for `/api/v1/skills/check-updates`
+  // when it doesn't yet know a skill's version. The platform echoes it back as
+  // `installed`, and mergeUpdatesIntoSkills writes it as registryCurrentVersion.
+  // No real skill ships at 0.0.0 (submission pipeline defaults to 1.0.0 — incr 0728).
+  // Treat it as absent so the chain falls through to pluginVersion or the default.
+  if (trimmed === "0.0.0") return null;
   return trimmed;
 }
 

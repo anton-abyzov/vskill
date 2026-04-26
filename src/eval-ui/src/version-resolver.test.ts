@@ -85,4 +85,45 @@ describe("resolveSkillVersion", () => {
     });
     expect(out).toEqual({ version: "1.0.0", versionSource: "default" });
   });
+
+  // 0756: the studio sends "0.0.0" as a placeholder to /api/v1/skills/check-updates
+  // when it doesn't yet know the version. The platform echoes that back as
+  // `installed`, mergeUpdatesIntoSkills writes it as registryCurrentVersion,
+  // and the old resolver accepted "0.0.0" as valid semver — beating the real
+  // plugin.json version (1.0.4) and the "1.0.0" default. Treat it as absent.
+  it("TC-008: 0.0.0 in registry is rejected as a sentinel — falls through to plugin", () => {
+    const out = resolveSkillVersion({
+      frontmatterVersion: null,
+      registryCurrentVersion: "0.0.0",
+      pluginVersion: "1.0.4",
+    });
+    expect(out).toEqual({ version: "1.0.4", versionSource: "plugin" });
+  });
+
+  it("TC-009: 0.0.0 in registry with no plugin version — falls through to default", () => {
+    const out = resolveSkillVersion({
+      frontmatterVersion: null,
+      registryCurrentVersion: "0.0.0",
+      pluginVersion: null,
+    });
+    expect(out).toEqual({ version: "1.0.0", versionSource: "default" });
+  });
+
+  it("TC-010: 0.0.0 in frontmatter is also rejected (no real skill ships at 0.0.0)", () => {
+    const out = resolveSkillVersion({
+      frontmatterVersion: "0.0.0",
+      registryCurrentVersion: "1.0.0",
+      pluginVersion: null,
+    });
+    expect(out).toEqual({ version: "1.0.0", versionSource: "registry" });
+  });
+
+  it("TC-011: 0.0.0 in plugin field is also rejected", () => {
+    const out = resolveSkillVersion({
+      frontmatterVersion: null,
+      registryCurrentVersion: null,
+      pluginVersion: "0.0.0",
+    });
+    expect(out).toEqual({ version: "1.0.0", versionSource: "default" });
+  });
 });

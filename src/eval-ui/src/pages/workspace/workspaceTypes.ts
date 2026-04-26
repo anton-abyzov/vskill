@@ -236,7 +236,10 @@ export interface WorkspaceContextValue {
   isReadOnly: boolean;
 
   // Async actions
-  saveContent: () => Promise<void>;
+  /** 0779 — optional `contentOverride` lets EditorPanel.handleSave persist a
+   *  patch-bumped variant computed in the same handler without waiting for a
+   *  React re-render after a SET_CONTENT dispatch. */
+  saveContent: (contentOverride?: string) => Promise<void>;
   saveEvals: (updated: EvalsFile) => Promise<void>;
   runCase: (caseId: number, mode?: RunMode) => void;
   runAll: (mode?: RunMode) => void;

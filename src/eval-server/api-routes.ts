@@ -1910,8 +1910,19 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         `${PLATFORM_BASE}${basePath}?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
         { signal: AbortSignal.timeout(10_000) },
       );
+      // 0746: pass through upstream status + body. Legitimate 4xx from the
+      // platform (e.g. "Version '1.0.1' not found", "Skill not found")
+      // were previously masked as 502 Platform API unavailable, which lied
+      // about the failure mode and hid the real error from the UI. Only
+      // genuine fetch failure (catch block below) is platform_unreachable.
       if (!resp.ok) {
-        sendJson(res, { error: "Platform API unavailable" }, 502, req);
+        let body: unknown;
+        try {
+          body = await resp.json();
+        } catch {
+          body = { error: `Upstream returned ${resp.status}` };
+        }
+        sendJson(res, body, resp.status, req);
         return;
       }
       const data = await resp.json();

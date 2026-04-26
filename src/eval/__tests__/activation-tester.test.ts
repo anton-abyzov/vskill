@@ -310,3 +310,108 @@ describe("testActivation — auto-classification", () => {
     expect(summary.results[1].autoClassified).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Disagreement-warning tests (increment 0775)
+// Auto-classified Phase 1 vs Phase 2 disagreement → scope_warning / drift_warning
+// instead of FP / FN. Manual labels stay strict.
+// ---------------------------------------------------------------------------
+
+const HELLO_META: SkillMeta = {
+  name: "hello-skill",
+  tags: [],
+};
+
+describe("testActivation — disagreement warnings", () => {
+  it("auto-classified scope_warning: Phase 1 says no, Phase 2 says yes", async () => {
+    const client = mockClient([
+      // Phase 1: classify "how are you today?" with name=hello-skill, tags=[] → not related
+      JSON.stringify({ related: false }),
+      // Phase 2: evaluate against full description that says "activate for every message" → activate
+      JSON.stringify({ activate: true, confidence: "high", reasoning: "Description says activate for every message" }),
+    ]);
+
+    const prompts: ActivationPrompt[] = [
+      { prompt: "how are you today?", expected: "auto" },
+    ];
+
+    const summary = await testActivation("This skill activates for every user message", prompts, client, undefined, HELLO_META);
+
+    expect(summary.results[0].verdict).toBe("scope_warning");
+    expect(summary.results[0].classification).toBe("FP"); // diagnostic info preserved
+    expect(summary.results[0].autoClassified).toBe(true);
+    expect(summary.scopeWarnings).toBe(1);
+    expect(summary.driftWarnings).toBe(0);
+    expect(summary.fp).toBe(0); // excluded from fp count
+    expect(summary.tp).toBe(0);
+  });
+
+  it("auto-classified drift_warning: Phase 1 says yes, Phase 2 says no", async () => {
+    const client = mockClient([
+      // Phase 1: classify → related (auto labels expected = should_activate)
+      JSON.stringify({ related: true }),
+      // Phase 2: evaluate against description → does NOT activate
+      JSON.stringify({ activate: false, confidence: "high", reasoning: "Description doesn't cover this case" }),
+    ]);
+
+    const prompts: ActivationPrompt[] = [
+      { prompt: "send a message", expected: "auto" },
+    ];
+
+    const summary = await testActivation("Some narrow description", prompts, client, undefined, {
+      name: "messaging-helper",
+      tags: ["messaging"],
+    });
+
+    expect(summary.results[0].verdict).toBe("drift_warning");
+    expect(summary.results[0].classification).toBe("FN");
+    expect(summary.results[0].autoClassified).toBe(true);
+    expect(summary.driftWarnings).toBe(1);
+    expect(summary.scopeWarnings).toBe(0);
+    expect(summary.fn).toBe(0); // excluded from fn count
+  });
+
+  it("manual disagreement still counts as FP (verdict=ok)", async () => {
+    // Manual label `should_not_activate` (no Phase 1 call), Phase 2 activates → real FP
+    const client = mockClient([
+      JSON.stringify({ activate: true, confidence: "high", reasoning: "Real bug" }),
+    ]);
+
+    const prompts: ActivationPrompt[] = [
+      { prompt: "some prompt", expected: "should_not_activate" },
+    ];
+
+    const summary = await testActivation("desc", prompts, client, undefined, HELLO_META);
+
+    expect(summary.results[0].verdict).toBe("ok");
+    expect(summary.results[0].classification).toBe("FP");
+    expect(summary.results[0].autoClassified).toBe(false);
+    expect(summary.fp).toBe(1);
+    expect(summary.scopeWarnings).toBe(0);
+  });
+
+  it("precision denominator excludes warnings", async () => {
+    // Mix: 1 manual TP + 1 auto-classified scope_warning.
+    // With the new scoring, fp should be 0 (warning is excluded), so precision = 1.0 (not 0.5).
+    const client = mockClient([
+      // Phase 1 for the auto prompt only → not related
+      JSON.stringify({ related: false }),
+      // Phase 2 for the manual prompt → activate (expected should_activate → TP)
+      JSON.stringify({ activate: true, confidence: "high", reasoning: "Match" }),
+      // Phase 2 for the auto prompt → activate (expected should_not_activate → would-be FP, but verdict=scope_warning)
+      JSON.stringify({ activate: true, confidence: "high", reasoning: "Description over-claims" }),
+    ]);
+
+    const prompts: ActivationPrompt[] = [
+      { prompt: "real positive case", expected: "should_activate" },
+      { prompt: "broad-scope case", expected: "auto" },
+    ];
+
+    const summary = await testActivation("desc that activates broadly", prompts, client, undefined, HELLO_META);
+
+    expect(summary.tp).toBe(1);
+    expect(summary.fp).toBe(0); // warning excluded
+    expect(summary.scopeWarnings).toBe(1);
+    expect(summary.precision).toBe(1); // tp / (tp + fp) = 1 / 1 = 1.0, NOT 0.5
+  });
+});

@@ -519,6 +519,8 @@ export interface StatsResult {
   }>;
 }
 
+export type Verdict = "ok" | "scope_warning" | "drift_warning";
+
 export interface ActivationResult {
   prompt: string;
   expected: "should_activate" | "should_not_activate";
@@ -527,6 +529,7 @@ export interface ActivationResult {
   reasoning: string;
   classification: "TP" | "TN" | "FP" | "FN";
   autoClassified?: boolean;
+  verdict?: Verdict;
 }
 
 export interface ActivationSummary {
@@ -539,6 +542,8 @@ export interface ActivationSummary {
   tn: number;
   fp: number;
   fn: number;
+  scopeWarnings?: number;
+  driftWarnings?: number;
   autoClassifiedCount?: number;
 }
 

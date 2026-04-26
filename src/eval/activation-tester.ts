@@ -14,6 +14,8 @@ export interface ActivationPrompt {
   expected: "should_activate" | "should_not_activate" | "auto";
 }
 
+export type Verdict = "ok" | "scope_warning" | "drift_warning";
+
 export interface ActivationResult {
   prompt: string;
   expected: "should_activate" | "should_not_activate";
@@ -22,6 +24,7 @@ export interface ActivationResult {
   reasoning: string;
   classification: "TP" | "TN" | "FP" | "FN";
   autoClassified?: boolean;
+  verdict: Verdict;
 }
 
 export interface ActivationSummary {
@@ -34,6 +37,8 @@ export interface ActivationSummary {
   tn: number;
   fp: number;
   fn: number;
+  scopeWarnings: number;
+  driftWarnings: number;
   autoClassifiedCount: number;
 }
 
@@ -149,6 +154,7 @@ Would this user prompt trigger this skill?`;
         : "low";
 
       const classification = classifyResult(p.expected, activate);
+      const verdict = computeVerdict(p.autoClassified, p.expected, activate);
 
       const result: ActivationResult = {
         prompt: p.prompt,
@@ -158,6 +164,7 @@ Would this user prompt trigger this skill?`;
         reasoning: String(json.reasoning || ""),
         classification,
         autoClassified: p.autoClassified,
+        verdict,
       };
       results.push(result);
       onResult?.(result);
@@ -170,6 +177,7 @@ Would this user prompt trigger this skill?`;
         reasoning: `Error: ${err instanceof Error ? err.message : String(err)}`,
         classification: p.expected === "should_activate" ? "FN" : "TN",
         autoClassified: p.autoClassified,
+        verdict: "ok",
       };
       results.push(result);
       onResult?.(result);
@@ -189,23 +197,42 @@ function classifyResult(
   return "FP";
 }
 
+// Auto-classified disagreement → soft warning (not a real FP/FN). Manual labels
+// signal user authority; their disagreements remain strict. See increment 0775.
+export function computeVerdict(
+  autoClassified: boolean | undefined,
+  expected: "should_activate" | "should_not_activate",
+  actual: boolean,
+): Verdict {
+  if (!autoClassified) return "ok";
+  if (expected === "should_not_activate" && actual) return "scope_warning";
+  if (expected === "should_activate" && !actual) return "drift_warning";
+  return "ok";
+}
+
 function computeSummary(results: ActivationResult[]): ActivationSummary {
-  const tp = results.filter((r) => r.classification === "TP").length;
-  const tn = results.filter((r) => r.classification === "TN").length;
-  const fp = results.filter((r) => r.classification === "FP").length;
-  const fn = results.filter((r) => r.classification === "FN").length;
+  const ok = (r: ActivationResult) => r.verdict === "ok";
+  const tp = results.filter((r) => r.classification === "TP" && ok(r)).length;
+  const tn = results.filter((r) => r.classification === "TN" && ok(r)).length;
+  const fp = results.filter((r) => r.classification === "FP" && ok(r)).length;
+  const fn = results.filter((r) => r.classification === "FN" && ok(r)).length;
+  const scopeWarnings = results.filter((r) => r.verdict === "scope_warning").length;
+  const driftWarnings = results.filter((r) => r.verdict === "drift_warning").length;
   const total = results.length;
+  const scoredTotal = tp + tn + fp + fn;
 
   return {
     results,
     precision: tp + fp > 0 ? tp / (tp + fp) : 0,
     recall: tp + fn > 0 ? tp / (tp + fn) : 0,
-    reliability: total > 0 ? (tp + tn) / total : 0,
+    reliability: scoredTotal > 0 ? (tp + tn) / scoredTotal : 0,
     total,
     tp,
     tn,
     fp,
     fn,
+    scopeWarnings,
+    driftWarnings,
     autoClassifiedCount: results.filter((r) => r.autoClassified).length,
   };
 }

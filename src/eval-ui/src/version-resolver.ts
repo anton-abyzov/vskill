@@ -8,6 +8,12 @@
 // Inputs that are null, undefined, empty, or fail semver validation are
 // skipped. The resolver always returns a non-empty version string and a
 // provenance label so the studio sidebar can render every skill consistently.
+//
+// Increment 0781: when `preferInstalled` is true and `installedCurrentVersion`
+// is a valid semver, return it ahead of the frontmatter check. This lets the
+// sidebar/right-panel match the Versions tab's [installed] marker for
+// installed skills whose on-disk frontmatter has drifted past the version the
+// user actually installed (lockfile / platform poll).
 
 export type VersionSource = "frontmatter" | "registry" | "plugin" | "default";
 
@@ -15,6 +21,10 @@ export interface ResolveSkillVersionInput {
   frontmatterVersion?: string | null;
   registryCurrentVersion?: string | null;
   pluginVersion?: string | null;
+  /** 0781: lockfile/platform-truth installed version. Used when `preferInstalled` is true. */
+  installedCurrentVersion?: string | null;
+  /** 0781: when true, prefer `installedCurrentVersion` over frontmatter. Set by callers for `origin === "installed"` skills. */
+  preferInstalled?: boolean;
 }
 
 export interface ResolveSkillVersionOutput {
@@ -44,6 +54,14 @@ function pick(value: string | null | undefined): string | null {
 export function resolveSkillVersion(
   input: ResolveSkillVersionInput,
 ): ResolveSkillVersionOutput {
+  // 0781: for installed skills the lockfile/platform truth wins over the
+  // on-disk frontmatter, which can drift after a save bumps the version
+  // without an actual update.
+  if (input.preferInstalled) {
+    const inst = pick(input.installedCurrentVersion);
+    if (inst) return { version: inst, versionSource: "registry" };
+  }
+
   const fm = pick(input.frontmatterVersion);
   if (fm) return { version: fm, versionSource: "frontmatter" };
 

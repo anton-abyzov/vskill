@@ -237,22 +237,13 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
               title="Delete skill"
               onClick={() => {
                 if (typeof window === "undefined") return;
+                // 0782 F-1: forward the canonical SkillInfo verbatim — same
+                // shape useContextMenuState.ts:54-59 dispatches. Synthesizing
+                // a partial object risked drifting from SkillInfo if the
+                // dialog later read additional fields (sourceAgent, scope, etc.).
                 window.dispatchEvent(
                   new CustomEvent("studio:request-delete", {
-                    detail: {
-                      skill: {
-                        plugin: skill.plugin,
-                        skill: skill.skill,
-                        dir: skill.dir ?? "",
-                        hasEvals: false,
-                        hasBenchmark: false,
-                        evalCount: 0,
-                        assertionCount: 0,
-                        benchmarkStatus: "missing",
-                        lastBenchmark: null,
-                        origin: "source",
-                      },
-                    },
+                    detail: { skill },
                   }),
                 );
               }}

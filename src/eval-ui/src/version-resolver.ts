@@ -3,7 +3,7 @@
 // Pure function. Picks a non-empty version string from three optional inputs
 // using a fixed precedence chain and labels the source for downstream UI use.
 //
-//   frontmatter.version  >  registry.currentVersion  >  plugin.json.version  >  "0.0.0"
+//   frontmatter.version  >  registry.currentVersion  >  plugin.json.version  >  "1.0.0"
 //
 // Inputs that are null, undefined, empty, or fail semver validation are
 // skipped. The resolver always returns a non-empty version string and a
@@ -47,5 +47,5 @@ export function resolveSkillVersion(
   const plug = pick(input.pluginVersion);
   if (plug) return { version: plug, versionSource: "plugin" };
 
-  return { version: "0.0.0", versionSource: "default" };
+  return { version: "1.0.0", versionSource: "default" };
 }

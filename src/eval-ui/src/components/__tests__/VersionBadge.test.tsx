@@ -32,11 +32,11 @@ describe("VersionBadge — T-002", () => {
   // so the component just renders it. When fed an explicitly empty value the
   // badge falls back to "0.0.0" so we never crash and never render an empty
   // chip.
-  it("0750: renders '0.0.0' fallback when version is empty/missing instead of returning null", () => {
-    expect(collectText(VersionBadge({ version: null }))).toBe("v0.0.0");
-    expect(collectText(VersionBadge({ version: undefined }))).toBe("v0.0.0");
-    expect(collectText(VersionBadge({ version: "" }))).toBe("v0.0.0");
-    expect(collectText(VersionBadge({ version: "   " }))).toBe("v0.0.0");
+  it("0750: renders '1.0.0' fallback when version is empty/missing instead of returning null", () => {
+    expect(collectText(VersionBadge({ version: null }))).toBe("v1.0.0");
+    expect(collectText(VersionBadge({ version: undefined }))).toBe("v1.0.0");
+    expect(collectText(VersionBadge({ version: "" }))).toBe("v1.0.0");
+    expect(collectText(VersionBadge({ version: "   " }))).toBe("v1.0.0");
   });
 
   // Increment 0750 — source-aware styling (US-003).
@@ -67,7 +67,7 @@ describe("VersionBadge — T-002", () => {
   });
 
   it("0750: source='default' renders italic with 'No version declared' tooltip", () => {
-    const tree = VersionBadge({ version: "0.0.0", source: "default" }) as unknown as ReactEl;
+    const tree = VersionBadge({ version: "1.0.0", source: "default" }) as unknown as ReactEl;
     const style = tree.props.style as Record<string, string | number>;
     expect(style.fontStyle).toBe("italic");
     expect(tree.props.title).toBe("No version declared");

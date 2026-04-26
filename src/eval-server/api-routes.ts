@@ -17,7 +17,7 @@ import { resolveSkillApiName as resolveSkillApiNameImpl } from "./skill-name-res
 import { runBenchmarkSSE, runSingleCaseSSE, assembleBulkResult } from "./benchmark-runner.js";
 import { getSkillSemaphore } from "./concurrency.js";
 import { resolveSkillDir } from "./skill-resolver.js";
-import { scanSkills, classifyOrigin, scanSkillsTriScope } from "../eval/skill-scanner.js";
+import { scanSkills, classifyOrigin, scanSkillsTriScope, dedupeByDir } from "../eval/skill-scanner.js";
 import type { SkillInfo, SkillScope } from "../eval/skill-scanner.js";
 import {
   scanInstalledPluginSkills,
@@ -1706,11 +1706,16 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       Promise.resolve(scanInstalledPluginSkills({ agentId: activeAgent })),
       Promise.resolve(scanAuthoredPluginSkills({ agentId: activeAgent, projectRoot: root })),
     ]);
-    const skills: SkillInfo[] = [
+    // 0740: defensive dedupe by canonical `dir`. The Layout 2 walker in
+    // skill-scanner.ts already skips manifest-bearing plugin dirs, but if a
+    // future scanner pass introduces overlap we collapse here. Precedence:
+    // `authoring-plugin` (manifest-backed) wins over any other `scopeV2`,
+    // since the plugin manifest is the source of truth for that subtree.
+    const skills: SkillInfo[] = dedupeByDir([
       ...triScopeSkills,
       ...installedPluginSkills,
       ...authoredPluginSkills,
-    ];
+    ]);
     const enriched = await Promise.all(
       skills.map(async (s) => {
         let evalCount = 0;
@@ -1772,27 +1777,26 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     sendJson(res, filtered, 200, req);
   });
 
-  // Check for skill updates via `vskill outdated --json`
+  // Check for skill updates. 0740: call the bundled `getOutdatedJson` helper
+  // directly instead of shelling out to whatever `vskill` is on PATH (which
+  // may be a different version than the studio is bundling). This guarantees
+  // the disk-version reconcile from outdated.ts is applied uniformly.
   router.get("/api/skills/updates", async (req, res) => {
     try {
-      const raw = execSync("vskill outdated --json", {
-        timeout: 15_000,
-        encoding: "utf-8",
-        stdio: ["ignore", "pipe", "ignore"],
-        env: { ...process.env, PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin" },
-      });
-      const parsed = JSON.parse(raw);
-      sendJson(res, Array.isArray(parsed) ? parsed : [], 200, req);
-    } catch (e) {
-      // vskill outdated exits 1 when updates exist — stdout still has JSON
-      const stdout = e && typeof e === "object" && "stdout" in e ? (e as { stdout: unknown }).stdout : null;
-      if (stdout) {
-        try {
-          const parsed = JSON.parse(stdout as string);
-          sendJson(res, Array.isArray(parsed) ? parsed : [], 200, req);
-          return;
-        } catch { /* fall through */ }
+      const { getOutdatedJson } = await import("../commands/outdated.js");
+      const programmatic = await getOutdatedJson();
+      if (!programmatic) {
+        sendJson(res, [], 200, req);
+        return;
       }
+      const enriched = programmatic.results.map((r) => ({
+        ...r,
+        ...(programmatic.pinMap.has(r.name)
+          ? { pinned: true, pinnedVersion: programmatic.pinMap.get(r.name) }
+          : {}),
+      }));
+      sendJson(res, enriched, 200, req);
+    } catch {
       sendJson(res, [], 200, req);
     }
   });

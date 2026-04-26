@@ -44,9 +44,14 @@ export function VersionHistoryPanel() {
   const [diffLoading, setDiffLoading] = useState(false);
 
   // Update state (T-006)
+  // 0736 GR-001: migrated from EventSource side-channel to single POST.
+  // The old api.startSkillUpdate(plugin, skill) issued a GET to a POST-only
+  // endpoint and reproduced the ERR_CONNECTION_REFUSED bug 0736 fixed for
+  // the skill detail page. Now uses api.postSkillUpdate, mirroring
+  // UpdateAction.tsx and UpdatesPanel.tsx semantics.
   const [updateStatus, setUpdateStatus] = useState<"idle" | "updating" | "scanning" | "installing" | "done" | "error">("idle");
   const [updateError, setUpdateError] = useState<string | null>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Pagination sentinel
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -98,72 +103,50 @@ export function VersionHistoryPanel() {
     setSelectedB(latest.version);
   }, [installed, latest]);
 
-  // T-006: Update handler
-  // Server emits named SSE events via sendSSE(res, eventName, data):
-  //   "progress" → { status: "updating" | "scanning" | "installing" | "done" }
-  //   "done"     → final event (sendSSEDone closes the stream)
-  //   "error"    → { error: "..." }
-  const handleUpdate = useCallback(() => {
+  // T-006 (0736 GR-001 migration): Update handler — single POST, no SSE.
+  // The backend still streams SSE frames in its response body, but
+  // api.postSkillUpdate awaits res.text() and parses the trailing "done"
+  // event, so the caller sees a final {ok, status, body, version} result.
+  // Aborting on unmount prevents stale state writes.
+  const handleUpdate = useCallback(async () => {
     setUpdateStatus("updating");
     setUpdateError(null);
 
-    const es = api.startSkillUpdate(plugin, skill);
-    esRef.current = es;
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-    es.addEventListener("progress", (evt: MessageEvent) => {
-      try {
-        const data = JSON.parse(evt.data);
-        switch (data.status) {
-          case "scanning":
-            setUpdateStatus("scanning");
-            break;
-          case "installing":
-            setUpdateStatus("installing");
-            break;
-          case "done":
-            setUpdateStatus("done");
-            break;
-        }
-      } catch {
-        // Malformed SSE data — reset to idle so user can retry
+    try {
+      const result = await api.postSkillUpdate(plugin, skill, controller.signal);
+
+      if (result.ok) {
+        setUpdateStatus("done");
+        refreshSkills();
+        mutate(swrKey);
+      } else {
+        const msg = `Update failed (HTTP ${result.status}): ${result.body || "no response body"}`;
         setUpdateStatus("error");
-        setUpdateError("Unexpected response from server");
+        setUpdateError(msg);
       }
-    });
-
-    es.addEventListener("done", () => {
-      es.close();
-      esRef.current = null;
-      refreshSkills();
-      mutate(swrKey);
-      setUpdateStatus("done");
-    });
-
-    es.addEventListener("error", (evt: Event) => {
-      // SSE "error" can be either a named server event or a connection error.
-      // Named server events have evt.data with error details.
-      const me = evt as MessageEvent;
-      let errorMsg = "Connection lost";
-      if (me.data) {
-        try {
-          const data = JSON.parse(me.data);
-          errorMsg = data.error || "Update failed";
-        } catch {}
+    } catch (err) {
+      // Aborted on unmount — caller is gone, no UI to update.
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
       }
+      const errMsg = err instanceof Error ? err.message : "Network error";
       setUpdateStatus("error");
-      setUpdateError(errorMsg);
-      es.close();
-      esRef.current = null;
-    });
+      setUpdateError(errMsg);
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
+    }
   }, [plugin, skill, swrKey, refreshSkills]);
 
-  // Cleanup EventSource on unmount
+  // Cleanup in-flight request on unmount
   useEffect(() => {
     return () => {
-      if (esRef.current) {
-        esRef.current.close();
-        esRef.current = null;
-      }
+      abortRef.current?.abort();
+      abortRef.current = null;
     };
   }, []);
 

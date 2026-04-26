@@ -1,12 +1,27 @@
 // ---------------------------------------------------------------------------
 // vskill outdated -- check installed skills for available updates
 // ---------------------------------------------------------------------------
+// 0740 contract — DISK is the source of truth for `currentVersion`:
+//   The lockfile records the version at install time. If the user edits
+//   SKILL.md in place, the lockfile drifts. To avoid the bell/toast lying
+//   ("installed 1.0.0" while sidebar shows 1.3.0), we resolve each entry's
+//   install path and read `metadata.version` from the on-disk SKILL.md.
+//   If unreadable we fall back to the lockfile version + a warning. After
+//   the platform returns `latest`, we compare semver — if disk >= latest
+//   the entry is NOT outdated (don't tell the user to "update" backwards).
+// ---------------------------------------------------------------------------
 
 import { checkUpdates } from "../api/client.js";
 import type { CheckUpdateItem, CheckUpdateResult } from "../api/client.js";
 import { readLockfile, writeLockfile } from "../lockfile/lockfile.js";
+import { getProjectRoot } from "../lockfile/project-root.js";
 import type { VskillLock } from "../lockfile/types.js";
 import { parseSource } from "../resolvers/source-resolver.js";
+import {
+  reconcileLockfileVersion,
+  resolveInstallPath,
+  compareSemver,
+} from "../eval/disk-version.js";
 import { bold, dim, green, red, yellow, cyan, table } from "../utils/output.js";
 
 const TWENTY_FOUR_HOURS = 86_400_000;
@@ -26,50 +41,93 @@ function resolveFullName(name: string, source: string): string {
   return name;
 }
 
-export async function outdatedCommand(opts: { json?: boolean }): Promise<void> {
+/**
+ * 0740: Programmatic entry-point for "what's outdated?". Same disk-version
+ * reconcile logic as `outdatedCommand`, but returns the data instead of
+ * printing/exiting. Lets the eval-server's `/api/skills/updates` route
+ * compute updates without shelling out to a separate `vskill` binary on
+ * PATH (which may be a different version than the studio is bundling).
+ *
+ * Returns null when there is no lockfile or no installed skills.
+ */
+export async function getOutdatedJson(): Promise<
+  { results: CheckUpdateResult[]; pinMap: Map<string, string> } | null
+> {
   const lock = readLockfile();
+  const lockDir = getProjectRoot();
+  if (!lock || Object.keys(lock.skills).length === 0) return null;
 
-  if (!lock || Object.keys(lock.skills).length === 0) {
-    console.log(dim("No skills installed."));
-    return;
-  }
+  const diskVersions = new Map<string, string>();
+  const reconcileWarnings = new Map<string, string>();
 
-  // Build the check-updates request
   const items: CheckUpdateItem[] = Object.entries(lock.skills).map(
-    ([name, entry]) => ({
-      name: resolveFullName(name, entry.source),
-      currentVersion: entry.version,
-      sha: entry.sha,
-    }),
+    ([name, entry]) => {
+      const resolvedName = resolveFullName(name, entry.source);
+      const skillMdPath = resolveInstallPath({ name, entry, lockDir });
+      const reconciled = reconcileLockfileVersion({
+        lockfileVersion: entry.version,
+        skillMdPath,
+      });
+      diskVersions.set(resolvedName, reconciled.version);
+      if (reconciled.warning) {
+        reconcileWarnings.set(resolvedName, reconciled.warning);
+      }
+      return {
+        name: resolvedName,
+        currentVersion: reconciled.version,
+        sha: entry.sha,
+      };
+    },
   );
 
-  let results: CheckUpdateResult[];
-  try {
-    results = await checkUpdates(items);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (opts.json) {
-      console.log(JSON.stringify({ error: msg, results: [] }, null, 2));
-    } else {
-      console.error(
-        red("Failed to check for updates: ") + dim(msg),
-      );
+  const rawResults = await checkUpdates(items);
+
+  const results: CheckUpdateResult[] = rawResults.map((r) => {
+    const disk = diskVersions.get(r.name) ?? r.installed;
+    const warning = reconcileWarnings.get(r.name);
+    let updateAvailable = r.updateAvailable;
+    if (updateAvailable && r.latest && compareSemver(disk, r.latest) >= 0) {
+      updateAvailable = false;
     }
-    process.exit(1);
-  }
+    return {
+      ...r,
+      installed: disk,
+      updateAvailable,
+      ...(warning ? { warning } : {}),
+    } as CheckUpdateResult;
+  });
 
-  const outdated = results.filter((r) => r.updateAvailable);
-
-  // Build pin lookup from lockfile
   const pinMap = new Map<string, string>();
   for (const [name, entry] of Object.entries(lock.skills)) {
     if (entry.pinnedVersion) {
-      // Map both short and resolved names
       pinMap.set(name, entry.pinnedVersion);
       const resolved = resolveFullName(name, entry.source);
       if (resolved !== name) pinMap.set(resolved, entry.pinnedVersion);
     }
   }
+
+  return { results, pinMap };
+}
+
+export async function outdatedCommand(opts: { json?: boolean }): Promise<void> {
+  const programmatic = await getOutdatedJson().catch((err) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (opts.json) {
+      console.log(JSON.stringify({ error: msg, results: [] }, null, 2));
+    } else {
+      console.error(red("Failed to check for updates: ") + dim(msg));
+    }
+    process.exit(1);
+    return null;
+  });
+
+  if (programmatic === null) {
+    console.log(dim("No skills installed."));
+    return;
+  }
+  const { results, pinMap } = programmatic;
+
+  const outdated = results.filter((r) => r.updateAvailable);
 
   // --json mode: output raw results enriched with pin info and exit
   if (opts.json) {

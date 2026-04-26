@@ -160,7 +160,7 @@ export function UpdatesPanel() {
   // Loading state
   if (loading) {
     return (
-      <div className="p-6">
+      <div data-testid="updates-panel" className="p-6">
         <div className="skeleton h-6 w-48 mb-4" />
         <div className="space-y-3">
           <div className="skeleton h-16 rounded-lg" />
@@ -173,7 +173,7 @@ export function UpdatesPanel() {
   // Empty state
   if (updates.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full py-16">
+      <div data-testid="updates-panel" className="flex flex-col items-center justify-center h-full py-16">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-4">
           <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
           <polyline points="22 4 12 14.01 9 11.01" />
@@ -192,7 +192,7 @@ export function UpdatesPanel() {
   }
 
   return (
-    <div className="p-6">
+    <div data-testid="updates-panel" className="p-6">
       {/* Toast notification */}
       {toast && (
         <div

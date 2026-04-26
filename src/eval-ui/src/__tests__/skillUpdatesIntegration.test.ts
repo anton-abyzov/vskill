@@ -74,9 +74,11 @@ describe("mergeUpdatesIntoSkills", () => {
   it("merges update data into matching skills", async () => {
     const { mergeUpdatesIntoSkills } = await import("../api.js");
 
+    // 0740: mergeUpdatesIntoSkills now gates by `origin === "installed"`. The
+    // skill must be marked installed for the merge to apply.
     const skills: SkillInfo[] = [
-      makeSkill({ plugin: "owner-repo", skill: "architect" }),
-      makeSkill({ plugin: "owner-repo", skill: "debug" }),
+      makeSkill({ plugin: "owner-repo", skill: "architect", origin: "installed" }),
+      makeSkill({ plugin: "owner-repo", skill: "debug", origin: "installed" }),
     ];
 
     const updates = [

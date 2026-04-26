@@ -183,6 +183,54 @@ function getInstalledPrefixes(): Set<string> {
 }
 
 /**
+ * 0740: Defensive dedupe by canonical `dir`. The Layout 2 walker in this file
+ * already skips manifest-bearing plugin dirs to prevent overlap with
+ * `scanAuthoredPluginSkills`, but if a future scanner pass introduces overlap
+ * we collapse here. Precedence: `authoring-plugin` (manifest-backed) wins
+ * over any other `scopeV2` since the plugin manifest is the source of truth
+ * for that subtree.
+ *
+ * Returns a new array; does not mutate input. When duplicates are dropped
+ * the dropped entries are reported via `console.warn` once per call so
+ * regressions stay visible.
+ */
+export function dedupeByDir(skills: SkillInfo[]): SkillInfo[] {
+  const byDir = new Map<string, SkillInfo>();
+  const dropped: { dir: string; kept: string; dropped: string }[] = [];
+
+  for (const s of skills) {
+    const existing = byDir.get(s.dir);
+    if (!existing) {
+      byDir.set(s.dir, s);
+      continue;
+    }
+    // Same dir collision — pick the manifest-backed entry.
+    const sIsAuthoringPlugin = s.scopeV2 === "authoring-plugin";
+    const existingIsAuthoringPlugin = existing.scopeV2 === "authoring-plugin";
+    if (sIsAuthoringPlugin && !existingIsAuthoringPlugin) {
+      byDir.set(s.dir, s);
+      dropped.push({ dir: s.dir, kept: String(s.scopeV2), dropped: String(existing.scopeV2) });
+    } else if (!sIsAuthoringPlugin && existingIsAuthoringPlugin) {
+      dropped.push({ dir: s.dir, kept: String(existing.scopeV2), dropped: String(s.scopeV2) });
+    } else {
+      // Neither (or both) authoring-plugin — keep first-seen, log the drop.
+      dropped.push({ dir: s.dir, kept: String(existing.scopeV2), dropped: String(s.scopeV2) });
+    }
+  }
+
+  if (dropped.length > 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[0740] dedupeByDir collapsed ${dropped.length} duplicate skill ${dropped.length === 1 ? "row" : "rows"}: ${
+        dropped.map((d) => `${d.dir} (kept ${d.kept}, dropped ${d.dropped})`).join("; ")
+      }`,
+    );
+  }
+
+  return Array.from(byDir.values());
+}
+
+/**
  * Classify a skill's origin based on its filesystem path relative to root.
  * Skills inside agent config directories or plugin caches are "installed".
  */
@@ -274,6 +322,16 @@ function scanPluginDirs(dir: string, skills: SkillInfo[], exclude: string[], roo
   }
 
   for (const plugin of entries) {
+    // 0740: skip plugin directories that have a `.claude-plugin/plugin.json`
+    // manifest. Those subtrees are owned by `scanAuthoredPluginSkills()` (see
+    // plugin-scanner.ts), which emits them with `scopeV2: "authoring-plugin"`.
+    // Without this skip, the same physical `dir` would be emitted twice in
+    // `/api/skills` (once here as `authoring-project`, once again as
+    // `authoring-plugin`), producing duplicate sidebar rows. Bug surfaced in
+    // 0740 after vskill@0.5.116; see spec for the obsidian-brain repro.
+    if (existsSync(join(dir, plugin, ".claude-plugin", "plugin.json"))) {
+      continue;
+    }
     scanSkillsDir(plugin, join(dir, plugin, "skills"), skills, root);
   }
 }

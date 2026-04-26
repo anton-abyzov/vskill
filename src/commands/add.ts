@@ -607,6 +607,14 @@ async function installMarketplaceRepo(
         marketplace: marketplaceName || undefined,
         pluginDir: true,
         scope: opts.global ? "user" : "project",
+        // 0737 — Source-repo provenance for the Studio detail header's
+        // clickable GitHub anchor. `repoUrl` is the canonical GitHub root;
+        // `sourceSkillPath` is intentionally NOT set here for plugin-level
+        // entries since a single plugin may hold multiple skills under
+        // skills/<name>/SKILL.md. resolveSourceLink() falls back to
+        // "SKILL.md" (correct for flat-layout plugins) and the per-skill
+        // case is covered by the explicit-field path documented in 0737.
+        sourceRepoUrl: `https://github.com/${owner}/${repo}`,
       };
     }
   }

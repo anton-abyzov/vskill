@@ -152,6 +152,18 @@ export interface SkillInfo {
   license?: string | null;
   /** Frontmatter `homepage` URL. */
   homepage?: string | null;
+  /**
+   * 0737: Canonical https:// URL of the source GitHub repo, derived from
+   * vskill.lock. Drives the source-file anchor on the Studio detail header.
+   * `null` for authored skills with no install record.
+   */
+  repoUrl?: string | null;
+  /**
+   * 0737: Relative path inside the repo to the SKILL.md (e.g.
+   * "skills/foo/SKILL.md"). Defaults to "SKILL.md" for flat-layout
+   * installs. `null` when no source repo is known.
+   */
+  skillPath?: string | null;
   /** Frontmatter `tags` — freeform taxonomy. */
   tags?: string[] | null;
   /** Frontmatter `deps` or `skill-deps` — other skills this one depends on. */

@@ -20,6 +20,10 @@ export interface SkillLockEntry {
   files?: string[];
   /** When set, skill is pinned at this version and skipped by `update` */
   pinnedVersion?: string;
+  /** 0737 — canonical source repo URL for the upstream SKILL.md (e.g. "https://github.com/owner/repo"). */
+  sourceRepoUrl?: string;
+  /** 0737 — relative path from the source repo root to the skill's SKILL.md (e.g. "skills/foo/SKILL.md"). */
+  sourceSkillPath?: string;
 }
 
 export interface VskillLock {

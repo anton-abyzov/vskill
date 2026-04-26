@@ -192,10 +192,14 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
           color: "var(--text-secondary)",
         }}
       >
-        <AuthorLink author={skill.author ?? null} repoUrl={skill.homepage ?? null} />
+        {/* 0737: prefer the lockfile-derived `repoUrl` (canonical install
+            provenance) over frontmatter `homepage` (author-declared). Fall
+            back to homepage so legacy authored skills with a GitHub
+            homepage keep their existing anchor. */}
+        <AuthorLink author={skill.author ?? null} repoUrl={skill.repoUrl ?? skill.homepage ?? null} />
         <SourceFileLink
-          repoUrl={skill.homepage ?? null}
-          skillPath={null}
+          repoUrl={skill.repoUrl ?? skill.homepage ?? null}
+          skillPath={skill.skillPath ?? null}
           absolutePath={skill.dir}
         />
       </div>

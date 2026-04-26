@@ -664,6 +664,39 @@ function Shell() {
           });
           setMarketplaceOpen(false);
         }}
+        onUninstall={async (plugin) => {
+          if (!window.confirm(`Uninstall ${plugin}? This removes the plugin and its skills.`)) {
+            return;
+          }
+          try {
+            const res = await fetch(
+              `/api/plugins/${encodeURIComponent(plugin)}/uninstall`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({}),
+              },
+            );
+            const body = (await res.json().catch(() => ({}))) as {
+              ok?: boolean;
+              error?: string;
+            };
+            if (!res.ok || !body.ok) {
+              toast({
+                message: body.error ?? `Uninstall failed (${res.status})`,
+                severity: "error",
+              });
+              return;
+            }
+            toast({ message: `Uninstalled ${plugin}.`, severity: "info" });
+            refreshSkills();
+          } catch (err) {
+            toast({
+              message: err instanceof Error ? err.message : String(err),
+              severity: "error",
+            });
+          }
+        }}
       />
 
       {/* 0702 T-042: App-level SettingsModal opened by the API-key-error toast.
@@ -683,6 +716,9 @@ function Shell() {
         job={installJob}
         onDone={(result) => {
           if (result.ok) {
+            // Refresh the sidebar/skill state so the just-installed plugin
+            // appears immediately — no manual page reload.
+            refreshSkills();
             setTimeout(() => setInstallJob(null), 3000);
           }
           // On failure, leave the toast pinned so the user can expand it.

@@ -12,9 +12,14 @@
 //   POST   /api/plugins/install             body: { plugin, scope? } → { ok, stdout, plugins }
 //   POST   /api/plugins/:name/uninstall     body: { scope? } → { ok, stdout, plugins }
 //
-// Any non-2xx exit from `claude` is surfaced as 500 with the stderr trail.
-// The refreshed plugin list is returned inline on every mutation so the UI
-// doesn't need a second GET.
+// CLI exit-code semantics:
+//   - exit 0           → 200 { ok: true, ..., plugins }
+//   - exit non-zero    → 200 { ok: false, code: "claude-cli-failed", error, stderr }
+//                        (CLI ran fine, the *operation* failed — UI surfaces error)
+//   - thrown exception → 500 { ok: false, code: "unexpected", error }
+//
+// The refreshed plugin list is returned inline on every successful mutation
+// so the UI doesn't need a second GET.
 // ---------------------------------------------------------------------------
 
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -31,6 +36,7 @@ import {
   type PluginScope,
   type InstalledPlugin,
 } from "./plugin-cli.js";
+import { buildClaudeCliFailureResponse } from "./plugin-cli-response.js";
 
 const VALID_SCOPES: readonly PluginScope[] = ["user", "project", "local"] as const;
 
@@ -298,17 +304,8 @@ async function runAndRespond(
   try {
     const result = await runClaudePlugin(args, { cwd, timeout: opts.timeout ?? 20_000 });
     if (result.code !== 0) {
-      sendJson(
-        res,
-        {
-          ok: false,
-          code: "claude-cli-failed",
-          error: result.stderr.trim() || result.stdout.trim() || "claude plugin command failed",
-          stdout: result.stdout,
-          stderr: result.stderr,
-        },
-        500,
-      );
+      const { status, body } = buildClaudeCliFailureResponse(result);
+      sendJson(res, body, status);
       return;
     }
     // Re-fetch the plugin list so the UI can refresh without a second call.

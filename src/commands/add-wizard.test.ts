@@ -267,18 +267,17 @@ describe("wizard integration: --select is a no-op (interactive is default)", () 
       { name: "skill-b", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-b/SKILL.md" },
     ]);
 
-    // 1 detected + 1 undetected from registry → agent checkbox + scope + method + skill checkbox
+    // 1 detected + 1 undetected from registry → agent checkbox + scope + skill checkbox
+    // (method prompt suppressed because user picks a single agent)
     mockPromptCheckboxList
       .mockResolvedValueOnce([0])     // agents: select detected only
       .mockResolvedValueOnce([0, 1]); // skills
-    mockPromptChoice
-      .mockResolvedValueOnce(0)  // scope: Project
-      .mockResolvedValueOnce(0); // method: symlink
+    mockPromptChoice.mockResolvedValueOnce(0); // scope: Project
 
     await addCommand("owner/repo", { select: true });
 
-    // Scope + method prompts
-    expect(mockPromptChoice).toHaveBeenCalledTimes(2);
+    // Scope only (method skipped for single agent)
+    expect(mockPromptChoice).toHaveBeenCalledTimes(1);
     // Agent checkbox + skill checkbox
     expect(mockPromptCheckboxList).toHaveBeenCalledTimes(2);
   });
@@ -302,8 +301,8 @@ describe("wizard integration: non-TTY mode", () => {
   });
 });
 
-describe("wizard integration: single skill prompts for method", () => {
-  it("shows method prompt and agent checkbox for single-skill with undetected agents", async () => {
+describe("wizard integration: single skill + single agent prompts only scope", () => {
+  it("shows agent checkbox + scope, suppresses method prompt for single agent", async () => {
     const agents = [makeAgent()];
     mockDetectInstalledAgents.mockResolvedValue(agents);
     mockDiscoverSkills.mockResolvedValue([
@@ -312,21 +311,19 @@ describe("wizard integration: single skill prompts for method", () => {
 
     // 1 detected + 1 undetected → agent checkbox shown
     mockPromptCheckboxList.mockResolvedValueOnce([0]); // agents: select detected
-    mockPromptChoice
-      .mockResolvedValueOnce(0)  // scope: Project
-      .mockResolvedValueOnce(0); // method: symlink
+    mockPromptChoice.mockResolvedValueOnce(0); // scope: Project
 
     await addCommand("owner/repo", {});
 
     // Agent checkbox shown (detected + undetected agents in list)
     expect(mockPromptCheckboxList).toHaveBeenCalledTimes(1);
-    // Scope + method prompts
-    expect(mockPromptChoice).toHaveBeenCalledTimes(2);
+    // Scope only (method skipped for single agent)
+    expect(mockPromptChoice).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("wizard integration: --agent flag skips agent selection", () => {
-  it("does not prompt for agents but still prompts for method", async () => {
+  it("does not prompt for agents; method prompt suppressed when --agent narrows to one", async () => {
     const agents = [makeAgent()];
     mockDetectInstalledAgents.mockResolvedValue(agents);
     mockDiscoverSkills.mockResolvedValue([
@@ -334,23 +331,21 @@ describe("wizard integration: --agent flag skips agent selection", () => {
       { name: "skill-b", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-b/SKILL.md" },
     ]);
 
-    // Scope + method selection + skill selection (no agent checkbox since --agent)
-    mockPromptChoice
-      .mockResolvedValueOnce(0)  // scope: Project
-      .mockResolvedValueOnce(0); // method: symlink
+    // Scope + skill selection (no agent checkbox since --agent; no method since single agent)
+    mockPromptChoice.mockResolvedValueOnce(0); // scope: Project
     mockPromptCheckboxList.mockResolvedValue([0, 1]); // select all skills
 
     await addCommand("owner/repo", { agent: ["claude-code"] });
 
     // Skill checkbox called, agent checkbox NOT called (--agent flag)
     expect(mockPromptCheckboxList).toHaveBeenCalledTimes(1);
-    // Scope + method prompts
-    expect(mockPromptChoice).toHaveBeenCalledTimes(2);
+    // Scope only (method skipped for single agent)
+    expect(mockPromptChoice).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("wizard integration: --global flag skips scope selection", () => {
-  it("does not prompt for scope when --global is provided but still prompts for method", async () => {
+  it("skips scope due to --global; method also skipped for single agent → no choice prompts", async () => {
     const agents = [makeAgent()];
     mockDetectInstalledAgents.mockResolvedValue(agents);
     mockDiscoverSkills.mockResolvedValue([
@@ -358,16 +353,15 @@ describe("wizard integration: --global flag skips scope selection", () => {
       { name: "skill-b", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-b/SKILL.md" },
     ]);
 
-    // Agent checkbox + skill checkbox (no scope since --global, but method is prompted)
+    // Agent checkbox + skill checkbox (no scope since --global, no method since single agent)
     mockPromptCheckboxList
       .mockResolvedValueOnce([0])     // agents: select detected
       .mockResolvedValueOnce([0, 1]); // skills
-    mockPromptChoice.mockResolvedValueOnce(0); // method: symlink
 
     await addCommand("owner/repo", { global: true, select: true });
 
-    // Only method prompt (scope skipped due to --global)
-    expect(mockPromptChoice).toHaveBeenCalledTimes(1);
+    // No promptChoice calls: scope skipped by --global, method skipped by single-agent rule
+    expect(mockPromptChoice).not.toHaveBeenCalled();
   });
 });
 
@@ -396,9 +390,9 @@ describe("wizard integration: abort at agent selection", () => {
   });
 });
 
-// TC-014: Single-agent detected shows agents + method + skills (undetected shown too)
-describe("wizard integration: TC-014 single-agent prompts agents + method + skills", () => {
-  it("shows agent checkbox with detected+undetected, method, and skills", async () => {
+// TC-014: Single-agent detected shows agents + scope + skills (method prompt suppressed)
+describe("wizard integration: TC-014 single-agent prompts agents + scope + skills", () => {
+  it("shows agent checkbox with detected+undetected, scope, skills; suppresses method prompt", async () => {
     const agents = [makeAgent()];
     mockDetectInstalledAgents.mockResolvedValue(agents);
     mockDiscoverSkills.mockResolvedValue([
@@ -410,16 +404,14 @@ describe("wizard integration: TC-014 single-agent prompts agents + method + skil
     mockPromptCheckboxList
       .mockResolvedValueOnce([0])     // agents: select detected
       .mockResolvedValueOnce([0, 1]); // select both skills
-    mockPromptChoice
-      .mockResolvedValueOnce(0)  // scope: Project
-      .mockResolvedValueOnce(0); // method: symlink
+    mockPromptChoice.mockResolvedValueOnce(0); // scope: Project
 
     await addCommand("owner/repo", {});
 
     // Agent checkbox + skill checkbox
     expect(mockPromptCheckboxList).toHaveBeenCalledTimes(2);
-    // Scope + method prompts
-    expect(mockPromptChoice).toHaveBeenCalledTimes(2);
+    // Scope only (method skipped for single agent)
+    expect(mockPromptChoice).toHaveBeenCalledTimes(1);
     // Installation proceeded (via canonical installer)
     expect(mockInstallSymlink).toHaveBeenCalled();
   });
@@ -448,6 +440,29 @@ describe("wizard integration: TC-015 multi-agent prompts agents + method + skill
     expect(mockPromptCheckboxList).toHaveBeenCalledTimes(2);
     // Scope + method prompts
     expect(mockPromptChoice).toHaveBeenCalledTimes(2);
+  });
+});
+
+// TC-014b: Single-agent skips method prompt (Symlink-vs-Copy is meaningless for one agent)
+describe("wizard integration: TC-014b single-agent skips method prompt", () => {
+  it("does not prompt for method when only one agent is selected", async () => {
+    const agents = [makeAgent()];
+    mockDetectInstalledAgents.mockResolvedValue(agents);
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "skill-a", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-a/SKILL.md" },
+    ]);
+
+    mockPromptCheckboxList
+      .mockResolvedValueOnce([0])  // agents: select detected only
+      .mockResolvedValueOnce([0]); // skills
+    mockPromptChoice.mockResolvedValueOnce(0); // scope: Project
+
+    await addCommand("owner/repo", {});
+
+    // Only the scope prompt should fire — method prompt is suppressed for single agent
+    expect(mockPromptChoice).toHaveBeenCalledTimes(1);
+    expect(mockPromptChoice).toHaveBeenNthCalledWith(1, "Installation scope:", expect.any(Array));
+    expect(mockPromptChoice).not.toHaveBeenCalledWith("Installation method:", expect.any(Array));
   });
 });
 
@@ -514,13 +529,10 @@ describe("wizard integration: --cwd flag skips scope prompt", () => {
     ]);
 
     mockPromptCheckboxList.mockResolvedValueOnce([0]); // agents
-    mockPromptChoice.mockResolvedValueOnce(0); // method: Symlink (no scope since --cwd)
 
     await addCommand("owner/repo", { cwd: "/some/path" });
 
-    // Only method prompt (scope skipped due to --cwd)
-    expect(mockPromptChoice).toHaveBeenCalledTimes(1);
-    // First call should be method, not scope
-    expect(mockPromptChoice).toHaveBeenNthCalledWith(1, "Installation method:", expect.any(Array));
+    // No promptChoice calls: scope skipped by --cwd, method skipped by single-agent rule
+    expect(mockPromptChoice).not.toHaveBeenCalled();
   });
 });

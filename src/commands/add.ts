@@ -989,9 +989,12 @@ async function promptInstallOptions(
     useGlobal = !!opts.global;
   }
 
-  // Installation method (skip if --copy explicitly set)
+  // Installation method — only meaningful with 2+ agents. With one agent there
+  // is no source-of-truth dedup to gain, and for `claude-code` the symlink path
+  // falls through to a direct copy via COPY_FALLBACK_AGENTS regardless of the
+  // user's choice. Skip the prompt and use the existing default.
   let useSymlink = !opts.copy;
-  if (!opts.copy) {
+  if (!opts.copy && selectedAgents.length > 1) {
     const prompter3 = createPrompter();
     const methodIdx = await prompter3.promptChoice("Installation method:", [
       { label: "Symlink", hint: "single source of truth, easy updates" },

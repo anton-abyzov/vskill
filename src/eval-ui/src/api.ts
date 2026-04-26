@@ -1009,6 +1009,13 @@ export const api = {
     return fetchJson("/api/git/diff", { method: "POST" });
   },
 
+  // 0759 Phase 6: lightweight porcelain probe — returns the file paths
+  // (status prefix already stripped). Sidebar polls this to highlight
+  // skills with uncommitted changes.
+  gitStatus(): Promise<{ paths: string[] }> {
+    return fetchJson("/api/git/status");
+  },
+
   gitCommitMessage(opts?: { provider?: string; model?: string }): Promise<{ message: string }> {
     return fetchJson("/api/git/commit-message", {
       method: "POST",
@@ -1189,6 +1196,24 @@ export interface SkillUpdateInfo {
  *   - Bare-leaf match remains the fallback (back-compat for legacy
  *     payloads that omit a plugin scope).
  */
+/**
+ * 0766 F-004: strict semver greater-or-equal compare. Returns true when `a`
+ * is the same as or newer than `b`. Falsy / malformed inputs return false
+ * so the caller falls back to the existing "trust the update record" path.
+ */
+function isVersionAtOrAhead(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  const re = /^(\d+)\.(\d+)\.(\d+)/;
+  const ma = a.match(re);
+  const mb = b.match(re);
+  if (!ma || !mb) return false;
+  const [, a1, a2, a3] = ma.map(Number) as unknown as [unknown, number, number, number];
+  const [, b1, b2, b3] = mb.map(Number) as unknown as [unknown, number, number, number];
+  if (a1 !== b1) return a1 > b1;
+  if (a2 !== b2) return a2 > b2;
+  return a3 >= b3;
+}
+
 export function mergeUpdatesIntoSkills(
   skills: SkillInfo[],
   updates: SkillUpdateInfo[],
@@ -1228,9 +1253,17 @@ export function mergeUpdatesIntoSkills(
       u = leafLookup.get(s.skill);
     }
     if (!u) return s;
+    // 0766 F-004: if the on-disk frontmatter version is already at or beyond
+    // the polling result's `latest`, suppress `updateAvailable`. Without
+    // this, after a successful update + refreshSkills lands but BEFORE
+    // refreshUpdates lands, the merge would re-stamp updateAvailable: true
+    // from the stale poll, making the "Update to <X>" button + bell flicker
+    // back. The defense is also useful when the poll is simply behind for
+    // any reason (network lag, server cache).
+    const updateAvailable = u.updateAvailable && !isVersionAtOrAhead(s.version, u.latest);
     const merged: SkillInfo = {
       ...s,
-      updateAvailable: u.updateAvailable,
+      updateAvailable,
       currentVersion: u.installed,
       latestVersion: u.latest ?? undefined,
     };

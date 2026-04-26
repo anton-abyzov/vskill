@@ -17,6 +17,19 @@
         "3170"
       ],
       "port": 3170
+    },
+    {
+      "name": "vskill-studio-0775",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/dist/bin.js",
+        "studio",
+        "--port",
+        "3079",
+        "--root",
+        "/Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/greet-anton"
+      ],
+      "port": 3079
     }
   ]
 }

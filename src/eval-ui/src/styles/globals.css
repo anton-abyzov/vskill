@@ -518,3 +518,12 @@ summary:focus-visible {
     display: none;
   }
 }
+
+/* ==================================================================== */
+/* SkillOverview right-rail (0774): collapse to single column < 900px    */
+/* ==================================================================== */
+@media (max-width: 899px) {
+  .skill-overview {
+    grid-template-columns: 1fr !important;
+  }
+}

@@ -8,6 +8,9 @@ import { SourceFileLink } from "./SourceFileLink";
 import { BenchmarkInfoPopover } from "./BenchmarkInfoPopover";
 // 0772 US-005: surface GitHub publish-readiness on the Overview tab.
 import { PublishStatusRow } from "./PublishStatusRow";
+// 0774 T-004: right-rail with Setup + Credentials sections (absorbs the old
+// standalone Deps tab content into Overview as canonical metadata).
+import { SkillOverviewRightRail } from "./SkillOverviewRightRail";
 
 // ---------------------------------------------------------------------------
 // T-006 (0707): SkillOverview — responsive 8-card metric grid + sticky
@@ -114,12 +117,11 @@ export function SkillOverview(props: SkillOverviewProps) {
   const mcpDepsCount = skill.mcpDeps?.length ?? 0;
   const skillDepsCount = skill.deps?.length ?? 0;
 
-  return (
-    <div
-      data-testid="skill-overview"
-      className="skill-overview"
-      style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16 }}
-    >
+  // 0774 T-004: 2-column grid at viewports >= 900px (main content + 280px
+  // right-rail). The `skill-overview` class in globals.css drives the
+  // responsive collapse to a single column on narrower viewports.
+  const mainColumn = (
+    <div data-testid="skill-overview-main" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {/* Compact sticky header — skill name, version badge, install method,
           and byline row (author + source + category + last modified). */}
       <header
@@ -261,6 +263,26 @@ export function SkillOverview(props: SkillOverviewProps) {
           data-testid="metric-last-modified"
         />
       </div>
+    </div>
+  );
+
+  return (
+    <div
+      data-testid="skill-overview"
+      className="skill-overview"
+      style={{
+        display: "grid",
+        // 0774 T-004: 2-column at >= 900px, single column below.
+        // The CSS class `skill-overview` in globals.css overrides
+        // gridTemplateColumns at narrower viewports via media query.
+        gridTemplateColumns: "minmax(0, 1fr) 280px",
+        gap: 16,
+        padding: 16,
+        alignItems: "start",
+      }}
+    >
+      {mainColumn}
+      <SkillOverviewRightRail plugin={skill.plugin} skill={skill.skill} />
     </div>
   );
 }

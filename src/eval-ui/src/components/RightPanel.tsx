@@ -18,6 +18,9 @@ import { DetailHeader } from "./DetailHeader";
 import { SkillOverview } from "./SkillOverview";
 import { UpdateAction } from "./UpdateAction";
 import { CheckNowButton } from "./CheckNowButton";
+// 0774 T-009: secondary tab bar nested under top-level Run / Trigger tabs.
+import { SubTabBar } from "./SubTabBar";
+import type { SubTabDescriptor } from "./SubTabBar";
 
 // ---------------------------------------------------------------------------
 // 0707 T-007: Flat 9-tab detail view.
@@ -140,6 +143,52 @@ function applyPersonaRedirect(active: DetailTab, isReadOnly: boolean): DetailTab
   if (allowed.has(active)) return active;
   if (CONSUMER_BACKCOMPAT_TABS.has(active)) return active;
   return "overview";
+}
+
+// ---------------------------------------------------------------------------
+// 0774 Part B: sub-tab descriptors + URL helpers.
+//
+// Run tab gets `Run | History | Models` sub-modes (mounting RunPanel,
+// HistoryPanel, LeaderboardPanel respectively — the existing standalone
+// panels are reused as sub-tab children, no rewrites).
+//
+// Trigger tab (internal id "activation") gets `Run | History` sub-modes.
+// The "history" sub-mode mounts ActivationPanel (whose existing in-panel
+// history list surfaces past runs; cleaner extraction is a follow-up).
+//
+// Other top-level tabs have no sub-modes — SubTabBar is hidden for them.
+// ---------------------------------------------------------------------------
+
+const SUB_TAB_DESCRIPTORS: Partial<Record<DetailTab, SubTabDescriptor[]>> = {
+  run: [
+    { id: "run", label: "Run" },
+    { id: "history", label: "History" },
+    { id: "models", label: "Models" },
+  ],
+  activation: [
+    { id: "run", label: "Run" },
+    { id: "history", label: "History" },
+  ],
+};
+
+/** Default sub-mode for a top-level tab — empty string when no sub-modes. */
+export function defaultSubFor(active: DetailTab): string {
+  const descriptors = SUB_TAB_DESCRIPTORS[active];
+  return descriptors && descriptors.length > 0 ? descriptors[0].id : "";
+}
+
+/** Pure helper: read `?sub=` from a query string, validating against the
+ *  active tab's descriptors. Falls back to the default sub-mode when the
+ *  param is missing or unknown. Exported for unit testing. */
+export function readInitialSub(active: DetailTab, search: string): string {
+  const descriptors = SUB_TAB_DESCRIPTORS[active];
+  if (!descriptors) return "";
+  const params = new URLSearchParams(search);
+  const fromQuery = params.get("sub");
+  if (fromQuery && descriptors.some((d) => d.id === fromQuery)) {
+    return fromQuery;
+  }
+  return descriptors[0].id;
 }
 
 interface Props {
@@ -287,6 +336,11 @@ function IntegratedDetailShell({
   onSelectSkill: (s: { plugin: string; skill: string; origin: "source" | "installed" }) => void;
 }) {
   const [active, setActive] = useState<DetailTab>(readInitialTab());
+  // 0774 T-007: sub-tab state — initialized from URL, kept in sync via the
+  // URL effect below.
+  const [sub, setSub] = useState<string>(() =>
+    readInitialSub(readInitialTab(), typeof window !== "undefined" ? window.location.search : ""),
+  );
 
   // 0769 T-024: when the URL deep-links into a hidden author-only tab on a
   // read-only consumer skill, redirect to Overview ONCE and dispatch a toast.
@@ -312,26 +366,41 @@ function IntegratedDetailShell({
     }
   }, [skillInfo, active]);
 
-  // Sync active tab to the ?panel= query param so deep links round-trip.
+  // 0774 T-007: when the top-level tab changes, reset `sub` to the default
+  // for the new tab (or empty if the new tab has no sub-modes). Without this
+  // reset the URL would carry a stale `?sub=` after switching tabs.
+  useEffect(() => {
+    setSub(defaultSubFor(active));
+  }, [active]);
+
+  // 0769 T-023 + 0774 T-007: sync `active` AND `sub` to URL atomically so
+  // deep links round-trip and switching tabs cleans up stale params.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     if (active === "overview") {
       params.delete("panel");
     } else {
-      // 0769 T-023: write "trigger" instead of "activation" — canonical URL
-      // form. Reading still accepts both for back-compat.
+      // 0769 T-023: canonical URL writes "trigger" not "activation".
       params.set("panel", active === "activation" ? "trigger" : active);
+    }
+    // Sub param: only set when the active tab actually has sub-modes AND
+    // the current sub is non-default (default is implied by absence).
+    const descriptors = SUB_TAB_DESCRIPTORS[active];
+    if (descriptors && sub && sub !== descriptors[0].id) {
+      params.set("sub", sub);
+    } else {
+      params.delete("sub");
     }
     const qs = params.toString();
     const url = `${window.location.pathname}${qs ? "?" + qs : ""}${window.location.hash}`;
     window.history.replaceState(null, "", url);
-  }, [active]);
+  }, [active, sub]);
 
   const content = useMemo(() => {
     if (!skillInfo) return <EmptyState variant="no-selection" />;
-    return renderSkillDetail(skillInfo, active, setActive, { allSkills, onSelectSkill });
-  }, [skillInfo, active, allSkills, onSelectSkill]);
+    return renderSkillDetail(skillInfo, active, setActive, sub, setSub, { allSkills, onSelectSkill });
+  }, [skillInfo, active, sub, allSkills, onSelectSkill]);
 
   return <div className="flex flex-col h-full" style={{ background: "var(--bg-canvas)" }}>{content}</div>;
 }
@@ -487,11 +556,25 @@ function renderErrorState(skill: SkillInfo, message: string) {
 // tab delegates to the existing workspace panels under a shared
 // WorkspaceProvider so their behavior stays intact.
 // ---------------------------------------------------------------------------
-function WorkspacePanel({ active }: { active: DetailTab }) {
+// 0774 T-008: WorkspacePanel dispatches on (active, sub) so Run + Trigger
+// can mount different children per sub-mode. Other top-level tabs ignore
+// `sub` and behave identically to before.
+function WorkspacePanel({ active, sub }: { active: DetailTab; sub: string }) {
   if (active === "editor") return <EditorPanel />;
   if (active === "tests") return <TestsPanel />;
-  if (active === "run") return <RunPanel />;
-  if (active === "activation") return <ActivationPanel />;
+  if (active === "run") {
+    // Run sub-modes: history -> HistoryPanel, models -> LeaderboardPanel,
+    // run (default) -> RunPanel.
+    if (sub === "history") return <HistoryPanel />;
+    if (sub === "models") return <LeaderboardPanel />;
+    return <RunPanel />;
+  }
+  if (active === "activation") {
+    // Trigger sub-modes — both render ActivationPanel today; the panel's
+    // existing in-panel history surfaces past runs. A future increment can
+    // extract the history list into its own component for tighter UX.
+    return <ActivationPanel />;
+  }
   if (active === "history") return <HistoryPanel />;
   if (active === "leaderboard") return <LeaderboardPanel />;
   if (active === "deps") return <DepsPanel />;
@@ -520,6 +603,8 @@ function renderSkillDetail(
   skill: SkillInfo,
   active: DetailTab,
   onChange?: (t: DetailTab) => void,
+  sub: string = "",
+  onSubChange?: (s: string) => void,
   integrated?: { allSkills: SkillInfo[]; onSelectSkill: (s: { plugin: string; skill: string; origin: "source" | "installed" }) => void },
 ) {
   // 0769 T-024: persona signal — installed skills are read-only consumers.
@@ -540,6 +625,9 @@ function renderSkillDetail(
   // For all non-overview tabs we wrap in a single WorkspaceProvider so the
   // inner panels keep their existing state machine. The provider is keyed
   // on the skill identity so switching skills rebuilds state cleanly.
+  // 0774 T-010 (F-004 fix): pass safeActive (post-persona-redirect) so the
+  // mounted panel matches the visible tab on the very first render — no
+  // one-frame ARIA mismatch when consumers deep-link to author tabs.
   const workspaceBody = integrated != null ? (
     <WorkspaceProvider
       key={`${skill.plugin}/${skill.skill}`}
@@ -547,12 +635,12 @@ function renderSkillDetail(
       skill={skill.skill}
       origin={skill.origin}
     >
-      <WorkspaceTabSync active={active} />
-      <WorkspacePanel active={active} />
+      <WorkspaceTabSync active={safeActive} />
+      <WorkspacePanel active={safeActive} sub={sub} />
     </WorkspaceProvider>
   ) : (
     <div style={{ padding: 16, fontFamily: "var(--font-sans)", color: "var(--text-secondary)", fontSize: 13 }}>
-      Select a skill from the sidebar to load its {active} view.
+      Select a skill from the sidebar to load its {safeActive} view.
     </div>
   );
 
@@ -622,6 +710,19 @@ function renderSkillDetail(
         </div>
       )}
       {renderTabBar(safeActive, onChange, isReadOnly)}
+      {/* 0774 T-009: secondary tab bar nests under the top-level bar for
+          tabs that have sub-modes (Run, Trigger). Hidden for tabs without
+          sub-modes (Overview, Edit, Tests, Versions). When onSubChange
+          isn't wired (prop-driven tests), the bar still renders but
+          clicks are no-ops — keeps visibility tests simple. */}
+      {SUB_TAB_DESCRIPTORS[safeActive] && (
+        <SubTabBar
+          parentTabId={safeActive}
+          tabs={SUB_TAB_DESCRIPTORS[safeActive]!}
+          active={sub || (SUB_TAB_DESCRIPTORS[safeActive]![0]?.id ?? "")}
+          onChange={onSubChange ?? (() => {})}
+        />
+      )}
       <div
         role="tabpanel"
         id={`detail-panel-${safeActive}`}

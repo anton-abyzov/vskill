@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.112] - 2026-04-25
+
+### Fixed
+- **fix(api)**: `/api/skills/updates` now handles exit-code-1 from `vskill outdated` correctly — when updates exist the CLI exits 1 but stdout still carries valid JSON; the catch block now reads `e.stdout` instead of swallowing the data. Also propagates `PATH` to `execSync` so the `vskill` binary is found in restricted shell environments (discovered during 0732 E2E).
+
 ## [0.5.111] - 2026-04-25
 
 ### Fixed

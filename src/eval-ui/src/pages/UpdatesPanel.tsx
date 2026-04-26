@@ -30,6 +30,7 @@ export function UpdatesPanel() {
   const [batchProgress, setBatchProgress] = useState<Map<string, BatchUpdateProgress>>(new Map());
   const [batchRunning, setBatchRunning] = useState(false);
   const [singleUpdating, setSingleUpdating] = useState<Set<string>>(new Set());
+  const [singleErrors, setSingleErrors] = useState<Map<string, string>>(new Map());
   const [toast, setToast] = useState<string | null>(null);
   const [changelogDiff, setChangelogDiff] = useState<{ skill: UpdateItem; diff: VersionDiff } | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
@@ -105,35 +106,37 @@ export function UpdatesPanel() {
     });
   }, [selected, fetchUpdates]);
 
-  // Single skill update
-  const handleSingleUpdate = useCallback((skill: UpdateItem) => {
-    const shortName = skill.name.split("/").pop() || skill.name;
+  // Single skill update — uses POST (same as UpdateAction.tsx), not the broken EventSource path.
+  const handleSingleUpdate = useCallback(async (skill: UpdateItem) => {
     const parts = skill.name.split("/");
     const plugin = parts.length >= 3 ? parts[parts.length - 2] : parts[0];
     const skillName = parts[parts.length - 1];
 
     setSingleUpdating((prev) => new Set(prev).add(skill.name));
+    setSingleErrors((prev) => { const next = new Map(prev); next.delete(skill.name); return next; });
 
-    const es = api.startSkillUpdate(plugin, skillName);
-
-    es.addEventListener("done", () => {
-      es.close();
+    try {
+      const result = await api.postSkillUpdate(plugin, skillName);
+      if (!result.ok) {
+        const msg = `Update failed (HTTP ${result.status}): ${result.body}`;
+        setSingleErrors((prev) => new Map(prev).set(skill.name, msg));
+        setToast(`Couldn't update ${skillName} — HTTP ${result.status}`);
+        setTimeout(() => setToast(null), 5000);
+      } else {
+        fetchUpdates();
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Network error";
+      setSingleErrors((prev) => new Map(prev).set(skill.name, msg));
+      setToast(`Couldn't update ${skillName} — ${msg}`);
+      setTimeout(() => setToast(null), 5000);
+    } finally {
       setSingleUpdating((prev) => {
         const next = new Set(prev);
         next.delete(skill.name);
         return next;
       });
-      fetchUpdates();
-    });
-
-    es.addEventListener("error", () => {
-      es.close();
-      setSingleUpdating((prev) => {
-        const next = new Set(prev);
-        next.delete(skill.name);
-        return next;
-      });
-    });
+    }
   }, [fetchUpdates]);
 
   // View Changes → load diff in modal

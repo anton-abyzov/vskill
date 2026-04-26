@@ -27,6 +27,20 @@ import { updateStore } from "../stores/updateStore";
  *     `studio:toast` CustomEvent; hidden-tab arrivals only update the store
  *     (AC-US5-02). Components consume `updatesById` + `status` for the
  *     push-driven surfaces.
+ *
+ * SSE ID-format contract (0736 / AC-US3-01)
+ * ------------------------------------------
+ * UpdateHub (vskill-platform) accepts ONLY UUID (`Skill.id`) or public slug
+ * (`sk_published_<owner>/<repo>/<skill>`) in the `?skills=<csv>` filter.
+ * The raw `<plugin>/<skill>` local name (e.g. `.claude/greet-anton`) is
+ * silently dropped by the platform and must NOT appear in the filter.
+ *
+ * Callers must pass pre-resolved IDs via `skillIds`. When installed skills are
+ * enriched with UUID/slug by the backend (via `/api/skills/installed`), callers
+ * should use `resolveSubscriptionIds()` from `utils/resolveSubscriptionIds.ts`
+ * to extract the valid ID list before passing it here. Skills without either
+ * UUID or slug are omitted from the filter — the polling fallback covers them
+ * (FR-005 / AC-US3-02).
  */
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,9 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+// real-sse tests spin up real node:http servers — they must bypass the
+// shimNodeBuiltinsForBrowser plugin that stubs out node:* modules.
+const REAL_SSE_GLOB = "**/*.real-sse.*.test.ts";
 
 // 0703 follow-up: shim node:* built-ins that agents-registry + resolve-binary
 // transitively pull in. The UI never actually executes `detectInstalled` etc.
@@ -12,7 +15,9 @@ import path from "path";
 const shimNodeBuiltinsForBrowser = {
   name: "shim-node-builtins-for-browser",
   enforce: "pre" as const,
-  resolveId(source: string) {
+  resolveId(source: string, importer?: string) {
+    // real-sse integration tests boot real node:http servers — let node:* through
+    if (importer?.includes(".real-sse.")) return null;
     if (source.startsWith("node:")) return "\0shimNode";
     return null;
   },

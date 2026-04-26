@@ -4,6 +4,7 @@ import type { SkillInfo } from "./types";
 import type { SkillUpdateInfo } from "./api";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useSkillUpdates } from "./hooks/useSkillUpdates";
+import { resolveSubscriptionIds } from "./utils/resolveSubscriptionIds";
 
 // ---------------------------------------------------------------------------
 // State
@@ -325,30 +326,122 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: "DISMISS_UPDATE_NOTIFICATION" });
   }, []);
 
+  // 0736 AC-US3-01: resolved SSE subscription IDs (UUID or slug) for installed
+  // skills. Populated asynchronously after polling data arrives. Until resolved,
+  // the SSE filter is empty and the hook degrades to polling (AC-US3-02).
+  // Key: "<plugin>/<skill>" → { uuid?, slug? }
+  const resolvedIdsRef = useRef<Map<string, { uuid?: string; slug?: string }>>(new Map());
+  const resolvedIdsCsvRef = useRef<string>("");
+  // F-006 (0736): surface resolveInstalledSkillIds failures once-per-session.
+  // Avoids spamming the console while still giving devs visibility when SSE
+  // subscription resolution silently breaks for the entire session.
+  const resolveErrorWarnedRef = useRef<boolean>(false);
+  const [resolvedIdsCsv, setResolvedIdsCsv] = useState<string>("");
+
   // 0683 T-002 + 0708 T-040: shared hook owns polling (/api/skills/updates)
-  // AND the push-pipeline EventSource (/api/v1/skills/stream). Pass the
-  // installed-skill list so UpdateHub fans out only skills this user has
-  // installed (AC-US5-08). ID format is `<plugin>/<skill>` — the platform's
-  // SSE endpoint maps these to internal Skill.id UUIDs server-side.
-  const installedSkillIds = useMemo(() => {
-    const ids: string[] = [];
-    for (const s of state.skills) {
-      if (s.origin === "installed") ids.push(`${s.plugin}/${s.skill}`);
-    }
-    return ids;
-  }, [state.skills]);
-  // 0708 wrap-up: the SSE filter is scoped to installed skills (AC-US5-08),
-  // but the not-tracked dot (AC-US5-09) needs tracking state for ALL
-  // visible skills — including source-origin ones in dev/E2E. We pass the
-  // wider list separately so reconciliation can populate `trackedForUpdates`
-  // without affecting the SSE subscription.
+  // AND the push-pipeline EventSource (/api/v1/skills/stream). Pass resolved
+  // UUID/slug IDs so UpdateHub can match the SSE filter. Until the platform
+  // enrichment resolves, skillIds is empty and polling covers updates.
+  // 0708 wrap-up: the not-tracked dot (AC-US5-09) needs tracking state for ALL
+  // visible skills — pass the wider list separately for reconciliation.
   const allSkillIds = useMemo(() => {
     return state.skills.map((s) => `${s.plugin}/${s.skill}`);
   }, [state.skills]);
+
+  const resolvedSseIds = useMemo(() => {
+    if (!resolvedIdsCsv) return [];
+    return resolvedIdsCsv.split(",").filter(Boolean);
+  }, [resolvedIdsCsv]);
+
   const skillUpdates = useSkillUpdates({
-    skillIds: installedSkillIds,
+    skillIds: resolvedSseIds,
     trackingSkillIds: allSkillIds,
   });
+
+  // 0736 AC-US3-01: When polling data arrives, resolve installed skills to
+  // their platform UUID/slug and rebuild the SSE subscription filter. The
+  // resolver calls /api/v1/skills/check-updates (proxied to the platform)
+  // which returns `id` (UUID) and `slug` per result once the 0736 platform
+  // change ships. Until then both fields are absent and resolvedSseIds stays
+  // empty — graceful degradation per AC-US3-02, polling covers updates.
+  //
+  // We use skillUpdates.updates (the polling result) as the source of platform
+  // skill names, since that's the only place canonical names flow in from
+  // `vskill outdated --json`. Effect re-runs when the installed skill set or
+  // polling result changes — but the lastResolveSigRef gate below short-circuits
+  // the actual /check-updates network call when the input shape is unchanged
+  // (NFR-001: ≤1 req/min steady state). Without this gate, every poll cycle
+  // (5-min cadence) AND every reconcileCheckUpdates merge re-fires this
+  // effect, doubling the request load (see code-review-report F-001).
+  const lastResolveSigRef = useRef<string>("");
+  useEffect(() => {
+    const installed = state.skills.filter((s) => s.origin === "installed");
+    if (installed.length === 0) {
+      setResolvedIdsCsv("");
+      lastResolveSigRef.current = "";
+      return;
+    }
+    // Build short-name → {platformName, installedVersion} lookup from polling.
+    // skillUpdates.updates carries the canonical platform name (e.g. "acme/repo/skill")
+    // which is required by resolveInstalledSkillIds to hit the right DB row.
+    const updateByShort = new Map<string, SkillUpdateInfo>();
+    for (const u of skillUpdates.updates) {
+      updateByShort.set(u.name.split("/").pop() || u.name, u);
+    }
+    const toResolve = installed.map((s) => {
+      const u = updateByShort.get(s.skill);
+      return {
+        plugin: s.plugin,
+        skill: s.skill,
+        name: u?.name ?? s.skill,
+        currentVersion: s.currentVersion ?? u?.installed ?? "0.0.0",
+      };
+    });
+    // Content-stable signature: skip the network call when the resolver input
+    // is identical to the previous run. Sorted to make order-independent.
+    const sig = toResolve
+      .map((t) => `${t.plugin}/${t.skill}@${t.currentVersion}#${t.name}`)
+      .sort()
+      .join("|");
+    if (sig === lastResolveSigRef.current) {
+      return;
+    }
+    lastResolveSigRef.current = sig;
+    let cancelled = false;
+    api.resolveInstalledSkillIds(toResolve).then((enriched) => {
+      if (cancelled) return;
+      const resolved = resolveSubscriptionIds(enriched);
+      const ids = resolved.flatMap((r) => [r.uuid, r.slug].filter(Boolean) as string[]);
+      // Stable CSV so useSkillUpdates only reconnects when IDs actually change
+      const csv = [...ids].sort().join(",");
+      if (csv !== resolvedIdsCsvRef.current) {
+        resolvedIdsCsvRef.current = csv;
+        resolvedIdsRef.current = new Map(
+          enriched.map((e) => [`${e.plugin}/${e.skill}`, { uuid: e.uuid, slug: e.slug }]),
+        );
+        setResolvedIdsCsv(csv);
+      }
+    }).catch((err: unknown) => {
+      // Reset signature so a future input (or a successful retry on the next
+      // poll cycle) can proceed. Otherwise a one-off network blip would lock
+      // out resolution until the input shape itself changes.
+      if (!cancelled) {
+        lastResolveSigRef.current = "";
+      }
+      // F-006: surface the failure once-per-session so devs can see this in
+      // DevTools. The polling fallback (5-min cadence) still covers updates,
+      // so this is non-fatal — but completely silent swallowing makes the
+      // SSE-resolver path un-debuggable when it breaks.
+      if (!resolveErrorWarnedRef.current) {
+        resolveErrorWarnedRef.current = true;
+        const msg = err instanceof Error ? err.message : String(err);
+        // eslint-disable-next-line no-console
+        console.warn("[studio] resolveInstalledSkillIds failed (using polling fallback):", msg);
+      }
+    });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.skills, skillUpdates.updates]);
 
   // Re-merge the raw skills with the latest update list on every change.
   // `mergeUpdatesIntoSkills` only writes fields when an entry exists, so we

@@ -10,6 +10,15 @@ export interface SkillUpdateEvent {
   type: "skill.updated";
   eventId: string;
   skillId: string;
+  /**
+   * Public skill slug ID (e.g. `sk_published_acme/foo/bar`) — increment 0732.
+   *
+   * Augmented by the platform's publish endpoint so SSE subscribers can
+   * filter using either the internal UUID (`skillId`) or the public slug
+   * surfaced by the discovery API. Optional for backwards compatibility
+   * with pre-0732 in-flight events.
+   */
+  skillSlug?: string;
   version: string;
   gitSha: string;
   diffSummary?: string;

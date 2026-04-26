@@ -37,6 +37,7 @@ import {
   type InstalledPlugin,
 } from "./plugin-cli.js";
 import { buildClaudeCliFailureResponse } from "./plugin-cli-response.js";
+import { resolvePluginRef } from "./plugin-ref-resolver.js";
 
 const VALID_SCOPES: readonly PluginScope[] = ["user", "project", "local"] as const;
 
@@ -233,7 +234,8 @@ export function registerPluginCliRoutes(router: Router, root: string): void {
     if (scope !== undefined && !isValidScope(scope)) {
       return sendError(res, 400, "invalid-scope", `Invalid scope: ${scope}`);
     }
-    const args = ["enable", name, ...(scope ? ["--scope", scope] : [])];
+    const ref = resolvePluginRef(name, await fetchPluginList(root));
+    const args = ["enable", ref, ...(scope ? ["--scope", scope] : [])];
     await runAndRespond(args, root, res);
   });
 
@@ -248,7 +250,8 @@ export function registerPluginCliRoutes(router: Router, root: string): void {
     if (scope !== undefined && !isValidScope(scope)) {
       return sendError(res, 400, "invalid-scope", `Invalid scope: ${scope}`);
     }
-    const args = ["disable", name, ...(scope ? ["--scope", scope] : [])];
+    const ref = resolvePluginRef(name, await fetchPluginList(root));
+    const args = ["disable", ref, ...(scope ? ["--scope", scope] : [])];
     await runAndRespond(args, root, res);
   });
 
@@ -278,10 +281,12 @@ export function registerPluginCliRoutes(router: Router, root: string): void {
     if (scope !== undefined && !isValidScope(scope)) {
       return sendError(res, 400, "invalid-scope", `Invalid scope: ${scope}`);
     }
-    // The official CLI exposes `uninstall` as a subcommand — if it evolves or
-    // isn't present on an older `claude` binary, the spawn will surface a
-    // non-zero exit and the UI will see `code: "claude-cli-failed"`.
-    const args = ["uninstall", name, ...(scope ? ["--scope", scope] : [])];
+    // 0743: Claude requires `name@marketplace` for plugins from a marketplace
+    // (bare name returns "not found in installed plugins"). Resolve the bare
+    // name against the installed-list output so the UI can keep using the
+    // short name while we shell out with the right ref.
+    const ref = resolvePluginRef(name, await fetchPluginList(root));
+    const args = ["uninstall", ref, ...(scope ? ["--scope", scope] : [])];
     await runAndRespond(args, root, res, { timeout: 30_000 });
   });
 }

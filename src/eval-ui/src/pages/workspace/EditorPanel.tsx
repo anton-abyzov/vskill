@@ -381,7 +381,11 @@ export function EditorPanel() {
               {saving ? <><span className="spinner" style={{ width: 11, height: 11, borderWidth: 1.5 }} /> Saving...</> : "Save"}
             </button>
             {gitRemote.hasRemote && gitRemote.remoteUrl && (
-              <PublishButton remoteUrl={gitRemote.remoteUrl} />
+              <PublishButton
+                remoteUrl={gitRemote.remoteUrl}
+                provider={config?.provider}
+                model={config?.model}
+              />
             )}
           </div>
         )}

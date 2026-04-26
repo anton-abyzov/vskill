@@ -202,6 +202,119 @@ describe("api.checkSkillUpdates", () => {
     const rows = await api.checkSkillUpdates(["p/s"]);
     expect(rows).toEqual([]);
   });
+
+  // -------------------------------------------------------------------------
+  // 0761 US-003: transient 5xx retry (one shot, 250ms backoff). Recovers from
+  // CF cold-start blips without flooding the network tab with red rows.
+  // -------------------------------------------------------------------------
+
+  it("AC-US3-01: retries once on 503 and returns the second-call results", async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) })
+      .mockResolvedValueOnce(
+        okJson({
+          results: [
+            {
+              skillId: "p/s",
+              version: "2.0.0",
+              eventId: "evt_retry",
+              publishedAt: "2026-04-26T00:00:00Z",
+            },
+          ],
+        }),
+      );
+
+    const rows = await api.checkSkillUpdates(["p/s"]);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].skillId).toBe("p/s");
+  });
+
+  it("AC-US3-01: retries once on 502 and on 504", async () => {
+    for (const status of [502, 504]) {
+      mockFetch.mockReset();
+      mockFetch
+        .mockResolvedValueOnce({ ok: false, status, json: async () => ({}) })
+        .mockResolvedValueOnce(okJson({ results: [] }));
+
+      await api.checkSkillUpdates(["x/y"]);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  it("AC-US3-01: a second 5xx returns [] after the retry exhausts", async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) });
+
+    const rows = await api.checkSkillUpdates(["p/s"]);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(rows).toEqual([]);
+  });
+
+  it("AC-US3-02: 4xx is NOT retried", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
+
+    const rows = await api.checkSkillUpdates(["p/s"]);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(rows).toEqual([]);
+  });
+
+  it("AC-US3-03: thrown fetch is NOT retried (existing catch path unchanged)", async () => {
+    mockFetch.mockRejectedValue(new Error("ECONNREFUSED"));
+
+    const rows = await api.checkSkillUpdates(["p/s"]);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(rows).toEqual([]);
+  });
+
+  it("AC-US3-05: successful first response — no extra fetch", async () => {
+    mockFetch.mockResolvedValue(okJson({ results: [] }));
+
+    await api.checkSkillUpdates(["p/s"]);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0761 US-003 AC-US3-04: same retry contract for resolveInstalledSkillIds
+// (it hits the same /api/v1/skills/check-updates endpoint).
+// ---------------------------------------------------------------------------
+describe("api.resolveInstalledSkillIds — 5xx retry (0761 AC-US3-04)", () => {
+  it("retries once on 503 and unwraps the second response's id/slug fields", async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) })
+      .mockResolvedValueOnce(
+        okJson({
+          results: [
+            { name: "anton-abyzov/vskill/greet-anton", id: "uuid-1", slug: "sk_published_a/v/g" },
+          ],
+        }),
+      );
+
+    const out = await api.resolveInstalledSkillIds([
+      {
+        name: "anton-abyzov/vskill/greet-anton",
+        plugin: "vskill",
+        skill: "greet-anton",
+      },
+    ]);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      plugin: "vskill",
+      skill: "greet-anton",
+      uuid: "uuid-1",
+      slug: "sk_published_a/v/g",
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

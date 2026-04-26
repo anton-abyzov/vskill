@@ -1,5 +1,6 @@
 import { Suspense, lazy, useCallback, useMemo, useRef, useState } from "react";
 import { useStudio } from "../StudioContext";
+import { useToast } from "./ToastProvider";
 import updateBellIcon from "../assets/icons/update-bell.svg";
 
 // Lazy-load the popover body so the closed bell stays ≤2KB gzipped.
@@ -10,6 +11,11 @@ const UpdateDropdown = lazy(() => import("./UpdateDropdown"));
  *
  * Reads `updateCount`, `updates`, `refreshUpdates`, `isRefreshingUpdates`
  * from `StudioContext`. When clicked, mounts `UpdateDropdown` (lazy).
+ *
+ * 0747 T-006: row click resolves the actual sidebar skill via revealSkill
+ * using server-provided localPlugin/localSkill. Falls back to last-segment
+ * split for older servers. Surfaces a toast naming the owning agent when no
+ * match is found in current state.
  */
 export function UpdateBell() {
   const {
@@ -18,8 +24,16 @@ export function UpdateBell() {
     isRefreshingUpdates,
     refreshUpdates,
     selectSkill,
+    revealSkill,
+    skills,
     updatesById,
-  } = useStudio();
+    activeAgent,
+  } = useStudio() as ReturnType<typeof useStudio> & {
+    revealSkill: (plugin: string, skill: string) => void;
+    skills?: Array<{ plugin: string; skill: string; source?: string }>;
+    activeAgent?: string | null;
+  };
+  const { toast } = useToast();
 
   // 0708 AC-US5-03: project push-store entries → short-name-keyed diff
   // summaries so UpdateDropdown can render the one-liner under each row.
@@ -116,10 +130,65 @@ export function UpdateBell() {
             diffSummariesById={diffSummariesById}
             onRefresh={() => refreshUpdates()}
             onSelectSkill={(u) => {
-              const parts = u.name.split("/");
-              const plugin = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
-              const skill = parts[parts.length - 1];
-              selectSkill({ plugin, skill, origin: "installed" });
+              // 0747 T-006: prefer server-resolved local fs identifiers over
+              // a naive split of the canonical platform name. revealSkill's
+              // F-001 (no-plugin guard) and F-002 (non-plugin-source
+              // fallback) handle the matching against current sidebar state.
+              const localSkill =
+                u.localSkill ?? u.name.split("/").pop() ?? "";
+              const localPlugin = u.localPlugin ?? "";
+              if (revealSkill) {
+                revealSkill(localPlugin, localSkill);
+              } else {
+                // Defensive: pre-0747 contexts without revealSkill exposed
+                // fall back to the legacy selectSkill flow.
+                const parts = u.name.split("/");
+                const plugin =
+                  parts.length >= 2 ? parts[parts.length - 2] : parts[0];
+                selectSkill({
+                  plugin,
+                  skill: localSkill,
+                  origin: "installed",
+                });
+              }
+              // If no matching row exists in the current sidebar state, surface
+              // the owning agent via toast so the user knows where to look.
+              const matched = (skills ?? []).some(
+                (s) =>
+                  s.skill === localSkill &&
+                  (localPlugin === "" || s.plugin === localPlugin),
+              );
+              if (!matched) {
+                const installLocations = u.installLocations ?? [];
+                if (installLocations.length > 0) {
+                  // 0761 US-004: prefer informational wording when the click
+                  // target's installLocations include the current agent. The
+                  // user is already viewing a valid copy of the skill — telling
+                  // them to "switch to X" is misleading. Fall back to the
+                  // legacy actionable wording only when the skill genuinely
+                  // lives elsewhere.
+                  const currentAgentLocations = activeAgent
+                    ? installLocations.filter((loc) => loc.agent === activeAgent)
+                    : [];
+                  const otherAgentLocations = activeAgent
+                    ? installLocations.filter((loc) => loc.agent !== activeAgent)
+                    : installLocations;
+
+                  if (currentAgentLocations.length > 0 && otherAgentLocations.length > 0) {
+                    const message =
+                      otherAgentLocations.length >= 2
+                        ? `Also installed under ${otherAgentLocations.length} other locations.`
+                        : `Also installed under ${otherAgentLocations[0].agentLabel}.`;
+                    toast({ severity: "info", message });
+                  } else {
+                    const owner = installLocations[0].agentLabel;
+                    toast({
+                      severity: "info",
+                      message: `Skill installed under ${owner} — switch to ${owner} to view details.`,
+                    });
+                  }
+                }
+              }
               close();
             }}
             onViewAll={() => {

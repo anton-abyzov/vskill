@@ -316,3 +316,141 @@ describe("T-04: resolveSkillApiName", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 });
+
+// ---------------------------------------------------------------------------
+// T-05: 0761 — Source-tree skill resolution
+//
+// vskill itself authors skills at `<root>/skills/<skill>/SKILL.md`, NOT under
+// `<root>/plugins/*/skills/<skill>`. Without this branch the resolver falls
+// through to bare-name and the platform proxy mistakenly resolves to a same-
+// named standalone repo (e.g. anton-abyzov/greet-anton/greet-anton instead of
+// anton-abyzov/vskill/greet-anton).
+// ---------------------------------------------------------------------------
+
+describe("T-05: resolveSkillApiName — source-tree skill (0761)", () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    resetResolverCache();
+    tmp = mkdtempSync(join(tmpdir(), "vskill-resolver-"));
+  });
+
+  function makeSourceTreeSkill(skill: string): void {
+    const dir = join(tmp, "skills", skill);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), "---\nname: " + skill + "\n---\n");
+  }
+
+  function makePluginSkill(plugin: string, skill: string): void {
+    const dir = join(tmp, "plugins", plugin, "skills", skill);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), "---\nname: " + skill + "\n---\n");
+  }
+
+  it("TC-05a: <root>/skills/<skill>/SKILL.md resolves via root git remote (AC-US1-01)", async () => {
+    mocks.readLockfile.mockReturnValue(null);
+    makeSourceTreeSkill("greet-anton");
+    mocks.execFile.mockImplementation(((..._args: unknown[]) => {
+      const cb = _args[_args.length - 1] as (err: Error | null, out: { stdout: string; stderr: string } | null) => void;
+      cb(null, { stdout: "https://github.com/anton-abyzov/vskill.git\n", stderr: "" });
+    }) as never);
+
+    const result = await resolveSkillApiName("greet-anton", tmp);
+
+    expect(result).toBe("anton-abyzov/vskill/greet-anton");
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("TC-05b: source-tree beats lockfile when both present (AC-US1-03 — fixes wrong-upstream timeline)", async () => {
+    // Lockfile points at a same-named standalone repo (downstream install
+    // copy). Source-tree skill is the canonical vskill author copy. The
+    // resolver MUST prefer source-tree so the Versions tab proxies to the
+    // in-repo upstream — otherwise clicking "Update" overwrites the source
+    // skill with content from the foreign standalone repo.
+    mocks.readLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {
+        "greet-anton": {
+          version: "1.0.2",
+          sha: "x",
+          tier: "VERIFIED",
+          installedAt: "2026-01-01",
+          source: "github:anton-abyzov/greet-anton",
+        },
+      },
+      createdAt: "2026-01-01",
+      updatedAt: "2026-01-01",
+    });
+    mocks.parseSource.mockReturnValue({
+      type: "github",
+      owner: "anton-abyzov",
+      repo: "greet-anton",
+    });
+    makeSourceTreeSkill("greet-anton");
+    mocks.execFile.mockImplementation(((..._args: unknown[]) => {
+      const cb = _args[_args.length - 1] as (err: Error | null, out: { stdout: string; stderr: string } | null) => void;
+      cb(null, { stdout: "https://github.com/anton-abyzov/vskill.git\n", stderr: "" });
+    }) as never);
+
+    const result = await resolveSkillApiName("greet-anton", tmp);
+
+    expect(result).toBe("anton-abyzov/vskill/greet-anton");
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("TC-05c: source-tree skill beats plugins/* walk (AC-US1-04)", async () => {
+    mocks.readLockfile.mockReturnValue(null);
+    makeSourceTreeSkill("greet-anton");
+    makePluginSkill("personal", "greet-anton");
+    mocks.execFile.mockImplementation(((..._args: unknown[]) => {
+      const cb = _args[_args.length - 1] as (err: Error | null, out: { stdout: string; stderr: string } | null) => void;
+      cb(null, { stdout: "https://github.com/anton-abyzov/vskill.git\n", stderr: "" });
+    }) as never);
+
+    const result = await resolveSkillApiName("greet-anton", tmp);
+
+    expect(result).toBe("anton-abyzov/vskill/greet-anton");
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("TC-05d: no source-tree, no plugins, no lockfile → bare name (AC-US1-02)", async () => {
+    mocks.readLockfile.mockReturnValue(null);
+
+    const result = await resolveSkillApiName("ghost-skill", tmp);
+
+    expect(result).toBe("ghost-skill");
+    expect(mocks.execFile).not.toHaveBeenCalled();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("TC-05e: source-tree git failure → bare name (graceful)", async () => {
+    mocks.readLockfile.mockReturnValue(null);
+    makeSourceTreeSkill("greet-anton");
+    mocks.execFile.mockImplementation(((..._args: unknown[]) => {
+      const cb = _args[_args.length - 1] as (err: Error | null, out: unknown) => void;
+      cb(new Error("git: command not found"), null);
+    }) as never);
+
+    const result = await resolveSkillApiName("greet-anton", tmp);
+
+    expect(result).toBe("greet-anton");
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("TC-05f: source-tree second call hits cache (AC-US1-05)", async () => {
+    mocks.readLockfile.mockReturnValue(null);
+    makeSourceTreeSkill("greet-anton");
+    mocks.execFile.mockImplementation(((..._args: unknown[]) => {
+      const cb = _args[_args.length - 1] as (err: Error | null, out: { stdout: string; stderr: string } | null) => void;
+      cb(null, { stdout: "https://github.com/anton-abyzov/vskill.git\n", stderr: "" });
+    }) as never);
+
+    await resolveSkillApiName("greet-anton", tmp);
+    await resolveSkillApiName("greet-anton", tmp);
+
+    expect(mocks.execFile).toHaveBeenCalledTimes(1);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+});

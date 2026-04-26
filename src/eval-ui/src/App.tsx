@@ -381,6 +381,67 @@ function Shell() {
     window.addEventListener("studio:request-delete", onRequestDelete);
     return () => window.removeEventListener("studio:request-delete", onRequestDelete);
   }, []);
+
+  // 0780: parallel buffer for installed-skill uninstall. Same 10s undo +
+  // optimistic hide as the source-skill delete flow, but commits via
+  // POST /api/skills/:plugin/:skill/uninstall which removes the lockfile
+  // entry AND trashes the dir.
+  const [pendingUninstallSkill, setPendingUninstallSkill] = useState<SkillInfo | null>(null);
+  const pendingUninstall = usePendingDeletion({
+    delayMs: 10_000,
+    apiCall: (plugin, skill) => api.uninstallSkill(plugin, skill),
+    onCommit: (s) => {
+      refreshSkills();
+      optimisticRestore(s);
+    },
+    onFailure: (s, err) => {
+      optimisticRestore(s);
+      toast({
+        message: `Couldn't uninstall ${s.skill}: ${err.message}`,
+        severity: "error",
+        durationMs: 0,
+        action: {
+          label: strings.actions.retry,
+          onInvoke: () => {
+            optimisticHide(s);
+            pendingUninstall.enqueueDelete(s);
+          },
+        },
+      });
+    },
+  });
+  useEffect(() => {
+    function onRequestUninstall(e: Event) {
+      if (!(e instanceof CustomEvent)) return;
+      const detail = (e as CustomEvent).detail as { skill?: SkillInfo } | undefined;
+      if (detail?.skill) setPendingUninstallSkill(detail.skill);
+    }
+    window.addEventListener("studio:request-uninstall", onRequestUninstall);
+    return () => window.removeEventListener("studio:request-uninstall", onRequestUninstall);
+  }, []);
+  const handleConfirmUninstall = useCallback(() => {
+    const skill = pendingUninstallSkill;
+    setPendingUninstallSkill(null);
+    if (!skill) return;
+    const target = { plugin: skill.plugin, skill: skill.skill };
+    optimisticHide(target);
+    pendingUninstall.enqueueDelete(target);
+    toast({
+      message: `Uninstalled ${skill.skill}. Sent to your ${trashLabel}.`,
+      severity: "info",
+      durationMs: 10_000,
+      action: {
+        label: strings.actions.undo,
+        onInvoke: () => {
+          pendingUninstall.cancelDelete(keyOf(target));
+          optimisticRestore(target);
+        },
+      },
+    });
+  }, [pendingUninstallSkill, optimisticHide, optimisticRestore, pendingUninstall, toast, trashLabel, keyOf]);
+  const handleCancelUninstall = useCallback(() => {
+    setPendingUninstallSkill(null);
+  }, []);
   const handleConfirmDelete = useCallback(() => {
     const skill = pendingDeleteSkill;
     setPendingDeleteSkill(null);
@@ -849,6 +910,20 @@ function Shell() {
         variant="destructive"
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
+      />
+
+      {/* 0780: installed-skill uninstall confirmation. Opened by
+          studio:request-uninstall events from the read-only-banner Uninstall
+          button. Sends the dir to OS trash and removes the lockfile entry. */}
+      <ConfirmDialog
+        open={pendingUninstallSkill !== null}
+        title={pendingUninstallSkill ? `Uninstall "${pendingUninstallSkill.skill}"?` : ""}
+        body={`It will be sent to your ${trashLabel} and the lockfile entry will be removed. You can re-install with vskill install.`}
+        confirmLabel="Uninstall"
+        cancelLabel="Cancel"
+        variant="destructive"
+        onConfirm={handleConfirmUninstall}
+        onCancel={handleCancelUninstall}
       />
 
       {/* 0767: marketplace-driven plugin Uninstall confirmation. Mirrors the

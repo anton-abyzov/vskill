@@ -480,6 +480,17 @@ export const api = {
     return fetchJson(`/api/skills/${plugin}/${skill}`, { method: "DELETE" });
   },
 
+  // 0780 — uninstall an installed (lockfile-tracked) skill. Symmetric to
+  // `vskill install`: removes the lockfile entry AND trashes the on-disk
+  // dir. Does NOT touch source-authored skills (use deleteSkill for those).
+  uninstallSkill(plugin: string, skill: string): Promise<{
+    ok: boolean;
+    removedFromLockfile: boolean;
+    trashedDir: string | null;
+  }> {
+    return fetchJson(`/api/skills/${plugin}/${skill}/uninstall`, { method: "POST" });
+  },
+
   improveSkill(plugin: string, skill: string, opts: { provider?: string; model?: string; eval_id?: number; notes?: string }): Promise<ImproveResult> {
     return fetchJson(`/api/skills/${plugin}/${skill}/improve`, {
       method: "POST",

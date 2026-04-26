@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { scanSkills } from "../skill-scanner.js";
 
@@ -328,5 +328,32 @@ describe("scanSkills", () => {
     // Flat layout only fires when skills.length === 0, so stray-skill is excluded.
     expect(skills).toHaveLength(1);
     expect(skills[0].skill).toBe("social-media-posting");
+  });
+
+  // --- Self layout + installed skills coexist ---
+  // Repro: user runs `vskill new` then `vskill install <other>` in the same
+  // project. The root SKILL.md (authoring source) MUST not mask installed
+  // skills under `.claude/skills/*`. Bug surfaced when Studio's PROJECT
+  // section showed 0 skills for a project that had a root SKILL.md AND a
+  // `.claude/skills/greet-anton/SKILL.md` installed copy.
+  it("emits both root SKILL.md AND installed .claude/skills/* entries", async () => {
+    // Authoring source — root IS the skill.
+    writeFileSync(join(testDir, "SKILL.md"), "# my-authoring-skill");
+    // Installed skill — `.claude/skills/<name>/SKILL.md`.
+    const installed = join(testDir, ".claude", "skills", "greet-anton");
+    mkdirSync(installed, { recursive: true });
+    writeFileSync(join(installed, "SKILL.md"), "# greet-anton");
+
+    const skills = await scanSkills(testDir);
+
+    expect(skills).toHaveLength(2);
+    const names = skills.map((s) => s.skill).sort();
+    expect(names).toEqual([basename(testDir), "greet-anton"].sort());
+    const installedEntry = skills.find((s) => s.skill === "greet-anton")!;
+    expect(installedEntry.origin).toBe("installed");
+    expect(installedEntry.dir).toBe(installed);
+    const rootEntry = skills.find((s) => s.skill !== "greet-anton")!;
+    expect(rootEntry.origin).toBe("source");
+    expect(rootEntry.dir).toBe(testDir);
   });
 });

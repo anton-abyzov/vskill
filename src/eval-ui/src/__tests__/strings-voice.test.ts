@@ -195,4 +195,12 @@ describe("strings-voice (T-035 / AC-US10-01..06)", () => {
       expect(body).toMatch(/[.?]$/);
     }
   });
+
+  it("installed empty-state references <skill> (not <plugin>) in install hint", () => {
+    // The PROJECT/Installed section is about skills, not plugins. The argument
+    // accepted by `vskill install` is a skill identifier — calling it
+    // "<plugin>" misleads users who installed a vskill into their project.
+    expect(strings.sidebar.emptyInstalledBody).toContain("<skill>");
+    expect(strings.sidebar.emptyInstalledBody).not.toContain("<plugin>");
+  });
 });

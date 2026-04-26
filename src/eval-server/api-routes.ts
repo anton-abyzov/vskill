@@ -3,8 +3,8 @@
 // ---------------------------------------------------------------------------
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync, statSync } from "node:fs";
-import { execSync } from "node:child_process";
-import { join, resolve, dirname, basename } from "node:path";
+import { execSync, execFileSync } from "node:child_process";
+import { join, resolve, dirname, basename, relative } from "node:path";
 import { homedir } from "node:os";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
@@ -758,6 +758,118 @@ export function deriveSourceAgent(
 }
 
 /**
+ * 0770 — Pure regex parser. Normalizes any github.com origin remote
+ * (SSH, HTTPS, ssh://) to its canonical `https://github.com/owner/repo`
+ * form (no `.git` suffix, no trailing path). Returns null for non-github
+ * hosts, malformed input, empty/whitespace strings.
+ */
+export function parseGithubRemote(remote: string | null | undefined): string | null {
+  const trimmed = (remote ?? "").trim();
+  if (!trimmed) return null;
+  // SSH: git@github.com:owner/repo[.git]
+  let m = /^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/.exec(trimmed);
+  if (m) return `https://github.com/${m[1]}/${m[2]}`;
+  // ssh://git@github.com/owner/repo[.git]
+  m = /^ssh:\/\/git@github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?$/.exec(trimmed);
+  if (m) return `https://github.com/${m[1]}/${m[2]}`;
+  // http(s)://github.com/owner/repo[.git][/...]
+  m = /^https?:\/\/github\.com\/([^/\s]+)\/([^/\s?#]+?)(?:\.git)?(?:[/?#].*)?$/.exec(trimmed);
+  if (m) return `https://github.com/${m[1]}/${m[2]}`;
+  return null;
+}
+
+/**
+ * 0770 — Walk parent directories from `startDir` looking for a `.git` entry
+ * (directory OR file — git worktrees use a `.git` file). Bails at the
+ * filesystem root or after `maxLevels` iterations. Returns the absolute
+ * path of the discovered git root, or null.
+ */
+export function walkUpForGitRoot(startDir: string, maxLevels = 12): string | null {
+  let current = resolve(startDir);
+  for (let i = 0; i < maxLevels; i++) {
+    if (existsSync(join(current, ".git"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+  return null;
+}
+
+const authoredSourceLinkCache = new Map<string, { repoUrl: string | null; skillPath: string | null }>();
+
+/**
+ * 0770 — Test-only helper to clear the module-level memoization cache so
+ * tests can isolate detection runs across `beforeEach`.
+ */
+export function resetAuthoredSourceLinkCache(): void {
+  authoredSourceLinkCache.clear();
+}
+
+/**
+ * 0770 — Detect source-repo provenance for a locally-authored skill (no
+ * lockfile entry). Walks for `.git`, reads `origin` remote, normalizes via
+ * `parseGithubRemote`, and computes `skillPath` from `git ls-files` (with a
+ * filesystem fallback for untracked SKILL.md files). Memoized per absolute
+ * skill dir for the eval-server process lifetime.
+ *
+ * All git invocations use `execFileSync` with explicit argv (no shell), a
+ * 1500ms hard timeout, and silenced stderr. Any error converts to
+ * `{null, null}` — `buildSkillMetadata` never throws because of git.
+ */
+export function detectAuthoredSourceLink(
+  skillDir: string,
+): { repoUrl: string | null; skillPath: string | null } {
+  const absDir = resolve(skillDir);
+  const cached = authoredSourceLinkCache.get(absDir);
+  if (cached) return cached;
+
+  const compute = (): { repoUrl: string | null; skillPath: string | null } => {
+    const gitRoot = walkUpForGitRoot(absDir);
+    if (!gitRoot) return { repoUrl: null, skillPath: null };
+
+    let remote = "";
+    try {
+      remote = execFileSync("git", ["config", "--get", "remote.origin.url"], {
+        cwd: gitRoot,
+        timeout: 1500,
+        stdio: ["ignore", "pipe", "ignore"],
+        encoding: "utf-8",
+      }).trim();
+    } catch {
+      return { repoUrl: null, skillPath: null };
+    }
+
+    const repoUrl = parseGithubRemote(remote);
+    if (!repoUrl) return { repoUrl: null, skillPath: null };
+
+    let skillPath: string | null = null;
+    try {
+      const tracked = execFileSync("git", ["ls-files", "--full-name", "SKILL.md"], {
+        cwd: absDir,
+        timeout: 1500,
+        stdio: ["ignore", "pipe", "ignore"],
+        encoding: "utf-8",
+      }).trim();
+      if (tracked) skillPath = tracked;
+    } catch {
+      // fall through to filesystem fallback
+    }
+
+    if (!skillPath) {
+      // Filesystem fallback for untracked SKILL.md — same path the file will
+      // have on github.com once committed and pushed.
+      skillPath = relative(gitRoot, join(absDir, "SKILL.md")).replace(/\\/g, "/");
+    }
+
+    return { repoUrl, skillPath };
+  };
+
+  const result = compute();
+  authoredSourceLinkCache.set(absDir, result);
+  return result;
+}
+
+/**
  * 0737 — Resolve the source-repo provenance (repoUrl + skillPath) for a
  * skill by looking up its lockfile entry. Two precedences:
  *   1. Explicit `sourceRepoUrl` / `sourceSkillPath` (set by `vskill install`
@@ -768,21 +880,22 @@ export function deriveSourceAgent(
  * skill dir basename and the lockfile key differ — fall back to the parent
  * directory's basename when no exact match exists.
  *
- * Returns `{ null, null }` for any non-github source (e.g.
- * `marketplace:specweave/sw#name`) — guessing a repo URL would produce
- * broken anchors. Authored skills (no lockfile entry) also return null.
+ * 0770 — When no lockfile entry resolves provenance, fall through to
+ * `detectAuthoredSourceLink` which inspects the parent git repo's origin
+ * remote. Lockfile-derived values still take precedence to preserve
+ * install-time provenance when the workspace itself is a git repo.
  */
 function resolveSourceLink(
   skillDir: string,
   root: string,
 ): { repoUrl: string | null; skillPath: string | null } {
   const lock = readLockfile(root);
-  if (!lock) return { repoUrl: null, skillPath: null };
+  if (!lock) return detectAuthoredSourceLink(skillDir);
 
   const skillName = basename(skillDir);
   const parentName = basename(dirname(skillDir));
   const entry = lock.skills[skillName] ?? lock.skills[parentName];
-  if (!entry) return { repoUrl: null, skillPath: null };
+  if (!entry) return detectAuthoredSourceLink(skillDir);
 
   if (entry.sourceRepoUrl) {
     return {
@@ -800,6 +913,9 @@ function resolveSourceLink(
   // copy-chip (local path); a fresh `vskill add` writes the explicit
   // `sourceSkillPath` and restores the working anchor via the branch above.
   const m = /^github:([^/]+)\/([^/#]+)/.exec(entry.source ?? "");
+  // 0770: do NOT fall through here — an installed skill with a non-github
+  // `source` (e.g. `marketplace:...`) is still installed, not authored. Local
+  // git detection would leak the workspace remote (umbrella, etc.).
   if (!m) return { repoUrl: null, skillPath: null };
   return {
     repoUrl: `https://github.com/${m[1]}/${m[2]}`,

@@ -5,6 +5,7 @@ import { api } from "../../api";
 import { useSWR, mutate } from "../../hooks/useSWR";
 import { ChangelogViewer } from "../../components/ChangelogViewer";
 import { buildSubmitUrl } from "../../utils/submit-url";
+import { formatTierLabel } from "../../components/FindSkillsPalette/components/TierBadge";
 import type { VersionEntry, VersionDiff } from "../../types";
 
 const CERT_COLORS: Record<string, { bg: string; text: string }> = {
@@ -373,7 +374,7 @@ export function VersionHistoryPanel() {
                       className="text-[9px] font-medium px-1.5 py-0.5 rounded-full"
                       style={{ background: certStyle.bg, color: certStyle.text }}
                     >
-                      {v.certTier}
+                      {formatTierLabel(v.certTier)}
                     </span>
                     {isInstalled && (
                       <span

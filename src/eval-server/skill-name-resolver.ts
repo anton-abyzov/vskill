@@ -64,6 +64,39 @@ export function parseGitHubRemoteUrl(url: string): { owner: string; repo: string
 }
 
 /**
+ * 0761: Locate a source-tree skill at `<root>/skills/<skill>/SKILL.md`.
+ *
+ * vskill itself authors skills at this top-level layout (the canonical
+ * author-side location), distinct from the plugin-author layout under
+ * `<root>/plugins/<plugin>/skills/<skill>`. Without this probe, the resolver falls through
+ * to bare-name and the platform proxy mistakenly resolves to a same-named
+ * standalone GitHub repo.
+ *
+ * Security: same isUnsafeSegment guard as `findAuthoredSkillDir`, plus a
+ * prefix-containment check against `resolve(<root>, "skills") + sep`.
+ */
+export async function findAuthoredSourceTreeSkillDir(
+  root: string,
+  skill: string,
+): Promise<string | null> {
+  if (isUnsafeSegment(skill)) return null;
+
+  const skillsRoot = resolve(root, "skills");
+  const skillsRootPrefix = skillsRoot.endsWith(sep) ? skillsRoot : skillsRoot + sep;
+  const skillDir = resolve(skillsRoot, skill);
+  if (!skillDir.startsWith(skillsRootPrefix)) return null;
+
+  try {
+    const st = await stat(skillDir);
+    if (!st.isDirectory()) return null;
+    await access(join(skillDir, "SKILL.md"));
+    return skillDir;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Locate an authored skill on disk under `<root>/plugins/<plugin>/skills/<skill>/SKILL.md`.
  * Returns the absolute directory containing SKILL.md, or null if not found.
  * On duplicates across plugins, returns the lexicographically first match.
@@ -133,6 +166,23 @@ export function readGitOriginOwnerRepo(dir: string): Promise<{ owner: string; re
 export async function resolveSkillApiName(skill: string, root: string): Promise<string> {
   const cached = resolverCache.get(skill);
   if (cached !== undefined) return cached;
+
+  // 0761: source-tree skills (`<root>/skills/<skill>`) are the canonical
+  // author copy of a vskill-source skill. The repo's own git remote is the
+  // correct upstream regardless of any lockfile entry — lockfile entries
+  // point at downstream installs (e.g. `.claude/skills/<skill>` populated
+  // from a same-named standalone repo). Without this short-circuit, a vskill
+  // user with a `github:anton-abyzov/greet-anton` lockfile install (a
+  // separate repo) would see the Versions tab proxy to the WRONG upstream
+  // and could overwrite the source skill with content from a foreign repo.
+  const sourceDir = await findAuthoredSourceTreeSkillDir(root, skill);
+  if (sourceDir) {
+    const sourceRemote = await readGitOriginOwnerRepo(sourceDir);
+    if (sourceRemote) {
+      return rememberAndReturn(skill, `${sourceRemote.owner}/${sourceRemote.repo}/${skill}`);
+    }
+    return rememberAndReturn(skill, skill);
+  }
 
   const lock = readLockfile();
   const entry = lock?.skills?.[skill];

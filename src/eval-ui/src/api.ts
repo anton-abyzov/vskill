@@ -103,6 +103,28 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 // ---------------------------------------------------------------------------
+// 0761 US-003: one-shot retry for transient gateway 5xx (502/503/504). Used
+// only for endpoints whose existing failure contract is `[]` graceful-degrade
+// (currently `/api/v1/skills/check-updates`), so callers see the recovered
+// response without changes to their happy-path handling.
+//
+// Why one shot: the platform's failure mode is short worker cold-starts; a
+// single ~250ms retry recovers most blips. Repeated retries would stack load
+// during a real outage. 4xx is deterministic and not retried.
+// ---------------------------------------------------------------------------
+async function fetchWith5xxRetry(
+  input: RequestInfo,
+  init?: RequestInit,
+): Promise<Response> {
+  const first = await fetch(input, init);
+  if (first.status >= 502 && first.status <= 504) {
+    await new Promise((r) => setTimeout(r, 250));
+    return fetch(input, init);
+  }
+  return first;
+}
+
+// ---------------------------------------------------------------------------
 // SkillInfo response normalization (T-021, T-025)
 //
 // The server is the SSoT for origin + frontmatter fields. These helpers act as
@@ -800,7 +822,7 @@ export const api = {
       // backfilled by the polling/SSE merge once it lands. Use "0.0.0" as a
       // placeholder so the platform always has at least a comparable string.
       const sortedIds = [...skillIds].sort();
-      const res = await fetch(`${BASE}/api/v1/skills/check-updates`, {
+      const res = await fetchWith5xxRetry(`${BASE}/api/v1/skills/check-updates`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -861,7 +883,7 @@ export const api = {
   ): Promise<Array<{ plugin: string; skill: string; uuid?: string; slug?: string }>> {
     if (skills.length === 0) return [];
     try {
-      const res = await fetch(`${BASE}/api/v1/skills/check-updates`, {
+      const res = await fetchWith5xxRetry(`${BASE}/api/v1/skills/check-updates`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

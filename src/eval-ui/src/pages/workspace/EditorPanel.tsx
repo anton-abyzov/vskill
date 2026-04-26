@@ -14,6 +14,13 @@ import { SkillFileBrowser } from "../../components/SkillFileBrowser";
 import { SecondaryFileViewer } from "../../components/SecondaryFileViewer";
 import { PublishButton } from "../../components/PublishButton";
 import { useGitRemote } from "../../hooks/useGitRemote";
+import { bumpVersion, validateVersionTransition, type BumpKind } from "../../utils/bumpVersion";
+import { getFrontmatterVersion, setFrontmatterVersion } from "../../utils/setFrontmatterVersion";
+
+function emitToast(message: string, severity: "info" | "error"): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("studio:toast", { detail: { message, severity } }));
+}
 
 type ViewMode = "split" | "raw" | "preview";
 
@@ -87,7 +94,7 @@ export function EditorPanel() {
   // 0759: probe git state for the Publish button. Hook runs once on mount.
   const gitRemote = useGitRemote();
 
-  const { files, activeFile, secondaryContent, loading: filesLoading, error: filesError, selectFile, refresh: refreshFiles, isSkillMd } = useSkillFiles(plugin ?? "", skill ?? "");
+  const { files, activeFile, secondaryContent, loading: filesLoading, error: filesError, loadError: filesLoadError, selectFile, refresh: refreshFiles, isSkillMd } = useSkillFiles(plugin ?? "", skill ?? "");
   const [secondaryDirty, setSecondaryDirty] = useState(false);
 
   const guardedSelectFile = useCallback((path: string) => {
@@ -129,11 +136,48 @@ export function EditorPanel() {
   const specialKeys = new Set(["name", "description", "metadata", "allowed-tools", "version", "tags"]);
   const extraFields = Object.entries(metadata).filter(([k]) => !specialKeys.has(k));
 
+  // 0759 Phase 7: validate version transition before save (no jumps > 1
+  // segment) and dispatch a `studio:content-saved` event after a successful
+  // write so the sidebar/header re-fetch and reflect the new version
+  // everywhere — no manual refresh required.
   const handleSave = useCallback(async () => {
+    const fromVersion = getFrontmatterVersion(state.savedContent);
+    const toVersion = getFrontmatterVersion(skillContent);
+    if (toVersion !== null) {
+      const check = validateVersionTransition(fromVersion, toVersion);
+      if (!check.valid) {
+        emitToast(`Save blocked: ${check.reason ?? "invalid version transition"}`, "error");
+        return;
+      }
+    }
     setSaving(true);
     await saveContent();
     setSaving(false);
-  }, [saveContent]);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("studio:content-saved", {
+        detail: { plugin, skill, version: toVersion },
+      }));
+    }
+  }, [saveContent, skillContent, state.savedContent, plugin, skill]);
+
+  // 0759 Phase 7: manual bump-by-1 controls. Each handler reads the current
+  // frontmatter version (or defaults to "1.0.0"), computes the next version
+  // for the requested kind, and rewrites the textarea content. The author
+  // still clicks Save to commit — the bump is a convenience, not auto-save.
+  const handleBump = useCallback((kind: BumpKind) => {
+    const current = getFrontmatterVersion(skillContent) ?? "1.0.0";
+    let next: string;
+    try {
+      next = bumpVersion(current, kind);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      emitToast(`Bump failed: ${msg}`, "error");
+      return;
+    }
+    const newContent = setFrontmatterVersion(skillContent, next);
+    dispatch({ type: "SET_CONTENT", content: newContent });
+    emitToast(`Bumped to v${next} (${kind}). Click Save to commit.`, "info");
+  }, [skillContent, dispatch]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "s") {
@@ -363,6 +407,58 @@ export function EditorPanel() {
               <span>Regenerate</span>
             </button>
             <div style={{ width: 1, height: 16, background: "var(--border-subtle)" }} />
+            {/* 0759 Phase 7: manual bump-by-1 controls. Tooltips show the
+                resulting version so the author can preview before clicking. */}
+            {!isReadOnly && (() => {
+              const current = getFrontmatterVersion(skillContent) ?? "1.0.0";
+              let nextPatch = current;
+              let nextMinor = current;
+              let nextMajor = current;
+              try {
+                nextPatch = bumpVersion(current, "patch");
+                nextMinor = bumpVersion(current, "minor");
+                nextMajor = bumpVersion(current, "major");
+              } catch {
+                // Invalid current version — disable bump buttons silently.
+              }
+              const btnStyle = { padding: "4px 8px" } as const;
+              return (
+                <div style={{ display: "inline-flex", gap: 2, alignItems: "center" }}
+                     aria-label="Version bump"
+                     data-testid="version-bump-controls">
+                  <button
+                    type="button"
+                    onClick={() => handleBump("patch")}
+                    title={`Bump patch: ${current} → ${nextPatch}`}
+                    aria-label="Bump patch version"
+                    className="btn btn-ghost text-[11px]"
+                    style={btnStyle}
+                  >
+                    +patch
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleBump("minor")}
+                    title={`Bump minor: ${current} → ${nextMinor}`}
+                    aria-label="Bump minor version"
+                    className="btn btn-ghost text-[11px]"
+                    style={btnStyle}
+                  >
+                    +minor
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleBump("major")}
+                    title={`Bump major: ${current} → ${nextMajor}`}
+                    aria-label="Bump major version"
+                    className="btn btn-ghost text-[11px]"
+                    style={btnStyle}
+                  >
+                    +major
+                  </button>
+                </div>
+              );
+            })()}
             {isDirty && (
               <button
                 onClick={() => dispatch({ type: "SET_CONTENT", content: state.savedContent })}
@@ -398,6 +494,7 @@ export function EditorPanel() {
           activeFile={activeFile}
           onSelect={guardedSelectFile}
           onRefresh={refreshFiles}
+          loadError={filesLoadError}
         />
       )}
 

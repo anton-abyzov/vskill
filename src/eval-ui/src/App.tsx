@@ -305,6 +305,18 @@ function Shell() {
     document.documentElement.style.setProperty("--sidebar-width", `${sidebarWidth}px`);
   }, [sidebarWidth]);
 
+  // 0759 Phase 7: when EditorPanel saves a SKILL.md, it dispatches a
+  // `studio:content-saved` CustomEvent. Re-fetch the skill list so the
+  // sidebar version badge, header, and dirty indicator all reflect the
+  // freshly-persisted frontmatter (especially the version field).
+  useEffect(() => {
+    function onContentSaved() {
+      refreshSkills();
+    }
+    window.addEventListener("studio:content-saved", onContentSaved);
+    return () => window.removeEventListener("studio:content-saved", onContentSaved);
+  }, [refreshSkills]);
+
   // ---------------------------------------------------------------------------
   // 0722: Skill delete flow (ConfirmDialog + 10s Undo + OS trash)
   // ---------------------------------------------------------------------------

@@ -70,7 +70,14 @@ export function VersionBadge(props: VersionBadgeProps) {
   const padY = size === "sm" ? 1 : 2;
   const padX = size === "sm" ? 5 : 8;
 
-  const isInherited = source !== undefined && source !== "frontmatter";
+  // 0759 Phase 7: italic was previously applied for ANY non-frontmatter source
+  // (default / registry / plugin). User feedback: italicising the implicit
+  // 1.0.0 default looked like a data bug, when really the skill just hadn't
+  // declared a version. Italics now ONLY apply to genuinely inherited
+  // versions (registry pull / plugin manifest), where the visual cue still
+  // helps the author notice the inheritance. The "default" tooltip ("No
+  // version declared") is preserved on hover for discoverability.
+  const isInherited = source === "registry" || source === "plugin";
   const sourceTitle = provenanceTooltip(source, safeVersion, pluginName);
   const finalTitle = props.title ?? sourceTitle;
 

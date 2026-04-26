@@ -166,6 +166,39 @@ async function collectDiffSummary(root: string, timeoutMs: number): Promise<Diff
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/git/status
+//
+// Lightweight `git status --porcelain` probe used by the sidebar to highlight
+// skills with uncommitted changes. Returns ONLY the file paths (porcelain
+// status prefix stripped) so the UI can resolve dirty paths to skills via
+// `getDirtySkillIds(skills, paths, root)`. Cheap enough to poll on a 5-10s
+// interval. Non-git workspaces (or git error) → `{ paths: [] }`, never 5xx.
+// ---------------------------------------------------------------------------
+
+const PORCELAIN_PREFIX_RE = /^[ MADRCU?!]{1,2} +/;
+
+export function makeGetGitStatusHandler(root: string) {
+  return async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!isRequestAllowed(req)) {
+      sendJson(res, { error: "forbidden" }, 403);
+      return;
+    }
+    const result = await runGitCommand(["status", "--porcelain"], root, getTimeoutMs());
+    if (result.exitCode !== 0) {
+      // Not a git repo / detached / network — fail soft so the UI just shows
+      // an empty dirty set without bothering the user.
+      sendJson(res, { paths: [] }, 200);
+      return;
+    }
+    const paths = result.stdout
+      .split("\n")
+      .map((line) => line.replace(PORCELAIN_PREFIX_RE, "").trim())
+      .filter((p) => p.length > 0);
+    sendJson(res, { paths }, 200);
+  };
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/git/diff
 //
 // Returns the combined staged + unstaged diff plus a dirty/file-count summary.
@@ -349,6 +382,9 @@ export function makePostGitPublishHandler(root: string) {
 export function registerGitRoutes(router: Router, root: string): void {
   const remoteHandler = makeGetGitRemoteHandler(root);
   router.get("/api/git/remote", (req, res) => remoteHandler(req, res));
+
+  const statusHandler = makeGetGitStatusHandler(root);
+  router.get("/api/git/status", (req, res) => statusHandler(req, res));
 
   const diffHandler = makePostGitDiffHandler(root);
   router.post("/api/git/diff", (req, res) => diffHandler(req, res));

@@ -67,6 +67,12 @@ interface Props {
   revealSkillId?: string | null;
   /** 0704: called after Sidebar scrolls the reveal target into view. */
   onRevealComplete?: () => void;
+  /**
+   * 0759 Phase 6: set of `<plugin>/<skill>` IDs whose directory contains
+   * uncommitted git changes. Plumbed through from App's `useDirtySkills`
+   * hook. SkillRow renders an amber dot for any ID in this set.
+   */
+  dirtySkillIds?: Set<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +233,7 @@ export function Sidebar({
   topSlot,
   revealSkillId,
   onRevealComplete,
+  dirtySkillIds,
 }: Props) {
   // 0686 T-007 (US-003): Tri-scope mode is enabled when the caller passes
   // an active agent OR when any incoming skill carries a `scope` field
@@ -462,6 +469,7 @@ export function Sidebar({
                 onSelect={onSelect}
                 onContextMenu={onContextMenu}
                 useVirtual={useVirtual}
+                dirtySkillIds={dirtySkillIds}
               />
             )}
           </NamedScopeSection>
@@ -482,6 +490,7 @@ export function Sidebar({
                 onSelect={onSelect}
                 onContextMenu={onContextMenu}
                 useVirtual={useVirtual}
+                dirtySkillIds={dirtySkillIds}
               />
             )}
           </NamedScopeSection>
@@ -544,6 +553,7 @@ export function Sidebar({
                         }
                         onSelect={() => onSelect(skill)}
                         onContextMenu={onContextMenu}
+                        dirty={dirtySkillIds?.has(`${skill.plugin}/${skill.skill}`)}
                       />
                     )}
                   />
@@ -613,6 +623,7 @@ export function Sidebar({
                 onSelect={onSelect}
                 onContextMenu={onContextMenu}
                 useVirtual={useVirtual}
+                dirtySkillIds={dirtySkillIds}
               />
             )}
           </NamedScopeSection>
@@ -646,6 +657,7 @@ export function Sidebar({
                         }
                         onSelect={() => onSelect(skill)}
                         onContextMenu={onContextMenu}
+                        dirty={dirtySkillIds?.has(`${skill.plugin}/${skill.skill}`)}
                       />
                     )}
                   />
@@ -670,6 +682,7 @@ export function Sidebar({
                 onSelect={onSelect}
                 onContextMenu={onContextMenu}
                 useVirtual={useVirtual}
+                dirtySkillIds={dirtySkillIds}
               />
             )}
           </SidebarSection>
@@ -686,6 +699,7 @@ export function Sidebar({
                 onSelect={onSelect}
                 onContextMenu={onContextMenu}
                 useVirtual={useVirtual}
+                dirtySkillIds={dirtySkillIds}
               />
             )}
           </SidebarSection>
@@ -858,12 +872,15 @@ function SectionList({
   onSelect,
   onContextMenu,
   useVirtual,
+  dirtySkillIds,
 }: {
   items: Array<[plugin: string, skills: SkillInfo[]]>;
   selectedKey: SelectedKey | null;
   onSelect: (s: SkillInfo) => void;
   onContextMenu?: (e: React.MouseEvent<HTMLButtonElement>, s: SkillInfo) => void;
   useVirtual: boolean;
+  /** 0759 Phase 6: dirty IDs threaded through to PluginGroup → SkillRow. */
+  dirtySkillIds?: Set<string>;
 }) {
   if (useVirtual) {
     const flat = flattenForVirtual(items);
@@ -919,6 +936,7 @@ function SectionList({
                 isSelected={isSelected}
                 onSelect={() => onSelect(s)}
                 onContextMenu={onContextMenu}
+                dirty={dirtySkillIds?.has(`${s.plugin}/${s.skill}`)}
               />
             );
           }}
@@ -937,6 +955,7 @@ function SectionList({
           selectedKey={selectedKey}
           onSelect={onSelect}
           onContextMenu={onContextMenu}
+          dirtySkillIds={dirtySkillIds}
         />
       ))}
     </div>

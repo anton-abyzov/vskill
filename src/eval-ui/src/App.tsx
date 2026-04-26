@@ -6,6 +6,7 @@ import { TopRail } from "./components/TopRail";
 import { StatusBar } from "./components/StatusBar";
 import { Sidebar } from "./components/Sidebar";
 import { ResizeHandle, readSidebarWidth, DEFAULT_SIDEBAR_WIDTH } from "./components/ResizeHandle";
+import { useDirtySkills } from "./hooks/useDirtySkills";
 import { DisconnectBanner } from "./components/DisconnectBanner";
 import { RightPanel } from "./components/RightPanel";
 import { UpdateToast } from "./components/UpdateToast";
@@ -199,6 +200,13 @@ function Shell() {
   // 0700 phase 2B + 2C: MarketplaceDrawer + InstallProgressToast state.
   const [marketplaceOpen, setMarketplaceOpen] = useState(false);
   const [installJob, setInstallJob] = useState<InstallJob | null>(null);
+  // 0767: ConfirmDialog gating for marketplace-driven Uninstall (replaces
+  // window.confirm()). The pending-promise resolver lets the async onUninstall
+  // callback await the user's choice before issuing the API call.
+  const [pluginUninstallTarget, setPluginUninstallTarget] = useState<{
+    plugin: string;
+    resolve: (ok: boolean) => void;
+  } | null>(null);
   useEffect(() => {
     function onOpenMarketplace() {
       setMarketplaceOpen(true);
@@ -393,6 +401,10 @@ function Shell() {
     [state.skills, hiddenSkillKeys, keyOf],
   );
 
+  // 0759 Phase 6: poll /api/git/status and resolve dirty paths to a Set of
+  // "<plugin>/<skill>" IDs the sidebar marks with an amber dot.
+  const dirtySkillIds = useDirtySkills(visibleSkills, activeProject?.path ?? null);
+
   const selectedInfo = useMemo(() => {
     if (!state.selectedSkill) return null;
     return state.skills.find(
@@ -586,6 +598,7 @@ function Shell() {
             activeAgentId={activeAgentId}
             revealSkillId={state.revealSkillId}
             onRevealComplete={clearReveal}
+            dirtySkillIds={dirtySkillIds}
             topSlot={
               agentsResponse.status === "ready" && pickerEntries.length > 0 ? (
                 <>
@@ -745,9 +758,12 @@ function Shell() {
           setMarketplaceOpen(false);
         }}
         onUninstall={async (plugin) => {
-          if (!window.confirm(`Uninstall ${plugin}? This removes the plugin and its skills.`)) {
-            return;
-          }
+          // 0767: gate the request behind <ConfirmDialog>; the resolver
+          // bridges the dialog's onConfirm/onCancel back into this async flow.
+          const ok = await new Promise<boolean>((resolve) => {
+            setPluginUninstallTarget({ plugin, resolve });
+          });
+          if (!ok) return;
           try {
             const res = await fetch(
               `/api/plugins/${encodeURIComponent(plugin)}/uninstall`,
@@ -760,6 +776,7 @@ function Shell() {
             const body = (await res.json().catch(() => ({}))) as {
               ok?: boolean;
               error?: string;
+              fallback?: string;
             };
             if (!res.ok || !body.ok) {
               toast({
@@ -768,7 +785,11 @@ function Shell() {
               });
               return;
             }
-            toast({ message: `Uninstalled ${plugin}.`, severity: "info" });
+            const note =
+              body.fallback === "orphan-cache-removed"
+                ? `Removed orphaned ${plugin}.`
+                : `Uninstalled ${plugin}.`;
+            toast({ message: note, severity: "success" });
             refreshSkills();
           } catch (err) {
             toast({
@@ -816,6 +837,33 @@ function Shell() {
         variant="destructive"
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
+      />
+
+      {/* 0767: marketplace-driven plugin Uninstall confirmation. Mirrors the
+          PluginActionMenu sidebar flow so both surfaces use the same dialog. */}
+      <ConfirmDialog
+        open={pluginUninstallTarget !== null}
+        title={
+          pluginUninstallTarget
+            ? `Uninstall ${pluginUninstallTarget.plugin}?`
+            : ""
+        }
+        body={
+          pluginUninstallTarget
+            ? `This removes the ${pluginUninstallTarget.plugin} plugin and all of its skills. You can reinstall it later from the marketplace.`
+            : ""
+        }
+        confirmLabel="Uninstall"
+        cancelLabel="Cancel"
+        variant="destructive"
+        onConfirm={() => {
+          pluginUninstallTarget?.resolve(true);
+          setPluginUninstallTarget(null);
+        }}
+        onCancel={() => {
+          pluginUninstallTarget?.resolve(false);
+          setPluginUninstallTarget(null);
+        }}
       />
     </>
   );

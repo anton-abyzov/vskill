@@ -13,6 +13,8 @@ interface Props {
   onSelect: (skill: SkillInfo) => void;
   /** T-064: context-menu opener threaded from Sidebar → App-level anchor. */
   onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>, skill: SkillInfo) => void;
+  /** 0759 Phase 6: dirty IDs threaded through to each SkillRow. */
+  dirtySkillIds?: Set<string>;
 }
 
 /**
@@ -23,7 +25,7 @@ interface Props {
  * No pill backgrounds. Count is tabular-nums. Header uses a very small
  * lighter-weight label so the rows underneath feel primary.
  */
-export function PluginGroup({ plugin, skills, selectedKey, onSelect, onContextMenu }: Props) {
+export function PluginGroup({ plugin, skills, selectedKey, onSelect, onContextMenu, dirtySkillIds }: Props) {
   const sorted = [...skills].sort((a, b) => a.skill.localeCompare(b.skill));
 
   return (
@@ -69,7 +71,7 @@ export function PluginGroup({ plugin, skills, selectedKey, onSelect, onContextMe
             !!selectedKey && selectedKey.plugin === s.plugin && selectedKey.skill === s.skill;
           return (
             <div role="listitem" key={`${s.plugin}/${s.skill}`}>
-              <SkillRow skill={s} isSelected={isSelected} onSelect={() => onSelect(s)} onContextMenu={onContextMenu} />
+              <SkillRow skill={s} isSelected={isSelected} onSelect={() => onSelect(s)} onContextMenu={onContextMenu} dirty={dirtySkillIds?.has(`${s.plugin}/${s.skill}`)} />
             </div>
           );
         })}

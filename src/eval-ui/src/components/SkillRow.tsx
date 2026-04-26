@@ -24,6 +24,13 @@ interface Props {
    * ContextMenu at the cursor location.
    */
   onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>, skill: SkillInfo) => void;
+  /**
+   * 0759 Phase 6: when `true`, render a small amber dot before the version
+   * badge to flag that this authored skill has uncommitted git changes.
+   * Resolved by the parent via `useDirtySkills` + `getDirtySkillIds`.
+   * Optional — pre-Phase-6 callers omit it; the dot stays hidden.
+   */
+  dirty?: boolean;
 }
 
 /**
@@ -38,7 +45,7 @@ interface Props {
  * - `updateAvailable` chip renders an accent-colored "Update" pill with the
  *   latest version when applicable.
  */
-function SkillRowBase({ skill, isSelected, onSelect, onContextMenu }: Props) {
+function SkillRowBase({ skill, isSelected, onSelect, onContextMenu, dirty }: Props) {
   const dotColor = skill.origin === "installed" ? "var(--status-installed)" : "var(--status-own)";
 
   return (
@@ -134,6 +141,27 @@ function SkillRowBase({ skill, isSelected, onSelect, onContextMenu }: Props) {
       >
         {skill.skill}
       </span>
+
+      {/* 0759 Phase 6: dirty-tree indicator. Small amber dot rendered just
+          before the version badge when the skill's directory contains any
+          uncommitted git changes. Click hint goes through the title — the
+          actual publish flow lives on the Editor toolbar. */}
+      {dirty && (
+        <span
+          aria-label="Uncommitted changes"
+          data-testid="skill-row-dirty-dot"
+          title="Uncommitted changes — open this skill, click Publish to commit & push"
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: "50%",
+            background: "var(--color-warning, #f59e0b)",
+            display: "inline-block",
+            flexShrink: 0,
+            boxShadow: "0 0 0 1px rgba(245,158,11,0.25)",
+          }}
+        />
+      )}
 
       {/* 0707 T-009: reusable VersionBadge (sm) instead of an inline <span>.
           0750: always render — VersionBadge falls back to "1.0.0" when

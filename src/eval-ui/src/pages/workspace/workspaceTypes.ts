@@ -122,10 +122,21 @@ export interface WorkspaceState {
   activationTotalPrompts: number;
   activationStartedAt: number | null;
   activationClassifyingStatus: string | null;
+  // Increment 0776: where the current prompts text came from. Drives the
+  // "from SKILL.md" / "AI-generated" badge in ActivationPanel.
+  activationPromptsSource: "skill-md" | "ai-generated" | "user-typed" | null;
+  // The canonical prompts text last loaded from a source. When `activationPrompts`
+  // diverges from this, we flip the source to "user-typed".
+  activationPromptsCanonical: string;
 
   // AI prompt generation
   generatingPrompts: boolean;
   generatingPromptsError: string | null;
+
+  // Test-cases save (increment 0776)
+  savingTestCases: boolean;
+  savingTestCasesError: string | null;
+  savingTestCasesSuccess: string | null;
 
   // Activation history
   activationHistory: ActivationHistoryRun[] | null;
@@ -207,6 +218,11 @@ export type WorkspaceAction =
   | { type: "ACTIVATION_CANCEL"; totalPrompts: number }
   | { type: "GENERATE_PROMPTS_START" }
   | { type: "GENERATE_PROMPTS_DONE" }
+  | { type: "SET_PROMPTS_SOURCE"; source: "skill-md" | "ai-generated" | "user-typed" | null; canonical?: string }
+  | { type: "SAVE_TEST_CASES_START" }
+  | { type: "SAVE_TEST_CASES_SUCCESS"; count: number }
+  | { type: "SAVE_TEST_CASES_ERROR"; error: string }
+  | { type: "CLEAR_SAVE_TEST_CASES_FEEDBACK" }
   | { type: "GENERATE_PROMPTS_ERROR"; error: string }
   | { type: "ACTIVATION_HISTORY_LOADED"; runs: ActivationHistoryRun[] };
 
@@ -234,6 +250,10 @@ export interface WorkspaceContextValue {
   cancelActivation: () => void;
   generateActivationPrompts: (count?: number) => void;
   fetchActivationHistory: () => void;
+  // Increment 0776: load committed `## Test Cases` from SKILL.md, save current
+  // textarea prompts back as a `## Test Cases` block.
+  loadTestCasesFromSkillMd: () => Promise<void>;
+  saveTestCasesToSkillMd: () => Promise<void>;
   submitAiEdit: (instruction: string, provider?: string, model?: string) => void;
   cancelAiEdit: () => void;
   applyAiEdit: () => Promise<void>;

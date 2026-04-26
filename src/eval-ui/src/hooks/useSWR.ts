@@ -66,22 +66,44 @@ export function useSWR<T>(
   const { ttl = 30_000, enabled = true } = opts;
 
   const [, forceUpdate] = useState(0);
+  // 0766 F-001: real error state — without it, a rejected fetcher leaves
+  // `loading` true forever (no cache entry → `(enabled && !entry)` was always
+  // truthy in the old loading formula) and the consumer has no way to render
+  // a recovery UI.
+  const [errorState, setErrorState] = useState<Error | undefined>(undefined);
+  // 0766 F-001: bump on revalidate so the fetch effect re-runs even when
+  // [key, fetcher, ttl, enabled] are otherwise stable. Without this,
+  // mutate() invalidates the cache but no new fetch ever starts in the same
+  // hook instance.
+  const [revalidationTick, setRevalidationTick] = useState(0);
   const mountedRef = useRef(true);
   const keyRef = useRef(key);
   keyRef.current = key;
 
-  const revalidate = () => mutate(key);
+  const revalidate = () => {
+    setErrorState(undefined);
+    mutate(key);
+    setRevalidationTick((n) => n + 1);
+  };
 
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
-  // Subscribe to external invalidations for this key
+  // Subscribe to external invalidations for this key.
+  // 0766 F-002 follow-on: when an external `mutate(key)` clears the cache,
+  // the consumer must also kick off a re-fetch — bumping revalidationTick
+  // makes the fetch effect re-run (its deps include revalidationTick).
+  // Without this, after mutate the consumer renders with no cache entry +
+  // no in-flight fetch + no error → renders the empty/no-data state and
+  // never refetches until the component remounts.
   useEffect(() => {
     if (!enabled) return;
     const notify = () => {
-      if (mountedRef.current) forceUpdate((n) => n + 1);
+      if (mountedRef.current) {
+        setRevalidationTick((n) => n + 1);
+      }
     };
     if (!listeners.has(key)) listeners.set(key, new Set());
     listeners.get(key)!.add(notify);
@@ -116,33 +138,42 @@ export function useSWR<T>(
         cache.set(key, { data, fetchedAt: Date.now() });
         inFlight.delete(key);
         if (mountedRef.current && keyRef.current === key) {
+          // 0766 F-001: success path clears any stale error from a previous
+          // failed attempt.
+          setErrorState(undefined);
           forceUpdate((n) => n + 1);
         }
         for (const sub of flight.subscribers) sub();
       },
       (err) => {
         inFlight.delete(key);
+        const errInstance = err instanceof Error ? err : new Error(String(err));
         if (mountedRef.current && keyRef.current === key) {
+          // 0766 F-001/F-003: capture the error in state (so consumers can
+          // render an error UI and `loading` stops being true) and DO NOT
+          // re-throw — the old `throw err` produced an unhandled-promise
+          // rejection because nothing awaits the .then result.
+          setErrorState(errInstance);
           forceUpdate((n) => n + 1);
         }
         for (const sub of flight.subscribers) sub();
-        throw err;
       },
     );
     flight.promise = promise;
     inFlight.set(key, flight);
-  }, [key, fetcher, ttl, enabled]);
+  }, [key, fetcher, ttl, enabled, revalidationTick]);
 
   const entry = cache.get(key) as CacheEntry<T> | undefined;
-  const loading = enabled && !entry && inFlight.has(key);
 
-  // Capture fetch errors without a separate state by checking inFlight absence + no cache
-  const error = undefined as Error | undefined; // errors surface via re-render after inFlight clears
+  // 0766 F-001: loading is true ONLY while a request is genuinely in flight
+  // (or about to start, before the first effect runs). A rejected fetch
+  // surfaces via `error`, NOT via permanent loading.
+  const loading = enabled && !entry && !errorState && inFlight.has(key);
 
   return {
     data: entry?.data,
-    loading: loading || (enabled && !entry),
-    error,
+    loading,
+    error: errorState,
     revalidate,
   };
 }

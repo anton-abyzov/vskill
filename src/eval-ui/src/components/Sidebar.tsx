@@ -16,6 +16,8 @@ import { SkillRow } from "./SkillRow";
 import { SkeletonRow } from "./SkeletonRow";
 import { useKeyboardShortcut } from "../hooks/useKeyboardShortcut";
 import { strings } from "../strings";
+// 0772 US-006: sparse "GitHub not connected" indicator on the Project section.
+import { SidebarGitHubIndicator } from "./SidebarGitHubIndicator";
 
 // Virtualization threshold: ADR / scope brief target is 200 rows combined.
 export const VIRTUALIZATION_THRESHOLD = 200;
@@ -459,6 +461,11 @@ export function Sidebar({
             count={five.availableProject.total}
             filteredCount={query ? five.availableProject.filtered : null}
             updateCount={outdatedByScope?.installed ?? outdatedByOrigin?.installed}
+            headerRightSlot={
+              isClaudeCode ? (
+                <SidebarGitHubIndicator projectRoot={resolvedAgentId} />
+              ) : null
+            }
           >
             {five.availableProject.filtered === 0 ? (
               <InstalledEmptyState queryActive={!!query} agentId={resolvedAgentId} />
@@ -735,6 +742,7 @@ function NamedScopeSection({
   updateCount,
   children,
   forceOpen = false,
+  headerRightSlot,
 }: {
   label: string;
   storageKey: string;
@@ -748,6 +756,12 @@ function NamedScopeSection({
    * restored once forceOpen goes false.
    */
   forceOpen?: boolean;
+  /** 0772 US-006: optional content rendered at the right edge of the
+   *  section header (after `updateCount`, before the chevron flips).
+   *  Currently used by the AVAILABLE > Project section to surface the
+   *  GitHub-not-connected indicator. Click events should NOT bubble to
+   *  the toggle button; the slot handles its own onClick. */
+  headerRightSlot?: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(() => readCollapsedSafe(storageKey));
   // 0704: forceOpen overrides collapsed without mutating it.
@@ -773,69 +787,81 @@ function NamedScopeSection({
 
   return (
     <section data-vskill-named-scope={label}>
-      <button
-        type="button"
-        onClick={toggle}
-        aria-expanded={!effectiveCollapsed}
+      <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 8,
           width: "100%",
           padding: "6px 12px",
-          background: "transparent",
-          border: "none",
-          cursor: "pointer",
-          fontFamily: "var(--font-sans)",
-          textAlign: "left",
+          gap: 8,
         }}
       >
-        <span
-          aria-hidden
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={!effectiveCollapsed}
           style={{
-            fontSize: 14,
-            fontWeight: 700,
-            color: "var(--color-ink, var(--text-primary))",
-            width: 16,
-            display: "inline-block",
-            textAlign: "center",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flex: 1,
+            minWidth: 0,
+            padding: 0,
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            fontFamily: "var(--font-sans)",
+            textAlign: "left",
           }}
         >
-          {effectiveCollapsed ? "▸" : "▾"}
-        </span>
-        <span
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            letterSpacing: "0.06em",
-            textTransform: "uppercase",
-            color: "var(--text-primary)",
-          }}
-        >
-          {label}
-        </span>
-        <span
-          style={{
-            fontSize: 11,
-            color: "var(--text-tertiary)",
-            fontVariantNumeric: "tabular-nums",
-            fontFamily: "var(--font-mono)",
-          }}
-        >
-          ({countLabel})
-        </span>
-        {updateCount != null && updateCount > 0 && (
           <span
+            aria-hidden
             style={{
-              marginLeft: "auto",
-              fontSize: 10,
-              color: "var(--color-own, #f59e0b)",
+              fontSize: 14,
+              fontWeight: 700,
+              color: "var(--color-ink, var(--text-primary))",
+              width: 16,
+              display: "inline-block",
+              textAlign: "center",
             }}
           >
-            {updateCount} update{updateCount !== 1 ? "s" : ""}
+            {effectiveCollapsed ? "▸" : "▾"}
           </span>
-        )}
-      </button>
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: "var(--text-primary)",
+            }}
+          >
+            {label}
+          </span>
+          <span
+            style={{
+              fontSize: 11,
+              color: "var(--text-tertiary)",
+              fontVariantNumeric: "tabular-nums",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            ({countLabel})
+          </span>
+          {updateCount != null && updateCount > 0 && (
+            <span
+              style={{
+                marginLeft: "auto",
+                fontSize: 10,
+                color: "var(--color-own, #f59e0b)",
+              }}
+            >
+              {updateCount} update{updateCount !== 1 ? "s" : ""}
+            </span>
+          )}
+        </button>
+        {headerRightSlot}
+      </div>
       {!effectiveCollapsed && (
         // 0700 polish: indent children so plugin headers + skill rows sit
         // visually nested under the section label (which starts ~28px in

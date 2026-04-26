@@ -55,7 +55,7 @@ vim plugins/personal/skills/obsidian-brain/references/routing-rules.md
 
 ```bash
 # Security scan
-npx vskill scan plugins/personal/skills/obsidian-brain/SKILL.md
+npx vskill@latest scan plugins/personal/skills/obsidian-brain/SKILL.md
 
 # SKILL.md under 500 lines
 wc -l plugins/personal/skills/obsidian-brain/SKILL.md
@@ -93,11 +93,11 @@ git push origin main
 
 ```bash
 # Default: programmatic API submission (no browser)
-npx vskill submit anton-abyzov/vskill --skill obsidian-brain \
+npx vskill@latest submit anton-abyzov/vskill --skill obsidian-brain \
   --path plugins/personal/skills/obsidian-brain/SKILL.md
 
 # Browser fallback (OAuth)
-npx vskill submit anton-abyzov/vskill --skill obsidian-brain --browser
+npx vskill@latest submit anton-abyzov/vskill --skill obsidian-brain --browser
 
 # Direct API (curl)
 curl -X POST https://verified-skill.com/api/v1/submissions \
@@ -113,27 +113,27 @@ curl -X POST https://verified-skill.com/api/v1/submissions \
 ### 6. CHECK STATUS
 
 ```bash
-npx vskill info obsidian-brain       # Registry details
-npx vskill versions obsidian-brain   # Version history
-npx vskill outdated                  # Local vs registry comparison
-npx vskill list                      # All installed skills
-npx vskill list --json               # JSON format with SHA + version
+npx vskill@latest info obsidian-brain       # Registry details
+npx vskill@latest versions obsidian-brain   # Version history
+npx vskill@latest outdated                  # Local vs registry comparison
+npx vskill@latest list                      # All installed skills
+npx vskill@latest list --json               # JSON format with SHA + version
 ```
 
 ### 7. INSTALL / UPDATE
 
 ```bash
 # First install
-npx vskill install anton-abyzov/vskill/obsidian-brain
+npx vskill@latest install anton-abyzov/vskill/obsidian-brain
 
 # Update to latest
-npx vskill update obsidian-brain
+npx vskill@latest update obsidian-brain
 
 # Update ALL skills
-npx vskill update
+npx vskill@latest update
 
 # Pin to version
-npx vskill install obsidian-brain@1.1.0
+npx vskill@latest install obsidian-brain@1.1.0
 
 # Check lockfile
 cat vskill.lock | python3 -m json.tool
@@ -219,7 +219,7 @@ RECEIVED → TIER1_SCANNING → TIER2_SCANNING → AUTO_APPROVED → PUBLISHED
 
 ```bash
 cd repositories/anton-abyzov/vskill
-npx vskill studio
+npx vskill@latest studio
 # → Open http://localhost:3077
 ```
 

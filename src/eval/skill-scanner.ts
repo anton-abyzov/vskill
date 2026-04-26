@@ -79,6 +79,14 @@ export interface SkillInfo {
   pluginMarketplace?: string | null;
   pluginManifestPath?: string | null;
   pluginVersion?: string | null;
+  /**
+   * 0769 T-002: editable upstream source path for plugin-cache skills.
+   * For installed plugin skills, points at the marketplace clone
+   * (~/.claude/plugins/marketplaces/<mp>/plugins/<plugin>/skills/<skill>) when
+   * that directory exists, otherwise null. The cache snapshot at `dir` is a
+   * per-version copy; the marketplace clone is what users edit + git-track.
+   */
+  sourcePath?: string | null;
 }
 
 /** 0698 T-002: translate legacy scope → new 5-value vocabulary. */
@@ -540,7 +548,11 @@ function inodeKey(p: string): string | null {
   }
 }
 
-function installMethodFor(
+/**
+ * 0769 T-004: exported for plugin-scanner.ts so cache-installed plugin skills
+ * derive installMethod from lstat truth instead of a hardcoded "symlinked".
+ */
+export function installMethodFor(
   skillDir: string,
   scope: SkillScope,
   isSymlink?: boolean,

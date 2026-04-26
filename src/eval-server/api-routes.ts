@@ -16,7 +16,15 @@ import { parseSource } from "../resolvers/source-resolver.js";
 import { resolveSkillApiName as resolveSkillApiNameImpl } from "./skill-name-resolver.js";
 import { runBenchmarkSSE, runSingleCaseSSE, assembleBulkResult } from "./benchmark-runner.js";
 import { getSkillSemaphore } from "./concurrency.js";
-import { resolveSkillDir } from "./skill-resolver.js";
+import { resolveSkillDir, resolveAllowedSkillDir } from "./skill-resolver.js";
+import { setSkillDirEntry, ensurePluginCacheEntry } from "./skill-dir-registry.js";
+import {
+  pickInstalledVersion,
+  readSkillMd,
+  sha256Hex,
+  type UpstreamVersion,
+} from "./installed-version.js";
+import { extractFrontmatterVersion } from "../utils/version.js";
 import { scanSkills, classifyOrigin, scanSkillsTriScope, dedupeByDir } from "../eval/skill-scanner.js";
 import type { SkillInfo, SkillScope } from "../eval/skill-scanner.js";
 import {
@@ -119,6 +127,10 @@ export interface AgentScopeEntry {
   isDefault: boolean;
   localSkillCount: number;
   globalSkillCount: number;
+  // 0772 US-002: plugin skills are a Claude-Code-only concept (the marketplace
+  // plugin model belongs to CC). Populated for claude-code via
+  // scanInstalledPluginSkills; always 0 for other agents.
+  pluginSkillCount: number;
   resolvedLocalDir: string;
   resolvedGlobalDir: string;
   lastSync: string | null;
@@ -213,6 +225,15 @@ export async function buildAgentsResponse(
     return agentPresenceCache.data;
   }
 
+  // 0772 US-002: count plugin skills once for claude-code. The plugin scanner
+  // walks ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills/, so
+  // the result is independent of agent identity (plugins are CC-only by
+  // current registry design). Pass `home` so tests can override the homedir.
+  const claudePluginCount = scanInstalledPluginSkills({
+    agentId: "claude-code",
+    home,
+  }).length;
+
   // Map each agent → resolved local + global dir. For tests, `home` overrides
   // the homedir-derived global path. In production, resolveGlobalSkillsDir()
   // handles cross-platform resolution (darwin / linux / win32).
@@ -263,6 +284,7 @@ export async function buildAgentsResponse(
       isDefault,
       localSkillCount,
       globalSkillCount,
+      pluginSkillCount: agent.id === "claude-code" ? claudePluginCount : 0,
       resolvedLocalDir,
       resolvedGlobalDir,
       lastSync,
@@ -1897,6 +1919,20 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       scope: rawScope,
       agent: activeAgent,
     });
+
+    // 0769 T-008: keep an in-memory (plugin, skill) → dir registry so the
+    // /files and /file routes can serve plugin-cache skills whose directory
+    // lives outside `root` (~/.claude/plugins/cache/...).
+    for (const s of filtered) {
+      if (s.plugin && s.skill) {
+        setSkillDirEntry(s.plugin, s.skill, {
+          dir: s.dir,
+          sourcePath: s.sourcePath ?? null,
+          origin: s.origin,
+        });
+      }
+    }
+
     sendJson(res, filtered, 200, req);
   });
 
@@ -1904,20 +1940,56 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // directly instead of shelling out to whatever `vskill` is on PATH (which
   // may be a different version than the studio is bundling). This guarantees
   // the disk-version reconcile from outdated.ts is applied uniformly.
+  //
+  // 0747 T-002: enrich each row with `installLocations[]`, `localPlugin`,
+  // `localSkill` so the Studio's bell dropdown can render tooltips and route
+  // smart clicks via `revealSkill` instead of guessing local fs identifiers
+  // from the canonical platform name.
   router.get("/api/skills/updates", async (req, res) => {
     try {
       const { getOutdatedJson } = await import("../commands/outdated.js");
+      const { scanSkillInstallLocations } = await import("./utils/scan-install-locations.js");
       const programmatic = await getOutdatedJson();
       if (!programmatic) {
         sendJson(res, [], 200, req);
         return;
       }
-      const enriched = programmatic.results.map((r) => ({
-        ...r,
-        ...(programmatic.pinMap.has(r.name)
-          ? { pinned: true, pinnedVersion: programmatic.pinMap.get(r.name) }
-          : {}),
-      }));
+      // 0747 AC-US4-06 + code-review F-004: per-request memoization keyed by
+      // canonical skill name. Each unique name is scanned exactly once even
+      // if it appears in multiple rows, so the syscall cost is O(unique
+      // names × agents × scopes), not O(rows × agents × scopes). For a
+      // typical /updates response every row has a distinct name, so this
+      // matches the previous one-call-per-row behavior on the happy path
+      // while giving a correct lower bound when names ever duplicate.
+      const scanCache = new Map<string, ReturnType<typeof scanSkillInstallLocations>>();
+      const scanOnce = (name: string) => {
+        const hit = scanCache.get(name);
+        if (hit !== undefined) return hit;
+        const fresh = scanSkillInstallLocations(name, root);
+        scanCache.set(name, fresh);
+        return fresh;
+      };
+      const enriched = programmatic.results.map((r) => {
+        const locations = scanOnce(r.name);
+        const localSkill = r.name.split("/").pop();
+        // Highest-precedence install wins for the local fs pair the click
+        // handler reveals: project > personal > plugin.
+        const precedence = { project: 0, personal: 1, plugin: 2 } as const;
+        const winner = [...locations].sort(
+          (a, b) =>
+            precedence[a.scope as keyof typeof precedence] -
+            precedence[b.scope as keyof typeof precedence],
+        )[0];
+        return {
+          ...r,
+          ...(programmatic.pinMap.has(r.name)
+            ? { pinned: true, pinnedVersion: programmatic.pinMap.get(r.name) }
+            : {}),
+          installLocations: locations,
+          localSkill,
+          ...(winner?.pluginSlug ? { localPlugin: winner.pluginSlug } : {}),
+        };
+      });
       sendJson(res, enriched, 200, req);
     } catch {
       sendJson(res, [], 200, req);
@@ -1936,8 +2008,8 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
    * (installed skills); falls back to authored-skill discovery on disk +
    * git remote parse for skills authored in this repo. See skill-name-resolver.ts.
    */
-  function resolveSkillApiName(skill: string): Promise<string> {
-    return resolveSkillApiNameImpl(skill, root);
+  function resolveSkillApiName(skill: string, plugin: string | null = null): Promise<string> {
+    return resolveSkillApiNameImpl(skill, root, plugin);
   }
 
   // T-009 (proxy) + 0707 T-021 (harden): Versions endpoint
@@ -1952,7 +2024,9 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   //
   // Never returns 5xx for the "no VCS surface" case — that is normal empty state.
   router.get("/api/skills/:plugin/:skill/versions", async (req, res, params) => {
-    const fullName = await resolveSkillApiName(params.skill);
+    // 0765: pass plugin so installed-agent views (.claude/, .cursor/, ...)
+    // resolve via lockfile instead of source-tree probe.
+    const fullName = await resolveSkillApiName(params.skill, params.plugin);
     const parts = fullName.split("/");
     const apiPath = parts.length === 3
       ? `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}/versions`
@@ -1988,12 +2062,41 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     }
     const versions = Array.isArray(data.versions) ? data.versions : [];
 
-    // Enrich with isInstalled from lockfile
+    // 0764: enrich `isInstalled` via precedence chain
+    //   lockfile > frontmatter `version:` > on-disk SKILL.md content-hash.
+    // Pre-0764 we only consulted the lockfile; Anthropic-installed skills
+    // (`.claude/skills/<name>/`) have no lockfile entry, so every row used
+    // to come back with `isInstalled: undefined` and the UI couldn't render
+    // the installed badge or the "Update to <latest>" button.
     const lock = readLockfile();
-    const installedVersion = lock?.skills[params.skill]?.version;
+    const lockfileVersion = lock?.skills[params.skill]?.version ?? null;
+
+    let frontmatterVersion: string | null = null;
+    let onDiskContentHash: string | null = null;
+    if (!lockfileVersion) {
+      try {
+        const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+        const md = readSkillMd(skillDir);
+        if (md) {
+          frontmatterVersion = extractFrontmatterVersion(md) ?? null;
+          onDiskContentHash = sha256Hex(md);
+        }
+      } catch {
+        // resolveSkillDir throws on directory-traversal — silently skip the
+        // fallback (no signal beyond lockfile then).
+      }
+    }
+
+    const installedVersion = pickInstalledVersion({
+      versions: versions as UpstreamVersion[],
+      lockfileVersion,
+      frontmatterVersion,
+      onDiskContentHash,
+    });
+
     const enriched = versions.map((v: any) => ({
       ...v,
-      isInstalled: installedVersion ? v.version === installedVersion : undefined,
+      isInstalled: installedVersion ? v.version === installedVersion : false,
     }));
 
     sendJson(
@@ -2015,7 +2118,8 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       return;
     }
 
-    const fullName = await resolveSkillApiName(params.skill);
+    // 0765: same plugin-aware resolution as /versions.
+    const fullName = await resolveSkillApiName(params.skill, params.plugin);
     const parts = fullName.split("/");
     const basePath = parts.length === 3
       ? `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}/versions/diff`
@@ -2049,20 +2153,99 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   });
 
   // T-011: Single-skill update SSE endpoint
+  //
+  // 0747 T-003: optional `?agent=<id>` query param scopes the update to a
+  // single agent's install. The id MUST be in AGENTS_REGISTRY (allowlist) —
+  // it is interpolated into the execSync command, so any non-allowlisted
+  // value is rejected before reaching the shell. Without `?agent`, behavior
+  // is unchanged and `vskill update` does its built-in cross-agent fan-out.
+  // 0747 code-review/grill F-002: validate :skill route params against a
+  // strict slug regex. Without this, a value starting with `--` becomes a
+  // CLI flag instead of a positional arg (e.g. `vskill update --force`
+  // touches every skill including pinned ones). execFileSync prevents
+  // shell injection but Commander still parses argv. Allowed: alphanum,
+  // dot, underscore, hyphen, slash (for canonical owner/repo/skill names).
+  const SKILL_SLUG_RE = /^[a-zA-Z0-9._/-]+$/;
+  const isSafeSkillName = (s: string): boolean =>
+    typeof s === "string" &&
+    s.length > 0 &&
+    s.length <= 200 &&
+    !s.startsWith("-") &&
+    SKILL_SLUG_RE.test(s);
+
   router.post("/api/skills/:plugin/:skill/update", async (req, res, params) => {
     initSSE(res, req);
     const skillName = params.skill;
 
-    sendSSE(res, "progress", { status: "updating", skill: skillName });
+    // 0747 grill F-002: reject before doing anything so a malformed slug
+    // can never reach Commander as a flag.
+    if (!isSafeSkillName(skillName)) {
+      sendSSE(res, "error", {
+        error: `Invalid skill name: ${skillName}`,
+        skill: skillName,
+      });
+      sendSSEDone(res, { status: "error", skill: skillName });
+      return;
+    }
+
+    // Parse optional ?agent=<id>
+    let agentId: string | null = null;
+    try {
+      const reqUrl = (req as { url?: string }).url ?? "";
+      const url = new URL(reqUrl, "http://localhost");
+      const raw = url.searchParams.get("agent");
+      if (raw !== null) {
+        const allowed = AGENTS_REGISTRY.some((a) => a.id === raw);
+        if (!allowed) {
+          sendSSE(res, "error", {
+            error: `Unknown agent id: ${raw}`,
+            skill: skillName,
+          });
+          sendSSEDone(res, { status: "error", skill: skillName });
+          return;
+        }
+        agentId = raw;
+      }
+    } catch {
+      // URL parse error → behave as if ?agent was omitted
+    }
+
+    sendSSE(res, "progress", {
+      status: "updating",
+      skill: skillName,
+      ...(agentId ? { agent: agentId } : {}),
+    });
 
     try {
-      execSync(`vskill update ${skillName}`, {
+      // 0747 code-review F-001: use execFileSync with argv array — never
+      // shell-interpolate user-controlled values. skillName comes from a
+      // route param and could otherwise carry shell metacharacters via
+      // decodeURIComponent. agentId is allowlisted above; we still pass it
+      // as a separate arg for defense-in-depth.
+      const args = ["update", skillName];
+      if (agentId) args.push("--agent", agentId);
+      // 0765: pin cwd to the studio root so the CLI's process.cwd()-based
+      // lockfile lookup AND its agent-dir SKILL.md sync target both land in
+      // the right tree. Without this, a studio launched with --root <X> from
+      // a different shell cwd would update the lockfile but leave on-disk
+      // SKILL.md frontmatter stale (the bell would refresh, but the version
+      // chip wouldn't).
+      execFileSync("vskill", args, {
         timeout: 60_000,
         encoding: "utf-8",
         stdio: ["ignore", "pipe", "pipe"],
+        cwd: root,
       });
-      sendSSE(res, "progress", { status: "done", skill: skillName });
-      sendSSEDone(res, { status: "done", skill: skillName });
+      sendSSE(res, "progress", {
+        status: "done",
+        skill: skillName,
+        ...(agentId ? { agent: agentId } : {}),
+      });
+      sendSSEDone(res, {
+        status: "done",
+        skill: skillName,
+        ...(agentId ? { agent: agentId } : {}),
+      });
     } catch (err) {
       sendSSE(res, "error", { error: (err as Error).message, skill: skillName });
       sendSSEDone(res, { status: "error", skill: skillName });
@@ -2091,11 +2274,27 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       for (const skill of skills) {
         sendSSE(res, "skill:start", { skill });
 
+        // 0747 grill F-002: reject body.skills[] entries that could be
+        // misread by Commander as flags (e.g. `--force`).
+        if (!isSafeSkillName(skill)) {
+          sendSSE(res, "skill:error", {
+            skill,
+            error: `Invalid skill name: ${skill}`,
+          });
+          failed++;
+          continue;
+        }
+
         try {
-          execSync(`vskill update ${skill}`, {
+          // 0747 code-review F-001 (defense-in-depth): batch endpoint also
+          // shell-interpolated body.skills[]. Switch to execFileSync argv
+          // form so request-body values can never reach the shell.
+          // 0765: pin cwd (see single-skill update handler above).
+          execFileSync("vskill", ["update", skill], {
             timeout: 60_000,
             encoding: "utf-8",
             stdio: ["ignore", "pipe", "pipe"],
+            cwd: root,
           });
           sendSSE(res, "skill:done", { skill });
           updated++;
@@ -2111,9 +2310,39 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     }
   });
 
+  // 0769 T-008: allowlist for skill-dir resolution. Plugin-cache snapshots
+  // and marketplace clones live OUTSIDE the studio root, so the file-tree and
+  // file-read routes need to reach into ~/.claude/plugins/{cache,marketplaces}
+  // and ~/.claude/skills. Path traversal is rejected by validateAgainstAllowlist
+  // inside resolveAllowedSkillDir.
+  const skillFsAllowedRoots = (): string[] => {
+    const home = homedir();
+    return [
+      root,
+      join(home, ".claude/plugins/cache"),
+      join(home, ".claude/plugins/marketplaces"),
+      join(home, ".claude/skills"),
+    ];
+  };
+  // 0769 F-002: cold-server deep links to /api/skills/:plugin/:skill/files (or
+  // /file) hit the route before the user has visited /api/skills, so the
+  // SkillDirRegistry hasn't been populated yet. Lazy-fill it on registry miss
+  // by running scanInstalledPluginSkills once. Subsequent calls hit the fast
+  // path via setSkillDirEntry inside ensurePluginCacheEntry.
+  const resolveSkillDirForFsRoute = async (plugin: string, skill: string): Promise<string> => {
+    await ensurePluginCacheEntry(plugin, skill);
+    return resolveAllowedSkillDir(root, plugin, skill, skillFsAllowedRoots());
+  };
+
   // Get skill detail
   router.get("/api/skills/:plugin/:skill", async (req, res, params) => {
-    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    let skillDir: string;
+    try {
+      skillDir = await resolveSkillDirForFsRoute(params.plugin, params.skill);
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 400, req);
+      return;
+    }
     const skillMdPath = join(skillDir, "SKILL.md");
     let skillContent = "";
     try {
@@ -2124,9 +2353,11 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // List all files in a skill directory (recursive, flat list)
   router.get("/api/skills/:plugin/:skill/files", async (req, res, params) => {
-    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
-    if (!resolve(skillDir).startsWith(resolve(root))) {
-      sendJson(res, { error: "Invalid skill path" }, 400, req);
+    let skillDir: string;
+    try {
+      skillDir = await resolveSkillDirForFsRoute(params.plugin, params.skill);
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 400, req);
       return;
     }
     if (!existsSync(skillDir)) {
@@ -2175,9 +2406,11 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Read any file in a skill directory (with path traversal protection)
   router.get("/api/skills/:plugin/:skill/file", async (req, res, params) => {
-    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
-    if (!resolve(skillDir).startsWith(resolve(root))) {
-      sendJson(res, { error: "Invalid skill path" }, 400, req);
+    let skillDir: string;
+    try {
+      skillDir = await resolveSkillDirForFsRoute(params.plugin, params.skill);
+    } catch (err) {
+      sendJson(res, { error: (err as Error).message }, 400, req);
       return;
     }
 

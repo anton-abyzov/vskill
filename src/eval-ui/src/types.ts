@@ -246,6 +246,13 @@ export interface SkillInfo {
   symlinkTarget?: string | null;
   /** How the skill got here: author (own), copied (regular file install), or symlinked (plugin cache). */
   installMethod?: "authored" | "copied" | "symlinked";
+  /**
+   * 0769 T-009: editable upstream source path for plugin-cache installs
+   * (~/.claude/plugins/marketplaces/<mp>/plugins/<plugin>/skills/<skill>).
+   * `null` when no marketplace clone exists. The DetailHeader path chip
+   * prefers this over `dir` (the per-version cache snapshot).
+   */
+  sourcePath?: string | null;
   // -------------------------------------------------------------------------
   // Pre-existing install/update state (populated by mergeUpdatesIntoSkills).
   // -------------------------------------------------------------------------
@@ -286,6 +293,10 @@ export interface AgentScopeEntry {
   isDefault: boolean;
   localSkillCount: number;
   globalSkillCount: number;
+  // 0772 US-002: plugin skills are a Claude-Code-only concept. Optional so
+  // older server payloads (pre-0.5.139) don't fail typecheck — the adapter
+  // defaults to 0 when absent.
+  pluginSkillCount?: number;
   resolvedLocalDir: string;
   resolvedGlobalDir: string;
   lastSync: string | null;

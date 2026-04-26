@@ -42,6 +42,38 @@ import { CheckNowButton } from "./CheckNowButton";
 
 type DetailTab = PanelId | "overview";
 
+// 0769 Part B (T-019/T-022/T-023): persona-conditional tab descriptors.
+//
+// AUTHOR (origin === "source", isReadOnly === false) sees 6 tabs:
+//   Overview | Edit | Tests | Run | Trigger | Versions
+// CONSUMER (origin === "installed", isReadOnly === true) sees 3:
+//   Overview | Trigger | Versions
+//
+// History, Leaderboard, and Deps are no longer top-level tabs — their
+// existing panels remain rendered when the user deep-links via
+// `?panel=history|leaderboard|deps` (so existing bookmarks don't 404), but
+// the tab bar surfaces only the 6/3 set above.
+//
+// "Activation" is relabelled "Trigger" in the UI; the internal id stays
+// `"activation"` (the panel id, the route names, the storage filenames are
+// unchanged). Both `?panel=activation` and `?panel=trigger` resolve to the
+// same panel — Trigger is the canonical written form.
+interface TabDescriptor {
+  id: DetailTab;
+  label: string;
+  /** Predicate against the persona signal — defaults to always-visible. */
+  visibleWhen?: (ctx: { isReadOnly: boolean }) => boolean;
+}
+
+const TAB_DESCRIPTORS: TabDescriptor[] = [
+  { id: "overview", label: "Overview" },
+  { id: "editor", label: "Edit", visibleWhen: ({ isReadOnly }) => !isReadOnly },
+  { id: "tests", label: "Tests", visibleWhen: ({ isReadOnly }) => !isReadOnly },
+  { id: "run", label: "Run", visibleWhen: ({ isReadOnly }) => !isReadOnly },
+  { id: "activation", label: "Trigger" },
+  { id: "versions", label: "Versions" },
+];
+
 const ALL_TABS: DetailTab[] = [
   "overview",
   "editor",
@@ -56,10 +88,10 @@ const ALL_TABS: DetailTab[] = [
 
 const TAB_LABELS: Record<DetailTab, string> = {
   overview: "Overview",
-  editor: "Editor",
+  editor: "Edit",
   tests: "Tests",
   run: "Run",
-  activation: "Activation",
+  activation: "Trigger",
   history: "History",
   leaderboard: "Leaderboard",
   deps: "Deps",
@@ -70,11 +102,43 @@ function isValidTab(value: unknown): value is DetailTab {
   return typeof value === "string" && (ALL_TABS as string[]).includes(value);
 }
 
+/** Persona-conditional visibility filter for the live tab bar. */
+function visibleTabsFor(isReadOnly: boolean): TabDescriptor[] {
+  return TAB_DESCRIPTORS.filter((t) => (t.visibleWhen ? t.visibleWhen({ isReadOnly }) : true));
+}
+
 function readInitialTab(): DetailTab {
   if (typeof window === "undefined") return "overview";
   const params = new URLSearchParams(window.location.search);
   const fromQuery = params.get("panel");
+  // 0769 T-023: accept "trigger" as an alias for "activation" so the new
+  // user-facing label round-trips through deep links.
+  if (fromQuery === "trigger") return "activation";
   if (isValidTab(fromQuery)) return fromQuery;
+  return "overview";
+}
+
+/**
+ * 0769 T-024: when the URL deep-links to an author-only tab on a read-only
+ * (consumer) skill, redirect to Overview. Returns the safe tab.
+ *
+ * Back-compat (F-001 followup): we explicitly allow `history`, `leaderboard`,
+ * and `deps` deep-links even on consumer skills — these panels were eliminated
+ * from the visible tab BAR (the IA reorg) but the panels themselves remain
+ * mountable to honor existing bookmarks. Only the author-workbench tabs
+ * (editor, tests, run) get redirected away from consumers.
+ */
+const CONSUMER_BACKCOMPAT_TABS: ReadonlySet<DetailTab> = new Set<DetailTab>([
+  "history",
+  "leaderboard",
+  "deps",
+]);
+
+function applyPersonaRedirect(active: DetailTab, isReadOnly: boolean): DetailTab {
+  if (!isReadOnly) return active;
+  const allowed = new Set(visibleTabsFor(true).map((t) => t.id));
+  if (allowed.has(active)) return active;
+  if (CONSUMER_BACKCOMPAT_TABS.has(active)) return active;
   return "overview";
 }
 
@@ -141,9 +205,13 @@ export function RightPanel(props: Props = {}) {
       <div className="h-full overflow-auto animate-fade-in">
         <MobileBackButton />
         <CreateSkillInline
-          onCreated={(plugin, skill) => {
+          onCreated={async (plugin, skill) => {
+            // 0772 US-004 (AC-US4-01): await refreshSkills BEFORE selecting so
+            // the right-pane skillInfo lookup finds the new row. Without the
+            // await, the URL hash flips but the detail view falls back to the
+            // empty state because state.skills hasn't refreshed yet.
             setMode("browse");
-            refreshSkills();
+            await refreshSkills();
             selectSkill({ plugin, skill, origin: "source" });
           }}
           onCancel={() => setMode("browse")}
@@ -158,6 +226,16 @@ export function RightPanel(props: Props = {}) {
     }
     if (!state.skillsLoading && state.skills.length === 0) {
       return <EmptyState variant="no-skills" />;
+    }
+    // 0772 US-003: when global/plugin skills exist but the project bucket is
+    // empty, surface actionable CTAs (Browse marketplaces / Create new skill)
+    // instead of the passive "Select a skill" copy.
+    if (
+      !state.skillsLoading &&
+      state.skills.length > 0 &&
+      !state.skills.some((s) => s.scopeV2 === "available-project")
+    ) {
+      return <EmptyState variant="no-project-skills" />;
     }
     return <EmptyState variant="no-selection" />;
   }
@@ -210,6 +288,30 @@ function IntegratedDetailShell({
 }) {
   const [active, setActive] = useState<DetailTab>(readInitialTab());
 
+  // 0769 T-024: when the URL deep-links into a hidden author-only tab on a
+  // read-only consumer skill, redirect to Overview ONCE and dispatch a toast.
+  // The redirect runs as an effect (not in render) so we can fire the toast.
+  useEffect(() => {
+    if (!skillInfo) return;
+    const isReadOnly = skillInfo.origin === "installed";
+    if (!isReadOnly) return;
+    const safe = applyPersonaRedirect(active, true);
+    if (safe !== active) {
+      setActive(safe);
+      // Fire-and-forget toast — same `studio:toast` event other components use.
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("studio:toast", {
+            detail: {
+              message: "This skill is read-only — workbench tabs are hidden.",
+              severity: "info",
+            },
+          }),
+        );
+      }
+    }
+  }, [skillInfo, active]);
+
   // Sync active tab to the ?panel= query param so deep links round-trip.
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -217,7 +319,9 @@ function IntegratedDetailShell({
     if (active === "overview") {
       params.delete("panel");
     } else {
-      params.set("panel", active);
+      // 0769 T-023: write "trigger" instead of "activation" — canonical URL
+      // form. Reading still accepts both for back-compat.
+      params.set("panel", active === "activation" ? "trigger" : active);
     }
     const qs = params.toString();
     const url = `${window.location.pathname}${qs ? "?" + qs : ""}${window.location.hash}`;
@@ -232,7 +336,12 @@ function IntegratedDetailShell({
   return <div className="flex flex-col h-full" style={{ background: "var(--bg-canvas)" }}>{content}</div>;
 }
 
-function renderTabBar(active: DetailTab, onChange?: (t: DetailTab) => void) {
+function renderTabBar(
+  active: DetailTab,
+  onChange: ((t: DetailTab) => void) | undefined,
+  isReadOnly: boolean,
+) {
+  const tabs = visibleTabsFor(isReadOnly);
   return (
     <div
       role="tablist"
@@ -248,7 +357,7 @@ function renderTabBar(active: DetailTab, onChange?: (t: DetailTab) => void) {
         overflowX: "auto",
       }}
     >
-      {ALL_TABS.map((t) => {
+      {tabs.map(({ id: t, label }) => {
         const isActive = t === active;
         return (
           <button
@@ -275,7 +384,7 @@ function renderTabBar(active: DetailTab, onChange?: (t: DetailTab) => void) {
               whiteSpace: "nowrap",
             }}
           >
-            {TAB_LABELS[t]}
+            {label}
           </button>
         );
       })}
@@ -413,6 +522,9 @@ function renderSkillDetail(
   onChange?: (t: DetailTab) => void,
   integrated?: { allSkills: SkillInfo[]; onSelectSkill: (s: { plugin: string; skill: string; origin: "source" | "installed" }) => void },
 ) {
+  // 0769 T-024: persona signal — installed skills are read-only consumers.
+  const isReadOnly = skill.origin === "installed";
+  const safeActive = applyPersonaRedirect(active, isReadOnly);
   const onNavigate = (panel: PanelId) => {
     onChange?.(panel);
   };
@@ -493,8 +605,14 @@ function renderSkillDetail(
       {/* 0708 T-073/T-074 + wrap-up: per-skill "Check now" rescan button.
           Renders only for tracked skills (sourceRepoUrl present) per
           AC-US8-04. Placed alongside UpdateAction so users can manually
-          probe the upstream repo without leaving the detail view. */}
-      {skill.origin === "installed" && (
+          probe the upstream repo without leaving the detail view.
+
+          0769 T-017 (US-006): hide for plugin-cache installs
+          (scopeV2 === "available-plugin"). Plugin-cache skills update via
+          Claude Code's plugin manager, NOT via verified-skill.com — the
+          /api/v1/skills/:id/rescan endpoint doesn't exist for them and the
+          button would 404. We let CC own its own plugin updates. */}
+      {skill.origin === "installed" && skill.scopeV2 !== "available-plugin" && (
         <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--border-default)" }}>
           <CheckNowButton
             plugin={skill.plugin}
@@ -503,15 +621,15 @@ function renderSkillDetail(
           />
         </div>
       )}
-      {renderTabBar(active, onChange)}
+      {renderTabBar(safeActive, onChange, isReadOnly)}
       <div
         role="tabpanel"
-        id={`detail-panel-${active}`}
-        aria-labelledby={`detail-tab-${active}`}
-        data-testid={`detail-panel-${active}`}
+        id={`detail-panel-${safeActive}`}
+        aria-labelledby={`detail-tab-${safeActive}`}
+        data-testid={`detail-panel-${safeActive}`}
         style={{ flex: 1, minHeight: 0, overflow: "auto" }}
       >
-        {active === "overview" ? overviewBody : workspaceBody}
+        {safeActive === "overview" ? overviewBody : workspaceBody}
       </div>
     </div>
   );

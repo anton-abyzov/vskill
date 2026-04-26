@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useStudio } from "../StudioContext";
 
 interface Props {
-  variant: "no-selection" | "no-skills" | "error" | "no-results";
+  variant: "no-selection" | "no-skills" | "no-project-skills" | "error" | "no-results";
   message?: string;
   onRetry?: () => void;
 }
@@ -80,6 +80,64 @@ export function EmptyState({ variant, message, onRetry }: Props) {
           </svg>
           Create Your First Skill
         </button>
+      </div>
+    );
+  }
+
+  if (variant === "no-project-skills") {
+    return (
+      <div className="flex flex-col items-center justify-center h-full px-8 animate-fade-in" data-testid="empty-state-no-project-skills">
+        <div className="mb-5">
+          {!imgError ? (
+            <img
+              src="/images/empty-studio.webp"
+              width={128}
+              height={128}
+              alt=""
+              onError={() => setImgError(true)}
+              style={{ objectFit: "contain" }}
+            />
+          ) : (
+            <FallbackIcon />
+          )}
+        </div>
+        <p className="text-[15px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>
+          No skills installed for this project yet.
+        </p>
+        <p className="text-[12px] mb-5" style={{ color: "var(--text-tertiary)", maxWidth: 360, textAlign: "center" }}>
+          Browse the marketplace to install one, or author a new skill from scratch.
+        </p>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            data-testid="empty-state-browse-marketplaces"
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("studio:open-marketplace"));
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium transition-all duration-150"
+            style={{ background: "var(--accent)", color: "#fff", border: "none", cursor: "pointer" }}
+            aria-label="Browse marketplaces"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
+              <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+            </svg>
+            Browse marketplaces
+          </button>
+          <button
+            type="button"
+            data-testid="empty-state-create-skill"
+            onClick={() => setMode("create")}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium transition-all duration-150"
+            style={{ background: "var(--surface-2)", color: "var(--text-primary)", border: "1px solid var(--border-default, var(--border-subtle))", cursor: "pointer" }}
+            aria-label="Create new skill"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Create new skill
+          </button>
+        </div>
       </div>
     );
   }

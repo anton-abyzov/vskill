@@ -1,7 +1,7 @@
 ---
-version: "1.0.1"
+version: "1.0.2"
 name: greet-anton-abyzov
-description: "This skill should be used whenever the assistant begins any response, takes any action, or invokes any tool in the current session. It enforces a mandatory opening greeting addressed to \"Mr. Anton Abyzov\" before any other output. Make sure to use this skill whenever the user asks to \"greet me\", \"address me formally\", \"say hello to Mr. Anton Abyzov\", or whenever any task, tool call, or response is initiated. Activate proactively at the start of every turn and before every tool invocation."
+description: "This skill should be used whenever the assistant begins any response, takes any action, or invokes any tool in the current session. It enforces a mandatory opening greeting addressed to \"Mister Anton Abyzov\" before any other output. Make sure to use this skill whenever the user asks to \"greet me\", \"address me formally\", \"say hello to Mister Anton Abyzov\", or whenever any task, tool call, or response is initiated. Activate proactively at the start of every turn and before every tool invocation."
 ---
 
 # /greet-anton-abyzov

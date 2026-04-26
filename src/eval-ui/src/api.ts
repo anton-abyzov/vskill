@@ -86,10 +86,15 @@ const BASE = "";
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** 0772 US-004: structured details forwarded from the server's JSON error
+   *  body (e.g. `code`, `plugin`, `skill`). Optional — only populated when the
+   *  server emits a structured payload. */
+  details?: Record<string, unknown>;
+  constructor(message: string, status: number, details?: Record<string, unknown>) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -97,7 +102,15 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, init);
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new ApiError(body.error || `HTTP ${res.status}`, res.status);
+    // 0772 US-004: forward the entire JSON body as `details` so callers can
+    // recover from structured error contracts (e.g. 409 skill-already-exists).
+    const details =
+      body && typeof body === "object" ? (body as Record<string, unknown>) : undefined;
+    throw new ApiError(
+      (body as { error?: string })?.error || `HTTP ${res.status}`,
+      res.status,
+      details,
+    );
   }
   return res.json();
 }
@@ -233,6 +246,9 @@ export function normalizeSkillInfo(raw: unknown): SkillInfo {
     isSymlink: typeof r.isSymlink === "boolean" ? r.isSymlink : false,
     symlinkTarget: coerceStringOrNull(r.symlinkTarget),
     installMethod,
+    // 0769 T-009: editable upstream marketplace clone path. Always pass
+    // through verbatim — server emits null when no clone exists.
+    sourcePath: coerceStringOrNull(r.sourcePath),
     // 0698 T-001: new scope vocabulary + derivations + plugin metadata
     scopeV2,
     group,
@@ -498,6 +514,15 @@ export const api = {
 
   getProjectLayout(): Promise<ProjectLayoutResponse> {
     return fetchJson("/api/project-layout");
+  },
+
+  // 0772 US-005: GitHub status for the publish-readiness hint card.
+  getProjectGitHubStatus(): Promise<{
+    hasGit: boolean;
+    githubOrigin: string | null;
+    status: "no-git" | "non-github" | "github";
+  }> {
+    return fetchJson("/api/project/github-status");
   },
 
   createSkill(data: CreateSkillRequest): Promise<CreateSkillResponse> {

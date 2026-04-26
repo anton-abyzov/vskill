@@ -2,57 +2,21 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "vskill-0698",
+      "name": "vskill-studio-0747",
       "runtimeExecutable": "node",
-      "runtimeArgs": [
-        "dist/index.js",
-        "eval",
-        "serve",
-        "--root",
-        ".",
-        "--port",
-        "3162"
-      ],
-      "port": 3162
+      "runtimeArgs": ["dist/bin.js", "studio", "--port", "3185", "--no-open"],
+      "port": 3185
     },
     {
-      "name": "vskill-0740-verify",
+      "name": "vskill-studio-0761",
       "runtimeExecutable": "node",
       "runtimeArgs": [
-        "dist/index.js",
+        "/Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/dist/bin.js",
         "studio",
-        "--root",
-        "/Users/antonabyzov/Projects/github/specweave-umb",
         "--port",
-        "3163"
+        "3170"
       ],
-      "port": 3163
-    },
-    {
-      "name": "vskill-versions-tab-fix",
-      "runtimeExecutable": "node",
-      "runtimeArgs": [
-        "dist/bin.js",
-        "studio",
-        "--root",
-        "/Users/antonabyzov/Projects/github/specweave-umb",
-        "--port",
-        "3138"
-      ],
-      "port": 3138
-    },
-    {
-      "name": "vskill-readonly-banner-verify",
-      "runtimeExecutable": "node",
-      "runtimeArgs": [
-        "dist/index.js",
-        "studio",
-        "--root",
-        "/Users/antonabyzov/Projects/github/specweave-umb",
-        "--port",
-        "3164"
-      ],
-      "port": 3164
+      "port": 3170
     }
   ]
 }

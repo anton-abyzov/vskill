@@ -4,11 +4,12 @@
 
 import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
 import { join, basename, resolve, sep } from "node:path";
+import { spawnSync } from "node:child_process";
 import type { Router } from "./router.js";
 import { isSkillCreatorInstalled } from "../utils/skill-creator-detection.js";
 import { sendJson, readBody } from "./router.js";
 import type { ProviderName } from "../eval/llm.js";
-import { detectAvailableProviders, parseSkillFrontmatter } from "./api-routes.js";
+import { detectAvailableProviders, parseSkillFrontmatter, parseGithubRemote, walkUpForGitRoot } from "./api-routes.js";
 import { initSSE, sendSSE, sendSSEDone } from "./sse-helpers.js";
 import { classifyError } from "./error-classifier.js";
 import { writeHistoryEntry } from "../eval/benchmark-history.js";
@@ -137,6 +138,53 @@ function listSkillDirs(skillsDir: string): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * 0772 US-005 — Probe whether the project has a `.git` directory and a
+ * GitHub `origin` remote. Used by `GET /api/project/github-status` to drive
+ * the publish-readiness hint card on the Skill Overview tab.
+ *
+ * Returns a deterministic three-state result:
+ *   - `no-git`     → no `.git` found by walking up from `root` (12 levels max)
+ *   - `non-github` → `.git` exists but `origin` is missing or not on github.com
+ *   - `github`     → `.git` exists and `origin` resolves to a github.com URL
+ *
+ * Uses `spawnSync` with a 250ms timeout — same pattern as the onboarding
+ * detection. Any failure short-circuits to `no-git` (safe default; the UI
+ * shows the bootstrap hint instead of crashing).
+ */
+export interface ProjectGitHubStatus {
+  hasGit: boolean;
+  githubOrigin: string | null;
+  status: "no-git" | "non-github" | "github";
+}
+
+export function detectProjectGitHubStatus(root: string): ProjectGitHubStatus {
+  const gitRoot = walkUpForGitRoot(root);
+  if (!gitRoot) {
+    return { hasGit: false, githubOrigin: null, status: "no-git" };
+  }
+
+  let originUrl: string | null = null;
+  try {
+    const result = spawnSync("git", ["-C", gitRoot, "remote", "get-url", "origin"], {
+      timeout: 250,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    if (result.status === 0 && typeof result.stdout === "string") {
+      originUrl = result.stdout.trim() || null;
+    }
+  } catch {
+    originUrl = null;
+  }
+
+  const githubOrigin = parseGithubRemote(originUrl);
+  if (githubOrigin) {
+    return { hasGit: true, githubOrigin, status: "github" };
+  }
+  return { hasGit: true, githubOrigin: null, status: "non-github" };
 }
 
 /** Detect project layout — mirrors scanSkills() logic from skill-scanner.ts */
@@ -1145,6 +1193,24 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
     }
   });
 
+  // 0772 US-005: GET /api/project/github-status — quick probe of git +
+  // GitHub origin so the UI can surface a "connect GitHub to publish" hint.
+  router.get("/api/project/github-status", async (_req, res) => {
+    try {
+      const status = detectProjectGitHubStatus(root);
+      sendJson(res, status, 200, _req);
+    } catch {
+      // Defensive: any failure → safe default (treat as no-git so the UI
+      // shows the bootstrap hint rather than crashing the studio).
+      sendJson(
+        res,
+        { hasGit: false, githubOrigin: null, status: "no-git" as const },
+        200,
+        _req,
+      );
+    }
+  });
+
   // POST /api/skills/create — create a new skill
   router.post("/api/skills/create", async (req, res) => {
     const body = (await readBody(req)) as CreateSkillRequest;
@@ -1199,7 +1265,17 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
     const skillExists = existsSync(skillMdPath);
 
     if (skillExists && !isDraftFinalize && !isUpdateMode) {
-      sendJson(res, { error: `Skill already exists at ${targetDir}` }, 409, req);
+      // 0772 US-004: emit a structured payload so the client can recover
+      // (navigate to the existing skill) without string-matching the message.
+      const conflictPlugin =
+        body.layout === 3 ? (basename(root) || "default") : (body.plugin || "");
+      sendJson(res, {
+        error: `Skill already exists at ${targetDir}`,
+        code: "skill-already-exists",
+        plugin: conflictPlugin,
+        skill: body.name,
+        dir: targetDir,
+      }, 409, req);
       return;
     }
 

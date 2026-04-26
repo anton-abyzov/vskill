@@ -211,13 +211,13 @@ Examples:
 
 ```bash
 # Point Ollama at a remote GPU workstation (OLLAMA_HOST is primary).
-OLLAMA_HOST=http://gpu-server:11434 npx vskill studio
+OLLAMA_HOST=http://gpu-server:11434 npx vskill@latest studio
 
 # Bare host:port is auto-prefixed with http://.
-OLLAMA_HOST=gpu.local:11434 npx vskill studio
+OLLAMA_HOST=gpu.local:11434 npx vskill@latest studio
 
 # Both set — OLLAMA_HOST wins and a deprecation line is logged once.
-OLLAMA_HOST=http://gpu:11434 OLLAMA_BASE_URL=http://legacy:11434 npx vskill studio
+OLLAMA_HOST=http://gpu:11434 OLLAMA_BASE_URL=http://legacy:11434 npx vskill@latest studio
 ```
 
 ### 5.2 Claude Code session delegation — ToS compliance (April 2026)

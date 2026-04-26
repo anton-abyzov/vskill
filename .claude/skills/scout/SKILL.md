@@ -1,4 +1,5 @@
 ---
+version: "1.0.3"
 description: "START HERE — Skill discovery and installation assistant. The recommended first skill when you don't know which skills you need. Searches verified-skill.com, recommends plugin bundles, and installs skills. Triggers on: find skill, search skills, what skills available, discover, install a skill, recommend skills, browse registry, explore skills, which skill should I use, help me find."
 ---
 

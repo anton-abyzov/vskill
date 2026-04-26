@@ -159,13 +159,48 @@ export function readGitOriginOwnerRepo(dir: string): Promise<{ owner: string; re
 }
 
 /**
- * Resolve a bare skill name to `owner/repo/skill`. Order: cache → lockfile →
- * authored-skill on disk + git remote → bare-name fallback. Every outcome is
- * cached so a successful resolution shells out to git at most once per process.
+ * Decide whether `plugin` is an installed-agent dir (`.claude`, `.cursor`,
+ * `.windsurf`, `.codex`, `.openclaw`, `.agent`, `.kiro`, `.gemini`,
+ * `.github`, `.aider`, `.copilot`, `.opencode`, `.pi`, ...). The convention
+ * is uniform: every supported agent dir starts with `.`.
+ *
+ * Used by the resolver to pick the right "what is the upstream of this skill"
+ * branch: installed-agent views go straight to the lockfile (which records
+ * the source the install came from); authoring views run the source-tree
+ * probe first so the Studio sees the SAME upstream the author publishes to.
  */
-export async function resolveSkillApiName(skill: string, root: string): Promise<string> {
-  const cached = resolverCache.get(skill);
+export function isInstalledAgentDirPlugin(plugin: string | null | undefined): boolean {
+  return !!plugin && plugin.startsWith(".");
+}
+
+/**
+ * Resolve a bare skill name to `owner/repo/skill`.
+ *
+ * 0765: `plugin` is now part of the lookup. When `plugin` identifies an
+ * installed-agent dir (e.g. `.claude/scout`), the lockfile-derived upstream
+ * wins — the user is looking at a downstream copy whose source is recorded
+ * in the lockfile, NOT the same-named source-tree skill in the local repo.
+ * For authoring plugins (e.g. `vskill/scout`), the existing 0761 source-tree
+ * probe runs first.
+ *
+ * Cache key is `${plugin}::${skill}` so an installed view of `foo` and an
+ * authoring view of `foo` cache independently.
+ *
+ * Order (authoring view): cache → source-tree → lockfile → authored-skill on
+ * disk + git remote → bare-name fallback.
+ *
+ * Order (installed-agent view): cache → lockfile → bare-name fallback.
+ */
+export async function resolveSkillApiName(
+  skill: string,
+  root: string,
+  plugin: string | null = null,
+): Promise<string> {
+  const cacheKey = `${plugin ?? ""}::${skill}`;
+  const cached = resolverCache.get(cacheKey);
   if (cached !== undefined) return cached;
+
+  const installedView = isInstalledAgentDirPlugin(plugin);
 
   // 0761: source-tree skills (`<root>/skills/<skill>`) are the canonical
   // author copy of a vskill-source skill. The repo's own git remote is the
@@ -175,13 +210,19 @@ export async function resolveSkillApiName(skill: string, root: string): Promise<
   // user with a `github:anton-abyzov/greet-anton` lockfile install (a
   // separate repo) would see the Versions tab proxy to the WRONG upstream
   // and could overwrite the source skill with content from a foreign repo.
-  const sourceDir = await findAuthoredSourceTreeSkillDir(root, skill);
-  if (sourceDir) {
-    const sourceRemote = await readGitOriginOwnerRepo(sourceDir);
-    if (sourceRemote) {
-      return rememberAndReturn(skill, `${sourceRemote.owner}/${sourceRemote.repo}/${skill}`);
+  //
+  // 0765: skip this probe when the user is looking at an installed copy —
+  // the lockfile is then authoritative and the source-tree skill (if any)
+  // belongs to a *different* upstream than the install.
+  if (!installedView) {
+    const sourceDir = await findAuthoredSourceTreeSkillDir(root, skill);
+    if (sourceDir) {
+      const sourceRemote = await readGitOriginOwnerRepo(sourceDir);
+      if (sourceRemote) {
+        return rememberAndReturn(cacheKey, `${sourceRemote.owner}/${sourceRemote.repo}/${skill}`);
+      }
+      return rememberAndReturn(cacheKey, skill);
     }
-    return rememberAndReturn(skill, skill);
   }
 
   const lock = readLockfile();
@@ -195,16 +236,16 @@ export async function resolveSkillApiName(skill: string, root: string): Promise<
       parsed.owner &&
       parsed.repo
     ) {
-      return rememberAndReturn(skill, `${parsed.owner}/${parsed.repo}/${skill}`);
+      return rememberAndReturn(cacheKey, `${parsed.owner}/${parsed.repo}/${skill}`);
     }
-    return rememberAndReturn(skill, skill);
+    return rememberAndReturn(cacheKey, skill);
   }
 
   const skillDir = await findAuthoredSkillDir(root, skill);
-  if (!skillDir) return rememberAndReturn(skill, skill);
+  if (!skillDir) return rememberAndReturn(cacheKey, skill);
 
   const remote = await readGitOriginOwnerRepo(skillDir);
-  if (!remote) return rememberAndReturn(skill, skill);
+  if (!remote) return rememberAndReturn(cacheKey, skill);
 
-  return rememberAndReturn(skill, `${remote.owner}/${remote.repo}/${skill}`);
+  return rememberAndReturn(cacheKey, `${remote.owner}/${remote.repo}/${skill}`);
 }

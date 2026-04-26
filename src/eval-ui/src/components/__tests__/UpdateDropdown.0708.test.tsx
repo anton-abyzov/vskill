@@ -2,6 +2,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// 0747 T-007: UpdateDropdown now consumes useToast for inline Update toasts.
+vi.mock("../ToastProvider", () => ({
+  useToast: () => ({ toast: vi.fn(), dismiss: vi.fn(), clear: vi.fn() }),
+}));
+
+// 0766 F-002: stub StudioContext for the new onSkillUpdated dependency.
+vi.mock("../../StudioContext", () => ({
+  useStudio: () => ({ onSkillUpdated: vi.fn() }),
+}));
+
 const updates = [
   { name: "plugin-a/skill-x", installed: "1.0.0", latest: "2.0.0", updateAvailable: true },
   { name: "plugin-b/skill-y", installed: "1.0.0", latest: "1.1.0", updateAvailable: true },

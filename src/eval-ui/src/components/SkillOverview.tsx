@@ -6,6 +6,8 @@ import { VersionBadge } from "./VersionBadge";
 import { AuthorLink } from "./AuthorLink";
 import { SourceFileLink } from "./SourceFileLink";
 import { BenchmarkInfoPopover } from "./BenchmarkInfoPopover";
+// 0772 US-005: surface GitHub publish-readiness on the Overview tab.
+import { PublishStatusRow } from "./PublishStatusRow";
 
 // ---------------------------------------------------------------------------
 // T-006 (0707): SkillOverview — responsive 8-card metric grid + sticky
@@ -182,6 +184,10 @@ export function SkillOverview(props: SkillOverviewProps) {
           ) : null}
         </div>
       </header>
+
+      {/* 0772 US-005: GitHub publish-readiness row. Renders nothing while
+          status is loading; once resolved, renders one of three states. */}
+      <PublishStatusRow />
 
       {/* Responsive 8-card grid */}
       <div

@@ -78,9 +78,16 @@ function truncatePath(p: string, max = 48): string {
 function NewDetailHeader({ skill }: { skill: SkillInfo }) {
   const [copied, setCopied] = useState(false);
 
+  // 0769 T-013: prefer the editable upstream marketplace clone over the
+  // per-version cache snapshot. For plugin-cache installs `sourcePath` points
+  // at ~/.claude/plugins/marketplaces/<mp>/plugins/<plugin>/skills/<skill>/
+  // (where users can git-track edits). For everything else `sourcePath` is
+  // null and we fall back to `dir` — matching pre-0769 behavior.
+  const displayPath = (skill.sourcePath ?? skill.dir) || "—";
+
   const onCopyPath = useCallback(async () => {
     try {
-      await navigator.clipboard?.writeText(skill.dir);
+      await navigator.clipboard?.writeText(displayPath);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
       // T-065: Surface a real toast in addition to the inline "Copied"
@@ -89,7 +96,7 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
     } catch {
       emitToast(strings.toasts.permissionDenied, "error");
     }
-  }, [skill.dir]);
+  }, [displayPath]);
 
   // 0700 polish: match the sidebar + top-rail vocabulary — Anthropic-aligned
   // labels ("Project" for installed, "Skills" for authored) instead of the
@@ -228,8 +235,8 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
         <button
           type="button"
           data-testid="detail-header-path-chip"
-          title={skill.dir}
-          aria-label={`Copy path ${skill.dir} to clipboard`}
+          title={displayPath}
+          aria-label={`Copy path ${displayPath} to clipboard`}
           onClick={onCopyPath}
           style={{
             display: "inline-flex",
@@ -248,7 +255,7 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
             cursor: "pointer",
           }}
         >
-          {truncatePath(skill.dir || "—")}
+          {truncatePath(displayPath)}
         </button>
         <button
           data-testid="detail-header-copy-path"

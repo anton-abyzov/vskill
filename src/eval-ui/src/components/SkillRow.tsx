@@ -136,11 +136,11 @@ function SkillRowBase({ skill, isSelected, onSelect, onContextMenu }: Props) {
       </span>
 
       {/* 0707 T-009: reusable VersionBadge (sm) instead of an inline <span>.
-          0750: always render — VersionBadge falls back to "0.0.0" when
+          0750: always render — VersionBadge falls back to "1.0.0" when
           missing, source-aware styling distinguishes author-declared from
           inherited versions. */}
       <VersionBadge
-        version={skill.resolvedVersion ?? skill.version ?? "0.0.0"}
+        version={skill.resolvedVersion ?? skill.version ?? "1.0.0"}
         source={skill.versionSource ?? (skill.version ? "frontmatter" : "default")}
         pluginName={skill.pluginName ?? null}
         size="sm"

@@ -11,7 +11,7 @@
 // callers that already render their own "v").
 //
 // Increment 0750: source-aware rendering. The badge no longer returns null
-// for empty version — it falls back to "0.0.0" so the AVAILABLE sidebar
+// for empty version — it falls back to "1.0.0" so the AVAILABLE sidebar
 // never has blank slots. Callers pass `source` (frontmatter | registry |
 // plugin | default) so inherited versions render in italic with a `title`
 // tooltip describing provenance, distinguishing author-declared from
@@ -60,7 +60,7 @@ export function VersionBadge(props: VersionBadgeProps) {
   // Increment 0750: never render empty / never return null. Empty input falls
   // back to the "0.0.0 default" baseline so the sidebar never blanks out.
   const safeVersion =
-    typeof version === "string" && version.trim() !== "" ? version.trim() : "0.0.0";
+    typeof version === "string" && version.trim() !== "" ? version.trim() : "1.0.0";
 
   const normalized = showPrefix && !safeVersion.startsWith("v") ? `v${safeVersion}` : safeVersion;
   const fontSize = size === "sm" ? 10 : 12;

@@ -43,7 +43,7 @@ describe("resolveSkillVersion", () => {
       registryCurrentVersion: null,
       pluginVersion: null,
     });
-    expect(out).toEqual({ version: "0.0.0", versionSource: "default" });
+    expect(out).toEqual({ version: "1.0.0", versionSource: "default" });
   });
 
   it("TC-005: gws scenario — frontmatter '0.1.0' wins over registry '1.0.0'", () => {
@@ -71,18 +71,18 @@ describe("resolveSkillVersion", () => {
       registryCurrentVersion: null,
       pluginVersion: null,
     });
-    expect(out).toEqual({ version: "0.0.0", versionSource: "default" });
+    expect(out).toEqual({ version: "1.0.0", versionSource: "default" });
   });
 
   it("TC-007b: undefined inputs treated as absent (consumer convenience)", () => {
     const out = resolveSkillVersion({});
-    expect(out).toEqual({ version: "0.0.0", versionSource: "default" });
+    expect(out).toEqual({ version: "1.0.0", versionSource: "default" });
   });
 
   it("TC-007c: invalid semver in plugin field also falls through", () => {
     const out = resolveSkillVersion({
       pluginVersion: "garbage",
     });
-    expect(out).toEqual({ version: "0.0.0", versionSource: "default" });
+    expect(out).toEqual({ version: "1.0.0", versionSource: "default" });
   });
 });

@@ -130,10 +130,15 @@ describe("0729 — VersionHistoryPanel empty-state", () => {
     expect(findByTestId(tree, "versions-empty-state-installed").length).toBe(0);
   });
 
-  it("AC-US1-02: installed skill + empty versions → renders the INSTALLED empty state with no CTA", () => {
+  it("AC-US1-02: installed skill + empty versions + no on-disk version → renders the INSTALLED empty state with no CTA", () => {
     swrReturn = { data: [], loading: false };
     workspaceState = { plugin: "anthropic-skills", skill: "pdf" };
-    studioSkills = [makeSkill({ plugin: "anthropic-skills", skill: "pdf", origin: "installed" })];
+    // version=null forces the legacy bare empty state. Installed skills WITH
+    // an on-disk frontmatter version now render a richer local-only timeline
+    // entry (covered in VersionHistoryPanel.local-fallback.test.tsx), so the
+    // "bare empty state" contract this AC locks only applies when there is
+    // genuinely nothing to show.
+    studioSkills = [makeSkill({ plugin: "anthropic-skills", skill: "pdf", origin: "installed", version: null })];
 
     const tree = (VersionHistoryPanel as unknown as () => unknown)();
     expect(findByTestId(tree, "versions-empty-state-installed").length).toBe(1);

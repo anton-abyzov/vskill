@@ -90,12 +90,15 @@ describe("PublishDrawer", () => {
 
     await act(async () => {
       root.render(
+        // 0759 Phase 9: drawer now defaults to manual mode. Tests that assert
+        // auto-generation pass defaultMode="ai" to opt into the old behavior.
         <PublishDrawer
           provider="claude-cli"
           model="sonnet"
           remoteUrl="git@github.com:owner/repo.git"
           fileCount={3}
           onClose={onClose}
+          defaultMode="ai"
         />,
       );
       await flush();
@@ -110,7 +113,7 @@ describe("PublishDrawer", () => {
     mockGitCommitMessage.mockResolvedValueOnce({ message: "x" });
     await act(async () => {
       root.render(
-        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={5} onClose={onClose} />,
+        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={5} onClose={onClose} defaultMode="ai" />,
       );
       await flush();
     });
@@ -130,7 +133,7 @@ describe("PublishDrawer", () => {
 
     await act(async () => {
       root.render(
-        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:owner/repo.git" fileCount={1} onClose={onClose} />,
+        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:owner/repo.git" fileCount={1} onClose={onClose} defaultMode="ai" />,
       );
       await flush();
     });
@@ -175,7 +178,7 @@ describe("PublishDrawer", () => {
 
     await act(async () => {
       root.render(
-        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} />,
+        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" />,
       );
       await flush();
     });
@@ -209,7 +212,7 @@ describe("PublishDrawer", () => {
 
     await act(async () => {
       root.render(
-        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} />,
+        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" />,
       );
       await flush();
     });
@@ -233,7 +236,7 @@ describe("PublishDrawer", () => {
     mockGitCommitMessage.mockResolvedValueOnce({ message: "x" });
     await act(async () => {
       root.render(
-        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} />,
+        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" />,
       );
       await flush();
     });
@@ -254,7 +257,7 @@ describe("PublishDrawer", () => {
 
     await act(async () => {
       root.render(
-        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} />,
+        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" />,
       );
       await flush();
     });
@@ -274,7 +277,7 @@ describe("PublishDrawer", () => {
     mockGitCommitMessage.mockResolvedValueOnce({ message: "feat: x" });
     await act(async () => {
       root.render(
-        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} />,
+        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" />,
       );
       await flush();
     });

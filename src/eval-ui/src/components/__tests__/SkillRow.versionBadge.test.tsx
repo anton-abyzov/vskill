@@ -52,11 +52,30 @@ describe("SkillRow — T-009 VersionBadge integration", () => {
     }
   });
 
-  it("renders no badge when skill.version is missing", () => {
+  // Increment 0750: SkillRow now always renders the version badge — the
+  // null-when-missing branch was removed in favor of a "0.0.0" italic
+  // default so the AVAILABLE sidebar never has blank slots.
+  it("0750: renders a default '0.0.0' badge when skill.version (and resolved) are missing", () => {
     const { version, ...rest } = makeSkill("1.0.0");
     void version;
     const tree = SkillRow({ skill: rest as SkillInfo, isSelected: false, onSelect: () => {} });
     const badges = findAll(tree, (el) => el.props?.["data-testid"] === "skill-row-version");
-    expect(badges.length).toBe(0);
+    expect(badges.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("0750: passes versionSource through to VersionBadge for source-aware styling", () => {
+    const skill: SkillInfo = {
+      ...makeSkill("2.3.0"),
+      resolvedVersion: "2.3.0",
+      versionSource: "plugin",
+      pluginName: "specweave",
+    };
+    const tree = SkillRow({ skill, isSelected: false, onSelect: () => {} });
+    // Find the rendered <span> carrying data-version (the inner badge after
+    // VersionBadge runs). It must have title prop with the plugin tooltip.
+    const badges = findAll(tree, (el) => typeof el.props?.["data-version"] === "string");
+    const withTitle = badges.find((b) => typeof b.props.title === "string");
+    expect(withTitle).toBeDefined();
+    expect(String(withTitle!.props.title)).toMatch(/Inherited from .* plugin v2\.3\.0/);
   });
 });

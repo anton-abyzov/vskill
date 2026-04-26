@@ -135,10 +135,18 @@ function SkillRowBase({ skill, isSelected, onSelect, onContextMenu }: Props) {
         {skill.skill}
       </span>
 
-      {/* 0707 T-009: reusable VersionBadge (sm) instead of an inline <span>. */}
-      {skill.version && (
-        <VersionBadge version={skill.version} size="sm" showPrefix={false} data-testid="skill-row-version" />
-      )}
+      {/* 0707 T-009: reusable VersionBadge (sm) instead of an inline <span>.
+          0750: always render — VersionBadge falls back to "0.0.0" when
+          missing, source-aware styling distinguishes author-declared from
+          inherited versions. */}
+      <VersionBadge
+        version={skill.resolvedVersion ?? skill.version ?? "0.0.0"}
+        source={skill.versionSource ?? (skill.version ? "frontmatter" : "default")}
+        pluginName={skill.pluginName ?? null}
+        size="sm"
+        showPrefix={false}
+        data-testid="skill-row-version"
+      />
 
       {/* 0686 US-008: chain-link glyph when the skill was installed via
           symlink. Renders when the server enriches SkillInfo with the

@@ -27,11 +27,57 @@ describe("VersionBadge — T-002", () => {
     expect(collectText(tree)).toBe("v2.0.0");
   });
 
-  it("returns null when the version is missing or empty", () => {
-    expect(VersionBadge({ version: null })).toBeNull();
-    expect(VersionBadge({ version: undefined })).toBeNull();
-    expect(VersionBadge({ version: "" })).toBeNull();
-    expect(VersionBadge({ version: "   " })).toBeNull();
+  // Increment 0750: VersionBadge no longer returns null. Callers (SkillRow,
+  // DetailHeader, etc.) feed it the resolver's already-non-empty `version`,
+  // so the component just renders it. When fed an explicitly empty value the
+  // badge falls back to "0.0.0" so we never crash and never render an empty
+  // chip.
+  it("0750: renders '0.0.0' fallback when version is empty/missing instead of returning null", () => {
+    expect(collectText(VersionBadge({ version: null }))).toBe("v0.0.0");
+    expect(collectText(VersionBadge({ version: undefined }))).toBe("v0.0.0");
+    expect(collectText(VersionBadge({ version: "" }))).toBe("v0.0.0");
+    expect(collectText(VersionBadge({ version: "   " }))).toBe("v0.0.0");
+  });
+
+  // Increment 0750 — source-aware styling (US-003).
+  it("0750: source='frontmatter' renders normal weight, no title tooltip", () => {
+    const tree = VersionBadge({ version: "1.4.0", source: "frontmatter" }) as unknown as ReactEl;
+    const style = tree.props.style as Record<string, string | number>;
+    expect(style.fontStyle).not.toBe("italic");
+    expect(tree.props.title).toBeUndefined();
+  });
+
+  it("0750: source='plugin' renders italic with 'Inherited from … plugin v…' tooltip", () => {
+    const tree = VersionBadge({ version: "2.3.0", source: "plugin" }) as unknown as ReactEl;
+    const style = tree.props.style as Record<string, string | number>;
+    expect(style.fontStyle).toBe("italic");
+    expect(String(tree.props.title)).toMatch(/Inherited from .* plugin v2\.3\.0/);
+  });
+
+  it("0750: source='plugin' with pluginName names the plugin in the tooltip", () => {
+    const tree = VersionBadge({ version: "2.3.0", source: "plugin", pluginName: "specweave" }) as unknown as ReactEl;
+    expect(String(tree.props.title)).toBe("Inherited from specweave plugin v2.3.0");
+  });
+
+  it("0750: source='registry' renders italic with 'Inherited from registry' tooltip", () => {
+    const tree = VersionBadge({ version: "1.0.0", source: "registry" }) as unknown as ReactEl;
+    const style = tree.props.style as Record<string, string | number>;
+    expect(style.fontStyle).toBe("italic");
+    expect(tree.props.title).toBe("Inherited from registry");
+  });
+
+  it("0750: source='default' renders italic with 'No version declared' tooltip", () => {
+    const tree = VersionBadge({ version: "0.0.0", source: "default" }) as unknown as ReactEl;
+    const style = tree.props.style as Record<string, string | number>;
+    expect(style.fontStyle).toBe("italic");
+    expect(tree.props.title).toBe("No version declared");
+  });
+
+  it("0750: omitting source defaults to non-italic, no tooltip (back-compat)", () => {
+    const tree = VersionBadge({ version: "1.0.0" }) as unknown as ReactEl;
+    const style = tree.props.style as Record<string, string | number>;
+    expect(style.fontStyle).not.toBe("italic");
+    expect(tree.props.title).toBeUndefined();
   });
 
   it("uses tabular-nums + 1px border token so rows align consistently", () => {

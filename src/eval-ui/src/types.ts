@@ -144,6 +144,20 @@ export interface SkillInfo {
   description?: string | null;
   /** Frontmatter `version` — semver string, if declared. Separate from installed `currentVersion` below. */
   version?: string | null;
+  /**
+   * Increment 0750: resolved version for sidebar/UI display, computed by the
+   * normalizer (`normalizeSkillInfo`) via the precedence chain
+   * `frontmatter > registry currentVersion > plugin.json version > "0.0.0"`.
+   * Always non-empty when the skill came through the normalizer; consumers
+   * MAY fall back to `version` for raw fixtures bypassing the normalizer.
+   */
+  resolvedVersion?: string;
+  /**
+   * Increment 0750: provenance label for `resolvedVersion`. Drives the
+   * source-aware styling in `VersionBadge` (normal weight for `frontmatter`,
+   * italic + tooltip for `registry` | `plugin` | `default`).
+   */
+  versionSource?: "frontmatter" | "registry" | "plugin" | "default";
   /** Frontmatter `category` — e.g. "productivity", "devops". */
   category?: string | null;
   /** Frontmatter `author`. */

@@ -1714,10 +1714,20 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         timeout: 15_000,
         encoding: "utf-8",
         stdio: ["ignore", "pipe", "ignore"],
+        env: { ...process.env, PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin" },
       });
       const parsed = JSON.parse(raw);
       sendJson(res, Array.isArray(parsed) ? parsed : [], 200, req);
-    } catch {
+    } catch (e) {
+      // vskill outdated exits 1 when updates exist — stdout still has JSON
+      const stdout = e && typeof e === "object" && "stdout" in e ? (e as { stdout: unknown }).stdout : null;
+      if (stdout) {
+        try {
+          const parsed = JSON.parse(stdout as string);
+          sendJson(res, Array.isArray(parsed) ? parsed : [], 200, req);
+          return;
+        } catch { /* fall through */ }
+      }
       sendJson(res, [], 200, req);
     }
   });

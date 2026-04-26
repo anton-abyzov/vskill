@@ -115,7 +115,7 @@ describe("GET /api/skills/updates", () => {
     expect(mocks.sendJson).toHaveBeenCalledWith(fakeRes, outdatedResult, 200, fakeReq);
   });
 
-  it("returns empty array when vskill outdated exits non-zero", async () => {
+  it("returns empty array when vskill outdated exits non-zero with no stdout", async () => {
     mocks.execSync.mockImplementation(() => { throw new Error("exit code 1"); });
 
     await handler(fakeReq, fakeRes);
@@ -129,5 +129,34 @@ describe("GET /api/skills/updates", () => {
     await handler(fakeReq, fakeRes);
 
     expect(mocks.sendJson).toHaveBeenCalledWith(fakeRes, [], 200, fakeReq);
+  });
+
+  it("returns update data from e.stdout when vskill outdated exits 1 (updates exist)", async () => {
+    // vskill outdated exits 1 when updates are found — stdout still has valid JSON
+    const outdatedResult = [
+      { name: "owner/repo/skill", installed: "1.0.0", latest: "1.1.0", updateAvailable: true },
+    ];
+    const err = Object.assign(new Error("Command failed: vskill outdated --json"), {
+      status: 1,
+      stdout: JSON.stringify(outdatedResult),
+    });
+    mocks.execSync.mockImplementation(() => { throw err; });
+
+    await handler(fakeReq, fakeRes);
+
+    expect(mocks.sendJson).toHaveBeenCalledWith(fakeRes, outdatedResult, 200, fakeReq);
+  });
+
+  it("passes PATH in env to execSync so vskill binary can be found", async () => {
+    mocks.execSync.mockReturnValue(Buffer.from("[]"));
+
+    await handler(fakeReq, fakeRes);
+
+    expect(mocks.execSync).toHaveBeenCalledWith(
+      "vskill outdated --json",
+      expect.objectContaining({
+        env: expect.objectContaining({ PATH: expect.any(String) }),
+      }),
+    );
   });
 });

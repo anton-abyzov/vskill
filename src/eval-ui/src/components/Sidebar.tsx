@@ -533,9 +533,10 @@ export function Sidebar({
                 <span aria-hidden>🛒</span> Browse marketplaces…
               </button>
               {five.availablePlugin.filtered === 0 ? (
-                <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--text-secondary)" }}>
-                  No plugin skills installed yet.
-                </div>
+                <AvailablePluginEmptyState
+                  queryActive={!!query}
+                  hasInstalled={five.availablePlugin.total > 0}
+                />
               ) : (
                 five.availablePlugin.byPlugin.map(([pluginName, pluginSkills]) => (
                   <PluginTreeGroup
@@ -644,9 +645,10 @@ export function Sidebar({
               forceOpen={revealTarget?.bucket === "plugin"}
             >
               {five.authoringPlugin.filtered === 0 ? (
-                <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--text-secondary)" }}>
-                  No plugin sources in this project. Add <code>&lt;plugin&gt;/.claude-plugin/plugin.json</code>.
-                </div>
+                <AuthoringPluginEmptyState
+                  queryActive={!!query}
+                  hasSources={five.authoringPlugin.total > 0}
+                />
               ) : (
                 five.authoringPlugin.byPlugin.map(([pluginName, pluginSkills]) => (
                   <PluginTreeGroup
@@ -1068,6 +1070,60 @@ function GlobalEmptyState({
       body={
         <>
           Run <Mono>vskill install --global &lt;skill&gt;</Mono> to add one.
+        </>
+      }
+    />
+  );
+}
+
+// Plugin section empty-states must distinguish "nothing installed" from
+// "search filter excludes everything". Mirrors InstalledEmptyState /
+// GlobalEmptyState so the user gets a "No matches" hint when their query
+// hides all installed plugin skills.
+function AvailablePluginEmptyState({
+  queryActive,
+  hasInstalled,
+}: {
+  queryActive: boolean;
+  hasInstalled: boolean;
+}) {
+  if (queryActive && hasInstalled) {
+    return (
+      <EmptyMessage
+        headline="No matches in this section."
+        body="Adjust the filter or press Escape to clear."
+      />
+    );
+  }
+  return (
+    <EmptyMessage
+      headline="No plugin skills installed yet."
+      body={<>Click <Mono>Browse marketplaces…</Mono> above to add one.</>}
+    />
+  );
+}
+
+function AuthoringPluginEmptyState({
+  queryActive,
+  hasSources,
+}: {
+  queryActive: boolean;
+  hasSources: boolean;
+}) {
+  if (queryActive && hasSources) {
+    return (
+      <EmptyMessage
+        headline="No matches in this section."
+        body="Adjust the filter or press Escape to clear."
+      />
+    );
+  }
+  return (
+    <EmptyMessage
+      headline="No plugin sources in this project."
+      body={
+        <>
+          Add <Mono>&lt;plugin&gt;/.claude-plugin/plugin.json</Mono> to author one.
         </>
       }
     />

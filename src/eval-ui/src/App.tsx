@@ -136,12 +136,6 @@ function Shell() {
   const [activeAgentId, setActiveAgentIdState] = useState<string | null>(() =>
     getStudioPreference<string | null>("activeAgent", null),
   );
-  useEffect(() => {
-    // Hydrate from the server's `suggested` when no persisted choice exists.
-    if (!activeAgentId && agentsResponse.response?.suggested) {
-      setActiveAgentIdState(agentsResponse.response.suggested);
-    }
-  }, [activeAgentId, agentsResponse.response?.suggested]);
   const handleActiveAgentChange = useCallback((agentId: string) => {
     setActiveAgentIdState(agentId);
     writeStudioPreference("activeAgent", agentId);
@@ -151,6 +145,17 @@ function Shell() {
       );
     }
   }, []);
+  useEffect(() => {
+    // 0733: Hydrate from the server's `suggested` when no persisted choice
+    // exists — but route through handleActiveAgentChange so localStorage AND
+    // the studio:agent-changed event both fire. Without this, App holds the
+    // suggested value in React state only, leaving StudioContext (which
+    // reads localStorage) stuck on null and fetching /api/skills with no
+    // ?agent=, which the picker cannot reflect.
+    if (!activeAgentId && agentsResponse.response?.suggested) {
+      handleActiveAgentChange(agentsResponse.response.suggested);
+    }
+  }, [activeAgentId, agentsResponse.response?.suggested, handleActiveAgentChange]);
   const pickerEntries = useMemo(
     () => (agentsResponse.response ? agentsResponseToPickerEntries(agentsResponse.response) : []),
     [agentsResponse.response],

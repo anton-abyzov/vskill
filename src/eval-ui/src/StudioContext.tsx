@@ -188,20 +188,55 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
       return null;
     }
   });
+  // 0733: defer the first /api/skills fetch until we have a non-null
+  // activeAgent. Warm path (localStorage seeded) sets bootstrapDone=true on
+  // mount instantly; cold path (empty localStorage) waits for /api/agents to
+  // resolve and sets activeAgent + bootstrapDone together. Without this, the
+  // first /api/skills request goes out with no ?agent= and the server's
+  // defense-in-depth filter is the only thing standing between the user and
+  // skills from agents they didn't select.
+  const [bootstrapDone, setBootstrapDone] = useState<boolean>(activeAgent !== null);
 
   useEffect(() => {
     function onAgentChanged(e: Event) {
       if (!(e instanceof CustomEvent)) return;
       const detail = e.detail as { agentId?: string } | undefined;
-      if (detail?.agentId) setActiveAgentInternal(detail.agentId);
+      if (detail?.agentId) {
+        setActiveAgentInternal(detail.agentId);
+        setBootstrapDone(true);
+      }
     }
     window.addEventListener("studio:agent-changed", onAgentChanged);
     return () => window.removeEventListener("studio:agent-changed", onAgentChanged);
   }, []);
 
+  // 0733: cold-start bootstrap — when localStorage was empty at mount, fetch
+  // /api/agents and adopt `suggested` as the initial activeAgent before the
+  // first loadSkills runs. If the fetch fails (offline, server hiccup), fall
+  // back to the same default the server uses ("claude-code") so the UI still
+  // renders something coherent.
+  useEffect(() => {
+    if (bootstrapDone) return;
+    let cancelled = false;
+    api.getAgents()
+      .then((resp) => {
+        if (cancelled) return;
+        const suggested = resp?.suggested ?? "claude-code";
+        setActiveAgentInternal((current) => current ?? suggested);
+        setBootstrapDone(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setActiveAgentInternal((current) => current ?? "claude-code");
+        setBootstrapDone(true);
+      });
+    return () => { cancelled = true; };
+  }, [bootstrapDone]);
+
   const loadSkills = useCallback(() => {
+    if (!bootstrapDone || !activeAgent) return;
     dispatch({ type: "SET_SKILLS_LOADING", loading: true });
-    const filter = activeAgent ? { agent: activeAgent } : undefined;
+    const filter = { agent: activeAgent };
     api.getSkills(filter)
       .then((skills) => {
         dispatch({ type: "SET_SKILLS", skills });
@@ -217,7 +252,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
       })
       .catch((e) => dispatch({ type: "SET_SKILLS_ERROR", error: e.message }));
-  }, [activeAgent]);
+  }, [activeAgent, bootstrapDone]);
 
   useEffect(() => { loadSkills(); }, [loadSkills]);
 

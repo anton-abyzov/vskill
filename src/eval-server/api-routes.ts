@@ -1696,9 +1696,13 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         };
       }),
     );
+    // 0733: filter MUST use the resolved `activeAgent` (not the raw query
+    // param). The handler scans the global scope using `activeAgent` — if the
+    // filter keeps using `rawAgent`, the server scans for one agent but
+    // returns skills from ALL of them (the .aider/ .cursor/ etc. leak).
     const filtered = filterSkillsByScopeAndAgent(enriched, {
       scope: rawScope,
-      agent: rawAgent,
+      agent: activeAgent,
     });
     sendJson(res, filtered, 200, req);
   });

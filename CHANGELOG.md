@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.111] - 2026-04-25
+
+### Fixed
+- **0732**: ID-format dual-accept for SSE skill-update notifications — the platform now augments every `skill.updated` event with both UUID (`skillId`) and public slug (`skillSlug`). Studio clients subscribed via slug-ID (the format returned by the discovery API) now receive update notifications correctly without UUID knowledge. The `greet-anton` skill (`anton-abyzov/vskill/greet-anton`) is verified against production SSE.
+
 ## [Unreleased]
 
 ### Added

@@ -82,6 +82,9 @@ export class Router {
   }
 }
 
+/** Matches any localhost/loopback Origin value (http or https, any port). */
+export const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
 export function sendJson(
   res: http.ServerResponse,
   data: unknown,
@@ -94,7 +97,7 @@ export function sendJson(
     Vary: "Origin",
   };
   const origin = req?.headers?.origin;
-  if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+  if (origin && LOCALHOST_ORIGIN_RE.test(origin)) {
     headers["Access-Control-Allow-Origin"] = origin;
     headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS";
     headers["Access-Control-Allow-Headers"] = "Content-Type";

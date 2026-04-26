@@ -163,6 +163,56 @@ describe("RightPanel — persona-conditional tab layout (T-007 + 0769 T-019)", (
     expect(overview.length).toBe(0);
   });
 
+  it("renders the Run SubTabBar (3 sub-tabs) when activeDetailTab='run' (0774 T-011)", () => {
+    const tree = RightPanel({
+      selectedSkillInfo: makeSkill(),
+      activeDetailTab: "run",
+      allSkills: [],
+      onSelectSkill: () => {},
+    });
+    const subBar = findAll(tree, (el) => el.props?.["data-testid"] === "detail-subtab-bar-run");
+    expect(subBar.length).toBe(1);
+    const subTabs = findAll(tree, (el) => el.props?.["data-testid"]?.toString().startsWith("detail-subtab-run-"));
+    expect(subTabs.length).toBe(3);
+    const ids = subTabs.map((t) => t.props["data-testid"]);
+    expect(ids).toEqual(["detail-subtab-run-run", "detail-subtab-run-history", "detail-subtab-run-models"]);
+  });
+
+  it("renders the Trigger SubTabBar (2 sub-tabs) when activeDetailTab='activation' (0774 T-011)", () => {
+    const tree = RightPanel({
+      selectedSkillInfo: makeSkill(),
+      activeDetailTab: "activation",
+      allSkills: [],
+      onSelectSkill: () => {},
+    });
+    const subBar = findAll(tree, (el) => el.props?.["data-testid"] === "detail-subtab-bar-activation");
+    expect(subBar.length).toBe(1);
+    const subTabs = findAll(tree, (el) => el.props?.["data-testid"]?.toString().startsWith("detail-subtab-activation-"));
+    expect(subTabs.length).toBe(2);
+  });
+
+  it("does NOT render a SubTabBar when activeDetailTab='versions' (no sub-modes) (0774 T-011)", () => {
+    const tree = RightPanel({
+      selectedSkillInfo: makeSkill(),
+      activeDetailTab: "versions",
+      allSkills: [],
+      onSelectSkill: () => {},
+    });
+    const subBar = findAll(tree, (el) => el.props?.["data-testid"]?.toString().startsWith("detail-subtab-bar-"));
+    expect(subBar.length).toBe(0);
+  });
+
+  it("renders the Trigger SubTabBar for installed-origin (consumer) skills too (0774 T-011)", () => {
+    const tree = RightPanel({
+      selectedSkillInfo: makeSkill({ origin: "installed" }),
+      activeDetailTab: "activation",
+      allSkills: [],
+      onSelectSkill: () => {},
+    });
+    const subBar = findAll(tree, (el) => el.props?.["data-testid"] === "detail-subtab-bar-activation");
+    expect(subBar.length).toBe(1);
+  });
+
   it("no longer embeds SkillWorkspaceInner inside the Overview tab", () => {
     // Sanity: scan for any element whose type display name contains
     // "SkillWorkspaceInner". The component is no longer imported.

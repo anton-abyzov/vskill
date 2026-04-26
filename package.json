@@ -26,7 +26,8 @@
     "lint:skills-spec": "npx tsx scripts/validate-skills-spec.ts",
     "clean": "rm -rf dist",
     "preuninstall": "node scripts/preuninstall.cjs",
-    "prepublishOnly": "npm run build && npm run build:eval-ui"
+    "sync:readme-badges": "node scripts/sync-readme-badges.cjs",
+    "prepublishOnly": "npm run build && npm run build:eval-ui && node scripts/sync-readme-badges.cjs && git diff --exit-code README.md"
   },
   "keywords": [
     "ai",

@@ -13,6 +13,7 @@ import { registerTestInstallRoute } from "./test-install.js";
 import { registerRevertRoute } from "./revert.js";
 import { registerOpsRoutes } from "./ops.js";
 import { registerDetectEnginesRoute } from "../../eval-server/detect-engines-route.js";
+import { registerInstallEngineRoutes } from "../../eval-server/install-engine-routes.js";
 
 export function registerScopeTransferRoutes(router: Router, root: string): void {
   registerPromoteRoute(router, root);
@@ -20,4 +21,5 @@ export function registerScopeTransferRoutes(router: Router, root: string): void 
   registerRevertRoute(router, root);
   registerOpsRoutes(router);
   registerDetectEnginesRoute(router, root);
+  registerInstallEngineRoutes(router, root);
 }

@@ -11,6 +11,15 @@ const CLASSIFICATION_STYLES: Record<string, { bg: string; text: string }> = {
   TN: { bg: "var(--green-muted)", text: "var(--green)" },
   FP: { bg: "var(--red-muted)", text: "var(--red)" },
   FN: { bg: "var(--red-muted)", text: "var(--red)" },
+  SCOPE_WARNING: { bg: "var(--yellow-muted)", text: "var(--yellow)" },
+  DRIFT_WARNING: { bg: "var(--yellow-muted)", text: "var(--yellow)" },
+};
+
+const WARNING_TOOLTIPS: Record<string, string> = {
+  scope_warning:
+    "Description claims broader scope than name+tags suggest. Either narrow the description or add explicit '+' prefix to confirm intended scope.",
+  drift_warning:
+    "Description omits intent that classifier inferred from name+tags. Description may need to mention this case explicitly.",
 };
 
 export function ActivationPanel() {
@@ -61,8 +70,10 @@ export function ActivationPanel() {
   }
 
   const promptCount = promptsText.trim().split("\n").filter(Boolean).length;
-  const correctResults = activationResults.filter((r) => r.classification === "TP" || r.classification === "TN");
-  const incorrectResults = activationResults.filter((r) => r.classification === "FP" || r.classification === "FN");
+  const isWarning = (r: ActivationResult) => r.verdict === "scope_warning" || r.verdict === "drift_warning";
+  const correctResults = activationResults.filter((r) => (r.classification === "TP" || r.classification === "TN") && !isWarning(r));
+  const incorrectResults = activationResults.filter((r) => (r.classification === "FP" || r.classification === "FN") && !isWarning(r));
+  const warningResults = activationResults.filter(isWarning);
   const cleanDescription = skillDescription?.replace(/^---[\s\S]*?---\s*/, "").trim() ?? null;
   const hasGeneratedPrompts = promptsText.trim().length > 0;
   // NOTE: renderMarkdown performs sanitization before rendering
@@ -355,6 +366,20 @@ export function ActivationPanel() {
               <ConfusionCell label="False Negative" abbr="FN" count={activationSummary.fn} bg="var(--red-muted)"            color="var(--red)"                  description="Missed activation" />
               <ConfusionCell label="True Negative"  abbr="TN" count={activationSummary.tn} bg="var(--green-muted)"          color="var(--green)"                description="Correctly silent" />
             </div>
+            <div
+              className="mt-3 max-w-xs mx-auto text-center text-[11px]"
+              style={{ color: "var(--text-tertiary)" }}
+              title="Auto-classified disagreements: not real failures, but worth reviewing. Hover a yellow row for details."
+            >
+              Warnings:{" "}
+              <span style={{ color: (activationSummary.scopeWarnings ?? 0) > 0 ? "var(--yellow)" : "var(--text-tertiary)" }}>
+                {activationSummary.scopeWarnings ?? 0} scope
+              </span>
+              {", "}
+              <span style={{ color: (activationSummary.driftWarnings ?? 0) > 0 ? "var(--yellow)" : "var(--text-tertiary)" }}>
+                {activationSummary.driftWarnings ?? 0} drift
+              </span>
+            </div>
           </div>
         </div>
       )}
@@ -491,8 +516,14 @@ function Dot() {
 }
 
 function ResultRow({ result }: { result: ActivationResult }) {
-  const cs = CLASSIFICATION_STYLES[result.classification] || CLASSIFICATION_STYLES.FN;
-  const isCorrect = result.classification === "TP" || result.classification === "TN";
+  const isWarning = result.verdict === "scope_warning" || result.verdict === "drift_warning";
+  const styleKey = isWarning
+    ? (result.verdict === "scope_warning" ? "SCOPE_WARNING" : "DRIFT_WARNING")
+    : result.classification;
+  const cs = CLASSIFICATION_STYLES[styleKey] || CLASSIFICATION_STYLES.FN;
+  const isCorrect = !isWarning && (result.classification === "TP" || result.classification === "TN");
+  const verdictLabel = result.verdict === "scope_warning" ? "scope warn" : result.verdict === "drift_warning" ? "drift warn" : null;
+  const tooltip = result.verdict && result.verdict !== "ok" ? WARNING_TOOLTIPS[result.verdict] : undefined;
 
   return (
     <div
@@ -507,6 +538,12 @@ function ResultRow({ result }: { result: ActivationResult }) {
           {isCorrect ? (
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={cs.text} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12" />
+            </svg>
+          ) : isWarning ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={cs.text} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
             </svg>
           ) : (
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={cs.text} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -524,8 +561,9 @@ function ResultRow({ result }: { result: ActivationResult }) {
           <span
             className="pill"
             style={{ background: "var(--surface-3)", color: cs.text, fontWeight: 700, fontSize: "10px", padding: "1px 6px" }}
+            title={tooltip}
           >
-            {result.classification}
+            {verdictLabel ?? result.classification}
           </span>
           <span style={{ color: result.activate ? "var(--green)" : "var(--text-tertiary)" }}>
             {result.activate ? "Activated" : "Silent"}

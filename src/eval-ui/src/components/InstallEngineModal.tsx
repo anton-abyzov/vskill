@@ -14,7 +14,7 @@ import type { Engine } from "./EngineSelector";
 import { useInstallEngine } from "../hooks/useInstallEngine";
 
 const COMMAND_BY_ENGINE: Record<Exclude<Engine, "none">, string> = {
-  vskill: "vskill install anton-abyzov/vskill/plugins/skills/skills/skill-builder",
+  vskill: "vskill install anton-abyzov/vskill/skill-builder",
   "anthropic-skill-creator": "claude plugin install skill-creator",
 };
 

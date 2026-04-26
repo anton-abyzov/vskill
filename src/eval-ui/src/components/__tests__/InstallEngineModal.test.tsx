@@ -111,7 +111,7 @@ describe("AC-US5-04: confirm stage shows the exact command + security note", () 
     renderModal({ engine: "vskill" });
     const preview = getByTestId("install-command-preview");
     expect(preview.textContent).toContain(
-      "vskill install anton-abyzov/vskill/plugins/skills/skills/skill-builder",
+      "vskill install anton-abyzov/vskill/skill-builder",
     );
     expect(getByTestId("install-security-note").textContent).toContain(
       "This runs the command in your terminal as your user",

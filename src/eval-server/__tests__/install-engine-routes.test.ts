@@ -248,7 +248,7 @@ describe("AC-US5-07: hard-coded command allow-list (no shell injection surface)"
     expect(procMock.spawnCalls[0].command).toBe("vskill");
     expect(procMock.spawnCalls[0].args).toEqual([
       "install",
-      "anton-abyzov/vskill/plugins/skills/skills/skill-builder",
+      "anton-abyzov/vskill/skill-builder",
     ]);
   });
 });

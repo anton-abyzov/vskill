@@ -52,7 +52,7 @@ const INSTALL_COMMANDS: Record<EngineName, EngineCommand> = {
   },
   vskill: {
     command: "vskill",
-    args: ["install", "anton-abyzov/vskill/plugins/skills/skills/skill-builder"],
+    args: ["install", "anton-abyzov/vskill/skill-builder"],
     prerequisite: "vskill",
   },
 };

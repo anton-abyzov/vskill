@@ -699,9 +699,55 @@ function renderSkillDetail(
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
             <path d="M7 11V7a5 5 0 0 1 10 0v4" />
           </svg>
-          <span>
+          <span style={{ flex: 1, minWidth: 0 }}>
             This is an installed copy of the skill. Editing, generating tests, and running evals are disabled. Open the source skill to make changes.
           </span>
+          {/* 0780: Uninstall button — visible only for lockfile-tracked
+              installed skills. Plugin-bundled skills (trackedForUpdates=false)
+              are managed by the PluginActionMenu instead. */}
+          {skill.trackedForUpdates && (
+            <button
+              type="button"
+              data-testid="uninstall-button"
+              aria-label={`Uninstall ${skill.skill}`}
+              onClick={() => {
+                if (typeof window === "undefined") return;
+                window.dispatchEvent(
+                  new CustomEvent("studio:request-uninstall", {
+                    detail: {
+                      skill: {
+                        plugin: skill.plugin,
+                        skill: skill.skill,
+                        dir: skill.dir ?? "",
+                        hasEvals: false,
+                        hasBenchmark: false,
+                        evalCount: 0,
+                        assertionCount: 0,
+                        benchmarkStatus: "missing",
+                        lastBenchmark: null,
+                        origin: "installed",
+                      },
+                    },
+                  }),
+                );
+              }}
+              style={{
+                flexShrink: 0,
+                marginLeft: 8,
+                padding: "3px 10px",
+                fontSize: 11,
+                fontWeight: 500,
+                fontFamily: "var(--font-sans)",
+                color: "var(--text-primary)",
+                background: "transparent",
+                border: "1px solid var(--border-default, var(--border-subtle))",
+                borderRadius: 4,
+                cursor: "pointer",
+              }}
+            >
+              Uninstall
+            </button>
+          )}
         </div>
       )}
       {/* 0708 T-073/T-074 + wrap-up: per-skill "Check now" rescan button.

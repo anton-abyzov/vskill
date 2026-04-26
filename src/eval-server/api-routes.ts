@@ -11,7 +11,7 @@ import { sendJson, readBody } from "./router.js";
 import { initSSE, sendSSE, sendSSEDone, withHeartbeat, startDynamicHeartbeat } from "./sse-helpers.js";
 import { dataEventBus, emitDataEvent } from "./data-events.js";
 import { classifyError } from "./error-classifier.js";
-import { readLockfile } from "../lockfile/lockfile.js";
+import { readLockfile, writeLockfile } from "../lockfile/lockfile.js";
 import { parseSource } from "../resolvers/source-resolver.js";
 import { resolveSkillApiName as resolveSkillApiNameImpl } from "./skill-name-resolver.js";
 import { runBenchmarkSSE, runSingleCaseSSE, assembleBulkResult } from "./benchmark-runner.js";
@@ -1043,21 +1043,29 @@ function resolveSourceLink(
   }
 
   // Legacy derivation from `source: github:owner/repo`.
-  // 0743: We DO NOT default `skillPath` to "SKILL.md" here. Multi-skill repos
-  // (vskill, marketingskills, etc.) hold the SKILL.md under a nested path,
-  // and the legacy `source` string carries no path information. Guessing
-  // "SKILL.md" produced confidently-wrong 404 anchors for every install from
-  // a multi-skill repo. Returning `null` lets the UI fall back to the safe
-  // copy-chip (local path); a fresh `vskill add` writes the explicit
-  // `sourceSkillPath` and restores the working anchor via the branch above.
+  // 0743: We DO NOT blindly default `skillPath` to "SKILL.md" here. Multi-skill
+  // repos (vskill, marketingskills, etc.) hold the SKILL.md under a nested
+  // path, and the legacy `source` string carries no path information.
+  // Guessing "SKILL.md" produced confidently-wrong 404 anchors for every
+  // install from a multi-skill repo.
+  //
+  // 0773 hotfix: when the matched lockfile entry KEY equals the source repo
+  // basename (i.e. `vskill install anton-abyzov/greet-anton` keys the entry
+  // as `greet-anton` AND the repo is `greet-anton`), the repo IS the skill —
+  // SKILL.md sits at the repo root. Defaulting skillPath to "SKILL.md" in
+  // that exact shape restores the working SourceFileLink anchor for
+  // single-skill repos without re-introducing 404s for multi-skill repos.
   const m = /^github:([^/]+)\/([^/#]+)/.exec(entry.source ?? "");
   // 0770: do NOT fall through here — an installed skill with a non-github
   // `source` (e.g. `marketplace:...`) is still installed, not authored. Local
   // git detection would leak the workspace remote (umbrella, etc.).
   if (!m) return { repoUrl: null, skillPath: null };
+  const repoBasename = m[2];
+  const lockKey = lock.skills[skillName] ? skillName : parentName;
+  const isSingleSkillRepo = repoBasename === lockKey;
   return {
     repoUrl: `https://github.com/${m[1]}/${m[2]}`,
-    skillPath: entry.sourceSkillPath ?? null,
+    skillPath: entry.sourceSkillPath ?? (isSingleSkillRepo ? "SKILL.md" : null),
   };
 }
 
@@ -2653,6 +2661,79 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     } catch (err) {
       sendJson(res, { error: `Failed to delete skill: ${(err as Error).message}` }, 500, req);
     }
+  });
+
+  // 0780 — Uninstall an installed (lockfile-tracked) skill. Symmetric to
+  // `vskill install`: removes the lockfile entry AND trashes the on-disk
+  // dir. Idempotent on partially-removed installs (lockfile entry without
+  // disk dir, or vice versa). Returns 404 only when neither exists.
+  //
+  // Distinct from DELETE /api/skills/:plugin/:skill (which trashes
+  // source-authored skills only and explicitly rejects installed copies):
+  // this route is the canonical uninstall path for lockfile-tracked
+  // installed skills.
+  router.post("/api/skills/:plugin/:skill/uninstall", async (req, res, params) => {
+    // Skill-name validation — same kebab-case regex used by skill-create
+    // routes. Performed BEFORE any filesystem access to defang path-traversal
+    // attempts (e.g. `../../etc/passwd`).
+    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(params.skill)) {
+      sendJson(res, { error: "Invalid skill name", code: "invalid-skill-name" }, 400, req);
+      return;
+    }
+
+    const skillDir = join(root, ".claude", "skills", params.skill);
+    const resolvedDir = resolve(skillDir);
+    const resolvedRoot = resolve(root);
+    if (!resolvedDir.startsWith(resolvedRoot + "/") && resolvedDir !== resolvedRoot) {
+      sendJson(res, { error: "Invalid skill path", code: "invalid-path" }, 400, req);
+      return;
+    }
+
+    let removedFromLockfile = false;
+    try {
+      const lock = readLockfile(root);
+      if (lock && lock.skills && Object.prototype.hasOwnProperty.call(lock.skills, params.skill)) {
+        delete lock.skills[params.skill];
+        writeLockfile(lock, root);
+        removedFromLockfile = true;
+      }
+    } catch (err) {
+      sendJson(
+        res,
+        { error: `Failed to update lockfile: ${(err as Error).message}`, code: "lockfile-write-failed" },
+        500,
+        req,
+      );
+      return;
+    }
+
+    let trashedDir: string | null = null;
+    if (existsSync(skillDir)) {
+      try {
+        const trash = (await import("trash")).default;
+        await trash([skillDir]);
+        trashedDir = skillDir;
+      } catch (err) {
+        sendJson(
+          res,
+          {
+            error: `Failed to trash skill dir: ${(err as Error).message}`,
+            code: "trash-failed",
+            removedFromLockfile,
+          },
+          500,
+          req,
+        );
+        return;
+      }
+    }
+
+    if (!removedFromLockfile && trashedDir === null) {
+      sendJson(res, { error: "Skill is not installed", code: "not-installed" }, 404, req);
+      return;
+    }
+
+    sendJson(res, { ok: true, removedFromLockfile, trashedDir }, 200, req);
   });
 
   // Get skill description (for activation testing preview)

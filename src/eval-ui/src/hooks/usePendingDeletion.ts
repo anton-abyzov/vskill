@@ -17,6 +17,13 @@ export interface PendingDeletionOptions {
   delayMs?: number;
   onCommit?: (skill: PendingSkill) => void;
   onFailure?: (skill: PendingSkill, err: Error) => void;
+  /**
+   * 0780: override the API call invoked when the timer fires. Defaults to
+   * `api.deleteSkill` (source-skill trash flow). Pass `api.uninstallSkill`
+   * for the installed-skill uninstall flow. The hook is otherwise identical
+   * — same buffer semantics, same undo, same flushPending.
+   */
+  apiCall?: (plugin: string, skill: string) => Promise<unknown>;
 }
 
 export interface UsePendingDeletionReturn {
@@ -39,13 +46,16 @@ export function usePendingDeletion(
   const delayMs = opts?.delayMs ?? 10_000;
   const onCommit = opts?.onCommit;
   const onFailure = opts?.onFailure;
+  const apiCall = opts?.apiCall ?? api.deleteSkill.bind(api);
 
   // Latest callbacks via ref so the timer closure always sees fresh handlers
   // without re-creating timers when the parent re-renders.
   const onCommitRef = useRef(onCommit);
   const onFailureRef = useRef(onFailure);
+  const apiCallRef = useRef(apiCall);
   onCommitRef.current = onCommit;
   onFailureRef.current = onFailure;
+  apiCallRef.current = apiCall;
 
   const entriesRef = useRef<Map<string, Entry>>(new Map());
   // Bump to force re-render when pending state changes (so isPending reflects).
@@ -54,7 +64,7 @@ export function usePendingDeletion(
 
   const commit = useCallback(async (entry: Entry) => {
     try {
-      await api.deleteSkill(entry.skill.plugin, entry.skill.skill);
+      await apiCallRef.current(entry.skill.plugin, entry.skill.skill);
       onCommitRef.current?.(entry.skill);
     } catch (err) {
       onFailureRef.current?.(entry.skill, err as Error);

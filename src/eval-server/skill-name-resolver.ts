@@ -40,7 +40,16 @@ function isUnsafeSegment(s: string): boolean {
 }
 
 function rememberAndReturn(skill: string, value: string): string {
-  resolverCache.set(skill, value);
+  // Only cache fully-resolved 3-part `owner/repo/skill` forms. Caching the
+  // bare-name fallback (a single segment with no slashes) poisons subsequent
+  // lookups when the git remote was unreadable on the first call — e.g. a
+  // freshly-cloned repo with no `origin` yet, or a transient git timeout.
+  // Studio sessions can survive for hours, so a poisoned cache means the
+  // Versions tab reports "No published versions yet" forever despite the
+  // skill being live on verified-skill.com (0782 hotfix).
+  if (value.includes("/")) {
+    resolverCache.set(skill, value);
+  }
   return value;
 }
 

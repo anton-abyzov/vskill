@@ -12,6 +12,7 @@
 
 import * as React from "react";
 import { mutate as swrMutate } from "../hooks/useSWR";
+import { triggerPluginsRefresh } from "../hooks/usePluginsPolling";
 
 export interface InstallJob {
   plugin: string;
@@ -95,7 +96,7 @@ export function InstallProgressToast({
                 finalStatus = ev.ok ? "ok" : "failed";
                 setStatus(finalStatus);
                 // Refresh both caches — sidebar + plugin list
-                swrMutate("plugins");
+                triggerPluginsRefresh();
                 swrMutate("skills");
                 onDone({ ok: ev.ok ?? false, code: ev.code ?? null, lines: bufferedLines });
               } else if (ev.type === "error" && ev.error) {

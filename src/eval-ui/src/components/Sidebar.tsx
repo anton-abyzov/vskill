@@ -1,5 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { useSWR } from "../hooks/useSWR";
+import { usePluginsPolling } from "../hooks/usePluginsPolling";
 import { Virtuoso } from "react-virtuoso";
 import type { SkillInfo } from "../types";
 import { SidebarSection } from "./SidebarSection";
@@ -255,15 +255,10 @@ export function Sidebar({
   const isClaudeCode = resolvedAgentId === "claude-code";
 
   // 0700: fetch installed plugin list so the per-plugin "⋯" action menu
-  // knows whether to show Enable vs Disable. SWR keeps this shared with
-  // PluginActionMenu which invalidates "plugins" after mutations.
-  const { data: pluginListData } = useSWR<{
-    plugins: Array<{ name: string; marketplace: string; enabled: boolean; scope: string }>;
-  }>(
-    "plugins",
-    () => fetch("/api/plugins").then((r) => r.json()),
-    { enabled: isClaudeCode, ttl: 60_000 },
-  );
+  // knows whether to show Enable vs Disable. usePluginsPolling provides
+  // controlled backoff + AbortController cleanup (fixes 0736 runaway retry).
+  const { plugins: rawPluginList } = usePluginsPolling();
+  const pluginListData = isClaudeCode ? { plugins: rawPluginList ?? [] } : undefined;
   const pluginEnabledByName = useMemo(() => {
     const map = new Map<string, boolean>();
     for (const p of pluginListData?.plugins ?? []) {

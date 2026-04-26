@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.116] - 2026-04-25
+
+### Fixed
+- **0736 (US-001)**: Studio update click now sends clean POST `/api/skills/:plugin/:skill/update` — eliminated the double-fire from old `onAction("update")` dispatch. UpdateAction.tsx shows inline progress + structured error UX; no more "Stream error" toast on update click.
+- **0736 (US-002)**: `usePluginsPolling()` hook with AbortController + `visibilityState` pause + exponential backoff replaces the runaway `setInterval` that fired 7,500+ requests per session. Polls pause when tab is hidden and back off on errors (2s → 4s → 8s … 60s cap).
+- **0736 (US-003)**: `resolveSubscriptionIds()` + StudioContext wire-up ensures SSE subscriptions use UUID/`sk_published_*` slug (from the platform's check-updates response) rather than raw `.claude/<skill>` paths. Platform's check-updates response now includes `id` + `slug` fields. UpdatesPanel re-renders correctly when subscription IDs are resolved.
+- Code-review hardening: request-abortion on cleanup (F-001), removed stale TODO comments (F-005), pure component memoization (F-006), polling state reset on unmount (F-007), consistent error message propagation (F-010).
+
 ## [0.5.112] - 2026-04-25
 
 ### Fixed

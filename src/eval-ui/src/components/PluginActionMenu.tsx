@@ -17,6 +17,7 @@
 
 import * as React from "react";
 import { mutate as swrMutate } from "../hooks/useSWR";
+import { triggerPluginsRefresh } from "../hooks/usePluginsPolling";
 
 export interface PluginActionMenuProps {
   pluginName: string;
@@ -76,7 +77,7 @@ export function PluginActionMenu({
         return;
       }
       swrMutate("skills");
-      swrMutate("plugins");
+      triggerPluginsRefresh();
       onAfterAction?.();
       setOpen(false);
     } catch (err) {

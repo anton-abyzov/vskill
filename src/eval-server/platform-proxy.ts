@@ -29,6 +29,23 @@
 //   - Connection failures upstream return a `502 Bad Gateway` JSON
 //     envelope so the studio's fetch error handlers see a structured
 //     response rather than a hung socket.
+//
+// SSE subscription ID-format contract (0736 / AC-US3-04)
+// -------------------------------------------------------
+// /api/v1/skills/stream is forwarded verbatim to the platform's UpdateHub.
+// The `?skills=<csv>` query param MUST contain UUID (`Skill.id`) or public
+// slug (`sk_published_<owner>/<repo>/<skill>`) identifiers — NOT the studio's
+// local `<plugin>/<skill>` name format (e.g. `.claude/greet-anton`).
+//
+// The studio side resolves platform IDs via the `resolveSubscriptionIds()`
+// helper (src/eval-ui/src/utils/resolveSubscriptionIds.ts) before opening
+// the EventSource. Skills without a resolvable UUID or slug are omitted from
+// the filter; the polling fallback (usePluginsPolling) covers them so no
+// updates are lost. See useSkillUpdates.ts for the full hook-side contract.
+//
+// This proxy does NOT transform or validate the `?skills=` parameter — it
+// forwards exactly what the studio sends. Correctness is the studio's
+// responsibility (enforced in resolveSubscriptionIds + useSkillUpdates).
 // ---------------------------------------------------------------------------
 
 import * as http from "node:http";

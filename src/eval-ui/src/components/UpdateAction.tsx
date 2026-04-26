@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useStudio } from "../StudioContext";
 import type { SkillInfo, VersionDiff } from "../types";
-import { useOptimisticAction } from "../hooks/useOptimisticAction";
 import { useToast } from "./ToastProvider";
 import { ChangelogViewer } from "./ChangelogViewer";
 
@@ -11,98 +10,73 @@ interface Props {
 }
 
 type ActionStatus = "idle" | "updating" | "done" | "error";
-interface Snapshot {
-  status: ActionStatus;
-}
-
-const SSE_TIMEOUT_MS = 60_000;
 
 /**
- * 0683 T-009: "Update to X.Y.Z" CTA rendered inside the `RightPanel` Overview
- * tab when the selected skill has an outstanding update. Wraps the existing
- * single-skill SSE update API in a Promise that resolves on `done` and
- * rejects on `error` / `TIMEOUT`, then drives it through
- * `useOptimisticAction` for rollback + retry + toast semantics.
+ * 0736 US-001: "Update to X.Y.Z" CTA rendered inside the RightPanel Overview
+ * tab when the selected skill has an outstanding update.
  *
- * Renders `null` when the skill is null, or when `skill.updateAvailable` is
- * not `true`.
+ * Uses a single POST /api/skills/:plugin/:skill/update (not an EventSource).
+ * The old SSE side-channel (startSkillUpdate) caused ERR_CONNECTION_REFUSED
+ * because the backend only accepts POST, not GET.
  */
 export function UpdateAction({ skill }: Props) {
   const { refreshUpdates, dismissPushUpdate } = useStudio();
   const { toast } = useToast();
   const [status, setStatus] = useState<ActionStatus>("idle");
-  const [progressStatus, setProgressStatus] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
   const [changelogDiff, setChangelogDiff] = useState<VersionDiff | null>(null);
   const [changelogLoading, setChangelogLoading] = useState(false);
-  const esRef = useRef<EventSource | null>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const runSSE = useCallback((): Promise<void> => {
-    return new Promise<void>((resolve, reject) => {
-      if (!skill) {
-        reject(new Error("No skill selected"));
-        return;
-      }
-      const es = api.startSkillUpdate(skill.plugin, skill.skill);
-      esRef.current = es;
-      const cleanup = () => {
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-          timeoutRef.current = null;
-        }
-        try { es.close(); } catch { /* noop */ }
-        esRef.current = null;
-      };
-      timeoutRef.current = setTimeout(() => {
-        cleanup();
-        reject(new Error("TIMEOUT"));
-      }, SSE_TIMEOUT_MS);
-      es.addEventListener("progress", (evt: MessageEvent) => {
-        try {
-          const data = JSON.parse(evt.data);
-          if (typeof data?.status === "string") setProgressStatus(data.status);
-        } catch { /* silent */ }
-      });
-      es.addEventListener("done", () => {
-        cleanup();
+  const handleUpdate = useCallback(async () => {
+    if (!skill) return;
+    if (status === "updating") return;
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setStatus("updating");
+    setErrorMsg(null);
+
+    try {
+      const result = await api.postSkillUpdate(skill.plugin, skill.skill, controller.signal);
+
+      if (result.ok) {
         setStatus("done");
-        setProgressStatus(null);
         void refreshUpdates();
-        // 0708 T-039: clear the push-store entry so the blue UpdateChip dot
-        // and the bell count for this skill vanish immediately — without
-        // waiting for the next outdated poll to land.
         dismissPushUpdate(`${skill.plugin}/${skill.skill}`);
         toast({ message: `Updated ${skill.skill}.`, severity: "success", durationMs: 4000 });
-        resolve();
+      } else {
+        const msg = `Update failed (HTTP ${result.status}): ${result.body}`;
+        setStatus("idle");
+        setErrorMsg(msg);
+        toast({
+          message: `Couldn't update ${skill.skill} — HTTP ${result.status}`,
+          severity: "error",
+          durationMs: 0,
+          action: { label: "Retry", onInvoke: () => { void handleUpdate(); } },
+        });
+      }
+    } catch (err) {
+      // Aborted on unmount — caller is gone, no UI to update.
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
+      const errMsg = err instanceof Error ? err.message : "Network error";
+      setStatus("idle");
+      setErrorMsg(errMsg);
+      toast({
+        message: `Couldn't update ${skill.skill} — ${errMsg}`,
+        severity: "error",
+        durationMs: 0,
+        action: { label: "Retry", onInvoke: () => { void handleUpdate(); } },
       });
-      es.addEventListener("error", (evt: MessageEvent) => {
-        cleanup();
-        let message = "Stream error";
-        try {
-          const data = typeof evt.data === "string" ? JSON.parse(evt.data) : null;
-          if (data?.error) message = String(data.error);
-        } catch { /* keep default */ }
-        reject(new Error(message));
-      });
-    });
-  }, [skill, refreshUpdates, dismissPushUpdate, toast]);
-
-  const action = useOptimisticAction<[], Snapshot>({
-    snapshot: () => ({ status }),
-    apply: () => {
-      setStatus("updating");
-      setProgressStatus("updating");
-    },
-    commit: () => runSSE(),
-    rollback: (snap) => {
-      setStatus(snap.status === "updating" ? "idle" : snap.status);
-      setProgressStatus(null);
-    },
-    failureMessage: (err) =>
-      `Couldn't update ${skill?.skill ?? "skill"} — ${(err as Error).message}`,
-    timeoutMs: SSE_TIMEOUT_MS + 1000,
-  });
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
+    }
+  }, [skill, status, refreshUpdates, dismissPushUpdate, toast]);
 
   useEffect(() => {
     if (!showChangelog) return;
@@ -123,13 +97,9 @@ export function UpdateAction({ skill }: Props) {
     return () => { cancelled = true; };
   }, [showChangelog, changelogDiff, skill?.plugin, skill?.skill, skill?.latestVersion, skill?.currentVersion, skill]);
 
-  // Cleanup SSE on unmount.
   useEffect(() => {
     return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      if (esRef.current) {
-        try { esRef.current.close(); } catch { /* noop */ }
-      }
+      abortRef.current?.abort();
     };
   }, []);
 
@@ -161,7 +131,7 @@ export function UpdateAction({ skill }: Props) {
         <button
           type="button"
           data-testid="update-action-button"
-          onClick={() => { void action.run(); }}
+          onClick={() => { void handleUpdate(); }}
           disabled={disabled}
           style={{
             height: 36,
@@ -196,7 +166,7 @@ export function UpdateAction({ skill }: Props) {
           {showChangelog ? "Hide changelog" : "Preview changelog"}
         </button>
       </div>
-      {progressStatus && (
+      {status === "updating" && (
         <div
           data-testid="update-action-progress"
           role="status"
@@ -206,7 +176,20 @@ export function UpdateAction({ skill }: Props) {
             color: "var(--text-muted, var(--text-secondary))",
           }}
         >
-          {progressStatus}
+          Updating…
+        </div>
+      )}
+      {errorMsg && status !== "updating" && (
+        <div
+          data-testid="update-action-error"
+          role="alert"
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            color: "var(--color-error, #d32f2f)",
+          }}
+        >
+          {errorMsg}
         </div>
       )}
       {showChangelog && latest && (

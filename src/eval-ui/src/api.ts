@@ -975,6 +975,24 @@ export const api = {
   studioOpsStream(): EventSource {
     return new EventSource(`${BASE}/api/studio/ops/stream`);
   },
+
+  // 0759: minimum-viable publish flow. Probe of git state + real push.
+  // Full 0742 build will add SSE streaming, AI commit messages, and gh-CLI
+  // repo creation on top of these primitives.
+  gitRemote(): Promise<{ remoteUrl: string | null; branch: string | null; hasRemote: boolean }> {
+    return fetchJson("/api/git/remote");
+  },
+
+  gitPublish(): Promise<{
+    success: boolean;
+    commitSha: string | null;
+    branch: string | null;
+    remoteUrl: string | null;
+    stdout: string;
+    stderr: string;
+  }> {
+    return fetchJson("/api/git/publish", { method: "POST" });
+  },
 };
 
 // ---------------------------------------------------------------------------

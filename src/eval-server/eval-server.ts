@@ -31,6 +31,7 @@ import { registerWorkspaceRoutes } from "./workspace-routes.js";
 import { loadWorkspace, addProject, setActiveProject, projectIdFromPath } from "./workspace-store.js";
 import { registerAuthoringRoutes } from "./authoring-routes.js";
 import { registerPluginCliRoutes } from "./plugin-cli-routes.js";
+import { registerGitRoutes } from "./git-routes.js";
 import { checkDistFreshness } from "./check-dist-freshness.js";
 import { homedir } from "node:os";
 
@@ -99,6 +100,7 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
   registerScopeTransferRoutes(router, root);
   registerAuthoringRoutes(router, root);
   registerPluginCliRoutes(router, root);
+  registerGitRoutes(router, root);
 
   // Static asset directory
   const staticDir = path.resolve(__dirname, "../eval-ui");

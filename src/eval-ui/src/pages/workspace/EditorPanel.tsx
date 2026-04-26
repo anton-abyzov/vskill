@@ -12,6 +12,8 @@ import type { ProgressEntry } from "../../components/ProgressLog";
 import { useSkillFiles } from "./useSkillFiles";
 import { SkillFileBrowser } from "../../components/SkillFileBrowser";
 import { SecondaryFileViewer } from "../../components/SecondaryFileViewer";
+import { PublishButton } from "../../components/PublishButton";
+import { useGitRemote } from "../../hooks/useGitRemote";
 
 type ViewMode = "split" | "raw" | "preview";
 
@@ -81,6 +83,9 @@ export function EditorPanel() {
   const [regenError, setRegenError] = useState<string | null>(null);
   const regenAbortRef = useRef<AbortController | null>(null);
   const { config } = useConfig();
+
+  // 0759: probe git state for the Publish button. Hook runs once on mount.
+  const gitRemote = useGitRemote();
 
   const { files, activeFile, secondaryContent, loading: filesLoading, error: filesError, selectFile, refresh: refreshFiles, isSkillMd } = useSkillFiles(plugin ?? "", skill ?? "");
   const [secondaryDirty, setSecondaryDirty] = useState(false);
@@ -375,6 +380,9 @@ export function EditorPanel() {
             >
               {saving ? <><span className="spinner" style={{ width: 11, height: 11, borderWidth: 1.5 }} /> Saving...</> : "Save"}
             </button>
+            {gitRemote.hasRemote && gitRemote.remoteUrl && (
+              <PublishButton remoteUrl={gitRemote.remoteUrl} />
+            )}
           </div>
         )}
       </div>

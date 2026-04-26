@@ -1,6 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SkillUpdateInfo } from "../api";
+import { api } from "../api";
 import { classifyBump, BUMP_COLORS } from "../utils/semverBump";
+import { formatUpdateLocationTooltip } from "../utils/formatUpdateLocationTooltip";
+import { useToast } from "./ToastProvider";
+import { useStudio } from "../StudioContext";
 
 interface Props {
   updates: SkillUpdateInfo[];
@@ -73,6 +77,71 @@ export default function UpdateDropdown({
   }, [onClose, anchorRef]);
 
   const outdated = updates.filter((u) => u.updateAvailable);
+  const { toast } = useToast();
+  // 0766 F-002: route post-update invalidation through the central helper
+  // so the bell, sidebar, header chip, and Versions tab all clear together.
+  const { onSkillUpdated } = useStudio();
+  const [updatingNames, setUpdatingNames] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+
+  // 0747 T-007: inline Update button click. Reuses POST
+  // /api/skills/:plugin/:skill/update which already does cross-agent fan-out
+  // via vskill update <name>. For all-readonly (plugin-bundled-only) skills,
+  // the click is blocked with an informative toast — no update endpoint hit.
+  async function handleInlineUpdate(u: SkillUpdateInfo) {
+    const locations = u.installLocations ?? [];
+    const updatable = locations.filter((l) => !l.readonly);
+    if (locations.length > 0 && updatable.length === 0) {
+      const slug = locations[0].pluginSlug ?? "the plugin";
+      toast({
+        severity: "info",
+        message: `This skill came from plugin ${slug}. Update the plugin to refresh it.`,
+      });
+      return;
+    }
+    if (updatingNames.has(u.name)) return;
+    setUpdatingNames((s) => {
+      const next = new Set(s);
+      next.add(u.name);
+      return next;
+    });
+    try {
+      const parts = u.name.split("/");
+      const plugin = u.localPlugin ?? (parts.length >= 2 ? parts[parts.length - 2] : parts[0]);
+      const skill = u.localSkill ?? parts[parts.length - 1];
+      const result = await api.postSkillUpdate(plugin, skill);
+      if (result.ok) {
+        const count = updatable.length || 1;
+        const noun = count === 1 ? "location" : "locations";
+        // 0766 F-002: invalidate all caches that depend on this skill's
+        // installed version (bell list, /api/skills, versions SWR key, push
+        // store entry). Without this, the bell still showed "1 update
+        // available" until the 5-min polling cycle.
+        onSkillUpdated(plugin, skill);
+        toast({
+          severity: "success",
+          message: `Updated ${skill} in ${count} ${noun}.`,
+          durationMs: 4000,
+        });
+      } else {
+        toast({
+          severity: "error",
+          message: `Couldn't update ${skill} — HTTP ${result.status}`,
+          durationMs: 0,
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Network error";
+      toast({ severity: "error", message: `Update failed: ${msg}`, durationMs: 0 });
+    } finally {
+      setUpdatingNames((s) => {
+        const next = new Set(s);
+        next.delete(u.name);
+        return next;
+      });
+    }
+  }
 
   return (
     <div
@@ -148,8 +217,17 @@ export default function UpdateDropdown({
             const bump = u.latest ? classifyBump(u.installed, u.latest) : "patch";
             const c = BUMP_COLORS[bump];
             const diff = diffSummariesById?.get(u.name);
+            // 0747 T-007: tooltip + inline Update button per row
+            const tooltip = formatUpdateLocationTooltip(
+              u.installLocations ?? [],
+              { pinned: u.pinned ?? false },
+            );
+            const isUpdating = updatingNames.has(u.name);
             return (
-              <li key={u.name} style={{ margin: 0 }}>
+              <li
+                key={u.name}
+                style={{ margin: 0, display: "flex", alignItems: "stretch", gap: 4 }}
+              >
                 <button
                   ref={i === 0 ? firstItemRef : undefined}
                   type="button"
@@ -239,6 +317,30 @@ export default function UpdateDropdown({
                       </span>
                     )}
                   </span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="update-dropdown-row-update"
+                  data-skill-name={u.name}
+                  title={tooltip}
+                  onClick={() => {
+                    void handleInlineUpdate(u);
+                  }}
+                  disabled={isUpdating}
+                  style={{
+                    flexShrink: 0,
+                    padding: "0 10px",
+                    background: "var(--color-ink)",
+                    color: "var(--color-paper)",
+                    border: "none",
+                    borderRadius: 4,
+                    cursor: isUpdating ? "not-allowed" : "pointer",
+                    fontFamily: "var(--font-sans)",
+                    fontSize: 11,
+                    fontWeight: 500,
+                  }}
+                >
+                  {isUpdating ? "Updating…" : "Update"}
                 </button>
               </li>
             );

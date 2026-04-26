@@ -167,9 +167,16 @@ interface SkillFileBrowserProps {
   activeFile: string;
   onSelect: (path: string) => void;
   onRefresh: () => void;
+  /**
+   * 0769 T-011: when set, the file-tree fetch failed (e.g. server returned a
+   * non-200 for /api/skills/:plugin/:skill/files). Renders an explicit error
+   * state instead of "No files found", which would falsely imply the skill
+   * dir is empty.
+   */
+  loadError?: string | null;
 }
 
-export function SkillFileBrowser({ files, activeFile, onSelect, onRefresh }: SkillFileBrowserProps) {
+export function SkillFileBrowser({ files, activeFile, onSelect, onRefresh, loadError }: SkillFileBrowserProps) {
   const [expanded, setExpanded] = useState(false);
   const tree = useMemo(() => buildTree(files), [files]);
 
@@ -229,7 +236,14 @@ export function SkillFileBrowser({ files, activeFile, onSelect, onRefresh }: Ski
             padding: "2px 4px 4px",
           }}
         >
-          {tree.length === 0 ? (
+          {loadError ? (
+            <div
+              style={{ fontSize: 11, color: "var(--text-warning, var(--text-tertiary))", padding: "4px 8px" }}
+              title={loadError}
+            >
+              Skill files not accessible from this workspace
+            </div>
+          ) : tree.length === 0 ? (
             <div style={{ fontSize: 11, color: "var(--text-tertiary)", padding: "4px 8px" }}>
               No files found
             </div>

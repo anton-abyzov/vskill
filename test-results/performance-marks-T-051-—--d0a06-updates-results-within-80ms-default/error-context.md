@@ -1,0 +1,153 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - link "Skill Studio — home" [ref=e7] [cursor=pointer]:
+            - /url: "#/"
+            - img [ref=e9]
+            - generic [ref=e11]: Skill Studio
+          - button "fixtures" [ref=e14] [cursor=pointer]:
+            - generic [ref=e16]: fixtures
+            - generic [ref=e17]: ▾
+        - navigation "Breadcrumb"
+        - generic [ref=e18]:
+          - button "Find verified skills — opens search (⌘⇧K)" [ref=e19] [cursor=pointer]:
+            - img [ref=e20]
+            - generic [ref=e23]: Find skills
+            - generic [ref=e24]: ⌘⇧K
+          - button "Create a new skill" [ref=e25] [cursor=pointer]:
+            - img [ref=e26]
+            - text: New Skill
+          - button "Claude Code · Claude Opus 4.7" [ref=e28] [cursor=pointer]:
+            - generic [ref=e30]: Claude Code · Claude Opus 4.7
+          - button "No updates available" [ref=e33] [cursor=pointer]
+          - button "Open command palette" [ref=e34] [cursor=pointer]:
+            - generic [ref=e35]: ⌘K
+    - generic [ref=e36]:
+      - complementary "Skills sidebar" [ref=e37]:
+        - generic [ref=e38]:
+          - button "Claude Code (0 · 11)" [ref=e39] [cursor=pointer]:
+            - generic [ref=e41]: Claude Code
+            - generic [ref=e42]: (0 · 11)
+            - generic [ref=e43]: ▾
+          - note "Claude Code session info" [ref=e44]:
+            - generic [ref=e46]:
+              - generic [ref=e47]: Claude Code uses your existing session. No API key needed — vskill just runs the official claude binary on your behalf.
+              - button "Learn more" [ref=e48] [cursor=pointer]
+            - button "Dismiss Claude Code info banner" [ref=e49] [cursor=pointer]: ×
+          - search [ref=e50]:
+            - img [ref=e51]
+            - searchbox "Filter skills" [active] [ref=e54]: test
+          - generic [ref=e55]:
+            - button "AVAILABLE (62)" [expanded] [ref=e56] [cursor=pointer]:
+              - generic [ref=e57]: ▾
+              - generic [ref=e58]: AVAILABLE
+              - generic [ref=e59]: (62)
+            - generic [ref=e60]:
+              - button "Project (0)" [expanded] [ref=e61] [cursor=pointer]:
+                - generic [ref=e62]: ▾
+                - generic [ref=e63]: Project
+                - generic [ref=e64]: (0)
+              - generic [ref=e66]:
+                - generic [ref=e67]: No matches in this section.
+                - generic [ref=e68]: Adjust the filter or press Escape to clear.
+            - generic [ref=e69]:
+              - button "Personal (1 of 11)" [expanded] [ref=e70] [cursor=pointer]:
+                - generic [ref=e71]: ▾
+                - generic [ref=e72]: Personal
+                - generic [ref=e73]: (1 of 11)
+              - group "claude-code (1)" [ref=e76]:
+                - generic [ref=e77]:
+                  - generic "claude-code" [ref=e78]
+                  - generic [ref=e79]: (1)
+                - list [ref=e80]:
+                  - listitem [ref=e81]:
+                    - button "webapp-testing 1.0.0" [ref=e82] [cursor=pointer]:
+                      - generic "webapp-testing" [ref=e84]
+                      - generic "No version declared" [ref=e85]: 1.0.0
+            - generic [ref=e86]:
+              - button "Plugins (0 of 51)" [expanded] [ref=e87] [cursor=pointer]:
+                - generic [ref=e88]: ▾
+                - generic [ref=e89]: Plugins
+                - generic [ref=e90]: (0 of 51)
+              - generic [ref=e91]:
+                - button "Browse marketplaces…" [ref=e92] [cursor=pointer]:
+                  - generic [ref=e93]: 🛒
+                  - text: Browse marketplaces…
+                - generic [ref=e94]: No plugin skills installed yet.
+            - button "AUTHORING (4) New" [expanded] [ref=e96] [cursor=pointer]:
+              - generic [ref=e97]: ▾
+              - generic [ref=e98]: AUTHORING
+              - generic [ref=e99]: (4)
+              - button "New" [ref=e101]:
+                - img [ref=e102]
+                - text: New
+            - generic [ref=e103]:
+              - button "Skills (2 of 4)" [expanded] [ref=e104] [cursor=pointer]:
+                - generic [ref=e105]: ▾
+                - generic [ref=e106]: Skills
+                - generic [ref=e107]: (2 of 4)
+              - generic [ref=e109]:
+                - group "fixtures (1)" [ref=e110]:
+                  - generic [ref=e111]:
+                    - generic "fixtures" [ref=e112]
+                    - generic [ref=e113]: (1)
+                  - list [ref=e114]:
+                    - listitem [ref=e115]:
+                      - button "hotfix-dup-test 1.0.0" [ref=e116] [cursor=pointer]:
+                        - generic "hotfix-dup-test" [ref=e118]
+                        - generic "No version declared" [ref=e119]: 1.0.0
+                - group "test-plugin (1)" [ref=e120]:
+                  - generic [ref=e121]:
+                    - generic "test-plugin" [ref=e122]
+                    - generic [ref=e123]: (1)
+                  - list [ref=e124]:
+                    - listitem [ref=e125]:
+                      - button "test-skill 1.0.0" [ref=e126] [cursor=pointer]:
+                        - generic "test-skill" [ref=e128]
+                        - generic "No version declared" [ref=e129]: 1.0.0
+            - generic [ref=e130]:
+              - button "Plugins (0)" [expanded] [ref=e131] [cursor=pointer]:
+                - generic [ref=e132]: ▾
+                - generic [ref=e133]: Plugins
+                - generic [ref=e134]: (0)
+              - generic [ref=e136]:
+                - text: No plugin sources in this project. Add
+                - code [ref=e137]: <plugin>/.claude-plugin/plugin.json
+                - text: .
+      - separator "Resize sidebar" [ref=e138]
+      - main [ref=e139]:
+        - generic [ref=e140]:
+          - heading "Select a skill to view details" [level=2] [ref=e141]
+          - paragraph [ref=e142]: Choose a skill from the sidebar — its frontmatter, filesystem info, and benchmark status will appear here.
+    - contentinfo [ref=e143]:
+      - contentinfo [ref=e144]:
+        - generic "opus" [ref=e145]
+        - generic [ref=e146]: "|"
+        - 'generic "Health: ok" [ref=e147]':
+          - generic [ref=e149]: ok
+        - generic [ref=e150]: "|"
+        - generic [ref=e151]:
+          - button "Use current Claude Code session — unlocked." [ref=e152] [cursor=pointer]:
+            - img [ref=e153]
+          - button "Anthropic API — locked. Click to add a key." [ref=e156] [cursor=pointer]:
+            - img [ref=e157]
+          - button "OpenRouter — unlocked." [ref=e160] [cursor=pointer]:
+            - img [ref=e161]
+          - button "Ollama (local, free) — unlocked." [ref=e164] [cursor=pointer]:
+            - img [ref=e165]
+          - button "LM Studio (local, free) — locked. Click to add a key." [ref=e168] [cursor=pointer]:
+            - img [ref=e169]
+          - button "OpenAI API — locked. Click for install instructions." [ref=e172] [cursor=pointer]:
+            - img [ref=e173]
+        - button "Switch to dark theme" [ref=e176] [cursor=pointer]:
+          - img [ref=e177]
+          - generic [ref=e180]: auto
+    - status [ref=e181]
+  - status [ref=e182]
+  - alert [ref=e183]
+```

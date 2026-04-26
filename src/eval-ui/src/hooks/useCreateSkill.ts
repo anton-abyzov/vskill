@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import { useConfig } from "../ConfigContext";
 import type { ProjectLayoutResponse, DetectedLayout, SaveDraftRequest } from "../types";
 import type { ProgressEntry } from "../components/ProgressLog";
@@ -214,6 +214,10 @@ export interface UseCreateSkillReturn {
   // Submission
   creating: boolean;
   error: string | null;
+  /** 0772 US-004: neutral info message (e.g. "Skill already existed — opened
+   *  it"). Distinct from `error` so consuming components can render a calmer
+   *  affordance instead of the red error styling. */
+  info: string | null;
   handleCreate: () => void;
 
   /**
@@ -259,6 +263,8 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
   // Submission
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 0772 US-004: neutral info channel for recoverable cases (409, etc).
+  const [info, setInfo] = useState<string | null>(null);
 
   // 0734: engine selection + version
   const [engineDetection, setEngineDetection] = useState<EngineDetectionState | null>(null);
@@ -614,6 +620,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
 
   const handleCreate = useCallback(async () => {
     setError(null);
+    setInfo(null);
     if (!name.trim()) { setError("Skill name is required"); return; }
     if (!description.trim()) { setError("Description is required"); return; }
     if (selectedLayout !== 3 && !effectivePlugin.trim()) { setError("Plugin name is required"); return; }
@@ -638,7 +645,24 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
       draftDirRef.current = null;
       onCreated(result.plugin, result.skill);
     } catch (err) {
-      setError((err as Error).message);
+      // 0772 US-004: a 409 from /api/skills/create with the structured
+      // `skill-already-exists` payload means the file already exists on disk
+      // (typical cause: the previous create succeeded but the UI failed to
+      // navigate, the user clicked again). Treat as a successful navigation
+      // to the existing skill, with a neutral info note.
+      if (
+        err instanceof ApiError &&
+        err.status === 409 &&
+        err.details?.code === "skill-already-exists"
+      ) {
+        const conflictPlugin = typeof err.details.plugin === "string" ? err.details.plugin : "";
+        const conflictSkill = typeof err.details.skill === "string" ? err.details.skill : toKebab(name);
+        setInfo("Skill already existed — opened it.");
+        draftDirRef.current = null;
+        onCreated(conflictPlugin, conflictSkill);
+      } else {
+        setError((err as Error).message);
+      }
     } finally {
       setCreating(false);
     }
@@ -671,7 +695,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
     draftSaved,
     showPluginRecommendation, setShowPluginRecommendation,
     pluginLayoutInfo, applyPluginRecommendation,
-    creating, error, handleCreate,
+    creating, error, info, handleCreate,
     // 0734: engine + version + detection state
     engineDetection, refreshEngineDetection,
     engine, setEngine,

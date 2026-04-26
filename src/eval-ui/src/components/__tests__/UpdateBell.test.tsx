@@ -5,6 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Stub the SVG asset — Vitest's default resolver doesn't run Vite asset loaders.
 vi.mock("../../assets/icons/update-bell.svg", () => ({ default: "stub-bell.svg" }));
 
+// 0747 T-006: UpdateBell now consumes useToast for the no-match owning-agent
+// fallback. Tests that don't render <ToastProvider> must stub it.
+vi.mock("../ToastProvider", () => ({
+  useToast: () => ({ toast: vi.fn(), dismiss: vi.fn(), clear: vi.fn() }),
+}));
+
 // Replace the lazy-loaded dropdown with a synchronous stub. The lazy path
 // is validated separately via the source-inspection contract in
 // `__tests__/update-bell.lazy.test.ts`.
@@ -29,6 +35,9 @@ interface StudioStub {
   isRefreshingUpdates: boolean;
   refreshUpdates: () => Promise<void>;
   selectSkill: (s: { plugin: string; skill: string; origin: "source" | "installed" }) => void;
+  // 0766 F-002: post-update invalidation helper consumed by lazy-mounted
+  // UpdateDropdown.
+  onSkillUpdated: (plugin: string, skill: string) => void;
 }
 
 let stub: StudioStub = {
@@ -37,6 +46,9 @@ let stub: StudioStub = {
   isRefreshingUpdates: false,
   refreshUpdates: vi.fn(() => Promise.resolve()),
   selectSkill: vi.fn(),
+  // 0766 F-002: UpdateDropdown (lazy-mounted by UpdateBell when opened)
+  // depends on onSkillUpdated for post-update invalidation.
+  onSkillUpdated: vi.fn(),
 };
 
 vi.mock("../../StudioContext", () => ({

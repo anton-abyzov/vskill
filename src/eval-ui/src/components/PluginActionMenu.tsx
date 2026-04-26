@@ -10,14 +10,15 @@
 //   - enabled=true  → [Disable] [Uninstall]
 //   - enabled=false → [Enable]  [Uninstall]
 //
-// Optimistic UI: the caller passes `onAfterAction` which triggers a refetch
-// of both /api/plugins (for enabled-state) and /api/skills (so the sidebar
-// reflects the new available skills).
+// 0767: Uninstall now routes through the shared <ConfirmDialog> instead of
+// window.confirm(), and surfaces success/error through the studio:toast
+// CustomEvent bridge so feedback survives the menu being closed.
 // ---------------------------------------------------------------------------
 
 import * as React from "react";
 import { mutate as swrMutate } from "../hooks/useSWR";
 import { triggerPluginsRefresh } from "../hooks/usePluginsPolling";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 export interface PluginActionMenuProps {
   pluginName: string;
@@ -25,6 +26,15 @@ export interface PluginActionMenuProps {
   enabled: boolean;
   /** Fired on successful mutation so parents can refresh. */
   onAfterAction?: () => void;
+}
+
+type Severity = "success" | "error" | "info" | "warning";
+
+function emitToast(message: string, severity: Severity): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("studio:toast", { detail: { message, severity } }),
+  );
 }
 
 export function PluginActionMenu({
@@ -35,6 +45,7 @@ export function PluginActionMenu({
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
   const rootRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -48,18 +59,10 @@ export function PluginActionMenu({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  async function runAction(
-    action: "enable" | "disable" | "uninstall",
-  ): Promise<void> {
+  async function callApi(action: "enable" | "disable" | "uninstall"): Promise<void> {
     setBusy(action);
     setError(null);
     try {
-      if (action === "uninstall") {
-        if (!window.confirm(`Uninstall ${pluginName}? This removes the plugin and its skills.`)) {
-          setBusy(null);
-          return;
-        }
-      }
       const res = await fetch(
         `/api/plugins/${encodeURIComponent(pluginName)}/${action}`,
         {
@@ -71,20 +74,40 @@ export function PluginActionMenu({
       const body = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         error?: string;
+        fallback?: string;
       };
       if (!res.ok || !body.ok) {
-        setError(body.error ?? `${action} failed (${res.status})`);
+        const msg = body.error ?? `${action} failed (${res.status})`;
+        setError(msg);
+        if (action === "uninstall") {
+          emitToast(`Failed to uninstall ${pluginName}: ${msg}`, "error");
+        }
         return;
+      }
+      if (action === "uninstall") {
+        const note =
+          body.fallback === "orphan-cache-removed"
+            ? `Removed orphaned ${pluginName}`
+            : `Uninstalled ${pluginName}`;
+        emitToast(note, "success");
       }
       swrMutate("skills");
       triggerPluginsRefresh();
       onAfterAction?.();
       setOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      if (action === "uninstall") {
+        emitToast(`Failed to uninstall ${pluginName}: ${msg}`, "error");
+      }
     } finally {
       setBusy(null);
     }
+  }
+
+  function onUninstallClick(): void {
+    setConfirmOpen(true);
   }
 
   return (
@@ -146,7 +169,7 @@ export function PluginActionMenu({
         >
           {enabled ? (
             <MenuItem
-              onClick={() => void runAction("disable")}
+              onClick={() => void callApi("disable")}
               disabled={busy !== null}
               busy={busy === "disable"}
               label="Disable"
@@ -154,7 +177,7 @@ export function PluginActionMenu({
             />
           ) : (
             <MenuItem
-              onClick={() => void runAction("enable")}
+              onClick={() => void callApi("enable")}
               disabled={busy !== null}
               busy={busy === "enable"}
               label="Enable"
@@ -162,7 +185,7 @@ export function PluginActionMenu({
             />
           )}
           <MenuItem
-            onClick={() => void runAction("uninstall")}
+            onClick={onUninstallClick}
             disabled={busy !== null}
             busy={busy === "uninstall"}
             label="Uninstall"
@@ -188,6 +211,22 @@ export function PluginActionMenu({
           )}
         </div>
       )}
+      <ConfirmDialog
+        open={confirmOpen}
+        title={`Uninstall ${pluginName}?`}
+        body={`This removes the ${pluginName} plugin and all of its skills. You can reinstall it later from the marketplace.`}
+        confirmLabel="Uninstall"
+        cancelLabel="Cancel"
+        variant="destructive"
+        onCancel={() => {
+          setConfirmOpen(false);
+          setOpen(false);
+        }}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          void callApi("uninstall");
+        }}
+      />
     </div>
   );
 }

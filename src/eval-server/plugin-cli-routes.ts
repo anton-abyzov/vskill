@@ -38,6 +38,10 @@ import {
 } from "./plugin-cli.js";
 import { buildClaudeCliFailureResponse } from "./plugin-cli-response.js";
 import { resolvePluginRef } from "./plugin-ref-resolver.js";
+import {
+  listOrphanPluginCacheDirs,
+  removeOrphanPluginCacheDirs,
+} from "./plugin-orphan-cleanup.js";
 
 const VALID_SCOPES: readonly PluginScope[] = ["user", "project", "local"] as const;
 
@@ -59,7 +63,20 @@ async function fetchPluginList(cwd?: string): Promise<InstalledPlugin[]> {
   return parseInstalledPlugins(result.stdout);
 }
 
-export function registerPluginCliRoutes(router: Router, root: string): void {
+export interface PluginCliRoutesOptions {
+  /**
+   * Override the marketplace cache root used by the orphan-cache fallback.
+   * Defaults to `~/.claude/plugins/cache`. Tests inject a tmp dir.
+   */
+  cacheRoot?: string;
+}
+
+export function registerPluginCliRoutes(
+  router: Router,
+  root: string,
+  options: PluginCliRoutesOptions = {},
+): void {
+  const cacheRoot = options.cacheRoot ?? join(homedir(), ".claude", "plugins", "cache");
   // GET /api/plugins — list installed plugins
   router.get("/api/plugins", async (_req, res) => {
     try {
@@ -287,7 +304,41 @@ export function registerPluginCliRoutes(router: Router, root: string): void {
     // short name while we shell out with the right ref.
     const ref = resolvePluginRef(name, await fetchPluginList(root));
     const args = ["uninstall", ref, ...(scope ? ["--scope", scope] : [])];
-    await runAndRespond(args, root, res, { timeout: 30_000 });
+
+    try {
+      const result = await runClaudePlugin(args, { cwd: root, timeout: 30_000 });
+      if (result.code === 0) {
+        const plugins = await fetchPluginList(root);
+        sendJson(res, { ok: true, stdout: result.stdout, plugins });
+        return;
+      }
+      // 0767: when the CLI says "not found in installed plugins" but the
+      // marketplace cache still holds an orphaned <mp>/<name>/ dir, remove
+      // it so the Studio sidebar stops surfacing the ghost plugin.
+      const combined = `${result.stdout}\n${result.stderr}`;
+      if (/not found in installed plugins/i.test(combined)) {
+        const bareName = name.split("@")[0];
+        const orphans = listOrphanPluginCacheDirs(bareName, cacheRoot);
+        if (orphans.length > 0) {
+          const cleanup = removeOrphanPluginCacheDirs(orphans, cacheRoot);
+          if (cleanup.removed.length > 0) {
+            const plugins = await fetchPluginList(root);
+            sendJson(res, {
+              ok: true,
+              fallback: "orphan-cache-removed",
+              removed: cleanup.removed,
+              failed: cleanup.failed,
+              plugins,
+            });
+            return;
+          }
+        }
+      }
+      const { status, body: failureBody } = buildClaudeCliFailureResponse(result);
+      sendJson(res, failureBody, status);
+    } catch (err) {
+      sendError(res, 500, "unexpected", err instanceof Error ? err.message : String(err));
+    }
   });
 }
 

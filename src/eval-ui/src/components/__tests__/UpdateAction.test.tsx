@@ -3,10 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // Stub StudioContext so UpdateAction doesn't need the provider tree.
+// 0766 F-002: UpdateAction now routes post-update invalidation through a
+// single `onSkillUpdated(plugin, skill)` helper instead of the old
+// refreshUpdates + dismissPushUpdate pair. Tests assert the new contract.
+const onSkillUpdatedSpy = vi.fn();
 const refreshUpdatesSpy = vi.fn(() => Promise.resolve());
 const dismissPushUpdateSpy = vi.fn();
 vi.mock("../../StudioContext", () => ({
   useStudio: () => ({
+    onSkillUpdated: onSkillUpdatedSpy,
     refreshUpdates: refreshUpdatesSpy,
     dismissPushUpdate: dismissPushUpdateSpy,
   }),
@@ -147,6 +152,7 @@ describe("UpdateAction — POST-based update (0736 US-001)", () => {
     lastFetchUrl = null;
     lastFetchMethod = null;
     fetchCallCount = 0;
+    onSkillUpdatedSpy.mockClear();
     refreshUpdatesSpy.mockClear();
     dismissPushUpdateSpy.mockClear();
   });
@@ -255,7 +261,10 @@ describe("UpdateAction — POST-based update (0736 US-001)", () => {
 
   // ---- AC-US1-02: success path --------------------------------------------
 
-  it("AC-US1-02: on 200 success, refreshUpdates is called and dismissPushUpdate fires", async () => {
+  it("AC-US1-02 (0766 F-002): on 200 success, onSkillUpdated(plugin, skill) fires", async () => {
+    // 0766: post-update invalidation now goes through a single helper that
+    // refreshes the bell, the listing, the versions key, and the push store
+    // — no more partial invalidation that left the Versions tab stale.
     nextFetchResponse = { type: "success", version: "1.4.0" };
     const h = await mountAction({ updateAvailable: true, currentVersion: "1.0.0", latestVersion: "1.4.0", plugin: "p", skill: "s" });
     try {
@@ -264,8 +273,8 @@ describe("UpdateAction — POST-based update (0736 US-001)", () => {
         btn.click();
         await flushMicrotasks();
       });
-      expect(refreshUpdatesSpy).toHaveBeenCalledTimes(1);
-      expect(dismissPushUpdateSpy).toHaveBeenCalledWith("p/s");
+      expect(onSkillUpdatedSpy).toHaveBeenCalledTimes(1);
+      expect(onSkillUpdatedSpy).toHaveBeenCalledWith("p", "s");
     } finally {
       h.unmount();
     }

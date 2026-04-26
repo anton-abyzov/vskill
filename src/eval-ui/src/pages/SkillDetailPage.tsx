@@ -1,6 +1,7 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
+import type { InstallLocation } from "../api";
 import { useSSE } from "../sse";
 import type { EvalsFile, EvalCase, Assertion, BenchmarkResult, ImproveResult } from "../types";
 import { SkillContentViewer } from "../components/SkillContentViewer";
@@ -8,6 +9,9 @@ import { SkillImprovePanel } from "../components/SkillImprovePanel";
 import { McpDependencies } from "../components/McpDependencies";
 import { ModelCompareModal } from "../components/ModelCompareModal";
 import { ProgressLog } from "../components/ProgressLog";
+import { InstallLocationChips } from "../components/InstallLocationChips";
+import { useToast } from "../components/ToastProvider";
+import { useStudio } from "../StudioContext";
 import type { ProgressEntry } from "../components/ProgressLog";
 
 interface AssertionResult {
@@ -30,6 +34,58 @@ interface InlineResult {
 export function SkillDetailPage() {
   const { plugin, skill } = useParams<{ plugin: string; skill: string }>();
   const navigate = useNavigate();
+  // 0747 T-009/T-010: pull install locations + per-skill update endpoint via
+  // the cached updates list from StudioContext. Optional chaining: useStudio
+  // may not expose `updates` in legacy contexts, hence the guarded read.
+  const studio = useStudio() as ReturnType<typeof useStudio> & {
+    updates?: Array<{
+      name: string;
+      pinned?: boolean;
+      installLocations?: InstallLocation[];
+      localPlugin?: string;
+      localSkill?: string;
+    }>;
+  };
+  const { toast } = useToast();
+  // 0747 code-review F-005: collapse the two memos into one and drop the
+  // `endsWith(/${skill})` fallback. The fallback could collide across owners
+  // (e.g. `acme/repo/foo` and `mobile/extra/foo` both end in `/foo`), making
+  // chips render install locations from the wrong skill. We only trust an
+  // exact (localPlugin, localSkill) match; if no match, render no chips
+  // (safer than misleading chips).
+  const matchedUpdate = useMemo(() => {
+    if (!plugin || !skill || !studio.updates) return null;
+    return (
+      studio.updates.find(
+        (u) => u.localPlugin === plugin && u.localSkill === skill,
+      ) ?? null
+    );
+  }, [plugin, skill, studio.updates]);
+  const installLocations: InstallLocation[] = matchedUpdate?.installLocations ?? [];
+  const skillPinned: boolean = Boolean(matchedUpdate?.pinned);
+
+  async function handleUpdateThisLocation(loc: InstallLocation) {
+    if (!plugin || !skill) return;
+    try {
+      const result = await api.postSkillUpdate(plugin, skill, { agentId: loc.agent });
+      if (result.ok) {
+        toast({
+          severity: "success",
+          message: `Updated ${skill} in ${loc.scope} (${loc.agentLabel}).`,
+          durationMs: 4000,
+        });
+      } else {
+        toast({
+          severity: "error",
+          message: `Couldn't update ${loc.agentLabel} — HTTP ${result.status}`,
+          durationMs: 0,
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Network error";
+      toast({ severity: "error", message: `Update failed: ${msg}`, durationMs: 0 });
+    }
+  }
   const [evals, setEvals] = useState<EvalsFile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -294,6 +350,13 @@ export function SkillDetailPage() {
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
         <span className="font-medium" style={{ color: "var(--text-primary)" }}>{skill}</span>
       </div>
+
+      {/* 0747 T-009: Install location chips — only render when N>1 */}
+      <InstallLocationChips
+        locations={installLocations}
+        pinned={skillPinned}
+        onUpdateLocation={handleUpdateThisLocation}
+      />
 
       {/* Skill Definition Viewer */}
       <SkillContentViewer content={skillContent} />

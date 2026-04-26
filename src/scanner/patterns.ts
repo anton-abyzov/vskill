@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Tier 1 Security Scan Patterns
-// 38 regex-based patterns for static analysis of skill content.
+// 52 regex-based patterns for static analysis of skill content.
 // ---------------------------------------------------------------------------
 
 // ---- Types ----------------------------------------------------------------

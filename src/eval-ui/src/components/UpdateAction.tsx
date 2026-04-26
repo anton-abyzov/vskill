@@ -20,7 +20,10 @@ type ActionStatus = "idle" | "updating" | "done" | "error";
  * because the backend only accepts POST, not GET.
  */
 export function UpdateAction({ skill }: Props) {
-  const { refreshUpdates, dismissPushUpdate } = useStudio();
+  // 0766 F-002: route through onSkillUpdated for full invalidation. The old
+  // refreshUpdates + dismissPushUpdate pair refreshed the bell but left the
+  // Versions tab and skill listing stale.
+  const { onSkillUpdated } = useStudio();
   const { toast } = useToast();
   const [status, setStatus] = useState<ActionStatus>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -43,8 +46,7 @@ export function UpdateAction({ skill }: Props) {
 
       if (result.ok) {
         setStatus("done");
-        void refreshUpdates();
-        dismissPushUpdate(`${skill.plugin}/${skill.skill}`);
+        onSkillUpdated(skill.plugin, skill.skill);
         toast({ message: `Updated ${skill.skill}.`, severity: "success", durationMs: 4000 });
       } else {
         const msg = `Update failed (HTTP ${result.status}): ${result.body}`;
@@ -76,7 +78,7 @@ export function UpdateAction({ skill }: Props) {
         abortRef.current = null;
       }
     }
-  }, [skill, status, refreshUpdates, dismissPushUpdate, toast]);
+  }, [skill, status, onSkillUpdated, toast]);
 
   useEffect(() => {
     if (!showChangelog) return;

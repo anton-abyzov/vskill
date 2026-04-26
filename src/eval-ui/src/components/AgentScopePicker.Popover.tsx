@@ -284,6 +284,7 @@ function AgentRow({
       />
       <span style={{ flex: 1, fontSize: 13 }}>{agent.displayName}</span>
       <span
+        title="project · personal · plugins"
         style={{
           fontFamily: "var(--font-mono)",
           fontSize: 10,
@@ -291,7 +292,7 @@ function AgentRow({
           fontVariantNumeric: "tabular-nums",
         }}
       >
-        {agent.installedCount}·{agent.globalCount}
+        {agent.installedCount}·{agent.globalCount}·{agent.pluginCount ?? 0}
       </span>
     </button>
   );
@@ -481,6 +482,7 @@ function StatsPane({
       >
         <Row label={strings.scopePicker.statsInstalled} value={String(agent.installedCount)} />
         <Row label={strings.scopePicker.statsGlobal} value={String(agent.globalCount)} />
+        <Row label={strings.scopePicker.statsPlugins} value={String(agent.pluginCount ?? 0)} />
         <Row
           label={strings.scopePicker.statsLastSync}
           value={agent.lastSync ? formatRelative(agent.lastSync) : "—"}

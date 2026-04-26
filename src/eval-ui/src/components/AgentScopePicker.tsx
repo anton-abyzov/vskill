@@ -27,6 +27,9 @@ export interface PickerAgentEntry {
   presence: "detected" | "absent";
   installedCount: number;
   globalCount: number;
+  /** 0772 US-002: plugin skills (claude-code only). 0 elsewhere. Optional in
+   *  fixtures so existing tests don't need to enumerate the new field. */
+  pluginCount?: number;
   lastSync: string | null;
   health: "ok" | "stale" | "missing";
   /** Populated for agents that share a globalSkillsDir (kimi+qwen, etc).
@@ -74,6 +77,9 @@ export function agentsResponseToPickerEntries(
       presence: a.detected ? "detected" : "absent",
       installedCount: a.localSkillCount,
       globalCount: a.globalSkillCount,
+      // 0772 US-002: forward plugin count; default to 0 for older server
+      // payloads that haven't been redeployed yet.
+      pluginCount: a.pluginSkillCount ?? 0,
       lastSync: a.lastSync,
       health: a.health,
       sharedFolderGroup: folder ? folder.consumers : undefined,
@@ -175,6 +181,7 @@ export function AgentScopePicker({
           {activeAgent?.displayName ?? "Select agent"}
         </span>
         <span
+          title="project · personal · plugins"
           style={{
             fontFamily: "var(--font-mono)",
             fontSize: 11,
@@ -182,7 +189,7 @@ export function AgentScopePicker({
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          ({activeAgent?.installedCount ?? 0} · {activeAgent?.globalCount ?? 0})
+          ({activeAgent?.installedCount ?? 0} · {activeAgent?.globalCount ?? 0} · {activeAgent?.pluginCount ?? 0})
         </span>
         <span aria-hidden="true" style={{ fontSize: 10, color: "var(--text-secondary)" }}>
           ▾

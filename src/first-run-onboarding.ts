@@ -4,6 +4,7 @@
 //
 // Runs BEFORE the browser opens. Skips silently when:
 //   - stdin is not a TTY
+//   - claude binary is on PATH (Claude Code provides a no-key path)
 //   - any provider env var is already set
 //   - any provider already has a stored key
 //
@@ -12,6 +13,7 @@
 // studio launch must not be blocked by onboarding.
 // ---------------------------------------------------------------------------
 
+import { spawnSync } from "node:child_process";
 import {
   PROVIDERS,
   type ProviderId,
@@ -37,6 +39,37 @@ export interface OnboardingIO {
   promptConfirm: (question: string) => Promise<boolean>;
   readMaskedKey: () => Promise<string>;
   env: NodeJS.ProcessEnv;
+  /** 0772 US-001: detect whether the `claude` CLI binary is on PATH. When
+   *  true, the prompt is skipped silently because Claude Code provides a
+   *  no-key path. Defaults to a real `which`/`where` call when omitted. */
+  detectClaudeBinary?: () => boolean;
+}
+
+// 0772 US-001: softened copy lives at the top so tests can import it.
+const PROMPT_HEADER =
+  "\nSkill Studio works with Claude Code (no key needed) or with an optional API key for OpenAI / OpenRouter / Anthropic comparisons.\n";
+const DECLINE_HINT =
+  "Skipping. Install Claude Code for a no-key path, or run `vskill keys set anthropic` later to add a key.\n";
+
+/**
+ * 0772 US-001 — Detect whether the `claude` CLI binary is on PATH.
+ * POSIX uses `which claude`; win32 uses `where claude`. Bounded 250 ms timeout.
+ * Never throws — any failure is reported as "not detected".
+ */
+export function detectClaudeBinaryDefault(): boolean {
+  try {
+    const isWin = process.platform === "win32";
+    const cmd = isWin ? "where" : "which";
+    const result = spawnSync(cmd, ["claude"], {
+      timeout: 250,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (result.error) return false;
+    if (typeof result.status !== "number") return false;
+    return result.status === 0;
+  } catch {
+    return false;
+  }
 }
 
 function defaultPromptConfirm(question: string): Promise<boolean> {
@@ -74,6 +107,7 @@ function defaultIO(): OnboardingIO {
     promptConfirm: defaultPromptConfirm,
     readMaskedKey: () => readSecretFromStdin(),
     env: process.env,
+    detectClaudeBinary: detectClaudeBinaryDefault,
   };
 }
 
@@ -92,23 +126,36 @@ function anyProviderConfigured(env: NodeJS.ProcessEnv): boolean {
   return false;
 }
 
+/**
+ * 0772 US-001 — Safe wrapper: never propagate throws. Failure means "not
+ * detected" so the prompt still fires.
+ */
+function safeDetectClaude(io: OnboardingIO): boolean {
+  if (!io.detectClaudeBinary) return false;
+  try {
+    return io.detectClaudeBinary();
+  } catch {
+    return false;
+  }
+}
+
 export async function firstRunOnboarding(
   io: OnboardingIO = defaultIO(),
 ): Promise<OnboardingResult> {
   // Non-TTY: never prompt (e.g. CI, piped, detached).
   if (!io.isTTY()) return { action: "skip" };
 
+  // 0772 US-001: claude binary on PATH → silent skip (Claude Code is the
+  // no-key path; surfacing the prompt here would mislead the user).
+  if (safeDetectClaude(io)) return { action: "skip" };
+
   // Already configured → nothing to do.
   if (anyProviderConfigured(io.env)) return { action: "skip" };
 
-  io.stdout.write(
-    "\nNo API key detected. Skill Studio needs an Anthropic API key to run evals.\n",
-  );
-  const accepted = await io.promptConfirm("Add one now?");
+  io.stdout.write(PROMPT_HEADER);
+  const accepted = await io.promptConfirm("Add an API key now?");
   if (!accepted) {
-    io.stdout.write(
-      "Skipping. Run `vskill keys set anthropic` later to configure.\n",
-    );
+    io.stdout.write(DECLINE_HINT);
     return { action: "declined" };
   }
 

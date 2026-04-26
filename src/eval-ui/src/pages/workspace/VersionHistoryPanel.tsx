@@ -23,7 +23,9 @@ export function VersionHistoryPanel() {
   const { state } = useWorkspace();
   const { plugin, skill } = state;
   const studio = useStudio();
-  const { refreshSkills, updateCount } = studio;
+  // 0766 F-002: onSkillUpdated does the full cache fan-out. updateCount is
+  // still consumed for the "Manage all updates" link.
+  const { onSkillUpdated, updateCount } = studio;
   // 0729: lookup the SkillInfo so the empty state can branch on origin and
   // build a submit URL pre-filled with the skill's repoUrl/homepage.
   const skillInfo = useMemo(
@@ -121,8 +123,10 @@ export function VersionHistoryPanel() {
 
       if (result.ok) {
         setUpdateStatus("done");
-        refreshSkills();
-        mutate(swrKey);
+        // 0766 F-002: full invalidation (refreshUpdates + refreshSkills +
+        // mutate(versions key) + dismissPushUpdate) so the bell, sidebar
+        // arrow, and Update button all clear together with the Versions tab.
+        onSkillUpdated(plugin, skill);
       } else {
         const msg = `Update failed (HTTP ${result.status}): ${result.body || "no response body"}`;
         setUpdateStatus("error");
@@ -141,7 +145,7 @@ export function VersionHistoryPanel() {
         abortRef.current = null;
       }
     }
-  }, [plugin, skill, swrKey, refreshSkills]);
+  }, [plugin, skill, onSkillUpdated]);
 
   // Cleanup in-flight request on unmount
   useEffect(() => {

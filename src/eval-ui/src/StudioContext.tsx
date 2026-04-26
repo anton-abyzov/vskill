@@ -1,5 +1,6 @@
 import { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, mergeUpdatesIntoSkills } from "./api";
+import { mutate as mutateSWR } from "./hooks/useSWR";
 import type { SkillInfo } from "./types";
 import type { SkillUpdateInfo } from "./api";
 import { useMediaQuery } from "./hooks/useMediaQuery";
@@ -120,7 +121,11 @@ export interface StudioContextValue {
   setMode: (mode: "browse" | "create") => void;
   setSearch: (query: string) => void;
   setMobileView: (view: "list" | "detail") => void;
-  refreshSkills: () => void;
+  /** 0772 US-004: returns a Promise that resolves once the skills fetch
+   *  has been dispatched into state. Callers that need to navigate to a
+   *  newly-created skill MUST await this before calling `selectSkill` so
+   *  the right pane can find the new row. */
+  refreshSkills: () => Promise<void>;
   updateCount: number;
   dismissUpdateNotification: () => void;
   /** Raw update list returned by `GET /api/skills/updates` (0683). */
@@ -143,6 +148,21 @@ export interface StudioContextValue {
   updateStreamStatus: import("./types/skill-update").StreamStatus;
   /** 0708: dismiss a push-store entry (e.g. after user installs the update). */
   dismissPushUpdate: (skillId: string) => void;
+  /** 0766 F-002: invalidate ALL caches that depend on a skill's installed
+   *  version after an update completes (regardless of which UI entry point
+   *  initiated it). Refreshes /api/skills/updates (clears the bell, the
+   *  sidebar arrow, and the "Update to <X>" button), refreshes /api/skills
+   *  (so the listing's currentVersion + frontmatter-derived fields refresh),
+   *  invalidates the per-skill versions SWR key (so the Versions tab
+   *  refetches), and dismisses any push-pipeline entry for the skill.
+   *  Pre-0766, the three call sites (UpdateAction, VersionHistoryPanel,
+   *  UpdateDropdown) each invalidated only a subset, leaving the other
+   *  surfaces stale until the 5-minute polling cycle. */
+  onSkillUpdated: (plugin: string, skill: string) => void;
+  /** 0761 US-004: active agent slug ("claude-code", "codex", "anthropic-skill",
+   *  …) so consumers like UpdateBell can detect whether an update's
+   *  installLocations point at the agent the user is currently viewing. */
+  activeAgent: string | null;
 }
 
 // 0708: exported (named `StudioContext`) so leaf components like `UpdateChip`
@@ -234,11 +254,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; };
   }, [bootstrapDone]);
 
-  const loadSkills = useCallback(() => {
-    if (!bootstrapDone || !activeAgent) return;
+  const loadSkills = useCallback((): Promise<void> => {
+    if (!bootstrapDone || !activeAgent) return Promise.resolve();
     dispatch({ type: "SET_SKILLS_LOADING", loading: true });
     const filter = { agent: activeAgent };
-    api.getSkills(filter)
+    return api.getSkills(filter)
       .then((skills) => {
         dispatch({ type: "SET_SKILLS", skills });
         // Restore selection from hash: #/skills/<plugin>/<skill>
@@ -493,6 +513,17 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   const refreshUpdates = skillUpdates.refresh;
   const isRefreshingUpdates = skillUpdates.isRefreshing;
 
+  // 0766 F-002: single full-invalidation helper. Every caller that finishes
+  // a successful update (UpdateAction, VersionHistoryPanel, UpdateDropdown)
+  // routes through this so the bell + Versions tab + sidebar + chip clear
+  // together regardless of where the user clicked.
+  const onSkillUpdated = useCallback((plugin: string, skill: string): void => {
+    void refreshUpdates();
+    loadSkills();
+    mutateSWR(`versions/${plugin}/${skill}`);
+    skillUpdates.dismiss(`${plugin}/${skill}`);
+  }, [refreshUpdates, loadSkills, skillUpdates]);
+
   const value = useMemo<StudioContextValue>(() => ({
     state: effectiveState,
     selectSkill,
@@ -513,7 +544,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     pushUpdateCount: skillUpdates.pushUpdateCount,
     updateStreamStatus: skillUpdates.status,
     dismissPushUpdate: skillUpdates.dismiss,
-  }), [effectiveState, selectSkill, clearSelection, setMode, setSearch, setMobileView, loadSkills, updateCount, dismissUpdateNotification, skillUpdates.updates, outdatedByOrigin, isRefreshingUpdates, refreshUpdates, revealSkill, clearReveal, skillUpdates.updatesById, skillUpdates.pushUpdateCount, skillUpdates.status, skillUpdates.dismiss]);
+    activeAgent,
+    onSkillUpdated,
+  }), [effectiveState, selectSkill, clearSelection, setMode, setSearch, setMobileView, loadSkills, updateCount, dismissUpdateNotification, skillUpdates.updates, outdatedByOrigin, isRefreshingUpdates, refreshUpdates, revealSkill, clearReveal, skillUpdates.updatesById, skillUpdates.pushUpdateCount, skillUpdates.status, skillUpdates.dismiss, activeAgent, onSkillUpdated]);
 
   return <StudioCtx.Provider value={value}>{children}</StudioCtx.Provider>;
 }

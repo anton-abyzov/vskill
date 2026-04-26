@@ -15,7 +15,7 @@
 
 import { existsSync, readdirSync, statSync, readFileSync } from "node:fs";
 import { join, basename, dirname } from "node:path";
-import type { SkillInfo } from "./skill-scanner.js";
+import { installMethodFor, type SkillInfo } from "./skill-scanner.js";
 
 const CLAUDE_CODE_AGENT_ID = "claude-code";
 
@@ -91,7 +91,10 @@ export function scanInstalledPluginSkills(
           group: "available",
           source: "plugin",
           precedenceRank: -1,
-          installMethod: "symlinked",
+          // 0769 T-004: lstat truth, not hardcoded "symlinked".
+          installMethod: installMethodFor(skillDir, "installed"),
+          // 0769 T-002: editable upstream marketplace clone, when present.
+          sourcePath: resolveMarketplaceSourcePath(home, marketplace, pluginName, skillName),
           sourceAgent: CLAUDE_CODE_AGENT_ID,
           pluginName,
           pluginNamespace: `${pluginName}:${skillName}`,
@@ -233,6 +236,36 @@ function findPluginManifests(root: string, maxDepth: number): string[] {
 function maybePluginManifestPath(versionDir: string): string | null {
   const manifest = join(versionDir, ".claude-plugin", "plugin.json");
   return existsSync(manifest) ? manifest : null;
+}
+
+/**
+ * 0769 T-002: Translate a plugin-cache location to its marketplace clone.
+ *
+ *   cache:        ~/.claude/plugins/cache/<mp>/<plugin>/<sha>/skills/<skill>
+ *   marketplace:  ~/.claude/plugins/marketplaces/<mp>/plugins/<plugin>/skills/<skill>
+ *
+ * Note the "plugins/" segment that the marketplace layout has and the cache
+ * layout doesn't. Returns null when the marketplace clone path doesn't exist
+ * (e.g. user installed via a non-marketplace mechanism).
+ */
+function resolveMarketplaceSourcePath(
+  home: string,
+  marketplace: string,
+  pluginName: string,
+  skillName: string,
+): string | null {
+  const candidate = join(
+    home,
+    ".claude",
+    "plugins",
+    "marketplaces",
+    marketplace,
+    "plugins",
+    pluginName,
+    "skills",
+    skillName,
+  );
+  return existsSync(candidate) ? candidate : null;
 }
 
 function extractVersionFromManifest(manifestPath: string): string | null {

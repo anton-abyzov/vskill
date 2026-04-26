@@ -8,6 +8,13 @@ export interface UseSkillFilesResult {
   secondaryContent: SkillFileContent | null;
   loading: boolean;
   error: string | null;
+  /**
+   * 0769 T-011: distinct from `error` (which covers per-file open failures).
+   * `loadError` is non-null when the FILE LIST fetch itself failed, so the
+   * file-tree UI can render "Skill files not accessible" instead of the
+   * misleading "No files found" empty state.
+   */
+  loadError: string | null;
   selectFile: (path: string) => void;
   refresh: () => void;
   isSkillMd: boolean;
@@ -19,14 +26,18 @@ export function useSkillFiles(plugin: string, skill: string): UseSkillFilesResul
   const [secondaryContent, setSecondaryContent] = useState<SkillFileContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchFileList = useCallback(async () => {
     try {
       const data = await api.getSkillFiles(plugin, skill);
       setFiles(data.files);
+      setLoadError(null);
     } catch (err) {
-      // Non-fatal — file tree just stays empty
+      // 0769 T-011: surface fetch failures so the UI can distinguish "empty
+      // skill" (legitimate) from "cannot reach the skill files" (error).
       setFiles([]);
+      setLoadError((err as Error).message ?? "Unable to load skill files");
     }
   }, [plugin, skill]);
 
@@ -35,6 +46,7 @@ export function useSkillFiles(plugin: string, skill: string): UseSkillFilesResul
     setActiveFile("SKILL.md");
     setSecondaryContent(null);
     setError(null);
+    setLoadError(null);
     fetchFileList();
   }, [plugin, skill, fetchFileList]);
 
@@ -68,6 +80,7 @@ export function useSkillFiles(plugin: string, skill: string): UseSkillFilesResul
     secondaryContent,
     loading,
     error,
+    loadError,
     selectFile,
     refresh,
     isSkillMd: activeFile === "SKILL.md",

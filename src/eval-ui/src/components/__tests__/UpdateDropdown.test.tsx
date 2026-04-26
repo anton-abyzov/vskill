@@ -2,6 +2,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// 0747 T-007: UpdateDropdown now consumes useToast for the inline Update
+// button's success/error/blocked toasts. Tests that don't render
+// <ToastProvider> must stub it.
+vi.mock("../ToastProvider", () => ({
+  useToast: () => ({ toast: vi.fn(), dismiss: vi.fn(), clear: vi.fn() }),
+}));
+
+// 0766 F-002: UpdateDropdown now calls onSkillUpdated(plugin, skill) after
+// a successful inline update so the bell + Versions tab clear together.
+// Stub StudioContext so the dropdown can mount without the provider tree.
+const onSkillUpdatedSpy = vi.fn();
+vi.mock("../../StudioContext", () => ({
+  useStudio: () => ({ onSkillUpdated: onSkillUpdatedSpy }),
+}));
+
 const majorMinor = [
   { name: "plugin-a/skill-x", installed: "1.0.0", latest: "2.0.0", updateAvailable: true },
   { name: "plugin-b/skill-y", installed: "1.0.0", latest: "1.1.0", updateAvailable: true },

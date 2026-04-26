@@ -296,6 +296,7 @@ const scopePicker = {
   popoverTitle: "Choose active agent",
   statsInstalled: "Installed",
   statsGlobal: "Global",
+  statsPlugins: "Plugins",
   statsLastSync: "Last sync",
   statsHealthOk: "Fresh",
   statsHealthStale: "Updates available",

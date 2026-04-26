@@ -136,21 +136,19 @@ describe("T-033 RightPanel — empty and error states", () => {
 
 // T-031 TAB BAR + INTEGRATION
 // 0707 T-007 update: layout evolved from 2 tabs (Overview | Versions) to 9
-// flat tabs (Overview | Editor | Tests | Run | Activation | History |
-// Leaderboard | Deps | Versions). The assertions below track that migration.
-describe("T-031 RightPanel — flat 9-tab bar", () => {
-  it("renders the DetailHeader and every tab label when a skill is selected", () => {
+// flat tabs. 0769 T-019 collapsed back to a persona-conditional 6-tab set
+// for authors (Overview | Edit | Tests | Run | Trigger | Versions) — History,
+// Leaderboard, and Deps are no longer top-level surfaces.
+describe("T-031 RightPanel — persona-conditional tab bar (6 author / 3 consumer)", () => {
+  it("renders the DetailHeader and every author tab label when a source skill is selected", () => {
     const tree = RightPanel({ selectedSkillInfo: makeSkill() });
     const text = collectText(tree);
     for (const label of [
       "Overview",
-      "Editor",
+      "Edit",
       "Tests",
       "Run",
-      "Activation",
-      "History",
-      "Leaderboard",
-      "Deps",
+      "Trigger",
       "Versions",
     ]) {
       expect(text).toContain(label);
@@ -163,7 +161,7 @@ describe("T-031 RightPanel — flat 9-tab bar", () => {
       const attrs = el.props as Record<string, unknown>;
       return attrs["role"] === "tab";
     });
-    expect(tabs.length).toBe(9);
+    expect(tabs.length).toBe(6);
     const activeTab = tabs.find((t) => t.props["aria-selected"] === true);
     expect(activeTab).toBeTruthy();
     const style = activeTab!.props.style as Record<string, string>;

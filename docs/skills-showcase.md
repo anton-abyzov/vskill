@@ -291,13 +291,13 @@ Search the [verified-skill.com](https://verified-skill.com) registry by keyword,
 
 ```bash
 # Install a single plugin
-npx vskill install --repo anton-abyzov/vskill --plugin mobile
+npx vskill@latest install --repo anton-abyzov/vskill --plugin mobile
 
 # Install everything
-npx vskill install --repo anton-abyzov/vskill --all
+npx vskill@latest install --repo anton-abyzov/vskill --all
 
 # Install a specific skill by name from the registry
-npx vskill install remotion-best-practices
+npx vskill@latest install remotion-best-practices
 ```
 
 Every skill is scanned before installation. No exceptions. No `--skip-scan`.

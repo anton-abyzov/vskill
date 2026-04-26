@@ -104,8 +104,8 @@ function makeSkill(over: Partial<SkillInfo> = {}): SkillInfo {
   };
 }
 
-describe("RightPanel — flat 9-tab layout (T-007)", () => {
-  it("renders 9 top-level tab buttons in a single tablist", () => {
+describe("RightPanel — persona-conditional tab layout (T-007 + 0769 T-019)", () => {
+  it("renders 6 author tabs (no History/Leaderboard/Deps) for source-origin skills", () => {
     const tree = RightPanel({ selectedSkillInfo: makeSkill() });
     const tabs = findAll(tree, (el) => el.props?.role === "tab");
     const ids = tabs.map((t) => t.props["data-testid"] as string);
@@ -115,13 +115,29 @@ describe("RightPanel — flat 9-tab layout (T-007)", () => {
       "detail-tab-tests",
       "detail-tab-run",
       "detail-tab-activation",
-      "detail-tab-history",
-      "detail-tab-leaderboard",
-      "detail-tab-deps",
       "detail-tab-versions",
     ]);
     const tablist = findAll(tree, (el) => el.props?.role === "tablist")[0];
     expect(tablist).toBeDefined();
+  });
+
+  it("renders 3 consumer tabs (Overview/Trigger/Versions only) for installed-origin skills", () => {
+    const tree = RightPanel({ selectedSkillInfo: makeSkill({ origin: "installed" }) });
+    const tabs = findAll(tree, (el) => el.props?.role === "tab");
+    const ids = tabs.map((t) => t.props["data-testid"] as string);
+    expect(ids).toEqual([
+      "detail-tab-overview",
+      "detail-tab-activation",
+      "detail-tab-versions",
+    ]);
+  });
+
+  it("uses the user-facing label 'Trigger' for the activation tab", () => {
+    const tree = RightPanel({ selectedSkillInfo: makeSkill() });
+    const triggerTab = findAll(tree, (el) => el.props?.["data-testid"] === "detail-tab-activation")[0];
+    expect(triggerTab).toBeDefined();
+    // Children prop is the rendered label string.
+    expect(triggerTab.props.children).toBe("Trigger");
   });
 
   it("marks the default active tab as 'overview' and renders SkillOverview", () => {

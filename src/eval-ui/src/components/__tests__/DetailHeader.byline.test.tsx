@@ -78,17 +78,23 @@ describe("DetailHeader — T-008 byline + version badge integration", () => {
     expect(collectText(badge[0])).toContain("v0.1.0");
   });
 
-  it("renders the byline row with AuthorLink + SourceFileLink", () => {
+  it("renders the byline row with AuthorLink anchor + SourceFileLink copy-chip when only homepage is present (0743)", () => {
+    // 0743: this fixture has `homepage` but no `repoUrl`. AuthorLink keeps
+    // the homepage fallback (it only routes to /{owner} profile — safe),
+    // so it renders an anchor. SourceFileLink stopped using homepage as a
+    // repoUrl source (it would synthesise a wrong /blob/HEAD/ URL), so it
+    // renders the copy-chip (⧉) instead of an anchor (↗).
     const tree = DetailHeader({ skill: makeSkill() });
     const byline = findAll(tree, (el) => el.props?.["data-testid"] === "detail-header-byline")[0];
     expect(byline).toBeDefined();
-    // AuthorLink is an anchor (repoUrl parses to github.com/anton-abyzov).
+    // AuthorLink is an anchor (homepage parses to github.com/anton-abyzov).
     const anchor = findAll(byline, (el) => el.type === "a" && typeof el.props?.href === "string");
-    expect(anchor.length).toBeGreaterThanOrEqual(1);
+    expect(anchor.length).toBe(1);
     expect(String(anchor[0].props.href)).toBe("https://github.com/anton-abyzov");
-    // SourceFileLink renders with ↗ affordance (since repoUrl parses).
+    // SourceFileLink falls through to copy-chip — copy marker (⧉), not ↗.
     expect(collectText(byline)).toContain("Anton Abyzov");
-    expect(collectText(byline)).toContain("↗");
+    expect(collectText(byline)).toContain("⧉");
+    expect(collectText(byline)).not.toContain("↗");
   });
 
   it("falls back to copy-chips when the skill has no homepage / repo URL", () => {

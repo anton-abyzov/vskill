@@ -192,13 +192,18 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
           color: "var(--text-secondary)",
         }}
       >
-        {/* 0737: prefer the lockfile-derived `repoUrl` (canonical install
-            provenance) over frontmatter `homepage` (author-declared). Fall
-            back to homepage so legacy authored skills with a GitHub
-            homepage keep their existing anchor. */}
+        {/* 0743: AuthorLink keeps the `repoUrl ?? homepage` fallback — the
+            anchor only routes to https://github.com/{owner} (profile), so a
+            homepage from an unrelated repo still resolves to the right
+            account page. SourceFileLink does NOT — it constructs a blob URL,
+            and a homepage that points at the wrong repo (common for skills
+            authored across multiple projects) produces a confidently-wrong
+            404 anchor. SourceFileLink uses ONLY `skill.repoUrl`; when
+            absent it falls through to the safe copy-chip showing the local
+            absolute path. */}
         <AuthorLink author={skill.author ?? null} repoUrl={skill.repoUrl ?? skill.homepage ?? null} />
         <SourceFileLink
-          repoUrl={skill.repoUrl ?? skill.homepage ?? null}
+          repoUrl={skill.repoUrl ?? null}
           skillPath={skill.skillPath ?? null}
           absolutePath={skill.dir}
         />

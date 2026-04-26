@@ -130,7 +130,15 @@ describe("0737: DetailHeader byline renders source-file anchor", () => {
     expect(copyChip.length).toBe(1);
   });
 
-  it("uses frontmatter `homepage` when `repoUrl` is null but homepage is a github URL (regression — pre-0737 path)", () => {
+  it("renders copy-chip when only `homepage` is present (no `repoUrl`) — 0743 inverts the pre-0737 fallback that produced misleading anchors", () => {
+    // 0743: `homepage` is author-declared metadata that routinely points at
+    // an unrelated repo (e.g. the author's main project, not the repo
+    // hosting THIS skill). Using it as a `SourceFileLink` repoUrl produced
+    // confidently-wrong /blob/HEAD/ anchors. AuthorLink keeps the homepage
+    // fallback (covered by AuthorLink.test.tsx) — that's safe because it
+    // only routes to the {owner} profile page. SourceFileLink no longer
+    // uses homepage; it falls through to the existing safe copy-chip when
+    // repoUrl is absent.
     const tree = DetailHeader({
       skill: makeSkill({
         repoUrl: null,
@@ -139,10 +147,9 @@ describe("0737: DetailHeader byline renders source-file anchor", () => {
       }),
     });
     const byline = findAll(tree, (el) => el.props?.["data-testid"] === "detail-header-byline")[0];
-    const sourceLink = findAll(byline, (el) => el.props?.["data-testid"] === "source-file-link")[0];
-    expect(sourceLink).toBeDefined();
-    expect(String(sourceLink.props.href)).toBe(
-      "https://github.com/anton-abyzov/easychamp-mcp/blob/HEAD/",
-    );
+    const sourceLink = findAll(byline, (el) => el.props?.["data-testid"] === "source-file-link");
+    const copyChip = findAll(byline, (el) => el.props?.["data-testid"] === "source-file-copy");
+    expect(sourceLink.length).toBe(0);
+    expect(copyChip.length).toBe(1);
   });
 });

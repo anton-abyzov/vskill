@@ -228,6 +228,10 @@ export function normalizeSkillInfo(raw: unknown): SkillInfo {
     author: coerceStringOrNull(r.author),
     license: coerceStringOrNull(r.license),
     homepage: coerceStringOrNull(r.homepage),
+    // 0737: source-repo provenance from the lockfile, drives the Studio
+    // detail header's clickable GitHub anchor (DetailHeader byline).
+    repoUrl: coerceStringOrNull(r.repoUrl),
+    skillPath: coerceStringOrNull(r.skillPath),
     tags: coerceStringArrayOrNull(r.tags),
     deps: coerceStringArrayOrNull(r.deps),
     mcpDeps: coerceStringArrayOrNull(r.mcpDeps),
@@ -624,8 +628,12 @@ export const api = {
    * 0736 US-001: single-skill update via POST (replaces the broken EventSource
    * side-channel in startSkillUpdate). Returns a structured result so callers
    * can render inline progress without an SSE stream.
+   *
+   * Accepts an optional AbortSignal so callers can cancel an in-flight update
+   * on unmount. AbortError is propagated to the caller (see UpdateAction.tsx
+   * which silently ignores AbortError because the component is gone).
    */
-  async postSkillUpdate(plugin: string, skill: string): Promise<{
+  async postSkillUpdate(plugin: string, skill: string, signal?: AbortSignal): Promise<{
     ok: boolean;
     status: number;
     body: string;
@@ -635,18 +643,52 @@ export const api = {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal,
     });
-    const rawBody = await res.text();
+    // F-010: stream SSE frames as they arrive instead of buffering the full
+    // body via res.text(). This allows the backend's per-step progress events
+    // to flow through without blocking until the connection closes. Version is
+    // extracted from the last "done" event in the stream.
     let version: string | undefined;
-    // Backend sends SSE frames: parse the last "done" event for version.
-    const doneMatch = rawBody.match(/event:\s*done[\s\S]*?data:\s*(\{[^\n]+\})/);
-    if (doneMatch) {
-      try {
-        const parsed = JSON.parse(doneMatch[1]) as { version?: string };
-        version = parsed.version;
-      } catch { /* noop */ }
+    let bodyExcerpt = "";
+    if (res.body) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let done = false;
+      let accumulated = "";
+      while (!done) {
+        const chunk = await reader.read();
+        done = chunk.done;
+        if (chunk.value) {
+          const text = decoder.decode(chunk.value, { stream: !done });
+          accumulated += text;
+          if (bodyExcerpt.length < 200) {
+            bodyExcerpt += text;
+          }
+        }
+      }
+      // Parse the last "done" event from the accumulated SSE frames.
+      const doneMatch = accumulated.match(/event:\s*done[\s\S]*?data:\s*(\{[^\n]+\})/);
+      if (doneMatch) {
+        try {
+          const parsed = JSON.parse(doneMatch[1]) as { version?: string };
+          version = parsed.version;
+        } catch { /* noop */ }
+      }
+      bodyExcerpt = bodyExcerpt.slice(0, 200);
+    } else {
+      // Fallback for environments where ReadableStream body is unavailable.
+      const rawBody = await res.text();
+      bodyExcerpt = rawBody.slice(0, 200);
+      const doneMatch = rawBody.match(/event:\s*done[\s\S]*?data:\s*(\{[^\n]+\})/);
+      if (doneMatch) {
+        try {
+          const parsed = JSON.parse(doneMatch[1]) as { version?: string };
+          version = parsed.version;
+        } catch { /* noop */ }
+      }
     }
-    return { ok: res.ok, status: res.status, body: rawBody.slice(0, 200), version };
+    return { ok: res.ok, status: res.status, body: bodyExcerpt, version };
   },
 
   /**
@@ -738,8 +780,71 @@ export const api = {
         }));
       }
       return [];
-    } catch {
+    } catch (err) {
+      const SKILL_UPDATE_DEBUG = false;
+      if (SKILL_UPDATE_DEBUG) {
+        // eslint-disable-next-line no-console
+        console.warn("[studio] checkSkillUpdates failed:", err instanceof Error ? err.message : String(err));
+      }
       return [];
+    }
+  },
+
+  /**
+   * 0736 AC-US3-01: Resolve installed skills to their platform UUID/slug so
+   * `useSkillUpdates` can build a valid SSE subscription filter.
+   *
+   * POSTs to `/api/v1/skills/check-updates` (already proxied to the platform
+   * by platform-proxy.ts) with the skill names. The enriched response (once
+   * vskill-platform ships the 0736 backend change) includes `id` (UUID) and
+   * `slug` per result. Until then, both fields are absent and callers
+   * gracefully degrade — unresolvable skills are omitted from the SSE filter
+   * (AC-US3-02) and covered by the polling fallback.
+   *
+   * Input: array of `{ name, plugin, skill }` where `name` is the canonical
+   * platform skill name (e.g. `acme/myrepo/greet-anton`) and `plugin`/`skill`
+   * are the local filesystem identifiers.
+   */
+  async resolveInstalledSkillIds(
+    skills: Array<{ name: string; plugin: string; skill: string; currentVersion?: string }>,
+  ): Promise<Array<{ plugin: string; skill: string; uuid?: string; slug?: string }>> {
+    if (skills.length === 0) return [];
+    try {
+      const res = await fetch(`${BASE}/api/v1/skills/check-updates`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          skills: skills.map((s) => ({
+            name: s.name,
+            currentVersion: s.currentVersion ?? "0.0.0",
+          })),
+        }),
+      });
+      if (!res.ok) return skills.map((s) => ({ plugin: s.plugin, skill: s.skill }));
+      const body = await res.json().catch(() => null);
+      const results: Array<Record<string, unknown>> = Array.isArray(body)
+        ? body
+        : Array.isArray((body as { results?: unknown[] } | null)?.results)
+          ? (body as { results: Array<Record<string, unknown>> }).results
+          : [];
+      // Build lookup: platform skill name → enriched result
+      const byName = new Map(results.map((r) => [r.name as string, r]));
+      return skills.map((s) => {
+        const r = byName.get(s.name);
+        return {
+          plugin: s.plugin,
+          skill: s.skill,
+          uuid: typeof r?.id === "string" && r.id.length > 0 ? r.id : undefined,
+          slug: typeof r?.slug === "string" && r.slug.length > 0 ? r.slug : undefined,
+        };
+      });
+    } catch (err) {
+      const SKILL_UPDATE_DEBUG = false;
+      if (SKILL_UPDATE_DEBUG) {
+        // eslint-disable-next-line no-console
+        console.warn("[studio] resolveInstalledSkillIds failed:", err instanceof Error ? err.message : String(err));
+      }
+      return skills.map((s) => ({ plugin: s.plugin, skill: s.skill }));
     }
   },
 

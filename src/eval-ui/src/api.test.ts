@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { api, ApiError } from "./api";
+import { api, ApiError, normalizeSkillInfo } from "./api";
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
@@ -189,5 +189,50 @@ describe("api.checkSkillUpdates", () => {
     mockFetch.mockRejectedValue(new Error("ECONNREFUSED"));
     const rows = await api.checkSkillUpdates(["p/s"]);
     expect(rows).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0737 — normalizeSkillInfo MUST passthrough repoUrl + skillPath. The server
+// emits these on /api/skills (api-routes.ts), but normalizeSkillInfo is a
+// whitelist — any new field must be added here too or it gets silently
+// stripped before reaching DetailHeader. Regression guard.
+// ---------------------------------------------------------------------------
+describe("0737: normalizeSkillInfo passthrough for repoUrl + skillPath", () => {
+  function rawSkill(over: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      plugin: ".claude",
+      skill: "greet-anton",
+      dir: "/tmp/.claude/skills/greet-anton",
+      hasEvals: false,
+      hasBenchmark: false,
+      evalCount: 0,
+      assertionCount: 0,
+      benchmarkStatus: "missing",
+      lastBenchmark: null,
+      origin: "installed",
+      ...over,
+    };
+  }
+
+  it("passes through repoUrl when the server emits it", () => {
+    const out = normalizeSkillInfo(rawSkill({
+      repoUrl: "https://github.com/anton-abyzov/greet-anton",
+      skillPath: "SKILL.md",
+    }));
+    expect(out.repoUrl).toBe("https://github.com/anton-abyzov/greet-anton");
+    expect(out.skillPath).toBe("SKILL.md");
+  });
+
+  it("normalises absent repoUrl/skillPath to null (matching the rest of the SkillInfo contract)", () => {
+    const out = normalizeSkillInfo(rawSkill({}));
+    expect(out.repoUrl ?? null).toBeNull();
+    expect(out.skillPath ?? null).toBeNull();
+  });
+
+  it("rejects non-string repoUrl/skillPath gracefully (defensive coercion)", () => {
+    const out = normalizeSkillInfo(rawSkill({ repoUrl: 42, skillPath: ["bad"] }));
+    expect(out.repoUrl ?? null).toBeNull();
+    expect(out.skillPath ?? null).toBeNull();
   });
 });

@@ -227,8 +227,8 @@ entryPoint: SKILL.md
     expect(Object.keys(parsed).sort()).toEqual(
       [
         "author", "category", "deps", "description", "entryPoint",
-        "homepage", "lastModified", "license", "mcpDeps", "sizeBytes",
-        "sourceAgent", "tags", "version",
+        "homepage", "lastModified", "license", "mcpDeps", "repoUrl",
+        "sizeBytes", "skillPath", "sourceAgent", "tags", "version",
       ].sort(),
     );
   });

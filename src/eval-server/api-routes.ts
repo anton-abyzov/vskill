@@ -4,7 +4,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { join, resolve, dirname } from "node:path";
+import { join, resolve, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
@@ -415,6 +415,14 @@ export interface SkillMetadataFields {
   lastModified: string | null;
   sizeBytes: number | null;
   sourceAgent: string | null;
+  /** 0737 — Canonical https:// URL of the source GitHub repo, derived from
+   *  vskill.lock (`sourceRepoUrl` or legacy `source: github:owner/repo`).
+   *  Drives the source-file anchor on the Studio detail header. */
+  repoUrl: string | null;
+  /** 0737 — Relative path inside the repo to the SKILL.md (e.g.
+   *  "skills/foo/SKILL.md"). Defaults to "SKILL.md" for flat-layout
+   *  installs derived from a legacy `github:` source string. */
+  skillPath: string | null;
 }
 
 const EMPTY_METADATA: SkillMetadataFields = {
@@ -431,6 +439,8 @@ const EMPTY_METADATA: SkillMetadataFields = {
   lastModified: null,
   sizeBytes: null,
   sourceAgent: null,
+  repoUrl: null,
+  skillPath: null,
 };
 
 /**
@@ -748,6 +758,49 @@ export function deriveSourceAgent(
 }
 
 /**
+ * 0737 — Resolve the source-repo provenance (repoUrl + skillPath) for a
+ * skill by looking up its lockfile entry. Two precedences:
+ *   1. Explicit `sourceRepoUrl` / `sourceSkillPath` (set by `vskill install`
+ *      after this change ships).
+ *   2. Legacy `source: github:owner/repo` string (every existing install).
+ *
+ * Lockfile entries are keyed by plugin name; for nested-layout plugins the
+ * skill dir basename and the lockfile key differ — fall back to the parent
+ * directory's basename when no exact match exists.
+ *
+ * Returns `{ null, null }` for any non-github source (e.g.
+ * `marketplace:specweave/sw#name`) — guessing a repo URL would produce
+ * broken anchors. Authored skills (no lockfile entry) also return null.
+ */
+function resolveSourceLink(
+  skillDir: string,
+  root: string,
+): { repoUrl: string | null; skillPath: string | null } {
+  const lock = readLockfile(root);
+  if (!lock) return { repoUrl: null, skillPath: null };
+
+  const skillName = basename(skillDir);
+  const parentName = basename(dirname(skillDir));
+  const entry = lock.skills[skillName] ?? lock.skills[parentName];
+  if (!entry) return { repoUrl: null, skillPath: null };
+
+  if (entry.sourceRepoUrl) {
+    return {
+      repoUrl: entry.sourceRepoUrl,
+      skillPath: entry.sourceSkillPath ?? "SKILL.md",
+    };
+  }
+
+  // Legacy derivation from `source: github:owner/repo`.
+  const m = /^github:([^/]+)\/([^/#]+)/.exec(entry.source ?? "");
+  if (!m) return { repoUrl: null, skillPath: null };
+  return {
+    repoUrl: `https://github.com/${m[1]}/${m[2]}`,
+    skillPath: entry.sourceSkillPath ?? "SKILL.md",
+  };
+}
+
+/**
  * Build the T-025 metadata payload for a single skill. Reads SKILL.md from
  * disk if present; returns EMPTY_METADATA on any error so the /api/skills
  * response never fails because of a single bad skill.
@@ -758,8 +811,13 @@ export function buildSkillMetadata(
   root: string,
 ): SkillMetadataFields {
   const skillMd = join(skillDir, "SKILL.md");
+  const sourceLink = resolveSourceLink(skillDir, root);
   if (!existsSync(skillMd)) {
-    return { ...EMPTY_METADATA, sourceAgent: deriveSourceAgent(skillDir, root, origin) };
+    return {
+      ...EMPTY_METADATA,
+      sourceAgent: deriveSourceAgent(skillDir, root, origin),
+      ...sourceLink,
+    };
   }
   let fm: Record<string, string | string[] | Record<string, string | string[]>> = {};
   try {
@@ -787,6 +845,8 @@ export function buildSkillMetadata(
     lastModified,
     sizeBytes,
     sourceAgent: deriveSourceAgent(skillDir, root, origin),
+    repoUrl: sourceLink.repoUrl,
+    skillPath: sourceLink.skillPath,
   };
 }
 
@@ -1693,6 +1753,11 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
           lastModified: meta.lastModified,
           sizeBytes: meta.sizeBytes,
           sourceAgent,
+          // 0737: source-repo provenance — drives the Studio detail header's
+          // clickable GitHub anchor. Both fields default to null when no
+          // lockfile entry / no github source is known.
+          repoUrl: meta.repoUrl,
+          skillPath: meta.skillPath,
         };
       }),
     );

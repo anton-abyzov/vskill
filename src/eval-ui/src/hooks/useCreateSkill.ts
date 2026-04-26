@@ -129,6 +129,17 @@ export interface UseCreateSkillOptions {
 // Hook Return Type
 // ---------------------------------------------------------------------------
 
+/** 0734: authoring engine selection for the create-skill form. */
+export type CreateSkillEngineUi = "vskill" | "anthropic-skill-creator" | "none";
+
+/** 0734: detect-engines API response shape (mirror of types.ts DetectEnginesResponse). */
+export interface EngineDetectionState {
+  vskillSkillBuilder: boolean;
+  anthropicSkillCreator: boolean;
+  vskillVersion: string | null;
+  anthropicPath: string | null;
+}
+
 export interface UseCreateSkillReturn {
   // Mode
   mode: "manual" | "ai";
@@ -190,6 +201,16 @@ export interface UseCreateSkillReturn {
   pluginLayoutInfo: { layout: 1 | 2; plugins: string[] } | null;
   applyPluginRecommendation: () => void;
 
+  // 0734: engine selection + version
+  engineDetection: EngineDetectionState | null;
+  refreshEngineDetection: () => Promise<void>;
+  engine: CreateSkillEngineUi;
+  setEngine: (e: CreateSkillEngineUi) => void;
+  version: string;
+  setVersion: (v: string) => void;
+  versionValid: boolean;
+  setVersionValid: (valid: boolean) => void;
+
   // Submission
   creating: boolean;
   error: string | null;
@@ -238,6 +259,38 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
   // Submission
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 0734: engine selection + version
+  const [engineDetection, setEngineDetection] = useState<EngineDetectionState | null>(null);
+  const [engine, setEngine] = useState<CreateSkillEngineUi>("vskill");
+  const [version, setVersion] = useState<string>("1.0.0");
+  const [versionValid, setVersionValid] = useState<boolean>(true);
+
+  const refreshEngineDetection = useCallback(async () => {
+    try {
+      const result = await api.detectEngines();
+      setEngineDetection(result);
+      // Apply default precedence on first load (don't override user's explicit pick).
+      setEngine((prev) => {
+        if (prev !== "vskill") return prev; // user has interacted, keep their choice
+        if (result.vskillSkillBuilder) return "vskill";
+        if (result.anthropicSkillCreator) return "anthropic-skill-creator";
+        return "none";
+      });
+    } catch {
+      // Fail-soft: leave detection null; UI shows "all options" with no install hints.
+      setEngineDetection({
+        vskillSkillBuilder: false,
+        anthropicSkillCreator: false,
+        vskillVersion: null,
+        anthropicPath: null,
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshEngineDetection();
+  }, [refreshEngineDetection]);
 
   // AI generation state
   const [aiPrompt, setAiPrompt] = useState("");
@@ -565,6 +618,8 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
     if (!description.trim()) { setError("Description is required"); return; }
     if (selectedLayout !== 3 && !effectivePlugin.trim()) { setError("Plugin name is required"); return; }
 
+    if (!versionValid) { setError("Version is not valid semver"); return; }
+
     setCreating(true);
     try {
       const result = await api.createSkill({
@@ -577,6 +632,8 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
         body,
         aiMeta: aiMetaRef.current || undefined,
         draftDir: draftDirRef.current || undefined,
+        version: version.trim() || undefined,
+        engine,
       });
       draftDirRef.current = null;
       onCreated(result.plugin, result.skill);
@@ -585,7 +642,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
     } finally {
       setCreating(false);
     }
-  }, [name, description, selectedLayout, effectivePlugin, model, allowedTools, body, onCreated]);
+  }, [name, description, selectedLayout, effectivePlugin, model, allowedTools, body, version, versionValid, engine, onCreated]);
 
   const applyPluginRecommendation = useCallback(() => {
     if (!pluginLayoutInfo) return;
@@ -615,6 +672,11 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
     showPluginRecommendation, setShowPluginRecommendation,
     pluginLayoutInfo, applyPluginRecommendation,
     creating, error, handleCreate,
+    // 0734: engine + version + detection state
+    engineDetection, refreshEngineDetection,
+    engine, setEngine,
+    version, setVersion,
+    versionValid, setVersionValid,
     standaloneLocked: forceLayout === 3,
   };
 }

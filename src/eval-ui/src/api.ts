@@ -1,5 +1,5 @@
 // API client for the eval server
-import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel, VersionEntry, VersionDiff, AgentsResponse, StudioOp, Provenance, TransferEvent, SkillScope, SkillGroup, SkillSource } from "./types";
+import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel, VersionEntry, VersionDiff, AgentsResponse, StudioOp, Provenance, TransferEvent, SkillScope, SkillGroup, SkillSource, DetectEnginesResponse } from "./types";
 
 // ---------------------------------------------------------------------------
 // 0707 T-025: backend envelope types for the four hardened studio endpoints.
@@ -470,6 +470,10 @@ export const api = {
     });
   },
 
+  detectEngines(): Promise<DetectEnginesResponse> {
+    return fetchJson("/api/studio/detect-engines");
+  },
+
   saveDraft(data: SaveDraftRequest): Promise<SaveDraftResponse> {
     return fetchJson("/api/skills/save-draft", {
       method: "POST",
@@ -614,6 +618,35 @@ export const api = {
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     });
     return es;
+  },
+
+  /**
+   * 0736 US-001: single-skill update via POST (replaces the broken EventSource
+   * side-channel in startSkillUpdate). Returns a structured result so callers
+   * can render inline progress without an SSE stream.
+   */
+  async postSkillUpdate(plugin: string, skill: string): Promise<{
+    ok: boolean;
+    status: number;
+    body: string;
+    version: string | undefined;
+  }> {
+    const url = `${BASE}/api/skills/${plugin}/${skill}/update`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const rawBody = await res.text();
+    let version: string | undefined;
+    // Backend sends SSE frames: parse the last "done" event for version.
+    const doneMatch = rawBody.match(/event:\s*done[\s\S]*?data:\s*(\{[^\n]+\})/);
+    if (doneMatch) {
+      try {
+        const parsed = JSON.parse(doneMatch[1]) as { version?: string };
+        version = parsed.version;
+      } catch { /* noop */ }
+    }
+    return { ok: res.ok, status: res.status, body: rawBody.slice(0, 200), version };
   },
 
   /**

@@ -43,6 +43,25 @@ interface AiGenerationMeta {
   reasoning: string;
 }
 
+/**
+ * Authoring engine for the skill (0734). Three first-class peer choices:
+ *   - "vskill" (default): VSkill skill-builder, cross-universal across 8 agents.
+ *   - "anthropic-skill-creator": Anthropic's built-in plugin, richer Claude-native
+ *     schema, Claude-only. Requires the `skill-creator` plugin installed locally.
+ *   - "none": skip engine assistance, emit the request body verbatim. The
+ *     `metadata.engine` frontmatter key is omitted entirely.
+ *
+ * Anthropic and VSkill are peer engines, NOT a fallback chain — the trade-off
+ * is "richer Claude-native expressiveness" vs. "portable cross-tool output".
+ */
+export type CreateSkillEngine = "vskill" | "anthropic-skill-creator" | "none";
+
+const VALID_ENGINES: ReadonlySet<string> = new Set<CreateSkillEngine>([
+  "vskill",
+  "anthropic-skill-creator",
+  "none",
+]);
+
 interface CreateSkillRequest {
   name: string;
   plugin: string;
@@ -51,6 +70,8 @@ interface CreateSkillRequest {
   model?: string;
   allowedTools?: string;
   body: string;
+  /** Authoring engine — see CreateSkillEngine. Defaults to "vskill". */
+  engine?: CreateSkillEngine;
   /**
    * Explicit `version:` to emit in SKILL.md frontmatter. When omitted:
    *   - mode="create" → defaults to "1.0.0"
@@ -250,8 +271,14 @@ function buildSkillMd(data: CreateSkillRequest): string {
   // Spec-compliant metadata block — tags and target-agents live HERE, not at root.
   const hasTags = Array.isArray(data.tags) && data.tags.length > 0;
   const hasAgents = Array.isArray(data.targetAgents) && data.targetAgents.length > 0;
-  if (hasTags || hasAgents) {
+  // 0734: persist authoring engine in metadata so future updates know how the
+  // skill was produced. "none" → omit entirely (caller authored raw).
+  const hasEngine = data.engine === "vskill" || data.engine === "anthropic-skill-creator";
+  if (hasTags || hasAgents || hasEngine) {
     lines.push("metadata:");
+    if (hasEngine) {
+      lines.push(`  engine: ${data.engine}`);
+    }
     if (hasTags) {
       lines.push("  tags:");
       for (const t of data.tags!) lines.push(`    - ${t}`);
@@ -288,6 +315,8 @@ export interface BuildSkillMdInput {
   description: string;
   /** Frontmatter `version:`. Defaults to "1.0.0" when omitted or empty. */
   version?: string;
+  /** 0734: authoring engine emitted under metadata.engine. */
+  engine?: CreateSkillEngine;
   model?: string;
   allowedTools?: string;
   body: string;
@@ -1142,6 +1171,22 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
       return;
     }
 
+    // 0734: validate authoring engine. Default to "vskill" when omitted.
+    const engine: CreateSkillEngine = (body.engine ?? "vskill") as CreateSkillEngine;
+    if (body.engine !== undefined && !VALID_ENGINES.has(body.engine)) {
+      sendJson(res, {
+        error: `Invalid engine: ${body.engine}. Must be one of: vskill, anthropic-skill-creator, none.`,
+      }, 400, req);
+      return;
+    }
+    if (engine === "anthropic-skill-creator" && !isSkillCreatorInstalled(root)) {
+      sendJson(res, {
+        error: "skill-creator-not-installed",
+        remediation: "claude plugin install skill-creator",
+      }, 400, req);
+      return;
+    }
+
     const targetDir = computeSkillDir(root, body.layout, body.plugin || "", body.name);
     const skillMdPath = join(targetDir, "SKILL.md");
 
@@ -1178,8 +1223,8 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
       mkdirSync(targetDir, { recursive: true });
       mkdirSync(join(targetDir, "evals"), { recursive: true });
 
-      // Write SKILL.md (with the resolved version injected into the request)
-      const content = buildSkillMd({ ...body, version: resolvedVersion });
+      // Write SKILL.md (with resolved version + validated engine).
+      const content = buildSkillMd({ ...body, version: resolvedVersion, engine });
       writeFileSync(skillMdPath, content, "utf-8");
 
       // Write evals.json if provided (from AI generation)
@@ -1240,6 +1285,9 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
       }
 
       const isUpdate = skillExists && isUpdateMode;
+      // Anthropic skill-creator emits Claude-only by definition; VSkill/none
+      // are universal across the registered universal targets.
+      const emittedTargets = engine === "anthropic-skill-creator" ? ["claude-code"] : null;
       sendJson(res, {
         ok: true,
         plugin: body.layout === 3 ? (basename(root) || "default") : body.plugin,
@@ -1247,6 +1295,8 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
         dir: targetDir,
         skillMdPath,
         version: resolvedVersion,
+        engine,
+        ...(emittedTargets ? { emittedTargets } : {}),
         updated: isUpdate,
         ...(publishResult ? { publish: publishResult } : {}),
       }, isUpdate ? 200 : 201, req);

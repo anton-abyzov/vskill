@@ -77,3 +77,69 @@ export function isSkillCreatorInstalled(projectRoot?: string): boolean {
 
   return false;
 }
+
+/**
+ * Find the first path on disk where skill-creator is installed.
+ *
+ * Same search order as isSkillCreatorInstalled() but returns the matched path
+ * (or null if not installed). Used by Studio's /api/studio/detect-engines route
+ * to surface the install location to the UI.
+ */
+export function findSkillCreatorPath(projectRoot?: string): string | null {
+  const home = homedir();
+
+  const globalCanonical = join(home, ".agents", "skills", "skill-creator");
+  if (existsSync(globalCanonical)) return globalCanonical;
+
+  if (projectRoot) {
+    const projectCanonical = join(projectRoot, ".agents", "skills", "skill-creator");
+    if (existsSync(projectCanonical)) return projectCanonical;
+
+    for (const agent of AGENTS_REGISTRY) {
+      const candidate = join(projectRoot, agent.localSkillsDir, "skill-creator");
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+
+  for (const agent of AGENTS_REGISTRY) {
+    const resolved = agent.globalSkillsDir.replace("~", home);
+    const candidate = join(resolved, "skill-creator");
+    if (existsSync(candidate)) return candidate;
+
+    if (agent.pluginCacheDir) {
+      const cacheDir = agent.pluginCacheDir.replace("~", home);
+      try {
+        if (existsSync(cacheDir)) {
+          for (const mkt of readdirSync(cacheDir, { withFileTypes: true })) {
+            if (!mkt.isDirectory()) continue;
+            for (const plugin of readdirSync(join(cacheDir, mkt.name), { withFileTypes: true })) {
+              if (plugin.isDirectory() && plugin.name.includes("skill-creator")) {
+                return join(cacheDir, mkt.name, plugin.name);
+              }
+            }
+          }
+        }
+      } catch { /* ignore permission errors */ }
+    }
+
+    if (agent.pluginMarketplaceDir) {
+      const mktRoot = agent.pluginMarketplaceDir.replace("~", home);
+      try {
+        if (existsSync(mktRoot)) {
+          for (const mkt of readdirSync(mktRoot, { withFileTypes: true })) {
+            if (!mkt.isDirectory()) continue;
+            const pluginsDir = join(mktRoot, mkt.name, "plugins");
+            if (!existsSync(pluginsDir)) continue;
+            for (const plugin of readdirSync(pluginsDir, { withFileTypes: true })) {
+              if (plugin.isDirectory() && plugin.name.includes("skill-creator")) {
+                return join(pluginsDir, plugin.name);
+              }
+            }
+          }
+        }
+      } catch { /* ignore permission errors */ }
+    }
+  }
+
+  return null;
+}

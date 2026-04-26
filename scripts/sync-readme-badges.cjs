@@ -7,7 +7,6 @@
  *   agentPlatforms — agents.json agentPrefixes.length
  *   plugins        — direct subdirectories of plugins/
  *   skills         — plugins/<plugin>/skills/<skill>/SKILL.md
- *   scanPatterns   — `id` declarations in src/scanner/patterns.ts
  *
  * Wired into prepublishOnly (see package.json). The followup
  * `git diff --exit-code README.md` guard fails npm publish if any badge
@@ -15,6 +14,11 @@
  *
  * CLI: `node scripts/sync-readme-badges.cjs [vskill-root]`
  *      defaults to the parent directory of this script.
+ *
+ * 0771 Fix Pass — also rewrites the `alt="<N> agents/plugins/skills"` text on
+ * the same `<img>` tags so accessibility metadata never drifts (grill #6).
+ * The unused `scanPatterns` count was dropped (grill #7) — no shields.io
+ * pattern in the README consumes it.
  */
 const fs = require("node:fs");
 const path = require("node:path");
@@ -59,20 +63,11 @@ function countSkills(root) {
   return total;
 }
 
-function countScanPatterns(root) {
-  const file = path.join(root, "src", "scanner", "patterns.ts");
-  if (!fs.existsSync(file)) return 0;
-  const src = fs.readFileSync(file, "utf8");
-  const matches = src.match(/^\s*id:\s*"/gm);
-  return matches ? matches.length : 0;
-}
-
 function computeCounts(root) {
   return {
     agentPlatforms: countAgentPlatforms(root),
     plugins: countPlugins(root),
     skills: countSkills(root),
-    scanPatterns: countScanPatterns(root),
   };
 }
 
@@ -107,6 +102,22 @@ function rewriteReadme(readmePath, counts) {
     `shields.io/badge/skills-${counts.skills}-`,
   );
 
+  // 0771 Fix Pass (grill #6) — also rewrite the alt-text counters on the same
+  // <img> tags so a11y metadata stays in sync with the badge URL.
+  // Patterns: alt="N agents", alt="N plugins", alt="N skills" (case-insensitive).
+  updated = updated.replace(
+    /alt="\d+\s+agents"/gi,
+    `alt="${counts.agentPlatforms} agents"`,
+  );
+  updated = updated.replace(
+    /alt="\d+\s+plugins"/gi,
+    `alt="${counts.plugins} plugins"`,
+  );
+  updated = updated.replace(
+    /alt="\d+\s+skills"/gi,
+    `alt="${counts.skills} skills"`,
+  );
+
   if (updated === original) return false;
   fs.writeFileSync(readmePath, updated);
   return true;
@@ -127,7 +138,7 @@ function main() {
   console.log(
     `[sync-readme-badges] ${changed ? "updated" : "no change to"} ${readme} ` +
       `(agents=${counts.agentPlatforms} plugins=${counts.plugins} ` +
-      `skills=${counts.skills} patterns=${counts.scanPatterns})`,
+      `skills=${counts.skills})`,
   );
 }
 
@@ -139,5 +150,4 @@ module.exports = {
   countAgentPlatforms,
   countPlugins,
   countSkills,
-  countScanPatterns,
 };

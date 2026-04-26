@@ -5,6 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Stub the SVG asset — Vitest's default resolver doesn't run Vite asset loaders.
 vi.mock("../../assets/icons/update-bell.svg", () => ({ default: "stub-bell.svg" }));
 
+// 0778: stub the platform-health hook so its fetch loop doesn't keep this
+// test's microtask queue alive forever (which manifests as worker OOM).
+vi.mock("../../hooks/usePlatformHealth", () => ({
+  usePlatformHealth: () => ({
+    data: { degraded: false, reason: null, statsAgeMs: 0, oldestActiveAgeMs: 0 },
+    loading: false,
+  }),
+}));
+
 // 0747 T-006: UpdateBell now consumes useToast for the no-match owning-agent
 // fallback. Tests that don't render <ToastProvider> must stub it.
 vi.mock("../ToastProvider", () => ({

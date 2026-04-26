@@ -97,11 +97,12 @@ describe("0771 Track F — sync-readme-badges.cjs (T-006)", () => {
   it("rewrites stale shields.io URLs to match filesystem counts (AC-US6-03)", () => {
     const mod = require(SCRIPT);
     const counts = mod.computeCounts(fixtureDir);
+    // 0771 Fix Pass (grill #7): scanPatterns dropped — no shields.io badge in
+    // README.md ever consumed it. Keeping the dead field invited drift.
     expect(counts).toEqual({
       agentPlatforms: 7,
       plugins: 2,
       skills: 3,
-      scanPatterns: 5,
     });
 
     const before = fs.readFileSync(fixtureReadme, "utf8");
@@ -118,6 +119,15 @@ describe("0771 Track F — sync-readme-badges.cjs (T-006)", () => {
     expect(after).toContain("agents-7_platforms-0969DA");
     expect(after).toContain("plugins-2-8B5CF6");
     expect(after).toContain("skills-3-10B981");
+
+    // 0771 Fix Pass (grill #6): alt-text counters are rewritten in lockstep
+    // with the badge URLs so accessibility metadata never drifts.
+    expect(after).not.toContain('alt="40 agents"');
+    expect(after).not.toContain('alt="5 plugins"');
+    expect(after).not.toContain('alt="10 skills"');
+    expect(after).toContain('alt="7 agents"');
+    expect(after).toContain('alt="2 plugins"');
+    expect(after).toContain('alt="3 skills"');
 
     // Surrounding prose untouched.
     expect(after).toContain("Surrounding prose: should not be touched. 40 here is fine.");

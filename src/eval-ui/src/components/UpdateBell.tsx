@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useMemo, useRef, useState } from "react";
 import { useStudio } from "../StudioContext";
 import { useToast } from "./ToastProvider";
-import updateBellIcon from "../assets/icons/update-bell.svg";
+import { usePlatformHealth } from "../hooks/usePlatformHealth";
 
 // Lazy-load the popover body so the closed bell stays ≤2KB gzipped.
 const UpdateDropdown = lazy(() => import("./UpdateDropdown"));
@@ -34,6 +34,10 @@ export function UpdateBell() {
     activeAgent?: string | null;
   };
   const { toast } = useToast();
+  // 0778 — surface upstream-degraded state in the bell + dropdown.
+  const { data: platformHealth } = usePlatformHealth();
+  const platformDegraded = platformHealth?.degraded === true;
+  const platformReason = platformHealth?.reason ?? null;
 
   // 0708 AC-US5-03: project push-store entries → short-name-keyed diff
   // summaries so UpdateDropdown can render the one-liner under each row.
@@ -51,13 +55,25 @@ export function UpdateBell() {
 
   const close = useCallback(() => setOpen(false), []);
 
-  const bellColor =
-    updateCount > 0 ? "var(--text-primary)" : "var(--text-secondary)";
+  // 0778 — when the platform pipeline is degraded, the glyph shifts to the
+  // amber warn token and the aria/title labels include the degraded state.
+  // The healthy path is unchanged.
+  const bellColor = platformDegraded
+    ? "var(--color-own)"
+    : updateCount > 0
+      ? "var(--text-primary)"
+      : "var(--text-secondary)";
   const badgeText = updateCount > 9 ? "9+" : String(updateCount);
-  const ariaLabel =
+  const baseAriaLabel =
     updateCount === 0
       ? "No updates available"
       : `${updateCount} updates available, open summary`;
+  const ariaLabel = platformDegraded
+    ? `${baseAriaLabel} — platform crawler degraded`
+    : baseAriaLabel;
+  const titleAttr = platformDegraded
+    ? "Update checks paused — verified-skill.com crawler is degraded. Your submissions are queued."
+    : undefined;
 
   return (
     <span
@@ -71,6 +87,7 @@ export function UpdateBell() {
         aria-label={ariaLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
+        title={titleAttr}
         onClick={() => setOpen((v) => !v)}
         style={{
           position: "relative",
@@ -87,13 +104,31 @@ export function UpdateBell() {
           cursor: "pointer",
         }}
       >
-        <img
-          src={updateBellIcon}
-          alt=""
+        {/* 0778 — inline SVG so the parent `color` (bellColor) actually
+            tints the icon. The previous <img src={icon}> path didn't
+            propagate currentColor. */}
+        <svg
+          data-testid="update-bell-icon"
           width={18}
           height={18}
-          style={{ display: "block", opacity: updateCount > 0 ? 1 : 0.75 }}
-        />
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.75}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          focusable="false"
+          style={{
+            display: "block",
+            opacity: updateCount > 0 || platformDegraded ? 1 : 0.75,
+            color: bellColor,
+          }}
+        >
+          <path d="M5.5 17h11l-1.2-1.8a2 2 0 0 1-.3-1.1V10a4 4 0 1 0-8 0v4.1a2 2 0 0 1-.3 1.1L5.5 17Z" />
+          <path d="M10 20a2 2 0 0 0 4 0" />
+          <circle cx="17" cy="7" r="2.2" fill="currentColor" stroke="none" />
+        </svg>
         {updateCount > 0 && (
           <span
             data-testid="update-bell-badge"
@@ -128,6 +163,8 @@ export function UpdateBell() {
             updates={updates}
             isRefreshing={isRefreshingUpdates}
             diffSummariesById={diffSummariesById}
+            platformDegraded={platformDegraded}
+            platformReason={platformReason}
             onRefresh={() => refreshUpdates()}
             onSelectSkill={(u) => {
               // 0747 T-006: prefer server-resolved local fs identifiers over

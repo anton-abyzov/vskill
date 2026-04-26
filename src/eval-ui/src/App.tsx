@@ -40,6 +40,7 @@ import {
 } from "./hooks/useContextMenuState";
 import type { SkillInfo } from "./types";
 import { useKeyboardShortcut } from "./hooks/useKeyboardShortcut";
+import { useIsCreateRoute, useIsUpdatesRoute } from "./hooks/useHashRoute";
 import { useTheme } from "./theme/useTheme";
 import type { Command } from "./components/CommandPalette";
 import { strings } from "./strings";
@@ -54,22 +55,12 @@ const CreateSkillPage = lazy(() =>
   import("./pages/CreateSkillPage").then((m) => ({ default: m.CreateSkillPage })),
 );
 
-function useIsCreateRoute(): boolean {
-  const [onCreate, setOnCreate] = useState<boolean>(() =>
-    typeof window !== "undefined" && window.location.hash.startsWith("#/create"),
-  );
-  useEffect(() => {
-    function onHashChange(): void {
-      setOnCreate(window.location.hash.startsWith("#/create"));
-    }
-    window.addEventListener("hashchange", onHashChange);
-    // Fire once on mount — Vite HMR + some navigation paths (window.location
-    // .assign before listener attach) need the sync read.
-    onHashChange();
-    return () => window.removeEventListener("hashchange", onHashChange);
-  }, []);
-  return onCreate;
-}
+// 0740: lazy-load UpdatesPanel for the `#/updates` hash route. Same rationale
+// as CreateSkillPage — bulk update list is only mounted when explicitly
+// navigated to via the View Updates affordance.
+const UpdatesPage = lazy(() =>
+  import("./pages/UpdatesPanel").then((m) => ({ default: m.UpdatesPanel })),
+);
 
 export function App() {
   return (
@@ -475,12 +466,19 @@ function Shell() {
   ]);
 
   const onCreateRoute = useIsCreateRoute();
+  const onUpdatesRoute = useIsUpdatesRoute();
 
   // 0703 follow-up: keep StudioLayout chrome (TopRail, sidebar, ⌘K, brand)
   // visible when CreateSkillPage is active, so users don't feel teleported to
   // a standalone page and still have escape hatches. The page renders in the
   // main slot instead of replacing the whole tree.
-  const mainContent = onCreateRoute ? (
+  // 0740: same treatment for the `#/updates` route — clicking "View Updates"
+  // in the toast/bell now lands here instead of the empty default slot.
+  const mainContent = onUpdatesRoute ? (
+    <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
+      <UpdatesPage />
+    </Suspense>
+  ) : onCreateRoute ? (
     <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
       <CreateSkillPage />
     </Suspense>

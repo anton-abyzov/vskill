@@ -382,6 +382,10 @@ export interface CheckUpdateResult {
   diffSummary?: string;
   certTier?: string;
   certScore?: number;
+  /** 0740: set when `outdated` could not read the on-disk version and fell
+   * back to the lockfile pin. UI surfaces this as a soft hint without
+   * breaking the update flow. */
+  warning?: string;
 }
 
 /**

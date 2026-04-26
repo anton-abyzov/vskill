@@ -1027,8 +1027,19 @@ export interface SkillUpdateInfo {
 }
 
 /**
- * Merge update info into SkillInfo array. Matches by skill name
- * (last segment of the update's `name` field against SkillInfo.skill).
+ * Merge update info into SkillInfo array.
+ *
+ * 0740 contract — gate by origin + match by full identity:
+ *   - Only rows with `origin === "installed"` are eligible. Authoring rows
+ *     (the user's own SKILL.md sources) never inherit `updateAvailable`,
+ *     even when their leaf name matches an outdated entry. Without this
+ *     gate, ALL `obsidian-brain` rows in the sidebar showed the ↑ glyph.
+ *   - When the SkillUpdateInfo's `name` carries plugin scope
+ *     (`owner/repo/skill`), prefer matching `<pluginName>/<skill>` over
+ *     bare leaf so two installed skills sharing a leaf name from different
+ *     plugins stay distinct.
+ *   - Bare-leaf match remains the fallback (back-compat for legacy
+ *     payloads that omit a plugin scope).
  */
 export function mergeUpdatesIntoSkills(
   skills: SkillInfo[],
@@ -1036,16 +1047,38 @@ export function mergeUpdatesIntoSkills(
 ): SkillInfo[] {
   if (!updates.length) return skills;
 
-  // Build lookup: skill short name → update info
-  const lookup = new Map<string, SkillUpdateInfo>();
+  // Two lookups:
+  //   `fullKeyLookup` — `<pluginScope>/<leaf>` for plugin-scoped updates.
+  //   `leafLookup` — bare leaf for the case where a row has no pluginName.
+  //
+  // Match policy: rows with `pluginName` MUST match via fullKeyLookup or get
+  // no merge — this prevents a plugin-scoped update from polluting every
+  // same-leaf row in OTHER plugins. Rows without `pluginName` fall back to
+  // leaf (covers the umbrella + project-scoped install case where the row
+  // doesn't carry a plugin scope).
+  const fullKeyLookup = new Map<string, SkillUpdateInfo>();
+  const leafLookup = new Map<string, SkillUpdateInfo>();
   for (const u of updates) {
-    // name format: "owner/repo/skill" — extract last segment
-    const shortName = u.name.split("/").pop() || u.name;
-    lookup.set(shortName, u);
+    const segments = u.name.split("/");
+    const leaf = segments.pop() || u.name;
+    leafLookup.set(leaf, u);
+    if (segments.length >= 1) {
+      const pluginSegment = segments[segments.length - 1];
+      fullKeyLookup.set(`${pluginSegment}/${leaf}`, u);
+    }
   }
 
   return skills.map((s) => {
-    const u = lookup.get(s.skill);
+    if (s.origin !== "installed") return s;
+    let u: SkillUpdateInfo | undefined;
+    if (s.pluginName) {
+      // Strict: a plugin-scoped row only matches its own plugin scope. This
+      // prevents leaf-name collisions across plugins.
+      u = fullKeyLookup.get(`${s.pluginName}/${s.skill}`);
+    } else {
+      // No plugin scope on the row — leaf match is the only option.
+      u = leafLookup.get(s.skill);
+    }
     if (!u) return s;
     const merged: SkillInfo = {
       ...s,

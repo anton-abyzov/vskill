@@ -162,7 +162,15 @@ describe("outdatedCommand", () => {
 
     const output = logs.join("\n");
     const parsed = JSON.parse(output);
-    expect(parsed).toEqual(apiResults);
+    // 0740: response now includes a `warning` field when the disk-version
+    // reconcile falls back to the lockfile pin (no installed SKILL.md found
+    // in this test fixture). Strip it to compare the original API shape.
+    const stripped = parsed.map((p: Record<string, unknown>) => {
+      const { warning, ...rest } = p;
+      void warning;
+      return rest;
+    });
+    expect(stripped).toEqual(apiResults);
     expect(exitCode).toBe(1);
   });
 
@@ -179,7 +187,13 @@ describe("outdatedCommand", () => {
 
     const output = logs.join("\n");
     const parsed = JSON.parse(output);
-    expect(parsed).toEqual([
+    // 0740: see comment above re: `warning` field on disk-fallback.
+    const stripped = parsed.map((p: Record<string, unknown>) => {
+      const { warning, ...rest } = p;
+      void warning;
+      return rest;
+    });
+    expect(stripped).toEqual([
       { name: "a/b/pm", installed: "1.0.0", latest: "1.0.0", updateAvailable: false },
     ]);
   });

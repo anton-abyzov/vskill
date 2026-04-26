@@ -66,10 +66,14 @@ describe("VersionBadge — T-002", () => {
     expect(tree.props.title).toBe("Inherited from registry");
   });
 
-  it("0750: source='default' renders italic with 'No version declared' tooltip", () => {
+  // 0759 Phase 7 (supersedes 0750 italic-on-default): the implicit 1.0.0
+  // default no longer renders italic. Authors found the italic confusing —
+  // it looked like a data bug rather than a provenance hint. Tooltip stays
+  // for hover discoverability. Italics remain only for "registry"/"plugin".
+  it("0759 Phase 7: source='default' renders normal (NOT italic) with 'No version declared' tooltip", () => {
     const tree = VersionBadge({ version: "1.0.0", source: "default" }) as unknown as ReactEl;
     const style = tree.props.style as Record<string, string | number>;
-    expect(style.fontStyle).toBe("italic");
+    expect(style.fontStyle).not.toBe("italic");
     expect(tree.props.title).toBe("No version declared");
   });
 

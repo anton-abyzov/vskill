@@ -19,6 +19,13 @@ interface Props {
    * returns to its empty state alongside the hash navigation to "#/".
    */
   onHome?: () => void;
+  /**
+   * 0741 T-018 (AC-US2-01): optional slot for the FindSkillsNavButton (⌘⇧K
+   * palette trigger). When provided, renders immediately to the LEFT of the
+   * "+ New Skill" CTA — never to the right, so the primary action stays
+   * the rightmost call-to-action in the rail.
+   */
+  findSkillsSlot?: ReactNode;
 }
 
 // T-059: Breadcrumb segments dispatch a `studio:navigate-scope` CustomEvent
@@ -45,7 +52,7 @@ function dispatchNavigateScope(
  *   - project name  — Inter Tight 400, --text-secondary.
  *   - breadcrumb    — Inter Tight 400, plugin name in meta style, skill name in primary.
  */
-export function TopRail({ projectName, selected, onOpenPalette, onHome, projectPickerSlot, onRequestCreateSkill }: Props) {
+export function TopRail({ projectName, selected, onOpenPalette, onHome, projectPickerSlot, onRequestCreateSkill, findSkillsSlot }: Props) {
   // 0700 polish: breadcrumb origin label — use Anthropic-aligned vocabulary
   // ("Project" for installed skills the current agent consumes in its
   // `.claude/skills/`, "Skills" for user-authored) to match the Sidebar
@@ -160,6 +167,10 @@ export function TopRail({ projectName, selected, onOpenPalette, onHome, projectP
         data-toprail-right="true"
         style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
       >
+        {/* 0741 T-018 (AC-US2-01): FindSkillsNavButton lives immediately to
+            the LEFT of the "+ New Skill" CTA, so the rightmost slot stays
+            owned by the primary action. */}
+        {findSkillsSlot}
         {/* 0698 polish: primary Create Skill CTA — highest-intent action
             gets the strongest visual treatment. */}
         {onRequestCreateSkill && (

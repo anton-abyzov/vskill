@@ -78,12 +78,26 @@ export function getPlatformBaseUrl(): string {
 
 /**
  * Decide whether a given request URL should be proxied to the platform.
- * Today the contract is: any unhandled `/api/v1/skills/*` request goes to
- * the platform. Other `/api/...` paths remain owned by the eval-server.
+ *
+ * Forwarded prefixes:
+ *   - /api/v1/skills/*           — original contract (skill metadata, versions, stream)
+ *   - /api/v1/studio/search      — find-palette query endpoint (0741 US-005)
+ *   - /api/v1/studio/telemetry/  — fire-and-forget palette telemetry (0741 US-005)
+ *   - /api/v1/stats              — trending fallback for empty queries (0741 US-005)
+ *
+ * Other `/api/...` paths remain owned by the eval-server (e.g. `/api/config`,
+ * `/api/skills` legacy local route, `/api/agents`, `/api/workspace`).
  */
+const PROXY_PREFIXES = [
+  "/api/v1/skills/",
+  "/api/v1/studio/search",
+  "/api/v1/studio/telemetry/",
+  "/api/v1/stats",
+] as const;
+
 export function shouldProxyToPlatform(url: string | undefined): boolean {
   if (!url) return false;
-  return url.startsWith("/api/v1/skills/");
+  return PROXY_PREFIXES.some((p) => url.startsWith(p));
 }
 
 function pickHeadersForUpstream(

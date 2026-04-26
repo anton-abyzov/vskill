@@ -132,7 +132,7 @@ function renderPopover(skill: SkillInfo) {
           marginBottom: tags.length > 0 ? 6 : 0,
         }}
       >
-        <span title="Version">{skill.version ?? "—"}</span>
+        <span title="Version">{skill.resolvedVersion ?? skill.version ?? "—"}</span>
         <span title="Last modified">{formatRelative(skill.lastModified)}</span>
         <span title="Eval count">
           {skill.evalCount != null ? `${skill.evalCount} eval${skill.evalCount === 1 ? "" : "s"}` : "—"}

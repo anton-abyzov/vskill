@@ -58,9 +58,12 @@ export function VersionBadge(props: VersionBadgeProps) {
   const { version, showPrefix = true, size = "md", source, pluginName } = props;
 
   // Increment 0750: never render empty / never return null. Empty input falls
-  // back to the "0.0.0 default" baseline so the sidebar never blanks out.
-  const safeVersion =
-    typeof version === "string" && version.trim() !== "" ? version.trim() : "1.0.0";
+  // back to "1.0.0" so the sidebar never blanks out.
+  // 0756: also reject the literal "0.0.0" — it's the studio's own placeholder
+  // for the platform's /check-updates endpoint and should never reach a badge.
+  // Defense-in-depth: belts-and-braces in case any caller bypasses the resolver.
+  const trimmed = typeof version === "string" ? version.trim() : "";
+  const safeVersion = trimmed === "" || trimmed === "0.0.0" ? "1.0.0" : trimmed;
 
   const normalized = showPrefix && !safeVersion.startsWith("v") ? `v${safeVersion}` : safeVersion;
   const fontSize = size === "sm" ? 10 : 12;

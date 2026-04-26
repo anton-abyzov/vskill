@@ -149,7 +149,11 @@ export function SkillOverview(props: SkillOverviewProps) {
           >
             {skill.skill}
           </h2>
-          <VersionBadge version={skill.version ?? null} />
+          <VersionBadge
+            version={skill.resolvedVersion ?? skill.version ?? null}
+            source={skill.versionSource}
+            pluginName={skill.pluginName ?? null}
+          />
           {installMethodChip(skill)}
         </div>
         <div

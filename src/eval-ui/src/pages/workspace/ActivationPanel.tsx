@@ -24,8 +24,11 @@ export function ActivationPanel() {
   // 0707 T-009: read the skill's frontmatter version so every activation-log
   // row can show a VersionBadge.
   const { state: studioState } = useStudio();
+  const currentSkillVersionInfo = studioState.skills.find(
+    (s) => s.plugin === plugin && s.skill === skill,
+  );
   const currentSkillVersion =
-    studioState.skills.find((s) => s.plugin === plugin && s.skill === skill)?.version ?? null;
+    currentSkillVersionInfo?.resolvedVersion ?? currentSkillVersionInfo?.version ?? null;
 
   const [promptsText, setPromptsText] = useState(activationPrompts);
   const [skillDescription, setSkillDescription] = useState<string | null>(null);

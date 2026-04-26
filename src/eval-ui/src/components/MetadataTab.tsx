@@ -281,7 +281,7 @@ function renderFrontmatterCard(skill: SkillInfo): ReactNode {
     <section key="frontmatter" style={CARD_STYLE} aria-labelledby="md-frontmatter">
       <h3 id="md-frontmatter" style={SECTION_HEADING_STYLE}>Frontmatter</h3>
       {scalarRow("Description", skill.description ?? null)}
-      {scalarRow("Version", skill.version ?? null, { tabular: true })}
+      {scalarRow("Version", skill.resolvedVersion ?? skill.version ?? null, { tabular: true })}
       {scalarRow("Category", skill.category ?? null)}
       {scalarRow("Author", skill.author ?? null)}
       {scalarRow("License", skill.license ?? null)}

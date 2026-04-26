@@ -182,15 +182,16 @@ describe("StudioContext — resolver effect signature short-circuit (F-001)", ()
     }
   });
 
-  it("uses frontmatter `version` (then `pluginVersion`) before defaulting to 0.0.0", async () => {
+  it("uses frontmatter `version` (then `pluginVersion`) before defaulting to 1.0.0", async () => {
     // 0741 fix: the resolver was sending currentVersion: "0.0.0" for every
     // installed skill that lacked a polling-derived `installed` value (i.e.
     // every skill the platform doesn't yet track). Result: the user's
     // /api/v1/skills/check-updates payload had 63 entries all at "0.0.0",
     // making cache keys collide and surface as meaningless to the platform.
-    // The frontmatter `version` (already on SkillInfo from /api/skills) AND
-    // the plugin's own `pluginVersion` (1.0.0 etc.) are accurate fallbacks
-    // that the resolver should prefer over the literal "0.0.0".
+    // 0756 follow-up: the final fallback is now "1.0.0" (matches resolveSkillVersion's
+    // default and the platform's submission default), so the placeholder no longer
+    // leaks back into the badge. Frontmatter `version` and `pluginVersion` still win
+    // when present.
     const { api } = await import("../api");
     const installedSkills = [
       // Skill with frontmatter version → MUST use it.
@@ -210,7 +211,7 @@ describe("StudioContext — resolver effect signature short-circuit (F-001)", ()
         version: null,
         pluginVersion: "1.5.0",
       }),
-      // Skill with neither → falls back to "0.0.0" (existing contract).
+      // Skill with neither → falls back to "1.0.0" (0756: matches resolver default).
       makeSkill({
         plugin: "p3",
         skill: "neither",
@@ -238,7 +239,7 @@ describe("StudioContext — resolver effect signature short-circuit (F-001)", ()
 
       expect(byShort.get("with-fm")).toBe("2.4.1");
       expect(byShort.get("with-plugin")).toBe("1.5.0");
-      expect(byShort.get("neither")).toBe("0.0.0");
+      expect(byShort.get("neither")).toBe("1.0.0");
     } finally {
       h.unmount();
     }

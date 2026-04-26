@@ -24,7 +24,8 @@ export function HistoryPanel() {
   const skillInfoForVersion = studioState.skills.find(
     (s) => s.plugin === plugin && s.skill === skill,
   );
-  const currentSkillVersion = skillInfoForVersion?.version ?? null;
+  const currentSkillVersion =
+    skillInfoForVersion?.resolvedVersion ?? skillInfoForVersion?.version ?? null;
   const [tab, setTab] = useState<Tab>("timeline");
   const [filterModel, setFilterModel] = useState("");
   const [filterType, setFilterType] = useState<"" | "benchmark" | "comparison" | "baseline" | "model-compare" | "improve" | "instruct" | "ai-generate" | "eval-generate">("");

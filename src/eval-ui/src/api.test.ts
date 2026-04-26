@@ -84,15 +84,21 @@ describe("ApiError on non-ok response", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 0712 US-003 T-016D: api.checkSkillUpdates wire contract.
+// 0712 US-003 T-016D / 0741 follow-up: api.checkSkillUpdates wire contract.
 //
 // The vskill-platform `/api/v1/skills/check-updates` endpoint is POST-only;
 // sending GET returns 405 Method Not Allowed (verified end-to-end via
 // `wrangler dev` and via Claude_Preview browser network capture). These tests
 // pin the wire contract so a future refactor can't silently regress to GET.
+//
+// Payload shape: the platform handler at `route.ts:141-151` requires each
+// `skills[]` entry to be an OBJECT with `name` + `currentVersion` strings.
+// Sending bare strings makes every entry get filtered to [], so the response
+// is silently `{results: []}` — best-effort reconciliation never sees update
+// data, and SSE-fallback users miss notifications. Keep the body as objects.
 // ---------------------------------------------------------------------------
 describe("api.checkSkillUpdates", () => {
-  it("POSTs to /api/v1/skills/check-updates with a JSON body of sorted skill ids", async () => {
+  it("POSTs to /api/v1/skills/check-updates with sorted {name, currentVersion} objects", async () => {
     mockFetch.mockResolvedValue(okJson({ results: [] }));
     await api.checkSkillUpdates(["b/skill", "a/skill", "c/skill"]);
 
@@ -103,10 +109,16 @@ describe("api.checkSkillUpdates", () => {
     expect(
       (init.headers as Record<string, string>)["content-type"],
     ).toBe("application/json");
-    // Body must be JSON of `{ skills: <sorted> }` — sorted so the request
-    // signature is stable across reorderings of the input array.
+    // Body must be `{ skills: [{ name, currentVersion }, ...] }` sorted by
+    // name so the request signature is stable across reorderings.
+    // `currentVersion` is a placeholder ("0.0.0") because reconcile callers
+    // only have IDs — full version flows through `resolveInstalledSkillIds`.
     expect(JSON.parse(init.body as string)).toEqual({
-      skills: ["a/skill", "b/skill", "c/skill"],
+      skills: [
+        { name: "a/skill", currentVersion: "0.0.0" },
+        { name: "b/skill", currentVersion: "0.0.0" },
+        { name: "c/skill", currentVersion: "0.0.0" },
+      ],
     });
   });
 

@@ -390,11 +390,24 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }
     const toResolve = installed.map((s) => {
       const u = updateByShort.get(s.skill);
+      // 0741 fix: prefer accurate version over the literal "0.0.0".
+      // Order: previously-merged install state → polling-derived `installed`
+      // → frontmatter `version:` → plugin's own `pluginVersion` → "0.0.0".
+      // The frontmatter + plugin fallbacks matter for the common case where
+      // the platform doesn't yet track these skills (so polling never returns
+      // an `installed` value) — without them every payload entry was "0.0.0",
+      // making cache keys collide and surface as meaningless to the platform.
+      const resolvedVersion =
+        s.currentVersion ??
+        u?.installed ??
+        s.version ??
+        s.pluginVersion ??
+        "0.0.0";
       return {
         plugin: s.plugin,
         skill: s.skill,
         name: u?.name ?? s.skill,
-        currentVersion: s.currentVersion ?? u?.installed ?? "0.0.0",
+        currentVersion: resolvedVersion,
       };
     });
     // Content-stable signature: skip the network call when the resolver input

@@ -182,6 +182,68 @@ describe("StudioContext — resolver effect signature short-circuit (F-001)", ()
     }
   });
 
+  it("uses frontmatter `version` (then `pluginVersion`) before defaulting to 0.0.0", async () => {
+    // 0741 fix: the resolver was sending currentVersion: "0.0.0" for every
+    // installed skill that lacked a polling-derived `installed` value (i.e.
+    // every skill the platform doesn't yet track). Result: the user's
+    // /api/v1/skills/check-updates payload had 63 entries all at "0.0.0",
+    // making cache keys collide and surface as meaningless to the platform.
+    // The frontmatter `version` (already on SkillInfo from /api/skills) AND
+    // the plugin's own `pluginVersion` (1.0.0 etc.) are accurate fallbacks
+    // that the resolver should prefer over the literal "0.0.0".
+    const { api } = await import("../api");
+    const installedSkills = [
+      // Skill with frontmatter version → MUST use it.
+      makeSkill({
+        plugin: "p1",
+        skill: "with-fm",
+        origin: "installed",
+        currentVersion: undefined,
+        version: "2.4.1",
+      }),
+      // Skill with no frontmatter but plugin version → MUST use plugin version.
+      makeSkill({
+        plugin: "p2",
+        skill: "with-plugin",
+        origin: "installed",
+        currentVersion: undefined,
+        version: null,
+        pluginVersion: "1.5.0",
+      }),
+      // Skill with neither → falls back to "0.0.0" (existing contract).
+      makeSkill({
+        plugin: "p3",
+        skill: "neither",
+        origin: "installed",
+        currentVersion: undefined,
+        version: null,
+        pluginVersion: null,
+      }),
+    ];
+    (api.getSkills as ReturnType<typeof vi.fn>).mockResolvedValue(installedSkills);
+    (api.getSkillUpdates as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    const probe: { current: ContextValue | null } = { current: null };
+    const h = await renderProvider(probe);
+
+    try {
+      await h.act(async () => { await flushMicrotasks(); });
+
+      expect(resolveInstalledSkillIdsSpy).toHaveBeenCalled();
+      const lastCall = resolveInstalledSkillIdsSpy.mock.calls[
+        resolveInstalledSkillIdsSpy.mock.calls.length - 1
+      ];
+      const payload = lastCall[0] as Array<{ skill: string; currentVersion: string }>;
+      const byShort = new Map(payload.map((p) => [p.skill, p.currentVersion]));
+
+      expect(byShort.get("with-fm")).toBe("2.4.1");
+      expect(byShort.get("with-plugin")).toBe("1.5.0");
+      expect(byShort.get("neither")).toBe("0.0.0");
+    } finally {
+      h.unmount();
+    }
+  });
+
   it("DOES call resolveInstalledSkillIds when a new installed skill appears", async () => {
     const { api } = await import("../api");
     const getSkillsMock = api.getSkills as ReturnType<typeof vi.fn>;

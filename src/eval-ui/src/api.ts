@@ -751,10 +751,20 @@ export const api = {
       // skill list as a JSON body. The proxy in `src/eval-server/platform-proxy.ts`
       // forwards the body verbatim, and the response shape is the
       // `{results: [...]}` envelope handled below.
+      //
+      // 0741 follow-up: the platform handler at `route.ts:141-151` requires
+      // each entry to be an OBJECT with `name` + `currentVersion`. Sending
+      // bare strings made every entry get filtered to [], so reconcile was
+      // silently a no-op. Reconcile callers only have IDs — version is
+      // backfilled by the polling/SSE merge once it lands. Use "0.0.0" as a
+      // placeholder so the platform always has at least a comparable string.
+      const sortedIds = [...skillIds].sort();
       const res = await fetch(`${BASE}/api/v1/skills/check-updates`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ skills: [...skillIds].sort() }),
+        body: JSON.stringify({
+          skills: sortedIds.map((name) => ({ name, currentVersion: "0.0.0" })),
+        }),
       });
       if (!res.ok) return [];
       const body = await res.json().catch(() => null);

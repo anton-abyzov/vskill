@@ -27,6 +27,32 @@
         "3163"
       ],
       "port": 3163
+    },
+    {
+      "name": "vskill-versions-tab-fix",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "dist/bin.js",
+        "studio",
+        "--root",
+        "/Users/antonabyzov/Projects/github/specweave-umb",
+        "--port",
+        "3138"
+      ],
+      "port": 3138
+    },
+    {
+      "name": "vskill-readonly-banner-verify",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "dist/index.js",
+        "studio",
+        "--root",
+        "/Users/antonabyzov/Projects/github/specweave-umb",
+        "--port",
+        "3164"
+      ],
+      "port": 3164
     }
   ]
 }

@@ -124,6 +124,37 @@ export function SkillWorkspaceInner({ hideHeader = false }: SkillWorkspaceInnerP
         <DetailHeader state={state} isReadOnly={isReadOnly} onDelete={isReadOnly ? undefined : handleDelete} />
       )}
 
+      {/* Read-only banner — explains why edit/run/generate buttons are disabled */}
+      {isReadOnly && (
+        <div
+          data-testid="read-only-banner"
+          className="flex items-center gap-2 px-4 py-2 text-[12px]"
+          style={{
+            background: "var(--surface-2)",
+            color: "var(--text-secondary)",
+            borderBottom: "1px solid var(--border-subtle)",
+          }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ flexShrink: 0, color: "var(--text-tertiary)" }}
+          >
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          <span>
+            This is an installed copy of the skill. Editing, generating tests, and running evals are disabled. Open the source skill to make changes.
+          </span>
+        </div>
+      )}
+
       {/* Workspace-level error banner (e.g. delete failures) */}
       {state.error && (
         <div className="px-4 py-2" style={{ borderBottom: "1px solid var(--border-subtle)" }}>

@@ -453,6 +453,43 @@ function renderSkillDetail(
           header when an update is pending, so it is visible regardless of
           which tab is active. Returns null when no update is available. */}
       <UpdateAction skill={skill} />
+      {/* Read-only banner explains why edit/run/generate buttons are disabled
+          when viewing an installed copy. Sits above the Check-now row so
+          it's the first thing users see before reaching disabled controls. */}
+      {skill.origin === "installed" && (
+        <div
+          data-testid="read-only-banner"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 16px",
+            background: "var(--surface-2)",
+            color: "var(--text-secondary)",
+            borderBottom: "1px solid var(--border-subtle)",
+            fontFamily: "var(--font-sans)",
+            fontSize: 12,
+          }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ flexShrink: 0, color: "var(--text-tertiary)" }}
+          >
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          <span>
+            This is an installed copy of the skill. Editing, generating tests, and running evals are disabled. Open the source skill to make changes.
+          </span>
+        </div>
+      )}
       {/* 0708 T-073/T-074 + wrap-up: per-skill "Check now" rescan button.
           Renders only for tracked skills (sourceRepoUrl present) per
           AC-US8-04. Placed alongside UpdateAction so users can manually

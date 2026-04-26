@@ -201,6 +201,62 @@ export function VersionHistoryPanel() {
         </div>
       );
     }
+    // Installed skill, no upstream registry entry, but the on-disk SKILL.md
+    // carries a frontmatter version. Render that as a single local-only
+    // timeline entry so the tab matches the header / sidebar version label
+    // instead of pretending no version exists.
+    if (skillInfo?.version) {
+      return (
+        <div className="p-5">
+          <div className="text-[14px] font-semibold mb-4" style={{ color: "var(--text-primary)" }}>
+            Version History
+          </div>
+          <div className="relative">
+            <div
+              className="absolute left-3 top-0 bottom-0"
+              style={{ width: 2, background: "var(--border-subtle)" }}
+            />
+            <div
+              data-testid="version-row-local"
+              className="w-full text-left pl-8 pr-4 py-3 relative rounded-lg"
+              style={{ background: "transparent", border: "1px solid transparent" }}
+            >
+              <span
+                className="absolute left-1.5 top-4 rounded-full"
+                style={{
+                  width: 10,
+                  height: 10,
+                  background: "var(--accent)",
+                  border: "2px solid var(--accent)",
+                }}
+              />
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                    {skillInfo.version}
+                  </span>
+                  <span
+                    className="text-[9px] font-medium px-1.5 py-0.5 rounded-full"
+                    style={{ background: "var(--surface-3)", color: "var(--text-tertiary)" }}
+                  >
+                    LOCAL
+                  </span>
+                  <span
+                    className="text-[9px] font-medium px-1.5 py-0.5 rounded-full"
+                    style={{ background: "var(--accent-muted)", color: "var(--accent)" }}
+                  >
+                    installed
+                  </span>
+                </div>
+              </div>
+              <div className="text-[11px] mt-1" style={{ color: "var(--text-tertiary)" }}>
+                Local-only — this skill is not registered on verified-skill.com, so no upstream history is available.
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div
         className="flex flex-col items-center justify-center h-full py-16"

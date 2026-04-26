@@ -11,6 +11,8 @@ import { ProgressLog } from "../../components/ProgressLog";
 import { ErrorCard } from "../../components/ErrorCard";
 import { ParameterStorePanel } from "./ParameterStorePanel";
 
+const READ_ONLY_TOOLTIP = "This is an installed copy (read-only). Open the source skill to edit.";
+
 // ---------------------------------------------------------------------------
 // Assertion quality badge types
 // ---------------------------------------------------------------------------
@@ -184,15 +186,29 @@ export function TestsPanel() {
           )}
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setShowForm(true)} disabled={isReadOnly} className="btn btn-primary text-[12px]">Create Test Case</button>
+          <button
+            onClick={() => setShowForm(true)}
+            disabled={isReadOnly}
+            title={isReadOnly ? READ_ONLY_TOOLTIP : undefined}
+            className="btn btn-primary text-[12px]"
+          >
+            Create Test Case
+          </button>
           <div style={{ position: "relative" }}>
             <div className="flex">
-              <button onClick={() => handleGenerateEvals("unit")} disabled={generateEvalsLoading || isReadOnly} className="btn btn-secondary text-[12px]" style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}>
+              <button
+                onClick={() => handleGenerateEvals("unit")}
+                disabled={generateEvalsLoading || isReadOnly}
+                title={isReadOnly ? READ_ONLY_TOOLTIP : undefined}
+                className="btn btn-secondary text-[12px]"
+                style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+              >
                 {generateEvalsLoading ? <><span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> Generating...</> : "Generate Unit Tests"}
               </button>
               <button
                 onClick={() => setGenerateDropdownOpen(!generateDropdownOpen)}
                 disabled={generateEvalsLoading || isReadOnly}
+                title={isReadOnly ? READ_ONLY_TOOLTIP : undefined}
                 className="btn btn-secondary text-[12px]"
                 style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: "1px solid var(--border-default)", padding: "4px 6px" }}
               >
@@ -288,10 +304,10 @@ export function TestsPanel() {
               </button>
             ) : (
               <>
-                <button onClick={() => runAll("benchmark")} disabled={cases.length === 0 || isReadOnly} className="btn btn-primary text-[10px] px-2 py-0.5" style={{ whiteSpace: "nowrap" }}>
+                <button onClick={() => runAll("benchmark")} disabled={cases.length === 0 || isReadOnly} title={isReadOnly ? READ_ONLY_TOOLTIP : undefined} className="btn btn-primary text-[10px] px-2 py-0.5" style={{ whiteSpace: "nowrap" }}>
                   Run All
                 </button>
-                <button onClick={() => runAll("comparison")} disabled={cases.length === 0 || isReadOnly} className="btn btn-secondary text-[10px] px-2 py-0.5" style={{ whiteSpace: "nowrap" }}>
+                <button onClick={() => runAll("comparison")} disabled={cases.length === 0 || isReadOnly} title={isReadOnly ? READ_ONLY_TOOLTIP : undefined} className="btn btn-secondary text-[10px] px-2 py-0.5" style={{ whiteSpace: "nowrap" }}>
                   Compare All
                 </button>
               </>

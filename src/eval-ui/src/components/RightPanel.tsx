@@ -323,7 +323,21 @@ function renderDetailShell(props: Props) {
     props.allSkills && props.onSelectSkill
       ? { allSkills: props.allSkills, onSelectSkill: props.onSelectSkill }
       : undefined;
-  return renderSkillDetail(skill, active, props.onDetailTabChange, integrated);
+  // 0779: positional-args fix. renderSkillDetail signature is
+  // (skill, active, onChange, sub, onSubChange, integrated). The previous
+  // 4-arg call passed `integrated` in the `sub` slot, so the real
+  // `integrated` parameter was undefined — which made every non-overview
+  // tab (Versions, Editor, Tests, Run, Trigger) render the "Select a skill
+  // from the sidebar to load its <X> view." fallback in production
+  // (App.tsx:560 always supplies selectedSkillInfo, hitting this path).
+  return renderSkillDetail(
+    skill,
+    active,
+    props.onDetailTabChange,
+    "",
+    undefined,
+    integrated,
+  );
 }
 
 function IntegratedDetailShell({

@@ -940,6 +940,24 @@ async function promptInstallOptions(
   let useGlobal = !!opts.global;
 
   if (!shouldPrompt) {
+    // 0742: non-TTY runs (piped, npx subprocess, Claude Code's bash tool, etc.)
+    // historically fanned out to every detected agent, leaving stray symlinks
+    // for tools the user never opted into. When the user did NOT pass --yes
+    // (CI opt-in) and did NOT scope with --agent, narrow to claude-code only
+    // (or the first detected agent if claude-code isn't present). --yes still
+    // means "fan out to everything" so existing CI scripts keep working.
+    if (!opts.yes && !opts.agent?.length && selectedAgents.length > 1) {
+      const claudeCode = selectedAgents.find((a) => a.id === "claude-code");
+      const target = claudeCode ?? selectedAgents[0];
+      console.log(
+        dim(
+          `Non-interactive: installing to ${target.displayName} only ` +
+            `(${selectedAgents.length} agents detected). ` +
+            `Use --agent <id> to override or --yes to install to all detected agents.`,
+        ),
+      );
+      selectedAgents = [target];
+    }
     return { agents: selectedAgents, global: useGlobal, symlink: !opts.copy };
   }
 

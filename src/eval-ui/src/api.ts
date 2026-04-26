@@ -626,6 +626,18 @@ export const api = {
     return es;
   },
 
+  /**
+   * @deprecated 0736 F-007: this dual-channel pattern (EventSource GET + side-channel POST)
+   * was the source of ERR_CONNECTION_REFUSED on the update-click flow — the GET hits a
+   * POST-only endpoint and silently fails, surfacing as a "Stream error" toast.
+   *
+   * Use `postSkillUpdate(plugin, skill, signal?)` instead — single POST, structured
+   * `{ ok, status, body, version }` result, AbortSignal support for unmount cancellation.
+   *
+   * Retained only because the test suite spies on this function as an anti-pattern guard
+   * (asserting the new code paths do NOT call it). No production code path references it.
+   * Safe to remove once the test mocks no longer need the symbol.
+   */
   startSkillUpdate(plugin: string, skill: string): EventSource {
     const url = `${BASE}/api/skills/${plugin}/${skill}/update`;
     const es = new EventSource(url);
@@ -645,13 +657,30 @@ export const api = {
    * on unmount. AbortError is propagated to the caller (see UpdateAction.tsx
    * which silently ignores AbortError because the component is gone).
    */
-  async postSkillUpdate(plugin: string, skill: string, signal?: AbortSignal): Promise<{
+  async postSkillUpdate(
+    plugin: string,
+    skill: string,
+    signalOrOpts?: AbortSignal | { signal?: AbortSignal; agentId?: string },
+  ): Promise<{
     ok: boolean;
     status: number;
     body: string;
     version: string | undefined;
   }> {
-    const url = `${BASE}/api/skills/${plugin}/${skill}/update`;
+    // 0747 T-010: backwards-compat — second arg may be a plain AbortSignal
+    // (legacy call sites) OR an options object with `agentId` for per-location
+    // update via `?agent=<id>` query param.
+    let signal: AbortSignal | undefined;
+    let agentId: string | undefined;
+    if (signalOrOpts && typeof (signalOrOpts as AbortSignal).aborted === "boolean") {
+      signal = signalOrOpts as AbortSignal;
+    } else if (signalOrOpts && typeof signalOrOpts === "object") {
+      const opts = signalOrOpts as { signal?: AbortSignal; agentId?: string };
+      signal = opts.signal;
+      agentId = opts.agentId;
+    }
+    const qs = agentId ? `?agent=${encodeURIComponent(agentId)}` : "";
+    const url = `${BASE}/api/skills/${plugin}/${skill}/update${qs}`;
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1033,6 +1062,29 @@ export async function runTransferSSE(
   return doneEvent;
 }
 
+/**
+ * 0747 T-004: An install location for a skill across one of {project,
+ * personal, plugin} scopes for one of the registered agents (claude-code,
+ * codex, cursor, ...). Returned by the backend's `scanSkillInstallLocations`
+ * and surfaced in the Studio's Update tooltip + chip strip.
+ */
+export interface InstallLocation {
+  scope: "project" | "personal" | "plugin";
+  /** AgentDefinition.id, e.g. "claude-code", "codex", "cursor". */
+  agent: string;
+  /** Human-readable agent name, e.g. "Claude Code". */
+  agentLabel: string;
+  /** Absolute path to the skill folder containing SKILL.md. */
+  dir: string;
+  /** Set when scope === "plugin". */
+  pluginSlug?: string;
+  pluginMarketplace?: string;
+  /** True when this location is a symlink to canonical .agents/skills/<name>/. */
+  symlinked: boolean;
+  /** True for plugin-bundled (read-only) installs. Update is blocked. */
+  readonly: boolean;
+}
+
 export interface SkillUpdateInfo {
   name: string;
   installed: string;
@@ -1046,6 +1098,24 @@ export interface SkillUpdateInfo {
    * payloads that predate 0708).
    */
   trackedForUpdates?: boolean;
+  /** 0747: pin metadata mirrored from server. */
+  pinned?: boolean;
+  pinnedVersion?: string;
+  /**
+   * 0747 T-002/T-004: backend-provided install locations across all registered
+   * agents (project + personal scopes) plus plugin cache. Optional for
+   * backwards-compat with older eval-server builds — UI MUST gracefully
+   * degrade when absent.
+   */
+  installLocations?: InstallLocation[];
+  /**
+   * 0747: highest-precedence install's local fs identifiers, suitable for
+   * `revealSkill(plugin, skill)` to scroll the matching sidebar row into
+   * view. `localPlugin` may be omitted when the highest-precedence install
+   * has no plugin context (project/personal scope without a plugin layer).
+   */
+  localPlugin?: string;
+  localSkill?: string;
 }
 
 /**

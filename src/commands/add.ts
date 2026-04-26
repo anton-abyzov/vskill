@@ -22,6 +22,7 @@ import { filterAgents } from "../utils/agent-filter.js";
 import { detectInstalledAgents, AGENTS_REGISTRY } from "../agents/agents-registry.js";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { ensureLockfile, writeLockfile, readLockfile, removeSkillFromLock } from "../lockfile/index.js";
+import { buildGitHubInstallLockEntry } from "./add-lockfile.js";
 import { runTier1Scan } from "../scanner/index.js";
 import { getAvailablePlugins, getPluginSource, getPluginVersion, hasPlugin, discoverUnregisteredPlugins } from "../marketplace/index.js";
 import type { UnregisteredPlugin } from "../marketplace/index.js";
@@ -1390,6 +1391,13 @@ interface SkillInstallResult {
   score?: number;
   sha?: string;
   version?: string;
+  /**
+   * 0743 — repo-relative path to the SKILL.md (e.g.
+   * "plugins/sw/skills/greet-anton/SKILL.md"). Threaded from
+   * `DiscoveredSkill.path` so the lockfile-write loop can persist
+   * `sourceSkillPath` for the studio detail-header anchor.
+   */
+  sourceSkillPath?: string;
 }
 
 async function installOneGitHubSkill(
@@ -1401,6 +1409,12 @@ async function installOneGitHubSkill(
   agents: Array<{ id: string; displayName: string; localSkillsDir: string; globalSkillsDir: string }>,
   projectRoot: string,
   agentRawUrls?: Record<string, string>,
+  /**
+   * 0743 — repo-relative SKILL.md path from `DiscoveredSkill.path`. Threaded
+   * through to the lockfile so the studio detail-header anchor resolves to
+   * the actual file (not /blob/HEAD/SKILL.md at the repo root).
+   */
+  sourceSkillPath?: string,
 ): Promise<SkillInstallResult> {
   // Blocklist + rejection check BEFORE fetching (prevents misleading 404)
   const repoUrl = `https://github.com/${owner}/${repo}`;
@@ -1503,7 +1517,7 @@ async function installOneGitHubSkill(
   }
 
   const skillVersion = extractFrontmatterVersion(content) || "1.0.0";
-  return { skillName, installed: true, verdict: scanResult.verdict, score: scanResult.score, sha, version: skillVersion };
+  return { skillName, installed: true, verdict: scanResult.verdict, score: scanResult.score, sha, version: skillVersion, sourceSkillPath };
 }
 
 // ---------------------------------------------------------------------------
@@ -2075,7 +2089,7 @@ export async function addCommand(
   for (const skill of selectedSkills) {
     console.log(dim(`\nInstalling skill: ${bold(skill.name)}...`));
     try {
-      const result = await installOneGitHubSkill(owner, repo, skill.name, skill.rawUrl, opts, selectedAgents, projectRoot, skill.agentRawUrls);
+      const result = await installOneGitHubSkill(owner, repo, skill.name, skill.rawUrl, opts, selectedAgents, projectRoot, skill.agentRawUrls, skill.path);
       results.push(result);
     } catch (err) {
       console.error(red(`  Unexpected error installing "${skill.name}": ${(err as Error).message}`));
@@ -2083,20 +2097,21 @@ export async function addCommand(
     }
   }
 
-  // Update lockfile (global → ~/.agents/, project → project root)
+  // Update lockfile (global → ~/.agents/, project → project root).
+  // 0743: delegated to buildGitHubInstallLockEntry so `sourceRepoUrl` and
+  // `sourceSkillPath` are persisted alongside the legacy `source` string.
   const lockDir = lockfileRoot(opts);
   const lock = ensureLockfile(lockDir);
   for (const r of results) {
     if (r.installed && r.sha) {
-      lock.skills[r.skillName] = {
+      lock.skills[r.skillName] = buildGitHubInstallLockEntry({
         version: r.version || "1.0.0",
         sha: r.sha,
-        tier: "VERIFIED",
-        installedAt: new Date().toISOString(),
-        source: `github:${owner}/${repo}`,
-        scope: opts.global ? "user" : "project",
-        files: ["SKILL.md"],
-      };
+        owner,
+        repo,
+        sourceSkillPath: r.sourceSkillPath ?? null,
+        global: !!opts.global,
+      });
     }
   }
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
@@ -2713,19 +2728,21 @@ async function installSingleSkillLegacy(
     ? installCopy(skillName, namespacedContent, selectedAgents, installOpts, legacyAgentFiles)
     : installSymlink(skillName, namespacedContent, selectedAgents, installOpts, legacyAgentFiles);
 
-  // Update lockfile (global → ~/.agents/, project → project root)
+  // Update lockfile (global → ~/.agents/, project → project root).
+  // 0743: persist `sourceSkillPath` from the locally-derived `skillSubpath`
+  // so the studio detail-header anchor opens the correct file on GitHub
+  // (no more 404s on `/blob/HEAD/SKILL.md` for nested-layout repos).
   const lockDir = lockfileRoot(opts);
   const lock = ensureLockfile(lockDir);
   const ghVersion = extractFrontmatterVersion(content) || "1.0.0";
-  lock.skills[skillName] = {
+  lock.skills[skillName] = buildGitHubInstallLockEntry({
     version: ghVersion,
     sha,
-    tier: "VERIFIED",
-    installedAt: new Date().toISOString(),
-    source: `github:${owner}/${repo}`,
-    scope: opts.global ? "user" : "project",
-    files: ["SKILL.md"],
-  };
+    owner,
+    repo,
+    sourceSkillPath: skillSubpath,
+    global: !!opts.global,
+  });
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock, lockDir);
 

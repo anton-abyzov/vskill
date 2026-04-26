@@ -792,11 +792,18 @@ function resolveSourceLink(
   }
 
   // Legacy derivation from `source: github:owner/repo`.
+  // 0743: We DO NOT default `skillPath` to "SKILL.md" here. Multi-skill repos
+  // (vskill, marketingskills, etc.) hold the SKILL.md under a nested path,
+  // and the legacy `source` string carries no path information. Guessing
+  // "SKILL.md" produced confidently-wrong 404 anchors for every install from
+  // a multi-skill repo. Returning `null` lets the UI fall back to the safe
+  // copy-chip (local path); a fresh `vskill add` writes the explicit
+  // `sourceSkillPath` and restores the working anchor via the branch above.
   const m = /^github:([^/]+)\/([^/#]+)/.exec(entry.source ?? "");
   if (!m) return { repoUrl: null, skillPath: null };
   return {
     repoUrl: `https://github.com/${m[1]}/${m[2]}`,
-    skillPath: entry.sourceSkillPath ?? "SKILL.md",
+    skillPath: entry.sourceSkillPath ?? null,
   };
 }
 

@@ -74,9 +74,13 @@ describe("0737: buildSkillMetadata exposes repoUrl/skillPath", () => {
     rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  it("derives repoUrl + skillPath from legacy lockfile `source: github:owner/repo` (flat layout)", () => {
-    // Mirrors the user's actual greet-anton entry in vskill.lock — this is
-    // the dominant case we need to cover for already-installed skills.
+  it("derives repoUrl from legacy lockfile `source: github:owner/repo` but leaves skillPath null (0743 — multi-skill repos cannot be guessed)", () => {
+    // 0743: legacy entries without `sourceSkillPath` cannot be turned into a
+    // working blob URL — multi-skill repos (vskill, marketingskills, etc.)
+    // have no SKILL.md at root. Defaulting to "SKILL.md" produced 404s. The
+    // resolver now returns `skillPath: null`; the UI falls back to the
+    // copy-chip showing the local path. Reinstalling the skill writes the
+    // explicit `sourceSkillPath` and restores the working anchor.
     const skillDir = seedFlatSkill(tmpRoot, "greet-anton", [
       "name: greet-anton",
       "version: 1.0.1",
@@ -89,14 +93,14 @@ describe("0737: buildSkillMetadata exposes repoUrl/skillPath", () => {
           sha: "abc",
           tier: "VERIFIED",
           installedAt: "2026-04-26T00:00:00.000Z",
-          source: "github:anton-abyzov/greet-anton",
+          source: "github:anton-abyzov/vskill",
         },
       },
     });
 
     const md = buildSkillMetadata(skillDir, "installed", tmpRoot);
-    expect(md.repoUrl).toBe("https://github.com/anton-abyzov/greet-anton");
-    expect(md.skillPath).toBe("SKILL.md");
+    expect(md.repoUrl).toBe("https://github.com/anton-abyzov/vskill");
+    expect(md.skillPath).toBeNull();
   });
 
   it("uses explicit `sourceRepoUrl` + `sourceSkillPath` from lockfile when present (forward-compat path)", () => {

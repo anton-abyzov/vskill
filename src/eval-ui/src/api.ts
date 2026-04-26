@@ -1,5 +1,6 @@
 // API client for the eval server
 import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel, VersionEntry, VersionDiff, AgentsResponse, StudioOp, Provenance, TransferEvent, SkillScope, SkillGroup, SkillSource, DetectEnginesResponse } from "./types";
+import { resolveSkillVersion } from "./version-resolver.js";
 
 // ---------------------------------------------------------------------------
 // 0707 T-025: backend envelope types for the four hardened studio endpoints.
@@ -271,6 +272,17 @@ export function normalizeSkillInfo(raw: unknown): SkillInfo {
   if (typeof r.currentVersion === "string") info.currentVersion = r.currentVersion;
   if (typeof r.latestVersion === "string") info.latestVersion = r.latestVersion;
   if (typeof r.pinnedVersion === "string") info.pinnedVersion = r.pinnedVersion;
+
+  // Increment 0750: resolve a non-empty version string + provenance label
+  // so the sidebar always shows a badge. `currentVersion` may be enriched
+  // later by `mergeUpdatesIntoSkills`; that path re-runs resolution.
+  const resolved = resolveSkillVersion({
+    frontmatterVersion: info.version ?? null,
+    registryCurrentVersion: info.currentVersion ?? null,
+    pluginVersion: info.pluginVersion ?? null,
+  });
+  info.resolvedVersion = resolved.version;
+  info.versionSource = resolved.versionSource;
 
   return info;
 }
@@ -1103,6 +1115,16 @@ export function mergeUpdatesIntoSkills(
     if (typeof u.trackedForUpdates === "boolean") {
       merged.trackedForUpdates = u.trackedForUpdates;
     }
+    // Increment 0750: re-resolve version after enriching `currentVersion`
+    // so the sidebar reflects registry-provided versions when frontmatter
+    // is absent.
+    const reresolved = resolveSkillVersion({
+      frontmatterVersion: merged.version ?? null,
+      registryCurrentVersion: merged.currentVersion ?? null,
+      pluginVersion: merged.pluginVersion ?? null,
+    });
+    merged.resolvedVersion = reresolved.version;
+    merged.versionSource = reresolved.versionSource;
     return merged;
   });
 }

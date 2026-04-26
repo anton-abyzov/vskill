@@ -8,6 +8,10 @@ import { renderMarkdown } from "../utils/renderMarkdown";
 import { SkillFileTree } from "../components/SkillFileTree";
 import { AgentSelector } from "../components/AgentSelector";
 import type { InstalledAgentEntry } from "../components/AgentSelector";
+import { EngineSelector, defaultEngineFromDetection } from "../components/EngineSelector";
+import type { Engine } from "../components/EngineSelector";
+import { VersionInput } from "../components/VersionInput";
+import { InstallEngineModal } from "../components/InstallEngineModal";
 import {
   readStudioPreferences,
   writeStudioPreference,
@@ -77,6 +81,10 @@ function SparkleIcon({ size = 14, color = "currentColor" }: { size?: number; col
 export function CreateSkillPage() {
   const navigate = useNavigate();
   const { config } = useConfig();
+
+  // 0734: state for the engine install modal — set when the user clicks
+  // [Install] next to a missing engine in EngineSelector.
+  const [installModalEngine, setInstallModalEngine] = useState<Exclude<Engine, "none"> | null>(null);
 
   // 0698 polish: accept ?mode=&skillName=&description=&pluginName= from the
   // CreateSkillModal's "Generate with AI" chain. Read from hash-based query.
@@ -373,6 +381,18 @@ export function CreateSkillPage() {
           </div>
         </div>
       </div>
+
+      {/* 0734: Engine selector — peer choices (VSkill / Anthropic / none). */}
+      {sk.engineDetection && (
+        <div className="mb-4">
+          <EngineSelector
+            detection={sk.engineDetection}
+            selected={sk.engine as Engine}
+            onSelect={(e) => sk.setEngine(e as typeof sk.engine)}
+            onInstallClick={(e) => setInstallModalEngine(e)}
+          />
+        </div>
+      )}
 
       {/* Loading */}
       {sk.layoutLoading && (
@@ -902,6 +922,16 @@ export function CreateSkillPage() {
                   />
                 </div>
 
+                {/* 0734: Version input (semver-validated). */}
+                <div className="mb-4">
+                  <VersionInput
+                    value={sk.version}
+                    onChange={sk.setVersion}
+                    onValidityChange={sk.setVersionValid}
+                    mode="create"
+                  />
+                </div>
+
                 {/* Description */}
                 <div className="mb-4">
                   <label className="text-[11px] font-medium uppercase tracking-wider mb-2 block" style={{ color: "var(--text-tertiary)" }}>
@@ -1113,6 +1143,17 @@ export function CreateSkillPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 0734: Install-engine consent modal — only mounted when triggered. */}
+      {installModalEngine && (
+        <InstallEngineModal
+          engine={installModalEngine}
+          onClose={() => setInstallModalEngine(null)}
+          onSuccess={() => {
+            void sk.refreshEngineDetection();
+          }}
+        />
       )}
     </div>
   );

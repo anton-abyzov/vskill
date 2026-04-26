@@ -583,6 +583,9 @@ export interface AiGenerationMeta {
   reasoning: string;
 }
 
+/** 0734: authoring engine — peer choices (NOT a fallback chain). */
+export type CreateSkillEngine = "vskill" | "anthropic-skill-creator" | "none";
+
 export interface CreateSkillRequest {
   name: string;
   plugin: string;
@@ -594,6 +597,10 @@ export interface CreateSkillRequest {
   evals?: GeneratedEval[];
   aiMeta?: AiGenerationMeta;
   draftDir?: string;
+  /** 0734: explicit version emitted in SKILL.md frontmatter. Defaults to "1.0.0" server-side. */
+  version?: string;
+  /** 0734: authoring engine. Defaults to "vskill" server-side. */
+  engine?: CreateSkillEngine;
 }
 
 export interface CreateSkillResponse {
@@ -602,6 +609,16 @@ export interface CreateSkillResponse {
   skill: string;
   dir: string;
   skillMdPath: string;
+  version?: string;
+  engine?: CreateSkillEngine;
+  emittedTargets?: string[];
+}
+
+export interface DetectEnginesResponse {
+  vskillSkillBuilder: boolean;
+  anthropicSkillCreator: boolean;
+  vskillVersion: string | null;
+  anthropicPath: string | null;
 }
 
 export interface SaveDraftRequest extends CreateSkillRequest {

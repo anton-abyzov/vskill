@@ -999,13 +999,25 @@ export const api = {
   },
 
   // 0759: minimum-viable publish flow. Probe of git state + real push.
-  // Full 0742 build will add SSE streaming, AI commit messages, and gh-CLI
-  // repo creation on top of these primitives.
+  // 0759 Phase 5: dirty-detection + AI-generated commit message reusing the
+  // user's configured studio provider/model.
   gitRemote(): Promise<{ remoteUrl: string | null; branch: string | null; hasRemote: boolean }> {
     return fetchJson("/api/git/remote");
   },
 
-  gitPublish(): Promise<{
+  gitDiff(): Promise<{ hasChanges: boolean; diff: string; fileCount: number }> {
+    return fetchJson("/api/git/diff", { method: "POST" });
+  },
+
+  gitCommitMessage(opts?: { provider?: string; model?: string }): Promise<{ message: string }> {
+    return fetchJson("/api/git/commit-message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts ?? {}),
+    });
+  },
+
+  gitPublish(opts?: { commitMessage?: string }): Promise<{
     success: boolean;
     commitSha: string | null;
     branch: string | null;
@@ -1013,7 +1025,11 @@ export const api = {
     stdout: string;
     stderr: string;
   }> {
-    return fetchJson("/api/git/publish", { method: "POST" });
+    return fetchJson("/api/git/publish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts ?? {}),
+    });
   },
 };
 

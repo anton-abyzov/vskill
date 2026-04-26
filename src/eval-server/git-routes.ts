@@ -13,7 +13,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
 import type { Router } from "./router.js";
-import { sendJson, LOCALHOST_ORIGIN_RE } from "./router.js";
+import { sendJson, readBody, LOCALHOST_ORIGIN_RE } from "./router.js";
+import { createLlmClient, type ProviderName } from "../eval/llm.js";
 
 interface GitResult {
   exitCode: number | null;
@@ -134,12 +135,125 @@ export function makeGetGitRemoteHandler(root: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Diff + dirty-state helpers (Phase 5).
+//
+// `git status --porcelain` is the canonical "is the tree dirty?" check —
+// any non-empty output means there are tracked changes (staged, unstaged,
+// or untracked). We combine `git diff --staged` + `git diff` for the
+// payload sent to the LLM so it sees both already-staged and unstaged work.
+// ---------------------------------------------------------------------------
+
+interface DiffSummary {
+  hasChanges: boolean;
+  diff: string;
+  fileCount: number;
+}
+
+async function collectDiffSummary(root: string, timeoutMs: number): Promise<DiffSummary> {
+  const [staged, unstaged, status] = await Promise.all([
+    runGitCommand(["diff", "--staged"], root, timeoutMs),
+    runGitCommand(["diff"], root, timeoutMs),
+    runGitCommand(["status", "--porcelain"], root, timeoutMs),
+  ]);
+  const stagedText = staged.exitCode === 0 ? staged.stdout : "";
+  const unstagedText = unstaged.exitCode === 0 ? unstaged.stdout : "";
+  const diff = [stagedText, unstagedText].filter(Boolean).join("\n");
+  const statusText = status.exitCode === 0 ? status.stdout : "";
+  const fileCount = statusText
+    .split("\n")
+    .filter((l) => l.trim().length > 0).length;
+  return { hasChanges: fileCount > 0, diff, fileCount };
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/git/diff
+//
+// Returns the combined staged + unstaged diff plus a dirty/file-count summary.
+// The UI calls this when the user clicks Publish to decide whether to open
+// the commit-message drawer (dirty) or just push (clean).
+// ---------------------------------------------------------------------------
+export function makePostGitDiffHandler(root: string) {
+  return async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!isRequestAllowed(req)) {
+      sendJson(res, { error: "forbidden" }, 403);
+      return;
+    }
+    const summary = await collectDiffSummary(root, getTimeoutMs());
+    sendJson(res, summary, 200);
+  };
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/git/commit-message
+//
+// Body: `{ provider?: ProviderName, model?: string }` — reuses the user's
+// already-configured studio provider (same one used by AI Edit, Improve,
+// Generate). Runs git diff, sends the patch to the LLM, returns the message.
+// Returns 400 when there are no changes, 500 on LLM error.
+// ---------------------------------------------------------------------------
+
+const COMMIT_MESSAGE_SYSTEM_PROMPT =
+  "You write concise, conventional-commit-style git commit messages. " +
+  "Output ONLY the commit message itself — no quotes, no markdown, no preamble. " +
+  "Format: a single subject line under 72 chars, optionally followed by a blank " +
+  "line and a body wrapped at 72 chars. Use lowercase type prefix when applicable " +
+  "(feat:, fix:, refactor:, docs:, test:, chore:). Be specific about what changed " +
+  "and why, but stay terse.";
+
+const DIFF_TRUNCATION_CAP = 10_000;
+
+export function makePostGitCommitMessageHandler(root: string) {
+  return async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!isRequestAllowed(req)) {
+      sendJson(res, { error: "forbidden" }, 403);
+      return;
+    }
+
+    let body: { provider?: ProviderName; model?: string };
+    try {
+      body = (await readBody(req)) as { provider?: ProviderName; model?: string };
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : "invalid body" }, 400);
+      return;
+    }
+
+    const summary = await collectDiffSummary(root, getTimeoutMs());
+    if (!summary.hasChanges) {
+      sendJson(res, { error: "no changes to commit", hasChanges: false }, 400);
+      return;
+    }
+
+    // Cap diff size so we don't blow context windows / pricing on huge patches.
+    let payload = summary.diff;
+    let truncated = false;
+    if (payload.length > DIFF_TRUNCATION_CAP) {
+      payload = payload.slice(0, DIFF_TRUNCATION_CAP);
+      truncated = true;
+    }
+
+    const userPrompt =
+      `Generate a commit message for the following diff` +
+      (truncated ? ` (truncated to first ${DIFF_TRUNCATION_CAP} chars of a larger patch)` : "") +
+      `:\n\n${payload}`;
+
+    try {
+      const client = createLlmClient({ provider: body.provider, model: body.model });
+      const result = await client.generate(COMMIT_MESSAGE_SYSTEM_PROMPT, userPrompt);
+      sendJson(res, { message: result.text.trim() }, 200);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      sendJson(res, { error: msg }, 500);
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/git/publish
 //
-// Pushes already-committed changes (no commit composition in this MVP — the
-// full 0742 increment will add AI commit messages and dirty-state composition).
-// On success, also collects HEAD SHA, remote URL, and current branch so the
-// UI can construct the verified-skill.com submit URL.
+// Pushes already-committed changes. When body.commitMessage is provided AND
+// the working tree is dirty, also runs `git add -A && git commit -m "<msg>"`
+// before push. The full 0742 increment may layer dirty-pill, SSE streaming,
+// and gh-CLI repo creation on top.
 // ---------------------------------------------------------------------------
 export function makePostGitPublishHandler(root: string) {
   return async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -149,7 +263,42 @@ export function makePostGitPublishHandler(root: string) {
       return;
     }
 
+    let body: { commitMessage?: string } = {};
+    try {
+      body = (await readBody(req)) as { commitMessage?: string };
+    } catch {
+      // Empty body / malformed body — fall back to "no commit" mode (today's
+      // happy path). We don't fail loudly here because the original 0759
+      // contract accepted no body at all.
+    }
+
     const timeout = getTimeoutMs();
+
+    // Optional commit phase. We only commit when the caller supplied a message
+    // AND there's something to commit. A clean tree with a stray message is a
+    // no-op (we still push, in case there are unpushed commits).
+    if (typeof body.commitMessage === "string" && body.commitMessage.trim().length > 0) {
+      const status = await runGitCommand(["status", "--porcelain"], root, timeout);
+      const dirty = status.exitCode === 0 && status.stdout.trim().length > 0;
+      if (dirty) {
+        const add = await runGitCommand(["add", "-A"], root, timeout);
+        if (add.exitCode !== 0) {
+          const errorMsg = (add.stderr || add.stdout).trim() || "git add failed";
+          sendJson(res, { success: false, error: errorMsg, stdout: add.stdout, stderr: add.stderr }, 500);
+          return;
+        }
+        const commit = await runGitCommand(
+          ["commit", "-m", body.commitMessage],
+          root,
+          timeout,
+        );
+        if (commit.exitCode !== 0) {
+          const errorMsg = (commit.stderr || commit.stdout).trim() || "git commit failed";
+          sendJson(res, { success: false, error: errorMsg, stdout: commit.stdout, stderr: commit.stderr }, 500);
+          return;
+        }
+      }
+    }
 
     const push = await runGitCommand(["push"], root, timeout);
 
@@ -200,6 +349,12 @@ export function makePostGitPublishHandler(root: string) {
 export function registerGitRoutes(router: Router, root: string): void {
   const remoteHandler = makeGetGitRemoteHandler(root);
   router.get("/api/git/remote", (req, res) => remoteHandler(req, res));
+
+  const diffHandler = makePostGitDiffHandler(root);
+  router.post("/api/git/diff", (req, res) => diffHandler(req, res));
+
+  const commitMessageHandler = makePostGitCommitMessageHandler(root);
+  router.post("/api/git/commit-message", (req, res) => commitMessageHandler(req, res));
 
   const publishHandler = makePostGitPublishHandler(root);
   router.post("/api/git/publish", (req, res) => publishHandler(req, res));

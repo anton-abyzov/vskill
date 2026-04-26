@@ -137,6 +137,23 @@ program
   });
 
 program
+  .command("stamp-versions")
+  .description("Inject version: \"1.0.0\" into local SKILL.md files that lack a version (default: dry-run)")
+  .option("--write", "Actually modify files (without this flag, prints what would change)")
+  .option("--root <dir...>", "Override roots to walk (defaults to ~/.claude/skills + ~/.claude/plugins/cache)")
+  .option("--version <semver>", "Version string to stamp (default: 1.0.0)")
+  .option("--json", "Emit JSON report instead of human-readable output")
+  .action(async (opts) => {
+    const { stampVersionsCommand } = await import("./commands/stamp-versions.js");
+    await stampVersionsCommand({
+      root: opts.root,
+      version: opts.version,
+      write: opts.write,
+      json: opts.json,
+    });
+  });
+
+program
   .command("submit [source]")
   .description("Submit a skill for verification on verified-skill.com")
   .option("--skill <name>", "Skill name within a multi-skill repo")

@@ -301,6 +301,70 @@ describe("wizard integration: non-TTY mode", () => {
   });
 });
 
+// 0742: regression — non-TTY runs (e.g. piped, run via Claude Code's bash tool,
+// nested npx subprocess) used to silently fan out to every detected agent,
+// leaving leftover symlinks for agents the user never opted into. Default to
+// claude-code-only when the user didn't pass --yes (CI opt-in) or --agent.
+describe("wizard integration: non-TTY guards against silent multi-agent fanout (0742)", () => {
+  it("installs to claude-code only when non-TTY + multiple detected + no --yes/--agent", async () => {
+    mockIsTTY.mockReturnValue(false);
+    const agents = [
+      makeAgent(),
+      makeAgent({ id: "cursor", displayName: "Cursor", localSkillsDir: ".cursor/skills" }),
+      makeAgent({ id: "codex", displayName: "Codex", localSkillsDir: ".codex/skills" }),
+      makeAgent({ id: "opencode", displayName: "OpenCode", localSkillsDir: ".opencode/skills" }),
+    ];
+    mockDetectInstalledAgents.mockResolvedValue(agents);
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "skill-a", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-a/SKILL.md" },
+    ]);
+
+    await addCommand("owner/repo", {});
+
+    // Should call install with exactly one agent (claude-code), NOT all 4
+    const installCall = mockInstallSymlink.mock.calls[0] ?? mockInstallCopy.mock.calls[0];
+    expect(installCall, "install was never called").toBeDefined();
+    const passedAgents = installCall![2] as Array<{ id: string }>;
+    expect(passedAgents).toHaveLength(1);
+    expect(passedAgents[0].id).toBe("claude-code");
+  });
+
+  it("preserves explicit --yes opt-in: fans out to all detected agents", async () => {
+    mockIsTTY.mockReturnValue(false);
+    const agents = [
+      makeAgent(),
+      makeAgent({ id: "cursor", displayName: "Cursor", localSkillsDir: ".cursor/skills" }),
+    ];
+    mockDetectInstalledAgents.mockResolvedValue(agents);
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "skill-a", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-a/SKILL.md" },
+    ]);
+
+    await addCommand("owner/repo", { yes: true });
+
+    const installCall = mockInstallSymlink.mock.calls[0] ?? mockInstallCopy.mock.calls[0];
+    expect(installCall).toBeDefined();
+    const passedAgents = installCall![2] as Array<{ id: string }>;
+    expect(passedAgents).toHaveLength(2);
+  });
+
+  it("non-TTY single-agent install is unaffected by the guard", async () => {
+    mockIsTTY.mockReturnValue(false);
+    const agents = [makeAgent()];
+    mockDetectInstalledAgents.mockResolvedValue(agents);
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "skill-a", rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/skill-a/SKILL.md" },
+    ]);
+
+    await addCommand("owner/repo", {});
+
+    const installCall = mockInstallSymlink.mock.calls[0] ?? mockInstallCopy.mock.calls[0];
+    expect(installCall).toBeDefined();
+    const passedAgents = installCall![2] as Array<{ id: string }>;
+    expect(passedAgents.map((a) => a.id)).toEqual(["claude-code"]);
+  });
+});
+
 describe("wizard integration: single skill + single agent prompts only scope", () => {
   it("shows agent checkbox + scope, suppresses method prompt for single agent", async () => {
     const agents = [makeAgent()];

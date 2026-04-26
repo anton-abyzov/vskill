@@ -21,6 +21,15 @@ interface Props {
    * one-line summary is rendered below the version transition.
    */
   diffSummariesById?: ReadonlyMap<string, string>;
+  /**
+   * 0778 US-003: when true, render an amber banner above the update list
+   * explaining the upstream pipeline is degraded. The banner is additive
+   * — the existing "No updates available" / "X updates" line still renders
+   * below.
+   */
+  platformDegraded?: boolean;
+  /** 0778 US-003: human-readable reason composed by the server. */
+  platformReason?: string | null;
 }
 
 /**
@@ -42,6 +51,8 @@ export default function UpdateDropdown({
   onClose,
   anchorRef,
   diffSummariesById,
+  platformDegraded,
+  platformReason,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const firstItemRef = useRef<HTMLButtonElement>(null);
@@ -168,6 +179,33 @@ export default function UpdateDropdown({
         gap: 6,
       }}
     >
+      {platformDegraded && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="update-dropdown-platform-degraded-banner"
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            padding: "8px 10px",
+            borderRadius: 6,
+            border: "1px solid color-mix(in srgb, var(--color-own, #f59e0b) 40%, transparent)",
+            background: "color-mix(in srgb, var(--color-own, #f59e0b) 10%, transparent)",
+            color: "var(--text-primary)",
+          }}
+        >
+          <span aria-hidden="true" style={{ fontSize: 14, lineHeight: 1.2 }}>
+            ⚠
+          </span>
+          <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>Platform crawler degraded</span>
+            <span style={{ fontSize: 11, color: "var(--text-secondary)", wordBreak: "break-word" }}>
+              {platformReason ?? "Update checks paused upstream — your submissions are queued."}
+            </span>
+          </span>
+        </div>
+      )}
       <div
         style={{
           display: "flex",

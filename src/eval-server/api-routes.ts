@@ -164,6 +164,116 @@ interface AgentPresenceCacheEntry {
 let agentPresenceCache: AgentPresenceCacheEntry | null = null;
 const AGENT_PRESENCE_CACHE_TTL = 30_000;
 
+// ---------------------------------------------------------------------------
+// 0778 — Platform health proxy.
+//
+// Studio's update bell currently surfaces "No updates available" with neutral
+// styling even when the verified-skill.com pipeline is degraded (tier-1
+// scanner stalled, VM heartbeat stale). This module probes the upstream
+// degraded-state signals so the bell can shift to an amber state with a
+// human reason instead of misleading the author.
+//
+// The browser does NOT call verified-skill.com directly (project's CORS-free
+// architecture). The eval-server fetches the upstream JSON and computes the
+// derived shape below.
+// ---------------------------------------------------------------------------
+
+export interface PlatformHealth {
+  degraded: boolean;
+  reason: string | null;
+  statsAgeMs: number;
+  oldestActiveAgeMs: number;
+}
+
+const PLATFORM_HEALTH_CACHE_TTL = 60_000;
+const PLATFORM_HEALTH_TIMEOUT_MS = 1500;
+const PLATFORM_HEARTBEAT_STALE_MS = 30 * 60 * 1000;
+const PLATFORM_OLDEST_ACTIVE_STALE_MS = 24 * 60 * 60 * 1000;
+
+let platformHealthCache: { data: PlatformHealth; ts: number } | null = null;
+
+/** Test hook — clear the 60 s cache so the next computePlatformHealth re-fetches. */
+export function resetPlatformHealthCache(): void {
+  platformHealthCache = null;
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
+  if (ms < 86_400_000) {
+    const h = Math.floor(ms / 3_600_000);
+    const m = Math.round((ms % 3_600_000) / 60_000);
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
+  return `${Math.round(ms / 86_400_000)}d`;
+}
+
+const SAFE_FALLBACK: PlatformHealth = {
+  degraded: false,
+  reason: "platform-unreachable",
+  statsAgeMs: 0,
+  oldestActiveAgeMs: 0,
+};
+
+/**
+ * 0778 — Compute platform health by probing two upstream verified-skill.com
+ * endpoints. Bounded by a 1500 ms timeout. Errors of any kind return the
+ * safe fallback so the studio never amber-flashes on user wifi blips.
+ */
+export async function computePlatformHealth(opts: {
+  fetchImpl?: typeof fetch;
+  /** Test-only: bypass the in-memory cache. */
+  skipCache?: boolean;
+} = {}): Promise<PlatformHealth> {
+  const f = opts.fetchImpl ?? fetch;
+  const now = Date.now();
+  if (
+    !opts.skipCache &&
+    platformHealthCache &&
+    now - platformHealthCache.ts < PLATFORM_HEALTH_CACHE_TTL
+  ) {
+    return platformHealthCache.data;
+  }
+
+  let result: PlatformHealth;
+  try {
+    const signal = AbortSignal.timeout(PLATFORM_HEALTH_TIMEOUT_MS);
+    const [statsRes, queueRes] = await Promise.all([
+      f("https://verified-skill.com/api/v1/submissions/stats", { signal }),
+      f("https://verified-skill.com/api/v1/queue/health", { signal }),
+    ]);
+    if (!statsRes.ok || !queueRes.ok) throw new Error("upstream non-2xx");
+    const stats = (await statsRes.json()) as { degraded?: boolean };
+    const queue = (await queueRes.json()) as {
+      statsAge?: { ageMs?: number };
+      oldestActive?: { ageMs?: number };
+    };
+
+    const statsAgeMs = Number(queue.statsAge?.ageMs ?? 0);
+    const oldestActiveAgeMs = Number(queue.oldestActive?.ageMs ?? 0);
+    const reasons: string[] = [];
+    if (stats.degraded === true) reasons.push("platform reports degraded");
+    if (statsAgeMs > PLATFORM_HEARTBEAT_STALE_MS) {
+      reasons.push(`heartbeat stale ${formatDuration(statsAgeMs)}`);
+    }
+    if (oldestActiveAgeMs > PLATFORM_OLDEST_ACTIVE_STALE_MS) {
+      reasons.push(`oldest active submission ${formatDuration(oldestActiveAgeMs)}`);
+    }
+
+    result = {
+      degraded: reasons.length > 0,
+      reason: reasons.length > 0 ? reasons.join("; ") : null,
+      statsAgeMs,
+      oldestActiveAgeMs,
+    };
+  } catch {
+    result = { ...SAFE_FALLBACK };
+  }
+
+  platformHealthCache = { data: result, ts: now };
+  return result;
+}
+
 /** Test hook — clear the 30 s cache so the next buildAgentsResponse() re-scans. */
 export function resetAgentPresenceCache(): void {
   agentPresenceCache = null;
@@ -1951,6 +2061,17 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // `localSkill` so the Studio's bell dropdown can render tooltips and route
   // smart clicks via `revealSkill` instead of guessing local fs identifiers
   // from the canonical platform name.
+  // 0778 — Platform health proxy. Returns a small JSON shape the bell uses
+  // to surface upstream-degraded state. NEVER throws; failure → safe fallback.
+  router.get("/api/platform/health", async (req, res) => {
+    try {
+      const data = await computePlatformHealth();
+      sendJson(res, data, 200, req);
+    } catch {
+      sendJson(res, { ...SAFE_FALLBACK }, 200, req);
+    }
+  });
+
   router.get("/api/skills/updates", async (req, res) => {
     try {
       const { getOutdatedJson } = await import("../commands/outdated.js");

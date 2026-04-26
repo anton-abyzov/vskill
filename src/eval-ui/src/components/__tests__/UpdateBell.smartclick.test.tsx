@@ -10,6 +10,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../assets/icons/update-bell.svg", () => ({ default: "stub-bell.svg" }));
 
+// 0778: stub platform-health hook to prevent fetch loop / OOM.
+vi.mock("../../hooks/usePlatformHealth", () => ({
+  usePlatformHealth: () => ({
+    data: { degraded: false, reason: null, statsAgeMs: 0, oldestActiveAgeMs: 0 },
+    loading: false,
+  }),
+}));
+
 interface CapturedDropdownProps {
   onSelectSkill?: (u: unknown) => void;
 }

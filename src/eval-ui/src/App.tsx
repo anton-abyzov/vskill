@@ -48,6 +48,27 @@ import { strings } from "./strings";
 // T-039: CommandPalette is lazy-loaded so it stays out of the initial bundle.
 const CommandPalette = lazy(() => import("./components/CommandPalette"));
 
+// 0741 T-016: FindSkillsPalette (⌘⇧K) is lazy-loaded for the same reason —
+// the palette + ported components add ~30-40KB gzip and only mount when the
+// user explicitly opens the verified-skill find experience.
+const FindSkillsPalette = lazy(() =>
+  import("./components/FindSkillsPalette/FindSkillsPalette").then((m) => ({
+    default: m.FindSkillsPalette,
+  })),
+);
+
+// 0741 T-018: FindSkillsNavButton is small enough to ship in the initial
+// bundle — it's a TopRail chrome element visible on every page render.
+import { FindSkillsNavButton } from "./components/FindSkillsPalette/FindSkillsNavButton";
+
+// 0741 T-019: SkillDetailPanel is lazy-loaded — it only mounts after the
+// user picks a result from the FindSkillsPalette.
+const SkillDetailPanel = lazy(() =>
+  import("./components/FindSkillsPalette/SkillDetailPanel").then((m) => ({
+    default: m.SkillDetailPanel,
+  })),
+);
+
 // 0703 hotfix: lazy-load CreateSkillPage because it is only mounted when the
 // hash is `/create` (the modal's Generate-with-AI branch). Keeping it out of
 // the initial bundle preserves home-page LCP.
@@ -429,9 +450,38 @@ function Shell() {
     [mode, setTheme, refreshSkills],
   );
 
+  // 0741 T-019: Selected skill for the SkillDetailPanel — set by the
+  // FindSkillsPalette `onSelect` callback, cleared when the panel closes.
+  const [findDetailSkill, setFindDetailSkill] = useState<{
+    owner: string;
+    repo: string;
+    slug: string;
+    displayName: string;
+  } | null>(null);
+
   useKeyboardShortcut([
     { key: "cmd+k", handler: () => setPaletteOpen((p) => !p) },
     { key: "ctrl+k", handler: () => setPaletteOpen((p) => !p) },
+    // 0741 T-016 (AC-US1-02): ⌘⇧K (Mac) and Ctrl+Shift+K (Win/Linux) open the
+    // FindSkillsPalette. Bare ⌘K above remains the CommandPalette trigger —
+    // separate handlers per chord guarantee no double-fire (modifier match
+    // is exact in matchesShortcut).
+    {
+      key: "cmd+shift+k",
+      handler: () => {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("openFindSkills"));
+        }
+      },
+    },
+    {
+      key: "ctrl+shift+k",
+      handler: () => {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("openFindSkills"));
+        }
+      },
+    },
     { key: "?", handler: () => setShortcutsOpen((s) => !s) },
     // T-0684 (B2): Flip data-theme based on RESOLVED theme rather than
     // stored mode. When mode="auto" the stored mode !== "light" (it's
@@ -516,6 +566,7 @@ function Shell() {
                 />
               ) : undefined
             }
+            findSkillsSlot={<FindSkillsNavButton />}
           />
         }
         sidebar={
@@ -604,6 +655,35 @@ function Shell() {
             open={paletteOpen}
             onClose={() => setPaletteOpen(false)}
             commands={commands}
+          />
+        </Suspense>
+      )}
+      {/* 0741 T-014/T-016: FindSkillsPalette (⌘⇧K). Always mounted but the
+          shell internally returns null until `openFindSkills` fires. The
+          shell handles its own lazy/Suspense for the inner SearchPaletteCore. */}
+      <Suspense fallback={null}>
+        <FindSkillsPalette
+          onSelect={(result) => {
+            // result.name is "owner/repo/slug" for hierarchical skills, or a
+            // legacy flat name. Only the hierarchical shape is supported by
+            // the SkillDetailPanel — bail otherwise.
+            const parts = result.name.split("/");
+            if (parts.length !== 3) return;
+            setFindDetailSkill({
+              owner: parts[0],
+              repo: parts[1],
+              slug: parts[2],
+              displayName: result.displayName ?? result.name,
+            });
+          }}
+        />
+      </Suspense>
+      {/* 0741 T-019: SkillDetailPanel — opened by the FindSkillsPalette. */}
+      {findDetailSkill && (
+        <Suspense fallback={null}>
+          <SkillDetailPanel
+            selectedSkill={findDetailSkill}
+            onClose={() => setFindDetailSkill(null)}
           />
         </Suspense>
       )}

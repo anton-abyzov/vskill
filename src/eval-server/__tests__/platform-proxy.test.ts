@@ -114,6 +114,48 @@ describe("shouldProxyToPlatform", () => {
     expect(shouldProxyToPlatform("/api/config")).toBe(false);
     expect(shouldProxyToPlatform(undefined)).toBe(false);
   });
+
+  // 0741 US-005 AC-US5-01: extend predicate for find-palette endpoints.
+  // The eval-ui's FindSkillsPalette + SkillDetailPanel issue same-origin
+  // fetches that must reach the platform via the eval-server proxy (per the
+  // browser→localhost-only architecture rule).
+  it("matches /api/v1/studio/search (find-palette query endpoint)", () => {
+    expect(
+      shouldProxyToPlatform("/api/v1/studio/search?q=obs&limit=20"),
+    ).toBe(true);
+  });
+  it("matches /api/v1/studio/telemetry/search-select (fire-and-forget)", () => {
+    expect(
+      shouldProxyToPlatform("/api/v1/studio/telemetry/search-select"),
+    ).toBe(true);
+  });
+  it("matches /api/v1/studio/telemetry/install-copy (fire-and-forget)", () => {
+    expect(
+      shouldProxyToPlatform("/api/v1/studio/telemetry/install-copy"),
+    ).toBe(true);
+  });
+  it("matches /api/v1/stats (trending fallback)", () => {
+    expect(shouldProxyToPlatform("/api/v1/stats")).toBe(true);
+  });
+  // 0741 AC-US5-05: confirm the existing /api/v1/skills/* glob still covers
+  // the detail-page endpoints (.../{owner}/{repo}/{skill} and .../versions).
+  it("matches /api/v1/skills/{owner}/{repo}/{skill}/versions via existing glob", () => {
+    expect(
+      shouldProxyToPlatform("/api/v1/skills/anton-abyzov/vskill/greet-anton/versions"),
+    ).toBe(true);
+    expect(
+      shouldProxyToPlatform("/api/v1/skills/anton-abyzov/vskill/greet-anton"),
+    ).toBe(true);
+  });
+  // 0741 AC-US5-04: negative — paths that look studio-ish but are NOT
+  // intended to be proxied. /api/v1/studio (no trailing path) shouldn't
+  // match the search prefix; /api/v1/foo is unrelated.
+  it("does NOT match /api/v1/studio (bare prefix, no specific endpoint)", () => {
+    expect(shouldProxyToPlatform("/api/v1/studio")).toBe(false);
+  });
+  it("does NOT match /api/v1/foo (unrelated v1 path)", () => {
+    expect(shouldProxyToPlatform("/api/v1/foo")).toBe(false);
+  });
 });
 
 describe("getPlatformBaseUrl", () => {

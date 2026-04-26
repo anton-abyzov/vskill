@@ -607,6 +607,113 @@ describe("T-010: GET /api/skills/:plugin/:skill/versions/diff", () => {
       req,
     );
   });
+
+  // 0746: pass-through — non-2xx upstream MUST NOT be masked as 502.
+  // Only true network failure (fetch throws) is platform_unreachable.
+
+  it("0746 AC-US1-01: forwards upstream 400 status + body unchanged", async () => {
+    mocks.readLockfile.mockReturnValue(LOCK_FIXTURE);
+    mocks.parseSource.mockReturnValue({
+      type: "marketplace",
+      owner: "anton-abyzov",
+      repo: "greet-anton",
+      pluginName: "greet-anton",
+    });
+    mocks.resolveSkillApiNameImpl.mockResolvedValue(
+      "anton-abyzov/greet-anton/greet-anton",
+    );
+
+    const upstreamBody = { error: "Version '1.0.1' not found" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => upstreamBody,
+      }),
+    );
+
+    const req = fakeReq(
+      "http://localhost/api/skills/greet-anton/greet-anton/versions/diff?from=1.0.1&to=1.0.2",
+    );
+    const res = fakeRes();
+
+    await handler(req, res, { plugin: "greet-anton", skill: "greet-anton" });
+
+    expect(mocks.sendJson).toHaveBeenCalledWith(res, upstreamBody, 400, req);
+    expect(mocks.sendJson).not.toHaveBeenCalledWith(
+      res,
+      { error: "Platform API unavailable" },
+      502,
+      req,
+    );
+  });
+
+  it("0746 AC-US1-02: forwards upstream 404 status + body unchanged", async () => {
+    mocks.readLockfile.mockReturnValue(LOCK_FIXTURE);
+    mocks.parseSource.mockReturnValue({
+      type: "marketplace",
+      owner: "x",
+      repo: "y",
+      pluginName: "z",
+    });
+    mocks.resolveSkillApiNameImpl.mockResolvedValue("x/y/z");
+
+    const upstreamBody = { error: "Skill not found" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => upstreamBody,
+      }),
+    );
+
+    const req = fakeReq(
+      "http://localhost/api/skills/myPlugin/architect/versions/diff?from=1.0.0&to=2.0.0",
+    );
+    const res = fakeRes();
+
+    await handler(req, res, { plugin: "myPlugin", skill: "architect" });
+
+    expect(mocks.sendJson).toHaveBeenCalledWith(res, upstreamBody, 404, req);
+  });
+
+  it("0746 AC-US1-03: non-JSON upstream body falls back to {error: 'Upstream returned <status>'}", async () => {
+    mocks.readLockfile.mockReturnValue(LOCK_FIXTURE);
+    mocks.parseSource.mockReturnValue({
+      type: "marketplace",
+      owner: "x",
+      repo: "y",
+      pluginName: "z",
+    });
+    mocks.resolveSkillApiNameImpl.mockResolvedValue("x/y/z");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: async () => {
+          throw new Error("not json");
+        },
+      }),
+    );
+
+    const req = fakeReq(
+      "http://localhost/api/skills/myPlugin/architect/versions/diff?from=1.0.0&to=2.0.0",
+    );
+    const res = fakeRes();
+
+    await handler(req, res, { plugin: "myPlugin", skill: "architect" });
+
+    expect(mocks.sendJson).toHaveBeenCalledWith(
+      res,
+      { error: "Upstream returned 503" },
+      503,
+      req,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

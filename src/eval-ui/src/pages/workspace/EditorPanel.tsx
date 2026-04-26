@@ -16,6 +16,7 @@ import { PublishButton } from "../../components/PublishButton";
 import { useGitRemote } from "../../hooks/useGitRemote";
 import { bumpVersion, validateVersionTransition, type BumpKind } from "../../utils/bumpVersion";
 import { getFrontmatterVersion, setFrontmatterVersion } from "../../utils/setFrontmatterVersion";
+import { computeSavePayload } from "../../utils/computeSavePayload";
 
 function emitToast(message: string, severity: "info" | "error"): void {
   if (typeof window === "undefined") return;
@@ -140,22 +141,31 @@ export function EditorPanel() {
   // segment) and dispatch a `studio:content-saved` event after a successful
   // write so the sidebar/header re-fetch and reflect the new version
   // everywhere — no manual refresh required.
+  //
+  // 0779: Save bumps patch by default. computeSavePayload returns the
+  // editor's content unchanged when the user already bumped manually (editor
+  // version > saved version), and a patch-bumped variant when the editor
+  // version equals the saved version (the user hit Save without clicking a
+  // bump button).
   const handleSave = useCallback(async () => {
-    const fromVersion = getFrontmatterVersion(state.savedContent);
-    const toVersion = getFrontmatterVersion(skillContent);
-    if (toVersion !== null) {
-      const check = validateVersionTransition(fromVersion, toVersion);
+    const { contentToSave, version: effectiveVersion, fromVersion } =
+      computeSavePayload(skillContent, state.savedContent);
+    if (effectiveVersion !== null) {
+      const check = validateVersionTransition(fromVersion, effectiveVersion);
       if (!check.valid) {
         emitToast(`Save blocked: ${check.reason ?? "invalid version transition"}`, "error");
         return;
       }
     }
     setSaving(true);
-    await saveContent();
+    // 0779: always pass the (possibly patch-bumped) contentToSave. saveContent
+    // guards against redundant SET_CONTENT dispatch when the value is
+    // unchanged — see WorkspaceContext.tsx.
+    await saveContent(contentToSave);
     setSaving(false);
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("studio:content-saved", {
-        detail: { plugin, skill, version: toVersion },
+        detail: { plugin, skill, version: effectiveVersion },
       }));
     }
   }, [saveContent, skillContent, state.savedContent, plugin, skill]);
@@ -534,10 +544,13 @@ export function EditorPanel() {
             <textarea
               ref={textareaRef}
               value={skillContent}
-              onChange={(e) => { if (!isReadOnly) dispatch({ type: "SET_CONTENT", content: e.target.value }); }}
+              onChange={(e) => { if (!isReadOnly && !saving) dispatch({ type: "SET_CONTENT", content: e.target.value }); }}
               onKeyDown={handleKeyDown}
               spellCheck={false}
-              readOnly={isReadOnly}
+              // 0779 F-001: lock the textarea while a save is in flight so a
+              // user-typed edit can't race with the post-await SET_CONTENT
+              // dispatched by the auto-bump path.
+              readOnly={isReadOnly || saving}
               className="flex-1 w-full resize-none outline-none"
               style={{
                 background: "var(--surface-0)",

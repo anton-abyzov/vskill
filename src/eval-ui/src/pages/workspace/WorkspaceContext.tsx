@@ -220,10 +220,19 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
   // ---------------------------------------------------------------------------
   // Async actions
   // ---------------------------------------------------------------------------
-  const saveContent = useCallback(async () => {
+  // 0779 — saveContent accepts an optional `contentOverride` so callers (e.g.
+  // EditorPanel.handleSave's auto-bump path) can persist a content string
+  // computed in the same handler without waiting for React to re-render
+  // after a SET_CONTENT dispatch. When provided, the override is also pushed
+  // into editor state so the textarea reflects the persisted value.
+  const saveContent = useCallback(async (contentOverride?: string) => {
     if (isReadOnly) return;
+    const contentToSave = contentOverride ?? state.skillContent;
     try {
-      await api.applyImprovement(plugin, skill, state.skillContent);
+      await api.applyImprovement(plugin, skill, contentToSave);
+      if (contentOverride !== undefined && contentOverride !== state.skillContent) {
+        dispatch({ type: "SET_CONTENT", content: contentOverride });
+      }
       dispatch({ type: "CONTENT_SAVED" });
     } catch (e) {
       dispatch({ type: "SET_ERROR", error: (e as Error).message });

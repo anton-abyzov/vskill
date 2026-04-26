@@ -19,6 +19,10 @@
 
 import * as React from "react";
 import { mutate as swrMutate } from "../hooks/useSWR";
+import {
+  filterMarketplaces,
+  filterMarketplacePlugins,
+} from "./marketplaceFilters";
 
 export interface MarketplaceSummary {
   name: string;
@@ -44,6 +48,12 @@ export interface MarketplaceDrawerProps {
   onClose: () => void;
   /** Invoked with { plugin, marketplace } so the parent can kick off SSE. */
   onInstall: (plugin: string, marketplace: string) => void;
+  /**
+   * Uninstall an installed plugin. The parent owns the fetch, confirm prompt,
+   * and post-success refresh. Resolves when the operation has settled (so the
+   * drawer can clear its per-row busy spinner).
+   */
+  onUninstall?: (plugin: string) => Promise<void>;
   /** Names of already-installed plugins — so rows can show an "Installed" chip. */
   installedNames: Set<string>;
 }
@@ -52,13 +62,33 @@ export function MarketplaceDrawer({
   open,
   onClose,
   onInstall,
+  onUninstall,
   installedNames,
 }: MarketplaceDrawerProps): React.ReactElement | null {
+  const [uninstallingPlugin, setUninstallingPlugin] = React.useState<string | null>(null);
   const [marketplaces, setMarketplaces] = React.useState<MarketplaceSummary[]>([]);
   const [selectedName, setSelectedName] = React.useState<string | null>(null);
   const [detail, setDetail] = React.useState<MarketplaceDetail | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [marketplaceQuery, setMarketplaceQuery] = React.useState("");
+  const [pluginQuery, setPluginQuery] = React.useState("");
+
+  // Reset the per-view search box when navigating in/out of a marketplace
+  // so a stale query never silently filters the next list.
+  React.useEffect(() => {
+    if (selectedName) setMarketplaceQuery("");
+    else setPluginQuery("");
+  }, [selectedName]);
+
+  const visibleMarketplaces = React.useMemo(
+    () => filterMarketplaces(marketplaces, marketplaceQuery),
+    [marketplaces, marketplaceQuery],
+  );
+  const visiblePlugins = React.useMemo(
+    () => filterMarketplacePlugins(detail?.plugins ?? [], pluginQuery),
+    [detail, pluginQuery],
+  );
 
   // Load marketplaces on open
   React.useEffect(() => {
@@ -217,8 +247,22 @@ export function MarketplaceDrawer({
           {!selectedName && !loading && marketplaces.length === 0 && !error && (
             <EmptyMarketplaces />
           )}
+          {!selectedName && marketplaces.length > 0 && (
+            <SearchInput
+              value={marketplaceQuery}
+              onChange={setMarketplaceQuery}
+              placeholder="Search marketplaces…"
+              ariaLabel="Search marketplaces"
+              testId="marketplace-search"
+            />
+          )}
+          {!selectedName && marketplaces.length > 0 && visibleMarketplaces.length === 0 && (
+            <div style={{ padding: 12, fontSize: 12, color: "var(--text-tertiary)" }}>
+              No marketplaces match “{marketplaceQuery}”.
+            </div>
+          )}
           {!selectedName &&
-            marketplaces.map((m) => (
+            visibleMarketplaces.map((m) => (
               <button
                 key={m.name}
                 type="button"
@@ -270,7 +314,21 @@ export function MarketplaceDrawer({
                   This marketplace has no plugins catalogued yet.
                 </div>
               )}
-              {detail.plugins.map((p) => {
+              {detail.plugins.length > 0 && (
+                <SearchInput
+                  value={pluginQuery}
+                  onChange={setPluginQuery}
+                  placeholder="Search plugins…"
+                  ariaLabel="Search plugins"
+                  testId="plugin-search"
+                />
+              )}
+              {detail.plugins.length > 0 && visiblePlugins.length === 0 && (
+                <div style={{ padding: 12, fontSize: 12, color: "var(--text-tertiary)" }}>
+                  No plugins match “{pluginQuery}”.
+                </div>
+              )}
+              {visiblePlugins.map((p) => {
                 const installed = installedNames.has(p.name);
                 return (
                   <div key={p.name} style={{ padding: "10px 8px", borderBottom: "1px solid var(--border-subtle, rgba(0,0,0,0.05))" }}>
@@ -325,32 +383,63 @@ export function MarketplaceDrawer({
                           </div>
                         )}
                       </div>
-                      <button
-                        type="button"
-                        disabled={installed}
-                        onClick={() => onInstall(p.name, selectedName)}
-                        style={{
-                          flexShrink: 0,
-                          padding: "5px 12px",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          border: installed ? "none" : "1px solid var(--color-action, #2F5B8E)",
-                          borderRadius: 4,
-                          background: installed
-                            ? "var(--surface-2, rgba(0,0,0,0.05))"
-                            : "var(--color-action, #2F5B8E)",
-                          color: installed
-                            ? "var(--text-tertiary)"
-                            : "var(--color-action-ink, #FFFFFF)",
-                          cursor: installed ? "default" : "pointer",
-                          fontFamily: "inherit",
-                          boxShadow: installed
-                            ? "none"
-                            : "0 1px 2px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.12)",
-                        }}
-                      >
-                        {installed ? "Installed" : "Install"}
-                      </button>
+                      {installed && onUninstall ? (
+                        <button
+                          type="button"
+                          disabled={uninstallingPlugin === p.name}
+                          onClick={async () => {
+                            setUninstallingPlugin(p.name);
+                            try {
+                              await onUninstall(p.name);
+                            } finally {
+                              setUninstallingPlugin(null);
+                            }
+                          }}
+                          aria-label={`Uninstall ${p.name}`}
+                          style={{
+                            flexShrink: 0,
+                            padding: "5px 12px",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            border: "1px solid var(--color-error, #b91c1c)",
+                            borderRadius: 4,
+                            background: "transparent",
+                            color: "var(--color-error, #b91c1c)",
+                            cursor: uninstallingPlugin === p.name ? "wait" : "pointer",
+                            opacity: uninstallingPlugin === p.name ? 0.6 : 1,
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          {uninstallingPlugin === p.name ? "Uninstalling…" : "Uninstall"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={installed}
+                          onClick={() => onInstall(p.name, selectedName)}
+                          style={{
+                            flexShrink: 0,
+                            padding: "5px 12px",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            border: installed ? "none" : "1px solid var(--color-action, #2F5B8E)",
+                            borderRadius: 4,
+                            background: installed
+                              ? "var(--surface-2, rgba(0,0,0,0.05))"
+                              : "var(--color-action, #2F5B8E)",
+                            color: installed
+                              ? "var(--text-tertiary)"
+                              : "var(--color-action-ink, #FFFFFF)",
+                            cursor: installed ? "default" : "pointer",
+                            fontFamily: "inherit",
+                            boxShadow: installed
+                              ? "none"
+                              : "0 1px 2px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.12)",
+                          }}
+                        >
+                          {installed ? "Installed" : "Install"}
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -381,6 +470,45 @@ export function MarketplaceDrawer({
           </div>
         )}
       </aside>
+    </div>
+  );
+}
+
+function SearchInput({
+  value,
+  onChange,
+  placeholder,
+  ariaLabel,
+  testId,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder: string;
+  ariaLabel: string;
+  testId: string;
+}): React.ReactElement {
+  return (
+    <div style={{ padding: "0 4px 10px" }}>
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        data-testid={testId}
+        style={{
+          width: "100%",
+          padding: "6px 10px",
+          fontSize: 12,
+          fontFamily: "var(--font-sans)",
+          border: "1px solid var(--border-default, rgba(0,0,0,0.12))",
+          borderRadius: 4,
+          background: "var(--surface-0, #fff)",
+          color: "var(--text-primary)",
+          outline: "none",
+          boxSizing: "border-box",
+        }}
+      />
     </div>
   );
 }

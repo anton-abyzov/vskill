@@ -12,10 +12,12 @@ import { registerPromoteRoute } from "./promote.js";
 import { registerTestInstallRoute } from "./test-install.js";
 import { registerRevertRoute } from "./revert.js";
 import { registerOpsRoutes } from "./ops.js";
+import { registerDetectEnginesRoute } from "../../eval-server/detect-engines-route.js";
 
 export function registerScopeTransferRoutes(router: Router, root: string): void {
   registerPromoteRoute(router, root);
   registerTestInstallRoute(router, root);
   registerRevertRoute(router, root);
   registerOpsRoutes(router);
+  registerDetectEnginesRoute(router, root);
 }

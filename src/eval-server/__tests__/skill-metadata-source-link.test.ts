@@ -177,6 +177,37 @@ describe("0737: buildSkillMetadata exposes repoUrl/skillPath", () => {
     expect(md.homepage).toBe("https://example.com/skill");
   });
 
+  it("0773 hotfix: defaults skillPath to 'SKILL.md' when legacy source repo basename matches the skill name (single-skill repo)", () => {
+    // 0773: For single-skill repos like anton-abyzov/greet-anton — where the
+    // repo IS the skill — SKILL.md sits at the repo root. The legacy
+    // `source: github:owner/repo` lockfile entries (every install before the
+    // explicit-field path shipped) carry no path info, but when the lockfile
+    // entry key equals the source repo basename we can safely default
+    // skillPath to "SKILL.md". This restores the working SourceFileLink
+    // anchor for single-skill repos without re-introducing 404s for
+    // multi-skill repos (covered by the L77 test, repo basename != skill key).
+    const skillDir = seedFlatSkill(tmpRoot, "greet-anton", [
+      "name: greet-anton",
+      "version: 1.0.3",
+      "description: x",
+    ]);
+    seedLockfile(tmpRoot, {
+      skills: {
+        "greet-anton": {
+          version: "1.0.3",
+          sha: "abc",
+          tier: "CERTIFIED",
+          installedAt: "2026-04-26T00:00:00.000Z",
+          source: "github:anton-abyzov/greet-anton",
+        },
+      },
+    });
+
+    const md = buildSkillMetadata(skillDir, "installed", tmpRoot);
+    expect(md.repoUrl).toBe("https://github.com/anton-abyzov/greet-anton");
+    expect(md.skillPath).toBe("SKILL.md");
+  });
+
   it("derives skillPath as `skills/<name>/SKILL.md` for nested-layout marketplace plugins", () => {
     // Nested layout: a plugin with multiple skills, each at
     // <repo>/skills/<skillname>/SKILL.md. The lockfile entry is keyed by

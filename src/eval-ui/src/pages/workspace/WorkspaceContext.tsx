@@ -692,12 +692,65 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
         return `${prefix}${p.prompt}`;
       }).join("\n");
 
+      dispatch({ type: "SET_PROMPTS_SOURCE", source: "ai-generated", canonical: text });
       dispatch({ type: "SET_ACTIVATION_PROMPTS", prompts: text });
       dispatch({ type: "GENERATE_PROMPTS_DONE" });
     } catch (e) {
       dispatch({ type: "GENERATE_PROMPTS_ERROR", error: (e as Error).message });
     }
   }, [plugin, skill, config]);
+
+  // ---------------------------------------------------------------------------
+  // Increment 0776: load + save author-anchored ## Test Cases in SKILL.md
+  // ---------------------------------------------------------------------------
+  const loadTestCasesFromSkillMd = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/skills/${plugin}/${skill}/test-cases`);
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        prompts: { prompt: string; expected: "should_activate" | "should_not_activate" | "auto" }[];
+        source: "skill-md" | null;
+      };
+      if (!data.prompts || data.prompts.length === 0) return;
+      const text = data.prompts
+        .map((p) => {
+          if (p.expected === "should_activate") return `+${p.prompt}`;
+          if (p.expected === "should_not_activate") return `!${p.prompt}`;
+          return p.prompt;
+        })
+        .join("\n");
+      dispatch({ type: "SET_PROMPTS_SOURCE", source: "skill-md", canonical: text });
+      dispatch({ type: "SET_ACTIVATION_PROMPTS", prompts: text });
+    } catch {
+      // Silent — fixtures load is best-effort, not a blocking error.
+    }
+  }, [plugin, skill]);
+
+  const saveTestCasesToSkillMd = useCallback(async () => {
+    dispatch({ type: "SAVE_TEST_CASES_START" });
+    try {
+      const lines = state.activationPrompts.split("\n").map((l) => l.trim()).filter(Boolean);
+      const prompts = lines.map((line) => {
+        if (line.startsWith("!")) return { prompt: line.slice(1).trim(), expected: "should_not_activate" as const };
+        if (line.startsWith("+")) return { prompt: line.slice(1).trim(), expected: "should_activate" as const };
+        return { prompt: line, expected: "auto" as const };
+      });
+      const res = await fetch(`/api/skills/${plugin}/${skill}/test-cases`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompts }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; count?: number; error?: string };
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      dispatch({ type: "SAVE_TEST_CASES_SUCCESS", count: body.count ?? prompts.length });
+      // Auto-clear the success message after 3s
+      setTimeout(() => dispatch({ type: "CLEAR_SAVE_TEST_CASES_FEEDBACK" }), 3000);
+    } catch (e) {
+      dispatch({ type: "SAVE_TEST_CASES_ERROR", error: (e as Error).message });
+    }
+  }, [plugin, skill, state.activationPrompts]);
 
   const value = useMemo<WorkspaceContextValue>(() => ({
     state,
@@ -717,6 +770,8 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     cancelActivation,
     generateActivationPrompts,
     fetchActivationHistory,
+    loadTestCasesFromSkillMd,
+    saveTestCasesToSkillMd,
     submitAiEdit,
     cancelAiEdit,
     applyAiEdit,
@@ -725,7 +780,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     selectAllEvalChanges,
     deselectAllEvalChanges,
     retryEvalsSave,
-  }), [state, isReadOnly, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, cancelActivation, generateActivationPrompts, fetchActivationHistory, submitAiEdit, cancelAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave]);
+  }), [state, isReadOnly, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, cancelActivation, generateActivationPrompts, fetchActivationHistory, loadTestCasesFromSkillMd, saveTestCasesToSkillMd, submitAiEdit, cancelAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave]);
 
   return (
     <WorkspaceCtx.Provider value={value}>

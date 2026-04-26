@@ -40,6 +40,11 @@ export const initialWorkspaceState: WorkspaceState = {
   activationClassifyingStatus: null,
   generatingPrompts: false,
   generatingPromptsError: null,
+  activationPromptsSource: null,
+  activationPromptsCanonical: "",
+  savingTestCases: false,
+  savingTestCasesError: null,
+  savingTestCasesSuccess: null,
   activationHistory: null,
   activationHistoryLoading: false,
   loading: true,
@@ -279,8 +284,29 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 
     // -- Activation test lifecycle --
 
-    case "SET_ACTIVATION_PROMPTS":
-      return { ...state, activationPrompts: action.prompts };
+    case "SET_ACTIVATION_PROMPTS": {
+      // Increment 0776: when prompts diverge from the canonical text, the
+      // source flips to "user-typed". Same text → keep current source.
+      const isCanonical = action.prompts === state.activationPromptsCanonical;
+      return {
+        ...state,
+        activationPrompts: action.prompts,
+        activationPromptsSource: isCanonical
+          ? state.activationPromptsSource
+          : state.activationPromptsSource === null
+            ? "user-typed"
+            : (state.activationPromptsSource === "skill-md" || state.activationPromptsSource === "ai-generated")
+              ? "user-typed"
+              : state.activationPromptsSource,
+      };
+    }
+
+    case "SET_PROMPTS_SOURCE":
+      return {
+        ...state,
+        activationPromptsSource: action.source,
+        activationPromptsCanonical: action.canonical ?? state.activationPromptsCanonical,
+      };
 
     case "ACTIVATION_START":
       return { ...state, activationRunning: true, activationResults: [], activationSummary: null, activationError: null, activationClassifyingStatus: null, activationStartedAt: Date.now() };
@@ -317,6 +343,26 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 
     case "GENERATE_PROMPTS_ERROR":
       return { ...state, generatingPrompts: false, generatingPromptsError: action.error };
+
+    // -- Test cases save (increment 0776) --
+
+    case "SAVE_TEST_CASES_START":
+      return { ...state, savingTestCases: true, savingTestCasesError: null, savingTestCasesSuccess: null };
+
+    case "SAVE_TEST_CASES_SUCCESS":
+      return {
+        ...state,
+        savingTestCases: false,
+        savingTestCasesSuccess: `Saved ${action.count} test case${action.count === 1 ? "" : "s"} to SKILL.md`,
+        activationPromptsSource: "skill-md",
+        activationPromptsCanonical: state.activationPrompts,
+      };
+
+    case "SAVE_TEST_CASES_ERROR":
+      return { ...state, savingTestCases: false, savingTestCasesError: action.error };
+
+    case "CLEAR_SAVE_TEST_CASES_FEEDBACK":
+      return { ...state, savingTestCasesSuccess: null, savingTestCasesError: null };
 
     // -- Activation history --
 

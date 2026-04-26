@@ -23,11 +23,21 @@ const WARNING_TOOLTIPS: Record<string, string> = {
 };
 
 export function ActivationPanel() {
-  const { state, dispatch, runActivationTest, cancelActivation, generateActivationPrompts } = useWorkspace();
+  const {
+    state,
+    dispatch,
+    runActivationTest,
+    cancelActivation,
+    generateActivationPrompts,
+    loadTestCasesFromSkillMd,
+    saveTestCasesToSkillMd,
+  } = useWorkspace();
   const {
     plugin, skill, activationPrompts, activationResults, activationSummary,
     activationRunning, activationError, activationStartedAt, activationClassifyingStatus,
     generatingPrompts, generatingPromptsError,
+    activationPromptsSource,
+    savingTestCases, savingTestCasesError, savingTestCasesSuccess,
     activationHistory,
   } = state;
   // 0707 T-009: read the skill's frontmatter version so every activation-log
@@ -61,12 +71,27 @@ export function ActivationPanel() {
       .catch(() => setSkillDescription(null));
   }, [plugin, skill]);
 
+  // Increment 0776: on mount, try to load committed `## Test Cases` from
+  // SKILL.md. Fires after the panel mounts but only when no prompts are
+  // already loaded (avoids clobbering AI-generated or user-typed text).
+  useEffect(() => {
+    if (!activationPrompts || activationPrompts.trim().length === 0) {
+      loadTestCasesFromSkillMd();
+    }
+    // We intentionally only run this on plugin/skill change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plugin, skill]);
+
   function handleRun() {
     runActivationTest(promptsText);
   }
 
   function handleGeneratePrompts() {
     generateActivationPrompts(8);
+  }
+
+  function handleSaveTestCases() {
+    saveTestCasesToSkillMd();
   }
 
   const promptCount = promptsText.trim().split("\n").filter(Boolean).length;
@@ -98,10 +123,69 @@ export function ActivationPanel() {
         {/* Left: Prompts */}
         <div className="glass-card p-4 flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-tertiary)" }}>
-              Test Prompts
-            </label>
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-tertiary)" }}>
+                Test Prompts
+              </label>
+              {activationPromptsSource === "skill-md" && (
+                <span
+                  className="pill"
+                  style={{ background: "var(--green-muted)", color: "var(--green)", fontSize: "9px", padding: "1px 5px" }}
+                  title="Loaded from the ## Test Cases block in SKILL.md. Save back any edits to persist them."
+                >
+                  from SKILL.md
+                </span>
+              )}
+              {activationPromptsSource === "ai-generated" && (
+                <span
+                  className="pill"
+                  style={{ background: "var(--purple-muted)", color: "var(--purple)", fontSize: "9px", padding: "1px 5px" }}
+                  title="AI-generated. Save as test cases to persist into SKILL.md."
+                >
+                  AI-generated
+                </span>
+              )}
+            </div>
             <div className="flex gap-1.5">
+              <button
+                onClick={handleSaveTestCases}
+                disabled={savingTestCases || !hasGeneratedPrompts || activationRunning}
+                className="text-[10px] px-2.5 py-1 rounded-md transition-colors duration-150 flex items-center gap-1.5"
+                style={{
+                  background: savingTestCases ? "var(--surface-3)" : "var(--surface-2)",
+                  color: !hasGeneratedPrompts ? "var(--text-tertiary)" : "var(--green)",
+                  border: "1px solid var(--border-subtle)",
+                  opacity: !hasGeneratedPrompts ? 0.5 : 1,
+                  cursor: !hasGeneratedPrompts ? "not-allowed" : "pointer",
+                }}
+                title={!hasGeneratedPrompts ? "No prompts to save" : "Write the current prompts back to SKILL.md as a ## Test Cases block"}
+                onMouseEnter={(e) => {
+                  if (hasGeneratedPrompts && !savingTestCases) {
+                    e.currentTarget.style.background = "var(--surface-3)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!savingTestCases) {
+                    e.currentTarget.style.background = "var(--surface-2)";
+                  }
+                }}
+              >
+                {savingTestCases ? (
+                  <>
+                    <div className="spinner" style={{ borderTopColor: "var(--green)", borderColor: "var(--border-subtle)", width: 10, height: 10 }} />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                      <polyline points="17 21 17 13 7 13 7 21" />
+                      <polyline points="7 3 7 8 15 8" />
+                    </svg>
+                    Save as test cases
+                  </>
+                )}
+              </button>
               <button
                 onClick={handleGeneratePrompts}
                 disabled={generatingPrompts || !cleanDescription || activationRunning}
@@ -144,6 +228,25 @@ export function ActivationPanel() {
               </button>
             </div>
           </div>
+
+          {savingTestCasesSuccess && (
+            <div
+              className="text-[11px] px-2 py-1 rounded"
+              style={{ color: "var(--green)", background: "var(--green-muted)" }}
+              aria-live="polite"
+            >
+              {savingTestCasesSuccess}
+            </div>
+          )}
+          {savingTestCasesError && (
+            <div
+              className="text-[11px] px-2 py-1 rounded"
+              style={{ color: "var(--red)", background: "var(--red-muted)" }}
+              aria-live="polite"
+            >
+              Save failed: {savingTestCasesError}
+            </div>
+          )}
 
           {!cleanDescription && !activationRunning && (
             <div

@@ -49,6 +49,12 @@ import { generateActionItems } from "../eval/action-items.js";
 import { buildEvalInitPrompt, parseGeneratedEvals, buildIntegrationEvalPrompt, parseGeneratedIntegrationEvals, detectBrowserRequirements, detectPlatformTargets } from "../eval/prompt-builder.js";
 import { testActivation } from "../eval/activation-tester.js";
 import type { ActivationPrompt, SkillMeta } from "../eval/activation-tester.js";
+import {
+  parseTestCases,
+  upsertTestCasesIntoSkillMd,
+  type ParsedTestCase,
+  type TestCaseExpected,
+} from "../eval/test-case-parser.js";
 import { detectMcpDependencies, detectSkillDependencies } from "../eval/mcp-detector.js";
 import { writeActivationRun, listActivationRuns, getActivationRun } from "../eval/activation-history.js";
 import type { ActivationHistoryRun } from "../eval/activation-history.js";
@@ -3381,6 +3387,50 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     } catch (err) {
       sendSSEDone(res, { error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  // GET parsed `## Test Cases` block from SKILL.md (increment 0776)
+  router.get("/api/skills/:plugin/:skill/test-cases", (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    const skillMdPath = join(skillDir, "SKILL.md");
+    const content = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
+    const prompts = parseTestCases(content);
+    sendJson(res, { prompts, source: prompts.length > 0 ? "skill-md" : null }, 200, req);
+  });
+
+  // PUT — upsert the `## Test Cases` block in SKILL.md (increment 0776).
+  // Empty prompts array removes the section. Frontmatter and other body
+  // sections are preserved verbatim.
+  router.put("/api/skills/:plugin/:skill/test-cases", async (req, res, params) => {
+    const skillDir = resolveSkillDir(root, params.plugin, params.skill);
+    const skillMdPath = join(skillDir, "SKILL.md");
+    const body = (await readBody(req)) as { prompts?: ParsedTestCase[] };
+
+    if (!body || !Array.isArray(body.prompts)) {
+      sendJson(res, { ok: false, error: "Body must be { prompts: ParsedTestCase[] }" }, 400, req);
+      return;
+    }
+    const allowed: TestCaseExpected[] = ["should_activate", "should_not_activate", "auto"];
+    for (const p of body.prompts) {
+      if (!p || typeof p.prompt !== "string" || p.prompt.length === 0) {
+        sendJson(res, { ok: false, error: "Each prompt must have a non-empty string prompt" }, 400, req);
+        return;
+      }
+      if (p.prompt.includes('"')) {
+        sendJson(res, { ok: false, error: 'Prompt strings may not contain double quotes (got: ' + p.prompt + ")" }, 400, req);
+        return;
+      }
+      if (!allowed.includes(p.expected)) {
+        sendJson(res, { ok: false, error: "expected must be one of: " + allowed.join(", ") }, 400, req);
+        return;
+      }
+    }
+
+    const existing = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
+    const updated = upsertTestCasesIntoSkillMd(existing, body.prompts);
+    mkdirSync(dirname(skillMdPath), { recursive: true });
+    writeFileSync(skillMdPath, updated, "utf-8");
+    sendJson(res, { ok: true, count: body.prompts.length }, 200, req);
   });
 
   // AI-generate activation test prompts (SSE)

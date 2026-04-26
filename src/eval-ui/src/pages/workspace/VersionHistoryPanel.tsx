@@ -19,6 +19,25 @@ function truncate(s: string | null, max: number): string {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
+/**
+ * 0781 AC-US3: the verified-skill.com platform emits `diffSummary: "0 files"`
+ * (and historically `"no file changes"`) when a publish carries no manifest
+ * entries — typically a metadata-only "save" that bumps the version without
+ * editing any file. Rendering that string verbatim makes users think the
+ * release is broken. Map both forms to a friendlier explainer until the
+ * upstream pipeline stops emitting empty publishes (incr 0779).
+ */
+export function formatDiffSummary(s: string | null | undefined): string {
+  if (!s) return "";
+  const trimmed = s.trim();
+  if (!trimmed) return "";
+  const lower = trimmed.toLowerCase();
+  if (lower === "0 files" || lower === "no files" || lower === "no file changes") {
+    return "Metadata-only release — no file changes";
+  }
+  return trimmed;
+}
+
 export function VersionHistoryPanel() {
   const { state } = useWorkspace();
   const { plugin, skill } = state;
@@ -393,11 +412,19 @@ export function VersionHistoryPanel() {
                     {new Date(v.createdAt).toLocaleDateString()}
                   </span>
                 </div>
-                {v.diffSummary && (
-                  <div className="text-[11px] mt-1" style={{ color: "var(--text-tertiary)" }}>
-                    {truncate(v.diffSummary, 80)}
-                  </div>
-                )}
+                {(() => {
+                  const summary = formatDiffSummary(v.diffSummary);
+                  if (!summary) return null;
+                  return (
+                    <div
+                      data-testid="version-row-diff-summary"
+                      className="text-[11px] mt-1"
+                      style={{ color: "var(--text-tertiary)" }}
+                    >
+                      {truncate(summary, 80)}
+                    </div>
+                  );
+                })()}
               </button>
             );
           })}

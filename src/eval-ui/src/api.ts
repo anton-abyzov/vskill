@@ -314,10 +314,15 @@ export function normalizeSkillInfo(raw: unknown): SkillInfo {
   // Increment 0750: resolve a non-empty version string + provenance label
   // so the sidebar always shows a badge. `currentVersion` may be enriched
   // later by `mergeUpdatesIntoSkills`; that path re-runs resolution.
+  // 0781: for installed skills, prefer `currentVersion` (lockfile/platform
+  // truth) over the on-disk frontmatter so the sidebar matches the
+  // Versions tab's [installed] marker.
   const resolved = resolveSkillVersion({
     frontmatterVersion: info.version ?? null,
     registryCurrentVersion: info.currentVersion ?? null,
     pluginVersion: info.pluginVersion ?? null,
+    installedCurrentVersion: info.currentVersion ?? null,
+    preferInstalled: info.origin === "installed",
   });
   info.resolvedVersion = resolved.version;
   info.versionSource = resolved.versionSource;
@@ -1313,10 +1318,14 @@ export function mergeUpdatesIntoSkills(
     // Increment 0750: re-resolve version after enriching `currentVersion`
     // so the sidebar reflects registry-provided versions when frontmatter
     // is absent.
+    // 0781: this path only runs for `origin === "installed"` (see early return
+    // above), so `preferInstalled: true` is unconditional here.
     const reresolved = resolveSkillVersion({
       frontmatterVersion: merged.version ?? null,
       registryCurrentVersion: merged.currentVersion ?? null,
       pluginVersion: merged.pluginVersion ?? null,
+      installedCurrentVersion: merged.currentVersion ?? null,
+      preferInstalled: true,
     });
     merged.resolvedVersion = reresolved.version;
     merged.versionSource = reresolved.versionSource;

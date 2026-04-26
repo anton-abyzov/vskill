@@ -126,4 +126,46 @@ describe("resolveSkillVersion", () => {
     });
     expect(out).toEqual({ version: "1.0.0", versionSource: "default" });
   });
+
+  // 0781 AC-US1-01: for installed skills the lockfile/platform truth must
+  // win over the on-disk frontmatter, which can drift after a save bumps
+  // the version without an actual update.
+  it("0781 TC-012: preferInstalled=true → installedCurrentVersion wins over frontmatter", () => {
+    const out = resolveSkillVersion({
+      frontmatterVersion: "1.0.3",
+      installedCurrentVersion: "1.0.2",
+      preferInstalled: true,
+    });
+    expect(out).toEqual({ version: "1.0.2", versionSource: "registry" });
+  });
+
+  // 0781 AC-US1-02: when no installed version is known, fall through.
+  it("0781 TC-013: preferInstalled=true but installedCurrentVersion absent → frontmatter still used", () => {
+    const out = resolveSkillVersion({
+      frontmatterVersion: "1.0.3",
+      installedCurrentVersion: null,
+      preferInstalled: true,
+    });
+    expect(out).toEqual({ version: "1.0.3", versionSource: "frontmatter" });
+  });
+
+  // 0781 AC-US1-03: own/authored skills are unaffected.
+  it("0781 TC-014: preferInstalled=false → frontmatter wins (own scope unchanged)", () => {
+    const out = resolveSkillVersion({
+      frontmatterVersion: "1.0.3",
+      installedCurrentVersion: "1.0.2",
+      preferInstalled: false,
+    });
+    expect(out).toEqual({ version: "1.0.3", versionSource: "frontmatter" });
+  });
+
+  // 0781: installed-current-version sentinel is filtered like other sources.
+  it("0781 TC-015: installedCurrentVersion='0.0.0' is rejected as a sentinel", () => {
+    const out = resolveSkillVersion({
+      frontmatterVersion: "1.0.3",
+      installedCurrentVersion: "0.0.0",
+      preferInstalled: true,
+    });
+    expect(out).toEqual({ version: "1.0.3", versionSource: "frontmatter" });
+  });
 });

@@ -34,10 +34,11 @@ export function UpdateBell() {
     activeAgent?: string | null;
   };
   const { toast } = useToast();
-  // 0778 — surface upstream-degraded state in the bell + dropdown.
+  // 0778 — surface upstream-degraded state on the bell icon (colour +
+  // tooltip). 0781: the in-dropdown banner was removed; the bell is now
+  // the only signal here.
   const { data: platformHealth } = usePlatformHealth();
   const platformDegraded = platformHealth?.degraded === true;
-  const platformReason = platformHealth?.reason ?? null;
 
   // 0708 AC-US5-03: project push-store entries → short-name-keyed diff
   // summaries so UpdateDropdown can render the one-liner under each row.
@@ -163,8 +164,6 @@ export function UpdateBell() {
             updates={updates}
             isRefreshing={isRefreshingUpdates}
             diffSummariesById={diffSummariesById}
-            platformDegraded={platformDegraded}
-            platformReason={platformReason}
             onRefresh={() => refreshUpdates()}
             onSelectSkill={(u) => {
               // 0747 T-006: prefer server-resolved local fs identifiers over

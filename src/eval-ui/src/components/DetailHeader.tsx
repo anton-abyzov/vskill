@@ -178,14 +178,110 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
         >
           {skill.skill}
         </h2>
-        {/* 0707 T-008: dedicated VersionBadge replaces the plain-text version. */}
-        <span data-testid="detail-header-version">
-          <VersionBadge
-            version={skill.resolvedVersion ?? skill.version ?? null}
-            source={skill.versionSource}
-            pluginName={skill.pluginName ?? null}
-          />
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* 0707 T-008: dedicated VersionBadge replaces the plain-text version. */}
+          <span data-testid="detail-header-version">
+            <VersionBadge
+              version={skill.resolvedVersion ?? skill.version ?? null}
+              source={skill.versionSource}
+              pluginName={skill.pluginName ?? null}
+            />
+          </span>
+          {/* 0781 AC-US4-01..03: plugin-bundled skills carry three potential
+              version sources (frontmatter, plugin manifest, upstream skill
+              track). When the skill is plugin-bundled and the manifest version
+              is known, show a muted chip "from {plugin}@{ver}" so the user
+              can read both the skill version (badge above) and the plugin
+              version without confusion. */}
+          {skill.pluginName && skill.pluginVersion && (
+            <span
+              data-testid="detail-header-plugin-chip"
+              title={`This skill ships in plugin ${skill.pluginName} v${skill.pluginVersion}. The plugin version is independent of this skill's own version track.`}
+              style={{
+                display: "inline-flex",
+                alignItems: "baseline",
+                gap: 4,
+                fontFamily: "var(--font-sans)",
+                fontSize: 11,
+                color: "var(--text-tertiary)",
+                padding: "2px 6px",
+                borderRadius: 4,
+                background: "var(--surface-1, transparent)",
+                border: "1px solid var(--border-subtle, transparent)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span>from</span>
+              <span style={{ color: "var(--text-secondary)" }}>{skill.pluginName}</span>
+              <span aria-hidden="true">@</span>
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontVariantNumeric: "tabular-nums",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                {skill.pluginVersion}
+              </span>
+            </span>
+          )}
+          {/* 0782: restore the trash button that LegacyDetailHeader had —
+              source-authored skills only. Dispatches studio:request-delete;
+              App.tsx opens ConfirmDialog + applies the 10s usePendingDeletion
+              undo buffer (same path as the sidebar context-menu Delete). */}
+          {skill.origin === "source" && (
+            <button
+              type="button"
+              data-testid="detail-header-delete"
+              aria-label="Delete skill"
+              title="Delete skill"
+              onClick={() => {
+                if (typeof window === "undefined") return;
+                window.dispatchEvent(
+                  new CustomEvent("studio:request-delete", {
+                    detail: {
+                      skill: {
+                        plugin: skill.plugin,
+                        skill: skill.skill,
+                        dir: skill.dir ?? "",
+                        hasEvals: false,
+                        hasBenchmark: false,
+                        evalCount: 0,
+                        assertionCount: 0,
+                        benchmarkStatus: "missing",
+                        lastBenchmark: null,
+                        origin: "source",
+                      },
+                    },
+                  }),
+                );
+              }}
+              className="flex items-center justify-center transition-colors duration-150"
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--text-tertiary)",
+                padding: 4,
+                borderRadius: 4,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "var(--red)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "var(--text-tertiary)";
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+                <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 0707 T-008: byline row — author (link when repoUrl parses) + source

@@ -1180,6 +1180,21 @@ function getClient(): ReturnType<typeof createLlmClient> {
   return createLlmClient(currentOverrides);
 }
 
+// Per-request client: prefer body-supplied provider/model, then session globals.
+// Lets the frontend send the user's selected model with each request so historical
+// runs reliably reflect the picker value rather than a stale session default.
+function clientFromBody(body: { provider?: unknown; model?: unknown } | null | undefined): {
+  client: ReturnType<typeof createLlmClient>;
+  provider: ProviderName;
+} {
+  const reqProvider = typeof body?.provider === "string" ? body.provider : undefined;
+  const reqModel = typeof body?.model === "string" ? body.model : undefined;
+  const provider = (reqProvider || currentOverrides.provider || "claude-cli") as ProviderName;
+  const model = reqModel || currentOverrides.model;
+  const client = createLlmClient({ provider, model });
+  return { client, provider };
+}
+
 /** Derive sidebar badge status from benchmark + current eval IDs. */
 function computeBenchmarkStatus(
   benchmark: BenchmarkResult | null,
@@ -2940,6 +2955,8 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       concurrency?: number;
       judgeModel?: string;
       noCache?: boolean;
+      provider?: string;
+      model?: string;
     };
     const filterIds = Array.isArray(body?.eval_ids) ? new Set(body.eval_ids) : null;
 
@@ -2956,7 +2973,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       const evals = loadAndValidateEvals(skillDir);
       const skillMdPath = join(skillDir, "SKILL.md");
       const skillContent = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
-      const client = getClient();
+      const { client, provider: effectiveProvider } = clientFromBody(body);
       const systemPrompt = buildEvalSystemPrompt(skillContent);
 
       // Create separate judge client if judgeModel is specified
@@ -2980,7 +2997,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
       await runBenchmarkSSE({
         res, skillDir, skillName: evals.skill_name, systemPrompt,
-        runType: "benchmark", provider: currentOverrides.provider || "claude-cli",
+        runType: "benchmark", provider: effectiveProvider,
         evalCases: evals.evals, filterIds, client, judgeClient, judgeCache,
         isAborted: () => aborted, concurrency,
       });
@@ -2999,19 +3016,23 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     let aborted = false;
     res.on("close", () => { aborted = true; });
 
-    const body = await readBody(req).catch(() => ({})) as { eval_ids?: number[] };
+    const body = await readBody(req).catch(() => ({})) as {
+      eval_ids?: number[];
+      provider?: string;
+      model?: string;
+    };
     const filterIds = Array.isArray(body?.eval_ids) ? new Set(body.eval_ids) : null;
 
     initSSE(res, req);
 
     try {
       const evals = loadAndValidateEvals(skillDir);
-      const client = getClient();
+      const { client, provider: effectiveProvider } = clientFromBody(body);
 
       await runBenchmarkSSE({
         res, skillDir, skillName: evals.skill_name,
         systemPrompt: "You are a helpful AI assistant.",
-        runType: "baseline", provider: currentOverrides.provider || "claude-cli",
+        runType: "baseline", provider: effectiveProvider,
         evalCases: evals.evals, filterIds, client, isAborted: () => aborted,
       });
     } catch (err) {
@@ -3026,7 +3047,12 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     const evalId = parseInt(params.evalId, 10);
     if (isNaN(evalId)) { sendJson(res, { error: "Invalid evalId" }, 400, req); return; }
 
-    const body = await readBody(req).catch(() => ({})) as { mode?: string; bulk?: boolean };
+    const body = await readBody(req).catch(() => ({})) as {
+      mode?: string;
+      bulk?: boolean;
+      provider?: string;
+      model?: string;
+    };
     const isBaseline = body?.mode === "baseline";
     const isBulkChild = body?.bulk === true;
 
@@ -3047,7 +3073,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
       const skillMdPath = join(skillDir, "SKILL.md");
       const skillContent = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
-      const client = getClient();
+      const { client, provider: effectiveProvider } = clientFromBody(body);
       const systemPrompt = isBaseline
         ? buildBaselineSystemPrompt()
         : buildEvalSystemPrompt(skillContent);
@@ -3056,7 +3082,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
       const benchCase = await runSingleCaseSSE({
         res, evalCase, systemPrompt, client, isAborted: () => aborted,
-        provider: currentOverrides.provider || "claude-cli",
+        provider: effectiveProvider,
       });
 
       if (!released) { released = true; sem.release(); }
@@ -3071,7 +3097,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
             cases: [benchCase],
             overall_pass_rate: benchCase.pass_rate,
             type: isBaseline ? "baseline" : "benchmark",
-            provider: currentOverrides.provider || "claude-cli",
+            provider: effectiveProvider,
             totalDurationMs: benchCase.durationMs ?? 0,
             totalInputTokens: benchCase.inputTokens ?? null,
             totalOutputTokens: benchCase.outputTokens ?? null,

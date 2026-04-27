@@ -72,6 +72,7 @@ interface Props {
 
 export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
   const isReadOnly = origin === "installed";
+  const { config } = useConfig();
   const [state, dispatch] = useReducer(workspaceReducer, {
     ...initialWorkspaceState,
     plugin,
@@ -261,16 +262,20 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
 
     dispatch({ type: "CASE_RUN_START", caseId, mode });
 
+    const body: Record<string, unknown> =
+      mode === "comparison" ? { eval_ids: [caseId] } :
+      mode === "baseline" ? { baseline_only: true } : {};
+    if (config?.provider) body.provider = config.provider;
+    if (config?.model) body.model = config.model;
+
     if (mode === "comparison") {
-      // Comparison uses the bulk endpoint with eval_ids filter (different flow)
       const url = `/api/skills/${plugin}/${skill}/compare`;
-      sseStartCase(caseId, url, { eval_ids: [caseId] });
+      sseStartCase(caseId, url, body);
     } else {
       const url = `/api/skills/${plugin}/${skill}/benchmark/case/${caseId}`;
-      const body = mode === "baseline" ? { baseline_only: true } : undefined;
-      sseStartCase(caseId, url, body);
+      sseStartCase(caseId, url, Object.keys(body).length > 0 ? body : undefined);
     }
-  }, [isReadOnly, plugin, skill, state.caseRunStates, sseStartCase]);
+  }, [isReadOnly, plugin, skill, state.caseRunStates, sseStartCase, config]);
 
   // -- Run all cases in parallel --
   const runAll = useCallback((mode: RunMode = "benchmark") => {
@@ -290,15 +295,20 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     bulkPendingRef.current = new Set(caseIds);
 
     for (const id of caseIds) {
+      const body: Record<string, unknown> =
+        mode === "comparison" ? { eval_ids: [id] } :
+        mode === "baseline" ? { baseline_only: true } : {};
+      if (config?.provider) body.provider = config.provider;
+      if (config?.model) body.model = config.model;
+
       if (mode === "comparison") {
-        sseStartCase(id, `/api/skills/${plugin}/${skill}/compare`, { eval_ids: [id] });
+        sseStartCase(id, `/api/skills/${plugin}/${skill}/compare`, body);
       } else {
         const url = `/api/skills/${plugin}/${skill}/benchmark/case/${id}`;
-        const body = mode === "baseline" ? { baseline_only: true } : undefined;
-        sseStartCase(id, url, body);
+        sseStartCase(id, url, Object.keys(body).length > 0 ? body : undefined);
       }
     }
-  }, [isReadOnly, plugin, skill, state.evals, sseStartCase]);
+  }, [isReadOnly, plugin, skill, state.evals, sseStartCase, config]);
 
   // -- Cancel per-case --
   const cancelCase = useCallback((caseId: number) => {
@@ -472,7 +482,6 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
   }, [plugin, skill]);
 
   // -- Generate Evals (SSE-backed) --
-  const { config } = useConfig();
   const genEvalsSSE = useSSE();
   const lastGenEvalsIdxRef = useRef(0);
 

@@ -373,11 +373,14 @@ export function TestsPanel({ embedded = false }: TestsPanelProps = {}) {
                 onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "var(--surface-2)"; }}
                 onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
               >
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-[12px] font-medium truncate flex items-center gap-1.5" style={{ color: active ? "var(--text-primary)" : "var(--text-secondary)" }}>
-                    #{c.id} {c.name}
+                <div className="flex items-center justify-between gap-2 mb-0.5 min-w-0">
+                  <span className="text-[12px] font-medium flex items-center gap-1.5 min-w-0 flex-1" style={{ color: active ? "var(--text-primary)" : "var(--text-secondary)" }}>
+                    <span className="truncate min-w-0 flex-1">#{c.id} {c.name}</span>
                     <span
+                      title={tt === "unit" ? "Unit test" : "Integration test"}
+                      aria-label={tt === "unit" ? "Unit test" : "Integration test"}
                       style={{
+                        flexShrink: 0,
                         fontSize: 9,
                         fontWeight: 600,
                         padding: "1px 5px",
@@ -385,13 +388,14 @@ export function TestsPanel({ embedded = false }: TestsPanelProps = {}) {
                         background: tt === "unit" ? "var(--accent-muted)" : "var(--orange-muted)",
                         color: tt === "unit" ? "var(--accent)" : "var(--orange)",
                         whiteSpace: "nowrap",
+                        letterSpacing: "0.02em",
                       }}
                     >
                       {tt === "unit" ? "U" : "I"}
                     </span>
                     {/* T-046: Lock icon for integration tests with missing credentials */}
                     {tt === "integration" && c.requiredCredentials?.some((cr) => missingCredNames.has(cr)) && (
-                      <span title="Configure credentials to run">
+                      <span title="Configure credentials to run" style={{ flexShrink: 0, display: "inline-flex" }}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--orange)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                           <path d="M7 11V7a5 5 0 0 1 10 0v4" />
@@ -1067,28 +1071,54 @@ function Section({ title, action, children }: { title: string; action?: React.Re
 
 function StatusPill({ result }: { result?: InlineResult }) {
   const [showTooltip, setShowTooltip] = useState(false);
+
+  const baseStyle: React.CSSProperties = {
+    padding: "2px 8px",
+    borderRadius: 9999,
+    flexShrink: 0,
+    minWidth: 44,
+    justifyContent: "center",
+    position: "relative",
+    cursor: "default",
+  };
+
   if (!result || result.status == null) {
-    return <span className="pill text-[10px]" style={{ background: "var(--surface-3)", color: "var(--text-tertiary)" }}>--</span>;
+    return (
+      <span
+        className="pill text-[10px]"
+        title="Not run yet"
+        aria-label="Not run yet"
+        style={{
+          ...baseStyle,
+          background: "var(--surface-3)",
+          color: "var(--text-tertiary)",
+        }}
+      >
+        --
+      </span>
+    );
   }
   const pass = result.status === "pass";
   const score = result.passRate ?? 0;
   const verdict = pass ? "PASS" : "FAIL";
   const explanation = verdictExplanation(verdict, score);
+  const display = result.passRate != null ? `${Math.round(result.passRate * 100)}%` : verdict;
 
   return (
     <span
       className="pill text-[10px]"
       style={{
+        ...baseStyle,
         background: pass ? "var(--green-muted)" : "var(--red-muted)",
         color: pass ? "var(--green)" : "var(--red)",
-        position: "relative",
-        cursor: "default",
+        fontWeight: 600,
       }}
       onMouseEnter={() => setShowTooltip(true)}
       onMouseLeave={() => setShowTooltip(false)}
+      aria-label={`${verdict} ${display}`}
       aria-describedby={showTooltip ? "verdict-tooltip" : undefined}
     >
-      {result.passRate != null ? `${Math.round(result.passRate * 100)}%` : result.status}
+      {display}
       {showTooltip && (
         <div
           id="verdict-tooltip"

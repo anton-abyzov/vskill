@@ -8,7 +8,14 @@ import { Sidebar } from "./components/Sidebar";
 import { ResizeHandle, readSidebarWidth, DEFAULT_SIDEBAR_WIDTH } from "./components/ResizeHandle";
 import { useDirtySkills } from "./hooks/useDirtySkills";
 import { DisconnectBanner } from "./components/DisconnectBanner";
-import { RightPanel } from "./components/RightPanel";
+import {
+  RightPanel,
+  readInitialTabFromSearch,
+  readInitialSub,
+  defaultSubFor,
+  resolveLegacyTab,
+  type DetailTab,
+} from "./components/RightPanel";
 import { UpdateToast } from "./components/UpdateToast";
 import { ToastProvider, useToast } from "./components/ToastProvider";
 import { ShortcutModal } from "./components/ShortcutModal";
@@ -105,23 +112,111 @@ function Shell() {
   // NOT persist across reloads (spec non-goal). Mobile-view auto-hiding
   // remains governed by StudioContext.mobileView.
   const [sidebarToggledHidden, setSidebarToggledHidden] = useState(false);
-  // T-063: Active detail tab lives at the App level so RightPanel can drive
-  // the Overview / Versions switch in integrated mode. Without this lift,
-  // `renderDetailShell` received no `onDetailTabChange` handler and clicking
-  // "Versions" was a silent no-op (qa-findings #1).
-  // 0707 T-007: RightPanel now exposes the full flat 9-tab set, so the
-  // lifted state type widens accordingly.
-  const [activeDetailTab, setActiveDetailTab] = useState<
-    | "overview"
-    | "editor"
-    | "tests"
-    | "run"
-    | "activation"
-    | "history"
-    | "leaderboard"
-    | "deps"
-    | "versions"
-  >("overview");
+  // T-063 + 0792 T-013/T-014: active detail tab AND sub-mode live at the App
+  // level so the production prop-driven RightPanel path (which is the only
+  // path App actually mounts) can drive both surfaces. An earlier draft kept
+  // sub state inside RightPanel.IntegratedDetailShell — but that branch is
+  // unreachable in production because App always passes `selectedSkillInfo`
+  // as a prop, so the sub clicks were silent no-ops. Lifting both into App
+  // is symmetric with the existing tab pattern and centralizes URL effects.
+  //
+  // Initial values read from `?tab=` (legacy `?panel=` honored), and within
+  // the resolved tab from `?mode=` (run) or `?view=` (history). Legacy
+  // ?panel= and ?sub= bookmarks resolve via `resolveLegacyTab`.
+  const [activeDetailTab, setActiveDetailTabState] = useState<DetailTab>(() => {
+    if (typeof window === "undefined") return "overview";
+    return readInitialTabFromSearch(window.location.search).tab;
+  });
+  const [activeDetailSub, setActiveDetailSub] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    const target = readInitialTabFromSearch(window.location.search);
+    if (target.mode) return target.mode;
+    if (target.view) return target.view;
+    return readInitialSub(target.tab, window.location.search);
+  });
+
+  // Tab setter used by RightPanel — resets sub to the default for the new
+  // tab so stale `?mode=`/`?view=` doesn't bleed across switches.
+  const setActiveDetailTab = useCallback((next: DetailTab) => {
+    setActiveDetailTabState((prev) => {
+      if (prev !== next) {
+        setActiveDetailSub(defaultSubFor(next));
+      }
+      return next;
+    });
+  }, []);
+
+  // 0792 T-014: one-shot deep-link redirect on mount + popstate. All legacy
+  // tokens (?tab=tests / ?tab=trigger / ?tab=activation / ?tab=versions /
+  // ?tab=leaderboard / ?tab=editor / legacy ?panel=…) resolve through
+  // `resolveLegacyTab`. The URL is rewritten to canonical form via
+  // `replaceState` (no back-button trap) and React state is synced.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const rewrite = () => {
+      const params = new URLSearchParams(window.location.search);
+      const rawTab = params.get("tab");
+      const rawPanel = params.get("panel");
+      const target = resolveLegacyTab(rawTab) ?? resolveLegacyTab(rawPanel);
+      if (!target) return;
+      const next = new URLSearchParams(window.location.search);
+      next.delete("panel");
+      next.delete("sub");
+      if (target.tab === "overview") next.delete("tab");
+      else next.set("tab", target.tab);
+      next.delete("mode");
+      next.delete("view");
+      if (target.mode) next.set("mode", target.mode);
+      if (target.view) next.set("view", target.view);
+      const qs = next.toString();
+      const url = `${window.location.pathname}${qs ? "?" + qs : ""}${window.location.hash}`;
+      const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      if (url !== current) {
+        window.history.replaceState(null, "", url);
+      }
+      setActiveDetailTabState(target.tab);
+      // Resolve sub from explicit hint, else fall back to descriptor default
+      // for the redirected tab.
+      if (target.mode) setActiveDetailSub(target.mode);
+      else if (target.view) setActiveDetailSub(target.view);
+      else setActiveDetailSub(defaultSubFor(target.tab));
+    };
+    rewrite();
+    window.addEventListener("popstate", rewrite);
+    return () => window.removeEventListener("popstate", rewrite);
+  }, []);
+
+  // 0792 T-014: mirror (`activeDetailTab`, `activeDetailSub`) back to the
+  // URL whenever either changes so clicks update the address bar in place.
+  // Canonical contract: `?tab=` (top-level) + `?mode=` (run) / `?view=`
+  // (history). Legacy `?panel=` and `?sub=` are stripped on every write so
+  // the URL converges to the new form.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    params.delete("panel");
+    params.delete("sub");
+    if (activeDetailTab === "overview") {
+      params.delete("tab");
+    } else {
+      params.set("tab", activeDetailTab);
+    }
+    params.delete("mode");
+    params.delete("view");
+    // Only persist sub when it differs from the descriptor default —
+    // omitting it keeps the URL short for the common case.
+    const isDefault = activeDetailSub === defaultSubFor(activeDetailTab);
+    if (!isDefault && activeDetailSub) {
+      if (activeDetailTab === "run") params.set("mode", activeDetailSub);
+      else if (activeDetailTab === "history") params.set("view", activeDetailSub);
+    }
+    const qs = params.toString();
+    const url = `${window.location.pathname}${qs ? "?" + qs : ""}${window.location.hash}`;
+    const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (url !== current) {
+      window.history.replaceState(null, "", url);
+    }
+  }, [activeDetailTab, activeDetailSub]);
   // T-064: Shared context-menu anchor for sidebar rows. The actual ContextMenu
   // component is rendered once at the App root; row right-clicks update this
   // state with cursor coords + the target skill.
@@ -580,6 +675,8 @@ function Shell() {
       selectedSkillInfo={selectedInfo}
       activeDetailTab={activeDetailTab}
       onDetailTabChange={setActiveDetailTab}
+      activeDetailSub={activeDetailSub}
+      onDetailSubChange={setActiveDetailSub}
       allSkills={state.skills}
       onSelectSkill={onSelect}
     />

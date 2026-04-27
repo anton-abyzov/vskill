@@ -1,9 +1,10 @@
 // ---------------------------------------------------------------------------
-// T-007 (0707): RightPanel — flat 9-tab layout
+// 0792 T-013: RightPanel — 4-tab IA layout (Overview/Edit/Run/History)
 //
-// Verifies that RightPanel now renders a single 9-tab tablist (instead of
-// the old 2-tab Overview|Versions pattern). Uses the same function-call
-// rendering strategy as the other tests in this folder.
+// Replaces the prior 6-tab test (0707 T-007 / 0769 Part B). Every test that
+// asserted "Tests / Trigger / Versions" as top-level tabs has been rewritten
+// to expect the new 4-tab IA. Sub-tab assertions cover the new mode/view
+// descriptors under Run and History.
 // ---------------------------------------------------------------------------
 import { describe, it, expect, vi } from "vitest";
 
@@ -22,14 +23,16 @@ vi.mock("react", async (importOriginal) => {
 
 // Stub sub-components so we can walk the tree without mounting the real
 // workspace panel machinery.
-vi.mock("../../pages/workspace/VersionHistoryPanel", () => ({ VersionHistoryPanel: () => null }));
 vi.mock("../../pages/workspace/EditorPanel", () => ({ EditorPanel: () => null }));
-vi.mock("../../pages/workspace/TestsPanel", () => ({ TestsPanel: () => null }));
-vi.mock("../../pages/workspace/RunPanel", () => ({ RunPanel: () => null }));
+vi.mock("../../pages/workspace/RunDispatcherPanel", () => ({
+  RunDispatcherPanel: () => null,
+  isValidRunMode: (v: unknown) => v === "benchmark" || v === "activation" || v === "ab",
+}));
+vi.mock("../../pages/workspace/HistoryShell", () => ({
+  HistoryShell: () => null,
+  isValidHistoryView: (v: unknown) => v === "timeline" || v === "models" || v === "versions",
+}));
 vi.mock("../../pages/workspace/ActivationPanel", () => ({ ActivationPanel: () => null }));
-vi.mock("../../pages/workspace/HistoryPanel", () => ({ HistoryPanel: () => null }));
-vi.mock("../../pages/workspace/LeaderboardPanel", () => ({ LeaderboardPanel: () => null }));
-vi.mock("../../pages/workspace/DepsPanel", () => ({ DepsPanel: () => null }));
 vi.mock("../../pages/workspace/WorkspaceContext", () => ({
   WorkspaceProvider: ({ children }: { children: unknown }) => children as never,
   useWorkspace: () => ({ state: { activePanel: "editor" }, dispatch: () => {} }),
@@ -104,40 +107,40 @@ function makeSkill(over: Partial<SkillInfo> = {}): SkillInfo {
   };
 }
 
-describe("RightPanel — persona-conditional tab layout (T-007 + 0769 T-019)", () => {
-  it("renders 6 author tabs (no History/Leaderboard/Deps) for source-origin skills", () => {
+describe("RightPanel — 4-tab IA (0792 T-013)", () => {
+  it("renders exactly 4 tabs (Overview/Edit/Run/History) for source-origin skills", () => {
     const tree = RightPanel({ selectedSkillInfo: makeSkill() });
     const tabs = findAll(tree, (el) => el.props?.role === "tab");
     const ids = tabs.map((t) => t.props["data-testid"] as string);
     expect(ids).toEqual([
       "detail-tab-overview",
-      "detail-tab-editor",
-      "detail-tab-tests",
+      "detail-tab-edit",
       "detail-tab-run",
-      "detail-tab-activation",
-      "detail-tab-versions",
+      "detail-tab-history",
     ]);
     const tablist = findAll(tree, (el) => el.props?.role === "tablist")[0];
     expect(tablist).toBeDefined();
   });
 
-  it("renders 3 consumer tabs (Overview/Trigger/Versions only) for installed-origin skills", () => {
+  it("hides Edit for installed-origin (consumer) skills, leaving Overview/Run/History", () => {
     const tree = RightPanel({ selectedSkillInfo: makeSkill({ origin: "installed" }) });
     const tabs = findAll(tree, (el) => el.props?.role === "tab");
     const ids = tabs.map((t) => t.props["data-testid"] as string);
     expect(ids).toEqual([
       "detail-tab-overview",
-      "detail-tab-activation",
-      "detail-tab-versions",
+      "detail-tab-run",
+      "detail-tab-history",
     ]);
   });
 
-  it("uses the user-facing label 'Trigger' for the activation tab", () => {
+  it("does not surface 'Tests', 'Trigger', or 'Versions' as top-level tabs anymore", () => {
     const tree = RightPanel({ selectedSkillInfo: makeSkill() });
-    const triggerTab = findAll(tree, (el) => el.props?.["data-testid"] === "detail-tab-activation")[0];
-    expect(triggerTab).toBeDefined();
-    // Children prop is the rendered label string.
-    expect(triggerTab.props.children).toBe("Trigger");
+    const tabs = findAll(tree, (el) => el.props?.role === "tab");
+    const ids = tabs.map((t) => t.props["data-testid"] as string);
+    expect(ids).not.toContain("detail-tab-tests");
+    expect(ids).not.toContain("detail-tab-activation");
+    expect(ids).not.toContain("detail-tab-versions");
+    expect(ids).not.toContain("detail-tab-trigger");
   });
 
   it("marks the default active tab as 'overview' and renders SkillOverview", () => {
@@ -152,18 +155,17 @@ describe("RightPanel — persona-conditional tab layout (T-007 + 0769 T-019)", (
   it("respects activeDetailTab prop for non-overview tabs", () => {
     const tree = RightPanel({
       selectedSkillInfo: makeSkill(),
-      activeDetailTab: "tests",
+      activeDetailTab: "edit",
       allSkills: [],
       onSelectSkill: () => {},
     });
     const activeTab = findAll(tree, (el) => el.props?.role === "tab" && el.props["aria-selected"] === true);
-    expect(activeTab[0].props["data-testid"]).toBe("detail-tab-tests");
-    // Overview body should NOT be mounted when active tab !== overview.
+    expect(activeTab[0].props["data-testid"]).toBe("detail-tab-edit");
     const overview = findAll(tree, (el) => el.props?.["data-testid"] === "skill-overview");
     expect(overview.length).toBe(0);
   });
 
-  it("renders the Run SubTabBar (3 sub-tabs) when activeDetailTab='run' (0774 T-011)", () => {
+  it("renders the Run SubTabBar (Benchmark/Activation/A/B) when activeDetailTab='run'", () => {
     const tree = RightPanel({
       selectedSkillInfo: makeSkill(),
       activeDetailTab: "run",
@@ -172,58 +174,165 @@ describe("RightPanel — persona-conditional tab layout (T-007 + 0769 T-019)", (
     });
     const subBar = findAll(tree, (el) => el.props?.["data-testid"] === "detail-subtab-bar-run");
     expect(subBar.length).toBe(1);
-    const subTabs = findAll(tree, (el) => el.props?.["data-testid"]?.toString().startsWith("detail-subtab-run-"));
+    const subTabs = findAll(tree, (el) =>
+      typeof el.props?.["data-testid"] === "string" &&
+      (el.props["data-testid"] as string).startsWith("detail-subtab-run-"),
+    );
     expect(subTabs.length).toBe(3);
     const ids = subTabs.map((t) => t.props["data-testid"]);
-    expect(ids).toEqual(["detail-subtab-run-run", "detail-subtab-run-history", "detail-subtab-run-models"]);
+    expect(ids).toEqual([
+      "detail-subtab-run-benchmark",
+      "detail-subtab-run-activation",
+      "detail-subtab-run-ab",
+    ]);
   });
 
-  it("renders the Trigger SubTabBar (2 sub-tabs) when activeDetailTab='activation' (0774 T-011)", () => {
+  it("renders the History SubTabBar (Timeline/Models/Versions) when activeDetailTab='history'", () => {
     const tree = RightPanel({
       selectedSkillInfo: makeSkill(),
-      activeDetailTab: "activation",
+      activeDetailTab: "history",
       allSkills: [],
       onSelectSkill: () => {},
     });
-    const subBar = findAll(tree, (el) => el.props?.["data-testid"] === "detail-subtab-bar-activation");
+    const subBar = findAll(tree, (el) => el.props?.["data-testid"] === "detail-subtab-bar-history");
     expect(subBar.length).toBe(1);
-    const subTabs = findAll(tree, (el) => el.props?.["data-testid"]?.toString().startsWith("detail-subtab-activation-"));
-    expect(subTabs.length).toBe(2);
+    const subTabs = findAll(tree, (el) =>
+      typeof el.props?.["data-testid"] === "string" &&
+      (el.props["data-testid"] as string).startsWith("detail-subtab-history-"),
+    );
+    expect(subTabs.length).toBe(3);
+    const ids = subTabs.map((t) => t.props["data-testid"]);
+    expect(ids).toEqual([
+      "detail-subtab-history-timeline",
+      "detail-subtab-history-models",
+      "detail-subtab-history-versions",
+    ]);
   });
 
-  it("does NOT render a SubTabBar when activeDetailTab='versions' (no sub-modes) (0774 T-011)", () => {
+  it("does NOT render a SubTabBar when activeDetailTab='edit' (no sub-modes)", () => {
     const tree = RightPanel({
       selectedSkillInfo: makeSkill(),
-      activeDetailTab: "versions",
+      activeDetailTab: "edit",
       allSkills: [],
       onSelectSkill: () => {},
     });
-    const subBar = findAll(tree, (el) => el.props?.["data-testid"]?.toString().startsWith("detail-subtab-bar-"));
+    const subBar = findAll(tree, (el) =>
+      typeof el.props?.["data-testid"] === "string" &&
+      (el.props["data-testid"] as string).startsWith("detail-subtab-bar-"),
+    );
     expect(subBar.length).toBe(0);
   });
 
-  it("renders the Trigger SubTabBar for installed-origin (consumer) skills too (0774 T-011)", () => {
+  it("does NOT render a SubTabBar when activeDetailTab='overview'", () => {
     const tree = RightPanel({
-      selectedSkillInfo: makeSkill({ origin: "installed" }),
-      activeDetailTab: "activation",
+      selectedSkillInfo: makeSkill(),
+      activeDetailTab: "overview",
       allSkills: [],
       onSelectSkill: () => {},
     });
-    const subBar = findAll(tree, (el) => el.props?.["data-testid"] === "detail-subtab-bar-activation");
-    expect(subBar.length).toBe(1);
+    const subBar = findAll(tree, (el) =>
+      typeof el.props?.["data-testid"] === "string" &&
+      (el.props["data-testid"] as string).startsWith("detail-subtab-bar-"),
+    );
+    expect(subBar.length).toBe(0);
   });
 
-  it("no longer embeds SkillWorkspaceInner inside the Overview tab", () => {
-    // Sanity: scan for any element whose type display name contains
-    // "SkillWorkspaceInner". The component is no longer imported.
-    const tree = RightPanel({ selectedSkillInfo: makeSkill() });
-    const candidates = findAll(tree, (el) => {
-      if (typeof el.type === "function") {
-        const name = (el.type as { name?: string }).name ?? "";
-        return name.includes("SkillWorkspaceInner");
-      }
-      return false;
+  // 0792 PLAN_CORRECTION: regression guard — production wires sub state
+  // through the prop-driven path. The earlier draft owned sub state inside
+  // IntegratedDetailShell, which is unreachable when App always supplies
+  // `selectedSkillInfo`; that made every Run mode chip / History view chip
+  // a silent no-op. These tests pin the new contract: the activeDetailSub
+  // prop drives which sub-tab is aria-selected, and clicking a sub-tab
+  // invokes onDetailSubChange with the descriptor id.
+  it("activeDetailSub controls which Run sub-tab is aria-selected", () => {
+    const tree = RightPanel({
+      selectedSkillInfo: makeSkill(),
+      activeDetailTab: "run",
+      activeDetailSub: "activation",
+      allSkills: [],
+      onSelectSkill: () => {},
     });
-    expect(candidates.length).toBe(0);
+    const subTabs = findAll(tree, (el) =>
+      typeof el.props?.["data-testid"] === "string" &&
+      (el.props["data-testid"] as string).startsWith("detail-subtab-run-"),
+    );
+    const selected = subTabs.find((t) => t.props["aria-selected"] === true);
+    expect(selected?.props["data-testid"]).toBe("detail-subtab-run-activation");
+  });
+
+  it("activeDetailSub controls which History sub-tab is aria-selected", () => {
+    const tree = RightPanel({
+      selectedSkillInfo: makeSkill(),
+      activeDetailTab: "history",
+      activeDetailSub: "models",
+      allSkills: [],
+      onSelectSkill: () => {},
+    });
+    const subTabs = findAll(tree, (el) =>
+      typeof el.props?.["data-testid"] === "string" &&
+      (el.props["data-testid"] as string).startsWith("detail-subtab-history-"),
+    );
+    const selected = subTabs.find((t) => t.props["aria-selected"] === true);
+    expect(selected?.props["data-testid"]).toBe("detail-subtab-history-models");
+  });
+
+  it("clicking a Run sub-tab invokes onDetailSubChange with the mode id", () => {
+    const onSubChange = vi.fn();
+    const tree = RightPanel({
+      selectedSkillInfo: makeSkill(),
+      activeDetailTab: "run",
+      activeDetailSub: "benchmark",
+      onDetailSubChange: onSubChange,
+      allSkills: [],
+      onSelectSkill: () => {},
+    });
+    const activationTab = findAll(tree, (el) =>
+      el.props?.["data-testid"] === "detail-subtab-run-activation",
+    )[0];
+    expect(activationTab).toBeDefined();
+    (activationTab.props.onClick as () => void)();
+    expect(onSubChange).toHaveBeenCalledWith("activation");
+  });
+
+  it("clicking a History sub-tab invokes onDetailSubChange with the view id", () => {
+    const onSubChange = vi.fn();
+    const tree = RightPanel({
+      selectedSkillInfo: makeSkill(),
+      activeDetailTab: "history",
+      activeDetailSub: "timeline",
+      onDetailSubChange: onSubChange,
+      allSkills: [],
+      onSelectSkill: () => {},
+    });
+    const versionsTab = findAll(tree, (el) =>
+      el.props?.["data-testid"] === "detail-subtab-history-versions",
+    )[0];
+    expect(versionsTab).toBeDefined();
+    (versionsTab.props.onClick as () => void)();
+    expect(onSubChange).toHaveBeenCalledWith("versions");
+  });
+
+  // Regression guard for the silent-no-op bug surfaced in PLAN_CORRECTION:
+  // when no onDetailSubChange handler is provided, clicking a sub-tab
+  // hits SubTabBar's dev-warn default (T-016) rather than crashing or
+  // mutating state. This test pairs with the click-tests above to bracket
+  // both wired and unwired paths.
+  it("clicking a sub-tab without onDetailSubChange does not throw", () => {
+    const tree = RightPanel({
+      selectedSkillInfo: makeSkill(),
+      activeDetailTab: "run",
+      activeDetailSub: "benchmark",
+      // intentionally omit onDetailSubChange
+      allSkills: [],
+      onSelectSkill: () => {},
+    });
+    const activationTab = findAll(tree, (el) =>
+      el.props?.["data-testid"] === "detail-subtab-run-activation",
+    )[0];
+    expect(activationTab).toBeDefined();
+    // Don't assert on console.warn here — that's covered in
+    // SubTabBar.test.tsx. Just confirm the click is a safe no-op rather
+    // than an exception, so a missing handler is observable, not fatal.
+    expect(() => (activationTab.props.onClick as () => void)()).not.toThrow();
   });
 });

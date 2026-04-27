@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 // ---------------------------------------------------------------------------
-// T-063: App-level Versions tab wiring
-// ---------------------------------------------------------------------------
-// The bug (qa-findings #1): App.tsx passed `selectedSkillInfo` to RightPanel
-// without supplying an `onDetailTabChange` handler, so clicking "Versions"
-// was a dead no-op. These tests lock down the contract: once App lifts the
-// tab state, clicking a tab button must change the active tab, and the
-// detail shell must render the matching tab panel.
+// T-063 / 0792 T-013/T-014: top-level tab wiring
+//
+// History note: the original 0707 IA had "Versions" as its own top-level
+// tab. 0792 collapses that into a "History" tab with a Versions view, so
+// these tests now verify the new contract:
+//
+//   - Default active tab is Overview.
+//   - Setting activeDetailTab="history" makes the History tab aria-selected.
+//   - Clicking the History tab button invokes onDetailTabChange with
+//     "history".
+//   - With allSkills supplied (integrated mode) the History tab mounts
+//     HistoryShell which dispatches to one of three views.
 // ---------------------------------------------------------------------------
 import { describe, it, expect, vi } from "vitest";
 
@@ -23,14 +28,15 @@ vi.mock("react", async (importOriginal) => {
   };
 });
 
-// Stubs identical to detail-right-panel.test.tsx so RightPanel can be
-// rendered in isolation without pulling workspace modules.
-vi.mock("../../pages/workspace/SkillWorkspace", () => ({
-  SkillWorkspaceInner: () => null,
+vi.mock("../../pages/workspace/EditorPanel", () => ({ EditorPanel: () => null }));
+vi.mock("../../pages/workspace/HistoryShell", () => ({
+  HistoryShell: () =>
+    ({ type: "div", props: { "data-testid": "history-shell", children: "History pane" } }) as unknown,
+  isValidHistoryView: (v: unknown) => v === "timeline" || v === "models" || v === "versions",
 }));
-vi.mock("../../pages/workspace/VersionHistoryPanel", () => ({
-  VersionHistoryPanel: () =>
-    ({ type: "div", props: { "data-testid": "version-history-panel", children: "Versions pane" } }) as unknown,
+vi.mock("../../pages/workspace/RunDispatcherPanel", () => ({
+  RunDispatcherPanel: () => null,
+  isValidRunMode: (v: unknown) => v === "benchmark" || v === "activation" || v === "ab",
 }));
 vi.mock("../../pages/workspace/WorkspaceContext", () => ({
   WorkspaceProvider: ({ children }: { children: unknown }) => children as never,
@@ -42,6 +48,7 @@ vi.mock("../../pages/UpdatesPanel", () => ({
 vi.mock("../CreateSkillInline", () => ({
   CreateSkillInline: () => null,
 }));
+vi.mock("../UpdateAction", () => ({ UpdateAction: () => null }));
 vi.mock("../../StudioContext", () => ({
   useStudio: () => ({
     state: {
@@ -125,11 +132,10 @@ function makeSkill(over: Partial<SkillInfo> = {}): SkillInfo {
   };
 }
 
-describe("T-063 RightPanel — Versions tab wiring", () => {
+describe("RightPanel — top-level tab wiring (0792 IA)", () => {
   it("Overview tab is the default when activeDetailTab is not supplied", () => {
     const skill = makeSkill();
     const tree = RightPanel({ selectedSkillInfo: skill });
-    // Look for the overview tab's button aria-selected state.
     const tabs = findElements(tree as unknown, (el) => {
       const attrs = el.props as Record<string, unknown>;
       return el.type === "button" && typeof attrs["aria-selected"] === "boolean" && attrs.id === "detail-tab-overview";
@@ -138,18 +144,18 @@ describe("T-063 RightPanel — Versions tab wiring", () => {
     expect(tabs[0].props["aria-selected"]).toBe(true);
   });
 
-  it("Versions tab becomes aria-selected when activeDetailTab='versions'", () => {
+  it("History tab becomes aria-selected when activeDetailTab='history'", () => {
     const skill = makeSkill();
-    const tree = RightPanel({ selectedSkillInfo: skill, activeDetailTab: "versions" });
-    const versionsTab = findElements(tree as unknown, (el) => {
+    const tree = RightPanel({ selectedSkillInfo: skill, activeDetailTab: "history" });
+    const historyTab = findElements(tree as unknown, (el) => {
       const attrs = el.props as Record<string, unknown>;
-      return el.type === "button" && attrs.id === "detail-tab-versions";
+      return el.type === "button" && attrs.id === "detail-tab-history";
     })[0];
-    expect(versionsTab).toBeTruthy();
-    expect(versionsTab.props["aria-selected"]).toBe(true);
+    expect(historyTab).toBeTruthy();
+    expect(historyTab.props["aria-selected"]).toBe(true);
   });
 
-  it("clicking the Versions tab button invokes onDetailTabChange with 'versions'", () => {
+  it("clicking the History tab button invokes onDetailTabChange with 'history'", () => {
     const skill = makeSkill();
     const spy = vi.fn();
     const tree = RightPanel({
@@ -157,31 +163,29 @@ describe("T-063 RightPanel — Versions tab wiring", () => {
       activeDetailTab: "overview",
       onDetailTabChange: spy,
     });
-    const versionsTab = findElements(tree as unknown, (el) => {
+    const historyTab = findElements(tree as unknown, (el) => {
       const attrs = el.props as Record<string, unknown>;
-      return el.type === "button" && attrs.id === "detail-tab-versions";
+      return el.type === "button" && attrs.id === "detail-tab-history";
     })[0];
-    expect(versionsTab).toBeTruthy();
-    (versionsTab.props.onClick as () => void)();
-    expect(spy).toHaveBeenCalledWith("versions");
+    expect(historyTab).toBeTruthy();
+    (historyTab.props.onClick as () => void)();
+    expect(spy).toHaveBeenCalledWith("history");
   });
 
-  it("Versions tab panel renders the VersionHistoryPanel (not the 'Select a skill' fallback) when allSkills is supplied", () => {
+  it("History tab panel renders the HistoryShell when allSkills is supplied", () => {
     const skill = makeSkill();
     const tree = expand(RightPanel({
       selectedSkillInfo: skill,
-      activeDetailTab: "versions",
+      activeDetailTab: "history",
       onDetailTabChange: () => {},
       allSkills: [skill],
       onSelectSkill: () => {},
     }));
-    // VersionHistoryPanel stub carries data-testid="version-history-panel".
-    const histPanel = findElements(tree, (el) => {
+    const histShell = findElements(tree, (el) => {
       const attrs = el.props as Record<string, unknown>;
-      return attrs["data-testid"] === "version-history-panel";
+      return attrs["data-testid"] === "history-shell";
     });
-    expect(histPanel.length).toBeGreaterThan(0);
-    // And the 'Select a skill from the sidebar…' fallback must NOT be in the tree.
+    expect(histShell.length).toBeGreaterThan(0);
     const fallbackTexts = findElements(tree, (el) => {
       const attrs = el.props as Record<string, unknown>;
       return typeof attrs.children === "string" && /select a skill/i.test(String(attrs.children));

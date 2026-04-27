@@ -255,36 +255,32 @@ describe("QA: DetailHeader copy button [AC-US3-01]", () => {
 // ---------------------------------------------------------------------------
 describe("QA: RightPanel tab wiring [AC-US3-01, AC-US3-08]", () => {
   it("renders tabs with role='tab' + aria-controls pointing at the panel id", () => {
-    // 0707 T-007: layout expanded from 2 tabs to a flat 9-tab bar.
-    // 0769 T-019: persona-conditional 6 author / 3 consumer set.
+    // 0792 T-013: 4-tab IA (Overview/Edit/Run/History).
     const tree = RightPanel({ selectedSkillInfo: makeSkill(), activeDetailTab: "overview" });
     const tabs = findAll(tree, (el) => (el.props as Record<string, unknown>).role === "tab");
-    expect(tabs.length).toBe(6);
+    expect(tabs.length).toBe(4);
     for (const t of tabs) {
       const controls = String(t.props["aria-controls"]);
       expect(controls).toMatch(
-        /^detail-panel-(overview|editor|tests|run|activation|versions)$/,
+        /^detail-panel-(overview|edit|run|history)$/,
       );
     }
   });
 
   it("emits the active tab with aria-selected=true and the inactive with false", () => {
-    const tree = RightPanel({ selectedSkillInfo: makeSkill(), activeDetailTab: "versions" });
+    const tree = RightPanel({ selectedSkillInfo: makeSkill(), activeDetailTab: "history" });
     const tabs = findAll(tree, (el) => (el.props as Record<string, unknown>).role === "tab");
     const active = tabs.find((t) => t.props["aria-selected"] === true);
     const inactive = tabs.find((t) => t.props["aria-selected"] === false);
     expect(active).toBeTruthy();
     expect(inactive).toBeTruthy();
-    expect(String(active!.props.id)).toBe("detail-tab-versions");
+    expect(String(active!.props.id)).toBe("detail-tab-history");
     expect(String(inactive!.props.id)).toBe("detail-tab-overview");
   });
 
-  it("tab click handler is wired through when onDetailTabChange is provided (contract App.tsx must honour)", () => {
-    // REGRESSION: App.tsx currently passes `selectedSkillInfo` WITHOUT an
-    // `onDetailTabChange` handler, so the click is a no-op in the running
-    // product. We assert the component-level contract — if the caller
-    // supplies a handler it is invoked — so ui-link-agent's App.tsx fix
-    // lands cleanly.
+  it("tab click handler is wired through when onDetailTabChange is provided", () => {
+    // App.tsx is the caller that owns the handler — this verifies the
+    // component-level contract (handler invoked with the new tab id).
     let called: string | null = null;
     const tree = RightPanel({
       selectedSkillInfo: makeSkill(),
@@ -293,12 +289,12 @@ describe("QA: RightPanel tab wiring [AC-US3-01, AC-US3-08]", () => {
         called = t;
       },
     });
-    const versionsTab = findAll(tree, (el) => (el.props as Record<string, unknown>).id === "detail-tab-versions")[0];
-    expect(versionsTab).toBeTruthy();
-    const onClick = versionsTab.props.onClick as (() => void) | undefined;
-    expect(onClick, "versions tab should carry an onClick handler").toBeTypeOf("function");
+    const historyTab = findAll(tree, (el) => (el.props as Record<string, unknown>).id === "detail-tab-history")[0];
+    expect(historyTab).toBeTruthy();
+    const onClick = historyTab.props.onClick as (() => void) | undefined;
+    expect(onClick, "history tab should carry an onClick handler").toBeTypeOf("function");
     onClick!();
-    expect(called).toBe("versions");
+    expect(called).toBe("history");
   });
 });
 

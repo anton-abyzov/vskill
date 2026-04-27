@@ -105,7 +105,17 @@ function computeAssertionBadges(
   return badges;
 }
 
-export function TestsPanel() {
+// 0792 T-012: when `embedded` is true, hide all execution surfaces (Run All
+// / Compare All toolbar, per-case Run/A-B Compare buttons, per-case
+// Execution History expander). Authoring affordances stay intact: case
+// list, prompt/expected/assertion editors, Add Test Case, type filter.
+// Execution belongs to the Run tab in the new IA — see
+// RunDispatcherPanel.tsx and AC-US1-03.
+export interface TestsPanelProps {
+  embedded?: boolean;
+}
+
+export function TestsPanel({ embedded = false }: TestsPanelProps = {}) {
   const { state, dispatch, saveEvals, runCase, runAll, cancelCase, cancelAll, generateEvals, isReadOnly } = useWorkspace();
   const { evals, evalsError, selectedCaseId, inlineResults, caseRunStates, generateEvalsLoading, generateEvalsProgress, generateEvalsError } = state;
 
@@ -294,7 +304,10 @@ export function TestsPanel() {
               flexShrink: 0,
             }}
           >
-            {isAnyRunning ? (
+            {/* 0792 T-012: execution toolbar (Run All / Compare All / Cancel
+                All) is hidden in embedded mode — execution lives in the Run
+                tab. Authoring affordances (Create / type filter) remain. */}
+            {!embedded && (isAnyRunning ? (
               <button
                 onClick={cancelAll}
                 className="btn text-[10px] px-2 py-0.5"
@@ -311,7 +324,7 @@ export function TestsPanel() {
                   Compare All
                 </button>
               </>
-            )}
+            ))}
           </div>
         </div>
         {/* Test type filter tabs */}
@@ -440,6 +453,7 @@ export function TestsPanel() {
             onCompare={(evalId) => runCase(evalId, "comparison")}
             onCancel={(evalId) => cancelCase(evalId)}
             onImprove={(evalId) => dispatch({ type: "OPEN_IMPROVE", evalId })}
+            embedded={embedded}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-[13px]" style={{ color: "var(--text-tertiary)" }}>
@@ -465,7 +479,7 @@ export function TestsPanel() {
 // ---------------------------------------------------------------------------
 
 function CaseDetail({
-  evalCase, result, evals, caseStatus, onSaveEvals, onRun, onCompare, onCancel, onImprove,
+  evalCase, result, evals, caseStatus, onSaveEvals, onRun, onCompare, onCancel, onImprove, embedded = false,
 }: {
   evalCase: EvalCase;
   result: InlineResult | undefined;
@@ -476,6 +490,9 @@ function CaseDetail({
   onCompare: (evalId: number) => void;
   onCancel: (evalId: number) => void;
   onImprove: (evalId: number) => void;
+  // 0792 T-012: in embedded mode (Edit-tab eval cases section) per-case
+  // execution buttons + execution history are hidden — Run tab owns those.
+  embedded?: boolean;
 }) {
   const { state, isReadOnly } = useWorkspace();
   const { plugin, skill } = state;
@@ -617,7 +634,10 @@ function CaseDetail({
             flexShrink: 0,
           }}
         >
-          {caseStatus === "running" || caseStatus === "queued" ? (
+          {/* 0792 T-012: per-case Run / A/B Compare / Cancel buttons are
+              hidden in embedded mode (Edit tab) — execution lives in the
+              Run tab. Authoring (prompt/expected/assertions edit) stays. */}
+          {!embedded && (caseStatus === "running" || caseStatus === "queued" ? (
             <button onClick={() => onCancel(evalCase.id)} className="btn text-[12px]" style={{ background: "var(--red-muted)", color: "var(--red)", border: "1px solid var(--red-muted)", whiteSpace: "nowrap" }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4 }}><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
               Cancel
@@ -631,7 +651,7 @@ function CaseDetail({
                 A/B Compare
               </button>
             </>
-          )}
+          ))}
           {hasFails && !isReadOnly && caseStatus !== "running" && caseStatus !== "queued" && (
             <button onClick={() => onImprove(evalCase.id)} className="btn btn-secondary text-[12px]" style={{ whiteSpace: "nowrap" }}>
               Fix with AI
@@ -846,8 +866,11 @@ function CaseDetail({
         ) : null;
       })()}
 
-      {/* Execution History (collapsible) */}
-      <CaseHistorySection evalId={evalCase.id} sharedEntries={historyEntries} sharedLoading={historyLoading} />
+      {/* Execution History (collapsible) — 0792 T-012: hidden in embedded
+          mode; the unified History tab is the canonical evidence surface. */}
+      {!embedded && (
+        <CaseHistorySection evalId={evalCase.id} sharedEntries={historyEntries} sharedLoading={historyLoading} />
+      )}
     </div>
   );
 }

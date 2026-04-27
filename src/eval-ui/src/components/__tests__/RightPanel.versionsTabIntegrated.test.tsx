@@ -1,15 +1,20 @@
 // @vitest-environment jsdom
 // 0779 hotfix — regression test for RightPanel.renderDetailShell forwarding
 // the `integrated` arg correctly to renderSkillDetail. Before the fix,
-// `integrated` was passed in the `sub` slot (positional-args bug at line 326),
-// which made every non-overview tab render the "Select a skill from the
-// sidebar to load its <X> view." fallback in production (App.tsx:560 always
-// supplies selectedSkillInfo, hitting the renderDetailShell path).
+// `integrated` was passed in the `sub` slot, which made every non-overview
+// tab render the "Select a skill from the sidebar to load its <X> view."
+// fallback in production.
+//
+// 0792 T-013/T-014: under the new 4-tab IA the version history is a *view*
+// inside the History tab, not its own top-level tab. We assert the same
+// "no fallback when integrated mode is wired" contract against the new
+// History tab and verify the Versions view mounts via the URL contract
+// (`?tab=history&view=versions` would be the deep-link form).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-// Stub everything heavyweight so the workspace body can mount.
+// Stub heavyweight modules so the workspace body can mount cheaply.
 vi.mock("../../pages/workspace/WorkspaceContext", () => ({
   WorkspaceProvider: ({ children }: { children: React.ReactNode }) => {
     const React = require("react");
@@ -19,21 +24,22 @@ vi.mock("../../pages/workspace/WorkspaceContext", () => ({
       children,
     );
   },
-  useWorkspace: () => ({ state: { activePanel: "versions" }, dispatch: () => {} }),
+  useWorkspace: () => ({ state: { activePanel: "history" }, dispatch: () => {} }),
 }));
-vi.mock("../../pages/workspace/VersionHistoryPanel", () => ({
-  VersionHistoryPanel: () => {
+// HistoryShell stub renders a marker so we know the History tab mounted
+// instead of the "Select a skill" fallback.
+vi.mock("../../pages/workspace/HistoryShell", () => ({
+  HistoryShell: () => {
     const React = require("react");
-    return React.createElement("div", { "data-testid": "stub-version-history-panel" }, "stub-versions-body");
+    return React.createElement("div", { "data-testid": "stub-history-shell" }, "stub-history-body");
   },
+  isValidHistoryView: (v: unknown) => v === "timeline" || v === "models" || v === "versions",
+}));
+vi.mock("../../pages/workspace/RunDispatcherPanel", () => ({
+  RunDispatcherPanel: () => null,
+  isValidRunMode: (v: unknown) => v === "benchmark" || v === "activation" || v === "ab",
 }));
 vi.mock("../../pages/workspace/EditorPanel", () => ({ EditorPanel: () => null }));
-vi.mock("../../pages/workspace/TestsPanel", () => ({ TestsPanel: () => null }));
-vi.mock("../../pages/workspace/RunPanel", () => ({ RunPanel: () => null }));
-vi.mock("../../pages/workspace/ActivationPanel", () => ({ ActivationPanel: () => null }));
-vi.mock("../../pages/workspace/HistoryPanel", () => ({ HistoryPanel: () => null }));
-vi.mock("../../pages/workspace/LeaderboardPanel", () => ({ LeaderboardPanel: () => null }));
-vi.mock("../../pages/workspace/DepsPanel", () => ({ DepsPanel: () => null }));
 vi.mock("../UpdateAction", () => ({ UpdateAction: () => null }));
 vi.mock("../CheckNowButton", () => ({ CheckNowButton: () => null }));
 vi.mock("../UpdatesPanel", () => ({ UpdatesPanel: () => null }), { virtual: true });
@@ -93,13 +99,13 @@ async function mountRightPanel(activeDetailTab: string) {
   };
 }
 
-describe("RightPanel — integrated arg propagation (0779 hotfix)", () => {
+describe("RightPanel — integrated arg propagation (0779 / 0792)", () => {
   beforeEach(() => { document.body.innerHTML = ""; });
   afterEach(() => vi.clearAllMocks());
 
-  it("Versions tab renders VersionHistoryPanel (NOT the 'Select a skill' fallback) when allSkills + onSelectSkill are provided", async () => {
-    const m = await mountRightPanel("versions");
-    expect(m.container.querySelector("[data-testid='stub-version-history-panel']")).toBeTruthy();
+  it("History tab renders HistoryShell (NOT the 'Select a skill' fallback) when allSkills + onSelectSkill are provided", async () => {
+    const m = await mountRightPanel("history");
+    expect(m.container.querySelector("[data-testid='stub-history-shell']")).toBeTruthy();
     expect(m.container.textContent ?? "").not.toContain("Select a skill from the sidebar to load its");
     m.unmount();
   });

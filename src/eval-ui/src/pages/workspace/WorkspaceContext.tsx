@@ -264,7 +264,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
 
     const body: Record<string, unknown> =
       mode === "comparison" ? { eval_ids: [caseId] } :
-      mode === "baseline" ? { baseline_only: true } : {};
+      mode === "baseline" ? { mode: "baseline" } : {};
     if (config?.provider) body.provider = config.provider;
     if (config?.model) body.model = config.model;
 
@@ -297,7 +297,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     for (const id of caseIds) {
       const body: Record<string, unknown> =
         mode === "comparison" ? { eval_ids: [id] } :
-        mode === "baseline" ? { baseline_only: true } : {};
+        mode === "baseline" ? { mode: "baseline" } : {};
       if (config?.provider) body.provider = config.provider;
       if (config?.model) body.model = config.model;
 

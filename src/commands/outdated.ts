@@ -11,6 +11,8 @@
 //   the entry is NOT outdated (don't tell the user to "update" backwards).
 // ---------------------------------------------------------------------------
 
+import { existsSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { checkUpdates } from "../api/client.js";
 import type { CheckUpdateItem, CheckUpdateResult } from "../api/client.js";
 import { readLockfile, writeLockfile } from "../lockfile/lockfile.js";
@@ -21,7 +23,9 @@ import {
   reconcileLockfileVersion,
   resolveInstallPath,
   compareSemver,
+  readDiskVersion,
 } from "../eval/disk-version.js";
+import { readAuthored, removeAuthoredSkill } from "../lockfile/authored.js";
 import { bold, dim, green, red, yellow, cyan, table } from "../utils/output.js";
 
 const TWENTY_FOUR_HOURS = 86_400_000;
@@ -51,34 +55,67 @@ function resolveFullName(name: string, source: string): string {
  * Returns null when there is no lockfile or no installed skills.
  */
 export async function getOutdatedJson(): Promise<
-  { results: CheckUpdateResult[]; pinMap: Map<string, string> } | null
+  { results: CheckUpdateResult[]; pinMap: Map<string, string>; authoredNames: Set<string> } | null
 > {
   const lock = readLockfile();
   const lockDir = getProjectRoot();
-  if (!lock || Object.keys(lock.skills).length === 0) return null;
+  const authored = readAuthored(lockDir);
+  const lockSkillCount = lock ? Object.keys(lock.skills).length : 0;
+  if (lockSkillCount === 0 && authored.length === 0) return null;
 
   const diskVersions = new Map<string, string>();
   const reconcileWarnings = new Map<string, string>();
+  const authoredNames = new Set<string>();
 
-  const items: CheckUpdateItem[] = Object.entries(lock.skills).map(
-    ([name, entry]) => {
-      const resolvedName = resolveFullName(name, entry.source);
-      const skillMdPath = resolveInstallPath({ name, entry, lockDir });
-      const reconciled = reconcileLockfileVersion({
-        lockfileVersion: entry.version,
-        skillMdPath,
-      });
-      diskVersions.set(resolvedName, reconciled.version);
-      if (reconciled.warning) {
-        reconcileWarnings.set(resolvedName, reconciled.warning);
-      }
-      return {
-        name: resolvedName,
-        currentVersion: reconciled.version,
-        sha: entry.sha,
-      };
-    },
-  );
+  const items: CheckUpdateItem[] = lock
+    ? Object.entries(lock.skills).map(([name, entry]) => {
+        const resolvedName = resolveFullName(name, entry.source);
+        const skillMdPath = resolveInstallPath({ name, entry, lockDir });
+        const reconciled = reconcileLockfileVersion({
+          lockfileVersion: entry.version,
+          skillMdPath,
+        });
+        diskVersions.set(resolvedName, reconciled.version);
+        if (reconciled.warning) {
+          reconcileWarnings.set(resolvedName, reconciled.warning);
+        }
+        return {
+          name: resolvedName,
+          currentVersion: reconciled.version,
+          sha: entry.sha,
+        };
+      })
+    : [];
+
+  // 0794 / T-007 — append authored (source-origin) skills to the poll set.
+  // Skills the user has published themselves don't appear in vskill.lock
+  // (only installs do), so they were silently skipped before. Read disk
+  // version from the source SKILL.md and include them in the upstream
+  // check. Skip silently if the file disappeared (and clean up tracking)
+  // or if the local version cannot be read.
+  for (const a of authored) {
+    if (lock?.skills[a.name]) {
+      // Already tracked via lockfile — avoid duplicate poll entries.
+      continue;
+    }
+    const absSourcePath = isAbsolute(a.sourcePath)
+      ? a.sourcePath
+      : join(lockDir, a.sourcePath);
+    if (!existsSync(absSourcePath)) {
+      removeAuthoredSkill(lockDir, a.name);
+      console.error(
+        dim(`${a.name}: source path no longer exists, removed from authored tracking`),
+      );
+      continue;
+    }
+    const v = readDiskVersion(absSourcePath);
+    if (!v) continue; // never published or unreadable — skip silently (AC-US6-05)
+    diskVersions.set(a.name, v);
+    items.push({ name: a.name, currentVersion: v });
+    authoredNames.add(a.name);
+  }
+
+  if (items.length === 0) return null;
 
   const rawResults = await checkUpdates(items);
 
@@ -98,15 +135,17 @@ export async function getOutdatedJson(): Promise<
   });
 
   const pinMap = new Map<string, string>();
-  for (const [name, entry] of Object.entries(lock.skills)) {
-    if (entry.pinnedVersion) {
-      pinMap.set(name, entry.pinnedVersion);
-      const resolved = resolveFullName(name, entry.source);
-      if (resolved !== name) pinMap.set(resolved, entry.pinnedVersion);
+  if (lock) {
+    for (const [name, entry] of Object.entries(lock.skills)) {
+      if (entry.pinnedVersion) {
+        pinMap.set(name, entry.pinnedVersion);
+        const resolved = resolveFullName(name, entry.source);
+        if (resolved !== name) pinMap.set(resolved, entry.pinnedVersion);
+      }
     }
   }
 
-  return { results, pinMap };
+  return { results, pinMap, authoredNames };
 }
 
 export async function outdatedCommand(opts: { json?: boolean }): Promise<void> {

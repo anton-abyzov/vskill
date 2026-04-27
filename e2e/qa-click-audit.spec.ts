@@ -75,33 +75,37 @@ test.describe("breadcrumb nav [AC-US3-01]", () => {
 
 // ---------------------------------------------------------------------------
 // 2. Tab switching (AC-US3-01 / AC-US8-06)
+//
+// 0792 migration: Versions is no longer a top-level tab — it lives as the
+// `?view=versions` chip under the unified `History` tab. We assert the new
+// shape: clicking History selects the History top-level tab, then clicking
+// the Versions sub-tab chip flips aria-selected and updates the tabpanel id.
 // ---------------------------------------------------------------------------
 test.describe("detail tabs [AC-US3-01, AC-US8-06]", () => {
-  test("Overview / Versions tab buttons switch content and ARIA state", async ({ page }) => {
+  test("Overview / History+Versions tab navigation switches content and ARIA state", async ({ page }) => {
     await page.goto("/");
     await selectFixtureSkill(page);
 
-    const overviewTab = page.getByRole("tab", { name: /overview/i });
-    const versionsTab = page.getByRole("tab", { name: /versions/i });
+    const overviewTab = page.getByTestId("detail-tab-overview");
+    const historyTab = page.getByTestId("detail-tab-history");
 
     await expect(overviewTab).toHaveAttribute("aria-selected", "true");
-    await expect(versionsTab).toHaveAttribute("aria-selected", "false");
+    await expect(historyTab).toHaveAttribute("aria-selected", "false");
 
-    // REGRESSION: in integrated App.tsx the RightPanel is invoked with
-    // `selectedSkillInfo` set, which routes through `renderDetailShell` and
-    // does NOT provide an `onDetailTabChange` callback. Clicking Versions
-    // is therefore a no-op (the spec body renders the "Select a skill…"
-    // fallback even though a skill is selected).
-    //
-    // If this test fails with aria-selected still "false" on versions —
-    // the wiring fix (pass `onDetailTabChange` from App.tsx or switch to
-    // IntegratedDetailShell) has not landed yet.
-    await versionsTab.click();
-    await expect(versionsTab).toHaveAttribute("aria-selected", "true");
+    // Switch to History tab (new home for Versions).
+    await historyTab.click();
+    await expect(historyTab).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("detail-panel-history")).toHaveAttribute(
+      "id",
+      "detail-panel-history",
+    );
 
-    // The active tabpanel id should match the selected tab id.
-    const panel = page.locator('[role="tabpanel"]').first();
-    await expect(panel).toHaveAttribute("id", "detail-panel-versions");
+    // Drill into the Versions view chip — `?view=versions` per AC-US1-04.
+    const versionsChip = page.getByTestId("detail-subtab-history-versions");
+    await expect(versionsChip).toBeVisible();
+    await versionsChip.click();
+    await expect(versionsChip).toHaveAttribute("aria-selected", "true");
+    await expect(page).toHaveURL(/\?tab=history&view=versions/);
   });
 });
 
@@ -369,19 +373,26 @@ test.describe("skill deps chips [AC-US3-04]", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 13. Versions tab content (AC-US3-08)
+// 13. Versions content (AC-US3-08)
+//
+// 0792 migration: Versions moved from a top-level tab to the
+// `?view=versions` chip under History. Same regression canary applies — the
+// VersionHistoryPanel must render its own content rather than the global
+// "select a skill" fallback when a skill is already selected.
 // ---------------------------------------------------------------------------
-test.describe("versions tab [AC-US3-08]", () => {
-  test("versions tab shows version history (integrated) — regression noted if fallback is displayed", async ({ page }) => {
+test.describe("versions view [AC-US3-08]", () => {
+  test("history → versions view shows version history (integrated) — regression noted if fallback is displayed", async ({ page }) => {
     await page.goto("/");
     await selectFixtureSkill(page);
 
-    await page.getByRole("tab", { name: /versions/i }).click();
+    await page.getByTestId("detail-tab-history").click();
+    await page.getByTestId("detail-subtab-history-versions").click();
+    await expect(page).toHaveURL(/\?tab=history&view=versions/);
 
     // Either the version list renders (green path) OR the "select a skill"
     // fallback is shown (regression). We assert the green path.
     const fallback = page.getByText(/select a skill from the sidebar to load its version/i);
-    await expect(fallback, "Versions tab should not show the 'select a skill' fallback when a skill is already selected — see qa-findings.md").toHaveCount(0);
+    await expect(fallback, "Versions view should not show the 'select a skill' fallback when a skill is already selected — see qa-findings.md").toHaveCount(0);
   });
 });
 

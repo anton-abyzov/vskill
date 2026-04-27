@@ -92,8 +92,18 @@ async function fetchGitHubFlat(
   const branch = await getDefaultBranch(owner, repo);
   const base = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}`;
 
-  // Try skill-specific path first
-  let content = await fetchRaw(`${base}/skills/${skillName}/SKILL.md`);
+  // Honor the lockfile-recorded path first when present. Installs that record
+  // a non-conventional path (e.g. `plugins/skills/skills/<name>/SKILL.md`)
+  // would otherwise 404 on both fallback paths and the update would silently
+  // claim "could not fetch update from any source".
+  let content: string | null = null;
+  if (entry.sourceSkillPath) {
+    content = await fetchRaw(`${base}/${entry.sourceSkillPath}`);
+  }
+  // Try skill-specific path next
+  if (!content) {
+    content = await fetchRaw(`${base}/skills/${skillName}/SKILL.md`);
+  }
   // Fallback to root SKILL.md
   if (!content) {
     content = await fetchRaw(`${base}/SKILL.md`);

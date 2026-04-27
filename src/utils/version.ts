@@ -15,13 +15,24 @@ export function extractFrontmatterVersion(
   if (!fmMatch) return undefined;
 
   const frontmatter = fmMatch[1];
-  const versionMatch = frontmatter.match(
-    /^version:\s*"?(\S+?)"?\s*$/m,
-  );
-  if (!versionMatch) return undefined;
 
-  const version = versionMatch[1];
-  return SEMVER_RE.test(version) ? version : undefined;
+  // 1. Top-level `version:` wins when present (existing behavior).
+  const topLevel = frontmatter.match(/^version:\s*"?(\S+?)"?\s*$/m);
+  if (topLevel && SEMVER_RE.test(topLevel[1])) return topLevel[1];
+
+  // 2. Fall back to nested `metadata.version`. The skill-builder family of
+  //    skills uses this format (publish flow stores semver under metadata),
+  //    and without this branch resolveVersion() in the update path would
+  //    miss the upstream version and synthetically bumpPatch(currentVersion)
+  //    instead — installing 1.0.1 when upstream actually shipped 1.0.3.
+  const metaIdx = frontmatter.search(/^metadata\s*:\s*$/m);
+  if (metaIdx >= 0) {
+    const after = frontmatter.slice(metaIdx);
+    const nested = after.match(/^[ \t]+version\s*:\s*"?(\S+?)"?\s*$/m);
+    if (nested && SEMVER_RE.test(nested[1])) return nested[1];
+  }
+
+  return undefined;
 }
 
 /**

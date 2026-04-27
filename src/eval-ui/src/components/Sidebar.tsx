@@ -11,6 +11,7 @@ import { SidebarSearch, matchSkillQuery } from "./SidebarSearch";
 import { PluginGroup, type SelectedKey } from "./PluginGroup";
 import { PluginTreeGroup } from "./PluginTreeGroup";
 import { PluginActionMenu } from "./PluginActionMenu";
+import { ConvertToPluginDialog } from "./ConvertToPluginDialog";
 import { GroupHeader } from "./GroupHeader";
 import { SkillRow } from "./SkillRow";
 import { SkeletonRow } from "./SkeletonRow";
@@ -75,6 +76,13 @@ interface Props {
    * hook. SkillRow renders an amber dot for any ID in this set.
    */
   dirtySkillIds?: Set<string>;
+  /**
+   * 0793 T-005: called after the user successfully converts a candidate
+   * folder of standalone authored skills into a plugin. Sidebar wraps it
+   * around the dialog's onConverted handler so callers can refetch the skill
+   * list and let dedupeByDir flip the affected skills' scopeV2.
+   */
+  onSkillsChanged?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +109,27 @@ interface FiveScopeBuckets {
   availablePlugin: SectionData;
   authoringProject: SectionData;
   authoringPlugin: SectionData;
+  /**
+   * 0793 T-005: candidate plugin groups derived from `authoringProject` —
+   * parent dirs that contain 2+ standalone authored skills with no manifest
+   * yet. Rendered as collapsible PluginTreeGroups with a "Convert →" CTA so
+   * the sidebar stops contradicting the URL (which already nests these
+   * skills under `<dir>/<skill>`).
+   */
+  authoringCandidatePlugins: AuthoringCandidatePlugin[];
+}
+
+/**
+ * 0793 T-005: a folder of standalone authored skills that could be promoted
+ * to a real plugin via `POST /api/authoring/convert-to-plugin`.
+ */
+interface AuthoringCandidatePlugin {
+  /** Group label — the shared `plugin` field. */
+  groupKey: string;
+  /** Skills inside this candidate group (already filtered by query). */
+  skills: SkillInfo[];
+  /** Absolute path of any skill in the group (used as the convert anchor). */
+  anchorSkillDir: string;
 }
 
 function partitionByGroupSource(
@@ -146,12 +175,35 @@ function partitionByGroupSource(
     return { total: source.length, filtered: filtered.length, byPlugin };
   }
 
+  const authoringProject = buildSection(bins.authoringProject);
+
+  // 0793 T-005: extract candidate plugins from authoringProject. A "candidate"
+  // is a byPlugin bucket with 2+ skills sharing the same `plugin` field — the
+  // URL routing already nests skills under that field as the owner segment, so
+  // the sidebar should match that grouping. Single-skill buckets stay flat.
+  //
+  // F-003 (0793 review iteration 2): defensively reject empty/whitespace
+  // groupKey. The live source-side scanner sets `plugin = basename(parentDir)`
+  // (always non-empty), but a future scanner — or a test fixture — could emit
+  // `plugin: ""`, which would render an unlabeled PluginTreeGroup and seed
+  // ConvertToPluginDialog with `initialName: ""` (KEBAB regex needs ≥2 chars,
+  // so submit is permanently disabled). Better to skip the group than render
+  // an unfixable one.
+  const authoringCandidatePlugins: AuthoringCandidatePlugin[] = authoringProject.byPlugin
+    .filter(([groupKey, list]) => list.length >= 2 && groupKey.trim().length >= 2)
+    .map(([groupKey, list]) => ({
+      groupKey,
+      skills: list,
+      anchorSkillDir: list[0]!.dir,
+    }));
+
   return {
     availableProject: buildSection(bins.availableProject),
     availablePersonal: buildSection(bins.availablePersonal),
     availablePlugin: buildSection(bins.availablePlugin),
-    authoringProject: buildSection(bins.authoringProject),
+    authoringProject,
     authoringPlugin: buildSection(bins.authoringPlugin),
+    authoringCandidatePlugins,
   };
 }
 
@@ -236,7 +288,16 @@ export function Sidebar({
   revealSkillId,
   onRevealComplete,
   dirtySkillIds,
+  onSkillsChanged,
 }: Props) {
+  // 0793 T-005: state for the Convert-to-plugin dialog. The dialog mounts
+  // when convertTarget is non-null. Dismissing or successful conversion
+  // clears it back to null.
+  const [convertTarget, setConvertTarget] = useState<{
+    candidateLabel: string;
+    initialName: string;
+    anchorSkillDir: string;
+  } | null>(null);
   // 0686 T-007 (US-003): Tri-scope mode is enabled when the caller passes
   // an active agent OR when any incoming skill carries a `scope` field
   // (meaning the server enrichment is live). Default path stays 2-section
@@ -625,14 +686,77 @@ export function Sidebar({
             {five.authoringProject.filtered === 0 ? (
               <OwnEmptyState queryActive={!!query} />
             ) : (
-              <SectionList
-                items={five.authoringProject.byPlugin}
-                selectedKey={selectedKey}
-                onSelect={onSelect}
-                onContextMenu={onContextMenu}
-                useVirtual={useVirtual}
-                dirtySkillIds={dirtySkillIds}
-              />
+              <>
+                {/* 0793 T-005: candidate plugin groups — folders with 2+
+                    standalone skills get a collapsible header with a
+                    "Convert →" CTA so the sidebar matches the URL routing
+                    that already nests them under <dir>/<skill>. */}
+                {five.authoringCandidatePlugins.map((cand) => (
+                  <PluginTreeGroup
+                    key={`candidate-${cand.groupKey}`}
+                    pluginName={cand.groupKey}
+                    skills={cand.skills}
+                    persistKey={`vskill-candidate-plugin-${cand.groupKey}-collapsed`}
+                    headerActionSlot={
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConvertTarget({
+                            candidateLabel: cand.groupKey,
+                            initialName: cand.groupKey,
+                            anchorSkillDir: cand.anchorSkillDir,
+                          });
+                        }}
+                        title="Write .claude-plugin/plugin.json into this folder so Claude Code recognizes it as a plugin"
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 500,
+                          padding: "2px 8px",
+                          borderRadius: 10,
+                          border: "1px solid var(--border-subtle, rgba(128,128,128,0.3))",
+                          background: "transparent",
+                          color: "var(--text-secondary)",
+                          cursor: "pointer",
+                          fontFamily: "var(--font-sans)",
+                        }}
+                      >
+                        Not a plugin yet · Convert →
+                      </button>
+                    }
+                    renderSkill={(skill) => (
+                      <SkillRow
+                        skill={skill}
+                        isSelected={
+                          selectedKey?.plugin === skill.plugin &&
+                          selectedKey?.skill === skill.skill
+                        }
+                        onSelect={() => onSelect(skill)}
+                        onContextMenu={onContextMenu}
+                        dirty={dirtySkillIds?.has(`${skill.plugin}/${skill.skill}`)}
+                      />
+                    )}
+                  />
+                ))}
+                {/* Single-skill or non-grouped buckets keep flat rendering. */}
+                <SectionList
+                  items={five.authoringProject.byPlugin.filter(
+                    ([key]) =>
+                      // F-004 (0793 review): hide buckets already rendered as
+                      // candidate plugins above. authoringCandidatePlugins is
+                      // built from this same map filtered by `length >= 2`, so
+                      // a key match is sufficient — no need to recheck length.
+                      !five.authoringCandidatePlugins.some(
+                        (c) => c.groupKey === key,
+                      ),
+                  )}
+                  selectedKey={selectedKey}
+                  onSelect={onSelect}
+                  onContextMenu={onContextMenu}
+                  useVirtual={useVirtual}
+                  dirtySkillIds={dirtySkillIds}
+                />
+              </>
             )}
           </NamedScopeSection>
 
@@ -648,6 +772,14 @@ export function Sidebar({
                 <AuthoringPluginEmptyState
                   queryActive={!!query}
                   hasSources={five.authoringPlugin.total > 0}
+                  candidates={five.authoringCandidatePlugins}
+                  onPromote={(c) =>
+                    setConvertTarget({
+                      candidateLabel: c.groupKey,
+                      initialName: c.groupKey,
+                      anchorSkillDir: c.anchorSkillDir,
+                    })
+                  }
                 />
               ) : (
                 five.authoringPlugin.byPlugin.map(([pluginName, pluginSkills]) => (
@@ -713,6 +845,36 @@ export function Sidebar({
             )}
           </SidebarSection>
         </div>
+      )}
+
+      {/* 0793 T-005: convert-to-plugin dialog. Mounts above all sections,
+          covers the viewport via fixed positioning. */}
+      {convertTarget && (
+        <ConvertToPluginDialog
+          anchorSkillDir={convertTarget.anchorSkillDir}
+          candidateLabel={convertTarget.candidateLabel}
+          initialName={convertTarget.initialName}
+          onCancel={() => setConvertTarget(null)}
+          onConverted={(result) => {
+            setConvertTarget(null);
+            // Refetch /api/skills so dedupeByDir flips authoring-project →
+            // authoring-plugin for the affected skills (the discovery logic
+            // already handles the scope transition correctly).
+            onSkillsChanged?.();
+            // F-002 (0793 review iteration 2): when the server soft-skipped
+            // schema validation (claude CLI not on PATH), warn the user — the
+            // CLI sibling does this with a yellow warning line, so Studio
+            // needs parity. window.alert is intentionally low-tech here:
+            // sidebar.tsx has no shared toast system, and this case is rare
+            // (only fires when `claude` isn't installed at all).
+            if (result.validation === "skipped") {
+              // eslint-disable-next-line no-alert
+              window.alert(
+                `Plugin manifest written, but schema validation was skipped because the 'claude' CLI is not on PATH. Install Claude Code to enable plugin schema validation.`,
+              );
+            }
+          }}
+        />
       )}
     </div>
   );
@@ -1106,9 +1268,15 @@ function AvailablePluginEmptyState({
 function AuthoringPluginEmptyState({
   queryActive,
   hasSources,
+  candidates,
+  onPromote,
 }: {
   queryActive: boolean;
   hasSources: boolean;
+  /** 0793 T-005: candidate folders that could be promoted to plugins. */
+  candidates?: AuthoringCandidatePlugin[];
+  /** 0793 T-005: open the Convert dialog for the given candidate. */
+  onPromote?: (c: AuthoringCandidatePlugin) => void;
 }) {
   if (queryActive && hasSources) {
     return (
@@ -1118,15 +1286,71 @@ function AuthoringPluginEmptyState({
       />
     );
   }
+
   return (
-    <EmptyMessage
-      headline="No plugin sources in this project."
-      body={
-        <>
-          Add <Mono>&lt;plugin&gt;/.claude-plugin/plugin.json</Mono> to author one.
-        </>
-      }
-    />
+    <>
+      <EmptyMessage
+        headline="No plugin sources in this project."
+        body={
+          <>
+            Add <Mono>&lt;plugin&gt;/.claude-plugin/plugin.json</Mono> to author one,
+            or <Mono>vskill plugin new</Mono> from the terminal.
+          </>
+        }
+      />
+      {candidates && candidates.length > 0 && (
+        <div
+          style={{
+            padding: "0 14px 12px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--text-secondary)",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              marginBottom: 2,
+            }}
+          >
+            Candidate folders ({candidates.length})
+          </div>
+          {candidates.map((c) => (
+            <button
+              key={`promote-${c.groupKey}`}
+              type="button"
+              onClick={() => onPromote?.(c)}
+              title={`Promote ${c.groupKey}/ to a Claude Code plugin`}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
+                padding: "6px 8px",
+                fontSize: 12,
+                background: "transparent",
+                border: "1px dashed var(--border-subtle, rgba(128,128,128,0.35))",
+                borderRadius: 4,
+                color: "var(--text-primary)",
+                cursor: "pointer",
+                textAlign: "left",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              <span>
+                {c.groupKey}/ <span style={{ color: "var(--text-tertiary)" }}>({c.skills.length} skills)</span>
+              </span>
+              <span style={{ fontFamily: "var(--font-sans)", fontSize: 11, color: "var(--text-secondary)" }}>
+                Promote →
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 

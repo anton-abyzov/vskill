@@ -726,6 +726,7 @@ function Shell() {
             revealSkillId={state.revealSkillId}
             onRevealComplete={clearReveal}
             dirtySkillIds={dirtySkillIds}
+            onSkillsChanged={refreshSkills}
             topSlot={
               agentsResponse.status === "ready" && pickerEntries.length > 0 ? (
                 <>

@@ -311,6 +311,12 @@ program
 const { registerSkillCommand } = await import("./commands/skill.js");
 registerSkillCommand(program);
 
+// 0793: vskill plugin {new} — plugin authoring (Claude Code's CLI has no
+// `claude plugin new` so vskill owns this scaffolder; schema validation
+// delegates to `claude plugin validate`).
+const { registerPluginCommand } = await import("./commands/plugin.js");
+registerPluginCommand(program);
+
 // 0702: vskill keys {set|list|remove|path} — cross-platform API key storage.
 program
   .command("keys [subcommand] [provider]")

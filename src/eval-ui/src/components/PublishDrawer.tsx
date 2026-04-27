@@ -121,13 +121,22 @@ export function PublishDrawer({
 
   const canCommit = message.trim().length > 0 && !publishing && !generating;
 
+  // 0784 hotfix — modal always renders on a dark surface (matches the
+  // backdrop-blur design intent) with hard-coded light text, so readability
+  // doesn't depend on the host theme tokens. Light-theme users were getting
+  // dark text on the dark modal and couldn't read anything.
+  const MODAL_TEXT = "#E6EDF3";
+  const MODAL_TEXT_MUTED = "#9CA3AF";
+  const MODAL_BORDER = "rgba(255,255,255,0.12)";
+  const MODAL_INPUT_BG = "#0F1115";
+
   // ── style tokens ───────────────────────────────────────────────────────
   const labelStyle: React.CSSProperties = {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: 600,
     letterSpacing: "0.06em",
     textTransform: "uppercase",
-    color: "var(--text-tertiary)",
+    color: MODAL_TEXT_MUTED,
     fontFamily: "var(--font-mono, monospace)",
     marginBottom: 6,
     display: "block",
@@ -135,15 +144,15 @@ export function PublishDrawer({
 
   const segmentBase: React.CSSProperties = {
     flex: 1,
-    height: 30,
+    height: 32,
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    fontSize: 11,
+    fontSize: 12,
     fontFamily: "var(--font-mono, monospace)",
     background: "transparent",
-    color: "var(--text-secondary)",
+    color: MODAL_TEXT_MUTED,
     border: "none",
     cursor: "pointer",
     transition: "background 120ms ease, color 120ms ease",
@@ -151,8 +160,8 @@ export function PublishDrawer({
 
   const segmentActive: React.CSSProperties = {
     ...segmentBase,
-    background: "var(--bg-subtle)",
-    color: "var(--text-primary)",
+    background: "rgba(255,255,255,0.08)",
+    color: MODAL_TEXT,
     fontWeight: 600,
   };
 
@@ -196,13 +205,14 @@ export function PublishDrawer({
             maxWidth: "calc(100vw - 48px)",
             maxHeight: "80vh",
             overflowY: "auto",
-            background: "var(--bg-elevated, #1a1a1a)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: 8,
+            // 0784 hotfix — hard-coded dark surface + light text so the modal
+            // is readable in every theme without relying on host tokens.
+            background: "#1A1D24",
+            border: `1px solid ${MODAL_BORDER}`,
+            borderRadius: 10,
             padding: 24,
-            boxShadow:
-              "0 24px 64px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04)",
-            color: "var(--text-primary)",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.05)",
+            color: MODAL_TEXT,
             fontFamily: "var(--font-mono, monospace)",
             animation: "publishDrawerIn 180ms cubic-bezier(0.2, 0.8, 0.2, 1)",
           }}
@@ -211,10 +221,10 @@ export function PublishDrawer({
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
             <strong
               style={{
-                fontSize: 14,
-                fontWeight: 600,
+                fontSize: 16,
+                fontWeight: 700,
                 letterSpacing: "-0.01em",
-                color: "var(--text-primary)",
+                color: MODAL_TEXT,
                 fontFamily: "var(--font-sans, var(--font-mono, sans-serif))",
               }}
             >
@@ -228,8 +238,8 @@ export function PublishDrawer({
               style={{
                 background: "none",
                 border: "none",
-                color: "var(--text-tertiary)",
-                fontSize: 18,
+                color: MODAL_TEXT_MUTED,
+                fontSize: 22,
                 lineHeight: 1,
                 cursor: publishing ? "not-allowed" : "pointer",
                 padding: 0,
@@ -244,18 +254,18 @@ export function PublishDrawer({
               display: "flex",
               alignItems: "center",
               gap: 6,
-              fontSize: 11,
-              color: "var(--text-tertiary)",
+              fontSize: 12,
+              color: MODAL_TEXT_MUTED,
               fontVariantNumeric: "tabular-nums",
               marginBottom: 18,
             }}
           >
-            <span aria-hidden="true" style={{ color: "var(--color-accent)", fontFamily: "monospace" }}>▮</span>
+            <span aria-hidden="true" style={{ color: "#F59E0B", fontFamily: "monospace" }}>▮</span>
             <span>
               {fileCount} file{fileCount === 1 ? "" : "s"} changed
             </span>
           </div>
-          <div style={{ height: 1, background: "var(--border-subtle)", margin: "0 -24px 18px" }} />
+          <div style={{ height: 1, background: MODAL_BORDER, margin: "0 -24px 18px" }} />
 
           {/* ── Mode toggle (segmented) ────────────────────────────── */}
           <span style={labelStyle}>Mode</span>
@@ -265,10 +275,11 @@ export function PublishDrawer({
             data-testid="publish-mode-toggle"
             style={{
               display: "flex",
-              border: "1px solid var(--border-subtle)",
-              borderRadius: 4,
+              border: `1px solid ${MODAL_BORDER}`,
+              borderRadius: 6,
               overflow: "hidden",
               marginBottom: 16,
+              background: MODAL_INPUT_BG,
             }}
           >
             <button
@@ -282,7 +293,7 @@ export function PublishDrawer({
             >
               Write yourself
             </button>
-            <div style={{ width: 1, background: "var(--border-subtle)" }} />
+            <div style={{ width: 1, background: MODAL_BORDER }} />
             <button
               type="button"
               role="tab"
@@ -315,18 +326,47 @@ export function PublishDrawer({
             }
             style={{
               width: "100%",
-              background: "var(--bg-subtle)",
-              border: "1px solid var(--border-subtle)",
-              borderRadius: 4,
+              background: MODAL_INPUT_BG,
+              border: `1px solid ${MODAL_BORDER}`,
+              borderRadius: 6,
               padding: "10px 12px",
               fontFamily: "var(--font-mono, monospace)",
-              fontSize: 12,
+              fontSize: 13,
               lineHeight: 1.6,
-              color: "var(--text-primary)",
+              color: MODAL_TEXT,
               resize: "vertical",
               outline: "none",
             }}
           />
+
+          {/* 0784 hotfix — explicit Generate button so the user doesn't have
+              to discover that switching modes triggers generation. Visible
+              only in AI mode. */}
+          {mode === "ai" && (
+            <button
+              type="button"
+              onClick={generate}
+              disabled={generating || publishing}
+              data-testid="publish-generate-button"
+              style={{
+                marginTop: 10,
+                padding: "8px 14px",
+                background: generating ? "rgba(255,255,255,0.06)" : "#2563EB",
+                color: generating ? MODAL_TEXT_MUTED : "#FFFFFF",
+                border: "1px solid " + (generating ? MODAL_BORDER : "#2563EB"),
+                borderRadius: 6,
+                fontFamily: "var(--font-mono, monospace)",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: generating || publishing ? "not-allowed" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              {generating ? "Generating…" : "Generate with AI"}
+            </button>
+          )}
 
           {/* ── Inline error block (AI generation failure) ────────── */}
           {generateError && mode === "ai" && (
@@ -414,14 +454,24 @@ export function PublishDrawer({
                 </button>
               )}
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
+            <div style={{ display: "flex", gap: 8 }}>
               <button
                 type="button"
                 aria-label="Cancel"
                 onClick={onClose}
                 disabled={publishing}
-                className="btn btn-ghost text-[11px]"
-                style={{ padding: "4px 10px" }}
+                style={{
+                  padding: "8px 14px",
+                  background: "transparent",
+                  color: MODAL_TEXT,
+                  border: `1px solid ${MODAL_BORDER}`,
+                  borderRadius: 6,
+                  fontFamily: "var(--font-mono, monospace)",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: publishing ? "not-allowed" : "pointer",
+                  opacity: publishing ? 0.5 : 1,
+                }}
               >
                 Cancel
               </button>
@@ -430,8 +480,18 @@ export function PublishDrawer({
                 aria-label="Commit & Push"
                 onClick={onCommitPush}
                 disabled={!canCommit}
-                className="btn btn-primary text-[11px]"
-                style={{ padding: "5px 14px" }}
+                data-testid="publish-commit-push"
+                style={{
+                  padding: "8px 16px",
+                  background: canCommit ? "#22C55E" : "rgba(255,255,255,0.06)",
+                  color: canCommit ? "#0B0F12" : MODAL_TEXT_MUTED,
+                  border: "1px solid " + (canCommit ? "#22C55E" : MODAL_BORDER),
+                  borderRadius: 6,
+                  fontFamily: "var(--font-mono, monospace)",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: canCommit ? "pointer" : "not-allowed",
+                }}
               >
                 {publishing ? "Publishing…" : "Commit & Push"}
               </button>

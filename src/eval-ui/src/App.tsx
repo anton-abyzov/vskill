@@ -43,13 +43,9 @@ import type { SkillInfo } from "./types";
 import { useKeyboardShortcut } from "./hooks/useKeyboardShortcut";
 import { useIsCreateRoute, useIsUpdatesRoute } from "./hooks/useHashRoute";
 import { useTheme } from "./theme/useTheme";
-import type { Command } from "./components/CommandPalette";
 import { strings } from "./strings";
 
-// T-039: CommandPalette is lazy-loaded so it stays out of the initial bundle.
-const CommandPalette = lazy(() => import("./components/CommandPalette"));
-
-// 0741 T-016: FindSkillsPalette (⌘⇧K) is lazy-loaded for the same reason —
+// 0741 T-016: FindSkillsPalette (⌘K) is lazy-loaded —
 // the palette + ported components add ~30-40KB gzip and only mount when the
 // user explicitly opens the verified-skill find experience.
 const FindSkillsPalette = lazy(() =>
@@ -100,11 +96,10 @@ export function App() {
 function Shell() {
   const { state, selectSkill, clearSelection, refreshSkills, outdatedByOrigin, revealSkill, clearReveal } = useStudio();
   const { config } = useConfig();
-  const { mode, resolvedTheme, setTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
   const { toast } = useToast();
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => readSidebarWidth());
   const [sseConnected] = useState<boolean>(true); // SSE-connection hook lives outside Phase 2 scope
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // T-0684 (B4): Cmd+B sidebar visibility toggle. Per-session only — does
   // NOT persist across reloads (spec non-goal). Mobile-view auto-hiding
@@ -388,7 +383,14 @@ function Shell() {
   // entry AND trashes the dir.
   const [pendingUninstallSkill, setPendingUninstallSkill] = useState<SkillInfo | null>(null);
   const pendingUninstall = usePendingDeletion({
-    delayMs: 10_000,
+    // 0784 hotfix: was 10_000 — the 10s debounce was silently dropping the
+    // uninstall whenever the user navigated away before the timer fired.
+    // Toast claimed "Sent to your system Trash" but the file + lockfile
+    // entry stayed intact. Drop to 250ms so the API call commits before
+    // any plausible navigation, while still giving the optimisticHide a
+    // tick to flush. Real undo is provided by the OS Trash (user can
+    // restore the dir from there) + reinstall via `vskill install`.
+    delayMs: 250,
     apiCall: (plugin, skill) => api.uninstallSkill(plugin, skill),
     onCommit: (s) => {
       refreshSkills();
@@ -426,19 +428,16 @@ function Shell() {
     const target = { plugin: skill.plugin, skill: skill.skill };
     optimisticHide(target);
     pendingUninstall.enqueueDelete(target);
+    // 0784 hotfix: toast wording is honest about what's happening. The 250ms
+    // commit window is too short for a meaningful Undo, and OS Trash already
+    // offers true undo for the on-disk dir. Reinstall via `vskill install`
+    // restores the lockfile entry.
     toast({
       message: `Uninstalled ${skill.skill}. Sent to your ${trashLabel}.`,
       severity: "info",
-      durationMs: 10_000,
-      action: {
-        label: strings.actions.undo,
-        onInvoke: () => {
-          pendingUninstall.cancelDelete(keyOf(target));
-          optimisticRestore(target);
-        },
-      },
+      durationMs: 4000,
     });
-  }, [pendingUninstallSkill, optimisticHide, optimisticRestore, pendingUninstall, toast, trashLabel, keyOf]);
+  }, [pendingUninstallSkill, optimisticHide, pendingUninstall, toast, trashLabel]);
   const handleCancelUninstall = useCallback(() => {
     setPendingUninstallSkill(null);
   }, []);
@@ -499,42 +498,6 @@ function Shell() {
     return `Viewing ${state.selectedSkill.skill} (${origin})`;
   }, [state.selectedSkill]);
 
-  // Global shortcuts: ⌘K → palette, ? → cheatsheet, ⌘⇧D → theme toggle,
-  // E → edit placeholder (deferred to increment 0675).
-  const commands = useMemo<Command[]>(
-    () => [
-      {
-        id: "switch-theme",
-        label: strings.palette.actionSwitchTheme,
-        description: "Cycle light / dark / auto",
-        keywords: ["theme", "dark", "light", "mode"],
-        onInvoke: () => setTheme(mode === "light" ? "dark" : mode === "dark" ? "auto" : "light"),
-      },
-      {
-        id: "toggle-sidebar",
-        label: "Toggle sidebar",
-        description: "Show or hide the skills sidebar",
-        keywords: ["sidebar", "panel", "hide", "show", "cmd+b"],
-        onInvoke: () => setSidebarToggledHidden((h) => !h),
-      },
-      {
-        id: "show-shortcuts",
-        label: "Show keyboard shortcuts",
-        description: "Open the cheatsheet",
-        keywords: ["help", "keys"],
-        onInvoke: () => setShortcutsOpen(true),
-      },
-      {
-        id: "refresh-skills",
-        label: "Refresh skills",
-        description: "Re-scan local + installed",
-        keywords: ["reload", "scan"],
-        onInvoke: () => refreshSkills(),
-      },
-    ],
-    [mode, setTheme, refreshSkills],
-  );
-
   // 0741 T-019: Selected skill for the SkillDetailPanel — set by the
   // FindSkillsPalette `onSelect` callback, cleared when the panel closes.
   const [findDetailSkill, setFindDetailSkill] = useState<{
@@ -545,14 +508,9 @@ function Shell() {
   } | null>(null);
 
   useKeyboardShortcut([
-    { key: "cmd+k", handler: () => setPaletteOpen((p) => !p) },
-    { key: "ctrl+k", handler: () => setPaletteOpen((p) => !p) },
-    // 0741 T-016 (AC-US1-02): ⌘⇧K (Mac) and Ctrl+Shift+K (Win/Linux) open the
-    // FindSkillsPalette. Bare ⌘K above remains the CommandPalette trigger —
-    // separate handlers per chord guarantee no double-fire (modifier match
-    // is exact in matchesShortcut).
+    // ⌘K (Mac) and Ctrl+K (Win/Linux) open the FindSkillsPalette.
     {
-      key: "cmd+shift+k",
+      key: "cmd+k",
       handler: () => {
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("openFindSkills"));
@@ -560,7 +518,7 @@ function Shell() {
       },
     },
     {
-      key: "ctrl+shift+k",
+      key: "ctrl+k",
       handler: () => {
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("openFindSkills"));
@@ -638,7 +596,6 @@ function Shell() {
           <TopRail
             projectName={config?.projectName ?? null}
             selected={state.selectedSkill}
-            onOpenPalette={() => setPaletteOpen(true)}
             onHome={clearSelection}
             onRequestCreateSkill={() => openCreateModal("standalone")}
             projectPickerSlot={
@@ -733,18 +690,7 @@ function Shell() {
         onClose={closeContextMenu}
         onAction={(action, skill) => handleContextMenuAction(action, skill)}
       />
-      {/* T-039: CommandPalette is loaded on first open. Suspense boundary
-          prevents a flash if the chunk hasn't hit the network yet. */}
-      {paletteOpen && (
-        <Suspense fallback={null}>
-          <CommandPalette
-            open={paletteOpen}
-            onClose={() => setPaletteOpen(false)}
-            commands={commands}
-          />
-        </Suspense>
-      )}
-      {/* 0741 T-014/T-016: FindSkillsPalette (⌘⇧K). Always mounted but the
+      {/* 0741 T-014/T-016: FindSkillsPalette (⌘K). Always mounted but the
           shell internally returns null until `openFindSkills` fires. The
           shell handles its own lazy/Suspense for the inner SearchPaletteCore. */}
       <Suspense fallback={null}>

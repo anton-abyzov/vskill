@@ -128,16 +128,35 @@ export function usePendingDeletion(
     };
   }, [flushPending]);
 
-  // On unmount: cancel pending timers (do not auto-commit — ambiguous user
-  // intent on component unmount; caller should use flushPending explicitly).
+  // 0784 hotfix: on unmount, AUTO-COMMIT pending operations.
+  //
+  // The original behavior cancelled timers without committing — the
+  // rationale was "ambiguous user intent on component unmount". In
+  // practice this silently dropped uninstall/delete operations whenever
+  // the user navigated, refreshed, or the parent component re-mounted
+  // before the debounce window elapsed. The user clicked Uninstall, saw
+  // the toast claim success, and the file stayed on disk.
+  //
+  // The user's intent at click-time was unambiguous: they confirmed the
+  // operation. Honor it. flushPending() commits via the same fetch
+  // pipeline used in the timer path; browsers honor keepalive on
+  // navigation/unload so the request lands.
   useEffect(() => {
     const entries = entriesRef.current;
     return () => {
       for (const entry of entries.values()) {
-        if (entry.timeoutId) clearTimeout(entry.timeoutId);
+        if (entry.timeoutId) {
+          clearTimeout(entry.timeoutId);
+          entry.timeoutId = null;
+          // Fire-and-forget commit so unmount doesn't drop the operation.
+          void commit(entry);
+        }
       }
       entries.clear();
     };
+    // commit is stable via useCallback in the parent; intentionally exclude
+    // to keep the unmount handler running once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return { enqueueDelete, cancelDelete, flushPending, isPending };

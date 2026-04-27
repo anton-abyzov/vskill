@@ -2,10 +2,16 @@
 // vskill submit -- submit skill for verification via API or browser fallback
 // ---------------------------------------------------------------------------
 
+import * as fs from "node:fs/promises";
+import { existsSync } from "node:fs";
+import * as path from "node:path";
 import { openBrowser } from "../utils/browser.js";
-import { submitSkill, getSubmission } from "../api/client.js";
+import { submitSkill, getSubmission, getVersions } from "../api/client.js";
 import { bold, green, red, dim, cyan, yellow } from "../utils/output.js";
 import { parseGitHubSource, validateSkillName } from "../utils/validation.js";
+import { upsertFrontmatterVersion, validatesAsYamlFrontmatter } from "../lib/frontmatter.js";
+import { addAuthoredSkill } from "../lockfile/authored.js";
+import { getProjectRoot } from "../lockfile/project-root.js";
 
 interface SubmitOptions {
   skill?: string;
@@ -79,6 +85,12 @@ export async function submitCommand(
     if (response.alreadyVerified) {
       console.log(green("Already verified! ") + dim("Skill is up-to-date in the registry."));
       if (response.id) console.log(dim(`Submission: ${response.id}`));
+      // 0794 / T-005 — write registry version back to local SKILL.md frontmatter.
+      // Only fires when the user has a local source path: prevents phantom
+      // "update available" right after submit (project_skill_version_publish_desync.md).
+      if (response.skillName && opts.path) {
+        await tryWriteBackVersion(response.skillName, opts.path);
+      }
       return;
     }
 
@@ -92,6 +104,12 @@ export async function submitCommand(
     console.log(dim(`State: ${response.state}`));
     console.log(dim("\nThe skill will go through tier-1 and tier-2 scanning."));
     console.log(dim(`Check status: vskill info ${opts.skill || repo}`));
+    // 0794 / T-005 — when state is already 'completed' (rare fast-path),
+    // attempt write-back. For pending state the user should re-run after
+    // scan completes (or use vskill outdated which will pick up the new version).
+    if (response.state === "completed" && response.skillName && opts.path) {
+      await tryWriteBackVersion(response.skillName, opts.path);
+    }
   } catch (err) {
     const msg = (err as Error).message;
     if (msg.includes("429") || msg.includes("rate")) {
@@ -101,5 +119,42 @@ export async function submitCommand(
       console.log(dim("\nFallback: use --browser to submit via GitHub OAuth."));
     }
     process.exit(1);
+  }
+}
+
+/**
+ * 0794 / T-005 — write the registry's latest version back to the user's
+ * local SKILL.md frontmatter. Looks up the latest published version via
+ * the registry's `/skills/<name>/versions` endpoint and uses
+ * upsertFrontmatterVersion to update only the top-level `version:` field.
+ *
+ * Best-effort: any failure is logged as dim text and never throws —
+ * write-back is a UX nicety, not a correctness requirement.
+ */
+async function tryWriteBackVersion(skillName: string, sourcePath: string): Promise<void> {
+  try {
+    const resolved = path.resolve(sourcePath);
+    if (!existsSync(resolved)) return;
+    const versions = await getVersions(skillName);
+    if (!versions || versions.length === 0) return;
+    const latest = versions[0]; // API returns versions newest-first
+    if (!latest?.version) return;
+    const before = await fs.readFile(resolved, "utf8");
+    const after = upsertFrontmatterVersion(before, latest.version);
+    if (after === before) return; // already up to date
+    if (!validatesAsYamlFrontmatter(after)) {
+      console.log(dim(`(skipped writeback: result would not be valid YAML frontmatter)`));
+      return;
+    }
+    await fs.writeFile(resolved, after);
+    console.log(dim(`Wrote version ${latest.version} to ${path.relative(process.cwd(), resolved)}`));
+    // 0794 / T-006 — track this skill for source-origin update polling.
+    try {
+      addAuthoredSkill(getProjectRoot(), skillName, resolved);
+    } catch {
+      // Authored tracking is best-effort; never block writeback.
+    }
+  } catch (err) {
+    console.log(dim(`(version writeback skipped: ${(err as Error).message})`));
   }
 }

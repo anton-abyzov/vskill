@@ -366,9 +366,10 @@ export function SkillDetailPanel({
           width: "100%",
           maxWidth: 720,
           margin: "0 1rem",
-          background: "var(--bg)",
+          background: "var(--bg-surface, #FFFFFF)",
+          color: "var(--text-primary, #191919)",
           borderRadius: "8px",
-          border: "1px solid var(--border)",
+          border: "1px solid var(--color-rule, #E8E1D6)",
           boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
           overflow: "hidden",
           maxHeight: "80vh",
@@ -380,7 +381,7 @@ export function SkillDetailPanel({
         <div
           style={{
             padding: "0.75rem 1rem",
-            borderBottom: "1px solid var(--border)",
+            borderBottom: "1px solid var(--color-rule, #E8E1D6)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -400,7 +401,7 @@ export function SkillDetailPanel({
               cursor: "pointer",
               fontFamily: "var(--font-mono, monospace)",
               fontSize: 12,
-              color: "var(--text-secondary)",
+              color: "var(--text-secondary, #5A5651)",
             }}
           >
             ← Back to results
@@ -409,8 +410,8 @@ export function SkillDetailPanel({
             style={{
               fontFamily: "var(--font-mono, monospace)",
               fontSize: 11,
-              color: "var(--text-faint)",
-              border: "1px solid var(--border)",
+              color: "var(--text-secondary, #5A5651)",
+              border: "1px solid var(--color-rule, #E8E1D6)",
               borderRadius: 4,
               padding: "1px 5px",
             }}
@@ -421,7 +422,7 @@ export function SkillDetailPanel({
 
         <div style={{ overflowY: "auto", padding: "1rem", flex: 1 }}>
           {loading && (
-            <div data-testid="skill-detail-loading" style={{ padding: "2rem", textAlign: "center", color: "var(--text-faint)" }}>
+            <div data-testid="skill-detail-loading" style={{ padding: "2rem", textAlign: "center", color: "var(--text-secondary, #5A5651)" }}>
               Loading…
             </div>
           )}
@@ -434,7 +435,7 @@ export function SkillDetailPanel({
                 textAlign: "center",
                 fontFamily: "var(--font-mono, monospace)",
                 fontSize: "0.875rem",
-                color: "var(--status-danger-text)",
+                color: "var(--red, #b54444)",
               }}
             >
               <div style={{ marginBottom: "0.75rem" }}>Failed to load skill: {error}</div>
@@ -446,9 +447,9 @@ export function SkillDetailPanel({
                   fontSize: "0.8125rem",
                   padding: "0.4rem 1rem",
                   borderRadius: 4,
-                  border: "1px solid var(--border)",
+                  border: "1px solid var(--color-rule, #E8E1D6)",
                   background: "transparent",
-                  color: "var(--text)",
+                  color: "var(--text-primary, #191919)",
                   cursor: "pointer",
                 }}
               >
@@ -465,7 +466,7 @@ export function SkillDetailPanel({
                   {displayName}
                 </h2>
                 {meta?.description && (
-                  <p style={{ margin: "0 0 0.75rem", color: "var(--text-secondary)", fontSize: "0.875rem", lineHeight: 1.5 }}>
+                  <p style={{ margin: "0 0 0.75rem", color: "var(--text-secondary, #5A5651)", fontSize: "0.875rem", lineHeight: 1.5 }}>
                     {meta.description}
                   </p>
                 )}
@@ -479,11 +480,11 @@ export function SkillDetailPanel({
 
               {/* Versions — T-022 */}
               <section data-testid="skill-detail-versions" style={{ marginBottom: "1.25rem" }}>
-                <h3 style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-faint)" }}>
+                <h3 style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-secondary, #5A5651)" }}>
                   Versions
                 </h3>
                 {topVersions.length === 0 ? (
-                  <div style={{ color: "var(--text-faint)", fontSize: "0.8125rem" }}>No versions found.</div>
+                  <div style={{ color: "var(--text-secondary, #5A5651)", fontSize: "0.8125rem" }}>No versions found.</div>
                 ) : (
                   <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 }}>
                     {topVersions.map((v) => {
@@ -504,12 +505,12 @@ export function SkillDetailPanel({
                               textAlign: "left",
                               padding: "0.5rem 0.75rem",
                               borderRadius: 4,
-                              border: selected ? "1px solid var(--link-accent, #0d9488)" : "1px solid var(--border)",
-                              background: selected ? "color-mix(in srgb, var(--link-accent, #0d9488) 8%, transparent)" : "transparent",
+                              border: selected ? "1px solid var(--color-action, #2F5B8E)" : "1px solid var(--color-rule, #E8E1D6)",
+                              background: selected ? "color-mix(in srgb, var(--color-action, #2F5B8E) 8%, transparent)" : "transparent",
                               cursor: "pointer",
                               fontFamily: "var(--font-mono, monospace)",
                               fontSize: "0.8125rem",
-                              color: "var(--text)",
+                              color: "var(--text-primary, #191919)",
                               display: "flex",
                               alignItems: "center",
                               gap: "0.5rem",
@@ -519,10 +520,10 @@ export function SkillDetailPanel({
                               {selected ? "●" : "○"}
                             </span>
                             <span style={{ fontWeight: 600 }}>v{v.version}</span>
-                            {date && <span style={{ color: "var(--text-faint)" }}>· {date}</span>}
-                            {author && <span style={{ color: "var(--text-faint)" }}>· {author}</span>}
+                            {date && <span style={{ color: "var(--text-secondary, #5A5651)" }}>· {date}</span>}
+                            {author && <span style={{ color: "var(--text-secondary, #5A5651)" }}>· {author}</span>}
                             {selected && (
-                              <span data-testid="skill-detail-version-selected-tag" style={{ marginLeft: "auto", fontSize: "0.6875rem", color: "var(--link-accent, #0d9488)" }}>
+                              <span data-testid="skill-detail-version-selected-tag" style={{ marginLeft: "auto", fontSize: "0.6875rem", color: "var(--color-action, #2F5B8E)" }}>
                                 Selected
                               </span>
                             )}
@@ -538,7 +539,7 @@ export function SkillDetailPanel({
                     href={`${PLATFORM_URL}/skills/${selectedSkill.owner}/${selectedSkill.repo}/${selectedSkill.slug}/versions`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    style={{ fontFamily: "var(--font-mono, monospace)", fontSize: "0.75rem", color: "var(--link-accent, #0d9488)", textDecoration: "none" }}
+                    style={{ fontFamily: "var(--font-mono, monospace)", fontSize: "0.75rem", color: "var(--color-action, #2F5B8E)", textDecoration: "none" }}
                   >
                     see all versions →
                   </a>
@@ -548,16 +549,16 @@ export function SkillDetailPanel({
               {/* Install or Blocked panel — T-023 / T-025 */}
               {isBlocked ? (
                 <section data-testid="skill-detail-blocked" style={{ marginBottom: "0.5rem" }}>
-                  <h3 style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--status-danger-text)" }}>
+                  <h3 style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--red, #b54444)" }}>
                     This skill is blocked
                   </h3>
                   <div
                     style={{
                       padding: "1rem",
                       borderRadius: 6,
-                      border: "1px solid var(--status-danger-border)",
-                      background: "var(--status-danger-bg)",
-                      color: "var(--status-danger-text)",
+                      border: "1px solid var(--red, #b54444)",
+                      background: "var(--red-muted, color-mix(in srgb, #b54444 18%, transparent))",
+                      color: "var(--red, #b54444)",
                       fontSize: "0.875rem",
                     }}
                   >
@@ -566,16 +567,16 @@ export function SkillDetailPanel({
                 </section>
               ) : installResult && !installResult.ok ? (
                 <section data-testid="skill-detail-install-error" style={{ marginBottom: "0.5rem" }}>
-                  <h3 style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--status-danger-text)" }}>
+                  <h3 style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--red, #b54444)" }}>
                     Install command unavailable
                   </h3>
                   <div
                     style={{
                       padding: "1rem",
                       borderRadius: 6,
-                      border: "1px solid var(--status-danger-border)",
-                      background: "var(--status-danger-bg)",
-                      color: "var(--status-danger-text)",
+                      border: "1px solid var(--red, #b54444)",
+                      background: "var(--red-muted, color-mix(in srgb, #b54444 18%, transparent))",
+                      color: "var(--red, #b54444)",
                       fontSize: "0.875rem",
                     }}
                   >
@@ -584,9 +585,36 @@ export function SkillDetailPanel({
                 </section>
               ) : installResult && installResult.ok ? (
                 <section data-testid="skill-detail-install" style={{ marginBottom: "0.5rem" }}>
-                  <h3 style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-faint)" }}>
+                  <h3 style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-secondary, #5A5651)" }}>
                     Install
                   </h3>
+                  {/* 0784: primary Install CTA above the terminal block. Shares
+                      handleCopy with the Copy chip so behavior — clipboard,
+                      toast, telemetry — is identical regardless of which
+                      button the user picks. Mirrors the same pattern shipped
+                      to verified-skill.com /studio/find/[…]. */}
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    data-testid="skill-detail-install-primary"
+                    aria-label="Install skill — copy command to clipboard"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      marginBottom: "0.5rem",
+                      padding: "0.5rem 1rem",
+                      borderRadius: 6,
+                      border: "1px solid var(--text-primary, #191919)",
+                      background: "var(--text-primary, #191919)",
+                      color: "var(--bg-surface, #FFFFFF)",
+                      cursor: "pointer",
+                      fontFamily: "var(--font-mono, monospace)",
+                      fontSize: "0.875rem",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Install
+                  </button>
                   <div style={{ display: "flex", gap: "0.5rem", alignItems: "stretch" }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <TerminalBlock compact>
@@ -602,9 +630,9 @@ export function SkillDetailPanel({
                         flexShrink: 0,
                         padding: "0 1rem",
                         borderRadius: 6,
-                        border: "1px solid var(--border)",
-                        background: "var(--bg)",
-                        color: "var(--text)",
+                        border: "1px solid var(--color-rule, #E8E1D6)",
+                        background: "var(--bg-surface, #FFFFFF)",
+                        color: "var(--text-primary, #191919)",
                         cursor: "pointer",
                         fontFamily: "var(--font-mono, monospace)",
                         fontSize: "0.8125rem",

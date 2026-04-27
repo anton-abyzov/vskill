@@ -2,7 +2,7 @@
 name: slack-messaging
 description: "Slack channel and thread messaging skill with context-aware session management. Reads messages, sends replies, searches channels and users, drafts and schedules messages -- all via Slack MCP tools. Use this skill whenever the user wants to read Slack messages, reply in Slack, send a Slack message, check a Slack channel, respond to a Slack thread, monitor Slack conversations, draft a Slack message, schedule a Slack message, find a Slack channel or user, or do anything involving Slack communication. Also activate when the user mentions 'check Slack', 'reply on Slack', 'send to #channel', 'DM someone on Slack', 'what did they say in Slack', 'catch up on Slack', 'Slack thread', 'post in Slack', or references any Slack channel by name (e.g., '#general', '#engineering'). This skill manages session boundaries: thread replies stay in the same session to preserve conversational context, while new top-level channel messages start a fresh session to keep conversations isolated."
 metadata:
-  version: 1.0.0
+  version: 1.0.3
   tags: slack, messaging, channels, threads, communication, mcp, chat, team-communication
 ---
 

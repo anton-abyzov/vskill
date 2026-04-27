@@ -2,7 +2,7 @@
 name: figma-connect
 description: "Figma-to-code bridge combining Figma MCP server tools with the Code Connect CLI for end-to-end design implementation workflows. Use this skill when implementing UI components from Figma design URLs, publishing Code Connect mappings to Figma Dev Mode, extracting design tokens from Figma variables, setting up Figma Code Connect in a project, or running the full design-to-code roundtrip pipeline. Activate when the user shares a Figma design URL and wants code implementation, says 'implement from Figma', 'code connect', 'publish to dev mode', 'figma connect publish', 'extract design tokens from Figma', 'figma to code', 'connect components to Figma', 'set up code connect', 'sync figma tokens', 'figma variables to CSS', 'figma variables to Tailwind', 'map component to Figma', 'npx figma connect', or references any figma.com/design URL in a code implementation context. Do NOT activate for pure Figma file creation, FigJam diagrams, Figma plugin development, or Storybook setup — those are separate concerns."
 metadata:
-  version: 0.1.0
+  version: 1.0.3
   tags: figma, code-connect, design-to-code, design-tokens, dev-mode, mcp, react, vue, swiftui, compose, frontend
 ---
 

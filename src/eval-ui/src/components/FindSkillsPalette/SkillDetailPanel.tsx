@@ -361,6 +361,77 @@ export function SkillDetailPanel({
     }
   }, [installResult, telemetryInstallCopyUrl, skillName, selectedVersion, publisher, slug, isLatestSelected, onToast]);
 
+  // 0784 hotfix — primary Install button actually runs the install via the
+  // localhost-only POST /api/studio/install-skill endpoint, then streams
+  // progress over SSE. Falls back to copy-to-clipboard if the endpoint is
+  // unavailable (e.g. the verified-skill.com proxy where there is no local
+  // shell).
+  const handleInstall = useCallback(async () => {
+    if (!installResult || !installResult.ok) return;
+    const target = `${publisher}/${slug}`;
+    if (onToast) {
+      try { onToast(`Installing ${target}…`, "info"); } catch { /* non-fatal */ }
+    } else {
+      dispatchToastFallback(`Installing ${target}…`, "info", 5000);
+    }
+    let jobId: string | null = null;
+    try {
+      const res = await fetch("/api/studio/install-skill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skill: target, scope }),
+      });
+      if (res.status === 404) {
+        // Endpoint not present (older eval-server, or browser is talking to
+        // the verified-skill.com proxy) — fall back to copy-to-clipboard.
+        return handleCopy();
+      }
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+        const msg = errBody.error || `Install failed (HTTP ${res.status})`;
+        if (onToast) {
+          try { onToast(msg, "error"); } catch { /* non-fatal */ }
+        } else {
+          dispatchToastFallback(msg, "error", 6000);
+        }
+        return;
+      }
+      const body = (await res.json()) as { jobId?: string };
+      jobId = body?.jobId ?? null;
+    } catch {
+      // Network failure — fall back to copy-to-clipboard so the user can
+      // still install manually.
+      return handleCopy();
+    }
+    if (!jobId) return;
+
+    // Stream progress + final status. Server uses SSE; we read it as text
+    // chunks via the EventSource API — falls back gracefully if absent.
+    if (typeof EventSource === "undefined") return;
+    const es = new EventSource(`/api/studio/install-skill/${jobId}/stream`);
+    const TIMEOUT_MS = 200_000;
+    const safetyTimer = setTimeout(() => { try { es.close(); } catch { /* */ } }, TIMEOUT_MS);
+    es.addEventListener("done", (ev) => {
+      clearTimeout(safetyTimer);
+      try { es.close(); } catch { /* */ }
+      let parsed: { success?: boolean; stderr?: string } = {};
+      try { parsed = JSON.parse((ev as MessageEvent).data); } catch { /* */ }
+      const okFinal = parsed.success === true;
+      const finalMsg = okFinal
+        ? `Installed ${target} (${scope})`
+        : `Install failed: ${parsed.stderr?.trim().split(/\r?\n/).slice(-1)[0] || "see terminal"}`;
+      if (onToast) {
+        try { onToast(finalMsg, okFinal ? "success" : "error"); } catch { /* non-fatal */ }
+      } else {
+        dispatchToastFallback(finalMsg, okFinal ? "success" : "error", okFinal ? 4000 : 8000);
+      }
+    });
+    es.onerror = () => {
+      clearTimeout(safetyTimer);
+      try { es.close(); } catch { /* */ }
+    };
+  }, [installResult, publisher, slug, scope, onToast, handleCopy]);
+
   const trustTier: TrustTier = (meta?.trustTier as TrustTier | undefined) ?? "T1";
   const certTier: CertificationTier =
     meta?.certTier === "CERTIFIED" || meta?.certTier === "VERIFIED"
@@ -685,9 +756,9 @@ export function SkillDetailPanel({
                       user picks. */}
                   <button
                     type="button"
-                    onClick={handleCopy}
+                    onClick={handleInstall}
                     data-testid="skill-detail-install-primary"
-                    aria-label="Install skill — copy npm command to clipboard"
+                    aria-label="Install skill"
                     style={{
                       display: "inline-flex",
                       alignItems: "center",

@@ -205,7 +205,7 @@ describe("SkillDetailPanel — T-023 install command", () => {
     const h = await mount({});
     await flushMicrotasks();
     const npmCmd = h.container.querySelector("[data-testid='skill-detail-install-variant-cmd-npm']");
-    expect(npmCmd?.textContent).toBe("npx vskill@latest install obsidian/brain/wiki-sync");
+    expect(npmCmd?.textContent).toBe("npx vskill@latest install obsidian/brain/wiki-sync --scope project");
     // All 5 variants are present.
     for (const label of ["npm", "bun", "pnpm", "yarn", "alternative"]) {
       expect(h.container.querySelector(`[data-testid='skill-detail-install-variant-${label}']`)).toBeTruthy();
@@ -232,9 +232,9 @@ describe("SkillDetailPanel — T-023 install command", () => {
     const oldRow = Array.from(rows).find((r) => r.getAttribute("data-version") === "1.0.0") as HTMLButtonElement;
     await act(async () => { oldRow.click(); });
     const npmCmd = h.container.querySelector("[data-testid='skill-detail-install-variant-cmd-npm']");
-    expect(npmCmd?.textContent).toBe("npx vskill@latest install obsidian/brain/wiki-sync@1.0.0");
+    expect(npmCmd?.textContent).toBe("npx vskill@latest install obsidian/brain/wiki-sync@1.0.0 --scope project");
     const bunCmd = h.container.querySelector("[data-testid='skill-detail-install-variant-cmd-bun']");
-    expect(bunCmd?.textContent).toBe("bunx vskill@latest install obsidian/brain/wiki-sync@1.0.0");
+    expect(bunCmd?.textContent).toBe("bunx vskill@latest install obsidian/brain/wiki-sync@1.0.0 --scope project");
     await h.unmount();
   });
 
@@ -273,7 +273,7 @@ describe("SkillDetailPanel — T-024 copy + T-028 telemetry", () => {
     const installBtn = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
     await act(async () => { installBtn.click(); });
     await flushMicrotasks();
-    expect(writeText).toHaveBeenCalledWith("npx vskill@latest install obsidian/brain/wiki-sync");
+    expect(writeText).toHaveBeenCalledWith("npx vskill@latest install obsidian/brain/wiki-sync --scope project");
     expect(onToast).toHaveBeenCalledTimes(1);
     expect(onToast.mock.calls[0][0]).toContain("npx vskill@latest install");
     expect(onToast.mock.calls[0][1]).toBe("success");
@@ -322,7 +322,7 @@ describe("SkillDetailPanel — T-024 copy + T-028 telemetry", () => {
     const bunCopy = h.container.querySelector("[data-testid='skill-detail-copy-bun']") as HTMLButtonElement;
     await act(async () => { bunCopy.click(); });
     await flushMicrotasks();
-    expect(writeText).toHaveBeenCalledWith("bunx vskill@latest install obsidian/brain/wiki-sync");
+    expect(writeText).toHaveBeenCalledWith("bunx vskill@latest install obsidian/brain/wiki-sync --scope project");
     expect(onToast).toHaveBeenCalled();
     expect(onToast.mock.calls[0][0]).toContain("bunx vskill@latest install");
     await h.unmount();

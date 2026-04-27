@@ -94,7 +94,16 @@ interface InstallVariant {
   command: string;
 }
 
-function buildInstallCommand(publisher: string, slug: string, version: string | null): {
+// 0784: install scope mirrors the `vskill install` CLI flags. project=local
+// per-repo .claude/, user=~/.claude/, global=system agent dirs. Default = project.
+type InstallScope = "project" | "user" | "global";
+
+function scopeFlag(scope: InstallScope): string {
+  if (scope === "global") return " --global";
+  return ` --scope ${scope}`;
+}
+
+function buildInstallCommand(publisher: string, slug: string, version: string | null, scope: InstallScope): {
   ok: true;
   /** Canonical npm command — used by the primary Install button + Copy chip. */
   command: string;
@@ -113,18 +122,19 @@ function buildInstallCommand(publisher: string, slug: string, version: string | 
   // 0784: render every common package-manager invocation so the user can pick
   // their flavor without having to translate. Canonical = npm (`npx`) — that's
   // what the primary Install button + Copy chip copy.
-  const npmCmd = `npx vskill@latest install ${ident}`;
+  const flag = scopeFlag(scope);
+  const npmCmd = `npx vskill@latest install ${ident}${flag}`;
   const variants: InstallVariant[] = [
     { label: "npm", comment: "# npm", command: npmCmd },
-    { label: "bun", comment: "# bun", command: `bunx vskill@latest install ${ident}` },
-    { label: "pnpm", comment: "# pnpm", command: `pnpx vskill@latest install ${ident}` },
-    { label: "yarn", comment: "# yarn", command: `yarn dlx vskill@latest install ${ident}` },
+    { label: "bun", comment: "# bun", command: `bunx vskill@latest install ${ident}${flag}` },
+    { label: "pnpm", comment: "# pnpm", command: `pnpx vskill@latest install ${ident}${flag}` },
+    { label: "yarn", comment: "# yarn", command: `yarn dlx vskill@latest install ${ident}${flag}` },
     {
       label: "alternative",
       comment: "# alternative (publisher + --skill flag)",
       command: version
-        ? `npx vskill@latest install ${publisher}@${version} --skill ${slug}`
-        : `npx vskill@latest install ${publisher} --skill ${slug}`,
+        ? `npx vskill@latest install ${publisher}@${version} --skill ${slug}${flag}`
+        : `npx vskill@latest install ${publisher} --skill ${slug}${flag}`,
     },
   ];
   return { ok: true, command: npmCmd, variants };
@@ -196,6 +206,7 @@ export function SkillDetailPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
+  const [scope, setScope] = useState<InstallScope>("project");
   const [retryNonce, setRetryNonce] = useState(0);
   const dialogRef = useRef<HTMLDivElement>(null);
   const backLinkRef = useRef<HTMLButtonElement>(null);
@@ -327,8 +338,8 @@ export function SkillDetailPanel({
 
   const installResult = useMemo(() => {
     if (!selectedVersion) return null;
-    return buildInstallCommand(publisher, slug, isLatestSelected ? null : selectedVersion);
-  }, [publisher, slug, selectedVersion, isLatestSelected]);
+    return buildInstallCommand(publisher, slug, isLatestSelected ? null : selectedVersion, scope);
+  }, [publisher, slug, selectedVersion, isLatestSelected, scope]);
 
   const handleCopy = useCallback(async () => {
     if (!installResult || !installResult.ok) return;
@@ -614,6 +625,59 @@ export function SkillDetailPanel({
                   <h3 style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-secondary, #5A5651)" }}>
                     Install
                   </h3>
+                  {/* 0784: install scope picker — mirrors `vskill install` CLI
+                      flags. Project = per-repo .claude/, User = ~/.claude/,
+                      Global = system agent dirs. Default = project. */}
+                  <div
+                    role="radiogroup"
+                    aria-label="Install scope"
+                    data-testid="skill-detail-install-scope"
+                    style={{
+                      display: "flex",
+                      gap: "0.5rem",
+                      alignItems: "center",
+                      marginBottom: "0.75rem",
+                      fontFamily: "var(--font-mono, monospace)",
+                      fontSize: "0.75rem",
+                      color: "var(--text-secondary, #5A5651)",
+                    }}
+                  >
+                    <span>Scope:</span>
+                    {(["project", "user", "global"] as const).map((s) => {
+                      const checked = scope === s;
+                      const description =
+                        s === "project"
+                          ? "Per-repo .claude/ — only this project"
+                          : s === "user"
+                            ? "~/.claude/ — every project on this account"
+                            : "System agent dirs — every agent on this machine";
+                      const label = s === "global" ? "Global" : s === "user" ? "User" : "Project";
+                      return (
+                        <button
+                          key={s}
+                          type="button"
+                          role="radio"
+                          aria-checked={checked}
+                          data-testid={`skill-detail-install-scope-${s}`}
+                          title={description}
+                          onClick={() => setScope(s)}
+                          style={{
+                            padding: "0.25rem 0.6rem",
+                            borderRadius: 4,
+                            border: `1px solid ${checked ? "var(--text-primary, #191919)" : "var(--color-rule, #E8E1D6)"}`,
+                            background: checked ? "var(--text-primary, #191919)" : "transparent",
+                            color: checked ? "var(--bg-surface, #FFFFFF)" : "var(--text-secondary, #5A5651)",
+                            cursor: "pointer",
+                            fontFamily: "var(--font-mono, monospace)",
+                            fontSize: "0.75rem",
+                            fontWeight: checked ? 600 : 400,
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
                   {/* 0784: primary Install CTA above the terminal block. Shares
                       handleCopy with the per-variant Copy chips so behavior —
                       clipboard write of the canonical npm command, toast,

@@ -8,9 +8,10 @@ import { updateStore } from "../stores/updateStore";
  * Shared update hook — polling (0683) + SSE push (0708).
  *
  * Responsibilities:
- *   - Polling path (0683): `updates`, `updatesMap` (keyed by short-name),
- *     `updateCount`, `refresh`, `lastFetchAt`, `error`. Preserves the exact
- *     public contract that UpdateBell, SidebarSection, UpdateToast, and
+ *   - Polling path (0683): `updates`, `updatesMap` (keyed by canonical full
+ *     name, with leaf alias when unambiguous — see `buildMap`), `updateCount`,
+ *     `refresh`, `lastFetchAt`, `error`. Preserves the exact public contract
+ *     that UpdateBell, SidebarSection, UpdateToast, and
  *     StudioContext.mergeUpdatesIntoSkills consume.
  *   - SSE push (0708): when `skillIds` is non-empty, opens a single
  *     EventSource against `/api/v1/skills/stream?skills=<sorted-csv>`. The
@@ -119,11 +120,28 @@ const DEFAULT_STREAM_BASE = "/api/v1/skills/stream";
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Primary key is the canonical full name (`<owner>/<repo>/<skill>` or
+// `<plugin>/<skill>`). A bare leaf alias is added ONLY when (a) the leaf
+// differs from the full name and (b) no other update in the list shares
+// that leaf. When two updates collide on a leaf across different plugins,
+// the alias is dropped — full-name lookups still resolve both, and leaf
+// lookups miss deterministically instead of silently returning whichever
+// entry happened to be inserted last (the pre-1.0 bug that hid one of two
+// available updates from the panel).
 function buildMap(list: SkillUpdateInfo[]): Map<string, SkillUpdateInfo> {
   const out = new Map<string, SkillUpdateInfo>();
+  for (const u of list) out.set(u.name, u);
+  const leafCounts = new Map<string, number>();
   for (const u of list) {
-    const shortName = u.name.split("/").pop() || u.name;
-    out.set(shortName, u);
+    const leaf = u.name.split("/").pop() || u.name;
+    if (leaf === u.name) continue;
+    leafCounts.set(leaf, (leafCounts.get(leaf) ?? 0) + 1);
+  }
+  for (const u of list) {
+    const leaf = u.name.split("/").pop() || u.name;
+    if (leaf === u.name) continue;
+    if ((leafCounts.get(leaf) ?? 0) > 1) continue;
+    if (!out.has(leaf)) out.set(leaf, u);
   }
   return out;
 }
@@ -343,17 +361,19 @@ export function useSkillUpdates(
             typeof r.trackedForUpdates === "boolean" ? r.trackedForUpdates : undefined,
         }));
       if (pollEntries.length > 0) {
-        // Merge with existing polling updates by short-name. We only fill in
-        // FIELDS the legacy poll doesn't already provide — primarily
-        // `trackedForUpdates`. This prevents check-updates' tracking-state
-        // response (which can lag the legacy poll's update detection) from
-        // overwriting `updateAvailable: true` with stale `false`.
+        // Merge with existing polling updates. Keyed by canonical FULL name
+        // (`u.name`) so two skills sharing a leaf across plugins don't
+        // overwrite each other (pre-1.0 bug). We only fill in FIELDS the
+        // legacy poll doesn't already provide — primarily `trackedForUpdates`.
+        // This prevents check-updates' tracking-state response (which can lag
+        // the legacy poll's update detection) from overwriting
+        // `updateAvailable: true` with stale `false`.
         setUpdates((prev) => {
           const map = new Map<string, SkillUpdateInfo>();
-          for (const u of prev) map.set(u.name.split("/").pop() || u.name, u);
+          for (const u of prev) map.set(u.name, u);
           let added = 0;
           for (const u of pollEntries) {
-            const key = u.name.split("/").pop() || u.name;
+            const key = u.name;
             const existing = map.get(key);
             if (existing) {
               // Only fill the gap fields — never overwrite live update state.

@@ -95,4 +95,85 @@ test.describe("0683 — update notifications full flow", () => {
     // Badge decrements — after refreshUpdates picks up the empty fixture.
     await expect(page.getByTestId("update-bell-badge")).toHaveCount(0);
   });
+
+  // 1.0.0 — multi-update visibility regression. Pre-1.0 the panel could show
+  // only one update at a time even when the polling endpoint returned several,
+  // because downstream maps were keyed solely by leaf and a leaf collision
+  // (or unrelated downstream lookup) could mask entries. This test pins the
+  // polling response to TWO updates and asserts the dropdown lists BOTH.
+  test("dropdown lists every update when /api/skills/updates returns multiple", async ({ page }) => {
+    await page.route("**/api/skills/updates", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            name: "test-plugin/skill-builder",
+            installed: "0.1.0",
+            latest: "1.0.3",
+            updateAvailable: true,
+          },
+          {
+            name: "test-plugin/hi-anton",
+            installed: "1.0.2",
+            latest: "1.0.3",
+            updateAvailable: true,
+          },
+        ]),
+      });
+    });
+
+    await page.goto("/");
+
+    const badge = page.getByTestId("update-bell-badge");
+    await expect(badge).toHaveText("2");
+
+    await page.getByTestId("update-bell").click();
+    const dropdown = page.getByTestId("update-dropdown");
+    await expect(dropdown).toBeVisible();
+    await expect(dropdown).toContainText("2 updates available");
+
+    const rows = page.getByTestId("update-dropdown-row");
+    await expect(rows).toHaveCount(2);
+    await expect(rows.filter({ hasText: "skill-builder" })).toHaveCount(1);
+    await expect(rows.filter({ hasText: "hi-anton" })).toHaveCount(1);
+  });
+
+  test("dropdown surfaces both entries when two updates share a leaf across plugins", async ({ page }) => {
+    await page.route("**/api/skills/updates", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            name: "acme/plugin-x/foo",
+            installed: "1.0.0",
+            latest: "1.1.0",
+            updateAvailable: true,
+          },
+          {
+            name: "other/plugin-y/foo",
+            installed: "2.0.0",
+            latest: "2.1.0",
+            updateAvailable: true,
+          },
+        ]),
+      });
+    });
+
+    await page.goto("/");
+
+    const badge = page.getByTestId("update-bell-badge");
+    await expect(badge).toHaveText("2");
+
+    await page.getByTestId("update-bell").click();
+    const dropdown = page.getByTestId("update-dropdown");
+    await expect(dropdown).toBeVisible();
+    await expect(dropdown).toContainText("2 updates available");
+
+    const rows = page.getByTestId("update-dropdown-row");
+    await expect(rows).toHaveCount(2);
+    await expect(rows.filter({ hasText: "acme/plugin-x/foo" })).toHaveCount(1);
+    await expect(rows.filter({ hasText: "other/plugin-y/foo" })).toHaveCount(1);
+  });
 });

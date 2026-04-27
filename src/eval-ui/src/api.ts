@@ -376,6 +376,27 @@ export const api = {
     return Array.isArray(raw) ? raw.map(normalizeSkillInfo) : [];
   },
 
+  // 0793: convert a folder of standalone authored skills into a Claude Code
+  // plugin by writing <pluginDir>/.claude-plugin/plugin.json. Server derives
+  // pluginDir from anchorSkillDir (= dirname(dirname(anchor))). Validation is
+  // delegated to `claude plugin validate` server-side.
+  async convertToPlugin(req: {
+    anchorSkillDir: string;
+    pluginName: string;
+    description: string;
+  }): Promise<{
+    ok: true;
+    pluginDir: string;
+    manifestPath: string;
+    validation: "passed" | "skipped";
+  }> {
+    return fetchJson("/api/authoring/convert-to-plugin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
+  },
+
   // 0686: per-agent scope stats + shared-folder grouping for the
   // AgentScopePicker. Returns agents with filesystem presence only.
   getAgents(): Promise<AgentsResponse> {

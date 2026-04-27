@@ -5,10 +5,11 @@ description: >
   "new skill", "create a skill", "build a skill", "make a skill",
   "generate a skill", "author a skill", "skill builder".
 metadata:
-  version: 1.0.3
+  version: 1.0.4
   homepage: https://verified-skill.com/skills/skill-builder
   tags:
     - skill-authoring
+    - plugin-authoring
     - meta
     - universal
 ---
@@ -137,6 +138,52 @@ verification surfaces (Studio UI state for B, Claude Code's native
 skill-creator log for C). Consumers that need "did skill-builder
 activate?" gating must check the sentinel AND tolerate its absence
 in fallback modes.
+
+## Authoring a plugin (multi-skill bundle)
+
+Claude Code's plugin system lets you ship 2+ related skills under a single
+shared identity (a folder with `.claude-plugin/plugin.json` and one or more
+`skills/<slug>/SKILL.md` underneath). Prefer plugin mode over standalone
+when **the user describes 2+ related skills under a shared identity** —
+e.g. "a plugin called `hi-anton` with `greet` and `farewell` skills", or
+"bundle these under one namespace for distribution".
+
+`claude plugin` CLI has no `new`/`create` subcommand — plugin authoring is
+otherwise unowned. There are three concrete paths to land a valid plugin
+manifest, all of which delegate schema validation to
+`claude plugin validate <path>` so vskill never duplicates Claude Code's
+plugin schema:
+
+1. **`vskill plugin new <name> [--with-skill <slug>] [--description "..."]`**
+   *(CLI; preferred when working from the terminal)*. Scaffolds
+   `<name>/.claude-plugin/plugin.json` and (optionally) a first skill.
+   Runs `claude plugin validate <name>` after writing; on failure the
+   manifest is unlinked so a broken plugin never lands.
+
+2. **Studio Create-Skill modal → "Plugin (multi-skill)" mode** (writes both
+   `<plugin>/.claude-plugin/plugin.json` and a first
+   `<plugin>/skills/<skill>/SKILL.md` in a single click).
+
+3. **Studio sidebar "Convert →" CTA** *(when standalone skills already
+   exist)*. The AUTHORING > Skills section detects folders with 2+
+   standalone skills and offers a one-click promotion to a real plugin.
+   Behind the scenes this calls `POST /api/authoring/convert-to-plugin`.
+
+Folder shape after authoring:
+
+```
+my-plugin/
+├── .claude-plugin/
+│   └── plugin.json          # {"name":"my-plugin","description":"…"} — author/version derived at install time
+└── skills/
+    ├── greet/SKILL.md
+    └── farewell/SKILL.md
+```
+
+Once any of the three paths writes a valid manifest, the next refresh in
+Skill Studio promotes the affected skills' `scopeV2` from
+`authoring-project` to `authoring-plugin` automatically — no further user
+action needed.
 
 ## What this is NOT
 

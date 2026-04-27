@@ -310,9 +310,9 @@ export function CreateSkillModal({
             />
 
             <DestinationCard
-              title="New plugin"
-              subtitle={canSelectNewPlugin ? "Bundles one or more skills for distribution" : "Claude Code only"}
-              description="Scaffolds <plugin>/.claude-plugin/plugin.json and its first skill."
+              title="Plugin (multi-skill)"
+              subtitle={canSelectNewPlugin ? "Bundle related skills under one Claude Code plugin" : "Claude Code only"}
+              description="Creates <folder>/.claude-plugin/plugin.json and <folder>/skills/<first>/SKILL.md."
               icon="📦"
               disabled={!canSelectNewPlugin}
               selected={mode === "new-plugin"}

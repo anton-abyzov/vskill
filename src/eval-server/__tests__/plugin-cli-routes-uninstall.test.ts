@@ -90,14 +90,14 @@ async function callUninstall(name: string, body: object = {}): Promise<Captured>
 }
 
 describe("POST /api/plugins/:name/uninstall — orphan-cache fallback (0767)", () => {
+  // 0795: after `claude plugin list` was removed from the CLI, the route
+  // no longer shells out for ref resolution or post-action refresh — both
+  // calls go through `discoverInstalledPlugins` (filesystem walk). Each test
+  // therefore mocks `runClaudePlugin` exactly once (for the actual
+  // install/uninstall/enable/disable subcommand, which DO still exist).
+
   it("returns ok:false unchanged when CLI fails for a non-orphan reason", async () => {
-    // First call (the route fetches the installed list to resolve refs).
-    mocks.runClaudePlugin.mockResolvedValueOnce({
-      stdout: "",
-      stderr: "",
-      code: 0,
-    });
-    // Second call: actual uninstall.
+    // Single call: the actual uninstall.
     mocks.runClaudePlugin.mockResolvedValueOnce({
       stdout: "",
       stderr: "Permission denied",
@@ -117,17 +117,14 @@ describe("POST /api/plugins/:name/uninstall — orphan-cache fallback (0767)", (
     const orphan = join(cacheRoot, "claude-plugins-official", "skill-creator");
     seed(join(orphan, "78497c524da3"));
 
-    // installed-list call → empty
-    mocks.runClaudePlugin.mockResolvedValueOnce({ stdout: "", stderr: "", code: 0 });
-    // uninstall call → "not found"
+    // Single call: uninstall returns "not found"; the route's listOrphan path
+    // takes over and removes the cache dir directly.
     mocks.runClaudePlugin.mockResolvedValueOnce({
       stdout: "",
       stderr:
         '✘ Failed to uninstall plugin "skill-creator": Plugin "skill-creator" not found in installed plugins',
       code: 1,
     });
-    // Post-cleanup re-fetch.
-    mocks.runClaudePlugin.mockResolvedValueOnce({ stdout: "", stderr: "", code: 0 });
 
     const result = await callUninstall("skill-creator");
 
@@ -142,13 +139,11 @@ describe("POST /api/plugins/:name/uninstall — orphan-cache fallback (0767)", (
     const orphan = join(cacheRoot, "claude-plugins-official", "skill-creator");
     seed(join(orphan, "abc"));
 
-    mocks.runClaudePlugin.mockResolvedValueOnce({ stdout: "", stderr: "", code: 0 });
     mocks.runClaudePlugin.mockResolvedValueOnce({
       stdout: "",
       stderr: 'Plugin "skill-creator" not found in installed plugins',
       code: 1,
     });
-    mocks.runClaudePlugin.mockResolvedValueOnce({ stdout: "", stderr: "", code: 0 });
 
     const result = await callUninstall("skill-creator@claude-plugins-official");
     expect(result.body?.ok).toBe(true);
@@ -156,7 +151,6 @@ describe("POST /api/plugins/:name/uninstall — orphan-cache fallback (0767)", (
   });
 
   it("returns the original CLI error when 'not found' but no orphan cache dir exists", async () => {
-    mocks.runClaudePlugin.mockResolvedValueOnce({ stdout: "", stderr: "", code: 0 });
     mocks.runClaudePlugin.mockResolvedValueOnce({
       stdout: "",
       stderr: 'Plugin "ghost" not found in installed plugins',
@@ -171,17 +165,10 @@ describe("POST /api/plugins/:name/uninstall — orphan-cache fallback (0767)", (
 
   it("returns ok:true with no fallback when CLI succeeds (orphan branch never runs)", async () => {
     mocks.runClaudePlugin.mockResolvedValueOnce({
-      stdout: `Installed plugins:\n\n  ❯ skill-creator@claude-plugins-official\n    Version: 1.0.0\n    Scope: user\n    Status: ✔ enabled\n`,
-      stderr: "",
-      code: 0,
-    });
-    mocks.runClaudePlugin.mockResolvedValueOnce({
       stdout: "Uninstalled plugin",
       stderr: "",
       code: 0,
     });
-    // Re-fetch of plugin list after success.
-    mocks.runClaudePlugin.mockResolvedValueOnce({ stdout: "", stderr: "", code: 0 });
 
     const result = await callUninstall("skill-creator");
     expect(result.body?.ok).toBe(true);

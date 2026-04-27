@@ -42,6 +42,7 @@ import {
   listOrphanPluginCacheDirs,
   removeOrphanPluginCacheDirs,
 } from "./plugin-orphan-cleanup.js";
+import { discoverInstalledPlugins } from "./plugin-discovery.js";
 
 const VALID_SCOPES: readonly PluginScope[] = ["user", "project", "local"] as const;
 
@@ -57,10 +58,18 @@ function sendError(res: ServerResponse, status: number, code: string, msg: strin
   sendJson(res, { ok: false, code, error: msg }, status);
 }
 
-async function fetchPluginList(cwd?: string): Promise<InstalledPlugin[]> {
-  const result = await runClaudePlugin(["list"], { cwd, timeout: 15_000 });
-  if (result.code !== 0) return [];
-  return parseInstalledPlugins(result.stdout);
+/**
+ * 0795 — replaces `claude plugin list` (subcommand removed from Claude Code).
+ * Walks the plugin cache + reads enabledPlugins from settings.json. Same
+ * `InstalledPlugin[]` shape so callers (mutation routes that refresh the
+ * list after action) need no change.
+ *
+ * `runClaudePlugin` is still used elsewhere in this file for install/uninstall/
+ * enable/disable, which DO exist as subcommands.
+ */
+async function fetchPluginList(cwd?: string, cacheRoot?: string): Promise<InstalledPlugin[]> {
+  const root = cacheRoot ?? join(homedir(), ".claude", "plugins", "cache");
+  return discoverInstalledPlugins({ cacheRoot: root, projectDir: cwd });
 }
 
 export interface PluginCliRoutesOptions {
@@ -77,14 +86,13 @@ export function registerPluginCliRoutes(
   options: PluginCliRoutesOptions = {},
 ): void {
   const cacheRoot = options.cacheRoot ?? join(homedir(), ".claude", "plugins", "cache");
-  // GET /api/plugins — list installed plugins
-  router.get("/api/plugins", async (_req, res) => {
+  // GET /api/plugins — list installed plugins.
+  // 0795: was shelling out to `claude plugin list`, but Claude Code removed
+  // that subcommand. We now walk the plugin cache + read enabledPlugins from
+  // settings.json directly. Same response contract.
+  router.get("/api/plugins", (_req, res) => {
     try {
-      const result = await runClaudePlugin(["list"], { cwd: root, timeout: 15_000 });
-      if (result.code !== 0) {
-        return sendError(res, 500, "claude-cli-failed", result.stderr.trim() || "claude plugin list failed");
-      }
-      const plugins = parseInstalledPlugins(result.stdout);
+      const plugins = discoverInstalledPlugins({ cacheRoot, projectDir: root });
       sendJson(res, { plugins });
     } catch (err) {
       sendError(res, 500, "unexpected", err instanceof Error ? err.message : String(err));

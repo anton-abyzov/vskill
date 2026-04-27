@@ -15,6 +15,13 @@ import { createRoot, type Root } from "react-dom/client";
 
 import type { ConfigResponse, ProviderInfo } from "../../api";
 
+vi.mock("../../StudioContext", () => ({
+  useStudio: () => ({
+    refreshSkills: vi.fn(),
+    revealSkill: vi.fn(),
+  }),
+}));
+
 vi.mock("../../ConfigContext", () => ({
   useConfig: () => ({
     config: {

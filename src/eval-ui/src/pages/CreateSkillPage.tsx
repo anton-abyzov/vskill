@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useCreateSkill, toKebab } from "../hooks/useCreateSkill";
 import { useConfig } from "../ConfigContext";
+import { useStudio } from "../StudioContext";
 import { ProgressLog } from "../components/ProgressLog";
 import { ErrorCard } from "../components/ErrorCard";
 import { renderMarkdown } from "../utils/renderMarkdown";
@@ -79,8 +80,8 @@ function SparkleIcon({ size = 14, color = "currentColor" }: { size?: number; col
 // ---------------------------------------------------------------------------
 
 export function CreateSkillPage() {
-  const navigate = useNavigate();
   const { config } = useConfig();
+  const { refreshSkills, revealSkill } = useStudio();
 
   // 0734: state for the engine install modal — set when the user clicks
   // [Install] next to a missing engine in EngineSelector.
@@ -257,7 +258,16 @@ export function CreateSkillPage() {
   const forceLayout = prefill.mode === "standalone" ? 3 : undefined;
 
   const sk = useCreateSkill({
-    onCreated: (plugin, skill) => navigate(`/skills/${plugin}/${skill}`),
+    // 0788: mirror CreateSkillModal's onCreated (App.tsx:743-761) — the
+    // studio uses ad-hoc hash routing (useHashRoute.ts only knows #/create
+    // and #/updates), so react-router's navigate('/skills/...') was a no-op
+    // that left state.selectedSkill stale. revealSkill dispatches
+    // REVEAL_SKILL AND writes window.location.hash; refreshSkills first so
+    // the just-created row is in state.skills before the matcher runs.
+    onCreated: (plugin, skill) => {
+      refreshSkills();
+      setTimeout(() => revealSkill(plugin, skill), 500);
+    },
     resolveAiConfigOverride,
     forceLayout,
   });

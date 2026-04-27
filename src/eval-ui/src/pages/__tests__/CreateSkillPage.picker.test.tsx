@@ -44,6 +44,13 @@ const configRef: { current: ConfigResponse | null } = { current: null };
 // Hoisted module mocks — must be declared before the CreateSkillPage import
 // ---------------------------------------------------------------------------
 
+vi.mock("../../StudioContext", () => ({
+  useStudio: () => ({
+    refreshSkills: vi.fn(),
+    revealSkill: vi.fn(),
+  }),
+}));
+
 vi.mock("../../ConfigContext", () => ({
   useConfig: () => ({
     config: configRef.current,

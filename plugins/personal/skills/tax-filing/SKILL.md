@@ -9,6 +9,9 @@ description: >
   home office deduction, or any tax-year financial preparation. Also activate when the user wants to
   analyze business expenses, calculate tax liability, prepare audit documentation, or generate invoices
   for foreign contractors. This skill handles both C-Corp (Form 1120) and personal MFJ (Form 1040) returns.
+metadata:
+  version: 1.0.2
+  tags: tax, irs, accounting, ccorp, 1120, 1040, xero, finance
 ---
 
 # Tax Filing Skill

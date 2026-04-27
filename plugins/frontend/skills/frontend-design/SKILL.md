@@ -2,7 +2,7 @@
 name: frontend-design
 description: "Create distinctive, production-grade frontend interfaces with visual verification. Use this skill when the user asks to build web components, pages, landing pages, dashboards, React/Vue/Svelte components, HTML/CSS layouts, or any web UI that needs to look polished. Also activates when styling, beautifying, redesigning, or doing visual refresh of existing UI. Covers the full loop: design thinking, code generation, and browser-based visual verification to iterate until the result actually looks right. Use this skill even if the user doesn't explicitly say 'design' — any request to build or improve a web interface benefits from this skill's aesthetic guidance and verification workflow."
 metadata:
-  version: 1.0.0
+  version: 1.0.2
   tags: frontend, design, ui, visual-verification, browser, chrome, playwright, css, animations, accessibility
 ---
 

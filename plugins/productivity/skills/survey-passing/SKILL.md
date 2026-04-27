@@ -2,6 +2,7 @@
 name: survey-passing
 description: "Find and complete paid expert surveys from expert network platforms (Arbolus, Guidepoint, GLG, AlphaSights, Techsponential) using the user's real professional background. Automates the mechanical form-filling of expert consultations that pay $50-$100+. Use this skill whenever the user mentions surveys, canopy, expert consultations, Arbolus, Guidepoint, GLG, AlphaSights, 'find surveys', 'check surveys', 'complete survey', 'paid survey', 'expert network', 'canopy reward', or any reference to survey rewards/honorariums. Also activate when the user asks to check Gmail for survey invitations or mentions earning money from expertise sharing."
 metadata:
+  version: 1.0.3
   tags: survey, expert-network, arbolus, guidepoint, glg, alphasights, techsponential, canopy, paid-survey, automation, gmail
 ---
 

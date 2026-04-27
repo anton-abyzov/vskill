@@ -2,6 +2,7 @@
 name: social-media-posting
 description: "Cross-platform social media content creation, posting, and engagement skill. Covers Instagram, LinkedIn, X/Twitter, Threads, YouTube, TikTok, Reddit, dev.to, Facebook, Discord, and Telegram. Handles AI image generation (Nano Banana Pro with 3 options per image at correct aspect ratios), AI video generation (Veo 3.1), carousel creation, platform-specific posting flows, deduplication against recent posts, strategic content planning (hook formulas, psychological angles, content pillars), brand context integration, proof screenshot creation for virality, and daily engagement (replying to 10 threads per platform). Use this skill whenever the user wants to post content to social media, create social media visuals, schedule posts, engage with followers, grow their audience, reply to threads, or manage any social media activity. Also activate when the user mentions any social platform by name, says 'post this', 'share on social', 'engage', 'reply to threads', 'publish a post about', 'social media blast', 'cross-post this', 'announce on social', 'spread the word', 'promote this on', 'quick post', 'post with video', 'create social content for', 'repost across socials', or references content distribution."
 metadata:
+  version: 1.0.3
   tags: social-media, instagram, linkedin, twitter, threads, youtube, tiktok, reddit, discord, telegram, posting, engagement, automation, image-generation, content-creation, copywriting, publishing, video-generation, veo
 ---
 

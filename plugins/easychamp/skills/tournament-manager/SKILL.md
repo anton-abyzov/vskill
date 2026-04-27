@@ -2,7 +2,7 @@
 name: tournament-manager
 description: "Tournament manager for the EasyChamp platform. Use when the user wants to create or operate a sports league, tournament, or bracket — covers generating a league, spinning up a tournament under it, building the bracket, producing a schedule with venues, and entering match results. Activates for 'create a league', 'start a tournament', 'make a bracket', 'schedule matches', 'enter a score', 'record results', 'basketball tournament', 'soccer league', 'single-elim bracket', 'double-elimination', or any EasyChamp-related workflow. Backed by the EasyChamp MCP — requires an EASYCHAMP_API_KEY for live use, or EASYCHAMP_DEMO=1 for offline demos. Do NOT activate for non-sports scheduling (use a generic calendar skill instead) or for tournament-style brackets inside unrelated domains (e.g. 'coding challenge bracket' without EasyChamp — prompt for clarification)."
 metadata:
-  version: 0.1.0
+  version: 1.0.3
   author: Anton Abyzov
   homepage: https://easychamp.com
   tags: easychamp, tournament, league, bracket, schedule, results, sports, mcp, showcase

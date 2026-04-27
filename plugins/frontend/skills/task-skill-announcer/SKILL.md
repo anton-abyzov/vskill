@@ -1,6 +1,10 @@
 ---
+name: task-skill-announcer
 description: "This skill should be used whenever the user asks to \"run the task skill\", \"invoke the task skill\", \"use the task skill\", \"trigger task skill\", or mentions a \"task skill\" in any context. Make sure to use this skill whenever the user references task skill activation, task skill testing, or wants to verify the task skill is working. Activate on any mention of \"I'm a task skill\" or requests to demonstrate task skill behavior."
 model: haiku
+metadata:
+  version: 1.0.3
+  tags: smoke-test, demo, skill-routing
 ---
 
 # /task-skill-announcer

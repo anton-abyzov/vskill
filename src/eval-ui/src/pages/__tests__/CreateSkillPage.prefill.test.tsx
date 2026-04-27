@@ -23,6 +23,13 @@ const setDescriptionMock = vi.fn();
 const setPluginMock = vi.fn();
 const useCreateSkillOptionsSpy = vi.fn();
 
+vi.mock("../../StudioContext", () => ({
+  useStudio: () => ({
+    refreshSkills: vi.fn(),
+    revealSkill: vi.fn(),
+  }),
+}));
+
 vi.mock("../../ConfigContext", () => ({
   useConfig: () => ({
     config: {

@@ -197,19 +197,23 @@ describe("SkillDetailPanel — T-022 versions", () => {
 // T-023: install command + sanitization
 // ---------------------------------------------------------------------------
 describe("SkillDetailPanel — T-023 install command", () => {
-  it("renders `vskill install <publisher>/<slug>` for the latest version", async () => {
+  it("renders `npx vskill@latest install <publisher>/<slug>` (npm variant) for the latest version", async () => {
     globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
       if (url.endsWith("/versions")) return jsonResponse({ versions: [{ version: "1.0.0", isLatest: true }] });
       return jsonResponse({ displayName: "X", ownerSlug: "obsidian", repoSlug: "brain", skillSlug: "wiki-sync" });
     }) as unknown as typeof fetch;
     const h = await mount({});
     await flushMicrotasks();
-    const cmd = h.container.querySelector("[data-testid='skill-detail-install-command']");
-    expect(cmd?.textContent).toBe("vskill install obsidian/brain/wiki-sync");
+    const npmCmd = h.container.querySelector("[data-testid='skill-detail-install-variant-cmd-npm']");
+    expect(npmCmd?.textContent).toBe("npx vskill@latest install obsidian/brain/wiki-sync");
+    // All 5 variants are present.
+    for (const label of ["npm", "bun", "pnpm", "yarn", "alternative"]) {
+      expect(h.container.querySelector(`[data-testid='skill-detail-install-variant-${label}']`)).toBeTruthy();
+    }
     await h.unmount();
   });
 
-  it("renders `@<version>` form for non-latest selection", async () => {
+  it("renders `@<version>` form across all variants for non-latest selection", async () => {
     globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
       if (url.endsWith("/versions")) {
         return jsonResponse({
@@ -227,8 +231,10 @@ describe("SkillDetailPanel — T-023 install command", () => {
     const rows = h.container.querySelectorAll("[data-testid='skill-detail-version-row']");
     const oldRow = Array.from(rows).find((r) => r.getAttribute("data-version") === "1.0.0") as HTMLButtonElement;
     await act(async () => { oldRow.click(); });
-    const cmd = h.container.querySelector("[data-testid='skill-detail-install-command']");
-    expect(cmd?.textContent).toBe("vskill install obsidian/brain/wiki-sync@1.0.0");
+    const npmCmd = h.container.querySelector("[data-testid='skill-detail-install-variant-cmd-npm']");
+    expect(npmCmd?.textContent).toBe("npx vskill@latest install obsidian/brain/wiki-sync@1.0.0");
+    const bunCmd = h.container.querySelector("[data-testid='skill-detail-install-variant-cmd-bun']");
+    expect(bunCmd?.textContent).toBe("bunx vskill@latest install obsidian/brain/wiki-sync@1.0.0");
     await h.unmount();
   });
 
@@ -263,12 +269,13 @@ describe("SkillDetailPanel — T-024 copy + T-028 telemetry", () => {
     const h = await mount({ onToast });
     await flushMicrotasks();
     const { act } = await import("react");
-    const copyBtn = h.container.querySelector("[data-testid='skill-detail-copy']") as HTMLButtonElement;
-    await act(async () => { copyBtn.click(); });
+    // Primary Install button copies the canonical npm command (`npx vskill@latest install …`).
+    const installBtn = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
+    await act(async () => { installBtn.click(); });
     await flushMicrotasks();
-    expect(writeText).toHaveBeenCalledWith("vskill install obsidian/brain/wiki-sync");
+    expect(writeText).toHaveBeenCalledWith("npx vskill@latest install obsidian/brain/wiki-sync");
     expect(onToast).toHaveBeenCalledTimes(1);
-    expect(onToast.mock.calls[0][0]).toContain("vskill install");
+    expect(onToast.mock.calls[0][0]).toContain("npx vskill@latest install");
     expect(onToast.mock.calls[0][1]).toBe("success");
     // Telemetry — fire-and-forget, keepalive: true
     const tcall = fetchSpy.mock.calls.find((c) => String(c[0]).includes("/api/v1/studio/telemetry/install-copy"));
@@ -292,11 +299,32 @@ describe("SkillDetailPanel — T-024 copy + T-028 telemetry", () => {
     const h = await mount({ onToast });
     await flushMicrotasks();
     const { act } = await import("react");
-    const copyBtn = h.container.querySelector("[data-testid='skill-detail-copy']") as HTMLButtonElement;
-    await act(async () => { copyBtn.click(); });
+    const installBtn = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
+    await act(async () => { installBtn.click(); });
     await flushMicrotasks();
     expect(writeText).toHaveBeenCalled();
     expect(onToast).toHaveBeenCalled();
+    await h.unmount();
+  });
+
+  // 0784: per-variant Copy chips each copy their OWN command (not the canonical npm).
+  it("clicking the bun Copy chip writes the bun command to the clipboard", async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/versions")) return jsonResponse({ versions: [{ version: "1.0.0", isLatest: true }] });
+      return jsonResponse({ displayName: "X", ownerSlug: "obsidian", repoSlug: "brain", skillSlug: "wiki-sync" });
+    }) as unknown as typeof fetch;
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const onToast = vi.fn();
+    const h = await mount({ onToast });
+    await flushMicrotasks();
+    const { act } = await import("react");
+    const bunCopy = h.container.querySelector("[data-testid='skill-detail-copy-bun']") as HTMLButtonElement;
+    await act(async () => { bunCopy.click(); });
+    await flushMicrotasks();
+    expect(writeText).toHaveBeenCalledWith("bunx vskill@latest install obsidian/brain/wiki-sync");
+    expect(onToast).toHaveBeenCalled();
+    expect(onToast.mock.calls[0][0]).toContain("bunx vskill@latest install");
     await h.unmount();
   });
 });

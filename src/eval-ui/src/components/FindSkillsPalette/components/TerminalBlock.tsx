@@ -13,7 +13,11 @@ export default function TerminalBlock({ children, compact }: TerminalBlockProps)
     <pre
       data-testid="terminal-block"
       style={{
-        background: "var(--bg-code)",
+        // 0784: --bg-code is not defined in eval-ui's globals — without a
+        // fallback the block rendered with NO background, leaving #E6EDF3
+        // text on the white surface (effectively invisible). Hardcoded #161B22
+        // as the fallback so the terminal block is always readable.
+        background: "var(--bg-code, #161B22)",
         color: "#E6EDF3",
         fontFamily: "var(--font-geist-mono)",
         fontSize: compact ? "0.8rem" : "0.875rem",

@@ -6,10 +6,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockMkdirSync = vi.hoisted(() => vi.fn());
 const mockWriteFileSync = vi.hoisted(() => vi.fn());
 const mockUnlinkSync = vi.hoisted(() => vi.fn());
+const mockExistsSync = vi.hoisted(() => vi.fn().mockReturnValue(false));
+const mockReadFileSync = vi.hoisted(() => vi.fn().mockReturnValue(""));
+const mockReaddirSync = vi.hoisted(() => vi.fn().mockReturnValue([]));
+const mockRmdirSync = vi.hoisted(() => vi.fn());
 vi.mock("node:fs", () => ({
   mkdirSync: (...args: unknown[]) => mockMkdirSync(...args),
   writeFileSync: (...args: unknown[]) => mockWriteFileSync(...args),
   unlinkSync: (...args: unknown[]) => mockUnlinkSync(...args),
+  existsSync: (...args: unknown[]) => mockExistsSync(...args),
+  readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
+  readdirSync: (...args: unknown[]) => mockReaddirSync(...args),
+  rmdirSync: (...args: unknown[]) => mockRmdirSync(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -406,6 +414,12 @@ describe("updateCommand", () => {
       sha: fullSha,
       tier: "VERIFIED",
     });
+    // 0765 metadata-only bump: when SHA matches, source does a canonical
+    // platform lookup via getSkill. Reject it here so this test stays
+    // focused on the "SHA matches, no change" intent — without this, the
+    // default beforeEach mockGetSkill returns version 2.0.0 and triggers
+    // a metadata bump path that overwrites lockfile.version.
+    mockGetSkill.mockRejectedValueOnce(new Error("not found"));
 
     const { updateCommand } = await import("./update.js");
     await updateCommand("frontend", { all: false });
@@ -437,9 +451,12 @@ describe("updateCommand", () => {
     await updateCommand("frontend", { all: false });
 
     expect(mockResolveVersion).toHaveBeenCalled();
+    // Source intentionally passes serverVersion: undefined for non-registry
+    // sources (update.ts: `parsed.type === "registry" ? result.version : undefined`).
+    // Lockfile source is "github:test/repo", so serverVersion is undefined here.
     expect(mockResolveVersion).toHaveBeenCalledWith(
       expect.objectContaining({
-        serverVersion: "3.0.0",
+        serverVersion: undefined,
         hashChanged: true,
         isFirstInstall: false,
       }),

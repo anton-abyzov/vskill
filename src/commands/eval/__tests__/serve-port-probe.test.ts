@@ -50,7 +50,9 @@ describe("probeVskillServer (0706 T-007)", () => {
     });
 
     // Fetch against the stub and assert our contract: projectName + root + model.
-    const resp = await fetch(`http://localhost:${port}/api/config`, {
+    // Use 127.0.0.1 explicitly — `localhost` resolves to ::1 first on macOS,
+    // and the stub binds IPv4 only, producing ECONNREFUSED ::1:<port>.
+    const resp = await fetch(`http://127.0.0.1:${port}/api/config`, {
       signal: AbortSignal.timeout(1000),
     });
     const data = (await resp.json()) as { root?: string };
@@ -64,7 +66,7 @@ describe("probeVskillServer (0706 T-007)", () => {
       res.end(JSON.stringify({ not: "vskill" }));
     });
 
-    const resp = await fetch(`http://localhost:${port}/api/config`, {
+    const resp = await fetch(`http://127.0.0.1:${port}/api/config`, {
       signal: AbortSignal.timeout(1000),
     });
     const data = (await resp.json()) as { root?: string };

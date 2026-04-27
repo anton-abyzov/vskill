@@ -270,8 +270,11 @@ describe("SkillDetailPanel — T-024 copy + T-028 telemetry", () => {
     await flushMicrotasks();
     const { act } = await import("react");
     // Primary Install button copies the canonical npm command (`npx vskill@latest install …`).
-    const installBtn = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
-    await act(async () => { installBtn.click(); });
+    // 0784 hotfix: primary button now invokes /api/studio/install-skill.
+    // Existing copy+telemetry behavior is exercised through the per-variant
+    // npm Copy chip (which still uses the original handleCopy path).
+    const npmCopyBtn = h.container.querySelector("[data-testid='skill-detail-copy-npm']") as HTMLButtonElement;
+    await act(async () => { npmCopyBtn.click(); });
     await flushMicrotasks();
     expect(writeText).toHaveBeenCalledWith("npx vskill@latest install obsidian/brain/wiki-sync --scope project");
     expect(onToast).toHaveBeenCalledTimes(1);
@@ -299,8 +302,11 @@ describe("SkillDetailPanel — T-024 copy + T-028 telemetry", () => {
     const h = await mount({ onToast });
     await flushMicrotasks();
     const { act } = await import("react");
-    const installBtn = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
-    await act(async () => { installBtn.click(); });
+    // 0784 hotfix: primary button now invokes /api/studio/install-skill.
+    // Existing copy+telemetry behavior is exercised through the per-variant
+    // npm Copy chip (which still uses the original handleCopy path).
+    const npmCopyBtn = h.container.querySelector("[data-testid='skill-detail-copy-npm']") as HTMLButtonElement;
+    await act(async () => { npmCopyBtn.click(); });
     await flushMicrotasks();
     expect(writeText).toHaveBeenCalled();
     expect(onToast).toHaveBeenCalled();

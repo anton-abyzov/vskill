@@ -186,7 +186,7 @@ export function InstallProgressToast({
               style={{
                 fontFamily: "var(--font-mono)",
                 fontSize: 10,
-                color: "var(--text-tertiary)",
+                color: "var(--text-primary)",
                 marginLeft: 4,
               }}
             >
@@ -199,7 +199,7 @@ export function InstallProgressToast({
                 display: "block",
                 fontFamily: "var(--font-mono)",
                 fontSize: 10,
-                color: "var(--text-tertiary)",
+                color: "var(--text-primary)",
                 marginTop: 2,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -212,7 +212,7 @@ export function InstallProgressToast({
         </span>
         <span
           aria-hidden
-          style={{ fontSize: 10, color: "var(--text-tertiary)" }}
+          style={{ fontSize: 10, color: "var(--text-primary)" }}
         >
           {expanded ? "▾" : "▸"}
         </span>

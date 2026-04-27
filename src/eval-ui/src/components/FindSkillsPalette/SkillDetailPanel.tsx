@@ -88,9 +88,18 @@ function publisherFromMetadata(meta: SkillMetadata | null, fallback: SelectedSki
   return `${fallback.owner}/${fallback.repo}`;
 }
 
+interface InstallVariant {
+  label: string;
+  comment: string;
+  command: string;
+}
+
 function buildInstallCommand(publisher: string, slug: string, version: string | null): {
   ok: true;
+  /** Canonical npm command — used by the primary Install button + Copy chip. */
   command: string;
+  /** All 5 package-manager variants for display. */
+  variants: InstallVariant[];
 } | { ok: false; reason: string } {
   // Sanitize ALL identifier components — refuse to render the panel on any
   // mismatch (AC-US4-06). Matches the 0717 contract.
@@ -101,7 +110,24 @@ function buildInstallCommand(publisher: string, slug: string, version: string | 
   if (version && !VERSION_REGEX.test(version)) {
     return { ok: false, reason: "Invalid version identifier" };
   }
-  return { ok: true, command: `vskill install ${ident}` };
+  // 0784: render every common package-manager invocation so the user can pick
+  // their flavor without having to translate. Canonical = npm (`npx`) — that's
+  // what the primary Install button + Copy chip copy.
+  const npmCmd = `npx vskill@latest install ${ident}`;
+  const variants: InstallVariant[] = [
+    { label: "npm", comment: "# npm", command: npmCmd },
+    { label: "bun", comment: "# bun", command: `bunx vskill@latest install ${ident}` },
+    { label: "pnpm", comment: "# pnpm", command: `pnpx vskill@latest install ${ident}` },
+    { label: "yarn", comment: "# yarn", command: `yarn dlx vskill@latest install ${ident}` },
+    {
+      label: "alternative",
+      comment: "# alternative (publisher + --skill flag)",
+      command: version
+        ? `npx vskill@latest install ${publisher}@${version} --skill ${slug}`
+        : `npx vskill@latest install ${publisher} --skill ${slug}`,
+    },
+  ];
+  return { ok: true, command: npmCmd, variants };
 }
 
 function dispatchToastFallback(message: string, kind: "success" | "error", durationMs: number) {
@@ -315,7 +341,7 @@ export function SkillDetailPanel({
       ts: Date.now(),
     });
     const message = ok
-      ? `Run vskill install ${publisher}/${slug}${isLatestSelected ? "" : `@${selectedVersion}`} in your terminal`
+      ? `Run ${installResult.command} in your terminal`
       : "Copy failed — please copy the command manually.";
     if (onToast) {
       try { onToast(message, ok ? "success" : "error"); } catch { /* hook failure non-fatal */ }
@@ -589,19 +615,19 @@ export function SkillDetailPanel({
                     Install
                   </h3>
                   {/* 0784: primary Install CTA above the terminal block. Shares
-                      handleCopy with the Copy chip so behavior — clipboard,
-                      toast, telemetry — is identical regardless of which
-                      button the user picks. Mirrors the same pattern shipped
-                      to verified-skill.com /studio/find/[…]. */}
+                      handleCopy with the per-variant Copy chips so behavior —
+                      clipboard write of the canonical npm command, toast,
+                      telemetry — is identical regardless of which button the
+                      user picks. */}
                   <button
                     type="button"
                     onClick={handleCopy}
                     data-testid="skill-detail-install-primary"
-                    aria-label="Install skill — copy command to clipboard"
+                    aria-label="Install skill — copy npm command to clipboard"
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
-                      marginBottom: "0.5rem",
+                      marginBottom: "0.75rem",
                       padding: "0.5rem 1rem",
                       borderRadius: 6,
                       border: "1px solid var(--text-primary, #191919)",
@@ -615,31 +641,66 @@ export function SkillDetailPanel({
                   >
                     Install
                   </button>
-                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "stretch" }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <TerminalBlock compact>
-                        <span data-testid="skill-detail-install-command">{installResult.command}</span>
-                      </TerminalBlock>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopy}
-                      data-testid="skill-detail-copy"
-                      aria-label="Copy install command"
-                      style={{
-                        flexShrink: 0,
-                        padding: "0 1rem",
-                        borderRadius: 6,
-                        border: "1px solid var(--color-rule, #E8E1D6)",
-                        background: "var(--bg-surface, #FFFFFF)",
-                        color: "var(--text-primary, #191919)",
-                        cursor: "pointer",
-                        fontFamily: "var(--font-mono, monospace)",
-                        fontSize: "0.8125rem",
-                      }}
-                    >
-                      Copy
-                    </button>
+                  {/* 0784: render every common package-manager variant so the
+                      user picks their flavor without translating. Each row
+                      shows a "# label" comment, the `$ command`, and a Copy
+                      chip targeted to that single variant. */}
+                  <div data-testid="skill-detail-install-command" style={{ display: "block" }}>
+                    <TerminalBlock compact>
+                      {installResult.variants.map((v, i) => (
+                        <div
+                          key={v.label}
+                          data-testid={`skill-detail-install-variant-${v.label}`}
+                          style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", marginTop: i === 0 ? 0 : "0.75rem" }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ color: "#8B949E", marginBottom: "0.125rem" }}>{v.comment}</div>
+                            <div>
+                              <span style={{ color: "#8B949E", marginRight: "0.5rem" }}>$</span>
+                              <span data-testid={`skill-detail-install-variant-cmd-${v.label}`}>{v.command}</span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const ok = await copyToClipboard(v.command);
+                              const message = ok
+                                ? `Run ${v.command} in your terminal`
+                                : "Copy failed — please copy the command manually.";
+                              if (onToast) {
+                                try { onToast(message, ok ? "success" : "error"); } catch { /* hook failure non-fatal */ }
+                              } else {
+                                dispatchToastFallback(message, ok ? "success" : "error", 3500);
+                              }
+                              if (ok) {
+                                fireInstallCopyTelemetry(telemetryInstallCopyUrl, {
+                                  skillName,
+                                  version: selectedVersion ?? "",
+                                  q: "",
+                                  ts: Date.now(),
+                                });
+                              }
+                            }}
+                            data-testid={`skill-detail-copy-${v.label}`}
+                            aria-label={`Copy ${v.label} install command`}
+                            style={{
+                              flexShrink: 0,
+                              padding: "0.25rem 0.6rem",
+                              borderRadius: 4,
+                              border: "1px solid color-mix(in srgb, #E6EDF3 25%, transparent)",
+                              background: "color-mix(in srgb, #E6EDF3 8%, transparent)",
+                              color: "#E6EDF3",
+                              cursor: "pointer",
+                              fontFamily: "var(--font-mono, monospace)",
+                              fontSize: "0.7rem",
+                              alignSelf: "flex-end",
+                            }}
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      ))}
+                    </TerminalBlock>
                   </div>
                 </section>
               ) : null}

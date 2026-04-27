@@ -230,22 +230,39 @@ export function TopRail({ projectName, selected, onOpenPalette, onHome, projectP
           onClick={onOpenPalette}
           aria-label="Open command palette"
           title="Command palette (⌘K)"
+          data-testid="command-palette-trigger"
           style={{
             display: "inline-flex",
             alignItems: "center",
             gap: 6,
-            height: 26,
-            padding: "0 10px",
-            borderRadius: 4,
+            height: 28,
+            padding: "0 12px",
+            borderRadius: 6,
             border: "1px solid var(--border-default)",
             background: "transparent",
             color: "var(--text-secondary)",
-            fontSize: 11,
-            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+            fontWeight: 500,
+            fontFamily: "var(--font-sans)",
             cursor: "pointer",
+            letterSpacing: "0.01em",
           }}
         >
-          <span>⌘K</span>
+          <span>Commands</span>
+          <kbd
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              color: "var(--text-faint)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 4,
+              padding: "1px 5px",
+              marginLeft: 2,
+              lineHeight: 1,
+            }}
+          >
+            ⌘K
+          </kbd>
         </button>
       </div>
     </div>

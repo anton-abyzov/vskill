@@ -7,7 +7,6 @@ import { UpdateBell } from "./UpdateBell";
 interface Props {
   projectName: string | null;
   selected: SelectedSkill | null;
-  onOpenPalette: () => void;
   /** 0698 T-016: optional slot for the multi-project picker pill next to the logo.
    *  When provided, renders instead of the legacy projectName inline label. */
   projectPickerSlot?: ReactNode;
@@ -42,7 +41,11 @@ function dispatchNavigateScope(
 }
 
 /**
- * Top rail — logo + "Skill Studio" label + breadcrumb + ⌘K trigger.
+ * Top rail — logo · project picker | breadcrumb | skill actions | session status.
+ *
+ * Right side is split into two groups separated by a hairline divider:
+ *   - Skill actions: FindSkills (⌘⇧K) + Create Skill CTA
+ *   - Session status: AgentModelPicker + UpdateBell
  *
  * Breadcrumb format: `OWN › plugin › skill-name` or `INSTALLED › plugin › skill-name`.
  * When no skill is selected, only the project name shows after the logo.
@@ -52,7 +55,7 @@ function dispatchNavigateScope(
  *   - project name  — Inter Tight 400, --text-secondary.
  *   - breadcrumb    — Inter Tight 400, plugin name in meta style, skill name in primary.
  */
-export function TopRail({ projectName, selected, onOpenPalette, onHome, projectPickerSlot, onRequestCreateSkill, findSkillsSlot }: Props) {
+export function TopRail({ projectName, selected, onHome, projectPickerSlot, onRequestCreateSkill, findSkillsSlot }: Props) {
   // 0700 polish: breadcrumb origin label — use Anthropic-aligned vocabulary
   // ("Project" for installed skills the current agent consumes in its
   // `.claude/skills/`, "Skills" for user-authored) to match the Sidebar
@@ -162,108 +165,79 @@ export function TopRail({ projectName, selected, onOpenPalette, onHome, projectP
         )}
       </nav>
 
-      {/* Quick actions */}
+      {/* Right side — two functional groups separated by a hairline divider.
+          Group A (skill actions): find existing skills + create new skill.
+          Group B (session status): which agent/model is active + update notifications. */}
       <div
         data-toprail-right="true"
-        style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
+        style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}
       >
-        {/* 0741 T-018 (AC-US2-01): FindSkillsNavButton lives immediately to
-            the LEFT of the "+ New Skill" CTA, so the rightmost slot stays
-            owned by the primary action. */}
-        {findSkillsSlot}
-        {/* 0698 polish: primary Create Skill CTA — highest-intent action
-            gets the strongest visual treatment. */}
-        {onRequestCreateSkill && (
-          <button
-            type="button"
-            data-slot="create-skill-button"
-            onClick={onRequestCreateSkill}
-            aria-label="Create a new skill"
-            title="Create a new skill"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              height: 28,
-              padding: "0 12px",
-              borderRadius: 6,
-              border: "1px solid var(--color-action, #2F5B8E)",
-              background: "var(--color-action, #2F5B8E)",
-              color: "var(--color-action-ink, #FFFFFF)",
-              fontSize: 12,
-              fontWeight: 600,
-              fontFamily: "var(--font-sans)",
-              cursor: "pointer",
-              letterSpacing: "0.01em",
-              boxShadow: "0 1px 2px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.12)",
-            }}
-          >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
+        {/* Group A — skill actions */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {findSkillsSlot}
+          {onRequestCreateSkill && (
+            <button
+              type="button"
+              data-slot="create-skill-button"
+              onClick={onRequestCreateSkill}
+              aria-label="Create a new skill"
+              title="Create a new skill"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                height: 28,
+                padding: "0 12px",
+                borderRadius: 6,
+                border: "1px solid var(--color-action, #2F5B8E)",
+                background: "var(--color-action, #2F5B8E)",
+                color: "var(--color-action-ink, #FFFFFF)",
+                fontSize: 12,
+                fontWeight: 600,
+                fontFamily: "var(--font-sans)",
+                cursor: "pointer",
+                letterSpacing: "0.01em",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.12)",
+              }}
             >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            New Skill
-          </button>
-        )}
-        {/* 0682: AgentModelPicker replaces the legacy flat ModelSelector.
-            Two-pane agent + model chooser with searchable OpenRouter catalog,
-            unified Settings modal, and Claude Code auto-default. */}
-        <span data-slot="agent-model-picker" style={{ minWidth: 200 }}>
-          <AgentModelPicker />
-        </span>
-        {/* 0683 T-008: UpdateBell sits between ModelSelector and the ⌘K button. */}
-        <span data-slot="update-bell" style={{ display: "inline-flex" }}>
-          <UpdateBell />
-        </span>
-        <button
-          type="button"
-          onClick={onOpenPalette}
-          aria-label="Open command palette"
-          title="Command palette (⌘K)"
-          data-testid="command-palette-trigger"
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              New Skill
+            </button>
+          )}
+        </div>
+
+        {/* Hairline divider — same token used by the project-picker separator. */}
+        <span
+          aria-hidden="true"
           style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            height: 28,
-            padding: "0 12px",
-            borderRadius: 6,
-            border: "1px solid var(--border-default)",
-            background: "transparent",
-            color: "var(--text-secondary)",
-            fontSize: 12,
-            fontWeight: 500,
-            fontFamily: "var(--font-sans)",
-            cursor: "pointer",
-            letterSpacing: "0.01em",
+            width: 1,
+            height: 18,
+            background: "var(--border-default)",
           }}
-        >
-          <span>Commands</span>
-          <kbd
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
-              color: "var(--text-faint)",
-              border: "1px solid var(--border-default)",
-              borderRadius: 4,
-              padding: "1px 5px",
-              marginLeft: 2,
-              lineHeight: 1,
-            }}
-          >
-            ⌘K
-          </kbd>
-        </button>
+        />
+
+        {/* Group B — session status */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span data-slot="agent-model-picker" style={{ minWidth: 200 }}>
+            <AgentModelPicker />
+          </span>
+          <span data-slot="update-bell" style={{ display: "inline-flex" }}>
+            <UpdateBell />
+          </span>
+        </div>
       </div>
     </div>
   );

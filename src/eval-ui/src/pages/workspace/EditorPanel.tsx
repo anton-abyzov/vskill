@@ -17,6 +17,10 @@ import { useGitRemote } from "../../hooks/useGitRemote";
 import { bumpVersion, validateVersionTransition, type BumpKind } from "../../utils/bumpVersion";
 import { getFrontmatterVersion, setFrontmatterVersion } from "../../utils/setFrontmatterVersion";
 import { computeSavePayload } from "../../utils/computeSavePayload";
+// 0792 T-012: eval-case authoring is now embedded inside the Edit tab so the
+// new IA's Edit surface covers Authoring (markdown + cases) end-to-end. The
+// Run tab handles execution; only the authoring view lives here.
+import { TestsPanel } from "./TestsPanel";
 
 function emitToast(message: string, severity: "info" | "error"): void {
   if (typeof window === "undefined") return;
@@ -324,7 +328,17 @@ export function EditorPanel() {
   ];
 
   return (
-    <div className="flex flex-col h-full" onKeyDown={handleKeyDown} tabIndex={-1}>
+    // 0792 T-012: outer container allows scroll so the embedded eval-cases
+    // disclosure can grow below the editor without clipping. When the
+    // disclosure is closed (default) the layout is identical to the prior
+    // flex-column form because the summary row is short and the editor body
+    // still fills the viewport via min-height below.
+    <div
+      className="flex flex-col"
+      style={{ height: "100%", overflow: "auto" }}
+      onKeyDown={handleKeyDown}
+      tabIndex={-1}
+    >
       {/* ── Toolbar ─────────────────────────────────────── */}
       <div
         className="flex items-center justify-between px-3 py-1.5"
@@ -531,6 +545,11 @@ export function EditorPanel() {
             viewMode === "raw" ? "1fr" :
             viewMode === "preview" ? "1fr" :
             "1fr 1fr",
+          // 0792 T-012: outer container is now scrollable so flex-1 alone
+          // collapses to 0; pin a comfortable min-height so the editor body
+          // still fills the viewport on first paint regardless of the
+          // embedded eval-cases disclosure state.
+          minHeight: "60vh",
         }}
       >
         {/* ── Raw Editor Pane ──────────────────────────── */}
@@ -906,6 +925,79 @@ export function EditorPanel() {
           />
         </div>
       )}
+
+      {/* ── 0792 T-012: Eval cases authoring section ─────────────────────
+          AC-US1-02: eval-case authoring is reachable inside Edit. We render
+          the existing TestsPanel as a collapsible section so the markdown
+          editor stays the primary surface but cases are one click away
+          without leaving the tab. Closed by default to preserve the prior
+          editor-first feel; opening it expands a fixed-height workspace.
+          The Run tab still owns execution; case-level run buttons inside
+          TestsPanel use WorkspaceContext.runCase/runAll which work the same
+          regardless of which tab hosts the panel. */}
+      {isSkillMd && (
+        <EvalCasesSection />
+      )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 0792 T-012: EvalCasesSection — a thin disclosure that hosts TestsPanel
+// inside the Edit tab. Declared at module scope rather than inline so the
+// open/closed state survives editor re-renders that don't otherwise touch
+// this branch.
+// ---------------------------------------------------------------------------
+
+function EvalCasesSection() {
+  const [open, setOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage?.getItem("vskill:editor-eval-cases-open") === "1";
+  });
+  const handleToggle = (e: React.SyntheticEvent<HTMLDetailsElement>) => {
+    const isOpen = (e.currentTarget as HTMLDetailsElement).open;
+    setOpen(isOpen);
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage?.setItem("vskill:editor-eval-cases-open", isOpen ? "1" : "0");
+      } catch {
+        // storage unavailable — ignore
+      }
+    }
+  };
+  return (
+    <details
+      data-testid="editor-eval-cases-section"
+      open={open}
+      onToggle={handleToggle}
+      style={{ borderTop: "1px solid var(--border-subtle)", background: "var(--bg-canvas)" }}
+    >
+      <summary
+        style={{
+          padding: "10px 16px",
+          fontFamily: "var(--font-sans)",
+          fontSize: 13,
+          fontWeight: 500,
+          color: "var(--text-primary)",
+          cursor: "pointer",
+          userSelect: "none",
+          background: "var(--surface-1)",
+          borderBottom: open ? "1px solid var(--border-subtle)" : "none",
+        }}
+      >
+        Eval cases
+      </summary>
+      {open && (
+        <div
+          data-testid="editor-eval-cases-body"
+          style={{ height: 520, overflow: "hidden" }}
+        >
+          {/* 0792 T-012: embedded mode hides execution surfaces (Run All /
+              per-case Run / Execution History) so the Edit tab is purely
+              an authoring surface — execution lives in the Run tab. */}
+          <TestsPanel embedded />
+        </div>
+      )}
+    </details>
   );
 }

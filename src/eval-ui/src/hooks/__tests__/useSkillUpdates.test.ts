@@ -227,4 +227,52 @@ describe("useSkillUpdates (T-001)", () => {
       },
     );
   });
+
+  // 1.0.0 — Map-keying regression coverage. Pre-1.0 `buildMap` keyed solely
+  // by leaf, so two distinct outdated skills could silently overwrite one
+  // another in `updatesMap`. The dropdown panel reads `updates[]` directly
+  // and was unaffected, but downstream consumers of `updatesMap` (and
+  // anything that mirrored the same leaf-only pattern) were not. The fix
+  // primary-keys by full name and adds a leaf alias only when unambiguous.
+  it("keeps two distinct updates addressable by full name in updatesMap", async () => {
+    await withMocked(
+      [
+        { name: "anton/vskill/skill-builder", installed: "0.1.0", latest: "1.0.3", updateAvailable: true },
+        { name: "anton/hi-anton/hi-anton", installed: "1.0.2", latest: "1.0.3", updateAvailable: true },
+      ],
+      async (_spy, h) => {
+        await h.act(async () => { await flushMicrotasks(); });
+        const m = h.api().updatesMap;
+        expect(h.api().updateCount).toBe(2);
+        expect(h.api().updates).toHaveLength(2);
+        expect(m.get("anton/vskill/skill-builder")?.latest).toBe("1.0.3");
+        expect(m.get("anton/hi-anton/hi-anton")?.latest).toBe("1.0.3");
+        // Distinct leaves — leaf aliases resolve as expected.
+        expect(m.get("skill-builder")?.installed).toBe("0.1.0");
+        expect(m.get("hi-anton")?.installed).toBe("1.0.2");
+      },
+    );
+  });
+
+  it("preserves both entries on leaf collision and drops the ambiguous leaf alias", async () => {
+    await withMocked(
+      [
+        { name: "acme/plugin-x/foo", installed: "1.0.0", latest: "1.1.0", updateAvailable: true },
+        { name: "other/plugin-y/foo", installed: "2.0.0", latest: "2.1.0", updateAvailable: true },
+      ],
+      async (_spy, h) => {
+        await h.act(async () => { await flushMicrotasks(); });
+        const m = h.api().updatesMap;
+        expect(h.api().updateCount).toBe(2);
+        expect(h.api().updates).toHaveLength(2);
+        // Both full keys remain.
+        expect(m.get("acme/plugin-x/foo")?.latest).toBe("1.1.0");
+        expect(m.get("other/plugin-y/foo")?.latest).toBe("2.1.0");
+        // Ambiguous leaf alias is dropped — leaf-only consumers must
+        // disambiguate via full key. Pre-1.0 this returned whichever entry
+        // wrote last, silently hiding the other.
+        expect(m.has("foo")).toBe(false);
+      },
+    );
+  });
 });

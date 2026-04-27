@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.0] - 2026-04-27
+
+### Fixed
+- **Studio update notifications — multi-update visibility**: `useSkillUpdates.buildMap` and the `reconcileCheckUpdates` setUpdates callback both keyed by leaf-name only (`u.name.split("/").pop()`). When two skills shared a leaf name across plugins (e.g. `acme/x/foo` + `bob/y/foo`), the second silently overwrote the first in `updatesMap` and downstream lookups, hiding one of the available updates from the panel. Now keys by canonical full name (`<owner>/<repo>/<skill>` or `<plugin>/<skill>`) with a leaf alias added only when unambiguous; ambiguous leaves drop the alias deterministically rather than overwrite.
+
+### Added
+- Unit-test coverage for two distinct updates and same-leaf collision scenarios (`useSkillUpdates.test.ts`)
+- E2E coverage asserting the dropdown lists every entry when the polling endpoint returns multiple updates, including the same-leaf-cross-plugin case (`e2e/update-notifications.spec.ts`)
+
+### Note on source-origin skills
+Skills authored locally (no lockfile entry) are not tracked by `/api/skills/updates` — the polling endpoint enumerates lockfile entries via `getOutdatedJson()`. Self-publishing notifications for source-origin skills you author are tracked as a separate follow-up.
+
+### Major version
+This release transitions vskill to 1.0 to mark the public API as stable for the Studio update-notification contract and the `vskill skill` CLI surface introduced over the 0.5.x series.
+
 ## [0.5.116] - 2026-04-25
 
 ### Fixed

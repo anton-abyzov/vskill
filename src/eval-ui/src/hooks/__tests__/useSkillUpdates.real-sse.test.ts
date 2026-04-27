@@ -21,11 +21,29 @@
 // that the real wire actually behaves the way those mocks claim.
 
 import http, { type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventSource as RealEventSource } from "eventsource";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
+
+// UpdateBell consumes useToast for the no-match owning-agent fallback. This
+// hook test renders <UpdateBell> without a real <ToastProvider> ancestor, so
+// stub the provider module — same pattern as the existing component tests
+// (see src/eval-ui/src/components/__tests__/UpdateBell.test.tsx).
+vi.mock("../../components/ToastProvider", () => ({
+  useToast: () => ({ toast: vi.fn(), dismiss: vi.fn(), clear: vi.fn() }),
+}));
+
+// Stub the platform-health hook so its fetch loop doesn't keep this test's
+// microtask queue alive forever (manifests as worker OOM). Same rationale
+// as UpdateBell.test.tsx (0778).
+vi.mock("../usePlatformHealth", () => ({
+  usePlatformHealth: () => ({
+    data: { degraded: false, reason: null, statsAgeMs: 0, oldestActiveAgeMs: 0 },
+    loading: false,
+  }),
+}));
 
 import { updateStore } from "../../stores/updateStore";
 import type { SkillUpdateEvent } from "../../types/skill-update";

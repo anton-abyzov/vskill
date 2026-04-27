@@ -17,7 +17,11 @@ const mocks = vi.hoisted(() => ({
   sendSSEDone: vi.fn(),
   readLockfile: vi.fn(),
   parseSource: vi.fn(),
+  // 0747 F-001: source uses execFileSync (argv form, no shell) — execSync
+  // remained as a hoisted mock for any legacy callsites but the
+  // update/batch-update routes no longer touch it.
   execSync: vi.fn(),
+  execFileSync: vi.fn(),
   fetch: vi.fn(),
   resolveSkillApiNameImpl: vi.fn(),
 }));
@@ -37,6 +41,7 @@ vi.mock("../sse-helpers.js", () => ({
 
 vi.mock("node:child_process", () => ({
   execSync: mocks.execSync,
+  execFileSync: mocks.execFileSync,
 }));
 
 vi.mock("../../lockfile/lockfile.js", () => ({
@@ -735,7 +740,8 @@ describe("T-011: POST /api/skills/:plugin/:skill/update", () => {
   });
 
   it("streams SSE progress and done on successful update", async () => {
-    mocks.execSync.mockReturnValue("Updated architect 2.2.0 -> 2.3.0");
+    // 0747 F-001: source uses execFileSync (argv form), not execSync.
+    mocks.execFileSync.mockReturnValue("Updated architect 2.2.0 -> 2.3.0");
 
     const req = fakeReq("http://localhost/api/skills/myPlugin/architect/update");
     const res = fakeRes();
@@ -755,7 +761,7 @@ describe("T-011: POST /api/skills/:plugin/:skill/update", () => {
   });
 
   it("streams SSE error when update fails", async () => {
-    mocks.execSync.mockImplementation(() => {
+    mocks.execFileSync.mockImplementation(() => {
       throw new Error("scan FAILED");
     });
 
@@ -796,7 +802,8 @@ describe("T-012: POST /api/skills/batch-update", () => {
     mocks.readBody.mockResolvedValue({
       skills: ["architect", "pm"],
     });
-    mocks.execSync.mockReturnValue("ok");
+    // 0747 F-001: batch route uses execFileSync (argv form).
+    mocks.execFileSync.mockReturnValue("ok");
 
     const req = fakeReq("http://localhost/api/skills/batch-update");
     const res = fakeRes();
@@ -830,8 +837,8 @@ describe("T-012: POST /api/skills/batch-update", () => {
     mocks.readBody.mockResolvedValue({
       skills: ["architect", "pm"],
     });
-    // First skill fails, second succeeds
-    mocks.execSync
+    // 0747 F-001: batch route uses execFileSync. First skill fails, second succeeds.
+    mocks.execFileSync
       .mockImplementationOnce(() => {
         throw new Error("scan FAILED");
       })
@@ -871,7 +878,7 @@ describe("T-012: POST /api/skills/batch-update", () => {
       resolveFirst = r;
     });
     mocks.readBody.mockReturnValueOnce(deferredBody);
-    mocks.execSync.mockReturnValue("ok");
+    mocks.execFileSync.mockReturnValue("ok");
 
     const req1 = fakeReq("http://localhost/api/skills/batch-update");
     const res1 = fakeRes();

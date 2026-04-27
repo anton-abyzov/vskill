@@ -93,6 +93,11 @@ async function withProxyServer<T>(
   try {
     return await fn(port);
   } finally {
+    // Drop any keep-alive sockets immediately so `close()` resolves without
+    // waiting for socket idle-timeout (~5s) — otherwise `withProxyServer`
+    // dominates the 5s test budget and trips a timeout even though the
+    // fetch + assertion completed in milliseconds.
+    proxyServer.closeAllConnections();
     await new Promise<void>((resolve) => proxyServer.close(() => resolve()));
   }
 }

@@ -11,6 +11,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mocks = vi.hoisted(() => ({
   sendJson: vi.fn(),
   execSync: vi.fn(),
+  getOutdatedJson: vi.fn(),
+  scanSkillInstallLocations: vi.fn(() => []),
 }));
 
 vi.mock("../router.js", async (importOriginal) => {
@@ -20,6 +22,17 @@ vi.mock("../router.js", async (importOriginal) => {
 
 vi.mock("node:child_process", () => ({
   execSync: mocks.execSync,
+}));
+
+// 0740: handler now calls getOutdatedJson() directly (dynamic import) instead
+// of shelling out to a `vskill` binary on PATH. Mock the bundled helper.
+vi.mock("../../commands/outdated.js", () => ({
+  getOutdatedJson: mocks.getOutdatedJson,
+}));
+
+// 0747 T-002: each row is enriched with installLocations[] via this helper.
+vi.mock("../utils/scan-install-locations.js", () => ({
+  scanSkillInstallLocations: mocks.scanSkillInstallLocations,
 }));
 
 // Stub everything else registerRoutes depends on
@@ -102,21 +115,52 @@ describe("GET /api/skills/updates", () => {
     expect(updatesIdx).toBeLessThan(paramIdx);
   });
 
-  it("returns parsed JSON from vskill outdated --json", async () => {
-    const outdatedResult = [
-      { name: "owner/repo/skill", installed: "1.0.0", latest: "1.0.3", updateAvailable: true },
-      { name: "owner/repo/other", installed: "1.0.2", latest: "1.0.2", updateAvailable: false },
-    ];
-    mocks.execSync.mockReturnValue(Buffer.from(JSON.stringify(outdatedResult)));
+  it("returns enriched results from getOutdatedJson with installLocations/localSkill", async () => {
+    // 0740: handler calls getOutdatedJson() from ../commands/outdated.js
+    // (no more execSync). 0747 T-002: each row is enriched with
+    // installLocations[], localSkill, and (when present) localPlugin.
+    const programmatic = {
+      results: [
+        { name: "owner/repo/skill", installed: "1.0.0", latest: "1.0.3", updateAvailable: true },
+        { name: "owner/repo/other", installed: "1.0.2", latest: "1.0.2", updateAvailable: false },
+      ],
+      pinMap: new Map<string, string>(),
+    };
+    mocks.getOutdatedJson.mockResolvedValue(programmatic);
+    mocks.scanSkillInstallLocations.mockReturnValue([
+      { scope: "project", pluginSlug: "owner/repo" },
+    ]);
 
     await handler(fakeReq, fakeRes);
 
-    expect(mocks.execSync).toHaveBeenCalledWith("vskill outdated --json", expect.objectContaining({ timeout: expect.any(Number) }));
-    expect(mocks.sendJson).toHaveBeenCalledWith(fakeRes, outdatedResult, 200, fakeReq);
+    expect(mocks.getOutdatedJson).toHaveBeenCalled();
+    expect(mocks.sendJson).toHaveBeenCalledWith(
+      fakeRes,
+      [
+        expect.objectContaining({
+          name: "owner/repo/skill",
+          installed: "1.0.0",
+          latest: "1.0.3",
+          updateAvailable: true,
+          installLocations: [{ scope: "project", pluginSlug: "owner/repo" }],
+          localSkill: "skill",
+          localPlugin: "owner/repo",
+        }),
+        expect.objectContaining({
+          name: "owner/repo/other",
+          updateAvailable: false,
+          localSkill: "other",
+          localPlugin: "owner/repo",
+        }),
+      ],
+      200,
+      fakeReq,
+    );
   });
 
   it("returns empty array when vskill outdated exits non-zero with no stdout", async () => {
-    mocks.execSync.mockImplementation(() => { throw new Error("exit code 1"); });
+    // Handler's catch-all returns []. Simulate by making getOutdatedJson throw.
+    mocks.getOutdatedJson.mockRejectedValue(new Error("exit code 1"));
 
     await handler(fakeReq, fakeRes);
 
@@ -124,39 +168,27 @@ describe("GET /api/skills/updates", () => {
   });
 
   it("returns empty array when JSON parsing fails", async () => {
-    mocks.execSync.mockReturnValue(Buffer.from("not valid json"));
+    // Simulate underlying parse failure surfacing as a thrown error.
+    mocks.getOutdatedJson.mockRejectedValue(new SyntaxError("Unexpected token"));
 
     await handler(fakeReq, fakeRes);
 
     expect(mocks.sendJson).toHaveBeenCalledWith(fakeRes, [], 200, fakeReq);
   });
 
-  it("returns update data from e.stdout when vskill outdated exits 1 (updates exist)", async () => {
-    // vskill outdated exits 1 when updates are found — stdout still has valid JSON
-    const outdatedResult = [
-      { name: "owner/repo/skill", installed: "1.0.0", latest: "1.1.0", updateAvailable: true },
-    ];
-    const err = Object.assign(new Error("Command failed: vskill outdated --json"), {
-      status: 1,
-      stdout: JSON.stringify(outdatedResult),
-    });
-    mocks.execSync.mockImplementation(() => { throw err; });
-
-    await handler(fakeReq, fakeRes);
-
-    expect(mocks.sendJson).toHaveBeenCalledWith(fakeRes, outdatedResult, 200, fakeReq);
+  // SKIP REASON: 0740 retired execSync(`vskill outdated --json`) — the
+  // handler now calls getOutdatedJson() in-process, so the "exit code 1
+  // with stdout on err" execSync semantics no longer exist. The
+  // equivalent in-process error path is covered by the
+  // "returns empty array when getOutdatedJson throws" case above.
+  it.skip("returns update data from e.stdout when vskill outdated exits 1 (updates exist)", async () => {
+    // intentionally empty — see SKIP REASON above
   });
 
-  it("passes PATH in env to execSync so vskill binary can be found", async () => {
-    mocks.execSync.mockReturnValue(Buffer.from("[]"));
-
-    await handler(fakeReq, fakeRes);
-
-    expect(mocks.execSync).toHaveBeenCalledWith(
-      "vskill outdated --json",
-      expect.objectContaining({
-        env: expect.objectContaining({ PATH: expect.any(String) }),
-      }),
-    );
+  // SKIP REASON: 0740 retired execSync. There is no shell-out, so PATH
+  // in env is no longer relevant — the helper is invoked directly via
+  // dynamic import.
+  it.skip("passes PATH in env to execSync so vskill binary can be found", async () => {
+    // intentionally empty — see SKIP REASON above
   });
 });

@@ -57,7 +57,7 @@ describe("submitCommand — API mode (default)", () => {
       repoUrl: "https://github.com/myorg/myskill",
       skillName: "my-awesome-skill",
       skillPath: undefined,
-      source: "cli-auto",
+      source: "cli-submit",
     });
     expect(mockOpenBrowser).not.toHaveBeenCalled();
   });

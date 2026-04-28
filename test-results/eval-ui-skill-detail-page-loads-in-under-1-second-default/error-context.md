@@ -16,9 +16,9 @@
         - navigation "Breadcrumb" [ref=e18]:
           - button "Skills" [ref=e19] [cursor=pointer]
           - generic [ref=e20]: ›
-          - button "easychamp" [ref=e21] [cursor=pointer]
+          - button "test-plugin" [ref=e21] [cursor=pointer]
           - generic [ref=e22]: ›
-          - generic [ref=e23]: tournament-manager
+          - generic [ref=e23]: test-skill
         - generic [ref=e24]:
           - generic [ref=e25]:
             - button "Find verified skills — opens search (⌘⇧K)" [ref=e26] [cursor=pointer]:
@@ -316,7 +316,7 @@
                     - generic [ref=e454]: (1)
                   - list [ref=e455]:
                     - listitem [ref=e456]:
-                      - button "tournament-manager 0.1.0" [active] [ref=e457] [cursor=pointer]:
+                      - button "tournament-manager 0.1.0" [ref=e457] [cursor=pointer]:
                         - generic "tournament-manager" [ref=e459]
                         - generic [ref=e460]: 0.1.0
                 - group "fixtures (2)" [ref=e461]:
@@ -357,29 +357,29 @@
         - generic [ref=e499]:
           - generic [ref=e501]:
             - generic [ref=e502]:
-              - generic [ref=e503]: easychamp
+              - generic [ref=e503]: test-plugin
               - generic [ref=e504]: ›
               - generic [ref=e505]:
                 - 'generic "Origin: Skills" [ref=e506]'
                 - text: Skills
             - generic [ref=e507]:
-              - heading "tournament-manager" [level=2] [ref=e508]
+              - heading "test-skill" [level=2] [ref=e508]
               - generic [ref=e509]:
-                - generic [ref=e511]: v0.1.0
+                - generic "No version declared" [ref=e511]: v1.0.0
                 - button "Delete skill" [ref=e512] [cursor=pointer]:
                   - img [ref=e513]
             - generic [ref=e516]:
-              - link "Anton Abyzov" [ref=e517] [cursor=pointer]:
+              - link "anton-abyzov" [ref=e517] [cursor=pointer]:
                 - /url: https://github.com/anton-abyzov
               - link "SKILL.md" [ref=e518] [cursor=pointer]:
-                - /url: https://github.com/anton-abyzov/vskill/blob/HEAD/e2e/fixtures/easychamp/skills/tournament-manager/SKILL.md
+                - /url: https://github.com/anton-abyzov/vskill/blob/HEAD/e2e/fixtures/test-plugin/skills/test-skill/SKILL.md
                 - generic [ref=e519]: SKILL.md
                 - generic [ref=e520]: ↗
             - generic [ref=e521]:
               - generic [ref=e522]: Install method
               - generic [ref=e523]: Authored
             - generic [ref=e524]:
-              - button "Copy path /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/fixtures/easychamp/skills/tournament-manager to clipboard" [ref=e525] [cursor=pointer]: /Users/anton…easychamp/skills/tournament-manager
+              - button "Copy path /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/fixtures/test-plugin/skills/test-skill to clipboard" [ref=e525] [cursor=pointer]: /Users/anton…tures/test-plugin/skills/test-skill
               - button "Copy skill path to clipboard" [ref=e526] [cursor=pointer]:
                 - img [ref=e527]
                 - text: Copy
@@ -393,114 +393,90 @@
               - generic [ref=e537]:
                 - generic [ref=e538]:
                   - generic [ref=e539]:
-                    - heading "tournament-manager" [level=2] [ref=e540]
-                    - generic [ref=e541]: v0.1.0
+                    - heading "test-skill" [level=2] [ref=e540]
+                    - generic "No version declared" [ref=e541]: v1.0.0
                     - generic [ref=e542]: Authored
                   - generic [ref=e543]:
-                    - button "Anton Abyzov" [ref=e544] [cursor=pointer]:
-                      - text: Anton Abyzov
-                      - generic [ref=e545]: ⧉
-                    - link "tournament-manager" [ref=e546] [cursor=pointer]:
-                      - /url: https://easychamp.com/blob/HEAD/
-                      - generic [ref=e547]: tournament-manager
-                      - generic [ref=e548]: ↗
-                    - generic "2026-04-24T20:00:55.973Z" [ref=e549]: · Updated 2 days ago
-                - generic [ref=e550]:
-                  - generic [ref=e551]: Publish-ready
-                  - generic [ref=e552]: "GitHub origin: https://github.com/anton-abyzov/vskill"
-                  - button "Publish" [ref=e554] [cursor=pointer]
-                - generic [ref=e555]:
-                  - button "Benchmark — Never run About benchmarks" [ref=e556] [cursor=pointer]:
-                    - generic [ref=e557]: Benchmark
-                    - generic [ref=e558]: —
-                    - generic [ref=e559]: Never run
-                    - button "About benchmarks" [ref=e563]: ℹ
-                  - button "Tests 0 0 assertions" [ref=e564] [cursor=pointer]:
-                    - generic [ref=e565]: Tests
-                    - generic [ref=e566]: "0"
-                    - generic [ref=e567]: 0 assertions
-                  - button "Activations 0 Never" [ref=e568] [cursor=pointer]:
-                    - generic [ref=e569]: Activations
-                    - generic [ref=e570]: "0"
-                    - generic [ref=e571]: Never
-                  - button "Last run —" [ref=e572] [cursor=pointer]:
-                    - generic [ref=e573]: Last run
-                    - generic [ref=e574]: —
-                  - button "MCP deps 1 easychamp" [ref=e575] [cursor=pointer]:
-                    - generic [ref=e576]: MCP deps
-                    - generic [ref=e577]: "1"
-                    - generic [ref=e578]: easychamp
-                  - button "Skill deps 0 None" [ref=e579] [cursor=pointer]:
-                    - generic [ref=e580]: Skill deps
-                    - generic [ref=e581]: "0"
-                    - generic [ref=e582]: None
-                  - generic [ref=e583]:
-                    - generic [ref=e584]: Size
-                    - generic [ref=e585]: 519 B
-                  - generic [ref=e586]:
-                    - generic [ref=e587]: Last modified
-                    - generic [ref=e588]: 2 days ago
-                    - generic [ref=e589]: 2026-04-24T20:00:55.973Z
-              - complementary [ref=e590]:
-                - generic [ref=e591]:
-                  - heading "Setup" [level=3] [ref=e592]
-                  - generic [ref=e593]:
-                    - generic [ref=e594]:
-                      - img [ref=e596]
-                      - generic [ref=e599]: Dependencies
-                      - generic [ref=e600]: "1"
-                    - generic [ref=e602]:
-                      - generic [ref=e603]: MCP Servers
-                      - generic [ref=e604]:
-                        - generic [ref=e605]:
-                          - generic [ref=e606]:
-                            - generic [ref=e607]: EasyChamp
-                            - generic [ref=e608]: stdio
-                          - button "Copy Config" [ref=e609] [cursor=pointer]:
-                            - img [ref=e610]
-                            - text: Copy Config
-                        - generic [ref=e613]: https://easychamp.com/mcp
-                        - generic [ref=e614]:
-                          - generic [ref=e615]: easychamp_generate_league
-                          - generic [ref=e616]: easychamp_generate_tournament
-                          - generic [ref=e617]: easychamp_generate_bracket
-                          - generic [ref=e618]: easychamp_create_schedule
-                          - generic [ref=e619]: easychamp_enter_results
-                - generic [ref=e620]:
-                  - heading "Credentials" [level=3] [ref=e621]
-                  - generic [ref=e622]:
-                    - generic [ref=e623]:
-                      - generic [ref=e624]: Parameters & Secrets
-                      - button "+ Add Parameter" [ref=e625] [cursor=pointer]
-                    - generic [ref=e626]: No credentials configured for this skill
-    - contentinfo [ref=e627]:
-      - contentinfo [ref=e628]:
-        - generic "opus" [ref=e629]
-        - generic [ref=e630]: "|"
-        - 'generic "Health: ok" [ref=e631]':
-          - generic [ref=e633]: ok
-        - generic [ref=e634]: "|"
-        - generic [ref=e635]:
-          - button "Use current Claude Code session — unlocked." [ref=e636] [cursor=pointer]:
-            - img [ref=e637]
-          - button "Anthropic API — locked. Click to add a key." [ref=e640] [cursor=pointer]:
-            - img [ref=e641]
-          - button "OpenRouter — locked. Click to add a key." [ref=e644] [cursor=pointer]:
-            - img [ref=e645]
-          - button "Ollama (local, free) — locked. Click to add a key." [ref=e648] [cursor=pointer]:
-            - img [ref=e649]
-          - button "LM Studio (local, free) — locked. Click to add a key." [ref=e652] [cursor=pointer]:
-            - img [ref=e653]
-          - button "OpenAI API — locked. Click for install instructions." [ref=e656] [cursor=pointer]:
-            - img [ref=e657]
-        - button "Switch to dark theme" [ref=e660] [cursor=pointer]:
-          - img [ref=e661]
-          - generic [ref=e664]: auto
-    - status [ref=e665]: Viewing tournament-manager (Own)
-  - generic [ref=e666]:
-    - generic [ref=e667]: 1 update available
-    - button "View Updates" [ref=e668] [cursor=pointer]
-    - button "Dismiss" [ref=e669] [cursor=pointer]: ✕
-  - status [ref=e670]
-  - alert [ref=e671]
+                    - generic [ref=e544]: —
+                    - button "test-skill" [ref=e545] [cursor=pointer]:
+                      - generic [ref=e546]: test-skill
+                      - generic [ref=e547]: ⧉
+                    - generic "2026-03-14T06:06:57.709Z" [ref=e548]: · Updated 1 month ago
+                - generic [ref=e549]:
+                  - generic [ref=e550]: Publish-ready
+                  - generic [ref=e551]: "GitHub origin: https://github.com/anton-abyzov/vskill"
+                  - button "Publish" [ref=e553] [cursor=pointer]
+                - generic [ref=e554]:
+                  - button "Benchmark 0% 1 month ago About benchmarks" [ref=e555] [cursor=pointer]:
+                    - generic [ref=e556]: Benchmark
+                    - generic [ref=e557]: 0%
+                    - generic [ref=e558]: 1 month ago
+                    - button "About benchmarks" [ref=e562]: ℹ
+                  - button "Tests 2 4 assertions" [ref=e563] [cursor=pointer]:
+                    - generic [ref=e564]: Tests
+                    - generic [ref=e565]: "2"
+                    - generic [ref=e566]: 4 assertions
+                  - button "Activations 0 Never" [ref=e567] [cursor=pointer]:
+                    - generic [ref=e568]: Activations
+                    - generic [ref=e569]: "0"
+                    - generic [ref=e570]: Never
+                  - button "Last run 1 month ago" [ref=e571] [cursor=pointer]:
+                    - generic [ref=e572]: Last run
+                    - generic [ref=e573]: 1 month ago
+                  - button "MCP deps 0 None" [ref=e574] [cursor=pointer]:
+                    - generic [ref=e575]: MCP deps
+                    - generic [ref=e576]: "0"
+                    - generic [ref=e577]: None
+                  - button "Skill deps 0 None" [ref=e578] [cursor=pointer]:
+                    - generic [ref=e579]: Skill deps
+                    - generic [ref=e580]: "0"
+                    - generic [ref=e581]: None
+                  - generic [ref=e582]:
+                    - generic [ref=e583]: Size
+                    - generic [ref=e584]: 270 B
+                  - generic [ref=e585]:
+                    - generic [ref=e586]: Last modified
+                    - generic [ref=e587]: 1 month ago
+                    - generic [ref=e588]: 2026-03-14T06:06:57.709Z
+              - complementary [ref=e589]:
+                - generic [ref=e590]:
+                  - heading "Setup" [level=3] [ref=e591]
+                  - generic [ref=e592]: No dependencies detected
+                - generic [ref=e593]:
+                  - heading "Credentials" [level=3] [ref=e594]
+                  - generic [ref=e595]:
+                    - generic [ref=e596]:
+                      - generic [ref=e597]: Parameters & Secrets
+                      - button "+ Add Parameter" [ref=e598] [cursor=pointer]
+                    - generic [ref=e599]: No credentials configured for this skill
+    - contentinfo [ref=e600]:
+      - contentinfo [ref=e601]:
+        - generic "opus" [ref=e602]
+        - generic [ref=e603]: "|"
+        - 'generic "Health: ok" [ref=e604]':
+          - generic [ref=e606]: ok
+        - generic [ref=e607]: "|"
+        - generic [ref=e608]:
+          - button "Use current Claude Code session — unlocked." [ref=e609] [cursor=pointer]:
+            - img [ref=e610]
+          - button "Anthropic API — locked. Click to add a key." [ref=e613] [cursor=pointer]:
+            - img [ref=e614]
+          - button "OpenRouter — locked. Click to add a key." [ref=e617] [cursor=pointer]:
+            - img [ref=e618]
+          - button "Ollama (local, free) — locked. Click to add a key." [ref=e621] [cursor=pointer]:
+            - img [ref=e622]
+          - button "LM Studio (local, free) — locked. Click to add a key." [ref=e625] [cursor=pointer]:
+            - img [ref=e626]
+          - button "OpenAI API — locked. Click for install instructions." [ref=e629] [cursor=pointer]:
+            - img [ref=e630]
+        - button "Switch to dark theme" [ref=e633] [cursor=pointer]:
+          - img [ref=e634]
+          - generic [ref=e637]: auto
+    - status [ref=e638]: Viewing test-skill (Own)
+  - generic [ref=e639]:
+    - generic [ref=e640]: 1 update available
+    - button "View Updates" [ref=e641] [cursor=pointer]
+    - button "Dismiss" [ref=e642] [cursor=pointer]: ✕
+  - status [ref=e643]
+  - alert [ref=e644]
 ```

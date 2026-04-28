@@ -549,7 +549,10 @@ async function installMarketplaceRepo(
           if (!contentRes.ok) continue;
           const content = await contentRes.text();
           const namespacedName = sd.name === plugin.name ? plugin.name : `${plugin.name}/${sd.name}`;
-          const processedContent = ensureFrontmatter(content, namespacedName, true);
+          // forceName only when actually namespacing — otherwise installs must
+          // not mutate already-valid frontmatter (no-touch principle).
+          const isRenaming = sd.name !== plugin.name;
+          const processedContent = ensureFrontmatter(content, namespacedName, isRenaming);
           for (const agent of agents) {
             const baseDir = resolveInstallBase(opts, agent);
             const skillDir = join(baseDir, sd.name);
@@ -1829,7 +1832,8 @@ async function installRepoPlugin(
           : join(plugDir, skill.name);
         mkdirSync(skillDir, { recursive: true });
         const namespacedSkillName = skill.name === pluginName ? pluginName : `${pluginName}/${skill.name}`;
-        writeFileSync(join(skillDir, "SKILL.md"), ensureFrontmatter(skill.content, namespacedSkillName, true), "utf-8");
+        const isRenamingSkill = skill.name !== pluginName;
+        writeFileSync(join(skillDir, "SKILL.md"), ensureFrontmatter(skill.content, namespacedSkillName, isRenamingSkill), "utf-8");
         cleanStaleNesting(skillDir);
       }
       // Commands: {agent-dir}/{plugin-name}/{command-name}.md
@@ -2717,8 +2721,11 @@ async function installSingleSkillLegacy(
   const namespacedName = pluginNamespace && skillName !== pluginNamespace
     ? `${pluginNamespace}/${skillName}`
     : skillName;
+  // forceName only when the namespaced name actually differs from the source's
+  // skill name — guarantees a no-touch install when no rename is needed.
+  const isRenamingNamespace = !!pluginNamespace && namespacedName !== skillName;
   const namespacedContent = pluginNamespace
-    ? ensureFrontmatter(content, namespacedName, true)
+    ? ensureFrontmatter(content, namespacedName, isRenamingNamespace)
     : content;
   const sha = computeSha(content);
   const projectRoot = safeProjectRoot();

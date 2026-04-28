@@ -83,6 +83,80 @@ describe("ensureFrontmatter", () => {
     expect(result).toContain("version: 1.0");
     expect(result).toContain("name: my-skill");
   });
+
+  // ---------------------------------------------------------------------------
+  // forceName=true behavior — regression coverage for the install-time
+  // corruption that produced `name: frontend-design frontend-design` and a
+  // duplicate `description:` line. Before this suite the forceName branch was
+  // entirely untested.
+  // ---------------------------------------------------------------------------
+
+  // TC-FN-01: forceName=true, name matches, description present → no-op (no-touch principle)
+  it("forceName: returns content unchanged when name already matches and description exists", () => {
+    const content =
+      "---\nname: my-skill\ndescription: Already set\nlicense: MIT\n---\n# Body";
+    const result = ensureFrontmatter(content, "my-skill", true);
+    expect(result).toBe(content);
+  });
+
+  // TC-FN-02: forceName=true, names differ, description present → rename only, no duplicate description
+  it("forceName: replaces full name line cleanly when names differ, keeps single description", () => {
+    const content =
+      "---\nname: pm\ndescription: Original description\nlicense: MIT\n---\n# Body";
+    const result = ensureFrontmatter(content, "sw/pm", true);
+    expect(result).toContain("name: sw/pm");
+    expect(result).not.toContain("name: sw/pm pm");
+    expect(result).not.toContain("name: pm sw/pm");
+    // Exactly one description line
+    const descCount = (result.match(/^description:/gm) ?? []).length;
+    expect(descCount).toBe(1);
+    expect(result).toContain("description: Original description");
+    expect(result).toContain("license: MIT");
+  });
+
+  // TC-FN-03: forceName=true, name matches, description missing → add description from body
+  it("forceName: adds description from body when missing, even with matching name", () => {
+    const content =
+      "---\nname: my-skill\nlicense: MIT\n---\n# Heading\n\nFirst paragraph text.";
+    const result = ensureFrontmatter(content, "my-skill", true);
+    expect(result).toContain("name: my-skill");
+    expect(result).not.toContain("name: my-skill my-skill");
+    const descCount = (result.match(/^description:/gm) ?? []).length;
+    expect(descCount).toBe(1);
+    expect(result).toContain("description: First paragraph text.");
+  });
+
+  // TC-FN-04: forceName=true, name missing → inject name (description path covered by TC-002/003)
+  it("forceName: injects name when missing", () => {
+    const content = "---\ndescription: A skill\n---\n# Body";
+    const result = ensureFrontmatter(content, "my-skill", true);
+    expect(result).toContain("name: my-skill");
+    expect(result).toContain("description: A skill");
+  });
+
+  // TC-FN-05: regression — exact frontend-design corruption pattern must NOT recur
+  it("forceName: never produces duplicated name token (frontend-design regression)", () => {
+    const content =
+      "---\nname: frontend-design\ndescription: Create distinctive interfaces.\nlicense: Complete terms in LICENSE.txt\n---\nThis skill guides creation of distinctive, production-grade frontend interfaces.";
+    const result = ensureFrontmatter(content, "frontend-design", true);
+    expect(result).not.toMatch(/name:.*frontend-design.*frontend-design/);
+    const descCount = (result.match(/^description:/gm) ?? []).length;
+    expect(descCount).toBe(1);
+    // No-op since names match and description exists
+    expect(result).toBe(content);
+  });
+
+  // TC-FN-06: forceName=true with body containing quotes — the previous bug extracted
+  // the body as a re-quoted second description; ensure that no longer happens
+  it("forceName: does not extract body as second description when description already exists", () => {
+    const content =
+      '---\nname: skill\ndescription: Short summary\n---\nBody with "quoted" content that previously got re-extracted as a second description.';
+    const result = ensureFrontmatter(content, "skill", true);
+    expect(result).not.toContain('description: "Body with');
+    expect(result).not.toContain("\\\"quoted\\\"");
+    const descCount = (result.match(/^description:/gm) ?? []).length;
+    expect(descCount).toBe(1);
+  });
 });
 
 describe("validateSkillNameStrict", () => {

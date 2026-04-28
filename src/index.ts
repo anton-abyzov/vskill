@@ -154,6 +154,23 @@ program
   });
 
 program
+  .command("repair-skills")
+  .description("Detect and restore corrupted SKILL.md files (duplicated name or description). Default: dry-run.")
+  .option("--write", "Actually restore files (without this flag, prints what would change)")
+  .option("--root <dir...>", "Override roots to walk (defaults to all known cross-tool skill dirs)")
+  .option("--source-root <dir>", "Where to look for pristine sources (default: ~/.claude/plugins/marketplaces)")
+  .option("--json", "Emit JSON report instead of human-readable output")
+  .action(async (opts) => {
+    const { repairSkillsCommand } = await import("./commands/repair-skills.js");
+    await repairSkillsCommand({
+      root: opts.root,
+      sourceRoot: opts.sourceRoot,
+      write: opts.write,
+      json: opts.json,
+    });
+  });
+
+program
   .command("submit [source]")
   .description("Submit a skill for verification on verified-skill.com")
   .option("--skill <name>", "Skill name within a multi-skill repo")

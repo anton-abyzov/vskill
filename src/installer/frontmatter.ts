@@ -19,6 +19,12 @@ const CLAUDE_FIELD_PATTERNS = [
 /** Detects `name:` field at the start of a line in frontmatter */
 const HAS_NAME_RE = /^name:/m;
 
+/** Matches an entire `name:` line including its value (used to replace the whole line, not just the token) */
+const NAME_LINE_RE = /^name:.*$/m;
+
+/** Captures the value of the first `name:` line (used to detect idempotent renames) */
+const NAME_VALUE_RE = /^name:\s*(.*)$/m;
+
 /** Detects `description:` field at the start of a line in frontmatter */
 const HAS_DESCRIPTION_RE = /^description:/m;
 
@@ -92,17 +98,36 @@ export function ensureFrontmatter(content: string, skillName: string, forceName 
     return normalized;
   }
 
-  // When forceName is set, replace existing name field with the namespaced name
+  // When forceName is set, replace existing name field with the namespaced name.
+  // Idempotence guard: if the existing name already equals the requested name AND
+  // a description is present, this branch is a no-op — return the source unchanged
+  // so installs never mutate already-valid frontmatter (the no-touch principle).
   if (forceName && hasName) {
-    const updatedFm = fmBlock.replace(HAS_NAME_RE, `name: ${skillName}`);
-    const rest = normalized.slice(match[0].length);
-    const desc = hasDescription ? "" : null;
-    if (desc === null) {
-      return `---\n${updatedFm}\n---\n${rest}`;
+    const currentNameMatch = fmBlock.match(NAME_VALUE_RE);
+    const currentName = currentNameMatch?.[1].trim() ?? "";
+    const namesMatch = currentName === skillName;
+
+    if (namesMatch && hasDescription) {
+      return normalized;
     }
-    const body = rest;
+
+    // Replace the WHOLE name line (not just the `name:` token) so the old value
+    // is overwritten cleanly. The previous regex matched only `^name:` and left
+    // the old value dangling, producing `name: foo foo` corruption.
+    const updatedFm = namesMatch ? fmBlock : fmBlock.replace(NAME_LINE_RE, `name: ${skillName}`);
+
+    if (hasDescription) {
+      // Description already present — preserve it verbatim, only the name changed.
+      return normalized.replace(FRONTMATTER_RE, `---\n${updatedFm}\n---`);
+    }
+
+    // No description in source — extract one from the body and append.
+    const body = normalized.slice(match[0].length);
     const extractedDesc = extractDescription(body, skillName);
-    return `---\n${updatedFm}\ndescription: ${quoteYAMLValue(extractedDesc)}\n---\n${rest}`;
+    return normalized.replace(
+      FRONTMATTER_RE,
+      `---\n${updatedFm}\ndescription: ${quoteYAMLValue(extractedDesc)}\n---`,
+    );
   }
 
   let updatedBlock = fmBlock;

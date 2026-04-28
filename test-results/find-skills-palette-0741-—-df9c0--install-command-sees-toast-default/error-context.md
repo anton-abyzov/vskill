@@ -375,6 +375,90 @@
           - img [ref=e529]
           - generic [ref=e532]: auto
     - status [ref=e533]
-  - status [ref=e534]
-  - alert [ref=e535]
+  - dialog "Skill detail — Obsidian Brain" [ref=e534]:
+    - generic [ref=e536]:
+      - generic [ref=e537]:
+        - button "← Back to results" [active] [ref=e538] [cursor=pointer]
+        - generic [ref=e539]: Esc
+      - generic [ref=e540]:
+        - generic [ref=e541]:
+          - heading "Obsidian Brain" [level=2] [ref=e542]
+          - generic [ref=e543]:
+            - generic [ref=e544]: T1 UNSCANNED
+            - generic [ref=e545]:
+              - img [ref=e546]
+              - text: Security-Scanned
+            - generic [ref=e549]: "--"
+        - generic [ref=e550]:
+          - heading "Versions" [level=3] [ref=e551]
+          - list [ref=e552]:
+            - listitem [ref=e553]:
+              - button "v1.2.3 · 2026-04-20 · anton@example.com Selected" [pressed] [ref=e554] [cursor=pointer]:
+                - generic [ref=e555]: ●
+                - generic [ref=e556]: v1.2.3
+                - generic [ref=e557]: · 2026-04-20
+                - generic [ref=e558]: · anton@example.com
+                - generic [ref=e559]: Selected
+            - listitem [ref=e560]:
+              - button "v1.2.2 · 2026-04-15 · anton@example.com" [ref=e561] [cursor=pointer]:
+                - generic [ref=e562]: ○
+                - generic [ref=e563]: v1.2.2
+                - generic [ref=e564]: · 2026-04-15
+                - generic [ref=e565]: · anton@example.com
+            - listitem [ref=e566]:
+              - button "v1.2.1 · 2026-04-10 · anton@example.com" [ref=e567] [cursor=pointer]:
+                - generic [ref=e568]: ○
+                - generic [ref=e569]: v1.2.1
+                - generic [ref=e570]: · 2026-04-10
+                - generic [ref=e571]: · anton@example.com
+            - listitem [ref=e572]:
+              - button "v1.2.0 · 2026-04-05 · anton@example.com" [ref=e573] [cursor=pointer]:
+                - generic [ref=e574]: ○
+                - generic [ref=e575]: v1.2.0
+                - generic [ref=e576]: · 2026-04-05
+                - generic [ref=e577]: · anton@example.com
+            - listitem [ref=e578]:
+              - button "v1.1.0 · 2026-03-30 · anton@example.com" [ref=e579] [cursor=pointer]:
+                - generic [ref=e580]: ○
+                - generic [ref=e581]: v1.1.0
+                - generic [ref=e582]: · 2026-03-30
+                - generic [ref=e583]: · anton@example.com
+          - link "see all versions →" [ref=e585] [cursor=pointer]:
+            - /url: https://verified-skill.com/skills/anton-abyzov/vskill/obsidian-brain/versions
+        - generic [ref=e586]:
+          - heading "Install" [level=3] [ref=e587]
+          - radiogroup "Install scope" [ref=e588]:
+            - generic [ref=e589]: "Scope:"
+            - radio "Project" [checked] [ref=e590] [cursor=pointer]
+            - radio "User" [ref=e591] [cursor=pointer]
+            - radio "Global" [ref=e592] [cursor=pointer]
+          - button "Install skill" [ref=e593] [cursor=pointer]: Install
+          - generic [ref=e595]:
+            - generic [ref=e596]:
+              - generic [ref=e597]:
+                - generic [ref=e598]: "# npm"
+                - generic [ref=e599]: $npx vskill@latest install anton-abyzov/vskill/obsidian-brain --scope project
+              - button "Copy npm install command" [ref=e600] [cursor=pointer]: Copy
+            - generic [ref=e601]:
+              - generic [ref=e602]:
+                - generic [ref=e603]: "# bun"
+                - generic [ref=e604]: $bunx vskill@latest install anton-abyzov/vskill/obsidian-brain --scope project
+              - button "Copy bun install command" [ref=e605] [cursor=pointer]: Copy
+            - generic [ref=e606]:
+              - generic [ref=e607]:
+                - generic [ref=e608]: "# pnpm"
+                - generic [ref=e609]: $pnpx vskill@latest install anton-abyzov/vskill/obsidian-brain --scope project
+              - button "Copy pnpm install command" [ref=e610] [cursor=pointer]: Copy
+            - generic [ref=e611]:
+              - generic [ref=e612]:
+                - generic [ref=e613]: "# yarn"
+                - generic [ref=e614]: $yarn dlx vskill@latest install anton-abyzov/vskill/obsidian-brain --scope project
+              - button "Copy yarn install command" [ref=e615] [cursor=pointer]: Copy
+            - generic [ref=e616]:
+              - generic [ref=e617]:
+                - generic [ref=e618]: "# alternative (publisher + --skill flag)"
+                - generic [ref=e619]: $npx vskill@latest install anton-abyzov/vskill --skill obsidian-brain --scope project
+              - button "Copy alternative install command" [ref=e620] [cursor=pointer]: Copy
+  - status [ref=e621]
+  - alert [ref=e622]
 ```

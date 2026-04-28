@@ -31,38 +31,133 @@ node dist/index.js eval serve --root .   # API at localhost:3077
 
 ---
 
-## 2. Process topology
+## 2. Architecture diagrams
 
-`npx vskill studio` boots two concurrent processes:
+Three views of the same system. All diagrams are [Mermaid](https://mermaid.js.org/) — they render natively on GitHub, in Docusaurus, and in most modern Markdown viewers. Source-controlled, diff-friendly, and exportable to SVG via `mmdc -i diagram.mmd -o diagram.svg` if a binary is needed.
 
+### 2.1 Where skills live on disk
+
+A skill exists in **one of two states**: *source* (an authored repo on your machine or GitHub) or *installed* (a copy materialized into a per-agent directory by `vskill install`). The studio's sidebar reflects both states; `classifyOrigin()` in `src/eval/skill-scanner.ts` is the SSoT.
+
+```mermaid
+flowchart LR
+    subgraph Source["Source — authored once"]
+        direction TB
+        A1["Local repo<br/>vskill/skills/&lt;skill&gt;/SKILL.md"]
+        A2["Local repo<br/>vskill/plugins/&lt;plugin&gt;/skills/&lt;skill&gt;/"]
+        A3["GitHub<br/>github.com/&lt;owner&gt;/&lt;repo&gt;"]
+        A1 -.git push.-> A3
+        A2 -.git push.-> A3
+    end
+
+    subgraph Installed["Installed — materialized per-agent by vskill install"]
+        direction TB
+        B1["~/.claude/skills/&lt;skill&gt;/"]
+        B2["~/.cursor/skills/&lt;skill&gt;/"]
+        B3["~/.codex/skills/&lt;skill&gt;/"]
+        B4["~/.gemini/skills/&lt;skill&gt;/"]
+        B5["~/.windsurf/skills/&lt;skill&gt;/"]
+        B6["+30 more agents<br/>see src/agents/agents-registry.ts"]
+        B7["Project-scoped<br/>&lt;project&gt;/.&lt;agent&gt;/skills/&lt;skill&gt;/"]
+    end
+
+    Source ==vskill install==> Installed
+    Installed -.scanned by.-> S["eval-server<br/>port 3077"]
+    Source -.scanned by.-> S
+    S --> UI["Studio sidebar<br/>port 3162"]
 ```
-                     ┌──────────────────────────────┐
-                     │  node dist/index.js eval     │
-                     │  serve (eval-server)         │
-                     │  Port: 3077                  │
-                     │  ─────────────────────────── │
-                     │  REST + SSE endpoints        │
-                     │  Scans filesystem for skills │
-                     │  Runs evals / benchmarks     │
-                     │  Provider adapters → LLM APIs│
-                     └──────────┬───────────────────┘
-                                │ proxy /api
-                                ▼
-                     ┌──────────────────────────────┐
-                     │  Static dist/eval-ui/        │
-                     │  served on port 3162         │
-                     │  ─────────────────────────── │
-                     │  Vite 6 + React 19           │
-                     │  Tailwind 4 + warm-neutral   │
-                     │  palette (see ADR-0674-01)   │
-                     │  Routes via react-router v7  │
-                     └──────────────────────────────┘
+
+**Read this diagram when**: you can't find a skill you just edited, you're confused why the same skill appears twice in the sidebar (source + installed), or you're adding support for a new agent.
+
+### 2.2 Publish / submit flow
+
+"Submit" = make a local edit visible to *other* users. Two paths in parallel — git is the durable record, the internal broadcast is a latency optimization.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as Author<br/>(in Studio)
+    participant S as eval-server<br/>(localhost:3077)
+    participant FS as Local FS
+    participant GH as GitHub
+    participant VS as verified-skill.com<br/>(production worker)
+    participant Other as Other user
+
+    U->>S: Apply improvement (UI button)
+    S->>FS: Write SKILL.md + tests, bump version
+    par Durable path (always)
+        S->>GH: POST /api/git/publish<br/>(git commit + push)
+        Note over GH,VS: Scanner polls GitHub<br/>every ~10 min
+        GH-->>VS: New version detected
+        VS->>VS: Catalog version<br/>in registry
+    and Optimization (when INTERNAL_BROADCAST_KEY set)
+        S->>VS: POST /api/v1/internal/skills/publish<br/>(submitSkillUpdateEvent)
+        VS-->>VS: UpdateHub fans out<br/>via SSE immediately
+    end
+    VS-->>Other: SSE notification<br/>"new version available"
+    Other->>VS: vskill install &lt;skill&gt;
+    VS-->>Other: Tarball + metadata
+    Other->>Other: Materialize into<br/>~/.&lt;agent&gt;/skills/
 ```
 
-Source layout (key paths inside the `vskill` repo):
+**Key invariants**:
+- The browser **never** calls `verified-skill.com` directly — all upstream traffic goes through the eval-server's `platform-proxy.ts`. This keeps the studio CORS-free and lets `VSKILL_PLATFORM_URL` redirect to a local platform for dev.
+- If `INTERNAL_BROADCAST_KEY` is missing (the default in shipped builds), the broadcast path no-ops and the user is told to `git push` so the scanner picks the change up.
+- `git push` alone is sufficient — the broadcast is an "instant notify" optimization, not a requirement for publication.
+
+### 2.3 Runtime topology
+
+`npx vskill studio` boots one Node process serving two roles: the static SPA (port 3162) and the REST/SSE API (port 3077, internally proxied at `/api`).
+
+```mermaid
+flowchart TB
+    Browser["Browser<br/>localhost:3162<br/>Vite-built React 19 SPA"]
+
+    subgraph Node["vskill studio (single Node process)"]
+        direction TB
+        Static["Static dist/eval-ui/<br/>served at :3162"]
+        Server["eval-server<br/>:3077 — REST + SSE"]
+        Static -.proxy /api.-> Server
+        Scanner["skill-scanner<br/>classifyOrigin()"]
+        Server --> Scanner
+    end
+
+    Browser -- HTTP / EventSource --> Static
+
+    subgraph FS["Local filesystem"]
+        SrcFS["Source skills<br/>vskill/skills, vskill/plugins/"]
+        InstFS["Installed skills<br/>~/.&lt;agent&gt;/skills/"]
+    end
+
+    Scanner --> SrcFS
+    Scanner --> InstFS
+
+    subgraph LLMs["LLM providers (src/eval/llm.ts)"]
+        Claude["claude CLI"]
+        Anthropic["Anthropic API"]
+        OpenRouter["OpenRouter"]
+        Ollama["Ollama / LM Studio<br/>(local)"]
+    end
+
+    Server -- shells out --> Claude
+    Server -- HTTPS --> Anthropic
+    Server -- HTTPS --> OpenRouter
+    Server -- HTTP --> Ollama
+
+    Server -- "/api/v1/skills/*<br/>(platform-proxy.ts)" --> Platform["verified-skill.com<br/>(or VSKILL_PLATFORM_URL)"]
+```
+
+**Why one process serves two ports**: in production the studio is deployed behind the platform on the same origin, so `/api/v1/skills/*` resolves to the platform without a proxy. In local dev they're separate processes, and `platform-proxy.ts` closes the gap so the same SPA code works in both environments.
+
+---
+
+## 2.4 Source layout
+
+Key paths inside the `vskill` repo:
 - `src/eval/` — evaluation engine: comparator (A/B skill-on/off), benchmark runner, LLM provider adapters, skill scanner (`classifyOrigin()` is the Own-vs-Installed SSoT).
-- `src/eval-server/` — HTTP server. Routes in `api-routes.ts`, skill creation in `skill-create-routes.ts`, skill improvement in `improve-routes.ts`, SSE helpers in `sse-helpers.ts`.
+- `src/eval-server/` — HTTP server. Routes in `api-routes.ts`, skill creation in `skill-create-routes.ts`, skill improvement in `improve-routes.ts`, platform proxy in `platform-proxy.ts`, git publish in `git-routes.ts`, SSE helpers in `sse-helpers.ts`.
 - `src/eval-ui/` — Vite SPA. Shell in `App.tsx`, sidebar at `src/components/Sidebar.tsx`, detail panel at `src/components/RightPanel.tsx`, update management UI at `src/pages/UpdatesPanel.tsx`.
+- `src/agents/agents-registry.ts` — list of supported agents and their `globalSkillsDir` values (the `~/.<agent>/skills/` paths in diagram 2.1).
 - `src/bin.ts` — CLI entry (`vskill` binary).
 - `scripts/` — CI scripts: `check-no-shimmer.ts`, `check-serif-scope.ts`, `check-bundle-size.ts`, `check-strings-voice.ts`.
 

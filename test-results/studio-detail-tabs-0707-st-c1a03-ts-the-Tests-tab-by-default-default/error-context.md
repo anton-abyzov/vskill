@@ -20,454 +20,451 @@
           - generic [ref=e22]: ›
           - generic [ref=e23]: test-skill
         - generic [ref=e24]:
-          - button "Find verified skills — opens search (⌘⇧K)" [ref=e25] [cursor=pointer]:
-            - img [ref=e26]
-            - generic [ref=e29]: Find skills
-            - generic [ref=e30]: ⌘⇧K
-          - button "Create a new skill" [ref=e31] [cursor=pointer]:
-            - img [ref=e32]
-            - text: New Skill
-          - button "Claude Code · Claude Opus 4.7" [ref=e34] [cursor=pointer]:
-            - generic [ref=e36]: Claude Code · Claude Opus 4.7
-          - button "1 updates available, open summary" [ref=e39] [cursor=pointer]:
-            - generic [ref=e40]: "1"
-          - button "Open command palette" [ref=e41] [cursor=pointer]:
-            - generic [ref=e42]: ⌘K
-    - generic [ref=e43]:
-      - complementary "Skills sidebar" [ref=e44]:
-        - generic [ref=e45]:
-          - button "Claude Code (0 · 11)" [ref=e46] [cursor=pointer]:
-            - generic [ref=e48]: Claude Code
-            - generic [ref=e49]: (0 · 11)
-            - generic [ref=e50]: ▾
-          - note "Claude Code session info" [ref=e51]:
-            - generic [ref=e53]:
-              - generic [ref=e54]: Claude Code uses your existing session. No API key needed — vskill just runs the official claude binary on your behalf.
-              - button "Learn more" [ref=e55] [cursor=pointer]
-            - button "Dismiss Claude Code info banner" [ref=e56] [cursor=pointer]: ×
-          - search [ref=e57]:
-            - img [ref=e58]
-            - searchbox "Filter skills" [ref=e61]
-            - generic [ref=e62]: /
-          - generic [ref=e63]:
-            - button "AVAILABLE (62)" [expanded] [ref=e64] [cursor=pointer]:
-              - generic [ref=e65]: ▾
-              - generic [ref=e66]: AVAILABLE
-              - generic [ref=e67]: (62)
-            - generic [ref=e68]:
-              - button "Project (0)" [expanded] [ref=e69] [cursor=pointer]:
-                - generic [ref=e70]: ▾
-                - generic [ref=e71]: Project
-                - generic [ref=e72]: (0)
-              - generic [ref=e74]:
-                - generic [ref=e75]: No skills installed for claude-code in this project.
-                - generic [ref=e76]:
+          - generic [ref=e25]:
+            - button "Find verified skills — opens search (⌘⇧K)" [ref=e26] [cursor=pointer]:
+              - img [ref=e27]
+              - generic [ref=e30]: Find skills
+              - generic [ref=e31]: ⌘⇧K
+            - button "Create a new skill" [ref=e32] [cursor=pointer]:
+              - img [ref=e33]
+              - text: New Skill
+          - generic [ref=e35]:
+            - button "Claude Code · Claude Opus 4.7" [ref=e37] [cursor=pointer]:
+              - generic [ref=e39]: Claude Code · Claude Opus 4.7
+            - button "1 updates available, open summary" [ref=e42] [cursor=pointer]:
+              - img [ref=e43]
+              - generic [ref=e47]: "1"
+    - generic [ref=e48]:
+      - complementary "Skills sidebar" [ref=e49]:
+        - generic [ref=e50]:
+          - button "Claude Code (0 · 11 · 50)" [ref=e51] [cursor=pointer]:
+            - generic [ref=e53]: Claude Code
+            - generic "project · personal · plugins" [ref=e54]: (0 · 11 · 50)
+            - generic [ref=e55]: ▾
+          - note "Claude Code session info" [ref=e56]:
+            - generic [ref=e58]:
+              - generic [ref=e59]: Claude Code uses your existing session. No API key needed — vskill just runs the official claude binary on your behalf.
+              - button "Learn more" [ref=e60] [cursor=pointer]
+            - button "Dismiss Claude Code info banner" [ref=e61] [cursor=pointer]: ×
+          - search [ref=e62]:
+            - img [ref=e63]
+            - searchbox "Filter skills" [ref=e66]
+            - generic [ref=e67]: /
+          - generic [ref=e68]:
+            - button "AVAILABLE (61)" [expanded] [ref=e69] [cursor=pointer]:
+              - generic [ref=e70]: ▾
+              - generic [ref=e71]: AVAILABLE
+              - generic [ref=e72]: (61)
+            - generic [ref=e73]:
+              - button "Project (0)" [expanded] [ref=e75] [cursor=pointer]:
+                - generic [ref=e76]: ▾
+                - generic [ref=e77]: Project
+                - generic [ref=e78]: (0)
+              - generic [ref=e80]:
+                - generic [ref=e81]: No skills installed for claude-code in this project.
+                - generic [ref=e82]:
                   - text: Run
-                  - code [ref=e77]: vskill install <skill>
+                  - code [ref=e83]: vskill install <skill>
                   - text: to add one.
-            - generic [ref=e78]:
-              - button "Personal (11)" [expanded] [ref=e79] [cursor=pointer]:
-                - generic [ref=e80]: ▾
-                - generic [ref=e81]: Personal
-                - generic [ref=e82]: (11)
-              - group "claude-code (11)" [ref=e85]:
-                - generic [ref=e86]:
-                  - generic "claude-code" [ref=e87]
-                  - generic [ref=e88]: (11)
-                - list [ref=e89]:
-                  - listitem [ref=e90]:
-                    - button "excalidraw-diagram-generator 1.0.0 symlinked from /Users/antonabyzov/.agents/skills/excalidraw-diagram-generator" [ref=e91] [cursor=pointer]:
-                      - generic "excalidraw-diagram-generator" [ref=e93]
-                      - generic "No version declared" [ref=e94]: 1.0.0
-                      - img "symlinked from /Users/antonabyzov/.agents/skills/excalidraw-diagram-generator" [ref=e95]:
-                        - img [ref=e96]
-                  - listitem [ref=e99]:
-                    - button "excalidraw-skill 1.0.0" [ref=e100] [cursor=pointer]:
-                      - generic "excalidraw-skill" [ref=e102]
-                      - generic "No version declared" [ref=e103]: 1.0.0
-                  - listitem [ref=e104]:
-                    - button "frontend-design 1.0.0" [ref=e105] [cursor=pointer]:
-                      - generic "frontend-design" [ref=e107]
-                      - generic "No version declared" [ref=e108]: 1.0.0
-                  - listitem [ref=e109]:
-                    - button "gws 0.1.0" [ref=e110] [cursor=pointer]:
-                      - generic "gws" [ref=e112]
-                      - generic [ref=e113]: 0.1.0
-                  - listitem [ref=e114]:
-                    - button "nanobanana 1.0.0" [ref=e115] [cursor=pointer]:
-                      - generic "nanobanana" [ref=e117]
-                      - generic "No version declared" [ref=e118]: 1.0.0
-                  - listitem [ref=e119]:
-                    - button "obsidian-brain 1.4.0" [ref=e120] [cursor=pointer]:
-                      - generic "obsidian-brain" [ref=e122]
-                      - generic [ref=e123]: 1.4.0
-                  - listitem [ref=e124]:
-                    - button "pptx 1.0.0" [ref=e125] [cursor=pointer]:
-                      - generic "pptx" [ref=e127]
-                      - generic "No version declared" [ref=e128]: 1.0.0
-                  - listitem [ref=e129]:
-                    - button "slack-messaging 1.0.0" [ref=e130] [cursor=pointer]:
-                      - generic "slack-messaging" [ref=e132]
-                      - generic [ref=e133]: 1.0.0
-                  - listitem [ref=e134]:
-                    - button "social-media-posting 1.0.0" [ref=e135] [cursor=pointer]:
-                      - generic "social-media-posting" [ref=e137]
-                      - generic "No version declared" [ref=e138]: 1.0.0
-                  - listitem [ref=e139]:
-                    - button "tax-filing 1.0.0" [ref=e140] [cursor=pointer]:
-                      - generic "tax-filing" [ref=e142]
-                      - generic "No version declared" [ref=e143]: 1.0.0
-                  - listitem [ref=e144]:
-                    - button "webapp-testing 1.0.0" [ref=e145] [cursor=pointer]:
-                      - generic "webapp-testing" [ref=e147]
-                      - generic "No version declared" [ref=e148]: 1.0.0
-            - generic [ref=e149]:
-              - button "Plugins (51)" [expanded] [ref=e150] [cursor=pointer]:
-                - generic [ref=e151]: ▾
-                - generic [ref=e152]: Plugins
-                - generic [ref=e153]: (51)
-              - generic [ref=e154]:
-                - button "Browse marketplaces…" [ref=e155] [cursor=pointer]:
-                  - generic [ref=e156]: 🛒
+            - generic [ref=e84]:
+              - button "Personal (11)" [expanded] [ref=e86] [cursor=pointer]:
+                - generic [ref=e87]: ▾
+                - generic [ref=e88]: Personal
+                - generic [ref=e89]: (11)
+              - group "claude-code (11)" [ref=e92]:
+                - generic [ref=e93]:
+                  - generic "claude-code" [ref=e94]
+                  - generic [ref=e95]: (11)
+                - list [ref=e96]:
+                  - listitem [ref=e97]:
+                    - button "excalidraw-diagram-generator 1.0.0 symlinked from /Users/antonabyzov/.agents/skills/excalidraw-diagram-generator" [ref=e98] [cursor=pointer]:
+                      - generic "excalidraw-diagram-generator" [ref=e100]
+                      - generic "No version declared" [ref=e101]: 1.0.0
+                      - img "symlinked from /Users/antonabyzov/.agents/skills/excalidraw-diagram-generator" [ref=e102]:
+                        - img [ref=e103]
+                  - listitem [ref=e106]:
+                    - button "excalidraw-skill 1.0.0" [ref=e107] [cursor=pointer]:
+                      - generic "excalidraw-skill" [ref=e109]
+                      - generic [ref=e110]: 1.0.0
+                  - listitem [ref=e111]:
+                    - button "frontend-design 1.0.0" [ref=e112] [cursor=pointer]:
+                      - generic "frontend-design" [ref=e114]
+                      - generic [ref=e115]: 1.0.0
+                  - listitem [ref=e116]:
+                    - button "gws 1.0.0" [ref=e117] [cursor=pointer]:
+                      - generic "gws" [ref=e119]
+                      - generic [ref=e120]: 1.0.0
+                  - listitem [ref=e121]:
+                    - button "nanobanana 1.0.0" [ref=e122] [cursor=pointer]:
+                      - generic "nanobanana" [ref=e124]
+                      - generic [ref=e125]: 1.0.0
+                  - listitem [ref=e126]:
+                    - button "obsidian-brain 1.0.0" [ref=e127] [cursor=pointer]:
+                      - generic "obsidian-brain" [ref=e129]
+                      - generic [ref=e130]: 1.0.0
+                  - listitem [ref=e131]:
+                    - button "pptx 1.0.0" [ref=e132] [cursor=pointer]:
+                      - generic "pptx" [ref=e134]
+                      - generic [ref=e135]: 1.0.0
+                  - listitem [ref=e136]:
+                    - button "slack-messaging 1.0.0" [ref=e137] [cursor=pointer]:
+                      - generic "slack-messaging" [ref=e139]
+                      - generic [ref=e140]: 1.0.0
+                  - listitem [ref=e141]:
+                    - button "social-media-posting 1.0.0" [ref=e142] [cursor=pointer]:
+                      - generic "social-media-posting" [ref=e144]
+                      - generic [ref=e145]: 1.0.0
+                  - listitem [ref=e146]:
+                    - button "tax-filing 1.0.0" [ref=e147] [cursor=pointer]:
+                      - generic "tax-filing" [ref=e149]
+                      - generic [ref=e150]: 1.0.0
+                  - listitem [ref=e151]:
+                    - button "webapp-testing 1.0.0" [ref=e152] [cursor=pointer]:
+                      - generic "webapp-testing" [ref=e154]
+                      - generic [ref=e155]: 1.0.0
+            - generic [ref=e156]:
+              - button "Plugins (50)" [expanded] [ref=e158] [cursor=pointer]:
+                - generic [ref=e159]: ▾
+                - generic [ref=e160]: Plugins
+                - generic [ref=e161]: (50)
+              - generic [ref=e162]:
+                - button "Browse marketplaces…" [ref=e163] [cursor=pointer]:
+                  - generic [ref=e164]: 🛒
                   - text: Browse marketplaces…
-                - group "codex (3)" [ref=e157]:
-                  - generic [ref=e158]:
-                    - button "codex (3)" [expanded] [ref=e159] [cursor=pointer]:
-                      - generic [ref=e160]: ▾
-                      - generic [ref=e161]: codex
-                      - generic [ref=e162]: (3)
-                    - button "Manage codex" [ref=e165] [cursor=pointer]: ⋯
+                - group "codex (3)" [ref=e165]:
                   - generic [ref=e166]:
-                    - button "codex-cli-runtime 1.0.4" [ref=e168] [cursor=pointer]:
-                      - generic "codex-cli-runtime" [ref=e170]
-                      - generic "Inherited from codex plugin v1.0.4" [ref=e171]: 1.0.4
-                    - button "codex-result-handling 1.0.4" [ref=e173] [cursor=pointer]:
-                      - generic "codex-result-handling" [ref=e175]
-                      - generic "Inherited from codex plugin v1.0.4" [ref=e176]: 1.0.4
-                    - button "gpt-5-4-prompting 1.0.4" [ref=e178] [cursor=pointer]:
-                      - generic "gpt-5-4-prompting" [ref=e180]
-                      - generic "Inherited from codex plugin v1.0.4" [ref=e181]: 1.0.4
-                - group "skill-creator (1)" [ref=e182]:
-                  - generic [ref=e183]:
-                    - button "skill-creator (1)" [expanded] [ref=e184] [cursor=pointer]:
-                      - generic [ref=e185]: ▾
-                      - generic [ref=e186]: skill-creator
-                      - generic [ref=e187]: (1)
-                    - button "Manage skill-creator" [ref=e190] [cursor=pointer]: ⋯
-                  - button "skill-creator 1.0.0" [ref=e193] [cursor=pointer]:
-                    - generic "skill-creator" [ref=e195]
-                    - generic "No version declared" [ref=e196]: 1.0.0
-                - group "sw (47)" [ref=e197]:
-                  - generic [ref=e198]:
-                    - button "sw (47)" [expanded] [ref=e199] [cursor=pointer]:
-                      - generic [ref=e200]: ▾
-                      - generic [ref=e201]: sw
-                      - generic [ref=e202]: (47)
-                    - button "Manage sw" [ref=e205] [cursor=pointer]: ⋯
-                  - generic [ref=e206]:
-                    - button "ado-mapper 1.0.0" [ref=e208] [cursor=pointer]:
-                      - generic "ado-mapper" [ref=e210]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e211]: 1.0.0
-                    - button "ado-multi-project 1.0.0" [ref=e213] [cursor=pointer]:
-                      - generic "ado-multi-project" [ref=e215]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e216]: 1.0.0
-                    - button "ado-resource-validator 1.0.0" [ref=e218] [cursor=pointer]:
-                      - generic "ado-resource-validator" [ref=e220]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e221]: 1.0.0
-                    - button "ado-sync 1.0.0" [ref=e223] [cursor=pointer]:
-                      - generic "ado-sync" [ref=e225]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e226]: 1.0.0
-                    - button "architect 1.0.0" [ref=e228] [cursor=pointer]:
-                      - generic "architect" [ref=e230]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e231]: 1.0.0
-                    - button "auto 1.0.0" [ref=e233] [cursor=pointer]:
-                      - generic "auto" [ref=e235]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e236]: 1.0.0
-                    - button "brainstorm 1.0.0" [ref=e238] [cursor=pointer]:
-                      - generic "brainstorm" [ref=e240]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e241]: 1.0.0
-                    - button "close-all 1.0.0" [ref=e243] [cursor=pointer]:
-                      - generic "close-all" [ref=e245]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e246]: 1.0.0
-                    - button "code-reviewer 1.0.0" [ref=e248] [cursor=pointer]:
-                      - generic "code-reviewer" [ref=e250]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e251]: 1.0.0
-                    - button "debug 1.0.0" [ref=e253] [cursor=pointer]:
-                      - generic "debug" [ref=e255]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e256]: 1.0.0
-                    - button "diagrams 1.0.0" [ref=e258] [cursor=pointer]:
-                      - generic "diagrams" [ref=e260]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e261]: 1.0.0
-                    - button "do 1.0.0" [ref=e263] [cursor=pointer]:
-                      - generic "do" [ref=e265]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e266]: 1.0.0
-                    - button "done 1.0.0" [ref=e268] [cursor=pointer]:
-                      - generic "done" [ref=e270]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e271]: 1.0.0
-                    - button "e2e 1.0.0" [ref=e273] [cursor=pointer]:
-                      - generic "e2e" [ref=e275]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e276]: 1.0.0
-                    - button "get 1.1.0" [ref=e278] [cursor=pointer]:
-                      - generic "get" [ref=e280]
-                      - generic [ref=e281]: 1.1.0
-                    - button "github-issue-standard 1.0.0" [ref=e283] [cursor=pointer]:
-                      - generic "github-issue-standard" [ref=e285]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e286]: 1.0.0
-                    - button "github-multi-project 1.0.0" [ref=e288] [cursor=pointer]:
-                      - generic "github-multi-project" [ref=e290]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e291]: 1.0.0
-                    - button "github-sync 1.0.0" [ref=e293] [cursor=pointer]:
-                      - generic "github-sync" [ref=e295]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e296]: 1.0.0
-                    - button "grill 1.0.0" [ref=e298] [cursor=pointer]:
-                      - generic "grill" [ref=e300]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e301]: 1.0.0
-                    - button "help 1.0.0" [ref=e303] [cursor=pointer]:
-                      - generic "help" [ref=e305]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e306]: 1.0.0
-                    - button "image 1.0.0" [ref=e308] [cursor=pointer]:
-                      - generic "image" [ref=e310]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e311]: 1.0.0
-                    - button "import 1.0.0" [ref=e313] [cursor=pointer]:
-                      - generic "import" [ref=e315]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e316]: 1.0.0
-                    - button "increment 1.0.0" [ref=e318] [cursor=pointer]:
-                      - generic "increment" [ref=e320]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e321]: 1.0.0
-                    - button "jira-mapper 1.0.0" [ref=e323] [cursor=pointer]:
-                      - generic "jira-mapper" [ref=e325]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e326]: 1.0.0
-                    - button "jira-resource-validator 1.0.0" [ref=e328] [cursor=pointer]:
-                      - generic "jira-resource-validator" [ref=e330]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e331]: 1.0.0
-                    - button "jira-sync 1.0.0" [ref=e333] [cursor=pointer]:
-                      - generic "jira-sync" [ref=e335]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e336]: 1.0.0
-                    - button "judge-llm 1.0.0" [ref=e338] [cursor=pointer]:
-                      - generic "judge-llm" [ref=e340]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e341]: 1.0.0
-                    - button "npm 1.0.0" [ref=e343] [cursor=pointer]:
-                      - generic "npm" [ref=e345]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e346]: 1.0.0
-                    - button "plan 1.0.0" [ref=e348] [cursor=pointer]:
-                      - generic "plan" [ref=e350]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e351]: 1.0.0
-                    - button "pm 1.0.0" [ref=e353] [cursor=pointer]:
-                      - generic "pm" [ref=e355]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e356]: 1.0.0
-                    - button "pr 1.0.0" [ref=e358] [cursor=pointer]:
-                      - generic "pr" [ref=e360]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e361]: 1.0.0
-                    - button "pr-review 1.0.0" [ref=e363] [cursor=pointer]:
-                      - generic "pr-review" [ref=e365]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e366]: 1.0.0
-                    - button "progress-sync 1.0.0" [ref=e368] [cursor=pointer]:
-                      - generic "progress-sync" [ref=e370]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e371]: 1.0.0
-                    - button "release-expert 1.0.0" [ref=e373] [cursor=pointer]:
-                      - generic "release-expert" [ref=e375]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e376]: 1.0.0
-                    - button "remotion 1.0.0" [ref=e378] [cursor=pointer]:
-                      - generic "remotion" [ref=e380]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e381]: 1.0.0
-                    - button "skill-gen 1.0.0" [ref=e383] [cursor=pointer]:
-                      - generic "skill-gen" [ref=e385]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e386]: 1.0.0
-                    - button "sync-docs 1.0.0" [ref=e388] [cursor=pointer]:
-                      - generic "sync-docs" [ref=e390]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e391]: 1.0.0
-                    - button "tdd-cycle 1.0.0" [ref=e393] [cursor=pointer]:
-                      - generic "tdd-cycle" [ref=e395]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e396]: 1.0.0
-                    - button "tdd-green 1.0.0" [ref=e398] [cursor=pointer]:
-                      - generic "tdd-green" [ref=e400]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e401]: 1.0.0
-                    - button "tdd-red 1.0.0" [ref=e403] [cursor=pointer]:
-                      - generic "tdd-red" [ref=e405]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e406]: 1.0.0
-                    - button "tdd-refactor 1.0.0" [ref=e408] [cursor=pointer]:
-                      - generic "tdd-refactor" [ref=e410]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e411]: 1.0.0
-                    - button "team-build 1.0.0" [ref=e413] [cursor=pointer]:
-                      - generic "team-build" [ref=e415]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e416]: 1.0.0
-                    - button "team-lead 1.0.0" [ref=e418] [cursor=pointer]:
-                      - generic "team-lead" [ref=e420]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e421]: 1.0.0
-                    - button "team-merge 1.0.0" [ref=e423] [cursor=pointer]:
-                      - generic "team-merge" [ref=e425]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e426]: 1.0.0
-                    - button "umbrella 1.0.0" [ref=e428] [cursor=pointer]:
-                      - generic "umbrella" [ref=e430]
-                      - generic [ref=e431]: 1.0.0
-                    - button "validate 1.0.0" [ref=e433] [cursor=pointer]:
-                      - generic "validate" [ref=e435]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e436]: 1.0.0
-                    - button "video 1.0.0" [ref=e438] [cursor=pointer]:
-                      - generic "video" [ref=e440]
-                      - generic "Inherited from sw plugin v1.0.0" [ref=e441]: 1.0.0
-            - button "AUTHORING (4) New" [expanded] [ref=e443] [cursor=pointer]:
-              - generic [ref=e444]: ▾
-              - generic [ref=e445]: AUTHORING
-              - generic [ref=e446]: (4)
-              - button "New" [ref=e448]:
-                - img [ref=e449]
+                    - button "codex (3)" [expanded] [ref=e167] [cursor=pointer]:
+                      - generic [ref=e168]: ▾
+                      - generic [ref=e169]: codex
+                      - generic [ref=e170]: (3)
+                    - button "Manage codex" [ref=e173] [cursor=pointer]: ⋯
+                  - generic [ref=e174]:
+                    - button "codex-cli-runtime 1.0.4" [ref=e176] [cursor=pointer]:
+                      - generic "codex-cli-runtime" [ref=e178]
+                      - generic "Inherited from codex plugin v1.0.4" [ref=e179]: 1.0.4
+                    - button "codex-result-handling 1.0.4" [ref=e181] [cursor=pointer]:
+                      - generic "codex-result-handling" [ref=e183]
+                      - generic "Inherited from codex plugin v1.0.4" [ref=e184]: 1.0.4
+                    - button "gpt-5-4-prompting 1.0.4" [ref=e186] [cursor=pointer]:
+                      - generic "gpt-5-4-prompting" [ref=e188]
+                      - generic "Inherited from codex plugin v1.0.4" [ref=e189]: 1.0.4
+                - group "sw (47)" [ref=e190]:
+                  - generic [ref=e191]:
+                    - button "sw (47)" [expanded] [ref=e192] [cursor=pointer]:
+                      - generic [ref=e193]: ▾
+                      - generic [ref=e194]: sw
+                      - generic [ref=e195]: (47)
+                    - button "Manage sw" [ref=e198] [cursor=pointer]: ⋯
+                  - generic [ref=e199]:
+                    - button "ado-mapper 1.0.0" [ref=e201] [cursor=pointer]:
+                      - generic "ado-mapper" [ref=e203]
+                      - generic [ref=e204]: 1.0.0
+                    - button "ado-multi-project 1.0.0" [ref=e206] [cursor=pointer]:
+                      - generic "ado-multi-project" [ref=e208]
+                      - generic [ref=e209]: 1.0.0
+                    - button "ado-resource-validator 1.0.0" [ref=e211] [cursor=pointer]:
+                      - generic "ado-resource-validator" [ref=e213]
+                      - generic [ref=e214]: 1.0.0
+                    - button "ado-sync 1.0.0" [ref=e216] [cursor=pointer]:
+                      - generic "ado-sync" [ref=e218]
+                      - generic [ref=e219]: 1.0.0
+                    - button "architect 1.0.0" [ref=e221] [cursor=pointer]:
+                      - generic "architect" [ref=e223]
+                      - generic [ref=e224]: 1.0.0
+                    - button "auto 1.0.0" [ref=e226] [cursor=pointer]:
+                      - generic "auto" [ref=e228]
+                      - generic [ref=e229]: 1.0.0
+                    - button "brainstorm 1.0.0" [ref=e231] [cursor=pointer]:
+                      - generic "brainstorm" [ref=e233]
+                      - generic [ref=e234]: 1.0.0
+                    - button "close-all 1.0.0" [ref=e236] [cursor=pointer]:
+                      - generic "close-all" [ref=e238]
+                      - generic [ref=e239]: 1.0.0
+                    - button "code-reviewer 1.0.0" [ref=e241] [cursor=pointer]:
+                      - generic "code-reviewer" [ref=e243]
+                      - generic [ref=e244]: 1.0.0
+                    - button "debug 1.0.0" [ref=e246] [cursor=pointer]:
+                      - generic "debug" [ref=e248]
+                      - generic [ref=e249]: 1.0.0
+                    - button "diagrams 1.0.0" [ref=e251] [cursor=pointer]:
+                      - generic "diagrams" [ref=e253]
+                      - generic [ref=e254]: 1.0.0
+                    - button "do 1.0.0" [ref=e256] [cursor=pointer]:
+                      - generic "do" [ref=e258]
+                      - generic [ref=e259]: 1.0.0
+                    - button "done 1.0.0" [ref=e261] [cursor=pointer]:
+                      - generic "done" [ref=e263]
+                      - generic [ref=e264]: 1.0.0
+                    - button "e2e 1.0.0" [ref=e266] [cursor=pointer]:
+                      - generic "e2e" [ref=e268]
+                      - generic [ref=e269]: 1.0.0
+                    - button "get 1.1.0" [ref=e271] [cursor=pointer]:
+                      - generic "get" [ref=e273]
+                      - generic [ref=e274]: 1.1.0
+                    - button "github-issue-standard 1.0.0" [ref=e276] [cursor=pointer]:
+                      - generic "github-issue-standard" [ref=e278]
+                      - generic [ref=e279]: 1.0.0
+                    - button "github-multi-project 1.0.0" [ref=e281] [cursor=pointer]:
+                      - generic "github-multi-project" [ref=e283]
+                      - generic [ref=e284]: 1.0.0
+                    - button "github-sync 1.0.0" [ref=e286] [cursor=pointer]:
+                      - generic "github-sync" [ref=e288]
+                      - generic [ref=e289]: 1.0.0
+                    - button "grill 1.0.0" [ref=e291] [cursor=pointer]:
+                      - generic "grill" [ref=e293]
+                      - generic [ref=e294]: 1.0.0
+                    - button "help 1.0.0" [ref=e296] [cursor=pointer]:
+                      - generic "help" [ref=e298]
+                      - generic [ref=e299]: 1.0.0
+                    - button "image 1.0.0" [ref=e301] [cursor=pointer]:
+                      - generic "image" [ref=e303]
+                      - generic [ref=e304]: 1.0.0
+                    - button "import 1.0.0" [ref=e306] [cursor=pointer]:
+                      - generic "import" [ref=e308]
+                      - generic [ref=e309]: 1.0.0
+                    - button "increment 1.0.0" [ref=e311] [cursor=pointer]:
+                      - generic "increment" [ref=e313]
+                      - generic [ref=e314]: 1.0.0
+                    - button "jira-mapper 1.0.0" [ref=e316] [cursor=pointer]:
+                      - generic "jira-mapper" [ref=e318]
+                      - generic [ref=e319]: 1.0.0
+                    - button "jira-resource-validator 1.0.0" [ref=e321] [cursor=pointer]:
+                      - generic "jira-resource-validator" [ref=e323]
+                      - generic [ref=e324]: 1.0.0
+                    - button "jira-sync 1.0.0" [ref=e326] [cursor=pointer]:
+                      - generic "jira-sync" [ref=e328]
+                      - generic [ref=e329]: 1.0.0
+                    - button "judge-llm 1.0.0" [ref=e331] [cursor=pointer]:
+                      - generic "judge-llm" [ref=e333]
+                      - generic [ref=e334]: 1.0.0
+                    - button "npm 1.0.0" [ref=e336] [cursor=pointer]:
+                      - generic "npm" [ref=e338]
+                      - generic [ref=e339]: 1.0.0
+                    - button "plan 1.0.0" [ref=e341] [cursor=pointer]:
+                      - generic "plan" [ref=e343]
+                      - generic [ref=e344]: 1.0.0
+                    - button "pm 1.0.0" [ref=e346] [cursor=pointer]:
+                      - generic "pm" [ref=e348]
+                      - generic [ref=e349]: 1.0.0
+                    - button "pr 1.0.0" [ref=e351] [cursor=pointer]:
+                      - generic "pr" [ref=e353]
+                      - generic [ref=e354]: 1.0.0
+                    - button "pr-review 1.0.0" [ref=e356] [cursor=pointer]:
+                      - generic "pr-review" [ref=e358]
+                      - generic [ref=e359]: 1.0.0
+                    - button "progress-sync 1.0.0" [ref=e361] [cursor=pointer]:
+                      - generic "progress-sync" [ref=e363]
+                      - generic [ref=e364]: 1.0.0
+                    - button "release-expert 1.0.0" [ref=e366] [cursor=pointer]:
+                      - generic "release-expert" [ref=e368]
+                      - generic [ref=e369]: 1.0.0
+                    - button "remotion 1.0.0" [ref=e371] [cursor=pointer]:
+                      - generic "remotion" [ref=e373]
+                      - generic [ref=e374]: 1.0.0
+                    - button "skill-gen 1.0.0" [ref=e376] [cursor=pointer]:
+                      - generic "skill-gen" [ref=e378]
+                      - generic [ref=e379]: 1.0.0
+                    - button "sync-docs 1.0.0" [ref=e381] [cursor=pointer]:
+                      - generic "sync-docs" [ref=e383]
+                      - generic [ref=e384]: 1.0.0
+                    - button "tdd-cycle 1.0.0" [ref=e386] [cursor=pointer]:
+                      - generic "tdd-cycle" [ref=e388]
+                      - generic [ref=e389]: 1.0.0
+                    - button "tdd-green 1.0.0" [ref=e391] [cursor=pointer]:
+                      - generic "tdd-green" [ref=e393]
+                      - generic [ref=e394]: 1.0.0
+                    - button "tdd-red 1.0.0" [ref=e396] [cursor=pointer]:
+                      - generic "tdd-red" [ref=e398]
+                      - generic [ref=e399]: 1.0.0
+                    - button "tdd-refactor 1.0.0" [ref=e401] [cursor=pointer]:
+                      - generic "tdd-refactor" [ref=e403]
+                      - generic [ref=e404]: 1.0.0
+                    - button "team-build 1.0.0" [ref=e406] [cursor=pointer]:
+                      - generic "team-build" [ref=e408]
+                      - generic [ref=e409]: 1.0.0
+                    - button "team-lead 1.0.0" [ref=e411] [cursor=pointer]:
+                      - generic "team-lead" [ref=e413]
+                      - generic [ref=e414]: 1.0.0
+                    - button "team-merge 1.0.0" [ref=e416] [cursor=pointer]:
+                      - generic "team-merge" [ref=e418]
+                      - generic [ref=e419]: 1.0.0
+                    - button "umbrella 1.0.0" [ref=e421] [cursor=pointer]:
+                      - generic "umbrella" [ref=e423]
+                      - generic [ref=e424]: 1.0.0
+                    - button "validate 1.0.0" [ref=e426] [cursor=pointer]:
+                      - generic "validate" [ref=e428]
+                      - generic [ref=e429]: 1.0.0
+                    - button "video 1.0.0" [ref=e431] [cursor=pointer]:
+                      - generic "video" [ref=e433]
+                      - generic [ref=e434]: 1.0.0
+            - button "AUTHORING (4) New" [expanded] [ref=e436] [cursor=pointer]:
+              - generic [ref=e437]: ▾
+              - generic [ref=e438]: AUTHORING
+              - generic [ref=e439]: (4)
+              - button "New" [ref=e441]:
+                - img [ref=e442]
                 - text: New
-            - generic [ref=e450]:
-              - button "Skills (4)" [expanded] [ref=e451] [cursor=pointer]:
-                - generic [ref=e452]: ▾
-                - generic [ref=e453]: Skills
-                - generic [ref=e454]: (4)
-              - generic [ref=e456]:
-                - group "easychamp (1)" [ref=e457]:
-                  - generic [ref=e458]:
-                    - generic "easychamp" [ref=e459]
-                    - generic [ref=e460]: (1)
-                  - list [ref=e461]:
-                    - listitem [ref=e462]:
-                      - button "tournament-manager 0.1.0" [ref=e463] [cursor=pointer]:
-                        - generic "tournament-manager" [ref=e465]
-                        - generic [ref=e466]: 0.1.0
-                - group "fixtures (2)" [ref=e467]:
-                  - generic [ref=e468]:
-                    - generic "fixtures" [ref=e469]
-                    - generic [ref=e470]: (2)
-                  - list [ref=e471]:
-                    - listitem [ref=e472]:
-                      - button "hotfix-dup-test 1.0.0" [ref=e473] [cursor=pointer]:
-                        - generic "hotfix-dup-test" [ref=e475]
-                        - generic "No version declared" [ref=e476]: 1.0.0
-                    - listitem [ref=e477]:
-                      - button "lint-markdown-files 1.0.0" [ref=e478] [cursor=pointer]:
-                        - generic "lint-markdown-files" [ref=e480]
-                        - generic [ref=e481]: 1.0.0
-                - group "test-plugin (1)" [ref=e482]:
-                  - generic [ref=e483]:
-                    - generic "test-plugin" [ref=e484]
-                    - generic [ref=e485]: (1)
-                  - list [ref=e486]:
-                    - listitem [ref=e487]:
-                      - button "test-skill 1.0.0" [active] [ref=e488] [cursor=pointer]:
-                        - generic "test-skill" [ref=e490]
-                        - generic "No version declared" [ref=e491]: 1.0.0
-            - generic [ref=e492]:
-              - button "Plugins (0)" [expanded] [ref=e493] [cursor=pointer]:
-                - generic [ref=e494]: ▾
-                - generic [ref=e495]: Plugins
-                - generic [ref=e496]: (0)
-              - generic [ref=e498]:
-                - text: No plugin sources in this project. Add
-                - code [ref=e499]: <plugin>/.claude-plugin/plugin.json
-                - text: .
-      - separator "Resize sidebar" [ref=e500]
-      - main [ref=e501]:
-        - generic [ref=e502]:
-          - generic [ref=e504]:
-            - generic [ref=e505]:
-              - generic [ref=e506]: test-plugin
-              - generic [ref=e507]: ›
-              - generic [ref=e508]:
-                - 'generic "Origin: Skills" [ref=e509]'
+            - generic [ref=e443]:
+              - button "Skills (4)" [expanded] [ref=e445] [cursor=pointer]:
+                - generic [ref=e446]: ▾
+                - generic [ref=e447]: Skills
+                - generic [ref=e448]: (4)
+              - generic [ref=e450]:
+                - group "easychamp (1)" [ref=e451]:
+                  - generic [ref=e452]:
+                    - generic "easychamp" [ref=e453]
+                    - generic [ref=e454]: (1)
+                  - list [ref=e455]:
+                    - listitem [ref=e456]:
+                      - button "tournament-manager 0.1.0" [ref=e457] [cursor=pointer]:
+                        - generic "tournament-manager" [ref=e459]
+                        - generic [ref=e460]: 0.1.0
+                - group "fixtures (2)" [ref=e461]:
+                  - generic [ref=e462]:
+                    - generic "fixtures" [ref=e463]
+                    - generic [ref=e464]: (2)
+                  - list [ref=e465]:
+                    - listitem [ref=e466]:
+                      - button "hotfix-dup-test 1.0.0" [ref=e467] [cursor=pointer]:
+                        - generic "hotfix-dup-test" [ref=e469]
+                        - generic "No version declared" [ref=e470]: 1.0.0
+                    - listitem [ref=e471]:
+                      - button "lint-markdown-files 1.0.0" [ref=e472] [cursor=pointer]:
+                        - generic "lint-markdown-files" [ref=e474]
+                        - generic [ref=e475]: 1.0.0
+                - group "test-plugin (1)" [ref=e476]:
+                  - generic [ref=e477]:
+                    - generic "test-plugin" [ref=e478]
+                    - generic [ref=e479]: (1)
+                  - list [ref=e480]:
+                    - listitem [ref=e481]:
+                      - button "test-skill 1.0.0" [active] [ref=e482] [cursor=pointer]:
+                        - generic "test-skill" [ref=e484]
+                        - generic "No version declared" [ref=e485]: 1.0.0
+            - generic [ref=e486]:
+              - button "Plugins (0)" [expanded] [ref=e488] [cursor=pointer]:
+                - generic [ref=e489]: ▾
+                - generic [ref=e490]: Plugins
+                - generic [ref=e491]: (0)
+              - generic [ref=e493]:
+                - generic [ref=e494]: No plugin sources in this project.
+                - generic [ref=e495]:
+                  - text: Add
+                  - code [ref=e496]: <plugin>/.claude-plugin/plugin.json
+                  - text: to author one.
+      - separator "Resize sidebar" [ref=e497]
+      - main [ref=e498]:
+        - generic [ref=e499]:
+          - generic [ref=e501]:
+            - generic [ref=e502]:
+              - generic [ref=e503]: test-plugin
+              - generic [ref=e504]: ›
+              - generic [ref=e505]:
+                - 'generic "Origin: Skills" [ref=e506]'
                 - text: Skills
-            - generic [ref=e510]:
-              - heading "test-skill" [level=2] [ref=e511]
-              - generic "No version declared" [ref=e513]: v1.0.0
-            - generic [ref=e514]:
-              - generic [ref=e515]: —
-              - button "test-skill" [ref=e516] [cursor=pointer]:
-                - generic [ref=e517]: test-skill
-                - generic [ref=e518]: ⧉
-            - generic [ref=e519]:
-              - generic [ref=e520]: Install method
-              - generic [ref=e521]: Authored
-            - generic [ref=e522]:
-              - button "Copy path /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/fixtures/test-plugin/skills/test-skill to clipboard" [ref=e523] [cursor=pointer]: /Users/anton…tures/test-plugin/skills/test-skill
-              - button "Copy skill path to clipboard" [ref=e524] [cursor=pointer]:
-                - img [ref=e525]
+            - generic [ref=e507]:
+              - heading "test-skill" [level=2] [ref=e508]
+              - generic [ref=e509]:
+                - generic "No version declared" [ref=e511]: v1.0.0
+                - button "Delete skill" [ref=e512] [cursor=pointer]:
+                  - img [ref=e513]
+            - generic [ref=e516]:
+              - link "anton-abyzov" [ref=e517] [cursor=pointer]:
+                - /url: https://github.com/anton-abyzov
+              - link "SKILL.md" [ref=e518] [cursor=pointer]:
+                - /url: https://github.com/anton-abyzov/vskill/blob/HEAD/e2e/fixtures/test-plugin/skills/test-skill/SKILL.md
+                - generic [ref=e519]: SKILL.md
+                - generic [ref=e520]: ↗
+            - generic [ref=e521]:
+              - generic [ref=e522]: Install method
+              - generic [ref=e523]: Authored
+            - generic [ref=e524]:
+              - button "Copy path /Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/e2e/fixtures/test-plugin/skills/test-skill to clipboard" [ref=e525] [cursor=pointer]: /Users/anton…tures/test-plugin/skills/test-skill
+              - button "Copy skill path to clipboard" [ref=e526] [cursor=pointer]:
+                - img [ref=e527]
                 - text: Copy
-          - tablist "Detail sections" [ref=e528]:
-            - tab "Overview" [selected] [ref=e529] [cursor=pointer]
-            - tab "Editor" [ref=e530] [cursor=pointer]
-            - tab "Tests" [ref=e531] [cursor=pointer]
-            - tab "Run" [ref=e532] [cursor=pointer]
-            - tab "Activation" [ref=e533] [cursor=pointer]
+          - tablist "Detail sections" [ref=e530]:
+            - tab "Overview" [ref=e531] [cursor=pointer]
+            - tab "Edit" [ref=e532] [cursor=pointer]
+            - tab "Run" [selected] [ref=e533] [cursor=pointer]
             - tab "History" [ref=e534] [cursor=pointer]
-            - tab "Leaderboard" [ref=e535] [cursor=pointer]
-            - tab "Deps" [ref=e536] [cursor=pointer]
-            - tab "Versions" [ref=e537] [cursor=pointer]
-          - tabpanel "Overview" [ref=e538]:
-            - generic [ref=e539]:
-              - generic [ref=e540]:
-                - generic [ref=e541]:
-                  - heading "test-skill" [level=2] [ref=e542]
-                  - generic "No version declared" [ref=e543]: v1.0.0
-                  - generic [ref=e544]: Authored
-                - generic [ref=e545]:
-                  - generic [ref=e546]: —
-                  - button "test-skill" [ref=e547] [cursor=pointer]:
-                    - generic [ref=e548]: test-skill
-                    - generic [ref=e549]: ⧉
-                  - generic "2026-03-14T06:06:57.709Z" [ref=e550]: · Updated 1 month ago
+          - tablist "run sub-sections" [ref=e535]:
+            - tab "Benchmark" [selected] [ref=e536] [cursor=pointer]
+            - tab "Activation" [ref=e537] [cursor=pointer]
+            - tab "A/B" [ref=e538] [cursor=pointer]
+          - tabpanel "Run" [ref=e539]:
+            - generic [ref=e540]:
+              - generic [ref=e541]:
+                - generic [ref=e543]: Benchmark
+                - generic [ref=e544]:
+                  - button "Run A/B Test" [ref=e545] [cursor=pointer]
+                  - button "Test Skill" [ref=e546] [cursor=pointer]
+                  - button "Test Baseline" [ref=e547] [cursor=pointer]
+                - generic [ref=e548]:
+                  - generic [ref=e549]: "Est. duration: 1m–3m"
+                  - generic [ref=e550]: "Cost: Included"
               - generic [ref=e551]:
-                - button "Benchmark 0% 1 month ago About benchmarks" [ref=e552] [cursor=pointer]:
-                  - generic [ref=e553]: Benchmark
-                  - generic [ref=e554]: 0%
-                  - generic [ref=e555]: 1 month ago
-                  - button "About benchmarks" [ref=e559]: ℹ
-                - button "Tests 2 4 assertions" [ref=e560] [cursor=pointer]:
-                  - generic [ref=e561]: Tests
-                  - generic [ref=e562]: "2"
-                  - generic [ref=e563]: 4 assertions
-                - button "Activations 0 Never" [ref=e564] [cursor=pointer]:
-                  - generic [ref=e565]: Activations
-                  - generic [ref=e566]: "0"
-                  - generic [ref=e567]: Never
-                - button "Last run 1 month ago" [ref=e568] [cursor=pointer]:
-                  - generic [ref=e569]: Last run
-                  - generic [ref=e570]: 1 month ago
-                - button "MCP deps 0 None" [ref=e571] [cursor=pointer]:
-                  - generic [ref=e572]: MCP deps
-                  - generic [ref=e573]: "0"
-                  - generic [ref=e574]: None
-                - button "Skill deps 0 None" [ref=e575] [cursor=pointer]:
-                  - generic [ref=e576]: Skill deps
-                  - generic [ref=e577]: "0"
-                  - generic [ref=e578]: None
-                - generic [ref=e579]:
-                  - generic [ref=e580]: Size
-                  - generic [ref=e581]: 270 B
-                - generic [ref=e582]:
-                  - generic [ref=e583]: Last modified
-                  - generic [ref=e584]: 1 month ago
-                  - generic [ref=e585]: 2026-03-14T06:06:57.709Z
-    - contentinfo [ref=e586]:
-      - contentinfo [ref=e587]:
-        - generic "opus" [ref=e588]
-        - generic [ref=e589]: "|"
-        - 'generic "Health: ok" [ref=e590]':
-          - generic [ref=e592]: ok
-        - generic [ref=e593]: "|"
-        - generic [ref=e594]:
-          - button "Use current Claude Code session — unlocked." [ref=e595] [cursor=pointer]:
-            - img [ref=e596]
-          - button "Anthropic API — locked. Click to add a key." [ref=e599] [cursor=pointer]:
-            - img [ref=e600]
-          - button "OpenRouter — unlocked." [ref=e603] [cursor=pointer]:
-            - img [ref=e604]
-          - button "Ollama (local, free) — unlocked." [ref=e607] [cursor=pointer]:
-            - img [ref=e608]
-          - button "LM Studio (local, free) — locked. Click to add a key." [ref=e611] [cursor=pointer]:
-            - img [ref=e612]
-          - button "OpenAI API — locked. Click for install instructions." [ref=e615] [cursor=pointer]:
-            - img [ref=e616]
-        - button "Switch to dark theme" [ref=e619] [cursor=pointer]:
-          - img [ref=e620]
-          - generic [ref=e623]: auto
-    - status [ref=e624]: Viewing test-skill (Own)
-  - generic [ref=e625]:
-    - generic [ref=e626]: 1 update available
-    - button "View Updates" [ref=e627] [cursor=pointer]
-    - button "Dismiss" [ref=e628] [cursor=pointer]: ✕
-  - status [ref=e629]
-  - alert [ref=e630]
+                - generic [ref=e552]:
+                  - generic [ref=e553]:
+                    - generic [ref=e555]: "#1 basic-test-question"
+                    - generic [ref=e556]:
+                      - button "Compare" [ref=e557] [cursor=pointer]
+                      - button "Skill" [ref=e558] [cursor=pointer]
+                      - button "Base" [ref=e559] [cursor=pointer]
+                      - generic [ref=e560]: 100%
+                  - generic [ref=e562]:
+                    - generic [ref=e563]:
+                      - generic [ref=e564]: PASS
+                      - generic [ref=e565]: Mentions a testing framework by name
+                    - generic [ref=e566]:
+                      - generic [ref=e567]: PASS
+                      - generic [ref=e568]: Shows an example test with expect/assert statements
+                - generic [ref=e569]:
+                  - generic [ref=e570]:
+                    - generic [ref=e572]: "#2 edge-case-testing"
+                    - generic [ref=e573]:
+                      - button "Compare" [ref=e574] [cursor=pointer]
+                      - button "Skill" [ref=e575] [cursor=pointer]
+                      - button "Base" [ref=e576] [cursor=pointer]
+                      - generic [ref=e577]: 50%
+                  - generic [ref=e579]:
+                    - generic [ref=e580]:
+                      - generic [ref=e581]: PASS
+                      - generic [ref=e582]: Mentions testing with an empty string
+                    - generic [ref=e583]:
+                      - generic [ref=e584]: FAIL
+                      - generic [ref=e585]: Mentions unicode or special characters as edge cases
+              - generic [ref=e588]:
+                - generic [ref=e589]: Skill Pass Rate
+                - generic [ref=e590]: "--"
+    - contentinfo [ref=e591]:
+      - contentinfo [ref=e592]:
+        - generic "opus" [ref=e593]
+        - generic [ref=e594]: "|"
+        - 'generic "Health: ok" [ref=e595]':
+          - generic [ref=e597]: ok
+        - generic [ref=e598]: "|"
+        - generic [ref=e599]:
+          - button "Use current Claude Code session — unlocked." [ref=e600] [cursor=pointer]:
+            - img [ref=e601]
+          - button "Anthropic API — locked. Click to add a key." [ref=e604] [cursor=pointer]:
+            - img [ref=e605]
+          - button "OpenRouter — locked. Click to add a key." [ref=e608] [cursor=pointer]:
+            - img [ref=e609]
+          - button "Ollama (local, free) — locked. Click to add a key." [ref=e612] [cursor=pointer]:
+            - img [ref=e613]
+          - button "LM Studio (local, free) — locked. Click to add a key." [ref=e616] [cursor=pointer]:
+            - img [ref=e617]
+          - button "OpenAI API — locked. Click for install instructions." [ref=e620] [cursor=pointer]:
+            - img [ref=e621]
+        - button "Switch to dark theme" [ref=e624] [cursor=pointer]:
+          - img [ref=e625]
+          - generic [ref=e628]: auto
+    - status [ref=e629]: Viewing test-skill (Own)
+  - generic [ref=e630]:
+    - generic [ref=e631]: 1 update available
+    - button "View Updates" [ref=e632] [cursor=pointer]
+    - button "Dismiss" [ref=e633] [cursor=pointer]: ✕
+  - status [ref=e634]
+  - alert [ref=e635]
 ```

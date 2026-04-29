@@ -1,9 +1,9 @@
 ---
-version: "1.0.0"
+version: "1.1.0"
 name: remotion-best-practices
-description: "Best practices for Remotion video creation in React — scaffolding, compositions, animations, transitions — PLUS hard-won rules for high-fidelity product-demo videos: real logos/icons, precise YouTube-reference matching, full-screen camera zooms, click-targets that actually hit, content-tight rectangle highlights, voiceover regeneration discipline, and the editorial polish that makes a demo feel like the product, not a slideshow."
+description: "Best practices for Remotion video creation in React — scaffolding, compositions, animations, transitions — PLUS hard-won rules for high-fidelity product-demo videos: real logos/icons, precise YouTube-reference matching, full-screen camera zooms, click-targets that actually hit, content-tight rectangle highlights, voiceover regeneration discipline, audio-level normalization (no double-boost), per-scene voice-sync math, Studio detail-page mirror patterns, bold-not-subtle connection lines, and the YouTube publication kit (chapters, description, thumbnail, hashtags) that turns a render into a shipped video."
 metadata:
-  tags: remotion, video, react, animation, composition, demo-videos, product-demos, voiceover
+  tags: remotion, video, react, animation, composition, demo-videos, product-demos, voiceover, audio-normalization, youtube-publishing
 ---
 
 # /remotion-best-practices
@@ -387,19 +387,55 @@ const VOICES = {
 };
 ```
 
-#### I3. Audio boost the rendered MP4
+#### I3. Audio levels — normalize to −16 LUFS, do NOT double-boost
 
-Remotion's volume mixing tends to render audio quieter than expected (mean ~–20 dB, max ~–6 dB). **Always post-process** with a +8 dB volume boost so playback hits a normal listening level:
+The trap: it's tempting to apply `loudnorm` AND `volume=+8dB` to the voiceover.mp3, then ALSO apply `volume=+8dB` to the rendered MP4 "to be safe". That's ~16 dB of stacked boost on top of normalization — the result is harsh, peaks clip, and the user will tell you it's "too loud."
+
+**Correct pipeline** (single normalization pass on the voiceover, no post-render boost):
 
 ```bash
-ffmpeg -y -i hackathon-demo.mp4 \
-  -c:v copy \
-  -af "volume=8dB" \
-  -c:a aac -b:a 192k \
-  hackathon-demo-loud.mp4
+# 1. Generate voiceover-raw.mp3 from ElevenLabs
+# 2. Normalize ONLY (target -16 LUFS, the YouTube/podcast standard):
+ffmpeg -y -i voiceover-raw.mp3 \
+  -af "loudnorm=I=-16:TP=-1.5:LRA=11" \
+  -ar 44100 -b:a 128k voiceover.mp3
+# 3. Render with Remotion — voiceover plays at volume:1.0 in the composition,
+#    bgm at volume:0.08. Mix sounds natural at -16 LUFS reference.
+# 4. Do NOT post-process the rendered MP4 with volume=+8dB.
+#    Just copy it to public/hackathon-demo/out/.
 ```
 
-Target: mean −10 to −12 dB, max 0 dB.
+If you used to apply `+8dB` on the voiceover.mp3 AND `+8dB` on the rendered MP4, drop both. The single `loudnorm` pass is the correct level.
+
+Target: voice mean ~−16 LUFS, max ~−1.5 dBTP. Music bed at 0.08 volume in Remotion. If the user says "too loud", you double-boosted — re-process voiceover.mp3 with `loudnorm` only and re-render (or just copy the un-boosted MP4).
+
+#### I4. Voice end-sync with video — calculate from words, not vibes
+
+The other voice trap: voice that overflows scenes (drift) or under-fills the video (silent tail). Both feel wrong.
+
+**The math** for ElevenLabs Sarah on `eleven_v3` with em-dash-heavy narration:
+
+```
+sarah_wpm ≈ 122           # measured from prior renders, em-dashes slow it
+target_voice_seconds = video_seconds − 5  # 5s buffer at end for clean fade
+target_words = target_voice_seconds × sarah_wpm / 60
+```
+
+For a 184.5s video: target voice ~179s = ~365 words. Distribute proportionally per scene:
+
+```
+scene_word_budget = scene_seconds × sarah_wpm / 60
+                  = scene_seconds × 2.04
+```
+
+A 12s scene gets ~24 words, a 24s scene gets ~49 words. Stay UNDER budget per scene — voice that ends slightly early in a scene reads as breathing room; voice that overflows into the NEXT scene reads as broken.
+
+After regenerating, ElevenLabs reports `[done] duration=Xs`. Compare against video duration:
+- If voice > video: you over-wrote. Trim 10-15 words and regen.
+- If voice < video − 8s: you under-wrote. Voice will end too early. Add 10-15 words to the closing scenes.
+- If voice within [video − 8s, video − 2s]: you're in the sweet spot.
+
+**Per-scene drift detection:** if the user says "voice is way behind by AuthorPublish" or any mid-video scene, your earlier scenes have too many words. Voice text per scene must each fit within its visual scene duration — no scene's text should take longer to speak than that scene plays.
 
 ### J. Render workflow
 
@@ -492,6 +528,266 @@ If the user makes a script.ts change that affects narration timing, note in the 
 
 ---
 
+### M. Demo arc — before/after with the same prompt
+
+The strongest demo shape is **same prompt, different output, mediated by a state change in your product**. For Skill Studio that's:
+
+```
+Slide N    : terminal — prompt "design a hero" → skill v1.0.0 → AI-slop output
+Slide N+1  : browser — site-good.png with verdict "v1.0.0 — good, but not excellent"
+…author edits + publishes v1.0.1…
+Slide M    : terminal — SAME prompt → skill v1.0.1 → editorial output
+Slide M+1  : browser — site-excellent.png with verdict "v1.0.1 — design has taste"
+```
+
+**Rules for the after-pair (M, M+1):**
+
+1. **Pixel-mirror the chrome from the before-pair.** Same MacOsMenuBar, same window size, same title-bar tabs, same browser frame dimensions, same URL pattern (`localhost:3000/hero`). The viewer should read "this is the same page from earlier" — only the *content* should differ.
+
+2. **Flip the highlight color.** Where the before-pair had `border: 2px solid #dc2626` (red, "this is the bug"), the after-pair uses `border: 2px solid #16a34a` (green, "this is the fix"). Keep the rectangle the same shape — content-tight, `display: inline-flex`, `width: fit-content` — so the geometry feels unchanged.
+
+3. **Highlight the new version chip.** The new version (`v1.0.1`) gets a pulsing green pill next to the skill name. Use a slow sine-wave glow `boxShadow: 0 0 ${20 * pulse}px rgba(22,163,74,${0.5 * pulse})` so it reads as "this is what changed" without being shouty.
+
+4. **Skip the typing animation for the prompt on the second take.** The viewer recognizes the prompt; making them watch it type a second time is wasted seconds. Render it pre-typed in the highlight block.
+
+5. **Pair with a green verdict ribbon on the browser slide.** Match the red ribbon from the before-state position (bottom-center, pill shape, same typography). Just flip it to green and update the copy: "v1.0.1 output — design has taste". The visual rhyme with the earlier ribbon is what makes the payoff land.
+
+6. **Editorial reply tokens get a green underline pulse, the inverse of the red AI-slop pulse.** Pick 3-5 design-system tokens from the new code (`font-serif`, `tracking-widest`, `bg-stone-50`, `font-light`) and pulse them in green — same animation pattern as the bug-red pulse, opposite color, opposite meaning.
+
+The whole arc reads in one beat: *same prompt + new version → completely different product*. That's the whole product, condensed.
+
+---
+
+### N. Outro polish — feature pills should not look like a bullet list
+
+A flat row of pills with single-glyph icons (`❤ ⌂ ⛨`) reads as "PowerPoint slide." Make them look like a product page:
+
+1. **Inline SVG icons, not unicode glyphs.** Custom 44×44 line-art SVGs in a 84×84 round-square tile. Examples:
+   - Open Source → git-branch (two circles connected by a curved path)
+   - 100% Local → shield with a checkmark
+   - Enterprise-Ready → three stacked diamonds (SSO + audit + scoped)
+
+2. **Each tile gets a colored gradient + glow halo that pulses.** Slow sine wave, slightly out of phase per pill, so they don't bob in unison.
+
+   ```ts
+   const glowPhase = (frame / 75 + i * 0.4) * Math.PI * 2;
+   const glowAmount = (Math.sin(glowPhase) + 1) / 2;
+   boxShadow: `0 0 ${24 * glowAmount}px ${color}66, 0 0 ${48 * glowAmount}px ${color}33`;
+   ```
+
+3. **Hairline accent stripe at the top edge of each card** in the brand color, fading to transparent at both ends with `linear-gradient(90deg, transparent 0%, ${color} 18%, ${color} 82%, transparent 100%)`. This makes the card feel "tagged" rather than generic.
+
+4. **Continuous gentle float on each card.** A 3-pixel sine bob with phase offset:
+   ```ts
+   const floatY = Math.sin((frame / 90 + i * 0.5) * Math.PI * 2) * 3;
+   ```
+   This animation alone makes a static slide feel premium.
+
+5. **Soft outer halo ring** behind the icon tile — `radial-gradient(circle, ${color}22, transparent 70%)` at `inset: -8`, opacity tied to the same glow pulse. Subtle but the eye reads it as "this is real."
+
+6. **Bigger, heavier label typography.** `fontSize: 26, fontWeight: 800, letterSpacing: -0.4` — the label should feel as confident as the wordmark above it.
+
+The trap to avoid: animations that distract from the wordmark and tagline above. Keep the float amplitude ≤ 4px and the glow `0.3 → 1.0` (don't go to zero — it reads as flicker). The pills are a closing reassurance, not the focal point.
+
+---
+
+### O. Reference verification — the screenshot wins over the timestamp
+
+When the user says **"make it like at 3:40 of the YouTube video"** AND attaches a screenshot in the same message, the **screenshot is the authoritative reference**, not the YouTube timestamp.
+
+In one session: the user said "use like it was displayed here — on 3:40 on YouTube" and pasted a screenshot of their actual Skill Studio detail page. The agent extracted YouTube at 3:40 and got a "Claude Managed Agents" slide from a totally unrelated talk — and faithfully copied THAT slide's labels and bullets into the demo. The user was furious: "Stop hallucinating. You see the image? Or grab the same image from the YouTube video on 3:40."
+
+**The rule:**
+1. If the user pasted/attached an image in the message, that's the reference. Read it carefully (Read tool on the temp file path).
+2. If the user only gave a timestamp, extract that frame from the source video with `ffmpeg -ss N -i ... -frames:v 1 -update 1 -y out.png`.
+3. If both — the **image they pasted** wins. The timestamp may be approximate / a different video / mis-remembered.
+4. If you're unsure which is right, ASK — don't pick the wrong one and copy faithfully.
+
+This single mistake cost ~15 minutes of round-tripping and one section that had to be completely rewritten. Always check the actual image before adopting "reference content".
+
+---
+
+### P. Studio detail-page mirror — the 8-card stats grid pattern
+
+Real product demos benefit from showing the actual product UI as the user sees it. For Skill Studio, that means the **detail page** of an installed skill — not a presentation slide. The pattern (verified against the user's screenshot of the live product):
+
+**Top section (above tabs):**
+```
+.claude › ● PROJECT
+frontend-design                                      v1.0.0
+anton-abyzov  SKILL.md ↗
+INSTALL METHOD  Copied (independent)
+[ /Users/antonabyzov/.claude/skills/frontend-design  📋 Copy ]
+🔒 This is an installed copy of the skill. Editing, …  Uninstall
+Check now
+```
+
+**Tab strip:** Overview · Trigger · Versions (only three on this consumer view; the authoring view adds Tests · Run).
+
+**Overview content:**
+```
+frontend-design  v1.0.0  COPIED
+— frontend-design · Updated just now
+```
+
+**Stats grid — 4 columns × 2 rows = 8 cards:**
+
+| BENCHMARK | TESTS         | ACTIVATIONS | LAST RUN |
+|-----------|---------------|-------------|----------|
+| —         | 0             | 0           | —        |
+| Never run | 0 assertions  | Never       |          |
+
+| MCP DEPS | SKILL DEPS | SIZE   | LAST MODIFIED            |
+|----------|------------|--------|--------------------------|
+| 0        | 0          | 1.9 KB | just now                 |
+| None     | None       |        | 2026-04-27T02:11:22.424Z |
+
+Each card: tracked-uppercase label (11pt, +1.4 letter-spacing) · mono value (26pt, 700 weight) · sub-line (12pt, muted). LAST MODIFIED uses mono for the timestamp sub-line. Card padding "16px 18px", radius 10, surface bg, 1px border, min-height 110.
+
+This is "the product, not a slide" — the viewer sees a real Studio page they could navigate to themselves. Use this pattern any time the user shows you a screenshot of the live product they want mirrored.
+
+---
+
+### Q. Cursor-meets-button geometry — re-derive, don't guess
+
+Cursor click moments fail visually when the cursor floats near but doesn't TOUCH the button. The fix is geometry, not iteration:
+
+**1. Derive button position from layout, not from a render.**
+
+Layout math example (Generate Skill button in AuthorCreate, behind a 1.18× camera zoom anchored at bottom-center):
+
+```
+sidebar_width = 320
+main_pane_padding_left = 36
+button_left_unzoomed   = 320 + 36 = 356
+button_width           = 244       # padding(22) + ✨(20) + gap(8) + text + padding(22)
+button_center_unzoomed_x = 356 + 122 = 478
+
+# Camera transform: scale(1.18) transformOrigin: 50% 100%
+button_center_x_zoomed = 960 + (478 − 960) × 1.18 = 391
+button_center_y_zoomed = 1080 + (button_y_unzoomed − 1080) × 1.18
+```
+
+**2. Account for the cursor SVG tip offset.**
+
+The standard arrow-cursor SVG has its visible tip at offset `(3, 2)` within its 26×32 bounding box. To land the tip ON the button center, the SVG top-left must be at `(button_cx − 3, button_cy − 2)`.
+
+**3. Rule of thumb for camera-zoomed scenes:** put the cursor OUTSIDE the camera-zoom wrapper (so its coordinates are canvas-space), and apply the inverse-of-zoom math above to find the canvas-space landing target.
+
+**4. Verify with one frame extraction**, not a full render. Once you've placed the cursor:
+
+```bash
+ffmpeg -ss <click_seconds> -i video.mp4 -frames:v 1 -update 1 -y check.png
+```
+
+Read the PNG. If cursor isn't ON the button, fix the math BEFORE re-rendering the whole video.
+
+---
+
+### R. Connection-line aesthetics — bold, not subtle
+
+Lines that represent "X is connected to Y" (install arrows, sync indicators, anything edge-like) should be **bold and energized** when active, not 1-2 pixels of 50% alpha. Subtle reads as "this might be a hairline gridline" — exactly the wrong message.
+
+**Active / connected (green):**
+- Height: **4px** (not 2px)
+- Color: `rgba(34, 197, 94, 0.95)` (not 0.55)
+- borderRadius: 2
+- Glow: double-stack `boxShadow: 0 0 10px rgba(34, 197, 94, 0.65), 0 0 20px rgba(34, 197, 94, 0.35)`
+
+**Broken / disconnected (red, dashed):**
+- Same height
+- Repeating linear-gradient for dash effect: `repeating-linear-gradient(90deg, rgba(239,68,68,0.6) 0 8px, transparent 8px 16px)`
+- Glow that grows with the break-progress: `0 0 8px rgba(239, 68, 68, 0.6)`
+
+The contrast between bold-green-active and dashed-red-broken is the visual story. If the active line is too thin, the break doesn't read as dramatic — it reads as "the line just got slightly redder."
+
+---
+
+### S. YouTube publication kit — what to add when shipping a hackathon demo
+
+When the demo is rendered, the next step is publishing. Before uploading, prepare:
+
+#### S1. Chapter timestamps from script.ts
+
+Compute chapters by walking `HACKATHON_SCRIPT` and accumulating effective frames (raw frames minus `HACKATHON_TRANSITION_FRAMES` per non-null transition):
+
+```ts
+let runningEffective = 0;
+for (const scene of HACKATHON_SCRIPT) {
+  const startSec = runningEffective / HACKATHON_FPS;
+  // emit "M:SS  <chapter title from scene.caption or visualNotes>"
+  runningEffective += scene.durationFrames;
+  if (scene.transitionType !== null && !isLast) {
+    runningEffective -= HACKATHON_TRANSITION_FRAMES;
+  }
+}
+```
+
+YouTube chapter rules:
+- First chapter MUST be `0:00`
+- Minimum 3 chapters
+- Each chapter ≥ 10 seconds — merge or drop short scenes (e.g., a 4s BrandReveal merges into the previous Hook chapter; an 8s Outro can be dropped from the chapter list since the description still ends with the CTA)
+- Title format: action-oriented, present tense, ≤40 chars ("Edit, save, publish v1.0.1" beats "AuthorEditAndPublish scene")
+
+#### S2. Description structure (1500–2500 chars)
+
+```
+[Hook line 1 — punchy problem statement, ≤80 chars]
+[Hook line 2 — the fix, ≤80 chars]
+
+[3-4 lines: what this is, why it matters]
+
+Try it now:
+$ npx vskill@latest studio
+Web: https://verified-skill.com
+
+🔗 Links
+GitHub:        https://github.com/<owner>/<repo>
+Registry:      https://verified-skill.com
+…
+
+⏱️ Chapters
+0:00 …
+0:21 …
+…
+
+🛠️ Built with
+Anthropic Skills API · Claude Opus 4.7 · Remotion 4.0 · ElevenLabs · Next.js · Cloudflare Workers · Prisma
+
+About the author
+[1-line author bio]
+
+#ClaudeCode #AnthropicSkills #DevTools #OpenSource #BuiltWithClaude
+```
+
+The first two lines must fit in YouTube's above-fold preview (~150 chars).
+
+#### S3. Title, tags, hashtags
+
+- **Title** ≤60 chars, dev-direct (not clickbait): `I built a Claude Code Skills manager with Opus 4.7` works; `🤯 You won't BELIEVE what I made…` doesn't.
+- **Tags** (15-20): primary keyword first ("claude code"), then variants, then long-tail.
+- **Hashtags** (3-5 above title): `#ClaudeCode #Opus47 #BuiltWithClaude #AITools #OpenSource`. Verify any hackathon-mandated hashtag from the official submission portal — don't invent.
+
+#### S4. Thumbnail
+
+- 1920×1080
+- Left third: face (mid-expression, not exaggerated). Dev-tool demos with builder face still outperform faceless thumbnails in 2026.
+- Right two-thirds: hero UI screenshot
+- Primary text overlay ≤4 words, top-right, white with black stroke
+- Brand color accent (e.g., Anthropic-adjacent #D97757) on a small badge
+- Keep face + text out of the bottom 15% (player overlays cover that)
+
+#### S5. Hackathon submission verification
+
+Before submitting:
+- Confirm the deadline UTC inside the official participant portal — don't trust third-party recaps
+- Confirm any mandated hashtag (and use it verbatim in social posts)
+- Verify judge handles before tagging — don't fabricate
+
+If the hackathon page is gated to authenticated viewers, say so honestly in the publish kit and ask the user to copy details from their dashboard.
+
+---
+
 ## Appendix — File-shape cheat sheet for a hackathon demo
 
 ```
@@ -506,8 +802,9 @@ src/remotion/
     Hook.tsx, Brand.tsx,
     Browse.tsx, AuthorCreate.tsx, AuthorEvals.tsx, AuthorPublish.tsx,
     ConsumeInstall.tsx, ConsumeBugSurface.tsx,
-    AuthorEditAndPublish.tsx, ConsumeSyncUpdate.tsx,
-    UpdateButton.tsx, Outro.tsx
+    AuthorEditAndPublish.tsx,
+    Update.tsx (= UpdateButton scene with bell-popup prelude),
+    ConsumeReuseUpdated.tsx, ConsumeBrowserExcellent.tsx, Outro.tsx
     uiTokens.ts              ← STUDIO_LIGHT, VERIFIED_DARK, TERMINAL_UI, FONTS
 public/hackathon-demo/
   skill-studio-logo.png      ← bell-badge logo, used by every Studio scene

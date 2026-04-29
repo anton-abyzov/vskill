@@ -158,4 +158,34 @@ describe("StudioContext — scope hash parsing (0801)", () => {
       h.unmount();
     }
   });
+
+  it("AC-US2-04: hash with unrecognized source segment falls through to legacy match", async () => {
+    const { api } = await import("../api");
+    // Skill exists at plugin=bar, skill=baz. The malformed hash starts with
+    // "foo" which is not a valid SkillSource. Rather than crashing or showing
+    // a blank crumb, the parser should treat the hash as legacy 2-segment
+    // (plugin=foo, skill=bar) — finding nothing — and the app should remain
+    // in the no-selection state without throwing.
+    const skills = [
+      makeSkill("bar", "baz", "project"),
+    ];
+    (api.getSkills as ReturnType<typeof vi.fn>).mockResolvedValue(skills);
+    (api.getSkillUpdates as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    window.location.hash = "#/skills/foo/bar/baz";
+
+    const probe: { current: ContextValue | null } = { current: null };
+    const h = await renderProvider(probe);
+    try {
+      await h.act(async () => { await flush(); });
+      // Provider must not have crashed — probe is populated.
+      expect(probe.current).not.toBeNull();
+      // Per plan.md hash-format migration: legacy 2-segment fallback treats
+      // first segment as plugin, second as skill. "foo"+"bar" matches no skill
+      // in our fixture, so selection stays null.
+      expect(probe.current?.state.selectedSkill).toBeNull();
+    } finally {
+      h.unmount();
+    }
+  });
 });

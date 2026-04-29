@@ -74,14 +74,17 @@ describe("TopRail", () => {
 
   // 0709 / 0700: keep the retired `OWN` name-drop in the describe prose so
   // future spelunkers grepping for the old vocabulary land here.
-  it("renders breadcrumb Skills › plugin › skill when a source skill is selected", () => {
+  // 0801: per AC-US1-05, the legacy origin='source' fallback (no `source` field
+  // on SelectedSkill) renders the "Project" scope label — not the authoring
+  // "Skills" label — because user-authored skills live in the project tier.
+  it("renders breadcrumb Project › plugin › skill for legacy origin=source fixtures", () => {
     const tree = expand(TopRail({
       projectName: "vskill",
       selected: { plugin: "obsidian-brain", skill: "lint", origin: "source" },
       onOpenPalette: vi.fn(),
     }));
     const text = collectText(tree);
-    expect(text).toContain(strings.scopeLabels.authoringSkills);
+    expect(text).toContain(strings.scopeLabels.sourceProject);
     expect(text).toContain("obsidian-brain");
     expect(text).toContain("lint");
   });

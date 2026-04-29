@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { SelectedSkill } from "../StudioContext";
+import { strings } from "../strings";
 import { AgentModelPicker } from "./AgentModelPicker";
 import { StudioLogo } from "./StudioLogo";
 import { UpdateBell } from "./UpdateBell";
@@ -40,6 +41,32 @@ function dispatchNavigateScope(
   window.dispatchEvent(new CustomEvent("studio:navigate-scope", { detail }));
 }
 
+// 0801: breadcrumb scope label.
+//   - Prefers the rich `source` field on SelectedSkill (project|personal|plugin),
+//     mapping to the matching scopeLabels token.
+//   - Falls back to `origin` for legacy fixtures and pre-0801 callers that
+//     populate SelectedSkill without `source`. Historically `origin: "source"`
+//     meant "user-authored" → renders the "Skills" (authoring) label;
+//     `origin: "installed"` without an explicit source most often means a
+//     personal-tier symlink (e.g. ~/.agents/skills/...) → "Personal".
+function scopeLabel(selected: SelectedSkill): string {
+  if (selected.source === "project") return strings.scopeLabels.sourceProject;
+  if (selected.source === "personal") return strings.scopeLabels.sourcePersonal;
+  if (selected.source === "plugin") return strings.scopeLabels.sourcePlugin;
+  return selected.origin === "installed"
+    ? strings.scopeLabels.sourcePersonal
+    : strings.scopeLabels.authoringSkills;
+}
+
+function scopeColor(selected: SelectedSkill): string {
+  if (selected.source === "project") return "var(--status-installed)";
+  if (selected.source === "plugin")  return "var(--color-accent-ink)";
+  // personal + legacy authoring/installed both use the existing --status-own
+  // token to preserve the pre-0801 visual treatment.
+  return "var(--status-own)";
+}
+
+
 /**
  * Top rail — logo · project picker | breadcrumb | skill actions | session status.
  *
@@ -56,16 +83,14 @@ function dispatchNavigateScope(
  *   - breadcrumb    — Inter Tight 400, plugin name in meta style, skill name in primary.
  */
 export function TopRail({ projectName, selected, onHome, projectPickerSlot, onRequestCreateSkill, findSkillsSlot }: Props) {
-  // 0700 polish: breadcrumb origin label — use Anthropic-aligned vocabulary
-  // ("Project" for installed skills the current agent consumes in its
-  // `.claude/skills/`, "Skills" for user-authored) to match the Sidebar
-  // group headers. Keeps the top and side in sync so the user never sees
-  // conflicting labels for the same skill.
-  const originLabel = selected
-    ? selected.origin === "installed"
-      ? "Project"
-      : "Skills"
-    : null;
+  // 0801: breadcrumb scope label derives from the 3-way `source` field
+  // (project|personal|plugin) on SelectedSkill. Pre-0801 the label came from
+  // the binary `origin` field, which collapsed personal symlinks (origin=
+  // installed, source=personal) and project installs (origin=installed,
+  // source=project) both to "Project" — so the header lied about where the
+  // skill actually lived. Now the header matches the sidebar group.
+  const crumbLabel = selected ? scopeLabel(selected) : null;
+  const crumbColor = selected ? scopeColor(selected) : "var(--text-secondary)";
 
   return (
     <div
@@ -125,7 +150,7 @@ export function TopRail({ projectName, selected, onHome, projectPickerSlot, onRe
           color: "var(--text-secondary)",
         }}
       >
-        {selected && originLabel && (
+        {selected && crumbLabel && (
           <>
             <BreadcrumbButton
               segment="origin"
@@ -134,10 +159,10 @@ export function TopRail({ projectName, selected, onHome, projectPickerSlot, onRe
                 textTransform: "uppercase",
                 letterSpacing: "0.06em",
                 fontWeight: 600,
-                color: selected.origin === "installed" ? "var(--status-installed)" : "var(--status-own)",
+                color: crumbColor,
               }}
             >
-              {originLabel}
+              {crumbLabel}
             </BreadcrumbButton>
             <Separator />
             <BreadcrumbButton

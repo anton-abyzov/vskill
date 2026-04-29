@@ -101,8 +101,12 @@ describe("T-026 DetailHeader — redesigned header", () => {
     expect(style.background).toContain("--status-own");
   });
 
-  it("renders a dot-only installed badge for installed skills", () => {
-    const skill = makeSkill({ origin: "installed" });
+  it("renders a dot-only installed badge for project-scope installed skills", () => {
+    // 0801: dot color is now driven by `source` (project|personal|plugin),
+    // not `origin` alone. A project-tier installed skill (source: "project")
+    // keeps the legacy --status-installed color. Personal-tier installed
+    // skills get --status-own (covered by the AC-US1-05 fallback).
+    const skill = makeSkill({ origin: "installed", source: "project" });
     const tree = DetailHeader({ skill });
     const dots = findAll(tree, (el) => {
       const attrs = el.props as Record<string, unknown>;

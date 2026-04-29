@@ -258,6 +258,11 @@ export function normalizeSkillInfo(raw: unknown): SkillInfo {
     pluginMarketplace: coerceStringOrNull(r.pluginMarketplace),
     pluginManifestPath: coerceStringOrNull(r.pluginManifestPath),
     pluginVersion: coerceStringOrNull(r.pluginVersion),
+    // 0802: friendly tool caption (e.g. "Claude Code") under the plugin
+    // folder header. Optional — server omits for unknown plugin folders.
+    ...(typeof r.pluginDisplay === "string" && r.pluginDisplay
+      ? { pluginDisplay: r.pluginDisplay }
+      : {}),
     precedenceRank,
     shadowedBy,
     // T-025: frontmatter + filesystem fields (all | null)

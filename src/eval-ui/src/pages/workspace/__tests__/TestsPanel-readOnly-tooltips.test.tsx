@@ -1,7 +1,13 @@
 // ---------------------------------------------------------------------------
-// RED test: when isReadOnly is true, the disabled buttons in the empty-state
-// of TestsPanel must expose a `title` attribute explaining why — so users
-// understand it's not broken, just an installed (read-only) copy.
+// Originally a RED test for tooltip-on-disabled pattern. After 0800 the
+// design changed: authoring buttons (Create / Generate / Add) are HIDDEN for
+// installed skills (`canEdit=false`) rather than rendered-but-disabled.
+// Run buttons stay visible and gated on `canRun` instead.
+//
+// These tests now verify the new contract:
+//   - canEdit=false → Create / Generate buttons not in tree
+//   - canEdit=true  → Create / Generate buttons present without read-only
+//                     tooltips (no degraded affordances on the source path)
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -31,7 +37,7 @@ const mockState: Record<string, unknown> = {
   generateEvalsError: null,
 };
 
-let mockIsReadOnly = true;
+let mockOrigin: "source" | "installed" = "installed";
 
 vi.mock("../WorkspaceContext", () => ({
   useWorkspace: () => ({
@@ -44,7 +50,13 @@ vi.mock("../WorkspaceContext", () => ({
     cancelAll: mockCancelAll,
     generateEvals: mockGenerateEvals,
     get isReadOnly() {
-      return mockIsReadOnly;
+      return mockOrigin === "installed";
+    },
+    get canEdit() {
+      return mockOrigin === "source";
+    },
+    get canRun() {
+      return false;
     },
   }),
 }));
@@ -104,7 +116,7 @@ function collectText(node: unknown): string {
   return "";
 }
 
-describe("TestsPanel — read-only tooltips on disabled buttons", () => {
+describe("TestsPanel — authoring buttons gated on canEdit (post-0800)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState.evals = null;
@@ -112,36 +124,27 @@ describe("TestsPanel — read-only tooltips on disabled buttons", () => {
     mockState.generateEvalsLoading = false;
   });
 
-  it("when isReadOnly=true, 'Create Test Case' button has a title attribute mentioning installed/read-only", () => {
-    mockIsReadOnly = true;
+  it("when canEdit=false (installed), 'Create Test Case' button is NOT rendered", () => {
+    mockOrigin = "installed";
     const tree = TestsPanel();
-
     const createButtons = collectElements(tree, (el) =>
       el.type === "button" && collectText(el).trim() === "Create Test Case",
     );
-    expect(createButtons.length).toBe(1);
-    const title = createButtons[0].props.title as string | undefined;
-    expect(title).toBeDefined();
-    expect(title!.toLowerCase()).toMatch(/installed|read.?only/);
+    expect(createButtons).toHaveLength(0);
   });
 
-  it("when isReadOnly=true, 'Generate Unit Tests' button has a title attribute mentioning installed/read-only", () => {
-    mockIsReadOnly = true;
+  it("when canEdit=false (installed), 'Generate Unit Tests' button is NOT rendered", () => {
+    mockOrigin = "installed";
     const tree = TestsPanel();
-
     const genButtons = collectElements(tree, (el) =>
       el.type === "button" && collectText(el).includes("Generate Unit Tests"),
     );
-    expect(genButtons.length).toBe(1);
-    const title = genButtons[0].props.title as string | undefined;
-    expect(title).toBeDefined();
-    expect(title!.toLowerCase()).toMatch(/installed|read.?only/);
+    expect(genButtons).toHaveLength(0);
   });
 
-  it("when isReadOnly=false, 'Generate Unit Tests' button has no read-only title", () => {
-    mockIsReadOnly = false;
+  it("when canEdit=true (source), 'Generate Unit Tests' button is rendered without read-only title", () => {
+    mockOrigin = "source";
     const tree = TestsPanel();
-
     const genButtons = collectElements(tree, (el) =>
       el.type === "button" && collectText(el).includes("Generate Unit Tests"),
     );
@@ -150,10 +153,9 @@ describe("TestsPanel — read-only tooltips on disabled buttons", () => {
     expect(title.toLowerCase()).not.toMatch(/installed|read.?only/);
   });
 
-  it("when isReadOnly=false, 'Create Test Case' button has no read-only title", () => {
-    mockIsReadOnly = false;
+  it("when canEdit=true (source), 'Create Test Case' button is rendered without read-only title", () => {
+    mockOrigin = "source";
     const tree = TestsPanel();
-
     const createButtons = collectElements(tree, (el) =>
       el.type === "button" && collectText(el).trim() === "Create Test Case",
     );

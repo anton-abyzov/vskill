@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, Fragment } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import { useConfig } from "../../ConfigContext";
 import type { RunMode, InlineResult, CaseRunStatus } from "./workspaceTypes";
@@ -6,6 +6,19 @@ import type { ClassifiedError } from "../../components/ErrorCard";
 import type { ComparisonCaseDetail } from "../../types";
 import { formatCost, formatTokens } from "../../utils/formatCost";
 import { verdictLabel } from "../../../../eval/verdict.js";
+import { useCaseHistory, CaseHistorySection } from "./TestsPanel";
+
+function PerCaseHistory({ evalId }: { evalId: number }) {
+  const { state } = useWorkspace();
+  const { entries, loading } = useCaseHistory(state.plugin, state.skill, evalId);
+  const hasEntries = !!entries && entries.length > 0;
+  if (!loading && !hasEntries) return null;
+  return (
+    <div data-testid={`run-case-history-${evalId}`} className="mt-2 ml-3 pl-3" style={{ borderLeft: "1px solid var(--border-subtle)" }}>
+      <CaseHistorySection evalId={evalId} sharedEntries={entries} sharedLoading={loading} />
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Exported pure helpers (tested in RunPanel.test.tsx)
@@ -90,7 +103,7 @@ function estimateCostLabel(provider: string | null, totalCalls: number): string 
 }
 
 export function RunPanel() {
-  const { state, runCase, runAll, cancelCase, cancelAll, isReadOnly } = useWorkspace();
+  const { state, runCase, runAll, cancelCase, cancelAll, canEdit, canRun } = useWorkspace();
   const { evals, caseRunStates, bulkRunActive, latestBenchmark, inlineResults } = state;
   const { config } = useConfig();
 
@@ -142,9 +155,15 @@ export function RunPanel() {
 
   return (
     <div className="p-5">
-      {/* Read-only notice */}
-      {isReadOnly && (
+      {/* 0800 / AC-US2-04: read-only banner — Run is now allowed for
+          installed skills (canRun gate), but authoring still isn't. The
+          banner explains the constraint and points users at the source
+          install path. testid is shared with TestsPanel so E2E can target
+          either surface. */}
+      {!canEdit && evals != null && (
         <div
+          role="status"
+          data-testid="tests-readonly-banner"
           className="flex items-center gap-2 px-3 py-2 rounded-lg mb-4 text-[11px]"
           style={{ background: "var(--surface-2)", color: "var(--text-tertiary)", border: "1px solid var(--border-subtle)" }}
         >
@@ -152,7 +171,10 @@ export function RunPanel() {
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
             <path d="M7 11V7a5 5 0 0 1 10 0v4" />
           </svg>
-          Installed skill — benchmarking is disabled. Edit the source skill to run benchmarks.
+          <span>
+            Read-only — to author or modify tests, install this skill as source via{" "}
+            <code style={{ background: "var(--surface-1)", padding: "1px 5px", borderRadius: 3, fontFamily: "var(--font-mono)" }}>vskill plugin new</code>.
+          </span>
         </div>
       )}
       {/* Controls */}
@@ -176,30 +198,37 @@ export function RunPanel() {
               Cancel All
             </button>
           )}
-          <button
-            onClick={() => runAll("comparison")}
-            disabled={cases.length === 0 || isAnyRunning || isReadOnly}
-            className="btn btn-primary text-[12px]"
-            title="Runs both your skill and the baseline, then compares results side by side"
-          >
-            Run A/B Test
-          </button>
+          {/* 0800 / AC-US2-01..02: benchmark Run All becomes the primary
+              CTA when canEdit=false. A/B and Baseline remain author-only
+              per spec Out-of-Scope (A/B mode stays source-only). */}
+          {canEdit && (
+            <button
+              onClick={() => runAll("comparison")}
+              disabled={!canRun || isAnyRunning}
+              className="btn btn-primary text-[12px]"
+              title="Runs both your skill and the baseline, then compares results side by side"
+            >
+              Run A/B Test
+            </button>
+          )}
           <button
             onClick={() => runAll("benchmark")}
-            disabled={cases.length === 0 || isAnyRunning || isReadOnly}
-            className="btn btn-secondary text-[12px]"
-            title="Runs benchmark using your skill only"
+            disabled={!canRun || isAnyRunning}
+            className={canEdit ? "btn btn-secondary text-[12px]" : "btn btn-primary text-[12px]"}
+            title={canEdit ? "Runs benchmark using your skill only" : "Run all author-shipped eval cases"}
           >
-            Test Skill
+            {canEdit ? "Test Skill" : "Run All"}
           </button>
-          <button
-            onClick={() => runAll("baseline")}
-            disabled={cases.length === 0 || isAnyRunning || isReadOnly}
-            className="btn btn-secondary text-[12px]"
-            title="Runs benchmark using the baseline (no skill) for reference"
-          >
-            Test Baseline
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => runAll("baseline")}
+              disabled={!canRun || isAnyRunning}
+              className="btn btn-secondary text-[12px]"
+              title="Runs benchmark using the baseline (no skill) for reference"
+            >
+              Test Baseline
+            </button>
+          )}
         </div>
 
         {!isAnyRunning && cases.length > 0 && (
@@ -255,24 +284,26 @@ export function RunPanel() {
           const caseStatus = caseRunState?.status ?? "idle";
           const benchCase = latestBenchmark?.cases.find((bc) => bc.eval_id === c.id);
           return (
-            <RunCaseCard
-              key={c.id}
-              name={c.name}
-              evalId={c.id}
-              result={r}
-              caseCost={benchCase?.cost}
-              caseBillingMode={benchCase?.billingMode}
-              caseInputTokens={benchCase?.inputTokens}
-              caseOutputTokens={benchCase?.outputTokens}
-              caseStatus={caseStatus}
-              runMode={caseRunState?.mode ?? null}
-              comparisonDetail={benchCase?.comparisonDetail}
-              isReadOnly={isReadOnly}
-              onRun={(id) => runCase(id, "benchmark")}
-              onBaseline={(id) => runCase(id, "baseline")}
-              onCompare={(id) => runCase(id, "comparison")}
-              onCancel={(id) => cancelCase(id)}
-            />
+            <Fragment key={c.id}>
+              <RunCaseCard
+                name={c.name}
+                evalId={c.id}
+                result={r}
+                caseCost={benchCase?.cost}
+                caseBillingMode={benchCase?.billingMode}
+                caseInputTokens={benchCase?.inputTokens}
+                caseOutputTokens={benchCase?.outputTokens}
+                caseStatus={caseStatus}
+                runMode={caseRunState?.mode ?? null}
+                comparisonDetail={benchCase?.comparisonDetail}
+                canEdit={canEdit}
+                onRun={(id) => runCase(id, "benchmark")}
+                onBaseline={(id) => runCase(id, "baseline")}
+                onCompare={(id) => runCase(id, "comparison")}
+                onCancel={(id) => cancelCase(id)}
+              />
+              <PerCaseHistory evalId={c.id} />
+            </Fragment>
           );
         })}
       </div>
@@ -309,11 +340,12 @@ export function RunPanel() {
               </div>
             )}
 
-            {/* Celebration CTA — 100% pass rate, no existing comparison */}
-            {latestBenchmark.overall_pass_rate >= 0.9999 && !latestBenchmark.comparison && (
+            {/* Celebration CTA — 100% pass rate, no existing comparison.
+                0800: A/B comparison is author-only per spec Out-of-Scope. */}
+            {canEdit && latestBenchmark.overall_pass_rate >= 0.9999 && !latestBenchmark.comparison && (
               <button
                 onClick={() => runAll("comparison")}
-                disabled={cases.length === 0 || isReadOnly}
+                disabled={!canRun}
                 className="text-[13px] font-semibold mt-3 w-full rounded-lg transition-opacity duration-150"
                 style={{
                   padding: "10px 0",
@@ -387,7 +419,7 @@ const MODE_BADGE: Record<RunMode, { label: string; bg: string; color: string }> 
   comparison: { label: "Compare", bg: "var(--purple-muted)", color: "var(--purple)" },
 };
 
-function RunCaseCard({ name, evalId, result, caseCost, caseBillingMode, caseInputTokens, caseOutputTokens, caseStatus, runMode, comparisonDetail, isReadOnly, onRun, onBaseline, onCompare, onCancel }: {
+function RunCaseCard({ name, evalId, result, caseCost, caseBillingMode, caseInputTokens, caseOutputTokens, caseStatus, runMode, comparisonDetail, canEdit = false, onRun, onBaseline, onCompare, onCancel }: {
   name: string;
   evalId: number;
   result?: InlineResult;
@@ -398,7 +430,8 @@ function RunCaseCard({ name, evalId, result, caseCost, caseBillingMode, caseInpu
   caseStatus: CaseRunStatus;
   runMode: RunMode | null;
   comparisonDetail?: ComparisonCaseDetail;
-  isReadOnly?: boolean;
+  /** 0800: gates per-case Compare / Baseline (author-only). */
+  canEdit?: boolean;
   onRun: (evalId: number) => void;
   onBaseline: (evalId: number) => void;
   onCompare: (evalId: number) => void;
@@ -447,9 +480,16 @@ function RunCaseCard({ name, evalId, result, caseCost, caseBillingMode, caseInpu
             </button>
           ) : (
             <>
-              <button onClick={() => onCompare(evalId)} disabled={isReadOnly} className="btn btn-primary text-[10px] px-2 py-1">Compare</button>
-              <button onClick={() => onRun(evalId)} disabled={isReadOnly} className="btn btn-secondary text-[10px] px-2 py-1">Skill</button>
-              <button onClick={() => onBaseline(evalId)} disabled={isReadOnly} className="btn btn-secondary text-[10px] px-2 py-1">Base</button>
+              {/* 0800: per-case Run is origin-agnostic (canRun on parent
+                  toolbar gates the bulk path). Compare / Baseline remain
+                  author-only — A/B comparison is out of scope for read-only. */}
+              {canEdit && (
+                <button onClick={() => onCompare(evalId)} className="btn btn-primary text-[10px] px-2 py-1">Compare</button>
+              )}
+              <button onClick={() => onRun(evalId)} className={canEdit ? "btn btn-secondary text-[10px] px-2 py-1" : "btn btn-primary text-[10px] px-2 py-1"}>{canEdit ? "Skill" : "Run"}</button>
+              {canEdit && (
+                <button onClick={() => onBaseline(evalId)} className="btn btn-secondary text-[10px] px-2 py-1">Base</button>
+              )}
             </>
           )}
           {result && result.status != null && (

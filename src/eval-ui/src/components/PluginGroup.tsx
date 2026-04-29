@@ -27,13 +27,22 @@ interface Props {
  */
 export function PluginGroup({ plugin, skills, selectedKey, onSelect, onContextMenu, dirtySkillIds }: Props) {
   const sorted = [...skills].sort((a, b) => a.skill.localeCompare(b.skill));
+  // 0802: friendly tool caption (e.g. "Claude Code") rendered under the
+  // uppercased plugin folder. Suppress when it exactly matches the plugin
+  // label (case-fold, leading-dot stripped) — that's the only redundancy
+  // worth hiding; mismatches like `.cursor` / `Cursor` still show because
+  // readers shouldn't have to know the dot-folder convention.
+  const pluginDisplay = skills[0]?.pluginDisplay;
+  const labelForCompare = plugin.replace(/^\./, "").toLowerCase();
+  const captionVisible =
+    !!pluginDisplay && pluginDisplay.toLowerCase() !== labelForCompare;
 
   return (
     <div role="group" aria-label={`${plugin} (${skills.length})`}>
       <div
         style={{
           display: "flex",
-          alignItems: "center",
+          alignItems: "baseline",
           gap: 8,
           padding: "8px 12px 4px 14px",
         }}
@@ -64,6 +73,22 @@ export function PluginGroup({ plugin, skills, selectedKey, onSelect, onContextMe
         >
           ({skills.length})
         </span>
+        {captionVisible && (
+          <span
+            style={{
+              fontSize: 9,
+              color: "var(--text-tertiary, var(--text-secondary))",
+              opacity: 0.75,
+              fontFamily: "var(--font-sans)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={pluginDisplay}
+          >
+            {pluginDisplay}
+          </span>
+        )}
       </div>
       <div role="list">
         {sorted.map((s) => {

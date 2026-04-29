@@ -248,7 +248,7 @@ program
 program
   .command("eval [subcommand] [target]")
   .description("Eval commands: serve, init, run, coverage, generate-all")
-  .option("--force", "Overwrite existing evals.json")
+  .option("-f, --force", "init/generate-all: overwrite existing evals.json. serve: force-restart any existing vskill server on the port")
   .option("--type <type>", "Test type for eval init: unit, integration, or all (default: unit)")
   .option("--root <path>", "Root directory to scan for skills (default: current dir)")
   .option("--port <number>", "Port for eval UI server (default: 3077)")
@@ -270,12 +270,13 @@ program
   .description("Launch the Skill Studio UI for local skill development")
   .option("--root <path>", "Root directory (default: current dir)")
   .option("--port <number>", "Port for Skill Studio server")
-  .action(async (opts: { root?: string; port?: string }) => {
+  .option("-f, --force", "Force-restart: stop any existing vskill server on the port and start fresh")
+  .action(async (opts: { root?: string; port?: string; force?: boolean }) => {
     const { resolve } = await import("node:path");
     const { runEvalServe } = await import("./commands/eval/serve.js");
     const root = opts.root ? resolve(opts.root) : resolve(".");
     const port = opts.port ? parseInt(opts.port, 10) : null;
-    await runEvalServe(root, port);
+    await runEvalServe(root, port, { force: !!opts.force });
   });
 
 program

@@ -8,6 +8,7 @@ import type { EvalsFile, BenchmarkResult, EvalChange } from "../../types";
 import type { ClassifiedError } from "../../components/ErrorCard";
 import type { WorkspaceContextValue, PanelId, RunMode, InlineResult, AssertionResultInline, ActivationHistoryRun } from "./workspaceTypes";
 import { workspaceReducer, initialWorkspaceState } from "./workspaceReducer";
+import { useSkillCapabilities } from "../../hooks/useSkillCapabilities.js";
 
 // ---------------------------------------------------------------------------
 // Runtime type guard for testType — prevents MouseEvent leak from onClick
@@ -78,6 +79,17 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     plugin,
     skill,
   });
+
+  // 0800: split read-only into two orthogonal capabilities. canEdit gates
+  // authoring (Add / Edit / Delete cases). canRun gates execution (Run /
+  // Run All) and is origin-agnostic — installed skills with cases can run
+  // their author-shipped evals against the user's own LLM credentials.
+  const capabilities = useSkillCapabilities(
+    { origin },
+    { exists: state.evals != null, cases: state.evals?.evals ?? [] },
+  );
+  const canEdit = capabilities.canEdit;
+  const canRun = capabilities.canRun;
 
   // Track bulk run completion — mutable ref, no re-renders
   const bulkPendingRef = useRef<Set<number>>(new Set());
@@ -251,8 +263,10 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
   }, [isReadOnly, plugin, skill]);
 
   // -- Per-case run --
+  // 0800: NOT gated on isReadOnly — installed skills can run author-shipped
+  // evals (US-002 / AC-US2-01). The backend already accepts these requests
+  // (api-routes.ts:2948).
   const runCase = useCallback((caseId: number, mode: RunMode = "benchmark") => {
-    if (isReadOnly) return;
     const caseState = state.caseRunStates.get(caseId);
     if (caseState?.status === "running") return; // already running
 
@@ -275,11 +289,12 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
       const url = `/api/skills/${plugin}/${skill}/benchmark/case/${caseId}`;
       sseStartCase(caseId, url, Object.keys(body).length > 0 ? body : undefined);
     }
-  }, [isReadOnly, plugin, skill, state.caseRunStates, sseStartCase, config]);
+  }, [plugin, skill, state.caseRunStates, sseStartCase, config]);
 
   // -- Run all cases in parallel --
+  // 0800: NOT gated on isReadOnly — installed skills can Run All
+  // author-shipped evals (US-002 / AC-US2-02).
   const runAll = useCallback((mode: RunMode = "benchmark") => {
-    if (isReadOnly) return;
     const cases = state.evals?.evals ?? [];
     if (cases.length === 0) return;
 
@@ -308,7 +323,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
         sseStartCase(id, url, Object.keys(body).length > 0 ? body : undefined);
       }
     }
-  }, [isReadOnly, plugin, skill, state.evals, sseStartCase, config]);
+  }, [plugin, skill, state.evals, sseStartCase, config]);
 
   // -- Cancel per-case --
   const cancelCase = useCallback((caseId: number) => {
@@ -774,6 +789,8 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     state,
     dispatch,
     isReadOnly,
+    canEdit,
+    canRun,
     saveContent,
     saveEvals,
     runCase,
@@ -798,7 +815,7 @@ export function WorkspaceProvider({ plugin, skill, origin, children }: Props) {
     selectAllEvalChanges,
     deselectAllEvalChanges,
     retryEvalsSave,
-  }), [state, isReadOnly, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, cancelActivation, generateActivationPrompts, fetchActivationHistory, loadTestCasesFromSkillMd, saveTestCasesToSkillMd, submitAiEdit, cancelAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave]);
+  }), [state, isReadOnly, canEdit, canRun, saveContent, saveEvals, runCase, runAll, cancelCase, cancelAll, improveForCase, applyImproveAndRerun, refreshSkillContent, generateEvals, runActivationTest, cancelActivation, generateActivationPrompts, fetchActivationHistory, loadTestCasesFromSkillMd, saveTestCasesToSkillMd, submitAiEdit, cancelAiEdit, applyAiEdit, discardAiEdit, toggleEvalChange, selectAllEvalChanges, deselectAllEvalChanges, retryEvalsSave]);
 
   return (
     <WorkspaceCtx.Provider value={value}>

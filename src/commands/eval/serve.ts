@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import * as net from "node:net";
 import { join } from "node:path";
 import { startEvalServer } from "../../eval-server/eval-server.js";
-import { yellow, dim, red, cyan, bold } from "../../utils/output.js";
+import { yellow, dim, red, cyan, bold, green } from "../../utils/output.js";
 import { isSkillCreatorInstalled } from "../../utils/skill-creator-detection.js";
 
 /**
@@ -105,10 +105,63 @@ function killHint(port: number): string {
   );
 }
 
-async function handlePortConflict(port: number, resolvedRoot: string): Promise<void> {
+/**
+ * Ask the running vskill server to shut itself down via POST /api/shutdown,
+ * then poll until the port is free (or timeout). Returns true if the port
+ * is free and the caller can proceed to bind it.
+ */
+export async function requestShutdownAndWait(port: number): Promise<boolean> {
+  try {
+    await fetch(`http://localhost:${port}/api/shutdown`, {
+      method: "POST",
+      signal: AbortSignal.timeout(2000),
+    });
+  } catch {
+    // The server typically closes the connection mid-response while shutting
+    // down — fetch may reject. That's fine; verify by polling the port.
+  }
+
+  // Poll up to ~5s in 100ms ticks for the port to free.
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (!(await isPortInUse(port))) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return false;
+}
+
+/**
+ * @returns true if the caller should proceed to start a fresh server on
+ *   `port` (i.e. --force successfully freed the port). On every other
+ *   outcome this function calls `process.exit(...)` directly and never
+ *   returns.
+ */
+async function handlePortConflict(
+  port: number,
+  resolvedRoot: string,
+  force: boolean,
+): Promise<boolean> {
   const existing = await probeVskillServer(port);
 
   if (existing) {
+    if (force) {
+      const sameProject = existing.root === resolvedRoot;
+      console.log(
+        `\n  ${dim("Force-restarting existing vskill server on port")} ${cyan(String(port))}${sameProject ? dim(" (same project)") : dim(` (was: ${existing.projectName || "unknown"})`)}…`,
+      );
+      const freed = await requestShutdownAndWait(port);
+      if (!freed) {
+        console.error(
+          red(`\n  Force-restart failed: port ${port} is still in use after shutdown request.\n\n`) +
+          killHint(port) +
+          "\n",
+        );
+        process.exit(1);
+      }
+      console.log(`  ${green("✓")} ${dim("Port freed — starting fresh server.")}\n`);
+      return true;
+    }
+
     const sameProject = existing.root === resolvedRoot;
     console.log(
       `\n  ${bold("Port")} ${cyan(String(port))} ${bold("is already in use by a vskill server:")}` +
@@ -116,7 +169,9 @@ async function handlePortConflict(port: number, resolvedRoot: string): Promise<v
       `\n  ${bold("Root:")}     ${dim(existing.root)}` +
       `\n  ${bold("Model:")}    ${dim(existing.model)}` +
       `\n\n  ${dim("Open the browser to:")} ${cyan(`http://localhost:${port}`)}` +
-      `\n\n  ${dim("Or restart fresh — kill the existing server, then re-run vskill studio:")}\n` +
+      `\n\n  ${bold("Or force-restart in place")} ${dim("(stops the existing server and starts fresh):")}` +
+      `\n  ${cyan("vskill studio --force")}    ${dim("# or: vskill eval serve --force")}` +
+      `\n\n  ${dim("Or kill the existing server manually and re-run vskill studio:")}\n` +
       killHint(port) +
       "\n",
     );
@@ -127,11 +182,13 @@ async function handlePortConflict(port: number, resolvedRoot: string): Promise<v
   // Port occupied by a non-vskill process. No PID discovery (Windows can't
   // do it portably, and the PID wasn't actionable anyway). Print kill hints
   // for both platforms so the user can free the port without leaving the
-  // terminal.
+  // terminal. --force can't help here — we have no shutdown endpoint to call
+  // on a process we don't own.
   console.error(
-    red(`\n  Port ${port} is in use by a non-vskill process — please free it manually.\n\n`) +
+    red(`\n  Port ${port} is in use by a non-vskill process — please free it manually.\n`) +
+    dim(`  (--force only works against an existing vskill server; the running process here is something else.)\n\n`) +
     killHint(port) +
-    `\n  ${dim("Or pick a different port:")} ${cyan(`vskill eval serve --port ${port + 1}`)}\n`,
+    `\n  ${dim("Or pick a different port:")} ${cyan(`vskill studio --port ${port + 1}`)}\n`,
   );
   process.exit(1);
 }
@@ -143,8 +200,10 @@ async function handlePortConflict(port: number, resolvedRoot: string): Promise<v
 export async function runEvalServe(
   root: string,
   port: number | null,
+  options: { force?: boolean } = {},
 ): Promise<void> {
   const resolvedRoot = resolve(root);
+  const force = options.force === true;
 
   checkSkillCreator(resolvedRoot);
 
@@ -165,9 +224,11 @@ export async function runEvalServe(
   const { firstRunOnboarding } = await import("../../first-run-onboarding.js");
   await firstRunOnboarding();
 
-  // Handle port conflicts gracefully
+  // Handle port conflicts gracefully. Returns true only on the --force
+  // success path (existing vskill server gracefully shut down); every
+  // other branch process.exit()s inside.
   if (await isPortInUse(effectivePort)) {
-    await handlePortConflict(effectivePort, resolvedRoot);
+    await handlePortConflict(effectivePort, resolvedRoot, force);
   }
 
   const server = await startEvalServer({

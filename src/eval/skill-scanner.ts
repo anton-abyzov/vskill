@@ -87,6 +87,14 @@ export interface SkillInfo {
    * per-version copy; the marketplace clone is what users edit + git-track.
    */
   sourcePath?: string | null;
+  /**
+   * 0802: friendly tool display name (e.g. "Claude Code") for the plugin
+   * group header caption. Set when the `plugin` label maps to a known agent
+   * (personal scope always; project scope when the folder name matches an
+   * agent's localSkillsDir prefix). Absent for unknown plugin folders so
+   * the UI can hide the caption cleanly.
+   */
+  pluginDisplay?: string;
 }
 
 /** 0698 T-002: translate legacy scope → new 5-value vocabulary. */
@@ -422,15 +430,21 @@ export async function scanSkillsTriScope(
       : resolveGlobalSkillsDir(agent);
 
     if (existsSync(globalDir)) {
+      // 0802: derive header label from the on-disk folder (e.g. `.claude`)
+      // so the PERSONAL section matches PROJECT's labeling convention.
+      // Falls back to agent.id when the parent dir isn't tool-prefixed
+      // (e.g. amp/kimi share `~/.config/agents/skills` → basename `agents`).
+      const pluginLabel = pluginLabelForGlobal(globalDir, agent.id);
       // Agent's global dir points at `.../skills/` — iterate children as skills.
       const globals: SkillInfo[] = [];
-      scanSkillsDir(agent.id, globalDir, globals, globalDir);
+      scanSkillsDir(pluginLabel, globalDir, globals, globalDir);
       for (const g of globals) {
         results.push({
           ...g,
           origin: "installed",
           scope: "global",
           sourceAgent: agent.id,
+          pluginDisplay: agent.displayName,
           ...symlinkFieldsFor(g.dir),
           installMethod: installMethodFor(g.dir, "global"),
         });
@@ -440,6 +454,17 @@ export async function scanSkillsTriScope(
 
   // 0698 T-002: enrich with new scope vocabulary + compute precedence/shadowing
   return enrichAndComputePrecedence(results);
+}
+
+/** 0802: derive the plugin-group header label for a personal-scope skill
+ *  set. Returns the basename of the parent dir (e.g. `.claude` from
+ *  `~/.claude/skills`) when that name starts with a `.` and is at least
+ *  two chars; otherwise falls back to the agent's registry id so generic
+ *  shared dirs (`~/.config/agents/skills`) don't render as "agents". */
+function pluginLabelForGlobal(globalDir: string, agentId: string): string {
+  const parent = basename(dirname(globalDir));
+  if (parent.startsWith(".") && parent.length >= 2) return parent;
+  return agentId;
 }
 
 /** Convert a globalSkillsDir pattern like `~/.claude/skills` to just the
@@ -458,7 +483,21 @@ function enrichWithScopeAndSymlink(s: SkillInfo, root: string): SkillInfo {
   const symlink = symlinkFieldsFor(s.dir);
   const installMethod = installMethodFor(s.dir, scope, symlink.isSymlink);
   const sourceAgent = scope === "own" ? null : deriveSourceAgentFromDir(s.dir, root);
-  return { ...s, scope, sourceAgent, ...symlink, installMethod };
+  // 0802: when the plugin label maps to a known agent prefix (e.g. `.claude`),
+  // surface the agent's displayName so the sidebar can render a friendly
+  // caption underneath the folder header. Unknown plugin folders stay clean.
+  const pluginDisplay = displayForPluginFolder(s.plugin);
+  return { ...s, scope, sourceAgent, ...symlink, installMethod, ...(pluginDisplay ? { pluginDisplay } : {}) };
+}
+
+/** 0802: look up a pluginDisplay from a plugin folder name. Accepts both
+ *  dotted (`.claude`) and undotted (`claude-code` agent id) keys. Returns
+ *  undefined for unknown values so the UI hides the caption. */
+function displayForPluginFolder(folder: string): string | undefined {
+  const agentId = folder.startsWith(".") ? agentIdForLocalPrefix(folder) : folder;
+  if (!agentId) return undefined;
+  const agent = AGENTS_REGISTRY.find((a) => a.id === agentId);
+  return agent?.displayName;
 }
 
 /** Walk one level up through the relative path to identify the owning agent

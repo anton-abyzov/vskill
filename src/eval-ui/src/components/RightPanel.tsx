@@ -298,7 +298,10 @@ export function RightPanel(props: Props = {}) {
             // 0772 US-004 (AC-US4-01): await refreshSkills BEFORE selecting.
             setMode("browse");
             await refreshSkills();
-            selectSkill({ plugin, skill, origin: "source" });
+            // 0801: newly-authored skills land in the authoring-project scope,
+            // so source="project". Reload re-resolves source from skill data
+            // via the hash parser, so this is just the optimistic initial value.
+            selectSkill({ plugin, skill, origin: "source", source: "project" });
           }}
           onCancel={() => setMode("browse")}
         />

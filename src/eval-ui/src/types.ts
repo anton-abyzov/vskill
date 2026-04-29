@@ -268,6 +268,13 @@ export interface SkillInfo {
    * "assume tracked" to avoid spamming the not-tracked dot.
    */
   trackedForUpdates?: boolean;
+  /**
+   * 0802: friendly tool display name (e.g. "Claude Code") for the plugin
+   * group header caption. Set by the scanner when the `plugin` label maps
+   * to a known agent. Absent for unknown plugin folders so the UI hides
+   * the caption.
+   */
+  pluginDisplay?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -98,11 +98,21 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
     }
   }, [displayPath]);
 
-  // 0700 polish: match the sidebar + top-rail vocabulary — Anthropic-aligned
-  // labels ("Project" for installed, "Skills" for authored) instead of the
-  // legacy Own/Installed.
-  const originLabel = skill.origin === "installed" ? "Project" : "Skills";
-  const originColor = skill.origin === "installed" ? "var(--status-installed)" : "var(--status-own)";
+  // 0801: derive scope from the rich 3-way `source` field (project|personal|
+  // plugin) so a personal-tier symlink (e.g. ~/.agents/skills/...) no longer
+  // collapses to "PROJECT". Falls back to `origin` for legacy fixtures
+  // (installed without source → personal; source without source → user-authored).
+  const originLabel: string = (() => {
+    if (skill.source === "project") return "Project";
+    if (skill.source === "personal") return "Personal";
+    if (skill.source === "plugin") return "Plugins";
+    return skill.origin === "installed" ? "Personal" : "Skills";
+  })();
+  const originColor: string = (() => {
+    if (skill.source === "project") return "var(--status-installed)";
+    if (skill.source === "plugin") return "var(--color-accent-ink)";
+    return "var(--status-own)";
+  })();
 
   return (
     <div

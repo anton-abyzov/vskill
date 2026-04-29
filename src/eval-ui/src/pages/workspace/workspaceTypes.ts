@@ -233,7 +233,20 @@ export type WorkspaceAction =
 export interface WorkspaceContextValue {
   state: WorkspaceState;
   dispatch: React.Dispatch<WorkspaceAction>;
+  /**
+   * Legacy flag — true when the skill is an installed copy.
+   *
+   * @deprecated 0800: prefer `canEdit` (origin-based) or `canRun`
+   * (cases-based). `isReadOnly === !canEdit`. Kept for ungated authoring
+   * paths (saveContent / saveEvals / generateEvals) which only fire on
+   * source skills regardless. New gates that control execution must use
+   * `canRun`, not `isReadOnly`.
+   */
   isReadOnly: boolean;
+  /** 0800: user may mutate eval cases (Add / Edit / Delete). */
+  canEdit: boolean;
+  /** 0800: user may execute eval cases (per-case Run / Run All). */
+  canRun: boolean;
 
   // Async actions
   /** 0779 — optional `contentOverride` lets EditorPanel.handleSave persist a

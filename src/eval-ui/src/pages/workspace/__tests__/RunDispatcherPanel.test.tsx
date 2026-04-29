@@ -10,6 +10,24 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("../RunPanel", () => ({ RunPanel: () => null }));
 vi.mock("../ActivationPanel", () => ({ ActivationPanel: () => null }));
 
+// 0800: RunDispatcherPanel now reads WorkspaceContext for the autorun effect.
+// Stub it so the function-call render still works without a provider.
+vi.mock("../WorkspaceContext", () => ({
+  useWorkspace: () => ({
+    state: { evals: null, plugin: "p", skill: "s" },
+    runAll: vi.fn(),
+  }),
+}));
+
+vi.mock("react", async () => {
+  const actual = await vi.importActual<typeof import("react")>("react");
+  return {
+    ...actual,
+    useEffect: () => {},
+    useRef: (init: unknown) => ({ current: init }),
+  };
+});
+
 import {
   RunDispatcherPanel,
   RUN_MODES,

@@ -9,7 +9,7 @@ allowed-tools:
   - Bash
   - CronCreate
 metadata:
-  version: 1.3.0
+  version: 1.4.0
   category: productivity
   tags: obsidian, vault, wiki, knowledge-management, para, ingest, lint, cron, note-taking, second-brain
 ---
@@ -79,6 +79,21 @@ Patterns (case-insensitive):
 ```
 
 **On credential match**: STOP wiki ingestion for that file (never create a wiki page from credentials).
+
+**Credential value preservation (MANDATORY)**: When routing a credential file, the file's contents (key/secret/token/password values) MUST be preserved **verbatim**. Do NOT:
+
+- Mask the value (e.g. `nvapi-**********c-e`, `sk-...x4y`)
+- Replace with placeholders (`actual secret NOT recorded`, `key-missing`, `*** redacted ***`)
+- Truncate or partially redact a value that's already complete in the source
+- Wrap copy-pasteable values (API keys, client IDs, GUIDs, tokens, session cookies, passwords) in backticks, quotes, or any other Markdown decoration. Write them as plain text on their own line so the user can triple-click → copy → paste directly into a terminal or form without having to strip surrounding characters. Field labels, URLs, model identifiers, and config syntax can stay formatted as normal — but the **value itself** that the user needs to grab is always plain text. Aesthetic prettiness is not a goal in credential files; clean copy-paste is.
+
+The `{{CREDENTIALS_FOLDER}}/` tree IS the user's credential store: siloed, locally-synced, and only readable by the user's own machine. Masking inside it defeats retrieval — the user cannot use a key they cannot read. Never overwrite an existing full value with a masked one. If updating a stale file that has both a masked entry and a full value (legacy inconsistency), reconcile in favor of the full value and remove the masked artefact.
+
+**Frontmatter `status:`** must reflect the actual state — `active`, `expired`, `revoked`, or `superseded`. Never `key-missing` if the value is in fact recorded in the file.
+
+**Exception**: banking PANs / credit-card numbers follow industry standard (last-4 + issuer + expiry, never full PAN). Don't change those.
+
+User-specific overrides (additional patterns, exceptions) live in `references/user-preferences.md` § Credentials, when present.
 
 1. **Discover vault structure** — list subfolders across all PARA categories to understand what domains exist (see [references/routing-rules.md](references/routing-rules.md) Step 1)
 2. **Identify domain** — analyze filename + content for domain signals (company names, project names, service types, technology keywords). Match against existing vault folders.

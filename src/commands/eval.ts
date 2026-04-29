@@ -17,7 +17,7 @@ export async function evalCommand(
     case "serve": {
       const port = opts.port ? parseInt(opts.port, 10) : null;
       const { runEvalServe } = await import("./eval/serve.js");
-      return runEvalServe(root, port);
+      return runEvalServe(root, port, { force: !!opts.force });
     }
 
     case "init": {

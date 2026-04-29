@@ -86,15 +86,50 @@ describe("TopRail", () => {
     expect(text).toContain("lint");
   });
 
-  // 0709 / 0700: prior vocabulary `INSTALLED`, retained here for grep.
-  it("renders breadcrumb Project when an installed skill is selected", () => {
+  // 0801: header crumb derives from `source` (project|personal|plugin), not
+  // the binary `origin`. Pre-0801 this test asserted that any `origin: installed`
+  // rendered "Project" — that conflated personal-tier symlinks with project
+  // installs. Now we exercise all three sources explicitly + a legacy fallback.
+  it("renders breadcrumb Project when source is project", () => {
+    const tree = expand(TopRail({
+      projectName: "vskill",
+      selected: { plugin: "obsidian-brain", skill: "lint", origin: "installed", source: "project" },
+      onOpenPalette: vi.fn(),
+    }));
+    const text = collectText(tree);
+    expect(text).toContain(strings.scopeLabels.sourceProject);
+  });
+
+  it("renders breadcrumb Personal when source is personal (e.g. ~/.agents/skills symlink)", () => {
+    const tree = expand(TopRail({
+      projectName: "vskill",
+      selected: { plugin: "claude-code", skill: "excalidraw-diagram-generator", origin: "installed", source: "personal" },
+      onOpenPalette: vi.fn(),
+    }));
+    const text = collectText(tree);
+    expect(text).toContain(strings.scopeLabels.sourcePersonal);
+    // Defense: must NOT collapse to "Project" the way pre-0801 code did.
+    expect(text).not.toMatch(/\bPROJECT\b/);
+  });
+
+  it("renders breadcrumb Plugins when source is plugin", () => {
+    const tree = expand(TopRail({
+      projectName: "vskill",
+      selected: { plugin: "anthropic-skills", skill: "pdf", origin: "installed", source: "plugin" },
+      onOpenPalette: vi.fn(),
+    }));
+    const text = collectText(tree);
+    expect(text).toContain(strings.scopeLabels.sourcePlugin);
+  });
+
+  it("falls back to Personal when source is missing and origin=installed (legacy bundles)", () => {
     const tree = expand(TopRail({
       projectName: "vskill",
       selected: { plugin: "obsidian-brain", skill: "lint", origin: "installed" },
       onOpenPalette: vi.fn(),
     }));
     const text = collectText(tree);
-    expect(text).toContain(strings.scopeLabels.sourceProject);
+    expect(text).toContain(strings.scopeLabels.sourcePersonal);
   });
 
   it("palette button has aria-label and fires onOpenPalette on click", () => {

@@ -11,8 +11,6 @@ import { ProgressLog } from "../../components/ProgressLog";
 import { ErrorCard } from "../../components/ErrorCard";
 import { ParameterStorePanel } from "./ParameterStorePanel";
 
-const READ_ONLY_TOOLTIP = "This is an installed copy (read-only). Open the source skill to edit.";
-
 // ---------------------------------------------------------------------------
 // Assertion quality badge types
 // ---------------------------------------------------------------------------
@@ -27,7 +25,7 @@ interface AssertionBadges {
 // Hook: shared case history fetcher (used by badges + history section)
 // ---------------------------------------------------------------------------
 
-function useCaseHistory(plugin: string, skill: string, evalId: number) {
+export function useCaseHistory(plugin: string, skill: string, evalId: number) {
   const [entries, setEntries] = useState<CaseHistoryEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const prevIdRef = useRef<string>("");
@@ -116,7 +114,7 @@ export interface TestsPanelProps {
 }
 
 export function TestsPanel({ embedded = false }: TestsPanelProps = {}) {
-  const { state, dispatch, saveEvals, runCase, runAll, cancelCase, cancelAll, generateEvals, isReadOnly } = useWorkspace();
+  const { state, dispatch, saveEvals, runCase, runAll, cancelCase, cancelAll, generateEvals, canEdit, canRun } = useWorkspace();
   const { evals, evalsError, selectedCaseId, inlineResults, caseRunStates, generateEvalsLoading, generateEvalsProgress, generateEvalsError } = state;
 
   const isAnyRunning = useMemo(() => {
@@ -195,55 +193,56 @@ export function TestsPanel({ embedded = false }: TestsPanelProps = {}) {
             </>
           )}
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowForm(true)}
-            disabled={isReadOnly}
-            title={isReadOnly ? READ_ONLY_TOOLTIP : undefined}
-            className="btn btn-primary text-[12px]"
-          >
-            Create Test Case
-          </button>
-          <div style={{ position: "relative" }}>
-            <div className="flex">
-              <button
-                onClick={() => handleGenerateEvals("unit")}
-                disabled={generateEvalsLoading || isReadOnly}
-                title={isReadOnly ? READ_ONLY_TOOLTIP : undefined}
-                className="btn btn-secondary text-[12px]"
-                style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
-              >
-                {generateEvalsLoading ? <><span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> Generating...</> : "Generate Unit Tests"}
-              </button>
-              <button
-                onClick={() => setGenerateDropdownOpen(!generateDropdownOpen)}
-                disabled={generateEvalsLoading || isReadOnly}
-                title={isReadOnly ? READ_ONLY_TOOLTIP : undefined}
-                className="btn btn-secondary text-[12px]"
-                style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: "1px solid var(--border-default)", padding: "4px 6px" }}
-              >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
-              </button>
-            </div>
-            {generateDropdownOpen && (
-              <div
-                className="absolute right-0 mt-1 rounded-lg py-1 z-50"
-                // eslint-disable-next-line vskill/no-raw-color -- intentional: dropdown elevation shadow uses alpha-only black
-                style={{ background: "var(--surface-1)", border: "1px solid var(--border-default)", minWidth: 180, boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}
-              >
+        {/* 0800 / AC-US2-05: Create / Generate buttons stay source-only.
+            Installed-skill empty state shows just the message — no authoring
+            CTAs, since modifying an installed copy isn't supported. */}
+        {canEdit && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowForm(true)}
+              className="btn btn-primary text-[12px]"
+            >
+              Create Test Case
+            </button>
+            <div style={{ position: "relative" }}>
+              <div className="flex">
                 <button
-                  onClick={() => handleGenerateEvals("integration")}
-                  className="w-full text-left px-3 py-2 text-[12px] transition-colors duration-100"
-                  style={{ color: "var(--text-secondary)", background: "transparent" }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-2)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  onClick={() => handleGenerateEvals("unit")}
+                  disabled={generateEvalsLoading}
+                  className="btn btn-secondary text-[12px]"
+                  style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
                 >
-                  Generate Integration Tests
+                  {generateEvalsLoading ? <><span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> Generating...</> : "Generate Unit Tests"}
+                </button>
+                <button
+                  onClick={() => setGenerateDropdownOpen(!generateDropdownOpen)}
+                  disabled={generateEvalsLoading}
+                  className="btn btn-secondary text-[12px]"
+                  style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: "1px solid var(--border-default)", padding: "4px 6px" }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
                 </button>
               </div>
-            )}
+              {generateDropdownOpen && (
+                <div
+                  className="absolute right-0 mt-1 rounded-lg py-1 z-50"
+                  // eslint-disable-next-line vskill/no-raw-color -- intentional: dropdown elevation shadow uses alpha-only black
+                  style={{ background: "var(--surface-1)", border: "1px solid var(--border-default)", minWidth: 180, boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}
+                >
+                  <button
+                    onClick={() => handleGenerateEvals("integration")}
+                    className="w-full text-left px-3 py-2 text-[12px] transition-colors duration-100"
+                    style={{ color: "var(--text-secondary)", background: "transparent" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-2)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  >
+                    Generate Integration Tests
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Progress log during generation */}
         {generateEvalsLoading && generateEvalsProgress.length > 0 && (
@@ -273,8 +272,39 @@ export function TestsPanel({ embedded = false }: TestsPanelProps = {}) {
     );
   }
 
+  // 0800 / AC-US2-04: read-only banner — defensive copy.
+  // In production TestsPanel is only rendered with `embedded={true}` (from the
+  // EditorPanel eval-cases disclosure), so this branch is currently unreachable
+  // at runtime; the user-facing banner that satisfies AC-US2-04 lives in
+  // RunPanel.tsx (same `data-testid="tests-readonly-banner"`).
+  // The branch is kept for: (a) unit-test coverage of the standalone
+  // TestsPanel surface (`__tests__/0800-readonly-run.test.tsx`), and
+  // (b) future regressions if a non-embedded caller is reintroduced.
+  const readOnlyBanner = !canEdit && !embedded && evals != null && (
+    <div
+      role="status"
+      data-testid="tests-readonly-banner"
+      style={{
+        padding: "10px 16px",
+        background: "var(--surface-2)",
+        borderBottom: "1px solid var(--border-subtle)",
+        fontFamily: "var(--font-sans)",
+        fontSize: 12,
+        color: "var(--text-secondary)",
+        lineHeight: 1.5,
+      }}
+    >
+      Read-only — to author or modify tests, install this skill as source via{" "}
+      <code style={{ background: "var(--surface-1)", padding: "1px 5px", borderRadius: 3, fontFamily: "var(--font-mono)" }}>
+        vskill plugin new
+      </code>.
+    </div>
+  );
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", height: "100%", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      {readOnlyBanner}
+      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", flex: 1, minHeight: 0, overflow: "hidden" }}>
       {/* Left: Case list */}
       <div className="overflow-auto" style={{ borderRight: "1px solid var(--border-subtle)", background: "var(--surface-1)" }}>
         <div
@@ -317,12 +347,17 @@ export function TestsPanel({ embedded = false }: TestsPanelProps = {}) {
               </button>
             ) : (
               <>
-                <button onClick={() => runAll("benchmark")} disabled={cases.length === 0 || isReadOnly} title={isReadOnly ? READ_ONLY_TOOLTIP : undefined} className="btn btn-primary text-[10px] px-2 py-0.5" style={{ whiteSpace: "nowrap" }}>
+                {/* 0800: Run All is gated on canRun (cases exist) — origin
+                    no longer matters. Compare All (A/B) remains author-only
+                    per spec Out-of-Scope: A/B mode stays source-only. */}
+                <button onClick={() => runAll("benchmark")} disabled={!canRun} className="btn btn-primary text-[10px] px-2 py-0.5" style={{ whiteSpace: "nowrap" }}>
                   Run All
                 </button>
-                <button onClick={() => runAll("comparison")} disabled={cases.length === 0 || isReadOnly} title={isReadOnly ? READ_ONLY_TOOLTIP : undefined} className="btn btn-secondary text-[10px] px-2 py-0.5" style={{ whiteSpace: "nowrap" }}>
-                  Compare All
-                </button>
+                {canEdit && (
+                  <button onClick={() => runAll("comparison")} disabled={!canRun} className="btn btn-secondary text-[10px] px-2 py-0.5" style={{ whiteSpace: "nowrap" }}>
+                    Compare All
+                  </button>
+                )}
               </>
             ))}
           </div>
@@ -417,7 +452,7 @@ export function TestsPanel({ embedded = false }: TestsPanelProps = {}) {
         </div>
         {/* Add case button */}
         <div className="px-3 py-2">
-          {!isReadOnly && (
+          {canEdit && (
             <button
               onClick={() => setShowForm(true)}
               className="w-full py-2 rounded-lg text-[12px] font-medium transition-all duration-150"
@@ -474,6 +509,7 @@ export function TestsPanel({ embedded = false }: TestsPanelProps = {}) {
           onCancel={() => setShowForm(false)}
         />
       )}
+      </div>
     </div>
   );
 }
@@ -498,7 +534,7 @@ function CaseDetail({
   // execution buttons + execution history are hidden — Run tab owns those.
   embedded?: boolean;
 }) {
-  const { state, isReadOnly } = useWorkspace();
+  const { state, canEdit, canRun } = useWorkspace();
   const { plugin, skill } = state;
   const { entries: historyEntries, loading: historyLoading } = useCaseHistory(plugin, skill, evalCase.id);
 
@@ -587,7 +623,7 @@ function CaseDetail({
           >
             #{evalCase.id} {evalCase.name}
           </span>
-          {isReadOnly ? (
+          {!canEdit ? (
             <span
               style={{
                 fontSize: 10,
@@ -648,20 +684,24 @@ function CaseDetail({
             </button>
           ) : (
             <>
-              <button onClick={() => onRun(evalCase.id)} disabled={isReadOnly} className="btn btn-primary text-[12px]" style={{ whiteSpace: "nowrap" }}>
+              {/* 0800: per-case Run is now origin-agnostic (canRun gate).
+                  A/B Compare stays source-only per spec Out-of-Scope. */}
+              <button onClick={() => onRun(evalCase.id)} disabled={!canRun} className="btn btn-primary text-[12px]" style={{ whiteSpace: "nowrap" }}>
                 Run
               </button>
-              <button onClick={() => onCompare(evalCase.id)} disabled={isReadOnly} className="btn btn-secondary text-[12px]" style={{ whiteSpace: "nowrap" }}>
-                A/B Compare
-              </button>
+              {canEdit && (
+                <button onClick={() => onCompare(evalCase.id)} disabled={!canRun} className="btn btn-secondary text-[12px]" style={{ whiteSpace: "nowrap" }}>
+                  A/B Compare
+                </button>
+              )}
             </>
           ))}
-          {hasFails && !isReadOnly && caseStatus !== "running" && caseStatus !== "queued" && (
+          {hasFails && canEdit && caseStatus !== "running" && caseStatus !== "queued" && (
             <button onClick={() => onImprove(evalCase.id)} className="btn btn-secondary text-[12px]" style={{ whiteSpace: "nowrap" }}>
               Fix with AI
             </button>
           )}
-          {!isReadOnly && caseStatus !== "running" && caseStatus !== "queued" && (
+          {canEdit && caseStatus !== "running" && caseStatus !== "queued" && (
             <button onClick={deleteCase} className="btn btn-ghost text-[12px]" aria-label="Delete test case" title="Delete test case" style={{ color: "var(--red)" }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
             </button>
@@ -670,7 +710,7 @@ function CaseDetail({
       </div>
 
       {/* T-048: Platform note for integration tests on installed skills */}
-      {isReadOnly && tt === "integration" && (
+      {!canEdit && tt === "integration" && (
         <div
           data-testid="platform-integration-note"
           className="mb-4 px-4 py-3 rounded-xl flex items-center gap-3"
@@ -729,7 +769,7 @@ function CaseDetail({
       )}
 
       {/* Editable integration fields */}
-      {!isReadOnly && tt === "integration" && (
+      {canEdit && tt === "integration" && (
         <IntegrationFieldsEditor evalCase={evalCase} onUpdate={updateCase} />
       )}
 
@@ -761,13 +801,13 @@ function CaseDetail({
               border: "1px solid var(--border-subtle)",
               maxHeight: 200,
               overflowY: "auto",
-              cursor: isReadOnly ? "default" : "pointer",
+              cursor: canEdit ? "pointer" : "default",
             }}
-            onClick={() => { if (!isReadOnly) setEditingPrompt(true); }}
-            onMouseEnter={(e) => { if (!isReadOnly) e.currentTarget.style.borderColor = "var(--border-hover)"; }}
+            onClick={() => { if (canEdit) setEditingPrompt(true); }}
+            onMouseEnter={(e) => { if (canEdit) e.currentTarget.style.borderColor = "var(--border-hover)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
           >
-            {evalCase.prompt || <span style={{ color: "var(--text-tertiary)", fontStyle: "italic" }}>{isReadOnly ? "No prompt" : "Click to edit prompt..."}</span>}
+            {evalCase.prompt || <span style={{ color: "var(--text-tertiary)", fontStyle: "italic" }}>{canEdit ? "Click to edit prompt..." : "No prompt"}</span>}
           </div>
         )}
       </Section>
@@ -800,19 +840,19 @@ function CaseDetail({
               border: "1px solid var(--border-subtle)",
               maxHeight: 200,
               overflowY: "auto",
-              cursor: isReadOnly ? "default" : "pointer",
+              cursor: canEdit ? "pointer" : "default",
             }}
-            onClick={() => { if (!isReadOnly) setEditingExpected(true); }}
-            onMouseEnter={(e) => { if (!isReadOnly) e.currentTarget.style.borderColor = "var(--border-hover)"; }}
+            onClick={() => { if (canEdit) setEditingExpected(true); }}
+            onMouseEnter={(e) => { if (canEdit) e.currentTarget.style.borderColor = "var(--border-hover)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
           >
-            {evalCase.expected_output || <span style={{ fontStyle: "italic" }}>{isReadOnly ? "No expected output" : "Click to edit expected output..."}</span>}
+            {evalCase.expected_output || <span style={{ fontStyle: "italic" }}>{canEdit ? "Click to edit expected output..." : "No expected output"}</span>}
           </div>
         )}
       </Section>
 
       {/* Assertions */}
-      <Section title={`Assertions (${evalCase.assertions.length})`} action={!isReadOnly ? <button onClick={addAssertion} className="btn btn-ghost text-[11px]">+ Add</button> : undefined}>
+      <Section title={`Assertions (${evalCase.assertions.length})`} action={canEdit ? <button onClick={addAssertion} className="btn btn-ghost text-[11px]">+ Add</button> : undefined}>
         {evalCase.assertions.length === 0 ? (
           <div className="text-[12px] text-center py-4" style={{ color: "var(--text-tertiary)" }}>
             No assertions. Click "+ Add" to create one.
@@ -828,7 +868,7 @@ function CaseDetail({
                   assertion={a}
                   result={r}
                   badges={badges}
-                  isReadOnly={isReadOnly}
+                  isReadOnly={!canEdit}
                   onUpdate={(text) => updateAssertion(a.id, text)}
                   onDelete={() => deleteAssertion(a.id)}
                 />
@@ -1215,7 +1255,7 @@ export function getLane(type: string): "left" | "right" | "full" {
 // History entry card (shared between flat and split-lane views)
 // ---------------------------------------------------------------------------
 
-function HistoryEntryCard({ entry }: { entry: CaseHistoryEntry }) {
+export function HistoryEntryCard({ entry }: { entry: CaseHistoryEntry }) {
   return (
     <div
       className="rounded-lg px-3 py-2.5"
@@ -1297,7 +1337,7 @@ function HistoryEntryCard({ entry }: { entry: CaseHistoryEntry }) {
 // Case History Section (collapsible, split-lane grid layout)
 // ---------------------------------------------------------------------------
 
-function CaseHistorySection({ evalId, sharedEntries, sharedLoading }: {
+export function CaseHistorySection({ evalId, sharedEntries, sharedLoading }: {
   evalId: number;
   sharedEntries?: CaseHistoryEntry[] | null;
   sharedLoading?: boolean;

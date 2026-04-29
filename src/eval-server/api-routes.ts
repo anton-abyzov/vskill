@@ -2000,6 +2000,13 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       ...installedPluginSkills,
       ...authoredPluginSkills,
     ]);
+    // 0806: hoist the lockfile read once per request. Without this, the
+    // client-side resolveSkillVersion has installedCurrentVersion=null on the
+    // first response and falls through to versionSource="frontmatter" — the
+    // badge renders non-italic until /api/skills/updates lands and the merge
+    // overwrites currentVersion. Stamping it server-side from the lockfile
+    // collapses the race so badges render their final source on first paint.
+    const lockForCurrentVersion = readLockfile(root);
     const enriched = await Promise.all(
       skills.map(async (s) => {
         let evalCount = 0;
@@ -2017,6 +2024,11 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         // Preserve scanner-derived sourceAgent (populated for installed + global
         // scopes) over the metadata-derived one which only covers local wrappers.
         const sourceAgent = s.sourceAgent ?? meta.sourceAgent;
+        // 0806: pin currentVersion from vskill.lock when an entry exists. Skills
+        // without a lockfile entry (hand-authored, Anthropic-style copies) keep
+        // currentVersion=null — the resolver then falls through to frontmatter,
+        // preserving non-italic styling for author-declared versions.
+        const currentVersion = lockForCurrentVersion?.skills?.[s.skill]?.version ?? null;
         return {
           ...s,
           origin,
@@ -2031,6 +2043,10 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
           // T-025: frontmatter + filesystem + sourceAgent, all nullable
           description: meta.description,
           version: meta.version,
+          // 0806: lockfile-pinned installed version (string|null). Consumed by
+          // client parseRawSkill -> resolveSkillVersion to stabilise the
+          // sidebar badge's italic state on first paint.
+          currentVersion,
           category: meta.category,
           author: meta.author,
           license: meta.license,

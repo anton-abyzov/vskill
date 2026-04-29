@@ -1,0 +1,48 @@
+{
+  "skill_name": "greet-anton",
+  "evals": [
+    {
+      "id": 1,
+      "name": "greets-with-full-name",
+      "prompt": "What is 2 + 2?",
+      "expected_output": "Response begins with a greeting line containing the full name 'Anton Abyzov', followed by the answer to the math question.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "assert-1",
+          "text": "The first line of the response contains the exact string 'Anton Abyzov'",
+          "type": "boolean"
+        },
+        {
+          "id": "assert-2",
+          "text": "The greeting does not use 'Anton' alone without the surname 'Abyzov'",
+          "type": "boolean"
+        },
+        {
+          "id": "assert-3",
+          "text": "The response answers the math question (4) after the greeting",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "full-name-greeting-on-coding-task",
+      "prompt": "Read the file at /tmp/example.txt",
+      "expected_output": "Response leads with a one-line greeting addressing 'Anton Abyzov' by full name before any tool call explanation.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "assert-1",
+          "text": "The user-facing text before any tool call contains 'Anton Abyzov'",
+          "type": "boolean"
+        },
+        {
+          "id": "assert-2",
+          "text": "The greeting line does not address the user as just 'Anton' without 'Abyzov'",
+          "type": "boolean"
+        }
+      ]
+    }
+  ]
+}

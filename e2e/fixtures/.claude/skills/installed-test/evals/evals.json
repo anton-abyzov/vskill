@@ -1,0 +1,21 @@
+{
+  "exists": true,
+  "skill_name": "installed-test",
+  "evals": [
+    {
+      "id": 1,
+      "name": "installed-readonly-case",
+      "prompt": "Should installed skills be runnable?",
+      "expected_output": "Yes, with a read-only banner and no Edit controls.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "mentions-runnable",
+          "text": "Acknowledges the request is allowed",
+          "type": "boolean"
+        }
+      ],
+      "testType": "unit"
+    }
+  ]
+}

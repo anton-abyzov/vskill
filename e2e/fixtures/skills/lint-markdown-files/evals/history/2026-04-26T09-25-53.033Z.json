@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-04-26T09:25:53.033Z",
+  "model": "sonnet",
+  "skill_name": "lint-markdown-files",
+  "cases": [],
+  "type": "ai-generate",
+  "provider": "claude-cli",
+  "generate": {
+    "prompt": "Lint markdown files for style and link integrity",
+    "result": "---\nname: lint-markdown-files\ndescription: \"Lint markdown files for style and link integrity.\"\nversion: \"1.0.0\"\nallowed-tools: Read,Bash(node*)\nmodel: claude-sonnet-4-5\n---\n\n# lint-markdown-files\n\nLint markdown files using the configured linter.\n\n## Workflow\n\n1. Walk the tree.\n2. Report issues.\n"
+  }
+}

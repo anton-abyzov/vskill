@@ -1,0 +1,8 @@
+{
+  "draft": true,
+  "createdAt": "2026-04-27T15:04:55.238Z",
+  "aiPrompt": "Lint markdown files for style and link integrity",
+  "aiProvider": "claude-cli",
+  "aiModel": "sonnet",
+  "aiReasoning": "Generated for the 0670 T-012b regression spec."
+}

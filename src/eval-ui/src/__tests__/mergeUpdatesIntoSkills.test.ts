@@ -102,3 +102,65 @@ describe("0740 mergeUpdatesIntoSkills — origin gating + identity match", () =>
     expect(out).toBe(skills); // exact same reference
   });
 });
+
+describe("0806 mergeUpdatesIntoSkills — '0.0.0' placeholder defence", () => {
+  it("preserves the row's existing currentVersion when u.installed is the '0.0.0' placeholder", () => {
+    // Server-side stamped currentVersion from the lockfile (1.0.1). The
+    // platform's check-updates round-trip can echo back installed='0.0.0'
+    // because the client sends '0.0.0' as a placeholder when it has no
+    // installed version to declare. We must NOT clobber the lockfile-pinned
+    // value with that sentinel — otherwise resolveSkillVersion later rejects
+    // '0.0.0' via pick(), the resolver falls through to frontmatter, and the
+    // sidebar badge loses its italic/registry styling within seconds of
+    // first paint.
+    const skills = [
+      row({
+        origin: "installed",
+        skill: "anymodel",
+        dir: "/installed/anymodel",
+        currentVersion: "1.0.1", // server-stamped from vskill.lock
+        version: "1.0.1",
+      }),
+    ];
+    const out = mergeUpdatesIntoSkills(skills, [
+      update({ name: "anton-abyzov/anymodel/anymodel", installed: "0.0.0", latest: "1.0.1", updateAvailable: false }),
+    ]);
+    expect(out[0].currentVersion).toBe("1.0.1"); // preserved, NOT overwritten with 0.0.0
+    // Re-resolution must still produce the registry source so the badge stays italic.
+    expect(out[0].versionSource).toBe("registry");
+  });
+
+  it("preserves the row's existing currentVersion when u.installed is empty string", () => {
+    const skills = [
+      row({
+        origin: "installed",
+        skill: "anymodel",
+        dir: "/installed/anymodel",
+        currentVersion: "1.0.1",
+        version: "1.0.1",
+      }),
+    ];
+    const out = mergeUpdatesIntoSkills(skills, [
+      update({ name: "anton-abyzov/anymodel/anymodel", installed: "" as never, latest: "1.0.1", updateAvailable: false }),
+    ]);
+    expect(out[0].currentVersion).toBe("1.0.1");
+    expect(out[0].versionSource).toBe("registry");
+  });
+
+  it("still overwrites when u.installed is a real version (no regression vs current behaviour)", () => {
+    const skills = [
+      row({
+        origin: "installed",
+        skill: "anymodel",
+        dir: "/installed/anymodel",
+        currentVersion: "1.0.0", // stale
+        version: "1.0.0",
+      }),
+    ];
+    const out = mergeUpdatesIntoSkills(skills, [
+      update({ name: "anton-abyzov/anymodel/anymodel", installed: "1.2.3", latest: "1.2.3", updateAvailable: false }),
+    ]);
+    expect(out[0].currentVersion).toBe("1.2.3"); // overwritten with truth
+    expect(out[0].versionSource).toBe("registry");
+  });
+});

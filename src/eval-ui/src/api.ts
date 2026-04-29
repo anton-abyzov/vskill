@@ -914,7 +914,13 @@ export const api = {
             typeof r.trackedForUpdates === "boolean" ? r.trackedForUpdates : undefined,
           updateAvailable:
             typeof r.updateAvailable === "boolean" ? r.updateAvailable : undefined,
-          installed: typeof r.installed === "string" ? r.installed : undefined,
+          // 0806: drop the "0.0.0" placeholder we sent so it can't round-trip
+          // back as if it were a real installed version. Without this filter,
+          // mergeUpdatesIntoSkills overwrites the lockfile-stamped
+          // currentVersion with "0.0.0" → resolveSkillVersion rejects the
+          // sentinel → falls through to versionSource="frontmatter" → badge
+          // loses its italic/registry styling within seconds of first paint.
+          installed: typeof r.installed === "string" && r.installed !== "0.0.0" ? r.installed : undefined,
           latest: typeof r.latest === "string" ? r.latest : undefined,
           name: typeof r.name === "string" ? r.name : undefined,
         }));
@@ -1328,10 +1334,18 @@ export function mergeUpdatesIntoSkills(
     // back. The defense is also useful when the poll is simply behind for
     // any reason (network lag, server cache).
     const updateAvailable = u.updateAvailable && !isVersionAtOrAhead(s.version, u.latest);
+    // 0806: defence-in-depth — if the polling source somehow leaks the "0.0.0"
+    // placeholder (e.g. a check-updates round-trip path that sneaks past the
+    // boundary filter, or an upstream regression), keep the row's existing
+    // server-stamped currentVersion instead of clobbering it. The same
+    // sentinel is also rejected by resolveSkillVersion's `pick()` later, but
+    // dropping it here preserves the lockfile-pinned value end-to-end so the
+    // badge keeps its italic/registry styling stable.
+    const installedFromUpdate = u.installed && u.installed !== "0.0.0" ? u.installed : null;
     const merged: SkillInfo = {
       ...s,
       updateAvailable,
-      currentVersion: u.installed,
+      currentVersion: installedFromUpdate ?? s.currentVersion,
       latestVersion: u.latest ?? undefined,
     };
     // 0708 AC-US5-09: surface server-reported tracking state so the

@@ -100,6 +100,10 @@ function setSearch(qs: string) {
 
 describe("RunDispatcherPanel — autorun (?autorun=1)", () => {
   beforeEach(() => {
+    // Tell React this is an act() environment so the act warnings don't fire.
+    // Without this, importing `act` from "react" in jsdom emits warnings on
+    // every effect that masks future regressions.
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     mockRunAll.mockReset();
     mockEvalsCases = [{ id: 1 }, { id: 2 }];
     container = document.createElement("div");

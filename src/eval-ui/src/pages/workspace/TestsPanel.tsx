@@ -304,7 +304,7 @@ export function TestsPanel({ embedded = false }: TestsPanelProps = {}) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {readOnlyBanner}
-      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", flex: 1, minHeight: 0, overflow: "hidden" }}>
+      <div className="eval-cases-grid">
       {/* Left: Case list */}
       <div className="overflow-auto" style={{ borderRight: "1px solid var(--border-subtle)", background: "var(--surface-1)" }}>
         <div

@@ -136,16 +136,17 @@ describe("T-033 RightPanel — empty and error states", () => {
 
 // T-031 TAB BAR + INTEGRATION
 // History: 0707 T-007 expanded to 9 flat tabs. 0769 T-019 collapsed to 6
-// author / 3 consumer. 0792 T-013 collapses further to a 4-tab IA
-// (Overview / Edit / Run / History) for authors and 3 for consumers
-// (Overview / Run / History).
-describe("T-031 RightPanel — persona-conditional tab bar (4 author / 3 consumer)", () => {
+// author / 3 consumer. 0792 T-013 collapsed to 4. 0805 restored Tests as
+// a top-level tab → 5-tab author IA (Overview / Edit / Tests / Run / History)
+// and 4 for consumers (Overview / Tests / Run / History).
+describe("T-031 RightPanel — persona-conditional tab bar (5 author / 4 consumer)", () => {
   it("renders the DetailHeader and every author tab label when a source skill is selected", () => {
     const tree = RightPanel({ selectedSkillInfo: makeSkill() });
     const text = collectText(tree);
     for (const label of [
       "Overview",
       "Edit",
+      "Tests",
       "Run",
       "History",
     ]) {
@@ -159,7 +160,7 @@ describe("T-031 RightPanel — persona-conditional tab bar (4 author / 3 consume
       const attrs = el.props as Record<string, unknown>;
       return attrs["role"] === "tab";
     });
-    expect(tabs.length).toBe(4);
+    expect(tabs.length).toBe(5);
     const activeTab = tabs.find((t) => t.props["aria-selected"] === true);
     expect(activeTab).toBeTruthy();
     const style = activeTab!.props.style as Record<string, string>;

@@ -160,3 +160,75 @@ describe("scanSkillsTriScope — three scopes partitioned by location", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 0802: Personal sub-section header parity. The PERSONAL group in the studio
+// sidebar previously labeled its inner header with the agent registry id
+// (e.g. "claude-code") while PROJECT used the on-disk folder name (".claude").
+// Fix is symmetric labeling: derive the plugin label from
+// basename(dirname(globalSkillsDir)), and carry the agent's displayName as
+// `pluginDisplay` so the UI can render a friendly caption underneath.
+// ---------------------------------------------------------------------------
+
+describe("scanSkillsTriScope — global plugin label parity (0802)", () => {
+  it("global skills under ~/.claude/skills get plugin='.claude' + pluginDisplay='Claude Code'", async () => {
+    writeSkill(fakeHome, ".claude/skills/personal-foo");
+
+    const skills = await scanSkillsTriScope(tmpRoot, {
+      agentId: "claude-code",
+      home: fakeHome,
+    });
+
+    const s = skills.find((x) => x.skill === "personal-foo");
+    expect(s).toBeDefined();
+    expect(s?.scope).toBe("global");
+    expect(s?.plugin).toBe(".claude");
+    expect(s?.pluginDisplay).toBe("Claude Code");
+  });
+
+  it("Cursor global skills get plugin='.cursor' + pluginDisplay='Cursor'", async () => {
+    writeSkill(fakeHome, ".cursor/skills/personal-bar");
+
+    const skills = await scanSkillsTriScope(tmpRoot, {
+      agentId: "cursor",
+      home: fakeHome,
+    });
+
+    const s = skills.find((x) => x.skill === "personal-bar");
+    expect(s).toBeDefined();
+    expect(s?.plugin).toBe(".cursor");
+    expect(s?.pluginDisplay).toBe("Cursor");
+  });
+
+  it("agents whose globalSkillsDir is shared (~/.config/agents/skills) fall back to agent.id as plugin label", async () => {
+    // amp uses ~/.config/agents/skills -- no per-tool dot folder in the path.
+    // The basename of dirname is "agents" (no leading dot), so we must NOT
+    // surface that as the header. Fall back to agent.id ("amp") + displayName.
+    writeSkill(fakeHome, ".config/agents/skills/shared-baz");
+
+    const skills = await scanSkillsTriScope(tmpRoot, {
+      agentId: "amp",
+      home: fakeHome,
+    });
+
+    const s = skills.find((x) => x.skill === "shared-baz");
+    expect(s).toBeDefined();
+    expect(s?.scope).toBe("global");
+    expect(s?.plugin).toBe("amp");
+    expect(s?.pluginDisplay).toBe("Amp");
+  });
+
+  it("project-scope skills under <root>/.claude/skills/* also carry pluginDisplay='Claude Code'", async () => {
+    writeSkill(tmpRoot, ".claude/skills/project-qux");
+
+    const skills = await scanSkillsTriScope(tmpRoot, {
+      agentId: "claude-code",
+      home: fakeHome,
+    });
+
+    const s = skills.find((x) => x.skill === "project-qux");
+    expect(s).toBeDefined();
+    expect(s?.plugin).toBe(".claude");
+    expect(s?.pluginDisplay).toBe("Claude Code");
+  });
+});

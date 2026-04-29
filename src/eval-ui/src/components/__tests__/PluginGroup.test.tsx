@@ -35,7 +35,12 @@ function collectText(node: unknown): string {
   return el.props?.children != null ? collectText(el.props.children) : "";
 }
 
-function makeSkill(plugin: string, skill: string, origin: "source" | "installed" = "source"): SkillInfo {
+function makeSkill(
+  plugin: string,
+  skill: string,
+  origin: "source" | "installed" = "source",
+  pluginDisplay?: string,
+): SkillInfo {
   return {
     plugin, skill,
     dir: `/plugins/${plugin}/${skill}`,
@@ -44,6 +49,7 @@ function makeSkill(plugin: string, skill: string, origin: "source" | "installed"
     benchmarkStatus: "missing",
     lastBenchmark: null,
     origin,
+    ...(pluginDisplay ? { pluginDisplay } : {}),
   };
 }
 
@@ -69,6 +75,33 @@ describe("PluginGroup", () => {
       onSelect: vi.fn(),
     }));
     expect(collectText(tree)).toMatch(/\(?3\)?/);
+  });
+
+  // 0802: per-plugin caption renders the friendly tool name (e.g. "Claude Code")
+  // under the uppercased folder header, matching project/personal symmetry.
+  it("renders the pluginDisplay caption when the first skill provides it", () => {
+    const tree = expand(PluginGroup({
+      plugin: ".claude",
+      skills: [
+        makeSkill(".claude", "alpha", "installed", "Claude Code"),
+        makeSkill(".claude", "beta", "installed", "Claude Code"),
+      ],
+      selectedKey: null,
+      onSelect: vi.fn(),
+    }));
+    expect(collectText(tree)).toContain("Claude Code");
+  });
+
+  it("omits the caption when no pluginDisplay is supplied", () => {
+    const tree = expand(PluginGroup({
+      plugin: "obsidian-brain",
+      skills: [makeSkill("obsidian-brain", "lint")],
+      selectedKey: null,
+      onSelect: vi.fn(),
+    }));
+    // No agent-display caption should be present for unknown plugin folders.
+    expect(collectText(tree)).not.toContain("Claude Code");
+    expect(collectText(tree)).not.toContain("Cursor");
   });
 
   it("alpha-sorts skills inside a group", () => {

@@ -949,11 +949,15 @@ export function EditorPanel() {
 // this branch.
 // ---------------------------------------------------------------------------
 
-function EvalCasesSection() {
+// Exported for unit testing (0800-editor-runall.test.tsx). Production
+// callers always render <EvalCasesSection /> from inside EditorPanel.
+export function EvalCasesSection() {
   const [open, setOpen] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage?.getItem("vskill:editor-eval-cases-open") === "1";
   });
+  const { state, canEdit } = useWorkspace();
+  const cases = state.evals?.evals ?? [];
   const handleToggle = (e: React.SyntheticEvent<HTMLDetailsElement>) => {
     const isOpen = (e.currentTarget as HTMLDetailsElement).open;
     setOpen(isOpen);
@@ -965,6 +969,30 @@ function EvalCasesSection() {
       }
     }
   };
+
+  // 0800 / AC-US1-02..03: deep-link from Edit → Run with autorun=1. We use
+  // history.replaceState (not pushState) to keep back-button semantics
+  // simple — a single navigation does NOT add an entry to the history
+  // stack; if the user wants to undo, they can click Back to the previous
+  // page that brought them to Edit. The RightPanel's URL effect picks up
+  // the new ?tab=run on the next render and switches the active tab.
+  const handleRunAll = useCallback((e: React.SyntheticEvent) => {
+    e.preventDefault?.();
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", "run");
+    params.set("mode", "benchmark");
+    params.set("autorun", "1");
+    const url = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
+    window.history.replaceState(null, "", url);
+    // Notify any listeners (RightPanel reads tabs from URL on render — but
+    // since we replaceState, fire a synthetic popstate so the tab effect
+    // runs without requiring a full reload).
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, []);
+
+  const showRunAll = canEdit && cases.length > 0;
+
   return (
     <details
       data-testid="editor-eval-cases-section"
@@ -983,9 +1011,25 @@ function EvalCasesSection() {
           userSelect: "none",
           background: "var(--surface-1)",
           borderBottom: open ? "1px solid var(--border-subtle)" : "none",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
         }}
       >
-        Eval cases
+        <span>Eval cases</span>
+        {showRunAll && (
+          <button
+            type="button"
+            data-testid="editor-eval-cases-run-all"
+            onClick={handleRunAll}
+            title="Run all → opens Run tab"
+            className="btn btn-primary text-[11px] px-2 py-0.5"
+            style={{ whiteSpace: "nowrap" }}
+          >
+            Run all
+          </button>
+        )}
       </summary>
       {open && (
         <div

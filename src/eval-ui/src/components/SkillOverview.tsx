@@ -111,6 +111,40 @@ function installMethodChip(skill: SkillInfo): ReactNode {
   );
 }
 
+// 0800 / AC-US1-01, AC-US1-06, AC-US2-07: small "N tests" chip rendered
+// next to the skill metadata when evals.json exists and has cases. The
+// chip is a button (so screen readers + keyboard-only users can activate
+// it) that navigates to the Run tab in benchmark mode. Visible for both
+// source and installed origins — installed users use it to discover the
+// read-only run path on their copy.
+function testsChip(skill: SkillInfo, onNavigate?: (panel: PanelId) => void): ReactNode {
+  const count = skill.evalCount ?? 0;
+  if (!skill.hasEvals || count <= 0) return null;
+  return (
+    <button
+      type="button"
+      data-testid="overview-tests-chip"
+      onClick={onNavigate ? () => onNavigate("run") : undefined}
+      title={`Open Run tab — ${count} test case${count === 1 ? "" : "s"}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        padding: "2px 8px",
+        border: "1px solid var(--border-default, var(--border))",
+        borderRadius: 9999,
+        fontFamily: "var(--font-sans)",
+        fontSize: 11,
+        color: "var(--text-secondary)",
+        background: "transparent",
+        cursor: onNavigate ? "pointer" : "default",
+      }}
+    >
+      {count} {count === 1 ? "test" : "tests"}
+    </button>
+  );
+}
+
 export function SkillOverview(props: SkillOverviewProps) {
   const { skill, onNavigate, activationsCount = 0, lastRunIso = null, repoUrl, skillPathInRepo } = props;
   const effectiveRepoUrl = repoUrl ?? (isLikelyGitHubUrl(skill.homepage) ? skill.homepage ?? null : null);
@@ -159,6 +193,7 @@ export function SkillOverview(props: SkillOverviewProps) {
             pluginName={skill.pluginName ?? null}
           />
           {installMethodChip(skill)}
+          {testsChip(skill, onNavigate)}
         </div>
         <div
           data-testid="skill-overview-byline"

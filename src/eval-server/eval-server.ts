@@ -146,6 +146,23 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
     await serveStatic(req, res, staticDir);
   });
 
+  // POST /api/shutdown — graceful self-stop, used by `vskill studio --force`
+  // to free the port before restarting in-place. Replies before closing so
+  // the caller sees a clean 200 instead of a connection reset. Registered
+  // here (after `server` is constructed) so the handler can close it.
+  router.post("/api/shutdown", async (_req, res) => {
+    sendJson(res, { ok: true, shuttingDown: true });
+    setTimeout(() => {
+      try {
+        server.close(() => process.exit(0));
+      } catch {
+        process.exit(0);
+      }
+      // Hard fallback if close() never fires (active websocket, hung handler).
+      setTimeout(() => process.exit(0), 1000).unref();
+    }, 50);
+  });
+
   return new Promise((resolve) => {
     server.listen(port, () => {
       // 0728: Warn when running compiled bundle predates source edits.

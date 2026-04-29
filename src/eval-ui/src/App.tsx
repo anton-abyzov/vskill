@@ -581,8 +581,12 @@ function Shell() {
   }, [state.skills, state.selectedSkill]);
 
   const onSelect = useCallback(
-    (s: { plugin: string; skill: string; origin: "source" | "installed" }) => {
-      selectSkill({ plugin: s.plugin, skill: s.skill, origin: s.origin });
+    // 0801: forward `source` (project|personal|plugin) so the breadcrumb
+    // header can render PROJECT/PERSONAL/PLUGIN matching the sidebar group.
+    // Sidebar passes a full SkillInfo, but typed locally here for back-compat
+    // with the older narrowed shape.
+    (s: { plugin: string; skill: string; origin: "source" | "installed"; source?: import("./types").SkillSource }) => {
+      selectSkill({ plugin: s.plugin, skill: s.skill, origin: s.origin, source: s.source });
     },
     [selectSkill],
   );

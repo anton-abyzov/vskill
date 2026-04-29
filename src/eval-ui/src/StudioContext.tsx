@@ -1,7 +1,7 @@
 import { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, mergeUpdatesIntoSkills } from "./api";
 import { mutate as mutateSWR } from "./hooks/useSWR";
-import type { SkillInfo } from "./types";
+import type { SkillInfo, SkillSource } from "./types";
 import type { SkillUpdateInfo } from "./api";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useSkillUpdates } from "./hooks/useSkillUpdates";
@@ -15,6 +15,13 @@ export interface SelectedSkill {
   plugin: string;
   skill: string;
   origin: "source" | "installed";
+  /**
+   * 0801: 3-way scope from `SkillInfo.source` (project|personal|plugin).
+   * Optional for back-compat with the ~25 test fixtures that mock
+   * SelectedSkill without it; consumers (TopRail) MUST fall back to
+   * deriving from `origin` when this is undefined.
+   */
+  source?: SkillSource;
 }
 
 export interface StudioState {
@@ -261,14 +268,34 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     return api.getSkills(filter)
       .then((skills) => {
         dispatch({ type: "SET_SKILLS", skills });
-        // Restore selection from hash: #/skills/<plugin>/<skill>
+        // 0801: hash format. New form is `#/skills/<source>/<plugin>/<skill>`
+        // (3 segments after /skills/), where <source> is project|personal|plugin.
+        // Legacy form `#/skills/<plugin>/<skill>` (2 segments) still parses for
+        // saved bookmarks — `source` is then derived from the matched skill.
         const hash = window.location.hash;
-        const m = hash.match(/^#\/skills\/([^/]+)\/([^/?]+)/);
-        if (m) {
-          const [, plugin, skill] = m;
+        const triple = hash.match(/^#\/skills\/(project|personal|plugin)\/([^/]+)\/([^/?]+)/);
+        if (triple) {
+          const [, src, plugin, skill] = triple;
+          const source = src as SkillSource;
+          const found = skills.find((s) => s.plugin === plugin && s.skill === skill && s.source === source);
+          if (found) {
+            dispatch({ type: "SELECT_SKILL", skill: { plugin, skill, origin: found.origin, source: found.source } });
+            return;
+          }
+          // Source segment present but no match — fall through to legacy match
+          // by (plugin, skill) so a slightly-stale URL still selects something.
+          const fallback = skills.find((s) => s.plugin === plugin && s.skill === skill);
+          if (fallback) {
+            dispatch({ type: "SELECT_SKILL", skill: { plugin, skill, origin: fallback.origin, source: fallback.source } });
+          }
+          return;
+        }
+        const legacy = hash.match(/^#\/skills\/([^/]+)\/([^/?]+)/);
+        if (legacy) {
+          const [, plugin, skill] = legacy;
           const found = skills.find((s) => s.plugin === plugin && s.skill === skill);
           if (found) {
-            dispatch({ type: "SELECT_SKILL", skill: { plugin, skill, origin: found.origin } });
+            dispatch({ type: "SELECT_SKILL", skill: { plugin, skill, origin: found.origin, source: found.source } });
           }
         }
       })
@@ -279,7 +306,12 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
   const selectSkill = useCallback((skill: SelectedSkill) => {
     dispatch({ type: "SELECT_SKILL", skill });
-    window.location.hash = `/skills/${skill.plugin}/${skill.skill}`;
+    // 0801: 3-segment hash when source is known so reload preserves the
+    // sidebar group (PROJECT/PERSONAL/PLUGIN). Falls back to the legacy
+    // 2-segment form for older callers that don't yet pass `source`.
+    window.location.hash = skill.source
+      ? `/skills/${skill.source}/${skill.plugin}/${skill.skill}`
+      : `/skills/${skill.plugin}/${skill.skill}`;
   }, []);
 
   // 0704: explicit reveal — select + flag for sidebar auto-reveal.
@@ -313,11 +345,15 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }
     const resolvedPlugin = found?.plugin ?? plugin;
     const origin = found?.origin ?? "source";
+    const source = found?.source;
     dispatch({
       type: "REVEAL_SKILL",
-      skill: { plugin: resolvedPlugin, skill: skillName, origin },
+      skill: { plugin: resolvedPlugin, skill: skillName, origin, source },
     });
-    window.location.hash = `/skills/${resolvedPlugin}/${skillName}`;
+    // 0801: 3-segment hash when source is known. Legacy fallback otherwise.
+    window.location.hash = source
+      ? `/skills/${source}/${resolvedPlugin}/${skillName}`
+      : `/skills/${resolvedPlugin}/${skillName}`;
   }, []);
   const clearReveal = useCallback(() => {
     dispatch({ type: "CLEAR_REVEAL" });

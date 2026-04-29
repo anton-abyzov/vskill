@@ -1,7 +1,13 @@
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
+import skillStudioLogoUrl from "../assets/skill-studio-logo.png";
 
 // ---------------------------------------------------------------------------
 // 0686 T-001 (US-001): StudioLogo — home-link component for the top rail.
+//
+// Mark: bell-badge "Skill Studio" logo (v6-A-orange-bell-badge.png) — the
+// canonical mark used in the hackathon demo video and on verified-skill.com.
+// Replaces the prior inline heartbeat-polyline SVG so every Skill Studio
+// surface shows the same orange bell mark.
 //
 // AC coverage:
 //   AC-US1-01  Click sets `window.location.hash = "#/"` and invokes the
@@ -89,31 +95,18 @@ export function StudioLogo({ onHome }: StudioLogoProps) {
           "background-color var(--duration-fast, 120ms) var(--ease-standard, ease)",
       }}
     >
-      <span
+      <img
+        src={skillStudioLogoUrl}
+        alt=""
         aria-hidden="true"
+        width={28}
+        height={28}
         style={{
-          width: 24,
-          height: 24,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          borderRadius: 6,
-          background: "color-mix(in srgb, var(--accent-surface) 20%, transparent)",
+          display: "block",
+          objectFit: "contain",
+          flexShrink: 0,
         }}
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="var(--accent-surface)"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-        </svg>
-      </span>
+      />
       <span
         style={{
           fontSize: 13,

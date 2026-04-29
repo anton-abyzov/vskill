@@ -45,17 +45,16 @@ function dispatchNavigateScope(
 //   - Prefers the rich `source` field on SelectedSkill (project|personal|plugin),
 //     mapping to the matching scopeLabels token.
 //   - Falls back to `origin` for legacy fixtures and pre-0801 callers that
-//     populate SelectedSkill without `source`. Historically `origin: "source"`
-//     meant "user-authored" → renders the "Skills" (authoring) label;
-//     `origin: "installed"` without an explicit source most often means a
-//     personal-tier symlink (e.g. ~/.agents/skills/...) → "Personal".
+//     populate SelectedSkill without `source`. Per AC-US1-05:
+//       origin: "installed" (no source) → "Personal" (most often a personal-tier symlink)
+//       origin: "source"    (no source) → "Project"  (user-authored, project tier)
 function scopeLabel(selected: SelectedSkill): string {
   if (selected.source === "project") return strings.scopeLabels.sourceProject;
   if (selected.source === "personal") return strings.scopeLabels.sourcePersonal;
   if (selected.source === "plugin") return strings.scopeLabels.sourcePlugin;
   return selected.origin === "installed"
     ? strings.scopeLabels.sourcePersonal
-    : strings.scopeLabels.authoringSkills;
+    : strings.scopeLabels.sourceProject;
 }
 
 function scopeColor(selected: SelectedSkill): string {
@@ -74,7 +73,8 @@ function scopeColor(selected: SelectedSkill): string {
  *   - Skill actions: FindSkills (⌘⇧K) + Create Skill CTA
  *   - Session status: AgentModelPicker + UpdateBell
  *
- * Breadcrumb format: `OWN › plugin › skill-name` or `INSTALLED › plugin › skill-name`.
+ * Breadcrumb format: `<scope> › plugin › skill-name` where scope is one of
+ * Project / Personal / Plugins (derived from SelectedSkill.source per 0801).
  * When no skill is selected, only the project name shows after the logo.
  *
  * Typography:

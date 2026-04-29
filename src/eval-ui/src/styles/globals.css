@@ -251,7 +251,9 @@ body {
 }
 
 /* ==================================================================== */
-/* Badge — text + dot, no pill fills                                     */
+/* Badge — base layout. The leading dot is opt-in via .pill-installed /  */
+/* .pill-own (status indicators). Filled badges (StatusPill, verdict     */
+/* pills, etc.) inherit only the layout, never the bullet.               */
 /* ==================================================================== */
 .pill {
   display: inline-flex;
@@ -265,7 +267,9 @@ body {
   color: var(--text-secondary);
 }
 
-.pill::before {
+/* status indicators render as text + leading dot */
+.pill-installed::before,
+.pill-own::before {
   content: "";
   width: 6px;
   height: 6px;
@@ -275,6 +279,25 @@ body {
 
 .pill-installed { color: var(--status-installed); }
 .pill-own       { color: var(--status-own); }
+
+/* ==================================================================== */
+/* Eval-cases grid (Studio Tests panel) — desktop side-by-side, narrow  */
+/* viewports collapse to a single stacked column. Replaces the prior    */
+/* inline `gridTemplateColumns` so the breakpoint can be honored.       */
+/* ==================================================================== */
+.eval-cases-grid {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 700px) {
+  .eval-cases-grid {
+    grid-template-columns: 1fr;
+  }
+}
 
 /* ==================================================================== */
 /* Input                                                                 */

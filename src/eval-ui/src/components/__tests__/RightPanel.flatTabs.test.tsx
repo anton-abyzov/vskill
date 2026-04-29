@@ -107,14 +107,15 @@ function makeSkill(over: Partial<SkillInfo> = {}): SkillInfo {
   };
 }
 
-describe("RightPanel — 4-tab IA (0792 T-013)", () => {
-  it("renders exactly 4 tabs (Overview/Edit/Run/History) for source-origin skills", () => {
+describe("RightPanel — 5-tab IA (0805 — Tests promoted back; 0792 T-013 was 4-tab)", () => {
+  it("renders exactly 5 tabs (Overview/Edit/Tests/Run/History) for source-origin skills", () => {
     const tree = RightPanel({ selectedSkillInfo: makeSkill() });
     const tabs = findAll(tree, (el) => el.props?.role === "tab");
     const ids = tabs.map((t) => t.props["data-testid"] as string);
     expect(ids).toEqual([
       "detail-tab-overview",
       "detail-tab-edit",
+      "detail-tab-tests",
       "detail-tab-run",
       "detail-tab-history",
     ]);
@@ -122,22 +123,23 @@ describe("RightPanel — 4-tab IA (0792 T-013)", () => {
     expect(tablist).toBeDefined();
   });
 
-  it("hides Edit for installed-origin (consumer) skills, leaving Overview/Run/History", () => {
+  it("hides Edit for installed-origin (consumer) skills, leaving Overview/Tests/Run/History", () => {
     const tree = RightPanel({ selectedSkillInfo: makeSkill({ origin: "installed" }) });
     const tabs = findAll(tree, (el) => el.props?.role === "tab");
     const ids = tabs.map((t) => t.props["data-testid"] as string);
     expect(ids).toEqual([
       "detail-tab-overview",
+      "detail-tab-tests",
       "detail-tab-run",
       "detail-tab-history",
     ]);
   });
 
-  it("does not surface 'Tests', 'Trigger', or 'Versions' as top-level tabs anymore", () => {
+  it("does not surface 'Trigger' or 'Versions' as top-level tabs anymore (Tests is now top-level via 0805)", () => {
     const tree = RightPanel({ selectedSkillInfo: makeSkill() });
     const tabs = findAll(tree, (el) => el.props?.role === "tab");
     const ids = tabs.map((t) => t.props["data-testid"] as string);
-    expect(ids).not.toContain("detail-tab-tests");
+    expect(ids).toContain("detail-tab-tests");
     expect(ids).not.toContain("detail-tab-activation");
     expect(ids).not.toContain("detail-tab-versions");
     expect(ids).not.toContain("detail-tab-trigger");

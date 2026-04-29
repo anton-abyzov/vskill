@@ -67,8 +67,8 @@ describe("readInitialSub (0792)", () => {
 });
 
 describe("resolveLegacyTab (0792 T-014)", () => {
-  it("redirects ?tab=tests to run benchmark", () => {
-    expect(resolveLegacyTab("tests")).toEqual({ tab: "run", mode: "benchmark" });
+  it("?tab=tests resolves to the Tests tab itself (0805 — Tests promoted back to top-level)", () => {
+    expect(resolveLegacyTab("tests")).toEqual({ tab: "tests" });
   });
 
   it("redirects ?tab=trigger and ?tab=activation to run activation", () => {

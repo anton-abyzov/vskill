@@ -4,6 +4,7 @@ import type { SkillInfo } from "../types";
 import type { PanelId } from "../pages/workspace/workspaceTypes";
 import { WorkspaceProvider, useWorkspace } from "../pages/workspace/WorkspaceContext";
 import { EditorPanel } from "../pages/workspace/EditorPanel";
+import { TestsPanel } from "../pages/workspace/TestsPanel";
 import { ActivationPanel } from "../pages/workspace/ActivationPanel";
 import {
   RunDispatcherPanel,
@@ -47,7 +48,7 @@ import type { SubTabDescriptor } from "./SubTabBar";
 // "Eval cases" section inside the Edit tab — see EditorPanel.tsx.
 // ---------------------------------------------------------------------------
 
-export type DetailTab = "overview" | "edit" | "run" | "history";
+export type DetailTab = "overview" | "edit" | "tests" | "run" | "history";
 
 interface TabDescriptor {
   id: DetailTab;
@@ -59,6 +60,11 @@ interface TabDescriptor {
 const TAB_DESCRIPTORS: TabDescriptor[] = [
   { id: "overview", label: "Overview" },
   { id: "edit", label: "Edit", visibleWhen: ({ isReadOnly }) => !isReadOnly },
+  // Tests is the dedicated authoring + per-case execution-history surface
+  // (restored in 0805). Visible to both authors and installed-skill consumers
+  // — read-only gating for installed is enforced inside TestsPanel via the
+  // canEdit/canRun split from 0800.
+  { id: "tests", label: "Tests" },
   // Run is visible for both authors and consumers — consumers may still want
   // to invoke a Trigger (activation) test on installed skills. Within Run we
   // hide the Benchmark mode for read-only consumers via RunDispatcherPanel
@@ -67,7 +73,7 @@ const TAB_DESCRIPTORS: TabDescriptor[] = [
   { id: "history", label: "History" },
 ];
 
-const ALL_TABS: DetailTab[] = ["overview", "edit", "run", "history"];
+const ALL_TABS: DetailTab[] = ["overview", "edit", "tests", "run", "history"];
 
 function isValidTab(value: unknown): value is DetailTab {
   return typeof value === "string" && (ALL_TABS as string[]).includes(value);
@@ -90,8 +96,9 @@ function visibleTabsFor(isReadOnly: boolean): TabDescriptor[] {
 type RedirectTarget = { tab: DetailTab; mode?: RunDispatcherMode; view?: HistoryView };
 
 const LEGACY_REDIRECTS: Record<string, RedirectTarget> = {
-  // Old "Tests" → Run benchmark (eval execution moved to Run).
-  tests: { tab: "run", mode: "benchmark" },
+  // 0805: Tests is back as a top-level tab. Identity entry so `?tab=tests`
+  // mounts the Tests tab directly. (Pre-0805 this was an alias to Run/benchmark.)
+  tests: { tab: "tests" },
   // Old "Trigger" / "Activation" → Run activation mode.
   trigger: { tab: "run", mode: "activation" },
   activation: { tab: "run", mode: "activation" },
@@ -614,6 +621,7 @@ function renderErrorState(skill: SkillInfo, message: string) {
 // ---------------------------------------------------------------------------
 function WorkspacePanel({ active, sub }: { active: DetailTab; sub: string }) {
   if (active === "edit") return <EditorPanel />;
+  if (active === "tests") return <TestsPanel />;
   if (active === "run") {
     const mode = isValidRunMode(sub) ? sub : "benchmark";
     return <RunDispatcherPanel mode={mode} />;
@@ -643,6 +651,7 @@ function WorkspaceTabSync({ active, sub }: { active: DetailTab; sub: string }) {
     if (active === "overview") return;
     const target: PanelId = (() => {
       if (active === "edit") return "editor";
+      if (active === "tests") return "tests";
       if (active === "run") return sub === "activation" ? "activation" : "run";
       if (active === "history") {
         if (sub === "models") return "leaderboard";
@@ -737,7 +746,7 @@ function renderSkillDetail(
         <path d="M7 11V7a5 5 0 0 1 10 0v4" />
       </svg>
       <span style={{ flex: 1, minWidth: 0 }}>
-        This is an installed copy of the skill. Editing, generating tests, and running evals are disabled. Open the source skill to make changes.
+        This is an installed copy of the skill. Editing and generating tests are disabled — running author-shipped evals is allowed. Open the source skill to make changes.
       </span>
       {skill.trackedForUpdates && (
         <button

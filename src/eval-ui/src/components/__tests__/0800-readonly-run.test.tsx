@@ -224,4 +224,20 @@ describe("TestsPanel (0800) — read-only run for installed skills", () => {
     );
     expect(banners).toHaveLength(0);
   });
+
+  it("AC-US2-05: installed skill with NO evals.json hides Create / Generate buttons", () => {
+    // Installed origin + no evals.json (exists: false) → empty state should
+    // render without authoring affordances. The "Create Test Case" and
+    // "Generate Unit/Integration Tests" buttons must not appear.
+    mockOrigin = "installed";
+    mockState.evals = null;
+    const tree = TestsPanel();
+
+    const createButtons = collectElements(tree, (el) => {
+      if (el.type !== "button") return false;
+      const text = collectText(el).trim();
+      return /Create Test Case|Add Test Case|Generate (Unit|Integration) Tests/i.test(text);
+    });
+    expect(createButtons).toHaveLength(0);
+  });
 });

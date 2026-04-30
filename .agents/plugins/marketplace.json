@@ -1,0 +1,20 @@
+{
+  "name": "vskill",
+  "interface": {
+    "displayName": "vskill"
+  },
+  "plugins": [
+    {
+      "name": "codex-bridge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-bridge"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Engineering"
+    }
+  ]
+}

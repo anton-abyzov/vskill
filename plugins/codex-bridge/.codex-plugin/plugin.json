@@ -7,7 +7,7 @@
   "repository": "https://github.com/anton-abyzov/vskill",
   "license": "MIT",
   "keywords": ["codex", "openai", "cross-runtime", "dual-manifest", "agents-md", "claude-md", "interop"],
-  "skills": ["./skills/agents-md-author"],
+  "skills": "./skills/",
   "interface": {
     "displayName": "Codex Bridge",
     "shortDescription": "Generate AGENTS.md / CLAUDE.md for any AI coding tool",

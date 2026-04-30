@@ -106,6 +106,16 @@ interface CreateSkillRequest {
   }>;
   aiMeta?: AiGenerationMeta;
   draftDir?: string;
+  // -------------------------------------------------------------------------
+  // 0815: multi-file payload — written atomically alongside SKILL.md and
+  // evals.json. Each `files` key is a relative path inside the skill dir;
+  // resolveSafe() rejects path traversal and absolute paths before any disk
+  // I/O. .env.example is auto-generated from `secrets[]` when non-empty.
+  // -------------------------------------------------------------------------
+  files?: Record<string, string>;
+  secrets?: string[];
+  runtime?: { python?: string; pip?: string[]; node?: string };
+  integrationTests?: { runner: "vitest" | "pytest" | "none"; file?: string; requires?: string[] };
 }
 
 interface SaveDraftRequest extends CreateSkillRequest {
@@ -601,6 +611,56 @@ export function formatValidatorReport(outcome: ValidatorOutcome): string {
 }
 
 /** Compute target directory for a new skill based on layout */
+// ---------------------------------------------------------------------------
+// 0815: path safety + .env.example helpers for multi-file skill creation.
+//
+// resolveSafe rejects any path that would escape the skill directory: absolute
+// paths, drive letters, '..' segments, and relative paths whose resolved form
+// lands outside `base`. Used by POST /api/skills/create when looping the
+// optional `files` map. Throws so the route returns 400.
+// ---------------------------------------------------------------------------
+export function resolveSafe(base: string, relPath: string): string {
+  if (typeof relPath !== "string" || relPath.length === 0) {
+    throw new Error(`resolveSafe: empty path`);
+  }
+  // Reject absolute paths (POSIX) and Windows drive letters.
+  if (relPath.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(relPath)) {
+    throw new Error(`resolveSafe: refused absolute path '${relPath}'`);
+  }
+  // Reject any '..' segment — easier to reason about than relying on resolve()
+  // alone, since a benign-looking resolve result can still hide a traversal
+  // depending on the realpath of `base`.
+  const segments = relPath.split(/[/\\]+/);
+  if (segments.some((s) => s === "..")) {
+    throw new Error(`resolveSafe: refused traversal in '${relPath}'`);
+  }
+  const resolved = resolve(base, relPath);
+  const baseResolved = resolve(base);
+  // Defense in depth: ensure the resolved path is still inside base.
+  if (resolved !== baseResolved && !resolved.startsWith(baseResolved + sep)) {
+    throw new Error(`resolveSafe: path '${relPath}' escapes base`);
+  }
+  return resolved;
+}
+
+/**
+ * Build a `.env.example` body from a list of secret env-var names. Each line
+ * is `NAME=` with no value — the file ships placeholders only, never real
+ * secrets. Caller is responsible for including a leading comment if desired.
+ */
+export function buildEnvExample(secrets: string[]): string {
+  const lines: string[] = [
+    "# .env.example — populated by the skill author, never committed.",
+    "# Copy to .env.local in this directory and fill in real values.",
+    "",
+  ];
+  for (const name of secrets) {
+    if (typeof name !== "string" || name.length === 0) continue;
+    lines.push(`${name}=`);
+  }
+  return lines.join("\n") + "\n";
+}
+
 function computeSkillDir(root: string, layout: 1 | 2 | 3, plugin: string, name: string): string {
   switch (layout) {
     case 1: return join(root, plugin, "skills", name);
@@ -1331,6 +1391,50 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
             });
           } catch { /* history write failure should not break the main response */ }
         }
+      }
+
+      // -------------------------------------------------------------------
+      // 0815: multi-file payload — write auxiliary files atomically.
+      //
+      // Each `files` entry is validated through resolveSafe() before any I/O.
+      // On any failure mid-write, rollback by removing the skill directory
+      // (unless this is an update — preserve existing user content). The
+      // rollback is intentionally NOT inside a finally — the existing outer
+      // try/catch (a few lines below) handles top-level failures and we want
+      // the path-traversal case to surface as a 400 with the dir cleaned up.
+      // -------------------------------------------------------------------
+      if (body.files && typeof body.files === "object") {
+        const written: string[] = [];
+        try {
+          for (const [relPath, contents] of Object.entries(body.files)) {
+            if (typeof contents !== "string") {
+              throw new Error(`files['${relPath}'] is not a string`);
+            }
+            const safePath = resolveSafe(targetDir, relPath);
+            const safeDir = safePath.slice(0, safePath.lastIndexOf(sep));
+            mkdirSync(safeDir, { recursive: true });
+            writeFileSync(safePath, contents, "utf-8");
+            written.push(safePath);
+          }
+        } catch (err) {
+          // Rollback: clean up the partial directory unless we're updating.
+          if (!isUpdateMode) {
+            try { rmSync(targetDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+          }
+          sendJson(res, {
+            error: `Failed to write multi-file payload: ${(err as Error).message}`,
+            code: "multi-file-write-failed",
+          }, 400, req);
+          return;
+        }
+      }
+
+      // 0815: emit .env.example from declared secrets (placeholders only).
+      if (Array.isArray(body.secrets) && body.secrets.length > 0) {
+        try {
+          const envExamplePath = join(targetDir, ".env.example");
+          writeFileSync(envExamplePath, buildEnvExample(body.secrets), "utf-8");
+        } catch { /* non-blocking — secrets are advisory */ }
       }
 
       // Finalize: remove draft.json if it exists (draft → final)

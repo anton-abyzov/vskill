@@ -14,15 +14,15 @@
 // filtered inside transfer before invoking copy.
 // ---------------------------------------------------------------------------
 
-import { existsSync, rmSync, readdirSync, statSync, copyFileSync, mkdirSync } from "node:fs";
-import { join, basename } from "node:path";
+import { existsSync, rmSync, readdirSync, statSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 import type { SkillScope, TransferEvent } from "../types.js";
 import {
   copyPluginFiltered,
-  isSkillMdCandidate,
   shouldSkipFromCommands,
 } from "../../shared/copy-plugin-filtered.js";
+import { resolveSourceLink } from "../../eval-server/source-link.js";
 
 export interface TransferRequest {
   plugin: string;
@@ -101,7 +101,12 @@ function countFiles(dir: string): number {
 function copyOwnSkillFiltered(sourceDir: string, targetDir: string, relBase = ""): void {
   mkdirSync(targetDir, { recursive: true });
   for (const entry of readdirSync(sourceDir)) {
-    if (!relBase && entry === ".vskill-meta.json") continue;
+    // 0809: filter the copied-skill source-link sidecar at the OWN scope root
+    // alongside the existing .vskill-meta.json filter. Sidecars are re-derived
+    // by the destination's `transfer()` post-copy step, never copied through.
+    // Asymmetric with copyPluginFiltered (which strips at any depth) on purpose:
+    // OWN scope is a single skill dir, so sidecars only ever exist at the root.
+    if (!relBase && (entry === ".vskill-meta.json" || entry === ".vskill-source.json")) continue;
     const relPath = relBase ? `${relBase}/${entry}` : entry;
     const sourcePath = join(sourceDir, entry);
     const st = statSync(sourcePath);
@@ -111,8 +116,6 @@ function copyOwnSkillFiltered(sourceDir: string, targetDir: string, relBase = ""
       copyFileSync(sourcePath, join(targetDir, entry));
     }
   }
-  void isSkillMdCandidate;
-  void basename;
 }
 
 export async function transfer(req: TransferRequest, emit: SSEEmit): Promise<TransferResult> {
@@ -139,6 +142,30 @@ export async function transfer(req: TransferRequest, emit: SSEEmit): Promise<Tra
     copyOwnSkillFiltered(sourcePath, destPath);
   } else {
     copyPluginFiltered(sourcePath, destPath);
+  }
+
+  // 0809 — Snapshot the SOURCE skill's source-link provenance into a
+  // `.vskill-source.json` sidecar in the destination so that downstream
+  // /api/skills resolution can render the same `↗` GitHub anchor that
+  // lockfile-installed and authored skills already get. The resolver's
+  // own precedence chain handles chained copies: when the source itself
+  // has a sidecar pointing to repo X, resolveSourceLink returns X and
+  // the destination snapshots X (NOT the intermediate copy location).
+  // We only write when the source has a resolvable repoUrl — otherwise
+  // the destination is byte-for-byte identical to the pre-0809 behavior.
+  try {
+    const sourceLink = resolveSourceLink(sourcePath, req.root);
+    if (sourceLink.repoUrl) {
+      writeFileSync(
+        join(destPath, ".vskill-source.json"),
+        JSON.stringify(sourceLink, null, 2),
+      );
+    }
+  } catch (err) {
+    // resolver / write failure must never break the copy itself, but we
+    // surface a breadcrumb so a degraded byline (no GitHub anchor on a
+    // copied skill that should have had one) is debuggable.
+    console.warn("[scope-transfer] sidecar write skipped:", (err as Error)?.message ?? err);
   }
 
   const filesWritten = countFiles(destPath);

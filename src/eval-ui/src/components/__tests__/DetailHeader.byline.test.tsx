@@ -104,4 +104,54 @@ describe("DetailHeader — T-008 byline + version badge integration", () => {
     const buttons = findAll(byline, (el) => el.type === "button");
     expect(buttons.length).toBeGreaterThanOrEqual(1);
   });
+
+  // -------------------------------------------------------------------------
+  // 0809: RepoLink chip in byline
+  // -------------------------------------------------------------------------
+
+  it("TC-027 / AC-US4-04: byline contains author, repo, and source-file chips when repoUrl is set", () => {
+    const tree = DetailHeader({
+      skill: makeSkill({
+        repoUrl: "https://github.com/anton-abyzov/greet-anton-test",
+        skillPath: "SKILL.md",
+      } as Partial<SkillInfo>),
+    });
+    const byline = findAll(tree, (el) => el.props?.["data-testid"] === "detail-header-byline")[0];
+    expect(byline).toBeDefined();
+
+    const author = findAll(byline, (el) => el.props?.["data-testid"] === "author-link");
+    const repo = findAll(byline, (el) => el.props?.["data-testid"] === "repo-link");
+    const sourceFile = findAll(byline, (el) => el.props?.["data-testid"] === "source-file-link");
+
+    expect(author.length).toBe(1);
+    expect(repo.length).toBe(1);
+    expect(sourceFile.length).toBe(1);
+
+    expect(String(repo[0].props.href)).toBe("https://github.com/anton-abyzov/greet-anton-test");
+    expect(String(sourceFile[0].props.href)).toBe(
+      "https://github.com/anton-abyzov/greet-anton-test/blob/HEAD/SKILL.md",
+    );
+  });
+
+  it("TC-028 / AC-US4-05: byline does NOT render the repo chip when repoUrl is null", () => {
+    const tree = DetailHeader({
+      skill: makeSkill({ repoUrl: null, skillPath: null } as Partial<SkillInfo>),
+    });
+    const byline = findAll(tree, (el) => el.props?.["data-testid"] === "detail-header-byline")[0];
+    const repo = findAll(byline, (el) => el.props?.["data-testid"] === "repo-link");
+    expect(repo.length).toBe(0);
+  });
+
+  it("TC-029 / AC-US4-04: repo chip canonicalizes /tree/<branch> URLs", () => {
+    const tree = DetailHeader({
+      skill: makeSkill({
+        repoUrl: "https://github.com/x/y/tree/feature/foo",
+        skillPath: "SKILL.md",
+      } as Partial<SkillInfo>),
+    });
+    const byline = findAll(tree, (el) => el.props?.["data-testid"] === "detail-header-byline")[0];
+    const repo = findAll(byline, (el) => el.props?.["data-testid"] === "repo-link")[0];
+    expect(repo).toBeDefined();
+    expect(String(repo.props.href)).toBe("https://github.com/x/y");
+  });
 });

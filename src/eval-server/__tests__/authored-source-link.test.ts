@@ -387,3 +387,117 @@ describe("0770 resolveSourceLink precedence (via buildSkillMetadata)", () => {
     expect(md.skillPath ?? null).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// 0809: resolveSourceLink with copied-skill sidecar
+// ---------------------------------------------------------------------------
+
+import { resetCopiedSkillSidecarCache } from "../source-link.js";
+
+function writeSidecar(skillDir: string, payload: unknown): void {
+  writeFileSync(
+    join(skillDir, ".vskill-source.json"),
+    typeof payload === "string" ? payload : JSON.stringify(payload, null, 2),
+    "utf-8",
+  );
+}
+
+describe("0809 resolveSourceLink with sidecar", () => {
+  let tmpRoot: string;
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), "0809-resolve-sidecar-"));
+    resetAuthoredSourceLinkCache();
+    resetCopiedSkillSidecarCache();
+  });
+
+  afterEach(() => {
+    rmSync(tmpRoot, { recursive: true, force: true });
+    resetAuthoredSourceLinkCache();
+    resetCopiedSkillSidecarCache();
+  });
+
+  it("TC-010: sidecar wins when no lockfile entry — copied skill outside any github-rooted git", () => {
+    // No lockfile, no git ancestor — only the sidecar should produce a link.
+    const skillDir = join(tmpRoot, ".claude", "skills", "survey-passing");
+    writeSkill(skillDir, ["name: survey-passing"]);
+    writeSidecar(skillDir, {
+      repoUrl: "https://github.com/anton-abyzov/greet-anton-test",
+      skillPath: "SKILL.md",
+    });
+
+    const md = buildSkillMetadata(skillDir, "installed", tmpRoot);
+    expect(md.repoUrl).toBe("https://github.com/anton-abyzov/greet-anton-test");
+    expect(md.skillPath).toBe("SKILL.md");
+  });
+
+  it("TC-011: lockfile beats sidecar — explicit install receipt is more authoritative", () => {
+    const skillDir = join(tmpRoot, ".claude", "skills", "platform-skill");
+    writeSkill(skillDir, ["name: platform-skill", "description: x"]);
+
+    // Sidecar points one way, lockfile points another way — lockfile must win.
+    writeSidecar(skillDir, {
+      repoUrl: "https://github.com/sidecar-loser/repo",
+      skillPath: "SKILL.md",
+    });
+    seedLockfile(tmpRoot, {
+      "platform-skill": {
+        version: "1.0.0",
+        sha: "abc",
+        tier: "VERIFIED",
+        installedAt: "2026-04-30T00:00:00.000Z",
+        source: "github:lockfile-winner/repo",
+        sourceRepoUrl: "https://github.com/lockfile-winner/repo",
+        sourceSkillPath: "skills/platform-skill/SKILL.md",
+      },
+    });
+
+    const md = buildSkillMetadata(skillDir, "installed", tmpRoot);
+    expect(md.repoUrl).toBe("https://github.com/lockfile-winner/repo");
+    expect(md.skillPath).toBe("skills/platform-skill/SKILL.md");
+  });
+
+  it("TC-012: sidecar beats authored detector — copy-time snapshot beats local git remote", () => {
+    // Workspace is a git repo with origin pointing at the umbrella ("wrong"
+    // remote for a copied skill). Sidecar must override the authored detector
+    // so the copied skill's link resolves to its true source.
+    gitInit(tmpRoot, "git@github.com:wrong-umbrella/repo.git");
+    const skillDir = join(tmpRoot, ".claude", "skills", "copied-skill");
+    writeSkill(skillDir, ["name: copied-skill"]);
+    writeSidecar(skillDir, {
+      repoUrl: "https://github.com/true-source/repo",
+      skillPath: "SKILL.md",
+    });
+    commitAll(tmpRoot, "init");
+
+    const md = buildSkillMetadata(skillDir, "installed", tmpRoot);
+    expect(md.repoUrl).toBe("https://github.com/true-source/repo");
+    expect(md.skillPath).toBe("SKILL.md");
+  });
+
+  it("TC-013: malformed sidecar falls through to authored detector — no broken anchor", () => {
+    gitInit(tmpRoot, "git@github.com:fallback/repo.git");
+    const skillDir = join(tmpRoot, ".claude", "skills", "broken-sidecar-skill");
+    writeSkill(skillDir, ["name: broken-sidecar-skill"]);
+    writeSidecar(skillDir, "not valid json{");
+    commitAll(tmpRoot, "init");
+
+    const md = buildSkillMetadata(skillDir, "source", tmpRoot);
+    expect(md.repoUrl).toBe("https://github.com/fallback/repo");
+    expect(md.skillPath).toBe(".claude/skills/broken-sidecar-skill/SKILL.md");
+  });
+
+  it("TC-013b: non-github sidecar (gitlab) falls through to authored detector", () => {
+    gitInit(tmpRoot, "git@github.com:fallback/repo.git");
+    const skillDir = join(tmpRoot, ".claude", "skills", "gitlab-source-skill");
+    writeSkill(skillDir, ["name: gitlab-source-skill"]);
+    writeSidecar(skillDir, {
+      repoUrl: "https://gitlab.com/x/y",
+      skillPath: "SKILL.md",
+    });
+    commitAll(tmpRoot, "init");
+
+    const md = buildSkillMetadata(skillDir, "source", tmpRoot);
+    expect(md.repoUrl).toBe("https://github.com/fallback/repo");
+  });
+});

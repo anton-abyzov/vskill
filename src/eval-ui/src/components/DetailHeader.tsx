@@ -5,6 +5,7 @@ import { passRateColor, passRateBackground } from "../utils/passRateColor";
 import { strings } from "../strings";
 import { VersionBadge } from "./VersionBadge";
 import { AuthorLink } from "./AuthorLink";
+import { RepoLink } from "./RepoLink";
 import { SourceFileLink } from "./SourceFileLink";
 
 // T-065: Dispatching a CustomEvent keeps DetailHeader test-mode-friendly
@@ -310,6 +311,11 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
             absent it falls through to the safe copy-chip showing the local
             absolute path. */}
         <AuthorLink author={skill.author ?? null} repoUrl={skill.repoUrl ?? skill.homepage ?? null} />
+        {/* 0809: clickable owner/repo chip — parity with verified-skill.com's
+            skill page header. Renders only when skill.repoUrl parses as a
+            github.com URL; otherwise returns null and the byline keeps its
+            existing 2-chip layout (author + file). */}
+        <RepoLink repoUrl={skill.repoUrl ?? null} />
         <SourceFileLink
           repoUrl={skill.repoUrl ?? null}
           skillPath={skill.skillPath ?? null}

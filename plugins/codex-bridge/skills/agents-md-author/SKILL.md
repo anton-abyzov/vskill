@@ -5,7 +5,7 @@ description: "Bootstrap or update project AI-agent instruction files (AGENTS.md 
 
 # agents-md-author
 
-Generate cross-vendor project instruction files. The Anthropic Agent Skills open spec (Dec 2025) standardized SKILL.md across 32+ tools; this skill applies the same logic at the project-instructions layer where Codex reads `AGENTS.md` and Claude Code reads `CLAUDE.md`.
+Generate cross-vendor project instruction files: `AGENTS.md` for Codex (and most other tools), `CLAUDE.md` for Claude Code, or both kept in sync. Load `references/agents-md-spec.md` if you need the cross-vendor convention details.
 
 ## When to activate
 
@@ -91,16 +91,9 @@ Keep it under ~150 lines. AI agents skim — verbose docs are skipped or ignored
 - If both `AGENTS.md` and `CLAUDE.md` were written, confirm they're byte-identical (or show the symlink)
 - Suggest the user commit the files
 
-## Anti-patterns
-
-- Inventing test commands the project doesn't have — read `package.json.scripts` literally
-- Writing a 500-line wall — agents skip it. Aim for ~100 lines.
-- Embedding secrets, API keys, or environment-specific paths — those go in `.env`, not in agent docs
-- Forking content between AGENTS.md and CLAUDE.md — they should be byte-identical or symlinked
-
 ## References
 
-- `references/agents-md-spec.md` — full cross-vendor convention summary (Anthropic, OpenAI, Cursor, etc.) — load this on demand if you need the spec details
+- `references/agents-md-spec.md` — full cross-vendor convention summary (Anthropic, OpenAI, Cursor, etc.) — load on demand for spec details, vendor matrix, and the AGENTS.md ≠ SKILL.md distinction
 - Anthropic Agent Skills spec: https://github.com/anthropics/skills
 - OpenAI Codex AGENTS.md guide: https://developers.openai.com/codex/guides/agents-md
 - agents.md cross-vendor standard: https://agents.md

@@ -83,22 +83,32 @@ The published Codex docs at developers.openai.com/codex/plugins/build show examp
 
 | Field | Wrong (what the docs imply) | Right (what `codex-cli` v0.125 accepts) |
 |---|---|---|
-| `policy.installation` | `"manual"` | `"AVAILABLE"` (or `"NOT_AVAILABLE"` / `"INSTALLED_BY_DEFAULT"`) |
-| `policy.authentication` | `"none"` | `"ON_USE"` (or `"ON_INSTALL"`) |
+| `policy.installation` | `"manual"` | `"AVAILABLE"` (or `"NOT_AVAILABLE"` / `"INSTALLED_BY_DEFAULT"`) — **enforced**, returns "unknown variant" error otherwise |
+| `policy.authentication` | `"none"` | `"ON_USE"` (or `"ON_INSTALL"`) — **enforced**, same error pattern |
 | `source.<key>` | `"type": "local"` | `"source": "local"` — yes, the inner key is also `source`, not `type` |
-| `category` | `"development"` | `"Engineering"` (PascalCase; see `~/.codex/.tmp/bundled-marketplaces/openai-bundled/.agents/plugins/marketplace.json` for canonical values) |
-| `interface.capabilities[]` | free-form strings | one of `"Read"`, `"Write"`, `"Interactive"` (likely more, but those are the documented set) |
+| `category` | `"development"` | `"Engineering"` (PascalCase; see `~/.codex/.tmp/bundled-marketplaces/openai-bundled/.agents/plugins/marketplace.json` for canonical values) — **convention, not enforced** by codex CLI today |
+| `interface.capabilities[]` | free-form strings | one of `"Read"`, `"Write"`, `"Interactive"` (convention; not enforced at registration) |
 | `SKILL.md` `description` | any length | **max 1024 chars** — Codex hard-rejects longer descriptions with "invalid description: exceeds maximum length" |
+| `plugin.json` `skills` | array of paths `["./skills/foo"]` | **string directory** `"./skills/"` — every working OpenAI plugin (browser-use, github, gmail, computer-use) uses the string form; the array form may not be loaded by codex's plugin loader |
 
 Look at `~/.codex/.tmp/bundled-marketplaces/openai-bundled/.agents/plugins/marketplace.json` and any `~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/.codex-plugin/plugin.json` after `codex plugin marketplace add` for the canonical reference shapes — they're the most reliable schema source until OpenAI ships a JSON Schema.
 
-## Strict-mode frontmatter rule
+## Strict-mode frontmatter convention
 
-The single rule that makes this work:
+The convention that makes this work:
 
-> The `SKILL.md` YAML frontmatter MUST contain only `name` and `description`. No `metadata`, no `allowed-tools`, no `model`, no `tags`.
+> The `SKILL.md` YAML frontmatter SHOULD contain only `name` and `description`. Avoid `metadata`, `allowed-tools`, `model`, `tags`.
 
-Codex's parser rejects unknown keys. Claude Code accepts them but doesn't require them. Strict-mode is the intersection.
+What Codex CLI v0.125 actually validates (verified by real-world testing on 2026-04-30):
+- `name`: present, used as the skill identifier (kebab-case is convention, **not** enforced — `Codex_Bridge` was accepted)
+- `description`: present, **≤1024 characters** (this IS enforced — over-length rejects with "invalid description: exceeds maximum length")
+- Valid YAML syntax
+
+What Codex CLI does NOT enforce today (as of v0.125):
+- Rejection of extra frontmatter keys — `tags: [foo]` was silently accepted
+- kebab-case on plugin or skill names
+
+Treat strict-mode as a **portability convention**, not a runtime guard. The reason to follow it anyway: future Codex versions may tighten the parser, and other AI tools that adopted the Anthropic Agent Skills open spec may already enforce these rules. Coding to the documented contract today gives you forward-compatibility for free.
 
 If you need Claude-specific behavior (like `allowed-tools`), ship two SKILL.md files via vskill's existing per-agent field-stripping installer — but that's the path **away** from cross-runtime portability, not toward it. The whole point of `codex-bridge` is to demonstrate the simpler way.
 

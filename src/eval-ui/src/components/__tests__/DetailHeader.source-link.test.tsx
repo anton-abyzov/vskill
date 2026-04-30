@@ -100,20 +100,26 @@ describe("0737: DetailHeader byline renders source-file anchor", () => {
     expect(label).toContain("↗");
   });
 
-  it("AuthorLink renders alongside SourceFileLink — both anchors visible (US-002)", () => {
-    // AuthorLink contract: anchor → publisher PROFILE (github.com/{owner}),
-    // not the repo root. The SourceFileLink anchor (US-001) covers the
-    // path-back-to-source need by landing on the SKILL.md blob page; from
-    // there the user is one click away from the repo root. We assert here
-    // that BOTH anchors coexist in the byline (no truncation collapse).
+  it("AuthorLink + RepoLink + SourceFileLink all render in the byline (US-002 + 0809)", () => {
+    // 0707 contract: AuthorLink anchor → publisher PROFILE (github.com/{owner}).
+    // 0737 contract: SourceFileLink anchor → SKILL.md blob URL.
+    // 0809 (this increment): RepoLink anchor → repo root (github.com/{owner}/{repo}).
+    // All three coexist in the byline when repoUrl is populated. By
+    // data-testid we assert both their presence and their exact targets.
     const tree = DetailHeader({ skill: makeSkill() });
     const byline = findAll(tree, (el) => el.props?.["data-testid"] === "detail-header-byline")[0];
-    const anchors = findAll(byline, (el) => el.type === "a" && typeof el.props?.href === "string");
-    expect(anchors.length).toBeGreaterThanOrEqual(2);
-    // First anchor: publisher profile derived from repoUrl.
-    expect(String(anchors[0].props.href)).toBe("https://github.com/coreyhaines31");
-    // Second anchor: SKILL.md blob URL.
-    expect(String(anchors[1].props.href)).toBe(
+
+    const author = findAll(byline, (el) => el.props?.["data-testid"] === "author-link")[0];
+    const repo = findAll(byline, (el) => el.props?.["data-testid"] === "repo-link")[0];
+    const sourceFile = findAll(byline, (el) => el.props?.["data-testid"] === "source-file-link")[0];
+
+    expect(author).toBeDefined();
+    expect(repo).toBeDefined();
+    expect(sourceFile).toBeDefined();
+
+    expect(String(author.props.href)).toBe("https://github.com/coreyhaines31");
+    expect(String(repo.props.href)).toBe("https://github.com/coreyhaines31/marketingskills");
+    expect(String(sourceFile.props.href)).toBe(
       "https://github.com/coreyhaines31/marketingskills/blob/HEAD/skills/analytics-tracking/SKILL.md",
     );
   });

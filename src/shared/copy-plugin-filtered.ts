@@ -70,6 +70,10 @@ export function copyPluginFiltered(sourceDir: string, targetDir: string, relBase
   mkdirSync(targetDir, { recursive: true });
   const entries = readdirSync(sourceDir);
   for (const entry of entries) {
+    // 0809: Drop vskill-internal sidecars at any directory level. Sidecar
+    // provenance is re-derived by transfer() at copy time; never propagated
+    // by file copy.
+    if (entry === ".vskill-source.json" || entry === ".vskill-meta.json") continue;
     const relPath = relBase ? `${relBase}/${entry}` : entry;
     const sourcePath = join(sourceDir, entry);
     const stat = statSync(sourcePath);

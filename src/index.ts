@@ -207,6 +207,15 @@ program
   });
 
 program
+  .command("check <skill-name> [path]")
+  .description("Preflight: verify declared MCPs, secrets, runtime, and tests for a skill")
+  .option("--json", "Emit machine-readable JSON instead of human output")
+  .action(async (skillName: string, path: string | undefined, opts: { json?: boolean }) => {
+    const { checkCommand } = await import("./commands/check.js");
+    await checkCommand(skillName, { json: opts.json, root: path });
+  });
+
+program
   .command("info <skill-name>")
   .description("Display detailed information about a skill from the registry")
   .action(async (skillName: string) => {

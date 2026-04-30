@@ -1,0 +1,37 @@
+{
+  "skill_name": "stripe-refund-auditor",
+  "evals": [
+    {
+      "id": 1,
+      "name": "produces concrete bash command for date range",
+      "prompt": "Audit our Stripe refunds for the last 30 days.",
+      "expected_output": "Response should include a bash code block that invokes scripts/audit.py with --since and --until flags computed from the current date.",
+      "assertions": [
+        { "id": "a1", "text": "Response includes a bash code block invoking python3 scripts/audit.py", "type": "boolean" },
+        { "id": "a2", "text": "The audit command includes both --since and --until flags", "type": "boolean" },
+        { "id": "a3", "text": "Response references scripts/grader.py for scoring after the audit step", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "warns when STRIPE_API_KEY is unset",
+      "prompt": "I tried running the audit but it exited with code 2 — what went wrong?",
+      "expected_output": "Response should explain that STRIPE_API_KEY is missing and suggest setting it via env or .env.local. Recommend running vskill check stripe-refund-auditor for a preflight diagnosis.",
+      "assertions": [
+        { "id": "a1", "text": "Response identifies missing STRIPE_API_KEY as the likely cause of exit code 2", "type": "boolean" },
+        { "id": "a2", "text": "Response suggests setting STRIPE_API_KEY in the environment or .env.local", "type": "boolean" },
+        { "id": "a3", "text": "Response mentions running vskill check stripe-refund-auditor for diagnostics", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "explains anomaly scoring heuristics on request",
+      "prompt": "Why did this refund get flagged as anomalous?",
+      "expected_output": "Response should walk through the four heuristics (missing reason, duplicate charge, large amount, failed status) and their weights, citing references/refund-schema.md.",
+      "assertions": [
+        { "id": "a1", "text": "Response names at least three of the four anomaly heuristics", "type": "boolean" },
+        { "id": "a2", "text": "Response cites the per-heuristic weights or references/refund-schema.md", "type": "boolean" }
+      ]
+    }
+  ]
+}

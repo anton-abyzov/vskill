@@ -163,6 +163,29 @@ function coerceStringArrayOrNull(v: unknown): string[] | null {
   return filtered.length > 0 ? filtered : null;
 }
 
+// 0815: coerce nested runtime + integrationTests blocks from /api/skills.
+function coerceRuntime(v: unknown): SkillInfo["runtime"] {
+  if (!v || typeof v !== "object") return null;
+  const r = v as Record<string, unknown>;
+  const python = coerceStringOrNull(r.python) ?? undefined;
+  const pip = coerceStringArrayOrNull(r.pip) ?? undefined;
+  const node = coerceStringOrNull(r.node) ?? undefined;
+  if (!python && !pip && !node) return null;
+  return { python, pip, node };
+}
+
+function coerceIntegrationTests(v: unknown): SkillInfo["integrationTests"] {
+  if (!v || typeof v !== "object") return null;
+  const r = v as Record<string, unknown>;
+  const runner = r.runner;
+  if (runner !== "vitest" && runner !== "pytest" && runner !== "none") return null;
+  return {
+    runner,
+    file: coerceStringOrNull(r.file) ?? undefined,
+    requires: coerceStringArrayOrNull(r.requires) ?? undefined,
+  };
+}
+
 export function normalizeSkillInfo(raw: unknown): SkillInfo {
   const r = (raw ?? {}) as Record<string, unknown>;
 
@@ -283,6 +306,11 @@ export function normalizeSkillInfo(raw: unknown): SkillInfo {
     lastModified: coerceStringOrNull(r.lastModified),
     sizeBytes: coerceNumberOrNull(r.sizeBytes),
     sourceAgent: coerceStringOrNull(r.sourceAgent),
+    // 0815: multi-file manifest fields. Server emits them as nullable nested
+    // objects; we coerce defensively in case a malformed shape arrives.
+    secrets: coerceStringArrayOrNull(r.secrets),
+    runtime: coerceRuntime(r.runtime),
+    integrationTests: coerceIntegrationTests(r.integrationTests),
   };
 
   // 0688: provenance sidecar passthrough — only when the server populated it

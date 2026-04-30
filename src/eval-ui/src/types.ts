@@ -116,6 +116,27 @@ export interface EvalsFile {
   evals: EvalCase[];
 }
 
+// ---------------------------------------------------------------------------
+// 0815: multi-file skill manifest sub-types.
+//
+// SkillRuntime describes the language runtime this skill expects (Python and/or
+// Node.js). pip is a list of pip-spec strings; node is an optional semver.
+// SkillIntegrationTests describes a runnable integration-test contract that
+// `vskill check` verifies against the disk (e.g. `pytest --collect-only`).
+// ---------------------------------------------------------------------------
+
+export interface SkillRuntime {
+  python?: string;
+  pip?: string[];
+  node?: string;
+}
+
+export interface SkillIntegrationTests {
+  runner: "vitest" | "pytest" | "none";
+  file?: string;
+  requires?: string[];
+}
+
 export interface SkillInfo {
   plugin: string;
   skill: string;
@@ -184,6 +205,21 @@ export interface SkillInfo {
   deps?: string[] | null;
   /** Frontmatter `mcp-deps` or `mcpDeps` — MCP server names this skill expects. */
   mcpDeps?: string[] | null;
+  // -------------------------------------------------------------------------
+  // 0815: multi-file skill manifest contract.
+  //
+  // `secrets` is the env-var name list this skill expects (purposes/hints live
+  // in the generated `.env.example` comments, not in frontmatter — keeps the
+  // YAML wire format flat for the existing parser).
+  // `runtime` declares language-runtime requirements; `integrationTests`
+  // declares the runnable integration-test contract for `vskill check`.
+  // -------------------------------------------------------------------------
+  /** Frontmatter `secrets` — env-var names this skill needs to run. */
+  secrets?: string[] | null;
+  /** Frontmatter runtime declaration (assembled from flat `runtime-*` fields). */
+  runtime?: SkillRuntime | null;
+  /** Frontmatter integration-test contract (assembled from flat `integration-*` fields). */
+  integrationTests?: SkillIntegrationTests | null;
   /** Entry-point file relative to dir (default `"SKILL.md"`). */
   entryPoint?: string | null;
   /** ISO 8601 timestamp of the most recent mtime in the skill dir. */

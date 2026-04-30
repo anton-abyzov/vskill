@@ -561,6 +561,22 @@ export interface SkillMetadataFields {
    *  "skills/foo/SKILL.md"). Defaults to "SKILL.md" for flat-layout
    *  installs derived from a legacy `github:` source string. */
   skillPath: string | null;
+  // -------------------------------------------------------------------------
+  // 0815: multi-file skill manifest contract — backwards-compatible.
+  //
+  // YAML wire format is intentionally flat (`runtime-python: ">=3.10"`,
+  // `integration-runner: pytest`) so the existing minimal parser handles it
+  // without a structural change. buildSkillMetadata assembles the flat fields
+  // into the typed nested objects below.
+  // -------------------------------------------------------------------------
+  /** Env-var names this skill expects (purposes/hints live in `.env.example` comments). */
+  secrets: string[] | null;
+  /** Language runtime declaration (Python and/or Node.js). */
+  runtime: { python: string | null; pip: string[] | null; node: string | null } | null;
+  /** Integration-test contract verified by `vskill check`. */
+  integrationTests:
+    | { runner: "vitest" | "pytest" | "none"; file: string | null; requires: string[] | null }
+    | null;
 }
 
 const EMPTY_METADATA: SkillMetadataFields = {
@@ -579,6 +595,9 @@ const EMPTY_METADATA: SkillMetadataFields = {
   sourceAgent: null,
   repoUrl: null,
   skillPath: null,
+  secrets: null,
+  runtime: null,
+  integrationTests: null,
 };
 
 /**
@@ -612,6 +631,20 @@ const SURFACED_METADATA_KEYS = new Set([
   // Path / file metadata
   "entryPoint",
   "entry-point",
+  // 0815: multi-file manifest fields (kebab-case canonical, camelCase tolerated).
+  "secrets",
+  "runtime-python",
+  "runtimePython",
+  "runtime-pip",
+  "runtimePip",
+  "runtime-node",
+  "runtimeNode",
+  "integration-runner",
+  "integrationRunner",
+  "integration-file",
+  "integrationFile",
+  "integration-requires",
+  "integrationRequires",
 ]);
 
 /**
@@ -950,6 +983,28 @@ export function buildSkillMetadata(
   const deps = toStringArrayOrNull(fm["skill-deps"] ?? fm.skillDeps ?? fm.deps);
   const mcpDeps = toStringArrayOrNull(fm["mcp-deps"] ?? fm.mcpDeps ?? fm.mcpDependencies);
   const tags = toStringArrayOrNull(fm.tags);
+  // 0815: assemble runtime + integrationTests from flat fields. Secrets stays
+  // a string[] (env-var names); purposes live in the skill's `.env.example`.
+  const secrets = toStringArrayOrNull(fm.secrets);
+  const runtimePython = toStringOrNull(fm["runtime-python"] ?? fm.runtimePython);
+  const runtimePip = toStringArrayOrNull(fm["runtime-pip"] ?? fm.runtimePip);
+  const runtimeNode = toStringOrNull(fm["runtime-node"] ?? fm.runtimeNode);
+  const runtime =
+    runtimePython || runtimePip || runtimeNode
+      ? { python: runtimePython, pip: runtimePip, node: runtimeNode }
+      : null;
+  const rawRunner = toStringOrNull(fm["integration-runner"] ?? fm.integrationRunner);
+  const integrationRunner: "vitest" | "pytest" | "none" | null =
+    rawRunner === "vitest" || rawRunner === "pytest" || rawRunner === "none"
+      ? rawRunner
+      : null;
+  const integrationFile = toStringOrNull(fm["integration-file"] ?? fm.integrationFile);
+  const integrationRequires = toStringArrayOrNull(
+    fm["integration-requires"] ?? fm.integrationRequires,
+  );
+  const integrationTests = integrationRunner
+    ? { runner: integrationRunner, file: integrationFile, requires: integrationRequires }
+    : null;
   return {
     description: toStringOrNull(fm.description),
     version: toStringOrNull(fm.version),
@@ -966,6 +1021,9 @@ export function buildSkillMetadata(
     sourceAgent: deriveSourceAgent(skillDir, root, origin),
     repoUrl: sourceLink.repoUrl,
     skillPath: sourceLink.skillPath,
+    secrets,
+    runtime,
+    integrationTests,
   };
 }
 

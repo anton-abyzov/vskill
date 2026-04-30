@@ -1,0 +1,24 @@
+{
+  "name": "codex-bridge",
+  "version": "0.1.0",
+  "description": "Cross-runtime plugin demonstrator — ships one strict-mode SKILL.md (agents-md-author) installable in both Anthropic Claude Code and OpenAI Codex CLI from the same source.",
+  "author": "Anton Abyzov <anton.abyzov@gmail.com>",
+  "homepage": "https://github.com/anton-abyzov/vskill/tree/main/plugins/codex-bridge",
+  "repository": "https://github.com/anton-abyzov/vskill",
+  "license": "MIT",
+  "keywords": ["codex", "openai", "cross-runtime", "dual-manifest", "agents-md", "claude-md", "interop"],
+  "skills": ["./skills/agents-md-author"],
+  "interface": {
+    "displayName": "Codex Bridge",
+    "shortDescription": "Generate AGENTS.md / CLAUDE.md for any AI coding tool",
+    "longDescription": "Reference implementation of vskill's dual-manifest pattern. Ships one skill, agents-md-author, that bootstraps cross-vendor project instructions (AGENTS.md for Codex, CLAUDE.md for Claude Code) from a single source. Frontmatter is deliberately strict (name + description only) so the same SKILL.md works in any tool that adopted the Anthropic Agent Skills open spec.",
+    "developerName": "Anton Abyzov",
+    "category": "Engineering",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/anton-abyzov/vskill",
+    "defaultPrompt": [
+      "Bootstrap AGENTS.md and CLAUDE.md for this project using the agents-md-author skill."
+    ],
+    "brandColor": "#1f6feb"
+  }
+}

@@ -61,6 +61,13 @@
       "source": "./plugins/personal",
       "version": "1.0.0",
       "category": "productivity"
+    },
+    {
+      "name": "codex-bridge",
+      "description": "Cross-runtime plugin demonstrator — ships one strict-mode SKILL.md (agents-md-author) installable in both Anthropic Claude Code and OpenAI Codex CLI from the same source. Reference implementation for the dual-manifest authoring pattern.",
+      "source": "./plugins/codex-bridge",
+      "version": "0.1.0",
+      "category": "development"
     }
   ],
   "metadata": {

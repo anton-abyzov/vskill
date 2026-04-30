@@ -100,7 +100,7 @@ The single rule that makes this work:
 
 Codex's parser rejects unknown keys. Claude Code accepts them but doesn't require them. Strict-mode is the intersection.
 
-If you need Claude-specific behavior (like `allowed-tools`), ship two SKILL.md files via vskill's existing field-stripping in `src/installer/canonical.ts` — but that's the path **away** from cross-runtime portability, not toward it. The whole point of `codex-bridge` is to demonstrate the simpler way.
+If you need Claude-specific behavior (like `allowed-tools`), ship two SKILL.md files via vskill's existing per-agent field-stripping installer — but that's the path **away** from cross-runtime portability, not toward it. The whole point of `codex-bridge` is to demonstrate the simpler way.
 
 ## Out of scope for this plugin
 

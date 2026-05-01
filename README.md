@@ -9,8 +9,8 @@
   <a href="https://www.npmjs.com/package/vskill"><img src="https://img.shields.io/npm/v/vskill?color=cb3837&logo=npm" alt="npm" /></a>
   <a href="https://www.npmjs.com/package/vskill"><img src="https://img.shields.io/npm/dw/vskill?color=cb3837&logo=npm&label=downloads" alt="downloads" /></a>
   <img src="https://img.shields.io/badge/agents-53_platforms-0969DA" alt="53 agents" />
-  <img src="https://img.shields.io/badge/plugins-8-8B5CF6" alt="8 plugins" />
-  <img src="https://img.shields.io/badge/skills-14-10B981" alt="14 skills" />
+  <img src="https://img.shields.io/badge/plugins-9-8B5CF6" alt="9 plugins" />
+  <img src="https://img.shields.io/badge/skills-16-10B981" alt="16 skills" />
   <a href="https://verified-skill.com"><img src="https://img.shields.io/badge/registry-verified--skill.com-F59E0B" alt="registry" /></a>
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" />
 </p>

@@ -203,6 +203,12 @@ export function SkillDetailPanel({
 }: SkillDetailPanelProps) {
   const [meta, setMeta] = useState<SkillMetadata | null>(null);
   const [versions, setVersions] = useState<SkillVersion[]>([]);
+  // 0819 AC-US5b-01..04: capture the platform's `unversioned: true` flag on
+  // the /versions response so we can render "Discovered — no published
+  // version yet (currentVersion: X)" instead of the misleading "No versions
+  // found.". The flag is additive — only present on the orphan branch.
+  const [unversioned, setUnversioned] = useState(false);
+  const [unversionedCurrentVersion, setUnversionedCurrentVersion] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
@@ -245,16 +251,27 @@ export function SkillDetailPanel({
       fetch(versionsUrl).then(async (res) => {
         if (!res.ok) throw new Error(`versions ${res.status}`);
         const body = await res.json();
-        // Support both `{ versions: [] }` and bare arrays.
-        return Array.isArray(body) ? (body as SkillVersion[]) : ((body?.versions as SkillVersion[]) ?? []);
+        // Support both `{ versions: [] }` and bare arrays. 0819: also
+        // capture `unversioned` + `currentVersion` from the orphan-branch
+        // payload (additive — absent on the happy path).
+        const list: SkillVersion[] = Array.isArray(body)
+          ? (body as SkillVersion[])
+          : ((body?.versions as SkillVersion[]) ?? []);
+        const isUnversioned = !Array.isArray(body) && body?.unversioned === true;
+        const orphanCurrent = !Array.isArray(body) && typeof body?.currentVersion === "string"
+          ? (body.currentVersion as string)
+          : null;
+        return { list, unversioned: isUnversioned, currentVersion: orphanCurrent };
       }),
     ])
       .then(([metaResp, versionsResp]) => {
         if (cancelled) return;
         setMeta(metaResp);
-        setVersions(versionsResp);
+        setVersions(versionsResp.list);
+        setUnversioned(versionsResp.unversioned);
+        setUnversionedCurrentVersion(versionsResp.currentVersion);
         // Default selection = latest published (`isLatest` if marked, else first).
-        const latest = versionsResp.find((v) => v.isLatest) ?? versionsResp[0] ?? null;
+        const latest = versionsResp.list.find((v) => v.isLatest) ?? versionsResp.list[0] ?? null;
         setSelectedVersion(latest ? latest.version : null);
         setLoading(false);
       })
@@ -592,7 +609,24 @@ export function SkillDetailPanel({
                   Versions
                 </h3>
                 {topVersions.length === 0 ? (
-                  <div style={{ color: "var(--text-secondary, #5A5651)", fontSize: "0.8125rem" }}>No versions found.</div>
+                  unversioned ? (
+                    // 0819 AC-US5b-01..03: skill exists but has zero
+                    // SkillVersions — surface this distinctly so the user
+                    // understands the skill is real but not yet published.
+                    <div
+                      data-testid="skill-detail-unversioned"
+                      style={{ color: "var(--text-secondary, #5A5651)", fontSize: "0.8125rem" }}
+                    >
+                      Discovered — no published version yet (currentVersion: {unversionedCurrentVersion ?? "unknown"}).
+                    </div>
+                  ) : (
+                    <div
+                      data-testid="skill-detail-no-versions"
+                      style={{ color: "var(--text-secondary, #5A5651)", fontSize: "0.8125rem" }}
+                    >
+                      No versions found.
+                    </div>
+                  )
                 ) : (
                   <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 }}>
                     {topVersions.map((v) => {

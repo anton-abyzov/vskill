@@ -7,6 +7,79 @@ interface Props {
   skill: string;
 }
 
+// Canonical docs URL for the Parameters & Secrets explainer.
+// Surfaced from the empty-state "Learn more →" anchor.
+const PARAMS_DOCS_URL =
+  "https://verified-skill.com/docs/parameters-and-secrets";
+
+// Native title="" tooltip describing the resolver chain — matches the
+// existing tooltip primitive used by the reveal toggle below.
+const RESOLVER_TOOLTIP =
+  "Stored as KEY=value in this skill's local .env.local (gitignored). Resolved from process.env first, then .env.local.";
+
+interface ParametersHeaderProps {
+  onToggleAdd: () => void;
+  addFormOpen: boolean;
+}
+
+export function ParametersHeader({ onToggleAdd, addFormOpen }: ParametersHeaderProps) {
+  return (
+    <div className="flex items-center justify-between mb-2">
+      <span className="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: "var(--text-tertiary)" }}>
+        Parameters & Secrets
+        <span
+          aria-label="About Parameters & Secrets"
+          title={RESOLVER_TOOLTIP}
+          style={{
+            cursor: "help",
+            fontSize: 11,
+            color: "var(--text-tertiary)",
+            opacity: 0.7,
+            display: "inline-block",
+            lineHeight: 1,
+          }}
+        >
+          ⓘ
+        </span>
+      </span>
+      <button
+        onClick={onToggleAdd}
+        aria-pressed={addFormOpen}
+        className="text-[11px] transition-colors duration-150"
+        style={{ color: "var(--accent)", background: "none", border: "none", cursor: "pointer" }}
+      >
+        + Add Parameter
+      </button>
+    </div>
+  );
+}
+
+export function ParametersEmptyState() {
+  return (
+    <div className="px-4 py-5 rounded-xl flex flex-col gap-2" style={{ background: "var(--surface-2)" }}>
+      <div className="text-[13px] font-semibold" style={{ color: "var(--text-secondary)" }}>
+        No parameters yet
+      </div>
+      <div className="text-[12px]" style={{ color: "var(--text-tertiary)", lineHeight: 1.5 }}>
+        Values are stored as <code style={{ fontSize: 11 }}>KEY=value</code> in this skill's local{" "}
+        <code style={{ fontSize: 11 }}>.env.local</code> (auto-added to{" "}
+        <code style={{ fontSize: 11 }}>.gitignore</code>). They appear here when declared as{" "}
+        <code style={{ fontSize: 11 }}>requiredCredentials</code> in{" "}
+        <code style={{ fontSize: 11 }}>evals.json</code>, or when you add custom ones below.
+      </div>
+      <a
+        href={PARAMS_DOCS_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-[11px]"
+        style={{ color: "var(--accent)", textDecoration: "none" }}
+      >
+        Learn more →
+      </a>
+    </div>
+  );
+}
+
 interface MergedCredential {
   name: string;
   status: string;
@@ -128,9 +201,7 @@ export function CredentialManager({ plugin, skill }: Props) {
   if (loading) {
     return (
       <div className="mt-6">
-        <div className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-tertiary)" }}>
-          Parameters & Secrets
-        </div>
+        <ParametersHeader onToggleAdd={() => {}} addFormOpen={false} />
         <div className="skeleton h-20 rounded-xl" />
       </div>
     );
@@ -138,18 +209,10 @@ export function CredentialManager({ plugin, skill }: Props) {
 
   return (
     <div className="mt-6">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>
-          Parameters & Secrets
-        </span>
-        <button
-          onClick={() => setShowAddForm(!showAddForm)}
-          className="text-[11px] transition-colors duration-150"
-          style={{ color: "var(--accent)", background: "none", border: "none", cursor: "pointer" }}
-        >
-          + Add Parameter
-        </button>
-      </div>
+      <ParametersHeader
+        onToggleAdd={() => setShowAddForm(!showAddForm)}
+        addFormOpen={showAddForm}
+      />
 
       {error && (
         <div className="mb-2 px-3 py-2 rounded-lg text-[11px]" style={{ background: "var(--red-muted)", color: "var(--red)" }}>
@@ -158,9 +221,7 @@ export function CredentialManager({ plugin, skill }: Props) {
       )}
 
       {credentials.length === 0 && !showAddForm ? (
-        <div className="text-[12px] text-center py-6 rounded-xl" style={{ color: "var(--text-tertiary)", background: "var(--surface-2)" }}>
-          No credentials configured for this skill
-        </div>
+        <ParametersEmptyState />
       ) : (
         <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--border-subtle)" }}>
           {credentials.map((cred) => (

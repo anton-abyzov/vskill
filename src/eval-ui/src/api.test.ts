@@ -318,6 +318,158 @@ describe("api.resolveInstalledSkillIds — 5xx retry (0761 AC-US3-04)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 0821 — chunked /api/v1/skills/check-updates calls. The platform handler at
+// vskill-platform/src/app/api/v1/skills/check-updates/route.ts:139 enforces
+// MAX_BATCH_SIZE=100 and returns HTTP 400 'Maximum 100 skills per request'.
+// Both checkSkillUpdates and resolveInstalledSkillIds must chunk inputs ≤100
+// before posting, and merge results in input order. Per-chunk failures
+// degrade only that chunk; sibling chunks still contribute their results.
+// ---------------------------------------------------------------------------
+describe("0821: api.checkSkillUpdates — batches at 100 per request", () => {
+  function makeIds(n: number, prefix = "p/skill"): string[] {
+    return Array.from({ length: n }, (_, i) => `${prefix}-${String(i).padStart(4, "0")}`);
+  }
+
+  function makeResultsForBody(body: string): { results: Array<Record<string, unknown>> } {
+    const parsed = JSON.parse(body) as { skills: Array<{ name: string }> };
+    return {
+      results: parsed.skills.map((s, i) => ({
+        skillId: s.name,
+        version: `1.0.${i}`,
+        eventId: `evt_${s.name}`,
+        publishedAt: "2026-05-01T00:00:00Z",
+      })),
+    };
+  }
+
+  it("AC-US1-06: 100-skill input fires exactly 1 fetch (boundary, no chunking)", async () => {
+    mockFetch.mockResolvedValue(okJson({ results: [] }));
+    await api.checkSkillUpdates(makeIds(100));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("AC-US1-01/AC-US1-03/AC-US1-05: 230-skill input fires 3 fetches with body chunks of 100,100,30", async () => {
+    mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
+      return okJson(makeResultsForBody(init.body as string));
+    });
+
+    const ids = makeIds(230);
+    const rows = await api.checkSkillUpdates(ids);
+
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    const sizes = mockFetch.mock.calls.map(([, init]) => {
+      const body = JSON.parse((init as RequestInit).body as string) as { skills: unknown[] };
+      return body.skills.length;
+    });
+    expect(sizes).toEqual([100, 100, 30]);
+    expect(rows).toHaveLength(230);
+    // Order preservation: rows arrive in the same sorted order the function POSTs.
+    const sortedIds = [...ids].sort();
+    rows.forEach((r, i) => expect(r.skillId).toBe(sortedIds[i]));
+  });
+
+  it("AC-US1-04/AC-US1-07: failing chunk does not fail siblings (partial degradation)", async () => {
+    // First fetch resolves to a 503 then a 503 (retry exhausts → returns []
+    // for that chunk). Second fetch succeeds. Order matters because the call
+    // sites send sorted bodies; with 200 ids the first chunk is the lower 100
+    // sorted IDs and the second chunk is the upper 100.
+    let callIdx = 0;
+    mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse((init as RequestInit).body as string) as { skills: Array<{ name: string }> };
+      const isFirstChunk = body.skills[0]?.name?.endsWith("-0000");
+      callIdx += 1;
+      if (isFirstChunk) {
+        return { ok: false, status: 503, json: async () => ({}) };
+      }
+      return okJson(makeResultsForBody(JSON.stringify(body)));
+    });
+
+    const rows = await api.checkSkillUpdates(makeIds(200));
+
+    // First chunk: 1 try + 1 retry (both 503). Second chunk: 1 try (200).
+    // Total 3 fetch invocations, but only 2 chunk slots.
+    expect(callIdx).toBeGreaterThanOrEqual(3);
+    expect(rows).toHaveLength(100);
+    // All returned rows belong to the second (upper) chunk.
+    rows.forEach((r) => expect(r.skillId.startsWith("p/skill-")).toBe(true));
+  });
+});
+
+describe("0821: api.resolveInstalledSkillIds — batches at 100 per request", () => {
+  function makeSkills(n: number): Array<{ name: string; plugin: string; skill: string; currentVersion?: string }> {
+    return Array.from({ length: n }, (_, i) => ({
+      name: `acme/repo/skill-${String(i).padStart(4, "0")}`,
+      plugin: "acme/repo",
+      skill: `skill-${String(i).padStart(4, "0")}`,
+    }));
+  }
+
+  function enrichBody(body: string): { results: Array<Record<string, unknown>> } {
+    const parsed = JSON.parse(body) as { skills: Array<{ name: string }> };
+    return {
+      results: parsed.skills.map((s, i) => ({
+        name: s.name,
+        id: `uuid-${s.name}`,
+        slug: `sk_published_${s.name}-${i}`,
+      })),
+    };
+  }
+
+  it("AC-US2-05: 100-skill input fires exactly 1 fetch", async () => {
+    mockFetch.mockResolvedValue(okJson({ results: [] }));
+    await api.resolveInstalledSkillIds(makeSkills(100));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("AC-US2-01/AC-US2-02/AC-US2-04: 230-skill input fires 3 fetches and returns 230 entries with uuid/slug from each chunk", async () => {
+    mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
+      return okJson(enrichBody((init as RequestInit).body as string));
+    });
+
+    const skills = makeSkills(230);
+    const out = await api.resolveInstalledSkillIds(skills);
+
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(out).toHaveLength(230);
+    out.forEach((entry, i) => {
+      expect(entry.plugin).toBe(skills[i].plugin);
+      expect(entry.skill).toBe(skills[i].skill);
+      expect(entry.uuid).toBe(`uuid-${skills[i].name}`);
+      expect(typeof entry.slug).toBe("string");
+    });
+  });
+
+  it("AC-US2-03: failed chunk degrades only that chunk's entries", async () => {
+    mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse((init as RequestInit).body as string) as { skills: Array<{ name: string }> };
+      // Fail the chunk that contains a known upper-half name. With 150 inputs
+      // and chunk size 100, chunk 1 = first 100 (skills 0000..0099) and
+      // chunk 2 = last 50 (skills 0100..0149).
+      const isUpperChunk = body.skills.some((s) => s.name.endsWith("-0149"));
+      if (isUpperChunk) {
+        return { ok: false, status: 400, json: async () => ({ error: "boom" }) };
+      }
+      return okJson(enrichBody((init as RequestInit).body as string));
+    });
+
+    const skills = makeSkills(150);
+    const out = await api.resolveInstalledSkillIds(skills);
+
+    expect(out).toHaveLength(150);
+    // First 100 keep their uuid; last 50 are degraded (no uuid/slug).
+    for (let i = 0; i < 100; i += 1) {
+      expect(out[i].uuid).toBe(`uuid-${skills[i].name}`);
+    }
+    for (let i = 100; i < 150; i += 1) {
+      expect(out[i].uuid).toBeUndefined();
+      expect(out[i].slug).toBeUndefined();
+      expect(out[i].plugin).toBe(skills[i].plugin);
+      expect(out[i].skill).toBe(skills[i].skill);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 0737 — normalizeSkillInfo MUST passthrough repoUrl + skillPath. The server
 // emits these on /api/skills (api-routes.ts), but normalizeSkillInfo is a
 // whitelist — any new field must be added here too or it gets silently

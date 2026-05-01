@@ -137,6 +137,22 @@ async function fetchWith5xxRetry(
   return first;
 }
 
+// 0821: Studio-side batch cap for /api/v1/skills/check-updates. Mirrors the
+// platform's MAX_BATCH_SIZE at vskill-platform/src/app/api/v1/skills/
+// check-updates/route.ts:139 — sending more than this in one POST returns
+// HTTP 400 'Maximum 100 skills per request'. If the platform constant
+// changes, update this one in lockstep.
+const CHECK_UPDATES_BATCH_SIZE = 100;
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  if (arr.length === 0 || size <= 0) return [];
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    out.push(arr.slice(i, i + size));
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // SkillInfo response normalization (T-021, T-025)
 //
@@ -394,6 +410,21 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ provider, model }),
+    });
+  },
+
+  // 0820 — open a skill (or its SKILL.md) in the user's preferred editor.
+  // Server resolves the dir from (plugin, skill) and refuses requests that
+  // reference unknown skills or path-traversal `file` values.
+  revealInEditor(
+    plugin: string,
+    skill: string,
+    file?: string,
+  ): Promise<{ ok: true; command: string; args: string[] }> {
+    return fetchJson("/api/skills/reveal-in-editor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(file ? { plugin, skill, file } : { plugin, skill }),
     });
   },
 
@@ -902,66 +933,93 @@ export const api = {
     name?: string;
   }>> {
     if (skillIds.length === 0) return [];
-    try {
-      // 0712 US-003 T-016D: the vskill-platform's `/api/v1/skills/check-updates`
-      // endpoint is POST-only — sending GET returns 405 Method Not Allowed
-      // (verified end-to-end against `wrangler dev` on port 3017). Send the
-      // skill list as a JSON body. The proxy in `src/eval-server/platform-proxy.ts`
-      // forwards the body verbatim, and the response shape is the
-      // `{results: [...]}` envelope handled below.
-      //
-      // 0741 follow-up: the platform handler at `route.ts:141-151` requires
-      // each entry to be an OBJECT with `name` + `currentVersion`. Sending
-      // bare strings made every entry get filtered to [], so reconcile was
-      // silently a no-op. Reconcile callers only have IDs — version is
-      // backfilled by the polling/SSE merge once it lands. Use "0.0.0" as a
-      // placeholder so the platform always has at least a comparable string.
-      const sortedIds = [...skillIds].sort();
-      const res = await fetchWith5xxRetry(`${BASE}/api/v1/skills/check-updates`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          skills: sortedIds.map((name) => ({ name, currentVersion: "0.0.0" })),
-        }),
-      });
-      if (!res.ok) return [];
-      const body = await res.json().catch(() => null);
-      // 0708 wrap-up: accept both the flat-array shape (legacy reconcile
-      // contract) AND the `{results: [...]}` envelope used by the platform's
-      // POST /skills/check-updates handler. The latter carries the
-      // `trackedForUpdates` flag that drives AC-US5-09.
-      if (Array.isArray(body)) return body;
-      if (body && typeof body === "object" && Array.isArray((body as { results?: unknown[] }).results)) {
-        return (body as { results: Array<Record<string, unknown>> }).results.map((r) => ({
-          skillId: typeof r.skillId === "string" ? r.skillId : (typeof r.name === "string" ? r.name : ""),
-          version: typeof r.version === "string" ? r.version : (typeof r.latest === "string" ? r.latest : ""),
-          eventId: typeof r.eventId === "string" ? r.eventId : "",
-          publishedAt: typeof r.publishedAt === "string" ? r.publishedAt : "",
-          diffSummary: typeof r.diffSummary === "string" ? r.diffSummary : undefined,
-          trackedForUpdates:
-            typeof r.trackedForUpdates === "boolean" ? r.trackedForUpdates : undefined,
-          updateAvailable:
-            typeof r.updateAvailable === "boolean" ? r.updateAvailable : undefined,
-          // 0806: drop the "0.0.0" placeholder we sent so it can't round-trip
-          // back as if it were a real installed version. Without this filter,
-          // mergeUpdatesIntoSkills overwrites the lockfile-stamped
-          // currentVersion with "0.0.0" → resolveSkillVersion rejects the
-          // sentinel → falls through to versionSource="frontmatter" → badge
-          // loses its italic/registry styling within seconds of first paint.
-          installed: typeof r.installed === "string" && r.installed !== "0.0.0" ? r.installed : undefined,
-          latest: typeof r.latest === "string" ? r.latest : undefined,
-          name: typeof r.name === "string" ? r.name : undefined,
-        }));
+    // 0712 US-003 T-016D: the vskill-platform's `/api/v1/skills/check-updates`
+    // endpoint is POST-only — sending GET returns 405 Method Not Allowed
+    // (verified end-to-end against `wrangler dev` on port 3017). Send the
+    // skill list as a JSON body. The proxy in `src/eval-server/platform-proxy.ts`
+    // forwards the body verbatim, and the response shape is the
+    // `{results: [...]}` envelope handled below.
+    //
+    // 0741 follow-up: the platform handler at `route.ts:141-151` requires
+    // each entry to be an OBJECT with `name` + `currentVersion`. Sending
+    // bare strings made every entry get filtered to [], so reconcile was
+    // silently a no-op. Reconcile callers only have IDs — version is
+    // backfilled by the polling/SSE merge once it lands. Use "0.0.0" as a
+    // placeholder so the platform always has at least a comparable string.
+    //
+    // 0821: chunk into ≤CHECK_UPDATES_BATCH_SIZE per request. Studios with
+    // >100 installed skills previously hit the platform's MAX_BATCH_SIZE cap
+    // and got HTTP 400 'Maximum 100 skills per request', silently degrading
+    // the not-tracked dot (AC-US5-09). Chunks fire concurrently via
+    // Promise.all; each chunk's failure degrades only that chunk (returns
+    // [] for it) so siblings still contribute.
+    const sortedIds = [...skillIds].sort();
+    const chunks = chunkArray(sortedIds, CHECK_UPDATES_BATCH_SIZE);
+
+    type Row = {
+      skillId: string;
+      version: string;
+      eventId: string;
+      publishedAt: string;
+      diffSummary?: string;
+      trackedForUpdates?: boolean;
+      updateAvailable?: boolean;
+      installed?: string;
+      latest?: string;
+      name?: string;
+    };
+
+    const fetchChunk = async (chunk: string[]): Promise<Row[]> => {
+      try {
+        const res = await fetchWith5xxRetry(`${BASE}/api/v1/skills/check-updates`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            skills: chunk.map((name) => ({ name, currentVersion: "0.0.0" })),
+          }),
+        });
+        if (!res.ok) return [];
+        const body = await res.json().catch(() => null);
+        // 0708 wrap-up: accept both the flat-array shape (legacy reconcile
+        // contract) AND the `{results: [...]}` envelope used by the platform's
+        // POST /skills/check-updates handler. The latter carries the
+        // `trackedForUpdates` flag that drives AC-US5-09.
+        if (Array.isArray(body)) return body as Row[];
+        if (body && typeof body === "object" && Array.isArray((body as { results?: unknown[] }).results)) {
+          return (body as { results: Array<Record<string, unknown>> }).results.map((r) => ({
+            skillId: typeof r.skillId === "string" ? r.skillId : (typeof r.name === "string" ? r.name : ""),
+            version: typeof r.version === "string" ? r.version : (typeof r.latest === "string" ? r.latest : ""),
+            eventId: typeof r.eventId === "string" ? r.eventId : "",
+            publishedAt: typeof r.publishedAt === "string" ? r.publishedAt : "",
+            diffSummary: typeof r.diffSummary === "string" ? r.diffSummary : undefined,
+            trackedForUpdates:
+              typeof r.trackedForUpdates === "boolean" ? r.trackedForUpdates : undefined,
+            updateAvailable:
+              typeof r.updateAvailable === "boolean" ? r.updateAvailable : undefined,
+            // 0806: drop the "0.0.0" placeholder we sent so it can't round-trip
+            // back as if it were a real installed version. Without this filter,
+            // mergeUpdatesIntoSkills overwrites the lockfile-stamped
+            // currentVersion with "0.0.0" → resolveSkillVersion rejects the
+            // sentinel → falls through to versionSource="frontmatter" → badge
+            // loses its italic/registry styling within seconds of first paint.
+            installed: typeof r.installed === "string" && r.installed !== "0.0.0" ? r.installed : undefined,
+            latest: typeof r.latest === "string" ? r.latest : undefined,
+            name: typeof r.name === "string" ? r.name : undefined,
+          }));
+        }
+        return [];
+      } catch (err) {
+        const SKILL_UPDATE_DEBUG = false;
+        if (SKILL_UPDATE_DEBUG) {
+          // eslint-disable-next-line no-console
+          console.warn("[studio] checkSkillUpdates chunk failed:", err instanceof Error ? err.message : String(err));
+        }
+        return [];
       }
-      return [];
-    } catch (err) {
-      const SKILL_UPDATE_DEBUG = false;
-      if (SKILL_UPDATE_DEBUG) {
-        // eslint-disable-next-line no-console
-        console.warn("[studio] checkSkillUpdates failed:", err instanceof Error ? err.message : String(err));
-      }
-      return [];
-    }
+    };
+
+    const chunkResults = await Promise.all(chunks.map(fetchChunk));
+    return chunkResults.flat();
   },
 
   /**
@@ -983,26 +1041,44 @@ export const api = {
     skills: Array<{ name: string; plugin: string; skill: string; currentVersion?: string }>,
   ): Promise<Array<{ plugin: string; skill: string; uuid?: string; slug?: string }>> {
     if (skills.length === 0) return [];
+    // 0821: chunk into ≤CHECK_UPDATES_BATCH_SIZE per request to stay under the
+    // platform's MAX_BATCH_SIZE cap. Per-chunk failures degrade only that
+    // chunk's entries (no uuid/slug); successful chunks still enrich.
+    const chunks = chunkArray(skills, CHECK_UPDATES_BATCH_SIZE);
+
+    const fetchChunk = async (
+      chunk: typeof skills,
+    ): Promise<Map<string, Record<string, unknown>>> => {
+      try {
+        const res = await fetchWith5xxRetry(`${BASE}/api/v1/skills/check-updates`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            skills: chunk.map((s) => ({
+              name: s.name,
+              currentVersion: s.currentVersion ?? "0.0.0",
+            })),
+          }),
+        });
+        if (!res.ok) return new Map();
+        const body = await res.json().catch(() => null);
+        const results: Array<Record<string, unknown>> = Array.isArray(body)
+          ? body
+          : Array.isArray((body as { results?: unknown[] } | null)?.results)
+            ? (body as { results: Array<Record<string, unknown>> }).results
+            : [];
+        return new Map(results.map((r) => [r.name as string, r]));
+      } catch {
+        return new Map();
+      }
+    };
+
     try {
-      const res = await fetchWith5xxRetry(`${BASE}/api/v1/skills/check-updates`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          skills: skills.map((s) => ({
-            name: s.name,
-            currentVersion: s.currentVersion ?? "0.0.0",
-          })),
-        }),
-      });
-      if (!res.ok) return skills.map((s) => ({ plugin: s.plugin, skill: s.skill }));
-      const body = await res.json().catch(() => null);
-      const results: Array<Record<string, unknown>> = Array.isArray(body)
-        ? body
-        : Array.isArray((body as { results?: unknown[] } | null)?.results)
-          ? (body as { results: Array<Record<string, unknown>> }).results
-          : [];
-      // Build lookup: platform skill name → enriched result
-      const byName = new Map(results.map((r) => [r.name as string, r]));
+      const chunkMaps = await Promise.all(chunks.map(fetchChunk));
+      const byName = new Map<string, Record<string, unknown>>();
+      for (const m of chunkMaps) {
+        for (const [k, v] of m) byName.set(k, v);
+      }
       return skills.map((s) => {
         const r = byName.get(s.name);
         return {

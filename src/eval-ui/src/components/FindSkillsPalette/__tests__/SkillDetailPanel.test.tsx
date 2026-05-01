@@ -194,6 +194,73 @@ describe("SkillDetailPanel — T-022 versions", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 0819 T-015: AC-US5b-01..05 — unversioned-branch copy.
+// When the platform's /versions response carries `unversioned: true`, the
+// panel must render "Discovered — no published version yet (currentVersion:
+// X)" instead of the misleading "No versions found.".
+// ---------------------------------------------------------------------------
+describe("SkillDetailPanel — 0819 T-015 unversioned branch", () => {
+  it("AC-US5b-02/03: renders skill-detail-unversioned with currentVersion when unversioned: true", async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/versions")) {
+        return jsonResponse({ versions: [], count: 0, unversioned: true, currentVersion: "1.0.0" });
+      }
+      return jsonResponse({ displayName: "Wiki Sync" });
+    }) as unknown as typeof fetch;
+
+    const h = await mount({});
+    await flushMicrotasks();
+
+    const unversionedNode = h.container.querySelector("[data-testid='skill-detail-unversioned']");
+    expect(unversionedNode).toBeTruthy();
+    expect(unversionedNode?.textContent ?? "").toContain("Discovered");
+    expect(unversionedNode?.textContent ?? "").toContain("no published version yet");
+    expect(unversionedNode?.textContent ?? "").toContain("currentVersion: 1.0.0");
+
+    // The legacy "no versions found" branch must NOT render simultaneously.
+    expect(h.container.querySelector("[data-testid='skill-detail-no-versions']")).toBeNull();
+
+    await h.unmount();
+  });
+
+  it("AC-US5b-03: legacy `versions: []` (no unversioned flag) keeps the original copy + testid", async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/versions")) return jsonResponse({ versions: [], count: 0 });
+      return jsonResponse({ displayName: "Wiki Sync" });
+    }) as unknown as typeof fetch;
+
+    const h = await mount({});
+    await flushMicrotasks();
+
+    expect(h.container.querySelector("[data-testid='skill-detail-no-versions']")).toBeTruthy();
+    expect(h.container.querySelector("[data-testid='skill-detail-unversioned']")).toBeNull();
+
+    await h.unmount();
+  });
+
+  it("AC-US5b-04: with versions present, neither orphan-copy testid renders", async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/versions")) {
+        return jsonResponse({
+          versions: [{ version: "1.0.0", isLatest: true, publishedAt: "2026-01-01" }],
+          count: 1,
+        });
+      }
+      return jsonResponse({ displayName: "Wiki Sync" });
+    }) as unknown as typeof fetch;
+
+    const h = await mount({});
+    await flushMicrotasks();
+
+    expect(h.container.querySelector("[data-testid='skill-detail-version-row']")).toBeTruthy();
+    expect(h.container.querySelector("[data-testid='skill-detail-unversioned']")).toBeNull();
+    expect(h.container.querySelector("[data-testid='skill-detail-no-versions']")).toBeNull();
+
+    await h.unmount();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // T-023: install command + sanitization
 // ---------------------------------------------------------------------------
 describe("SkillDetailPanel — T-023 install command", () => {

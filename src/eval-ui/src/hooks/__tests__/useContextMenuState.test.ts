@@ -1,16 +1,21 @@
 // @vitest-environment jsdom
 // ---------------------------------------------------------------------------
-// T-064: useContextMenuState — pure helpers for the shared context-menu
-// anchor. Extracting the reducer-level logic into a hook-free module lets
-// us unit-test the state transitions without React's render context.
+// useContextMenuState — pure helpers for the shared context-menu anchor and
+// the side-effecting action router.
+//
+// 0820 update: open / reveal / edit no longer dispatch the stale
+// "Edit lands with 0675…" placeholder. They POST to
+// /api/skills/reveal-in-editor and dispatch real success / failure toasts
+// based on the response.
 // ---------------------------------------------------------------------------
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   closedContextMenuState,
   openContextMenuAt,
   handleContextMenuAction,
 } from "../useContextMenuState";
 import type { SkillInfo } from "../../types";
+import { strings } from "../../strings";
 
 function makeSkill(over: Partial<SkillInfo> = {}): SkillInfo {
   return {
@@ -41,6 +46,17 @@ function makeSkill(over: Partial<SkillInfo> = {}): SkillInfo {
   };
 }
 
+function captureToast(): CustomEvent | undefined {
+  return (
+    (vi.mocked(window.dispatchEvent).mock.calls
+      .map((c) => c[0])
+      .find(
+        (e): e is CustomEvent =>
+          e instanceof CustomEvent && e.type === "studio:toast",
+      ))
+  );
+}
+
 describe("useContextMenuState — state transitions", () => {
   it("closedContextMenuState is the unambiguous closed shape", () => {
     expect(closedContextMenuState).toEqual({ open: false, x: 0, y: 0, skill: null });
@@ -56,7 +72,7 @@ describe("useContextMenuState — state transitions", () => {
   });
 });
 
-describe("useContextMenuState — handleContextMenuAction", () => {
+describe("useContextMenuState — handleContextMenuAction (clipboard / no-op)", () => {
   beforeEach(() => {
     Object.defineProperty(global.navigator, "clipboard", {
       configurable: true,
@@ -80,26 +96,9 @@ describe("useContextMenuState — handleContextMenuAction", () => {
     dispatchSpy.mockRestore();
   });
 
-  it("open fires a placeholder 'Not available' info toast", async () => {
-    const s = makeSkill();
-    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
-    handleContextMenuAction("open", s);
-    const toastEvent = dispatchSpy.mock.calls
-      .map((c) => c[0])
-      .find((e): e is CustomEvent => e instanceof CustomEvent && e.type === "studio:toast");
-    expect(toastEvent).toBeTruthy();
-    // strings.actions.editPlaceholder is the canonical copy — assert the
-    // toast uses it rather than hard-coding a substring.
-    const { strings } = await import("../../strings");
-    expect(String((toastEvent!.detail as { message: string }).message)).toBe(strings.actions.editPlaceholder);
-    dispatchSpy.mockRestore();
-  });
-
   it("unknown action is a silent no-op", () => {
     const s = makeSkill();
     const dispatchSpy = vi.spyOn(window, "dispatchEvent");
-    // Pass a string that is not a known ContextMenuAction to exercise the
-    // default/silent-no-op branch. The router accepts `ContextMenuAction | string`.
     handleContextMenuAction("does-not-exist", s);
     const toast = dispatchSpy.mock.calls
       .map((c) => c[0])
@@ -109,3 +108,119 @@ describe("useContextMenuState — handleContextMenuAction", () => {
   });
 });
 
+describe("useContextMenuState — open / reveal / edit (0820 reveal-in-editor)", () => {
+  let dispatchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    dispatchSpy = vi.spyOn(window, "dispatchEvent");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    dispatchSpy.mockRestore();
+  });
+
+  it("reveal POSTs { plugin, skill, file: 'SKILL.md' } and shows opening toast", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, command: "code", args: [] }),
+    });
+    const s = makeSkill({ plugin: "p", skill: "s" });
+
+    await handleContextMenuAction("reveal", s);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/skills/reveal-in-editor");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ plugin: "p", skill: "s", file: "SKILL.md" });
+
+    const toast = captureToast();
+    expect(toast?.detail).toMatchObject({
+      message: strings.toasts.openingInEditor,
+      severity: "info",
+    });
+  });
+
+  it("edit shares the reveal payload (file = SKILL.md)", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, command: "code", args: [] }),
+    });
+    const s = makeSkill({ plugin: "p", skill: "s" });
+
+    await handleContextMenuAction("edit", s);
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toEqual({
+      plugin: "p",
+      skill: "s",
+      file: "SKILL.md",
+    });
+  });
+
+  it("open omits `file` so the server opens the dir", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, command: "code", args: [] }),
+    });
+    const s = makeSkill({ plugin: "p", skill: "s" });
+
+    await handleContextMenuAction("open", s);
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toEqual({ plugin: "p", skill: "s" });
+  });
+
+  it("500 with body.error='no_editor' → noEditor toast", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: "no_editor" }),
+    });
+    await handleContextMenuAction("reveal", makeSkill());
+
+    const toast = captureToast();
+    expect(toast?.detail).toMatchObject({
+      message: strings.toasts.noEditor,
+      severity: "error",
+    });
+  });
+
+  it("404 → skillNotFound toast", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: "skill_not_found" }),
+    });
+    await handleContextMenuAction("reveal", makeSkill());
+
+    const toast = captureToast();
+    expect(toast?.detail).toMatchObject({
+      message: strings.toasts.skillNotFound,
+      severity: "error",
+    });
+  });
+
+  it("network failure → openFailed toast", async () => {
+    fetchMock.mockRejectedValue(new TypeError("fetch failed"));
+    await handleContextMenuAction("reveal", makeSkill());
+
+    const toast = captureToast();
+    expect(toast?.detail).toMatchObject({
+      message: strings.toasts.openFailed,
+      severity: "error",
+    });
+  });
+
+  it("regression: editPlaceholder string is gone and 'lands with 0675' copy is not present anywhere in strings", () => {
+    const s = strings as unknown as Record<string, Record<string, string>>;
+    expect(s.actions.editPlaceholder).toBeUndefined();
+    expect(JSON.stringify(strings)).not.toContain("0675");
+    expect(JSON.stringify(strings)).not.toContain("Edit lands with");
+  });
+});

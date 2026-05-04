@@ -1,0 +1,49 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - link "Skill Studio — home" [ref=e7] [cursor=pointer]:
+          - /url: "#/"
+          - img [ref=e9]
+          - generic [ref=e11]: Skill Studio
+        - navigation "Breadcrumb"
+        - generic [ref=e12]:
+          - button "Find verified skills — opens search (⌘⇧K)" [ref=e13] [cursor=pointer]:
+            - img [ref=e14]
+            - generic [ref=e17]: Find skills
+            - generic [ref=e18]: ⌘⇧K
+          - button "Create a new skill" [ref=e19] [cursor=pointer]:
+            - img [ref=e20]
+            - text: New Skill
+          - button "Loading…" [ref=e22] [cursor=pointer]:
+            - generic [ref=e24]: Loading…
+          - button "No updates available" [ref=e27] [cursor=pointer]
+          - button "Open command palette" [ref=e28] [cursor=pointer]:
+            - generic [ref=e29]: ⌘K
+    - generic [ref=e30]:
+      - complementary "Skills sidebar" [ref=e31]:
+        - search [ref=e33]:
+          - img [ref=e34]
+          - searchbox "Filter skills" [ref=e37]
+          - generic [ref=e38]: /
+      - separator "Resize sidebar" [ref=e58]
+      - main [ref=e59]:
+        - generic [ref=e60]:
+          - heading "Select a skill to view details" [level=2] [ref=e61]
+          - paragraph [ref=e62]: Choose a skill from the sidebar — its frontmatter, filesystem info, and benchmark status will appear here.
+    - contentinfo [ref=e63]:
+      - contentinfo [ref=e64]:
+        - generic [ref=e65]: —
+        - generic [ref=e66]: "|"
+        - 'generic "Health: ok" [ref=e67]':
+          - generic [ref=e69]: ok
+        - button "Switch to dark theme" [ref=e70] [cursor=pointer]:
+          - img [ref=e71]
+          - generic [ref=e74]: auto
+    - status [ref=e75]
+  - status [ref=e76]
+  - alert [ref=e77]
+```

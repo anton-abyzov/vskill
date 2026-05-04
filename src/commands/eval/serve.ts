@@ -237,8 +237,14 @@ export async function runEvalServe(
     projectName: name,
   });
 
-  // Graceful shutdown
+  // Graceful shutdown — idempotent so SIGINT + SIGTERM (or two SIGINTs from
+  // a parent shell forwarding) don't print the banner twice or race the
+  // exit timer. 0826: previously a single ^C printed "Shutting down…" twice
+  // because the shell delivered both SIGINT and SIGTERM.
+  let shuttingDown = false;
   const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     console.log("\nShutting down eval server...");
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 5000);

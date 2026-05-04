@@ -7,6 +7,8 @@ import { ChangelogViewer } from "../../components/ChangelogViewer";
 import { buildSubmitUrl } from "../../utils/submit-url";
 import { formatTierLabel } from "../../components/FindSkillsPalette/components/TierBadge";
 import type { VersionEntry, VersionDiff } from "../../types";
+import type { SkillVersionsEnvelope } from "../../api";
+import { ProviderChip } from "../../components/ProviderChip";
 
 const CERT_COLORS: Record<string, { bg: string; text: string }> = {
   CERTIFIED: { bg: "var(--yellow-muted)", text: "var(--yellow)" },
@@ -52,10 +54,22 @@ export function VersionHistoryPanel() {
     [studio.state.skills, plugin, skill],
   );
 
-  // Fetch versions
-  const swrKey = `versions/${plugin}/${skill}`;
-  const fetcher = useCallback(() => api.getSkillVersions(plugin, skill), [plugin, skill]);
-  const { data: versions, loading } = useSWR<VersionEntry[]>(swrKey, fetcher);
+  // Fetch versions — 0823: pull the FULL envelope so we can render the
+  // provider chip on each version row and swap the no-upstream message when
+  // origin resolution comes back empty. The CheckNowButton itself is mounted
+  // in RightPanel.tsx (not here) and gates on SkillInfo.trackedForUpdates from
+  // the per-skill scan, NOT this envelope flag — keeping the two separate
+  // because the scan-derived value drives banner visibility before the user
+  // ever opens the Versions tab.
+  const swrKey = `versions-envelope/${plugin}/${skill}`;
+  const envelopeFetcher = useCallback(
+    () => api.getSkillVersionsEnvelope(plugin, skill) as Promise<SkillVersionsEnvelope>,
+    [plugin, skill],
+  );
+  const { data: envelope, loading } = useSWR<SkillVersionsEnvelope>(swrKey, envelopeFetcher);
+  const versions: VersionEntry[] = envelope?.versions ?? [];
+  const provider = envelope?.provider ?? "local";
+  const noUpstream = envelope?.source === "none";
 
   // Selection state
   const [selectedA, setSelectedA] = useState<string | null>(null);
@@ -259,12 +273,11 @@ export function VersionHistoryPanel() {
                   <span className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
                     {skillInfo.version}
                   </span>
-                  <span
-                    className="text-[9px] font-medium px-1.5 py-0.5 rounded-full"
-                    style={{ background: "var(--surface-3)", color: "var(--text-tertiary)" }}
-                  >
-                    LOCAL
-                  </span>
+                  {/* 0823: provider chip replaces the static LOCAL pill so
+                      Anthropic-shipped + vskill-installed skills are
+                      distinguishable. Falls back to "Local" for unknown
+                      provenance. */}
+                  <ProviderChip provider={provider} />
                   <span
                     className="text-[9px] font-medium px-1.5 py-0.5 rounded-full"
                     style={{ background: "var(--accent-muted)", color: "var(--accent)" }}
@@ -273,8 +286,14 @@ export function VersionHistoryPanel() {
                   </span>
                 </div>
               </div>
-              <div className="text-[11px] mt-1" style={{ color: "var(--text-tertiary)" }}>
-                Local-only — this skill is not registered on verified-skill.com, so no upstream history is available.
+              <div
+                className="text-[11px] mt-1"
+                style={{ color: "var(--text-tertiary)" }}
+                data-testid="versions-no-upstream-message"
+              >
+                {noUpstream
+                  ? "No upstream registry — this skill ships without origin metadata, so update tracking is unavailable."
+                  : "Local-only — this skill is not registered on verified-skill.com, so no upstream history is available."}
               </div>
             </div>
           </div>
@@ -399,6 +418,9 @@ export function VersionHistoryPanel() {
                     >
                       {formatTierLabel(v.certTier)}
                     </span>
+                    {/* 0823 F-005 / AC-US2-09: provider chip on each row so
+                        provenance is visible alongside version + tier. */}
+                    <ProviderChip provider={provider} />
                     {isInstalled && (
                       <span
                         className="text-[9px] font-medium px-1.5 py-0.5 rounded-full"

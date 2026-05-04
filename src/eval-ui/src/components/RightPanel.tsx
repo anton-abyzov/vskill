@@ -4,6 +4,7 @@ import type { SkillInfo } from "../types";
 import type { PanelId } from "../pages/workspace/workspaceTypes";
 import { WorkspaceProvider, useWorkspace } from "../pages/workspace/WorkspaceContext";
 import { EditorPanel } from "../pages/workspace/EditorPanel";
+import { SourcePanel } from "./SourcePanel";
 import { TestsPanel } from "../pages/workspace/TestsPanel";
 import { ActivationPanel } from "../pages/workspace/ActivationPanel";
 import {
@@ -48,7 +49,7 @@ import type { SubTabDescriptor } from "./SubTabBar";
 // "Eval cases" section inside the Edit tab — see EditorPanel.tsx.
 // ---------------------------------------------------------------------------
 
-export type DetailTab = "overview" | "edit" | "tests" | "run" | "history";
+export type DetailTab = "overview" | "source" | "edit" | "tests" | "run" | "history";
 
 interface TabDescriptor {
   id: DetailTab;
@@ -59,6 +60,10 @@ interface TabDescriptor {
 
 const TAB_DESCRIPTORS: TabDescriptor[] = [
   { id: "overview", label: "Overview" },
+  // 0823: read-only "Source" view of SKILL.md + folder tree. Visible to ALL
+  // personas — installed copies have no Edit tab so without this they had no
+  // surface to view the body. Authors keep both: Source (read) + Edit (write).
+  { id: "source", label: "Source" },
   { id: "edit", label: "Edit", visibleWhen: ({ isReadOnly }) => !isReadOnly },
   // Tests is the dedicated authoring + per-case execution-history surface
   // (restored in 0805). Visible to both authors and installed-skill consumers
@@ -73,7 +78,7 @@ const TAB_DESCRIPTORS: TabDescriptor[] = [
   { id: "history", label: "History" },
 ];
 
-const ALL_TABS: DetailTab[] = ["overview", "edit", "tests", "run", "history"];
+const ALL_TABS: DetailTab[] = ["overview", "source", "edit", "tests", "run", "history"];
 
 function isValidTab(value: unknown): value is DetailTab {
   return typeof value === "string" && (ALL_TABS as string[]).includes(value);
@@ -110,6 +115,7 @@ const LEGACY_REDIRECTS: Record<string, RedirectTarget> = {
   editor: { tab: "edit" },
   // Identity entries make the lookup unconditional.
   overview: { tab: "overview" },
+  source: { tab: "source" },
   edit: { tab: "edit" },
   run: { tab: "run" },
   history: { tab: "history" },
@@ -146,7 +152,23 @@ function applyPersonaRedirect(active: DetailTab, isReadOnly: boolean): DetailTab
   if (!isReadOnly) return active;
   const allowed = new Set(visibleTabsFor(true).map((t) => t.id));
   if (allowed.has(active)) return active;
-  return "overview";
+  // 0823 AC-US1-06: read-only personas land on Source (the read-only sibling
+  // of Edit) when the requested tab isn't available, instead of Overview.
+  // Source is where they can actually inspect the skill body + folder tree.
+  return "source";
+}
+
+/**
+ * 0823 AC-US1-06: pick the default landing tab per persona.
+ *
+ * Authors land on Overview (status dashboard). Read-only consumers land on
+ * Source (the only surface that renders the SKILL.md body + file tree).
+ *
+ * Used by App.tsx when `?tab=` is absent; honors explicit deep links via the
+ * existing readInitialTab path.
+ */
+export function defaultLandingTab(isReadOnly: boolean): DetailTab {
+  return isReadOnly ? "source" : "overview";
 }
 
 // ---------------------------------------------------------------------------
@@ -826,7 +848,14 @@ function renderSkillDetail(
         data-testid={`detail-panel-${safeActive}`}
         style={{ flex: 1, minHeight: 0, overflow: "auto" }}
       >
-        {safeActive === "overview" ? overviewBody : workspaceBody}
+        {(() => {
+          // 0823 simplify: flat conditional instead of a 3-level ternary.
+          if (safeActive === "overview") return overviewBody;
+          if (safeActive === "source") {
+            return <SourcePanel plugin={skill.plugin} skill={skill.skill} />;
+          }
+          return workspaceBody;
+        })()}
       </div>
     </div>
   );

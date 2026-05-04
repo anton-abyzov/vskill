@@ -197,6 +197,13 @@ body {
   to { transform: rotate(360deg); }
 }
 
+/* 0823 F-001: dedicated keyframe for CheckNowButton spinner. The component
+ * declares `animation: check-now-spin 800ms linear infinite` inline; without
+ * this @keyframes block the spinner used to render as a static circle. */
+@keyframes check-now-spin {
+  to { transform: rotate(360deg); }
+}
+
 .animate-fade-in        { animation: fade-in var(--duration-base) var(--ease-standard) both; }
 .animate-fade-in-scale  { animation: fade-in-scale var(--duration-base) var(--ease-standard) both; }
 .animate-slide-in-right { animation: slide-in-right var(--duration-base) var(--ease-standard) both; }

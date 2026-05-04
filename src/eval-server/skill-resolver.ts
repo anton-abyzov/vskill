@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { existsSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, basename, resolve } from "node:path";
 import { getSkillDirEntry } from "./skill-dir-registry.js";
 
@@ -67,6 +68,49 @@ export function resolveAllowedSkillDir(
   const entry = getSkillDirEntry(plugin, skill);
   if (entry) {
     return validateAgainstAllowlist(entry.dir, allowedRoots);
+  }
+  // 0823 F-006: when no registry entry exists, try plugin-scoped fallbacks
+  // for installed-agent-dir plugins (.claude, .cursor, .gemini, ...). Each
+  // candidate is restricted to roots that match the plugin's agent dir to
+  // prevent cross-plugin name collisions (e.g. a `.cursor` request must NOT
+  // accidentally resolve to a same-named skill under `~/.claude/skills/`).
+  //
+  // The plugin-aware preference order is:
+  //   (1) ~/{plugin}/skills/<skill>      — agent's own canonical location
+  //   (2) ~/.agents/skills/<skill>       — vskill --global canonical location
+  //                                         (cross-agent, accepted only when
+  //                                         the plugin is an agent-dir form)
+  // Both candidates still pass through validateAgainstAllowlist so symlink
+  // escapes and traversal segments are rejected.
+  if (plugin && plugin.startsWith(".")) {
+    // Tier 1: skill under the agent's own home dir (~/.claude/skills/<skill>)
+    const home = homedir();
+    const agentLocal = join(home, plugin, "skills", skill);
+    if (existsSync(join(agentLocal, "SKILL.md"))) {
+      try {
+        return validateAgainstAllowlist(agentLocal, allowedRoots);
+      } catch (err) {
+        // 0823 F-005: log allowlist rejections (typically symlink escape) so
+        // operators can spot tampering. Caller still gets the next-tier
+        // candidate via the fall-through below.
+        console.warn(
+          `[skill-resolver] tier-1 candidate rejected for ${plugin}/${skill}:`,
+          (err as Error).message,
+        );
+      }
+    }
+    // Tier 2: shared ~/.agents/skills/<skill> (vskill --global)
+    const agentsShared = join(home, ".agents", "skills", skill);
+    if (existsSync(join(agentsShared, "SKILL.md"))) {
+      try {
+        return validateAgainstAllowlist(agentsShared, allowedRoots);
+      } catch (err) {
+        console.warn(
+          `[skill-resolver] tier-2 candidate rejected for ${plugin}/${skill}:`,
+          (err as Error).message,
+        );
+      }
+    }
   }
   return resolveSkillDir(root, plugin, skill);
 }

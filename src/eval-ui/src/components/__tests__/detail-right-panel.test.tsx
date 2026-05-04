@@ -160,7 +160,8 @@ describe("T-031 RightPanel — persona-conditional tab bar (5 author / 4 consume
       const attrs = el.props as Record<string, unknown>;
       return attrs["role"] === "tab";
     });
-    expect(tabs.length).toBe(5);
+    // 0823: Source tab added → 6 tabs for source-origin skills.
+    expect(tabs.length).toBe(6);
     const activeTab = tabs.find((t) => t.props["aria-selected"] === true);
     expect(activeTab).toBeTruthy();
     const style = activeTab!.props.style as Record<string, string>;

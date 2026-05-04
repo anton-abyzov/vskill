@@ -30,6 +30,13 @@ vi.mock("../../../hooks/useSWR", () => ({
 vi.mock("../../../api", () => ({
   api: {
     getSkillVersions: vi.fn(async () => []),
+    getSkillVersionsEnvelope: vi.fn(async () => ({
+      versions: [],
+      count: 0,
+      source: "platform",
+      provider: "vskill",
+      trackedForUpdates: false,
+    })),
     getVersionDiff: vi.fn(),
     startSkillUpdate: vi.fn(),
     postSkillUpdate: vi.fn(),
@@ -67,6 +74,16 @@ function findElements(node: unknown, match: (el: ReactEl) => boolean): ReactEl[]
   const el = node as ReactEl;
   const out: ReactEl[] = [];
   if (el.type != null && match(el)) out.push(el);
+  // 0823 F-007: also descend into function components so chip-walks reach
+  // the inner span emitted by `<ProviderChip />`.
+  if (typeof el.type === "function") {
+    try {
+      const rendered = (el.type as (props: Record<string, unknown>) => unknown)(el.props);
+      out.push(...findElements(rendered, match));
+    } catch {
+      /* ignore */
+    }
+  }
   if (el.props?.children != null) out.push(...findElements(el.props.children, match));
   return out;
 }
@@ -96,9 +113,50 @@ function makeVersion(over: Partial<VersionEntry> = {}): VersionEntry {
   } as VersionEntry;
 }
 
+describe("VersionHistoryPanel — provider chip per row (0823 F-007 / AC-US2-09)", () => {
+  it("AC-US2-09: provider chip renders for each version row", () => {
+    swrReturn = {
+      data: {
+        versions: [
+          makeVersion({ certTier: "CERTIFIED", version: "1.0.1" }),
+          makeVersion({ certTier: "VERIFIED", version: "1.0.0" }),
+        ],
+        count: 2,
+        source: "platform",
+        provider: "anthropic",
+        trackedForUpdates: true,
+      },
+      loading: false,
+    };
+    studioSkills = [];
+    const tree = (VersionHistoryPanel as unknown as () => unknown)();
+    // Two version rows × one ProviderChip each = at least two chip elements.
+    const chips = findElements(tree, (el) => {
+      const props = el.props as Record<string, unknown> | undefined;
+      const tid = props?.["data-testid"];
+      return typeof tid === "string" && tid.startsWith("provider-chip-");
+    });
+    expect(chips.length).toBeGreaterThanOrEqual(2);
+    chips.forEach((c) => {
+      expect((c.props as Record<string, unknown>)["data-provider"]).toBe("anthropic");
+    });
+  });
+});
+
 describe("VersionHistoryPanel — tier label nomenclature (0761 US-002)", () => {
   it("AC-US2-01: CERTIFIED renders as 'Trusted Publisher'", () => {
-    swrReturn = { data: [makeVersion({ certTier: "CERTIFIED" })], loading: false };
+    // 0823: VersionHistoryPanel now reads the envelope variant — wrap the
+    // legacy array in { versions, source, provider, trackedForUpdates }.
+    swrReturn = {
+      data: {
+        versions: [makeVersion({ certTier: "CERTIFIED" })],
+        count: 1,
+        source: "platform",
+        provider: "vskill",
+        trackedForUpdates: true,
+      },
+      loading: false,
+    };
     studioSkills = [];
 
     const tree = (VersionHistoryPanel as unknown as () => unknown)();
@@ -109,7 +167,16 @@ describe("VersionHistoryPanel — tier label nomenclature (0761 US-002)", () => 
   });
 
   it("AC-US2-01: VERIFIED renders as 'Security-Scanned'", () => {
-    swrReturn = { data: [makeVersion({ certTier: "VERIFIED" })], loading: false };
+    swrReturn = {
+      data: {
+        versions: [makeVersion({ certTier: "VERIFIED" })],
+        count: 1,
+        source: "platform",
+        provider: "vskill",
+        trackedForUpdates: true,
+      },
+      loading: false,
+    };
     studioSkills = [];
 
     const tree = (VersionHistoryPanel as unknown as () => unknown)();
@@ -121,7 +188,13 @@ describe("VersionHistoryPanel — tier label nomenclature (0761 US-002)", () => 
 
   it("AC-US2-02: unknown tier passes through unchanged", () => {
     swrReturn = {
-      data: [makeVersion({ certTier: "EXPERIMENTAL" as VersionEntry["certTier"] })],
+      data: {
+        versions: [makeVersion({ certTier: "EXPERIMENTAL" as VersionEntry["certTier"] })],
+        count: 1,
+        source: "platform",
+        provider: "vskill",
+        trackedForUpdates: true,
+      },
       loading: false,
     };
     studioSkills = [];

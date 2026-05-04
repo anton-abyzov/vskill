@@ -36,6 +36,22 @@ export type Provenance = {
   sourcePath: string;
   promotedAt: number;
   sourceSkillVersion?: string;
+
+  /** Set when this skill was created via `vskill clone`. */
+  forkedFrom?: {
+    source: string;
+    version: string;
+    clonedAt: string;
+  };
+
+  /** Set when the source itself was a fork — points to the deepest known ancestor. */
+  originalSource?: {
+    repoUrl?: string;
+    skillPath?: string;
+  };
+
+  /** Chain of intermediate `forkedFrom.source` values when forking a fork. Oldest-first (`forkChain[0]` is the deepest ancestor; latest intermediate parent is appended at the end). */
+  forkChain?: string[];
 };
 
 export type TransferEventName =

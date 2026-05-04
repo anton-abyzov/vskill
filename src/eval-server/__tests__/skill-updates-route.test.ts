@@ -31,9 +31,17 @@ vi.mock("../../commands/outdated.js", () => ({
 }));
 
 // 0747 T-002: each row is enriched with installLocations[] via this helper.
-vi.mock("../utils/scan-install-locations.js", () => ({
-  scanSkillInstallLocations: mocks.scanSkillInstallLocations,
-}));
+// 0820 follow-up: keep the real `pickHighestPrecedenceLocation` (pure helper)
+// so the route still picks a winner from whatever the mocked scanner returns.
+vi.mock("../utils/scan-install-locations.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../utils/scan-install-locations.js")
+  >("../utils/scan-install-locations.js");
+  return {
+    ...actual,
+    scanSkillInstallLocations: mocks.scanSkillInstallLocations,
+  };
+});
 
 // Stub everything else registerRoutes depends on
 vi.mock("node:fs", async (importOriginal) => {

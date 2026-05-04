@@ -48,7 +48,7 @@ export interface ContextMenuState {
 interface Props {
   state: ContextMenuState;
   onClose: () => void;
-  onAction: (action: ContextMenuAction, skill: SkillInfo) => void;
+  onAction: (action: ContextMenuAction, skill: SkillInfo) => void | Promise<void>;
   /** Optional override to test menu-item selection — defaults to the derived set. */
   itemsOverride?: ContextMenuItem[];
 }
@@ -124,7 +124,7 @@ export function ContextMenu({ state, onClose, onAction, itemsOverride }: Props) 
     if (!state.skill) return;
     const it = items[cursor];
     if (!it || it.disabled) return;
-    onAction(it.action, state.skill);
+    void onAction(it.action, state.skill);
     onClose();
   }, [items, cursor, state.skill, onAction, onClose]);
 
@@ -202,7 +202,7 @@ export function ContextMenu({ state, onClose, onAction, itemsOverride }: Props) 
           onMouseEnter={() => setCursor(i)}
           onClick={() => {
             if (item.disabled) return;
-            onAction(item.action, state.skill!);
+            void onAction(item.action, state.skill!);
             onClose();
           }}
           style={{

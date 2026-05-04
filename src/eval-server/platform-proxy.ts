@@ -51,6 +51,7 @@
 import * as http from "node:http";
 import * as https from "node:https";
 import { randomUUID } from "node:crypto";
+import { getDefaultKeychain } from "../lib/keychain.js";
 
 const DEFAULT_PLATFORM_URL = "https://verified-skill.com";
 
@@ -93,6 +94,21 @@ const PROXY_PREFIXES = [
   "/api/v1/studio/search",
   "/api/v1/studio/telemetry/",
   "/api/v1/stats",
+  // Private (org-scoped) routes that must carry the user's GitHub bearer token
+  // to the platform. The browser never sees this token; injection happens here.
+  "/api/v1/private/",
+  "/api/v1/tenants/",
+] as const;
+
+/**
+ * Path prefixes that require an `Authorization: Bearer <github-token>` header
+ * to be injected at the proxy boundary. Public skill routes are intentionally
+ * excluded — they must remain anonymous so unauthenticated tabs continue to
+ * function in the public skill catalog.
+ */
+const AUTH_REQUIRED_PREFIXES = [
+  "/api/v1/private/",
+  "/api/v1/tenants/",
 ] as const;
 
 export function shouldProxyToPlatform(url: string | undefined): boolean {
@@ -100,18 +116,69 @@ export function shouldProxyToPlatform(url: string | undefined): boolean {
   return PROXY_PREFIXES.some((p) => url.startsWith(p));
 }
 
-function pickHeadersForUpstream(
+export function shouldInjectAuth(url: string | undefined): boolean {
+  if (!url) return false;
+  return AUTH_REQUIRED_PREFIXES.some((p) => url.startsWith(p));
+}
+
+// In-process token cache so a burst of proxy requests doesn't repeatedly hit
+// the OS keychain. The keychain itself is fast on macOS but can be slower on
+// Linux libsecret. 60s aligns with how stale a manual `vskill auth login`
+// → `vskill studio refresh` loop would feel.
+let _cachedToken: { value: string | null; expiresAt: number } | null = null;
+const TOKEN_CACHE_MS = 60_000;
+
+function readTokenForProxy(now: number = Date.now()): string | null {
+  if (_cachedToken && _cachedToken.expiresAt > now) return _cachedToken.value;
+  let token: string | null = null;
+  try {
+    token = getDefaultKeychain().getGitHubToken();
+  } catch {
+    token = null;
+  }
+  _cachedToken = { value: token, expiresAt: now + TOKEN_CACHE_MS };
+  return token;
+}
+
+/** Test-only reset hook. */
+export function _resetPlatformProxyAuthCacheForTests(): void {
+  _cachedToken = null;
+}
+
+export interface PickHeadersOptions {
+  /** Request path (e.g. "/api/v1/tenants/abc/skills"). */
+  path?: string;
+  /** Token provider override; defaults to in-process cached keychain read. */
+  tokenProvider?: () => string | null;
+}
+
+export function pickHeadersForUpstream(
   src: http.IncomingHttpHeaders,
+  opts: PickHeadersOptions = {},
 ): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(src)) {
     if (typeof v === "undefined") continue;
     if (HOP_BY_HOP.has(k.toLowerCase())) continue;
+    // Strip any client-supplied Authorization on private/tenant paths — we
+    // mint our own from the keychain. On other paths we pass through (the
+    // existing public proxy never carried Authorization, so this is a no-op).
+    if (k.toLowerCase() === "authorization" && opts.path && shouldInjectAuth(opts.path)) {
+      continue;
+    }
     out[k] = Array.isArray(v) ? v.join(", ") : String(v);
   }
   // Preserve client-IP intent for any future platform-side observability.
   const xff = out["x-forwarded-for"];
   out["x-forwarded-for"] = xff ? `${xff}, 127.0.0.1` : "127.0.0.1";
+
+  if (opts.path && shouldInjectAuth(opts.path)) {
+    const tokenProvider = opts.tokenProvider ?? (() => readTokenForProxy());
+    const token = tokenProvider();
+    if (token) {
+      out["authorization"] = `Bearer ${token}`;
+    }
+  }
   return out;
 }
 
@@ -151,7 +218,7 @@ export function proxyToPlatform(
         port: target.port || (target.protocol === "https:" ? 443 : 80),
         path: `${target.pathname}${target.search}`,
         method: req.method,
-        headers: pickHeadersForUpstream(req.headers),
+        headers: pickHeadersForUpstream(req.headers, { path: target.pathname }),
       },
       (upstreamRes) => {
         const status = upstreamRes.statusCode ?? 502;

@@ -20,6 +20,13 @@ export interface SkillVersionsEnvelope {
    *  VCS surface (local fixture, platform unreachable). When "none" the
    *  response also carries header `X-Skill-VCS: unavailable`. */
   source: "platform" | "none";
+  /** 0823: provider classification driven by the origin resolver. Aligned with
+   *  ProviderChip's SkillProvider type — three-value enum, no string fallback. */
+  provider?: import("./components/ProviderChip").SkillProvider;
+  /** 0823: true only when an upstream resolved AND returned at least one
+   *  version. UI hides CheckNowButton + swaps the no-upstream message
+   *  when this is false. */
+  trackedForUpdates?: boolean;
 }
 
 /** Envelope returned by GET /api/skills/:plugin/:skill/evals. */

@@ -81,6 +81,37 @@ program
     await initCommand(opts);
   });
 
+// 0822: vskill clone — fork an installed skill (or whole plugin) under a new
+// authorship. Deep-copies the source, rewrites `name`/`author`/`version` in
+// SKILL.md frontmatter, writes fork provenance to `.vskill-meta.json`, and
+// optionally scaffolds a GitHub repo via `gh`.
+program
+  .command("clone [source]")
+  .description(
+    "Fork an installed skill (or whole plugin) — deep-copy with new authorship and provenance",
+  )
+  .option(
+    "--target <kind>",
+    "Target shape: standalone | plugin | new-plugin (interactive prompt if omitted)",
+  )
+  .option("--path <dir>", "Destination directory (for --target standalone or new-plugin)")
+  .option(
+    "--plugin <name-or-path>",
+    "Existing plugin path (--target plugin); OR plugin name to bulk-clone every skill in it (whole-plugin clone)",
+  )
+  .option("--plugin-name <name>", "New plugin name (--target new-plugin)")
+  .option("--author <name>", "Author name (default: git config user.name)")
+  .option("--namespace <ns>", "Namespace for the cloned skill (default: slugified --author)")
+  .option("--github", "Scaffold a GitHub repo via `gh` after files commit (--target new-plugin only)")
+  .option("--force", "Overwrite an existing target")
+  .option("--source <kind>", "Pin source location: project | personal | cache (auto-detect if omitted)")
+  .option("--dry-run", "Print planned actions without writing")
+  .option("-y, --yes", "Auto-confirm all prompts (non-interactive bulk clone)")
+  .action(async (source: string | undefined, opts) => {
+    const { cloneCommand } = await import("./commands/clone.js");
+    await cloneCommand(source, opts);
+  });
+
 program
   .command("scan <path>")
   .description("Run tier-1 security scan on a SKILL.md file")
@@ -351,6 +382,23 @@ program
   .action(async (subcommand?: string, provider?: string) => {
     const { keysCommand } = await import("./commands/keys.js");
     await keysCommand(subcommand, provider);
+  });
+
+// 0826: vskill auth {login|status|logout} — GitHub Device Flow for private skills.
+program
+  .command("auth [subcommand]")
+  .description("Sign in to GitHub for private skill access (login|status|logout)")
+  .allowUnknownOption(true)
+  .action(async (subcommand?: string, _opts?: unknown, command?: { args?: string[] }) => {
+    const { authCommand } = await import("./commands/auth.js");
+    const argv = command?.args ?? (subcommand ? [subcommand] : []);
+    const exit = await authCommand(argv, {
+      io: {
+        stdout: process.stdout,
+        stderr: process.stderr,
+      },
+    });
+    if (exit !== 0) process.exit(exit);
   });
 
 program.parse();

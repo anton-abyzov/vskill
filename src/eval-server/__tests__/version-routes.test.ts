@@ -338,9 +338,15 @@ describe("T-009: GET /api/skills/:plugin/:skill/versions", () => {
     await handler(req, res, { plugin: "myPlugin", skill: "architect" });
 
     expect(res.setHeader).toHaveBeenCalledWith("X-Skill-VCS", "unavailable");
+    // 0823: envelope now includes provider + trackedForUpdates fields.
     expect(mocks.sendJson).toHaveBeenCalledWith(
       res,
-      { versions: [], count: 0, source: "none" },
+      expect.objectContaining({
+        versions: [],
+        count: 0,
+        source: "none",
+        trackedForUpdates: false,
+      }),
       200,
       req,
     );
@@ -367,9 +373,15 @@ describe("T-009: GET /api/skills/:plugin/:skill/versions", () => {
     await handler(req, res, { plugin: "myPlugin", skill: "architect" });
 
     expect(res.setHeader).toHaveBeenCalledWith("X-Skill-VCS", "unavailable");
+    // 0823: envelope now includes provider + trackedForUpdates fields.
     expect(mocks.sendJson).toHaveBeenCalledWith(
       res,
-      { versions: [], count: 0, source: "none" },
+      expect.objectContaining({
+        versions: [],
+        count: 0,
+        source: "none",
+        trackedForUpdates: false,
+      }),
       200,
       req,
     );
@@ -424,7 +436,10 @@ describe("T-009: GET /api/skills/:plugin/:skill/versions", () => {
     await handler(req, res, { plugin: "google-workspace", skill: "gws" });
 
     const sentData = mocks.sendJson.mock.calls[0][1];
-    expect(sentData).toEqual({ versions: [], count: 0, source: "platform" });
+    // 0823: envelope now includes provider + trackedForUpdates fields.
+    expect(sentData).toMatchObject({ versions: [], count: 0, source: "platform" });
+    expect(sentData.provider).toBeDefined();
+    expect(sentData.trackedForUpdates).toBe(false);
   });
 
   // ---------------------------------------------------------------------------

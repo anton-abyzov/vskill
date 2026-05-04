@@ -104,6 +104,42 @@ describe("PluginGroup", () => {
     expect(collectText(tree)).not.toContain("Cursor");
   });
 
+  // 0802 AC-US2-04: case-fold suppression — when pluginDisplay equals the
+  // raw plugin label (case-insensitive, no dot-strip), the caption is
+  // hidden as a redundant rendering. This is the ONLY suppression branch;
+  // mismatches like `.cursor` / `Cursor` continue to render so readers
+  // don't have to learn the dot-folder convention.
+  it("suppresses the caption when pluginDisplay matches plugin (raw case-fold)", () => {
+    const tree = expand(PluginGroup({
+      // plugin is the literal agent-id (no leading dot), display is identical
+      // after lowercasing — caption would be redundant, so we hide it.
+      plugin: "amp",
+      skills: [makeSkill("amp", "shared-baz", "installed", "amp")],
+      selectedKey: null,
+      onSelect: vi.fn(),
+    }));
+    const text = collectText(tree);
+    // Header still shows the plugin label exactly once via the title span.
+    expect(text).toContain("amp");
+    // No second "amp" rendering as caption.
+    expect(text.match(/amp/g)?.length ?? 0).toBe(1);
+  });
+
+  // 0802 AC-US2-04: mismatch keeps caption visible — `.cursor` + `Cursor`
+  // is the canonical "different enough" pair (leading dot is a convention
+  // the reader shouldn't be required to know).
+  it("keeps the caption when plugin has a leading dot but display does not match casefold", () => {
+    const tree = expand(PluginGroup({
+      plugin: ".cursor",
+      skills: [makeSkill(".cursor", "rule-x", "installed", "Cursor")],
+      selectedKey: null,
+      onSelect: vi.fn(),
+    }));
+    // Both the plugin folder header and the friendly caption render.
+    expect(collectText(tree)).toContain(".cursor");
+    expect(collectText(tree)).toContain("Cursor");
+  });
+
   it("alpha-sorts skills inside a group", () => {
     const tree = expand(PluginGroup({
       plugin: "obsidian-brain",

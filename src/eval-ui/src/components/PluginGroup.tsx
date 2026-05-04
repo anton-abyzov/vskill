@@ -27,15 +27,15 @@ interface Props {
  */
 export function PluginGroup({ plugin, skills, selectedKey, onSelect, onContextMenu, dirtySkillIds }: Props) {
   const sorted = [...skills].sort((a, b) => a.skill.localeCompare(b.skill));
-  // 0802: friendly tool caption (e.g. "Claude Code") rendered under the
-  // uppercased plugin folder. Suppress when it exactly matches the plugin
-  // label (case-fold, leading-dot stripped) — that's the only redundancy
-  // worth hiding; mismatches like `.cursor` / `Cursor` still show because
-  // readers shouldn't have to know the dot-folder convention.
+  // 0802 AC-US2-04: friendly tool caption (e.g. "Claude Code") rendered
+  // under the uppercased plugin folder. Suppress ONLY on exact-match-after-
+  // casefold against the raw plugin label (no dot-strip). Pairs like
+  // `.cursor` / `Cursor` still render because readers shouldn't have to
+  // know the dot-folder convention; suppression triggers only for the
+  // rare redundant pair like `amp` / `Amp`.
   const pluginDisplay = skills[0]?.pluginDisplay;
-  const labelForCompare = plugin.replace(/^\./, "").toLowerCase();
   const captionVisible =
-    !!pluginDisplay && pluginDisplay.toLowerCase() !== labelForCompare;
+    !!pluginDisplay && pluginDisplay.toLowerCase() !== plugin.toLowerCase();
 
   return (
     <div role="group" aria-label={`${plugin} (${skills.length})`}>

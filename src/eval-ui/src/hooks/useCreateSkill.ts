@@ -123,6 +123,16 @@ export interface UseCreateSkillOptions {
    * project's first existing plugin once layout detection resolves.
    */
   forceLayout?: 1 | 2 | 3;
+  /**
+   * 0786 AC-US1-01 / AC-US1-04: invoked at the start of handleCreate (before
+   * `api.createSkill`) so any pending-delete for the same skill name is
+   * flushed against the server first. This avoids a 409
+   * `skill-already-exists` race when the user deletes a skill and
+   * immediately re-creates one with the same name within the 10s Undo
+   * window. Optional — when omitted (legacy / unit tests), handleCreate
+   * proceeds directly to api.createSkill.
+   */
+  flushPendingForSkillName?: (skillName: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -233,7 +243,7 @@ export interface UseCreateSkillReturn {
 // Hook
 // ---------------------------------------------------------------------------
 
-export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout }: UseCreateSkillOptions): UseCreateSkillReturn {
+export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout, flushPendingForSkillName }: UseCreateSkillOptions): UseCreateSkillReturn {
   // Mode toggle
   const [mode, setMode] = useState<"manual" | "ai">("ai");
 
@@ -629,6 +639,15 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
 
     setCreating(true);
     try {
+      // 0786 AC-US1-01 / AC-US1-04: flush any pending-delete for the same
+      // skill name BEFORE calling api.createSkill, so the previous folder
+      // is gone server-side by the time existsSync runs. Without this, a
+      // delete-then-immediate-create flow within the 10s Undo window hits
+      // the server while the prior folder still exists and surfaces a
+      // misleading 409 skill-already-exists error.
+      if (flushPendingForSkillName) {
+        await flushPendingForSkillName(toKebab(name));
+      }
       const result = await api.createSkill({
         name: toKebab(name),
         plugin: effectivePlugin || "",
@@ -666,7 +685,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
     } finally {
       setCreating(false);
     }
-  }, [name, description, selectedLayout, effectivePlugin, model, allowedTools, body, version, versionValid, engine, onCreated]);
+  }, [name, description, selectedLayout, effectivePlugin, model, allowedTools, body, version, versionValid, engine, onCreated, flushPendingForSkillName]);
 
   const applyPluginRecommendation = useCallback(() => {
     if (!pluginLayoutInfo) return;

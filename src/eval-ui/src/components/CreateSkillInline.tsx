@@ -1,4 +1,5 @@
 import { useCreateSkill, toKebab } from "../hooks/useCreateSkill";
+import { usePendingActions } from "../PendingActionsContext";
 import { ProgressLog } from "./ProgressLog";
 import { ErrorCard } from "./ErrorCard";
 import { renderMarkdown } from "../utils/renderMarkdown";
@@ -36,7 +37,11 @@ interface Props {
 }
 
 export function CreateSkillInline({ onCreated, onCancel }: Props) {
-  const sk = useCreateSkill({ onCreated });
+  // 0786 AC-US1-01: flush any 10s-Undo pending delete/uninstall for the
+  // same skill name BEFORE api.createSkill runs, so a delete-then-
+  // immediate-recreate flow doesn't trip the server's existsSync 409.
+  const { flushBySkillName: flushPendingForSkillName } = usePendingActions();
+  const sk = useCreateSkill({ onCreated, flushPendingForSkillName });
 
   return (
     <div className="px-8 py-6 max-w-4xl animate-fade-in overflow-auto h-full">

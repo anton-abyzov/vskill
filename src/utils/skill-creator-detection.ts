@@ -17,8 +17,13 @@ import { AGENTS_REGISTRY } from "../agents/agents-registry.js";
  *     for every agent in AGENTS_REGISTRY (covers .claude/skills, .cursor/skills, etc.)
  * 3. Any registered agent's global skills directory
  * 4. Any agent's plugin cache (e.g. Claude Code plugin cache at ~/.claude/plugins/cache/)
- * 4b. Any agent's plugin marketplace dir (e.g. ~/.claude/plugins/marketplaces/ — marketplace
- *     sources have an extra /plugins/ segment compared to the cache tree).
+ *
+ * 0786 (AC-US2-01/02/04): the marketplace catalog at
+ * `~/.claude/plugins/marketplaces/<mkt>/plugins/<name>` is NOT installation —
+ * it is the *available* plugin index. Cache presence is the only evidence of
+ * installation. Pre-0786 detection treated the catalog as installed and the
+ * Engine Selector / `/api/skill-creator-status` mislabelled un-installed
+ * engines as installed.
  */
 export function isSkillCreatorInstalled(projectRoot?: string): boolean {
   const home = homedir();
@@ -38,8 +43,8 @@ export function isSkillCreatorInstalled(projectRoot?: string): boolean {
     }
   }
 
-  // 3 + 4 + 4b. Check every registered agent's global skills dir, plugin cache,
-  // and marketplace source dir.
+  // 3 + 4. Check every registered agent's global skills dir and plugin cache.
+  // 0786: marketplace catalog branch removed — see JSDoc above.
   for (const agent of AGENTS_REGISTRY) {
     const resolved = agent.globalSkillsDir.replace("~", home);
     if (existsSync(join(resolved, "skill-creator"))) return true;
@@ -57,22 +62,6 @@ export function isSkillCreatorInstalled(projectRoot?: string): boolean {
         }
       } catch { /* ignore permission errors */ }
     }
-
-    if (agent.pluginMarketplaceDir) {
-      const mktRoot = agent.pluginMarketplaceDir.replace("~", home);
-      try {
-        if (existsSync(mktRoot)) {
-          for (const mkt of readdirSync(mktRoot, { withFileTypes: true })) {
-            if (!mkt.isDirectory()) continue;
-            const pluginsDir = join(mktRoot, mkt.name, "plugins");
-            if (!existsSync(pluginsDir)) continue;
-            for (const plugin of readdirSync(pluginsDir, { withFileTypes: true })) {
-              if (plugin.isDirectory() && plugin.name.includes("skill-creator")) return true;
-            }
-          }
-        }
-      } catch { /* ignore permission errors */ }
-    }
   }
 
   return false;
@@ -84,6 +73,9 @@ export function isSkillCreatorInstalled(projectRoot?: string): boolean {
  * Same search order as isSkillCreatorInstalled() but returns the matched path
  * (or null if not installed). Used by Studio's /api/studio/detect-engines route
  * to surface the install location to the UI.
+ *
+ * 0786: marketplace catalog branch removed (catalog presence is availability,
+ * not installation).
  */
 export function findSkillCreatorPath(projectRoot?: string): string | null {
   const home = homedir();
@@ -115,24 +107,6 @@ export function findSkillCreatorPath(projectRoot?: string): string | null {
             for (const plugin of readdirSync(join(cacheDir, mkt.name), { withFileTypes: true })) {
               if (plugin.isDirectory() && plugin.name.includes("skill-creator")) {
                 return join(cacheDir, mkt.name, plugin.name);
-              }
-            }
-          }
-        }
-      } catch { /* ignore permission errors */ }
-    }
-
-    if (agent.pluginMarketplaceDir) {
-      const mktRoot = agent.pluginMarketplaceDir.replace("~", home);
-      try {
-        if (existsSync(mktRoot)) {
-          for (const mkt of readdirSync(mktRoot, { withFileTypes: true })) {
-            if (!mkt.isDirectory()) continue;
-            const pluginsDir = join(mktRoot, mkt.name, "plugins");
-            if (!existsSync(pluginsDir)) continue;
-            for (const plugin of readdirSync(pluginsDir, { withFileTypes: true })) {
-              if (plugin.isDirectory() && plugin.name.includes("skill-creator")) {
-                return join(pluginsDir, plugin.name);
               }
             }
           }

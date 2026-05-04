@@ -20,7 +20,7 @@ vi.mock("node:os", async () => {
   };
 });
 
-const { isSkillBuilderInstalled } = await import("../skill-builder-detection.js");
+const { isSkillBuilderInstalled, findSkillBuilderPath } = await import("../skill-builder-detection.js");
 
 let projectRoot: string;
 let fakeHome: string;
@@ -146,5 +146,54 @@ describe("AC-US1-04: parses version from SKILL.md frontmatter", () => {
     writeFileSync(join(dir, "SKILL.md"), "---\nname: skill-builder\nversion: '0.1.0'\n---\n");
     const result = isSkillBuilderInstalled(projectRoot);
     expect(result.version).toBe("0.1.0");
+  });
+});
+
+// 0786 AC-US2-03 / AC-US2-05: marketplace-only presence does NOT count as
+// installed. The marketplace catalog at
+// ~/.claude/plugins/marketplaces/<mkt>/plugins/<name> is just the
+// available-plugin index — actual installs live under .claude/plugins/cache/.
+// Pre-0786 the marketplace branch caused Studio's Engine Selector to label
+// uninstalled engines as installed.
+describe("0786 — marketplace catalog is NOT installation", () => {
+  it("AC-US2-03 (0786): isSkillBuilderInstalled returns false when only present in marketplace catalog", () => {
+    const pluginRoot = join(
+      fakeHome,
+      ".claude/plugins/marketplaces/claude-plugins-official/plugins/skill-builder",
+    );
+    mkdirSync(pluginRoot, { recursive: true });
+    writeFileSync(
+      join(pluginRoot, "SKILL.md"),
+      `---\nname: skill-builder\nversion: "1.0.0"\n---\n`,
+    );
+    const result = isSkillBuilderInstalled();
+    expect(result.installed).toBe(false);
+    expect(result.path).toBe(null);
+  });
+
+  it("AC-US2-05 (0786): findSkillBuilderPath returns null when only present in marketplace catalog", () => {
+    const pluginRoot = join(
+      fakeHome,
+      ".claude/plugins/marketplaces/some-mkt/plugins/skill-builder",
+    );
+    mkdirSync(pluginRoot, { recursive: true });
+    writeFileSync(
+      join(pluginRoot, "SKILL.md"),
+      `---\nname: skill-builder\nversion: "1.0.0"\n---\n`,
+    );
+    expect(findSkillBuilderPath()).toBe(null);
+  });
+
+  it("AC-US2-05 (0786): findSkillBuilderPath returns the cache path when actually installed", () => {
+    const cacheDir = join(
+      fakeHome,
+      ".claude/plugins/cache/foo-mkt/skill-builder-plugin",
+    );
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(
+      join(cacheDir, "SKILL.md"),
+      `---\nname: skill-builder\nversion: "1.0.0"\n---\n`,
+    );
+    expect(findSkillBuilderPath()).toBe(cacheDir);
   });
 });

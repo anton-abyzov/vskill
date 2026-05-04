@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useCreateSkill, toKebab } from "../hooks/useCreateSkill";
 import { useConfig } from "../ConfigContext";
 import { useStudio } from "../StudioContext";
+import { usePendingActions } from "../PendingActionsContext";
 import { ProgressLog } from "../components/ProgressLog";
 import { ErrorCard } from "../components/ErrorCard";
 import { renderMarkdown } from "../utils/renderMarkdown";
@@ -257,6 +258,7 @@ export function CreateSkillPage() {
   // skill into a plugin either.
   const forceLayout = prefill.mode === "standalone" ? 3 : undefined;
 
+  const { flushBySkillName: flushPendingForSkillName } = usePendingActions();
   const sk = useCreateSkill({
     // 0788: mirror CreateSkillModal's onCreated (App.tsx:743-761) — the
     // studio uses ad-hoc hash routing (useHashRoute.ts only knows #/create
@@ -270,6 +272,10 @@ export function CreateSkillPage() {
     },
     resolveAiConfigOverride,
     forceLayout,
+    // 0786 AC-US1-01: flush any 10s-Undo pending delete/uninstall for the
+    // same skill name BEFORE api.createSkill runs, so a delete-then-
+    // immediate-recreate flow doesn't trip the server's existsSync 409.
+    flushPendingForSkillName,
   });
 
   // 0698 polish: apply modal-chain prefill once on mount.

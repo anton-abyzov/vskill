@@ -23,6 +23,8 @@ import { ContextMenu } from "./components/ContextMenu";
 import type { ContextMenuState } from "./components/ContextMenu";
 import { ConfirmDialog, getTrashLabel } from "./components/ConfirmDialog";
 import { usePendingDeletion } from "./hooks/usePendingDeletion";
+import { ApiError } from "./api";
+import { PendingActionsContext } from "./PendingActionsContext";
 import { SetupDrawer } from "./components/SetupDrawer";
 import { useSetupDrawer } from "./hooks/useSetupDrawer";
 import { AgentScopePicker, agentsResponseToPickerEntries } from "./components/AgentScopePicker";
@@ -493,6 +495,19 @@ function Shell() {
     },
     onFailure: (s, err) => {
       optimisticRestore(s);
+      // 0786 AC-US3-04: when the server emits the structured 422
+      // not-installed contract (lockfile-first gate, see api-routes.ts
+      // uninstall route), the user clicked Uninstall on a source-authored
+      // skill that has no lockfile entry. Render a friendly info toast
+      // pointing them at Delete instead of the cryptic generic API error.
+      if (err instanceof ApiError && err.details?.code === "not-installed") {
+        toast({
+          message: `${s.skill} is a source-authored skill — use Delete instead`,
+          severity: "info",
+          durationMs: 4000,
+        });
+        return;
+      }
       toast({
         message: `Couldn't uninstall ${s.skill}: ${err.message}`,
         severity: "error",
@@ -516,6 +531,26 @@ function Shell() {
     window.addEventListener("studio:request-uninstall", onRequestUninstall);
     return () => window.removeEventListener("studio:request-uninstall", onRequestUninstall);
   }, []);
+
+  // 0786 AC-US1-01 / AC-US1-04: bridge for the Create Skill flow. Flushes
+  // any pending source-skill delete OR installed-skill uninstall whose
+  // skill name matches `skillName`, so the on-disk folder is gone before
+  // the server's existsSync check runs in the create handler. Stable
+  // identity so `useCreateSkill`'s useCallback deps don't churn.
+  const flushPendingBySkillName = useCallback(
+    async (skillName: string) => {
+      await Promise.all([
+        pendingDeletion.flushBySkillName(skillName),
+        pendingUninstall.flushBySkillName(skillName),
+      ]);
+    },
+    [pendingDeletion, pendingUninstall],
+  );
+  const pendingActionsValue = useMemo(
+    () => ({ flushBySkillName: flushPendingBySkillName }),
+    [flushPendingBySkillName],
+  );
+
   const handleConfirmUninstall = useCallback(() => {
     const skill = pendingUninstallSkill;
     setPendingUninstallSkill(null);
@@ -706,7 +741,7 @@ function Shell() {
   );
 
   return (
-    <>
+    <PendingActionsContext.Provider value={pendingActionsValue}>
       <StudioLayout
         sidebarWidth={sidebarWidth}
         sidebarHidden={sidebarToggledHidden || (state.isMobile && state.mobileView === "detail")}
@@ -1019,6 +1054,6 @@ function Shell() {
           setPluginUninstallTarget(null);
         }}
       />
-    </>
+    </PendingActionsContext.Provider>
   );
 }

@@ -150,6 +150,69 @@ describe("usePendingDeletion (0722)", () => {
     }
   });
 
+  // 0786 AC-US1-04: flushKey fires a single pending entry's apiCall by
+  // fully-qualified `${plugin}/${skill}` key.
+  it("flushKey() fires the matching entry and is idempotent on a missing key", async () => {
+    const onCommit = vi.fn();
+    const h = await mountHook({ delayMs: 10_000, onCommit });
+    try {
+      await h.act(async () => {
+        h.api().enqueueDelete(skillA);
+        h.api().enqueueDelete(skillB);
+      });
+
+      await h.act(async () => {
+        await h.api().flushKey("easychamp/greet-anton");
+      });
+
+      // Only A was flushed; B remains pending.
+      expect(deleteSkill).toHaveBeenCalledTimes(1);
+      expect(deleteSkill).toHaveBeenCalledWith("easychamp", "greet-anton");
+      expect(h.api().isPending("easychamp/greet-anton")).toBe(false);
+      expect(h.api().isPending("personal/haiku-writer")).toBe(true);
+
+      // Idempotent on missing — does not throw, no extra calls.
+      await h.act(async () => {
+        await h.api().flushKey("nope/missing");
+      });
+      expect(deleteSkill).toHaveBeenCalledTimes(1);
+    } finally {
+      h.unmount();
+    }
+  });
+
+  // 0786: flushBySkillName matches by skill name across all pending entries
+  // since the create-skill submit path doesn't always know the resolved
+  // plugin (server computes it from project layout at submit time).
+  it("flushBySkillName() flushes pending entries by skill name regardless of plugin", async () => {
+    const onCommit = vi.fn();
+    const h = await mountHook({ delayMs: 10_000, onCommit });
+    try {
+      // Two entries sharing the same skill name but different plugins.
+      const sameNameA: Skill = { plugin: "p1", skill: "shared-name" };
+      const sameNameB: Skill = { plugin: "p2", skill: "shared-name" };
+      await h.act(async () => {
+        h.api().enqueueDelete(sameNameA);
+        h.api().enqueueDelete(sameNameB);
+        h.api().enqueueDelete(skillA);
+      });
+
+      await h.act(async () => {
+        await h.api().flushBySkillName("shared-name");
+      });
+
+      // Both shared-name entries flushed; skillA still pending.
+      expect(deleteSkill).toHaveBeenCalledTimes(2);
+      expect(deleteSkill).toHaveBeenCalledWith("p1", "shared-name");
+      expect(deleteSkill).toHaveBeenCalledWith("p2", "shared-name");
+      expect(h.api().isPending("p1/shared-name")).toBe(false);
+      expect(h.api().isPending("p2/shared-name")).toBe(false);
+      expect(h.api().isPending("easychamp/greet-anton")).toBe(true);
+    } finally {
+      h.unmount();
+    }
+  });
+
   it("emits onFailure when the API rejects", async () => {
     deleteSkill.mockRejectedValueOnce(new Error("EACCES"));
     const onCommit = vi.fn();

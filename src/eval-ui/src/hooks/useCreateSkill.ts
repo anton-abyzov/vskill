@@ -646,7 +646,19 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
       // the server while the prior folder still exists and surfaces a
       // misleading 409 skill-already-exists error.
       if (flushPendingForSkillName) {
-        await flushPendingForSkillName(toKebab(name));
+        try {
+          await flushPendingForSkillName(toKebab(name));
+        } catch (flushErr) {
+          // 0786 review F-002: distinguish flush-failed from create-failed so the
+          // user knows the previous delete is the root cause, not the new create.
+          // We surface a tailored error and bail without attempting api.createSkill —
+          // the prior folder is still on disk and a create would 409 anyway.
+          setError(
+            `Could not finalize previous delete of ${toKebab(name)}: ${(flushErr as Error).message}. Cancel the pending delete and try again.`,
+          );
+          setCreating(false);
+          return;
+        }
       }
       const result = await api.createSkill({
         name: toKebab(name),

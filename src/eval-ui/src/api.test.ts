@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { api, ApiError, normalizeSkillInfo } from "./api";
+import { api, ApiError, normalizeSkillInfo, __test__ } from "./api";
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
@@ -325,6 +325,48 @@ describe("api.resolveInstalledSkillIds — 5xx retry (0761 AC-US3-04)", () => {
 // before posting, and merge results in input order. Per-chunk failures
 // degrade only that chunk; sibling chunks still contribute their results.
 // ---------------------------------------------------------------------------
+// 0821 US-003 / T-002 — direct edge-case coverage for the file-internal
+// chunkArray helper. Exercised through __test__ to keep the helper out of
+// the public API while still asserting AC-US3-02 / AC-US3-03 explicitly.
+describe("0821: chunkArray helper edge cases (US-003)", () => {
+  const { chunkArray } = __test__;
+
+  it("AC-US3-02: empty input returns []", () => {
+    expect(chunkArray([], 100)).toEqual([]);
+  });
+
+  it("AC-US3-02: input length less than size returns one chunk", () => {
+    const arr = [1, 2, 3];
+    const out = chunkArray(arr, 100);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toEqual([1, 2, 3]);
+  });
+
+  it("AC-US3-02: input length exactly equal to size returns one chunk", () => {
+    const arr = Array.from({ length: 100 }, (_, i) => i);
+    const out = chunkArray(arr, 100);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toHaveLength(100);
+  });
+
+  it("AC-US3-02: input length exactly N×size returns N chunks of size", () => {
+    const arr = Array.from({ length: 300 }, (_, i) => i);
+    const out = chunkArray(arr, 100);
+    expect(out.map((c) => c.length)).toEqual([100, 100, 100]);
+  });
+
+  it("AC-US3-03: 230-element input returns chunks of [100, 100, 30]", () => {
+    const arr = Array.from({ length: 230 }, (_, i) => i);
+    const out = chunkArray(arr, 100);
+    expect(out.map((c) => c.length)).toEqual([100, 100, 30]);
+    // Order preservation across chunk boundaries.
+    expect(out[0][0]).toBe(0);
+    expect(out[1][0]).toBe(100);
+    expect(out[2][0]).toBe(200);
+    expect(out[2][29]).toBe(229);
+  });
+});
+
 describe("0821: api.checkSkillUpdates — batches at 100 per request", () => {
   function makeIds(n: number, prefix = "p/skill"): string[] {
     return Array.from({ length: n }, (_, i) => `${prefix}-${String(i).padStart(4, "0")}`);
@@ -390,8 +432,17 @@ describe("0821: api.checkSkillUpdates — batches at 100 per request", () => {
     // Total 3 fetch invocations, but only 2 chunk slots.
     expect(callIdx).toBeGreaterThanOrEqual(3);
     expect(rows).toHaveLength(100);
-    // All returned rows belong to the second (upper) chunk.
-    rows.forEach((r) => expect(r.skillId.startsWith("p/skill-")).toBe(true));
+    // All returned rows MUST belong to the upper sorted-100 chunk
+    // (skill-0100 .. skill-0199). If first-chunk results leaked into the
+    // merged result, IDs in the 0000..0099 range would appear here.
+    const returnedIds = rows.map((r) => r.skillId).sort();
+    expect(returnedIds[0]).toBe("p/skill-0100");
+    expect(returnedIds[returnedIds.length - 1]).toBe("p/skill-0199");
+    rows.forEach((r) => {
+      const suffix = parseInt(r.skillId.split("-")[1], 10);
+      expect(suffix).toBeGreaterThanOrEqual(100);
+      expect(suffix).toBeLessThanOrEqual(199);
+    });
   });
 });
 
@@ -466,6 +517,18 @@ describe("0821: api.resolveInstalledSkillIds — batches at 100 per request", ()
       expect(out[i].plugin).toBe(skills[i].plugin);
       expect(out[i].skill).toBe(skills[i].skill);
     }
+  });
+
+  it("F-006 (0736): throws when EVERY chunk fails so StudioContext can warn once", async () => {
+    // All chunks return 400. Per-chunk fallback would normally produce
+    // un-enriched entries, but the F-006 contract from 0736 needs visibility
+    // when SSE-resolver resolution is fully broken. The function rethrows so
+    // StudioContext.tsx:491's once-per-session console.warn fires and the
+    // retry signature resets for the next poll cycle.
+    mockFetch.mockResolvedValue({ ok: false, status: 400, json: async () => ({ error: "boom" }) });
+    await expect(api.resolveInstalledSkillIds(makeSkills(150))).rejects.toThrow(
+      /all chunks failed/,
+    );
   });
 });
 

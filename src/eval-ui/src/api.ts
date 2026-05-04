@@ -160,6 +160,12 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
+// 0821 AC-US3-03: test-only handle so the chunkArray helper can be exercised
+// directly for its edge cases (empty / exact / sub-size / N×size / 230). The
+// helper itself stays file-internal — this namespace is conventionally for
+// tests only and is not part of the public API surface.
+export const __test__ = { chunkArray };
+
 // ---------------------------------------------------------------------------
 // SkillInfo response normalization (T-021, T-025)
 //
@@ -1053,9 +1059,13 @@ export const api = {
     // chunk's entries (no uuid/slug); successful chunks still enrich.
     const chunks = chunkArray(skills, CHECK_UPDATES_BATCH_SIZE);
 
+    // Each chunk reports its own ok/empty state. We use that to decide whether
+    // to preserve the F-006 (0736) "all-failed" diagnostic contract: when every
+    // chunk fails, the function throws so StudioContext.tsx:491 can emit a
+    // once-per-session console.warn and reset its retry signature.
     const fetchChunk = async (
       chunk: typeof skills,
-    ): Promise<Map<string, Record<string, unknown>>> => {
+    ): Promise<{ ok: boolean; map: Map<string, Record<string, unknown>> }> => {
       try {
         const res = await fetchWith5xxRetry(`${BASE}/api/v1/skills/check-updates`, {
           method: "POST",
@@ -1067,42 +1077,48 @@ export const api = {
             })),
           }),
         });
-        if (!res.ok) return new Map();
+        if (!res.ok) return { ok: false, map: new Map() };
         const body = await res.json().catch(() => null);
         const results: Array<Record<string, unknown>> = Array.isArray(body)
           ? body
           : Array.isArray((body as { results?: unknown[] } | null)?.results)
             ? (body as { results: Array<Record<string, unknown>> }).results
             : [];
-        return new Map(results.map((r) => [r.name as string, r]));
+        return {
+          ok: true,
+          map: new Map(
+            results
+              .filter((r) => typeof r.name === "string" && (r.name as string).length > 0)
+              .map((r) => [r.name as string, r]),
+          ),
+        };
       } catch {
-        return new Map();
+        return { ok: false, map: new Map() };
       }
     };
 
-    try {
-      const chunkMaps = await Promise.all(chunks.map(fetchChunk));
-      const byName = new Map<string, Record<string, unknown>>();
-      for (const m of chunkMaps) {
-        for (const [k, v] of m) byName.set(k, v);
-      }
-      return skills.map((s) => {
-        const r = byName.get(s.name);
-        return {
-          plugin: s.plugin,
-          skill: s.skill,
-          uuid: typeof r?.id === "string" && r.id.length > 0 ? r.id : undefined,
-          slug: typeof r?.slug === "string" && r.slug.length > 0 ? r.slug : undefined,
-        };
-      });
-    } catch (err) {
-      const SKILL_UPDATE_DEBUG = false;
-      if (SKILL_UPDATE_DEBUG) {
-        // eslint-disable-next-line no-console
-        console.warn("[studio] resolveInstalledSkillIds failed:", err instanceof Error ? err.message : String(err));
-      }
-      return skills.map((s) => ({ plugin: s.plugin, skill: s.skill }));
+    // Per-chunk graceful degradation (AC-US2-03): a single failing chunk
+    // produces empty enrichment for its entries; sibling chunks still merge.
+    // F-006 (0736) all-fail contract: if EVERY chunk fails, throw so the
+    // StudioContext .catch() block emits a once-per-session diagnostic warn
+    // and resets lastResolveSigRef for retry on the next poll cycle.
+    const chunkResults = await Promise.all(chunks.map(fetchChunk));
+    if (chunkResults.length > 0 && chunkResults.every((c) => !c.ok)) {
+      throw new Error("resolveInstalledSkillIds: all chunks failed");
     }
+    const byName = new Map<string, Record<string, unknown>>();
+    for (const c of chunkResults) {
+      for (const [k, v] of c.map) byName.set(k, v);
+    }
+    return skills.map((s) => {
+      const r = byName.get(s.name);
+      return {
+        plugin: s.plugin,
+        skill: s.skill,
+        uuid: typeof r?.id === "string" && r.id.length > 0 ? r.id : undefined,
+        slug: typeof r?.slug === "string" && r.slug.length > 0 ? r.slug : undefined,
+      };
+    });
   },
 
   // ---------------------------------------------------------------------------

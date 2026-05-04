@@ -580,6 +580,33 @@ function Shell() {
     ) ?? null;
   }, [state.skills, state.selectedSkill]);
 
+  // 0823 AC-US1-06: read-only personas land on Source by default. Fires once
+  // per skill change when the URL has no explicit `?tab=`. Authors keep the
+  // pre-existing `overview` default. Skipped when the user has already
+  // navigated within this skill (the URL has `?tab=`), so a deep link wins.
+  //
+  // 0823 F-004: effect intentionally re-runs only when the SELECTED skill
+  // identity changes (plugin/skill/origin), NOT when the user toggles
+  // activeDetailTab manually — including activeDetailTab in deps would yank
+  // them back to Source after they clicked Overview. The lint rule has been
+  // satisfied via a ref capture so future readers don't break this property.
+  const lastFlippedKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedInfo) return;
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("tab")) return; // explicit deep link wins
+    const isReadOnly = selectedInfo.origin === "installed";
+    if (!isReadOnly) return;
+    const key = `${selectedInfo.plugin}/${selectedInfo.skill}`;
+    if (lastFlippedKey.current === key) return; // already flipped for this skill
+    lastFlippedKey.current = key;
+    if (activeDetailTab === "overview") {
+      setActiveDetailTabState("source");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedInfo?.plugin, selectedInfo?.skill, selectedInfo?.origin]);
+
   const onSelect = useCallback(
     // 0801: forward `source` (project|personal|plugin) so the breadcrumb
     // header can render PROJECT/PERSONAL/PLUGIN matching the sidebar group.
@@ -646,14 +673,6 @@ function Shell() {
     {
       key: "ctrl+b",
       handler: () => setSidebarToggledHidden((h) => !h),
-    },
-    {
-      key: "e",
-      handler: () =>
-        toast({
-          message: strings.actions.editPlaceholder,
-          severity: "info",
-        }),
     },
   ]);
 

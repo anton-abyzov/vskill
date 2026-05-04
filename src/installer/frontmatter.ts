@@ -145,6 +145,119 @@ export function ensureFrontmatter(content: string, skillName: string, forceName 
   return normalized.replace(FRONTMATTER_RE, `---\n${updatedBlock}\n---`);
 }
 
+/** Detects an `author:` line in frontmatter (anchored at start of line within the block). */
+const AUTHOR_LINE_RE = /^author:.*$/m;
+/** Detects a `version:` line in frontmatter. */
+const VERSION_LINE_RE = /^version:.*$/m;
+/** Detects a `forkedFrom:` line in frontmatter (informational; the canonical record lives in .vskill-meta.json). */
+const FORKED_FROM_LINE_RE = /^forkedFrom:.*$/m;
+/** Captures the value after a key (used for idempotence checks). */
+const AUTHOR_VALUE_RE = /^author:\s*(.*)$/m;
+const VERSION_VALUE_RE = /^version:\s*(.*)$/m;
+const FORKED_FROM_VALUE_RE = /^forkedFrom:\s*(.*)$/m;
+
+/**
+ * Replace the value of an existing frontmatter line, or append a new line at
+ * the end of the block if the field is absent. Returns the updated block (NOT
+ * the whole document) so the caller can splice it back into the original.
+ */
+function setOrAppendField(
+  fmBlock: string,
+  key: string,
+  value: string,
+  lineRe: RegExp,
+): string {
+  const formatted = `${key}: ${quoteYAMLValue(value)}`;
+  if (lineRe.test(fmBlock)) {
+    return fmBlock.replace(lineRe, formatted);
+  }
+  // Append. Preserve trailing newline behaviour: if fmBlock ends with \n, keep it.
+  const sep = fmBlock.endsWith("\n") || fmBlock.length === 0 ? "" : "\n";
+  return `${fmBlock}${sep}\n${formatted}`.replace(/\n{3,}/g, "\n\n");
+}
+
+/**
+ * Apply fork-authorship metadata to a SKILL.md string.
+ *
+ * Rewrites only the listed frontmatter fields (`name`, `author`, `version`,
+ * `forkedFrom`) via regex while preserving every other field verbatim. Matches
+ * the regex house-style of this module (no gray-matter / js-yaml dependency).
+ *
+ * Idempotent: running twice with the same arguments produces byte-equal output.
+ *
+ * On malformed YAML frontmatter (no `---` opening or no closing `---`), throws
+ * so the caller can abort before any disk write.
+ *
+ * @param content  raw SKILL.md text (CRLF normalized internally)
+ * @param meta.name        new fully-qualified skill name (e.g. "anton/ado-mapper")
+ * @param meta.author      new author name
+ * @param meta.version     new version string (typically "1.0.0" for a fresh fork)
+ * @param meta.forkedFrom  optional source skill name to record in frontmatter
+ *                         (the authoritative record lives in `.vskill-meta.json`;
+ *                         this is a human-readable breadcrumb only)
+ */
+export function applyForkMetadata(
+  content: string,
+  meta: { name: string; author: string; version: string; forkedFrom?: string },
+): string {
+  const normalized = content.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+  const match = normalized.match(FRONTMATTER_RE);
+  if (!match) {
+    throw new Error(
+      "applyForkMetadata: SKILL.md is missing a YAML frontmatter block (no opening/closing `---`).",
+    );
+  }
+
+  let fmBlock = match[1];
+
+  // Idempotence guard: if all four target fields already match the requested
+  // values verbatim, return the input unchanged so reruns produce no drift.
+  const currentName = fmBlock.match(NAME_VALUE_RE)?.[1].trim();
+  const currentAuthor = fmBlock.match(AUTHOR_VALUE_RE)?.[1].trim();
+  const currentVersion = fmBlock.match(VERSION_VALUE_RE)?.[1].trim();
+  const currentForkedFrom = fmBlock.match(FORKED_FROM_VALUE_RE)?.[1].trim();
+  const expectedForkedFrom = meta.forkedFrom ? quoteYAMLValue(meta.forkedFrom) : undefined;
+
+  if (
+    currentName === meta.name &&
+    currentAuthor === quoteYAMLValue(meta.author) &&
+    currentVersion === meta.version &&
+    (expectedForkedFrom === undefined || currentForkedFrom === expectedForkedFrom)
+  ) {
+    return normalized;
+  }
+
+  // 1. Rewrite or insert `name:`. Use the existing line-replace pattern so the
+  //    full line (not just the token) is overwritten cleanly — same shape as
+  //    `ensureFrontmatter`'s force-rename branch (avoids `name: foo foo`).
+  if (HAS_NAME_RE.test(fmBlock)) {
+    fmBlock = fmBlock.replace(NAME_LINE_RE, `name: ${meta.name}`);
+  } else {
+    fmBlock = `name: ${meta.name}\n${fmBlock}`;
+  }
+
+  // 2. Rewrite or insert `author:`.
+  fmBlock = setOrAppendField(fmBlock, "author", meta.author, AUTHOR_LINE_RE);
+
+  // 3. Rewrite or insert `version:`.
+  fmBlock = setOrAppendField(fmBlock, "version", meta.version, VERSION_LINE_RE);
+
+  // 4. Rewrite or insert `forkedFrom:` when supplied.
+  if (meta.forkedFrom !== undefined) {
+    fmBlock = setOrAppendField(fmBlock, "forkedFrom", meta.forkedFrom, FORKED_FROM_LINE_RE);
+  }
+
+  // 5. Ensure description exists (extract from body if missing) — match the
+  //    no-touch convention from ensureFrontmatter.
+  if (!HAS_DESCRIPTION_RE.test(fmBlock)) {
+    const body = normalized.slice(match[0].length);
+    const desc = extractDescription(body, meta.name);
+    fmBlock = `${fmBlock}\ndescription: ${quoteYAMLValue(desc)}`;
+  }
+
+  return normalized.replace(FRONTMATTER_RE, `---\n${fmBlock}\n---`);
+}
+
 /** Detects `target-agents:` field in frontmatter */
 const HAS_TARGET_AGENTS_RE = /^target-agents:\s*(.*)/m;
 

@@ -223,8 +223,20 @@ export function SkillOverview(props: SkillOverviewProps) {
       </header>
 
       {/* 0772 US-005: GitHub publish-readiness row. Renders nothing while
-          status is loading; once resolved, renders one of three states. */}
-      <PublishStatusRow />
+          status is loading; once resolved, renders one of three states.
+          Hidden on installed copies — publishing is an authoring action and
+          the user can't act on it from a symlinked/copied skill.
+          0826: also hide when the skill clearly came from a marketplace
+          (pluginMarketplace set, or installMethod is "copied"/"symlinked").
+          Otherwise the studio renders "Publish-ready · GitHub origin: <user's
+          own repo>" for skills that aren't the user's to publish, which
+          falsely advertises republishing someone else's plugin under the
+          local repo's URL. */}
+      {skill.origin !== "installed"
+        && !skill.pluginMarketplace
+        && skill.installMethod !== "copied"
+        && skill.installMethod !== "symlinked"
+        && <PublishStatusRow />}
 
       {/* Responsive 8-card grid */}
       <div

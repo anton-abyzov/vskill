@@ -157,6 +157,24 @@ jobs:
           node dist/bin.js update --help
           node dist/bin.js studio --help
 
+      - name: Smoke — vskill clone --help (0822 T-015)
+        shell: bash
+        run: |
+          # The 'clone' command must register on the bin and surface every
+          # documented flag. This smoke catches Commander-wiring regressions
+          # in src/index.ts before they reach users.
+          node dist/bin.js clone --help
+          node dist/bin.js clone --help > clone-help.txt
+          grep -- "--target" clone-help.txt
+          grep -- "--path" clone-help.txt
+          grep -- "--plugin" clone-help.txt
+          grep -- "--author" clone-help.txt
+          grep -- "--namespace" clone-help.txt
+          grep -- "--github" clone-help.txt
+          grep -- "--force" clone-help.txt
+          grep -- "--source" clone-help.txt
+          grep -- "--dry-run" clone-help.txt
+
       - name: Smoke — fixture install runs without crashing (0706 AC-US5-02)
         shell: bash
         run: |

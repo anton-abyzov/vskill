@@ -12,6 +12,7 @@ vi.mock("react", () => ({
 }));
 
 import { SkillOverview } from "../SkillOverview";
+import { PublishStatusRow } from "../PublishStatusRow";
 import type { SkillInfo } from "../../types";
 
 type ReactEl = { type: unknown; props: Record<string, unknown> };
@@ -172,5 +173,17 @@ describe("SkillOverview — T-006", () => {
     const bench = findByTestId(tree, "metric-benchmark")!;
     const trigger = findAll(bench, (el) => el.props?.["data-testid"] === "benchmark-info-trigger");
     expect(trigger.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders PublishStatusRow on source-origin skills", () => {
+    const tree = SkillOverview({ skill: makeSkill({ origin: "source" }) });
+    const rows = findAll(tree, (el) => el.type === PublishStatusRow);
+    expect(rows.length).toBe(1);
+  });
+
+  it("hides PublishStatusRow on installed-origin skills (publishing is an authoring action)", () => {
+    const tree = SkillOverview({ skill: makeSkill({ origin: "installed" }) });
+    const rows = findAll(tree, (el) => el.type === PublishStatusRow);
+    expect(rows.length).toBe(0);
   });
 });

@@ -136,6 +136,30 @@ function pluginLocations(slug: string): InstallLocation[] {
     }));
 }
 
+const SCOPE_PRECEDENCE: Record<InstallLocationScope, number> = {
+  project: 0,
+  personal: 1,
+  plugin: 2,
+};
+
+/**
+ * Pick the highest-precedence install (project > personal > plugin) from a
+ * set of locations. Returns undefined for an empty input. Used by both the
+ * /api/skills/updates row builder and the reveal-in-editor route so they
+ * agree on which copy is the "live" one to surface or open.
+ */
+export function pickHighestPrecedenceLocation(
+  locations: readonly InstallLocation[],
+): InstallLocation | undefined {
+  let winner: InstallLocation | undefined;
+  for (const loc of locations) {
+    if (!winner || SCOPE_PRECEDENCE[loc.scope] < SCOPE_PRECEDENCE[winner.scope]) {
+      winner = loc;
+    }
+  }
+  return winner;
+}
+
 /**
  * Find every install location of a skill identified by its canonical platform
  * name (e.g. "anton-abyzov/greet-anton/greet-anton"). Returns one entry per

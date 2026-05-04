@@ -108,7 +108,12 @@ describe("CheckNowButton (0708 T-073/T-074)", () => {
     }
   });
 
-  it("AC-US8-03: clicking disables the button + shows spinner; api.rescanSkill is invoked", async () => {
+  it("AC-US8-03: clicking disables the button + shows spinner during the in-flight POST", async () => {
+    // 0823 F-001: with the synchronous rescan contract the spinner only
+    // observable while the POST is in flight. Use a hanging promise so the
+    // test can observe the disabled+spinner state before the round-trip
+    // completes.
+    rescanSpy.mockImplementationOnce(() => new Promise(() => {}));
     const h = await mount({ plugin: "anthropic-skills", skill: "pdf", trackedForUpdates: true });
     try {
       const btn = h.container.querySelector("[data-testid='check-now-button']") as HTMLButtonElement;
@@ -122,7 +127,12 @@ describe("CheckNowButton (0708 T-073/T-074)", () => {
     }
   });
 
-  it("AC-US8-03: spinner clears when matching skill.updated push entry lands", async () => {
+  it("AC-US8-03: spinner clears when matching skill.updated push entry lands during a hung request", async () => {
+    // 0823 F-001: ambient push events from upstream still clear the spinner —
+    // useful for the case where the request is mid-flight and a separate push
+    // notification arrives. Use a hanging POST to keep the spinner up until
+    // the push event lands.
+    rescanSpy.mockImplementationOnce(() => new Promise(() => {}));
     const h = await mount({ plugin: "anthropic-skills", skill: "pdf", trackedForUpdates: true });
     try {
       const btn = h.container.querySelector("[data-testid='check-now-button']") as HTMLButtonElement;
@@ -132,17 +142,8 @@ describe("CheckNowButton (0708 T-073/T-074)", () => {
       stub = {
         updatesById: new Map([["anthropic-skills/pdf", makeEntry()]]),
       };
-      // Force a re-render.
-      await h.act(async () => {
-        // Re-run microtasks to give React a chance to reconcile any
-        // subscription the component holds. Update tests rely on the
-        // component re-reading stub via useStudio each render.
-        await flushMicrotasks();
-      });
-      // Trigger a re-render by clicking (no-op if disabled) or remount.
-      // The easiest way: advance any internal interval polling updatesById.
+      await h.act(async () => { await flushMicrotasks(); });
       await h.act(async () => { vi.advanceTimersByTime(300); await flushMicrotasks(); });
-      // Re-query after idle; component should have cleared itself.
       const btn2 = h.container.querySelector("[data-testid='check-now-button']") as HTMLButtonElement;
       expect(btn2.disabled).toBe(false);
       expect(h.container.querySelector("[data-testid='check-now-spinner']")).toBeFalsy();
@@ -151,7 +152,33 @@ describe("CheckNowButton (0708 T-073/T-074)", () => {
     }
   });
 
-  it("AC-US8-03: after 30s timeout without a push event, spinner clears + shows 'No changes detected'", async () => {
+  it("0823 F-001: spinner clears immediately on POST resolve when no push event arrived; shows 'No changes detected'", async () => {
+    // 0823 F-001 contract: the rescan endpoint is synchronous (it does the
+    // upstream fetch + emits the bus event before returning), so the POST
+    // resolution IS the "we're done" signal. Waiting for the SSE push (which
+    // may never arrive — the platform stream is upstream-sourced, not local)
+    // would always hit the 30s timeout fallback. With the mocked rescanSkill
+    // resolving in microtasks, the spinner clears + 'no changes detected'
+    // appears as soon as the await unwinds.
+    const h = await mount({ plugin: "anthropic-skills", skill: "pdf", trackedForUpdates: true });
+    try {
+      const btn = h.container.querySelector("[data-testid='check-now-button']") as HTMLButtonElement;
+      await h.act(async () => { btn.click(); await flushMicrotasks(); });
+      expect(btn.disabled).toBe(false);
+      expect(h.container.querySelector("[data-testid='check-now-spinner']")).toBeFalsy();
+      const tip = h.container.querySelector("[data-testid='check-now-no-changes']");
+      expect(tip).toBeTruthy();
+      expect(tip?.textContent).toMatch(/no changes detected/i);
+    } finally {
+      h.unmount();
+    }
+  });
+
+  it("0823 F-001: 30s timeout fallback still fires if api.rescanSkill never resolves (network hang)", async () => {
+    // Defensive fallback: if the network never returns (the request hangs),
+    // the 30s timeout from the original 0708 contract still clears the spinner.
+    // Override the default-resolving mock with a hanging promise.
+    rescanSpy.mockImplementationOnce(() => new Promise(() => {}));
     const h = await mount({ plugin: "anthropic-skills", skill: "pdf", trackedForUpdates: true });
     try {
       const btn = h.container.querySelector("[data-testid='check-now-button']") as HTMLButtonElement;
@@ -162,7 +189,6 @@ describe("CheckNowButton (0708 T-073/T-074)", () => {
       expect(h.container.querySelector("[data-testid='check-now-spinner']")).toBeFalsy();
       const tip = h.container.querySelector("[data-testid='check-now-no-changes']");
       expect(tip).toBeTruthy();
-      expect(tip?.textContent).toMatch(/no changes detected/i);
     } finally {
       h.unmount();
     }

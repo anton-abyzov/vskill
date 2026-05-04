@@ -109,12 +109,13 @@ function makeSkill(over: Partial<SkillInfo> = {}): SkillInfo {
 }
 
 describe("RightPanel — 0804 Tests as top-level tab", () => {
-  it("source skills get 5 tabs in order: Overview | Edit | Tests | Run | History", () => {
+  it("source skills get 6 tabs in order: Overview | Source | Edit | Tests | Run | History (0823 added Source)", () => {
     const tree = RightPanel({ selectedSkillInfo: makeSkill() });
     const tabs = findAll(tree, (el) => el.props?.role === "tab");
     const ids = tabs.map((t) => t.props["data-testid"] as string);
     expect(ids).toEqual([
       "detail-tab-overview",
+      "detail-tab-source",
       "detail-tab-edit",
       "detail-tab-tests",
       "detail-tab-run",
@@ -122,12 +123,13 @@ describe("RightPanel — 0804 Tests as top-level tab", () => {
     ]);
   });
 
-  it("installed skills see Tests as a top-level tab (Edit hidden, Tests + Run visible)", () => {
+  it("installed skills see Tests as a top-level tab (Edit hidden, Source + Tests + Run visible)", () => {
     const tree = RightPanel({ selectedSkillInfo: makeSkill({ origin: "installed" }) });
     const tabs = findAll(tree, (el) => el.props?.role === "tab");
     const ids = tabs.map((t) => t.props["data-testid"] as string);
     expect(ids).toEqual([
       "detail-tab-overview",
+      "detail-tab-source",
       "detail-tab-tests",
       "detail-tab-run",
       "detail-tab-history",

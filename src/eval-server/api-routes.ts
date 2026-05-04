@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync, statSync } from "node:fs";
-import { execSync, execFileSync } from "node:child_process";
+import { execSync, execFileSync, spawn } from "node:child_process";
 import { join, resolve, dirname, basename, relative } from "node:path";
 import { homedir } from "node:os";
 import type { Router } from "./router.js";
@@ -14,9 +14,13 @@ import { classifyError } from "./error-classifier.js";
 import { readLockfile, writeLockfile } from "../lockfile/lockfile.js";
 import { parseSource } from "../resolvers/source-resolver.js";
 import { resolveSkillApiName as resolveSkillApiNameImpl } from "./skill-name-resolver.js";
+import { resolveSkillOrigin } from "./origin-resolver.js";
 import { runBenchmarkSSE, runSingleCaseSSE, assembleBulkResult } from "./benchmark-runner.js";
 import { getSkillSemaphore } from "./concurrency.js";
 import { resolveSkillDir, resolveAllowedSkillDir } from "./skill-resolver.js";
+import { scanSkillInstallLocations, pickHighestPrecedenceLocation } from "./utils/scan-install-locations.js";
+import { whichSync } from "./utils/which.js";
+import { resolveEditorCommand, NoEditorError } from "./utils/resolve-editor.js";
 import { setSkillDirEntry, ensurePluginCacheEntry } from "./skill-dir-registry.js";
 import {
   pickInstalledVersion,
@@ -1385,13 +1389,9 @@ export function detectProjectAgents(root: string): DetectionInfo {
 }
 
 function isBinaryOnPath(name: string): boolean {
-  try {
-    const cmd = process.platform === "win32" ? `where ${name}` : `command -v ${name}`;
-    execSync(cmd, { stdio: "ignore", timeout: 1000 });
-    return true;
-  } catch {
-    return false;
-  }
+  // 0820 follow-up: delegate to the shared utils/which.ts helper. Cached
+  // there per-process, so the outer `detectionCache` is now belt-and-braces.
+  return whichSync(name);
 }
 
 // 0701 — Read the active Claude Code model from ~/.claude/settings.json so the
@@ -2048,12 +2048,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         const localSkill = r.name.split("/").pop();
         // Highest-precedence install wins for the local fs pair the click
         // handler reveals: project > personal > plugin.
-        const precedence = { project: 0, personal: 1, plugin: 2 } as const;
-        const winner = [...locations].sort(
-          (a, b) =>
-            precedence[a.scope as keyof typeof precedence] -
-            precedence[b.scope as keyof typeof precedence],
-        )[0];
+        const winner = pickHighestPrecedenceLocation(locations);
         return {
           ...r,
           ...(programmatic.pinMap.has(r.name)
@@ -2097,18 +2092,51 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   //                         "no version history" without treating it as an error.
   //
   // Never returns 5xx for the "no VCS surface" case — that is normal empty state.
-  router.get("/api/skills/:plugin/:skill/versions", async (req, res, params) => {
-    // 0765: pass plugin so installed-agent views (.claude/, .cursor/, ...)
-    // resolve via lockfile instead of source-tree probe.
-    const fullName = await resolveSkillApiName(params.skill, params.plugin);
+  // 0823 F-001: shared apiPath builder used by /versions, /versions/diff,
+  // and the rescan endpoint so all three resolve via the same origin chain
+  // (project lockfile → ~/.agents → Anthropic registry → git-remote fallback).
+  // Returns `{ apiPathRoot, origin }` — callers append `/versions` or
+  // `/versions/diff` as needed.
+  async function buildSkillApiPath(
+    skill: string,
+    plugin: string | null,
+  ): Promise<{ apiPathRoot: string; origin: Awaited<ReturnType<typeof resolveSkillOrigin>> }> {
+    const origin = await resolveSkillOrigin(skill, plugin, root);
+    if (origin.owner && origin.repo) {
+      return {
+        apiPathRoot: `/api/v1/skills/${encodeURIComponent(origin.owner)}/${encodeURIComponent(origin.repo)}/${encodeURIComponent(skill)}`,
+        origin,
+      };
+    }
+    // 0765 fallback: legacy resolver covers source-tree authored skills
+    // whose origin comes from a git remote, not a lockfile.
+    const fullName = await resolveSkillApiName(skill, plugin);
     const parts = fullName.split("/");
-    const apiPath = parts.length === 3
-      ? `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}/versions`
-      : `/api/v1/skills/${encodeURIComponent(fullName)}/versions`;
+    const apiPathRoot = parts.length === 3
+      ? `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}`
+      : `/api/v1/skills/${encodeURIComponent(fullName)}`;
+    return { apiPathRoot, origin };
+  }
+
+  router.get("/api/skills/:plugin/:skill/versions", async (req, res, params) => {
+    // 0823: comprehensive origin resolver via shared buildSkillApiPath.
+    const { apiPathRoot, origin } = await buildSkillApiPath(params.skill, params.plugin);
+    const apiPath = `${apiPathRoot}/versions`;
 
     const emptyEnvelope = () => {
       res.setHeader("X-Skill-VCS", "unavailable");
-      sendJson(res, { versions: [], count: 0, source: "none" }, 200, req);
+      sendJson(
+        res,
+        {
+          versions: [],
+          count: 0,
+          source: "none",
+          provider: origin.provider,
+          trackedForUpdates: false,
+        },
+        200,
+        req,
+      );
     };
 
     let fetchResp: Response;
@@ -2173,9 +2201,26 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       isInstalled: installedVersion ? v.version === installedVersion : false,
     }));
 
+    // 0823 F-003 (iter 4): runtime-verify Anthropic-registry hits via
+    // trackedForUpdates. If a registry-mapped skill returns no upstream
+    // versions (404 or empty), downgrade the provider chip to "local" so the
+    // UI doesn't claim "Anthropic" for a skill that isn't actually indexed
+    // upstream. Lockfile-derived providers stay regardless of count (the
+    // lockfile entry IS the proof the user installed it from somewhere real).
+    const tracked = origin.trackedForUpdates && enriched.length > 0;
+    const reportedProvider =
+      origin.source === "anthropic-registry" && !tracked ? "local" : origin.provider;
     sendJson(
       res,
-      { versions: enriched, count: enriched.length, source: "platform" },
+      {
+        versions: enriched,
+        count: enriched.length,
+        source: "platform",
+        // 0823: provider classification + tracking flag drive UI chip
+        // and CheckNowButton visibility.
+        provider: reportedProvider,
+        trackedForUpdates: tracked,
+      },
       200,
       req,
     );
@@ -2192,12 +2237,11 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       return;
     }
 
-    // 0765: same plugin-aware resolution as /versions.
-    const fullName = await resolveSkillApiName(params.skill, params.plugin);
-    const parts = fullName.split("/");
-    const basePath = parts.length === 3
-      ? `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}/versions/diff`
-      : `/api/v1/skills/${encodeURIComponent(fullName)}/versions/diff`;
+    // 0823 F-001: use the same origin-resolver-aware path builder as /versions
+    // so Anthropic-shipped skills (slack-messaging, pptx, etc.) get the
+    // matching upstream URL for diff requests, not the legacy bare-name path.
+    const { apiPathRoot } = await buildSkillApiPath(params.skill, params.plugin);
+    const basePath = `${apiPathRoot}/versions/diff`;
 
     try {
       const resp = await fetch(
@@ -2246,6 +2290,113 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     s.length <= 200 &&
     !s.startsWith("-") &&
     SKILL_SLUG_RE.test(s);
+
+  // 0823 — POST /api/v1/skills/:id/rescan — single-skill upstream version
+  // check. The client (CheckNowButton) calls this to verify whether a tracked
+  // installed skill has new versions available. The :id param is URL-encoded
+  // `<plugin>/<skill>` (e.g. `.claude%2Fnanobanana`).
+  //
+  // Flow:
+  //   1. URL-decode :id → (plugin, skill); validate slug.
+  //   2. resolveSkillOrigin → upstream owner/repo (or local fallback).
+  //   3. Fetch upstream versions; emit `skill.updated` via dataEventBus so
+  //      any local listeners (and the SSE stream once bridged) can react.
+  //   4. Return { jobId } synchronously. The actual update install (if any)
+  //      goes through the existing `/update` route — rescan is read-only.
+  //
+  // Idempotent + side-effect free on disk.
+  router.post("/api/v1/skills/:id/rescan", async (req, res, params) => {
+    const rawId = String(params.id ?? "");
+    const decoded = (() => {
+      try {
+        return decodeURIComponent(rawId);
+      } catch {
+        return rawId;
+      }
+    })();
+    const slashIdx = decoded.indexOf("/");
+    if (slashIdx <= 0 || slashIdx === decoded.length - 1) {
+      sendJson(res, { error: `Invalid skill id: ${rawId}` }, 400, req);
+      return;
+    }
+    const plugin = decoded.slice(0, slashIdx);
+    const skill = decoded.slice(slashIdx + 1);
+    if (!isSafeSkillName(skill) || !isSafeSkillName(plugin)) {
+      sendJson(res, { error: `Invalid skill id: ${rawId}` }, 400, req);
+      return;
+    }
+    // 0823 F-002 (security iter 4): isSafeSkillName regex permits `/` (legal
+    // for owner/repo/skill triples) so a doubly-encoded `.claude%2F.claude%2Fx`
+    // would split to plugin=.claude, skill=.claude/x. The skill segment after
+    // the first split MUST be a single slug — reject any embedded slash.
+    if (plugin.includes("/") || skill.includes("/")) {
+      sendJson(res, { error: `Invalid skill id (nested slash): ${rawId}` }, 400, req);
+      return;
+    }
+
+    // 0823 F-005 (low): use crypto.randomUUID per FR-005 spec — collision-
+    // free + auditable. Falls back to a Math.random suffix if the runtime
+    // is too old to expose the global API (Node 14 / very old browsers).
+    const jobId = (() => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const c = (globalThis as any).crypto;
+        if (c?.randomUUID) return `rescan-${c.randomUUID()}`;
+      } catch { /* fall through */ }
+      return `rescan-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    })();
+    let versions: unknown[] = [];
+
+    try {
+      const origin = await resolveSkillOrigin(skill, plugin, root);
+      if (origin.owner && origin.repo) {
+        const apiPath = `/api/v1/skills/${encodeURIComponent(origin.owner)}/${encodeURIComponent(origin.repo)}/${encodeURIComponent(skill)}/versions`;
+        try {
+          const fetchResp = await fetch(`${PLATFORM_BASE}${apiPath}`, {
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (fetchResp.ok) {
+            const data = (await fetchResp.json()) as { versions?: unknown[] };
+            versions = Array.isArray(data.versions) ? data.versions : [];
+          } else {
+            // 0823 F-009: surface non-OK responses for ops debugging — the
+            // user-facing button still treats the rescan as "no change", but
+            // the operator can see why upstream said no in the studio log.
+            console.warn(
+              `[rescan] upstream ${PLATFORM_BASE}${apiPath} → ${fetchResp.status} ${fetchResp.statusText}`,
+            );
+          }
+        } catch (fetchErr) {
+          // 0823 F-009: log network failures instead of silently swallowing.
+          console.warn(
+            `[rescan] upstream fetch failed for ${plugin}/${skill}:`,
+            (fetchErr as Error).message,
+          );
+        }
+      }
+    } catch (resolveErr) {
+      // 0823 F-009: resolveSkillOrigin should never throw, but if it does the
+      // operator needs to know — silent failure here would look like "no
+      // upstream changes" to the user forever.
+      console.error(
+        `[rescan] resolveSkillOrigin threw for ${plugin}/${skill}:`,
+        (resolveErr as Error).message,
+      );
+    }
+
+    // Emit local event so any in-process listeners (and the SSE bridge once
+    // wired) can push to clients. CheckNowButton's existing 30s timeout
+    // serves as the fallback if no SSE event reaches `updatesById`.
+    emitDataEvent("skill.updated", {
+      plugin,
+      skill,
+      versions,
+      jobId,
+      timestamp: new Date().toISOString(),
+    });
+
+    sendJson(res, { jobId }, 200, req);
+  });
 
   router.post("/api/skills/:plugin/:skill/update", async (req, res, params) => {
     initSSE(res, req);
@@ -2389,6 +2540,18 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // file-read routes need to reach into ~/.claude/plugins/{cache,marketplaces}
   // and ~/.claude/skills. Path traversal is rejected by validateAgainstAllowlist
   // inside resolveAllowedSkillDir.
+  // 0823 simplify: shared trailing-separator-aware containment check used by
+  // /file (read) and /file (PUT/save). Plain `startsWith()` is unsafe because
+  // two skills with shared prefixes (e.g. `foo` + `foo-secret`) collide. This
+  // helper appends the separator and explicitly accepts the exact-match case.
+  // Returns true when `candidate` is at or below `root` after normalization.
+  const isContainedIn = (candidate: string, root: string): boolean => {
+    const r = resolve(root);
+    if (candidate === r) return true;
+    const rWithSep = r.endsWith("/") ? r : r + "/";
+    return candidate.startsWith(rWithSep);
+  };
+
   const skillFsAllowedRoots = (): string[] => {
     const home = homedir();
     return [
@@ -2396,6 +2559,10 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       join(home, ".claude/plugins/cache"),
       join(home, ".claude/plugins/marketplaces"),
       join(home, ".claude/skills"),
+      // 0823: vskill install --global writes to ~/.agents/skills, and many
+      // ~/.claude/skills/* entries are symlinks INTO that dir. Without this
+      // allowlist entry the realpath check rejects them as "outside allowlist".
+      join(home, ".agents/skills"),
     ];
   };
   // 0769 F-002: cold-server deep links to /api/skills/:plugin/:skill/files (or
@@ -2490,13 +2657,16 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
     const url = new URL(req.url ?? "", "http://localhost");
     const filePath = url.searchParams.get("path") ?? "";
+    const raw = url.searchParams.get("raw") === "1";
     if (!filePath) {
       sendJson(res, { error: "Missing path query parameter" }, 400, req);
       return;
     }
 
     const fullPath = resolve(join(skillDir, filePath));
-    if (!fullPath.startsWith(resolve(skillDir))) {
+    // 0823 F-002 (security): trailing-separator-aware containment via shared
+    // helper — prevents prefix-confusion (e.g. `foo` vs `foo-secret`).
+    if (!isContainedIn(fullPath, skillDir)) {
       sendJson(res, { error: "Access denied" }, 403, req);
       return;
     }
@@ -2517,7 +2687,6 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       return;
     }
 
-    // Binary detection: check first 8KB for null bytes
     let buf: Buffer;
     try {
       buf = readFileSync(fullPath);
@@ -2526,6 +2695,63 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       return;
     }
 
+    // 0823 F-004: raw=1 returns the file bytes with a sniffed Content-Type so
+    // <img src=...&raw=1> works for inline preview. Binary detection still
+    // runs; raw mode only changes how the bytes are delivered, not which
+    // files are accepted.
+    if (raw) {
+      const ext = filePath.toLowerCase().slice(filePath.lastIndexOf(".") + 1);
+      // 0823 F-002 (security): SVG is REFUSED via raw because it can carry
+      // <script> that runs in the studio origin (localhost full-API access)
+      // when a user navigates the URL directly. SVGs still preview as
+      // "binary" placeholder via the JSON path.
+      if (ext === "svg") {
+        sendJson(
+          res,
+          {
+            error:
+              "SVG raw rendering disabled — script-injection risk. Use the binary placeholder.",
+          },
+          415,
+          req,
+        );
+        return;
+      }
+      const mime: Record<string, string> = {
+        png: "image/png",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        gif: "image/gif",
+        webp: "image/webp",
+        ico: "image/x-icon",
+        pdf: "application/pdf",
+      };
+      const contentType = mime[ext];
+      if (!contentType) {
+        // Unknown ext + raw=1 — refuse rather than serve as octet-stream
+        // (which the browser may sniff into a script context).
+        sendJson(
+          res,
+          { error: `raw=1 not supported for extension: ${ext || "<none>"}` },
+          415,
+          req,
+        );
+        return;
+      }
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Length", String(buf.length));
+      res.setHeader("Cache-Control", "private, max-age=60");
+      // 0823 F-002 (defense in depth): block content-type sniffing AND force
+      // an inline-only Content-Disposition so the browser cannot reinterpret
+      // the response as HTML/script.
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Disposition", "inline");
+      res.writeHead(200);
+      res.end(buf);
+      return;
+    }
+
+    // Binary detection: check first 8KB for null bytes
     const probe = buf.subarray(0, Math.min(8192, buf.length));
     for (let i = 0; i < probe.length; i++) {
       if (probe[i] === 0) {
@@ -2559,7 +2785,9 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     }
 
     const fullPath = resolve(join(skillDir, filePath));
-    if (!fullPath.startsWith(resolve(skillDir))) {
+    // 0823 F-002 (security): trailing-separator-aware containment via shared
+    // helper — same guard as /file (read).
+    if (!isContainedIn(fullPath, skillDir)) {
       sendJson(res, { error: "Path traversal denied" }, 403, req);
       return;
     }
@@ -3703,6 +3931,118 @@ Return ONLY the JSON lines, no other text.`;
     const mcpDependencies = detectMcpDependencies(content);
     const skillDependencies = detectSkillDependencies(content);
     sendJson(res, { mcpDependencies, skillDependencies }, 200, req);
+  });
+
+  // 0820 — Reveal in Editor / Open. Spawns the user's preferred editor on
+  // the skill folder (Open) or its SKILL.md (Reveal/Edit). Path-traversal
+  // hardened: never trusts a client-supplied dir; resolves (plugin, skill)
+  // server-side via scanSkillInstallLocations and rejects any non-basename
+  // `file`. Spawn is detached + unref'd so the response returns immediately.
+  router.post("/api/skills/reveal-in-editor", async (req, res) => {
+    let body: { plugin?: unknown; skill?: unknown; file?: unknown };
+    try {
+      body = (await readBody(req)) as typeof body;
+    } catch {
+      // Malformed JSON or oversized body — surface as 400 invalid_body
+      // rather than letting the router emit a generic 500.
+      sendJson(res, { error: "invalid_body" }, 400, req);
+      return;
+    }
+
+    const plugin = typeof body.plugin === "string" ? body.plugin : undefined;
+    const skill = typeof body.skill === "string" ? body.skill : undefined;
+    if (plugin === undefined || skill === undefined || skill.length === 0) {
+      sendJson(res, { error: "invalid_body" }, 400, req);
+      return;
+    }
+
+    let file: string | undefined;
+    if (body.file !== undefined) {
+      // Reject: non-string, empty, embeds either separator (POSIX `/` or
+      // Windows `\`), `.` / `..` as filename, or any control char. We check
+      // both separators explicitly since path.basename on POSIX doesn't
+      // recognize `\` as a separator, and the eval-server may run on either.
+      const f = body.file;
+      const invalid =
+        typeof f !== "string" ||
+        f.length === 0 ||
+        f === "." ||
+        f === ".." ||
+        f.includes("/") ||
+        f.includes("\\") ||
+        // eslint-disable-next-line no-control-regex
+        /[\x00-\x1f]/.test(f);
+      if (invalid) {
+        sendJson(res, { error: "invalid_file" }, 400, req);
+        return;
+      }
+      file = f;
+    }
+
+    const canonical = plugin ? `${plugin}/${skill}` : skill;
+    const winner = pickHighestPrecedenceLocation(scanSkillInstallLocations(canonical, root));
+    if (!winner) {
+      sendJson(res, { error: "skill_not_found" }, 404, req);
+      return;
+    }
+    const dir = winner.dir;
+
+    // Defense in depth: scanSkillInstallLocations already restricts dirs to
+    // known scope roots, but a final basename check rejects anything that
+    // doesn't end in the requested skill slug — protects against a future
+    // scanner regression that returned a parent or sibling dir.
+    if (basename(dir) !== skill) {
+      sendJson(res, { error: "skill_not_found" }, 404, req);
+      return;
+    }
+
+    if (file) {
+      const finalPath = join(dir, file);
+      // TOCTOU: file may be deleted between this check and spawn. We accept
+      // that — editors handle a vanished path by opening an empty buffer, and
+      // the alternative (no pre-check) would leak filesystem details via
+      // spawn ENOENT for normal "this skill has no SKILL.md" cases.
+      if (!existsSync(finalPath)) {
+        sendJson(res, { error: "file_not_found" }, 404, req);
+        return;
+      }
+    }
+
+    let launch: { command: string; args: string[] };
+    try {
+      launch = resolveEditorCommand({ dir, file });
+    } catch (err) {
+      if (err instanceof NoEditorError) {
+        sendJson(res, { error: "no_editor" }, 500, req);
+      } else {
+        // Distinguish "resolver blew up" from "spawn blew up". Same 500
+        // shape, but the error code points to the right phase.
+        sendJson(res, { error: "resolve_failed" }, 500, req);
+      }
+      return;
+    }
+
+    try {
+      await new Promise<void>((resolvePromise, rejectPromise) => {
+        const child = spawn(launch.command, launch.args, {
+          detached: true,
+          stdio: "ignore",
+        });
+        child.once("error", rejectPromise);
+        child.once("spawn", () => {
+          child.unref();
+          resolvePromise();
+        });
+      });
+    } catch (err) {
+      // Log so operators can diagnose ENOENT / permission-denied / etc.;
+      // the user-facing toast is the generic 500.
+      console.warn("[reveal-in-editor] spawn failed:", err);
+      sendJson(res, { error: "spawn_failed" }, 500, req);
+      return;
+    }
+
+    sendJson(res, { ok: true, command: launch.command, args: launch.args }, 200, req);
   });
 
   // Handle CORS preflight

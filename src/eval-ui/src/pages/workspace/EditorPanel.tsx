@@ -199,7 +199,12 @@ export function EditorPanel() {
       e.stopPropagation();
       if (isDirty) handleSave();
     }
-    if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+    // 0826: ⌘K is the global FindSkills shortcut — when the editor is
+    // focused it used to ALSO open the AI Edit bar (with its model picker),
+    // so the user saw the model selector pop in first and the skills
+    // palette right after. Move AI Edit to ⌘I (matches the Cursor "inline
+    // AI" convention) and let ⌘K bubble up untouched.
+    if ((e.ctrlKey || e.metaKey) && e.key === "i") {
       e.preventDefault();
       e.stopPropagation();
       dispatch({ type: aiEditOpen ? "CLOSE_AI_EDIT" : "OPEN_AI_EDIT" });

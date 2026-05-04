@@ -18,6 +18,7 @@
 import type { SkillInfo } from "../types";
 import type { ContextMenuAction, ContextMenuState } from "../components/ContextMenu";
 import { strings } from "../strings";
+import { api, ApiError } from "../api";
 
 export const closedContextMenuState: ContextMenuState = {
   open: false,
@@ -59,16 +60,41 @@ function dispatchRequestDelete(skill: SkillInfo): void {
 }
 
 /**
- * Side-effecting router for context-menu actions. Returns nothing — all
- * outputs happen via `navigator.clipboard` and `studio:toast` events.
+ * 0820 — invoke /api/skills/reveal-in-editor and surface the outcome via
+ * toast. Pure async helper so tests can await it.
+ */
+async function revealInEditor(skill: SkillInfo, file?: string): Promise<void> {
+  try {
+    await api.revealInEditor(skill.plugin, skill.skill, file);
+    dispatchToast(strings.toasts.openingInEditor, "info");
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const code = (err.details as { error?: string } | undefined)?.error;
+      if (err.status === 404) {
+        dispatchToast(strings.toasts.skillNotFound, "error");
+        return;
+      }
+      if (err.status === 500 && code === "no_editor") {
+        dispatchToast(strings.toasts.noEditor, "error");
+        return;
+      }
+    }
+    dispatchToast(strings.toasts.openFailed, "error");
+  }
+}
+
+/**
+ * Side-effecting router for context-menu actions. Returns a Promise so
+ * callers (production and tests) can await async branches uniformly;
+ * sync branches resolve immediately.
  *
  * Unknown actions are silently ignored to keep the surface tolerant of
  * future additions without a breaking change.
  */
-export function handleContextMenuAction(
+export async function handleContextMenuAction(
   action: ContextMenuAction | string,
   skill: SkillInfo,
-): void {
+): Promise<void> {
   switch (action) {
     case "copy-path":
       try {
@@ -80,10 +106,12 @@ export function handleContextMenuAction(
       }
       dispatchToast(strings.toasts.pathCopied, "info");
       return;
-    case "open":
     case "reveal":
     case "edit":
-      dispatchToast(strings.actions.editPlaceholder ?? "Not yet available.", "info");
+      await revealInEditor(skill, "SKILL.md");
+      return;
+    case "open":
+      await revealInEditor(skill);
       return;
     case "run-benchmark":
       dispatchToast(strings.toasts.benchmarkQueued, "info");
@@ -96,9 +124,9 @@ export function handleContextMenuAction(
       return;
     case "uninstall":
       // Uninstall is destructive and needs a confirm flow — out of scope
-      // for this plumbing increment. Emit a stub toast so the action is
-      // acknowledged rather than silently dropped.
-      dispatchToast(strings.actions.editPlaceholder ?? "Uninstall requires confirmation.", "info");
+      // for this plumbing increment. Emit a non-error info toast so the
+      // user knows the action exists but hasn't landed yet.
+      dispatchToast(strings.toasts.uninstallNotImplemented, "info");
       return;
     case "delete":
       // 0722: open the ConfirmDialog. App.tsx listens for studio:request-delete.

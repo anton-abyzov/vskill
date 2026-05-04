@@ -107,13 +107,14 @@ function makeSkill(over: Partial<SkillInfo> = {}): SkillInfo {
   };
 }
 
-describe("RightPanel — 5-tab IA (0805 — Tests promoted back; 0792 T-013 was 4-tab)", () => {
-  it("renders exactly 5 tabs (Overview/Edit/Tests/Run/History) for source-origin skills", () => {
+describe("RightPanel — 6-tab IA (0823 — Source added; 0805 — Tests promoted back; 0792 T-013 was 4-tab)", () => {
+  it("renders exactly 6 tabs (Overview/Source/Edit/Tests/Run/History) for source-origin skills", () => {
     const tree = RightPanel({ selectedSkillInfo: makeSkill() });
     const tabs = findAll(tree, (el) => el.props?.role === "tab");
     const ids = tabs.map((t) => t.props["data-testid"] as string);
     expect(ids).toEqual([
       "detail-tab-overview",
+      "detail-tab-source",
       "detail-tab-edit",
       "detail-tab-tests",
       "detail-tab-run",
@@ -123,12 +124,13 @@ describe("RightPanel — 5-tab IA (0805 — Tests promoted back; 0792 T-013 was 
     expect(tablist).toBeDefined();
   });
 
-  it("hides Edit for installed-origin (consumer) skills, leaving Overview/Tests/Run/History", () => {
+  it("hides Edit for installed-origin (consumer) skills, leaving Overview/Source/Tests/Run/History", () => {
     const tree = RightPanel({ selectedSkillInfo: makeSkill({ origin: "installed" }) });
     const tabs = findAll(tree, (el) => el.props?.role === "tab");
     const ids = tabs.map((t) => t.props["data-testid"] as string);
     expect(ids).toEqual([
       "detail-tab-overview",
+      "detail-tab-source",
       "detail-tab-tests",
       "detail-tab-run",
       "detail-tab-history",

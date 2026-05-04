@@ -1159,7 +1159,8 @@ describe("addCommand multi-skill discovery (GitHub path)", () => {
     expect(mockDiscoverSkills).not.toHaveBeenCalled();
     // Should fetch from skills/specific/SKILL.md
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/owner/repo/main/skills/specific/SKILL.md"
+      "https://raw.githubusercontent.com/owner/repo/main/skills/specific/SKILL.md",
+      expect.anything(),
     );
   });
 
@@ -1206,7 +1207,8 @@ describe("addCommand multi-skill discovery (GitHub path)", () => {
 
     // Should fall back to fetching root SKILL.md directly
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/owner/repo/main/SKILL.md"
+      "https://raw.githubusercontent.com/owner/repo/main/SKILL.md",
+      expect.anything(),
     );
     expect(mockRunTier1Scan).toHaveBeenCalledTimes(1);
   });
@@ -1250,7 +1252,8 @@ describe("addCommand source format routing", () => {
 
     expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md"
+      "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md",
+      expect.anything(),
     );
     expect(mockRunTier1Scan).toHaveBeenCalledTimes(1);
   });
@@ -1337,7 +1340,7 @@ describe("addCommand source format routing", () => {
 
     // 2-part with --skill flag
     await addCommand("owner/repo", { skill: "specific" });
-    expect(globalThis.fetch).toHaveBeenCalledWith(expectedUrl);
+    expect(globalThis.fetch).toHaveBeenCalledWith(expectedUrl, expect.anything());
 
     // Reset fetch mock
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockClear();
@@ -1358,7 +1361,7 @@ describe("addCommand source format routing", () => {
 
     // 3-part format
     await addCommand("owner/repo/specific", {});
-    expect(globalThis.fetch).toHaveBeenCalledWith(expectedUrl);
+    expect(globalThis.fetch).toHaveBeenCalledWith(expectedUrl, expect.anything());
   });
 
   // TC-026: 3-part format shows repo-not-found error when repo does not exist
@@ -1406,7 +1409,8 @@ describe("addCommand source format routing", () => {
 
     expect(mockDiscoverSkills).toHaveBeenCalledWith("anton-abyzov", "vskill");
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/anton-abyzov/vskill/main/plugins/skills/skills/scout/SKILL.md"
+      "https://raw.githubusercontent.com/anton-abyzov/vskill/main/plugins/skills/skills/scout/SKILL.md",
+      expect.anything(),
     );
   });
 
@@ -1420,7 +1424,8 @@ describe("addCommand source format routing", () => {
 
     expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md"
+      "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md",
+      expect.anything(),
     );
   });
 
@@ -1432,7 +1437,8 @@ describe("addCommand source format routing", () => {
 
     expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md"
+      "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md",
+      expect.anything(),
     );
   });
 });

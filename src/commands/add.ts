@@ -32,6 +32,7 @@ import { getSkill, searchSkills } from "../api/client.js";
 import type { SkillSearchResult } from "../api/client.js";
 import { checkPlatformSecurity } from "../security/index.js";
 import { discoverSkills, getDefaultBranch, checkRepoExists, warnRateLimitOnce } from "../discovery/github-tree.js";
+import { githubFetch, GitHubFetchError } from "../lib/github-fetch.js";
 import { parseGitHubSource, classifyIdentifier } from "../utils/validation.js";
 import {
   parseSkillsShUrl,
@@ -62,7 +63,12 @@ import { extractFrontmatterVersion } from "../utils/version.js";
 // mutation to the claude CLI (ADR 0724-01), and we honour the --no-enable
 // flag to skip it. Uninstall is imported for F-003 rollback of earlier
 // already-enabled plugins on a partway failure.
-import { claudePluginInstall, claudePluginUninstall } from "../utils/claude-plugin.js";
+import {
+  claudePluginInstall,
+  claudePluginUninstall,
+  claudePluginMarketplaceAdd,
+  claudePluginMarketplaceList,
+} from "../utils/claude-plugin.js";
 import {
   buildPerAgentReport,
   resolvePluginId,
@@ -99,7 +105,7 @@ async function parseManifestFromContentsApi(
 ): Promise<string | null> {
   // Prefer download_url for raw content — validate URL before fetching (SSRF prevention)
   if (data.download_url && isGitHubDownloadUrl(data.download_url)) {
-    const rawRes = await fetch(data.download_url);
+    const rawRes = await githubFetch(data.download_url);
     if (rawRes.ok) {
       const content = await rawRes.text();
       if (getAvailablePlugins(content).length > 0) return content;
@@ -129,7 +135,7 @@ export async function detectMarketplaceRepo(
 
   // Attempt 1: Contents API
   try {
-    const res = await fetch(contentsUrl, { headers });
+    const res = await githubFetch(contentsUrl, { headers });
     if (res.status === 404) return { isMarketplace: false };
     if (res.status === 403) warnRateLimitOnce(res);
     if (res.ok) {
@@ -144,7 +150,7 @@ export async function detectMarketplaceRepo(
   // Attempt 2: Retry Contents API after 1s delay
   try {
     await new Promise((r) => setTimeout(r, 1000));
-    const res = await fetch(contentsUrl, { headers });
+    const res = await githubFetch(contentsUrl, { headers });
     if (res.status === 404) return { isMarketplace: false };
     if (res.status === 403) warnRateLimitOnce(res);
     if (res.ok) {
@@ -160,7 +166,7 @@ export async function detectMarketplaceRepo(
   try {
     const branch = await getDefaultBranch(owner, repo);
     const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/.claude-plugin/marketplace.json`;
-    const res = await fetch(rawUrl);
+    const res = await githubFetch(rawUrl);
     if (res.ok) {
       const content = await res.text();
       if (getAvailablePlugins(content).length > 0) {
@@ -250,7 +256,7 @@ async function installMarketplaceRepo(
         // Not in marketplace or unregistered list — probe plugins/<name>/ folder directly
         let probeSource: string | null = null;
         try {
-          const probeRes = await fetch(
+          const probeRes = await githubFetch(
             `https://api.github.com/repos/${owner}/${repo}/contents/plugins/${preSelected[0]}`,
             { headers: { "User-Agent": "vskill-cli" } },
           );
@@ -429,7 +435,7 @@ async function installMarketplaceRepo(
         // Discover skills: try nested {pluginPath}/skills/ first, fall back to flat {pluginPath}/SKILL.md
         const skillsToSubmit: Array<{ name: string; path: string }> = [];
         const skillsUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${pluginPath}/skills`;
-        const skillsRes = await fetch(skillsUrl, { headers: { "User-Agent": "vskill-cli" } });
+        const skillsRes = await githubFetch(skillsUrl, { headers: { "User-Agent": "vskill-cli" } });
         if (skillsRes.ok) {
           const skillDirs = ((await skillsRes.json()) as Array<{ name: string; type: string }>)
             .filter((e) => e.type === "dir");
@@ -526,26 +532,29 @@ async function installMarketplaceRepo(
   ];
 
   for (const plugin of allPluginsToInstall) {
-    const pluginPath = plugin.source.replace(/^\.\//, "");
-    if (!pluginPath) {
-      results.push({ name: plugin.name, installed: false, method: "failed" });
-      continue;
-    }
+    // 0826: a marketplace plugin whose `source` is `"./"` lives at the repo
+    // root — the previous guard (`if (!pluginPath) … failed`) short-circuited
+    // those installs. Keep the path normalization but allow an empty value to
+    // mean "repo root" instead of treating it as a hard failure. Build URL
+    // segments with a leading-slash prefix only when there's a real path so
+    // we don't emit `//` between the contents-API base and `skills`.
+    const pluginPath = plugin.source.replace(/^\.\//, "").replace(/\/$/, "");
+    const pathSegment = pluginPath ? `/${pluginPath}` : "";
     const installSpin = spinner(`Installing skills: ${bold(plugin.name)}`);
 
     try {
       // Discover skills: try {pluginPath}/skills/ first, then fall back to {pluginPath}/SKILL.md
       const installedSkillNames: string[] = [];
-      const skillsUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${pluginPath}/skills`;
-      const skillsRes = await fetch(skillsUrl, { headers: { "User-Agent": "vskill-cli" } });
+      const skillsUrl = `https://api.github.com/repos/${owner}/${repo}/contents${pathSegment}/skills`;
+      const skillsRes = await githubFetch(skillsUrl, { headers: { "User-Agent": "vskill-cli" } });
 
       if (skillsRes.ok) {
         // Nested layout: {pluginPath}/skills/{skillName}/SKILL.md
         const skillDirs = ((await skillsRes.json()) as Array<{ name: string; type: string }>)
           .filter((e) => e.type === "dir");
         for (const sd of skillDirs) {
-          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/skills/${sd.name}/SKILL.md`;
-          const contentRes = await fetch(rawUrl);
+          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}${pathSegment}/skills/${sd.name}/SKILL.md`;
+          const contentRes = await githubFetch(rawUrl);
           if (!contentRes.ok) continue;
           const content = await contentRes.text();
           const namespacedName = sd.name === plugin.name ? plugin.name : `${plugin.name}/${sd.name}`;
@@ -564,8 +573,8 @@ async function installMarketplaceRepo(
         }
       } else {
         // Flat layout: {pluginPath}/SKILL.md directly in the plugin root
-        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/SKILL.md`;
-        const contentRes = await fetch(rawUrl);
+        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}${pathSegment}/SKILL.md`;
+        const contentRes = await githubFetch(rawUrl);
         if (contentRes.ok) {
           const content = await contentRes.text();
           const processedContent = ensureFrontmatter(content, plugin.name);
@@ -642,8 +651,15 @@ async function installMarketplaceRepo(
   // `enabledSoFar` so that a later failure rolls back all earlier
   // already-enabled plugins (otherwise we'd leave exactly the stale
   // `enabledPlugins` entries that `vskill cleanup` is meant to fix).
+  // 0826: include `opts.global` here. Previously a Studio "Global" install
+  // (or CLI `vskill install … --global`) wrote the SKILL.md stub to disk
+  // but never invoked `claude plugin install` — leaving the plugin
+  // unenabled. The user saw the skill on disk but Claude Code didn't load
+  // it. Treat --global as opt-in to the enable hook (scope = user, since
+  // --global is per-machine, not per-repo).
   const userOptedIn =
     opts.scope !== undefined ||
+    opts.global === true ||
     opts.dryRun === true ||
     opts.enable === false;
   if (userOptedIn) {
@@ -826,12 +842,78 @@ export function enableAfterInstall(
     );
     return { invoked: false, pluginId, scope };
   }
+  // 0826: when the source repo is a Claude Code plugin marketplace that
+  // hasn't been registered yet, `claude plugin install foo@bar` fails with
+  // "Plugin foo not found in marketplace bar" — and the rollback then
+  // wipes the on-disk extraction we just succeeded at. Detect that case
+  // up-front from the lockfile entry's marketplace metadata and register
+  // the marketplace via `claude plugin marketplace add` before delegating
+  // the install. Best-effort — if the add fails (network, invalid source)
+  // we still attempt the install so the original error is surfaced.
+  ensureMarketplaceRegistered(entry, pluginId, scope);
   claudePluginInstall(
     pluginId,
     scope,
     scope === "project" ? { cwd: process.cwd() } : undefined,
   );
   return { invoked: true, pluginId, scope };
+}
+
+/**
+ * 0826: Ensure the marketplace referenced by `entry` is registered with the
+ * claude CLI before we try to enable the plugin. The lockfile entry shape
+ * stores the marketplace name (e.g. `postiz-agent`) plus the originating
+ * `sourceRepoUrl` — we derive `<owner>/<repo>` from the URL and run
+ * `claude plugin marketplace add` if the name is missing from the current
+ * `claude plugin marketplace list`.
+ *
+ * Pure best-effort: any failure (network, parse) falls through silently and
+ * lets the subsequent `claudePluginInstall` surface the real error.
+ */
+function ensureMarketplaceRegistered(
+  entry: { marketplace?: string; sourceRepoUrl?: string },
+  pluginId: string,
+  scope: "user" | "project",
+): void {
+  const marketplaceName = entry.marketplace;
+  if (!marketplaceName) return;
+  // Already registered — nothing to do.
+  let registered: string[] = [];
+  try {
+    registered = claudePluginMarketplaceList();
+  } catch {
+    return;
+  }
+  if (registered.includes(marketplaceName)) return;
+  // Derive a `claude plugin marketplace add` source from the lockfile.
+  // GitHub URL → `owner/repo`; falls back to `marketplace@<id>` form which
+  // claude rejects with a clear message.
+  const repoSource = entry.sourceRepoUrl?.match(
+    /github\.com\/([^/]+\/[^/]+?)(?:\.git)?\/?$/,
+  );
+  const source = repoSource ? repoSource[1] : "";
+  if (!source) {
+    console.error(
+      dim(
+        `  marketplace "${marketplaceName}" not registered and no source repo URL available — skipping auto-add (claude plugin install will likely fail).`,
+      ),
+    );
+    return;
+  }
+  console.log(
+    dim(`  Registering marketplace "${marketplaceName}" (${source}) — required for ${pluginId}`),
+  );
+  try {
+    claudePluginMarketplaceAdd(source, scope);
+  } catch (err) {
+    // Surface the underlying error but keep going — claudePluginInstall
+    // will still throw a clearer "not found in marketplace" if needed.
+    console.error(
+      dim(
+        `  Failed to auto-register marketplace "${marketplaceName}": ${(err as Error).message.split("\n")[0]}`,
+      ),
+    );
+  }
 }
 
 /**
@@ -1047,7 +1129,7 @@ async function promptInstallOptions(
 async function fetchSkillContent(url: string): Promise<string> {
   const spin = spinner("Fetching skill");
   try {
-    const res = await fetch(url);
+    const res = await githubFetch(url);
     if (!res.ok) {
       spin.stop();
       if (res.status === 404) {
@@ -1439,7 +1521,7 @@ async function installOneGitHubSkill(
   // Fetch content (non-exiting for multi-skill support)
   let content: string;
   try {
-    const res = await fetch(rawUrl);
+    const res = await githubFetch(rawUrl);
     if (!res.ok) {
       return { skillName, installed: false, verdict: "FETCH_FAILED" };
     }
@@ -1496,7 +1578,7 @@ async function installOneGitHubSkill(
     agentFiles = {};
     const fetches = Object.entries(agentRawUrls).map(async ([relPath, url]) => {
       try {
-        const res = await fetch(url);
+        const res = await githubFetch(url);
         if (res.ok) agentFiles![relPath] = await res.text();
       } catch { /* skip failed agent file fetches */ }
     });
@@ -1543,7 +1625,7 @@ async function installAllRepoPlugins(
   const manifestSpin = spinner("Fetching marketplace.json");
   let manifestContent: string;
   try {
-    const res = await fetch(manifestUrl);
+    const res = await githubFetch(manifestUrl);
     if (!res.ok) {
       manifestSpin.stop();
       console.error(
@@ -1620,7 +1702,7 @@ async function installRepoPlugin(
   const manifestSpin = spinner("Fetching marketplace.json");
   let manifestContent: string;
   try {
-    const res = await fetch(manifestUrl);
+    const res = await githubFetch(manifestUrl);
     if (!res.ok) {
       manifestSpin.stop();
       throw new Error(
@@ -1642,7 +1724,7 @@ async function installRepoPlugin(
     // Not in marketplace.json — probe plugins/<name>/ folder in the repo
     const probeSpin = spinner(`Looking for "${pluginName}" folder in repo`);
     try {
-      const probeRes = await fetch(
+      const probeRes = await githubFetch(
         `https://api.github.com/repos/${owner}/${repo}/contents/plugins/${pluginName}`,
         { headers: { "User-Agent": "vskill-cli" } },
       );
@@ -1690,7 +1772,7 @@ async function installRepoPlugin(
   let skillEntries: GHEntry[] = [];
   let flatLayout = false;
   try {
-    const res = await fetch(
+    const res = await githubFetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${pluginPath}/skills`,
       { headers: { "User-Agent": "vskill-cli" } },
     );
@@ -1702,7 +1784,7 @@ async function installRepoPlugin(
   // Flat layout fallback: check for SKILL.md directly at plugin root
   if (skillEntries.length === 0) {
     try {
-      const res = await fetch(
+      const res = await githubFetch(
         `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/SKILL.md`,
       );
       if (res.ok) {
@@ -1714,7 +1796,7 @@ async function installRepoPlugin(
 
   let cmdEntries: GHEntry[] = [];
   try {
-    const res = await fetch(
+    const res = await githubFetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${pluginPath}/commands`,
       { headers: { "User-Agent": "vskill-cli" } },
     );
@@ -1749,7 +1831,7 @@ async function installRepoPlugin(
       ? `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/SKILL.md`
       : `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/skills/${entry.name}/SKILL.md`;
     try {
-      const res = await fetch(rawUrl);
+      const res = await githubFetch(rawUrl);
       if (res.ok) {
         const content = await res.text();
         skills.push({ name: entry.name, content });
@@ -1762,7 +1844,7 @@ async function installRepoPlugin(
   for (const entry of cmdEntries) {
     const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/commands/${entry.name}`;
     try {
-      const res = await fetch(rawUrl);
+      const res = await githubFetch(rawUrl);
       if (res.ok) {
         const content = await res.text();
         commands.push({ name: entry.name, content });
@@ -1977,7 +2059,7 @@ export async function addCommand(
         const pluginPath = plugin.source.replace(/^\.\//, "");
         const subpath = `${pluginPath}/skills/${threeSkill}/SKILL.md`;
         const probeUrl = `https://raw.githubusercontent.com/${threeOwner}/${threeRepo}/${branch}/${subpath}`;
-        const probeRes = await fetch(probeUrl);
+        const probeRes = await githubFetch(probeUrl);
         if (probeRes.ok) {
           return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts, subpath, plugin.name);
         }
@@ -2598,7 +2680,7 @@ async function installSingleSkillLegacy(
         ? skillSubpathOverride.replace(/\/SKILL\.md$/, "/agents")
         : `skills/${skill}/agents`;
       const agentsDirUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${agentsBasePath}`;
-      const dirRes = await fetch(agentsDirUrl, { headers: { Accept: "application/vnd.github.v3+json" } });
+      const dirRes = await githubFetch(agentsDirUrl, { headers: { Accept: "application/vnd.github.v3+json" } });
       if (dirRes.ok) {
         const entries = (await dirRes.json()) as Array<{ name: string; download_url?: string }>;
         const mdEntries = entries.filter((e) => e.name.endsWith(".md") && e.download_url && isGitHubDownloadUrl(e.download_url!));
@@ -2606,7 +2688,7 @@ async function installSingleSkillLegacy(
           legacyAgentFiles = {};
           const fetches = mdEntries.map(async (entry) => {
             try {
-              const res = await fetch(entry.download_url!);
+              const res = await githubFetch(entry.download_url!);
               if (res.ok) legacyAgentFiles![`agents/${entry.name}`] = await res.text();
             } catch { /* skip */ }
           });

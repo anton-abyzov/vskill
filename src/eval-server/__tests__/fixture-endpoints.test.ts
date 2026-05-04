@@ -110,7 +110,10 @@ describe("0707 T-026: /versions for non-git fixture skills", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("x-skill-vcs")).toBe("unavailable");
     const body = await res.json();
-    expect(body).toEqual({ versions: [], count: 0, source: "none" });
+    // 0823: envelope additively includes provider + trackedForUpdates.
+    expect(body).toMatchObject({ versions: [], count: 0, source: "none" });
+    expect(body.trackedForUpdates).toBe(false);
+    expect(body.provider).toBeDefined();
   });
 
   it("works for dash-containing plugin slugs (google-workspace/gws)", async () => {

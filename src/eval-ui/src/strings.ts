@@ -94,7 +94,6 @@ const actions = {
   update: "Update",
   uninstall: "Uninstall",
   retry: "Retry",
-  editPlaceholder: "Edit lands with 0675. Open the file in your editor.",
   // 0722: delete a user-owned skill via OS trash.
   delete: "Delete",
   deletePluginTooltip:
@@ -148,6 +147,13 @@ const toasts = {
   benchmarkQueued: "Benchmark queued.",
   themeUpdated: "Theme updated.",
   skillUpdated: "Skill updated.",
+  // 0820 — Open / Reveal in Editor outcomes.
+  openingInEditor: "Opening in editor…",
+  noEditor: "No editor found. Set $VISUAL or $EDITOR, or install code/cursor.",
+  openFailed: "Could not open in editor.",
+  skillNotFound: "Skill not found on disk.",
+  // 0820 — uninstall is wired to the menu but the confirm flow lands later.
+  uninstallNotImplemented: "Uninstall is not yet available from this menu.",
   // Error toasts.
   actionFailed: "Action failed. Retry or check logs.",
   networkError: "Network error. Check your connection.",

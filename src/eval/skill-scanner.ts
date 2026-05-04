@@ -206,10 +206,22 @@ function getInstalledPrefixes(): Set<string> {
  * over any other `scopeV2` since the plugin manifest is the source of truth
  * for that subtree.
  *
- * Returns a new array; does not mutate input. When duplicates are dropped
- * the dropped entries are reported via `console.warn` once per call so
- * regressions stay visible.
+ * Returns a new array; does not mutate input.
+ *
+ * 0826: previously the warn fired on every call — the studio polls scanners
+ * several times per second, so a stable overlap (e.g. an authoring-plugin
+ * shadowing an authoring-project mirror) flooded the terminal with the same
+ * line dozens of times before the user even did anything. Switched to
+ * "log once per signature" so regressions still surface, but only when the
+ * set of dropped rows actually changes.
  */
+let lastDedupeWarnSignature: string | null = null;
+
+/** Test-only — reset the per-process warn de-bouncer between cases. */
+export function __resetDedupeWarnCache(): void {
+  lastDedupeWarnSignature = null;
+}
+
 export function dedupeByDir(skills: SkillInfo[]): SkillInfo[] {
   const byDir = new Map<string, SkillInfo>();
   const dropped: { dir: string; kept: string; dropped: string }[] = [];
@@ -235,12 +247,23 @@ export function dedupeByDir(skills: SkillInfo[]): SkillInfo[] {
   }
 
   if (dropped.length > 0) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      `[0740] dedupeByDir collapsed ${dropped.length} duplicate skill ${dropped.length === 1 ? "row" : "rows"}: ${
-        dropped.map((d) => `${d.dir} (kept ${d.kept}, dropped ${d.dropped})`).join("; ")
-      }`,
-    );
+    const signature = dropped
+      .map((d) => `${d.dir}|${d.kept}|${d.dropped}`)
+      .sort()
+      .join("\n");
+    if (signature !== lastDedupeWarnSignature) {
+      lastDedupeWarnSignature = signature;
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[0740] dedupeByDir collapsed ${dropped.length} duplicate skill ${dropped.length === 1 ? "row" : "rows"}: ${
+          dropped.map((d) => `${d.dir} (kept ${d.kept}, dropped ${d.dropped})`).join("; ")
+        }`,
+      );
+    }
+  } else if (lastDedupeWarnSignature !== null) {
+    // The overlap was resolved (e.g. user removed the duplicate dir) — clear
+    // the cache so the next regression logs again.
+    lastDedupeWarnSignature = null;
   }
 
   return Array.from(byDir.values());

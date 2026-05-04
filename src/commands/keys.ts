@@ -24,6 +24,7 @@ import {
   redactKey,
 } from "../eval-server/settings-store.js";
 import { readSecretFromStdin } from "./masked-stdin.js";
+import { getDefaultKeychain, redactToken } from "../lib/keychain.js";
 
 export interface KeysCommandIO {
   stdout: { write: (s: string) => boolean };
@@ -50,17 +51,24 @@ function usageText(): string {
     "Usage: vskill keys <subcommand>",
     "",
     "Subcommands:",
-    "  set <provider>    Store an API key (provider: anthropic, openai, openrouter)",
+    "  set <provider>    Store an API key (provider: anthropic, openai, openrouter, github)",
     "  list              Show stored keys (redacted) and sources",
     "  remove <provider> Delete a stored key",
     "  path              Print absolute path of keys.env",
+    "",
+    "Note: `set github` and `remove github` operate on the OS keychain.",
+    "      For interactive sign-in via GitHub Device Flow, use `vskill auth login` instead.",
     "",
   ].join("\n");
 }
 
 function knownProvidersHint(): string {
-  const ids = PROVIDERS.map((p) => p.id).join(", ");
+  const ids = [...PROVIDERS.map((p) => p.id), "github"].join(", ");
   return `Known providers: ${ids}`;
+}
+
+function isGithubProvider(p: string): boolean {
+  return p === "github";
 }
 
 function pad(s: string, width: number): string {
@@ -74,6 +82,30 @@ async function cmdSet(provider: string | undefined, io: KeysCommandIO): Promise<
       `Usage: vskill keys set <provider>\n${knownProvidersHint()}\n`,
     );
     io.exit(1);
+    return;
+  }
+  if (isGithubProvider(provider)) {
+    if (!io.isPiped()) {
+      io.stdout.write(
+        "Paste GitHub token (input masked).\n" +
+          "Tip: prefer `vskill auth login` for an interactive Device Flow.\n" +
+          "GitHub token: ",
+      );
+    }
+    const token = (await io.readKeyFromStdin()).trim();
+    if (!token) {
+      io.stderr.write("no token provided\n");
+      io.exit(1);
+      return;
+    }
+    try {
+      getDefaultKeychain().setGitHubToken(token);
+    } catch (err) {
+      io.stderr.write(`failed to save GitHub token: ${(err as Error).message}\n`);
+      io.exit(1);
+      return;
+    }
+    io.stdout.write(`Stored ${redactToken(token)} for github (OS keychain)\n`);
     return;
   }
   if (!isProviderId(provider)) {
@@ -116,6 +148,20 @@ async function cmdList(io: KeysCommandIO): Promise<void> {
   const rows: string[][] = [];
 
   let anyAvailable = false;
+
+  // GitHub slot — backed by OS keychain (or 0600 fallback file). Status is
+  // shown without making any network call; `vskill auth status` is the
+  // canonical way to validate the token against /user.
+  try {
+    const ghToken = getDefaultKeychain().getGitHubToken();
+    const fallback = getDefaultKeychain().usingFallback();
+    const ghStatus = ghToken ? redactToken(ghToken) : "not set";
+    const ghSource = ghToken ? (fallback ? "file (0600)" : "keychain") : "—";
+    rows.push(["github", ghStatus, "—", ghSource]);
+    if (ghToken) anyAvailable = true;
+  } catch {
+    rows.push(["github", "unavailable", "—", "—"]);
+  }
 
   for (const p of PROVIDERS) {
     const meta = list[p.id];
@@ -173,6 +219,15 @@ async function cmdRemove(provider: string | undefined, io: KeysCommandIO): Promi
       `Usage: vskill keys remove <provider>\n${knownProvidersHint()}\n`,
     );
     io.exit(1);
+    return;
+  }
+  if (isGithubProvider(provider)) {
+    const had = getDefaultKeychain().clearGitHubToken();
+    io.stdout.write(
+      had
+        ? "Removed github token from OS keychain\n"
+        : "No github token was stored\n",
+    );
     return;
   }
   if (!isProviderId(provider)) {

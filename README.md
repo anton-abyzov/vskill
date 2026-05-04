@@ -133,9 +133,70 @@ npx vskill@latest skill new            # create a new skill (AI-assisted)
 npx vskill@latest eval sweep <skill>   # benchmark across models
 npx vskill@latest audit --ci           # SARIF v2.1.0 for CI
 npx vskill@latest keys set anthropic   # store API keys in ~/.vskill/keys.env
+npx vskill@latest auth login           # sign in to GitHub for private skills
 ```
 
 Full reference → [verified-skill.com/docs/cli-reference](https://verified-skill.com/docs/cli-reference)
+
+<br/>
+
+## Authentication (GitHub, for private skills)
+
+`vskill auth` signs you in to GitHub using the official Device Flow so the CLI
+can install skills from private repos and the local Studio can list your org's
+private catalog.
+
+```bash
+npx vskill@latest auth login    # interactive Device Flow — copy code, visit URL
+npx vskill@latest auth status   # show the current GitHub identity
+npx vskill@latest auth logout   # forget the GitHub token
+```
+
+How it works:
+
+1. `vskill auth login` requests a device + user code from `github.com/login/device/code`.
+2. You visit `https://github.com/login/device` and enter the 8-character code (rendered as `XXXX-XXXX`).
+3. The CLI polls `github.com/login/oauth/access_token` until you authorize, then validates against `api.github.com/user`.
+4. The resulting token is stored in your **OS keychain** (macOS Keychain / Windows DPAPI / libsecret).
+   On systems without a keyring daemon, the token falls back to `~/.vskill/keys.env` with mode `0600` and a startup warning.
+
+Where the token is used:
+
+- **`vskill install <github-url>`** — added as `Authorization: Bearer …` on every fetch to `api.github.com` and `raw.githubusercontent.com`. Public skills still install anonymously.
+- **`vskill studio`** — the local eval-server proxies private routes (`/api/v1/private/*`, `/api/v1/tenants/*`) to verified-skill.com with the bearer header injected at the proxy boundary. Your browser never holds the token.
+
+Configuration:
+
+- `VSKILL_GITHUB_CLIENT_ID` — the OAuth/App `client_id` used during Device Flow. Defaults are baked in for the public Skill Studio App; set this only if you are running a self-hosted variant.
+
+Inspect status of all credentials in one place:
+
+```bash
+npx vskill@latest keys list      # shows AI provider keys + the github slot
+```
+
+### Private skill workflow
+
+Once authenticated, installing a private org skill is identical to a public one — the CLI silently attaches the keychain token to every `api.github.com` and `raw.githubusercontent.com` request:
+
+```bash
+npx vskill@latest auth login                                # one-time setup
+npx vskill@latest add https://github.com/<org>/<repo>       # private skill installs same as public
+```
+
+The local skill bundle on disk **never contains** your GitHub token — the token is used only at fetch time. Your project's `vskill.lock` records `source: "private"` and the org name so future updates re-authenticate correctly.
+
+Customer-facing setup walkthrough → [`.specweave/docs/external/private-repos-quickstart.md`](../../../.specweave/docs/external/private-repos-quickstart.md) (in the umbrella repo).
+
+## Security & Compliance
+
+Skill Studio private-repo support (increment 0826) ships with documented threat model, verification checklist, SOC 2 evidence map, and operational runbooks — all in the umbrella repo under `.specweave/docs/`:
+
+- **Customer quickstart** — `.specweave/docs/external/private-repos-quickstart.md`
+- **Vendor security questionnaire** — `.specweave/docs/external/security-questionnaire-template.md`
+- **Threat model & verification checklist** — `.specweave/docs/internal/security/0826-*.md`
+- **SOC 2 evidence map** — `.specweave/docs/internal/compliance/0826-soc2-evidence-map.md`
+- **Operations + rotation runbooks** — `.specweave/docs/internal/runbooks/0826-*.md`
 
 <br/>
 

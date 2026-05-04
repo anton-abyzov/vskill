@@ -442,12 +442,28 @@ export function SkillDetailPanel({
       } else {
         dispatchToastFallback(finalMsg, okFinal ? "success" : "error", okFinal ? 4000 : 8000);
       }
+      // 0826: dismiss the dialog after a successful install. The user has
+      // their toast confirmation and the panel has nothing more to do —
+      // staying open looked like the install was still in progress. We also
+      // broadcast `studio:skill-installed` so installed-skill listings refresh
+      // immediately. Failures keep the dialog open so the user can read the
+      // error and decide whether to copy the manual command.
+      if (okFinal) {
+        if (typeof window !== "undefined") {
+          try {
+            window.dispatchEvent(
+              new CustomEvent("studio:skill-installed", { detail: { skill: target, scope } }),
+            );
+          } catch { /* non-fatal */ }
+        }
+        handleBack();
+      }
     });
     es.onerror = () => {
       clearTimeout(safetyTimer);
       try { es.close(); } catch { /* */ }
     };
-  }, [installResult, publisher, slug, scope, onToast, handleCopy]);
+  }, [installResult, publisher, slug, scope, onToast, handleCopy, handleBack]);
 
   const trustTier: TrustTier = (meta?.trustTier as TrustTier | undefined) ?? "T1";
   const certTier: CertificationTier =
@@ -750,12 +766,18 @@ export function SkillDetailPanel({
                     <span>Scope:</span>
                     {(["project", "user", "global"] as const).map((s) => {
                       const checked = scope === s;
+                      // 0826: tooltips explain *where* the skill files land so
+                      // the user picks scope from observable behavior, not
+                      // jargon. Global = every detected agent (Claude Code,
+                      // Cursor, Codex, …) on this machine — not a plugin
+                      // marker. Plugin vs single-skill is auto-detected by
+                      // the CLI from the source repo, independent of scope.
                       const description =
                         s === "project"
-                          ? "Per-repo .claude/ — only this project"
+                          ? "Per-repo .claude/skills/ — only this repo can see it"
                           : s === "user"
-                            ? "~/.claude/ — every project on this account"
-                            : "System agent dirs — every agent on this machine";
+                            ? "~/.claude/skills/ — every repo under your user, Claude Code only"
+                            : "Every detected AI agent on this machine (~/.agents/skills/ + ~/.claude/skills/, ~/.cursor/skills/, …)";
                       const label = s === "global" ? "Global" : s === "user" ? "User" : "Project";
                       return (
                         <button

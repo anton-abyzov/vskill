@@ -25,9 +25,18 @@ vi.mock("../../commands/outdated.js", () => ({
   getOutdatedJson: mocks.getOutdatedJson,
 }));
 
-vi.mock("../utils/scan-install-locations.js", () => ({
-  scanSkillInstallLocations: mocks.scanSkillInstallLocations,
-}));
+// 0820 follow-up: the route now imports `pickHighestPrecedenceLocation`
+// from the same module. Keep the real helper so the route still picks a
+// winner from whatever the mocked scanner returns.
+vi.mock("../utils/scan-install-locations.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../utils/scan-install-locations.js")
+  >("../utils/scan-install-locations.js");
+  return {
+    ...actual,
+    scanSkillInstallLocations: mocks.scanSkillInstallLocations,
+  };
+});
 
 import { registerRoutes } from "../api-routes.js";
 

@@ -93,6 +93,23 @@ export function CheckNowButton({
     }, RESCAN_TIMEOUT_MS);
     try {
       await api.rescanSkill(plugin, skill);
+      // 0823 F-001: clear spinner on POST success. The rescan endpoint is
+      // synchronous (does the upstream fetch + emits the bus event before
+      // returning), so its resolution IS the "we're done" signal — waiting
+      // for an SSE push that may never arrive (the platform stream is upstream-
+      // sourced) would always hit the 30s timeout fallback.
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      // Read the push map directly (not via the stale `loading` closure) to
+      // decide whether to surface the "no changes detected" tip.
+      const entryNow = studio.updatesById.get(skillId);
+      const startedAt = startedAtRef.current ?? 0;
+      const hadPush = !!entryNow && entryNow.receivedAt >= startedAt;
+      setLoading(false);
+      if (!hadPush) setShowNoChanges(true);
+      startedAtRef.current = null;
     } catch {
       // Abort the timeout — AC-US8-03 treats failures as "no spinner, no
       // toast" per the minimal tooltip contract. The surrounding RightPanel

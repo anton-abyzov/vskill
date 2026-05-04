@@ -255,15 +255,15 @@ describe("QA: DetailHeader copy button [AC-US3-01]", () => {
 // ---------------------------------------------------------------------------
 describe("QA: RightPanel tab wiring [AC-US3-01, AC-US3-08]", () => {
   it("renders tabs with role='tab' + aria-controls pointing at the panel id", () => {
-    // 0805: 5-tab IA (Overview/Edit/Tests/Run/History) — Tests restored as
-    // a top-level peer between Edit and Run.
+    // 0823: 6-tab IA (Overview/Source/Edit/Tests/Run/History) — Source added
+    // as the read-only sibling of Edit so installed copies have a body view.
     const tree = RightPanel({ selectedSkillInfo: makeSkill(), activeDetailTab: "overview" });
     const tabs = findAll(tree, (el) => (el.props as Record<string, unknown>).role === "tab");
-    expect(tabs.length).toBe(5);
+    expect(tabs.length).toBe(6);
     for (const t of tabs) {
       const controls = String(t.props["aria-controls"]);
       expect(controls).toMatch(
-        /^detail-panel-(overview|edit|tests|run|history)$/,
+        /^detail-panel-(overview|source|edit|tests|run|history)$/,
       );
     }
   });

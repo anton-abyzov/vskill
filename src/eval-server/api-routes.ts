@@ -2873,6 +2873,16 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     //   500 lockfile-write-failed      — writeLockfile threw
     //   500 trash-failed               — trash threw
     //   200 ok                         — entry removed from lockfile, dir trashed
+    //
+    // 0786 review F-003: lockfile key is currently the bare skill name
+    // (`lock.skills[params.skill]`) — params.plugin is intentionally NOT part
+    // of the key because the on-disk layout `~/.claude/skills/<skill>/` is
+    // unscoped. If two installed skills ever share the same name across
+    // different plugins, this gate disambiguates the FIRST uninstall correctly
+    // (entry removed) and 422s the SECOND (no entry left). The pre-0786 flow
+    // had the same shape; documenting the limitation here so future contributors
+    // don't accidentally introduce a plugin-scoped check on one side without
+    // updating writeLockfile / skill-list (api-routes.ts:1940 same shape).
     let lockfileEntryExists = false;
     try {
       const lockBefore = readLockfile(root);

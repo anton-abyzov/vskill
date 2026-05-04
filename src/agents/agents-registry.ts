@@ -60,9 +60,14 @@ export interface AgentDefinition {
   featureSupport: FeatureSupport;
   /** Directory path for cached plugin installations (agent-specific) */
   pluginCacheDir?: string;
-  /** Directory where marketplace-synced plugin SOURCES live. Differs from pluginCacheDir:
-   *  cache holds INSTALLED plugins at `{dir}/{marketplace}/{plugin}/`, marketplaces hold
-   *  SOURCES at `{dir}/{marketplace}/plugins/{plugin}/` (extra `/plugins/` segment). */
+  /** 0786 (AC-US2-06, T-012): Marketplace dir is the catalog of *available*
+   *  plugins — NEVER use this for installed-status detection. Installed plugins
+   *  live under `pluginCacheDir`. This field exists so future UI can offer
+   *  "Install from marketplace" affordances based on catalog presence.
+   *
+   *  Layout differs from pluginCacheDir: cache holds INSTALLED plugins at
+   *  `{dir}/{marketplace}/{plugin}/`, marketplaces hold SOURCES at
+   *  `{dir}/{marketplace}/plugins/{plugin}/` (extra `/plugins/` segment). */
   pluginMarketplaceDir?: string;
   /** Win32 override for POSIX-only globalSkillsDir entries (0686 AC-US7-03).
    *  When set, `resolveGlobalSkillsDir` uses this on win32 instead of the

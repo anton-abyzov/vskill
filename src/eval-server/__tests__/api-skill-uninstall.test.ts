@@ -168,22 +168,29 @@ describe("POST /api/skills/:plugin/:skill/uninstall (0780 US-003)", () => {
     expect(body.trashedDir).toBeNull();
   });
 
-  it("AC-US3-04: disk dir but no lockfile entry → trashed, removedFromLockfile=false", async () => {
+  it("AC-US3-03 (0786): disk dir but no lockfile entry → 422 not-installed (lockfile-first gate)", async () => {
+    // 0786: under the lockfile-first gate, a source-authored skill (disk dir
+    // present, no lockfile entry) MUST be rejected as not-installed so the
+    // UI can route the user to Delete instead of returning a misleading
+    // 200 ok. The disk dir is left untouched — Delete is the correct path.
     writeLock({ "other-skill": { version: "1.0.0", source: "x", scope: "project", files: [] } });
     const dir = writeSkillDir("greet-anton");
     const handler = setupHandler();
     const { status, body } = await runHandler(handler, { plugin: "anton-abyzov", skill: "greet-anton" });
-    expect(status).toBe(200);
-    expect(body.removedFromLockfile).toBe(false);
-    expect(body.trashedDir).toBe(dir);
-    expect(existsSync(dir)).toBe(false);
+    expect(status).toBe(422);
+    expect(body.code).toBe("not-installed");
+    // Disk dir untouched — Delete (DELETE /api/skills/...) is the right path.
+    expect(existsSync(dir)).toBe(true);
   });
 
-  it("AC-US3-05: neither → 404 with code='not-installed'", async () => {
+  it("AC-US3-03 (0786): neither lockfile entry nor disk dir → 422 not-installed", async () => {
+    // 0786: lockfile-first gate fires before any filesystem access; status
+    // is 422 (was 404 pre-0786) so the Studio onFailure handler can render
+    // the friendly "use Delete instead" toast.
     writeLock({});
     const handler = setupHandler();
     const { status, body } = await runHandler(handler, { plugin: "anton-abyzov", skill: "greet-anton" });
-    expect(status).toBe(404);
+    expect(status).toBe(422);
     expect(body.code).toBe("not-installed");
   });
 

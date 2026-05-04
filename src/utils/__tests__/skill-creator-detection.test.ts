@@ -97,14 +97,21 @@ describe("US-002: Marketplace-synced Claude Code installs", () => {
     );
   });
 
-  it("AC-US2-03: detects marketplace-synced skill-creator under ~/.claude/plugins/marketplaces", () => {
+  it("AC-US2-04 (0786): marketplace-only does NOT count as installed — catalog presence is availability, not installation", () => {
+    // 0786: prior to this increment, the marketplace catalog dir at
+    // ~/.claude/plugins/marketplaces/<mkt>/plugins/<name> was treated as
+    // evidence of installation. That dir is just the available-plugin
+    // index — actual installs live under ~/.claude/plugins/cache/. The
+    // Engine Selector and /api/skill-creator-status mislabelled
+    // un-installed engines as installed. Detection now ignores the
+    // marketplace branch.
     const pluginRoot = join(
       fakeHome,
       ".claude/plugins/marketplaces/claude-plugins-official/plugins/skill-creator",
     );
     mkdirSync(pluginRoot, { recursive: true });
     writeFileSync(join(pluginRoot, "README.md"), "# marketplace-synced\n");
-    expect(isSkillCreatorInstalled()).toBe(true);
+    expect(isSkillCreatorInstalled()).toBe(false);
   });
 
   it("AC-US2-04: returns false when marketplace exists but no skill-creator plugin", () => {

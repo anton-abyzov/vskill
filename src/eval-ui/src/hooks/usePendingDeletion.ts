@@ -31,6 +31,18 @@ export interface UsePendingDeletionReturn {
   cancelDelete: (skillKey: string) => void;
   flushPending: () => Promise<void>;
   isPending: (skillKey: string) => boolean;
+  /**
+   * 0786 AC-US1-04: fire a single pending entry's apiCall immediately by
+   * fully-qualified `${plugin}/${skill}` key. Idempotent — resolves with no
+   * apiCall if no entry exists for the key.
+   */
+  flushKey: (skillKey: string) => Promise<void>;
+  /**
+   * 0786: client-friendly variant for the create-skill submit path, which
+   * doesn't always know the resolved plugin at submit time. Flushes any
+   * pending entry whose `skill` matches `skillName` regardless of plugin.
+   */
+  flushBySkillName: (skillName: string) => Promise<void>;
 }
 
 const keyOf = (s: PendingSkill) => `${s.plugin}/${s.skill}`;
@@ -115,6 +127,36 @@ export function usePendingDeletion(
     [],
   );
 
+  // 0786 AC-US1-04: flush a single entry by fully-qualified key. Used by
+  // useCreateSkill's submit path so a same-name re-create after a delete
+  // doesn't race with the still-on-disk folder.
+  const flushKey = useCallback(async (skillKey: string) => {
+    const entry = entriesRef.current.get(skillKey);
+    if (!entry) return;
+    if (entry.timeoutId) {
+      clearTimeout(entry.timeoutId);
+      entry.timeoutId = null;
+    }
+    await commit(entry);
+  }, [commit]);
+
+  // 0786: client-side helper for the create-skill submit path. The client
+  // doesn't always know the resolved plugin at submit time (the server
+  // computes it via skill-create-routes.ts:1259-1280), so we match by
+  // skill name across all pending entries.
+  const flushBySkillName = useCallback(async (skillName: string) => {
+    const matching = Array.from(entriesRef.current.values()).filter(
+      (entry) => entry.skill.skill === skillName,
+    );
+    for (const entry of matching) {
+      if (entry.timeoutId) {
+        clearTimeout(entry.timeoutId);
+        entry.timeoutId = null;
+      }
+    }
+    await Promise.all(matching.map((entry) => commit(entry)));
+  }, [commit]);
+
   // beforeunload — flush pending deletes so the user doesn't lose intent.
   useEffect(() => {
     const handler = () => {
@@ -159,5 +201,5 @@ export function usePendingDeletion(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { enqueueDelete, cancelDelete, flushPending, isPending };
+  return { enqueueDelete, cancelDelete, flushPending, isPending, flushKey, flushBySkillName };
 }

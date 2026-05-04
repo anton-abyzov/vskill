@@ -28,7 +28,13 @@ export interface SkillBuilderDetection {
  * 4. Project-local agent-native: {projectRoot}/{agent.localSkillsDir}/skill-builder
  *    for every agent in AGENTS_REGISTRY (covers .claude/skills, .cursor/skills, etc.)
  * 5. Any registered agent's global skills directory
- * 6. Any agent's plugin cache or marketplace dir
+ * 6. Any agent's plugin cache (e.g. ~/.claude/plugins/cache/)
+ *
+ * 0786 (AC-US2-03/05): marketplace catalog at
+ * `~/.claude/plugins/marketplaces/<mkt>/plugins/<name>` is NOT treated as
+ * installed — it is the *available* plugin index. Only the plugin cache is
+ * evidence of installation. Pre-0786 the marketplace branch caused
+ * Studio's Engine Selector to label uninstalled engines as installed.
  */
 export function isSkillBuilderInstalled(projectRoot?: string): SkillBuilderDetection {
   const home = homedir();
@@ -59,21 +65,29 @@ export function isSkillBuilderInstalled(projectRoot?: string): SkillBuilderDetec
     }
   }
 
-  // Plugin cache + marketplace search — same shape as skill-creator-detection.
+  // Plugin cache search — same shape as skill-creator-detection.
+  // 0786: marketplace catalog branch removed (see JSDoc above). The
+  // findInPluginTree helper is kept as a reusable primitive but is no
+  // longer invoked with the marketplace root.
   for (const agent of AGENTS_REGISTRY) {
     if (agent.pluginCacheDir) {
       const cacheDir = agent.pluginCacheDir.replace("~", home);
       const match = findInPluginTree(cacheDir, /* hasPluginsSubdir */ false);
       if (match) return { installed: true, path: match, version: parseVersionAt(match) };
     }
-    if (agent.pluginMarketplaceDir) {
-      const mktRoot = agent.pluginMarketplaceDir.replace("~", home);
-      const match = findInPluginTree(mktRoot, /* hasPluginsSubdir */ true);
-      if (match) return { installed: true, path: match, version: parseVersionAt(match) };
-    }
   }
 
   return { installed: false, path: null, version: null };
+}
+
+/**
+ * 0786 AC-US2-03: thin wrapper exposing only the matched path. Mirrors
+ * findSkillCreatorPath in shape so route handlers and the Engine Selector
+ * can answer "where is skill-builder installed?" without inspecting the
+ * full SkillBuilderDetection record.
+ */
+export function findSkillBuilderPath(projectRoot?: string): string | null {
+  return isSkillBuilderInstalled(projectRoot).path;
 }
 
 function findInPluginTree(rootDir: string, hasPluginsSubdir: boolean): string | null {

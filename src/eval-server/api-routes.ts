@@ -2856,6 +2856,50 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
       return;
     }
 
+    // 0786 AC-US3-03: lockfile-first gate. The previous flow attempted the
+    // lockfile delete first, then the dir trash, and only returned a generic
+    // 404 not-installed when both fell through — which surfaced as a
+    // cryptic "Couldn't uninstall <skill>: api…" toast on source-authored
+    // skills. Now: read the lockfile up front, and if the skill is not a
+    // lockfile-tracked installed plugin skill, return HTTP 422 with the
+    // structured `not-installed` code so the UI can render a friendly
+    // "use Delete instead" message (see App.tsx pendingUninstall onFailure).
+    //
+    // Response contract:
+    //   400 invalid-skill-name         — bad kebab regex
+    //   400 invalid-path               — path-traversal attempt
+    //   422 not-installed              — skill not in lockfile (this gate)
+    //   500 lockfile-read-failed       — readLockfile threw
+    //   500 lockfile-write-failed      — writeLockfile threw
+    //   500 trash-failed               — trash threw
+    //   200 ok                         — entry removed from lockfile, dir trashed
+    let lockfileEntryExists = false;
+    try {
+      const lockBefore = readLockfile(root);
+      lockfileEntryExists = !!(
+        lockBefore?.skills &&
+        Object.prototype.hasOwnProperty.call(lockBefore.skills, params.skill)
+      );
+    } catch (err) {
+      sendJson(
+        res,
+        { error: `Failed to read lockfile: ${(err as Error).message}`, code: "lockfile-read-failed" },
+        500,
+        req,
+      );
+      return;
+    }
+
+    if (!lockfileEntryExists) {
+      sendJson(
+        res,
+        { error: `${params.skill} is not installed`, code: "not-installed" },
+        422,
+        req,
+      );
+      return;
+    }
+
     let removedFromLockfile = false;
     try {
       const lock = readLockfile(root);
@@ -2893,11 +2937,6 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
         );
         return;
       }
-    }
-
-    if (!removedFromLockfile && trashedDir === null) {
-      sendJson(res, { error: "Skill is not installed", code: "not-installed" }, 404, req);
-      return;
     }
 
     sendJson(res, { ok: true, removedFromLockfile, trashedDir }, 200, req);

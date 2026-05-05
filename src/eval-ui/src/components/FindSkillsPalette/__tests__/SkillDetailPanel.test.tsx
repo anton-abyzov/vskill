@@ -88,6 +88,12 @@ describe("SkillDetailPanel — T-020 parallel fetches", () => {
     let resolveMeta: ((r: Response) => void) | null = null;
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.endsWith("/versions")) return Promise.resolve(jsonResponse({ versions: [] }));
+      // 0827: install-state runs alongside but must not gate the loading
+      // contract — soft-fail it here so the test exercises only the
+      // metadata/versions path it was authored for.
+      if (url.startsWith("/api/studio/install-state")) {
+        return Promise.resolve(jsonResponse({ skill: "x", detectedAgentTools: [], scopes: { project: { installed: false, installedAgentTools: [], version: null }, user: { installed: false, installedAgentTools: [], version: null } } }));
+      }
       return new Promise<Response>((r) => { resolveMeta = r; });
     }) as unknown as typeof fetch;
     const h = await mount({});
@@ -615,6 +621,272 @@ describe("SkillDetailPanel — T-030 a11y", () => {
     const back = h.container.querySelector("[data-testid='skill-detail-back']");
     expect(document.activeElement).toBe(back);
     vi.useRealTimers();
+    await h.unmount();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0827 — install scope picker: two-button (Project | User) + per-scope
+// install-state awareness. Covers AC-US1-01..05, AC-US2-06..09, AC-US3-04.
+// ---------------------------------------------------------------------------
+
+interface InstallStateBody {
+  skill: string;
+  detectedAgentTools: { id: string; displayName: string; localDir: string; globalDir: string }[];
+  scopes: {
+    project: { installed: boolean; installedAgentTools: string[]; version: string | null };
+    user: { installed: boolean; installedAgentTools: string[]; version: string | null };
+  };
+}
+
+function emptyInstallState(skill: string): InstallStateBody {
+  return {
+    skill,
+    detectedAgentTools: [],
+    scopes: {
+      project: { installed: false, installedAgentTools: [], version: null },
+      user: { installed: false, installedAgentTools: [], version: null },
+    },
+  };
+}
+
+function makeFetchHandler(opts: {
+  installState?: InstallStateBody;
+  installStateStatus?: number;
+  onPost?: (body: unknown) => void;
+} = {}) {
+  return vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+    const u = String(url);
+    if (u.startsWith("/api/studio/install-state")) {
+      if (typeof opts.installStateStatus === "number" && opts.installStateStatus >= 400) {
+        return statusResponse(opts.installStateStatus);
+      }
+      return jsonResponse(opts.installState ?? emptyInstallState("obsidian/brain/wiki-sync"));
+    }
+    if (u.includes("/api/studio/install-skill") && init?.method === "POST") {
+      try { opts.onPost?.(JSON.parse(String(init.body))); } catch { /* */ }
+      return jsonResponse({ jobId: "job-x" });
+    }
+    if (u.endsWith("/versions")) return jsonResponse({ versions: [{ version: "1.0.0", isLatest: true }] });
+    return jsonResponse({ displayName: "X", ownerSlug: "obsidian", repoSlug: "brain", skillSlug: "wiki-sync" });
+  });
+}
+
+describe("0827 — SkillDetailPanel scope picker (Project | User only)", () => {
+  // T-009: AC-US1-01 — only Project + User radio buttons rendered, no Global.
+  it("T-009: renders only Project and User scope buttons (no Global)", async () => {
+    globalThis.fetch = makeFetchHandler() as unknown as typeof fetch;
+    const h = await mount({});
+    await flushMicrotasks();
+    expect(h.container.querySelector("[data-testid='skill-detail-install-scope-project']")).toBeTruthy();
+    expect(h.container.querySelector("[data-testid='skill-detail-install-scope-user']")).toBeTruthy();
+    expect(h.container.querySelector("[data-testid='skill-detail-install-scope-global']")).toBeNull();
+    await h.unmount();
+  });
+
+  // T-011: AC-US1-02 — User scope renders ` --global` (not `--scope user`).
+  it("T-011: User scope copy-command renders --global, not --scope user", async () => {
+    globalThis.fetch = makeFetchHandler() as unknown as typeof fetch;
+    const h = await mount({});
+    await flushMicrotasks();
+    const { act } = await import("react");
+    const userBtn = h.container.querySelector("[data-testid='skill-detail-install-scope-user']") as HTMLButtonElement;
+    await act(async () => { userBtn.click(); });
+    await flushMicrotasks();
+    const npmCmd = h.container.querySelector("[data-testid='skill-detail-install-variant-cmd-npm']");
+    expect(npmCmd?.textContent).toMatch(/npx vskill@latest install [^ ]+ --global$/);
+    expect(npmCmd?.textContent).not.toContain("--scope user");
+    await h.unmount();
+  });
+});
+
+describe("0827 — SkillDetailPanel install-state fetch (T-013)", () => {
+  it("T-013: fetches /api/studio/install-state alongside metadata + versions on mount", async () => {
+    const fetchSpy = makeFetchHandler();
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    const h = await mount({});
+    await flushMicrotasks();
+    const calls = fetchSpy.mock.calls.map((c) => String(c[0]));
+    expect(calls.some((u) => u === "/api/v1/skills/obsidian/brain/wiki-sync")).toBe(true);
+    expect(calls.some((u) => u === "/api/v1/skills/obsidian/brain/wiki-sync/versions")).toBe(true);
+    expect(calls.some((u) => u.startsWith("/api/studio/install-state?skill=obsidian%2Fbrain%2Fwiki-sync"))).toBe(true);
+    await h.unmount();
+  });
+});
+
+describe("0827 — SkillDetailPanel disabled-state rendering", () => {
+  // T-015: AC-US2-06 — User scope disabled when scopes.user.installed === true.
+  it("T-015: shows 'Installed ✓ User' disabled with correct title when user scope is installed", async () => {
+    const installState: InstallStateBody = {
+      skill: "obsidian/brain/wiki-sync",
+      detectedAgentTools: [{ id: "claude-code", displayName: "Claude Code", localDir: ".claude/skills", globalDir: "~/.claude/skills" }],
+      scopes: {
+        project: { installed: false, installedAgentTools: [], version: null },
+        user: { installed: true, installedAgentTools: ["claude-code"], version: "2.0.12" },
+      },
+    };
+    globalThis.fetch = makeFetchHandler({ installState }) as unknown as typeof fetch;
+    const h = await mount({});
+    await flushMicrotasks();
+    const userBtn = h.container.querySelector("[data-testid='skill-detail-install-scope-user']") as HTMLButtonElement;
+    expect(userBtn.textContent).toBe("Installed ✓ User");
+    expect(userBtn.getAttribute("aria-disabled")).toBe("true");
+    expect(userBtn.disabled).toBe(true);
+    expect(userBtn.getAttribute("title")).toMatch(/Installed v2\.0\.12 · claude-code/);
+    await h.unmount();
+  });
+
+  // T-017: AC-US2-07 — same contract for project scope.
+  it("T-017: shows 'Installed ✓ Project' disabled with correct title when project scope is installed", async () => {
+    const installState: InstallStateBody = {
+      skill: "obsidian/brain/wiki-sync",
+      detectedAgentTools: [{ id: "cursor", displayName: "Cursor", localDir: ".cursor/skills", globalDir: "~/.cursor/skills" }],
+      scopes: {
+        project: { installed: true, installedAgentTools: ["cursor"], version: "1.4.0" },
+        user: { installed: false, installedAgentTools: [], version: null },
+      },
+    };
+    globalThis.fetch = makeFetchHandler({ installState }) as unknown as typeof fetch;
+    const h = await mount({});
+    await flushMicrotasks();
+    const projBtn = h.container.querySelector("[data-testid='skill-detail-install-scope-project']") as HTMLButtonElement;
+    expect(projBtn.textContent).toBe("Installed ✓ Project");
+    expect(projBtn.getAttribute("aria-disabled")).toBe("true");
+    expect(projBtn.disabled).toBe(true);
+    expect(projBtn.getAttribute("title")).toMatch(/Installed v1\.4\.0 · cursor/);
+    await h.unmount();
+  });
+});
+
+describe("0827 — SkillDetailPanel enabled-button tooltips (T-018)", () => {
+  // T-018: AC-US1-04, AC-US1-05 — enabled tooltips list per-tool destinations.
+  it("T-018: tooltips list detectedAgentTools localDir/globalDir entries (project ./prefix, user ~ as-is)", async () => {
+    const installState: InstallStateBody = {
+      skill: "obsidian/brain/wiki-sync",
+      detectedAgentTools: [
+        { id: "claude-code", displayName: "Claude Code", localDir: ".claude/skills", globalDir: "~/.claude/skills" },
+        { id: "cursor", displayName: "Cursor", localDir: ".cursor/skills", globalDir: "~/.cursor/skills" },
+      ],
+      scopes: {
+        project: { installed: false, installedAgentTools: [], version: null },
+        user: { installed: false, installedAgentTools: [], version: null },
+      },
+    };
+    globalThis.fetch = makeFetchHandler({ installState }) as unknown as typeof fetch;
+    const h = await mount({});
+    await flushMicrotasks();
+    const projBtn = h.container.querySelector("[data-testid='skill-detail-install-scope-project']") as HTMLButtonElement;
+    const userBtn = h.container.querySelector("[data-testid='skill-detail-install-scope-user']") as HTMLButtonElement;
+    expect(projBtn.getAttribute("title")).toMatch(/Will install to: \.\/\.claude\/skills, \.\/\.cursor\/skills/);
+    expect(userBtn.getAttribute("title")).toMatch(/Will install to: ~\/\.claude\/skills, ~\/\.cursor\/skills/);
+    await h.unmount();
+  });
+});
+
+describe("0827 — SkillDetailPanel primary CTA gating (T-020)", () => {
+  // T-020: AC-US2-08 — primary Install CTA disabled when selected scope is installed.
+  it("T-020: primary CTA disabled with 'Already installed at <scope>' tooltip when selected scope is installed", async () => {
+    const installState: InstallStateBody = {
+      skill: "obsidian/brain/wiki-sync",
+      detectedAgentTools: [],
+      scopes: {
+        project: { installed: true, installedAgentTools: ["claude-code"], version: "2.0.12" },
+        user: { installed: false, installedAgentTools: [], version: null },
+      },
+    };
+    globalThis.fetch = makeFetchHandler({ installState }) as unknown as typeof fetch;
+    const h = await mount({});
+    await flushMicrotasks();
+    // Default scope is "project" — and it's installed → CTA disabled.
+    const cta = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
+    expect(cta.disabled).toBe(true);
+    expect(cta.getAttribute("title")).toMatch(/Already installed at project — re-run via CLI to force/);
+    // Switching to user (not installed) re-enables the CTA.
+    const { act } = await import("react");
+    const userBtn = h.container.querySelector("[data-testid='skill-detail-install-scope-user']") as HTMLButtonElement;
+    await act(async () => { userBtn.click(); });
+    await flushMicrotasks();
+    const cta2 = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
+    expect(cta2.disabled).toBe(false);
+    expect(cta2.getAttribute("title")).toBeNull();
+    await h.unmount();
+  });
+});
+
+describe("0827 — SkillDetailPanel re-fetch on studio:skill-installed (T-022)", () => {
+  // T-022: AC-US2-09 — install-state re-fetched after CustomEvent matching skill.
+  it("T-022: re-fetches install-state after studio:skill-installed event with matching skill", async () => {
+    let installStateCallCount = 0;
+    let currentBody: InstallStateBody = emptyInstallState("obsidian/brain/wiki-sync");
+    const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.startsWith("/api/studio/install-state")) {
+        installStateCallCount++;
+        return jsonResponse(currentBody);
+      }
+      if (u.endsWith("/versions")) return jsonResponse({ versions: [{ version: "1.0.0", isLatest: true }] });
+      return jsonResponse({ displayName: "X", ownerSlug: "obsidian", repoSlug: "brain", skillSlug: "wiki-sync" });
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    vi.useFakeTimers();
+    const h = await mount({});
+    await flushMicrotasks();
+    const initialCount = installStateCallCount;
+    expect(initialCount).toBeGreaterThanOrEqual(1);
+
+    // Flip the mocked install-state to "installed at user" before dispatching.
+    currentBody = {
+      skill: "obsidian/brain/wiki-sync",
+      detectedAgentTools: [],
+      scopes: {
+        project: { installed: false, installedAgentTools: [], version: null },
+        user: { installed: true, installedAgentTools: ["claude-code"], version: "2.0.12" },
+      },
+    };
+
+    const { act } = await import("react");
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("studio:skill-installed", {
+        detail: { skill: "obsidian/brain/wiki-sync", scope: "user" },
+      }));
+    });
+    // 50ms debounce + microtask flush.
+    await act(async () => { await vi.advanceTimersByTimeAsync(60); });
+    await flushMicrotasks();
+    vi.useRealTimers();
+
+    expect(installStateCallCount).toBeGreaterThan(initialCount);
+    const userBtn = h.container.querySelector("[data-testid='skill-detail-install-scope-user']") as HTMLButtonElement;
+    expect(userBtn.textContent).toBe("Installed ✓ User");
+    expect(userBtn.disabled).toBe(true);
+    await h.unmount();
+  });
+});
+
+describe("0827 — SkillDetailPanel non-blocking failure (T-024)", () => {
+  // T-024: AC-US3-04 — install-state 5xx leaves the panel functional + warns once.
+  it("T-024: install-state 500 still renders enabled buttons + primary CTA + warns once", async () => {
+    globalThis.fetch = makeFetchHandler({ installStateStatus: 500 }) as unknown as typeof fetch;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try { window.sessionStorage.removeItem("vskill:installState:warned"); } catch { /* */ }
+
+    const h = await mount({});
+    await flushMicrotasks();
+
+    const projBtn = h.container.querySelector("[data-testid='skill-detail-install-scope-project']") as HTMLButtonElement;
+    const userBtn = h.container.querySelector("[data-testid='skill-detail-install-scope-user']") as HTMLButtonElement;
+    const cta = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
+    expect(projBtn.disabled).toBe(false);
+    expect(userBtn.disabled).toBe(false);
+    expect(cta.disabled).toBe(false);
+
+    // Warned exactly once with "install-state" in the message.
+    const warnCalls = warnSpy.mock.calls.filter((args) =>
+      args.some((a) => typeof a === "string" && a.includes("install-state")),
+    );
+    expect(warnCalls.length).toBe(1);
+    warnSpy.mockRestore();
     await h.unmount();
   });
 });

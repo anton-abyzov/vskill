@@ -44,6 +44,16 @@ export interface ActivationHistoryEnvelope {
 export type BenchmarkLatestEnvelope = BenchmarkResult | null;
 
 // ---------------------------------------------------------------------------
+// 0827 — install-state endpoint shape.
+// Source of truth lives in src/eval-ui/src/types/install-state.ts; we
+// re-export so existing consumers can keep importing from "./api".
+// Drives the SkillDetailPanel's per-scope button state machine (US-001 / US-002).
+// ---------------------------------------------------------------------------
+
+export type { DetectedAgentTool, InstallStateForScope, InstallStateResponse } from "./types/install-state.js";
+import type { InstallStateResponse } from "./types/install-state.js";
+
+// ---------------------------------------------------------------------------
 // 0698 T-001: scope normalizer + derivation.
 //
 // The eval-server may return either legacy (`own`/`installed`/`global`) or new
@@ -451,6 +461,14 @@ export const api = {
     const qs = params.toString();
     const raw = await fetchJson<unknown[]>(`/api/skills${qs ? "?" + qs : ""}`);
     return Array.isArray(raw) ? raw.map(normalizeSkillInfo) : [];
+  },
+
+  // 0827: per-skill install state (project, user) for the SkillDetailPanel
+  // scope picker. See InstallStateResponse for shape.
+  getSkillInstallState(skill: string): Promise<InstallStateResponse> {
+    return fetchJson<InstallStateResponse>(
+      `/api/studio/install-state?skill=${encodeURIComponent(skill)}`,
+    );
   },
 
   // 0793: convert a folder of standalone authored skills into a Claude Code

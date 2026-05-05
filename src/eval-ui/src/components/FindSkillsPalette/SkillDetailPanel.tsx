@@ -20,6 +20,7 @@ import { RepoLink } from "./components/RepoLink";
 import RepoHealthBadge from "./components/RepoHealthBadge";
 import TerminalBlock from "./components/TerminalBlock";
 import { skillApiPath } from "../../lib/skill-url";
+import { api, type InstallStateResponse } from "../../api";
 
 // ---------------------------------------------------------------------------
 // Types — minimal shape covering the platform's `/api/v1/skills/...` payload.
@@ -94,13 +95,29 @@ interface InstallVariant {
   command: string;
 }
 
-// 0784: install scope mirrors the `vskill install` CLI flags. project=local
-// per-repo .claude/, user=~/.claude/, global=system agent dirs. Default = project.
-type InstallScope = "project" | "user" | "global";
+// 0827: install scope is binary in the UI — Project (this repo) or User
+// (every detected agent tool's user-level dir). The previous third option
+// "Global" was identical to User in terms of the underlying CLI invocation
+// (`--global` fans out to all detected tools at the user level) but unclear
+// to readers; collapsing the picker to two scopes makes the choice
+// self-explanatory and the disabled-state reasoning per AC-US1-04 sound.
+//
+// Mapping to the displayed CLI flag (informational copy-command only):
+//   project (UI) → ` --scope project`
+//   user    (UI) → ` --global`
+//
+// AC-US1-02: the POST body to /api/studio/install-skill sends the literal
+// scope value `"user"` — the server (install-skill-routes.ts) accepts
+// project | user | global and maps "user" to `--scope user` internally.
+type InstallScope = "project" | "user";
 
+/** Render the visible CLI flag in the copy-command. User → ` --global`. */
 function scopeFlag(scope: InstallScope): string {
-  if (scope === "global") return " --global";
-  return ` --scope ${scope}`;
+  return scope === "user" ? " --global" : ` --scope ${scope}`;
+}
+
+function capitalize(s: InstallScope): string {
+  return s === "user" ? "User" : "Project";
 }
 
 function buildInstallCommand(publisher: string, slug: string, version: string | null, scope: InstallScope): {
@@ -213,6 +230,10 @@ export function SkillDetailPanel({
   const [error, setError] = useState<string | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
   const [scope, setScope] = useState<InstallScope>("project");
+  // 0827: per-scope install-state (null = not yet loaded). Drives the scope
+  // picker's disabled/checkmark state and the primary CTA's "Already
+  // installed" affordance.
+  const [installState, setInstallState] = useState<InstallStateResponse | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const dialogRef = useRef<HTMLDivElement>(null);
   const backLinkRef = useRef<HTMLButtonElement>(null);
@@ -282,6 +303,65 @@ export function SkillDetailPanel({
       });
     return () => { cancelled = true; };
   }, [skillName, retryNonce]);
+
+  // 0827 — install-state lookup runs alongside the meta/versions fetches but
+  // does NOT gate the loading spinner. Older eval-servers without the route
+  // soft-fail to null and the picker degrades to its pre-0827 behavior (AC-US3-04).
+  // A separate effect (instead of bundling into Promise.all above) keeps first
+  // paint independent of this lookup and preserves the existing T-020 loading
+  // contract.
+  useEffect(() => {
+    let cancelled = false;
+    api.getSkillInstallState(skillName).then(
+      (resp) => { if (!cancelled) setInstallState(resp); },
+      () => {
+        if (cancelled) return;
+        // AC-US3-04: leave installState null (drives optimistic "not installed"
+        // rendering). Warn once per session via sessionStorage — the same panel
+        // can mount many times in a session, but each warning would be noise.
+        try {
+          const KEY = "vskill:installState:warned";
+          if (typeof sessionStorage !== "undefined" && !sessionStorage.getItem(KEY)) {
+            sessionStorage.setItem(KEY, "1");
+            console.warn("[SkillDetailPanel] install-state fetch failed; falling back to optimistic not-installed UX");
+          }
+        } catch {
+          // sessionStorage may be unavailable (private mode, jsdom edge cases).
+          // Swallow — the warn-once guard is best-effort.
+        }
+        setInstallState(null);
+      },
+    );
+    return () => { cancelled = true; };
+  }, [skillName, retryNonce]);
+
+  // 0827 — re-fetch install-state when an install completes elsewhere in the
+  // app (handleInstall dispatches `studio:skill-installed` on success). This
+  // lets the panel auto-flip from "Install" to "Installed" without forcing
+  // the user to close + reopen the dialog. Debounced 50ms to coalesce the
+  // event firing alongside the SSE done-frame.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onInstalled = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { skill?: string } | null;
+      if (!detail?.skill || detail.skill !== skillName) {
+        return;
+      }
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        api.getSkillInstallState(skillName).then(
+          (next) => setInstallState(next),
+          () => { /* silent — keep prior state */ },
+        );
+      }, 50);
+    };
+    window.addEventListener("studio:skill-installed", onInstalled as EventListener);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("studio:skill-installed", onInstalled as EventListener);
+    };
+  }, [skillName]);
 
   // Esc closes — restores the palette via onClose. The shell re-opens the
   // palette pre-filled with sessionStorage["find-skills:last-query"] (the
@@ -396,6 +476,10 @@ export function SkillDetailPanel({
       const res = await fetch("/api/studio/install-skill", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // 0827 AC-US1-02: send the literal UI scope ("project" | "user").
+        // Server's VALID_SCOPES accepts both — buildArgs maps "user" to
+        // `--scope user`. The displayed copy-command still shows ` --global`
+        // for the User choice (informational only).
         body: JSON.stringify({ skill: target, scope }),
       });
       if (res.status === 404) {
@@ -746,9 +830,14 @@ export function SkillDetailPanel({
                   <h3 style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-secondary, #5A5651)" }}>
                     Install
                   </h3>
-                  {/* 0784: install scope picker — mirrors `vskill install` CLI
-                      flags. Project = per-repo .claude/, User = ~/.claude/,
-                      Global = system agent dirs. Default = project. */}
+                  {/* 0827: two-scope picker (Project | User). Each pill
+                      reflects per-scope install-state from
+                      /api/studio/install-state — installed scopes are
+                      disabled with a checkmark + tooltip explaining where
+                      it's installed and how to remove it. Tooltip on User
+                      lists the detected agent tools that will receive the
+                      install (drives transparency for the `--global`
+                      fan-out). */}
                   <div
                     role="radiogroup"
                     aria-label="Install scope"
@@ -764,43 +853,56 @@ export function SkillDetailPanel({
                     }}
                   >
                     <span>Scope:</span>
-                    {(["project", "user", "global"] as const).map((s) => {
+                    {(["project", "user"] as const).map((s) => {
                       const checked = scope === s;
-                      // 0826: tooltips explain *where* the skill files land so
-                      // the user picks scope from observable behavior, not
-                      // jargon. Global = every detected agent (Claude Code,
-                      // Cursor, Codex, …) on this machine — not a plugin
-                      // marker. Plugin vs single-skill is auto-detected by
-                      // the CLI from the source repo, independent of scope.
-                      const description =
-                        s === "project"
-                          ? "Per-repo .claude/skills/ — only this repo can see it"
-                          : s === "user"
-                            ? "~/.claude/skills/ — every repo under your user, Claude Code only"
-                            : "Every detected AI agent on this machine (~/.agents/skills/ + ~/.claude/skills/, ~/.cursor/skills/, …)";
-                      const label = s === "global" ? "Global" : s === "user" ? "User" : "Project";
+                      const scopeState = installState?.scopes?.[s];
+                      const isInstalled = scopeState?.installed === true;
+                      const detectedList = installState?.detectedAgentTools ?? [];
+                      // Build the destinations list once; project entries are
+                      // prefixed with "./" to match the spec FR-003 contract.
+                      const projectDests = detectedList.map((a) => `./${a.localDir}`).join(", ");
+                      const userDests = detectedList.map((a) => a.globalDir).join(", ");
+                      const installedTools = scopeState?.installedAgentTools ?? [];
+                      // AC-US2-06/07: disabled tooltip is `Installed v<v> · <ids>`;
+                      // omit the version segment when the lockfile entry has no
+                      // recorded version.
+                      const installedTooltip = scopeState?.version
+                        ? `Installed v${scopeState.version} · ${installedTools.join(", ")}`
+                        : `Installed · ${installedTools.join(", ")}`;
+                      // AC-US1-04 / AC-US1-05: enabled tooltip lists the per-tool
+                      // destinations the install will touch. Falls back to a
+                      // generic copy when detection hasn't loaded yet.
+                      const enabledTooltip = s === "project"
+                        ? (projectDests ? `Will install to: ${projectDests}` : `Install with --scope project`)
+                        : (userDests ? `Will install to: ${userDests}` : `Install with --global`);
+                      const title = isInstalled ? installedTooltip : enabledTooltip;
+                      const label = capitalize(s);
                       return (
                         <button
                           key={s}
                           type="button"
                           role="radio"
                           aria-checked={checked}
+                          aria-disabled={isInstalled}
+                          disabled={isInstalled}
                           data-testid={`skill-detail-install-scope-${s}`}
-                          title={description}
-                          onClick={() => setScope(s)}
+                          data-installed={isInstalled ? "true" : "false"}
+                          title={title}
+                          onClick={() => { if (!isInstalled) setScope(s); }}
                           style={{
                             padding: "0.25rem 0.6rem",
                             borderRadius: 4,
                             border: `1px solid ${checked ? "var(--text-primary, #191919)" : "var(--color-rule, #E8E1D6)"}`,
                             background: checked ? "var(--text-primary, #191919)" : "transparent",
                             color: checked ? "var(--bg-surface, #FFFFFF)" : "var(--text-secondary, #5A5651)",
-                            cursor: "pointer",
+                            cursor: isInstalled ? "not-allowed" : "pointer",
+                            opacity: isInstalled ? 0.55 : 1,
                             fontFamily: "var(--font-mono, monospace)",
                             fontSize: "0.75rem",
                             fontWeight: checked ? 600 : 400,
                           }}
                         >
-                          {label}
+                          {isInstalled ? `Installed ✓ ${label}` : label}
                         </button>
                       );
                     })}
@@ -810,28 +912,49 @@ export function SkillDetailPanel({
                       clipboard write of the canonical npm command, toast,
                       telemetry — is identical regardless of which button the
                       user picks. */}
-                  <button
-                    type="button"
-                    onClick={handleInstall}
-                    data-testid="skill-detail-install-primary"
-                    aria-label="Install skill"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      marginBottom: "0.75rem",
-                      padding: "0.5rem 1rem",
-                      borderRadius: 6,
-                      border: "1px solid var(--text-primary, #191919)",
-                      background: "var(--text-primary, #191919)",
-                      color: "var(--bg-surface, #FFFFFF)",
-                      cursor: "pointer",
-                      fontFamily: "var(--font-mono, monospace)",
-                      fontSize: "0.875rem",
-                      fontWeight: 600,
-                    }}
-                  >
-                    Install
-                  </button>
+                  {(() => {
+                    // 0827 — disable the primary CTA when the currently
+                    // selected scope already has the skill installed. The
+                    // copy of the button + its tooltip explain *why* it's
+                    // disabled, so the user can switch scope or use the
+                    // (CLI-only) uninstall path instead.
+                    const selectedState = installState?.scopes?.[scope];
+                    const isInstalledSelected = selectedState?.installed === true;
+                    const versionSuffix = selectedState?.version ? ` (v${selectedState.version})` : "";
+                    // AC-US2-08: literal tooltip copy from spec — verbatim so
+                    // the test assertion `/Already installed at (project|user) — re-run via CLI to force/`
+                    // matches.
+                    const installedTooltip = `Already installed at ${scope} — re-run via CLI to force`;
+                    return (
+                      <button
+                        type="button"
+                        onClick={handleInstall}
+                        disabled={isInstalledSelected}
+                        aria-disabled={isInstalledSelected}
+                        data-testid="skill-detail-install-primary"
+                        data-installed={isInstalledSelected ? "true" : "false"}
+                        aria-label={isInstalledSelected ? "Already installed at the selected scope" : "Install skill"}
+                        title={isInstalledSelected ? installedTooltip : undefined}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          marginBottom: "0.75rem",
+                          padding: "0.5rem 1rem",
+                          borderRadius: 6,
+                          border: "1px solid var(--text-primary, #191919)",
+                          background: isInstalledSelected ? "var(--bg-surface, #FFFFFF)" : "var(--text-primary, #191919)",
+                          color: isInstalledSelected ? "var(--text-secondary, #5A5651)" : "var(--bg-surface, #FFFFFF)",
+                          cursor: isInstalledSelected ? "not-allowed" : "pointer",
+                          opacity: isInstalledSelected ? 0.7 : 1,
+                          fontFamily: "var(--font-mono, monospace)",
+                          fontSize: "0.875rem",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {isInstalledSelected ? `✓ Installed${versionSuffix}` : "Install"}
+                      </button>
+                    );
+                  })()}
                   {/* 0784: render every common package-manager variant so the
                       user picks their flavor without translating. Each row
                       shows a "# label" comment, the `$ command`, and a Copy

@@ -22,6 +22,7 @@ import { ShortcutModal } from "./components/ShortcutModal";
 import { ContextMenu } from "./components/ContextMenu";
 import type { ContextMenuState } from "./components/ContextMenu";
 import { ConfirmDialog, getTrashLabel } from "./components/ConfirmDialog";
+import { CloneToAuthoringDialog } from "./components/CloneToAuthoringDialog";
 import { usePendingDeletion } from "./hooks/usePendingDeletion";
 import { ApiError } from "./api";
 import { PendingActionsContext } from "./PendingActionsContext";
@@ -472,6 +473,20 @@ function Shell() {
     }
     window.addEventListener("studio:request-delete", onRequestDelete);
     return () => window.removeEventListener("studio:request-delete", onRequestDelete);
+  }, []);
+
+  // 0828: clone-to-authoring dialog opens on `studio:request-clone`. The
+  // dispatcher in useContextMenuState fires this event when the user picks
+  // "Clone to authoring…" from the context menu of an installed skill.
+  const [pendingCloneSkill, setPendingCloneSkill] = useState<SkillInfo | null>(null);
+  useEffect(() => {
+    function onRequestClone(e: Event) {
+      if (!(e instanceof CustomEvent)) return;
+      const detail = (e as CustomEvent).detail as { skill?: SkillInfo } | undefined;
+      if (detail?.skill) setPendingCloneSkill(detail.skill);
+    }
+    window.addEventListener("studio:request-clone", onRequestClone);
+    return () => window.removeEventListener("studio:request-clone", onRequestClone);
   }, []);
 
   // 0780: parallel buffer for installed-skill uninstall. Same 10s undo +
@@ -1054,6 +1069,30 @@ function Shell() {
           setPluginUninstallTarget(null);
         }}
       />
+
+      {/* 0828: Clone to authoring — opened by studio:request-clone events from
+          the context-menu router. Three targets (standalone / existing plugin
+          / new plugin) — see CloneToAuthoringDialog.tsx. On success the dialog
+          dispatches `studio:skills-changed` so the sidebar rescans and the
+          new authoring skill appears without a manual reload. */}
+      {pendingCloneSkill && (
+        <CloneToAuthoringDialog
+          skill={pendingCloneSkill}
+          onCloned={(result) => {
+            toast({
+              message: strings.toasts.cloneSucceeded,
+              severity: "info",
+            });
+            setPendingCloneSkill(null);
+            try {
+              window.dispatchEvent(new CustomEvent("studio:skills-changed", { detail: result }));
+            } catch { /* SSR/test fallback */ }
+            // Force a sidebar refresh on the next tick.
+            refreshSkills();
+          }}
+          onCancel={() => setPendingCloneSkill(null)}
+        />
+      )}
     </PendingActionsContext.Provider>
   );
 }

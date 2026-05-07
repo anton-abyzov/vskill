@@ -224,3 +224,49 @@ describe("useContextMenuState — open / reveal / edit (0820 reveal-in-editor)",
     expect(JSON.stringify(strings)).not.toContain("Edit lands with");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 0828 — clone action opens the CloneToAuthoringDialog by dispatching a
+// `studio:request-clone` event. Verifies the dispatcher fires the event with
+// the correct skill detail and does NOT call fetch directly (the dialog owns
+// the API call and its own success / failure UI states).
+// ---------------------------------------------------------------------------
+describe("useContextMenuState — clone (0828)", () => {
+  let dispatchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    dispatchSpy = vi.spyOn(window, "dispatchEvent");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    dispatchSpy.mockRestore();
+  });
+
+  it("dispatches studio:request-clone with skill detail", async () => {
+    const s = makeSkill({ plugin: ".claude", skill: "hyperframes-best-practices", origin: "installed" });
+    await handleContextMenuAction("clone", s);
+
+    const events = dispatchSpy.mock.calls
+      .map((c) => c[0])
+      .filter((e): e is CustomEvent => e instanceof CustomEvent && e.type === "studio:request-clone");
+    expect(events).toHaveLength(1);
+    expect((events[0]!.detail as { skill: SkillInfo }).skill).toBe(s);
+  });
+
+  it("does NOT call fetch directly — the dialog owns the API call", async () => {
+    await handleContextMenuAction("clone", makeSkill({ origin: "installed" }));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT fire any toast — the dialog handles its own success/failure states", async () => {
+    await handleContextMenuAction("clone", makeSkill({ origin: "installed" }));
+    const toastEvents = dispatchSpy.mock.calls
+      .map((c) => c[0])
+      .filter((e): e is CustomEvent => e instanceof CustomEvent && e.type === "studio:toast");
+    expect(toastEvents).toHaveLength(0);
+  });
+});

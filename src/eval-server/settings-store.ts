@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// settings-store.ts — File-backed credential store for vSkill Studio.
+// settings-store.ts — File-backed credential store for Skill Studio.
 //
 // Single on-disk file at `<configDir>/keys.env` (default configDir:
 // `~/.vskill`, overridable via VSKILL_CONFIG_DIR). KEY=VALUE dotenv format.

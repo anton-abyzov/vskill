@@ -379,7 +379,7 @@ function createCliClient(config: CliConfig): LlmClient {
 // COMPLIANCE CONTRACT (ToS, April 2026):
 //   This adapter MUST NOT read any file under `~/.claude/credentials*`,
 //   `~/.claude/auth*`, or `~/.claude/token*`. All session auth is owned by
-//   the `claude` CLI child process; vSkill Studio delegates and consumes
+//   the `claude` CLI child process; Skill Studio delegates and consumes
 //   only stdout/stderr. See `src/eval/__tests__/claude-cli-compliance.test.ts`
 //   which asserts zero fs reads against those paths at the Node API level,
 //   and `scripts/check-bundle-compliance.sh` which greps the built bundle
@@ -516,7 +516,7 @@ function createOpenRouterClient(modelOverride?: string): LlmClient {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${apiKey}`,
           "HTTP-Referer": "https://verified-skill.com",
-          "X-Title": "vSkill Studio",
+          "X-Title": "Skill Studio",
         },
         body: JSON.stringify({
           model,

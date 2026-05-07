@@ -1,4 +1,4 @@
-// Native macOS menu bar — vSkill / File / Edit / View / Window / Help.
+// Native macOS menu bar — Skill Studio / File / Edit / View / Window / Help.
 // Wired via Tauri 2's menu API, with platform-appropriate accelerators.
 
 use tauri::menu::{
@@ -9,20 +9,20 @@ use tauri::{AppHandle, Emitter, Manager, Wry};
 pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let pkg = app.package_info();
     let about_metadata = AboutMetadataBuilder::new()
-        .name(Some(String::from("vSkill")))
+        .name(Some(String::from("Skill Studio")))
         .version(Some(pkg.version.to_string()))
         .copyright(Some(String::from("Copyright © 2026 Anton Abyzov")))
         .website(Some(String::from("https://verified-skill.com")))
         .website_label(Some(String::from("verified-skill.com")))
         .build();
 
-    // vSkill submenu (App menu — only meaningful on macOS, Tauri ignores on others).
+    // Skill Studio submenu (App menu — only meaningful on macOS, Tauri ignores on others).
     // macOS HIG: Preferences… sits under the app menu with the Cmd+, accelerator
     // (AC-US1-01). On Win/Linux we additionally surface it under Edit (see below).
-    let app_submenu = SubmenuBuilder::new(app, "vSkill")
+    let app_submenu = SubmenuBuilder::new(app, "Skill Studio")
         .item(&PredefinedMenuItem::about(
             app,
-            Some("About vSkill"),
+            Some("About Skill Studio"),
             Some(about_metadata),
         )?)
         .separator()
@@ -43,7 +43,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&PredefinedMenuItem::show_all(app, None)?)
         .separator()
         .item(
-            &MenuItemBuilder::with_id("quit_vskill", "Quit vSkill")
+            &MenuItemBuilder::with_id("quit_vskill", "Quit Skill Studio")
                 .accelerator("CmdOrCtrl+Q")
                 .build(app)?,
         )
@@ -129,7 +129,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         )
         .separator()
         .item(
-            &MenuItemBuilder::with_id("about_vskill", "About vSkill")
+            &MenuItemBuilder::with_id("about_vskill", "About Skill Studio")
                 .build(app)?,
         )
         .build()?;

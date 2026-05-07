@@ -1,4 +1,4 @@
-# QA click-audit — vSkill Studio Redesign (increment 0674)
+# QA click-audit — Skill Studio Redesign (increment 0674)
 
 **Auditor:** qa-e2e-agent (team `impl-0674-studio`)
 **Target:** `src/eval-ui/` SPA — redesigned Studio at `npx vskill studio`

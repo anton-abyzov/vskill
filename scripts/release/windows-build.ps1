@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# windows-build.ps1 -- End-to-end Windows .msi release build for vSkill Desktop.
+# windows-build.ps1 -- End-to-end Windows .msi release build for Skill Studio.
 #
 # Owned by 0829 (vskill distribution & marketing, windows-port agent).
 #
@@ -46,7 +46,7 @@ $RootDir   = Resolve-Path (Join-Path $ScriptDir "..\..")
 Set-Location $RootDir
 
 Write-Host "=========================================="
-Write-Host "vSkill Desktop -- Windows .msi build"
+Write-Host "Skill Studio -- Windows .msi build"
 Write-Host "Working directory: $RootDir"
 Write-Host "=========================================="
 

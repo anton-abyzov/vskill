@@ -722,7 +722,7 @@ function CaseDetail({
             <line x1="12" y1="17" x2="12" y2="21" />
           </svg>
           <span className="text-[12px] font-medium" style={{ color: "var(--accent)" }}>
-            Run locally in vSkill Studio
+            Run locally in Skill Studio
           </span>
         </div>
       )}

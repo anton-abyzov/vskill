@@ -1,6 +1,6 @@
-# macOS Release Pipeline — vSkill Desktop
+# macOS Release Pipeline — Skill Studio
 
-This README documents the macOS portion of vSkill Desktop's release pipeline:
+This README documents the macOS portion of Skill Studio's release pipeline:
 config, signing, notarization, Homebrew Cask, and the troubleshooting paths
 for the issues most likely to bite a release.
 
@@ -36,12 +36,12 @@ If `asc certificates create --type DEVELOPER_ID_APPLICATION` doesn't go through 
 # After review/approval of the side effect:
 asc bundle-ids create \
   --identifier com.verifiedskill.desktop \
-  --name "vSkill Desktop" \
+  --name "Skill Studio" \
   --platform MAC_OS \
   --output json --pretty
 ```
 
-Or via developer.apple.com → Certificates, Identifiers & Profiles → Identifiers → `+` → App IDs → App → Continue. Bundle ID: `com.verifiedskill.desktop`. Description: "vSkill Desktop". App services: none (Developer ID distribution does not require any).
+Or via developer.apple.com → Certificates, Identifiers & Profiles → Identifiers → `+` → App IDs → App → Continue. Bundle ID: `com.verifiedskill.desktop`. Description: "Skill Studio". App services: none (Developer ID distribution does not require any).
 
 ### B. Create the Developer ID Application cert manually
 

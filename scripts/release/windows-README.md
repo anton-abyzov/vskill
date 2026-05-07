@@ -1,12 +1,12 @@
-# vSkill Desktop on Windows
+# Skill Studio on Windows
 
 This document covers two audiences:
-1. **End users** — installing vSkill Desktop and getting past the SmartScreen warning.
+1. **End users** — installing Skill Studio and getting past the SmartScreen warning.
 2. **Contributors** — building the `.msi` from source on a Windows host.
 
 ---
 
-## 1. Installing vSkill Desktop on Windows (end users)
+## 1. Installing Skill Studio on Windows (end users)
 
 ### 1.1 Download
 

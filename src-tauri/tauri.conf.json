@@ -112,7 +112,7 @@
       "endpoints": [
         "https://verified-skill.com/desktop/latest.json"
       ],
-      "pubkey": "<MINISIGN_PUBKEY_PLACEHOLDER>",
+      "pubkey": "RWQurXMiW9aLQ7B2y3YD1FmnJujwIZ86WVSs61uaXYuHEWBZcXkNY7MP",
       "allowDowngrades": true,
       "windows": { "installMode": "passive" }
     }

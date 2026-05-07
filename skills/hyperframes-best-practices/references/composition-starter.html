@@ -1,0 +1,171 @@
+<!doctype html>
+<!--
+  HyperFrames composition starter — iOS-card overlay system.
+
+  Drop in your scene content where indicated. The video plays full-screen and
+  overlay cards float on top with frosted-glass styling. Cards must avoid the
+  speaker's face cam (typically bottom-right; adjust the layout if not).
+
+  Bundled primitives:
+    .card                 — frosted-glass surface with top accent stripe
+    .card.--{g,b,p,c,r,t} — accent color (green/blue/purple/cyan/red/terra)
+    .pill                 — Skill Studio-style pill label with swatch
+    .brand-icon           — 64x64 inline-SVG container with hairline border
+    .brand-icon.--lg      — larger 96x96 variant
+    cardIn() / cardOut()  — GSAP iOS-style entry/exit helpers
+
+  Replace `assets/master_tight.mp4` with your tightened cut master and update
+  `data-duration` to its actual length.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      :root {
+        --green: #22c55e; --blue: #3b82f6; --purple: #a855f7;
+        --cyan:  #06b6d4; --red:  #ef4444; --terra: #d97757;
+        --bg: #0a0a0a; --text: #f5f5f7; --muted: #a3a3a3;
+        --border: rgba(255,255,255,0.10);
+        --font-sans: 'Geist Sans', 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+        --font-mono: 'Geist Mono', 'SF Mono', monospace;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #000; font-family: var(--font-sans); color: var(--text); -webkit-font-smoothing: antialiased; }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; }
+      #bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+      /* iOS-card primitive — frosted glass on top of video */
+      .card {
+        position: absolute;
+        background: linear-gradient(180deg, rgba(28,30,38,0.82) 0%, rgba(18,20,26,0.82) 100%);
+        backdrop-filter: blur(28px) saturate(140%);
+        -webkit-backdrop-filter: blur(28px) saturate(140%);
+        border: 1px solid var(--border);
+        border-radius: 28px;
+        box-shadow:
+          0 1px 0 rgba(255,255,255,0.06) inset,
+          0 24px 60px rgba(0,0,0,0.55),
+          0 8px 16px rgba(0,0,0,0.35);
+        overflow: hidden;
+        opacity: 0;
+      }
+      .card::before {
+        content: ""; position: absolute; left: 0; right: 0; top: 0;
+        height: 4px; background: var(--card-accent, var(--cyan));
+        opacity: 0.85;
+      }
+      .card.--g { --card-accent: var(--green); }
+      .card.--b { --card-accent: var(--blue); }
+      .card.--p { --card-accent: var(--purple); }
+      .card.--c { --card-accent: var(--cyan); }
+      .card.--r { --card-accent: var(--red); }
+      .card.--t { --card-accent: var(--terra); }
+
+      /* Skill Studio pill label */
+      .pill {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 6px 14px; border-radius: 999px;
+        font-family: var(--font-mono); font-size: 16px; font-weight: 600;
+        letter-spacing: 1.5px; text-transform: uppercase;
+      }
+      .pill .swatch { width: 8px; height: 8px; border-radius: 50%; }
+      .pill.--g { color: var(--green);  background: rgba(34,197,94,0.10);  border: 1px solid rgba(34,197,94,0.40); }
+      .pill.--g .swatch { background: var(--green); box-shadow: 0 0 10px var(--green); }
+      .pill.--b { color: var(--blue);   background: rgba(59,130,246,0.10); border: 1px solid rgba(59,130,246,0.40); }
+      .pill.--b .swatch { background: var(--blue); box-shadow: 0 0 10px var(--blue); }
+      .pill.--p { color: var(--purple); background: rgba(168,85,247,0.10); border: 1px solid rgba(168,85,247,0.40); }
+      .pill.--p .swatch { background: var(--purple); box-shadow: 0 0 10px var(--purple); }
+      .pill.--c { color: var(--cyan);   background: rgba(6,182,212,0.10);  border: 1px solid rgba(6,182,212,0.40); }
+      .pill.--c .swatch { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
+      .pill.--r { color: var(--red);    background: rgba(239,68,68,0.10);  border: 1px solid rgba(239,68,68,0.40); }
+      .pill.--r .swatch { background: var(--red); box-shadow: 0 0 10px var(--red); }
+
+      /* Brand icon container — drop inline SVGs inside */
+      .brand-icon { width: 64px; height: 64px; flex: 0 0 64px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border-radius: 16px; background: rgba(255,255,255,0.06);
+        border: 1px solid var(--border); }
+      .brand-icon svg { width: 38px; height: 38px; }
+      .brand-icon.--lg { width: 96px; height: 96px; flex-basis: 96px; border-radius: 22px; }
+      .brand-icon.--lg svg { width: 56px; height: 56px; }
+
+      /* Common positions — pick one per scene */
+      .pos-top    { top: 80px;  left: 80px;  right: 80px; padding: 32px 44px; }
+      .pos-tl     { top: 80px;  left: 80px;  padding: 32px 44px; max-width: 980px; }
+      .pos-bl     { top: auto; bottom: 80px; left: 80px;  padding: 22px 28px; max-width: 720px; }
+      .pos-bottom { top: auto; bottom: 80px; left: 80px;  right: 80px; padding: 32px 44px; }
+      .pos-center { top: 50%;  left: 50%;  transform: translate(-50%,-50%);
+                    padding: 56px 80px; min-width: 1100px; text-align: center; }
+
+      .clip { opacity: 0; }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="60"
+      data-width="1920"
+      data-height="1080"
+    >
+      <audio id="bgAudio" class="clip" preload="auto"
+             data-start="0" data-duration="60" data-track-index="-1"
+             src="assets/master_tight.mp4"></audio>
+
+      <video id="bg" class="clip" muted playsinline preload="auto"
+             data-start="0" data-duration="60" data-track-index="0"
+             src="assets/master_tight.mp4"></video>
+
+      <!-- ============================================================ -->
+      <!--  Drop your scene cards here. Example:                         -->
+      <!-- ============================================================ -->
+
+      <div class="card --c clip pos-top" id="exampleScene"
+           data-start="2" data-duration="6" data-track-index="2">
+        <div style="display:flex; align-items:baseline; gap:18px; margin-bottom:18px;">
+          <div class="pill --c"><span class="swatch"></span>Eyebrow label</div>
+        </div>
+        <div style="font-size: 64px; font-weight: 800; letter-spacing: -1.4px; line-height: 1.05;">
+          Big bold headline.
+        </div>
+      </div>
+
+      <!-- Add more scenes as needed. Each scene gets its own track index
+           or a non-overlapping time range on track 2. -->
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      tl.set("#bg", { opacity: 1 }, 0);
+      tl.set("#bgAudio", { opacity: 1 }, 0);
+
+      /* iOS-style card entry: slide up + scale + soft blur fade */
+      function cardIn(sel, start) {
+        tl.fromTo(sel,
+          { opacity: 0, y: 60, scale: 0.96, filter: "blur(8px)" },
+          { opacity: 1, y: 0, scale: 1, filter: "blur(0px)",
+            duration: 0.7, ease: "power3.out", overwrite: "auto" }, start);
+      }
+      function cardOut(sel, start) {
+        tl.to(sel,
+          { opacity: 0, y: -20, scale: 0.98, filter: "blur(6px)",
+            duration: 0.45, ease: "power2.in", overwrite: "auto" }, start);
+        tl.set(sel, { opacity: 0 }, start + 0.5);  // hard kill — required by lint
+      }
+      function cardScene(sel, start, dur) {
+        cardIn(sel, start);
+        cardOut(sel, start + dur - 0.45);
+      }
+
+      /* Scene timing — match data-start / data-duration on each card */
+      cardScene("#exampleScene", 2, 6);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

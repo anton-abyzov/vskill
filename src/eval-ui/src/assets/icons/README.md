@@ -1,6 +1,6 @@
 # Studio Icons
 
-Monochrome line icons for the vSkill Studio UI. Designed to inherit theme color via `currentColor` — they render correctly in both light (warm off-white `#FBF8F3`) and dark (warm near-black `#1A1814`) themes without per-theme variants.
+Monochrome line icons for the Skill Studio UI. Designed to inherit theme color via `currentColor` — they render correctly in both light (warm off-white `#FBF8F3`) and dark (warm near-black `#1A1814`) themes without per-theme variants.
 
 ## Inventory
 

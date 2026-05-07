@@ -1,5 +1,5 @@
 /**
- * Central user-facing copy for vSkill Studio (T-035 / US-010).
+ * Central user-facing copy for Skill Studio (T-035 / US-010).
  *
  * Every string the user can read in the Studio shell lives here so that:
  *   1. Voice stays consistent (short declarative sentence + concrete next step).

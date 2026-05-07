@@ -1,6 +1,6 @@
-# vSkill Desktop on Linux
+# Skill Studio on Linux
 
-vSkill Desktop ships three Linux package formats from a single build:
+Skill Studio ships three Linux package formats from a single build:
 
 | Format       | Best for                                  | Auto-update?   |
 |--------------|-------------------------------------------|----------------|
@@ -26,7 +26,7 @@ All three are GPG-signed (detached-armored) and accompanied by a single
 | openSUSE Tumbleweed | Tested (AppImage) | rolling release. |
 
 **Out of scope (v1)**: Ubuntu 20.04, Debian 11, RHEL 8, Fedora ≤39 — all ship
-with `webkit2gtk-4.0` instead of `4.1` and cannot run vSkill Desktop. Either
+with `webkit2gtk-4.0` instead of `4.1` and cannot run Skill Studio. Either
 upgrade or fall back to the web studio at https://verified-skill.com.
 
 ## Install

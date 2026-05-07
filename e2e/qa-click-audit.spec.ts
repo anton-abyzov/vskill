@@ -2,7 +2,7 @@
 // QA click-audit suite — increment 0674 (studio redesign).
 //
 // One spec file exercising every interactive surface in the redesigned
-// vSkill Studio. Each test cites the AC (from `.specweave/increments/
+// Skill Studio. Each test cites the AC (from `.specweave/increments/
 // 0674-vskill-studio-redesign/spec.md`) it is verifying.
 //
 // The fixture seeded by `eval serve --root e2e/fixtures` contains exactly

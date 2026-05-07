@@ -63,7 +63,7 @@ fi
 
 OUT="$REPO_ROOT/RELEASE_NOTES.md"
 {
-  printf '# vSkill Desktop %s\n\n' "${TAG#desktop-v}"
+  printf '# Skill Studio %s\n\n' "${TAG#desktop-v}"
   printf '%s\n' "$BODY"
   if [[ -n "$CHECKSUMS" ]]; then
     printf '\n## Checksums (SHA-256)\n\n```\n%s\n```\n' "$CHECKSUMS"

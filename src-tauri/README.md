@@ -1,4 +1,4 @@
-# vSkill Desktop (Tauri 2 shell)
+# Skill Studio (Tauri 2 shell)
 
 Native macOS / Windows wrapper around the existing `vskill studio` runtime.
 The Rust binary spawns the Node `eval-server` as a sidecar, captures the

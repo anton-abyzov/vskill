@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# publish-manifest.sh — Atomic publish of vSkill Desktop release artifacts +
+# publish-manifest.sh — Atomic publish of Skill Studio release artifacts +
 # latest.json to Cloudflare R2 (bucket: vskill-desktop, custom domain:
 # verified-skill.com/desktop/*). Implements ADR 0829-01 §3 atomic ordering.
 #
@@ -195,7 +195,7 @@ done
 # ---------------------------------------------------------------------------
 PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 NOTES_FILE="$REPO_ROOT/RELEASE_NOTES.md"
-NOTES="vSkill Desktop $VERSION"
+NOTES="Skill Studio $VERSION"
 if [[ -f "$NOTES_FILE" ]]; then
   # Strip shell-unfriendly chars; first 5KB.
   NOTES="$(head -c 5120 "$NOTES_FILE")"

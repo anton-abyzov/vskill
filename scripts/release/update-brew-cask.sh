@@ -56,14 +56,14 @@ cask "vskill" do
   sha256 "${SHA256}"
 
   url "${URL}"
-  name "vSkill Desktop"
+  name "Skill Studio"
   desc "Verified AI skill marketplace and studio (desktop)"
   homepage "https://verified-skill.com"
 
   auto_updates true
   depends_on macos: ">= :ventura"
 
-  app "vSkill.app"
+  app "Skill Studio.app"
 
   zap trash: [
     "~/.vskill",

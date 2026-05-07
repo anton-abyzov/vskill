@@ -41,7 +41,7 @@ Read both layers before authoring.
 > voiceover/script.ts coupling, the render+audio-boost pipeline — those
 > generalize. The exact constants (1.72× zoom, x=1488 button center,
 > v1.0.0 → v1.0.1 version pill, "Tier-1 patterns · Tier-2 LLM · Socket"
-> attribution) are vSkill Studio specifics — translate, do not copy.
+> attribution) are Skill Studio specifics — translate, do not copy.
 
 ---
 

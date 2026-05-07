@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "vSkill",
+  "productName": "Skill Studio",
   "version": "1.0.16",
   "identifier": "com.verifiedskill.desktop",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "vSkill",
+        "title": "Skill Studio",
         "width": 1280,
         "height": 800,
         "minWidth": 900,

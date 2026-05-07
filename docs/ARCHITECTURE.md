@@ -1,4 +1,4 @@
-# vSkill Studio — Architecture & Testing Guide
+# Skill Studio — Architecture & Testing Guide
 
 **Last updated**: 2026-04-23
 **Target audience**: developers running or extending the studio
@@ -317,7 +317,7 @@ OLLAMA_HOST=http://gpu:11434 OLLAMA_BASE_URL=http://legacy:11434 npx vskill@late
 
 ### 5.2 Claude Code session delegation — ToS compliance (April 2026)
 
-Anthropic's April 4, 2026 Terms of Service update prohibits third-party tools from consuming Max/Pro quota via OAuth token scraping. **vSkill Studio does not consume your Max/Pro subscription quota directly.** It delegates to the official [Claude Code CLI](https://docs.claude.com/en/docs/claude-code), which is the sanctioned consumer. The adapter in `src/eval/llm.ts::createClaudeCliClient()` shells out to the `claude` binary and never reads any file under `~/.claude/credentials*`, `~/.claude/auth*`, or `~/.claude/token*`.
+Anthropic's April 4, 2026 Terms of Service update prohibits third-party tools from consuming Max/Pro quota via OAuth token scraping. **Skill Studio does not consume your Max/Pro subscription quota directly.** It delegates to the official [Claude Code CLI](https://docs.claude.com/en/docs/claude-code), which is the sanctioned consumer. The adapter in `src/eval/llm.ts::createClaudeCliClient()` shells out to the `claude` binary and never reads any file under `~/.claude/credentials*`, `~/.claude/auth*`, or `~/.claude/token*`.
 
 This contract is enforced by two blocking gates:
 

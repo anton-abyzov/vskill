@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <strong>Download vSkill Desktop:</strong><br/><br/>
+  <strong>Download Skill Studio:</strong><br/><br/>
   <a href="https://verified-skill.com/desktop"><img src="https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
   <a href="https://verified-skill.com/desktop"><img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
   <a href="https://verified-skill.com/desktop"><img src="https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" /></a>

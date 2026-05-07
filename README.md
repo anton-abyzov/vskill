@@ -19,9 +19,13 @@
 
 <p align="center">
   <strong>Download Skill Studio:</strong><br/><br/>
-  <a href="https://verified-skill.com/desktop"><img src="https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
-  <a href="https://verified-skill.com/desktop"><img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
-  <a href="https://verified-skill.com/desktop"><img src="https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" /></a>
+  <a href="https://github.com/anton-abyzov/vskill/releases/latest/download/Skill.Studio_1.0.16_aarch64.dmg"><img src="https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
+  <a href="https://github.com/anton-abyzov/vskill/releases/latest/download/Skill.Studio_1.0.16_x64-setup.exe"><img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
+  <a href="https://github.com/anton-abyzov/vskill/releases/latest"><img src="https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" /></a>
+</p>
+
+<p align="center">
+  <em>All releases: <a href="https://github.com/anton-abyzov/vskill/releases">github.com/anton-abyzov/vskill/releases</a></em>
 </p>
 
 <br/>
@@ -33,8 +37,9 @@ npx vskill@latest install remotion-best-practices
 ```
 
 Native Mac, Windows, and Linux desktop apps available at
-**[verified-skill.com/desktop](https://verified-skill.com/desktop)** — 1.5 s cold launch,
-auto-update, no telemetry.
+**[GitHub Releases](https://github.com/anton-abyzov/vskill/releases/latest)** — 1.5 s cold launch,
+no telemetry. macOS Apple Silicon is signed by `Developer ID Application: EasyChamp, Inc.`
+and notarized + stapled by Apple — no Gatekeeper warning.
 
 The desktop app wraps the same studio runtime as `npx vskill studio` in a Tauri 2 shell:
 native menu bar, global `⌘K` find-skill palette, `⌘,` Preferences with General / Updates /

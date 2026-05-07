@@ -28,15 +28,21 @@ jobs:
       matrix:
         include:
           - os: macos-14
-            target: aarch64-apple-darwin,x86_64-apple-darwin
+            target: universal-apple-darwin
+            rustup_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            bundles: app,dmg
             platform: macos
             build: scripts/release/macos-build.sh
           - os: windows-2022
             target: x86_64-pc-windows-msvc
+            rustup_targets: x86_64-pc-windows-msvc
+            bundles: msi,nsis
             platform: windows
             build: scripts/release/windows-build.ps1
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            rustup_targets: x86_64-unknown-linux-gnu
+            bundles: deb,rpm,appimage
             platform: linux
             build: scripts/release/linux-build.sh
     runs-on: ${{ matrix.os }}
@@ -55,7 +61,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.rustup_targets }}
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
@@ -70,8 +76,12 @@ jobs:
             libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
             libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
             patchelf libfuse2 rpm gnupg
-          # minisign isn't in jammy main; install the rsign2-compatible binary via cargo
-          cargo install minisign --locked
+          # minisign isn't in jammy main; download the prebuilt static binary
+          MINISIGN_VERSION=0.12
+          curl -fsSL "https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz" -o /tmp/minisign.tgz
+          tar -xzf /tmp/minisign.tgz -C /tmp
+          sudo install -m 0755 /tmp/minisign-linux/x86_64/minisign /usr/local/bin/minisign
+          minisign -v
 
       - name: macOS — import Developer ID certificate
         if: matrix.platform == 'macos'
@@ -140,9 +150,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
           tagName: ${{ github.ref_name }}
-          releaseName: 'vSkill Desktop ${{ github.ref_name }}'
+          releaseName: 'Skill Studio ${{ github.ref_name }}'
           releaseDraft: true
           prerelease: false
 

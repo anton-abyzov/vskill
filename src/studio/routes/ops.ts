@@ -12,10 +12,7 @@ import type { Router } from "../../eval-server/router.js";
 import { sendJson } from "../../eval-server/router.js";
 import { initSSE, sendSSE } from "../../eval-server/sse-helpers.js";
 import { listOps, subscribe, deleteOp } from "../lib/ops-log.js";
-
-function parseQuery(url: string | undefined): URLSearchParams {
-  return new URL(url || "/", "http://localhost").searchParams;
-}
+import { parseQuery } from "../lib/query.js";
 
 export function registerOpsRoutes(router: Router): void {
   // GET /api/studio/ops?limit=50&before=<ts>

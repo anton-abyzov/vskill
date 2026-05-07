@@ -22,16 +22,8 @@ import {
 } from "../lib/scope-transfer.js";
 import { writeProvenance } from "../lib/provenance.js";
 import { appendOp } from "../lib/ops-log.js";
+import { parseQuery } from "../lib/query.js";
 import type { Provenance, SkillScope, StudioOp, TransferEvent } from "../types.js";
-
-interface PromoteParams {
-  plugin: string;
-  skill: string;
-}
-
-function parseQuery(url: string | undefined): URLSearchParams {
-  return new URL(url || "/", "http://localhost").searchParams;
-}
 
 export function registerPromoteRoute(
   router: Router,
@@ -41,7 +33,7 @@ export function registerPromoteRoute(
   router.post(
     "/api/skills/:plugin/:skill/promote",
     async (req: http.IncomingMessage, res: http.ServerResponse, params: Record<string, string>) => {
-      const { plugin, skill } = params as unknown as PromoteParams;
+      const { plugin, skill } = params;
       const query = parseQuery(req.url);
       const overwrite = query.get("overwrite") === "true";
       const fromScopeRaw = (query.get("from") || "installed") as SkillScope;

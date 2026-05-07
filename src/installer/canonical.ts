@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync } from "node:f
 import { join, relative, dirname, sep as pathSep } from "node:path";
 import os from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
+import { resolveTilde } from "../utils/paths.js";
 import { ensureFrontmatter, stripClaudeFields } from "./frontmatter.js";
 
 /**
@@ -26,15 +27,6 @@ export interface InstallOptions {
 }
 
 /**
- * Resolve tilde in a path to the user's home directory.
- */
-function expandTilde(p: string): string {
-  if (p === "~") return os.homedir();
-  if (p.startsWith("~/")) return os.homedir() + p.slice(1);
-  return p;
-}
-
-/**
  * Resolve the skills directory for an agent given the install scope.
  *
  * Global: uses agent.globalSkillsDir (e.g. ~/.claude/skills)
@@ -42,7 +34,7 @@ function expandTilde(p: string): string {
  */
 export function resolveAgentSkillsDir(agent: AgentDefinition, opts: InstallOptions): string {
   if (opts.global) {
-    return expandTilde(agent.globalSkillsDir);
+    return resolveTilde(agent.globalSkillsDir);
   }
   const resolved = join(opts.projectRoot, agent.localSkillsDir);
   const normalizedRoot = join(opts.projectRoot, ".");

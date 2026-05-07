@@ -299,7 +299,7 @@ export function stripClaudeFields(content: string, skillName: string): string {
   const body = normalized.substring(endIdx + 3);
 
   for (const pattern of CLAUDE_FIELD_PATTERNS) {
-    fmBlock = fmBlock.replace(new RegExp(pattern.source, pattern.flags), "");
+    fmBlock = fmBlock.replace(pattern, "");
   }
 
   // Collapse consecutive blank lines left by field removal

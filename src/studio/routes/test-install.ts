@@ -23,11 +23,8 @@ import {
   resolveScopePath,
 } from "../lib/scope-transfer.js";
 import { appendOp } from "../lib/ops-log.js";
+import { parseQuery } from "../lib/query.js";
 import type { SkillScope, StudioOp, TransferEvent } from "../types.js";
-
-function parseQuery(url: string | undefined): URLSearchParams {
-  return new URL(url || "/", "http://localhost").searchParams;
-}
 
 export function registerTestInstallRoute(
   router: Router,

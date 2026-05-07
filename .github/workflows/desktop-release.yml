@@ -28,8 +28,8 @@ jobs:
       matrix:
         include:
           - os: macos-14
-            target: universal-apple-darwin
-            rustup_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            target: aarch64-apple-darwin
+            rustup_targets: aarch64-apple-darwin
             bundles: app,dmg
             platform: macos
             build: scripts/release/macos-build.sh

@@ -45,7 +45,7 @@ coverage/
 # Tauri desktop wrapper
 src-tauri/target/
 src-tauri/gen/
-src-tauri/Cargo.lock
+# Cargo.lock IS tracked — reproducible CI builds for a binary project
 src-tauri/binaries/
 src-tauri/.cargo/
 

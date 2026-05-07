@@ -170,7 +170,11 @@ export function useDesktopBridge(): DesktopBridge {
         );
         return;
       }
-      await tauriInvoke<void>("set_setting", { path, value });
+      // Rust handler signature: `set_setting(key: String, value: Value)`.
+      // The Tauri IPC bridge serializes args by parameter NAME — sending
+      // `{ path }` instead of `{ key }` makes the call fail deserialization
+      // silently in v1.0.12 and the snapshot never refreshes.
+      await tauriInvoke<void>("set_setting", { key: path, value });
     };
 
     const resetSettings: DesktopBridge["resetSettings"] = async () => {
@@ -188,17 +192,17 @@ export function useDesktopBridge(): DesktopBridge {
 
     const checkForUpdates: DesktopBridge["checkForUpdates"] = async () => {
       if (!available) throw new BrowserModeError("checkForUpdates");
-      return tauriInvoke<UpdateInfo>("check_for_update");
+      return tauriInvoke<UpdateInfo>("check_for_updates");
     };
 
     const downloadAndInstallUpdate: DesktopBridge["downloadAndInstallUpdate"] = async () => {
       if (!available) throw new BrowserModeError("downloadAndInstallUpdate");
-      await tauriInvoke<void>("install_update_and_restart");
+      await tauriInvoke<void>("download_and_install_update");
     };
 
     const cancelUpdate: DesktopBridge["cancelUpdate"] = async () => {
       if (!available) throw new BrowserModeError("cancelUpdate");
-      await tauriInvoke<void>("cancel_update_check");
+      await tauriInvoke<void>("cancel_update");
     };
 
     const openPreferences: DesktopBridge["openPreferences"] = async (tab) => {
@@ -243,10 +247,9 @@ export function useDesktopBridge(): DesktopBridge {
     };
 
     const copyToClipboard: DesktopBridge["copyToClipboard"] = async (text) => {
-      if (available) {
-        await tauriInvoke<void>("copy_settings_path", { text });
-        return;
-      }
+      // No `copy_settings_path` Rust handler exists, and the clipboard plugin
+      // is not enabled in src-tauri/Cargo.toml. The web Clipboard API works
+      // inside the Tauri 2 webview and in the browser, so use it everywhere.
       try {
         await navigator.clipboard.writeText(text);
       } catch {

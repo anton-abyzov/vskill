@@ -17,14 +17,11 @@ on:
     tags:
       - 'desktop-v*'
 
-permissions:
-  contents: write
+permissions: write-all
 
 jobs:
   build:
     name: Build (${{ matrix.platform }})
-    permissions:
-      contents: write
     strategy:
       fail-fast: false
       matrix:

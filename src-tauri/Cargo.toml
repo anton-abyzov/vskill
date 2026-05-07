@@ -1,6 +1,11 @@
 [package]
 name = "vskill-desktop"
-version = "1.0.16"
+# Desktop versioning is INDEPENDENT of the npm CLI (`vskill` package).
+# CLI cadence: every npm publish bumps the patch (currently ~v1.0.16).
+# Desktop cadence: every desktop-v* tag bumps this.
+# Asset filenames pick this up via Tauri bundle naming, so this MUST
+# match the next intended `desktop-v*` git tag for clean filenames.
+version = "1.0.14"
 description = "vSkill desktop shell — native wrapper around the studio runtime"
 authors = ["Anton Abyzov"]
 license = "MIT"

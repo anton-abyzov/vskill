@@ -131,6 +131,31 @@ jobs:
         shell: pwsh
         run: pwsh scripts/desktop/build-sidecar-windows.ps1
 
+      - name: Derive desktop version from git tag + sync into Cargo.toml + tauri.conf.json
+        # Git tag `desktop-v1.0.14` → version `1.0.14`. This decouples the
+        # desktop release cadence from the npm CLI's `package.json` version
+        # (which ships separately). Without this step, asset filenames carry
+        # whatever was hardcoded in src-tauri/Cargo.toml at commit time, which
+        # may diverge from the tag (v1.0.13 tag with v1.0.16 filenames was the
+        # confusion that drove this fix).
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#desktop-v}"
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([\.\-].*)?$ ]]; then
+            echo "::error::Tag '${TAG}' does not match desktop-vX.Y.Z; got VERSION='${VERSION}'"
+            exit 1
+          fi
+          echo "Desktop version: ${VERSION}"
+          # sed in-place — works on macOS (BSD) + Linux (GNU) when given empty
+          # backup arg differently; use the portable -i.bak then rm pattern.
+          sed -i.bak -E "s/^version = \"[^\"]+\"$/version = \"${VERSION}\"/" src-tauri/Cargo.toml && rm src-tauri/Cargo.toml.bak
+          # tauri.conf.json — use python for reliable JSON edit
+          python3 -c "import json,sys; p='src-tauri/tauri.conf.json'; d=json.load(open(p)); d['version']='${VERSION}'; json.dump(d, open(p,'w'), indent=2)"
+          # Cargo.lock — re-resolve so the locked version matches Cargo.toml
+          (cd src-tauri && cargo update -p vskill-desktop --precise "${VERSION}" 2>&1 || cargo generate-lockfile)
+          echo "version-synced=true" >> $GITHUB_OUTPUT
+
       - name: Pre-flight — verify Tauri signing key is present
         # Without this guard, tauri-action silently builds bundles WITHOUT
         # .sig peers (the env var is optional from its perspective). That

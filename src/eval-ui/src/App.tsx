@@ -684,7 +684,9 @@ function Shell() {
   } | null>(null);
 
   useKeyboardShortcut([
-    // ⌘K (Mac) and Ctrl+K (Win/Linux) open the FindSkillsPalette.
+    // ⌘K (Mac) and Ctrl+K (Win/Linux) open the FindSkillsPalette ONLY.
+    // The agent+model picker used to also fire on plain Cmd+K, so both popovers
+    // would open on the same keystroke. It now lives on Cmd+Shift+M (below).
     {
       key: "cmd+k",
       handler: () => {
@@ -698,6 +700,27 @@ function Shell() {
       handler: () => {
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("openFindSkills"));
+        }
+      },
+    },
+    // ⌘⇧M (Mac) and Ctrl+Shift+M (Win/Linux) toggle the AgentModelPicker.
+    // Mnemonic: "M for Model". Goes through a CustomEvent so this hook stays
+    // the single source of truth for keyboard wiring (the picker also still
+    // honors a direct keydown for legacy unit-test paths, but production
+    // keyboard handling flows through here).
+    {
+      key: "cmd+shift+m",
+      handler: () => {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("openAgentModelPicker"));
+        }
+      },
+    },
+    {
+      key: "ctrl+shift+m",
+      handler: () => {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("openAgentModelPicker"));
         }
       },
     },

@@ -3,8 +3,14 @@
 //
 // Replaces the retired ModelSelector. Rendered in the top rail; opens a
 // popover with AgentList (left) + ModelList (right) + footer. Keyboard-first:
-// Cmd+K toggle, ↑↓ within pane, → model pane, ← agent pane, Enter select,
-// Esc close. Footer Settings button opens SettingsModal.
+// Cmd+Shift+M toggle (mnemonic: Model — re-bound from Cmd+K which now opens
+// the FindSkillsPalette), ↑↓ within pane, → model pane, ← agent pane,
+// Enter select, Esc close. Footer Settings button opens SettingsModal.
+//
+// The Cmd+Shift+M chord is wired in `App.tsx` via `useKeyboardShortcut` and
+// dispatches an `openAgentModelPicker` CustomEvent. This component listens
+// for that event and toggles its own state. Don't add a keydown listener
+// here — App's hook is the single owner of the chord.
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -79,18 +85,19 @@ export function AgentModelPicker({ onToast }: AgentModelPickerProps) {
     triggerRef.current?.focus();
   }, []);
 
-  // Cmd+K toggle — but not when an input owns focus.
+  // Cmd+Shift+M toggles us — but the keyboard listener lives in App.tsx
+  // (`useKeyboardShortcut` hook) so there's only ONE listener for the chord.
+  // App dispatches an `openAgentModelPicker` CustomEvent and we toggle in
+  // response. Same pattern the FindSkillsPalette uses for `openFindSkills`.
+  // A previous version registered a duplicate keydown listener here; it
+  // double-fired with App's hook and the two toggles cancelled out — leaving
+  // the popover invisible after the user pressed the chord.
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.key.toLowerCase() !== "k") return;
-      const tag = (document.activeElement as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
-      e.preventDefault();
-      setOpen((prev) => !prev);
+    const onCustomOpen = () => setOpen((prev) => !prev);
+    window.addEventListener("openAgentModelPicker", onCustomOpen);
+    return () => {
+      window.removeEventListener("openAgentModelPicker", onCustomOpen);
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
   }, []);
 
   // Keyboard within popover.

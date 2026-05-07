@@ -42,6 +42,13 @@ vskill.lock
 # Test artifacts
 coverage/
 
+# Tauri desktop wrapper
+src-tauri/target/
+src-tauri/gen/
+src-tauri/Cargo.lock
+src-tauri/binaries/
+src-tauri/.cargo/
+
 # NOTE: do NOT ignore `skills/` — that directory is the studio's OWN-scope
 # author-source path (see resolveScopePath in src/studio/lib/scope-transfer.ts).
 # Ignoring it caused the Publish button to silently drop newly-authored

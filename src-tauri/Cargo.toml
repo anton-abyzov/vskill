@@ -1,0 +1,52 @@
+[package]
+name = "vskill-desktop"
+version = "1.0.16"
+description = "vSkill desktop shell — native wrapper around the studio runtime"
+authors = ["Anton Abyzov"]
+license = "MIT"
+repository = "https://github.com/anton-abyzov/vskill"
+edition = "2021"
+rust-version = "1.78"
+
+[lib]
+name = "vskill_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# Fault-injection for settings.rs atomic-write tests (AC-US6-03). With this
+# feature on, `atomic_write` returns Err between fsync and rename, simulating
+# a crash. The live file is asserted unchanged. Off in production builds.
+fault-inject-write = []
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-updater = "2"
+tauri-plugin-autostart = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "io-util", "sync"] }
+log = "0.4"
+env_logger = "0.11"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "vskill-desktop"
+path = "src/main.rs"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

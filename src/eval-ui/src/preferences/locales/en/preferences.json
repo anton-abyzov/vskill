@@ -1,0 +1,157 @@
+{
+  "app": {
+    "title": "Skill Studio — Preferences",
+    "brand": "Skill Studio",
+    "browserCallout": "Some preferences require the Skill Studio desktop app.",
+    "downloadLink": "Download for Mac, Windows, or Linux",
+    "downloadUrl": "https://verified-skill.com/download"
+  },
+  "tabs": {
+    "general": "General",
+    "updates": "Updates",
+    "privacy": "Privacy",
+    "advanced": "Advanced"
+  },
+  "general": {
+    "heading": "General",
+    "subheading": "Appearance and project defaults.",
+    "theme": {
+      "label": "Appearance",
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark",
+      "help": "Match the system or pick a fixed theme."
+    },
+    "launchAtLogin": {
+      "label": "Launch Skill Studio at login",
+      "help": "Open Skill Studio automatically when you sign in.",
+      "browserDisabled": "Available in the desktop app.",
+      "errorAdmin": "Couldn't change launch at login. Your administrator may have disabled this.",
+      "openSettings": "Open System Settings"
+    },
+    "defaultProject": {
+      "label": "Default project folder",
+      "help": "New projects start here unless you choose another location.",
+      "notSet": "(not set)",
+      "choose": "Choose folder…"
+    },
+    "language": {
+      "label": "Language",
+      "help": "Currently English only. More languages will arrive in a future release.",
+      "english": "English"
+    }
+  },
+  "updates": {
+    "heading": "Updates",
+    "subheading": "Stay current with the latest Skill Studio.",
+    "currentVersion": "Current version",
+    "channel": {
+      "label": "Update channel",
+      "stable": "Stable",
+      "beta": "Beta",
+      "betaUnavailable": "No beta release yet — we'll check back later.",
+      "help": "Stable releases are recommended. Beta delivers previews of upcoming features."
+    },
+    "autoCheck": {
+      "label": "Check for updates automatically",
+      "help": "Skill Studio will check daily and notify you when an update is ready."
+    },
+    "checkNow": "Check for updates",
+    "checking": "Checking…",
+    "upToDate": "Skill Studio is up to date.",
+    "updateAvailable": "Update available: {{version}}",
+    "lastChecked": "Last checked",
+    "lastCheckedNever": "Never",
+    "lastCheckedAgo": "{{relative}}",
+    "errors": {
+      "network": "Couldn't reach the update server. Check your connection and try again.",
+      "signature": "Update signature invalid — refusing to install.",
+      "diskSpace": "Not enough disk space to install the update.",
+      "tryAgain": "Try again",
+      "viewLogs": "View logs"
+    },
+    "dialog": {
+      "title": "Update available",
+      "version": "Version {{version}}",
+      "releaseNotes": "Release notes",
+      "noReleaseNotes": "Release notes not provided.",
+      "installNow": "Install now",
+      "later": "Later",
+      "skipVersion": "Skip this version",
+      "downloading": "Downloading update…",
+      "preparing": "Preparing update…",
+      "restartRequired": "Restart required to finish installing.",
+      "restartNow": "Restart now",
+      "onQuit": "Install on quit",
+      "cancel": "Cancel"
+    },
+    "browserCallout": "Updates are managed by the desktop app. Run npm i -g vskill@latest to update the CLI.",
+    "about": {
+      "heading": "About",
+      "build": "Build",
+      "commit": "Commit",
+      "links": {
+        "openSource": "Open source licenses",
+        "website": "Visit verified-skill.com",
+        "acknowledgements": "Acknowledgements"
+      }
+    }
+  },
+  "privacy": {
+    "heading": "Privacy",
+    "subheading": "Decide what Skill Studio shares with us.",
+    "telemetry": {
+      "label": "Send anonymous usage telemetry",
+      "help": "Helps us improve Skill Studio. Disabled by default. No personal data is collected."
+    },
+    "crash": {
+      "label": "Send anonymized crash reports",
+      "help": "Sends a small report when Skill Studio crashes so we can fix it."
+    },
+    "openLogs": {
+      "label": "Open logs folder",
+      "help": "Inspect log files to audit what Skill Studio records on your machine.",
+      "browserHidden": "Logs are stored on the desktop app only."
+    },
+    "disclosure": "Skill Studio v1 does not currently emit telemetry. These switches reserve your preference for when telemetry ships."
+  },
+  "advanced": {
+    "heading": "Advanced",
+    "subheading": "Diagnostics and reset.",
+    "logLevel": {
+      "label": "Log level",
+      "help": "Higher levels emit more diagnostic detail. Defaults to Info.",
+      "error": "Error",
+      "warn": "Warning",
+      "info": "Info",
+      "debug": "Debug",
+      "trace": "Trace"
+    },
+    "settingsPath": {
+      "label": "Settings file",
+      "help": "Where your preferences live on disk.",
+      "reveal": "Reveal in Finder",
+      "copy": "Copy path",
+      "copied": "Copied",
+      "browserValue": "Stored in this browser's local storage"
+    },
+    "factoryReset": {
+      "label": "Factory reset",
+      "help": "Reset all preferences to their defaults. Recent projects and your keychain are preserved.",
+      "button": "Reset all preferences…",
+      "confirmTitle": "Reset all preferences?",
+      "confirmBody": "This will return every Skill Studio preference to its default value. Recent projects and API keys stored in your system keychain are not affected.",
+      "confirm": "Reset",
+      "cancel": "Cancel",
+      "done": "Preferences reset to defaults."
+    }
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "close": "Close",
+    "loading": "Loading…",
+    "browserMode": "Browser mode",
+    "desktopOnly": "Desktop only"
+  }
+}

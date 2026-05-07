@@ -54,6 +54,10 @@ export default defineConfig({
     outDir: path.resolve(__dirname, "../../dist/eval-ui"),
     emptyOutDir: true,
     rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        preferences: path.resolve(__dirname, "preferences.html"),
+      },
       output: {
         manualChunks(id) {
           if (id.includes("@fontsource-variable/")) {

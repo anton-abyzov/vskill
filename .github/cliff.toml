@@ -1,0 +1,51 @@
+# git-cliff config for vSkill Desktop release notes (0829 AC-US17-02).
+# Conventional Commits + grouped sections. Used by scripts/release/release-notes.sh.
+
+[changelog]
+# Header is stripped per release-notes.sh (--strip header) — this is just the
+# section template applied per tag.
+header = ""
+body = """
+{% if version %}\
+## {{ version | trim_start_matches(pat="desktop-v") }} — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## Unreleased
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}\
+- {{ commit.message | upper_first | trim }}{% if commit.scope %} *({{ commit.scope }})*{% endif %}{% if commit.id %} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/anton-abyzov/vskill/commit/{{ commit.id }})){% endif %}
+{% endfor %}\
+{% endfor %}\n
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+
+# Group ordering — matches plan §7.3 + AC-US17-02
+commit_parsers = [
+  { message = "^feat",       group = "Features" },
+  { message = "^fix",        group = "Bug Fixes" },
+  { message = "^perf",       group = "Performance" },
+  { message = "^refactor",   group = "Refactor" },
+  { message = "^docs",       group = "Documentation" },
+  { message = "^test",       group = "Tests" },
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore",      group = "Chore" },
+  { message = "^Merge",      skip = true },
+  { message = ".*",          group = "Other" },
+]
+
+protect_breaking_commits = false
+filter_commits = false
+
+# Tag pattern — only match desktop-vX.Y.Z (excludes other tag schemes if any).
+tag_pattern = "desktop-v[0-9]+\\.[0-9]+\\.[0-9]+(-rc[0-9]+)?"
+skip_tags = "v.*-beta.*"
+ignore_tags = ""
+topo_order = false
+sort_commits = "newest"

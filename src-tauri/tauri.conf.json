@@ -1,0 +1,120 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "vSkill",
+  "version": "1.0.16",
+  "identifier": "com.verifiedskill.desktop",
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "",
+    "frontendDist": "../dist/eval-ui",
+    "devUrl": null
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "vSkill",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "center": true,
+        "visible": false,
+        "decorations": true,
+        "fullscreen": false,
+        "url": "about:blank"
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "macOSPrivateApi": false
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "msi", "nsis", "deb", "rpm", "appimage"],
+    "category": "DeveloperTool",
+    "shortDescription": "Secure multi-platform AI skill installer (desktop)",
+    "longDescription": "vSkill desktop wraps the studio runtime in a native macOS app — Dock icon, menu bar, deep links, signed installer.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/[email protected]",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/vskill-server"
+    ],
+    "resources": [],
+    "copyright": "Copyright © 2026 Anton Abyzov",
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "frameworks": [],
+      "exceptionDomain": "",
+      "signingIdentity": "Developer ID Application: EasyChamp, Inc. (NMCB2JZ7QG)",
+      "providerShortName": "EasyChamp",
+      "entitlements": "Entitlements.plist",
+      "hardenedRuntime": true,
+      "dmg": {
+        "background": "../assets/dmg-background.png",
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 180, "y": 170 },
+        "applicationFolderPosition": { "x": 480, "y": 170 }
+      }
+    },
+    "windows": {
+      "wix": {
+        "language": "en-US"
+      },
+      "nsis": null,
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "allowDowngrades": true,
+      "digestAlgorithm": "sha256",
+      "certificateThumbprint": null,
+      "tsp": false,
+      "signCommand": null
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1"
+        ],
+        "section": "utils",
+        "priority": "optional"
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "gtk3",
+          "libayatana-appindicator-gtk3"
+        ]
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["vskill"]
+      }
+    },
+    "updater": {
+      "active": true,
+      "dialog": false,
+      "endpoints": [
+        "https://verified-skill.com/desktop/latest.json"
+      ],
+      "pubkey": "<MINISIGN_PUBKEY_PLACEHOLDER>",
+      "allowDowngrades": true,
+      "windows": { "installMode": "passive" }
+    }
+  }
+}

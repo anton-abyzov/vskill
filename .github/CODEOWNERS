@@ -1,0 +1,18 @@
+# CODEOWNERS for vskill — ensures reviews on release-critical paths.
+# Format: <pattern> <owner1> <owner2>
+#
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default: Anton owns everything.
+*                                   @anton-abyzov
+
+# Release pipeline + signing infrastructure — extra-careful review.
+.github/workflows/desktop-release.yml     @anton-abyzov
+.github/workflows/desktop-rollback.yml    @anton-abyzov
+.github/workflows/notarize-dryrun.yml     @anton-abyzov
+.github/workflows/lighthouse.yml          @anton-abyzov
+.github/cliff.toml                        @anton-abyzov
+.github/lighthouserc.json                 @anton-abyzov
+scripts/release/                          @anton-abyzov
+scripts/desktop/                          @anton-abyzov
+src-tauri/tauri.conf.json                 @anton-abyzov

@@ -50,15 +50,24 @@ export default defineConfig({
     : undefined,
   // Default project skips `-live.spec.ts` files. Live project opt-in via
   // `PLAYWRIGHT_RUN_LIVE=1 npx playwright test --project=live`.
+  // 0830 US-009 AC-US9-04: `desktop` project carries the auto-update smoke
+  // spec — runs darwin-only (the spec self-skips elsewhere via
+  // `test.skip(process.platform !== 'darwin')`). Default project ignores
+  // `e2e/desktop/**` so a regular `playwright test` run is unaffected.
   projects: [
     {
       name: "default",
-      testIgnore: /-live\.spec\.ts$/,
+      testIgnore: [/-live\.spec\.ts$/, /e2e\/desktop\//],
     },
     {
       name: "live",
       testMatch: /-live\.spec\.ts$/,
       grep: /@live/,
+    },
+    {
+      name: "desktop",
+      testDir: "e2e/desktop",
+      testMatch: /.*\.spec\.ts$/,
     },
   ],
   webServer: RUN_LIVE ? [...baseWebServers, liveWebServer] : baseWebServers,

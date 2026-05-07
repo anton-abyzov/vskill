@@ -1,0 +1,251 @@
+name: Desktop Release
+
+# Triggered by tags like `desktop-v0.1.0`. Builds vSkill Desktop on macOS,
+# Windows, and Linux runners; signs/notarizes per platform; uploads to
+# Cloudflare R2 (`vskill-desktop` bucket → verified-skill.com/desktop/*);
+# publishes a minisign-signed `latest.json` for the Tauri Updater plugin;
+# creates a GitHub Release as a defense-in-depth mirror.
+#
+# Owner: 0829 Track D (ci-pipeline-agent)
+# Spec ACs: AC-US13-01..06 (release pipeline), AC-US14-01..05 (updater + sig),
+#           AC-US16-01..05 (manifest hosting), AC-US17-01..05 (changelog)
+# Plan ref: .specweave/increments/0829-vskill-distribution-and-marketing/plan.md §7
+# ADR ref:  .specweave/docs/internal/architecture/adr/0829-01-update-manifest-hosting.md
+
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: universal-apple-darwin
+            platform: macos
+            build: scripts/release/macos-build.sh
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            platform: windows
+            build: scripts/release/windows-build.ps1
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            platform: linux
+            build: scripts/release/linux-build.sh
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install Linux build deps
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
+            libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            patchelf libfuse2 rpm \
+            gnupg minisign
+
+      - name: macOS — import Developer ID certificate
+        if: matrix.platform == 'macos'
+        env:
+          BUILD_CERT_BASE64: ${{ secrets.APPLE_CERTIFICATE }}
+          BUILD_CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "$BUILD_CERT_BASE64" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$BUILD_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions build.keychain
+          rm -f /tmp/cert.p12
+
+      - name: macOS — store notarytool credentials
+        if: matrix.platform == 'macos'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_B64: ${{ secrets.ASC_PRIVATE_KEY_BASE64 }}
+        run: |
+          echo "$ASC_KEY_B64" | base64 --decode > /tmp/AuthKey.p8
+          xcrun notarytool store-credentials vskill \
+            --key /tmp/AuthKey.p8 \
+            --key-id "$ASC_KEY_ID" \
+            --issuer "$ASC_ISSUER_ID"
+
+      - name: Install npm deps + build studio bundle
+        run: |
+          npm ci
+          npm run build
+          npm run build:eval-ui
+
+      - name: Build sidecar (macOS/Linux)
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            bash scripts/desktop/build-sidecar-linux.sh
+          else
+            bash scripts/desktop/build-sidecar.sh
+          fi
+
+      - name: Build sidecar (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: pwsh scripts/desktop/build-sidecar-windows.ps1
+
+      - name: Build Tauri app + sign + (macOS) notarize
+        # tauri-action signs the update bundle (.tar.gz/.zip) using
+        # TAURI_SIGNING_PRIVATE_KEY (minisign Ed25519 per ADR 0829-01 §2),
+        # codesigns the .app/.dmg via APPLE_* on macOS, and emits .sig
+        # peers next to each update bundle.
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # macOS codesigning + notarization
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # Tauri Updater minisign keypair (all platforms)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --target ${{ matrix.target }}
+          tagName: ${{ github.ref_name }}
+          releaseName: 'vSkill Desktop ${{ github.ref_name }}'
+          releaseDraft: true
+          prerelease: false
+
+      - name: Verify code signing (macOS)
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          DMG=$(ls -1t src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg | head -1)
+          spctl -a -t open -vv --context context:primary-signature "$DMG" || true
+          codesign -dv --verbose=4 "$DMG" 2>&1 | head -20
+
+      - name: GPG sign Linux artifacts
+        if: matrix.platform == 'linux'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_KEY_FPR: ${{ secrets.GPG_KEY_FPR }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          bash scripts/release/sign-linux-artifacts.sh src-tauri/target/release/bundle/
+
+      - name: Upload platform artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-artifacts
+          if-no-files-found: error
+          path: |
+            src-tauri/target/**/release/bundle/dmg/*.dmg
+            src-tauri/target/**/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/**/release/bundle/macos/*.app.tar.gz.sig
+            src-tauri/target/**/release/bundle/msi/*.msi
+            src-tauri/target/**/release/bundle/msi/*.msi.zip
+            src-tauri/target/**/release/bundle/msi/*.msi.zip.sig
+            src-tauri/target/**/release/bundle/nsis/*-setup.exe
+            src-tauri/target/**/release/bundle/nsis/*-setup.nsis.zip
+            src-tauri/target/**/release/bundle/nsis/*-setup.nsis.zip.sig
+            src-tauri/target/**/release/bundle/deb/*.deb
+            src-tauri/target/**/release/bundle/deb/*.deb.asc
+            src-tauri/target/**/release/bundle/rpm/*.rpm
+            src-tauri/target/**/release/bundle/rpm/*.rpm.asc
+            src-tauri/target/**/release/bundle/appimage/*.AppImage
+            src-tauri/target/**/release/bundle/appimage/*.AppImage.asc
+            src-tauri/target/**/release/bundle/appimage/*.AppImage.tar.gz
+            src-tauri/target/**/release/bundle/appimage/*.AppImage.tar.gz.sig
+
+  publish:
+    name: Publish to R2 + GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./release-artifacts/
+
+      - name: Install jq + aws-cli + git-cliff
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq awscli
+          curl -sSL https://github.com/orhun/git-cliff/releases/download/v2.6.1/git-cliff-2.6.1-x86_64-unknown-linux-gnu.tar.gz \
+            | tar xz -C /tmp
+          sudo install /tmp/git-cliff-2.6.1/git-cliff /usr/local/bin/git-cliff
+
+      - name: Generate release notes
+        run: bash scripts/release/release-notes.sh "${{ github.ref_name }}"
+
+      - name: Create / update GitHub Release (mirror)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: 'vSkill Desktop ${{ github.ref_name }}'
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
+          files: |
+            release-artifacts/**/*.dmg
+            release-artifacts/**/*.msi
+            release-artifacts/**/*-setup.exe
+            release-artifacts/**/*.deb
+            release-artifacts/**/*.rpm
+            release-artifacts/**/*.AppImage
+            release-artifacts/**/*.asc
+            release-artifacts/**/*.sig
+
+      - name: Publish to Cloudflare R2 + atomic latest.json
+        env:
+          CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          CLOUDFLARE_R2_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+        run: |
+          # Strip the desktop-v prefix → semver only.
+          VERSION="${GITHUB_REF_NAME#desktop-v}"
+          bash scripts/release/publish-manifest.sh "$VERSION" ./release-artifacts/
+
+      - name: Update Homebrew Cask (staging tap)
+        if: ${{ !contains(github.ref_name, '-rc') }}
+        continue-on-error: true
+        run: |
+          if [ -x scripts/release/update-brew-cask.sh ]; then
+            bash scripts/release/update-brew-cask.sh "${GITHUB_REF_NAME#desktop-v}"
+          else
+            echo "update-brew-cask.sh not found, skipping (other agent owns this script)"
+          fi

@@ -1,0 +1,74 @@
+name: Desktop Rollback
+
+# Manual rollback to a previously published version. Copies the archived
+# /desktop/history/v<TARGET>.json over /desktop/latest.json so the Tauri
+# Updater plugin steers all clients onto the older bundle on their next
+# 24h poll. Per ADR 0829-01 §4.
+#
+# IMPORTANT: the target version must already exist under /desktop/history/.
+# The publish workflow archives every release there automatically.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_version:
+        description: 'Version to roll back TO (e.g. 0.1.4 — must exist in /desktop/history/)'
+        required: true
+        type: string
+      reason:
+        description: 'One-line reason (recorded in workflow run + Slack)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install aws-cli
+        run: sudo apt-get update && sudo apt-get install -y awscli
+
+      - name: Validate inputs
+        env:
+          TARGET: ${{ inputs.target_version }}
+        run: |
+          if ! [[ "$TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]]; then
+            echo "ERROR: target_version must be semver (e.g. 0.1.4), got: $TARGET" >&2
+            exit 1
+          fi
+
+      - name: Roll latest.json back to target version
+        env:
+          CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          TARGET: ${{ inputs.target_version }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          R2_ENDPOINT="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          BUCKET=vskill-desktop
+
+          # Verify the target history file exists.
+          if ! aws --endpoint-url "$R2_ENDPOINT" s3 ls "s3://$BUCKET/desktop/history/v$TARGET.json" >/dev/null; then
+            echo "ERROR: s3://$BUCKET/desktop/history/v$TARGET.json does not exist." >&2
+            echo "Run: aws --endpoint-url $R2_ENDPOINT s3 ls s3://$BUCKET/desktop/history/  to see options." >&2
+            exit 1
+          fi
+
+          echo "==> Rolling back to v$TARGET — reason: $REASON"
+
+          # Atomic copy: history → latest. R2 single-key PUT is atomic.
+          aws --endpoint-url "$R2_ENDPOINT" s3 cp \
+            "s3://$BUCKET/desktop/history/v$TARGET.json" \
+            "s3://$BUCKET/desktop/latest.json" \
+            --cache-control "public, max-age=3600" \
+            --content-type "application/json"
+
+          echo "==> Rollback complete. Worst-case propagation: 1h CDN cache + 24h client poll."
+          echo "    Verify: curl -fsSL https://verified-skill.com/desktop/latest.json | jq .version"

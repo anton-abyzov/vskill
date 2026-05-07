@@ -12,12 +12,10 @@
 // AC-US1-04 (focus existing — no second instance), AC-US1-05 (lifecycle is
 // independent of main; close just hides per Mac convention).
 //
-// The URL `WebviewUrl::App("preferences/index.html".into())` resolves against
-// `frontendDist` (= `../dist/eval-ui` per tauri.conf.json `build.frontendDist`)
-// at build time and against `tauri://localhost/...` at runtime. The actual
-// Preferences React bundle is delivered by `preferences-ui-agent` to
-// `dist/eval-ui/preferences/index.html` — until that lands, this window will
-// 404 at runtime, but the Rust shell still compiles and links cleanly.
+// The URL `WebviewUrl::App("preferences.html".into())` resolves against
+// `frontendDist` (= `../dist/eval-ui` per tauri.conf.json `build.frontendDist`).
+// Vite multi-entry build emits `dist/eval-ui/preferences.html` (root-level, not
+// nested under a `preferences/` folder), matching `src/eval-ui/preferences.html`.
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -52,8 +50,8 @@ pub fn open_preferences(app: &AppHandle, tab: Option<&str>) -> Result<(), String
     }
 
     let url_path = match tab {
-        Some(t) if !t.is_empty() => format!("preferences/index.html?tab={t}"),
-        _ => "preferences/index.html".to_string(),
+        Some(t) if !t.is_empty() => format!("preferences.html?tab={t}"),
+        _ => "preferences.html".to_string(),
     };
 
     WebviewWindowBuilder::new(app, PREFERENCES_LABEL, WebviewUrl::App(url_path.into()))

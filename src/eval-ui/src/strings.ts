@@ -90,6 +90,9 @@ const actions = {
   revealInEditor: "Reveal in Editor",
   edit: "Edit",
   duplicate: "Duplicate",
+  // 0828: forks an installed skill into the authoring scope so the user
+  // can edit/own a copy. Wired in useContextMenuState → POST /api/skills/clone.
+  cloneToAuthoring: "Clone to authoring…",
   runBenchmark: "Run Benchmark",
   update: "Update",
   uninstall: "Uninstall",
@@ -144,6 +147,10 @@ const toasts = {
   pathCopied: "Path copied.",
   configCopied: "Config copied.",
   skillDuplicated: "Skill duplicated.",
+  // 0828: clone-to-authoring outcomes (wired in useContextMenuState).
+  cloneStarted: "Cloning to authoring…",
+  cloneSucceeded: "Cloned to authoring.",
+  cloneFailed: "Clone failed. Check eval-server logs.",
   benchmarkQueued: "Benchmark queued.",
   themeUpdated: "Theme updated.",
   skillUpdated: "Skill updated.",

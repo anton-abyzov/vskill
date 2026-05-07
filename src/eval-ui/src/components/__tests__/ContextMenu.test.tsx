@@ -56,6 +56,21 @@ describe("ContextMenu: itemsForSkill (pure)", () => {
       expect(a).toContain("run-benchmark");
     }
   });
+
+  // 0828 — Clone-to-authoring action. Forks an installed skill into the
+  // authoring scope; not relevant for source skills (they're already authored).
+  it("installed skill exposes 'clone' (Clone to authoring); source skill does not", () => {
+    const installedActions = itemsForSkill(mkSkill("installed")).map((i) => i.action);
+    expect(installedActions).toContain("clone");
+    const sourceActions = itemsForSkill(mkSkill("source")).map((i) => i.action);
+    expect(sourceActions).not.toContain("clone");
+  });
+
+  it("clone item is enabled (no disabled flag)", () => {
+    const item = itemsForSkill(mkSkill("installed")).find((i) => i.action === "clone");
+    expect(item).toBeDefined();
+    expect(item?.disabled).toBeFalsy();
+  });
 });
 
 async function mount(state: {

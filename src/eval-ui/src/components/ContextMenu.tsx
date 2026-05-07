@@ -24,6 +24,7 @@ export type ContextMenuAction =
   | "reveal"
   | "edit"
   | "duplicate"
+  | "clone"
   | "run-benchmark"
   | "update"
   | "uninstall"
@@ -72,6 +73,10 @@ export function itemsForSkill(skill: SkillInfo): ContextMenuItem[] {
   }
   // installed (plugin/global)
   const out = [...base];
+  // 0828: surface "Clone to authoring…" — wraps `vskill clone` so installed
+  // skills can be forked into the authoring scope from the UI (closes the gap
+  // the 0822 spec deferred at spec.md:149).
+  out.push({ action: "clone", label: a.cloneToAuthoring });
   if (skill.updateAvailable) out.push({ action: "update", label: a.update });
   out.push({ action: "uninstall", label: a.uninstall });
   // 0722: still surface Delete so the user understands why it's unavailable.

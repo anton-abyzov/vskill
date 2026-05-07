@@ -119,6 +119,19 @@ export async function handleContextMenuAction(
     case "duplicate":
       dispatchToast(strings.toasts.skillDuplicated, "info");
       return;
+    case "clone":
+      // 0828: fork an installed skill into the authoring scope.
+      // Opens the CloneToAuthoringDialog (3 targets: standalone / existing
+      // plugin / new plugin). App.tsx listens for `studio:request-clone` and
+      // renders the dialog with state. The dialog itself POSTs to
+      // /api/skills/clone and dispatches success / failure toasts +
+      // `studio:skills-changed` so the sidebar refreshes.
+      try {
+        window.dispatchEvent(new CustomEvent("studio:request-clone", { detail: { skill } }));
+      } catch {
+        /* JSDOM/test envs without dispatchEvent — non-fatal */
+      }
+      return;
     case "update":
       dispatchToast(strings.toasts.skillUpdated, "info");
       return;

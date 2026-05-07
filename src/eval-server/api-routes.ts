@@ -4094,6 +4094,184 @@ Return ONLY the JSON lines, no other text.`;
     sendJson(res, { ok: true, command: launch.command, args: launch.args }, 200, req);
   });
 
+  // -------------------------------------------------------------------------
+  // 0828 — POST /api/skills/clone
+  //
+  // Closes the gap left by 0822 (vskill-clone-skill-fork) which shipped the
+  // CLI but explicitly deferred Studio UI ("This increment is CLI-only" —
+  // 0822/spec.md:149). Forks an installed skill into the authoring scope by
+  // spawning the `vskill clone` binary with --target standalone --path
+  // <root>/skills/<skill-name>-fork --yes (auto-confirm, non-interactive).
+  //
+  // We shell out rather than calling runCloneOnce in-process because the
+  // CLI orchestrator uses `process.exit()` on errors (cloneCommand:580) and
+  // because spawning the same binary the user would run from terminal keeps
+  // a single source of truth — if the CLI gains new flags, this route
+  // automatically benefits.
+  //
+  // Body schema:
+  //   { source: string,            // skill name to clone
+  //     sourcePlugin?: string,     // plugin context (informational)
+  //     target?: "standalone",     // only standalone supported in v1
+  //     path?: string,             // optional override; defaults to <root>/skills/<name>-fork
+  //     author?: string,           // defaults to git config user.name
+  //     namespace?: string,        // defaults to slugified author
+  //     force?: boolean }          // overwrite existing target
+  //
+  // Returns:
+  //   200 { ok: true, target: <abs path>, files: <count>, stdout: <tail> }
+  //   400 { error: "invalid_body" | "invalid_source" }
+  //   500 { error: "clone_failed", message: <stderr tail>, exitCode }
+  // -------------------------------------------------------------------------
+  router.post("/api/skills/clone", async (req, res) => {
+    let body: {
+      source?: unknown;
+      sourcePlugin?: unknown;
+      target?: unknown;
+      path?: unknown;
+      plugin?: unknown;
+      pluginName?: unknown;
+      author?: unknown;
+      namespace?: unknown;
+      force?: unknown;
+    };
+    try {
+      body = (await readBody(req)) as typeof body;
+    } catch {
+      sendJson(res, { error: "invalid_body" }, 400, req);
+      return;
+    }
+
+    const source = typeof body.source === "string" ? body.source.trim() : "";
+    if (!source || !/^[a-z0-9][a-z0-9-]*$/i.test(source) || source.length > 64) {
+      sendJson(res, { error: "invalid_source" }, 400, req);
+      return;
+    }
+
+    // 0828 follow-up — three targets supported (matching the CLI):
+    //   "standalone"    → <root>/skills/<name>-fork (default)
+    //   "plugin"        → <plugin-root>/skills/<name>  (existing plugin)
+    //   "new-plugin"    → <root>/<plugin-name>/skills/<name>  (scaffold new)
+    type Target = "standalone" | "plugin" | "new-plugin";
+    const validTargets: ReadonlyArray<Target> = ["standalone", "plugin", "new-plugin"];
+    const target: Target = validTargets.includes(body.target as Target)
+      ? (body.target as Target)
+      : "standalone";
+
+    // Resolve the path inside `root`, with a path-traversal guard for any
+    // client-supplied path. We compute `targetPath` for the response payload;
+    // for plugin / new-plugin targets the CLI computes the actual skill dir
+    // from --plugin / --plugin-name.
+    const rootAbs = resolve(root);
+    function ensureInsideRoot(p: string): string | null {
+      const abs = resolve(rootAbs, p);
+      if (abs !== rootAbs && !abs.startsWith(rootAbs + "/")) return null;
+      return abs;
+    }
+
+    const slug = source.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+    let targetPath = "";
+
+    // Build CLI args. We always pass --yes to avoid hanging on a missing TTY.
+    const cliArgs: string[] = ["clone", source, "--yes", "--target", target];
+
+    if (target === "standalone") {
+      const defaultDir = join(rootAbs, "skills", `${slug}-fork`);
+      targetPath = defaultDir;
+      if (typeof body.path === "string" && body.path.trim()) {
+        const candidate = ensureInsideRoot(body.path);
+        if (!candidate) {
+          sendJson(res, { error: "path_outside_root" }, 400, req);
+          return;
+        }
+        targetPath = candidate;
+      }
+      cliArgs.push("--path", targetPath);
+    } else if (target === "plugin") {
+      // Existing plugin — body.plugin is the plugin name OR an absolute path.
+      const plugin = typeof body.plugin === "string" ? body.plugin.trim() : "";
+      if (!plugin) {
+        sendJson(res, { error: "missing_plugin" }, 400, req);
+        return;
+      }
+      // If it looks like a path, validate it's inside root. Otherwise let the
+      // CLI resolve the plugin name from its registry.
+      if (plugin.startsWith("/") || plugin.startsWith(".") || plugin.includes("/")) {
+        const candidate = ensureInsideRoot(plugin);
+        if (!candidate) {
+          sendJson(res, { error: "path_outside_root" }, 400, req);
+          return;
+        }
+        cliArgs.push("--plugin", candidate);
+        targetPath = join(candidate, "skills", slug);
+      } else {
+        cliArgs.push("--plugin", plugin);
+        targetPath = `<plugin:${plugin}>/skills/${slug}`;  // informational
+      }
+    } else {
+      // new-plugin — scaffold a fresh plugin folder.
+      const pluginName = typeof body.pluginName === "string" ? body.pluginName.trim() : "";
+      if (!pluginName || !/^[a-z][a-z0-9-]{0,62}[a-z0-9]$/.test(pluginName)) {
+        sendJson(res, { error: "invalid_plugin_name" }, 400, req);
+        return;
+      }
+      const pluginRoot = join(rootAbs, pluginName);
+      cliArgs.push("--plugin-name", pluginName);
+      cliArgs.push("--path", pluginRoot);
+      targetPath = join(pluginRoot, "skills", slug);
+    }
+
+    if (typeof body.author === "string" && body.author.trim()) {
+      cliArgs.push("--author", body.author.trim());
+    }
+    if (typeof body.namespace === "string" && body.namespace.trim()) {
+      cliArgs.push("--namespace", body.namespace.trim());
+    }
+    if (body.force === true) cliArgs.push("--force");
+
+    // Spawn the `vskill` binary on PATH — same pattern used by
+    // install-skill-routes.ts:74 for `vskill install`. This keeps a single
+    // source of truth (whatever the user runs from terminal also runs here).
+    let stdout = "";
+    let stderr = "";
+    const exitCode: number | null = await new Promise((resolveCode) => {
+      const child = spawn("vskill", cliArgs, {
+        cwd: root,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      child.stdout?.on("data", (c) => { stdout += c.toString(); });
+      child.stderr?.on("data", (c) => { stderr += c.toString(); });
+      child.on("error", () => resolveCode(127));
+      child.on("close", (code) => resolveCode(code));
+    });
+
+    if (exitCode !== 0) {
+      const tail = (stderr || stdout).trim().split("\n").slice(-6).join("\n");
+      sendJson(
+        res,
+        { error: "clone_failed", message: tail || "non-zero exit", exitCode },
+        500,
+        req,
+      );
+      return;
+    }
+
+    // Parse "files: N" from stdout for the response.
+    const filesMatch = stdout.match(/files:\s+(\d+)/);
+    const files = filesMatch ? parseInt(filesMatch[1], 10) : null;
+    sendJson(
+      res,
+      {
+        ok: true,
+        target: targetPath,
+        files,
+        stdout: stdout.trim().split("\n").slice(-8).join("\n"),
+      },
+      200,
+      req,
+    );
+  });
+
   // Handle CORS preflight
   router.options = (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse): void => {
     const origin = req.headers.origin;

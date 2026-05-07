@@ -56,6 +56,34 @@
         "/Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill"
       ],
       "port": 3082
+    },
+    {
+      "name": "vskill-studio-0827",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/dist/bin.js",
+        "studio",
+        "--port",
+        "3127",
+        "--no-open",
+        "--root",
+        "/Users/antonabyzov/Projects/github/specweave-umb"
+      ],
+      "port": 3127
+    },
+    {
+      "name": "vskill-studio-0827-running",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/dist/bin.js",
+        "studio",
+        "--port",
+        "3114",
+        "--no-open",
+        "--root",
+        "/Users/antonabyzov/Projects/github/specweave-umb"
+      ],
+      "port": 3114
     }
   ]
 }

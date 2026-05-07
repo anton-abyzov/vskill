@@ -150,7 +150,14 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
   // to free the port before restarting in-place. Replies before closing so
   // the caller sees a clean 200 instead of a connection reset. Registered
   // here (after `server` is constructed) so the handler can close it.
-  router.post("/api/shutdown", async (_req, res) => {
+  // Loopback-only: the same CSRF gate the install/state routes use, since
+  // any same-origin tab on a developer box could otherwise terminate studio.
+  router.post("/api/shutdown", async (req, res) => {
+    const addr = req.socket.remoteAddress ?? "";
+    if (addr !== "127.0.0.1" && addr !== "::1" && addr !== "::ffff:127.0.0.1") {
+      sendJson(res, { ok: false, error: "loopback-only" }, 403, req);
+      return;
+    }
     sendJson(res, { ok: true, shuttingDown: true });
     setTimeout(() => {
       try {

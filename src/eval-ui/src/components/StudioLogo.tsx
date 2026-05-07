@@ -77,11 +77,11 @@ export function StudioLogo({ onHome }: StudioLogoProps) {
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 10,
+        gap: 6,
         flexShrink: 0,
-        padding: "4px 6px",
-        margin: "-4px -6px",
-        borderRadius: 6,
+        padding: "4px 8px 4px 4px",
+        margin: "-4px -8px -4px -4px",
+        borderRadius: 8,
         textDecoration: "none",
         color: "inherit",
         cursor: "pointer",
@@ -99,12 +99,17 @@ export function StudioLogo({ onHome }: StudioLogoProps) {
         src={skillStudioLogoUrl}
         alt=""
         aria-hidden="true"
-        width={28}
-        height={28}
+        width={32}
+        height={32}
         style={{
           display: "block",
           objectFit: "contain",
           flexShrink: 0,
+          // The PNG has ~12% internal whitespace padding. Negative horizontal
+          // margins crop that visual gutter so the bell sits flush against
+          // its neighbors, and the slight vertical lift balances the
+          // bell's optical center (the clapper weights the lower third).
+          margin: "-2px -3px -2px -2px",
         }}
       />
       <span
@@ -112,6 +117,7 @@ export function StudioLogo({ onHome }: StudioLogoProps) {
           fontSize: 13,
           fontWeight: 600,
           letterSpacing: "-0.01em",
+          lineHeight: 1,
           color: "var(--text-primary)",
         }}
       >

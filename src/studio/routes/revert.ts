@@ -10,28 +10,15 @@
 import * as http from "node:http";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { existsSync, readdirSync, statSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, rmSync } from "node:fs";
 
 import type { Router } from "../../eval-server/router.js";
 import { sendJson } from "../../eval-server/router.js";
 import { initSSE, sendSSE, sendSSEDone } from "../../eval-server/sse-helpers.js";
-import { resolveScopePath } from "../lib/scope-transfer.js";
+import { countFiles, resolveScopePath } from "../lib/scope-transfer.js";
 import { readProvenance } from "../lib/provenance.js";
 import { appendOp } from "../lib/ops-log.js";
 import type { StudioOp, TransferEvent } from "../types.js";
-
-function countFiles(dir: string): number {
-  let n = 0;
-  if (!existsSync(dir)) return 0;
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    const st = statSync(full);
-    if (st.isDirectory()) n += countFiles(full);
-    else if (st.isFile()) n += 1;
-  }
-  return n;
-}
 
 export function registerRevertRoute(
   router: Router,

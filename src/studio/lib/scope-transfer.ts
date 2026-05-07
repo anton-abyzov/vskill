@@ -80,9 +80,11 @@ export function resolveScopePath(
 
 /**
  * Count files written recursively into a directory — used for the SSE
- * `copied` event payload.
+ * `copied` and `deleted` event payloads. Returns 0 for missing dirs so
+ * callers can use it on paths that may have been removed mid-flight.
  */
-function countFiles(dir: string): number {
+export function countFiles(dir: string): number {
+  if (!existsSync(dir)) return 0;
   let n = 0;
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);

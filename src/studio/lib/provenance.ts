@@ -27,8 +27,9 @@ export async function readProvenance(skillDir: string): Promise<Provenance | nul
   } catch (err) {
     const code = (err as NodeJS.ErrnoException)?.code;
     if (code !== "ENOENT") {
-      // Parse error or transient IO — log at debug, do not throw.
-      console.error(`[provenance] readProvenance(${skillDir}) failed: ${(err as Error).message}`);
+      // Parse error or transient IO — emit a breadcrumb (matches the
+      // best-effort pattern used elsewhere; caller still gets null).
+      console.warn(`[provenance] readProvenance(${skillDir}) failed: ${(err as Error).message}`);
     }
     return null;
   }

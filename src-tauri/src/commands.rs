@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_shell::ShellExt;
 
+use crate::preferences::settings::settings_path;
 use crate::preferences::SettingsStore;
 use crate::sidecar::{self, SharedSidecar};
 
@@ -202,4 +203,52 @@ pub async fn set_autostart(
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Bridge-completion handlers (post-v1.0.12 IPC alignment).
+//
+// The frontend `useDesktopBridge` ships call sites for these three commands
+// (`pick_default_project_folder`, `reveal_settings_file`, `copy_settings_path`)
+// but v1.0.12 only registered the settings/updater/autostart surface, so each
+// click rejected with "Command not found". `copy_settings_path` is now handled
+// by the web Clipboard API in the bridge, leaving these two genuine UI
+// features that need Rust:
+//   - folder picker uses tauri-plugin-dialog (already registered + capability)
+//   - reveal-in-Finder uses tauri-plugin-shell::open (already permissioned)
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn pick_default_project_folder(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    // tauri-plugin-dialog v2's pick_folder is callback-style; bridge to a
+    // oneshot so the Tauri command can return the chosen path (or None on
+    // cancel) as a normal awaited Result.
+    let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
+    app.dialog().file().pick_folder(move |folder| {
+        // FilePath -> String. None when the user dismissed the picker.
+        let path = folder.and_then(|f| f.into_path().ok())
+            .map(|p| p.to_string_lossy().to_string());
+        let _ = tx.send(path);
+    });
+    rx.await.map_err(|e| format!("folder picker channel closed: {e}"))
+}
+
+#[tauri::command]
+pub fn reveal_settings_file(app: AppHandle) -> Result<(), String> {
+    let path = settings_path();
+    // If the file hasn't been created yet (no setting saved since install),
+    // open the parent directory instead so the user still gets a useful
+    // Finder window. shell::open accepts directory paths on all platforms.
+    let target = if path.exists() {
+        path.clone()
+    } else {
+        path.parent().map(PathBuf::from).unwrap_or_else(|| path.clone())
+    };
+    let target_str = target.to_string_lossy().to_string();
+    #[allow(deprecated)]
+    app.shell()
+        .open(&target_str, None)
+        .map_err(|e| format!("could not reveal {target_str}: {e}"))
 }

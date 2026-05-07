@@ -56,6 +56,8 @@ pub fn run() {
             commands::open_preferences,
             commands::get_app_metadata,
             commands::set_autostart,
+            commands::pick_default_project_folder,
+            commands::reveal_settings_file,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

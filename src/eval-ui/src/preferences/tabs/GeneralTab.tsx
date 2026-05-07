@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Callout, FormRow, Section, Segmented, Toggle } from "../components/primitives";
@@ -8,8 +8,26 @@ export function GeneralTab({ bridge, snapshot, onSnapshotChanged, pushToast }: T
   const { t } = useTranslation("preferences");
   const isBrowser = !bridge.available;
 
+  // Optimistic theme — bind the segmented control to local state so the
+  // selection visually flips on click even before (or independent of) the
+  // persistence IPC resolves. Sync down whenever the snapshot reloads so
+  // settings.json remains the source of truth on next mount.
+  const [optimisticTheme, setOptimisticTheme] = useState<
+    "system" | "light" | "dark"
+  >(snapshot?.general.theme ?? "system");
+
+  useEffect(() => {
+    if (snapshot?.general.theme) {
+      setOptimisticTheme(snapshot.general.theme);
+    }
+  }, [snapshot?.general.theme]);
+
   const onThemeChange = useCallback(
     async (next: "system" | "light" | "dark") => {
+      // Reflect the click instantly. Even if persistence rejects, respect
+      // the user's gesture — the toast tells them it didn't save, the UI
+      // doesn't snap back as if their click never happened.
+      setOptimisticTheme(next);
       try {
         await bridge.setSetting("general.theme", next);
         await onSnapshotChanged();
@@ -57,7 +75,7 @@ export function GeneralTab({ bridge, snapshot, onSnapshotChanged, pushToast }: T
     }
   }, [bridge, onSnapshotChanged, pushToast]);
 
-  const theme = snapshot?.general.theme ?? "system";
+  const theme = optimisticTheme;
   const launchAtLogin = snapshot?.general.launchAtLogin ?? false;
   const defaultProjectFolder = snapshot?.general.defaultProjectFolder ?? null;
 

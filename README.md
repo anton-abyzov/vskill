@@ -36,6 +36,11 @@ Native Mac, Windows, and Linux desktop apps available at
 **[verified-skill.com/desktop](https://verified-skill.com/desktop)** — 1.5 s cold launch,
 auto-update, no telemetry.
 
+The desktop app wraps the same studio runtime as `npx vskill studio` in a Tauri 2 shell:
+native menu bar, global `⌘K` find-skill palette, `⌘,` Preferences with General / Updates /
+Privacy / Advanced tabs, settings persisted to `~/.vskill/settings.json` (atomic, 0600 perms),
+and signed auto-update via `tauri-plugin-updater` against minisign-signed manifests.
+
 <br/>
 
 ## Why vskill

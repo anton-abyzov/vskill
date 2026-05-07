@@ -375,7 +375,7 @@ fn spawn_debouncer(
     path: PathBuf,
     mut rx: mpsc::UnboundedReceiver<()>,
 ) {
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         loop {
             // Wait for the first signal — we don't write until something asks us to.
             if rx.recv().await.is_none() {

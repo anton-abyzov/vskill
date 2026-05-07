@@ -4,6 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use tauri::{Manager, RunEvent};
+#[cfg(target_os = "macos")]
 use tauri_plugin_autostart::MacosLauncher;
 
 mod commands;
@@ -31,12 +32,15 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(
-            tauri_plugin_autostart::Builder::new()
-                .macos_launcher(MacosLauncher::LaunchAgent)
-                .args(vec!["--minimized"])
-                .build(),
-        )
+        .plugin({
+            let mut b = tauri_plugin_autostart::Builder::new()
+                .args(vec!["--minimized"]);
+            #[cfg(target_os = "macos")]
+            {
+                b = b.macos_launcher(MacosLauncher::LaunchAgent);
+            }
+            b.build()
+        })
         .manage(state.clone())
         .invoke_handler(tauri::generate_handler![
             commands::get_server_port,

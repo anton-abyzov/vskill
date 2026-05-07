@@ -153,16 +153,37 @@ describe("AgentModelPicker — popover open/close", () => {
     expect(document.querySelector("[data-testid='agent-model-picker-popover']")).toBeNull();
   });
 
-  it("Cmd+K toggles the popover when no input owns focus", async () => {
+  it("toggles via the openAgentModelPicker CustomEvent and ignores raw Cmd+K", async () => {
+    // The picker used to listen for plain Cmd+K via its own keydown handler,
+    // which collided with the FindSkillsPalette's Cmd+K. The chord moved to
+    // Cmd+Shift+M ("M for Model") AND the keyboard listener was removed from
+    // this component — App.tsx now owns the keymap and dispatches an
+    // `openAgentModelPicker` CustomEvent. We test that contract here.
     const { act } = await import("react");
     await renderPicker();
     expect(document.querySelector("[data-testid='agent-model-picker-popover']")).toBeNull();
+
+    // Plain Cmd+K must be a no-op for this component now.
     act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
     });
-    expect(document.querySelector("[data-testid='agent-model-picker-popover']")).not.toBeNull();
+    expect(document.querySelector("[data-testid='agent-model-picker-popover']")).toBeNull();
+
+    // Raw Cmd+Shift+M is also a no-op here — the App-level hook owns the chord.
     act(() => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "m", metaKey: true, shiftKey: true }));
+    });
+    expect(document.querySelector("[data-testid='agent-model-picker-popover']")).toBeNull();
+
+    // The CustomEvent is the contract — dispatching it opens the popover.
+    act(() => {
+      window.dispatchEvent(new CustomEvent("openAgentModelPicker"));
+    });
+    expect(document.querySelector("[data-testid='agent-model-picker-popover']")).not.toBeNull();
+
+    // Dispatching it again closes.
+    act(() => {
+      window.dispatchEvent(new CustomEvent("openAgentModelPicker"));
     });
     expect(document.querySelector("[data-testid='agent-model-picker-popover']")).toBeNull();
   });

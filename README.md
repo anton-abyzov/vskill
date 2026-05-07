@@ -8,19 +8,33 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/vskill"><img src="https://img.shields.io/npm/v/vskill?color=cb3837&logo=npm" alt="npm" /></a>
   <a href="https://www.npmjs.com/package/vskill"><img src="https://img.shields.io/npm/dw/vskill?color=cb3837&logo=npm&label=downloads" alt="downloads" /></a>
+  <a href="https://github.com/anton-abyzov/vskill/stargazers"><img src="https://img.shields.io/github/stars/anton-abyzov/vskill?color=FFD700&logo=github" alt="GitHub stars" /></a>
+  <a href="https://github.com/anton-abyzov/vskill/actions/workflows/desktop-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/anton-abyzov/vskill/desktop-release.yml?branch=main&label=desktop%20build&logo=githubactions" alt="desktop build" /></a>
   <img src="https://img.shields.io/badge/agents-53_platforms-0969DA" alt="53 agents" />
   <img src="https://img.shields.io/badge/plugins-9-8B5CF6" alt="9 plugins" />
   <img src="https://img.shields.io/badge/skills-16-10B981" alt="16 skills" />
   <a href="https://verified-skill.com"><img src="https://img.shields.io/badge/registry-verified--skill.com-F59E0B" alt="registry" /></a>
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" />
+  <a href="https://github.com/anton-abyzov/vskill/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" /></a>
+</p>
+
+<p align="center">
+  <strong>Download vSkill Desktop:</strong><br/><br/>
+  <a href="https://verified-skill.com/desktop"><img src="https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
+  <a href="https://verified-skill.com/desktop"><img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>
+  <a href="https://verified-skill.com/desktop"><img src="https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" /></a>
 </p>
 
 <br/>
 
 ```bash
+# Browser studio — zero install
 npx vskill@latest studio        # open the local IDE for AI skills
 npx vskill@latest install remotion-best-practices
 ```
+
+Native Mac, Windows, and Linux desktop apps available at
+**[verified-skill.com/desktop](https://verified-skill.com/desktop)** — 1.5 s cold launch,
+auto-update, no telemetry.
 
 <br/>
 

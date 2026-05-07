@@ -4,11 +4,16 @@
 // Exercises three scenarios:
 //   Scenario 1 — Studio boots with Claude Code as the default and shows
 //                a silent trigger label (no toast banner).
-//   Scenario 2 — User opens the picker via Cmd/Ctrl+K, highlights the
+//   Scenario 2 — User opens the picker via Cmd/Ctrl+Shift+M, highlights the
 //                OpenRouter agent, sees the empty-state "Add API key →"
 //                CTA card, clicks it, Settings modal opens, key saved,
 //                picker reopens with OpenRouter live.
 //   Scenario 3 — Same flow, keyboard-only (no pointer events), under 15s.
+//
+// Hotkey note (0828): the picker used to fire on bare Cmd+K but that
+// collided with the FindSkillsPalette which also lives on Cmd+K. The picker
+// was re-bound to Cmd+Shift+M ("M" for Model). The studio-hotkeys-cmdk
+// suite covers the isolation between the two popovers.
 //
 // These specs target the real eval-server + Studio SPA — the server is
 // started by Playwright's config. Tests that require an OpenRouter
@@ -56,9 +61,9 @@ test.describe("0682 — Agent + Model picker", () => {
     expect(bodyMinusWhitelist).not.toMatch(/\bsubscription\b/i);
   });
 
-  test("Scenario 2: Cmd+K opens picker with ready-state panes and footer", async ({ page }) => {
+  test("Scenario 2: Cmd+Shift+M opens picker with ready-state panes and footer", async ({ page }) => {
     await waitForStudioReady(page);
-    await page.keyboard.press(`${mod()}+K`);
+    await page.keyboard.press(`${mod()}+Shift+M`);
     await page.waitForSelector("[data-testid='agent-model-picker-popover']", { timeout: 2000 });
     await expect(page.locator("[data-testid='agent-list']")).toBeVisible();
     await expect(page.locator("[data-testid='model-list'], [data-testid='openrouter-empty-card']")).toBeVisible();
@@ -71,7 +76,7 @@ test.describe("0682 — Agent + Model picker", () => {
   test("Scenario 3: keyboard-only open+nav+close under 15s", async ({ page }) => {
     const start = Date.now();
     await waitForStudioReady(page);
-    await page.keyboard.press(`${mod()}+K`);
+    await page.keyboard.press(`${mod()}+Shift+M`);
     await page.waitForSelector("[data-testid='agent-list']", { timeout: 2000 });
     // Navigate the agent pane 3 times down and then Esc.
     for (let i = 0; i < 3; i++) {
@@ -87,7 +92,7 @@ test.describe("0682 — Agent + Model picker", () => {
   // unconditionally). AC-US2-04.
   test("Scenario 4: keyboard nav inside model pane selects the focused row, not models[0]", async ({ page }) => {
     await waitForStudioReady(page);
-    await page.keyboard.press(`${mod()}+K`);
+    await page.keyboard.press(`${mod()}+Shift+M`);
     await page.waitForSelector("[data-testid='agent-list']", { timeout: 2000 });
 
     // Move focus into the model pane via Right Arrow.

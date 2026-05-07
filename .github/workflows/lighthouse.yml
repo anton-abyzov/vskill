@@ -1,0 +1,92 @@
+name: Lighthouse CI
+
+# Lighthouse mobile audit on the 5 critical verified-skill.com pages, gated
+# at >= 90 across all 4 Lighthouse categories (Performance, Accessibility,
+# Best Practices, SEO) per spec AC-US21-01..05.
+#
+# Triggers:
+#   - PRs that touch vskill-platform (boots a local dev server, audits localhost)
+#   - workflow_dispatch (audits production verified-skill.com on demand)
+#   - schedule (nightly audit of production)
+#
+# Owner: 0829 Track D (ci-pipeline-agent), Track E AC-US21-*.
+
+on:
+  pull_request:
+    paths:
+      - 'repositories/anton-abyzov/vskill-platform/**'
+      - '.github/workflows/lighthouse.yml'
+      - '.github/lighthouserc.json'
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Base URL to audit (default: production)'
+        required: false
+        default: 'https://verified-skill.com'
+  schedule:
+    # 06:00 UTC daily — well after any nightly deploy.
+    - cron: '0 6 * * *'
+
+permissions:
+  contents: read
+  pull-requests: write   # for lhci-action to post the score comment
+
+jobs:
+  lighthouse:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Lighthouse CI
+        run: npm install -g @lhci/cli@0.14.x
+
+      - name: Decide base URL
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Boot vskill-platform locally and audit localhost
+            echo "mode=local" >> "$GITHUB_OUTPUT"
+            echo "base=http://localhost:3000" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=remote" >> "$GITHUB_OUTPUT"
+            echo "base=${{ inputs.base_url }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=remote" >> "$GITHUB_OUTPUT"
+            echo "base=https://verified-skill.com" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Boot vskill-platform dev server (PR mode)
+        if: steps.target.outputs.mode == 'local'
+        working-directory: repositories/anton-abyzov/vskill-platform
+        run: |
+          if [ -f package.json ]; then
+            npm ci
+            (npm run dev > /tmp/lh-server.log 2>&1 &) && echo $! > /tmp/lh-server.pid
+            # Wait up to 60s for server to come up
+            for i in $(seq 1 60); do
+              if curl -fsS http://localhost:3000 >/dev/null 2>&1; then
+                echo "Server ready."
+                break
+              fi
+              sleep 1
+            done
+          else
+            echo "::warning::vskill-platform/package.json not present in this checkout — skipping local boot."
+            exit 0
+          fi
+
+      - name: Run Lighthouse CI
+        env:
+          LHCI_BASE_URL: ${{ steps.target.outputs.base }}
+        run: lhci autorun --config=.github/lighthouserc.json
+
+      - name: Stop dev server (PR mode)
+        if: always() && steps.target.outputs.mode == 'local'
+        run: |
+          [ -f /tmp/lh-server.pid ] && kill "$(cat /tmp/lh-server.pid)" || true

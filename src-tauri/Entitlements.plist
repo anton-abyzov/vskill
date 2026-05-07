@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  vSkill Desktop — macOS hardened-runtime entitlements.
+
+  Distribution: Developer ID Application (NOT Mac App Store sandbox).
+  Hardened runtime is enabled via tauri.conf.json bundle.macOS.hardenedRuntime=true.
+  See plan §4.2 for the architect-approved entitlement set and ADR 0828-01 for
+  the disable-library-validation justification (Node sidecar with @napi-rs/keyring).
+-->
+<plist version="1.0">
+<dict>
+  <!--
+    com.apple.security.cs.allow-jit
+    Required by WKWebView for WebAssembly + JIT-compiled JS. Without it the
+    studio runtime's JS engine cannot allocate executable pages.
+  -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+
+  <!--
+    com.apple.security.cs.allow-unsigned-executable-memory
+    Required by the Node sidecar (V8 engine). V8 generates writable+executable
+    pages at runtime that are not signed. Removing this entitlement crashes
+    the sidecar on first JS evaluation.
+  -->
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!--
+    com.apple.security.cs.disable-library-validation
+    Required so the Node sidecar can dlopen native modules (@napi-rs/keyring,
+    sharp, etc.) and Node's own internal .dylibs that are signed by the Node
+    project, not by EasyChamp, Inc. ADR 0828-01 records the architectural
+    justification: same posture Electron + every Tauri Node-sidecar app uses.
+  -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+
+  <!--
+    com.apple.security.network.client
+    Allows outbound HTTP/HTTPS to localhost (eval-server) and verified-skill.com
+    (skill registry, updater manifest). No server entitlement — we never accept
+    inbound connections.
+  -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+
+  <!--
+    com.apple.security.files.user-selected.read-write
+    Allows reading/writing files the user explicitly picks via NSOpenPanel
+    (project picker added in 0828). Does NOT grant general filesystem access;
+    Gatekeeper still prompts for ~/Documents, ~/Desktop, etc. on first access.
+  -->
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+
+  <!--
+    Explicitly NOT enabled:
+      - com.apple.security.app-sandbox
+        Would break the Node sidecar child process and ~/.vskill/ access.
+        Developer ID distribution does not require sandboxing.
+      - com.apple.security.cs.allow-dyld-environment-variables
+        Not needed; eval-server's boot-preflight.ts reads env from
+        ~/.vskill/keys.env directly, not via DYLD_*.
+  -->
+</dict>
+</plist>

@@ -1,0 +1,31 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default permissions for the vSkill desktop shell",
+  "windows": ["main", "preferences"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-minimize",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-set-focus",
+    "core:webview:default",
+    "core:webview:allow-create-webview-window",
+    "core:app:default",
+    "core:event:default",
+    "core:menu:default",
+    "core:path:default",
+    "shell:default",
+    "shell:allow-open",
+    "dialog:default",
+    "notification:default",
+    "deep-link:default",
+    "updater:default",
+    "autostart:default"
+  ]
+}

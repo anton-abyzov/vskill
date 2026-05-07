@@ -131,11 +131,37 @@ jobs:
         shell: pwsh
         run: pwsh scripts/desktop/build-sidecar-windows.ps1
 
+      - name: Pre-flight — verify Tauri signing key is present
+        # Without this guard, tauri-action silently builds bundles WITHOUT
+        # .sig peers (the env var is optional from its perspective). That
+        # breaks the Tauri Updater channel because there's nothing for
+        # latest.json's `signature` field to reference. v1.0.12 shipped this
+        # way; never again.
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is empty — auto-update bundles will be unsigned. Aborting."
+            exit 1
+          fi
+          echo "TAURI_SIGNING_PRIVATE_KEY present (length=${#TAURI_SIGNING_PRIVATE_KEY})"
+
       - name: Build Tauri app + sign + (macOS) notarize
         # tauri-action signs the update bundle (.tar.gz/.zip) using
         # TAURI_SIGNING_PRIVATE_KEY (minisign Ed25519 per ADR 0829-01 §2),
         # codesigns the .app/.dmg via APPLE_* on macOS, and emits .sig
         # peers next to each update bundle.
+        #
+        # `includeUpdaterJson: false` — we publish our own latest.json from
+        # vskill-platform's edge route + R2 (publish-manifest.sh handles the
+        # canonical manifest). Letting tauri-action write its own creates
+        # a stale `latest.json` asset on the GitHub Release that confuses
+        # consumers.
+        #
+        # `uploadUpdaterSignatures: true` (default) — ensures the .sig peer
+        # files are uploaded as Release assets even when the release is
+        # still in draft state (this was the gap in v1.0.12).
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
@@ -155,6 +181,40 @@ jobs:
           releaseName: 'Skill Studio ${{ github.ref_name }}'
           releaseDraft: true
           prerelease: false
+          includeUpdaterJson: false
+          uploadUpdaterSignatures: true
+
+      - name: Verify .sig peer files were generated
+        # Defensive — if tauri-action exited 0 but no .sig file landed next
+        # to the bundle, something is silently wrong with the signing config
+        # and we should not silently ship an unsigned release.
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE_DIR="src-tauri/target/${{ matrix.target }}/release/bundle"
+          if [ ! -d "$BUNDLE_DIR" ]; then
+            echo "::error::expected bundle dir not found: $BUNDLE_DIR"
+            exit 1
+          fi
+          # Map matrix.platform -> the bundle subdir whose .sig peer is required.
+          case "${{ matrix.platform }}" in
+            macos)   PEERS=("$BUNDLE_DIR/macos"/*.app.tar.gz.sig) ;;
+            windows) PEERS=("$BUNDLE_DIR/nsis"/*-setup.nsis.zip.sig "$BUNDLE_DIR/msi"/*.msi.zip.sig) ;;
+            linux)   PEERS=("$BUNDLE_DIR/appimage"/*.AppImage.tar.gz.sig) ;;
+          esac
+          MISSING=0
+          for p in "${PEERS[@]}"; do
+            # Glob may not expand if no match; check literal
+            if ! compgen -G "$p" > /dev/null; then
+              echo "::error::missing .sig peer for ${{ matrix.platform }}: $p"
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" -ne 0 ]; then
+            echo "::error::tauri-action did not emit expected .sig files. Auto-update will be broken."
+            exit 1
+          fi
+          echo "All expected .sig peers present for ${{ matrix.platform }}."
 
       - name: Verify code signing (macOS)
         if: matrix.platform == 'macos'

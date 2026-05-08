@@ -157,6 +157,14 @@ patchFsForSea();
 // import.
 import { startEvalServer } from "../../dist/eval-server/eval-server.js";
 
+// 0832 F-GRILL-03: the desktop sidecar must publish a lock file with
+// `source: "tauri"` so `vskill studio --status` can enumerate it. Without
+// this, a user running only the desktop app sees an empty status output.
+import {
+  writeLock as writeStudioLock,
+  registerCleanup as registerStudioLockCleanup,
+} from "../../dist/studio-runtime/lockfile.js";
+
 function parsePort(argv) {
   const idx = argv.indexOf("--port");
   if (idx === -1) return 0;
@@ -195,6 +203,25 @@ async function main() {
     addr && typeof addr === "object" && typeof addr.port === "number" ? addr.port : port;
 
   process.stdout.write(`LISTEN_PORT=${actualPort}\n`);
+
+  // 0832 F-GRILL-03: write a lock file with source="tauri" so the CLI's
+  // `vskill studio --status` and the Rust scanner agree on what's running.
+  // Best-effort — a write failure isn't fatal (the platform-native pgrep
+  // fallback in the Rust scanner still finds us via cmdline).
+  try {
+    writeStudioLock({
+      pid: process.pid,
+      port: actualPort,
+      cmdline: process.argv.join(" "),
+      startedAt: new Date().toISOString(),
+      source: "tauri",
+    });
+    registerStudioLockCleanup(actualPort);
+  } catch (err) {
+    process.stderr.write(
+      `sidecar: lock write failed (non-fatal): ${err && err.message ? err.message : err}\n`,
+    );
+  }
 
   const onSignal = () => {
     try {

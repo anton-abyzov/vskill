@@ -12,6 +12,15 @@ import { join } from "node:path";
 import { startEvalServer } from "../../eval-server/eval-server.js";
 import { yellow, dim, red, cyan, bold, green } from "../../utils/output.js";
 import { isSkillCreatorInstalled } from "../../utils/skill-creator-detection.js";
+// 0832 T-002/T-003/T-004: studio runtime lock files for cross-process discovery.
+import {
+  isPidAlive,
+  pruneStaleLocks,
+  registerCleanup,
+  removeLock,
+  writeLock,
+  type StudioLock,
+} from "../../studio-runtime/lockfile.js";
 
 /**
  * Deterministic port for a project path.
@@ -200,10 +209,22 @@ async function handlePortConflict(
 export async function runEvalServe(
   root: string,
   port: number | null,
-  options: { force?: boolean } = {},
+  options: { force?: boolean; replace?: boolean; status?: boolean } = {},
 ): Promise<void> {
+  // 0832 T-003: --status is read-only; print every detected studio instance
+  // (lock-file fast path, stale entries auto-pruned) and exit 0. Honored
+  // before any other side-effect (no port resolution, no firstRunOnboarding).
+  if (options.status === true) {
+    printStatusAndExit();
+    return; // unreachable — printStatusAndExit calls process.exit(0).
+  }
+
   const resolvedRoot = resolve(root);
   const force = options.force === true;
+  // 0832 T-004: --replace forwards to the existing --force path AND additionally
+  // SIGTERMs every external (non-this-process) studio lock owner. Both behaviors
+  // ship together so --replace is "make space for me unconditionally".
+  const replace = options.replace === true;
 
   checkSkillCreator(resolvedRoot);
 
@@ -224,11 +245,19 @@ export async function runEvalServe(
   const { firstRunOnboarding } = await import("../../first-run-onboarding.js");
   await firstRunOnboarding();
 
-  // Handle port conflicts gracefully. Returns true only on the --force
-  // success path (existing vskill server gracefully shut down); every
-  // other branch process.exit()s inside.
+  // 0832 T-004: --replace pre-flight kill of every external instance. Lock
+  // files only — we never reach across machines, never touch foreign-user PIDs
+  // (kill returns EPERM, isPidAlive treats that as alive but we still attempt
+  // SIGTERM and let the OS reject it). Stale entries pruned implicitly.
+  if (replace) {
+    await killExternalInstances();
+  }
+
+  // Handle port conflicts gracefully. --replace implies --force semantics for
+  // the specific port we're about to bind. Returns true only on the success
+  // path; every other branch process.exit()s inside.
   if (await isPortInUse(effectivePort)) {
-    await handlePortConflict(effectivePort, resolvedRoot, force);
+    await handlePortConflict(effectivePort, resolvedRoot, force || replace);
   }
 
   const server = await startEvalServer({
@@ -236,6 +265,29 @@ export async function runEvalServe(
     root: resolvedRoot,
     projectName: name,
   });
+
+  // 0832 T-002: write the studio runtime lock now that the port is bound.
+  // The Tauri scanner reads ~/.vskill/runtime/studio-{port}.lock as fast path.
+  const lock: StudioLock = {
+    pid: process.pid,
+    port: effectivePort,
+    cmdline: process.argv.join(" "),
+    startedAt: new Date().toISOString(),
+    source: detectSource(),
+  };
+  try {
+    writeLock(lock);
+    // SIGINT/SIGTERM/exit handler removes the lock file. Idempotent across
+    // repeat calls — extending the existing shutdown handler below.
+    registerCleanup(effectivePort);
+  } catch (e) {
+    console.warn(
+      yellow(
+        `  ⚠ Could not write studio lock file: ${(e as Error).message}\n` +
+          `    Desktop app will fall back to platform-native enumeration.\n`,
+      ),
+    );
+  }
 
   // Graceful shutdown — idempotent so SIGINT + SIGTERM (or two SIGINTs from
   // a parent shell forwarding) don't print the banner twice or race the
@@ -246,10 +298,97 @@ export async function runEvalServe(
     if (shuttingDown) return;
     shuttingDown = true;
     console.log("\nShutting down eval server...");
+    // 0832: best-effort lock removal in case registerCleanup ran but the
+    // signal handler chain reordered. Idempotent.
+    try {
+      removeLock(effectivePort);
+    } catch {
+      /* swallow — process is exiting */
+    }
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 5000);
   };
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+}
+
+// ---------------------------------------------------------------------------
+// 0832 helpers — status print, replace-kill, source classification.
+// ---------------------------------------------------------------------------
+
+/** Detect whether this CLI run is `npx`/`npm exec`/direct-node. */
+function detectSource(): StudioLock["source"] {
+  // npm-exec (`npx vskill studio`) sets npm_lifecycle_event/npm_execpath even
+  // when invoked via the new `npx` binary. Either of those + an `npx`-shaped
+  // path is a strong signal.
+  //
+  // 0832 F-009: npm 7+ runs `npx pkg@latest` from a one-shot install cache
+  // at `~/.npm/_npx/{hash}/node_modules/...`. argv[1] resolves to that path,
+  // so detect the `_npx/` segment as another strong signal.
+  const argv0 = process.argv[0] ?? "";
+  const argv1 = process.argv[1] ?? "";
+  if (
+    process.env.npm_execpath ||
+    process.env.npm_config_user_agent?.includes("npm/") ||
+    argv0.includes("npx") ||
+    argv1.includes("npx") ||
+    argv1.includes("/_npx/")
+  ) {
+    return "npx-cli";
+  }
+  return "node-direct";
+}
+
+/**
+ * Print the current studio lock-file population to stdout, one tab-separated
+ * line per instance, then exit 0. No instances → empty stdout + exit 0.
+ *
+ * Format: `port\t{N}\tsource={src}\tpid={pid}\tstarted={iso8601}`
+ */
+function printStatusAndExit(): never {
+  const live = pruneStaleLocks();
+  for (const lock of live) {
+    process.stdout.write(
+      `port\t${lock.port}\tsource=${lock.source ?? "npx-cli"}\tpid=${lock.pid}\tstarted=${lock.startedAt}\n`,
+    );
+  }
+  process.exit(0);
+}
+
+/**
+ * 0832 T-004: SIGTERM every external instance, wait up to 3s for graceful
+ * exit, escalate to SIGKILL if still alive. "External" = pid != process.pid.
+ */
+async function killExternalInstances(): Promise<void> {
+  const live = pruneStaleLocks();
+  const targets = live.filter((l) => l.pid !== process.pid);
+  if (targets.length === 0) return;
+
+  for (const t of targets) {
+    try {
+      process.kill(t.pid, "SIGTERM");
+    } catch {
+      /* not-our-process or already-gone */
+    }
+  }
+  // Wait up to 3s for graceful exit.
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    const stillAlive = targets.filter((t) => isPidAlive(t.pid));
+    if (stillAlive.length === 0) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  // Anything still alive → SIGKILL.
+  for (const t of targets) {
+    if (isPidAlive(t.pid)) {
+      try {
+        process.kill(t.pid, "SIGKILL");
+      } catch {
+        /* swallow */
+      }
+    }
+  }
+  // Their lock files are removed by their own SIGTERM handler; if SIGKILL won,
+  // the next pruneStaleLocks() call will sweep them. Caller continues.
 }

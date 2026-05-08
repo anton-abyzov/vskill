@@ -1,13 +1,19 @@
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
-import skillStudioLogoUrl from "../assets/skill-studio-logo.png";
+
+// Brand bell color sampled from the canonical orange-bell-badge mark used in
+// the hackathon demo video and on verified-skill.com. Inlined here because
+// the eval-ui theme tokens (--color-own etc.) resolve to muted clay/wood
+// tones, not the saturated mark color.
+const BRAND_BELL = "#F25F1C";
 
 // ---------------------------------------------------------------------------
 // 0686 T-001 (US-001): StudioLogo — home-link component for the top rail.
 //
-// Mark: bell-badge "Skill Studio" logo (v6-A-orange-bell-badge.png) — the
-// canonical mark used in the hackathon demo video and on verified-skill.com.
-// Replaces the prior inline heartbeat-polyline SVG so every Skill Studio
-// surface shows the same orange bell mark.
+// Mark: orange notification-bell glyph (transparent SVG) — same identity as
+// the prior raster bell-badge but rendered as a tile-less silhouette so it
+// reads as a logo glyph next to the wordmark, not as a separate chip. The
+// raster asset still exists for social cards / video where a square badge
+// is appropriate.
 //
 // AC coverage:
 //   AC-US1-01  Click sets `window.location.hash = "#/"` and invokes the
@@ -77,10 +83,10 @@ export function StudioLogo({ onHome }: StudioLogoProps) {
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 6,
+        gap: 8,
         flexShrink: 0,
-        padding: "4px 8px 4px 4px",
-        margin: "-4px -8px -4px -4px",
+        padding: "4px 8px",
+        margin: "-4px -8px",
         borderRadius: 8,
         textDecoration: "none",
         color: "inherit",
@@ -95,23 +101,38 @@ export function StudioLogo({ onHome }: StudioLogoProps) {
           "background-color var(--duration-fast, 120ms) var(--ease-standard, ease)",
       }}
     >
-      <img
-        src={skillStudioLogoUrl}
-        alt=""
+      <svg
+        width={22}
+        height={22}
+        viewBox="0 0 24 24"
         aria-hidden="true"
-        width={32}
-        height={32}
-        style={{
-          display: "block",
-          objectFit: "contain",
-          flexShrink: 0,
-          // The PNG has ~12% internal whitespace padding. Negative horizontal
-          // margins crop that visual gutter so the bell sits flush against
-          // its neighbors, and the slight vertical lift balances the
-          // bell's optical center (the clapper weights the lower third).
-          margin: "-2px -3px -2px -2px",
-        }}
-      />
+        focusable="false"
+        style={{ display: "block", flexShrink: 0, overflow: "visible" }}
+      >
+        {/* Bell silhouette — domed shoulders with a softly flared skirt and
+            a rounded clapper. Drawn as one filled path so the glyph stays
+            crisp against any surface tint. */}
+        <path
+          d="M12 3.25c-3.59 0-6.5 2.91-6.5 6.5v3.18c0 .67-.21 1.32-.6 1.86l-1.27 1.78c-.49.69 0 1.65.84 1.65h15.06c.84 0 1.33-.96.84-1.65l-1.27-1.78c-.39-.54-.6-1.19-.6-1.86V9.75c0-3.59-2.91-6.5-6.5-6.5z"
+          fill={BRAND_BELL}
+        />
+        {/* Clapper — half-disc dangling beneath the skirt. */}
+        <path
+          d="M9.75 19.4h4.5a2.25 2.25 0 11-4.5 0z"
+          fill={BRAND_BELL}
+        />
+        {/* Notification dot — tucked over the bell's right shoulder.
+            A subtle stroke in the surface color carves a hairline so the
+            dot stays legible when it overlaps the bell. */}
+        <circle
+          cx="18.5"
+          cy="5.5"
+          r="2.75"
+          fill={BRAND_BELL}
+          stroke="var(--surface-base, #ffffff)"
+          strokeWidth="1"
+        />
+      </svg>
       <span
         style={{
           fontSize: 13,

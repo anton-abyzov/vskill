@@ -35,6 +35,16 @@ pub struct SidecarState {
     pub strike_count: u32,
     pub first_strike_at: Option<Instant>,
     pub last_strike_at: Option<Instant>,
+    /// 0832: when set, the next `spawn_sidecar` call short-circuits with
+    /// `Ok(port)` so the boot path can navigate to the external instance
+    /// instead of spawning a new sidecar. Cleared after one consumption.
+    pub skip_spawn_to_port: Option<u16>,
+    /// 0832 (run-alongside fix): when true, the next `spawn_sidecar` call
+    /// skips the lifecycle scan/modal gate entirely and proceeds straight
+    /// to the spawn path. Cleared after one consumption. Used by
+    /// `lifecycle_run_alongside` so the user's explicit choice isn't
+    /// overridden by the gate re-firing on the same external instance.
+    pub bypass_scan_once: bool,
 }
 
 pub type SharedSidecar = Arc<Mutex<SidecarState>>;
@@ -50,6 +60,108 @@ pub fn spawn_sidecar<'a>(
     state: SharedSidecar,
 ) -> Pin<Box<dyn Future<Output = Result<u16, String>> + Send + 'a>> {
     Box::pin(async move {
+        // 0832 T-008: pre-flight scan. If an external (non-Tauri) studio
+        // instance is already running, emit the lifecycle event and pause
+        // sidecar spawn. The lifecycle handlers will either:
+        //   (a) navigate to the existing port + skip spawn forever (use-existing),
+        //   (b) kill it + retry spawn_sidecar (stop-and-replace), or
+        //   (c) close the modal + let spawn proceed (run-alongside).
+        //
+        // If the user picked "use existing" earlier in the session, we honour
+        // skip_spawn_to_port and return early with that port.
+        {
+            let skip_port = {
+                let mut s = state.lock().unwrap();
+                s.skip_spawn_to_port.take()
+            };
+            if let Some(port) = skip_port {
+                log::info!(
+                    "sidecar spawn skipped — using external studio instance on port {port}"
+                );
+                // 0832 F-001: clear `pid` on the use-existing early return so
+                // the Studio Instances submenu doesn't flag a stale or empty
+                // Tauri PID as the active app. The "this app" marker is
+                // applied via the `Tauri` source classification regardless.
+                let mut s = state.lock().unwrap();
+                s.port = Some(port);
+                s.pid = None;
+                return Ok(port);
+            }
+        }
+
+        // 0832 F-002: one-shot bypass for run-alongside. lifecycle_run_alongside
+        // sets this so the gate doesn't re-fire on the same external instance.
+        let bypass_scan = {
+            let mut s = state.lock().unwrap();
+            let v = s.bypass_scan_once;
+            s.bypass_scan_once = false;
+            v
+        };
+
+        // Scan for external instances. The 500ms hard timeout is in `scan()`
+        // itself, so this never blocks cold-launch. We only act when there is
+        // exactly one external (source != Tauri) hit — a single match is the
+        // unambiguous case the lifecycle modal handles. Multiple matches fall
+        // through to the Window > Studio Instances submenu (T-012).
+        let detected: Vec<crate::process_discovery::ProcessRecord> = if bypass_scan {
+            log::info!("sidecar spawn: bypass_scan_once active, skipping lifecycle gate");
+            Vec::new()
+        } else {
+            crate::process_discovery::scan().await.unwrap_or_default()
+        };
+        let external: Vec<&crate::process_discovery::ProcessRecord> = detected
+            .iter()
+            .filter(|r| r.source != crate::process_discovery::ProcessSource::Tauri)
+            .collect();
+        // 0832 F-004: AC-US1-03 says "exactly one external instance found" — the
+        // modal handles only the unambiguous case. Multi-external falls through
+        // to normal spawn; the user can manage them via Window > Studio Instances.
+        if external.len() == 1 {
+            let first = external[0];
+            log::info!(
+                "sidecar spawn paused — external instance detected at port {} pid {}",
+                first.port,
+                first.pid
+            );
+
+            // 0832 T-011: honor `studio.lifecycleDefault` if the user has
+            // already picked a default action. "ask" (the default value)
+            // opens the modal; the others auto-execute the saved choice.
+            let lifecycle_default = read_lifecycle_default(app).await;
+            match lifecycle_default.as_deref() {
+                Some("use-existing") => {
+                    log::info!(
+                        "lifecycleDefault=use-existing — using port {} without modal",
+                        first.port
+                    );
+                    {
+                        let mut s = state.lock().unwrap();
+                        s.port = Some(first.port);
+                    }
+                    let _ = load_studio_url(app, first.port);
+                    return Ok(first.port);
+                }
+                Some("run-alongside") => {
+                    log::info!("lifecycleDefault=run-alongside — proceeding with normal spawn");
+                    // Fall through to spawn — DO NOT open modal.
+                }
+                Some("stop-and-replace") => {
+                    log::info!(
+                        "lifecycleDefault=stop-and-replace — SIGTERM pid {}",
+                        first.pid
+                    );
+                    sigterm_with_grace(first.pid, Duration::from_millis(3000)).await;
+                    // Fall through to spawn.
+                }
+                _ => {
+                    // "ask" or unset → open the modal and pause.
+                    crate::lifecycle_modal::set_detected((*first).clone());
+                    let _ = crate::lifecycle_modal::open(app, first);
+                    return Err("lifecycle-modal-pending".to_string());
+                }
+            }
+        }
+
         log::info!("spawning sidecar `{}` --port 0", SIDECAR_NAME);
 
         let cmd = app
@@ -272,6 +384,49 @@ async fn wait_for_exit(pid: u32, max: Duration) -> bool {
         sleep(Duration::from_millis(50)).await;
     }
     !pid_is_alive(pid)
+}
+
+/// 0832 helper: read `studio.lifecycleDefault` from the SettingsStore. Returns
+/// None if the store isn't available yet (very early boot path). Falls back
+/// to "ask" semantics when None.
+async fn read_lifecycle_default(app: &AppHandle) -> Option<String> {
+    let store = app.try_state::<crate::preferences::SettingsStore>()?;
+    let snapshot = store.get().await;
+    Some(snapshot.studio.lifecycle_default)
+}
+
+/// 0832 helper: SIGTERM `pid`, wait `grace`, escalate to SIGKILL if alive.
+///
+/// Cross-platform: Unix uses libc signals; Windows shells out to `taskkill`
+/// which doesn't have a separate "graceful" stage, so the grace window is
+/// honored by waiting before the forced kill. `pub(crate)` so the lifecycle
+/// IPC handlers in commands.rs can reuse this rather than duplicating the
+/// logic.
+pub(crate) async fn sigterm_with_grace(pid: u32, grace: Duration) {
+    #[cfg(unix)]
+    {
+        if !pid_is_alive(pid) {
+            return;
+        }
+        send_signal(pid, Signal::Term);
+        let exited = wait_for_exit(pid, grace).await;
+        if !exited && pid_is_alive(pid) {
+            log::warn!("sigterm_with_grace: pid {pid} did not exit, sending SIGKILL");
+            send_signal(pid, Signal::Kill);
+            let _ = wait_for_exit(pid, Duration::from_millis(500)).await;
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows: taskkill /T /F is the equivalent of SIGKILL. There's no
+        // SIGTERM analogue without a custom WM_CLOSE message handler in the
+        // target, so we honor `grace` by waiting before the forced kill.
+        let _ = grace; // grace is not used on Windows; suppress unused warning
+        let _ = tokio::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output()
+            .await;
+    }
 }
 
 /// Crash supervisor: counts strikes within a 60 s sliding window. ≤3 triggers

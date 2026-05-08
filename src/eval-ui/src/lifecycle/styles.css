@@ -1,0 +1,158 @@
+/* 0832 lifecycle modal — minimal, native-feel styling. */
+
+:root {
+  --lc-bg: #fafafa;
+  --lc-fg: #18181b;
+  --lc-muted: #71717a;
+  --lc-border: #e4e4e7;
+  --lc-accent: #6366f1;
+  --lc-accent-fg: #ffffff;
+  --lc-danger: #b91c1c;
+}
+
+[data-theme="dark"] {
+  --lc-bg: #18181b;
+  --lc-fg: #f4f4f5;
+  --lc-muted: #a1a1aa;
+  --lc-border: #3f3f46;
+  --lc-accent: #818cf8;
+  --lc-accent-fg: #18181b;
+  --lc-danger: #f87171;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--lc-bg);
+  color: var(--lc-fg);
+  font-family: "Inter Tight Variable", -apple-system, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.lifecycle-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 24px 28px;
+  box-sizing: border-box;
+}
+
+.lifecycle-shell h1 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.lifecycle-shell .lc-detected {
+  font-size: 13px;
+  color: var(--lc-muted);
+  margin-bottom: 18px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--lc-border);
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-theme="dark"] .lifecycle-shell .lc-detected {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.lifecycle-shell .lc-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.lifecycle-shell .lc-btn {
+  font: inherit;
+  text-align: left;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--lc-border);
+  background: transparent;
+  color: var(--lc-fg);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lifecycle-shell .lc-btn:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="dark"] .lifecycle-shell .lc-btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.lifecycle-shell .lc-btn:focus-visible {
+  outline: 2px solid var(--lc-accent);
+  outline-offset: 2px;
+}
+
+.lifecycle-shell .lc-btn--primary {
+  background: var(--lc-accent);
+  color: var(--lc-accent-fg);
+  border-color: var(--lc-accent);
+}
+
+.lifecycle-shell .lc-btn--primary:hover {
+  filter: brightness(1.05);
+}
+
+.lifecycle-shell .lc-btn-title {
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.lifecycle-shell .lc-btn-help {
+  font-size: 12px;
+  color: var(--lc-muted);
+}
+
+.lifecycle-shell .lc-btn--primary .lc-btn-help {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.lifecycle-shell .lc-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 16px;
+  border-top: 1px solid var(--lc-border);
+  margin-top: 12px;
+}
+
+.lifecycle-shell .lc-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--lc-muted);
+  cursor: pointer;
+}
+
+.lifecycle-shell .lc-cancel {
+  font: inherit;
+  background: transparent;
+  border: none;
+  color: var(--lc-muted);
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.lifecycle-shell .lc-cancel:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--lc-fg);
+}
+
+[data-theme="dark"] .lifecycle-shell .lc-cancel:hover {
+  background: rgba(255, 255, 255, 0.05);
+}

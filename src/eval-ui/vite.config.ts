@@ -57,6 +57,9 @@ export default defineConfig({
       input: {
         main: path.resolve(__dirname, "index.html"),
         preferences: path.resolve(__dirname, "preferences.html"),
+        // 0832: lifecycle modal — opens when scanner detects an external
+        // running studio instance at boot.
+        lifecycle: path.resolve(__dirname, "lifecycle.html"),
       },
       output: {
         manualChunks(id) {

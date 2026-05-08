@@ -3,6 +3,12 @@ import { useTranslation } from "react-i18next";
 
 import { Callout, FormRow, Section, Segmented, Toggle } from "../components/primitives";
 import type { TabProps } from "../lib/tab-types";
+// 0831 US-003 — folder picker warning modal for home-root / personal-scope picks.
+// Owned by desktop-folder-agent.
+import {
+  FolderPickerWarning,
+  type WarningKind,
+} from "../../components/FolderPickerWarning";
 
 export function GeneralTab({ bridge, snapshot, onSnapshotChanged, pushToast }: TabProps) {
   const { t } = useTranslation("preferences");
@@ -63,17 +69,45 @@ export function GeneralTab({ bridge, snapshot, onSnapshotChanged, pushToast }: T
     [bridge, onSnapshotChanged, pushToast, t],
   );
 
+  // 0831 US-003 — pending warning modal state. When `pickProjectFolder`
+  // returns a `home_root` or `personal_scope` classification, we stash
+  // the path here and render the FolderPickerWarning modal. Buttons on
+  // the modal either re-open the picker (Pick again) or commit the path
+  // (Use this anyway).
+  const [warning, setWarning] = useState<{
+    kind: WarningKind;
+    path: string;
+  } | null>(null);
+
+  const commitFolder = useCallback(
+    async (path: string) => {
+      await bridge.setSetting("general.defaultProjectFolder", path);
+      await onSnapshotChanged();
+    },
+    [bridge, onSnapshotChanged],
+  );
+
   const onPickFolder = useCallback(async () => {
     try {
-      const path = await bridge.pickFolder();
-      if (path) {
-        await bridge.setSetting("general.defaultProjectFolder", path);
-        await onSnapshotChanged();
+      const picked = await bridge.pickProjectFolder();
+      if (!picked) return; // user cancelled
+      const { path, classification } = picked;
+      // Trigger the warning modal for home-root or personal-scope picks
+      // per AC-US3-01..03. Other classifications proceed silently.
+      if (classification.kind === "home_root") {
+        setWarning({ kind: "home_root", path });
+        return;
       }
+      if (classification.kind === "personal_scope") {
+        setWarning({ kind: "personal_scope", path });
+        return;
+      }
+      // Project root (strong or weak) or unclassified — commit directly.
+      await commitFolder(path);
     } catch {
       pushToast({ message: "Couldn't open folder picker.", variant: "error" });
     }
-  }, [bridge, onSnapshotChanged, pushToast]);
+  }, [bridge, commitFolder, pushToast]);
 
   const theme = optimisticTheme;
   const launchAtLogin = snapshot?.general.launchAtLogin ?? false;
@@ -165,6 +199,24 @@ export function GeneralTab({ bridge, snapshot, onSnapshotChanged, pushToast }: T
           }
         />
       </Section>
+
+      {warning ? (
+        <FolderPickerWarning
+          kind={warning.kind}
+          path={warning.path}
+          onPickAgain={() => {
+            // ESC-equivalent semantics: dismiss and re-open the picker.
+            setWarning(null);
+            void onPickFolder();
+          }}
+          onProceed={() => {
+            const path = warning.path;
+            setWarning(null);
+            void commitFolder(path);
+          }}
+          onClose={() => setWarning(null)}
+        />
+      ) : null}
     </>
   );
 }

@@ -58,6 +58,148 @@ export interface AppMetadata {
   arch: string;
 }
 
+// ---------------------------------------------------------------------------
+// 0831 auth — GitHub OAuth device-flow + sign-out wrappers.
+// Owned by desktop-auth-agent. Browser mode rejects all four with
+// BrowserModeError — no localStorage shadow because the OAuth token must
+// live in the OS credential vault (which we don't have outside the
+// desktop shell).
+// ---------------------------------------------------------------------------
+
+export interface DeviceFlowStartResponse {
+  /** Short user code displayed in the UI (e.g. "WDJB-MJHT"). */
+  userCode: string;
+  /** Verification URL — typically `https://github.com/login/device`. */
+  verificationUri: string;
+  /** Polling interval in seconds returned by GitHub. */
+  interval: number;
+  /** Device-code TTL in seconds; UI uses this to time out the dialog. */
+  expiresIn: number;
+}
+
+export interface SignedInUser {
+  /** GitHub login (e.g. "octocat"). */
+  login: string;
+  /** Avatar URL — render in `<img>` directly, no proxy. */
+  avatar_url: string;
+  /** Public email if exposed by GitHub; null on most accounts. */
+  email: string | null;
+  /** ISO-8601 timestamp of when the cache was refreshed. */
+  cached_at: string | null;
+}
+
+/**
+ * Tagged-union for the poll IPC. The Rust side returns `Err(string)` for
+ * every non-success state (`"pending"`, `"slow_down:<n>"`, `"denied"`,
+ * `"expired"`, `"no-flow"`, or a free-form network/parse error). The
+ * bridge converts these to a structured `PollGithubDeviceFlowOutcome` so
+ * the UI can switch on a discriminator instead of regex-matching strings.
+ */
+export type PollGithubDeviceFlowOutcome =
+  | { status: "granted"; user: SignedInUser }
+  | { status: "pending" }
+  | { status: "slow_down"; newInterval: number }
+  | { status: "denied" }
+  | { status: "expired" }
+  | { status: "no-flow" }
+  | { status: "error"; message: string };
+
+// ---------------------------------------------------------------------------
+// 0831 folders — typed shapes for `pick_default_project_folder` (extended)
+// and `get_repo_info`. Owned by desktop-folder-agent.
+// ---------------------------------------------------------------------------
+
+/**
+ * Classification of a folder per ADR-0831-03's ordered ruleset. Mirrors the
+ * Rust `FolderClassification` enum 1:1.
+ */
+export type FolderClassification =
+  | { kind: "home_root" }
+  | { kind: "personal_scope" }
+  | { kind: "project_root"; has_git: boolean; remote_url: string | null }
+  | { kind: "unclassified" };
+
+/** Result of `pick_default_project_folder` — null when user cancelled. */
+export interface PickedFolder {
+  path: string;
+  classification: FolderClassification;
+}
+
+/** Sync state of a working copy — mirrors Rust `SyncState`. */
+export type RepoSyncState =
+  | { kind: "clean" }
+  | { kind: "dirty"; count: number }
+  | { kind: "ahead"; count: number }
+  | { kind: "behind"; count: number }
+  | { kind: "no_remote" };
+
+/** Output of `get_repo_info` — drives the ConnectedRepoWidget. */
+export interface RepoInfo {
+  /** "owner/repo" — null when the folder isn't a github.com remote. */
+  name: string | null;
+  /** Current branch — null for detached HEAD. */
+  branch: string | null;
+  /** GitHub visibility — null when the lookup failed or wasn't possible. */
+  is_private: boolean | null;
+  /** Sync state from `git status` + `git rev-list`. */
+  sync_state: RepoSyncState;
+}
+
+// ---------------------------------------------------------------------------
+// 0831 quota — typed shapes for the quota IPCs.
+// Owned by desktop-quota-agent. Mirror of `vskill-platform/src/lib/billing/
+// quota-shape.ts::QuotaResponse` — duplicated per coordination contract so
+// the desktop doesn't import from the platform repo.
+// ---------------------------------------------------------------------------
+
+/** Lower-cased tier strings — wire format from the platform. */
+export type QuotaTierWire = "free" | "pro" | "enterprise";
+
+/** Mirror of the platform's `QuotaResponse` shape. */
+export interface QuotaResponse {
+  tier: QuotaTierWire;
+  /** Authoritative skill count (server-side). */
+  skillCount: number;
+  /** `50` for free; `null` (unlimited) for pro/enterprise. */
+  skillLimit: number | null;
+  /** ISO-8601 last-sync timestamp; `null` on first sync. */
+  lastSyncedAt: string | null;
+  /** Days the desktop should treat the cache as fresh. */
+  gracePeriodDaysRemaining: number;
+  /** ISO-8601 UTC server clock at response time — basis for skew correction. */
+  serverNow: string;
+}
+
+/** Mirror of Rust `quota::cache::QuotaCache`. */
+export interface QuotaCache {
+  response: QuotaResponse;
+  /** Local clock at sync time, ISO-8601. */
+  localAtSync: string;
+  /** Computed `local - server` delta in milliseconds. */
+  clockSkewMs: number;
+}
+
+/** Mirror of Rust `commands::QuotaSnapshot`. */
+export interface QuotaSnapshot {
+  /** Cached server response, or null when no sync has happened. */
+  cache: QuotaCache | null;
+  /** Locally-counted skill total (independent of the server's count). */
+  localSkillCount: number;
+  /** Whether the cache is within the offline grace window. */
+  isFresh: boolean;
+  /** Days remaining inside the grace window. Negative = stale. */
+  daysRemaining: number;
+}
+
+export interface QuotaCanCreateResult {
+  /** Whether the create should be hard-blocked client-side. */
+  blocked: boolean;
+  /** "ok" | "limit-reached" | "no-cache-and-signed-out". */
+  reason: string;
+  /** Snapshot the UI uses to render paywall context. */
+  snapshot: QuotaSnapshot;
+}
+
 export interface DesktopBridge {
   mode: BridgeMode;
   available: boolean;
@@ -76,6 +218,39 @@ export interface DesktopBridge {
   openLogsFolder: () => Promise<void>;
   revealSettingsFile: () => Promise<void>;
   copyToClipboard: (text: string) => Promise<void>;
+  // 0831 auth — GitHub OAuth device-flow + identity cache reads.
+  // All four reject with BrowserModeError outside the desktop shell.
+  startGithubDeviceFlow: () => Promise<DeviceFlowStartResponse>;
+  pollGithubDeviceFlow: () => Promise<PollGithubDeviceFlowOutcome>;
+  getSignedInUser: () => Promise<SignedInUser | null>;
+  signOut: () => Promise<void>;
+  // 0831 folders — appended at END per coordination contract.
+  /** Like `pickFolder()` but returns the full `{path, classification}` shape. */
+  pickProjectFolder: () => Promise<PickedFolder | null>;
+  /** Read git remote + sync state + GitHub visibility for `folder`. */
+  getRepoInfo: (folder: string) => Promise<RepoInfo>;
+  // 0831 quota — typed wrappers. Owned by desktop-quota-agent. Browser mode
+  // returns a synthetic "signed-out" snapshot rather than throwing so the
+  // hosted studio renders cleanly without a try/catch.
+  /** Read disk-backed cache + locally-counted skill total. No network. */
+  quotaGet: (projectRoots: string[]) => Promise<QuotaSnapshot>;
+  /**
+   * On-demand refresh. `fresh=true` busts the platform's KV cache via
+   * `?fresh=1` — used by the paywall race-resolution path so a "user just
+   * upgraded" doesn't see a stale Free response.
+   */
+  quotaForceSync: (
+    projectRoots: string[],
+    fresh: boolean,
+  ) => Promise<QuotaSnapshot>;
+  /** Pre-create gate. UI uses `blocked` to short-circuit into the paywall. */
+  quotaCanCreateSkill: (projectRoots: string[]) => Promise<QuotaCanCreateResult>;
+  /** Best-effort POST telemetry of the local count. Never throws on auth. */
+  quotaReportCount: (skillCount: number) => Promise<void>;
+  /** Open a https:// URL in the user's default browser. */
+  openExternalUrl: (url: string) => Promise<void>;
+  /** Re-fetch /user from GitHub and update the identity cache. */
+  refreshUserIdentity: () => Promise<SignedInUser | null>;
 }
 
 interface TauriInternals {
@@ -244,7 +419,14 @@ export function useDesktopBridge(): DesktopBridge {
 
     const pickFolder: DesktopBridge["pickFolder"] = async () => {
       if (!available) throw new BrowserModeError("pickFolder");
-      return tauriInvoke<string | null>("pick_default_project_folder");
+      // 0831: the Rust IPC return shape changed from `Option<String>` to
+      // `Option<{path, classification}>`. Existing callers (GeneralTab)
+      // only need the path string — we extract `.path` here so they
+      // don't have to change. The richer `pickProjectFolder()` wrapper
+      // (added below) returns the full shape for callers that want to
+      // fire the warning modal on home-root / personal-scope picks.
+      const raw = await tauriInvoke<PickedFolder | null>("pick_default_project_folder");
+      return raw?.path ?? null;
     };
 
     const openLogsFolder: DesktopBridge["openLogsFolder"] = async () => {
@@ -268,6 +450,206 @@ export function useDesktopBridge(): DesktopBridge {
       }
     };
 
+    // -------------------------------------------------------------------
+    // 0831 auth — GitHub OAuth wrappers. Browser mode rejects with
+    // BrowserModeError because the OAuth token must live in the OS
+    // credential vault, which only exists inside the Tauri shell.
+    // -------------------------------------------------------------------
+
+    /**
+     * Rust IPC payload — Rust returns camelCase for `start_github_device_flow`
+     * and snake_case for `get_signed_in_user`. We translate both at the
+     * bridge boundary so the UI sees a single normalized shape.
+     */
+    interface RawDeviceFlowStart {
+      userCode: string;
+      verificationUri: string;
+      interval: number;
+      expiresIn: number;
+    }
+
+    const startGithubDeviceFlow: DesktopBridge["startGithubDeviceFlow"] = async () => {
+      if (!available) throw new BrowserModeError("startGithubDeviceFlow");
+      const raw = await tauriInvoke<RawDeviceFlowStart>("start_github_device_flow");
+      return {
+        userCode: raw.userCode,
+        verificationUri: raw.verificationUri,
+        interval: raw.interval,
+        expiresIn: raw.expiresIn,
+      };
+    };
+
+    /**
+     * Single poll iteration. The Rust handler returns `Err(string)` for
+     * every non-granted state — we catch that here and translate the
+     * string code into a structured outcome the UI can switch on.
+     *
+     * Rust error code → outcome:
+     *   "pending"        → { status: "pending" }
+     *   "slow_down:<n>"  → { status: "slow_down", newInterval: <n> }
+     *   "denied"         → { status: "denied" }
+     *   "expired"        → { status: "expired" }
+     *   "no-flow"        → { status: "no-flow" }
+     *   anything else    → { status: "error", message }
+     */
+    const pollGithubDeviceFlow: DesktopBridge["pollGithubDeviceFlow"] = async () => {
+      if (!available) throw new BrowserModeError("pollGithubDeviceFlow");
+      try {
+        const user = await tauriInvoke<SignedInUser>("poll_github_device_flow");
+        return { status: "granted", user };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message === "pending") return { status: "pending" };
+        if (message.startsWith("slow_down:")) {
+          const n = Number.parseInt(message.slice("slow_down:".length), 10);
+          // GitHub's `slow_down` requires a >=5s bump. Defensive fallback in
+          // case the parse yields NaN — we never want a 0 here that would
+          // turn the polling loop into a hot loop.
+          const newInterval = Number.isFinite(n) && n > 0 ? n : 5;
+          return { status: "slow_down", newInterval };
+        }
+        if (message === "denied") return { status: "denied" };
+        if (message === "expired") return { status: "expired" };
+        if (message === "no-flow") return { status: "no-flow" };
+        return { status: "error", message };
+      }
+    };
+
+    const getSignedInUser: DesktopBridge["getSignedInUser"] = async () => {
+      if (!available) {
+        // Browser mode never has a signed-in user — no credential vault
+        // to read. Return null instead of throwing so the UI can render
+        // the signed-out state without a try/catch.
+        return null;
+      }
+      const raw = await tauriInvoke<SignedInUser | null>("get_signed_in_user");
+      return raw ?? null;
+    };
+
+    const signOut: DesktopBridge["signOut"] = async () => {
+      if (!available) throw new BrowserModeError("signOut");
+      await tauriInvoke<void>("sign_out");
+    };
+
+    // -------------------------------------------------------------------
+    // 0831 folders — owner: desktop-folder-agent.
+    // Appended at END per agent-coordination ADD-not-REPLACE contract so
+    // diffs from concurrent agents remain additive instead of conflicting.
+    // -------------------------------------------------------------------
+
+    /**
+     * Like `pickFolder()` but returns the full `{path, classification}`
+     * shape. Use this when the caller needs to fire the
+     * FolderPickerWarning modal on home-root or personal-scope picks.
+     * Browser mode rejects with BrowserModeError — there's no native
+     * folder picker available outside the Tauri shell.
+     */
+    const pickProjectFolder: DesktopBridge["pickProjectFolder"] = async () => {
+      if (!available) throw new BrowserModeError("pickProjectFolder");
+      const raw = await tauriInvoke<PickedFolder | null>("pick_default_project_folder");
+      return raw ?? null;
+    };
+
+    /**
+     * Read git remote + sync state + GitHub visibility for `folder`. The
+     * Rust IPC handles the OAuth-token lookup and falls back to
+     * unauthenticated GitHub API for free / signed-out users. Browser
+     * mode returns a synthetic "not-git" shape so the UI's empty state
+     * renders without throwing.
+     */
+    const getRepoInfo: DesktopBridge["getRepoInfo"] = async (folder) => {
+      if (!available) {
+        return {
+          name: null,
+          branch: null,
+          is_private: null,
+          sync_state: { kind: "no_remote" },
+        };
+      }
+      return tauriInvoke<RepoInfo>("get_repo_info", { folder });
+    };
+
+    // -------------------------------------------------------------------
+    // 0831 quota — owner: desktop-quota-agent.
+    // Appended at END per agent-coordination ADD-not-REPLACE contract.
+    // -------------------------------------------------------------------
+
+    const SIGNED_OUT_SNAPSHOT: QuotaSnapshot = {
+      cache: null,
+      localSkillCount: 0,
+      isFresh: false,
+      daysRemaining: 0,
+    };
+
+    const quotaGet: DesktopBridge["quotaGet"] = async (projectRoots) => {
+      if (!available) return { ...SIGNED_OUT_SNAPSHOT };
+      const raw = await tauriInvoke<QuotaSnapshot>("quota_get", {
+        projectRoots,
+      });
+      return raw;
+    };
+
+    const quotaForceSync: DesktopBridge["quotaForceSync"] = async (
+      projectRoots,
+      fresh,
+    ) => {
+      if (!available) return { ...SIGNED_OUT_SNAPSHOT };
+      const raw = await tauriInvoke<QuotaSnapshot>("quota_force_sync", {
+        projectRoots,
+        fresh,
+      });
+      return raw;
+    };
+
+    const quotaCanCreateSkill: DesktopBridge["quotaCanCreateSkill"] = async (
+      projectRoots,
+    ) => {
+      if (!available) {
+        // Browser mode never enforces — the hosted studio uses platform-side
+        // gates. Return an "ok" verdict with a synthetic snapshot.
+        return {
+          blocked: false,
+          reason: "browser-mode",
+          snapshot: { ...SIGNED_OUT_SNAPSHOT },
+        };
+      }
+      return tauriInvoke<QuotaCanCreateResult>("quota_can_create_skill", {
+        projectRoots,
+      });
+    };
+
+    const quotaReportCount: DesktopBridge["quotaReportCount"] = async (
+      skillCount,
+    ) => {
+      if (!available) return;
+      try {
+        await tauriInvoke<void>("quota_report_count", { skillCount });
+      } catch (err) {
+        // Non-blocking telemetry — log but don't surface.
+        // eslint-disable-next-line no-console
+        console.warn("quotaReportCount failed:", err);
+      }
+    };
+
+    const openExternalUrl: DesktopBridge["openExternalUrl"] = async (url) => {
+      if (!available) {
+        // Browser mode: open in a new tab via window.open. No-op in SSR.
+        if (typeof window !== "undefined") {
+          window.open(url, "_blank", "noopener,noreferrer");
+        }
+        return;
+      }
+      await tauriInvoke<void>("open_external_url", { url });
+    };
+
+    const refreshUserIdentity: DesktopBridge["refreshUserIdentity"] = async () => {
+      if (!available) return null;
+      const raw = await tauriInvoke<SignedInUser | null>(
+        "refresh_user_identity",
+      );
+      return raw ?? null;
+    };
+
     return {
       mode,
       available,
@@ -284,6 +666,20 @@ export function useDesktopBridge(): DesktopBridge {
       openLogsFolder,
       revealSettingsFile,
       copyToClipboard,
+      startGithubDeviceFlow,
+      pollGithubDeviceFlow,
+      getSignedInUser,
+      signOut,
+      // 0831 folders — appended LAST.
+      pickProjectFolder,
+      getRepoInfo,
+      // 0831 quota — appended LAST per agent-coordination contract.
+      quotaGet,
+      quotaForceSync,
+      quotaCanCreateSkill,
+      quotaReportCount,
+      openExternalUrl,
+      refreshUserIdentity,
     };
   }, [mode]);
 

@@ -41,9 +41,23 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "io-util", "sync"] }
 log = "0.4"
 env_logger = "0.11"
+# 0831 auth: OS keychain abstraction (macOS Keychain / Windows Credential Manager
+# / Linux libsecret). Used by `auth::token_store` per ADR-0831-01.
+keyring = "3"
+# 0831 auth: zero out OAuth tokens from memory after each HTTP call. Layered on
+# top of `keyring`'s at-rest protection — addresses Risk R-1 process-inspection
+# threat. Drop impl wipes the buffer.
+zeroize = { version = "1", features = ["zeroize_derive"] }
+# 0831 auth: lightweight in-process HTTP mock for device-flow state-machine
+# tests. dev-dependency only (does not ship in release binary).
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+# 0831 auth: mockito serves a controlled HTTP endpoint so device_flow tests
+# can exercise the polling state machine without touching github.com.
+mockito = "1"
 
 [[bin]]
 name = "vskill-desktop"

@@ -7,7 +7,16 @@ use tauri::{Manager, RunEvent};
 #[cfg(target_os = "macos")]
 use tauri_plugin_autostart::MacosLauncher;
 
+// 0831 auth — GitHub OAuth device-flow + secure token storage.
+// Owned by desktop-auth-agent (impl-0831-enterprise team). Surface lives
+// behind the `commands::auth_*` IPCs registered below.
+mod auth;
 mod commands;
+// 0831 folders — smart folder picker + connected-repo widget.
+// Owned by desktop-folder-agent (impl-0831-enterprise team). Surface lives
+// behind the `commands::pick_default_project_folder` (extended) +
+// `commands::get_repo_info` IPCs registered below.
+mod folders;
 mod lifecycle;
 // 0832 lifecycle modal — opens a 720x320 WebviewWindow when the scanner
 // detects a running external studio instance at boot.
@@ -17,6 +26,10 @@ mod preferences;
 // 0832 process discovery — enumerate running studio instances via
 // ~/.vskill/runtime/*.lock + platform-native fallback (lsof / /proc / pwsh).
 mod process_discovery;
+// 0831 quota — server-authoritative quota cache + 1h background sync + force_sync IPC.
+// Owned by desktop-quota-agent (impl-0831-enterprise team). Surface lives behind
+// the `commands::quota_*` IPCs registered below + the Tauri event `quota://updated`.
+mod quota;
 mod sidecar;
 
 use sidecar::{SharedSidecar, SidecarState};
@@ -73,6 +86,28 @@ pub fn run() {
             commands::list_studio_instances,
             commands::switch_to_studio_instance,
             commands::stop_studio_instance,
+            // 0831 auth — GitHub OAuth device-flow + sign-out (4 commands).
+            // ADD-not-REPLACE per agent coordination contract: appended at
+            // the END of the array so concurrent agents editing this file
+            // produce additive diffs instead of conflicts.
+            commands::start_github_device_flow,
+            commands::poll_github_device_flow,
+            commands::get_signed_in_user,
+            commands::sign_out,
+            // 0831 folders — connected-repo widget + folder picker
+            // classification (US-003 + US-004). Owned by
+            // desktop-folder-agent. `pick_default_project_folder` is
+            // already registered above; this entry adds the widget feed.
+            commands::get_repo_info,
+            // 0831 quota — server-authoritative quota cache + paywall
+            // gating (US-005, US-007, US-008, US-010). Owned by
+            // desktop-quota-agent. ADD-not-REPLACE per coordination.
+            commands::quota_get,
+            commands::quota_force_sync,
+            commands::quota_can_create_skill,
+            commands::quota_report_count,
+            commands::open_external_url,
+            commands::refresh_user_identity,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -87,6 +122,13 @@ pub fn run() {
             // 24h auto-check task is spawned after sidecar boot below so it
             // doesn't compete for the cold-launch budget.
             app.manage(preferences::UpdaterState::new());
+
+            // 0831 auth: pending GitHub device-flow state. Holds the
+            // `device_code` between `start_github_device_flow` and
+            // `poll_github_device_flow` IPC calls so the UI never has to
+            // see the device_code (it's effectively a bearer secret during
+            // the polling window).
+            app.manage(commands::PendingDeviceFlow::new());
 
             // Wire the native menu bar.
             let menu = menu::build(&handle)?;
@@ -146,6 +188,11 @@ pub fn run() {
             // honours settings.updates.autoCheck. Runs alongside the sidecar
             // boot so the cold-launch path is unaffected (NFR-01).
             preferences::updater::spawn_auto_check_task(handle.clone());
+
+            // 0831 quota: spawn the 1h background sync task. Idempotent on
+            // signed-out state (cheap keychain read + sleep). No-ops until
+            // the user signs in.
+            quota::sync::spawn_background_task(handle.clone());
 
             Ok(())
         })

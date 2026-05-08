@@ -311,13 +311,29 @@ program
   .option("--root <path>", "Root directory (default: current dir)")
   .option("--port <number>", "Port for Skill Studio server")
   .option("-f, --force", "Force-restart: stop any existing vskill server on the port and start fresh")
-  .action(async (opts: { root?: string; port?: string; force?: boolean }) => {
-    const { resolve } = await import("node:path");
-    const { runEvalServe } = await import("./commands/eval/serve.js");
-    const root = opts.root ? resolve(opts.root) : resolve(".");
-    const port = opts.port ? parseInt(opts.port, 10) : null;
-    await runEvalServe(root, port, { force: !!opts.force });
-  });
+  // 0832 T-003/T-004: process-lifecycle flags — print running instances or
+  // replace them before starting fresh. See 0832 spec for AC trace.
+  .option("--status", "Print one line per running studio instance (pid, port, source, startedAt) and exit")
+  .option("--replace", "Stop every running studio instance (SIGTERM 3s grace → SIGKILL), then start fresh")
+  .action(
+    async (opts: {
+      root?: string;
+      port?: string;
+      force?: boolean;
+      replace?: boolean;
+      status?: boolean;
+    }) => {
+      const { resolve } = await import("node:path");
+      const { runEvalServe } = await import("./commands/eval/serve.js");
+      const root = opts.root ? resolve(opts.root) : resolve(".");
+      const port = opts.port ? parseInt(opts.port, 10) : null;
+      await runEvalServe(root, port, {
+        force: !!opts.force,
+        replace: !!opts.replace,
+        status: !!opts.status,
+      });
+    },
+  );
 
 program
   .command("marketplace [subcommand]")

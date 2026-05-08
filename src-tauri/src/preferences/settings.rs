@@ -39,6 +39,12 @@ pub struct Settings {
     pub privacy: PrivacySettings,
     #[serde(default)]
     pub advanced: AdvancedSettings,
+    // 0832: studio process lifecycle defaults — "ask" | "use-existing" |
+    // "stop-and-replace" | "run-alongside". Default is "ask" so the modal
+    // appears on first conflict; user can opt-out via Preferences → Advanced
+    // OR by ticking "Don't ask again" in the modal itself.
+    #[serde(default)]
+    pub studio: StudioSettings,
     #[serde(flatten, default)]
     pub _unknown: HashMap<String, Value>,
 }
@@ -55,7 +61,23 @@ impl Default for Settings {
             updates: UpdateSettings::default(),
             privacy: PrivacySettings::default(),
             advanced: AdvancedSettings::default(),
+            studio: StudioSettings::default(),
             _unknown: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct StudioSettings {
+    /// "ask" | "use-existing" | "stop-and-replace" | "run-alongside".
+    pub lifecycle_default: String,
+}
+
+impl Default for StudioSettings {
+    fn default() -> Self {
+        Self {
+            lifecycle_default: "ask".to_string(),
         }
     }
 }
@@ -161,6 +183,8 @@ const ALLOWED_PATHS: &[&str] = &[
     "privacy.telemetryEnabled",
     "privacy.crashReportingEnabled",
     "advanced.logLevel",
+    // 0832 T-011: studio process-lifecycle default action.
+    "studio.lifecycleDefault",
 ];
 
 // ---------------------------------------------------------------------------
@@ -351,6 +375,20 @@ fn apply_path(settings: &mut Settings, key: &str, value: Value) -> Result<(), St
         }
         "advanced.logLevel" => {
             settings.advanced.log_level = expect_string(&value, key)?;
+        }
+        "studio.lifecycleDefault" => {
+            // Constrained enum: only the four documented values are written.
+            let s = expect_string(&value, key)?;
+            match s.as_str() {
+                "ask" | "use-existing" | "stop-and-replace" | "run-alongside" => {
+                    settings.studio.lifecycle_default = s;
+                }
+                _ => {
+                    return Err(format!(
+                        "invalid value for {key}: expected ask|use-existing|stop-and-replace|run-alongside, got {s}"
+                    ))
+                }
+            }
         }
         _ => return Err(format!("unknown setting path: {key}")),
     }
@@ -825,5 +863,54 @@ mod tests {
         let s = format_timestamp(SystemTime::now());
         assert_eq!(s.len(), 15);
         assert_eq!(&s[8..9], "-");
+    }
+
+    // 0832 T-011: studio.lifecycleDefault path tests.
+    #[tokio::test]
+    async fn test_studio_lifecycle_default_accepts_each_documented_value() {
+        let path = fresh_path();
+        let store = SettingsStore::new_at(path);
+        for v in ["ask", "use-existing", "stop-and-replace", "run-alongside"] {
+            store
+                .set_key("studio.lifecycleDefault", Value::String(v.to_string()))
+                .await
+                .expect("documented value should be accepted");
+            let s = store.get().await;
+            assert_eq!(s.studio.lifecycle_default, v);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_studio_lifecycle_default_rejects_invalid_value() {
+        let path = fresh_path();
+        let store = SettingsStore::new_at(path);
+        let err = store
+            .set_key("studio.lifecycleDefault", Value::String("invalid".into()))
+            .await
+            .expect_err("non-enum value should reject");
+        assert!(err.contains("invalid value"));
+    }
+
+    #[tokio::test]
+    async fn test_studio_lifecycle_default_persists_round_trip() {
+        let path = fresh_path();
+        let store = SettingsStore::new_at(path.clone());
+        store
+            .set_key(
+                "studio.lifecycleDefault",
+                Value::String("use-existing".into()),
+            )
+            .await
+            .expect("set");
+        store.flush_for_test().await;
+
+        let on_disk = load_from_path(&path);
+        assert_eq!(on_disk.studio.lifecycle_default, "use-existing");
+    }
+
+    #[test]
+    fn test_studio_settings_default_is_ask() {
+        let s = StudioSettings::default();
+        assert_eq!(s.lifecycle_default, "ask");
     }
 }

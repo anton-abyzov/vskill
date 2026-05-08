@@ -32,6 +32,14 @@ export interface SettingsSnapshot {
   advanced: {
     logLevel: "error" | "warn" | "info" | "debug" | "trace";
   };
+  // 0832: studio process-lifecycle defaults.
+  studio: {
+    lifecycleDefault:
+      | "ask"
+      | "use-existing"
+      | "stop-and-replace"
+      | "run-alongside";
+  };
 }
 
 export interface UpdateInfo {
@@ -105,6 +113,9 @@ const BROWSER_DEFAULTS: SettingsSnapshot = {
   },
   advanced: {
     logLevel: "info",
+  },
+  studio: {
+    lifecycleDefault: "ask",
   },
 };
 

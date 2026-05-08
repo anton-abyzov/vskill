@@ -9,8 +9,14 @@ use tauri_plugin_autostart::MacosLauncher;
 
 mod commands;
 mod lifecycle;
+// 0832 lifecycle modal — opens a 720x320 WebviewWindow when the scanner
+// detects a running external studio instance at boot.
+mod lifecycle_modal;
 mod menu;
 mod preferences;
+// 0832 process discovery — enumerate running studio instances via
+// ~/.vskill/runtime/*.lock + platform-native fallback (lsof / /proc / pwsh).
+mod process_discovery;
 mod sidecar;
 
 use sidecar::{SharedSidecar, SidecarState};
@@ -58,6 +64,15 @@ pub fn run() {
             commands::set_autostart,
             commands::pick_default_project_folder,
             commands::reveal_settings_file,
+            // 0832 lifecycle modal IPC surface.
+            commands::get_detected_instance,
+            commands::lifecycle_use_existing,
+            commands::lifecycle_stop_existing,
+            commands::lifecycle_run_alongside,
+            // 0832 Window > Studio Instances submenu IPC surface.
+            commands::list_studio_instances,
+            commands::switch_to_studio_instance,
+            commands::stop_studio_instance,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -90,6 +105,12 @@ pub fn run() {
             // Boot the sidecar in the background; show the main window once
             // /api/health responds. If boot fails, surface a plain dialog and
             // exit cleanly — the user's next launch is a fresh attempt.
+            //
+            // 0832: when the scanner detects an external studio instance,
+            // spawn_sidecar returns Err("lifecycle-modal-pending"). That's
+            // not a fatal failure — the lifecycle modal owns the next step.
+            // The IPC handlers (lifecycle_use_existing / lifecycle_stop_existing
+            // / lifecycle_run_alongside) re-drive the boot flow as needed.
             let boot_handle = handle.clone();
             let boot_state = state.clone();
             tauri::async_runtime::spawn(async move {
@@ -98,6 +119,9 @@ pub fn run() {
                         if let Err(e) = sidecar::load_studio_url(&boot_handle, port) {
                             log::error!("could not load studio URL: {e}");
                         }
+                    }
+                    Err(ref e) if e == "lifecycle-modal-pending" => {
+                        log::info!("sidecar boot deferred — lifecycle modal is up");
                     }
                     Err(e) => {
                         log::error!("sidecar boot failed: {e}");

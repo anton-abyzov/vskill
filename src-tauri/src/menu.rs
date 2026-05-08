@@ -109,10 +109,18 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&PredefinedMenuItem::fullscreen(app, None)?)
         .build()?;
 
-    // Window menu.
+    // Window menu — adds a "Studio Instances" item that opens the modal
+    // listing every detected studio instance (T-012). The submenu itself is
+    // built dynamically when clicked (event handler in handle_event) so the
+    // list is always fresh — no polling.
     let window_submenu = SubmenuBuilder::new(app, "Window")
         .item(&PredefinedMenuItem::minimize(app, None)?)
         .item(&PredefinedMenuItem::maximize(app, None)?)
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id("studio_instances", "Studio Instances...")
+                .build(app)?,
+        )
         .separator()
         .item(&PredefinedMenuItem::close_window(app, None)?)
         .build()?;
@@ -225,8 +233,49 @@ pub fn handle_event(app: &AppHandle, id: &str) {
                 serde_json::json!({ "action": id }),
             );
         }
+        "studio_instances" => {
+            // 0832 T-012: open a dedicated window that lists every detected
+            // studio instance. The submenu UI lives in src/eval-ui/src/lifecycle/
+            // and uses the list_studio_instances IPC handler. Refreshes on
+            // every open (no polling, as required by AC-US3-04).
+            if let Err(e) = open_studio_instances_window(app) {
+                log::error!("studio_instances window open failed: {e}");
+            }
+        }
         _ => {
             log::debug!("unhandled menu id: {id}");
         }
     }
+}
+
+/// 0832 T-012: open a 540x420 instances window. Same lifecycle.html entry
+/// point + a query param that switches the React app into instances-list mode.
+///
+/// 0832 F-GRILL-02: when the window is reused (already exists, just hidden),
+/// emit a `studio-instances://refresh` event so the React layer re-runs
+/// `list_studio_instances`. Without this, reopening shows stale rows from the
+/// last time the window was visible. AC-US3-04 says "refreshes within 1s of
+/// being opened" — a stale list breaks that contract.
+fn open_studio_instances_window(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::{Emitter, WebviewUrl, WebviewWindowBuilder};
+    const LABEL: &str = "studio_instances";
+    if let Some(existing) = app.get_webview_window(LABEL) {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        // Tell the renderer to re-fetch. Non-fatal if the listener isn't ready
+        // yet — the InstancesApp also refreshes on mount, so a fresh window
+        // load gets fresh data either way.
+        let _ = existing.emit("studio-instances://refresh", ());
+        return Ok(());
+    }
+    let url = WebviewUrl::App("lifecycle.html?mode=instances".into());
+    WebviewWindowBuilder::new(app, LABEL, url)
+        .title("Studio Instances")
+        .inner_size(540.0, 420.0)
+        .min_inner_size(540.0, 360.0)
+        .resizable(true)
+        .center()
+        .focused(true)
+        .build()?;
+    Ok(())
 }

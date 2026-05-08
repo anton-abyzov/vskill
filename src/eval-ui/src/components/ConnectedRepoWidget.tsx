@@ -299,7 +299,11 @@ function TierAwareVisibility({
   if (isPrivate !== true) {
     return <VisibilityPill isPrivate={isPrivate} />;
   }
-  // Private + free → show locked state with "Pro" chip.
+  // Private + free → show locked state with "Pro" chip. 0833: clicking
+  // the chip is the canonical "connect private repo" action for free
+  // users — the host wires `onUpgradeClick` to open PaywallModal (NOT
+  // pricing directly), and the modal's "Upgrade to Pro" CTA opens
+  // /pricing. Public repos never reach this branch (AC-US2-05).
   if (!isPaid) {
     return (
       <span
@@ -313,8 +317,8 @@ function TierAwareVisibility({
           type="button"
           onClick={onUpgradeClick}
           data-testid="repo-upgrade-chip"
-          title="Upgrade to enable private repo connections."
-          aria-label="Upgrade to Pro for private repository support"
+          title="Upgrade for private repo connections."
+          aria-label="Upgrade to Pro for private repository connections"
           style={proChipStyle}
         >
           Pro

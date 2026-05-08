@@ -30,6 +30,7 @@ import { SetupDrawer } from "./components/SetupDrawer";
 import { useSetupDrawer } from "./hooks/useSetupDrawer";
 import { AgentScopePicker, agentsResponseToPickerEntries } from "./components/AgentScopePicker";
 import { ClaudeCodeFirstUseBanner } from "./components/ClaudeCodeFirstUseBanner";
+import { ConnectedRepoWidget } from "./components/ConnectedRepoWidget";
 import { useAgentsResponse } from "./hooks/useAgentsResponse";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { ProjectPicker } from "./components/ProjectPicker";
@@ -301,52 +302,42 @@ function Shell() {
   // AUTHORING group header "+" (with pre-selected mode via initialCreateMode).
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [initialCreateMode, setInitialCreateMode] = useState<CreateSkillMode>("standalone");
-  // 0831 US-005 — paywall state. When a free user attempts the 51st create,
-  // the paywall opens INSTEAD of the create modal. The paywall internally
-  // fires a fresh quota sync; if the user is actually already on Pro the
-  // modal auto-dismisses and we re-open the create modal via `pendingCreateMode`.
+  // 0833 pivot — paywall state. The paywall is now triggered by the
+  // private-repo connect flow (ConnectedRepoWidget), NOT by skill-create.
+  // We keep the state at App level so any consumer can request the modal
+  // via the existing PaywallModal mount below; the create flow no longer
+  // reaches into it.
   const [paywallOpen, setPaywallOpen] = useState<boolean>(false);
-  const [pendingCreateMode, setPendingCreateMode] =
-    useState<CreateSkillMode | null>(null);
+  // 0833 — paywall context (repo name, etc.) carried as its own typed
+  // slot. The pre-0833 design overloaded `pendingCreateMode` for this
+  // purpose; that field was removed when the create-quota gate went away.
+  const [paywallContext, setPaywallContext] = useState<{ repoName?: string } | null>(null);
   // Stable ref to the current active project root — populated by the
-  // useEffect below once useWorkspace() declares `activeProject`. We use
-  // a ref so openCreateModal stays a stable callback identity.
+  // useEffect below once useWorkspace() declares `activeProject`. Kept
+  // for future inline gates that need a stable read of the active project
+  // root without triggering re-renders. (0833: previously consumed by the
+  // create-quota gate, which was removed in this pivot.)
   const activeProjectPathRef = useRef<string | null>(null);
+  // 0833 — tierState drives the private-repo paywall trigger via
+  // ConnectedRepoWidget mounted in Sidebar.topSlot. useTier() throws if
+  // QuotaProvider is missing, which doubles as a context-wiring assertion.
+  const tierState = useTier();
   const bridgeForCreate = useDesktopBridge();
-  // tierState is reserved for future inline gates inside Shell (e.g. wiring
-  // tier into the ConnectedRepoWidget when desktop-folder-agent mounts it).
-  // Reading the hook here also guarantees the QuotaProvider is wired
-  // correctly — useTier() throws if QuotaProvider is missing.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const _tierState = useTier();
-  // PRICING_URL is exported alongside the hook so any future gate can
-  // open it via bridgeForCreate.openExternalUrl(PRICING_URL).
+  // Suppress unused-import warning for PRICING_URL — exported alongside
+  // the tier hook so any future gate can open it via
+  // bridgeForCreate.openExternalUrl(PRICING_URL) without re-importing.
   void PRICING_URL;
   const openCreateModal = useCallback(
     async (mode: CreateSkillMode = "standalone") => {
-      // 0831 server-authoritative gate — call the Rust IPC FIRST. The IPC
-      // reads disk-cached quota; if the cache says the user is at the
-      // server-side limit on free tier, we trigger the paywall instead.
-      // Pro/Enterprise short-circuit to "ok" without the paywall path.
-      try {
-        const roots = activeProjectPathRef.current
-          ? [activeProjectPathRef.current]
-          : [];
-        const verdict = await bridgeForCreate.quotaCanCreateSkill(roots);
-        if (verdict.blocked) {
-          setPendingCreateMode(mode);
-          setPaywallOpen(true);
-          return;
-        }
-      } catch {
-        // Bridge failure (e.g. the IPC isn't registered in some test
-        // harness) → fall through to opening the create modal. We don't
-        // want a flaky bridge to block legitimate creates.
-      }
+      // 0833 pivot: skill-create is no longer tier-gated. Free users
+      // create unlimited public skills; the paywall fires on the
+      // private-repo connect action instead. The `quota_can_create_skill`
+      // IPC stays registered for future fair-use limits but is not
+      // consulted here.
       setInitialCreateMode(mode);
       setCreateModalOpen(true);
     },
-    [bridgeForCreate],
+    [],
   );
   useEffect(() => {
     // Listen for bubbling requests from elsewhere (e.g. AUTHORING header).
@@ -358,6 +349,27 @@ function Shell() {
     window.addEventListener("studio:request-create-skill", onRequestCreate);
     return () => window.removeEventListener("studio:request-create-skill", onRequestCreate);
   }, [openCreateModal]);
+
+  // 0833 — paywall request bus. ConnectedRepoWidget (when mounted into
+  // the shell) dispatches `studio:request-paywall` with the repo name as
+  // detail. Until the widget mount lands, the bus is also the e2e
+  // entrypoint that drives the auth-and-paywall regression spec —
+  // dispatching the event from a test reproduces the exact runtime path
+  // a real Connect-button click would take.
+  useEffect(() => {
+    function onRequestPaywall(e: Event) {
+      if (!(e instanceof CustomEvent)) return;
+      const detail = e.detail as { repoName?: string } | undefined;
+      // Store repo context in its own typed slot — the PaywallModal's
+      // `skillName` prop is purely advisory copy ("skill or repo context"
+      // per PaywallModal.tsx post-0833) and reads from paywallContext.
+      setPaywallContext(detail?.repoName ? { repoName: detail.repoName } : null);
+      setPaywallOpen(true);
+    }
+    window.addEventListener("studio:request-paywall", onRequestPaywall);
+    return () =>
+      window.removeEventListener("studio:request-paywall", onRequestPaywall);
+  }, []);
 
   // 0700 phase 2B + 2C: MarketplaceDrawer + InstallProgressToast state.
   const [marketplaceOpen, setMarketplaceOpen] = useState(false);
@@ -903,21 +915,49 @@ function Shell() {
             dirtySkillIds={dirtySkillIds}
             onSkillsChanged={refreshSkills}
             topSlot={
-              agentsResponse.status === "ready" && pickerEntries.length > 0 ? (
-                <>
-                  <AgentScopePicker
-                    agents={pickerEntries}
-                    activeAgentId={activeAgentId}
-                    onActiveAgentChange={handleActiveAgentChange}
-                    onOpenSetup={(providerId) => setupDrawer.open(providerId)}
+              <>
+                {agentsResponse.status === "ready" && pickerEntries.length > 0 ? (
+                  <>
+                    <AgentScopePicker
+                      agents={pickerEntries}
+                      activeAgentId={activeAgentId}
+                      onActiveAgentChange={handleActiveAgentChange}
+                      onOpenSetup={(providerId) => setupDrawer.open(providerId)}
+                    />
+                    {/* 0686 T-012 (US-006): first-use banner — only renders
+                        when Claude Code is the active scope agent AND the
+                        session dismissal flag is absent. Internal gating
+                        keeps this mount point cheap. */}
+                    <ClaudeCodeFirstUseBanner activeAgentId={activeAgentId} />
+                  </>
+                ) : null}
+                {/* 0833 — connected-repo widget. Renders the active
+                    project's git/repo info and, for free users on a
+                    private remote, surfaces the "Pro" upgrade chip that
+                    fires the paywall. The widget internally short-circuits
+                    when there's no active project (folder = null) so the
+                    mount stays cheap. AC-US2-02 + AC-US2-04. */}
+                {activeProject?.path ? (
+                  <ConnectedRepoWidget
+                    folder={activeProject.path}
+                    tier={tierState.tier}
+                    onUpgradeClick={() => {
+                      // Dispatch through the same paywall bus the e2e
+                      // regression spec exercises — keeps the runtime
+                      // path identical to the test path. App.tsx listens
+                      // for `studio:request-paywall` and opens
+                      // PaywallModal with the repo name as context.
+                      try {
+                        window.dispatchEvent(
+                          new CustomEvent("studio:request-paywall", {
+                            detail: { repoName: activeProject.path },
+                          }),
+                        );
+                      } catch { /* SSR/test fallback */ }
+                    }}
                   />
-                  {/* 0686 T-012 (US-006): first-use banner — only renders
-                      when Claude Code is the active scope agent AND the
-                      session dismissal flag is absent. Internal gating
-                      keeps this mount point cheap. */}
-                  <ClaudeCodeFirstUseBanner activeAgentId={activeAgentId} />
-                </>
-              ) : null
+                ) : null}
+              </>
             }
           />
         }
@@ -1179,25 +1219,29 @@ function Shell() {
         }}
       />
 
-      {/* 0831 US-005 — paywall modal. Triggered by openCreateModal when the
-          quotaCanCreateSkill IPC returns blocked. The modal internally fires
-          a fresh quota sync; if the user is actually on Pro it auto-dismisses
-          and resumes the create via onProceed. */}
+      {/* 0833 pivot — paywall modal. Triggered by ConnectedRepoWidget when
+          a free user clicks "Connect" on a private repo (was: 51st skill
+          create in 0831). The modal internally fires a fresh quota sync;
+          if the user is actually on Pro it auto-dismisses (AC-US2-06).
+          Auto-resume of the connect action requires the widget mount to
+          be live (deferred to a follow-up increment); until then,
+          dismissing the paywall returns the user to the connect button to
+          click again. */}
       <PaywallModal
         open={paywallOpen}
-        skillName={pendingCreateMode ?? undefined}
+        skillName={paywallContext?.repoName ?? undefined}
         onClose={() => {
           setPaywallOpen(false);
-          setPendingCreateMode(null);
+          setPaywallContext(null);
         }}
         onProceed={() => {
-          // Race-resolved: user is on Pro. Reopen the create modal with the
-          // mode they originally chose.
-          if (pendingCreateMode) {
-            setInitialCreateMode(pendingCreateMode);
-            setCreateModalOpen(true);
-          }
-          setPendingCreateMode(null);
+          // Race-resolved: user is on Pro. Clear paywall context and let
+          // the paid-tier UI take over. Auto-resume of the original
+          // connect action will land alongside the widget mount in a
+          // follow-up — there is currently no listener for a resume
+          // event, so we don't dispatch one (avoids the appearance of
+          // working wiring that doesn't actually exist).
+          setPaywallContext(null);
         }}
       />
 

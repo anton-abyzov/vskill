@@ -972,6 +972,36 @@ pub async fn quota_force_sync(
     Ok(build_snapshot(roots))
 }
 
+/// 0833 pivot — pure gate decision over a snapshot.
+///
+/// Extracted from `quota_can_create_skill` so we can unit-test the
+/// decision matrix without spinning up Tauri or touching disk. Returns
+/// `(blocked, reason)` exactly as the IPC reports them.
+///
+/// Decision matrix:
+///   - Pro / Enterprise (cached)       → `(false, "ok")`
+///   - Free + `skill_limit: None`      → `(false, "ok")` (0833: unlimited)
+///   - Free + `skill_limit: Some(N)`   → block when `skill_count >= N`
+///   - No cache (signed-out / first run) → `(false, "no-cache-and-signed-out")`
+fn evaluate_can_create(
+    cache: Option<&crate::quota::cache::QuotaCache>,
+) -> (bool, &'static str) {
+    match cache {
+        Some(c) if c.response.tier.is_paid() => (false, "ok"),
+        Some(c) => match c.response.skill_limit {
+            None => (false, "ok"),
+            Some(limit) => {
+                if c.response.skill_count >= limit {
+                    (true, "limit-reached")
+                } else {
+                    (false, "ok")
+                }
+            }
+        },
+        None => (false, "no-cache-and-signed-out"),
+    }
+}
+
 #[tauri::command]
 pub async fn quota_can_create_skill(
     project_roots: Option<Vec<String>>,
@@ -983,31 +1013,18 @@ pub async fn quota_can_create_skill(
         .collect::<Vec<_>>();
     let snapshot = build_snapshot(roots);
 
-    let (blocked, reason) = match &snapshot.cache {
-        Some(c) if c.response.tier.is_paid() => (false, "ok".to_string()),
-        Some(c) => {
-            // Free tier with cache — gate by SERVER's count, not local.
-            // Local count is informational; the server is the truth source
-            // (ADR-0831-04). Compare server's count against its own limit.
-            let limit = c.response.skill_limit.unwrap_or(50);
-            if c.response.skill_count >= limit {
-                (true, "limit-reached".to_string())
-            } else {
-                (false, "ok".to_string())
-            }
-        }
-        None => {
-            // No cache + no token → signed-out. UI should prompt sign-in
-            // BEFORE attempting create. Treat as not-blocked here since the
-            // server-side authoring route will reject via its own auth gate
-            // (or, in this v1, simply allow up to the local 50 cap).
-            (false, "no-cache-and-signed-out".to_string())
-        }
-    };
+    // 0833 pivot: free tier no longer has a 51st-skill cap. The paywall
+    // moved to the private-repo connect flow (handled in React). This IPC
+    // remains so future fair-use limits can plug back in without a
+    // contract change, but for v1 of 0833 it returns `ok` whenever the
+    // limit is null. Pro/Enterprise still short-circuit. If a future
+    // server response sets `skill_limit: Some(N)`, we resume the
+    // count-vs-limit check.
+    let (blocked, reason) = evaluate_can_create(snapshot.cache.as_ref());
 
     Ok(QuotaCanCreateResult {
         blocked,
-        reason,
+        reason: reason.to_string(),
         snapshot,
     })
 }
@@ -1113,5 +1130,106 @@ mod tests {
         assert!(json.contains("\"is_self\":false"));
         assert!(json.contains("\"pid\":4321"));
         assert!(json.contains("\"port\":7077"));
+    }
+
+    // -----------------------------------------------------------------------
+    // 0833 — quota_can_create_skill gate decision.
+    //
+    // We exercise the pure helper `evaluate_can_create` so the test stays
+    // hermetic (no disk, no Tauri). The IPC handler `quota_can_create_skill`
+    // calls this helper after running `build_snapshot`, so covering the
+    // helper covers the IPC's branch behavior too.
+    // -----------------------------------------------------------------------
+
+    use crate::quota::cache::{
+        QuotaCache, QuotaResponse, QuotaTier, GRACE_PERIOD_DAYS,
+    };
+
+    /// Build a `QuotaCache` for the gate tests. We bypass `from_response`
+    /// to avoid the clock-skew computation — the helper under test never
+    /// reads the timestamps.
+    fn make_cache(
+        tier: QuotaTier,
+        skill_count: i64,
+        skill_limit: Option<i64>,
+    ) -> QuotaCache {
+        QuotaCache {
+            response: QuotaResponse {
+                tier,
+                skill_count,
+                skill_limit,
+                last_synced_at: None,
+                grace_period_days_remaining: GRACE_PERIOD_DAYS,
+                server_now: "2026-05-08T00:00:00.000Z".to_string(),
+            },
+            local_at_sync: "2026-05-08T00:00:00.000Z".to_string(),
+            clock_skew_ms: 0,
+        }
+    }
+
+    #[test]
+    fn evaluate_can_create_free_unlimited_returns_ok_regardless_of_count() {
+        // 0833 pivot — free tier with `skill_limit: None` is unlimited; the
+        // gate must return `ok` regardless of `currentCount` (AC-US1-03).
+        // We probe several counts including a deliberately huge one to
+        // prove the limit-comparison branch is bypassed entirely.
+        for count in [0_i64, 1, 49, 50, 51, 100, 100_000] {
+            let cache = make_cache(QuotaTier::Free, count, None);
+            let (blocked, reason) = evaluate_can_create(Some(&cache));
+            assert!(
+                !blocked,
+                "free + null-limit must never block (count={count})"
+            );
+            assert_eq!(reason, "ok", "free + null-limit reason (count={count})");
+        }
+    }
+
+    #[test]
+    fn evaluate_can_create_free_with_explicit_limit_still_gates() {
+        // 0833 keeps the count-vs-limit logic intact for forward-compat.
+        // If a future server response carries `skill_limit: Some(N)` we
+        // resume gating — proven here against `Some(50)`.
+        let under = make_cache(QuotaTier::Free, 49, Some(50));
+        let (blocked, reason) = evaluate_can_create(Some(&under));
+        assert!(!blocked, "49 < 50 must not block");
+        assert_eq!(reason, "ok");
+
+        let at = make_cache(QuotaTier::Free, 50, Some(50));
+        let (blocked, reason) = evaluate_can_create(Some(&at));
+        assert!(blocked, "50 >= 50 must block");
+        assert_eq!(reason, "limit-reached");
+
+        let over = make_cache(QuotaTier::Free, 999, Some(50));
+        let (blocked, reason) = evaluate_can_create(Some(&over));
+        assert!(blocked, "999 >= 50 must block");
+        assert_eq!(reason, "limit-reached");
+    }
+
+    #[test]
+    fn evaluate_can_create_pro_short_circuits_to_ok() {
+        // Pro/Enterprise NEVER hit the limit branch — they short-circuit
+        // on `tier.is_paid()`. We verify with a deliberately-set limit
+        // that would otherwise block on free.
+        let cache = make_cache(QuotaTier::Pro, 9_999_999, Some(50));
+        let (blocked, reason) = evaluate_can_create(Some(&cache));
+        assert!(!blocked, "pro must short-circuit regardless of count");
+        assert_eq!(reason, "ok");
+    }
+
+    #[test]
+    fn evaluate_can_create_enterprise_short_circuits_to_ok() {
+        let cache = make_cache(QuotaTier::Enterprise, 9_999_999, None);
+        let (blocked, reason) = evaluate_can_create(Some(&cache));
+        assert!(!blocked, "enterprise must short-circuit");
+        assert_eq!(reason, "ok");
+    }
+
+    #[test]
+    fn evaluate_can_create_no_cache_returns_signed_out_marker() {
+        // First-run / signed-out — no cache. We don't block; the actual
+        // server-side authoring path will reject via its own auth gate.
+        let (blocked, reason) = evaluate_can_create(None);
+        assert!(!blocked, "no cache must not block");
+        assert_eq!(reason, "no-cache-and-signed-out");
     }
 }

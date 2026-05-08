@@ -15,9 +15,12 @@
 //                              avatar+login chip post-grant.
 //   - Test 2 (folder picker):  AC-US3-01, AC-US3-02 — home-root warning
 //                              modal + Pick again → ProjectRoot path.
-//   - Test 3 (paywall on 51st): AC-US5-03, AC-US5-04, AC-US8-03 — paywall
-//                              modal + canonical pricing-URL handoff via
-//                              `open_external_url`.
+//   - Test 3 (paywall on private-repo connect): AC-US2-02, AC-US2-03,
+//                              AC-US8-03 — paywall modal + canonical
+//                              pricing-URL handoff via `open_external_url`.
+//                              (0833 pivot: was "Paywall on 51st create"
+//                              in 0831; the trigger moved to private-repo
+//                              connect.)
 //   - Test 4 (connected-repo widget): AC-US4-01..03 — sanity-checks the
 //                              widget renders the picked-repo metadata IF
 //                              the studio shell mounts it. The component
@@ -113,8 +116,10 @@ async function installBridgeShim(page: Page): Promise<BridgeFixture> {
       signedIn: false,
       pollOutcomes: [],
       tier: "free",
-      skillCount: 49,
-      skillLimit: 50,
+      skillCount: 7,
+      // 0833: free tier is unlimited — paywall fires on private-repo
+      // connect, not on a count cap.
+      skillLimit: null,
       lastOpenedUrl: null,
       pickQueue: [],
       repoInfoQueue: [],
@@ -289,12 +294,13 @@ async function installBridgeShim(page: Page): Promise<BridgeFixture> {
           }
           return makeQuotaSnapshot();
         case "quota_can_create_skill": {
+          // 0833 pivot: gate is `null limit → ok` for free; paid short-
+          // circuits; explicit numeric limits still gate (forward-compat).
           const snapshot = makeQuotaSnapshot();
           let blocked = false;
           let reason = "ok";
-          if (s.tier === "free") {
-            const limit = s.skillLimit ?? 50;
-            if (s.skillCount >= limit) {
+          if (s.tier === "free" && s.skillLimit !== null) {
+            if (s.skillCount >= s.skillLimit) {
               blocked = true;
               reason = "limit-reached";
             }
@@ -518,15 +524,19 @@ test.describe("0831 T-030 — auth + folder + paywall regression", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Test 3: AC-US5-03/04 + AC-US8-03 — paywall on 51st create with the
-  // canonical pricing-URL handoff. (Functionally the same as the T-028
-  // smoke test, here re-asserted from the regression-suite POV so that a
-  // future refactor of either spec breaks visibly in only one place.)
+  // Test 3: AC-US2-02/03 + AC-US8-03 — paywall on private-repo connect
+  // with the canonical pricing-URL handoff. (0833 pivot — was "Paywall
+  // on 51st create" in 0831. Functionally re-asserted from the
+  // regression-suite POV so that a future refactor of either spec breaks
+  // visibly in only one place.)
+  //
+  // We dispatch `studio:request-paywall` to drive the trigger — the same
+  // event ConnectedRepoWidget will fire when its mount lands.
   // -------------------------------------------------------------------------
-  test("Test 3 — paywall on 51st create → Upgrade opens canonical pricing URL", async ({
+  test("Test 3 — paywall on private-repo connect → Upgrade opens canonical pricing URL", async ({
     page,
   }) => {
-    const bridge = await installBridgeShim(page);
+    await installBridgeShim(page);
 
     await page.addInitScript(() => {
       const w = window as unknown as {
@@ -540,8 +550,9 @@ test.describe("0831 T-030 — auth + folder + paywall regression", () => {
       if (w.__BRIDGE_STATE__) {
         w.__BRIDGE_STATE__.signedIn = true;
         w.__BRIDGE_STATE__.tier = "free";
-        w.__BRIDGE_STATE__.skillCount = 50;
-        w.__BRIDGE_STATE__.skillLimit = 50;
+        w.__BRIDGE_STATE__.skillCount = 7;
+        // 0833 default: no count cap.
+        w.__BRIDGE_STATE__.skillLimit = null;
       }
     });
 
@@ -550,14 +561,23 @@ test.describe("0831 T-030 — auth + folder + paywall regression", () => {
     const newSkill = page.getByRole("button", { name: /new skill/i });
     await expect(newSkill).toBeVisible({ timeout: 10_000 });
 
-    await bridge.clearCalls();
-    await newSkill.click();
+    // Drive the paywall via the App.tsx `studio:request-paywall` listener.
+    await page.evaluate(() => {
+      window.dispatchEvent(
+        new CustomEvent("studio:request-paywall", {
+          detail: { repoName: "anton-abyzov/private-fixture" },
+        }),
+      );
+    });
 
     const paywall = page.getByTestId("paywall-modal");
     await expect(paywall).toBeVisible({ timeout: 5_000 });
-
-    const calls = await bridge.calls();
-    expect(calls.some((c) => c.cmd === "quota_can_create_skill")).toBe(true);
+    // 0833 copy assertions — the new title and the absence of the old
+    // "50-skill free tier" string.
+    await expect(paywall).toContainText(
+      "Connect private repositories with Skill Studio Pro",
+    );
+    await expect(paywall).not.toContainText("50-skill free tier");
 
     // Click "Upgrade to Pro" — must invoke openExternalUrl with the
     // canonical pricing URL (single source of truth, AC-US8-03).

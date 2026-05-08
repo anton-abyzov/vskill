@@ -1,23 +1,27 @@
-// 0831 US-005 — PaywallModal.
+// 0831 US-005 — PaywallModal. (0833 pivot — repositioned around private-
+// repo connections, not a 50-skill cap.)
 //
 // Owner: desktop-quota-agent.
 //
-// Hard-blocks the 51st skill create on the free tier. Triggered by the
-// CreateSkillModal flow when `quotaCanCreateSkill()` returns `blocked: true`.
+// Triggered by ConnectedRepoWidget when a free user clicks "Connect" on
+// a private repository. (In 0831 this fired on the 51st skill-create —
+// that gate was removed in 0833.)
 //
-// UX contract (AC-US5-03..05):
-//   - Body copy: "You've reached the 50-skill free tier. Upgrade to Skill
-//     Studio Pro for unlimited skills + private repo support."
+// UX contract (AC-US2-03):
+//   - Title:  "Connect private repositories with Skill Studio Pro"
+//   - Body:   "Pro adds private repo connections, priority support, and
+//             unlimited skills. Free users keep all current features for
+//             public repos."
 //   - Two actions: "Upgrade to Pro" (opens pricing in browser) and
 //     "Maybe later" (closes the modal).
-//   - WAI-ARIA dialog with focus trap + ESC closes (AC-US5-03).
-//   - No countdown timers / urgency language (AC-US8-06).
+//   - WAI-ARIA dialog with focus trap + ESC closes.
+//   - No countdown timers / urgency language.
 //
 // Auto-upgrade race resolution (T-021):
 //   On open we kick off `forceSync(fresh=true)` in the background. If the
 //   refresh returns a paid tier, we auto-dismiss the modal AND call the
-//   `onProceed` callback so the user's create resumes. Window: 5s, gated
-//   by the `quota_force_sync` IPC's hard timeout.
+//   `onProceed` callback so the user's connect attempt resumes. Window:
+//   5s, gated by the `quota_force_sync` IPC's hard timeout.
 
 import {
   useCallback,
@@ -38,11 +42,16 @@ interface Props {
   onClose: () => void;
   /**
    * Callback fired when a background refresh detects that the user is
-   * actually on a paid tier (race resolution). The host should resume the
-   * blocked create flow.
+   * actually on a paid tier (race resolution). The host should resume
+   * the blocked action (post-0833: the private-repo connect flow).
    */
   onProceed?: () => void;
-  /** Skill name the user attempted to create — included in copy. */
+  /**
+   * Optional context the modal can include for personalization. In 0833
+   * this is the repo name the user tried to connect (e.g. "anton/foo");
+   * pre-0833 it was the skill name. Both are advisory — copy renders
+   * fine without it.
+   */
   skillName?: string;
 }
 
@@ -163,16 +172,16 @@ export function PaywallModal({
       />
       <div ref={dialogRef} style={dialogStyle}>
         <h2 id={TITLE_ID} style={titleStyle}>
-          You&rsquo;ve reached the 50-skill free tier
+          Connect private repositories with Skill Studio Pro
         </h2>
         <p id={BODY_ID} style={bodyStyle}>
-          Upgrade to Skill Studio Pro for unlimited skills + private repo
-          support.
+          Pro adds private repo connections, priority support, and unlimited
+          skills. Free users keep all current features for public repos.
           {skillName ? (
             <>
               {" "}
               <span style={{ color: "var(--color-muted, #888)" }}>
-                ({skillName} won&rsquo;t be created until you upgrade.)
+                ({skillName} won&rsquo;t connect until you upgrade.)
               </span>
             </>
           ) : null}

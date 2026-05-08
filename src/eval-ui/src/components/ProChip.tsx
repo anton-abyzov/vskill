@@ -28,7 +28,10 @@ interface Props {
   ariaLabel?: string;
 }
 
-const DEFAULT_TOOLTIP = "Upgrade to enable private repo connections.";
+// 0833 pivot — was "Upgrade for unlimited skills + private repos." The
+// 50-skill cap was removed; the only Pro-only feature is private repo
+// connections, so the tooltip leads with that.
+const DEFAULT_TOOLTIP = "Upgrade for private repo connections.";
 
 export function ProChip({
   tooltip = DEFAULT_TOOLTIP,

@@ -9,10 +9,17 @@
 // Returned shape mirrors what the spec calls out (US-008 AC-US8-05):
 //   { tier, isPro, isFree, skillCount, skillLimit, gracePeriodDaysRemaining }
 //
+// 0833 pivot: free tier returns `skillLimit: null` (unlimited public
+// skills). The hook exposes `isUnlimited` so consumers can avoid hard-
+// coding `skillLimit === null`. The default for cache-less / signed-out
+// states is now also `null` (was 50) so the UI never advertises a cap
+// that doesn't exist.
+//
 // Behavior on signed-out / no-cache state: returns `tier: "free"` —
-// failing CLOSED is intentional. The UI shows tier-locked gates rather
-// than letting a clean install bypass enforcement. The only escape hatch
-// is signing in (which triggers force_sync and resolves the real tier).
+// failing CLOSED is intentional for tier gates (private-repo paywall),
+// while the cap field stays `null` because no count-cap exists in v1.
+// The only escape hatch is signing in (which triggers force_sync and
+// resolves the real tier).
 
 import { useQuota } from "../contexts/QuotaContext";
 
@@ -30,10 +37,19 @@ export interface UseTierResult {
   /** Server-side authoritative count, or 0 when no cache. */
   skillCount: number;
   /**
-   * Server-side cap — `null` for unlimited (pro/enterprise).
-   * Defaults to `50` (free-tier limit) when no cache.
+   * Server-side cap — `null` means unlimited.
+   *
+   * 0833 pivot: ALL tiers report `null` in v1 (free included). The
+   * paywall now fires on the private-repo connect action instead of a
+   * 51st-skill create. Default when no cache loaded: `null`.
    */
   skillLimit: number | null;
+  /**
+   * 0833 pivot: convenience boolean — `true` when `skillLimit === null`
+   * (i.e. no count cap applies). Lets consumers avoid an inline null
+   * check and document intent.
+   */
+  isUnlimited: boolean;
   /** Days left in the offline-grace window. Negative when stale. */
   gracePeriodDaysRemaining: number;
   /** Whether the cache is fresh (within grace). */
@@ -43,8 +59,6 @@ export interface UseTierResult {
   /** Locally-counted skill total — informational, not enforcement. */
   localSkillCount: number;
 }
-
-const FREE_TIER_LIMIT_DEFAULT = 50;
 
 export function useTier(): UseTierResult {
   const { snapshot } = useQuota();
@@ -56,7 +70,8 @@ export function useTier(): UseTierResult {
       isFree: true,
       isEnterprise: false,
       skillCount: 0,
-      skillLimit: FREE_TIER_LIMIT_DEFAULT,
+      skillLimit: null,
+      isUnlimited: true,
       gracePeriodDaysRemaining: 0,
       isFresh: false,
       loaded: false,
@@ -66,14 +81,16 @@ export function useTier(): UseTierResult {
 
   const cache = snapshot.cache;
   if (!cache) {
-    // No cache yet — fail-closed to free.
+    // No cache yet — fail-closed to free for tier gates, but no cap
+    // applies (0833: nobody has a count cap in v1).
     return {
       tier: "free",
       isPro: false,
       isFree: true,
       isEnterprise: false,
       skillCount: 0,
-      skillLimit: FREE_TIER_LIMIT_DEFAULT,
+      skillLimit: null,
+      isUnlimited: true,
       gracePeriodDaysRemaining: snapshot.daysRemaining,
       isFresh: snapshot.isFresh,
       loaded: true,
@@ -83,13 +100,15 @@ export function useTier(): UseTierResult {
 
   const tier = cache.response.tier;
   const isPro = tier === "pro" || tier === "enterprise";
+  const skillLimit = cache.response.skillLimit;
   return {
     tier,
     isPro,
     isFree: tier === "free",
     isEnterprise: tier === "enterprise",
     skillCount: cache.response.skillCount,
-    skillLimit: cache.response.skillLimit,
+    skillLimit,
+    isUnlimited: skillLimit === null,
     gracePeriodDaysRemaining: snapshot.daysRemaining,
     isFresh: snapshot.isFresh,
     loaded: true,

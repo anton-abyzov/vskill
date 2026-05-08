@@ -1,13 +1,22 @@
 // ---------------------------------------------------------------------------
-// 0831 US-005 / US-001 — sign-in + paywall flow smoke test (T-028).
+// 0833 pivot — sign-in + paywall flow smoke test.
+//
+// (Originally 0831 T-028; rewritten for the 0833 trigger pivot. The
+// paywall used to fire on the 51st skill create; it now fires on a free
+// user attempting to connect a private repo. The test drives the flow by
+// dispatching `studio:request-paywall` on `window` — exactly the same
+// event ConnectedRepoWidget will dispatch when the widget mount lands.)
 //
 // Owner: desktop-quota-agent.
 //
 // Coverage:
-//   - AC-US1-01..06: device-flow code panel + verification URL handoff
-//   - AC-US5-01..05: skill counter + paywall trigger on the 51st create
-//   - AC-US7-02:     "Upgrade" button opens https://verified-skill.com/pricing
-//                    via the openExternalUrl IPC stub
+//   - AC-US2-02:    paywall fires on private-repo connect intent
+//   - AC-US2-03:    new modal copy ("Connect private repositories with
+//                   Skill Studio Pro" + "Pro adds private repo
+//                   connections, priority support, and unlimited skills.")
+//   - AC-US2-06:    Pro tier short-circuits — no modal
+//   - AC-US7-02:    "Upgrade" button opens https://verified-skill.com/pricing
+//                   via the openExternalUrl IPC stub
 //
 // Architecture (mirrors auto-update.spec.ts):
 //   - Inject `__TAURI_INTERNALS__` shim BEFORE the React bundle parses.
@@ -17,9 +26,9 @@
 //                open_external_url, get_repo_info,
 //                pick_default_project_folder, get_app_metadata,
 //                check_for_updates, set_setting, reset_settings.
-//   - Walk: sign in → see free tier counter → trigger 51st create →
-//     paywall modal → click "Upgrade" → assert openExternalUrl was called
-//     with the canonical pricing URL.
+//   - Walk: sign in (default state) → dispatch private-repo connect →
+//     paywall modal with new copy → click "Upgrade" → assert
+//     openExternalUrl was called with the canonical pricing URL.
 // ---------------------------------------------------------------------------
 
 import { test, expect, type Page } from "@playwright/test";
@@ -79,7 +88,8 @@ async function installBridgeShim(page: Page): Promise<BridgeFixture> {
       pollOutcomes: [],
       tier: "free",
       skillCount: 0,
-      skillLimit: 50,
+      // 0833: free tier no longer has a count cap — `null` means unlimited.
+      skillLimit: null,
       lastOpenedUrl: null,
       flipToProOnForceSync: false,
     };
@@ -244,12 +254,15 @@ async function installBridgeShim(page: Page): Promise<BridgeFixture> {
           }
           return makeQuotaSnapshot();
         case "quota_can_create_skill": {
+          // 0833 pivot: the IPC still exists but is no longer consulted
+          // from the create flow. We mirror the new gate logic — `null`
+          // limit returns ok regardless of count; explicit limits still
+          // gate. Pro/Enterprise short-circuit.
           const snapshot = makeQuotaSnapshot();
           let blocked = false;
           let reason = "ok";
-          if (s.tier === "free") {
-            const limit = s.skillLimit ?? 50;
-            if (s.skillCount >= limit) {
+          if (s.tier === "free" && s.skillLimit !== null) {
+            if (s.skillCount >= s.skillLimit) {
               blocked = true;
               reason = "limit-reached";
             }
@@ -315,14 +328,30 @@ async function getBridgeStateField<T>(page: Page, key: string): Promise<T | null
   }, key);
 }
 
-test.describe("0831 — auth + paywall smoke test", () => {
-  test("AC-US5-03/AC-US5-04: trigger 51st-skill create → paywall modal → upgrade opens pricing", async ({
+/**
+ * 0833 pivot — drives the paywall via the `studio:request-paywall`
+ * window event the App.tsx host listens for. ConnectedRepoWidget will
+ * dispatch this event with the repo name when its mount lands; until
+ * then the e2e dispatches it directly to exercise the runtime path.
+ */
+async function dispatchPrivateRepoConnect(
+  page: Page,
+  repoName = "anton-abyzov/private-fixture",
+): Promise<void> {
+  await page.evaluate((name) => {
+    window.dispatchEvent(
+      new CustomEvent("studio:request-paywall", { detail: { repoName: name } }),
+    );
+  }, repoName);
+}
+
+test.describe("0833 — auth + paywall (private-repo connect trigger)", () => {
+  test("AC-US2-02/03 + AC-US7-02: paywall on private-repo connect → upgrade opens pricing", async ({
     page,
   }) => {
-    const bridge = await installBridgeShim(page);
+    await installBridgeShim(page);
 
-    // Seed: free tier, AT the limit, sign-in already complete so the
-    // counter is meaningful. Force-sync stays "free" (no auto-upgrade race).
+    // Seed: signed in, free tier, no count cap (0833 default).
     await page.addInitScript(() => {
       const w = window as unknown as {
         __BRIDGE_STATE__?: {
@@ -335,35 +364,33 @@ test.describe("0831 — auth + paywall smoke test", () => {
       if (w.__BRIDGE_STATE__) {
         w.__BRIDGE_STATE__.signedIn = true;
         w.__BRIDGE_STATE__.tier = "free";
-        w.__BRIDGE_STATE__.skillCount = 50;
-        w.__BRIDGE_STATE__.skillLimit = 50;
+        w.__BRIDGE_STATE__.skillCount = 7;
+        w.__BRIDGE_STATE__.skillLimit = null;
       }
     });
 
     await page.goto("/index.html");
 
-    // Wait for the studio shell to mount. The TopRail's "+ New Skill" button
-    // is the canonical create entry — its accessible name is "New Skill".
-    const newSkillButton = page.getByRole("button", { name: /new skill/i });
-    await expect(newSkillButton).toBeVisible({ timeout: 10_000 });
+    // Make sure the shell finished mounting so the App.tsx event listener
+    // is wired before we dispatch.
+    await expect(
+      page.getByRole("button", { name: /new skill/i }),
+    ).toBeVisible({ timeout: 10_000 });
 
-    await bridge.clearCalls();
-    await newSkillButton.click();
+    await dispatchPrivateRepoConnect(page);
 
-    // The paywall must appear instead of the create modal.
+    // Paywall must appear with the new copy (AC-US2-03).
     const paywall = page.getByTestId("paywall-modal");
     await expect(paywall).toBeVisible({ timeout: 5_000 });
-    await expect(paywall).toContainText("50-skill free tier");
-    await expect(
-      page.getByTestId("paywall-upgrade"),
-    ).toBeVisible();
-    await expect(
-      page.getByTestId("paywall-maybe-later"),
-    ).toBeVisible();
+    await expect(paywall).toContainText(
+      "Connect private repositories with Skill Studio Pro",
+    );
+    await expect(paywall).toContainText("Pro adds private repo connections");
+    await expect(page.getByTestId("paywall-upgrade")).toBeVisible();
+    await expect(page.getByTestId("paywall-maybe-later")).toBeVisible();
 
-    // Verify the gate IPC was called (server-authoritative check).
-    const calls = await bridge.calls();
-    expect(calls.some((c) => c.cmd === "quota_can_create_skill")).toBe(true);
+    // The pre-0833 "50-skill free tier" copy must be GONE.
+    await expect(paywall).not.toContainText("50-skill free tier");
 
     // Click "Upgrade to Pro" — must invoke openExternalUrl with the
     // canonical pricing URL.
@@ -372,7 +399,7 @@ test.describe("0831 — auth + paywall smoke test", () => {
     expect(opened).toBe(PRICING_URL);
   });
 
-  test("AC-US5-03: 'Maybe later' closes the paywall without opening pricing", async ({
+  test("AC-US2-03: 'Maybe later' closes the paywall without opening pricing", async ({
     page,
   }) => {
     await installBridgeShim(page);
@@ -388,13 +415,17 @@ test.describe("0831 — auth + paywall smoke test", () => {
       if (w.__BRIDGE_STATE__) {
         w.__BRIDGE_STATE__.signedIn = true;
         w.__BRIDGE_STATE__.tier = "free";
-        w.__BRIDGE_STATE__.skillCount = 50;
-        w.__BRIDGE_STATE__.skillLimit = 50;
+        w.__BRIDGE_STATE__.skillCount = 7;
+        w.__BRIDGE_STATE__.skillLimit = null;
       }
     });
 
     await page.goto("/index.html");
-    await page.getByRole("button", { name: /new skill/i }).click();
+    await expect(
+      page.getByRole("button", { name: /new skill/i }),
+    ).toBeVisible({ timeout: 10_000 });
+    await dispatchPrivateRepoConnect(page);
+
     const paywall = page.getByTestId("paywall-modal");
     await expect(paywall).toBeVisible({ timeout: 5_000 });
 
@@ -418,20 +449,30 @@ test.describe("0831 — auth + paywall smoke test", () => {
       if (w.__BRIDGE_STATE__) {
         w.__BRIDGE_STATE__.signedIn = true;
         w.__BRIDGE_STATE__.tier = "free";
-        w.__BRIDGE_STATE__.skillCount = 50;
-        w.__BRIDGE_STATE__.skillLimit = 50;
+        w.__BRIDGE_STATE__.skillCount = 7;
+        w.__BRIDGE_STATE__.skillLimit = null;
       }
     });
 
     await page.goto("/index.html");
-    await page.getByRole("button", { name: /new skill/i }).click();
+    await expect(
+      page.getByRole("button", { name: /new skill/i }),
+    ).toBeVisible({ timeout: 10_000 });
+    await dispatchPrivateRepoConnect(page);
+
     const paywall = page.getByTestId("paywall-modal");
     await expect(paywall).toBeVisible({ timeout: 5_000 });
     await page.keyboard.press("Escape");
     await expect(paywall).toBeHidden();
   });
 
-  test("Pro user creates the 51st skill without paywall", async ({ page }) => {
+  test("AC-US2-06: Pro user clicking 'New Skill' never sees the paywall (no 51st-create gate)", async ({
+    page,
+  }) => {
+    // 0833 pivot: skill-create is no longer tier-gated for ANY tier. The
+    // test asserts this by clicking the canonical create entry (which
+    // pre-0833 fired the paywall on the 51st skill) and verifying the
+    // paywall stays hidden — even with a count well above the old cap.
     await installBridgeShim(page);
     await page.addInitScript(() => {
       const w = window as unknown as {
@@ -445,15 +486,13 @@ test.describe("0831 — auth + paywall smoke test", () => {
       if (w.__BRIDGE_STATE__) {
         w.__BRIDGE_STATE__.signedIn = true;
         w.__BRIDGE_STATE__.tier = "pro";
-        w.__BRIDGE_STATE__.skillCount = 50;
+        w.__BRIDGE_STATE__.skillCount = 200;
         w.__BRIDGE_STATE__.skillLimit = null;
       }
     });
 
     await page.goto("/index.html");
     await page.getByRole("button", { name: /new skill/i }).click();
-    // Paywall must NOT appear — instead the create modal opens. We just
-    // assert paywall stays hidden.
     const paywall = page.getByTestId("paywall-modal");
     await expect(paywall).toBeHidden({ timeout: 2_000 });
   });

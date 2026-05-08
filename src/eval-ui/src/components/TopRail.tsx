@@ -26,6 +26,13 @@ interface Props {
    * the rightmost call-to-action in the rail.
    */
   findSkillsSlot?: ReactNode;
+  /**
+   * 0831 T-011 (AC-US1-01, AC-US2-01): optional slot for the GitHub user
+   * dropdown. When provided, renders to the RIGHT of UpdateBell in the
+   * "session status" group — the rail's far-right edge. Browser mode
+   * passes `null` from App.tsx since the feature is desktop-only.
+   */
+  userDropdownSlot?: ReactNode;
 }
 
 // T-059: Breadcrumb segments dispatch a `studio:navigate-scope` CustomEvent
@@ -82,7 +89,15 @@ function scopeColor(selected: SelectedSkill): string {
  *   - project name  — Inter Tight 400, --text-secondary.
  *   - breadcrumb    — Inter Tight 400, plugin name in meta style, skill name in primary.
  */
-export function TopRail({ projectName, selected, onHome, projectPickerSlot, onRequestCreateSkill, findSkillsSlot }: Props) {
+export function TopRail({
+  projectName,
+  selected,
+  onHome,
+  projectPickerSlot,
+  onRequestCreateSkill,
+  findSkillsSlot,
+  userDropdownSlot,
+}: Props) {
   // 0801: breadcrumb scope label derives from the 3-way `source` field
   // (project|personal|plugin) on SelectedSkill. Pre-0801 the label came from
   // the binary `origin` field, which collapsed personal symlinks (origin=
@@ -262,6 +277,11 @@ export function TopRail({ projectName, selected, onHome, projectPickerSlot, onRe
           <span data-slot="update-bell" style={{ display: "inline-flex" }}>
             <UpdateBell />
           </span>
+          {userDropdownSlot && (
+            <span data-slot="user-dropdown" style={{ display: "inline-flex" }}>
+              {userDropdownSlot}
+            </span>
+          )}
         </div>
       </div>
     </div>

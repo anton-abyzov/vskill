@@ -67,6 +67,18 @@ const FindSkillsPalette = lazy(() =>
 // 0741 T-018: FindSkillsNavButton is small enough to ship in the initial
 // bundle — it's a TopRail chrome element visible on every page render.
 import { FindSkillsNavButton } from "./components/FindSkillsPalette/FindSkillsNavButton";
+// 0831 T-011 (AC-US1-01, AC-US2-01): GitHub user dropdown in the top-rail.
+// Renders nothing in browser mode (desktop-only feature — token storage
+// requires the Tauri shell's OS credential vault).
+import { UserDropdown } from "./components/UserDropdown";
+// 0831 T-018 / T-022 (US-005, US-008, US-010): server-authoritative quota
+// state lives in QuotaProvider mounted at the root. useTier / useQuota are
+// the consumer surfaces; the paywall + grace banner read from them.
+import { QuotaProvider } from "./contexts/QuotaContext";
+import { useTier, PRICING_URL } from "./hooks/useTier";
+import { PaywallModal } from "./components/PaywallModal";
+import { QuotaGraceBanner } from "./components/QuotaGraceBanner";
+import { useDesktopBridge } from "./preferences/lib/useDesktopBridge";
 
 // 0741 T-019: SkillDetailPanel is lazy-loaded — it only mounts after the
 // user picks a result from the FindSkillsPalette.
@@ -93,12 +105,19 @@ const UpdatesPage = lazy(() =>
 export function App() {
   return (
     <ConfigProvider>
-      <StudioProvider>
-        <ToastProvider>
-          <Shell />
-          <UpdateToast />
-        </ToastProvider>
-      </StudioProvider>
+      {/* 0831: QuotaProvider sits ABOVE StudioProvider so any descendant
+          (status bar, paywall, grace banner, ConnectedRepoWidget) can read
+          the snapshot via useQuota / useTier. The provider's internal
+          1m soft-poll + Tauri visibility events keep the snapshot in sync
+          with the Rust-side 1h background sync task. */}
+      <QuotaProvider>
+        <StudioProvider>
+          <ToastProvider>
+            <Shell />
+            <UpdateToast />
+          </ToastProvider>
+        </StudioProvider>
+      </QuotaProvider>
     </ConfigProvider>
   );
 }
@@ -271,14 +290,64 @@ function Shell() {
   const { workspace, switchProject, addProject, removeProject, activeProject } = useWorkspace();
   const [projectPaletteOpen, setProjectPaletteOpen] = useState(false);
 
+  // 0831: keep the activeProjectPathRef in sync so openCreateModal can
+  // pass the correct project root to the local skill counter without
+  // re-binding its callback identity each render.
+  useEffect(() => {
+    activeProjectPathRef.current = activeProject?.path ?? null;
+  }, [activeProject?.path]);
+
   // 0698 polish: CreateSkillModal — opened from TopRail "+ New Skill" or from
   // AUTHORING group header "+" (with pre-selected mode via initialCreateMode).
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [initialCreateMode, setInitialCreateMode] = useState<CreateSkillMode>("standalone");
-  const openCreateModal = useCallback((mode: CreateSkillMode = "standalone") => {
-    setInitialCreateMode(mode);
-    setCreateModalOpen(true);
-  }, []);
+  // 0831 US-005 — paywall state. When a free user attempts the 51st create,
+  // the paywall opens INSTEAD of the create modal. The paywall internally
+  // fires a fresh quota sync; if the user is actually already on Pro the
+  // modal auto-dismisses and we re-open the create modal via `pendingCreateMode`.
+  const [paywallOpen, setPaywallOpen] = useState<boolean>(false);
+  const [pendingCreateMode, setPendingCreateMode] =
+    useState<CreateSkillMode | null>(null);
+  // Stable ref to the current active project root — populated by the
+  // useEffect below once useWorkspace() declares `activeProject`. We use
+  // a ref so openCreateModal stays a stable callback identity.
+  const activeProjectPathRef = useRef<string | null>(null);
+  const bridgeForCreate = useDesktopBridge();
+  // tierState is reserved for future inline gates inside Shell (e.g. wiring
+  // tier into the ConnectedRepoWidget when desktop-folder-agent mounts it).
+  // Reading the hook here also guarantees the QuotaProvider is wired
+  // correctly — useTier() throws if QuotaProvider is missing.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _tierState = useTier();
+  // PRICING_URL is exported alongside the hook so any future gate can
+  // open it via bridgeForCreate.openExternalUrl(PRICING_URL).
+  void PRICING_URL;
+  const openCreateModal = useCallback(
+    async (mode: CreateSkillMode = "standalone") => {
+      // 0831 server-authoritative gate — call the Rust IPC FIRST. The IPC
+      // reads disk-cached quota; if the cache says the user is at the
+      // server-side limit on free tier, we trigger the paywall instead.
+      // Pro/Enterprise short-circuit to "ok" without the paywall path.
+      try {
+        const roots = activeProjectPathRef.current
+          ? [activeProjectPathRef.current]
+          : [];
+        const verdict = await bridgeForCreate.quotaCanCreateSkill(roots);
+        if (verdict.blocked) {
+          setPendingCreateMode(mode);
+          setPaywallOpen(true);
+          return;
+        }
+      } catch {
+        // Bridge failure (e.g. the IPC isn't registered in some test
+        // harness) → fall through to opening the create modal. We don't
+        // want a flaky bridge to block legitimate creates.
+      }
+      setInitialCreateMode(mode);
+      setCreateModalOpen(true);
+    },
+    [bridgeForCreate],
+  );
   useEffect(() => {
     // Listen for bubbling requests from elsewhere (e.g. AUTHORING header).
     function onRequestCreate(e: Event) {
@@ -802,6 +871,16 @@ function Shell() {
               ) : undefined
             }
             findSkillsSlot={<FindSkillsNavButton />}
+            userDropdownSlot={
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                {/* 0831 US-010: grace banner — invisible while fresh, yellow at
+                    7d, red past 8d. Mounts inline next to the user dropdown so
+                    a stale subscription state is always visible without taking
+                    full-width banner space. */}
+                <QuotaGraceBanner />
+                <UserDropdown />
+              </span>
+            }
           />
         }
         sidebar={
@@ -952,6 +1031,13 @@ function Shell() {
           setTimeout(() => {
             revealSkill(result.pluginName ?? "", result.skillName);
           }, 500);
+          // 0831 telemetry — best-effort POST of the new local count to the
+          // platform's `/api/v1/billing/quota/report`. Failure is silent;
+          // the platform also gets the count via the next 1h sync GET.
+          // Use the local count from the latest workspace state — the
+          // counter is debounced server-side so a tiny over-report (e.g.
+          // newly-created skill not yet in state) is harmless.
+          void bridgeForCreate.quotaReportCount(visibleSkills.length + 1);
         }}
       />
 
@@ -1090,6 +1176,28 @@ function Shell() {
         onCancel={() => {
           pluginUninstallTarget?.resolve(false);
           setPluginUninstallTarget(null);
+        }}
+      />
+
+      {/* 0831 US-005 — paywall modal. Triggered by openCreateModal when the
+          quotaCanCreateSkill IPC returns blocked. The modal internally fires
+          a fresh quota sync; if the user is actually on Pro it auto-dismisses
+          and resumes the create via onProceed. */}
+      <PaywallModal
+        open={paywallOpen}
+        skillName={pendingCreateMode ?? undefined}
+        onClose={() => {
+          setPaywallOpen(false);
+          setPendingCreateMode(null);
+        }}
+        onProceed={() => {
+          // Race-resolved: user is on Pro. Reopen the create modal with the
+          // mode they originally chose.
+          if (pendingCreateMode) {
+            setInitialCreateMode(pendingCreateMode);
+            setCreateModalOpen(true);
+          }
+          setPendingCreateMode(null);
         }}
       />
 

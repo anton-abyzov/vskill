@@ -80,6 +80,24 @@ import { useTier, PRICING_URL } from "./hooks/useTier";
 import { PaywallModal } from "./components/PaywallModal";
 import { QuotaGraceBanner } from "./components/QuotaGraceBanner";
 import { useDesktopBridge } from "./preferences/lib/useDesktopBridge";
+// 0834 T-027/T-028 (US-012): Account cabinet mount points.
+//
+//   - AccountProvider supplies the platform base URL + auth header to
+//     useAccount() consumers.
+//   - AccountSidebarEntry renders below the Skills sidebar (AC-US12-01).
+//   - AccountShell renders inline in the main pane (NOT a webview pop-out
+//     per Q2 resolution) when the entry is active.
+//
+// Auth strategy: cookie-mode by default (covers npx vskill studio's
+// browser tab). When isTauriHost() returns true, the bridge swaps in
+// bearer-mode + reads the keyring token via the `account_get_token` IPC.
+import { AccountProvider, type AccountContextValue } from "./contexts/AccountContext";
+import {
+  createTauriAccountContext,
+  isTauriHost,
+} from "./contexts/AccountTauriBridge";
+import { AccountSidebarEntry } from "./components/AccountSidebarEntry";
+import { AccountShell } from "./components/AccountShell";
 
 // 0741 T-019: SkillDetailPanel is lazy-loaded — it only mounts after the
 // user picks a result from the FindSkillsPalette.
@@ -114,13 +132,42 @@ export function App() {
       <QuotaProvider>
         <StudioProvider>
           <ToastProvider>
-            <Shell />
-            <UpdateToast />
+            <AccountProviderHost>
+              <Shell />
+              <UpdateToast />
+            </AccountProviderHost>
           </ToastProvider>
         </StudioProvider>
       </QuotaProvider>
     </ConfigProvider>
   );
+}
+
+/**
+ * 0834 — Wraps children in <AccountProvider> with a value resolved at boot.
+ * In Tauri the bridge reads from the OS keyring; in web/npx-studio it falls
+ * back to the cookie-mode default. Resolves async without blocking render —
+ * children mount with the cookie default, then re-render with the bearer
+ * value once the IPC round-trip lands. AC-US12-03.
+ */
+function AccountProviderHost({ children }: { children: React.ReactNode }) {
+  const [value, setValue] = useState<Partial<AccountContextValue> | undefined>(
+    undefined,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isTauriHost()) return;
+    void createTauriAccountContext().then((ctx) => {
+      if (cancelled) return;
+      setValue(ctx);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return <AccountProvider value={value}>{children}</AccountProvider>;
 }
 
 function Shell() {
@@ -135,6 +182,12 @@ function Shell() {
   // NOT persist across reloads (spec non-goal). Mobile-view auto-hiding
   // remains governed by StudioContext.mobileView.
   const [sidebarToggledHidden, setSidebarToggledHidden] = useState(false);
+  // 0834 T-027/T-028 (AC-US12-01, AC-US12-02): which surface is showing
+  // in the main pane. `false` = the existing skill detail / studio editor
+  // path. `true` = the AccountShell cabinet (Profile / Plan / Repos /
+  // Skills / Tokens / Notifications / Danger). Toggled by clicking the
+  // AccountSidebarEntry below the Skills sidebar.
+  const [accountView, setAccountView] = useState(false);
   // T-063 + 0792 T-013/T-014: active detail tab AND sub-mode live at the App
   // level so the production prop-driven RightPanel path (which is the only
   // path App actually mounts) can drive both surfaces. An earlier draft kept
@@ -839,7 +892,29 @@ function Shell() {
   // main slot instead of replacing the whole tree.
   // 0740: same treatment for the `#/updates` route — clicking "View Updates"
   // in the toast/bell now lands here instead of the empty default slot.
-  const mainContent = onUpdatesRoute ? (
+  // 0834 T-027/T-028 (AC-US12-01): when the user clicks the Account
+  // sidebar entry, replace the main pane with AccountShell instead of
+  // routing to a webview pop-out. The Skills sidebar stays visible so
+  // the user can navigate back without losing context.
+  const mainContent = accountView ? (
+    <AccountShell
+      online={typeof navigator === "undefined" ? true : navigator.onLine !== false}
+      onConnectRepo={() => {
+        if (typeof window !== "undefined") {
+          window.open(
+            "https://verified-skill.com/account/repos/connect",
+            "_blank",
+            "noopener,noreferrer",
+          );
+        }
+      }}
+      onUpgradeClick={() => {
+        if (typeof window !== "undefined") {
+          window.open(PRICING_URL, "_blank", "noopener,noreferrer");
+        }
+      }}
+    />
+  ) : onUpdatesRoute ? (
     <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
       <UpdatesPage />
     </Suspense>
@@ -896,6 +971,16 @@ function Shell() {
           />
         }
         sidebar={
+          <div
+            data-testid="desktop-sidebar"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              height: "100%",
+              minHeight: 0,
+            }}
+          >
+          <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <Sidebar
             skills={visibleSkills}
             selectedKey={
@@ -903,7 +988,12 @@ function Shell() {
                 ? { plugin: state.selectedSkill.plugin, skill: state.selectedSkill.skill }
                 : null
             }
-            onSelect={onSelect}
+            onSelect={(skill) => {
+              // Switching to a skill exits the account view so the
+              // selected skill's detail mounts in the main pane.
+              setAccountView(false);
+              onSelect(skill);
+            }}
             isLoading={state.skillsLoading}
             error={state.skillsError ?? null}
             onRetry={refreshSkills}
@@ -960,6 +1050,23 @@ function Shell() {
               </>
             }
           />
+          </div>
+          {/* 0834 T-027/T-028 (AC-US12-01, US-005, US-006): Account
+              entry below Skills. Same component used by the desktop
+              Tauri sidebar AND the npx vskill studio browser sidebar
+              — single render path, identical-by-construction. */}
+          <div
+            style={{
+              borderTop: "1px solid var(--border-default, rgba(128,128,128,0.25))",
+              padding: "6px 0",
+            }}
+          >
+            <AccountSidebarEntry
+              active={accountView}
+              onClick={() => setAccountView((v) => !v)}
+            />
+          </div>
+          </div>
         }
         resizeHandle={
           <ResizeHandle initialWidth={sidebarWidth ?? DEFAULT_SIDEBAR_WIDTH} onChange={setSidebarWidth} />

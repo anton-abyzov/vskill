@@ -5,6 +5,14 @@
 // AC-US3-03/04 (provenance-gated delete — missing .vskill-meta.json → 400
 //                {code:"no-provenance"}, no fs change; the original promote
 //                op in ops-log is preserved — a new revert op is appended)
+//
+// Semantics: revert is mechanically an OWN-only delete. The SSE `destPath` /
+// op-log `paths.dest` carry `provenance.sourcePath` as the LOGICAL target
+// (where the skill should reappear once OWN is removed and the underlying
+// installed/global scope becomes visible again). If that source has been
+// uninstalled or modified between promote and revert, the user ends up with
+// no skill at all — we record `sourceExists` in the op-log details so an
+// audit can detect this case post-hoc.
 // ---------------------------------------------------------------------------
 
 import * as http from "node:http";
@@ -54,6 +62,9 @@ export function registerRevertRoute(
         // Capture target scope for logging BEFORE the delete.
         const toScope = provenance.promotedFrom;
         const filesDeleted = countFiles(ownDir);
+        // Record whether the logical reveal target still exists on disk.
+        // False = revert leaves the user with no copy of the skill anywhere.
+        const sourceExists = existsSync(provenance.sourcePath);
 
         emit({
           type: "started",
@@ -81,7 +92,7 @@ export function registerRevertRoute(
           toScope,
           paths: { source: ownDir, dest: provenance.sourcePath },
           actor: "studio-ui",
-          details: { filesDeleted },
+          details: { filesDeleted, sourceExists },
         };
         await appendOp(op);
 

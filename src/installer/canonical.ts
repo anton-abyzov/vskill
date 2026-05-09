@@ -7,20 +7,6 @@ import type { AgentDefinition } from "../agents/agents-registry.js";
 import { resolveTilde } from "../utils/paths.js";
 import { ensureFrontmatter, stripClaudeFields } from "./frontmatter.js";
 
-/**
- * Filter agents by target-agents frontmatter.
- * When targetAgents is undefined or empty, returns all agents (existing behavior).
- * When targetAgents is specified, returns only agents whose IDs are in the list.
- */
-export function filterAgentsByTargetAgents(
-  agents: AgentDefinition[],
-  targetAgents: string[] | undefined,
-): AgentDefinition[] {
-  if (!targetAgents || targetAgents.length === 0) return agents;
-  const targetSet = new Set(targetAgents);
-  return agents.filter((a) => targetSet.has(a.id));
-}
-
 export interface InstallOptions {
   global: boolean;
   projectRoot: string;

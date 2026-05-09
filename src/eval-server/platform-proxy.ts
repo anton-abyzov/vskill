@@ -211,6 +211,11 @@ export function proxyToPlatform(
   return new Promise((resolve) => {
     const target = new URL(req.url ?? "/", baseUrl);
     const transport = target.protocol === "https:" ? https : http;
+    // Captured for client-disconnect cleanup. Once headers are received the
+    // active socket is held by upstreamRes (an SSE stream may keep it open
+    // for hours); destroying upstreamReq alone is not enough on Node's https
+    // agent in all cases.
+    let upstreamRes: http.IncomingMessage | null = null;
     const upstreamReq = transport.request(
       {
         protocol: target.protocol,
@@ -220,21 +225,22 @@ export function proxyToPlatform(
         method: req.method,
         headers: pickHeadersForUpstream(req.headers, { path: target.pathname }),
       },
-      (upstreamRes) => {
-        const status = upstreamRes.statusCode ?? 502;
-        const headers = pickHeadersForDownstream(upstreamRes.headers);
+      (incoming) => {
+        upstreamRes = incoming;
+        const status = incoming.statusCode ?? 502;
+        const headers = pickHeadersForDownstream(incoming.headers);
         try {
           res.writeHead(status, headers);
         } catch {
           // Headers already sent — fall through to pipe; `res.write` will
           // continue on the existing stream.
         }
-        upstreamRes.on("end", () => resolve());
-        upstreamRes.on("error", () => {
+        incoming.on("end", () => resolve());
+        incoming.on("error", () => {
           if (!res.writableEnded) res.end();
           resolve();
         });
-        upstreamRes.pipe(res);
+        incoming.pipe(res);
       },
     );
 
@@ -256,15 +262,17 @@ export function proxyToPlatform(
 
     // Close upstream cleanly when the client disconnects (esp. EventSource
     // unmounts) so we don't leak sockets on long-lived SSE streams.
+    // We tear down BOTH the request and the response — the response holds
+    // the socket once headers have been received.
     res.on("close", () => {
-      try {
-        upstreamReq.destroy();
-      } catch {
-        /* noop */
-      }
+      try { upstreamReq.destroy(); } catch { /* noop */ }
+      try { upstreamRes?.destroy(); } catch { /* noop */ }
     });
 
     // Forward the request body (if any) — req is a readable stream.
+    // Contract: callers MUST NOT pre-read the body before reaching this
+    // proxy, otherwise pipe sends nothing. No middleware in eval-server
+    // currently does, but new ones must respect this.
     req.pipe(upstreamReq);
   });
 }

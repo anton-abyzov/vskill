@@ -110,7 +110,7 @@ sha256sum -c SHA256SUMS
 gpg --verify vSkill_*.AppImage.asc vSkill_*.AppImage
 ```
 
-If `gpg --verify` says `Good signature from "vSkill Releases <sales@easychamp.com>"`
+If `gpg --verify` says `Good signature from "vSkill Releases <anton.abyzov@easychamp.com>"`
 and `sha256sum -c` prints `OK` for every line, the artifacts are authentic and
 unmodified. If you see `BAD signature` or hash mismatch, do **not** install —
 report it via https://github.com/anton-abyzov/vskill/security/advisories.

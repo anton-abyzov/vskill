@@ -46,7 +46,7 @@ gpg --import vskill-pubkey.asc
 
 # 2. Verify the signature
 gpg --verify .\vskill_1.0.0_x64_en-US.msi.asc .\vskill_1.0.0_x64_en-US.msi
-# Look for: "Good signature from vSkill Releases <sales@easychamp.com>"
+# Look for: "Good signature from vSkill Releases <anton.abyzov@easychamp.com>"
 ```
 
 The fingerprint is published at <https://verified-skill.com/security>.
@@ -256,4 +256,4 @@ the same.
   the `windows` label. Attach the `.msi` SHA256, your Windows version
   (`winver`), and any SmartScreen / installer log output.
 - **Runtime crashes**: include `%USERPROFILE%\.vskill\logs\` if present.
-- **Security concerns**: email <sales@easychamp.com>.
+- **Security concerns**: email <anton.abyzov@easychamp.com>.

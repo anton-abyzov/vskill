@@ -27,9 +27,11 @@ import {
 } from "../../../../scripts/check-bundle-size";
 
 describe("bundle-size — chunk classification", () => {
-  it("classifies initial entry as index-<hash>.js", () => {
+  it("classifies initial entry as index-<hash>.js or main-<hash>.js", () => {
     expect(isInitialJs("index-Y-u_qHe2.js")).toBe(true);
+    expect(isInitialJs("main-DxLeuA0C.js")).toBe(true);
     expect(isInitialJs("index.js")).toBe(false);
+    expect(isInitialJs("main.js")).toBe(false);
     expect(isInitialJs("fonts-abc.js")).toBe(false);
   });
 

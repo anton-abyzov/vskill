@@ -18,7 +18,7 @@ export interface PrivateOrg {
 }
 
 export interface PrivateOrgSectionProps {
-  /** null = no auth (keychain empty); empty array = auth ok but no installations. */
+  /** null = no auth (credential store empty); empty array = auth ok but no installations. */
   orgs: PrivateOrg[] | null;
   activeSkillSlug?: string | null;
   onSelectSkill?: (orgSlug: string, skillSlug: string) => void;

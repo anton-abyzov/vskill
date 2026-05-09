@@ -17,7 +17,7 @@
 // Why a Context instead of a hook on each consumer? The status bar, the
 // paywall, the grace banner, and ConnectedRepoWidget all need the same
 // snapshot — duplicating the IPC roundtrip + invalidation per consumer
-// would race the renders and waste keychain reads.
+// would race the renders and waste credential-store reads.
 
 import {
   createContext,
@@ -174,7 +174,7 @@ export function QuotaProvider({
       void refresh();
     });
     // 60s soft poll so the UI doesn't drift more than a minute behind the
-    // background sync loop. Cheap (single keychain read + fs read).
+    // background sync loop. Cheap (single credential-store read + fs read).
     const timer = setInterval(() => {
       void refresh();
     }, 60_000);

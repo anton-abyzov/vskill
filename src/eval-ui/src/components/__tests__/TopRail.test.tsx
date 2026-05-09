@@ -135,18 +135,19 @@ describe("TopRail", () => {
     expect(text).toContain(strings.scopeLabels.sourcePersonal);
   });
 
-  it("palette button has aria-label and fires onOpenPalette on click", () => {
-    const onOpen = vi.fn();
+  it("renders the findSkillsSlot when provided (palette trigger now lives in a slot)", () => {
+    // The legacy `onOpenPalette` prop was removed in 0741 T-018 — TopRail
+    // now exposes `findSkillsSlot: ReactNode` so the host (App.tsx) decides
+    // which component renders the ⌘⇧K palette trigger. Coverage for the
+    // FindSkillsNavButton lives in its own test file. Here we just verify
+    // the slot is rendered into the rail.
+    const slotMarker = "FIND_SKILLS_SLOT_MARKER";
     const tree = expand(TopRail({
       projectName: "vskill",
       selected: null,
-      onOpenPalette: onOpen,
+      findSkillsSlot: slotMarker,
     }));
-    const buttons = findElements(tree, (el) => el.type === "button" && /palette/i.test(String(el.props["aria-label"] ?? "")));
-    expect(buttons.length).toBeGreaterThan(0);
-    const btn = buttons[0];
-    const onClick = btn.props.onClick as () => void;
-    onClick();
-    expect(onOpen).toHaveBeenCalled();
+    const text = collectText(tree);
+    expect(text).toContain(slotMarker);
   });
 });

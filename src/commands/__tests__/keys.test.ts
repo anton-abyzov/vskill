@@ -231,6 +231,17 @@ describe("vskill keys — dispatcher (T-030)", () => {
         saved[name] = process.env[name];
         delete process.env[name];
       }
+      // Stub the keychain so the developer's real OS keychain GitHub
+      // token doesn't sneak in and flip `anyAvailable` to true.
+      const keychainMod = await import("../../lib/keychain.js");
+      const stub = {
+        getGitHubToken: () => null,
+        setGitHubToken: () => undefined,
+        usingFallback: () => false,
+      } as unknown as ReturnType<typeof keychainMod.getDefaultKeychain>;
+      const spy = vi
+        .spyOn(keychainMod, "getDefaultKeychain")
+        .mockReturnValue(stub);
       try {
         const { io, captured } = makeIO();
         await keysCommand("list", undefined, io);
@@ -238,6 +249,7 @@ describe("vskill keys — dispatcher (T-030)", () => {
           "vskill keys set",
         );
       } finally {
+        spy.mockRestore();
         for (const [name, value] of Object.entries(saved)) {
           if (value === undefined) delete process.env[name];
           else process.env[name] = value;

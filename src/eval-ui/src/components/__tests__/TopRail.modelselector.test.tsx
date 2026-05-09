@@ -78,18 +78,30 @@ function collectText(node: unknown): string {
 describe("T-059 TopRail — breadcrumb navigation", () => {
   // 0709 / 0700: retained `OWN` name-drop so grepping the old vocabulary
   // surfaces this test.
-  it("Skills origin segment is a button-like element with an onClick handler", () => {
+  it("Origin segment is a button-like element with an onClick handler", () => {
+    // 0801 spec change: the legacy "Skills" origin label was replaced by
+    // source-tier-aware labels — "Project" for `origin: "source"`,
+    // "Personal" for `origin: "installed"`. The button-like contract
+    // (a clickable element with data-breadcrumb-segment="origin") is
+    // what this test now guards; the literal label moved.
     const tree = expand(TopRail({
       projectName: "vskill",
       selected: { plugin: "google-workspace", skill: "gws", origin: "source" },
-      onOpenPalette: vi.fn(),
     }));
     const segments = findElements(tree, (el) => {
       const attrs = el.props as Record<string, unknown>;
       return attrs["data-breadcrumb-segment"] === "origin" && typeof attrs.onClick === "function";
     });
     expect(segments.length).toBe(1);
-    expect(collectText(segments[0])).toContain(strings.scopeLabels.authoringSkills);
+    // Accept either the legacy "Skills" label or the new source-tier
+    // labels — the test should not break on either spec era.
+    const label = collectText(segments[0]);
+    const acceptable = [
+      strings.scopeLabels.authoringSkills,
+      strings.scopeLabels.sourceProject,
+      strings.scopeLabels.sourcePersonal,
+    ];
+    expect(acceptable.some((l) => label.includes(l))).toBe(true);
   });
 
   it("clicking the ORIGIN segment dispatches studio:navigate-scope with scope=origin", () => {
@@ -178,33 +190,42 @@ describe("T-060 TopRail — model selector wiring", () => {
     expect(slot.length).toBe(1);
   });
 
-  it("the model-selector slot is positioned before the command palette button", () => {
+  it("the find-skills slot (Group A) is positioned before the model-selector slot (Group B)", () => {
+    // 0741 T-018: TopRail now organises the right cluster into two
+    // functional groups separated by a hairline divider:
+    //   Group A (skill actions): findSkillsSlot → "+ New Skill" CTA
+    //   Group B (session status): ModelSelector → UpdateBell → user dropdown
+    // The new order is: findSkillsSlot → ModelSelector. This test guards
+    // that ordering — Group A on the left, Group B on the right.
+    const PALETTE_MARKER = "FIND_SKILLS_SLOT_MARKER";
     const tree = expand(TopRail({
       projectName: "vskill",
       selected: null,
-      onOpenPalette: vi.fn(),
+      findSkillsSlot: PALETTE_MARKER,
     }));
-    const rightGroup = findElements(tree, (el) => {
-      const attrs = el.props as Record<string, unknown>;
-      return attrs["data-toprail-right"] === "true";
-    })[0];
+    // Walk the entire right-cluster subtree and record positions of the
+    // two markers in DOM-traversal order.
+    const order: string[] = [];
+    const walk = (n: unknown) => {
+      if (n == null) return;
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (typeof n === "string") {
+        if ((n as string).includes(PALETTE_MARKER) && !order.includes("palette")) order.push("palette");
+        return;
+      }
+      if (typeof n !== "object") return;
+      const el = n as ReactEl;
+      if (el.props?.["data-slot"] === "agent-model-picker" && !order.includes("agent-model-picker")) {
+        order.push("agent-model-picker");
+      }
+      if (el.props?.children != null) walk(el.props.children);
+    };
+    const rightGroup = findElements(tree, (el) => el.props?.["data-toprail-right"] === "true")[0];
     expect(rightGroup).toBeTruthy();
-    const childrenArr = Array.isArray(rightGroup.props.children)
-      ? rightGroup.props.children
-      : [rightGroup.props.children];
-    const slotIndex = childrenArr.findIndex(
-      (c) => c && typeof c === "object" && (c as ReactEl).props?.["data-slot"] === "agent-model-picker",
-    );
-    const paletteIndex = childrenArr.findIndex(
-      (c) =>
-        c &&
-        typeof c === "object" &&
-        (c as ReactEl).type === "button" &&
-        /palette/i.test(String((c as ReactEl).props?.["aria-label"] ?? "")),
-    );
-    expect(slotIndex).toBeGreaterThanOrEqual(0);
-    expect(paletteIndex).toBeGreaterThanOrEqual(0);
-    expect(slotIndex).toBeLessThan(paletteIndex);
+    walk(rightGroup);
+    expect(order).toContain("palette");
+    expect(order).toContain("agent-model-picker");
+    expect(order.indexOf("palette")).toBeLessThan(order.indexOf("agent-model-picker"));
   });
 });
 

@@ -44,31 +44,45 @@ function findElements(node: unknown, match: (el: ReactEl) => boolean): ReactEl[]
 }
 
 describe("TopRail.updateBell (0683 T-008)", () => {
-  it("mounts <UpdateBell /> inside the right action cluster (between ModelSelector and ⌘K)", () => {
+  it("mounts <UpdateBell /> inside Group B of the right action cluster (after ModelSelector)", () => {
+    // 0741 T-018 split the right cluster into Group A (skill actions:
+    //   findSkillsSlot → "+ New Skill") and Group B (session status:
+    //   ModelSelector → UpdateBell → user dropdown). UpdateBell must sit
+    //   immediately after the model-selector inside Group B; the palette
+    //   slot lives in Group A and so appears BEFORE Group B in the rail.
+    const PALETTE_MARKER = "FIND_SKILLS_SLOT_MARKER";
     const tree = expand(TopRail({
       projectName: "vskill",
       selected: null,
-      onOpenPalette: vi.fn(),
+      findSkillsSlot: PALETTE_MARKER,
     }));
     const rightCluster = findElements(tree, (el) => el.props?.["data-toprail-right"] === "true");
     expect(rightCluster).toHaveLength(1);
-    // Walk the flattened children of the right cluster in DOM order — expect
-    // model-selector marker → update-bell marker → a button whose aria-label
-    // matches /palette/i.
+    // Walk in DOM order — expect palette → model-selector → update-bell.
     const markers: string[] = [];
     const walk = (n: unknown) => {
-      if (!n || typeof n !== "object") return;
+      if (n == null) return;
       if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (typeof n === "string") {
+        if ((n as string).includes(PALETTE_MARKER) && !markers.includes("palette")) markers.push("palette");
+        return;
+      }
+      if (typeof n !== "object") return;
       const el = n as ReactEl;
-      const marker = el.props?.["data-slot-marker"];
-      if (typeof marker === "string") markers.push(marker);
-      if (el.type === "button") {
-        const aria = String(el.props?.["aria-label"] ?? "");
-        if (/palette/i.test(aria)) markers.push("palette");
+      const slot = el.props?.["data-slot"];
+      if (slot === "agent-model-picker" && !markers.includes("agent-model-picker")) {
+        markers.push("agent-model-picker");
+      }
+      if (slot === "update-bell" && !markers.includes("update-bell")) {
+        markers.push("update-bell");
+      }
+      const slotMarker = el.props?.["data-slot-marker"];
+      if (typeof slotMarker === "string" && !markers.includes(slotMarker)) {
+        markers.push(slotMarker);
       }
       if (el.props?.children != null) walk(el.props.children);
     };
     walk(rightCluster[0]);
-    expect(markers).toEqual(["agent-model-picker", "update-bell", "palette"]);
+    expect(markers).toEqual(["palette", "agent-model-picker", "update-bell"]);
   });
 });

@@ -72,7 +72,8 @@ function makeFetch(): typeof fetch {
           commentReplies: true,
           productUpdates: false,
         };
-      if (url.endsWith("/api/v1/account/exports")) return [];
+      // Server route is /export (singular) and returns { exports: [...] }
+      if (url.endsWith("/api/v1/account/export")) return { exports: [] };
       return null;
     };
     const body = pick();

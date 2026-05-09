@@ -140,7 +140,7 @@ describe("DangerZone", () => {
     await act(async () => {
       confirm.click();
     });
-    expect(spies.onDeleteAccount).toHaveBeenCalled();
+    expect(spies.onDeleteAccount).toHaveBeenCalledWith("alice");
     unmount();
   });
 

@@ -601,11 +601,11 @@ function DangerTab() {
           setPending((p) => ({ ...p, exportRequest: false }));
         }
       }}
-      onDeleteAccount={async () => {
+      onDeleteAccount={async (confirmHandle) => {
         setPending((p) => ({ ...p, deleteAccount: true }));
         setErrorMsg(null);
         try {
-          await deleteAccount();
+          await deleteAccount(confirmHandle);
         } catch (e) {
           setErrorMsg(e instanceof Error ? e.message : String(e));
         } finally {

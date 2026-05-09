@@ -264,10 +264,18 @@ export function useSkillsSummary() {
 
 export function useAccountExports() {
   const ctx = useAccountContext();
+  // GET route is /api/v1/account/export (singular) and returns
+  // `{ exports: AccountExportDTO[] }` — unwrap here so consumers see a
+  // plain readonly array.
   return useSWR<ReadonlyArray<AccountExportDTO>>(
     KEY.exports(),
-    () =>
-      request<ReadonlyArray<AccountExportDTO>>(ctx, "/api/v1/account/exports"),
+    async () => {
+      const wrapped = await request<{ exports: AccountExportDTO[] }>(
+        ctx,
+        "/api/v1/account/export",
+      );
+      return wrapped.exports;
+    },
     { ttl: DEFAULT_TTL_MS },
   );
 }
@@ -301,9 +309,18 @@ export function useRequestExport() {
 
 export function useDeleteAccount() {
   const ctx = useAccountContext();
-  return useCallback(async () => {
-    await request<void>(ctx, "/api/v1/account/delete", { method: "POST" });
-  }, [ctx]);
+  // confirmHandle is required by the server route (mirrors the web modal —
+  // user must type their GitHub login to confirm). Content-Type is set
+  // automatically by the request helper when `body` is present.
+  return useCallback(
+    async (confirmHandle: string) => {
+      await request<void>(ctx, "/api/v1/account/delete", {
+        method: "POST",
+        body: JSON.stringify({ confirmHandle }),
+      });
+    },
+    [ctx],
+  );
 }
 
 // ---------------------------------------------------------------------------

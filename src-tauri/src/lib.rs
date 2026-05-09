@@ -11,6 +11,10 @@ use tauri_plugin_autostart::MacosLauncher;
 // Owned by desktop-auth-agent (impl-0831-enterprise team). Surface lives
 // behind the `commands::auth_*` IPCs registered below.
 mod auth;
+// 0834 account — IPC surface for the /account WebView. Reads the keyring
+// token and exposes the platform URL so AccountContext on the JS side
+// can produce `Authorization: Bearer …` headers.
+mod account;
 mod commands;
 // 0831 folders — smart folder picker + connected-repo widget.
 // Owned by desktop-folder-agent (impl-0831-enterprise team). Surface lives
@@ -108,6 +112,9 @@ pub fn run() {
             commands::quota_report_count,
             commands::open_external_url,
             commands::refresh_user_identity,
+            // 0834 account — IPC for the /account WebView (US-012).
+            account::commands::account_get_token,
+            account::commands::account_get_platform_url,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

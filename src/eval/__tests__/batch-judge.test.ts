@@ -376,8 +376,9 @@ describe("batchJudgeAssertions — polling", () => {
 
     const promise = batchJudgeAssertions(requests, client, judgeClient, BASE_OPTIONS);
 
-    // Advance past the polling intervals
-    for (let i = 0; i < 10; i++) {
+    // Advance past the polling intervals — the polling backoff escalates,
+    // so we advance enough fake time to cover 3 polls plus headroom.
+    for (let i = 0; i < 60; i++) {
       await vi.advanceTimersByTimeAsync(5_000);
     }
 
@@ -386,7 +387,7 @@ describe("batchJudgeAssertions — polling", () => {
     expect(results).toHaveLength(6);
     expect(mockBatchRetrieve).toHaveBeenCalledWith("batch-poll-test");
     expect(pollCount).toBeGreaterThanOrEqual(3);
-  });
+  }, 30_000);
 
   it("times out and falls back after 10 minutes", async () => {
     const requests = makeRequests(6);

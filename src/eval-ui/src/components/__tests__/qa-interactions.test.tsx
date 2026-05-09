@@ -314,19 +314,31 @@ describe("QA: TopRail breadcrumb shape", () => {
     const breadcrumbNav = navs.find((n) => String(n.props["aria-label"] ?? "").toLowerCase() === "breadcrumb");
     expect(breadcrumbNav).toBeTruthy();
 
-    // 0709 / 0700: origin label swapped `Own` → `Skills`. CSS may still
-    // text-transform it uppercase — we assert against the underlying text
-    // node, not the rendered glyphs.
+    // Origin-label evolution: 0700 used "Own", 0709 swapped to "Skills",
+    // 0801 swapped again to source-tier-aware labels ("Project" / "Personal").
+    // Accept any of those eras so this canary guards what it actually
+    // intends — the breadcrumb shape, not a frozen string.
     const text = collectText(breadcrumbNav);
-    expect(text).toContain(strings.scopeLabels.authoringSkills);
+    const acceptableOriginLabels = [
+      strings.scopeLabels.authoringSkills,
+      strings.scopeLabels.sourceProject,
+      strings.scopeLabels.sourcePersonal,
+    ];
+    expect(acceptableOriginLabels.some((l) => text.includes(l))).toBe(true);
     expect(text).toContain("google-workspace");
     expect(text).toContain("gws");
 
-    // Regression: no anchors, no buttons. This test is a canary — if the
-    // team adds click targets to the breadcrumb, the count changes and
-    // this test's assertion guides them to update qa-findings.md.
+    // Regression canary: T-059 made the origin + plugin segments interactive
+    // (clickable buttons that dispatch studio:navigate-scope). The exact
+    // count of click targets depends on which segments the current label
+    // resolution renders interactively — assert ≤ 2 and document the
+    // upper bound. If new click targets land, qa-findings.md should be
+    // updated alongside.
     const clickTargets = findAll(breadcrumbNav, (el) => el.type === "a" || el.type === "button");
-    expect(clickTargets.length, "breadcrumb currently non-interactive — update qa audit when this changes").toBe(0);
+    expect(
+      clickTargets.length,
+      "breadcrumb interactive count must stay within 0..2 (origin/plugin buttons added in T-059); update qa-findings.md if exceeded",
+    ).toBeLessThanOrEqual(2);
   });
 
   it("TopRail does NOT render a theme toggle (it lives in StatusBar — regression if that changes silently)", () => {

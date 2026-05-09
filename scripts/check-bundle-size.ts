@@ -53,8 +53,10 @@ export interface BudgetViolation {
 }
 
 export function isInitialJs(name: string): boolean {
-  // Vite defaults: `index-<hash>.js` is the app entry chunk.
-  return /^index-[A-Za-z0-9_-]+\.js$/.test(name);
+  // Vite defaults: `index-<hash>.js` is the app entry chunk. Some configs
+  // (including the eval-ui build after the 0834 surface additions) emit
+  // `main-<hash>.js` instead — recognise both as the initial chunk.
+  return /^(index|main)-[A-Za-z0-9_-]+\.js$/.test(name);
 }
 
 export function isFontsAsset(name: string): boolean {

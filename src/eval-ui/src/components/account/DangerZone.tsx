@@ -17,7 +17,12 @@ export interface DangerZoneProps {
 
   onSignOutAll(): Promise<void> | void;
   onExportRequest(): Promise<void> | void;
-  onDeleteAccount(): Promise<void> | void;
+  /**
+   * Receives the user-typed confirm phrase (must equal `githubHandle` —
+   * the modal disables the button until they match). The handler forwards
+   * it to the platform `/api/v1/account/delete` endpoint as `confirmHandle`.
+   */
+  onDeleteAccount(confirmHandle: string): Promise<void> | void;
 
   pending?: {
     signOutAll?: boolean;
@@ -109,8 +114,8 @@ export function DangerZone({
           githubHandle={githubHandle}
           pending={Boolean(pending?.deleteAccount)}
           onCancel={() => setDeleteOpen(false)}
-          onConfirm={async () => {
-            await onDeleteAccount();
+          onConfirm={async (typedHandle) => {
+            await onDeleteAccount(typedHandle);
             setDeleteOpen(false);
           }}
         />
@@ -321,7 +326,7 @@ function DeleteAccountModal({
   githubHandle: string;
   pending: boolean;
   onCancel: () => void;
-  onConfirm: () => Promise<void> | void;
+  onConfirm: (typedHandle: string) => Promise<void> | void;
 }) {
   const [typed, setTyped] = useState("");
   const matches = typed.trim() === githubHandle;
@@ -379,7 +384,7 @@ function DeleteAccountModal({
         </SecondaryButton>
         <DangerButton
           disabled={!matches || pending}
-          onClick={() => void onConfirm()}
+          onClick={() => void onConfirm(typed.trim())}
         >
           {pending ? "Deleting…" : "Delete account"}
         </DangerButton>

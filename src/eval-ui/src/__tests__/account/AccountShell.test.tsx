@@ -32,7 +32,8 @@ function makeFetch(responses: MockResponses): typeof fetch {
       if (url.endsWith("/api/v1/account/tokens")) return responses.tokens;
       if (url.endsWith("/api/v1/account/skills/summary")) return responses.skills;
       if (url.endsWith("/api/v1/account/notifications")) return responses.notifications;
-      if (url.endsWith("/api/v1/account/exports")) return responses.exports;
+      // Server route is /export (singular) and returns { exports: [...] }
+      if (url.endsWith("/api/v1/account/export")) return responses.exports;
       return null;
     };
     const body = pick();

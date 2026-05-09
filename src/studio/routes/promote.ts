@@ -9,13 +9,13 @@
 import * as http from "node:http";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { existsSync } from "node:fs";
 
 import type { Router } from "../../eval-server/router.js";
 import { sendJson } from "../../eval-server/router.js";
 import { initSSE, sendSSE, sendSSEDone } from "../../eval-server/sse-helpers.js";
 import {
   transfer,
+  validatePaths,
   CollisionError,
   MissingSourceError,
   resolveScopePath,
@@ -45,13 +45,20 @@ export function registerPromoteRoute(
 
       // Pre-validate BEFORE opening the SSE stream so collisions and missing-
       // source errors return clean HTTP status codes (409 / 404) per AC-US1-03.
-      if (!existsSync(sourcePath)) {
-        sendJson(res, { ok: false, code: "missing-source", path: sourcePath }, 404, req);
-        return;
-      }
-      if (existsSync(destPath) && !overwrite) {
-        sendJson(res, { ok: false, code: "collision", path: destPath }, 409, req);
-        return;
+      // Single source of truth: validatePaths is the same check transfer()
+      // re-runs internally — no double-stat in the happy path.
+      try {
+        validatePaths(sourcePath, destPath, overwrite);
+      } catch (err) {
+        if (err instanceof MissingSourceError) {
+          sendJson(res, { ok: false, code: "missing-source", path: err.path }, 404, req);
+          return;
+        }
+        if (err instanceof CollisionError) {
+          sendJson(res, { ok: false, code: "collision", path: err.path }, 409, req);
+          return;
+        }
+        throw err;
       }
 
       const emit = (e: TransferEvent) => {

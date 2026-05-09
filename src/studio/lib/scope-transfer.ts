@@ -14,8 +14,13 @@
 // filtered inside transfer before invoking copy.
 // ---------------------------------------------------------------------------
 
-import { existsSync, rmSync, readdirSync, statSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, readdirSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+// Cap recursion depth on user-content trees we don't fully control.
+// 32 is well above any realistic skill nesting (plan.md skills have 0–3
+// levels) and safely below Node's default call-stack budget.
+const MAX_RECURSION_DEPTH = 32;
 
 import type { SkillScope, TransferEvent } from "../types.js";
 import {
@@ -82,15 +87,19 @@ export function resolveScopePath(
  * Count files written recursively into a directory — used for the SSE
  * `copied` and `deleted` event payloads. Returns 0 for missing dirs so
  * callers can use it on paths that may have been removed mid-flight.
+ *
+ * Skips symlinks (lstat) to avoid following loops, and caps depth at
+ * MAX_RECURSION_DEPTH so a pathological tree can't blow the call stack.
  */
-export function countFiles(dir: string): number {
+export function countFiles(dir: string, depth = 0): number {
   if (!existsSync(dir)) return 0;
+  if (depth >= MAX_RECURSION_DEPTH) return 0;
   let n = 0;
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    const st = statSync(full);
-    if (st.isDirectory()) n += countFiles(full);
-    else if (st.isFile()) n += 1;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) n += countFiles(full, depth + 1);
+    else if (entry.isFile()) n += 1;
   }
   return n;
 }
@@ -100,37 +109,51 @@ export function countFiles(dir: string): number {
  * copyPluginFiltered this does not do the plugin-root flattening, because
  * OWN → INSTALLED|GLOBAL is a straight skill-dir copy with one exclusion.
  */
-function copyOwnSkillFiltered(sourceDir: string, targetDir: string, relBase = ""): void {
+function copyOwnSkillFiltered(sourceDir: string, targetDir: string, relBase = "", depth = 0): void {
+  if (depth >= MAX_RECURSION_DEPTH) return;
   mkdirSync(targetDir, { recursive: true });
-  for (const entry of readdirSync(sourceDir)) {
+  for (const entry of readdirSync(sourceDir, { withFileTypes: true })) {
     // 0809: filter the copied-skill source-link sidecar at the OWN scope root
     // alongside the existing .vskill-meta.json filter. Sidecars are re-derived
     // by the destination's `transfer()` post-copy step, never copied through.
     // Asymmetric with copyPluginFiltered (which strips at any depth) on purpose:
     // OWN scope is a single skill dir, so sidecars only ever exist at the root.
-    if (!relBase && (entry === ".vskill-meta.json" || entry === ".vskill-source.json")) continue;
-    const relPath = relBase ? `${relBase}/${entry}` : entry;
-    const sourcePath = join(sourceDir, entry);
-    const st = statSync(sourcePath);
-    if (st.isDirectory()) {
-      copyOwnSkillFiltered(sourcePath, join(targetDir, entry), relPath);
-    } else if (st.isFile() && !shouldSkipFromCommands(relPath)) {
-      copyFileSync(sourcePath, join(targetDir, entry));
+    if (!relBase && (entry.name === ".vskill-meta.json" || entry.name === ".vskill-source.json")) continue;
+    // Skip symlinks defensively — copying through them risks loops and
+    // unexpected escapes from the skill dir.
+    if (entry.isSymbolicLink()) continue;
+    const relPath = relBase ? `${relBase}/${entry.name}` : entry.name;
+    const sourcePath = join(sourceDir, entry.name);
+    if (entry.isDirectory()) {
+      copyOwnSkillFiltered(sourcePath, join(targetDir, entry.name), relPath, depth + 1);
+    } else if (entry.isFile() && !shouldSkipFromCommands(relPath)) {
+      copyFileSync(sourcePath, join(targetDir, entry.name));
     }
   }
+}
+
+/**
+ * Pre-flight check that a transfer can succeed. Throws MissingSourceError /
+ * CollisionError without touching the filesystem. Routes call this BEFORE
+ * opening an SSE stream so failure cases return clean HTTP 404 / 409 with
+ * a JSON body instead of opening SSE then immediately emitting an error.
+ */
+export function validatePaths(
+  sourcePath: string,
+  destPath: string,
+  overwrite: boolean,
+): void {
+  if (!existsSync(sourcePath)) throw new MissingSourceError(sourcePath);
+  if (existsSync(destPath) && !overwrite) throw new CollisionError(destPath);
 }
 
 export async function transfer(req: TransferRequest, emit: SSEEmit): Promise<TransferResult> {
   const sourcePath = resolveScopePath(req.fromScope, req.root, req.skill, req.home);
   const destPath = resolveScopePath(req.toScope, req.root, req.skill, req.home);
 
-  if (!existsSync(sourcePath)) {
-    throw new MissingSourceError(sourcePath);
-  }
-
-  if (existsSync(destPath) && !req.overwrite) {
-    throw new CollisionError(destPath);
-  }
+  // Re-validate inside transfer too — callers may call transfer() directly
+  // (not via the route layer) and expect the throw contract.
+  validatePaths(sourcePath, destPath, req.overwrite ?? false);
 
   // If overwrite, clear the destination first so stale files aren't left behind.
   if (existsSync(destPath) && req.overwrite) {

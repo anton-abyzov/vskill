@@ -106,11 +106,12 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
   const staticDir = path.resolve(__dirname, "../eval-ui");
 
   const server = http.createServer(async (req, res) => {
-    // Handle CORS preflight
+    // Handle CORS preflight. Router exposes an optional `options` handler
+    // declared on the class — type-checked, no `as any` cast needed.
     if (req.method === "OPTIONS") {
       const apiRoutes = req.url?.startsWith("/api/");
-      if (apiRoutes && (router as any).options) {
-        (router as any).options(req, res);
+      if (apiRoutes && router.options) {
+        router.options(req, res);
         return;
       }
       res.writeHead(204);

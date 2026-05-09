@@ -14,6 +14,34 @@ import { initSSE, sendSSE } from "../../eval-server/sse-helpers.js";
 import { listOps, subscribe, deleteOp } from "../lib/ops-log.js";
 import { parseQuery } from "../lib/query.js";
 
+// One ticker fans out to every connected SSE client instead of one timer
+// per connection. Lazily started on first subscriber, stopped when the
+// last leaves. `.unref()` so an idle ticker doesn't block process exit.
+const HEARTBEAT_MS = 3000;
+const heartbeatClients = new Set<http.ServerResponse>();
+let heartbeatTimer: NodeJS.Timeout | null = null;
+
+function startHeartbeatIfNeeded(): void {
+  if (heartbeatTimer || heartbeatClients.size === 0) return;
+  heartbeatTimer = setInterval(() => {
+    const ts = Date.now();
+    for (const res of heartbeatClients) {
+      try {
+        sendSSE(res, "heartbeat", { ts });
+      } catch {
+        // Stream closed mid-fan-out — drop it now to avoid a stuck client
+        // keeping the timer alive after the connection ended.
+        heartbeatClients.delete(res);
+      }
+    }
+    if (heartbeatClients.size === 0 && heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  }, HEARTBEAT_MS);
+  heartbeatTimer.unref();
+}
+
 export function registerOpsRoutes(router: Router): void {
   // GET /api/studio/ops?limit=50&before=<ts>
   router.get(
@@ -47,14 +75,11 @@ export function registerOpsRoutes(router: Router): void {
         }
       });
 
-      const heartbeat = setInterval(() => {
-        try {
-          sendSSE(res, "heartbeat", { ts: Date.now() });
-        } catch {}
-      }, 3000);
+      heartbeatClients.add(res);
+      startHeartbeatIfNeeded();
 
       const cleanup = () => {
-        clearInterval(heartbeat);
+        heartbeatClients.delete(res);
         unsub();
       };
       req.on("close", cleanup);

@@ -164,13 +164,39 @@ jobs:
         # way; never again.
         shell: bash
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          RAW_TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          if [ -z "${TAURI_SIGNING_PRIVATE_KEY}" ]; then
+          if [ -z "${RAW_TAURI_SIGNING_PRIVATE_KEY}" ]; then
             echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is empty — auto-update bundles will be unsigned. Aborting."
             exit 1
           fi
-          echo "TAURI_SIGNING_PRIVATE_KEY present (length=${#TAURI_SIGNING_PRIVATE_KEY})"
+          # 2026-05-09: every desktop CI before v1.0.18 failed at the
+          # base64 decode step inside tauri-action with
+          # `Invalid symbol 32, offset 9` — ASCII 32 is a SPACE. The
+          # secret was set with whitespace/newlines that tauri-action's
+          # base64 decoder rejects. Strip ALL whitespace before passing
+          # the value downstream so the workflow is resilient to a
+          # one-time misformatted upload (the proper long-term fix is
+          # to re-set the secret cleanly via
+          # `base64 -i minisign-priv.key | tr -d '\\n'` then `gh secret
+          # set`, but until that lands this defensive scrub keeps the
+          # release pipeline working).
+          CLEAN_KEY="$(printf '%s' "${RAW_TAURI_SIGNING_PRIVATE_KEY}" | tr -d ' \t\r\n')"
+          if [ "${#CLEAN_KEY}" -ne "${#RAW_TAURI_SIGNING_PRIVATE_KEY}" ]; then
+            STRIPPED=$(( ${#RAW_TAURI_SIGNING_PRIVATE_KEY} - ${#CLEAN_KEY} ))
+            echo "::warning::Stripped ${STRIPPED} whitespace char(s) from TAURI_SIGNING_PRIVATE_KEY before base64 decode."
+          fi
+          echo "TAURI_SIGNING_PRIVATE_KEY present (raw_length=${#RAW_TAURI_SIGNING_PRIVATE_KEY}, clean_length=${#CLEAN_KEY})"
+          # Export the cleaned value to subsequent steps via
+          # GITHUB_ENV so tauri-action receives the whitespace-free
+          # base64 instead of the raw secret. Standard GH-Actions
+          # mechanism — the value is masked because it derives from a
+          # secret.
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY<<EOF_CLEAN_KEY"
+            echo "${CLEAN_KEY}"
+            echo "EOF_CLEAN_KEY"
+          } >> "${GITHUB_ENV}"
 
       - name: Build Tauri app + sign + (macOS) notarize
         # tauri-action signs the update bundle (.tar.gz/.zip) using
@@ -197,8 +223,12 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # Tauri Updater minisign keypair (all platforms)
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # Tauri Updater minisign keypair (all platforms). Note: we
+          # intentionally do NOT re-pull the raw secret here — the
+          # whitespace-stripped CLEAN_KEY is already exported into
+          # GITHUB_ENV by the pre-flight step above and inherited by
+          # this step. Inheriting via GITHUB_ENV instead of `${{ secrets.X }}`
+          # is what makes the defensive scrub effective.
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}

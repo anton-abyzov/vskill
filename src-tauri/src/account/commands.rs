@@ -1,46 +1,92 @@
-// 0834 T-029 — Tauri IPC commands for the /account WebView.
+// 0834 T-029 / 0836 US-003 — Tauri IPC commands for the /account WebView.
 //
-// `account_get_token` reads the OAuth/PAT token from the keyring and
-// returns it to the WebView so AccountContext.getAuthHeader can produce
-// `Authorization: Bearer …`. Returns `None` when no token is stored
-// (clean signed-out state); only returns `Err(...)` for genuinely
-// unexpected backend failures (locked keychain, denied permission, etc.).
+// 0836 US-003 SECURITY CHANGE
+// ---------------------------
+// `account_get_token` is REMOVED. The IPC previously returned the raw
+// `gho_*` GitHub OAuth token to the WebView so AccountContext could mint
+// `Authorization: Bearer …` headers. That made any reachable XSS or
+// compromised npm dep one `invoke('account_get_token')` away from
+// exfiltrating the user's GitHub access. We now keep the token Rust-side
+// only — every authenticated /api/v1/private|tenants/* request goes
+// through the eval-server's platform-proxy, which injects the bearer
+// from the keychain on the proxy side (see `src/eval-server/platform-proxy.ts`).
 //
-// `account_get_platform_url` returns the canonical platform origin. The
-// constant lives here rather than in the WebView so power users can
-// override via env without touching JS bundles.
+// Replacement IPC: `account_get_user_summary` returns just the display
+// fields the WebView legitimately needs:
+//   - signedIn: bool
+//   - login:    Option<String> (GitHub login)
+//   - avatarUrl: Option<String> (avatar URL)
+//   - tier:     "free" | "pro" | "enterprise"
+//
+// `account_get_platform_url` is unchanged.
 
-use crate::auth::TokenStore;
+use serde::Serialize;
 
 /// Default platform origin. Env override:
 ///   VSKILL_PLATFORM_URL=https://verified-skill.dev npm run desktop:dev
 const DEFAULT_PLATFORM_URL: &str = "https://verified-skill.com";
 const PLATFORM_URL_ENV: &str = "VSKILL_PLATFORM_URL";
 
-/// Read the keyring-backed token. Returns:
-///   - `Ok(Some(token))` when a token is stored
-///   - `Ok(None)` when the user is signed out
-///   - `Err(message)` only on unexpected backend failures
-#[tauri::command]
-pub fn account_get_token() -> Result<Option<String>, String> {
-    read_token_from_store(&TokenStore::new())
+/// IPC payload for `account_get_user_summary`. The shape is frozen so the
+/// React layer (AccountContext + AccountTauriBridge) can read it without a
+/// typed bridge schema. Field names are camelCase on the wire because the
+/// WebView consumes JSON, not snake_case Rust.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountUserSummary {
+    /// Whether the user has a cached identity (a successful sign-in has
+    /// happened in the past and the cache file is present).
+    pub signed_in: bool,
+    /// GitHub login (e.g. "octocat"). `None` when signed-out.
+    pub login: Option<String>,
+    /// Avatar URL. `None` when signed-out.
+    pub avatar_url: Option<String>,
+    /// Pricing tier — "free" | "pro" | "enterprise". Lowercase strings on
+    /// the wire match `QuotaTierWire` on the platform side.
+    pub tier: String,
 }
 
-/// Inner — TokenStore-agnostic so tests can pass a stub. The store
-/// trait isn't exported because we only need this one function and
-/// over-engineering a trait for one call would obscure intent.
-pub fn read_token_from_store(store: &TokenStore) -> Result<Option<String>, String> {
-    match store.load() {
-        Ok(Some(token)) => {
-            // `Zeroizing<String>` derefs to `&str` — clone into a plain
-            // String so the value can cross the IPC boundary. The plain
-            // String is non-zeroized, but Tauri's serde layer makes that
-            // unavoidable; the keyring copy stays the canonical source.
-            Ok(Some((*token).clone()))
-        }
-        Ok(None) => Ok(None),
-        Err(e) => Err(format!("keyring read failed: {e}")),
+/// 0836 US-003: pure helper that turns the (identity, quota) state pair into
+/// the WebView-facing summary. Extracted so cargo tests can exercise the
+/// state matrix without disk / Tauri.
+pub fn build_user_summary(
+    identity: Option<crate::auth::UserIdentity>,
+    quota: Option<crate::quota::cache::QuotaCache>,
+) -> AccountUserSummary {
+    let tier = quota
+        .as_ref()
+        .map(|c| match c.response.tier {
+            crate::quota::cache::QuotaTier::Free => "free",
+            crate::quota::cache::QuotaTier::Pro => "pro",
+            crate::quota::cache::QuotaTier::Enterprise => "enterprise",
+        })
+        .unwrap_or("free")
+        .to_string();
+    match identity {
+        Some(i) => AccountUserSummary {
+            signed_in: true,
+            login: Some(i.login),
+            avatar_url: Some(i.avatar_url),
+            tier,
+        },
+        None => AccountUserSummary {
+            signed_in: false,
+            login: None,
+            avatar_url: None,
+            tier,
+        },
     }
+}
+
+/// IPC entry point. Reads the cached `UserIdentity` (non-sensitive) and the
+/// quota cache (non-sensitive), assembles the summary, and returns it. Never
+/// reads the keychain — the bearer token stays Rust-side, accessed only by
+/// the eval-server's platform proxy.
+#[tauri::command]
+pub fn account_get_user_summary() -> AccountUserSummary {
+    let identity = crate::auth::load_identity_cache().ok().flatten();
+    let quota = crate::quota::cache::load_quota_cache().ok().flatten();
+    build_user_summary(identity, quota)
 }
 
 /// Returns the platform origin to use for `/api/v1/account/*` requests.

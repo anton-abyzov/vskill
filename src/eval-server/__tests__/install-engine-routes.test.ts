@@ -66,6 +66,7 @@ vi.mock("../install-engine-routes-helpers.js", () => ({
 
 const { Router } = await import("../router.js");
 const { registerInstallEngineRoutes } = await import("../install-engine-routes.js");
+const { studioTokenHeaders } = await import("./helpers/studio-token-test-helpers.js");
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -96,6 +97,10 @@ function makeReqRes(opts: {
       "content-type": "application/json",
       host: "127.0.0.1:3077",
       "content-length": String(Buffer.byteLength(bodyStr)),
+      // 0836 US-002: include X-Studio-Token so the gate lets the request reach
+      // the route handler. The loopback-IP guard inside the handler is the
+      // unit under test for AC-US5-08; this header is incidental.
+      ...studioTokenHeaders(),
     },
     socket: { remoteAddress: opts.remoteAddress ?? "127.0.0.1" },
     on: (event: string, cb: (chunk?: Buffer) => void) => {

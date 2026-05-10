@@ -1,13 +1,19 @@
-// 0834 T-029 — unit tests for the account IPC commands.
+// 0834 T-029 / 0836 T-008 — unit tests for the account IPC commands.
 //
-// AC-US12-03 + AC-US13-06: cargo tests cover the IPC commands. We can't
-// fully exercise the keyring without an OS service in CI, so the
-// keyring-touching tests are gated behind `serial_test` and only run
-// when the host OS exposes a backend. The platform-URL resolver is
-// pure and tested unconditionally.
+// 0836 US-003 changes the surface from `account_get_token` (returns the
+// raw `gho_*` token to the WebView) to `account_get_user_summary` (returns
+// `{ login, avatarUrl, tier, signedIn }` only — no token). These tests
+// exercise the pure helper `build_user_summary` over the state matrix:
+//   (a) signed-out, no quota cache       → defaults `{ signedIn: false, ... }`
+//   (b) signed-in, no quota cache        → identity fields + tier="free"
+//   (c) signed-in, quota cache pro       → tier="pro"
+// The compile-guard on `account_get_token` removal is enforced by the
+// Rust compiler — if the symbol is reintroduced this test file will not
+// build because we no longer import it.
 
-use super::commands::{read_token_from_store, resolve_platform_url};
-use crate::auth::TokenStore;
+use super::commands::{build_user_summary, resolve_platform_url};
+use crate::auth::UserIdentity;
+use crate::quota::cache::{QuotaCache, QuotaResponse, QuotaTier, GRACE_PERIOD_DAYS};
 
 #[test]
 fn platform_url_default_when_no_env() {
@@ -45,34 +51,109 @@ fn platform_url_falls_back_when_override_is_empty() {
     );
 }
 
-// The keyring-backed token test runs only when the host actually has
-// a working keyring backend. CI on Linux without `dbus-x11`/`libsecret`
-// returns `keyring::Error::PlatformFailure`; treat that as "skip" and
-// surface only logic errors. Marking `ignore` keeps it out of default
-// `cargo test` runs but available via `cargo test -- --ignored`.
-#[test]
-#[ignore]
-fn read_token_returns_none_when_keyring_empty() {
-    let store = TokenStore::new();
-    let _ = store.clear();
-    match read_token_from_store(&store) {
-        Ok(None) => {} // expected — keyring slot is empty
-        Ok(Some(_)) => panic!("expected None, got Some"),
-        Err(e) => panic!("keyring backend not available: {e}"),
+// ---------------------------------------------------------------------------
+// 0836 US-003 — account_get_user_summary (via build_user_summary helper)
+// ---------------------------------------------------------------------------
+
+fn make_quota_cache(tier: QuotaTier) -> QuotaCache {
+    QuotaCache {
+        response: QuotaResponse {
+            tier,
+            skill_count: 0,
+            skill_limit: match tier {
+                QuotaTier::Free => Some(50),
+                _ => None,
+            },
+            last_synced_at: None,
+            grace_period_days_remaining: GRACE_PERIOD_DAYS,
+            server_now: "2026-05-09T00:00:00.000Z".into(),
+        },
+        local_at_sync: "2026-05-09T00:00:00.000Z".into(),
+        clock_skew_ms: 0,
     }
 }
 
 #[test]
-#[ignore]
-fn read_token_returns_saved_value() {
-    let store = TokenStore::new();
-    let _ = store.clear();
-    let test_token = "vsk_test_abcdef0123456789";
-    if store.save(test_token).is_err() {
-        // Backend unavailable — skip cleanly.
-        return;
-    }
-    let read = read_token_from_store(&store).expect("read should succeed");
-    assert_eq!(read.as_deref(), Some(test_token));
-    let _ = store.clear();
+fn user_summary_signed_out_with_no_quota_cache_returns_defaults() {
+    let summary = build_user_summary(None, None);
+    assert!(!summary.signed_in);
+    assert_eq!(summary.login, None);
+    assert_eq!(summary.avatar_url, None);
+    assert_eq!(summary.tier, "free");
+}
+
+#[test]
+fn user_summary_signed_out_with_quota_cache_still_returns_signed_out_shape() {
+    // Even if a stale quota cache says "pro", the summary must report
+    // signed_in=false / login=None when the identity cache is missing.
+    let summary = build_user_summary(None, Some(make_quota_cache(QuotaTier::Pro)));
+    assert!(!summary.signed_in);
+    assert_eq!(summary.login, None);
+    assert_eq!(summary.avatar_url, None);
+    // The tier still reflects the cached value — the UI renders the
+    // pricing badge regardless of identity for grace-window scenarios.
+    assert_eq!(summary.tier, "pro");
+}
+
+#[test]
+fn user_summary_signed_in_no_quota_returns_identity_with_free_tier() {
+    let identity = UserIdentity {
+        login: "octocat".into(),
+        avatar_url: "https://avatars.githubusercontent.com/u/583231?v=4".into(),
+        email: None,
+        cached_at: None,
+    };
+    let summary = build_user_summary(Some(identity), None);
+    assert!(summary.signed_in);
+    assert_eq!(summary.login.as_deref(), Some("octocat"));
+    assert_eq!(
+        summary.avatar_url.as_deref(),
+        Some("https://avatars.githubusercontent.com/u/583231?v=4"),
+    );
+    assert_eq!(summary.tier, "free");
+}
+
+#[test]
+fn user_summary_signed_in_with_pro_quota_reports_pro_tier() {
+    let identity = UserIdentity {
+        login: "octocat".into(),
+        avatar_url: "https://avatars.githubusercontent.com/u/1?v=4".into(),
+        email: None,
+        cached_at: None,
+    };
+    let summary = build_user_summary(
+        Some(identity),
+        Some(make_quota_cache(QuotaTier::Pro)),
+    );
+    assert!(summary.signed_in);
+    assert_eq!(summary.login.as_deref(), Some("octocat"));
+    assert_eq!(summary.tier, "pro");
+}
+
+#[test]
+fn user_summary_signed_in_with_enterprise_quota_reports_enterprise_tier() {
+    let identity = UserIdentity {
+        login: "ent-user".into(),
+        avatar_url: "https://avatars.githubusercontent.com/u/2?v=4".into(),
+        email: None,
+        cached_at: None,
+    };
+    let summary = build_user_summary(
+        Some(identity),
+        Some(make_quota_cache(QuotaTier::Enterprise)),
+    );
+    assert!(summary.signed_in);
+    assert_eq!(summary.tier, "enterprise");
+}
+
+#[test]
+fn user_summary_serializes_with_camel_case_fields() {
+    // The WebView reads `signedIn` and `avatarUrl` (camelCase). Lock the
+    // wire shape so a future serde rename trips this test.
+    let summary = build_user_summary(None, None);
+    let json = serde_json::to_string(&summary).expect("serialize");
+    assert!(json.contains("\"signedIn\":false"), "json: {json}");
+    assert!(json.contains("\"avatarUrl\":null"), "json: {json}");
+    assert!(json.contains("\"login\":null"), "json: {json}");
+    assert!(json.contains("\"tier\":\"free\""), "json: {json}");
 }

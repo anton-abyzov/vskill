@@ -21,8 +21,26 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startEvalServer } from "../eval-server.js";
+import { studioTokenHeaders } from "./helpers/studio-token-test-helpers.js";
 
 const INTERNAL_KEY = "test-internal-key-0726";
+
+// 0836 US-002: every /api/* fetch issued by this e2e must include
+// X-Studio-Token. Patch globalThis.fetch for the file's lifetime so each
+// `fetch(evalUrl(...))` call gets the header automatically.
+const _origFetch = globalThis.fetch;
+globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+  const merged: RequestInit = { ...(init ?? {}) };
+  const url = typeof input === "string" ? input : input.toString();
+  // Only inject the token for the eval-server target; don't leak it onto the
+  // fake platform server (different process, different gate).
+  if (url.includes("/api/skills/") || url.match(/\/api\/(?!v1\/internal)/)) {
+    const headers = new Headers(merged.headers ?? {});
+    for (const [k, v] of Object.entries(studioTokenHeaders())) headers.set(k, v);
+    merged.headers = headers;
+  }
+  return _origFetch(input, merged);
+}) as typeof fetch;
 
 interface CapturedPublish {
   headers: http.IncomingHttpHeaders;

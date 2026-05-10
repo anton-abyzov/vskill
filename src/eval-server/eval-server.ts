@@ -18,7 +18,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router } from "./router.js";
-import { sendJson } from "./router.js";
+import { sendJson, getStudioToken } from "./router.js";
 import { registerRoutes } from "./api-routes.js";
 import { proxyToPlatform, shouldProxyToPlatform } from "./platform-proxy.js";
 import { registerImproveRoutes } from "./improve-routes.js";
@@ -172,7 +172,11 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
   });
 
   return new Promise((resolve) => {
-    server.listen(port, () => {
+    // 0836 US-001: bind explicit loopback so the kernel rejects non-loopback
+    // connects (LAN, dual-stack `::`). The default Node behaviour (no host
+    // arg) binds dual-stack including LAN-reachable interfaces — anyone on
+    // the same Wi-Fi could reach the GitHub-token-injecting proxy.
+    server.listen(port, "127.0.0.1", () => {
       // 0728: Warn when running compiled bundle predates source edits.
       // pkgRoot is two levels up from __dirname (dist/eval-server/ or src/eval-server/).
       const pkgRoot = path.resolve(__dirname, "..", "..");
@@ -182,7 +186,20 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
           `\n  \x1b[33m⚠️  Stale dist detected (${freshness.details}) — run \`npm run build\` and restart\x1b[0m`,
         );
       }
-      console.log(`\n  Skill Studio: http://localhost:${port}\n`);
+      // Read the bound port from server.address() in case `port: 0` was
+      // passed (the OS assigns a free port). The banner string MUST stay
+      // visually consistent with prior versions for the bridge port-detector.
+      const bound = server.address();
+      const boundPort =
+        bound && typeof bound === "object" ? bound.port : port;
+      console.log(`\n  Skill Studio: http://localhost:${boundPort}\n`);
+      // 0836 US-002 AC-US2-01/07: emit the Studio token banner so:
+      //   - CLI users (`npx vskill studio`) can copy it for curl
+      //   - The Tauri sidecar (sidecar.rs stdout parser) can capture it
+      //     and stash on SharedSidecar.studio_token for the WebView IPC.
+      // Token is per-process and lives only in eval-server memory.
+      const token = getStudioToken();
+      console.log(`  Studio token: ${token}\n`);
       resolve(server);
     });
   });

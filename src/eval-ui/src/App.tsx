@@ -88,14 +88,24 @@ import { useDesktopBridge } from "./preferences/lib/useDesktopBridge";
 //   - AccountShell renders inline in the main pane (NOT a webview pop-out
 //     per Q2 resolution) when the entry is active.
 //
-// Auth strategy: cookie-mode by default (covers npx vskill studio's
-// browser tab). When isTauriHost() returns true, the bridge swaps in
-// bearer-mode + reads the keyring token via the `account_get_token` IPC.
+// Auth strategy: cookie-mode in both bundles. The web bundle relies on
+// platform same-origin cookies; the Tauri bundle proxies authenticated
+// `/api/v1/account/*` calls through the eval-server, which injects the
+// keyring bearer Rust-side. The deleted `account_get_token` IPC is gone
+// (0836 US-003) — the WebView never holds the raw `gho_*` token.
 import { AccountProvider, type AccountContextValue } from "./contexts/AccountContext";
 import {
   createTauriAccountContext,
   isTauriHost,
 } from "./contexts/AccountTauriBridge";
+// 0836 US-002: install the X-Studio-Token fetch patch BEFORE any component
+// renders so the very first /api/* call (typically the WebSocket / SSE
+// init) carries the header. Calling more than once is a no-op.
+import { installStudioTokenFetchPatch } from "./contexts/StudioTokenBridge";
+
+// Side-effect: patch globalThis.fetch on first import (Tauri only). The
+// helper is itself a no-op outside Tauri, so the web build is unchanged.
+installStudioTokenFetchPatch();
 import { AccountSidebarEntry } from "./components/AccountSidebarEntry";
 import { AccountShell } from "./components/AccountShell";
 

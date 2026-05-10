@@ -98,6 +98,13 @@ const PROXY_PREFIXES = [
   // to the platform. The browser never sees this token; injection happens here.
   "/api/v1/private/",
   "/api/v1/tenants/",
+  // 0836 US-003: account cabinet routes were previously fetched directly from
+  // the WebView with `Authorization: Bearer <gho_*>` minted by the deleted
+  // `account_get_token` IPC. Proxying them through the eval-server lets us
+  // inject the bearer Rust-side from the keychain — the WebView never holds
+  // the token. Public marketing endpoints under /api/v1/account/* stay
+  // anonymous (the auth-injection check below excludes them by default).
+  "/api/v1/account/",
 ] as const;
 
 /**
@@ -109,6 +116,10 @@ const PROXY_PREFIXES = [
 const AUTH_REQUIRED_PREFIXES = [
   "/api/v1/private/",
   "/api/v1/tenants/",
+  // 0836 US-003: every /api/v1/account/* route requires the user's bearer
+  // (profile, repos, tokens, notifications, exports). Inject it here so the
+  // WebView never sees a `gho_*` value.
+  "/api/v1/account/",
 ] as const;
 
 export function shouldProxyToPlatform(url: string | undefined): boolean {
@@ -123,10 +134,16 @@ export function shouldInjectAuth(url: string | undefined): boolean {
 
 // In-process token cache so a burst of proxy requests doesn't repeatedly hit
 // the OS keychain. The keychain itself is fast on macOS but can be slower on
-// Linux libsecret. 60s aligns with how stale a manual `vskill auth login`
-// → `vskill studio refresh` loop would feel.
+// Linux libsecret.
+//
+// 0836 hardening (F-005): TTL kept intentionally short (5s) so that a desktop
+// `sign_out` IPC — which clears the Rust keychain in a separate process —
+// is reflected by the Node-side eval-server within at most 5 seconds.
+// Cross-process cache invalidation would require a control-channel from the
+// Tauri shell into the sidecar; bounding the staleness window achieves the
+// same UX guarantee with no extra plumbing.
 let _cachedToken: { value: string | null; expiresAt: number } | null = null;
-const TOKEN_CACHE_MS = 60_000;
+const TOKEN_CACHE_MS = 5_000;
 
 function readTokenForProxy(now: number = Date.now()): string | null {
   if (_cachedToken && _cachedToken.expiresAt > now) return _cachedToken.value;
@@ -140,9 +157,19 @@ function readTokenForProxy(now: number = Date.now()): string | null {
   return token;
 }
 
-/** Test-only reset hook. */
-export function _resetPlatformProxyAuthCacheForTests(): void {
+/**
+ * Public invalidation hook so callers (e.g. an HTTP control endpoint, or a
+ * future SIGUSR1 handler) can drop the cached token immediately on auth
+ * state changes. Tests use this to reset between cases as well.
+ */
+export function invalidatePlatformProxyTokenCache(): void {
   _cachedToken = null;
+}
+
+/** @deprecated Prefer `invalidatePlatformProxyTokenCache`. Kept for any
+ * existing test imports until they migrate. */
+export function _resetPlatformProxyAuthCacheForTests(): void {
+  invalidatePlatformProxyTokenCache();
 }
 
 export interface PickHeadersOptions {
@@ -195,6 +222,37 @@ function pickHeadersForDownstream(
 }
 
 /**
+ * Determine whether a given request/response pair is on the SSE path.
+ *
+ * Heuristic (cheap — runs on every request when VSKILL_DEBUG_SSE=1):
+ *   - Path ends with `/stream` (e.g. `/api/v1/skills/stream`).
+ *   - OR upstream response carries `content-type: text/event-stream`.
+ *
+ * The path heuristic alone is sufficient for the only SSE endpoint the studio
+ * proxies today (`/api/v1/skills/stream`). The content-type fallback covers
+ * forward-compat in case future SSE endpoints are added without a `/stream`
+ * suffix.
+ */
+function isSsePathOrResponse(
+  pathname: string,
+  responseContentType: string | undefined,
+): boolean {
+  if (pathname.endsWith("/stream")) return true;
+  if (
+    typeof responseContentType === "string" &&
+    responseContentType.toLowerCase().includes("text/event-stream")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Whether structured per-request SSE logging is currently enabled. */
+function isSseDebugEnabled(): boolean {
+  return process.env.VSKILL_DEBUG_SSE === "1";
+}
+
+/**
  * Proxy a single HTTP request from the studio to the platform.
  * SSE-safe: streams the upstream body chunks directly to the response so
  * `text/event-stream` connections stay open.
@@ -202,6 +260,15 @@ function pickHeadersForDownstream(
  * Resolves once the proxy pipeline finishes (either side ended) — callers
  * can `await` to know the response has been written, but typical use is
  * fire-and-forget within an HTTP server handler.
+ *
+ * SSE diagnostic logging (0838 / AC-US1-02):
+ *   When `VSKILL_DEBUG_SSE=1`, every `text/event-stream`-shaped request emits
+ *     proxy.sse.start{requestId, upstreamUrl}  on dispatch
+ *     proxy.sse.end{requestId, status, durationMs}  on completion
+ *   AND the response gets `X-Request-Id: <requestId>` so client-side debug
+ *   logs (in useSkillUpdates) can be correlated with server-side logs.
+ *   When the flag is unset (or "0"), no per-request logs and no header
+ *   injection — preserves the production hot path.
  */
 export function proxyToPlatform(
   req: http.IncomingMessage,
@@ -211,11 +278,27 @@ export function proxyToPlatform(
   return new Promise((resolve) => {
     const target = new URL(req.url ?? "/", baseUrl);
     const transport = target.protocol === "https:" ? https : http;
+    const debugEnabled = isSseDebugEnabled();
+    // Pre-allocate requestId only when debug is enabled — avoids unnecessary
+    // crypto work on the production hot path.
+    const requestId = debugEnabled ? randomUUID() : null;
+    const startTime = debugEnabled ? Date.now() : 0;
+    // Path-based heuristic for SSE detection (cheap + sufficient for /stream).
+    let isSseRequest = debugEnabled && target.pathname.endsWith("/stream");
+    let logEndEmitted = false;
     // Captured for client-disconnect cleanup. Once headers are received the
     // active socket is held by upstreamRes (an SSE stream may keep it open
     // for hours); destroying upstreamReq alone is not enough on Node's https
     // agent in all cases.
     let upstreamRes: http.IncomingMessage | null = null;
+
+    function emitEndLog(status: number): void {
+      if (!debugEnabled || !isSseRequest || logEndEmitted || !requestId) return;
+      logEndEmitted = true;
+      const durationMs = Date.now() - startTime;
+      console.log("proxy.sse.end", { requestId, status, durationMs });
+    }
+
     const upstreamReq = transport.request(
       {
         protocol: target.protocol,
@@ -229,14 +312,36 @@ export function proxyToPlatform(
         upstreamRes = incoming;
         const status = incoming.statusCode ?? 502;
         const headers = pickHeadersForDownstream(incoming.headers);
+        // Promote to SSE if upstream content-type confirms it (covers future
+        // SSE endpoints without a `/stream` suffix).
+        if (debugEnabled && !isSseRequest) {
+          const ct = incoming.headers["content-type"];
+          isSseRequest = isSsePathOrResponse(
+            target.pathname,
+            Array.isArray(ct) ? ct[0] : ct,
+          );
+        }
+        // Inject X-Request-Id so studio debug logs can correlate to server.
+        if (debugEnabled && isSseRequest && requestId) {
+          headers["x-request-id"] = requestId;
+          // Emit the start log only once we know this IS an SSE request.
+          console.log("proxy.sse.start", {
+            requestId,
+            upstreamUrl: `${target.origin}${target.pathname}${target.search}`,
+          });
+        }
         try {
           res.writeHead(status, headers);
         } catch {
           // Headers already sent — fall through to pipe; `res.write` will
           // continue on the existing stream.
         }
-        incoming.on("end", () => resolve());
+        incoming.on("end", () => {
+          emitEndLog(status);
+          resolve();
+        });
         incoming.on("error", () => {
+          emitEndLog(status);
           if (!res.writableEnded) res.end();
           resolve();
         });
@@ -257,6 +362,7 @@ export function proxyToPlatform(
           }),
         );
       }
+      emitEndLog(502);
       resolve();
     });
 
@@ -267,6 +373,7 @@ export function proxyToPlatform(
     res.on("close", () => {
       try { upstreamReq.destroy(); } catch { /* noop */ }
       try { upstreamRes?.destroy(); } catch { /* noop */ }
+      emitEndLog(upstreamRes?.statusCode ?? 0);
     });
 
     // Forward the request body (if any) — req is a readable stream.

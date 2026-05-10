@@ -221,10 +221,18 @@ async function installBridgeShim(page: Page): Promise<void> {
           // 0834 desktop IPCs (T-027/T-028, AC-US12-03 + AC-US13-06):
           case "get_account_url":
             return accountUrl;
-          // AccountTauriBridge.getAuthHeader() invokes `account_get_token`
-          // lazily on each fetch and uses the result as the Bearer header.
-          case "account_get_token":
-            return s.bearerToken;
+          case "account_get_platform_url":
+            return "https://verified-skill.com";
+          // 0836 US-003: account_get_token REMOVED — bearer is injected
+          // Rust-side by the eval-server platform-proxy. The WebView now
+          // calls `account_get_user_summary` for display data only.
+          case "account_get_user_summary":
+            return {
+              signedIn: s.signedIn,
+              login: s.cachedProfile?.githubHandle ?? null,
+              avatarUrl: s.cachedProfile?.avatarUrl ?? null,
+              tier: s.tier,
+            };
           // Older alias kept for backward-compat with stale bundles.
           case "get_keyring_bearer":
             return s.bearerToken;
@@ -261,19 +269,24 @@ async function getBridgeCalls(page: Page): Promise<BridgeCall[]> {
 }
 
 /**
- * AccountTauriBridge sets `platformBaseUrl = "https://verified-skill.com"`
- * for desktop + studio surfaces. The shared eval-ui hooks then `fetch()`
- * `<base>/api/v1/account/profile` etc. with the Bearer header from
- * `account_get_token`. Stub those URLs so the e2e doesn't hit prod.
+ * 0836 US-003: AccountTauriBridge now uses `platformBaseUrl: ""` so the
+ * shared eval-ui hooks fetch RELATIVE `/api/v1/account/*` paths. Those land
+ * on the eval-server's platform-proxy, which injects the Rust-side
+ * keychain bearer and forwards to verified-skill.com. We still stub the
+ * upstream URLs (for direct hits) AND relative URLs (for proxy round-trips
+ * that reach the same dispatcher in the test rig). Both routes fulfil
+ * with the same fixture so the assertion path doesn't change.
  */
 async function stubAccountFetches(page: Page): Promise<void> {
   // Playwright runs routes in REGISTRATION-REVERSED order — the LAST
   // registered handler wins. Register the catch-all FIRST and the
   // specific endpoints LAST so /profile and /repos hit their targeted
   // fixtures, not the empty {} fallback.
-  await page.route(
+  for (const re of [
     /^https:\/\/verified-skill\.com\/api\/v1\/account\//,
-    (route) => {
+    /\/api\/v1\/account\//,
+  ]) {
+    await page.route(re, (route) => {
       if (route.request().method() === "GET") {
         return route.fulfill({
           status: 200,
@@ -282,26 +295,32 @@ async function stubAccountFetches(page: Page): Promise<void> {
         });
       }
       return route.fallback();
-    },
-  );
-  await page.route(
-    "https://verified-skill.com/api/v1/account/profile",
-    (route) =>
+    });
+  }
+  for (const re of [
+    /^https:\/\/verified-skill\.com\/api\/v1\/account\/profile$/,
+    /\/api\/v1\/account\/profile$/,
+  ]) {
+    await page.route(re, (route) =>
       route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(PROFILE_FIXTURE),
       }),
-  );
-  await page.route(
-    "https://verified-skill.com/api/v1/account/repos",
-    (route) =>
+    );
+  }
+  for (const re of [
+    /^https:\/\/verified-skill\.com\/api\/v1\/account\/repos$/,
+    /\/api\/v1\/account\/repos$/,
+  ]) {
+    await page.route(re, (route) =>
       route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(REPOS_FIXTURE),
       }),
-  );
+    );
+  }
 }
 
 // Desktop App.tsx mounts AccountSidebarEntry below the Skills sidebar
@@ -371,7 +390,7 @@ test.describe("0834 US-012 — Desktop /account view", () => {
     }
   });
 
-  test("AC-US12-03: Bearer token from keyring is fetched (account_get_token IPC)", async ({
+  test("AC-US12-03 / 0836 US-003: WebView never invokes the deleted account_get_token IPC", async ({
     page,
   }) => {
     await installBridgeShim(page);
@@ -383,17 +402,13 @@ test.describe("0834 US-012 — Desktop /account view", () => {
       timeout: 5_000,
     });
 
-    // AccountTauriBridge.getAuthHeader() invokes account_get_token lazily
-    // on each fetch — the test waits a short tick for at least one call.
-    await expect
-      .poll(
-        async () => {
-          const calls = await getBridgeCalls(page);
-          return calls.map((c) => c.cmd);
-        },
-        { timeout: 5_000 },
-      )
-      .toContain("account_get_token");
+    // 0836 US-003: account_get_token is REMOVED. The bearer is injected by
+    // the eval-server's platform-proxy from the Rust keychain — the
+    // WebView never calls this IPC. The summary IPC (display fields only)
+    // is what the bridge calls instead.
+    const calls = await getBridgeCalls(page);
+    const cmds = calls.map((c) => c.cmd);
+    expect(cmds).not.toContain("account_get_token");
   });
 
   test("AC-US12-04: offline mode shows cached banner; reconnect hides it", async ({

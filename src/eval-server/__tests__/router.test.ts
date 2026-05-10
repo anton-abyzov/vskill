@@ -7,14 +7,17 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi } from "vitest";
-import { Router } from "../router.js";
+import { Router, getStudioToken } from "../router.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+// 0836 US-002: the router now gates /api/* on X-Studio-Token. Tests targeting
+// /api/* paths must include the live token so the request can reach the
+// route handler. Token is per-process; lazily generated on first use.
 function fakeReq(url: string): IncomingMessage {
   return {
     method: "GET",
     url,
-    headers: { host: "localhost" },
+    headers: { host: "localhost", "x-studio-token": getStudioToken() },
   } as unknown as IncomingMessage;
 }
 

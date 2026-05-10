@@ -27,6 +27,7 @@ vi.mock("../plugin-cli.js", async (importOriginal) => {
 
 import { Router } from "../router";
 import { registerPluginCliRoutes } from "../plugin-cli-routes";
+import { studioTokenHeaders } from "./helpers/studio-token-test-helpers.js";
 
 let cacheRoot: string;
 let router: Router;
@@ -58,7 +59,12 @@ async function callUninstall(name: string, body: object = {}): Promise<Captured>
   const req = new IncomingMessage(socket);
   req.method = "POST";
   req.url = `/api/plugins/${name}/uninstall`;
-  req.headers = { "content-type": "application/json", host: "localhost" };
+  // 0836 US-002: include X-Studio-Token so the gate lets the request through.
+  req.headers = {
+    "content-type": "application/json",
+    host: "localhost",
+    ...studioTokenHeaders(),
+  };
 
   const res = new ServerResponse(req);
   // Capture writeHead + end so we can assert the response.

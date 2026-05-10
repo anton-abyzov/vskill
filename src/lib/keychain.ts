@@ -14,17 +14,34 @@
 // Tokens are NEVER logged. Callers should redact via `redactToken()` before
 // any user-facing output.
 //
-// Service identity:
-//   - service:  "vskill-github"
-//   - account:  "github_token"
+// Service identity (0836 US-006 — canonical, shared with the Rust desktop):
+//   - service:  "com.verifiedskill.desktop"   (was "vskill-github")
+//   - account:  "github-oauth-token"          (was "github_token")
+//
+// On first construction we run a one-time migration that moves any token
+// from the legacy slot into the canonical slot. The legacy fallback in
+// `getGitHubToken` covers users who haven't yet booted a process that ran
+// the migration (e.g., the Rust desktop wrote the canonical slot, but a
+// vintage CLI install reads from the old one). Both paths are scheduled
+// for removal AFTER vskill 1.1.x — see keychain-migration.ts for the
+// removal target.
 // ---------------------------------------------------------------------------
 
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeOs from "node:os";
+import { runKeychainMigration } from "./migration/keychain-migration.js";
 
-export const SERVICE_NAME = "vskill-github";
-export const GITHUB_TOKEN_KEY = "github_token";
+export const SERVICE_NAME = "com.verifiedskill.desktop";
+export const GITHUB_TOKEN_KEY = "github-oauth-token";
+
+// 0836 US-006: legacy slot — read-only fallback during the one-release
+// compat window. Remove after vskill 1.1.x ships.
+// TODO(0836-followup): drop LEGACY_SERVICE_NAME + LEGACY_TOKEN_KEY + the
+// fallback branch in getGitHubToken once 1.1.x has had one full release
+// cycle to migrate users.
+const LEGACY_SERVICE_NAME = "vskill-github";
+const LEGACY_TOKEN_KEY = "github_token";
 
 export interface KeyringBackend {
   setPassword(service: string, account: string, password: string): void;
@@ -71,6 +88,16 @@ const defaultFs: FsAdapter = {
   mkdirSync: (p) => nodeFs.mkdirSync(p, { recursive: true, mode: 0o700 }),
   unlinkSync: (p) => nodeFs.unlinkSync(p),
 };
+
+// 0836 US-006: per-process flag so the one-time migration runs exactly
+// once even if multiple keychains are constructed (the test suite does
+// this; production has a single default keychain).
+let _migrationRun = false;
+
+/** Test-only — reset the migration-once flag so test factories can re-run it. */
+export function _resetMigrationFlagForTests(): void {
+  _migrationRun = false;
+}
 
 function loadDefaultKeyring(): KeyringBackend | null {
   // The native module is loaded lazily so the CLI still boots in environments
@@ -145,6 +172,21 @@ export function createKeychain(opts: KeychainOptions = {}): Keychain {
   if (opts.keyring !== undefined) keyring = opts.keyring;
   else keyring = loadDefaultKeyring();
 
+  // 0836 US-006: run the one-time legacy-slot → canonical-slot migration
+  // exactly once per process. The helper is idempotent (skip-flag +
+  // mutex), so calling it on every createKeychain construction is safe;
+  // the per-process flag is only an optimization to avoid the cheap
+  // file-stat check on every test factory.
+  if (!_migrationRun) {
+    _migrationRun = true;
+    try {
+      runKeychainMigration({ keyring });
+    } catch {
+      // Best-effort — migration failure leaves the legacy fallback path
+      // intact; no user-visible regression.
+    }
+  }
+
   let warnedFallback = false;
   let fallbackInUse = false;
 
@@ -197,17 +239,54 @@ export function createKeychain(opts: KeychainOptions = {}): Keychain {
 
     getGitHubToken(): string | null {
       const r = tryKeyring((kr) => kr.getPassword(SERVICE_NAME, GITHUB_TOKEN_KEY));
-      if (r.ok && r.value) return r.value;
+      if (r.ok && r.value) {
+        // 0836 hardening (F-008 follow-up): if BOTH the canonical and the
+        // legacy slots are populated, log a WARN. This catches the
+        // dual-writer drift case where a vintage `vskill@<old>` install
+        // wrote to legacy after migration's done-flag was set. Canonical
+        // wins (current return), but operators get a signal the user has
+        // two copies and should re-authenticate.
+        try {
+          const legacy = tryKeyring((kr) =>
+            kr.getPassword(LEGACY_SERVICE_NAME, LEGACY_TOKEN_KEY),
+          );
+          if (legacy.ok && legacy.value && legacy.value !== r.value) {
+            // Avoid logging the token values themselves — only the fact of drift.
+            // eslint-disable-next-line no-console
+            console.warn(
+              "[vskill keychain] both canonical and legacy slots are populated; canonical wins. Run `vskill auth login` to clear drift.",
+            );
+          }
+        } catch {
+          // Non-fatal: drift detection is best-effort.
+        }
+        return r.value;
+      }
       if (r.ok && r.value === null) {
+        // 0836 US-006 legacy fallback: a vintage CLI install that hasn't
+        // booted post-migration may still hold the token in the old slot.
+        // Honor it for one release window. The migration helper will move
+        // this on the next process boot; until then we read from where it
+        // lives.
+        // TODO(0836-followup): remove after vskill 1.1.x ships.
+        const legacy = tryKeyring((kr) =>
+          kr.getPassword(LEGACY_SERVICE_NAME, LEGACY_TOKEN_KEY),
+        );
+        if (legacy.ok && legacy.value) return legacy.value;
+
         // keyring works but slot is empty — also peek at fallback in case the
         // user set a token before keyring became available, but DO NOT warn
         // because keyring is fine.
         const map = readFallback();
-        return map.get(GITHUB_TOKEN_KEY) ?? null;
+        if (map.has(GITHUB_TOKEN_KEY)) return map.get(GITHUB_TOKEN_KEY) ?? null;
+        // 0836 US-006: legacy file-fallback key, kept for the same
+        // one-release window as the legacy keyring service.
+        return map.get(LEGACY_TOKEN_KEY) ?? null;
       }
       ensureFallbackWarned();
       const map = readFallback();
-      return map.get(GITHUB_TOKEN_KEY) ?? null;
+      if (map.has(GITHUB_TOKEN_KEY)) return map.get(GITHUB_TOKEN_KEY) ?? null;
+      return map.get(LEGACY_TOKEN_KEY) ?? null;
     },
 
     clearGitHubToken(): boolean {

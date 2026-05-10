@@ -38,6 +38,25 @@ pub fn get_server_port(state: State<'_, SharedSidecar>) -> Option<u16> {
     sidecar::snapshot(state.inner()).port
 }
 
+/// 0836 US-002: returns the per-process X-Studio-Token captured from the
+/// sidecar's startup banner (see `sidecar::parse_studio_token`). The WebView
+/// invokes this once on mount and injects the value into every `/api/*`
+/// fetch as `X-Studio-Token: <token>`.
+///
+/// Returns `None` until the banner has been parsed off sidecar stdout
+/// (typically <100ms after the port is announced). The WebView treats
+/// `null` as transient and retries — see `useStudioTokenBridge`.
+///
+/// SECURITY:
+///   - The token is NOT exposed via any HTTP endpoint; only the Tauri IPC
+///     ACL gates this surface (AC-US2-02).
+///   - Never logged or persisted.
+#[tauri::command]
+pub fn get_studio_token(state: State<'_, SharedSidecar>) -> Option<String> {
+    let guard = state.inner().lock().ok()?;
+    guard.studio_token.clone()
+}
+
 #[tauri::command]
 pub async fn restart_server(app: AppHandle) -> Result<u16, String> {
     let state: State<'_, SharedSidecar> = app.state();
@@ -670,25 +689,83 @@ pub fn get_signed_in_user() -> Result<Option<crate::auth::UserIdentity>, String>
     crate::auth::load_identity_cache().map_err(|e| e.to_string())
 }
 
-/// Clear keychain token + identity cache. Idempotent — calling on an
-/// already-signed-out state is a no-op success. Does NOT call GitHub's
-/// token revocation endpoint (deferred to a future T-008-extension); the
-/// user's next sign-in will replace any leftover server-side grant.
+/// Sign out: best-effort revoke the GitHub OAuth grant THEN clear local
+/// state. The keychain is ALWAYS cleared, even if revocation fails — a user
+/// on a flight clicking Sign Out shouldn't be trapped with their token
+/// sitting in the keyring.
+///
+/// 0836 US-005 flow:
+///   1. Read token from keychain (Zeroizing — wiped on drop).
+///   2. If a token exists, call `revoke_grant` with a 5s budget. The
+///      platform proxy at verified-skill.com forwards to GitHub's
+///      `DELETE /applications/{client_id}/grant` (it holds the
+///      client_secret). We log INFO on success, INFO on AlreadyInvalid,
+///      WARN on Failed — the gho_* token NEVER appears in any log line.
+///   3. Always clear the keychain entry + identity cache.
+///
+/// If both clears succeed, return Ok regardless of step 2's outcome.
 #[tauri::command]
-pub fn sign_out() -> Result<(), String> {
-    use crate::auth::{clear_identity_cache, TokenStore};
+pub async fn sign_out() -> Result<(), String> {
+    use crate::auth::{
+        clear_identity_cache, perform_sign_out, revoke_grant, RevocationOutcome,
+        TokenStore,
+    };
 
     let store = TokenStore::new();
-    // We swallow individual errors here so a partial state (e.g. keychain
-    // entry missing but cache file present) doesn't leave the user stuck —
-    // both clear paths are idempotent and best-effort by design.
-    let token_err = store.clear().err();
-    let cache_err = clear_identity_cache().err();
-    match (token_err, cache_err) {
-        (None, None) => Ok(()),
-        (Some(e), _) => Err(format!("clear keychain: {e}")),
-        (_, Some(e)) => Err(format!("clear identity cache: {e}")),
+
+    // Read token best-effort. We do NOT bail on a missing token — local
+    // cleanup must run unconditionally.
+    let token_for_revoke = store.load().ok().flatten();
+
+    // Track wall-clock so we can log the elapsed revocation time. The
+    // `perform_sign_out` helper enforces the AC-US5-05 call-order contract
+    // (revoke BEFORE clear) and is unit-tested directly; routing the IPC
+    // through the same helper means the production path inherits that
+    // coverage instead of relying on inline duplication.
+    let started = std::time::Instant::now();
+    let store_for_clear = TokenStore::new();
+    let outcome = perform_sign_out(
+        token_for_revoke.as_deref().map(|s| s.as_str()),
+        // revoke_fn — best-effort revocation against verified-skill.com.
+        // `platform_url=None` resolves to the production base per
+        // ADR-0836-02. The Zeroizing token wrapper drops once `revoke_grant`
+        // returns; the bearer header is built and consumed inside.
+        |t| async move { revoke_grant(&t, None).await },
+        // clear_fn — ALWAYS run after revoke. Returns Err(String) on local
+        // cleanup failure (only path that surfaces an IPC error to JS).
+        move || {
+            let token_err = store_for_clear.clear().err();
+            let cache_err = clear_identity_cache().err();
+            match (token_err, cache_err) {
+                (None, None) => Ok(()),
+                (Some(e), _) => Err(format!("clear keychain: {e}")),
+                (_, Some(e)) => Err(format!("clear identity cache: {e}")),
+            }
+        },
+        // record_call — no-op in production. The helper's own tests use
+        // this to assert call sequence; here we don't need the trace.
+        |_| {},
+    )
+    .await?;
+
+    let elapsed_ms = started.elapsed().as_millis();
+    match outcome {
+        RevocationOutcome::Revoked => {
+            log::info!("sign_out: github grant revoked ({elapsed_ms}ms)");
+        }
+        RevocationOutcome::AlreadyInvalid => {
+            log::info!(
+                "sign_out: github grant already invalid ({elapsed_ms}ms)"
+            );
+        }
+        RevocationOutcome::Failed(reason) => {
+            log::warn!(
+                "sign_out: github grant revocation failed (best-effort): \
+                 {reason} ({elapsed_ms}ms)"
+            );
+        }
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

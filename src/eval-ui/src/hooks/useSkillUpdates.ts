@@ -3,6 +3,11 @@ import { api } from "../api";
 import type { SkillUpdateInfo } from "../api";
 import type { SkillUpdateEvent, StreamStatus, UpdateStoreEntry } from "../types/skill-update";
 import { updateStore } from "../stores/updateStore";
+import {
+  enqueue as enqueueToast,
+  drain as drainToastQueue,
+  type QueuedToast,
+} from "../utils/toastQueue";
 
 /**
  * Shared update hook — polling (0683) + SSE push (0708).
@@ -24,10 +29,17 @@ import { updateStore } from "../stores/updateStore";
  *     successful reconnect returns `status: "connected"`. An `event: gone`
  *     frame clears `seenEventIds`, issues a silent one-shot
  *     `/api/v1/skills/check-updates` reconciliation, and merges the result
- *     (AC-US5-11) — no toast fires. Visible-tab event arrivals dispatch a
- *     `studio:toast` CustomEvent; hidden-tab arrivals only update the store
- *     (AC-US5-02). Components consume `updatesById` + `status` for the
- *     push-driven surfaces.
+ *     (AC-US5-11) — no toast fires.
+ *   - 0838 visibility queue (US-003): when an event arrives while the tab is
+ *     hidden, the toast payload is enqueued to a bounded localStorage FIFO
+ *     instead of dispatching `studio:toast`. On the next visibilitychange →
+ *     "visible" the queue is drained at 250 ms intervals, deduped against
+ *     `updateStore.seenEventIds`.
+ *   - 0838 debug flag (US-001): `[sse]` console.debug logging gated on
+ *     `import.meta.env.VITE_VSKILL_DEBUG_SSE` or `?debugSse=1` query param.
+ *   - 0838 telemetry (US-005): once-per-(event, session) POST to
+ *     `/api/v1/studio/telemetry/sse` on stream lifecycle transitions.
+ *     Disabled by `VITE_VSKILL_DISABLE_TELEMETRY` or `?disableTelemetry=1`.
  *
  * SSE ID-format contract (0736 / AC-US3-01)
  * ------------------------------------------
@@ -35,13 +47,6 @@ import { updateStore } from "../stores/updateStore";
  * (`sk_published_<owner>/<repo>/<skill>`) in the `?skills=<csv>` filter.
  * The raw `<plugin>/<skill>` local name (e.g. `.claude/greet-anton`) is
  * silently dropped by the platform and must NOT appear in the filter.
- *
- * Callers must pass pre-resolved IDs via `skillIds`. When installed skills are
- * enriched with UUID/slug by the backend (via `/api/skills/installed`), callers
- * should use `resolveSubscriptionIds()` from `utils/resolveSubscriptionIds.ts`
- * to extract the valid ID list before passing it here. Skills without either
- * UUID or slug are omitted from the filter — the polling fallback covers them
- * (FR-005 / AC-US3-02).
  */
 
 // ---------------------------------------------------------------------------
@@ -56,28 +61,24 @@ export interface UseSkillUpdatesOptions {
   staleAfterMs?: number;
   /**
    * 0708: Installed skill IDs the current user's Studio should subscribe to.
-   * When non-empty, the hook opens a single EventSource filtered to these
-   * IDs. The list is sorted for URL stability; changes cause reconnect.
-   * Omit or pass `[]` to disable SSE (useful for routes that don't need it).
    */
   skillIds?: string[];
   /**
-   * 0708 wrap-up: skill IDs to query for tracking state (`trackedForUpdates`)
-   * via the platform's `/api/v1/skills/check-updates` endpoint. Distinct
-   * from `skillIds` because the SSE filter is scoped to installed skills
-   * (AC-US5-08), but the not-tracked dot (AC-US5-09) needs tracking state
-   * for ALL visible skills — including source-origin ones in dev/E2E.
-   * Defaults to the same list as `skillIds`.
+   * 0708 wrap-up: skill IDs to query for tracking state (`trackedForUpdates`).
    */
   trackingSkillIds?: string[];
   /**
    * 0708 fallback watchdog — how long to wait for a sustained `connected`
-   * signal before flipping `status: "fallback"`. Defaults to 60 s per
-   * AC-US5-05.
+   * signal before flipping `status: "fallback"`. Defaults to 60 s per AC-US5-05.
    */
   disconnectFallbackMs?: number;
   /** 0708: Override `/api/v1/skills/stream` path (test injection only). */
   streamUrlBase?: string;
+  /**
+   * 0838: replay-spacing override (ms between queued-toast dispatches on
+   * visibility flip). Defaults to 250 ms per AC-US3-03.
+   */
+  replayIntervalMs?: number;
 }
 
 export interface SkillUpdatesState {
@@ -115,19 +116,119 @@ const DEFAULT_TIMEOUT = 15_000;
 const DEFAULT_STALE = 60_000;
 const DEFAULT_FALLBACK_MS = 60_000;
 const DEFAULT_STREAM_BASE = "/api/v1/skills/stream";
+const DEFAULT_REPLAY_INTERVAL_MS = 250;
+const TELEMETRY_ENDPOINT = "/api/v1/studio/telemetry/sse";
+const SESSION_ID_KEY = "vskill.studio.sse.sessionId";
 
 // ---------------------------------------------------------------------------
-// Helpers
+// 0838 helpers — debug, telemetry, sessionId
 // ---------------------------------------------------------------------------
 
-// Primary key is the canonical full name (`<owner>/<repo>/<skill>` or
-// `<plugin>/<skill>`). A bare leaf alias is added ONLY when (a) the leaf
-// differs from the full name and (b) no other update in the list shares
-// that leaf. When two updates collide on a leaf across different plugins,
-// the alias is dropped — full-name lookups still resolve both, and leaf
-// lookups miss deterministically instead of silently returning whichever
-// entry happened to be inserted last (the pre-1.0 bug that hid one of two
-// available updates from the panel).
+function readImportMetaEnv(): Record<string, string | undefined> {
+  // Wrapped so jsdom-mode tests (no Vite env injection) still work.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const env = (import.meta as any)?.env;
+    if (env && typeof env === "object") return env;
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function isDebugSse(): boolean {
+  if (typeof window === "undefined") return false;
+  const env = readImportMetaEnv();
+  if (env.VITE_VSKILL_DEBUG_SSE === "1" || env.VITE_VSKILL_DEBUG_SSE === "true") {
+    return true;
+  }
+  try {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("debugSse") === "1") return true;
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+function isTelemetryDisabled(): boolean {
+  if (typeof window === "undefined") return true;
+  const env = readImportMetaEnv();
+  if (env.VITE_VSKILL_DISABLE_TELEMETRY === "1" || env.VITE_VSKILL_DISABLE_TELEMETRY === "true") {
+    return true;
+  }
+  try {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("disableTelemetry") === "1") return true;
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+function debugSse(event: string, payload?: Record<string, unknown>): void {
+  if (!isDebugSse()) return;
+  try {
+    const ts = new Date().toISOString();
+    if (payload) {
+      // eslint-disable-next-line no-console
+      console.debug(`[sse] ${ts} ${event}`, payload);
+    } else {
+      // eslint-disable-next-line no-console
+      console.debug(`[sse] ${ts} ${event}`);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function uuidV4(): string {
+  // crypto.randomUUID() is the canonical path; fall back to a hand-rolled
+  // v4 for jsdom environments that lack it.
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      // ignore
+    }
+  }
+  // RFC 4122 v4 hand-rolled.
+  const hex: string[] = [];
+  for (let i = 0; i < 16; i++) {
+    hex.push(Math.floor(Math.random() * 256).toString(16).padStart(2, "0"));
+  }
+  hex[6] = ((parseInt(hex[6], 16) & 0x0f) | 0x40).toString(16).padStart(2, "0");
+  hex[8] = ((parseInt(hex[8], 16) & 0x3f) | 0x80).toString(16).padStart(2, "0");
+  return (
+    hex.slice(0, 4).join("") +
+    "-" +
+    hex.slice(4, 6).join("") +
+    "-" +
+    hex.slice(6, 8).join("") +
+    "-" +
+    hex.slice(8, 10).join("") +
+    "-" +
+    hex.slice(10, 16).join("")
+  );
+}
+
+function getOrCreateSessionId(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const existing = window.sessionStorage.getItem(SESSION_ID_KEY);
+    if (existing) return existing;
+    const id = uuidV4();
+    window.sessionStorage.setItem(SESSION_ID_KEY, id);
+    return id;
+  } catch {
+    return uuidV4();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Existing helpers
+// ---------------------------------------------------------------------------
+
 function buildMap(list: SkillUpdateInfo[]): Map<string, SkillUpdateInfo> {
   const out = new Map<string, SkillUpdateInfo>();
   for (const u of list) out.set(u.name, u);
@@ -176,6 +277,7 @@ export function useSkillUpdates(
   const staleAfterMs = opts?.staleAfterMs ?? DEFAULT_STALE;
   const fallbackMs = opts?.disconnectFallbackMs ?? DEFAULT_FALLBACK_MS;
   const streamBase = opts?.streamUrlBase ?? DEFAULT_STREAM_BASE;
+  const replayIntervalMs = opts?.replayIntervalMs ?? DEFAULT_REPLAY_INTERVAL_MS;
 
   // Sort-stable CSV so url identity is deterministic.
   const skillsCsv = useMemo(() => {
@@ -211,15 +313,56 @@ export function useSkillUpdates(
   const statusRef = useRef(status);
   statusRef.current = status;
 
-  // External-store snapshot for the push-driven map. Components can also read
-  // `updateStore.getSnapshot()` directly — this mirror keeps the hook return
-  // value React-identity-stable.
+  // 0838: per-session telemetry dedupe — Set keyed by event name.
+  const telemetrySentRef = useRef<Set<string>>(new Set());
+  // 0838: timestamp of the most recent `connected` event (for
+  // durationSinceOpenMs in subsequent transitions).
+  const lastConnectedAtRef = useRef<number | null>(null);
+
+  // External-store snapshot for the push-driven map.
   const updatesById = useSyncExternalStore(
     (l) => updateStore.subscribe(l),
     () => updateStore.getSnapshot(),
     () => updateStore.getSnapshot(),
   );
   const pushUpdateCount = updatesById.size;
+
+  // ---------------------------------------------------------------------------
+  // 0838 telemetry helper (T-012)
+  // ---------------------------------------------------------------------------
+  const emitTelemetry = useCallback(
+    (event: "connected" | "fallback" | "reconnect-scheduled" | "gone-frame-received") => {
+      if (isTelemetryDisabled()) return;
+      if (telemetrySentRef.current.has(event)) return;
+      telemetrySentRef.current.add(event);
+      const sessionId = getOrCreateSessionId();
+      const now = Date.now();
+      const payload: Record<string, unknown> = {
+        event,
+        sessionId,
+        sourceTier: "platform-proxy",
+        timestamp: now,
+      };
+      if (event !== "connected" && lastConnectedAtRef.current != null) {
+        payload.durationSinceOpenMs = now - lastConnectedAtRef.current;
+      }
+      try {
+        // Fire-and-forget; never block the SSE path on telemetry.
+        void fetch(TELEMETRY_ENDPOINT, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+          // keepalive lets the request survive a navigation; harmless when not.
+          keepalive: true,
+        }).catch(() => {
+          // Swallow — telemetry must never surface errors.
+        });
+      } catch {
+        // Swallow — even sync errors (e.g. fetch is undefined) are non-fatal.
+      }
+    },
+    [],
+  );
 
   // ----- Polling mechanics (unchanged) -------------------------------------
   const doFetch = useCallback(async (): Promise<void> => {
@@ -275,6 +418,57 @@ export function useSkillUpdates(
     }
   }, []);
 
+  // ---------------------------------------------------------------------------
+  // 0838 visibility queue replay (T-006)
+  // ---------------------------------------------------------------------------
+  const replayQueue = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const drained = drainToastQueue();
+    if (drained.length === 0) return;
+    debugSse("queue-drain", { count: drained.length });
+    // 0838 AC-US3-05: dedupe against the store entry currently keyed by
+    // skillId. If the entry has been *replaced* (different eventId — e.g.
+    // the polling fallback discovered a newer publish during the hidden
+    // window), we suppress the now-stale queued toast. If the entry still
+    // matches the queued eventId, we emit — that's the primary purpose of
+    // the queue. If the entry was cleared (e.g. user dismissed), we still
+    // emit — the user opted out of seeing the live indicator, but the
+    // queued toast represents an arrival they couldn't perceive.
+    drained.forEach((entry, idx) => {
+      const dispatchOne = () => {
+        if (!mountedRef.current) return;
+        const storeEntry = updateStore.getSnapshot().get(entry.skillId);
+        if (storeEntry && storeEntry.eventId !== entry.eventId) {
+          // A newer event for this skill has replaced ours — skip.
+          debugSse("queue-replay-skip-superseded", {
+            queuedEventId: entry.eventId,
+            currentEventId: storeEntry.eventId,
+          });
+          return;
+        }
+        try {
+          window.dispatchEvent(
+            new CustomEvent("studio:toast", {
+              detail: {
+                message: entry.message,
+                severity: entry.severity,
+                skillId: entry.skillId,
+                version: entry.version,
+                eventId: entry.eventId,
+              },
+            }),
+          );
+          debugSse("queue-replay", { eventId: entry.eventId });
+        } catch {
+          // ignore — dispatch failures are non-fatal
+        }
+      };
+      // First entry fires on the next tick; subsequent entries spaced by
+      // replayIntervalMs (AC-US3-03).
+      setTimeout(dispatchOne, idx * replayIntervalMs);
+    });
+  }, [replayIntervalMs]);
+
   useEffect(() => {
     mountedRef.current = true;
     const needsInitial =
@@ -295,6 +489,10 @@ export function useSkillUpdates(
         stopInterval();
         return;
       }
+      // 0838: visible again — replay queued toasts (best-effort, parallel
+      // to the polling debounce). Drain happens immediately so subsequent
+      // dispatches are spaced by replayIntervalMs.
+      replayQueue();
       debounceRef.current = setTimeout(() => {
         debounceRef.current = null;
         const stale =
@@ -322,17 +520,12 @@ export function useSkillUpdates(
 
   // ----- SSE lifecycle (0708) ---------------------------------------------
 
-  // Reconciliation helper — shared by gone-frame handler, 409 fallback, AND
-  // the on-mount tracking-state reconciliation (0708 wrap-up: AC-US5-09 needs
-  // `trackedForUpdates` to surface for SidebarSection / RightPanel).
   const reconcileCheckUpdates = useCallback(async (ids: string[]): Promise<void> => {
     if (ids.length === 0) return;
     try {
       const rows = await api.checkSkillUpdates(ids);
       if (!mountedRef.current || rows.length === 0) return;
       const now = Date.now();
-      // Push-store path — only entries with a real eventId+version go here
-      // (drives the blue dot + bell).
       const pushEntries: UpdateStoreEntry[] = rows
         .filter((r) => r.skillId && r.eventId && r.version)
         .map((r) => ({
@@ -344,9 +537,6 @@ export function useSkillUpdates(
           receivedAt: now,
         }));
       if (pushEntries.length > 0) updateStore.mergeBulk(pushEntries);
-      // Polling-shape merge — feeds mergeUpdatesIntoSkills so the not-tracked
-      // dot can surface even when no push event has fired. Only entries that
-      // carry `trackedForUpdates` or update flags go through here.
       const pollEntries: SkillUpdateInfo[] = rows
         .filter((r) =>
           typeof r.trackedForUpdates === "boolean" ||
@@ -361,13 +551,6 @@ export function useSkillUpdates(
             typeof r.trackedForUpdates === "boolean" ? r.trackedForUpdates : undefined,
         }));
       if (pollEntries.length > 0) {
-        // Merge with existing polling updates. Keyed by canonical FULL name
-        // (`u.name`) so two skills sharing a leaf across plugins don't
-        // overwrite each other (pre-1.0 bug). We only fill in FIELDS the
-        // legacy poll doesn't already provide — primarily `trackedForUpdates`.
-        // This prevents check-updates' tracking-state response (which can lag
-        // the legacy poll's update detection) from overwriting
-        // `updateAvailable: true` with stale `false`.
         setUpdates((prev) => {
           const map = new Map<string, SkillUpdateInfo>();
           for (const u of prev) map.set(u.name, u);
@@ -376,16 +559,12 @@ export function useSkillUpdates(
             const key = u.name;
             const existing = map.get(key);
             if (existing) {
-              // Only fill the gap fields — never overwrite live update state.
               const enriched: SkillUpdateInfo = { ...existing };
               if (existing.trackedForUpdates === undefined && u.trackedForUpdates !== undefined) {
                 enriched.trackedForUpdates = u.trackedForUpdates;
               }
               map.set(key, enriched);
             } else {
-              // No legacy entry — synthesize from check-updates so the not-
-              // tracked dot can render. Defaults `updateAvailable` to false
-              // so the bell does not increment.
               map.set(key, {
                 name: u.name,
                 installed: u.installed ?? "",
@@ -397,9 +576,6 @@ export function useSkillUpdates(
             }
           }
           if (added === 0 && map.size === prev.length) {
-            // No structural change, no fields enriched → bail to avoid an
-            // unnecessary state churn (and the merge path being re-run by
-            // downstream useMemos).
             return prev;
           }
           const next = [...map.values()];
@@ -414,16 +590,8 @@ export function useSkillUpdates(
   }, []);
 
   useEffect(() => {
-    // 0708 wrap-up: open SSE whenever the user has ANY visible skills, not
-    // only installed ones. The server enforces the AC-US5-08 filter (it
-    // only fans out events for skills the user has installed) so the wider
-    // subscription is safe — and it keeps the reconnect/fallback contracts
-    // exercisable in dev/E2E where source-origin skills dominate.
     const csvForSubscribe = skillsCsv || trackingCsv;
     if (!csvForSubscribe) {
-      // No skills at all → no SSE. We're considered 'fallback' so the
-      // polling path still drives updates; components can key off `status`
-      // if they need to degrade.
       setStatus("fallback");
       return;
     }
@@ -437,9 +605,6 @@ export function useSkillUpdates(
     const url = `${streamBase}?skills=${encodeURIComponent(csvForSubscribe)}`;
     let es: EventSource | null = null;
 
-    // Watchdog: if we haven't reached 'connected' within fallbackMs, flip to
-    // 'fallback'. Any later onopen flips back to 'connected' and cancels
-    // the watchdog (if still pending).
     let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     const armFallback = () => {
@@ -447,8 +612,13 @@ export function useSkillUpdates(
       fallbackTimer = setTimeout(() => {
         fallbackTimer = null;
         if (!mountedRef.current) return;
-        if (statusRef.current !== "connected") setStatus("fallback");
+        if (statusRef.current !== "connected") {
+          setStatus("fallback");
+          debugSse("fallback-flipped", { reason: "watchdog-timeout" });
+          emitTelemetry("fallback");
+        }
       }, fallbackMs);
+      debugSse("fallback-armed", { fallbackMs });
     };
     const cancelFallback = () => {
       if (fallbackTimer != null) {
@@ -458,13 +628,6 @@ export function useSkillUpdates(
     };
     armFallback();
 
-    // 0708 wrap-up: explicit reconnect on EventSource.CLOSED. Browsers
-    // auto-reconnect on `onerror` while in CONNECTING/OPEN, but if the
-    // connection terminates abruptly (e.g. `route.abort('connectionclosed')`
-    // in Playwright, or a server-side 5xx that closes the socket) the
-    // EventSource ends up in CLOSED and never tries again. We force a fresh
-    // EventSource with a small backoff so the AC-US5-05 reconnect contract
-    // holds across all drop modes.
     const RECONNECT_BACKOFF_MS = 1_000;
     const scheduleReconnect = () => {
       if (!mountedRef.current) return;
@@ -476,6 +639,8 @@ export function useSkillUpdates(
         if (es) {
           try { es.close(); } catch { /* noop */ }
         }
+        debugSse("reconnect-scheduled", { backoffMs: RECONNECT_BACKOFF_MS });
+        emitTelemetry("reconnect-scheduled");
         openStream();
       }, RECONNECT_BACKOFF_MS);
     };
@@ -490,31 +655,47 @@ export function useSkillUpdates(
       }
       if (!isSkillUpdateEvent(payload)) return;
       const outcome = updateStore.ingest(payload);
+      debugSse("message", { eventId: payload.eventId, skillId: payload.skillId, outcome });
       if (outcome === "duplicate") return;
-      // Visibility-gated toast (AC-US5-02).
       const isVisible =
         typeof document === "undefined" ||
         document.visibilityState !== "hidden";
+      const msg = `${payload.skillId} updated to ${payload.version}`;
       if (isVisible) {
-        const msg = `${payload.skillId} updated to ${payload.version}`;
-        window.dispatchEvent(
-          new CustomEvent("studio:toast", {
-            detail: {
-              message: msg,
-              severity: "info",
-              skillId: payload.skillId,
-              version: payload.version,
-              eventId: payload.eventId,
-            },
-          }),
-        );
+        try {
+          window.dispatchEvent(
+            new CustomEvent("studio:toast", {
+              detail: {
+                message: msg,
+                severity: "info",
+                skillId: payload.skillId,
+                version: payload.version,
+                eventId: payload.eventId,
+              },
+            }),
+          );
+        } catch {
+          // ignore
+        }
+      } else {
+        // 0838 AC-US3-01: tab is hidden — enqueue instead of dispatch.
+        const queued: QueuedToast = {
+          message: msg,
+          severity: "info",
+          skillId: payload.skillId,
+          version: payload.version,
+          eventId: payload.eventId,
+          enqueuedAt: Date.now(),
+        };
+        const outcome = enqueueToast(queued);
+        debugSse("queue-enqueue", { eventId: payload.eventId, outcome });
       }
     };
 
     const onGone = () => {
       if (!mountedRef.current) return;
-      // Gone-frame reconciliation (AC-US5-11): wipe dedup state, reconcile
-      // silently via /check-updates, then resume consuming live events.
+      debugSse("gone", { skillsCount: ids.length });
+      emitTelemetry("gone-frame-received");
       updateStore.clearSeen();
       void reconcileCheckUpdates(ids);
     };
@@ -522,20 +703,20 @@ export function useSkillUpdates(
     const openStream = () => {
       if (!mountedRef.current) return;
       es = new EventSource(url);
+      debugSse("open-attempt", { url });
 
       es.onopen = () => {
         if (!mountedRef.current) return;
         cancelFallback();
         setStatus("connected");
+        lastConnectedAtRef.current = Date.now();
+        debugSse("open", { url });
+        emitTelemetry("connected");
       };
 
       es.onerror = () => {
         if (!mountedRef.current) return;
-        // Two cases:
-        //   1. Connection still alive (transient hiccup) — browser will
-        //      auto-reconnect; we just (re-)arm the fallback watchdog.
-        //   2. Socket closed by peer / aborted — readyState becomes CLOSED
-        //      and the browser stops. We schedule an explicit reconnect.
+        debugSse("error", { readyState: es?.readyState });
         armFallback();
         if (es && es.readyState === EventSource.CLOSED) {
           scheduleReconnect();
@@ -559,12 +740,8 @@ export function useSkillUpdates(
         try { es.close(); } catch { /* noop */ }
       }
     };
-  }, [skillsCsv, trackingCsv, streamBase, fallbackMs, reconcileCheckUpdates]);
+  }, [skillsCsv, trackingCsv, streamBase, fallbackMs, reconcileCheckUpdates, emitTelemetry]);
 
-  // 0708 wrap-up: tracking-state reconciliation effect. Fires when the wider
-  // tracking list changes (covers source-origin skills too). Populates
-  // `trackedForUpdates` flags so SidebarSection / RightPanel can render the
-  // not-tracked dot (AC-US5-09) without waiting for a push event.
   useEffect(() => {
     if (!trackingCsv) return;
     const ids = trackingCsv.split(",");

@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.0.18] - 2026-05-10
+
+### Security (0836 — Skill Studio Hardening Pass, 6 P0 findings)
+
+- **P0-1 (US-001) — eval-server bind hardened to loopback**: `src/eval-server/eval-server.ts` now passes `'127.0.0.1'` explicitly to `server.listen(...)`. Previously the dual-stack default exposed the GitHub-token-injecting proxy to the LAN; anyone on the same Wi-Fi could reach it. Verified by a connect test against a non-loopback host IP that now returns ECONNREFUSED.
+- **P0-2 (US-002) — `X-Studio-Token` gate replaces permissive localhost CORS**: every `/api/*` request now requires a per-launch 256-bit `crypto.randomBytes` token compared with `crypto.timingSafeEqual`. The legacy `LOCALHOST_ORIGIN_RE` allowlist (DNS-rebinding-friendly) is removed. The Tauri WebView reads the token via the new `get_studio_token` IPC; the desktop bundle patches `globalThis.fetch` to inject the header on `/api/*`. CLI users see the token printed once on startup so `curl` workflows still work.
+- **P0-3 (US-003) — `account_get_token` IPC removed**: the deleted IPC used to ship the raw `gho_*` token to the WebView. A WebView XSS or compromised npm dep is no longer one IPC call away from full GitHub grant compromise. The replacement `account_get_user_summary` returns only display fields (`signedIn`/`login`/`avatarUrl`/`tier`). All authenticated `/api/v1/account/*` calls now flow through the eval-server's platform-proxy, which injects `Authorization: Bearer <gho_*>` Rust-side from the keychain.
+- **P0-4 (US-004) — release build refuses placeholder OAuth `client_id`**: `src-tauri/build.rs` now `panic!`s in the release profile when `GITHUB_OAUTH_CLIENT_ID` is unset OR equals the placeholder `Iv1.placeholder-replace-before-ship`. The CI workflow also runs `strings | grep` against the signed binary as defense-in-depth. v1.0.17 shipped with the placeholder; this gate ensures it never recurs.
+- **P0-5 (US-005) — sign-out revokes the GitHub OAuth grant**: `commands::sign_out` is now `async` and calls the platform proxy's `DELETE /api/v1/auth/github/grant` (which forwards to GitHub's `DELETE /applications/{client_id}/grant` with the `client_secret` held server-side per ADR-0831-02). 5s tokio timeout, best-effort: the keychain is ALWAYS cleared even on revocation failure. Token never appears in any log line — only the endpoint, status, and elapsed time.
+- **P0-6 (US-006) — keychain service consolidated**: Node CLI now reads/writes the canonical `com.verifiedskill.desktop::github-oauth-token` slot (matching the Rust desktop). A one-time, idempotent, file-mutex-guarded migration moves any token from the legacy `vskill-github::github_token` slot. Sign-in via the desktop is now visible to `vskill auth status` (and vice versa) on the next invocation.
+
+### Non-functional contract preserved
+
+- ZERO changes to `src-tauri/Entitlements.plist` (Apple notarization unchanged).
+- ZERO new Tauri capabilities or plugin allowlist additions.
+- ZERO new npm or Cargo runtime dependencies (mockito dev-dep already present).
+
+### Documentation
+
+- New `src-tauri/README.md` section documenting the `GITHUB_OAUTH_CLIENT_ID` build-arg requirement.
+- New runbook at `.specweave/docs/internal/specs/oauth-client-id-rotation.md` for rotating the OAuth App.
+
 ## [1.0.0] - 2026-04-27
 
 ### Fixed

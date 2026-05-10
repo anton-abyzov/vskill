@@ -17,6 +17,11 @@
 
 pub mod device_flow;
 pub mod github_client;
+// 0836 US-005 — best-effort GitHub OAuth grant revocation on sign-out via
+// the platform proxy (which holds the OAuth App client_secret per
+// ADR-0831-02). The desktop only carries the public `client_id`;
+// revocation is brokered through verified-skill.com to GitHub.
+pub mod grant_revoke;
 pub mod token_store;
 
 // Re-exports keep `commands.rs` import paths short.
@@ -31,6 +36,7 @@ pub use device_flow::{
     DeviceCodeResponse, DeviceFlowError, PollOutcome, DEFAULT_CLIENT_ID,
 };
 pub use github_client::fetch_user;
+pub use grant_revoke::{perform_sign_out, revoke_grant, RevocationOutcome};
 pub use token_store::{
     clear_identity_cache, load_identity_cache, save_identity_cache, TokenStore, UserIdentity,
 };

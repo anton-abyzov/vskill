@@ -1,22 +1,19 @@
-// 0834 T-029 — desktop account module.
+// 0834 T-029 / 0836 US-003 — desktop account module.
 //
-// IPC surface that the Tauri WebView calls so the eval-ui AccountContext
-// can build `Authorization: Bearer ${token}` headers when talking to
-// verified-skill.com/api/v1/account/*.
+// 0836 US-003: the previous `account_get_token` IPC (which returned the
+// raw `gho_*` token to the WebView) is REMOVED. WebView XSS or compromised
+// npm deps can no longer exfiltrate the bearer through this module. The
+// replacement `account_get_user_summary` returns only display fields
+// (login / avatar URL / tier / signedIn). All authenticated HTTP now flows
+// through the eval-server's platform-proxy, which injects the bearer
+// Rust-side from the keychain.
 //
-// Two layers:
-//   1. `account_get_token` IPC — returns the keyring-backed OAuth/PAT token
-//      currently in `auth::TokenStore`. Returns `None` when signed-out so
-//      the UI can fall back to the marketing/login surface.
-//   2. `account_get_url` IPC — returns the canonical platform URL the
-//      desktop should use. Today it always returns `verified-skill.com`,
-//      but the seam exists so the env override (used by AnyModel-style
-//      enterprise self-host) can flow through one place rather than being
-//      hard-coded inside the React tree.
-//
-// The `account_get_token` command is the only reason this module exists —
-// it doesn't read or write the keyring directly; it just delegates to
-// `TokenStore::load()` and stringifies the result. Stateless.
+// IPC surface:
+//   - `account_get_user_summary` → AccountUserSummary {
+//        signedIn, login, avatarUrl, tier
+//     } reads identity + quota cache; never the keychain.
+//   - `account_get_platform_url` → canonical platform URL (env override
+//     supported via VSKILL_PLATFORM_URL).
 
 pub mod commands;
 

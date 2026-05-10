@@ -62,6 +62,53 @@ cargo build --release
 
 `cargo test` runs the pure-Rust unit tests (e.g. `parse_listen_port`).
 
+## Build-time secrets
+
+### `GITHUB_OAUTH_CLIENT_ID` (required for release builds — 0836 US-004)
+
+Release builds **require** the OAuth App `client_id` to be set as a build
+environment variable. The placeholder constant
+`Iv1.placeholder-replace-before-ship` is rejected by `build.rs` in release
+profile, and a CI step `strings | grep` re-checks the signed binary as a
+second line of defense.
+
+| Profile | Behavior |
+|---|---|
+| `cargo build` (debug) | Tolerates missing/placeholder. Runtime guard catches usage. |
+| `cargo build --release` | **Panics** if env is unset OR equals the placeholder. |
+| CI `desktop-release.yml` | Sets `GITHUB_OAUTH_CLIENT_ID` from a repo secret + `strings | grep` post-sign. |
+
+#### Local dev (testing the OAuth flow)
+
+```sh
+export GITHUB_OAUTH_CLIENT_ID=Iv1.your-test-app-id
+cd src-tauri
+cargo build --release            # uses env-supplied id; no panic
+```
+
+#### CI (GitHub Actions)
+
+The secret lives at **Settings → Secrets and variables → Actions →
+`GITHUB_OAUTH_CLIENT_ID`**. The `desktop-release.yml` workflow exports it
+to the build step automatically. To rotate the OAuth App, follow the
+runbook at
+[`.specweave/docs/internal/specs/oauth-client-id-rotation.md`](../.specweave/docs/internal/specs/oauth-client-id-rotation.md).
+
+#### What happens if it's missing
+
+`cargo build --release` fails with:
+
+```
+error: failed to run custom build command for `vskill-desktop v1.0.x`
+Caused by:
+  thread 'main' panicked at src-tauri/build.rs:36:13:
+  GITHUB_OAUTH_CLIENT_ID is unset or equals the placeholder
+  (Iv1.placeholder-replace-before-ship); release builds REQUIRE a real
+  OAuth App client_id. Set it in CI secrets / shell env before
+  `cargo build --release`. See src-tauri/README.md and
+  .specweave/docs/internal/specs/oauth-client-id-rotation.md.
+```
+
 ## What this shell does NOT do
 
 - It does not modify `src/eval-server/**` or `src/studio/**`.

@@ -279,6 +279,38 @@ jobs:
           spctl -a -t open -vv --context context:primary-signature "$DMG" || true
           codesign -dv --verbose=4 "$DMG" 2>&1 | head -20
 
+      - name: 0836 US-004 — assert no placeholder client_id in release binary
+        # Defense-in-depth alongside src-tauri/build.rs: even if a future
+        # change bypasses build.rs (edited locally, vendored release, etc.),
+        # `strings | grep` against the signed binary catches the placeholder.
+        # v1.0.17 shipped the placeholder; this gate ensures it never
+        # happens again. We grep ONLY the host-platform binary path because
+        # `strings` semantics differ across runners — the macOS binary is
+        # the canonical artifact users ship, so we check there as the
+        # source of truth.
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN_GLOB="src-tauri/target/${{ matrix.target }}/release/bundle/macos"/*.app/Contents/MacOS/*
+          shopt -s nullglob
+          BINS=( $BIN_GLOB )
+          if [ "${#BINS[@]}" -eq 0 ]; then
+            echo "::error::no signed binary found at $BIN_GLOB"
+            exit 1
+          fi
+          PLACEHOLDER='Iv1.placeholder-replace-before-ship'
+          FAIL=0
+          for BIN in "${BINS[@]}"; do
+            echo "Scanning: $BIN"
+            if strings "$BIN" | grep -q -F "$PLACEHOLDER"; then
+              echo "::error::Placeholder GITHUB_OAUTH_CLIENT_ID found in $BIN"
+              FAIL=1
+            fi
+          done
+          if [ "$FAIL" -eq 1 ]; then exit 1; fi
+          echo "OK: placeholder string absent from all release binaries."
+
       - name: GPG sign Linux artifacts
         if: matrix.platform == 'linux'
         env:

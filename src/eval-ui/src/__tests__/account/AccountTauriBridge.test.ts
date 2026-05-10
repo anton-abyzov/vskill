@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
-// 0834 T-029 — AccountTauriBridge tests.
+// 0834 T-029 / 0836 US-003 — AccountTauriBridge tests.
 //
-// AC-US12-03: Tauri Bearer auth integration. Verifies the bridge wires
-// IPC results into the AccountContext shape correctly + falls back to
-// cookie/null when not in a Tauri host.
+// 0836 US-003: the bridge no longer mints `Authorization: Bearer ${token}`.
+// The deleted `account_get_token` IPC moved the bearer Rust-side; the
+// eval-server platform-proxy injects it for `/api/v1/account/*`. The bridge
+// now returns a cookie-mode AccountContext value with `platformBaseUrl: ""`
+// (same-origin, fetched through the eval-server) and a no-op
+// `getAuthHeader` returning null.
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 
 import {
   createTauriAccountContext,
+  getAccountUserSummary,
   isTauriHost,
 } from "../../contexts/AccountTauriBridge";
 
@@ -35,49 +39,76 @@ describe("isTauriHost", () => {
   });
 });
 
-describe("createTauriAccountContext", () => {
-  it("uses platformBaseUrl from IPC and builds Bearer headers", async () => {
+describe("createTauriAccountContext (0836 US-003: cookie-mode, no bearer)", () => {
+  it("returns a same-origin / cookie-mode context with null getAuthHeader", async () => {
     const invoke = vi.fn(async (cmd: string) => {
       if (cmd === "account_get_platform_url") return "https://verified-skill.dev";
-      if (cmd === "account_get_token") return "vsk_abc";
       return null;
     });
     (window as TauriWindowShape).__TAURI_INTERNALS__ = { invoke };
 
     const ctx = await createTauriAccountContext();
-    expect(ctx.platformBaseUrl).toBe("https://verified-skill.dev");
-    expect(ctx.authMode).toBe("bearer");
-    expect(await ctx.getAuthHeader()).toBe("Bearer vsk_abc");
-  });
-
-  it("falls back to default platform URL when IPC returns null", async () => {
-    const invoke = vi.fn(async () => null);
-    (window as TauriWindowShape).__TAURI_INTERNALS__ = { invoke };
-
-    const ctx = await createTauriAccountContext();
-    expect(ctx.platformBaseUrl).toBe("https://verified-skill.com");
-  });
-
-  it("getAuthHeader returns null when no token is stored", async () => {
-    const invoke = vi.fn(async (cmd: string) => {
-      if (cmd === "account_get_platform_url") return "https://verified-skill.com";
-      if (cmd === "account_get_token") return null;
-      return null;
-    });
-    (window as TauriWindowShape).__TAURI_INTERNALS__ = { invoke };
-
-    const ctx = await createTauriAccountContext();
+    expect(ctx.platformBaseUrl).toBe("");
+    expect(ctx.authMode).toBe("cookie");
     expect(await ctx.getAuthHeader()).toBeNull();
   });
 
-  it("swallows IPC errors and returns null token", async () => {
+  it("does not invoke the deleted account_get_token IPC", async () => {
+    const invoke = vi.fn(async () => null);
+    (window as TauriWindowShape).__TAURI_INTERNALS__ = { invoke };
+
+    await createTauriAccountContext();
+    const calls = invoke.mock.calls.map((c) => c[0] as string);
+    expect(calls).not.toContain("account_get_token");
+  });
+
+  it("works without Tauri internals (web build) — returns same default", async () => {
+    // Even without the IPC bridge, the desktop bundle can construct a
+    // context (jsdom defaults). This exercises the no-op fallback path.
+    const ctx = await createTauriAccountContext();
+    expect(ctx.platformBaseUrl).toBe("");
+    expect(ctx.authMode).toBe("cookie");
+    expect(await ctx.getAuthHeader()).toBeNull();
+  });
+});
+
+describe("getAccountUserSummary (0836 US-003)", () => {
+  it("returns the IPC payload verbatim when present", async () => {
+    const summary = {
+      signedIn: true,
+      login: "octocat",
+      avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4",
+      tier: "pro" as const,
+    };
     const invoke = vi.fn(async (cmd: string) => {
-      if (cmd === "account_get_platform_url") return "https://verified-skill.com";
+      if (cmd === "account_get_user_summary") return summary;
+      return null;
+    });
+    (window as TauriWindowShape).__TAURI_INTERNALS__ = { invoke };
+
+    const got = await getAccountUserSummary();
+    expect(got).toEqual(summary);
+  });
+
+  it("falls back to a clean signed-out shape when IPC is unavailable", async () => {
+    delete (window as TauriWindowShape).__TAURI_INTERNALS__;
+    const got = await getAccountUserSummary();
+    expect(got).toEqual({
+      signedIn: false,
+      login: null,
+      avatarUrl: null,
+      tier: "free",
+    });
+  });
+
+  it("falls back to signed-out shape when the IPC throws", async () => {
+    const invoke = vi.fn(async () => {
       throw new Error("keychain locked");
     });
     (window as TauriWindowShape).__TAURI_INTERNALS__ = { invoke };
 
-    const ctx = await createTauriAccountContext();
-    expect(await ctx.getAuthHeader()).toBeNull();
+    const got = await getAccountUserSummary();
+    expect(got.signedIn).toBe(false);
+    expect(got.tier).toBe("free");
   });
 });

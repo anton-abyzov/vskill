@@ -95,7 +95,12 @@ describe("keychain", () => {
 
     k.setGitHubToken("ghu_abc123");
     expect(k.getGitHubToken()).toBe("ghu_abc123");
-    expect(kr.store.get(`vskill-github::${GITHUB_TOKEN_KEY}`)).toBe("ghu_abc123");
+    // 0836 US-006: canonical service is now `com.verifiedskill.desktop`
+    // (was `vskill-github`); the fixture asserts the new slot directly so
+    // a future rename trips this test.
+    expect(
+      kr.store.get(`com.verifiedskill.desktop::${GITHUB_TOKEN_KEY}`),
+    ).toBe("ghu_abc123");
     expect(fsState.files.size).toBe(0);
     expect(warn).not.toHaveBeenCalled();
   });
@@ -129,7 +134,8 @@ describe("keychain", () => {
     const stored = fsState.files.get("/tmp/vskill-test-keys.env");
     expect(stored).toBeTruthy();
     expect(stored!.mode).toBe(0o600);
-    expect(stored!.content).toContain("github_token=file-token");
+    // 0836 US-006: canonical key is `github-oauth-token` (was `github_token`).
+    expect(stored!.content).toContain("github-oauth-token=file-token");
 
     // second op should not re-warn
     k.getGitHubToken();

@@ -267,4 +267,27 @@ mod tests {
         assert_eq!(parsed.email, None);
         assert_eq!(parsed.cached_at, None);
     }
+
+    // 0836 US-006 — interop lock with Node side. The canonical service name
+    // must remain `com.verifiedskill.desktop`; the Node CLI reads/writes
+    // the same slot via `src/lib/keychain.ts`. Renaming either constant
+    // without also updating Node + bumping the keychain migration is a P0
+    // break — sign-in via desktop wouldn't be visible to the CLI and vice
+    // versa.
+    #[test]
+    fn service_name_is_canonical_for_node_interop() {
+        assert_eq!(
+            super::SERVICE_NAME,
+            "com.verifiedskill.desktop",
+            "Renaming the keychain service breaks Node-side interop. If you \
+             must rename, also update src/lib/keychain.ts and bump the \
+             keychain-migration helper."
+        );
+        assert_eq!(
+            super::ACCOUNT_NAME,
+            "github-oauth-token",
+            "Renaming the keychain account breaks Node-side interop. If you \
+             must rename, also update src/lib/keychain.ts."
+        );
+    }
 }

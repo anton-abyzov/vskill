@@ -1,10 +1,38 @@
-import { Suspense, lazy, useCallback, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useId, useMemo, useRef, useState } from "react";
 import { useStudio } from "../StudioContext";
 import { useToast } from "./ToastProvider";
 import { usePlatformHealth } from "../hooks/usePlatformHealth";
 
 // Lazy-load the popover body so the closed bell stays ≤2KB gzipped.
 const UpdateDropdown = lazy(() => import("./UpdateDropdown"));
+
+/**
+ * 0838 T-004: status → label + color-token mapping for the bell pip.
+ * AC-US4-01 governs the color tokens; AC-US1-04 governs the labels.
+ */
+function statusLabel(status: "connecting" | "connected" | "fallback"): string {
+  switch (status) {
+    case "connected":
+      return "connected";
+    case "fallback":
+      return "reconnecting";
+    case "connecting":
+    default:
+      return "connecting";
+  }
+}
+
+function statusPipColor(status: "connecting" | "connected" | "fallback"): string {
+  switch (status) {
+    case "connected":
+      return "var(--status-success-text)";
+    case "fallback":
+      return "var(--color-own)";
+    case "connecting":
+    default:
+      return "var(--text-secondary)";
+  }
+}
 
 /**
  * 0683 T-006: Bell icon + count badge for the TopRail.
@@ -28,10 +56,19 @@ export function UpdateBell() {
     skills,
     updatesById,
     activeAgent,
+    updateStreamStatus,
+    trackedSkillCount,
   } = useStudio() as ReturnType<typeof useStudio> & {
     revealSkill: (plugin: string, skill: string) => void;
     skills?: Array<{ plugin: string; skill: string; source?: string }>;
     activeAgent?: string | null;
+    updateStreamStatus?: "connecting" | "connected" | "fallback";
+    /**
+     * 0838 AC-US4-02: total tracked-skill count (installed + source-origin
+     * with a registry twin). When zero, no SSE is attempted and the pip
+     * is suppressed — there's no signal worth showing.
+     */
+    trackedSkillCount?: number;
   };
   const { toast } = useToast();
   // 0778 — surface upstream-degraded state on the bell icon (colour +
@@ -39,6 +76,16 @@ export function UpdateBell() {
   // the only signal here.
   const { data: platformHealth } = usePlatformHealth();
   const platformDegraded = platformHealth?.degraded === true;
+
+  // 0838: stable a11y id for the hidden status-text span so the bell
+  // button can reference it via aria-describedby (AC-US1-04).
+  const statusTextId = useId();
+  const liveStatus = updateStreamStatus ?? "connecting";
+  const tracked = typeof trackedSkillCount === "number" ? trackedSkillCount : null;
+  // Pip is only shown when SSE has something to track. When tracked is
+  // explicitly null (legacy callers that don't pass it), default to showing
+  // the pip — back-compat with consumers that haven't adopted the new field.
+  const pipVisible = tracked === null ? true : tracked > 0;
 
   // 0708 AC-US5-03: project push-store entries → short-name-keyed diff
   // summaries so UpdateDropdown can render the one-liner under each row.
@@ -88,6 +135,7 @@ export function UpdateBell() {
         aria-label={ariaLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-describedby={statusTextId}
         title={titleAttr}
         onClick={() => setOpen((v) => !v)}
         style={{
@@ -157,7 +205,46 @@ export function UpdateBell() {
             {badgeText}
           </span>
         )}
+        {/* 0838 T-004 AC-US4-01: 6px colored pip in the bottom-right of the
+            icon. Hidden when there's nothing to track (AC-US4-02). */}
+        {pipVisible && (
+          <span
+            data-testid="update-bell-status-pip"
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              bottom: -1,
+              right: -1,
+              width: 6,
+              height: 6,
+              borderRadius: 999,
+              background: statusPipColor(liveStatus),
+              border: "1px solid var(--color-paper)",
+              display: "inline-block",
+              lineHeight: 0,
+            }}
+          />
+        )}
       </button>
+      {/* 0838 T-003 AC-US1-04: hidden status text linked via aria-describedby.
+          Visually offscreen but read by screen readers. */}
+      <span
+        id={statusTextId}
+        data-testid="update-bell-status-text"
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          margin: -1,
+          padding: 0,
+          overflow: "hidden",
+          clip: "rect(0 0 0 0)",
+          whiteSpace: "nowrap",
+          border: 0,
+        }}
+      >
+        {`Live updates: ${statusLabel(liveStatus)}`}
+      </span>
       {open && (
         <Suspense fallback={<span data-testid="update-bell-fallback">Loading…</span>}>
           <UpdateDropdown

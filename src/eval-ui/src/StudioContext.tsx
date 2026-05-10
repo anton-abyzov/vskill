@@ -170,6 +170,13 @@ export interface StudioContextValue {
    *  …) so consumers like UpdateBell can detect whether an update's
    *  installLocations point at the agent the user is currently viewing. */
   activeAgent: string | null;
+  /**
+   * 0838 AC-US4-02: total tracked-skill count (installed with platform
+   * identity + source-origin skills with a registry twin). Drives the
+   * UpdateBell pip's "no signal to show" suppression — when zero, the
+   * pip is hidden because no SSE is attempted.
+   */
+  trackedSkillCount: number;
 }
 
 // 0708: exported (named `StudioContext`) so leaf components like `UpdateChip`
@@ -394,6 +401,13 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   const resolveErrorWarnedRef = useRef<boolean>(false);
   const [resolvedIdsCsv, setResolvedIdsCsv] = useState<string>("");
 
+  // 0838 AC-US2-01: source-origin lookup state (declared early so the
+  // resolvedSseIds useMemo below can read it). Populated by the
+  // lookup-by-name effect further down.
+  const sourceOriginIdsCsvRef = useRef<string>("");
+  const lastSourceOriginSigRef = useRef<string>("");
+  const [sourceOriginIdsCsv, setSourceOriginIdsCsv] = useState<string>("");
+
   // 0683 T-002 + 0708 T-040: shared hook owns polling (/api/skills/updates)
   // AND the push-pipeline EventSource (/api/v1/skills/stream). Pass resolved
   // UUID/slug IDs so UpdateHub can match the SSE filter. Until the platform
@@ -405,14 +419,24 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   }, [state.skills]);
 
   const resolvedSseIds = useMemo(() => {
-    if (!resolvedIdsCsv) return [];
-    return resolvedIdsCsv.split(",").filter(Boolean);
-  }, [resolvedIdsCsv]);
+    // 0838 AC-US2-01: merge installed-resolved IDs with source-origin twins.
+    const installedIds = resolvedIdsCsv ? resolvedIdsCsv.split(",").filter(Boolean) : [];
+    const sourceIds = sourceOriginIdsCsv ? sourceOriginIdsCsv.split(",").filter(Boolean) : [];
+    if (installedIds.length === 0 && sourceIds.length === 0) return [];
+    return [...new Set([...installedIds, ...sourceIds])];
+  }, [resolvedIdsCsv, sourceOriginIdsCsv]);
 
   const skillUpdates = useSkillUpdates({
     skillIds: resolvedSseIds,
     trackingSkillIds: allSkillIds,
   });
+
+  // 0838 AC-US4-02: count of tracked skills (installed-with-platform-id +
+  // source-origin-with-twin). Drives the bell pip's "no signal to show"
+  // suppression.
+  const trackedSkillCount = useMemo(() => {
+    return resolvedSseIds.length;
+  }, [resolvedSseIds]);
 
   // 0736 AC-US3-01: When polling data arrives, resolve installed skills to
   // their platform UUID/slug and rebuild the SSE subscription filter. The
@@ -510,6 +534,58 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.skills, skillUpdates.updates]);
 
+  // 0838 AC-US2-01: source-origin lookup-by-name. Source-origin skills
+  // (locally authored, `origin === "source"`) carry no UUID/slug in the
+  // installed-skill record. We batch them against
+  // `/api/v1/skills/lookup-by-name` to discover registry twins; matched
+  // UUID/slug rows merge into the SSE filter alongside installed-skill IDs.
+  // Match key (AC-US2-05): case-insensitive name + exact author. Entries
+  // without an author are silently excluded. The lookup is content-stable:
+  // we only fire a fetch when the (name, author) tuple list changes.
+  useEffect(() => {
+    const sourceOrigin = state.skills.filter(
+      (s): s is typeof s & { author: string } =>
+        s.origin === "source" &&
+        typeof s.author === "string" &&
+        s.author.length > 0,
+    );
+    if (sourceOrigin.length === 0) {
+      if (sourceOriginIdsCsvRef.current !== "") {
+        sourceOriginIdsCsvRef.current = "";
+        setSourceOriginIdsCsv("");
+      }
+      lastSourceOriginSigRef.current = "";
+      return;
+    }
+    const entries = sourceOrigin.map((s) => ({ name: s.skill, author: s.author }));
+    const sig = entries
+      .map((e) => `${e.name.toLowerCase()}|${e.author}`)
+      .sort()
+      .join("\n");
+    if (sig === lastSourceOriginSigRef.current) return;
+    lastSourceOriginSigRef.current = sig;
+    let cancelled = false;
+    api.lookupSkillsByName(entries)
+      .then((rows) => {
+        if (cancelled) return;
+        const ids = rows
+          .flatMap((r) => [r.uuid, r.slug])
+          .filter((v): v is string => typeof v === "string" && v.length > 0);
+        const csv = [...new Set(ids)].sort().join(",");
+        if (csv !== sourceOriginIdsCsvRef.current) {
+          sourceOriginIdsCsvRef.current = csv;
+          setSourceOriginIdsCsv(csv);
+        }
+      })
+      .catch(() => {
+        // Reset so a future input change can retry. Polling fallback covers
+        // the gap meanwhile.
+        if (!cancelled) lastSourceOriginSigRef.current = "";
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.skills]);
+
   // Re-merge the raw skills with the latest update list on every change.
   // `mergeUpdatesIntoSkills` only writes fields when an entry exists, so we
   // strip any stale flags from `state.skills` first — otherwise a skill that
@@ -582,7 +658,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     dismissPushUpdate: skillUpdates.dismiss,
     activeAgent,
     onSkillUpdated,
-  }), [effectiveState, selectSkill, clearSelection, setMode, setSearch, setMobileView, loadSkills, updateCount, dismissUpdateNotification, skillUpdates.updates, outdatedByOrigin, isRefreshingUpdates, refreshUpdates, revealSkill, clearReveal, skillUpdates.updatesById, skillUpdates.pushUpdateCount, skillUpdates.status, skillUpdates.dismiss, activeAgent, onSkillUpdated]);
+    trackedSkillCount,
+  }), [effectiveState, selectSkill, clearSelection, setMode, setSearch, setMobileView, loadSkills, updateCount, dismissUpdateNotification, skillUpdates.updates, outdatedByOrigin, isRefreshingUpdates, refreshUpdates, revealSkill, clearReveal, skillUpdates.updatesById, skillUpdates.pushUpdateCount, skillUpdates.status, skillUpdates.dismiss, activeAgent, onSkillUpdated, trackedSkillCount]);
 
   return <StudioCtx.Provider value={value}>{children}</StudioCtx.Provider>;
 }

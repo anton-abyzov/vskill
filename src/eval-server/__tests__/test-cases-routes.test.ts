@@ -8,13 +8,19 @@ import { join } from "node:path";
 import { Router } from "../router.js";
 import { registerRoutes } from "../api-routes.js";
 import { parseTestCases } from "../../eval/test-case-parser.js";
+import { studioTokenHeaders } from "./helpers/studio-token-test-helpers.js";
 
 // Minimal fake req/res — just enough to satisfy the route handlers.
 function makeReq(method: string, url: string, body?: unknown): any {
   const req: any = {
     method,
     url,
-    headers: { host: "localhost:3079", "content-type": "application/json" },
+    // 0836 US-002: every /api/* request needs the X-Studio-Token to clear the gate.
+    headers: {
+      host: "localhost:3079",
+      "content-type": "application/json",
+      ...studioTokenHeaders(),
+    },
   };
   // EventEmitter-ish for readBody
   const handlers: Record<string, Function[]> = {};

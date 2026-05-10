@@ -45,6 +45,12 @@ pub struct SidecarState {
     /// `lifecycle_run_alongside` so the user's explicit choice isn't
     /// overridden by the gate re-firing on the same external instance.
     pub bypass_scan_once: bool,
+    /// 0836 US-002: per-process X-Studio-Token captured from the sidecar's
+    /// `Studio token: <token>` stdout banner. Forwarded to the WebView via
+    /// the `get_studio_token` Tauri IPC, never logged, never persisted.
+    /// Reset on every spawn so a stale token from a crashed prior sidecar
+    /// can't bleed into the next process.
+    pub studio_token: Option<String>,
 }
 
 pub type SharedSidecar = Arc<Mutex<SidecarState>>;
@@ -180,6 +186,10 @@ pub fn spawn_sidecar<'a>(
             s.child = Some(child);
             s.pid = Some(pid);
             s.port = None;
+            // 0836 US-002: reset studio token on a fresh spawn — the new
+            // sidecar will emit a fresh `Studio token: <token>` banner on
+            // stdout and we want the IPC to return None until that arrives.
+            s.studio_token = None;
         }
 
         // Channel — port detector pushes the port the moment we see LISTEN_PORT=...
@@ -189,17 +199,30 @@ pub fn spawn_sidecar<'a>(
         let state_clone = state.clone();
         tokio::spawn(async move {
             let mut port_announced = false;
+            let mut token_captured = false;
             while let Some(event) = rx.recv().await {
                 match event {
                     CommandEvent::Stdout(line) => {
                         let text = String::from_utf8_lossy(&line).to_string();
-                        log::debug!("[sidecar stdout] {}", text.trim_end());
                         if !port_announced {
                             if let Some(port) = parse_listen_port(&text) {
                                 port_announced = true;
                                 let _ = port_tx.send(port).await;
                             }
                         }
+                        // 0836 US-002: capture the `Studio token: <token>`
+                        // banner once. Suppress the line from debug logs so
+                        // the value never lands in user-shared log captures.
+                        if !token_captured {
+                            if let Some(token) = parse_studio_token(&text) {
+                                token_captured = true;
+                                let mut s = state_clone.lock().unwrap();
+                                s.studio_token = Some(token);
+                                log::debug!("[sidecar] studio token captured");
+                                continue;
+                            }
+                        }
+                        log::debug!("[sidecar stdout] {}", text.trim_end());
                     }
                     CommandEvent::Stderr(line) => {
                         let text = String::from_utf8_lossy(&line).to_string();
@@ -250,6 +273,27 @@ fn parse_listen_port(line: &str) -> Option<u16> {
         tok.strip_prefix("LISTEN_PORT=")
             .and_then(|n| n.trim().parse::<u16>().ok())
     })
+}
+
+/// 0836 US-002: pull the per-process studio token out of the eval-server's
+/// `Studio token: <token>` startup banner. The banner is base64url-encoded
+/// (43 chars, `[A-Za-z0-9_-]`) — we accept any non-whitespace token after
+/// the marker so a future encoding bump doesn't break this parser. Returns
+/// `None` for any line that doesn't carry the marker.
+fn parse_studio_token(line: &str) -> Option<String> {
+    // Match the marker substring rather than splitting on whitespace because
+    // a leading indent ("  Studio token: ABC") is the actual emitted shape.
+    let needle = "Studio token:";
+    let idx = line.find(needle)?;
+    let rest = line[idx + needle.len()..].trim_start();
+    let tok = rest
+        .split(|c: char| c.is_whitespace())
+        .next()?
+        .trim();
+    if tok.is_empty() {
+        return None;
+    }
+    Some(tok.to_string())
 }
 
 async fn poll_health(port: u16) -> Result<(), String> {
@@ -522,7 +566,7 @@ pub fn load_studio_url(app: &AppHandle, port: u16) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_listen_port;
+    use super::{parse_listen_port, parse_studio_token};
 
     #[test]
     fn parses_basic_listen_port() {
@@ -545,5 +589,49 @@ mod tests {
     #[test]
     fn rejects_garbage_port_value() {
         assert_eq!(parse_listen_port("LISTEN_PORT=abc"), None);
+    }
+
+    // -------------------------------------------------------------------------
+    // 0836 US-002 — parse_studio_token covers the eval-server banner shape:
+    //   "  Studio token: <43-char base64url>\n"
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn parses_studio_token_from_indented_banner() {
+        let line = "  Studio token: AbCdEf-_GhIjKlMnOpQrStUvWxYz0123456789ABCDEF\n";
+        assert_eq!(
+            parse_studio_token(line).as_deref(),
+            Some("AbCdEf-_GhIjKlMnOpQrStUvWxYz0123456789ABCDEF")
+        );
+    }
+
+    #[test]
+    fn parses_studio_token_without_indent() {
+        assert_eq!(
+            parse_studio_token("Studio token: tokA").as_deref(),
+            Some("tokA")
+        );
+    }
+
+    #[test]
+    fn ignores_lines_without_studio_token_marker() {
+        assert_eq!(parse_studio_token("Skill Studio: http://localhost:3077"), None);
+        assert_eq!(parse_studio_token("LISTEN_PORT=3077"), None);
+    }
+
+    #[test]
+    fn ignores_blank_token_value() {
+        assert_eq!(parse_studio_token("Studio token:    "), None);
+        assert_eq!(parse_studio_token("Studio token:"), None);
+    }
+
+    #[test]
+    fn captures_first_whitespace_terminated_token() {
+        // Defensive: if a future banner adds trailing fields, we capture only
+        // the first whitespace-bounded value.
+        assert_eq!(
+            parse_studio_token("Studio token: tokenA other-field=x").as_deref(),
+            Some("tokenA")
+        );
     }
 }

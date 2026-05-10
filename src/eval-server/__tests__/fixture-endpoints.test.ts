@@ -23,6 +23,22 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Router } from "../router.js";
 import { registerRoutes } from "../api-routes.js";
+import { studioTokenHeaders } from "./helpers/studio-token-test-helpers.js";
+
+// 0836 US-002: every /api/* fetch must include X-Studio-Token. Wrap globalThis.fetch
+// for the lifetime of this test file so we don't have to thread headers through
+// every individual fetch call.
+const _origFetch = globalThis.fetch;
+globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+  const merged: RequestInit = { ...(init ?? {}) };
+  const url = typeof input === "string" ? input : input.toString();
+  if (url.includes("/api/")) {
+    const headers = new Headers(merged.headers ?? {});
+    for (const [k, v] of Object.entries(studioTokenHeaders())) headers.set(k, v);
+    merged.headers = headers;
+  }
+  return _origFetch(input, merged);
+}) as typeof fetch;
 
 let tmpRoot: string;
 let baseUrl: string;

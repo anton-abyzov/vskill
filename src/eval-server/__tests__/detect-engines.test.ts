@@ -24,6 +24,7 @@ vi.mock("../../utils/skill-builder-detection.js", () => ({
 
 const { Router } = await import("../router.js");
 const { registerDetectEnginesRoute } = await import("../detect-engines-route.js");
+const { studioTokenHeaders } = await import("./helpers/studio-token-test-helpers.js");
 
 beforeEach(() => {
   detectionMock.skillCreator = false;
@@ -43,7 +44,8 @@ async function callRoute(): Promise<JsonResponse> {
   const req = {
     method: "GET",
     url: "/api/studio/detect-engines",
-    headers: { host: "127.0.0.1:3077" },
+    // 0836 US-002: include X-Studio-Token so the gate lets the request through.
+    headers: { host: "127.0.0.1:3077", ...studioTokenHeaders() },
   } as unknown as http.IncomingMessage;
 
   let status = 0;

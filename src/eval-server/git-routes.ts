@@ -13,7 +13,14 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
 import type { Router } from "./router.js";
-import { sendJson, readBody, LOCALHOST_ORIGIN_RE } from "./router.js";
+import { sendJson, readBody } from "./router.js";
+
+// 0836 US-002: the studio-token gate is now the primary authn for /api/*.
+// Origin-pattern matching kept as defense-in-depth for git-routes (CSRF
+// guard against browser cross-site requests with the token leaking via
+// devtools / extension). The pattern was previously exported from router.ts
+// as LOCALHOST_ORIGIN_RE — inlined here as the only remaining caller.
+const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 import { createLlmClient, type ProviderName } from "../eval/llm.js";
 
 interface GitResult {

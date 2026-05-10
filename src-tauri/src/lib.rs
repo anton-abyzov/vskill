@@ -67,6 +67,10 @@ pub fn run() {
         .manage(state.clone())
         .invoke_handler(tauri::generate_handler![
             commands::get_server_port,
+            // 0836 US-002 — per-process X-Studio-Token bridge for the
+            // WebView. The token is captured from the sidecar's startup
+            // banner; the IPC returns None until that arrives.
+            commands::get_studio_token,
             commands::restart_server,
             commands::open_logs_folder,
             commands::quit,
@@ -113,7 +117,12 @@ pub fn run() {
             commands::open_external_url,
             commands::refresh_user_identity,
             // 0834 account — IPC for the /account WebView (US-012).
-            account::commands::account_get_token,
+            // 0836 US-003: account_get_token REMOVED — XSS escalation
+            // path. Replaced with account_get_user_summary which returns
+            // display fields only (no token surface). Authenticated HTTP
+            // flows through the eval-server platform-proxy, which holds
+            // the bearer Rust-side.
+            account::commands::account_get_user_summary,
             account::commands::account_get_platform_url,
         ])
         .setup(move |app| {

@@ -114,6 +114,7 @@ vi.mock("../benchmark-runner.js", () => ({
 
 import { Router } from "../router.js";
 import { registerRoutes } from "../api-routes.js";
+import { studioTokenHeaders } from "./helpers/studio-token-test-helpers.js";
 import { sendSSE } from "../sse-helpers.js";
 import { judgeAssertion } from "../../eval/judge.js";
 import { runComparison } from "../../eval/comparator.js";
@@ -165,7 +166,8 @@ function makeMockReq(method: string, url: string, body?: unknown) {
   return {
     method,
     url,
-    headers: { host: "localhost" },
+    // 0836 US-002: pass the X-Studio-Token through the gate.
+    headers: { host: "localhost", ...studioTokenHeaders() },
     on: vi.fn((event: string, cb: (data?: unknown) => void) => {
       if (!listeners[event]) listeners[event] = [];
       listeners[event].push(cb);

@@ -101,6 +101,36 @@ export function deriveScopeSource(scope: SkillScope): SkillSource {
 
 const BASE = "";
 
+// 0836 hardening (F-004): diagnostic-only logger gated on the same
+// `VITE_VSKILL_DEBUG_SSE` / `?debugSse=1` toggle that drives
+// useSkillUpdates' debug stream. Errors are swallowed elsewhere by design
+// (polling fallback covers correctness), but staff debugging field reports
+// need a signal when the platform routes misbehave. NEVER surfaces to
+// end-users.
+function debugApiWarn(event: string, payload: Record<string, unknown>): void {
+  try {
+    let on = false;
+    const env = (import.meta as { env?: Record<string, string | undefined> })
+      .env;
+    if (env && (env.VITE_VSKILL_DEBUG_SSE === "1" || env.VITE_VSKILL_DEBUG_SSE === "true")) {
+      on = true;
+    }
+    if (
+      !on &&
+      typeof window !== "undefined" &&
+      typeof window.location !== "undefined"
+    ) {
+      const sp = new URLSearchParams(window.location.search);
+      if (sp.get("debugSse") === "1") on = true;
+    }
+    if (!on) return;
+    // eslint-disable-next-line no-console
+    console.warn(`[vskill api] ${event}`, payload);
+  } catch {
+    // Logging is strictly best-effort — never throw from a diagnostic.
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   /** 0772 US-004: structured details forwarded from the server's JSON error
@@ -1137,6 +1167,69 @@ export const api = {
         slug: typeof r?.slug === "string" && r.slug.length > 0 ? r.slug : undefined,
       };
     });
+  },
+
+  /**
+   * 0838 T-007/T-008/T-009: source-origin name+author lookup helper.
+   *
+   * Maps locally-authored (`origin === "source"`) skills to their registry
+   * twin via the platform's `/api/v1/skills/lookup-by-name` route. Match
+   * key is case-insensitive `name` + exact `author` (AC-US2-05).
+   *
+   * Cap: 50 entries per request (the platform route enforces this; we
+   * pre-clip on the studio side as a friendly default).
+   *
+   * Failures are swallowed — callers should treat empty results as "no
+   * twin found, polling fallback covers it".
+   */
+  async lookupSkillsByName(
+    entries: Array<{ name: string; author: string }>,
+  ): Promise<Array<{ name: string; author: string; uuid?: string; slug?: string }>> {
+    if (!Array.isArray(entries) || entries.length === 0) return [];
+    const clipped = entries.slice(0, 50);
+    try {
+      const res = await fetch(`${BASE}/api/v1/skills/lookup-by-name`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ entries: clipped }),
+      });
+      if (!res.ok) {
+        // 0836 hardening (F-004): emit a diagnostic on the failure path so a
+        // misdeployed platform route is visible to staff without surfacing
+        // anything to end-users. `[debugSse]`-prefixed so the existing
+        // useSkillUpdates filter picks it up alongside other source-origin
+        // diagnostics.
+        debugApiWarn("lookup-by-name-error", { status: res.status });
+        return [];
+      }
+      const body = await res.json().catch((err: unknown) => {
+        debugApiWarn("lookup-by-name-parse-error", {
+          message: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      });
+      const results: unknown = (body && typeof body === "object" && "results" in body)
+        ? (body as { results: unknown }).results
+        : null;
+      if (!Array.isArray(results)) {
+        if (body !== null) debugApiWarn("lookup-by-name-no-results-array", {});
+        return [];
+      }
+      return results
+        .filter((r): r is Record<string, unknown> => r !== null && typeof r === "object")
+        .map((r) => ({
+          name: typeof r.name === "string" ? r.name : "",
+          author: typeof r.author === "string" ? r.author : "",
+          uuid: typeof r.uuid === "string" && r.uuid.length > 0 ? r.uuid : undefined,
+          slug: typeof r.slug === "string" && r.slug.length > 0 ? r.slug : undefined,
+        }))
+        .filter((r) => r.name.length > 0);
+    } catch (err) {
+      debugApiWarn("lookup-by-name-fetch-error", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }
   },
 
   // ---------------------------------------------------------------------------

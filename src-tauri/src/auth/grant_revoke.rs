@@ -31,13 +31,14 @@ pub enum RevocationOutcome {
     /// github.com/settings/applications, or token expired). Treated as
     /// success per AC-US5-04 — the local state will be cleared regardless.
     AlreadyInvalid,
-    /// 5xx, network, timeout, OR 404 (platform endpoint not deployed).
-    /// Best-effort failed. The keychain is still cleared by the caller;
-    /// this signals "no server-side action confirmed". 404 is mapped here
-    /// rather than `AlreadyInvalid` because, in this codebase's deployment
-    /// posture, 404 most likely indicates the platform-side handler is not
-    /// yet wired (it lives behind a follow-up increment); collapsing to
-    /// success would make the gap silent in field telemetry.
+    /// 5xx, network, timeout, OR 404 (platform endpoint unreachable —
+    /// CDN cache miss / pre-deploy build / unrouted hostname). Best-effort
+    /// failed. The keychain is still cleared by the caller; this signals
+    /// "no server-side action confirmed". 404 is mapped here rather than
+    /// `AlreadyInvalid` because in this codebase the platform endpoint
+    /// ships with the desktop release — a 404 means deployment lag, not
+    /// that the user's grant is actually gone. Collapsing 404 to success
+    /// would make a deploy gap silent in field telemetry.
     Failed(String),
 }
 
@@ -57,13 +58,15 @@ fn revoke_url(platform_url: Option<&str>) -> String {
 /// appears in logs; on failure we surface only the endpoint, status, and
 /// reason.
 ///
-/// The platform endpoint MAY not yet exist (the platform-side handler is
-/// scheduled for a follow-up increment). In that case we receive a 404
-/// and return `Failed("http 404")` — the caller proceeds with local
-/// cleanup unchanged. We deliberately do NOT collapse 404 to
-/// `AlreadyInvalid`: doing so would make a missing-endpoint deployment
-/// indistinguishable from a successful revocation in field telemetry.
-/// 401 is the only "already invalid" status we trust per AC-US5-04.
+/// The platform endpoint exists at vskill-platform's
+/// `src/app/api/v1/auth/github/grant/route.ts` (0836 US-005). If a 404
+/// reaches the desktop, that signals deployment lag (CDN cache miss,
+/// pre-deploy build, unrouted hostname) rather than a permanent gap.
+/// We surface 404 as `Failed("http 404 (endpoint unreachable)")` — the
+/// caller proceeds with local cleanup unchanged. We deliberately do NOT
+/// collapse 404 to `AlreadyInvalid`: doing so would make a missing-endpoint
+/// deployment indistinguishable from a successful revocation in field
+/// telemetry. 401 is the only "already invalid" status we trust per AC-US5-04.
 pub async fn revoke_grant(
     token: &str,
     platform_url: Option<&str>,
@@ -99,10 +102,12 @@ pub async fn revoke_grant(
                 200 | 204 => RevocationOutcome::Revoked,
                 // AC-US5-04: 401 = token already invalid → success.
                 401 => RevocationOutcome::AlreadyInvalid,
-                // 404 = platform endpoint not deployed yet (most common
-                // failure mode in this deployment posture). Surface as
-                // Failed so field operators can detect the gap.
-                404 => RevocationOutcome::Failed("http 404 (endpoint not deployed)".into()),
+                // 404 = platform endpoint missing on the target deployment.
+                // The endpoint exists in the platform repo (0836 US-005),
+                // but a CDN cache miss / pre-deploy build / unrouted
+                // hostname can still produce 404. Surface as Failed so
+                // field operators can detect deployment lag.
+                404 => RevocationOutcome::Failed("http 404 (endpoint unreachable)".into()),
                 _ => RevocationOutcome::Failed(format!("http {status}")),
             }
         }
@@ -199,10 +204,12 @@ mod tests {
 
     #[tokio::test]
     async fn not_found_status_returns_failed_not_deployed() {
-        // 404 = platform endpoint not deployed (handler scheduled for a
-        // follow-up increment). We surface this as Failed (not
-        // AlreadyInvalid) so field operators can detect the gap rather
-        // than seeing a misleading success log.
+        // 404 = platform endpoint unreachable (CDN cache miss /
+        // pre-deploy build / unrouted hostname). The endpoint ships with
+        // the desktop release; a 404 here means deployment lag, not a
+        // permanent gap. We surface this as Failed (not AlreadyInvalid)
+        // so field operators can detect lag rather than seeing a
+        // misleading success log.
         let mut server = mockito::Server::new_async().await;
         let mock = server
             .mock("DELETE", "/api/v1/auth/github/grant")
@@ -218,8 +225,8 @@ mod tests {
                     "expected 404 in failure msg, got: {msg}"
                 );
                 assert!(
-                    msg.contains("not deployed"),
-                    "expected 'not deployed' hint, got: {msg}"
+                    msg.contains("unreachable"),
+                    "expected 'unreachable' hint, got: {msg}"
                 );
             }
             other => panic!("expected Failed, got {other:?}"),

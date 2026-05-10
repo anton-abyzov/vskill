@@ -49,31 +49,41 @@ pub struct AccountUserSummary {
 /// 0836 US-003: pure helper that turns the (identity, quota) state pair into
 /// the WebView-facing summary. Extracted so cargo tests can exercise the
 /// state matrix without disk / Tauri.
+///
+/// AC-US3-06 contract: when `identity` is `None`, the returned summary MUST
+/// be `{ signedIn: false, login: null, avatarUrl: null, tier: "free" }`
+/// regardless of any cached quota state. This prevents stale tier data from
+/// a previous sign-in (or another user on the same machine) leaking into
+/// the signed-out UI. The quota cache is independently cleared on sign-out
+/// (see G-008 fix in `commands::sign_out`), but this guard is the
+/// belt-and-suspenders defense in case clear_quota_cache() ever fails.
 pub fn build_user_summary(
     identity: Option<crate::auth::UserIdentity>,
     quota: Option<crate::quota::cache::QuotaCache>,
 ) -> AccountUserSummary {
-    let tier = quota
-        .as_ref()
-        .map(|c| match c.response.tier {
-            crate::quota::cache::QuotaTier::Free => "free",
-            crate::quota::cache::QuotaTier::Pro => "pro",
-            crate::quota::cache::QuotaTier::Enterprise => "enterprise",
-        })
-        .unwrap_or("free")
-        .to_string();
     match identity {
-        Some(i) => AccountUserSummary {
-            signed_in: true,
-            login: Some(i.login),
-            avatar_url: Some(i.avatar_url),
-            tier,
-        },
+        Some(i) => {
+            let tier = quota
+                .as_ref()
+                .map(|c| match c.response.tier {
+                    crate::quota::cache::QuotaTier::Free => "free",
+                    crate::quota::cache::QuotaTier::Pro => "pro",
+                    crate::quota::cache::QuotaTier::Enterprise => "enterprise",
+                })
+                .unwrap_or("free")
+                .to_string();
+            AccountUserSummary {
+                signed_in: true,
+                login: Some(i.login),
+                avatar_url: Some(i.avatar_url),
+                tier,
+            }
+        }
         None => AccountUserSummary {
             signed_in: false,
             login: None,
             avatar_url: None,
-            tier,
+            tier: "free".to_string(),
         },
     }
 }

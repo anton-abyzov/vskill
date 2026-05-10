@@ -102,8 +102,11 @@ const PROXY_PREFIXES = [
   // the WebView with `Authorization: Bearer <gho_*>` minted by the deleted
   // `account_get_token` IPC. Proxying them through the eval-server lets us
   // inject the bearer Rust-side from the keychain — the WebView never holds
-  // the token. Public marketing endpoints under /api/v1/account/* stay
-  // anonymous (the auth-injection check below excludes them by default).
+  // the token. ALL /api/v1/account/* routes (profile, tokens, repos,
+  // notifications, exports, delete, sign-out-all) are user-authenticated;
+  // they all match AUTH_REQUIRED_PREFIXES below. If a future public
+  // marketing route is added, route it under a different prefix (not
+  // /api/v1/account/) so it doesn't pick up the bearer.
   "/api/v1/account/",
 ] as const;
 

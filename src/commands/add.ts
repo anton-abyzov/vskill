@@ -793,6 +793,13 @@ interface AddOptions {
   scope?: "user" | "project";
   /** Print what enable / lockfile mutations would happen, no side effects. */
   dryRun?: boolean;
+  /**
+   * 0839 T-010 / ADR-002 — explicit tenant slug for private-skill resolution.
+   * Highest priority in the resolution chain (flag > env > config > auto).
+   * When set, the value is propagated to the API client via the
+   * `X-Vskill-Tenant` header on every outbound request in this run.
+   */
+  tenant?: string;
 }
 
 /**
@@ -1976,6 +1983,66 @@ export async function addCommand(
   source: string | undefined,
   opts: AddOptions
 ): Promise<void> {
+  // 0839 T-010 / ADR-002 / F-001 — apply explicit `--tenant` to the process
+  // env so every downstream API call (apiRequest -> buildRequestHeaders)
+  // sees it, then ALWAYS restore the prior value on exit. The flag wins
+  // over VSKILL_TENANT and config.json by virtue of being applied last;
+  // `invalidateAuthCache` is called so the read-once-per-process cache
+  // refreshes against the new env value. Tenant resolution beyond the
+  // flag (env > config > auto-pick) is handled at the API layer + by
+  // error surfacing on the response side (401/402 below).
+  //
+  // The try/finally is critical: process.env mutation MUST NOT leak across
+  // in-process re-invocations (test harness, future composite command,
+  // install-all loop). The finally arm restores the prior value
+  // (or `delete`s if no value existed) so the next caller sees a clean
+  // env, exactly as documented in ADR-002 ("flag is per-call, env var is
+  // for CI").
+  const priorTenantEnv = process.env.VSKILL_TENANT;
+  const priorTenantHadValue = "VSKILL_TENANT" in process.env;
+  const tenantOverrideApplied = !!(opts.tenant && opts.tenant.length > 0);
+  if (tenantOverrideApplied) {
+    process.env.VSKILL_TENANT = opts.tenant;
+    // The API client may have cached a previous (null) tenant on import.
+    // Invalidate so the new override takes effect on the very next call.
+    try {
+      const mod = await import("../api/client.js");
+      mod.invalidateAuthCache();
+    } catch {
+      /* non-fatal — fresh CLI run hasn't cached anything yet */
+    }
+  }
+
+  try {
+    return await addCommandInner(source, opts);
+  } finally {
+    // 0839 F-001 — always restore the prior process.env.VSKILL_TENANT so
+    // `--tenant` does not leak. Run unconditionally so any path that
+    // mutated env (whether explicitly via opts.tenant or via a nested
+    // helper, present or future) is also cleaned up. Skip when nothing
+    // changed to avoid cache thrash.
+    if (tenantOverrideApplied) {
+      if (priorTenantHadValue) {
+        process.env.VSKILL_TENANT = priorTenantEnv as string;
+      } else {
+        delete process.env.VSKILL_TENANT;
+      }
+      // Invalidate the cache once more so any subsequent in-process call
+      // re-reads the (now-restored) env state instead of the override.
+      try {
+        const mod = await import("../api/client.js");
+        mod.invalidateAuthCache();
+      } catch {
+        /* non-fatal */
+      }
+    }
+  }
+}
+
+async function addCommandInner(
+  source: string | undefined,
+  opts: AddOptions
+): Promise<void> {
   // Bulk repo mode: --repo with --all
   if (opts.repo && opts.all) {
     return installAllRepoPlugins(opts.repo, opts);
@@ -2421,8 +2488,51 @@ async function installFromRegistry(
         console.log(yellow("  Warning: Unverified skill (T1 -- no scan results)"));
       }
     }
-  } catch {
+  } catch (lookupErr) {
     spin.stop();
+
+    // 0839 T-010 — surface auth + entitlement failures from the platform
+    // (apiRequest annotates errors with .status and .parsedBody). These
+    // are NOT "skill not found" misses; we must NOT swallow them into the
+    // search-suggestion fallback.
+    const e = lookupErr as Error & {
+      status?: number;
+      parsedBody?: { upgradeUrl?: string; message?: string };
+    };
+
+    if (e.status === 401) {
+      // AC-US1-04 — anonymous or expired token. Do NOT clear the keychain
+      // (only `auth logout` does that); the token may simply have expired
+      // server-side, and the user should refresh, not lose their config.
+      console.error(
+        red(`Authentication required for "${skillName}".`) +
+          "\n" +
+          dim("Run `vskill auth login` to sign in."),
+      );
+      process.exit(1);
+    }
+    if (e.status === 402) {
+      // AC-US1-05 / AC-US2-04 — entitlement gate; the platform returns 402
+      // with `{ upgradeUrl, message }` so the CLI can deep-link the user
+      // straight to the right purchase page.
+      const upgradeUrl = e.parsedBody?.upgradeUrl;
+      const message =
+        e.parsedBody?.message ?? "This skill requires a paid plan.";
+      console.error(red(`${message}`));
+      if (upgradeUrl) {
+        console.error(dim(`Upgrade: ${cyan(upgradeUrl)}`));
+      }
+      process.exit(1);
+    }
+    if (e.status === 403) {
+      // Membership/scope failure — different from 401. Print verbatim so
+      // the platform's message reaches the user (e.g. "skill found in 2
+      // tenants — pass --tenant <slug>").
+      const msg = e.parsedBody?.message ?? e.message;
+      console.error(red(msg));
+      process.exit(1);
+    }
+
     // Skill not in registry — check blocklist before showing generic "not found"
     const safety = await checkInstallSafety(skillName);
     if (safety.blocked) {

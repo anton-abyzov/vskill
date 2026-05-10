@@ -18,6 +18,8 @@ import type { Keychain } from "../../lib/keychain.js";
 
 interface FakeKeychainState {
   token: string | null;
+  /** 0839 US-005 — verified-skill `vsk_*` slot. */
+  vskToken?: string | null;
 }
 
 function fakeKeychain(state: FakeKeychainState): Keychain {
@@ -31,6 +33,17 @@ function fakeKeychain(state: FakeKeychainState): Keychain {
     clearGitHubToken() {
       const had = state.token !== null;
       state.token = null;
+      return had;
+    },
+    setVskillToken(token) {
+      state.vskToken = token;
+    },
+    getVskillToken() {
+      return state.vskToken ?? null;
+    },
+    clearVskillToken() {
+      const had = state.vskToken != null;
+      state.vskToken = null;
       return had;
     },
     usingFallback() {
@@ -289,7 +302,7 @@ describe("vskill auth status / logout", () => {
 
   it("logout clears keychain and prints confirmation", async () => {
     const f = fakeIO();
-    const ks = { token: "ghu_present" };
+    const ks: FakeKeychainState = { token: "ghu_present" };
     const exit = await authCommand(["logout"], {
       io: f.io,
       keychain: fakeKeychain(ks),
@@ -298,9 +311,243 @@ describe("vskill auth status / logout", () => {
       }) as unknown as typeof fetch,
       sleep: () => Promise.resolve(),
       clientId: "Iv1.test",
+      // Pin the revoke helper so the test never hits the network even if the
+      // production lazy-import escapes the keychain branch.
+      signOutAll: async () => {
+        /* no-op */
+      },
     });
     expect(exit).toBe(0);
     expect(ks.token).toBeNull();
+    expect(f.stdoutBuf).toMatch(/Logged out/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0839 — T-006 / T-007 / US-005 acceptance tests.
+//
+// Login → exchange → both tokens stored.
+// Logout → clear both + best-effort revoke.
+// ---------------------------------------------------------------------------
+
+describe("0839 T-006 — auth login exchanges gho_ for vsk_", () => {
+  it("happy path: stores BOTH gho_* and vsk_* tokens after exchange", async () => {
+    const ks: FakeKeychainState = { token: null, vskToken: null };
+    const f = fakeIO();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          device_code: "dc",
+          user_code: "ABCD1234",
+          verification_uri: "https://github.com/login/device",
+          interval: 1,
+          expires_in: 60,
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "gho_token" }))
+      .mockResolvedValueOnce(jsonResponse(200, { login: "octocat", id: 1 }));
+
+    const exit = await authCommand(["login"], {
+      io: f.io,
+      keychain: fakeKeychain(ks),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      clientId: "Iv1.test",
+      version: "test",
+      exchangeForVskToken: async (token: string) => {
+        expect(token).toBe("gho_token");
+        return { token: "vsk_minted_xyz" };
+      },
+    });
+
+    expect(exit).toBe(0);
+    expect(ks.token).toBe("gho_token");
+    expect(ks.vskToken).toBe("vsk_minted_xyz");
+    expect(f.stdoutBuf).toMatch(/Logged in as @octocat/);
+    // Should NOT print legacy-mode banner on the happy path.
+    expect(f.stdoutBuf).not.toMatch(/legacy mode/i);
+  });
+
+  it("exchange 5xx: stores ONLY gho_*, prints legacy-mode banner, exits 0", async () => {
+    const ks: FakeKeychainState = { token: null, vskToken: null };
+    const f = fakeIO();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          device_code: "dc",
+          user_code: "DEAD1234",
+          verification_uri: "https://github.com/login/device",
+          interval: 1,
+          expires_in: 60,
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "gho_token2" }))
+      .mockResolvedValueOnce(jsonResponse(200, { login: "octocat", id: 1 }));
+
+    const exit = await authCommand(["login"], {
+      io: f.io,
+      keychain: fakeKeychain(ks),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      clientId: "Iv1.test",
+      version: "test",
+      exchangeForVskToken: async () => {
+        const e = new Error("exchange returned 503") as Error & {
+          status?: number;
+        };
+        e.status = 503;
+        throw e;
+      },
+    });
+
+    expect(exit).toBe(0);
+    expect(ks.token).toBe("gho_token2"); // gho stays
+    expect(ks.vskToken).toBeNull(); // vsk NOT stored
+    expect(f.stdoutBuf).toMatch(/legacy mode/i);
+  });
+
+  it("exchange returns no token: legacy-mode banner, exits 0", async () => {
+    const ks: FakeKeychainState = { token: null, vskToken: null };
+    const f = fakeIO();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          device_code: "dc",
+          user_code: "EEEE1111",
+          verification_uri: "https://github.com/login/device",
+          interval: 1,
+          expires_in: 60,
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "gho_token3" }))
+      .mockResolvedValueOnce(jsonResponse(200, { login: "octocat", id: 1 }));
+
+    const exit = await authCommand(["login"], {
+      io: f.io,
+      keychain: fakeKeychain(ks),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      clientId: "Iv1.test",
+      version: "test",
+      // Empty token in response — same legacy-mode handling.
+      exchangeForVskToken: async () => ({ token: "" }),
+    });
+
+    expect(exit).toBe(0);
+    expect(ks.token).toBe("gho_token3");
+    expect(ks.vskToken).toBeNull();
+    expect(f.stdoutBuf).toMatch(/legacy mode/i);
+  });
+});
+
+describe("0839 F-004 — login + logout invalidate the in-memory auth cache", () => {
+  it("login calls invalidateAuthCache after writing tokens", async () => {
+    const ks: FakeKeychainState = { token: null, vskToken: null };
+    const f = fakeIO();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          device_code: "dc",
+          user_code: "F4F4F4F4",
+          verification_uri: "https://github.com/login/device",
+          interval: 1,
+          expires_in: 60,
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "gho_fresh" }))
+      .mockResolvedValueOnce(jsonResponse(200, { login: "octocat", id: 1 }));
+
+    const invalidateAuthCache = vi.fn();
+    const exit = await authCommand(["login"], {
+      io: f.io,
+      keychain: fakeKeychain(ks),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      clientId: "Iv1.test",
+      version: "test",
+      exchangeForVskToken: async () => ({ token: "vsk_minted" }),
+      invalidateAuthCache,
+    });
+
+    expect(exit).toBe(0);
+    // Once after writing gho_, once after writing vsk_. (We don't pin to
+    // exactly 2 in case the impl chooses to consolidate — the contract is
+    // "at least one" so the cache reflects the post-login state.)
+    expect(invalidateAuthCache.mock.calls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("logout calls invalidateAuthCache after clearing keychain", async () => {
+    const ks: FakeKeychainState = { token: "gho_pre", vskToken: "vsk_pre" };
+    const f = fakeIO();
+    const invalidateAuthCache = vi.fn();
+
+    const exit = await authCommand(["logout"], {
+      io: f.io,
+      keychain: fakeKeychain(ks),
+      fetchImpl: (() => {
+        throw new Error("logout must not hit network directly");
+      }) as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      clientId: "Iv1.test",
+      signOutAll: async () => {},
+      invalidateAuthCache,
+    });
+
+    expect(exit).toBe(0);
+    expect(ks.token).toBeNull();
+    expect(ks.vskToken).toBeNull();
+    expect(invalidateAuthCache).toHaveBeenCalled();
+  });
+});
+
+describe("0839 T-007 — auth logout revokes + clears both slots", () => {
+  it("clears both keychain entries AND calls signOutAll", async () => {
+    const ks: FakeKeychainState = { token: "gho_x", vskToken: "vsk_y" };
+    const f = fakeIO();
+    const signOutAll = vi.fn(async () => {});
+
+    const exit = await authCommand(["logout"], {
+      io: f.io,
+      keychain: fakeKeychain(ks),
+      fetchImpl: (() => {
+        throw new Error("logout must not hit network directly");
+      }) as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      clientId: "Iv1.test",
+      signOutAll,
+    });
+
+    expect(exit).toBe(0);
+    expect(ks.token).toBeNull();
+    expect(ks.vskToken).toBeNull();
+    expect(signOutAll).toHaveBeenCalledOnce();
+    expect(f.stdoutBuf).toMatch(/Logged out/i);
+  });
+
+  it("revoke failure does not block keychain clear (exit 0)", async () => {
+    const ks: FakeKeychainState = { token: "gho_x", vskToken: "vsk_y" };
+    const f = fakeIO();
+
+    const exit = await authCommand(["logout"], {
+      io: f.io,
+      keychain: fakeKeychain(ks),
+      fetchImpl: (() => {
+        throw new Error("logout must not hit network directly");
+      }) as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      clientId: "Iv1.test",
+      signOutAll: async () => {
+        throw new Error("network down");
+      },
+    });
+
+    expect(exit).toBe(0);
+    expect(ks.token).toBeNull();
+    expect(ks.vskToken).toBeNull();
     expect(f.stdoutBuf).toMatch(/Logged out/i);
   });
 });

@@ -39,6 +39,27 @@ export interface AuthCommandDeps {
   clientId?: string;
   /** vskill version for User-Agent stamping. */
   version?: string;
+  /**
+   * 0839 US-005 — exchange a `gho_*` token for a `vsk_*` token via the
+   * platform `/auth/github/exchange-for-vsk-token` endpoint. Optional so
+   * tests can inject a fake; production wires `exchangeForVskToken` from
+   * `../api/client.ts`. Failure of this call MUST NOT block login
+   * (AC-US5-05 — fall back to "legacy mode").
+   */
+  exchangeForVskToken?: (githubToken: string) => Promise<{ token: string }>;
+  /**
+   * 0839 US-005 / AC-US5-06 — best-effort server-side revocation invoked
+   * on logout. Failure MUST NOT block local logout. Defaults to the
+   * platform `signOutAll` helper from `../api/client.ts`.
+   */
+  signOutAll?: () => Promise<void>;
+  /**
+   * 0839 F-004 — invalidate the in-memory auth cache after keychain
+   * mutations so a same-process `auth login && orgs list` sees the fresh
+   * token. Optional so tests can inject a spy; production wires
+   * `invalidateAuthCache` from `../api/client.ts`.
+   */
+  invalidateAuthCache?: () => void;
 }
 
 const DEVICE_CODE_URL = "https://github.com/login/device/code";
@@ -219,10 +240,42 @@ async function loginCmd(deps: Required<Pick<AuthCommandDeps, "fetchImpl" | "slee
   if (user.status !== 200 || !user.body || typeof (user.body as { login?: string }).login !== "string") {
     io.stderr.write(`vskill auth login: token saved but /user verification failed (HTTP ${user.status})\n`);
     keychain.setGitHubToken(accessToken);
+    // 0839 F-004 — invalidate cache so any subsequent in-process API call
+    // sees the new gho_ token rather than the pre-login (null) cache.
+    if (deps.invalidateAuthCache) deps.invalidateAuthCache();
     return 1;
   }
   const login = (user.body as { login: string }).login;
   keychain.setGitHubToken(accessToken);
+  // 0839 F-004 — bust the cache after writing a fresh gho_ to keychain.
+  if (deps.invalidateAuthCache) deps.invalidateAuthCache();
+
+  // --- Step 4: exchange gho_* for vsk_* (0839 US-005) ---------------------
+  // Best-effort: failure is non-fatal — login still succeeds in "legacy
+  // mode" with just the gho_* token (AC-US5-05). The platform's
+  // `requireUserOrGithubBearer` already accepts gho_*, so all features
+  // continue to work; only entitlement-aware flows that strictly require
+  // a vsk_* token would degrade.
+  if (deps.exchangeForVskToken) {
+    try {
+      const resp = await deps.exchangeForVskToken(accessToken);
+      if (resp && typeof resp.token === "string" && resp.token.length > 0) {
+        keychain.setVskillToken(resp.token);
+        // 0839 F-004 — bust again so vsk_ replaces gho_ in the cache.
+        if (deps.invalidateAuthCache) deps.invalidateAuthCache();
+      } else {
+        io.stdout.write(
+          `\nLogged in as @${login} (legacy mode — exchange returned no token).\n`,
+        );
+        return 0;
+      }
+    } catch (err) {
+      io.stdout.write(
+        `\nLogged in as @${login} (legacy mode — some features unavailable: ${(err as Error).message}).\n`,
+      );
+      return 0;
+    }
+  }
   io.stdout.write(`\nLogged in as @${login}.\n`);
   return 0;
 }
@@ -276,12 +329,38 @@ async function statusCmd(args: string[], deps: Required<Pick<AuthCommandDeps, "f
 async function logoutCmd(deps: AuthCommandDeps): Promise<number> {
   const { io } = deps;
   const keychain = deps.keychain ?? getDefaultKeychain();
-  const had = keychain.clearGitHubToken();
+
+  // 0839 US-005 / AC-US5-06: clear BOTH local tokens AND best-effort
+  // revoke server-side. Server-side revoke runs BEFORE local clear so a
+  // network failure doesn't prevent us from logging the user out
+  // remotely — but its failure NEVER blocks the local clear.
+  if (deps.signOutAll) {
+    try {
+      await deps.signOutAll();
+    } catch (err) {
+      // Soft-fail: local logout proceeds anyway. Surface the failure on
+      // stderr so power users running --debug see it.
+      if (process.env.VSKILL_DEBUG === "1") {
+        io.stderr.write(
+          `vskill auth logout: server-side revoke failed (${(err as Error).message}); local clear continues.\n`,
+        );
+      }
+    }
+  }
+
+  const hadGh = keychain.clearGitHubToken();
+  const hadVsk = keychain.clearVskillToken();
+  // 0839 F-004 — invalidate the in-memory cache so a subsequent API call
+  // doesn't keep using a token we just revoked. We do this unconditionally
+  // because even if the keychain didn't carry a token, the cache could
+  // still hold a value from a prior session that hadn't been written back.
+  if (deps.invalidateAuthCache) deps.invalidateAuthCache();
+  const had = hadGh || hadVsk;
   if (had) {
-    io.stdout.write("Logged out. GitHub token cleared from keychain.\n");
+    io.stdout.write("Logged out. Tokens cleared from keychain.\n");
     return 0;
   }
-  io.stdout.write("Logged out. (No GitHub token was stored.)\n");
+  io.stdout.write("Logged out. (No tokens were stored.)\n");
   return 0;
 }
 
@@ -308,17 +387,59 @@ export async function authCommand(
   const version = deps.version ?? "vskill";
   const io = deps.io;
 
+  // 0839 US-005: default `exchangeForVskToken` and `signOutAll` to the
+  // production platform helpers when not injected. Lazy-imported so the
+  // unit tests that pass mocks don't trigger any real network code.
+  const exchangeForVskToken =
+    deps.exchangeForVskToken ??
+    (async (githubToken: string) => {
+      const mod = await import("../api/client.js");
+      return mod.exchangeForVskToken(githubToken);
+    });
+  const signOutAll =
+    deps.signOutAll ??
+    (async () => {
+      const mod = await import("../api/client.js");
+      return mod.signOutAll();
+    });
+  // 0839 F-004 — default cache invalidator ties auth.ts to the API client's
+  // `invalidateAuthCache`. Synchronous module reference is fine here: the
+  // client.ts module is already imported by anything that touches the
+  // auth path, and we only call it after a successful keychain mutation.
+  const invalidateAuthCache =
+    deps.invalidateAuthCache ??
+    (() => {
+      // Best-effort: import lazily so test environments that mock
+      // ../api/client don't crash if the module shape differs.
+      void import("../api/client.js")
+        .then((mod) => {
+          if (typeof mod.invalidateAuthCache === "function") {
+            mod.invalidateAuthCache();
+          }
+        })
+        .catch(() => {
+          /* non-fatal — cache will fall stale until next process boot */
+        });
+    });
+
   const sub = argv[0];
   let exit = 0;
   switch (sub) {
     case "login":
-      exit = await loginCmd({ ...deps, fetchImpl, sleep, version });
+      exit = await loginCmd({
+        ...deps,
+        fetchImpl,
+        sleep,
+        version,
+        exchangeForVskToken,
+        invalidateAuthCache,
+      });
       break;
     case "status":
       exit = await statusCmd(argv.slice(1), { ...deps, fetchImpl, sleep: deps.sleep ?? defaultSleep, version });
       break;
     case "logout":
-      exit = await logoutCmd(deps);
+      exit = await logoutCmd({ ...deps, signOutAll, invalidateAuthCache });
       break;
     case undefined:
     case "--help":

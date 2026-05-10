@@ -32,6 +32,7 @@ import { loadWorkspace, addProject, setActiveProject, projectIdFromPath } from "
 import { registerAuthoringRoutes } from "./authoring-routes.js";
 import { registerPluginCliRoutes } from "./plugin-cli-routes.js";
 import { registerGitRoutes } from "./git-routes.js";
+import { handleActiveTenant } from "./active-tenant-routes.js";
 import { checkDistFreshness } from "./check-dist-freshness.js";
 import { homedir } from "node:os";
 
@@ -122,6 +123,16 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
     // Try API routes first
     const handled = await router.handle(req, res);
     if (handled) return;
+
+    // 0839 T-011 / US-004 — `/__internal/active-tenant` is a loopback-only
+    // GET/POST helper used by the Studio TenantPicker. Lives outside the
+    // `/api/*` namespace by design (the studio-token gate only covers
+    // `/api/*`; this path predates that gate and is guarded by the
+    // loopback bind + an explicit remoteAddress check inside the handler).
+    if ((req.url ?? "").startsWith("/__internal/active-tenant")) {
+      const taken = await handleActiveTenant(req, res);
+      if (taken) return;
+    }
 
     // 0712 US-003 T-016B (default re-targeted in 0725): forward platform-owned
     // API surface (`/api/v1/skills/*` — check-updates, stream, etc.) to the

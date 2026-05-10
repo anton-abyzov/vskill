@@ -3,6 +3,11 @@
 // ---------------------------------------------------------------------------
 
 import { createRequire } from "node:module";
+import {
+  getDefaultKeychain,
+  type Keychain,
+} from "../lib/keychain.js";
+import { getActiveTenant } from "../lib/active-tenant.js";
 
 // Base URL is overridable via `VSKILL_API_BASE` so tests (and hermetic CI runs)
 // can point the CLI at a mock server without touching the production host.
@@ -10,6 +15,164 @@ import { createRequire } from "node:module";
 const DEFAULT_BASE_URL = "https://verified-skill.com";
 function resolveBaseUrl(): string {
   return process.env.VSKILL_API_BASE || DEFAULT_BASE_URL;
+}
+
+// ---------------------------------------------------------------------------
+// 0839 US-001 / US-005 — Bearer interceptor + tenant header.
+//
+// Policy (ADR-001 + AC-US1-01..06, AC-US2-06, AC-US5-04):
+//   * Prefer the verified-skill `vsk_*` token over the raw GitHub `gho_*`.
+//     `requireUserOrGithubBearer` (vskill-platform) accepts both, but
+//     `vsk_*` is our property — scopes, TTL, revocation. Falls back to
+//     `gho_*` only when `vsk_*` is missing (legacy login or mid-rollout).
+//   * Anonymous flow preserved: when neither token is present, no
+//     Authorization header is sent. Public endpoints continue to work.
+//   * Token is read from the keychain at most once per process, then
+//     cached. Keychain reads are not free (libsecret on Linux is slow);
+//     a long-running CLI command may make many requests.
+//   * Tenant header: when an active tenant is configured (env or
+//     `~/.vskill/config.json`), every request carries
+//     `X-Vskill-Tenant: <slug>`. The platform routes are tenant-aware
+//     today; this header is additive and harmless when ignored.
+//   * Both caches are invalidatable for tests via the
+//     `_resetClientAuthCacheForTests` hook.
+// ---------------------------------------------------------------------------
+
+interface AuthCacheState {
+  token: string | null;
+  tenant: string | null;
+  loaded: boolean;
+}
+
+const _authCache: AuthCacheState = {
+  token: null,
+  tenant: null,
+  loaded: false,
+};
+
+/**
+ * Test-only override for the keychain provider. Production code never
+ * reaches this path; tests inject a fake to avoid touching @napi-rs/keyring
+ * or the on-disk fallback.
+ */
+let _keychainOverride: Keychain | null = null;
+
+/** @internal — test hook. */
+export function _setKeychainForTests(k: Keychain | null): void {
+  _keychainOverride = k;
+}
+
+/** @internal — test hook. Forces the next request to re-read keychain + config. */
+export function _resetClientAuthCacheForTests(): void {
+  _authCache.token = null;
+  _authCache.tenant = null;
+  _authCache.loaded = false;
+}
+
+/**
+ * 0839 F-004 — production-grade cache invalidation.
+ *
+ * The auth cache (`_authCache`) loads BOTH the bearer token and the active
+ * tenant from the keychain + config exactly once per process. After
+ * `vskill auth login` mutates the keychain, the same-process cache still
+ * holds pre-login state — so a script doing `vskill auth login && vskill
+ * orgs list` from a single Node process never sees the new token. The same
+ * applies on logout: a stale cache would keep sending the just-revoked
+ * token until the process exits.
+ *
+ * This function is intentionally exported as a non-test primitive so
+ * `auth.ts` can call it after `setVskillToken`, `clearVskillToken`, etc.
+ * It is internally identical to `_resetClientAuthCacheForTests`; we keep
+ * both names so the test hook stays explicit and the production callsite
+ * reads correctly.
+ */
+export function invalidateAuthCache(): void {
+  _authCache.token = null;
+  _authCache.tenant = null;
+  _authCache.loaded = false;
+}
+
+/**
+ * Resolve the Authorization token to send. Prefers `vsk_*`, falls back to
+ * `gho_*`. Returns null when nothing is stored (anonymous mode).
+ *
+ * Cached for the lifetime of the process so a single command invocation
+ * hits the keychain at most once (AC-US1-06).
+ */
+function resolveAuthToken(): string | null {
+  if (_authCache.loaded) return _authCache.token;
+  let token: string | null = null;
+  try {
+    const kc = _keychainOverride ?? getDefaultKeychain();
+    // Prefer vsk_* (ADR-001 / AC-US5-04).
+    token = kc.getVskillToken() ?? kc.getGitHubToken();
+  } catch {
+    token = null;
+  }
+  _authCache.token = token;
+  // Tenant resolution: env override beats config file (mirrors ADR-002
+  // step #2 — the lib `getActiveTenant` only reads the config file, so we
+  // layer the env check here). Per-command --tenant flags are applied by
+  // callers via `buildRequestHeaders({ tenantOverride })`.
+  let tenant: string | null = null;
+  if (process.env.VSKILL_TENANT && process.env.VSKILL_TENANT.length > 0) {
+    tenant = process.env.VSKILL_TENANT;
+  } else {
+    try {
+      tenant = getActiveTenant();
+    } catch {
+      tenant = null;
+    }
+  }
+  _authCache.tenant = tenant;
+  _authCache.loaded = true;
+  return token;
+}
+
+export interface BuildHeadersOptions {
+  /** Per-call tenant override (CLI --tenant flag). */
+  tenantOverride?: string | null;
+}
+
+/**
+ * Build the standard request headers for a verified-skill API call:
+ *   - Content-Type / User-Agent (always)
+ *   - Authorization: Bearer <token> (when a token is stored)
+ *   - X-Vskill-Tenant: <slug> (when an active tenant is set or overridden)
+ *
+ * Callers may pass extra headers via `extra`; those win over defaults.
+ */
+export function buildRequestHeaders(
+  extra?: Record<string, string>,
+  opts: BuildHeadersOptions = {},
+): Record<string, string> {
+  const token = resolveAuthToken();
+  const tenant =
+    opts.tenantOverride !== undefined ? opts.tenantOverride : _authCache.tenant;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "User-Agent": "vskill-cli",
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+    if (process.env.VSKILL_DEBUG === "1") {
+      const kind = token.startsWith("vsk_") ? "vsk_" : "gho_";
+      process.stderr.write(`[auth] using ${kind} token (cached)\n`);
+    }
+  } else if (process.env.VSKILL_DEBUG === "1") {
+    process.stderr.write(`[auth] no token, anonymous\n`);
+  }
+  if (tenant) {
+    headers["X-Vskill-Tenant"] = tenant;
+    if (process.env.VSKILL_DEBUG === "1") {
+      process.stderr.write(`[auth] tenant: ${tenant}\n`);
+    }
+  }
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) headers[k] = v;
+  }
+  return headers;
 }
 const VERSION: string = (() => {
   try {
@@ -104,25 +267,44 @@ export interface SubmissionRequest {
   source?: string;
 }
 
-async function apiRequest<T>(
+export async function apiRequest<T>(
   path: string,
-  options?: RequestInit
+  options?: RequestInit & { tenantOverride?: string | null }
 ): Promise<T> {
   const url = `${resolveBaseUrl()}${path}`;
+  const { tenantOverride, ...fetchOpts } = options ?? {};
+  const headers = buildRequestHeaders(
+    fetchOpts.headers as Record<string, string> | undefined,
+    { tenantOverride },
+  );
   const res = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "User-Agent": "vskill-cli",
-      ...options?.headers,
-    },
+    ...fetchOpts,
+    headers,
   });
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(
-      `API request failed: ${res.status} ${res.statusText}${body ? ` - ${body}` : ""}`
-    );
+    // 0839 AC-US1-04 / AC-US1-05 / AC-US2-05: surface auth + entitlement
+    // failures as structured errors so callers can format them without
+    // sniffing the message string. We attach `.status` and the parsed body
+    // (when JSON) to the thrown error.
+    const err = new Error(
+      `API request failed: ${res.status} ${res.statusText}${body ? ` - ${body}` : ""}`,
+    ) as Error & {
+      status?: number;
+      body?: string;
+      parsedBody?: unknown;
+    };
+    err.status = res.status;
+    err.body = body;
+    if (body) {
+      try {
+        err.parsedBody = JSON.parse(body);
+      } catch {
+        /* non-JSON body — leave parsedBody undefined */
+      }
+    }
+    throw err;
   }
 
   return res.json() as Promise<T>;
@@ -321,10 +503,7 @@ export async function reportInstall(
             `${resolveBaseUrl()}${skillApiPath(skillName)}/installs`,
             {
               method: "POST",
-              headers: {
-                "User-Agent": "vskill-cli",
-                "Content-Type": "application/json",
-              },
+              headers: buildRequestHeaders(),
               body: JSON.stringify({
                 ...(repoUrl ? { repoUrl } : {}),
                 ...(version ? { version } : {}),
@@ -400,10 +579,7 @@ export async function checkUpdates(
   try {
     const res = await fetch(`${resolveBaseUrl()}/api/v1/skills/check-updates`, {
       method: "POST",
-      headers: {
-        "User-Agent": "vskill-cli",
-        "Content-Type": "application/json",
-      },
+      headers: buildRequestHeaders(),
       body: JSON.stringify({
         skills,
         platform: process.platform,
@@ -467,10 +643,7 @@ export async function compareVersions(
     .join("/");
   const url = `${resolveBaseUrl()}/api/v1/skills/${encodedSkill}/versions/compare?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
   const res = await fetch(url, {
-    headers: {
-      "User-Agent": "vskill-cli",
-      "Content-Type": "application/json",
-    },
+    headers: buildRequestHeaders(),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -499,10 +672,7 @@ export async function reportInstallBatch(
             `${resolveBaseUrl()}/api/v1/skills/installs`,
             {
               method: "POST",
-              headers: {
-                "User-Agent": "vskill-cli",
-                "Content-Type": "application/json",
-              },
+              headers: buildRequestHeaders(),
               body: JSON.stringify({
                 skills,
                 source: "cli",
@@ -531,3 +701,89 @@ export async function reportInstallBatch(
     // Silent — install tracking must never block CLI
   }
 }
+
+// ---------------------------------------------------------------------------
+// 0839 — auth + tenant endpoints.
+// ---------------------------------------------------------------------------
+
+export interface TenantSummary {
+  /** Stable tenant identifier (cuid). */
+  tenantId: string;
+  /** URL-safe slug used in `X-Vskill-Tenant` and `vskill orgs use`. */
+  slug: string;
+  /** Human-readable display name (org or user-friendly). */
+  name: string;
+  /** Caller's role in the tenant (mirror of `OrgMember.role`). */
+  role: "owner" | "admin" | "member" | string;
+  /** GitHub App installation id, when available. */
+  installationId?: string | number | null;
+}
+
+export interface ListTenantsResponse {
+  tenants: TenantSummary[];
+}
+
+/**
+ * 0839 US-003 / US-004 — list tenants the authenticated user is a member of.
+ * Backed by `GET /api/v1/account/tenants` (added in T-002, ADR-003).
+ *
+ * Anonymous calls are NOT allowed: when no token is present, the endpoint
+ * returns 401 (the platform's `requireUserOrGithubBearer` rejects). Callers
+ * that want anonymous-safe behaviour should check for a token first.
+ */
+export async function listTenants(): Promise<TenantSummary[]> {
+  const data = await apiRequest<{
+    tenants?: Array<Record<string, unknown>>;
+  }>(`/api/v1/account/tenants`);
+  const items = Array.isArray(data.tenants) ? data.tenants : [];
+  return items.map((t) => ({
+    tenantId: String(t.tenantId ?? t.id ?? ""),
+    slug: String(t.slug ?? ""),
+    name: String(t.name ?? t.slug ?? ""),
+    role: String(t.role ?? "member"),
+    installationId:
+      t.installationId == null
+        ? null
+        : typeof t.installationId === "number"
+          ? t.installationId
+          : String(t.installationId),
+  }));
+}
+
+export interface ExchangeForVskTokenResponse {
+  token: string;
+  expiresAt: string;
+  scopes: string[];
+  userId: string;
+}
+
+/**
+ * 0839 US-005 — exchange a `gho_*` token for a `vsk_*` API token.
+ * Hits `POST /api/v1/auth/github/exchange-for-vsk-token`. The response
+ * `token` is the plaintext `vsk_*` (returned ONCE — only the hash is
+ * persisted server-side per AC-US5-02).
+ *
+ * Failures throw — callers (auth.ts) decide whether to fall back to
+ * "legacy mode" (gho_-only) or surface the error.
+ */
+export async function exchangeForVskToken(
+  githubToken: string,
+): Promise<ExchangeForVskTokenResponse> {
+  return apiRequest<ExchangeForVskTokenResponse>(
+    `/api/v1/auth/github/exchange-for-vsk-token`,
+    {
+      method: "POST",
+      body: JSON.stringify({ githubToken }),
+    },
+  );
+}
+
+/**
+ * 0839 US-005 / AC-US5-06 — best-effort server-side revocation. The CLI
+ * `auth logout` calls this AFTER clearing the local keychain; failure is
+ * logged but never blocks logout.
+ */
+export async function signOutAll(): Promise<void> {
+  await apiRequest<unknown>(`/api/v1/auth/sign-out-all`, { method: "DELETE" });
+}
+

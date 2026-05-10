@@ -1349,7 +1349,86 @@ export const api = {
       body: JSON.stringify(opts ?? {}),
     });
   },
+
+  // ---------------------------------------------------------------------------
+  // 0839 — Tenant switcher API helpers.
+  //
+  // The Studio talks to two different surfaces for tenant state:
+  //
+  //  1. Platform proxy (`/api/v1/account/tenants`) — listing tenants the
+  //     authenticated user is a member of. The eval-server's platform-proxy
+  //     forwards this request to verified-skill.com with the bearer token
+  //     injected Rust-side. From the WebView's perspective, the URL is
+  //     same-origin, so we go through the existing `fetch()` path.
+  //
+  //  2. Eval-server loopback (`/__internal/active-tenant`) — reads/writes
+  //     `currentTenant` in `~/.vskill/config.json`. CLI agent (T-011) owns
+  //     the handler; this UI just calls it and trusts the response shape.
+  //
+  // Failures are reported via `ApiError` so the caller can surface a banner
+  // (`Select a tenant to continue` per AC-US4-06) without crashing the UI.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * GET /api/v1/account/tenants — list tenants the user belongs to.
+   * Backend agent T-002 owns the route. Anonymous users get 401 here;
+   * the caller is responsible for catching that and falling back to the
+   * "Connect GitHub" CTA (AC-US4-04).
+   */
+  async getAccountTenants(): Promise<TenantListResponse> {
+    return fetchJson<TenantListResponse>("/api/v1/account/tenants");
+  },
+
+  /**
+   * GET /__internal/active-tenant — read the currently active tenant slug
+   * from `~/.vskill/config.json`. CLI agent (T-011) owns the handler.
+   * Returns `{ currentTenant: null }` when nothing is set.
+   */
+  async getActiveTenant(): Promise<{ currentTenant: string | null }> {
+    return fetchJson<{ currentTenant: string | null }>("/__internal/active-tenant");
+  },
+
+  /**
+   * POST /__internal/active-tenant — persist the active tenant slug.
+   * Pass `null` to clear. Returns the resulting state echoed by the
+   * server so the caller can confirm the write landed.
+   */
+  async setActiveTenant(slug: string | null): Promise<{ currentTenant: string | null }> {
+    return fetchJson<{ currentTenant: string | null }>("/__internal/active-tenant", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentTenant: slug }),
+    });
+  },
 };
+
+// ---------------------------------------------------------------------------
+// 0839 — Tenant DTOs (mirror of vskill-platform's /api/v1/account/tenants).
+//
+// Source of truth: `vskill-platform/src/app/api/v1/account/tenants/route.ts`
+// (created by the backend agent under T-002). Kept here so eval-ui compiles
+// standalone — same pattern as `types/account.ts`. When the platform shape
+// changes, copy the new definitions in.
+// ---------------------------------------------------------------------------
+
+/** A single tenant the authenticated user is a member of. */
+export interface TenantSummary {
+  /** Database ID — opaque to the UI. */
+  tenantId: string;
+  /** URL-safe slug, e.g. `acme-corp`. Used for `X-Vskill-Tenant` header + UI. */
+  slug: string;
+  /** Human-readable display name (org name on GitHub). */
+  name: string;
+  /** Caller's role inside the tenant. Drives badge styling later. */
+  role: "owner" | "admin" | "member";
+  /** GitHub installation_id (stringified — BigInt does not JSON). */
+  installationId: string;
+}
+
+/** GET /api/v1/account/tenants response envelope. */
+export interface TenantListResponse {
+  tenants: TenantSummary[];
+}
 
 // ---------------------------------------------------------------------------
 // 0688: Internal SSE-POST helper for the three transfer endpoints.

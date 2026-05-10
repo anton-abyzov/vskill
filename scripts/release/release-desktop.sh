@@ -75,18 +75,28 @@ printf '%s' "${PASSPHRASE}" | minisign -S -s "${KEY_DIR}/minisign.key" -m /tmp/_
 rm -f /tmp/_release_check.txt /tmp/_release_check.txt.minisig
 echo "   ✅ keypair OK"
 
-# Verify pubkey on disk matches what's baked into tauri.conf.json
+# Verify pubkey in tauri.conf.json is in the CORRECT FORMAT.
+# Tauri expects: base64(FULL minisign.pub file contents) — NOT the raw key string.
+# This bug burned 16 CI runs (v1.0.13..v1.0.28) before being identified.
+# Older tauri-bundler versions silently fell through to signing and surfaced
+# a misleading "Wrong password for that key" error; v1.0.28's tauri-bundler
+# finally produced the true error: "failed to decode pubkey: failed to
+# convert base64 to utf8".
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-DISK_PUBKEY=$(tail -1 "${KEY_DIR}/minisign.pub")
+EXPECTED_PUBKEY=$(base64 -i "${KEY_DIR}/minisign.pub" | tr -d '\n\r\t ')
 CONF_PUBKEY=$(node -e "const fs=require('fs'); console.log(JSON.parse(fs.readFileSync('${REPO_ROOT}/src-tauri/tauri.conf.json','utf8')).plugins.updater.pubkey);")
-if [[ "${DISK_PUBKEY}" != "${CONF_PUBKEY}" ]]; then
-  echo "❌ pubkey mismatch:" >&2
-  echo "   on disk:    ${DISK_PUBKEY}" >&2
-  echo "   tauri.conf: ${CONF_PUBKEY}" >&2
-  echo "   Update src-tauri/tauri.conf.json plugins.updater.pubkey to the disk value." >&2
+if [[ "${CONF_PUBKEY}" != "${EXPECTED_PUBKEY}" ]]; then
+  echo "❌ tauri.conf.json plugins.updater.pubkey is WRONG FORMAT or out of date." >&2
+  echo "   Expected (base64 of full minisign.pub):" >&2
+  echo "     ${EXPECTED_PUBKEY}" >&2
+  echo "   Found:" >&2
+  echo "     ${CONF_PUBKEY}" >&2
+  echo "" >&2
+  echo "   To fix, update tauri.conf.json plugins.updater.pubkey to the expected value." >&2
+  echo "   (Common mistake: putting the raw key string '${EXPECTED_PUBKEY:0:8}...' here.)" >&2
   exit 1
 fi
-echo "   ✅ pubkey matches tauri.conf.json"
+echo "   ✅ pubkey in tauri.conf.json is base64(minisign.pub) form (correct)"
 
 # ─── 2. Upload TAURI_SIGNING_PRIVATE_KEY + passphrase ────────────────────
 echo ">> [2/8] uploading TAURI_SIGNING_PRIVATE_KEY (base64) + passphrase..."

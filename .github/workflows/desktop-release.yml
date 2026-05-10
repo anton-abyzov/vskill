@@ -198,6 +198,33 @@ jobs:
             echo "EOF_CLEAN_KEY"
           } >> "${GITHUB_ENV}"
 
+      - name: Diagnose passphrase encoding (non-revealing)
+        # Prints SHA-256 of the env var so we can verify what bytes GH
+        # actually stored vs what we uploaded, without leaking the value.
+        # Expected (no-newline form): 22474c7dd76281e5115a1f22975eb71d76152a3d891f1d8bac62afe040515fb5
+        # Expected (with newline):    9a2e6c3a248a7fc530f543562ec79cfd24d52566d918d12996edbc3d029669f6
+        shell: bash
+        env:
+          P: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          echo "Passphrase length: ${#P}"
+          echo "Passphrase SHA-256 (raw): $(printf '%s' "$P" | shasum -a 256 | awk '{print $1}')"
+          echo "Passphrase SHA-256 (with trailing newline): $(printf '%s\n' "$P" | shasum -a 256 | awk '{print $1}')"
+          # Strip whitespace defensively
+          CLEAN_P=$(printf '%s' "$P" | tr -d ' \t\r\n')
+          echo "Passphrase clean length: ${#CLEAN_P}"
+          echo "Passphrase clean SHA-256: $(printf '%s' "$CLEAN_P" | shasum -a 256 | awk '{print $1}')"
+          if [ "${#CLEAN_P}" -ne "${#P}" ]; then
+            STRIPPED=$(( ${#P} - ${#CLEAN_P} ))
+            echo "::warning::Stripped ${STRIPPED} whitespace char(s) from TAURI_SIGNING_PRIVATE_KEY_PASSWORD."
+          fi
+          # Export cleaned value for the next step (overrides the raw secret).
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<EOF_CLEAN_P"
+            echo "${CLEAN_P}"
+            echo "EOF_CLEAN_P"
+          } >> "${GITHUB_ENV}"
+
       - name: Build Tauri app + sign + (macOS) notarize
         # tauri-action signs the update bundle (.tar.gz/.zip) using
         # TAURI_SIGNING_PRIVATE_KEY (minisign Ed25519 per ADR 0829-01 §2),
@@ -224,12 +251,13 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           # Tauri Updater minisign keypair (all platforms). Note: we
-          # intentionally do NOT re-pull the raw secret here — the
-          # whitespace-stripped CLEAN_KEY is already exported into
-          # GITHUB_ENV by the pre-flight step above and inherited by
-          # this step. Inheriting via GITHUB_ENV instead of `${{ secrets.X }}`
-          # is what makes the defensive scrub effective.
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # intentionally do NOT re-pull the raw secrets here — the
+          # whitespace-stripped CLEAN_KEY and CLEAN_P (passphrase) are
+          # exported into GITHUB_ENV by the pre-flight + diagnostic steps
+          # above and inherited by this step. Inheriting via GITHUB_ENV
+          # instead of `${{ secrets.X }}` is what makes the defensive
+          # scrub effective. v1.0.25 failed because the passphrase was
+          # explicitly re-pulled from secrets here, bypassing the cleanup.
           # 0836 US-004: src-tauri/build.rs panics if GITHUB_OAUTH_CLIENT_ID
           # is unset or equals the placeholder `Iv1.placeholder-replace-before-ship`
           # for release builds — guards against shipping a binary that can never

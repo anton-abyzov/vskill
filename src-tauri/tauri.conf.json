@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Skill Studio",
-  "version": "1.0.28",
+  "version": "1.0.29",
   "identifier": "com.verifiedskill.desktop",
   "build": {
     "beforeDevCommand": "",
@@ -132,7 +132,7 @@
       "endpoints": [
         "https://verified-skill.com/desktop/latest.json"
       ],
-      "pubkey": "RWRAKMUtAimeDjbhUiZU5OMP0tj7dOo3OPPy62n65bXLD94IdM1wk7DS",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBFOUUyOTAyMkRDNTI4NDAKUldSQUtNVXRBaW1lRGpiaFVpWlU1T01QMHRqN2RPbzNPUFB5NjJuNjViWExEOTRJZE0xd2s3RFMK",
       "allowDowngrades": true,
       "windows": {
         "installMode": "passive"

@@ -733,9 +733,19 @@ pub async fn sign_out() -> Result<(), String> {
         |t| async move { revoke_grant(&t, None).await },
         // clear_fn — ALWAYS run after revoke. Returns Err(String) on local
         // cleanup failure (only path that surfaces an IPC error to JS).
+        // G-008 fix: clear the quota cache too — otherwise the
+        // account_get_user_summary IPC could surface a stale `tier` from a
+        // previous user (multi-user-on-one-machine leak). build_user_summary
+        // also defends against this by forcing tier="free" when identity is
+        // None, but clearing the underlying cache is the correct posture.
+        // A quota-cache clear failure is logged but does not fail sign-out
+        // (the more important keychain + identity clears already succeeded).
         move || {
             let token_err = store_for_clear.clear().err();
             let cache_err = clear_identity_cache().err();
+            if let Err(e) = crate::quota::cache::clear_quota_cache() {
+                log::warn!("sign_out: clear_quota_cache failed (best-effort): {e}");
+            }
             match (token_err, cache_err) {
                 (None, None) => Ok(()),
                 (Some(e), _) => Err(format!("clear keychain: {e}")),

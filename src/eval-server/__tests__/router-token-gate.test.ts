@@ -312,3 +312,48 @@ describe("Router.handle integrated with tokenGate (US-002 AC-US2-04)", () => {
     expect(state.status).toBe(200);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 0836 US-002 (F-017 follow-up) — OPTIONS preflight Access-Control-Allow-Headers
+// MUST advertise X-Studio-Token, otherwise browser-initiated cross-origin
+// fetches fail at preflight before the actual request leaves the renderer.
+//
+// The OPTIONS handler lives in api-routes.ts (registerRoutes attaches it as
+// `router.options`). The contract under test: when a same-machine cross-origin
+// caller (e.g. http://localhost:9999) issues a CORS preflight, the response
+// must list both `Content-Type` and `X-Studio-Token` in the allowed-headers
+// list. Without `X-Studio-Token`, the browser refuses to send the actual
+// authenticated request and AC-US2-05 silently fails in the cross-origin case.
+// ---------------------------------------------------------------------------
+
+describe("OPTIONS preflight allow-headers (US-002 AC-US2-05 cross-origin path)", () => {
+  it("F-017: preflight echoes X-Studio-Token in Access-Control-Allow-Headers", async () => {
+    const { registerRoutes } = await import("../api-routes.js");
+    const router = new Router();
+    // registerRoutes() attaches `router.options` as a side effect of wiring
+    // the API surface. We don't need a real workspace root for this assertion.
+    registerRoutes(router, "/tmp/router-token-gate-test-fixture");
+    expect(router.options).toBeTypeOf("function");
+
+    const req = fakeReq({
+      method: "OPTIONS",
+      url: "/api/skills",
+      headers: {
+        origin: "http://localhost:9999",
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "x-studio-token, content-type",
+      },
+    });
+    const { res, state } = fakeRes();
+    router.options!(req, res);
+
+    expect(state.status).toBe(204);
+    expect(state.ended).toBe(true);
+    // Header keys are case-sensitive in the fake, so we read the exact one
+    // the handler writes.
+    const allowHeaders = state.headers?.["Access-Control-Allow-Headers"];
+    expect(typeof allowHeaders).toBe("string");
+    expect(String(allowHeaders).toLowerCase()).toContain("x-studio-token");
+    expect(String(allowHeaders).toLowerCase()).toContain("content-type");
+  });
+});

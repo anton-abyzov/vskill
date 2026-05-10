@@ -83,16 +83,20 @@ fn user_summary_signed_out_with_no_quota_cache_returns_defaults() {
 }
 
 #[test]
-fn user_summary_signed_out_with_quota_cache_still_returns_signed_out_shape() {
-    // Even if a stale quota cache says "pro", the summary must report
-    // signed_in=false / login=None when the identity cache is missing.
+fn user_summary_signed_out_with_stale_quota_cache_returns_free_tier() {
+    // AC-US3-06 contract: signed-out summary MUST be
+    // { signedIn: false, login: null, avatarUrl: null, tier: "free" }
+    // regardless of any quota cache. A stale cache from a previous sign-in
+    // (or another user on the same machine) must NOT leak into the
+    // signed-out UI's pricing badge.
     let summary = build_user_summary(None, Some(make_quota_cache(QuotaTier::Pro)));
     assert!(!summary.signed_in);
     assert_eq!(summary.login, None);
     assert_eq!(summary.avatar_url, None);
-    // The tier still reflects the cached value — the UI renders the
-    // pricing badge regardless of identity for grace-window scenarios.
-    assert_eq!(summary.tier, "pro");
+    assert_eq!(
+        summary.tier, "free",
+        "signed-out user must see free tier even with stale quota cache (G-007)"
+    );
 }
 
 #[test]

@@ -4272,14 +4272,23 @@ Return ONLY the JSON lines, no other text.`;
     );
   });
 
-  // Handle CORS preflight
+  // Handle CORS preflight.
+  //
+  // 0836 US-002 (F-017 follow-up): every authenticated /api/* request now
+  // carries the `X-Studio-Token` custom header. Browser-initiated cross-origin
+  // fetches issue a CORS preflight; the response MUST list `X-Studio-Token`
+  // in `Access-Control-Allow-Headers` or the browser blocks the actual
+  // request. The desktop hot path is same-origin (WebView is navigated to
+  // `http://127.0.0.1:{port}/`) and skips preflight, but CLI users opening
+  // the studio in a regular browser tab — and any future cross-origin
+  // tooling — depend on this echo.
   router.options = (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse): void => {
     const origin = req.headers.origin;
     if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
       res.writeHead(204, {
         "Access-Control-Allow-Origin": origin,
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Headers": "Content-Type, X-Studio-Token",
         "Access-Control-Max-Age": "3600",
       });
     } else {

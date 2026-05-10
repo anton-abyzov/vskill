@@ -282,6 +282,16 @@ async function serveStatic(
     if (stat.isFile()) {
       const ext = path.extname(filePath);
       const contentType = MIME_TYPES[ext] || "application/octet-stream";
+      // 0836 US-002 follow-up: HTML files need the per-process X-Studio-Token
+      // injected so the browser tab (npx vskill studio) can authenticate
+      // /api/* calls. Streaming the raw file would skip this — read + inject.
+      // Non-HTML assets (JS/CSS/images) stream as before.
+      if (ext === ".html") {
+        const raw = fs.readFileSync(filePath, "utf-8");
+        res.writeHead(200, { "Content-Type": contentType });
+        res.end(injectStudioToken(raw));
+        return;
+      }
       res.writeHead(200, { "Content-Type": contentType });
       fs.createReadStream(filePath).pipe(res);
       return;
@@ -295,9 +305,43 @@ async function serveStatic(
   try {
     const content = fs.readFileSync(indexPath, "utf-8");
     res.writeHead(200, { "Content-Type": "text/html" });
-    res.end(content);
+    res.end(injectStudioToken(content));
   } catch {
     res.writeHead(404);
     res.end("Not found — run 'npm run build:eval-ui' first");
   }
+}
+
+/**
+ * 0836 US-002 follow-up: inject the per-process X-Studio-Token into the
+ * served index.html so browser-mode (`npx vskill studio` → user's default
+ * browser) can authenticate API calls. Previously only Tauri's IPC path
+ * delivered the token; the browser tab had no way to obtain it and every
+ * /api/* call returned 401.
+ *
+ * Safe against DNS rebinding because the only consumer of this HTML is
+ * the same-origin loopback page. An attacker.com tab cannot read this
+ * HTML cross-origin (browser-enforced).
+ *
+ * Token resolution order on the client (StudioTokenBridge.ts):
+ *   1. window.__VSKILL_STUDIO_TOKEN__  ← injected here (works in both modes)
+ *   2. Tauri IPC get_studio_token       ← desktop-only fallback
+ */
+function injectStudioToken(html: string): string {
+  const token = getStudioToken();
+  // Use the marker pattern Tauri's CSP allows. Inline JSON ensures the
+  // value never appears in a script src attribute and isn't interpreted
+  // as a string literal that could break on quotes.
+  const marker = `<script id="__vskill_studio_token__" type="application/json">${
+    JSON.stringify({ token })
+  }</script>`;
+  // Inject just before </head>; fall back to prepending <body> if head not found.
+  if (html.includes("</head>")) {
+    return html.replace("</head>", `${marker}\n</head>`);
+  }
+  if (html.includes("<body")) {
+    return html.replace(/<body([^>]*)>/, `<body$1>\n${marker}`);
+  }
+  // No <head> or <body>: prepend (shouldn't happen for a real SPA shell).
+  return `${marker}\n${html}`;
 }

@@ -230,6 +230,21 @@ jobs:
           # this step. Inheriting via GITHUB_ENV instead of `${{ secrets.X }}`
           # is what makes the defensive scrub effective.
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # 0836 US-004: src-tauri/build.rs panics if GITHUB_OAUTH_CLIENT_ID
+          # is unset or equals the placeholder `Iv1.placeholder-replace-before-ship`
+          # for release builds — guards against shipping a binary that can never
+          # complete the device-flow sign-in. The post-build verification step
+          # below greps the compiled binary for the placeholder string as a
+          # second-line check (defense-in-depth).
+          #
+          # Hardcoded here (not a secret) because OAuth App client IDs are
+          # PUBLIC: device-flow leaks them in network traffic, and they're
+          # baked into every shipped desktop binary at compile time. The
+          # only thing that's secret is the OAuth App's client_secret, which
+          # vskill does NOT use (device-flow is client-secret-less).
+          # Source: Obsidian vault entry for "Github OAuth Auth token vskill
+          # verified skill.md" (App: vskill, app id 3406130, anton.abyzov@gmail.com).
+          GITHUB_OAUTH_CLIENT_ID: Ov23li6H8OpvPfuhyDEt
         with:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
           tagName: ${{ github.ref_name }}

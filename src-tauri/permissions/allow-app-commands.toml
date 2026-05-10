@@ -1,0 +1,74 @@
+# Tauri 2.x ACL — explicit allow rules for the desktop shell's custom IPC commands.
+#
+# Without this, every #[tauri::command] returns
+#   "Command <name> not allowed by ACL"
+# at runtime. The capabilities/default.json must reference this identifier
+# (`allow-app-commands`) so the WebView is granted access.
+#
+# Affected user-visible features in v1.0.30 (all broken until this lands):
+#   - Sign-in with GitHub (start_github_device_flow, poll_github_device_flow,
+#     get_signed_in_user, sign_out, refresh_user_identity)
+#   - Connected-repo widget (get_repo_info)
+#   - Quota / billing (quota_*)
+#   - Lifecycle controls (lifecycle_*, list_studio_instances,
+#     switch_to_studio_instance, stop_studio_instance)
+#   - Settings UI (get_settings, set_setting, reset_settings)
+#   - Project folder picker (pick_default_project_folder, get_detected_instance)
+#   - Self-update (check_for_updates, download_and_install_update, cancel_update)
+#   - Menu actions (open_preferences, open_logs_folder, reveal_settings_file,
+#     open_external_url, quit)
+#   - Server control (restart_server, get_server_port, get_app_metadata,
+#     set_autostart)
+#
+# `get_studio_token` is allowed even though the v1.0.30 HTML-injection path
+# made it optional, because older builds + tests still call it via IPC.
+
+[[permission]]
+identifier = "allow-app-commands"
+description = "Allow all custom IPC commands registered in the desktop shell's invoke_handler. These are the commands defined in src-tauri/src/commands.rs."
+
+commands.allow = [
+  # Sidecar / studio runtime
+  "get_server_port",
+  "get_studio_token",
+  "restart_server",
+  "open_logs_folder",
+  "quit",
+  "open_external_url",
+  # Settings
+  "get_settings",
+  "set_setting",
+  "reset_settings",
+  "reveal_settings_file",
+  # Self-update
+  "check_for_updates",
+  "download_and_install_update",
+  "cancel_update",
+  # Window / preferences
+  "open_preferences",
+  "get_app_metadata",
+  "set_autostart",
+  # Folder picker
+  "pick_default_project_folder",
+  "get_detected_instance",
+  # Process lifecycle (other vskill instances)
+  "lifecycle_use_existing",
+  "lifecycle_stop_existing",
+  "lifecycle_run_alongside",
+  "list_studio_instances",
+  "switch_to_studio_instance",
+  "stop_studio_instance",
+  # GitHub OAuth (device flow)
+  "start_github_device_flow",
+  "poll_github_device_flow",
+  "get_signed_in_user",
+  "sign_out",
+  "refresh_user_identity",
+  # Connected repo widget
+  "get_repo_info",
+  # Quota / billing
+  "quota_get",
+  "quota_force_sync",
+  "quota_can_create_skill",
+  "quota_report_count",
+]

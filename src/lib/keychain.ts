@@ -35,6 +35,14 @@ import { runKeychainMigration } from "./migration/keychain-migration.js";
 export const SERVICE_NAME = "com.verifiedskill.desktop";
 export const GITHUB_TOKEN_KEY = "github-oauth-token";
 
+// 0839 US-005: verified-skill API token (`vsk_*`) lives in a parallel
+// keychain slot so `gho_*` (GitHub OAuth, used for direct GitHub API calls)
+// and `vsk_*` (our minted API token, used for verified-skill.com calls)
+// coexist. See ADR-001 in 0839/plan.md. Distinct slots keep keychain
+// lookups O(1) and avoid prefix-sniffing every read.
+export const VSKILL_TOKEN_SERVICE = "vskill-token";
+export const VSKILL_TOKEN_KEY = "vskill-api-token";
+
 // 0836 US-006: legacy slot — read-only fallback during the one-release
 // compat window. Remove after vskill 1.1.x ships.
 // TODO(0836-followup): drop LEGACY_SERVICE_NAME + LEGACY_TOKEN_KEY + the
@@ -73,6 +81,12 @@ export interface Keychain {
   setGitHubToken(token: string): void;
   getGitHubToken(): string | null;
   clearGitHubToken(): boolean;
+  /** 0839 US-005: store the verified-skill `vsk_*` API token. Coexists with the GitHub token. */
+  setVskillToken(token: string): void;
+  /** 0839 US-005: read the verified-skill `vsk_*` API token. Returns null when absent. */
+  getVskillToken(): string | null;
+  /** 0839 US-005: remove the verified-skill `vsk_*` token. Returns true when something was removed. */
+  clearVskillToken(): boolean;
   /** True iff fallback storage is in use (introspection for `vskill auth status`). */
   usingFallback(): boolean;
 }
@@ -313,6 +327,68 @@ export function createKeychain(opts: KeychainOptions = {}): Keychain {
       return removed;
     },
 
+    // -----------------------------------------------------------------
+    // 0839 US-005: verified-skill API token (`vsk_*`).
+    //
+    // Same storage contract as the GitHub token (keyring preferred,
+    // 0600 file fallback) but a distinct service/account so the two
+    // tokens never collide. Public surface mirrors the GitHub helpers.
+    // -----------------------------------------------------------------
+    setVskillToken(token: string): void {
+      if (!token || typeof token !== "string") {
+        throw new Error("setVskillToken: token must be a non-empty string");
+      }
+      const r = tryKeyring((kr) =>
+        kr.setPassword(VSKILL_TOKEN_SERVICE, VSKILL_TOKEN_KEY, token),
+      );
+      if (r.ok) return;
+      ensureFallbackWarned();
+      const map = readFallback();
+      map.set(VSKILL_TOKEN_KEY, token);
+      writeFallback(map);
+    },
+
+    getVskillToken(): string | null {
+      const r = tryKeyring((kr) =>
+        kr.getPassword(VSKILL_TOKEN_SERVICE, VSKILL_TOKEN_KEY),
+      );
+      if (r.ok && r.value) return r.value;
+      if (r.ok && r.value === null) {
+        // Keyring works but slot is empty — peek at fallback in case the
+        // user wrote a token before keyring became available. Don't warn:
+        // the keyring path is healthy.
+        const map = readFallback();
+        return map.get(VSKILL_TOKEN_KEY) ?? null;
+      }
+      ensureFallbackWarned();
+      const map = readFallback();
+      return map.get(VSKILL_TOKEN_KEY) ?? null;
+    },
+
+    clearVskillToken(): boolean {
+      let removed = false;
+      const r = tryKeyring((kr) =>
+        kr.deletePassword(VSKILL_TOKEN_SERVICE, VSKILL_TOKEN_KEY),
+      );
+      if (r.ok && r.value) removed = true;
+      if (fs.existsSync(fallbackPath)) {
+        const map = readFallback();
+        if (map.delete(VSKILL_TOKEN_KEY)) {
+          if (map.size === 0) {
+            try {
+              fs.unlinkSync(fallbackPath);
+            } catch {
+              writeFallback(map);
+            }
+          } else {
+            writeFallback(map);
+          }
+          removed = true;
+        }
+      }
+      return removed;
+    },
+
     usingFallback(): boolean {
       return fallbackInUse || keyring === null;
     },
@@ -345,6 +421,20 @@ export function setGitHubToken(token: string): void {
 
 export function clearGitHubToken(): boolean {
   return getDefaultKeychain().clearGitHubToken();
+}
+
+// 0839 US-005: module-level convenience accessors for the verified-skill
+// API token. Mirror the GitHub helpers above for parity.
+export function getVskillToken(): string | null {
+  return getDefaultKeychain().getVskillToken();
+}
+
+export function setVskillToken(token: string): void {
+  getDefaultKeychain().setVskillToken(token);
+}
+
+export function clearVskillToken(): boolean {
+  return getDefaultKeychain().clearVskillToken();
 }
 
 /** Last-4 redaction for log-safe output. */

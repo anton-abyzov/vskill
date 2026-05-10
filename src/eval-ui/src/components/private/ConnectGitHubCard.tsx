@@ -1,17 +1,54 @@
 // 0826 — Studio CLI Connect-GitHub CTA card.
 // Shown in the org sidebar section when no auth or no installations exist.
+//
+// 0839 T-013 — When the signed-in user belongs to one or more tenants the
+// card promotes itself into a `<TenantPicker />` so the user can switch
+// active tenant without leaving the sidebar. The N=0 (no installations)
+// path falls through to the existing "no-installations" CTA, preserving
+// the 0834 onboarding flow verbatim.
 
 import type { CSSProperties } from "react";
+import { TenantPicker } from "./TenantPicker";
 
 export interface ConnectGitHubCardProps {
-  /** Mode shifts the message + CTA wording. */
-  state: "no-auth" | "no-installations" | "add-another";
+  /**
+   * Mode shifts the message + CTA wording.
+   *
+   * - `no-auth`           — pre-login banner ("Run vskill auth login")
+   * - `no-installations`  — logged-in but the App is on no orgs
+   * - `add-another`       — bottom-of-section "+ Connect another org" link
+   * - `tenant-picker`     — 0839: signed-in + ≥1 tenant → render the
+   *                         tenant switcher inline. Falls back to the
+   *                         `no-installations` CTA when N=0 so the user
+   *                         is nudged toward the install flow.
+   */
+  state: "no-auth" | "no-installations" | "add-another" | "tenant-picker";
   /** Called when the user clicks the CTA. In studio runtime this typically
       triggers `vskill auth login` via the eval-server endpoint. */
   onConnect?: () => void;
+  /**
+   * 0839 T-013 — Fired after the TenantPicker successfully POSTs a new
+   * active tenant to `/__internal/active-tenant`. The host wires this
+   * to invalidate caches that depend on `X-Vskill-Tenant` so subsequent
+   * fetches go through with the new header value.
+   */
+  onTenantChange?: (slug: string) => void;
 }
 
-export function ConnectGitHubCard({ state, onConnect }: ConnectGitHubCardProps) {
+export function ConnectGitHubCard({ state, onConnect, onTenantChange }: ConnectGitHubCardProps) {
+  // 0839 T-013 — tenant-picker mode renders the switcher with the
+  // existing "no-installations" CTA as its empty-state fallback, so the
+  // N=0 path still nudges users toward installing the App on an org.
+  if (state === "tenant-picker") {
+    return (
+      <div data-cta="connect-github" data-state="tenant-picker">
+        <TenantPicker onTenantChange={onTenantChange}>
+          <ConnectGitHubCard state="no-installations" onConnect={onConnect} />
+        </TenantPicker>
+      </div>
+    );
+  }
+
   const card: CSSProperties = {
     margin: "10px 14px",
     padding: state === "add-another" ? "10px 14px" : "14px 16px",

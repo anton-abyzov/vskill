@@ -19,6 +19,9 @@ import { useKeyboardShortcut } from "../hooks/useKeyboardShortcut";
 import { strings } from "../strings";
 // 0772 US-006: sparse "GitHub not connected" indicator on the Project section.
 import { SidebarGitHubIndicator } from "./SidebarGitHubIndicator";
+// 0843 US-001: signed-in users see ConnectedRepoWidget at the same mount point.
+import { ConnectedRepoWidget } from "./ConnectedRepoWidget";
+import { useAccountSummary } from "../hooks/useAccountSummary";
 
 // Virtualization threshold: ADR / scope brief target is 200 rows combined.
 export const VIRTUALIZATION_THRESHOLD = 200;
@@ -524,7 +527,7 @@ export function Sidebar({
             updateCount={outdatedByScope?.installed ?? outdatedByOrigin?.installed}
             headerRightSlot={
               isClaudeCode ? (
-                <SidebarGitHubIndicator projectRoot={resolvedAgentId} />
+                <ConnectedRepoOrIndicator projectRoot={resolvedAgentId} />
               ) : null
             }
           >
@@ -1499,4 +1502,35 @@ function SidebarError({ error, onRetry }: { error: string; onRetry?: () => void 
 function shortError(msg: string): string {
   const first = msg.split("\n")[0] ?? msg;
   return first.length > 80 ? first.slice(0, 77) + "…" : first;
+}
+
+/**
+ * 0843 US-001 — switches the Project-section right slot between the existing
+ * signed-out indicator and the richer ConnectedRepoWidget for signed-in users.
+ *
+ * Click on the widget hands off to the existing 0834 deep-link route via a
+ * `studio:open-account-tab` CustomEvent that App.tsx listens for; no new
+ * navigation surface is introduced here.
+ */
+function ConnectedRepoOrIndicator({ projectRoot }: { projectRoot: string }) {
+  const { signedIn, tier } = useAccountSummary();
+  if (signedIn) {
+    return (
+      <span
+        data-testid="sidebar-connected-repo-widget"
+        onClick={() => {
+          if (typeof window === "undefined") return;
+          window.dispatchEvent(
+            new CustomEvent("studio:open-account-tab", {
+              detail: { tab: "repos", initialPath: projectRoot },
+            }),
+          );
+        }}
+        style={{ display: "inline-flex", cursor: "pointer" }}
+      >
+        <ConnectedRepoWidget folder={projectRoot} tier={tier} />
+      </span>
+    );
+  }
+  return <SidebarGitHubIndicator projectRoot={projectRoot} />;
 }

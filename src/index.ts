@@ -41,6 +41,9 @@ program
   // 0724 T-006: dry-run preview of the would-be invocations
   .option("--dry-run", "Preview install / enable invocations without executing them")
   .option("-y, --yes", "Skip all prompts, use defaults (all skills, all agents, project scope, symlink)")
+  // 0839 T-010 / ADR-002: per-call tenant override for private-skill resolution.
+  // Highest priority — beats VSKILL_TENANT env and config.json `currentTenant`.
+  .option("--tenant <slug>", "Tenant slug for private-skill resolution (overrides config + env)")
   .action(async (source: string | undefined, opts) => {
     const { addCommand } = await import("./commands/add.js");
     await addCommand(source, opts);
@@ -409,6 +412,41 @@ program
     const { authCommand } = await import("./commands/auth.js");
     const argv = command?.args ?? (subcommand ? [subcommand] : []);
     const exit = await authCommand(argv, {
+      io: {
+        stdout: process.stdout,
+        stderr: process.stderr,
+      },
+    });
+    if (exit !== 0) process.exit(exit);
+  });
+
+// 0839 T-008: vskill orgs {list|use|current} — manage the active tenant.
+program
+  .command("orgs [subcommand] [slug]")
+  .description("Manage the active tenant for private-skill access (list|use|current)")
+  .allowUnknownOption(true)
+  .action(async (subcommand?: string, slug?: string, _opts?: unknown, command?: { args?: string[] }) => {
+    const { orgsCommand } = await import("./commands/orgs.js");
+    const argv = command?.args ?? [
+      ...(subcommand ? [subcommand] : []),
+      ...(slug ? [slug] : []),
+    ];
+    const exit = await orgsCommand(argv, {
+      io: {
+        stdout: process.stdout,
+        stderr: process.stderr,
+      },
+    });
+    if (exit !== 0) process.exit(exit);
+  });
+
+// 0839 T-009: vskill whoami — single-screen identity summary.
+program
+  .command("whoami")
+  .description("Show the current GitHub login, active tenant, and tenant list")
+  .action(async () => {
+    const { whoamiCommand } = await import("./commands/whoami.js");
+    const exit = await whoamiCommand([], {
       io: {
         stdout: process.stdout,
         stderr: process.stderr,

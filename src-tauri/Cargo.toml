@@ -5,7 +5,7 @@ name = "vskill-desktop"
 # Desktop cadence: every desktop-v* tag bumps this.
 # Asset filenames pick this up via Tauri bundle naming, so this MUST
 # match the next intended `desktop-v*` git tag for clean filenames.
-version = "1.0.17"
+version = "1.0.18"
 description = "vSkill desktop shell — native wrapper around the studio runtime"
 authors = ["Anton Abyzov"]
 license = "MIT"

@@ -91,19 +91,34 @@ interface TauriWindow extends Window {
   __TAURI_INTERNALS__?: TauriInternals;
 }
 
-/// Default fetcher — calls the Rust `get_repo_info` IPC. Browser mode
-/// (no Tauri internals) returns a synthetic "not-git" shape so the UI
-/// can render the empty state without throwing.
+/// Default fetcher. 2026-05-11 — switched from Tauri IPC to sidecar HTTP
+/// because Tauri 2.x ACL was rejecting the get_repo_info IPC at runtime
+/// (build.rs doesn't register custom commands via Attributes::app_manifest,
+/// so allowed_commands stays empty — see the tauri-desktop-release skill).
+/// The sidecar implements the same git-detection logic in Node and returns
+/// the same shape.
+///
+/// Errors are swallowed (returns the "no_remote" synthetic) instead of
+/// surfaced as a banner because the widget is an optional enhancement —
+/// a missing repo widget shouldn't push an ugly error banner over the
+/// whole left-rail layout the way an ACL rejection used to.
 async function defaultFetchRepoInfo(folder: string): Promise<RepoInfo> {
-  if (typeof window === "undefined") {
-    return { name: null, branch: null, is_private: null, sync_state: { kind: "no_remote" } };
+  const empty: RepoInfo = {
+    name: null,
+    branch: null,
+    is_private: null,
+    sync_state: { kind: "no_remote" },
+  };
+  if (typeof window === "undefined") return empty;
+  try {
+    const res = await fetch(
+      `/api/git/repo-info?folder=${encodeURIComponent(folder)}`,
+    );
+    if (!res.ok) return empty;
+    return (await res.json()) as RepoInfo;
+  } catch {
+    return empty;
   }
-  const w = window as TauriWindow;
-  const invoke = w.__TAURI_INTERNALS__?.invoke;
-  if (!invoke) {
-    return { name: null, branch: null, is_private: null, sync_state: { kind: "no_remote" } };
-  }
-  return invoke("get_repo_info", { folder }) as Promise<RepoInfo>;
 }
 
 export const ConnectedRepoWidget = forwardRef<ConnectedRepoWidgetHandle, Props>(

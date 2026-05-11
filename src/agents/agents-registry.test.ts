@@ -484,17 +484,23 @@ describe("AGENTS_REGISTRY — isRemoteOnly (0694 AC-US4-01..03)", () => {
     expect(remoteIds.length).toBeGreaterThan(0);
   });
 
-  it("AC-US4-02: devin/bolt-new/v0/replit are flagged isRemoteOnly: true", () => {
+  it("AC-US4-02: devin/bolt-new/v0/replit (+0845 chatgpt) are flagged isRemoteOnly: true", () => {
+    // 0845 T-003: chatgpt entry joined the remote-only set. It pairs
+    // isRemoteOnly: true with installMode: "clipboard" so the Studio
+    // surfaces it under "Cloud only (paste required)" — see ADR-0845-01.
     const remoteIds = AGENTS_REGISTRY.filter((a) => a.isRemoteOnly === true)
       .map((a) => a.id)
       .sort();
-    expect(remoteIds).toEqual(["bolt-new", "devin", "replit", "v0"]);
+    expect(remoteIds).toEqual(["bolt-new", "chatgpt", "devin", "replit", "v0"]);
   });
 
   it("AC-US4-03: getInstallableAgents() excludes isRemoteOnly entries", async () => {
     const { getInstallableAgents } = await import("./agents-registry.js");
     const installable = getInstallableAgents();
-    expect(installable.length).toBe(AGENTS_REGISTRY.length - 4);
+    const remoteOnlyCount = AGENTS_REGISTRY.filter(
+      (a) => a.isRemoteOnly === true,
+    ).length;
+    expect(installable.length).toBe(AGENTS_REGISTRY.length - remoteOnlyCount);
     for (const agent of installable) {
       expect(agent.isRemoteOnly).not.toBe(true);
     }

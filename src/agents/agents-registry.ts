@@ -18,6 +18,16 @@ import { existsSync as fsExistsSync, readdirSync as fsReaddirSync } from "node:f
 import { homedir as osHomedir } from "node:os";
 import { detectBinary } from "../utils/resolve-binary.js";
 import type { FormatTransformer } from "../installer/transformers/index.js";
+// 0845 T-006..T-010 — per-tool format transformers wired onto Tier-2
+// entries below. Each is a pure function (parsedSkill → files).
+import { cursorTransformer } from "../installer/transformers/cursor.js";
+import { windsurfTransformer } from "../installer/transformers/windsurf.js";
+import { githubCopilotTransformer } from "../installer/transformers/github-copilot.js";
+import { junieTransformer } from "../installer/transformers/junie.js";
+import { kiroTransformer } from "../installer/transformers/kiro.js";
+import { continueDevTransformer } from "../installer/transformers/continue-dev.js";
+import { traeTransformer } from "../installer/transformers/trae.js";
+import { aiderTransformer } from "../installer/transformers/aider.js";
 
 export interface FeatureSupport {
   /** Supports slash commands */
@@ -177,6 +187,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     // 0845 T-003: Tier 2 — emits `.cursor/rules/<name>.mdc` via transformer.
     tier: 2,
     installMode: 'filesystem',
+    formatTransformer: cursorTransformer,
   },
   {
     id: 'gemini-cli',
@@ -222,6 +233,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     // 0845 T-003: Tier 2 — emits `.github/instructions/<name>.instructions.md`.
     tier: 2,
     installMode: 'filesystem',
+    formatTransformer: githubCopilotTransformer,
   },
   {
     id: 'kimi-cli',
@@ -342,6 +354,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     // 0845 T-003: Tier 2 — emits `.continue/rules/<name>.md` (plain markdown).
     tier: 2,
     installMode: 'filesystem',
+    formatTransformer: continueDevTransformer,
   },
   {
     id: 'crush',
@@ -385,6 +398,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     // 0845 T-003: Tier 2 — emits `.junie/rules/<name>.md` (plain markdown).
     tier: 2,
     installMode: 'filesystem',
+    formatTransformer: junieTransformer,
   },
   {
     id: 'iflow-cli',
@@ -418,6 +432,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     // 0845 T-003: Tier 2 — emits `.kiro/steering/<name>.md` (plain markdown).
     tier: 2,
     installMode: 'filesystem',
+    formatTransformer: kiroTransformer,
   },
   {
     id: 'kode',
@@ -521,6 +536,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     // 0845 T-003: Tier 2 — emits `.trae/<name>.md` (plain markdown).
     tier: 2,
     installMode: 'filesystem',
+    formatTransformer: traeTransformer,
   },
   {
     id: 'trae-cn',
@@ -544,6 +560,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     // 0845 T-003: Tier 2 — emits `.windsurf/rules/<name>.md` (plain markdown).
     tier: 2,
     installMode: 'filesystem',
+    formatTransformer: windsurfTransformer,
   },
   {
     id: 'zencoder',
@@ -607,6 +624,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     // 0845 T-003: Tier 2 — emits conventions file + appends to ~/.aider.conf.yml.
     tier: 2,
     installMode: 'filesystem',
+    formatTransformer: aiderTransformer,
   },
   {
     id: 'tabnine',

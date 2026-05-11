@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   sendJson: vi.fn(),
   readLockfile: vi.fn(),
   detectInstalledAgents: vi.fn(),
+  getSupportedAgents: vi.fn(),
 }));
 
 vi.mock("../router.js", async (importOriginal) => {
@@ -22,20 +23,31 @@ vi.mock("../../lockfile/lockfile.js", () => ({
 }));
 vi.mock("../../agents/agents-registry.js", () => ({
   detectInstalledAgents: mocks.detectInstalledAgents,
+  getSupportedAgents: mocks.getSupportedAgents,
 }));
 
 const { registerInstallStateRoutes } = await import("../install-state-routes.js");
 
-function captureHandler() {
-  let handler: any;
+/**
+ * Captures registered GET handlers by path. The install-state-routes module
+ * now registers two routes (/api/studio/supported-agents — 0845 T-005, and
+ * /api/studio/install-state — 0827); the suite below selects whichever is
+ * relevant per-test instead of relying on call-order.
+ */
+function captureHandlers() {
+  const handlers: Record<string, any> = {};
   const fakeRouter: any = {
-    get: vi.fn((_path: string, h: any) => { handler = h; }),
+    get: vi.fn((p: string, h: any) => { handlers[p] = h; }),
     post: vi.fn(),
     put: vi.fn(),
     delete: vi.fn(),
   };
   registerInstallStateRoutes(fakeRouter, "/test-root");
-  return handler;
+  return handlers;
+}
+
+function captureHandler() {
+  return captureHandlers()["/api/studio/install-state"];
 }
 
 function fakeReq(opts: { url?: string; remoteAddress?: string } = {}) {
@@ -284,5 +296,104 @@ describe("0827 — GET /api/studio/install-state", () => {
     const body = mocks.sendJson.mock.calls[0][1];
     expect(body.scopes.user.installed).toBe(true);
     expect(body.scopes.user.version).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0845 T-005 — GET /api/studio/supported-agents
+// ---------------------------------------------------------------------------
+describe("0845 T-005 — GET /api/studio/supported-agents", () => {
+  let handler: any;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    handler = captureHandlers()["/api/studio/supported-agents"];
+    mocks.getSupportedAgents.mockResolvedValue([
+      {
+        id: "claude-code",
+        displayName: "Claude Code",
+        detected: true,
+        tier: 1,
+        installMode: "filesystem",
+        resolvedGlobalDir: "/home/u/.claude/skills",
+        resolvedLocalDir: ".claude/skills",
+      },
+      {
+        id: "codex",
+        displayName: "Codex CLI",
+        detected: false,
+        tier: 1,
+        installMode: "filesystem",
+        resolvedGlobalDir: "/home/u/.codex/skills",
+        resolvedLocalDir: ".codex/skills",
+      },
+      {
+        id: "chatgpt",
+        displayName: "ChatGPT",
+        detected: false,
+        tier: 3,
+        installMode: "clipboard",
+        resolvedGlobalDir: "/home/u/.chatgpt/skills",
+        resolvedLocalDir: ".chatgpt/skills",
+        pasteInstructionsUrl: "https://help.openai.com/x",
+      },
+    ]);
+  });
+
+  it("AC-US1-01: route is registered", () => {
+    expect(handler).toBeDefined();
+    expect(typeof handler).toBe("function");
+  });
+
+  it("AC-US6-02: rejects non-loopback remoteAddress with 403", async () => {
+    const req = fakeReq({ remoteAddress: "192.168.1.42" });
+    const res = fakeRes();
+    await handler(req, res, {});
+    const sent = mocks.sendJson.mock.calls[0];
+    expect(sent[2]).toBe(403);
+    expect(sent[1].error).toMatch(/localhost-only/i);
+    expect(mocks.getSupportedAgents).not.toHaveBeenCalled();
+  });
+
+  it("AC-US1-01: returns 200 with { agents: SupportedAgent[] } from getSupportedAgents()", async () => {
+    const req = fakeReq();
+    const res = fakeRes();
+    await handler(req, res, {});
+    const sent = mocks.sendJson.mock.calls[0];
+    expect(sent[2]).toBe(200);
+    const body = sent[1];
+    expect(Array.isArray(body.agents)).toBe(true);
+    expect(body.agents).toHaveLength(3);
+    expect(body.agents[0].id).toBe("claude-code");
+  });
+
+  it("AC-US1-01: undetected entries (e.g. Codex without PATH) still appear with detected: false", async () => {
+    const req = fakeReq();
+    const res = fakeRes();
+    await handler(req, res, {});
+    const body = mocks.sendJson.mock.calls[0][1];
+    const codex = body.agents.find((a: any) => a.id === "codex");
+    expect(codex).toBeDefined();
+    expect(codex.detected).toBe(false);
+  });
+
+  it("AC-US1-01: Tier 3 entries surface with pasteInstructionsUrl", async () => {
+    const req = fakeReq();
+    const res = fakeRes();
+    await handler(req, res, {});
+    const body = mocks.sendJson.mock.calls[0][1];
+    const cg = body.agents.find((a: any) => a.id === "chatgpt");
+    expect(cg.installMode).toBe("clipboard");
+    expect(cg.tier).toBe(3);
+    expect(cg.pasteInstructionsUrl).toBe("https://help.openai.com/x");
+  });
+
+  it("AC-US1-02: install-state route is unchanged (still registered, distinct handler)", () => {
+    const handlers = captureHandlers();
+    expect(handlers["/api/studio/install-state"]).toBeDefined();
+    expect(handlers["/api/studio/supported-agents"]).toBeDefined();
+    expect(handlers["/api/studio/install-state"]).not.toBe(
+      handlers["/api/studio/supported-agents"],
+    );
   });
 });

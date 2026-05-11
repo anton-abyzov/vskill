@@ -475,37 +475,16 @@ describe("SkillDetailPanel — T-026 back to results", () => {
 // 0826: install dialog should auto-close after a successful install so the
 // user isn't left looking at a panel that appears to still be running.
 // ---------------------------------------------------------------------------
-describe("SkillDetailPanel — 0826 close on install success", () => {
-  // Minimal EventSource shim that lets the test fire `done` events.
-  class FakeEventSource {
-    url: string;
-    listeners = new Map<string, ((ev: MessageEvent) => void)[]>();
-    onerror: ((ev: Event) => void) | null = null;
-    closed = false;
-    static instances: FakeEventSource[] = [];
-    constructor(url: string) {
-      this.url = url;
-      FakeEventSource.instances.push(this);
-    }
-    addEventListener(type: string, cb: (ev: MessageEvent) => void): void {
-      const list = this.listeners.get(type) ?? [];
-      list.push(cb);
-      this.listeners.set(type, list);
-    }
-    emit(type: string, data: unknown): void {
-      const list = this.listeners.get(type) ?? [];
-      const ev = new MessageEvent(type, { data: JSON.stringify(data) });
-      for (const cb of list) cb(ev);
-    }
-    close(): void { this.closed = true; }
-  }
-
-  it("calls onClose after SSE 'done' with success=true", async () => {
-    FakeEventSource.instances = [];
-    (globalThis as unknown as { EventSource: typeof FakeEventSource }).EventSource = FakeEventSource;
+describe("SkillDetailPanel — 0845 T-022 (AC-US2-01): Install button opens InstallTargetsModal", () => {
+  it("clicking the primary Install button opens the InstallTargetsModal (no single-agent SSE)", async () => {
+    let installSkillPosts = 0;
     globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
       if (typeof url === "string" && url.includes("/api/studio/install-skill") && init?.method === "POST") {
-        return jsonResponse({ jobId: "job-1" });
+        installSkillPosts++;
+        return jsonResponse({ jobId: "job-multi" });
+      }
+      if (typeof url === "string" && url.includes("/api/studio/supported-agents")) {
+        return jsonResponse({ agents: [] });
       }
       if (typeof url === "string" && url.endsWith("/versions")) {
         return jsonResponse({ versions: [{ version: "1.0.0", isLatest: true }] });
@@ -516,40 +495,15 @@ describe("SkillDetailPanel — 0826 close on install success", () => {
     const h = await mount({ onClose });
     await flushMicrotasks();
     const { act } = await import("react");
+    expect(document.querySelector("[data-testid='install-targets-modal']")).toBeNull();
     const installBtn = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
     await act(async () => { installBtn.click(); });
     await flushMicrotasks();
-    // Wait for the EventSource to be created.
-    expect(FakeEventSource.instances.length).toBe(1);
-    const es = FakeEventSource.instances[0];
-    await act(async () => { es.emit("done", { success: true, exitCode: 0, stderr: "" }); });
-    await flushMicrotasks();
-    expect(onClose).toHaveBeenCalledTimes(1);
-    await h.unmount();
-  });
-
-  it("does NOT call onClose after SSE 'done' with success=false (failure keeps dialog open)", async () => {
-    FakeEventSource.instances = [];
-    (globalThis as unknown as { EventSource: typeof FakeEventSource }).EventSource = FakeEventSource;
-    globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
-      if (typeof url === "string" && url.includes("/api/studio/install-skill") && init?.method === "POST") {
-        return jsonResponse({ jobId: "job-2" });
-      }
-      if (typeof url === "string" && url.endsWith("/versions")) {
-        return jsonResponse({ versions: [{ version: "1.0.0", isLatest: true }] });
-      }
-      return jsonResponse({ displayName: "X", ownerSlug: "obsidian", repoSlug: "brain", skillSlug: "wiki-sync" });
-    }) as unknown as typeof fetch;
-    const onClose = vi.fn();
-    const h = await mount({ onClose });
-    await flushMicrotasks();
-    const { act } = await import("react");
-    const installBtn = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
-    await act(async () => { installBtn.click(); });
-    await flushMicrotasks();
-    const es = FakeEventSource.instances[0];
-    await act(async () => { es.emit("done", { success: false, exitCode: 1, stderr: "boom" }); });
-    await flushMicrotasks();
+    // The modal opens; no direct POST fires from the panel itself —
+    // the modal owns the install lifecycle now.
+    expect(document.querySelector("[data-testid='install-targets-modal']")).toBeTruthy();
+    expect(installSkillPosts).toBe(0);
+    // SkillDetailPanel.onClose is NOT invoked just by opening the modal.
     expect(onClose).not.toHaveBeenCalled();
     await h.unmount();
   });

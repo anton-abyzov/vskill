@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-05-07T06:21:42.709Z",
+  "generatedAt": "2026-05-11T07:46:18.296Z",
   "agentPrefixes": [
     ".adal",
     ".agent",
@@ -9,6 +9,7 @@
     ".amp",
     ".augment",
     ".bolt",
+    ".chatgpt",
     ".claude",
     ".cline",
     ".codebuddy",
@@ -64,6 +65,7 @@
     ".amp/",
     ".augment/",
     ".bolt/",
+    ".chatgpt/",
     ".claude/",
     ".cline/",
     ".codebuddy/",

@@ -9,6 +9,7 @@ import {
   createRelativeSymlink,
   ensureCanonicalDir,
   resolveAgentSkillsDir,
+  resolveAgentInstallRoot,
 } from "./canonical.js";
 
 // Controlled mock for symlinkSync to test symlink-failure fallback path (TC-103)
@@ -638,6 +639,98 @@ describe("canonical installer", () => {
       expect(cursorContent).not.toContain("user-invocable");
       expect(cursorContent).toContain("name: pm");
       expect(cursorContent).toContain("description: PM skill");
+    });
+  });
+
+  // 0845 T-012/T-014 — resolveAgentInstallRoot returns the parent of the
+  // agent skills dir. Used by the Tier-2 transformer dispatcher in
+  // multi-install.ts. Win32 path overrides are honored on win32 only.
+  describe("resolveAgentInstallRoot", () => {
+    it("returns the parent of localSkillsDir for project scope", () => {
+      const agent = makeAgent({ localSkillsDir: ".cursor/skills" });
+      const root = resolveAgentInstallRoot(agent, {
+        global: false,
+        projectRoot: tempDir,
+      });
+      expect(root).toBe(join(tempDir, ".cursor"));
+    });
+
+    it("returns the parent of globalSkillsDir for user scope", () => {
+      const agent = makeAgent({ globalSkillsDir: "~/.cursor/skills" });
+      const root = resolveAgentInstallRoot(agent, {
+        global: true,
+        projectRoot: tempDir,
+      });
+      // Tilde expansion handled by resolveTilde — root is one level up.
+      expect(root.endsWith(".cursor") || root.endsWith(".cursor" + pathSep)).toBe(true);
+      expect(root).not.toContain("skills");
+    });
+
+    it("rejects path traversal via localSkillsDir (delegated to resolveAgentSkillsDir)", () => {
+      const agent = makeAgent({ localSkillsDir: "../../.evil/skills" });
+      expect(() =>
+        resolveAgentInstallRoot(agent, {
+          global: false,
+          projectRoot: tempDir,
+        }),
+      ).toThrow("Path traversal");
+    });
+
+    it("honors win32PathOverride on win32 (mocked process.platform)", () => {
+      const agent = makeAgent({
+        globalSkillsDir: "~/.cursor/skills",
+        win32PathOverride: "C:\\Users\\u\\AppData\\Roaming\\Cursor",
+      });
+      const original = process.platform;
+      Object.defineProperty(process, "platform", { value: "win32" });
+      try {
+        const root = resolveAgentInstallRoot(agent, {
+          global: true,
+          projectRoot: tempDir,
+        });
+        expect(root).toBe("C:\\Users\\u\\AppData\\Roaming\\Cursor");
+      } finally {
+        Object.defineProperty(process, "platform", { value: original });
+      }
+    });
+
+    it("ignores win32PathOverride on non-win32 hosts", () => {
+      const agent = makeAgent({
+        globalSkillsDir: "~/.cursor/skills",
+        win32PathOverride: "C:\\Users\\u\\AppData",
+      });
+      const original = process.platform;
+      Object.defineProperty(process, "platform", { value: "darwin" });
+      try {
+        const root = resolveAgentInstallRoot(agent, {
+          global: true,
+          projectRoot: tempDir,
+        });
+        expect(root).not.toContain("C:");
+        expect(root).not.toContain("AppData");
+      } finally {
+        Object.defineProperty(process, "platform", { value: original });
+      }
+    });
+
+    it("ignores win32PathOverride for project scope even on win32", () => {
+      const agent = makeAgent({
+        localSkillsDir: ".cursor/skills",
+        win32PathOverride: "C:\\some\\global\\path",
+      });
+      const original = process.platform;
+      Object.defineProperty(process, "platform", { value: "win32" });
+      try {
+        const root = resolveAgentInstallRoot(agent, {
+          global: false,
+          projectRoot: tempDir,
+        });
+        // win32PathOverride is for the GLOBAL install root only; project
+        // installs always live under projectRoot.
+        expect(root).toBe(join(tempDir, ".cursor"));
+      } finally {
+        Object.defineProperty(process, "platform", { value: original });
+      }
     });
   });
 });

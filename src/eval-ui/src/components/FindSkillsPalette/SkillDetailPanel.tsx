@@ -21,6 +21,7 @@ import RepoHealthBadge from "./components/RepoHealthBadge";
 import TerminalBlock from "./components/TerminalBlock";
 import { skillApiPath } from "../../lib/skill-url";
 import { api, type InstallStateResponse } from "../../api";
+import { InstallTargetsModal } from "../InstallTargetsModal";
 
 // ---------------------------------------------------------------------------
 // Types — minimal shape covering the platform's `/api/v1/skills/...` payload.
@@ -235,6 +236,13 @@ export function SkillDetailPanel({
   // installed" affordance.
   const [installState, setInstallState] = useState<InstallStateResponse | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
+  // 0845 T-022 (AC-US2-01): the primary Install button opens the
+  // InstallTargetsModal instead of running a single-agent install. The
+  // legacy single-agent SSE path is still reachable internally via the
+  // modal's POST /api/studio/install-skill with `agentIds[]` (server
+  // dispatches to the same install pipeline). The button's data-testid
+  // and keyboard shortcut are preserved.
+  const [installModalOpen, setInstallModalOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const backLinkRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -458,96 +466,35 @@ export function SkillDetailPanel({
     }
   }, [installResult, telemetryInstallCopyUrl, skillName, selectedVersion, publisher, slug, isLatestSelected, onToast]);
 
-  // 0784 hotfix — primary Install button actually runs the install via the
-  // localhost-only POST /api/studio/install-skill endpoint, then streams
-  // progress over SSE. Falls back to copy-to-clipboard if the endpoint is
-  // unavailable (e.g. the verified-skill.com proxy where there is no local
-  // shell).
-  const handleInstall = useCallback(async () => {
+  // 0845 T-022 (AC-US2-01): clicking the primary Install button opens the
+  // InstallTargetsModal so users can pick any combination of detected and
+  // undetected tools. The modal's submit hits POST /api/studio/install-skill
+  // with `agentIds[]`, which the server dispatches to the same install
+  // pipeline as the legacy single-agent path. The `data-testid` on the
+  // button and its keyboard shortcut (Enter/Space via native button) are
+  // preserved verbatim so existing focus-trap / keyboard tests still pass.
+  const handleInstall = useCallback(() => {
     if (!installResult || !installResult.ok) return;
-    const target = `${publisher}/${slug}`;
-    if (onToast) {
-      try { onToast(`Installing ${target}…`, "info"); } catch { /* non-fatal */ }
-    } else {
-      dispatchToastFallback(`Installing ${target}…`, "info", 5000);
-    }
-    let jobId: string | null = null;
-    try {
-      const res = await fetch("/api/studio/install-skill", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // 0827 AC-US1-02: send the literal UI scope ("project" | "user").
-        // Server's VALID_SCOPES accepts both — buildArgs maps "user" to
-        // `--scope user`. The displayed copy-command still shows ` --global`
-        // for the User choice (informational only).
-        body: JSON.stringify({ skill: target, scope }),
-      });
-      if (res.status === 404) {
-        // Endpoint not present (older eval-server, or browser is talking to
-        // the verified-skill.com proxy) — fall back to copy-to-clipboard.
-        return handleCopy();
-      }
-      if (!res.ok) {
-        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
-        const msg = errBody.error || `Install failed (HTTP ${res.status})`;
-        if (onToast) {
-          try { onToast(msg, "error"); } catch { /* non-fatal */ }
-        } else {
-          dispatchToastFallback(msg, "error", 6000);
-        }
-        return;
-      }
-      const body = (await res.json()) as { jobId?: string };
-      jobId = body?.jobId ?? null;
-    } catch {
-      // Network failure — fall back to copy-to-clipboard so the user can
-      // still install manually.
-      return handleCopy();
-    }
-    if (!jobId) return;
+    setInstallModalOpen(true);
+  }, [installResult]);
 
-    // Stream progress + final status. Server uses SSE; we read it as text
-    // chunks via the EventSource API — falls back gracefully if absent.
-    if (typeof EventSource === "undefined") return;
-    const es = new EventSource(`/api/studio/install-skill/${jobId}/stream`);
-    const TIMEOUT_MS = 200_000;
-    const safetyTimer = setTimeout(() => { try { es.close(); } catch { /* */ } }, TIMEOUT_MS);
-    es.addEventListener("done", (ev) => {
-      clearTimeout(safetyTimer);
-      try { es.close(); } catch { /* */ }
-      let parsed: { success?: boolean; stderr?: string } = {};
-      try { parsed = JSON.parse((ev as MessageEvent).data); } catch { /* */ }
-      const okFinal = parsed.success === true;
-      const finalMsg = okFinal
-        ? `Installed ${target} (${scope})`
-        : `Install failed: ${parsed.stderr?.trim().split(/\r?\n/).slice(-1)[0] || "see terminal"}`;
-      if (onToast) {
-        try { onToast(finalMsg, okFinal ? "success" : "error"); } catch { /* non-fatal */ }
-      } else {
-        dispatchToastFallback(finalMsg, okFinal ? "success" : "error", okFinal ? 4000 : 8000);
+  // Multi-agent install success — notify other panes that the skill's
+  // install-state changed. The 0827 `studio:skill-installed` CustomEvent
+  // is fired so the install-state listener at the top of this panel and
+  // any other UI watching for it can re-fetch.
+  const handleInstallModalSuccess = useCallback(() => {
+    if (typeof window !== "undefined") {
+      try {
+        window.dispatchEvent(
+          new CustomEvent("studio:skill-installed", {
+            detail: { skill: `${publisher}/${slug}`, scope },
+          }),
+        );
+      } catch {
+        // non-fatal
       }
-      // 0826: dismiss the dialog after a successful install. The user has
-      // their toast confirmation and the panel has nothing more to do —
-      // staying open looked like the install was still in progress. We also
-      // broadcast `studio:skill-installed` so installed-skill listings refresh
-      // immediately. Failures keep the dialog open so the user can read the
-      // error and decide whether to copy the manual command.
-      if (okFinal) {
-        if (typeof window !== "undefined") {
-          try {
-            window.dispatchEvent(
-              new CustomEvent("studio:skill-installed", { detail: { skill: target, scope } }),
-            );
-          } catch { /* non-fatal */ }
-        }
-        handleBack();
-      }
-    });
-    es.onerror = () => {
-      clearTimeout(safetyTimer);
-      try { es.close(); } catch { /* */ }
-    };
-  }, [installResult, publisher, slug, scope, onToast, handleCopy, handleBack]);
+    }
+  }, [publisher, slug, scope]);
 
   const trustTier: TrustTier = (meta?.trustTier as TrustTier | undefined) ?? "T1";
   const certTier: CertificationTier =
@@ -556,6 +503,7 @@ export function SkillDetailPanel({
       : "VERIFIED";
 
   return (
+    <>
     <div
       ref={dialogRef}
       data-testid="skill-detail-panel"
@@ -1023,6 +971,17 @@ export function SkillDetailPanel({
         </div>
       </div>
     </div>
+    {installModalOpen && (
+      <InstallTargetsModal
+        skill={`${publisher}/${slug}`}
+        skillDisplayName={displayName}
+        scope={scope}
+        activeAgentId={null}
+        onClose={() => setInstallModalOpen(false)}
+        onSuccess={handleInstallModalSuccess}
+      />
+    )}
+    </>
   );
 }
 

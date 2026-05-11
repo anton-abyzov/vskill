@@ -24,7 +24,11 @@ import { join } from "node:path";
 import type { Router } from "./router.js";
 import { sendJson } from "./router.js";
 import { readLockfile } from "../lockfile/lockfile.js";
-import { detectInstalledAgents } from "../agents/agents-registry.js";
+import {
+  detectInstalledAgents,
+  getSupportedAgents,
+  type SupportedAgent,
+} from "../agents/agents-registry.js";
 
 const SAFE_NAME = /^[a-zA-Z0-9._@/\-]+$/;
 const PLACEHOLDER_VERSION = "0.0.0";
@@ -110,7 +114,29 @@ function buildScopeState(
   return { installed: true, installedAgentTools, version };
 }
 
+export interface SupportedAgentsResponse {
+  agents: SupportedAgent[];
+}
+
 export function registerInstallStateRoutes(router: Router, root: string): void {
+  // 0845 T-005 (AC-US1-01, AC-US1-02, AC-US6-02): GET /api/studio/supported-agents
+  // returns every registry entry whose installMode is filesystem|clipboard,
+  // enriched with the detection flag + resolved install paths. Distinct from
+  // /api/studio/install-state (per-skill state) and from the older
+  // detected-only callers (preserved by detectInstalledAgents() — AC-US6-03).
+  router.get(
+    "/api/studio/supported-agents",
+    async (req: http.IncomingMessage, res: http.ServerResponse) => {
+      if (!isLocalhost(req)) {
+        sendJson(res, { error: "localhost-only endpoint" }, 403, req);
+        return;
+      }
+      const agents = await getSupportedAgents();
+      const body: SupportedAgentsResponse = { agents };
+      sendJson(res, body, 200, req);
+    },
+  );
+
   router.get(
     "/api/studio/install-state",
     async (req: http.IncomingMessage, res: http.ServerResponse) => {

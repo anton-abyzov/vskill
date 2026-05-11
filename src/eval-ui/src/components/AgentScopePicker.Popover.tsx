@@ -1,7 +1,12 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { strings } from "../strings";
 import type { PickerAgentEntry } from "./AgentScopePicker";
+import type { SupportedAgent } from "../types";
+import {
+  fetchSupportedAgents,
+  groupSupportedAgentsBySection,
+} from "../api/install";
 
 // ---------------------------------------------------------------------------
 // 0686 T-002 (US-002): Two-pane popover for AgentScopePicker.
@@ -16,7 +21,17 @@ import type { PickerAgentEntry } from "./AgentScopePicker";
 // "Not detected" group).
 // Right pane: AgentScopeStatsPane — installed/global counts, last-sync,
 // health, and the "Switch for this studio session" CTA.
+//
+// 0845 T-018 (AC-US1-03..06, AC-US6-01): when `groupBy="installMode"` is
+// passed, the popover renders THREE sections driven by /api/studio/supported-agents:
+//   - "Detected on this machine"       (filesystem + detected)
+//   - "Available to install"           (filesystem + undetected — with + Install here CTA)
+//   - "Cloud only (paste required)"    (clipboard tier)
+// The legacy `groupBy="presence"` view (default) is preserved verbatim so
+// the existing AgentScopePicker.test.tsx snapshots still pass.
 // ---------------------------------------------------------------------------
+
+export type AgentScopePickerGroupMode = "presence" | "installMode";
 
 export interface AgentScopePickerPopoverProps {
   agents: PickerAgentEntry[];
@@ -26,6 +41,25 @@ export interface AgentScopePickerPopoverProps {
   onSwitch: (agentId: string) => void;
   onOpenSetup: (agentId: string) => void;
   onClose: () => void;
+  /**
+   * 0845 T-018: opt-in to the three-section installMode view that pulls
+   * supported agents from GET /api/studio/supported-agents. Defaults to
+   * "presence" so existing callers and snapshot tests continue to work
+   * unchanged (plan.md §8 R12).
+   */
+  groupBy?: AgentScopePickerGroupMode;
+  /**
+   * 0845 T-018 (AC-US1-05): clicking `+ Install here` on an "Available to
+   * install" row opens the InstallTargetsModal with the chosen tool
+   * pre-checked. Provided by the parent (App.tsx) so the popover itself
+   * stays modal-agnostic. Only consulted when `groupBy="installMode"`.
+   */
+  onRequestInstall?: (agentId: string) => void;
+  /**
+   * Optional override for the supported-agents fetcher — used by tests
+   * to inject a fake. Defaults to the real network helper.
+   */
+  fetchSupportedAgentsImpl?: typeof fetchSupportedAgents;
 }
 
 interface AggregateRow {
@@ -91,6 +125,9 @@ export function AgentScopePickerPopover({
   // event listener in App.tsx.
   onOpenSetup: _onOpenSetup,
   onClose,
+  groupBy = "presence",
+  onRequestInstall,
+  fetchSupportedAgentsImpl,
 }: AgentScopePickerPopoverProps) {
   const shellRef = useRef<HTMLDivElement>(null);
 
@@ -123,6 +160,30 @@ export function AgentScopePickerPopover({
   }, [onClose]);
 
   const rows = useMemo(() => groupForDisplay(agents), [agents]);
+
+  // 0845 T-018 — fetch supported agents only when groupBy="installMode".
+  // Fetches once on mount (per popover open). The endpoint is bounded
+  // server-side so the wait is short; we render a lightweight loading
+  // hint while in flight.
+  const [supported, setSupported] = useState<SupportedAgent[] | null>(null);
+  const [supportedError, setSupportedError] = useState<string | null>(null);
+  useEffect(() => {
+    if (groupBy !== "installMode") return;
+    let cancelled = false;
+    const fetcher = fetchSupportedAgentsImpl ?? fetchSupportedAgents;
+    fetcher()
+      .then((list) => {
+        if (!cancelled) setSupported(list);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setSupportedError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [groupBy, fetchSupportedAgentsImpl]);
+
   const focusedAgent =
     agents.find((a) => a.id === focusedAgentId) ??
     agents.find((a) => a.id === activeAgentId) ??
@@ -134,6 +195,7 @@ export function AgentScopePickerPopover({
     <div
       ref={shellRef}
       data-testid="agent-scope-picker-popover"
+      data-group-by={groupBy}
       role="dialog"
       aria-label={strings.scopePicker.popoverTitle}
       style={{
@@ -162,48 +224,22 @@ export function AgentScopePickerPopover({
             padding: "6px 0",
           }}
         >
-          {rows.detected.length === 0 && rows.notDetected.length === 0 && (
-            <EmptyHint />
-          )}
-          {rows.detected.map((row) =>
-            row.kind === "aggregate" ? (
-              <SharedFolderRow
-                key={row.key}
-                row={row}
-                onFocus={() =>
-                  onFocusAgent(row.consumers[0]?.id ?? activeAgentId ?? "")
-                }
-              />
-            ) : (
-              <AgentRow
-                key={row.key}
-                agent={row.agent}
-                focused={row.agent.id === focusedAgentId}
-                active={row.agent.id === activeAgentId}
-                onClick={() => onFocusAgent(row.agent.id)}
-              />
-            ),
-          )}
-          {rows.notDetected.length > 0 && (
-            <>
-              <div
-                data-testid="agent-scope-not-detected-subheading"
-                title="These agents were not found on this machine. Hover a row to see which folder detection looked for."
-                style={{
-                  padding: "10px 14px 4px",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                  color: "var(--text-tertiary)",
-                }}
-              >
-                {strings.scopePicker.notDetectedSubheading}
-              </div>
-              {rows.notDetected.map((row) => (
-                <NotDetectedRow key={row.key} agent={row.agent} />
-              ))}
-            </>
+          {groupBy === "installMode" ? (
+            <InstallModeSections
+              supported={supported}
+              error={supportedError}
+              focusedAgentId={focusedAgentId}
+              activeAgentId={activeAgentId}
+              onFocus={onFocusAgent}
+              onRequestInstall={onRequestInstall}
+            />
+          ) : (
+            <PresenceSections
+              rows={rows}
+              activeAgentId={activeAgentId}
+              focusedAgentId={focusedAgentId}
+              onFocus={onFocusAgent}
+            />
           )}
         </section>
         <section
@@ -229,6 +265,343 @@ export function AgentScopePickerPopover({
       </style>
     </div>,
     document.body,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Legacy presence-grouped sections (default rendering — unchanged behavior).
+// ---------------------------------------------------------------------------
+
+function PresenceSections({
+  rows,
+  activeAgentId,
+  focusedAgentId,
+  onFocus,
+}: {
+  rows: { detected: RenderedRow[]; notDetected: IndividualRow[] };
+  activeAgentId: string | null;
+  focusedAgentId: string | null;
+  onFocus: (agentId: string) => void;
+}) {
+  if (rows.detected.length === 0 && rows.notDetected.length === 0) {
+    return <EmptyHint />;
+  }
+  return (
+    <>
+      {rows.detected.map((row) =>
+        row.kind === "aggregate" ? (
+          <SharedFolderRow
+            key={row.key}
+            row={row}
+            onFocus={() =>
+              onFocus(row.consumers[0]?.id ?? activeAgentId ?? "")
+            }
+          />
+        ) : (
+          <AgentRow
+            key={row.key}
+            agent={row.agent}
+            focused={row.agent.id === focusedAgentId}
+            active={row.agent.id === activeAgentId}
+            onClick={() => onFocus(row.agent.id)}
+          />
+        ),
+      )}
+      {rows.notDetected.length > 0 && (
+        <>
+          <div
+            data-testid="agent-scope-not-detected-subheading"
+            title="These agents were not found on this machine. Hover a row to see which folder detection looked for."
+            style={{
+              padding: "10px 14px 4px",
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "var(--text-tertiary)",
+            }}
+          >
+            {strings.scopePicker.notDetectedSubheading}
+          </div>
+          {rows.notDetected.map((row) => (
+            <NotDetectedRow key={row.key} agent={row.agent} />
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 0845 T-018 — three-section install-mode view.
+// ---------------------------------------------------------------------------
+
+function InstallModeSections({
+  supported,
+  error,
+  focusedAgentId,
+  activeAgentId,
+  onFocus,
+  onRequestInstall,
+}: {
+  supported: SupportedAgent[] | null;
+  error: string | null;
+  focusedAgentId: string | null;
+  activeAgentId: string | null;
+  onFocus: (agentId: string) => void;
+  onRequestInstall?: (agentId: string) => void;
+}) {
+  if (error) {
+    return (
+      <div
+        data-testid="agent-scope-supported-error"
+        style={{
+          padding: "16px 18px",
+          fontSize: 12,
+          color: "var(--color-error, #dc2626)",
+        }}
+      >
+        Failed to load supported agents: {error}
+      </div>
+    );
+  }
+  if (supported === null) {
+    return (
+      <div
+        data-testid="agent-scope-supported-loading"
+        style={{
+          padding: "16px 18px",
+          fontSize: 12,
+          color: "var(--text-secondary)",
+        }}
+      >
+        Loading agents…
+      </div>
+    );
+  }
+  const groups = groupSupportedAgentsBySection(supported);
+  return (
+    <>
+      <SupportedSection
+        testId="agent-scope-section-detected"
+        title="Detected on this machine"
+        agents={groups.detected}
+        emptyHint="No agents detected on this machine yet."
+        renderRow={(a) => (
+          <SupportedAgentRow
+            key={a.id}
+            agent={a}
+            focused={a.id === focusedAgentId}
+            active={a.id === activeAgentId}
+            onClick={() => onFocus(a.id)}
+            kind="detected"
+          />
+        )}
+      />
+      <SupportedSection
+        testId="agent-scope-section-available"
+        title="Available to install"
+        agents={groups.available}
+        emptyHint="All supported agents are detected — nothing left to install here."
+        renderRow={(a) => (
+          <SupportedAgentRow
+            key={a.id}
+            agent={a}
+            focused={a.id === focusedAgentId}
+            active={false}
+            onClick={() => onFocus(a.id)}
+            kind="available"
+            onRequestInstall={onRequestInstall}
+          />
+        )}
+      />
+      <SupportedSection
+        testId="agent-scope-section-cloud"
+        title="Cloud only (paste required)"
+        agents={groups.cloud}
+        emptyHint="No cloud-only tools available."
+        renderRow={(a) => (
+          <SupportedAgentRow
+            key={a.id}
+            agent={a}
+            focused={a.id === focusedAgentId}
+            active={false}
+            onClick={() => onFocus(a.id)}
+            kind="cloud"
+            onRequestInstall={onRequestInstall}
+          />
+        )}
+      />
+    </>
+  );
+}
+
+function SupportedSection({
+  testId,
+  title,
+  agents,
+  emptyHint,
+  renderRow,
+}: {
+  testId: string;
+  title: string;
+  agents: SupportedAgent[];
+  emptyHint: string;
+  renderRow: (agent: SupportedAgent) => React.ReactNode;
+}) {
+  return (
+    <div data-testid={testId}>
+      <div
+        style={{
+          padding: "10px 14px 4px",
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--text-tertiary)",
+        }}
+      >
+        {title}
+      </div>
+      {agents.length === 0 ? (
+        <div
+          style={{
+            padding: "4px 14px 8px",
+            fontSize: 11,
+            color: "var(--text-tertiary)",
+            fontStyle: "italic",
+          }}
+        >
+          {emptyHint}
+        </div>
+      ) : (
+        agents.map(renderRow)
+      )}
+    </div>
+  );
+}
+
+function SupportedAgentRow({
+  agent,
+  focused,
+  active,
+  onClick,
+  kind,
+  onRequestInstall,
+}: {
+  agent: SupportedAgent;
+  focused: boolean;
+  active: boolean;
+  onClick: () => void;
+  kind: "detected" | "available" | "cloud";
+  onRequestInstall?: (agentId: string) => void;
+}) {
+  const dotColor =
+    kind === "detected"
+      ? "var(--color-ok, #22c55e)"
+      : kind === "available"
+        ? "var(--color-own, #f59e0b)"
+        : "var(--text-tertiary)";
+  const pathDisplay =
+    kind === "cloud" ? "Copy to clipboard" : agent.resolvedGlobalDir;
+  return (
+    <div
+      data-testid={`agent-scope-supported-row-${agent.id}`}
+      data-kind={kind}
+      data-detected={agent.detected ? "true" : "false"}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
+        padding: "6px 14px",
+        background: focused
+          ? "color-mix(in srgb, var(--accent-surface) 10%, transparent)"
+          : "transparent",
+      }}
+    >
+      <button
+        type="button"
+        onClick={onClick}
+        data-testid={`agent-scope-supported-row-button-${agent.id}`}
+        data-active={active ? "true" : "false"}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          width: "100%",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          textAlign: "left",
+          padding: 0,
+          fontFamily: "var(--font-sans)",
+          color: "var(--text-primary)",
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: dotColor,
+            flexShrink: 0,
+          }}
+        />
+        <span style={{ flex: 1, fontSize: 13 }}>{agent.displayName}</span>
+        <span
+          title="Install tier"
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 9,
+            color: "var(--text-secondary)",
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+          }}
+        >
+          T{agent.tier}
+        </span>
+      </button>
+      <div
+        title={pathDisplay}
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          color: "var(--text-tertiary)",
+          paddingLeft: 16,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {pathDisplay}
+      </div>
+      {kind === "available" && onRequestInstall && (
+        <button
+          type="button"
+          data-testid={`agent-scope-install-cta-${agent.id}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRequestInstall(agent.id);
+          }}
+          style={{
+            alignSelf: "flex-start",
+            marginLeft: 16,
+            marginTop: 2,
+            padding: "2px 8px",
+            border: "1px solid var(--border-default, var(--border-subtle))",
+            borderRadius: 4,
+            background: "transparent",
+            color: "var(--accent-text, var(--text-primary))",
+            cursor: "pointer",
+            fontSize: 11,
+            fontFamily: "var(--font-sans)",
+          }}
+        >
+          + Install here
+        </button>
+      )}
+    </div>
   );
 }
 

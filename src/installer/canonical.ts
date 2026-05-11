@@ -13,13 +13,34 @@ export interface InstallOptions {
 }
 
 /**
+ * 0845 T-002 (AC-US3-03): per-agent env-var overrides for global skills dirs.
+ *
+ * Only Antigravity is wired today (`VSKILL_ANTIGRAVITY_SKILLS_DIR`); the table
+ * structure is reusable when future agents need an analogous escape hatch.
+ * Returns null when no override applies so callers fall back to the
+ * registry-declared `globalSkillsDir`.
+ */
+export function resolveGlobalSkillsDirEnvOverride(agent: AgentDefinition): string | null {
+  if (agent.id === "antigravity") {
+    const override = process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR;
+    if (override && override.trim().length > 0) return override.trim();
+  }
+  return null;
+}
+
+/**
  * Resolve the skills directory for an agent given the install scope.
  *
  * Global: uses agent.globalSkillsDir (e.g. ~/.claude/skills)
+ *         Honors per-agent env-var overrides via
+ *         `resolveGlobalSkillsDirEnvOverride()` — currently
+ *         `VSKILL_ANTIGRAVITY_SKILLS_DIR` for Antigravity.
  * Local:  uses projectRoot + agent.localSkillsDir (e.g. ./project/.claude/skills)
  */
 export function resolveAgentSkillsDir(agent: AgentDefinition, opts: InstallOptions): string {
   if (opts.global) {
+    const override = resolveGlobalSkillsDirEnvOverride(agent);
+    if (override) return override;
     return resolveTilde(agent.globalSkillsDir);
   }
   const resolved = join(opts.projectRoot, agent.localSkillsDir);
@@ -215,4 +236,35 @@ export function installCopy(
   }
 
   return installed;
+}
+
+/**
+ * 0845 T-012/T-014: Resolve the Tier-2 INSTALL ROOT for an agent —
+ * the parent of `localSkillsDir` / `globalSkillsDir`. Tier-2 transformers
+ * emit relative paths that include their own subfolder layout (e.g.
+ * `rules/<name>.mdc` for Cursor), so the dispatcher joins those onto
+ * this root rather than onto the skills dir itself.
+ *
+ * Win32 (T-014, AC-US4-12): when `process.platform === "win32"` and the
+ * agent declares `win32PathOverride`, that path is the install root
+ * directly (no parent traversal). On POSIX hosts the override is ignored
+ * — agents continue to honor `globalSkillsDir`'s tilde-expanded form.
+ *
+ * Project-scope (`global: false`) keeps the existing path-traversal
+ * guard via `resolveAgentSkillsDir` so projects can't escape via a
+ * crafted `localSkillsDir`. The returned root for project-scope is the
+ * parent of the resolved skills dir, with the same traversal protection
+ * already in force.
+ */
+export function resolveAgentInstallRoot(
+  agent: AgentDefinition,
+  opts: InstallOptions,
+): string {
+  if (opts.global && process.platform === "win32" && agent.win32PathOverride) {
+    return agent.win32PathOverride;
+  }
+  // Reuse `resolveAgentSkillsDir` so env overrides + project-traversal
+  // guards stay in one place. Then climb one level to the install root.
+  const skillsDir = resolveAgentSkillsDir(agent, opts);
+  return dirname(skillsDir);
 }

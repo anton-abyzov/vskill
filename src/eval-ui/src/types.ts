@@ -357,6 +357,50 @@ export interface AgentsResponse {
 }
 
 // ---------------------------------------------------------------------------
+// 0845 — SupportedAgent (mirrors src/agents/agents-registry.ts SupportedAgent)
+// Returned by GET /api/studio/supported-agents. Drives the 3-section
+// AgentScopePicker popover (Detected / Available / Cloud) and the
+// InstallTargetsModal tier-grouped checkbox list.
+// ---------------------------------------------------------------------------
+
+export interface SupportedAgent {
+  id: string;
+  displayName: string;
+  detected: boolean;
+  tier: 1 | 2 | 3;
+  installMode: "filesystem" | "clipboard";
+  resolvedGlobalDir: string;
+  resolvedLocalDir: string;
+  pasteInstructionsUrl?: string;
+  docsUrl?: string;
+}
+
+export interface SupportedAgentsResponse {
+  agents: SupportedAgent[];
+}
+
+// 0845 — per-agent result emitted by SSE on POST /api/studio/install-skill.
+export type AgentInstallStatus = "installed" | "exported" | "skipped" | "error";
+
+export interface AgentInstallResult {
+  agentId: string;
+  status: AgentInstallStatus;
+  detail?: string;
+  /** Absolute path of the written SKILL.md when status="installed". */
+  path?: string;
+  /** Tier-3 blob payload when status="exported". */
+  blob?: string;
+  /** Tier-3 paste-instructions URL when status="exported". */
+  pasteInstructionsUrl?: string;
+  /** Tier-3 docs URL when status="exported". */
+  docsUrl?: string;
+}
+
+export interface MultiInstallResult {
+  results: AgentInstallResult[];
+}
+
+// ---------------------------------------------------------------------------
 // Version lifecycle types (Phase 2)
 // ---------------------------------------------------------------------------
 

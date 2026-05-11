@@ -105,6 +105,22 @@ export function UserDropdown() {
     };
     try {
       const flow = await bridge.startGithubDeviceFlow();
+      // 2026-05-11 — `flow` now carries the OAuth Authorization Code state
+      // (userCode = state token, verificationUri = auth URL). Open the auth
+      // URL in the user's default browser via Tauri shell, OR window.open
+      // for browser mode. Then stash the state token on window so the bridge's
+      // pollGithubDeviceFlow can use it without changing the bridge interface.
+      (window as { __vskillOauthState?: string }).__vskillOauthState = flow.userCode;
+      const tauriShellOpen = (window as { __TAURI__?: { shell?: { open: (u: string) => Promise<void> } } })
+        .__TAURI__?.shell?.open;
+      if (tauriShellOpen) {
+        await tauriShellOpen(flow.verificationUri).catch(() => {
+          // Fallback to window.open if Tauri shell.open fails (capability denied).
+          window.open(flow.verificationUri, "_blank", "noopener");
+        });
+      } else {
+        window.open(flow.verificationUri, "_blank", "noopener");
+      }
       setSignInDialog(flow);
       // Drive the polling loop. We sleep `interval` seconds between calls
       // and honor `slow_down:N` by bumping the interval. Loop exits on
@@ -187,8 +203,10 @@ export function UserDropdown() {
     return signInDialog.userCode;
   }, [signInDialog]);
 
-  // Browser mode: render nothing. The whole feature is desktop-only.
-  if (!bridge.available) return null;
+  // 2026-05-11 — previously gated on `bridge.available` (Tauri-only) because
+  // the device-flow IPC was desktop-only. The new HTTP OAuth flow works in
+  // both Tauri WebView and browser mode (npx vskill studio), so the button
+  // renders in both. The sidecar handles the OAuth callback in either case.
 
   // While we're still reading the cache on cold start, render an inert
   // placeholder so the top-rail layout doesn't shift when the chip

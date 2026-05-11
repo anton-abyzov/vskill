@@ -468,14 +468,47 @@ export function useDesktopBridge(): DesktopBridge {
       expiresIn: number;
     }
 
+    // 2026-05-11 — start_github_device_flow IPC superseded by sidecar HTTP
+    // OAuth Authorization Code + PKCE flow. Why:
+    //   1. Tauri 2.x ACL was rejecting the device-flow IPC at runtime (the
+    //      build.rs doesn't register the app's commands via
+    //      Attributes::app_manifest, so allowed_commands stays empty even
+    //      with a correct permission TOML — see the tauri-desktop-release
+    //      skill for the full deep-dive).
+    //   2. The vskill OAuth App at github.com/settings/developers has
+    //      Device Flow DISABLED, so even when ACL was fixed the GitHub call
+    //      would have returned device_flow_disabled.
+    // The new flow:
+    //   - POST /api/oauth/github/start  → returns auth URL with PKCE challenge
+    //   - User opens URL in browser (caller does the open via tauri shell)
+    //   - GitHub redirects to /api/oauth/github/callback on the SAME sidecar
+    //   - Sidecar exchanges code, stores token via keychain.setGitHubToken
+    //   - Caller polls /api/oauth/github/status until "ready"
+    // The response shape stays {userCode, verificationUri, interval, expiresIn}
+    // for backward-compatibility with UserDropdown's signature, but the
+    // semantics are different — `verificationUri` is now the authorization
+    // URL the caller must open in the browser, and `userCode` is the flow
+    // `state` token (caller polls /status?state=<userCode>).
     const startGithubDeviceFlow: DesktopBridge["startGithubDeviceFlow"] = async () => {
-      if (!available) throw new BrowserModeError("startGithubDeviceFlow");
-      const raw = await tauriInvoke<RawDeviceFlowStart>("start_github_device_flow");
+      const res = await fetch("/api/oauth/github/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`OAuth start failed: HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      const data = (await res.json()) as {
+        state: string;
+        authUrl: string;
+        expiresAt: number;
+      };
       return {
-        userCode: raw.userCode,
-        verificationUri: raw.verificationUri,
-        interval: raw.interval,
-        expiresIn: raw.expiresIn,
+        userCode: data.state,           // Reused: state token = poll key
+        verificationUri: data.authUrl,  // Reused: the URL to open
+        interval: 2,                    // 2s poll cadence
+        expiresIn: Math.max(60, Math.floor((data.expiresAt - Date.now()) / 1000)),
       };
     };
 
@@ -492,43 +525,64 @@ export function useDesktopBridge(): DesktopBridge {
      *   "no-flow"        → { status: "no-flow" }
      *   anything else    → { status: "error", message }
      */
+    // 2026-05-11 — pollGithubDeviceFlow polls the sidecar's HTTP status
+    // endpoint instead of the Tauri IPC poll (same reason as start above —
+    // Tauri ACL + GitHub Device Flow disabled both blocked the IPC path).
+    // The `state` token from start() is stashed in a module-scoped var so
+    // poll() can reuse it without changing the bridge interface.
     const pollGithubDeviceFlow: DesktopBridge["pollGithubDeviceFlow"] = async () => {
-      if (!available) throw new BrowserModeError("pollGithubDeviceFlow");
+      const state = (window as { __vskillOauthState?: string }).__vskillOauthState;
+      if (!state) {
+        return { status: "error", message: "no OAuth flow in progress" };
+      }
       try {
-        const user = await tauriInvoke<SignedInUser>("poll_github_device_flow");
-        return { status: "granted", user };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (message === "pending") return { status: "pending" };
-        if (message.startsWith("slow_down:")) {
-          const n = Number.parseInt(message.slice("slow_down:".length), 10);
-          // GitHub's `slow_down` requires a >=5s bump. Defensive fallback in
-          // case the parse yields NaN — we never want a 0 here that would
-          // turn the polling loop into a hot loop.
-          const newInterval = Number.isFinite(n) && n > 0 ? n : 5;
-          return { status: "slow_down", newInterval };
+        const res = await fetch(
+          `/api/oauth/github/status?state=${encodeURIComponent(state)}`,
+        );
+        if (!res.ok) {
+          return { status: "error", message: `HTTP ${res.status}` };
         }
-        if (message === "denied") return { status: "denied" };
-        if (message === "expired") return { status: "expired" };
-        if (message === "no-flow") return { status: "no-flow" };
-        return { status: "error", message };
+        const data = (await res.json()) as {
+          status: string;
+          user?: SignedInUser;
+          error?: string;
+        };
+        if (data.status === "ready" && data.user) {
+          return { status: "granted", user: data.user };
+        }
+        if (data.status === "pending") return { status: "pending" };
+        if (data.status === "expired") return { status: "expired" };
+        if (data.status === "error") {
+          return { status: "error", message: data.error ?? "unknown" };
+        }
+        return { status: "pending" };
+      } catch (err) {
+        return { status: "error", message: err instanceof Error ? err.message : String(err) };
       }
     };
 
+    // 2026-05-11 — getSignedInUser reads /api/auth/me via HTTP. Works in
+    // both Tauri WebView AND browser mode (npx vskill studio). The sidecar
+    // looks up the cached token via keychain.getGitHubToken() and calls
+    // GitHub /user to validate. Returns null when no valid token exists.
     const getSignedInUser: DesktopBridge["getSignedInUser"] = async () => {
-      if (!available) {
-        // Browser mode never has a signed-in user — no credential vault
-        // to read. Return null instead of throwing so the UI can render
-        // the signed-out state without a try/catch.
+      try {
+        const res = await fetch("/api/auth/me");
+        if (!res.ok) return null;
+        const data = (await res.json()) as {
+          signedIn: boolean;
+          user?: SignedInUser;
+        };
+        return data.signedIn && data.user ? data.user : null;
+      } catch {
         return null;
       }
-      const raw = await tauriInvoke<SignedInUser | null>("get_signed_in_user");
-      return raw ?? null;
     };
 
+    // 2026-05-11 — signOut hits HTTP /api/auth/sign-out which clears the
+    // GitHub token via keychain.clearGitHubToken().
     const signOut: DesktopBridge["signOut"] = async () => {
-      if (!available) throw new BrowserModeError("signOut");
-      await tauriInvoke<void>("sign_out");
+      await fetch("/api/auth/sign-out", { method: "POST" });
     };
 
     // -------------------------------------------------------------------

@@ -73,6 +73,20 @@ const STATE_TTL_MS = 10 * 60 * 1000;   // 10 minutes — GitHub auth pages
                                         // allow ~15 min before user code expires
 const STATE_GC_INTERVAL_MS = 60 * 1000;
 
+// 2026-05-11 (Option B per Anton): the vskill OAuth App's registered
+// callback URL at github.com is the verified-skill.com platform endpoint
+// (so web sign-in works). For the DESKTOP flow we use a bounce-redirect:
+// GitHub → verified-skill.com/api/v1/auth/github/desktop-callback → 302 to
+// http://localhost:<sidecar-port>/api/oauth/github/callback. The port is
+// encoded in `state` so the platform knows where to bounce.
+const DESKTOP_BOUNCE_REDIRECT = "https://verified-skill.com/api/v1/auth/github/desktop-callback";
+
+// Allow overriding the bounce URL via env (useful for local platform
+// development against http://localhost:3000 etc.).
+function getRedirectUri(): string {
+  return process.env.VSKILL_OAUTH_BOUNCE_URL || DESKTOP_BOUNCE_REDIRECT;
+}
+
 // ---------------------------------------------------------------------------
 // In-memory state store
 // ---------------------------------------------------------------------------
@@ -130,17 +144,28 @@ function generatePkcePair(): { verifier: string; challenge: string } {
 // ---------------------------------------------------------------------------
 
 /**
- * Reconstruct the callback URL the browser will hit. We use the same host:port
- * the request came in on — that's already a 127.0.0.1 loopback bind, so the
- * URL is reachable from the user's browser without DNS/firewall issues.
- *
- * GitHub OAuth Apps registered with a `localhost` callback accept ANY port
- * (GitHub treats localhost specially per their docs), so we don't need to
- * pre-configure the dynamic eval-server port in the App settings.
+ * The redirect_uri we send to GitHub. Always the verified-skill.com bounce
+ * endpoint (which then 302s to localhost). Constant, registered in the
+ * OAuth App at github.com.
  */
-function buildCallbackUrl(req: http.IncomingMessage): string {
-  const host = req.headers.host || "127.0.0.1";
-  return `http://${host}/api/oauth/github/callback`;
+function buildGitHubRedirectUri(_req: http.IncomingMessage): string {
+  return getRedirectUri();
+}
+
+/**
+ * Extract the local sidecar port from the request host header so we can
+ * embed it in `state`. The platform bounce-redirect reads the port back
+ * out of state and forwards the user's browser to localhost:<port>.
+ */
+function getLocalPort(req: http.IncomingMessage): number {
+  const host = req.headers.host || "";
+  const m = host.match(/:(\d+)$/);
+  if (m) {
+    const n = Number.parseInt(m[1], 10);
+    if (Number.isFinite(n) && n > 0 && n <= 65535) return n;
+  }
+  // No port in host → default 80. Should never happen for sidecar binds.
+  return 80;
 }
 
 /**
@@ -275,9 +300,14 @@ export function registerOauthGithubRoutes(router: Router): void {
   // path — both are same-origin loopback so the redirect lands back here).
   // -------------------------------------------------------------------------
   router.post("/api/oauth/github/start", async (req, res) => {
-    const state = generateState();
+    // 2026-05-11 Option B: encode the sidecar's local port into state so
+    // the verified-skill.com bounce-redirect knows where to forward the
+    // user's browser. Format: <random base64url>.<port>. The same state
+    // round-trips through GitHub → platform → localhost callback.
+    const port = getLocalPort(req);
+    const state = `${generateState()}.${port}`;
     const { verifier, challenge } = generatePkcePair();
-    const callbackUrl = buildCallbackUrl(req);
+    const redirectUri = buildGitHubRedirectUri(req);
 
     flows.set(state, {
       verifier,
@@ -287,7 +317,7 @@ export function registerOauthGithubRoutes(router: Router): void {
 
     const authUrl = new URL(GITHUB_AUTHORIZE_URL);
     authUrl.searchParams.set("client_id", GITHUB_OAUTH_CLIENT_ID);
-    authUrl.searchParams.set("redirect_uri", callbackUrl);
+    authUrl.searchParams.set("redirect_uri", redirectUri);
     authUrl.searchParams.set("scope", REQUESTED_SCOPE);
     authUrl.searchParams.set("state", state);
     authUrl.searchParams.set("code_challenge", challenge);
@@ -350,8 +380,11 @@ export function registerOauthGithubRoutes(router: Router): void {
     }
 
     try {
-      const callbackUrl = buildCallbackUrl(req);
-      const { accessToken } = await exchangeCodeForToken(code, flow.verifier, callbackUrl);
+      // The redirect_uri sent to the token endpoint MUST exactly match the
+      // one used in the authorize step (the platform bounce URL, NOT
+      // localhost), per the OAuth 2.0 spec.
+      const redirectUri = buildGitHubRedirectUri(req);
+      const { accessToken } = await exchangeCodeForToken(code, flow.verifier, redirectUri);
       await persistGithubToken(accessToken);
       const user = await fetchUserProfile(accessToken);
       flow.status = "ready";

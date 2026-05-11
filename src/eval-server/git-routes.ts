@@ -386,6 +386,126 @@ export function makePostGitPublishHandler(root: string) {
 // ---------------------------------------------------------------------------
 // Mount
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// GET /api/git/repo-info?folder=<absolute-path>
+//
+// 2026-05-11 — port of the Tauri `get_repo_info` IPC command (which the
+// Tauri 2.x ACL silently blocks at runtime; see the tauri-desktop-release
+// skill for why). Returns the same shape as the Rust handler so the React
+// ConnectedRepoWidget renders identically without further changes.
+//
+// The shape matches:
+//   { name, branch, is_private, sync_state }
+//   sync_state.kind ∈ { "no_remote", "dirty", "ahead", "behind", "clean" }
+//
+// `is_private` is left null on the local side — querying the GitHub API
+// would require a token and is best done from the Tauri shell (or a
+// future server-side endpoint). The widget treats null as "unknown".
+// ---------------------------------------------------------------------------
+
+interface RepoInfo {
+  name: string | null;
+  branch: string | null;
+  is_private: boolean | null;
+  sync_state:
+    | { kind: "no_remote" }
+    | { kind: "dirty"; count: number }
+    | { kind: "ahead"; count: number }
+    | { kind: "behind"; count: number }
+    | { kind: "clean" };
+}
+
+function parseGithubUrl(url: string): { owner: string; repo: string } | null {
+  const stripDotGit = (s: string) => s.replace(/\.git$/, "");
+  // SSH form: git@github.com:owner/repo(.git)?
+  const sshMatch = url.match(/^git@github\.com:([^/]+)\/(.+?)(\.git)?$/);
+  if (sshMatch) return { owner: sshMatch[1], repo: stripDotGit(sshMatch[2]) };
+  // SSH proto form: ssh://git@github.com/owner/repo(.git)?
+  const sshProtoMatch = url.match(/^ssh:\/\/git@github\.com\/([^/]+)\/(.+?)(\.git)?$/);
+  if (sshProtoMatch) return { owner: sshProtoMatch[1], repo: stripDotGit(sshProtoMatch[2]) };
+  // HTTPS form: https://github.com/owner/repo(.git)?
+  const httpsMatch = url.match(/^https:\/\/github\.com\/([^/]+)\/(.+?)(\.git)?$/);
+  if (httpsMatch) return { owner: httpsMatch[1], repo: stripDotGit(httpsMatch[2]) };
+  return null;
+}
+
+export function makeGetRepoInfoHandler() {
+  return async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!isRequestAllowed(req)) {
+      sendJson(res, { error: "forbidden" }, 403);
+      return;
+    }
+    const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const folder = url.searchParams.get("folder");
+    const empty: RepoInfo = {
+      name: null,
+      branch: null,
+      is_private: null,
+      sync_state: { kind: "no_remote" },
+    };
+    if (!folder) {
+      sendJson(res, empty, 200);
+      return;
+    }
+    const timeout = getTimeoutMs();
+    // Detect remote URL — `git remote get-url origin` is the canonical form.
+    const remote = await runGitCommand(["remote", "get-url", "origin"], folder, timeout);
+    if (remote.exitCode !== 0) {
+      sendJson(res, empty, 200);
+      return;
+    }
+    const remoteUrl = remote.stdout.trim();
+    const parsed = parseGithubUrl(remoteUrl);
+    const branchResult = await runGitCommand(["branch", "--show-current"], folder, timeout);
+    const branch = branchResult.exitCode === 0
+      ? branchResult.stdout.trim() || null
+      : null;
+    if (!parsed) {
+      // Not a github.com remote — return what we have, the widget will
+      // render the "external git" empty state.
+      sendJson(res, { ...empty, branch }, 200);
+      return;
+    }
+    const name = `${parsed.owner}/${parsed.repo}`;
+
+    // Sync state: upstream → dirty → ahead/behind → clean.
+    const upstream = await runGitCommand(["rev-parse", "--abbrev-ref", "@{u}"], folder, timeout);
+    let sync_state: RepoInfo["sync_state"] = { kind: "no_remote" };
+    if (upstream.exitCode === 0) {
+      const porcelain = await runGitCommand(["status", "--porcelain"], folder, timeout);
+      const dirty = porcelain.exitCode === 0
+        ? porcelain.stdout.split("\n").filter((l) => l.trim().length > 0).length
+        : 0;
+      if (dirty > 0) {
+        sync_state = { kind: "dirty", count: dirty };
+      } else {
+        const counts = await runGitCommand(
+          ["rev-list", "--left-right", "--count", "HEAD...@{u}"],
+          folder,
+          timeout,
+        );
+        if (counts.exitCode === 0) {
+          const [aheadStr, behindStr] = counts.stdout.trim().split(/\s+/);
+          const ahead = parseInt(aheadStr ?? "0", 10) || 0;
+          const behind = parseInt(behindStr ?? "0", 10) || 0;
+          if (ahead > 0) sync_state = { kind: "ahead", count: ahead };
+          else if (behind > 0) sync_state = { kind: "behind", count: behind };
+          else sync_state = { kind: "clean" };
+        } else {
+          sync_state = { kind: "clean" };
+        }
+      }
+    }
+
+    sendJson(res, {
+      name,
+      branch,
+      is_private: null,   // GitHub API call deferred — null = "unknown"
+      sync_state,
+    } satisfies RepoInfo, 200);
+  };
+}
+
 export function registerGitRoutes(router: Router, root: string): void {
   const remoteHandler = makeGetGitRemoteHandler(root);
   router.get("/api/git/remote", (req, res) => remoteHandler(req, res));
@@ -401,4 +521,8 @@ export function registerGitRoutes(router: Router, root: string): void {
 
   const publishHandler = makePostGitPublishHandler(root);
   router.post("/api/git/publish", (req, res) => publishHandler(req, res));
+
+  // 2026-05-11 — replaces the blocked Tauri get_repo_info IPC.
+  const repoInfoHandler = makeGetRepoInfoHandler();
+  router.get("/api/git/repo-info", (req, res) => repoInfoHandler(req, res));
 }

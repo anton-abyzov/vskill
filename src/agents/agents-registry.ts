@@ -17,6 +17,7 @@ import { join as joinPath } from "node:path";
 import { existsSync as fsExistsSync, readdirSync as fsReaddirSync } from "node:fs";
 import { homedir as osHomedir } from "node:os";
 import { detectBinary } from "../utils/resolve-binary.js";
+import type { FormatTransformer } from "../installer/transformers/index.js";
 
 export interface FeatureSupport {
   /** Supports slash commands */
@@ -79,6 +80,34 @@ export interface AgentDefinition {
    *  instead of install affordances. The catalog still lists the entry
    *  so users searching for the brand can discover it. */
   isRemoteOnly?: boolean;
+
+  /** 0845 T-001 (AC-US4-01): Install tier.
+   *  - 1 = drop-in SKILL.md (Claude Code, Codex, Antigravity, ...)
+   *  - 2 = format-converted (Cursor .mdc, Windsurf, Copilot, ...)
+   *  - 3 = clipboard-only cloud tools (ChatGPT, v0, bolt.new)
+   *  When absent the agent is treated as Tier 1. */
+  tier?: 1 | 2 | 3;
+
+  /** 0845 T-001 (AC-US4-01): Install surface.
+   *  - "filesystem" → write to disk under globalSkillsDir / localSkillsDir
+   *  - "clipboard"  → emit a paste-ready blob; no disk write
+   *  - undefined    → defaults to "filesystem" if NOT isRemoteOnly,
+   *                   otherwise excluded from getSupportedAgents()
+   *  This field — not isRemoteOnly — is the gate Studio uses to decide
+   *  whether to surface an install affordance. See ADR-0845-01. */
+  installMode?: "filesystem" | "clipboard";
+
+  /** 0845 T-001 (AC-US4-01): Pure function transforming a parsed
+   *  SKILL.md into the list of files to write under the agent's
+   *  install root. Only set for Tier 2 agents. */
+  formatTransformer?: FormatTransformer;
+
+  /** 0845 T-001 (AC-US4-01): Tier 3 only — URL of the tool's docs page
+   *  explaining how to paste the exported blob. */
+  pasteInstructionsUrl?: string;
+
+  /** 0845 T-001: Tier 3 only — link to the tool's docs landing page. */
+  docsUrl?: string;
 }
 
 /** 0694 (AC-US1-04): Backward-compat alias map for renamed agent ids.
@@ -129,6 +158,12 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: () => detectBinary('codex'),
     parentCompany: 'OpenAI',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+    // 0845 T-003 (AC-US3-04): explicit Tier 1 drop-in. Codex is a primary
+    // Studio install target whose binary often isn't on PATH; tier annotation
+    // ensures it surfaces under "Available to install" rather than relying on
+    // the optional-field default.
+    tier: 1,
+    installMode: 'filesystem',
   },
   {
     id: 'cursor',
@@ -139,6 +174,9 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: () => detectBinary('cursor'),
     parentCompany: 'Anysphere',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
+    // 0845 T-003: Tier 2 — emits `.cursor/rules/<name>.mdc` via transformer.
+    tier: 2,
+    installMode: 'filesystem',
   },
   {
     id: 'gemini-cli',
@@ -149,6 +187,8 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: () => detectBinary('gemini'),
     parentCompany: 'Google',
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
+    tier: 1,
+    installMode: 'filesystem',
   },
   {
     // 0694 US-001 (AC-US1-02): renamed from `github-copilot` to free that ID
@@ -179,6 +219,9 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     },
     parentCompany: 'GitHub (Microsoft)',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
+    // 0845 T-003: Tier 2 — emits `.github/instructions/<name>.instructions.md`.
+    tier: 2,
+    installMode: 'filesystem',
   },
   {
     id: 'kimi-cli',
@@ -199,6 +242,8 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: () => detectBinary('opencode'),
     parentCompany: 'Community',
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
+    tier: 1,
+    installMode: 'filesystem',
   },
 
   // ----------------------------------------------------------------
@@ -213,6 +258,10 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: () => detectBinary('antigravity'),
     parentCompany: 'Google',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+    // 0845 T-002 (AC-US3-01): explicit Tier 1 drop-in. globalSkillsDir override
+    // via VSKILL_ANTIGRAVITY_SKILLS_DIR is handled in getSupportedAgents().
+    tier: 1,
+    installMode: 'filesystem',
   },
   {
     id: 'augment',
@@ -235,6 +284,8 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     featureSupport: { slashCommands: true, hooks: true, mcp: true, customSystemPrompt: true },
     pluginCacheDir: '~/.claude/plugins/cache',
     pluginMarketplaceDir: '~/.claude/plugins/marketplaces',
+    tier: 1,
+    installMode: 'filesystem',
   },
   {
     id: 'openclaw',
@@ -245,6 +296,8 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: () => detectBinary('openclaw'),
     parentCompany: 'Community',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+    tier: 1,
+    installMode: 'filesystem',
   },
   {
     id: 'replit',
@@ -286,6 +339,9 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: () => detectBinary('continue'),
     parentCompany: 'Continue',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
+    // 0845 T-003: Tier 2 — emits `.continue/rules/<name>.md` (plain markdown).
+    tier: 2,
+    installMode: 'filesystem',
   },
   {
     id: 'crush',
@@ -326,6 +382,9 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: () => detectBinary('junie'),
     parentCompany: 'JetBrains',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+    // 0845 T-003: Tier 2 — emits `.junie/rules/<name>.md` (plain markdown).
+    tier: 2,
+    installMode: 'filesystem',
   },
   {
     id: 'iflow-cli',
@@ -356,6 +415,9 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: () => detectBinary('kiro'),
     parentCompany: 'AWS',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+    // 0845 T-003: Tier 2 — emits `.kiro/steering/<name>.md` (plain markdown).
+    tier: 2,
+    installMode: 'filesystem',
   },
   {
     id: 'kode',
@@ -456,6 +518,9 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: () => detectBinary('trae'),
     parentCompany: 'ByteDance',
     featureSupport: { slashCommands: false, hooks: false, mcp: true, customSystemPrompt: true },
+    // 0845 T-003: Tier 2 — emits `.trae/<name>.md` (plain markdown).
+    tier: 2,
+    installMode: 'filesystem',
   },
   {
     id: 'trae-cn',
@@ -476,6 +541,9 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: () => detectBinary('windsurf'),
     parentCompany: 'Codeium',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
+    // 0845 T-003: Tier 2 — emits `.windsurf/rules/<name>.md` (plain markdown).
+    tier: 2,
+    installMode: 'filesystem',
   },
   {
     id: 'zencoder',
@@ -536,6 +604,9 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     detectInstalled: () => detectBinary('aider'),
     parentCompany: 'Aider',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+    // 0845 T-003: Tier 2 — emits conventions file + appends to ~/.aider.conf.yml.
+    tier: 2,
+    installMode: 'filesystem',
   },
   {
     id: 'tabnine',
@@ -563,6 +634,9 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
   },
   {
     // 0694 US-004: bolt.new is a browser-only product. See devin entry above.
+    // 0845 T-003: kept isRemoteOnly: true for legacy callers (detectInstalledAgents
+    // skips remote-only). The new `installMode: "clipboard"` is the gate Studio
+    // uses to surface it under "Cloud only (paste required)". See ADR-0845-01.
     id: 'bolt-new',
     displayName: 'bolt.new',
     localSkillsDir: '.bolt/skills',
@@ -572,9 +646,36 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     parentCompany: 'StackBlitz',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
     isRemoteOnly: true,
+    tier: 3,
+    installMode: 'clipboard',
+    pasteInstructionsUrl: 'https://bolt.new/',
+    docsUrl: 'https://bolt.new/',
+  },
+  {
+    // 0845 T-003 (AC-US5-01, plan.md §12 concern #1): NEW entry for ChatGPT
+    // Custom Instructions / Project Instructions / Custom GPT. A single
+    // registry row covers all three paste destinations; the UI may later
+    // split them if per-flavor blob shaping is needed. isRemoteOnly stays
+    // true so legacy detectInstalledAgents skips it; installMode=clipboard
+    // is the new gate that makes Studio surface it as a paste-only target.
+    id: 'chatgpt',
+    displayName: 'ChatGPT',
+    localSkillsDir: '.chatgpt/skills',
+    globalSkillsDir: '~/.chatgpt/skills',
+    isUniversal: false,
+    detectInstalled: async () => false,
+    parentCompany: 'OpenAI',
+    featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
+    isRemoteOnly: true,
+    tier: 3,
+    installMode: 'clipboard',
+    pasteInstructionsUrl: 'https://help.openai.com/en/articles/8096356-chatgpt-custom-instructions',
+    docsUrl: 'https://chatgpt.com/#settings/Personalization',
   },
   {
     // 0694 US-004: v0 is a Vercel hosted UI generator. See devin entry above.
+    // 0845 T-003: Tier 3 clipboard — see bolt-new note for the isRemoteOnly
+    // + installMode dual-flag pattern.
     id: 'v0',
     displayName: 'v0',
     localSkillsDir: '.v0/skills',
@@ -584,6 +685,10 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     parentCompany: 'Vercel',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
     isRemoteOnly: true,
+    tier: 3,
+    installMode: 'clipboard',
+    pasteInstructionsUrl: 'https://v0.dev/docs',
+    docsUrl: 'https://v0.dev/',
   },
   {
     id: 'gpt-pilot',
@@ -912,4 +1017,144 @@ export async function detectInstalledAgents(): Promise<AgentDefinition[]> {
   );
 
   return results.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+// ---------------------------------------------------------------------------
+// 0845 T-004 — getSupportedAgents() + SupportedAgent type.
+//
+// Parallel primitive to detectInstalledAgents(). Returns every entry the
+// Studio knows how to install to, regardless of binary detection. Used by
+// the new GET /api/studio/supported-agents endpoint and the
+// InstallTargetsModal — see ADR-0845-01 for the "installability is a UI
+// concern, not a detection concern" decision.
+// ---------------------------------------------------------------------------
+
+/** Enriched registry entry returned by getSupportedAgents(). */
+export interface SupportedAgent {
+  id: string;
+  displayName: string;
+  /** Whether the agent's binary or config dir was detected on this host. */
+  detected: boolean;
+  /** Install tier — 1 (drop-in) | 2 (format-converted) | 3 (clipboard). */
+  tier: 1 | 2 | 3;
+  /** "filesystem" or "clipboard" — defaults populated here so consumers
+   *  don't need to repeat the resolution logic. */
+  installMode: "filesystem" | "clipboard";
+  /** Tilde-expanded absolute path of the global skills dir. */
+  resolvedGlobalDir: string;
+  /** Project-relative local skills dir (verbatim from registry). */
+  resolvedLocalDir: string;
+  /** Tier 3 only — URL of the tool's docs page explaining how to paste. */
+  pasteInstructionsUrl?: string;
+  /** Tier 3 only — docs landing page for the tool. */
+  docsUrl?: string;
+}
+
+/**
+ * Resolve the global skills dir for a single agent, honoring env overrides.
+ * The Antigravity entry supports `VSKILL_ANTIGRAVITY_SKILLS_DIR` so test
+ * harnesses (and power users) can redirect installs without forking the
+ * registry. See AC-US3-03.
+ */
+function resolveGlobalDirForAgent(agent: AgentDefinition): string {
+  if (agent.id === "antigravity" && process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR) {
+    return process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR;
+  }
+  return expandHome(agent.globalSkillsDir);
+}
+
+/**
+ * Probe a single agent's binary or config dir in isolation. Used by
+ * getSupportedAgents() in parallel — never throws (returns false on
+ * any error). Mirrors the two-tier detection logic in
+ * detectInstalledAgents() so the two functions agree on "detected".
+ */
+async function probeAgentDetected(agent: AgentDefinition): Promise<boolean> {
+  // Remote-only agents have no local binary to probe. They still surface
+  // in getSupportedAgents() when they declare installMode=clipboard, but
+  // they are by definition undetectable.
+  if (agent.isRemoteOnly === true) return false;
+
+  try {
+    const detector = agent.detectInstalled;
+    if (typeof detector === "function") {
+      if (await detector()) return true;
+    } else {
+      const { exec } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execAsync = promisify(exec);
+      try {
+        await execAsync(detector);
+        return true;
+      } catch {
+        // fall through to dir fallback
+      }
+    }
+  } catch {
+    // fall through to dir fallback
+  }
+
+  try {
+    const { existsSync } = await import("node:fs");
+    const { dirname } = await import("node:path");
+    const globalDir = expandHome(agent.globalSkillsDir);
+    const home = process.env.HOME || process.env.USERPROFILE || "";
+    const configDir = dirname(globalDir);
+    if (configDir !== home && configDir !== `${home}/.config`) {
+      if (existsSync(globalDir)) return true;
+    }
+  } catch {
+    // ignore — agent is simply undetected
+  }
+
+  return false;
+}
+
+/**
+ * 0845 (AC-US1-01, AC-US6-02, AC-US6-03): Returns every registered agent
+ * the Studio knows how to install to — Tier 1 / 2 (filesystem) and Tier 3
+ * (clipboard). Independent of binary detection: undetected agents are
+ * still included, with `detected: false`.
+ *
+ * The exclusion gate is `installMode`. Entries without an explicit
+ * `installMode` default to "filesystem" UNLESS they are flagged
+ * `isRemoteOnly: true` — in which case they are excluded (preserves
+ * the pre-existing semantics for Devin and Replit, which have no
+ * clipboard fallback). Tier 3 entries (chatgpt, bolt-new, v0) are
+ * kept by virtue of setting `installMode: "clipboard"` explicitly.
+ *
+ * Detection probes run in parallel via `Promise.allSettled`
+ * (AC-US6-02). `detectInstalledAgents()` is UNCHANGED (AC-US6-03).
+ */
+export async function getSupportedAgents(): Promise<SupportedAgent[]> {
+  const candidates = AGENTS_REGISTRY.filter((a) => {
+    if (a.installMode === "clipboard") return true;
+    if (a.installMode === "filesystem") return true;
+    // No explicit installMode — default to "filesystem" only when not
+    // remote-only. Pure remote-only agents (devin, replit) drop out here.
+    return a.isRemoteOnly !== true;
+  });
+
+  const detectResults = await Promise.allSettled(
+    candidates.map((a) => probeAgentDetected(a)),
+  );
+
+  const supported: SupportedAgent[] = candidates.map((a, idx) => {
+    const r = detectResults[idx];
+    const detected = r.status === "fulfilled" ? r.value : false;
+    const result: SupportedAgent = {
+      id: a.id,
+      displayName: a.displayName,
+      detected,
+      tier: (a.tier ?? 1) as 1 | 2 | 3,
+      installMode: a.installMode ?? "filesystem",
+      resolvedGlobalDir: resolveGlobalDirForAgent(a),
+      resolvedLocalDir: a.localSkillsDir,
+    };
+    if (a.pasteInstructionsUrl) result.pasteInstructionsUrl = a.pasteInstructionsUrl;
+    if (a.docsUrl) result.docsUrl = a.docsUrl;
+    return result;
+  });
+
+  return supported.sort((a, b) => a.id.localeCompare(b.id));
 }

@@ -52,17 +52,27 @@ describe("buildAgentsResponse — presence + counts", () => {
     // Per 0694: remote-only agents are surfaced in the catalog; their availability is signaled by detection state, not filtering
     // (AC-US4-02 / AC-US4-04: bolt-new, devin, replit, v0 carry isRemoteOnly: true and must always appear so Studio can render the
     // "Remote" badge instead of install affordances).
+    // 0845 T-003: chatgpt joined this set as a clipboard-paste Tier 3 target.
     expect(ids).toContain("bolt-new");
+    expect(ids).toContain("chatgpt");
     expect(ids).toContain("devin");
     expect(ids).toContain("replit");
     expect(ids).toContain("v0");
 
     // No agent outside {claude-code, cursor, remote-only set} should appear — none of their paths exist
-    const allowed = new Set(["claude-code", "cursor", "bolt-new", "devin", "replit", "v0"]);
+    const allowed = new Set([
+      "claude-code",
+      "cursor",
+      "bolt-new",
+      "chatgpt",
+      "devin",
+      "replit",
+      "v0",
+    ]);
     expect(ids.filter((id) => !allowed.has(id))).toEqual([]);
 
     // Remote-only entries must be flagged so the UI keys off isRemoteOnly, not off id-matching
-    for (const remoteId of ["bolt-new", "devin", "replit", "v0"]) {
+    for (const remoteId of ["bolt-new", "chatgpt", "devin", "replit", "v0"]) {
       const entry = resp.agents.find((a) => a.id === remoteId);
       expect(entry?.isRemoteOnly).toBe(true);
     }

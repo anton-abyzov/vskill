@@ -16,6 +16,7 @@ import { registerDetectEnginesRoute } from "../../eval-server/detect-engines-rou
 import { registerInstallEngineRoutes } from "../../eval-server/install-engine-routes.js";
 import { registerInstallSkillRoutes } from "../../eval-server/install-skill-routes.js";
 import { registerInstallStateRoutes } from "../../eval-server/install-state-routes.js";
+import { registerSupportedAgentsRoutes } from "../../eval-server/supported-agents-routes.js";
 
 export function registerScopeTransferRoutes(router: Router, root: string): void {
   registerPromoteRoute(router, root);
@@ -27,4 +28,6 @@ export function registerScopeTransferRoutes(router: Router, root: string): void 
   registerInstallSkillRoutes(router);
   // 0827 — per-skill install-state for the panel's scope picker.
   registerInstallStateRoutes(router, root);
+  // 0845 — cross-tool install targets (every supported agent, detected or not).
+  registerSupportedAgentsRoutes(router);
 }

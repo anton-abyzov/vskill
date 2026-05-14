@@ -233,19 +233,32 @@ describe("vskill auth login (Device Flow)", () => {
     expect(f.stderrBuf).toMatch(/denied/i);
   });
 
-  it("login fails fast when client_id is missing", async () => {
-    const f = fakeIO();
-    const fetchImpl = vi.fn() as unknown as typeof fetch;
-    const exit = await authCommand(["login"], {
-      io: f.io,
-      keychain: fakeKeychain({ token: null }),
-      fetchImpl,
-      sleep: () => Promise.resolve(),
-      clientId: "",
-    });
-    expect(exit).toBe(2);
-    expect((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock?.calls?.length ?? 0).toBe(0);
-    expect(f.stderrBuf).toMatch(/VSKILL_GITHUB_CLIENT_ID/);
+  it("login falls back to the baked-in public client_id when no override is provided", async () => {
+    const prevEnv = process.env.VSKILL_GITHUB_CLIENT_ID;
+    delete process.env.VSKILL_GITHUB_CLIENT_ID;
+    try {
+      const f = fakeIO();
+      const fetchImpl = vi
+        .fn()
+        // device-code request fails fast so we don't have to mock the full flow;
+        // we only care that it was called with the baked-in client_id.
+        .mockResolvedValueOnce(jsonResponse(400, { error: "test_stop" })) as unknown as typeof fetch;
+      const exit = await authCommand(["login"], {
+        io: f.io,
+        keychain: fakeKeychain({ token: null }),
+        fetchImpl,
+        sleep: () => Promise.resolve(),
+        clientId: "",
+      });
+      expect(exit).toBe(1);
+      const calls = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls;
+      expect(calls.length).toBe(1);
+      const body = (calls[0][1] as RequestInit).body as string;
+      expect(body).toContain("client_id=Ov23li6H8OpvPfuhyDEt");
+    } finally {
+      if (prevEnv === undefined) delete process.env.VSKILL_GITHUB_CLIENT_ID;
+      else process.env.VSKILL_GITHUB_CLIENT_ID = prevEnv;
+    }
   });
 });
 

@@ -68,6 +68,12 @@ const USER_URL = "https://api.github.com/user";
 
 const DEFAULT_SCOPE = "read:user";
 
+// Public OAuth client_id for the Skill Studio GitHub App
+// (github.com/settings/applications/3406130). Safe to embed: OAuth client_ids
+// are public identifiers, not secrets, and Device Flow does not require a
+// client_secret. Override with VSKILL_GITHUB_CLIENT_ID for self-hosted variants.
+const DEFAULT_CLIENT_ID = "Ov23li6H8OpvPfuhyDEt";
+
 interface DeviceCodeResp {
   device_code: string;
   user_code: string;
@@ -143,14 +149,7 @@ async function getJson(
 async function loginCmd(deps: Required<Pick<AuthCommandDeps, "fetchImpl" | "sleep" | "version">> & AuthCommandDeps): Promise<number> {
   const { io, fetchImpl, sleep, version } = deps;
   const keychain = deps.keychain ?? getDefaultKeychain();
-  const clientId = deps.clientId ?? process.env.VSKILL_GITHUB_CLIENT_ID ?? "";
-  if (!clientId) {
-    io.stderr.write(
-      "vskill auth login: VSKILL_GITHUB_CLIENT_ID is not set. " +
-        "Set it to the Skill Studio GitHub App's client_id, then retry.\n",
-    );
-    return 2;
-  }
+  const clientId = deps.clientId || process.env.VSKILL_GITHUB_CLIENT_ID || DEFAULT_CLIENT_ID;
 
   // --- Step 1: device code -------------------------------------------------
   let dcRes: Response;

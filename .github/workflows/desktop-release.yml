@@ -294,24 +294,46 @@ jobs:
             echo "::error::expected bundle dir not found: $BUNDLE_DIR"
             exit 1
           fi
-          # Map matrix.platform -> the bundle subdir whose .sig peer is required.
+          require_any_sig() {
+            local label="$1"
+            shift
+            local pattern
+            for pattern in "$@"; do
+              if compgen -G "$pattern" > /dev/null; then
+                echo "Found signed $label artifact matching: $pattern"
+                return 0
+              fi
+            done
+            echo "::error::missing .sig peer for $label"
+            for pattern in "$@"; do
+              echo "::error::  tried: $pattern"
+            done
+            return 1
+          }
+
           case "${{ matrix.platform }}" in
-            macos)   PEERS=("$BUNDLE_DIR/macos"/*.app.tar.gz.sig) ;;
-            windows) PEERS=("$BUNDLE_DIR/nsis"/*-setup.nsis.zip.sig "$BUNDLE_DIR/msi"/*.msi.zip.sig) ;;
-            linux)   PEERS=("$BUNDLE_DIR/appimage"/*.AppImage.tar.gz.sig) ;;
+            macos)
+              require_any_sig "macOS updater bundle" \
+                "$BUNDLE_DIR/macos"/*.app.tar.gz.sig
+              ;;
+            windows)
+              require_any_sig "Windows NSIS installer" \
+                "$BUNDLE_DIR/nsis"/*-setup.exe.sig \
+                "$BUNDLE_DIR/nsis"/*-setup.nsis.zip.sig
+              require_any_sig "Windows MSI installer" \
+                "$BUNDLE_DIR/msi"/*.msi.sig \
+                "$BUNDLE_DIR/msi"/*.msi.zip.sig
+              ;;
+            linux)
+              require_any_sig "Linux AppImage" \
+                "$BUNDLE_DIR/appimage"/*.AppImage.sig \
+                "$BUNDLE_DIR/appimage"/*.AppImage.tar.gz.sig
+              ;;
+            *)
+              echo "::error::unknown platform ${{ matrix.platform }}"
+              exit 1
+              ;;
           esac
-          MISSING=0
-          for p in "${PEERS[@]}"; do
-            # Glob may not expand if no match; check literal
-            if ! compgen -G "$p" > /dev/null; then
-              echo "::error::missing .sig peer for ${{ matrix.platform }}: $p"
-              MISSING=1
-            fi
-          done
-          if [ "$MISSING" -ne 0 ]; then
-            echo "::error::tauri-action did not emit expected .sig files. Auto-update will be broken."
-            exit 1
-          fi
           echo "All expected .sig peers present for ${{ matrix.platform }}."
 
       - name: Verify code signing (macOS)
@@ -373,16 +395,21 @@ jobs:
             src-tauri/target/**/release/bundle/macos/*.app.tar.gz
             src-tauri/target/**/release/bundle/macos/*.app.tar.gz.sig
             src-tauri/target/**/release/bundle/msi/*.msi
+            src-tauri/target/**/release/bundle/msi/*.msi.sig
             src-tauri/target/**/release/bundle/msi/*.msi.zip
             src-tauri/target/**/release/bundle/msi/*.msi.zip.sig
             src-tauri/target/**/release/bundle/nsis/*-setup.exe
+            src-tauri/target/**/release/bundle/nsis/*-setup.exe.sig
             src-tauri/target/**/release/bundle/nsis/*-setup.nsis.zip
             src-tauri/target/**/release/bundle/nsis/*-setup.nsis.zip.sig
             src-tauri/target/**/release/bundle/deb/*.deb
+            src-tauri/target/**/release/bundle/deb/*.deb.sig
             src-tauri/target/**/release/bundle/deb/*.deb.asc
             src-tauri/target/**/release/bundle/rpm/*.rpm
+            src-tauri/target/**/release/bundle/rpm/*.rpm.sig
             src-tauri/target/**/release/bundle/rpm/*.rpm.asc
             src-tauri/target/**/release/bundle/appimage/*.AppImage
+            src-tauri/target/**/release/bundle/appimage/*.AppImage.sig
             src-tauri/target/**/release/bundle/appimage/*.AppImage.asc
             src-tauri/target/**/release/bundle/appimage/*.AppImage.tar.gz
             src-tauri/target/**/release/bundle/appimage/*.AppImage.tar.gz.sig

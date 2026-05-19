@@ -97,16 +97,18 @@ fi
 # ---------------------------------------------------------------------------
 # Step 1 — Discover artifacts + their .sig files
 # ---------------------------------------------------------------------------
-# Tauri Updater needs the `.tar.gz` (macOS), `.nsis.zip` or `.msi.zip` (Windows),
-# `.AppImage.tar.gz` (Linux) — all sit alongside the user-facing `.dmg`/`.msi`/
-# `.deb`/`.AppImage` produced by `cargo tauri build`. Each has a peer `.sig`
+# Tauri Updater needs the signed updater artifact emitted by tauri-action.
+# Current Tauri emits `.app.tar.gz` on macOS and signs the Windows/Linux
+# user-facing installers directly (`.exe`, `.msi`, `.AppImage`). Older action
+# versions emitted `.nsis.zip`, `.msi.zip`, and `.AppImage.tar.gz`, so discovery
+# keeps those fallbacks for rollback releases. Each bundle has a peer `.sig`
 # file emitted by tauri-action.
 #
 # We expect the upload to mirror the bundle/<format>/ tree:
 #   v<VERSION>/macos/vSkill_<v>_aarch64.dmg
 #   v<VERSION>/macos/vSkill_<v>_aarch64.app.tar.gz
 #   v<VERSION>/macos/vSkill_<v>_aarch64.app.tar.gz.sig
-#   v<VERSION>/windows/vSkill_<v>_x64-setup.nsis.zip(.sig) etc.
+#   v<VERSION>/windows/vSkill_<v>_x64-setup.exe(.sig) etc.
 
 declare -A PLATFORM_BUNDLE   # tauri platform key -> bundle filename (relative to artifacts/)
 declare -A PLATFORM_SIG      # tauri platform key -> base64 sig (read from .sig file)
@@ -117,7 +119,7 @@ discover_platform() {
   bundle="$(find "$search_dir" -type f -name "$pattern" 2>/dev/null | head -1 || true)"
   if [[ -z "$bundle" ]]; then
     echo "WARN: no $pattern found under $search_dir (skipping $key)" >&2
-    return
+    return 1
   fi
   local sig="${bundle}.sig"
   if [[ ! -f "$sig" ]]; then
@@ -141,10 +143,14 @@ if [[ -z "${PLATFORM_BUNDLE[darwin-aarch64]:-}" && -z "${PLATFORM_BUNDLE[darwin-
     PLATFORM_SIG["darwin-x86_64"]="${PLATFORM_SIG[darwin-aarch64]}"
   fi
 fi
-discover_platform "windows-x86_64"   "*x64-setup.nsis.zip"          "$ARTIFACTS_DIR" \
-  || discover_platform "windows-x86_64"   "*.msi.zip"                "$ARTIFACTS_DIR"
-discover_platform "linux-x86_64"     "*amd64.AppImage.tar.gz"       "$ARTIFACTS_DIR" \
-  || discover_platform "linux-x86_64"     "*.AppImage.tar.gz"        "$ARTIFACTS_DIR"
+discover_platform "windows-x86_64"   "*x64-setup.exe"              "$ARTIFACTS_DIR" \
+  || discover_platform "windows-x86_64"   "*x64-setup.nsis.zip"     "$ARTIFACTS_DIR" \
+  || discover_platform "windows-x86_64"   "*.msi"                  "$ARTIFACTS_DIR" \
+  || discover_platform "windows-x86_64"   "*.msi.zip"              "$ARTIFACTS_DIR"
+discover_platform "linux-x86_64"     "*amd64.AppImage"             "$ARTIFACTS_DIR" \
+  || discover_platform "linux-x86_64"     "*amd64.AppImage.tar.gz"  "$ARTIFACTS_DIR" \
+  || discover_platform "linux-x86_64"     "*.AppImage"             "$ARTIFACTS_DIR" \
+  || discover_platform "linux-x86_64"     "*.AppImage.tar.gz"      "$ARTIFACTS_DIR"
 
 if [[ ${#PLATFORM_BUNDLE[@]} -eq 0 ]]; then
   echo "ERROR: no platform bundles discovered under $ARTIFACTS_DIR" >&2
@@ -160,9 +166,8 @@ done
 # Step 2 — Upload binaries (per-version, immutable path)
 # ---------------------------------------------------------------------------
 # Upload BOTH the user-facing artifact (.dmg/.msi/.deb/.rpm/.AppImage) AND
-# the Tauri update bundle (.tar.gz/.zip + .sig). The user-facing artifacts are
-# what the website's download buttons link to; the update bundles are what
-# Tauri Updater downloads.
+# the Tauri update bundle plus its .sig peer. On Windows/Linux those can be
+# the same user-facing installers because tauri-action signs them directly.
 
 VERSION_PREFIX="$DEST_PREFIX/v$VERSION"
 

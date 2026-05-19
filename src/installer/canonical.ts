@@ -6,6 +6,7 @@ import os from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { resolveTilde } from "../utils/paths.js";
 import { ensureFrontmatter, stripClaudeFields } from "./frontmatter.js";
+import { resolveBundleTarget } from "./bundle-files.js";
 
 export interface InstallOptions {
   global: boolean;
@@ -134,10 +135,8 @@ const COPY_FALLBACK_AGENTS = new Set(["claude-code"]);
  * Keys are relative paths (e.g., "agents/frontend.md"), values are file contents.
  */
 function writeAgentFiles(targetDir: string, agentFiles: Record<string, string>): void {
-  const resolvedTarget = join(targetDir, "."); // normalize
   for (const [relPath, fileContent] of Object.entries(agentFiles)) {
-    const fullPath = join(resolvedTarget, relPath);
-    if (!fullPath.startsWith(resolvedTarget)) continue; // path traversal guard
+    const fullPath = resolveBundleTarget(targetDir, relPath);
     mkdirSync(dirname(fullPath), { recursive: true });
     writeFileSync(fullPath, fileContent);
   }

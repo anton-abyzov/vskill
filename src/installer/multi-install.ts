@@ -36,6 +36,7 @@ import {
 import { buildClipboardBlob } from "./clipboard-export.js";
 import { safeAppendYamlList } from "./yaml-safe-mutate.js";
 import type { ParsedSkill, TransformedFile } from "./transformers/index.js";
+import { sanitizeSkillBundleFiles } from "./bundle-files.js";
 
 export type AgentInstallStatus = "installed" | "exported" | "skipped" | "error";
 
@@ -152,7 +153,8 @@ function dispatchTier1(
     projectRoot,
   };
   const content = rawContent ?? reconstructSkillMd(skill);
-  const writtenPaths = installSymlink(skill.name, content, [agent], installOpts);
+  const bundleFiles = sanitizeSkillBundleFiles(skill.files);
+  const writtenPaths = installSymlink(skill.name, content, [agent], installOpts, bundleFiles);
   return {
     agentId: agent.id,
     status: "installed",
@@ -186,7 +188,10 @@ function dispatchTier2(
 
   let files: TransformedFile[];
   try {
-    files = agent.formatTransformer(skill);
+    files = [
+      ...agent.formatTransformer(skill),
+      ...buildTier2BundleFiles(skill),
+    ];
   } catch (err) {
     return {
       agentId: agent.id,
@@ -302,6 +307,16 @@ function reconstructSkillMd(skill: ParsedSkill): string {
     ? skill.originalFrontmatter
     : `name: ${skill.name}\ndescription: ${skill.description}`;
   return `---\n${fm}\n---\n\n${skill.body}`;
+}
+
+function buildTier2BundleFiles(skill: ParsedSkill): TransformedFile[] {
+  const bundleFiles = sanitizeSkillBundleFiles(skill.files);
+  return Object.entries(bundleFiles)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([relativePath, content]) => ({
+      relativePath: `skills/${skill.name}/${relativePath}`,
+      content,
+    }));
 }
 
 // Re-export for ergonomic test access. Not strictly needed but lets

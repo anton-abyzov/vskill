@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   useDesktopBridge,
   type DeviceFlowStartResponse,
@@ -10,16 +10,16 @@ import {
  *
  * Two render modes driven by the cached identity:
  *   1. Signed-out: "Sign in with GitHub" pill. Click triggers
- *      `startGithubDeviceFlow`, opens a small dialog with the user_code +
- *      verification URL, and starts a polling loop calling
+ *      `startGithubDeviceFlow`, opens GitHub's OAuth authorization URL in
+ *      the default browser, and starts a polling loop calling
  *      `pollGithubDeviceFlow` every `interval` seconds.
  *   2. Signed-in: avatar + login chip. Click reveals a dropdown menu with
  *      "View on GitHub" (opens the user's profile in a browser) and
  *      "Sign out" (calls `signOut` IPC and resets state).
  *
- * Browser mode (no Tauri shell) renders nothing — the dropdown is a
- * desktop-only feature because the OAuth token must live in the OS
- * credential vault.
+ * Browser mode uses the same sidecar HTTP OAuth flow as the Tauri WebView.
+ * The token stays in the native credential store; the UI only receives
+ * normalized signed-in user metadata.
  *
  * Coordination notes:
  *   - This file is owned by desktop-auth-agent. Other agents adding
@@ -89,6 +89,18 @@ export function UserDropdown() {
     };
   }, [menuOpen]);
 
+  const openExternal = useCallback(async (url: string) => {
+    try {
+      if (typeof bridge.openExternalUrl === "function") {
+        await bridge.openExternalUrl(url);
+        return;
+      }
+    } catch (err) {
+      console.warn("open external URL:", err);
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, [bridge]);
+
   const handleSignIn = useCallback(async () => {
     setSignInError(null);
     setSigningIn(true);
@@ -107,20 +119,11 @@ export function UserDropdown() {
       const flow = await bridge.startGithubDeviceFlow();
       // 2026-05-11 — `flow` now carries the OAuth Authorization Code state
       // (userCode = state token, verificationUri = auth URL). Open the auth
-      // URL in the user's default browser via Tauri shell, OR window.open
-      // for browser mode. Then stash the state token on window so the bridge's
-      // pollGithubDeviceFlow can use it without changing the bridge interface.
+      // URL in the user's default browser via the bridge. Then stash the state
+      // token on window so the bridge's pollGithubDeviceFlow can use it
+      // without changing the bridge interface.
       (window as { __vskillOauthState?: string }).__vskillOauthState = flow.userCode;
-      const tauriShellOpen = (window as { __TAURI__?: { shell?: { open: (u: string) => Promise<void> } } })
-        .__TAURI__?.shell?.open;
-      if (tauriShellOpen) {
-        await tauriShellOpen(flow.verificationUri).catch(() => {
-          // Fallback to window.open if Tauri shell.open fails (capability denied).
-          window.open(flow.verificationUri, "_blank", "noopener");
-        });
-      } else {
-        window.open(flow.verificationUri, "_blank", "noopener");
-      }
+      await openExternal(flow.verificationUri);
       setSignInDialog(flow);
       // Drive the polling loop. We sleep `interval` seconds between calls
       // and honor `slow_down:N` by bumping the interval. Loop exits on
@@ -177,7 +180,7 @@ export function UserDropdown() {
     // We deliberately leave `signInDialog` set to non-null on error so the
     // user can still see the code + retry button. They cancel by clicking
     // Cancel which clears the dialog.
-  }, [bridge]);
+  }, [bridge, openExternal]);
 
   const handleCancelSignIn = useCallback(() => {
     abortRef.current = true;
@@ -197,11 +200,6 @@ export function UserDropdown() {
     }
     setUser(null);
   }, [bridge]);
-
-  const userCodeFormatted = useMemo(() => {
-    if (!signInDialog) return null;
-    return signInDialog.userCode;
-  }, [signInDialog]);
 
   // 2026-05-11 — previously gated on `bridge.available` (Tauri-only) because
   // the device-flow IPC was desktop-only. The new HTTP OAuth flow works in
@@ -247,8 +245,8 @@ export function UserDropdown() {
           <SignInDialog
             response={signInDialog}
             error={signInError}
-            userCode={userCodeFormatted}
             onCancel={handleCancelSignIn}
+            onOpenGithub={() => void openExternal(signInDialog.verificationUri)}
             onRetry={handleSignIn}
           />
         )}
@@ -312,7 +310,7 @@ export function UserDropdown() {
           <MenuItem
             label="View on GitHub"
             onClick={() => {
-              window.open(`https://github.com/${user.login}`, "_blank", "noopener,noreferrer");
+              void openExternal(`https://github.com/${user.login}`);
               setMenuOpen(false);
             }}
           />
@@ -333,33 +331,22 @@ export function UserDropdown() {
 function SignInDialog({
   response,
   error,
-  userCode,
   onCancel,
+  onOpenGithub,
   onRetry,
 }: {
   response: DeviceFlowStartResponse;
   error: string | null;
-  userCode: string | null;
   onCancel: () => void;
+  onOpenGithub: () => void;
   onRetry: () => void;
 }) {
   const handleCopy = useCallback(async () => {
-    if (!userCode) return;
     try {
-      await navigator.clipboard.writeText(userCode);
+      await navigator.clipboard.writeText(response.verificationUri);
     } catch {
       // Clipboard denied (private mode, headless test) — silent fallback.
     }
-  }, [userCode]);
-
-  const handleOpenGithub = useCallback(() => {
-    // The Tauri `start_github_device_flow` IPC already opened the URL in
-    // the user's browser via shell::open. This button is a manual retry
-    // for the case where the auto-open was blocked by an OS prompt or the
-    // user dismissed the browser tab. We use window.open here (works in
-    // both Tauri webview and browser dev mode); Tauri intercepts and
-    // routes through shell::open via the OS handler.
-    window.open(response.verificationUri, "_blank", "noopener,noreferrer");
   }, [response.verificationUri]);
 
   return (
@@ -383,7 +370,7 @@ function SignInDialog({
       }}
     >
       <div style={{ fontSize: 13, marginBottom: 8 }}>
-        Enter this code at <strong>github.com/login/device</strong>:
+        Authorize Skill Studio in GitHub. Your browser should open automatically.
       </div>
       <div
         style={{
@@ -394,26 +381,28 @@ function SignInDialog({
         }}
       >
         <code
-          aria-label="Authorization code"
+          aria-label="Authorization URL"
           style={{
             flex: 1,
             fontFamily: "var(--font-mono)",
-            fontSize: 18,
-            letterSpacing: "0.12em",
+            fontSize: 12,
             padding: "6px 10px",
             background: "var(--surface-1, #0f1115)",
             border: "1px solid var(--border-default)",
             borderRadius: 6,
-            textAlign: "center",
+            textAlign: "left",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
         >
-          {userCode ?? "…"}
+          github.com/login/oauth/authorize
         </code>
         <button
           type="button"
           onClick={handleCopy}
-          aria-label="Copy code"
-          title="Copy code"
+          aria-label="Copy sign-in link"
+          title="Copy sign-in link"
           style={{
             height: 32,
             padding: "0 10px",
@@ -425,7 +414,7 @@ function SignInDialog({
             fontSize: 12,
           }}
         >
-          Copy
+          Copy link
         </button>
       </div>
 
@@ -449,7 +438,7 @@ function SignInDialog({
       <div style={{ display: "flex", gap: 8 }}>
         <button
           type="button"
-          onClick={handleOpenGithub}
+          onClick={onOpenGithub}
           style={{
             flex: 1,
             height: 32,

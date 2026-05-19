@@ -215,8 +215,8 @@ export function InstallTargetsModal({
     const streamFn = startInstallStreamImpl ?? startInstallStream;
 
     try {
-      const { jobId } = await installFn({ skill, agentIds, scope });
-      streamHandleRef.current = streamFn(jobId, {
+      const { jobId, streamPath } = await installFn({ skill, agentIds, scope });
+      streamHandleRef.current = streamFn(streamPath ?? jobId, {
         onResult: (r) => {
           setResults((prev) => ({ ...prev, [r.agentId]: r }));
         },

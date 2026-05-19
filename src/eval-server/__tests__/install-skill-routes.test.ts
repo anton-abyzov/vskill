@@ -18,7 +18,9 @@ const {
   isValidParsedSkill,
   SAFE_AGENT_ID,
   buildArgs,
+  normalizeInstallScope,
   resolveParsedSkillFromIdentifier,
+  runMultiInstallJob,
 } = __test__;
 
 describe("validateAgentIds", () => {
@@ -223,12 +225,11 @@ describe("buildArgs (legacy single-agent spawn — AC-US2-09 backward compat)", 
     ]);
   });
 
-  it("builds user-scope args", () => {
+  it("maps user scope to global install args", () => {
     expect(buildArgs("@anton/foo", "user")).toEqual([
       "install",
       "@anton/foo",
-      "--scope",
-      "user",
+      "--global",
     ]);
   });
 
@@ -238,5 +239,68 @@ describe("buildArgs (legacy single-agent spawn — AC-US2-09 backward compat)", 
       "@anton/foo",
       "--global",
     ]);
+  });
+});
+
+describe("normalizeInstallScope", () => {
+  it("normalizes legacy global to user for in-process multi-agent installs", () => {
+    expect(normalizeInstallScope("project")).toBe("project");
+    expect(normalizeInstallScope("user")).toBe("user");
+    expect(normalizeInstallScope("global")).toBe("user");
+  });
+});
+
+describe("runMultiInstallJob — desktop SSE contract", () => {
+  async function waitForDone(job: { done: boolean }): Promise<void> {
+    for (let i = 0; i < 40; i++) {
+      if (job.done) return;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    throw new Error("multi install job did not finish");
+  }
+
+  it("emits per-agent result frames and a terminal summary with results", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "multi-install-job-"));
+    try {
+      const job = await runMultiInstallJob({
+        skill: {
+          name: "desktop-parity-skill",
+          description: "Desktop parity fixture",
+          body: "Use this fixture to verify desktop install events.",
+          originalFrontmatter: [
+            "name: desktop-parity-skill",
+            "description: Desktop parity fixture",
+            "version: 1.0.0",
+          ].join("\n"),
+          version: "1.0.0",
+        },
+        agentIds: ["chatgpt"],
+        scope: "user",
+        projectRoot: tmp,
+      });
+
+      await waitForDone(job);
+
+      expect(job.pastEvents.map((ev) => ev.event)).toEqual(["result", "done"]);
+      const result = job.pastEvents[0]?.data as { agentId?: string; status?: string };
+      expect(result).toMatchObject({
+        agentId: "chatgpt",
+        status: "exported",
+      });
+      const summary = job.pastEvents[1]?.data as {
+        success?: boolean;
+        results?: Array<{ agentId: string; status: string }>;
+        exportedCount?: number;
+        errorCount?: number;
+      };
+      expect(summary.success).toBe(true);
+      expect(summary.results).toEqual([
+        expect.objectContaining({ agentId: "chatgpt", status: "exported" }),
+      ]);
+      expect(summary.exportedCount).toBe(1);
+      expect(summary.errorCount).toBe(0);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
   });
 });

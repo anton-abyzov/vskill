@@ -103,6 +103,14 @@ async function installApiMocks(
   const installSummary: MockedInstallSummary =
     opts.installSummary ?? { results: [] };
 
+  await page.route("**/api/v1/skills/stream**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: "event: heartbeat\ndata: {}\n\n",
+    });
+  });
+
   await page.route("**/api/studio/supported-agents", async (route) => {
     await route.fulfill({
       status: 200,
@@ -159,11 +167,8 @@ async function mountModalDirectly(
     activeAgentId?: string | null;
   },
 ) {
-  await page.goto("/");
-  await page.waitForLoadState("domcontentloaded");
-  // Wait for the bundle to register the harness mount-point. The Studio
-  // App lazy-loads — we just need React + the chunk graph to be ready.
-  await page.waitForFunction(() => typeof (window as unknown as { React?: unknown }).React !== "undefined" || document.querySelector("[data-testid='top-rail']") !== null, { timeout: 10_000 }).catch(() => {});
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("[data-testid='desktop-sidebar']", { timeout: 10_000 });
 
   // Inject a mount target + bootstrap script that imports the modal from
   // the production bundle. The dist/eval-ui/ Vite output exposes module
@@ -215,22 +220,14 @@ async function openModalViaSkillDetailButton(page: Page): Promise<boolean> {
 }
 
 test.describe("0845 InstallTargetsModal — UI smoke", () => {
-  test.skip(
-    true,
-    "InstallTargetsModal E2E requires either the harness window bridge or the e2e fixture to surface a skill with the new install flow wired up. The component is fully covered by 14 unit tests in src/eval-ui/src/components/__tests__/InstallTargetsModal.test.tsx — re-enable this spec once the foundation-agent + server-impl wire the supported-agents endpoint into the e2e fixture.",
-  );
-
   test("AC-US2-02 + AC-US2-03 — modal opens with tier sections and only active tool pre-checked", async ({ page }) => {
     await installApiMocks(page);
-    const opened = await openModalViaSkillDetailButton(page);
-    if (!opened) {
-      await mountModalDirectly(page, {
-        skill: "anton-abyzov/vskill/obsidian-brain",
-        skillDisplayName: "obsidian-brain",
-        scope: "user",
-        activeAgentId: "claude-code",
-      });
-    }
+    await mountModalDirectly(page, {
+      skill: "anton-abyzov/vskill/obsidian-brain",
+      skillDisplayName: "obsidian-brain",
+      scope: "user",
+      activeAgentId: "claude-code",
+    });
     await expect(page.locator("[data-testid='install-targets-modal']")).toBeVisible();
     await expect(page.locator("[data-testid='install-targets-modal-title']"))
       .toContainText("Install obsidian-brain to:");
@@ -247,14 +244,11 @@ test.describe("0845 InstallTargetsModal — UI smoke", () => {
 
   test("AC-US2-04 — Select all detected + Clear quick actions", async ({ page }) => {
     await installApiMocks(page);
-    const opened = await openModalViaSkillDetailButton(page);
-    if (!opened) {
-      await mountModalDirectly(page, {
-        skill: "anton-abyzov/vskill/obsidian-brain",
-        skillDisplayName: "obsidian-brain",
-        activeAgentId: null,
-      });
-    }
+    await mountModalDirectly(page, {
+      skill: "anton-abyzov/vskill/obsidian-brain",
+      skillDisplayName: "obsidian-brain",
+      activeAgentId: null,
+    });
     await page.locator("[data-testid='install-targets-select-all-detected']").click();
     await expect(
       page.locator("[data-testid='install-targets-row-claude-code']"),
@@ -274,14 +268,11 @@ test.describe("0845 InstallTargetsModal — UI smoke", () => {
   test("AC-US2-08 — Cancel closes without firing install POST", async ({ page }) => {
     const captured: unknown[] = [];
     await installApiMocks(page, { captureInstallPosts: (b) => captured.push(b) });
-    const opened = await openModalViaSkillDetailButton(page);
-    if (!opened) {
-      await mountModalDirectly(page, {
-        skill: "anton-abyzov/vskill/obsidian-brain",
-        skillDisplayName: "obsidian-brain",
-        activeAgentId: "claude-code",
-      });
-    }
+    await mountModalDirectly(page, {
+      skill: "anton-abyzov/vskill/obsidian-brain",
+      skillDisplayName: "obsidian-brain",
+      activeAgentId: "claude-code",
+    });
     await page.locator("[data-testid='install-targets-modal-cancel']").click();
     await expect(
       page.locator("[data-testid='install-targets-modal']"),
@@ -315,15 +306,12 @@ test.describe("0845 InstallTargetsModal — UI smoke", () => {
         ],
       },
     });
-    const opened = await openModalViaSkillDetailButton(page);
-    if (!opened) {
-      await mountModalDirectly(page, {
-        skill: "anton-abyzov/vskill/obsidian-brain",
-        skillDisplayName: "obsidian-brain",
-        scope: "user",
-        activeAgentId: "claude-code",
-      });
-    }
+    await mountModalDirectly(page, {
+      skill: "anton-abyzov/vskill/obsidian-brain",
+      skillDisplayName: "obsidian-brain",
+      scope: "user",
+      activeAgentId: "claude-code",
+    });
     // Add cursor + chatgpt to selection.
     await page.locator("[data-testid='install-targets-checkbox-cursor']").click();
     await page.locator("[data-testid='install-targets-checkbox-chatgpt']").click();

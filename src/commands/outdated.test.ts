@@ -6,6 +6,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockCheckUpdates = vi.hoisted(() => vi.fn());
 const mockReadLockfile = vi.hoisted(() => vi.fn());
+const mockReadAuthored = vi.hoisted(() => vi.fn());
+const mockRemoveAuthoredSkill = vi.hoisted(() => vi.fn());
 
 vi.mock("../api/client.js", () => ({
   checkUpdates: mockCheckUpdates,
@@ -40,6 +42,11 @@ vi.mock("../lockfile/lockfile.js", () => ({
   writeLockfile: mockWriteLockfile,
 }));
 
+vi.mock("../lockfile/authored.js", () => ({
+  readAuthored: mockReadAuthored,
+  removeAuthoredSkill: mockRemoveAuthoredSkill,
+}));
+
 const logs: string[] = [];
 const errors: string[] = [];
 let exitCode: number | undefined;
@@ -52,6 +59,8 @@ describe("outdatedCommand", () => {
     logs.length = 0;
     errors.length = 0;
     exitCode = undefined;
+    mockReadAuthored.mockReturnValue([]);
+    mockRemoveAuthoredSkill.mockReturnValue(undefined);
     vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
       logs.push(args.map(String).join(" "));
     });

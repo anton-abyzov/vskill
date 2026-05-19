@@ -11,8 +11,9 @@
 // folder-picker disambiguation flow that lives in the Preferences window.
 //
 // Coverage map:
-//   - Test 1 (sign-in flow):   AC-US1-01..05 — device-code dialog, polling,
-//                              avatar+login chip post-grant.
+//   - Test 1 (sign-in flow):   AC-US1-01..05 — OAuth auth URL opens in the
+//                              default browser, polling, avatar+login chip
+//                              post-grant.
 //   - Test 2 (folder picker):  AC-US3-01, AC-US3-02 — home-root warning
 //                              modal + Pick again → ProjectRoot path.
 //   - Test 3 (paywall on private-repo connect): AC-US2-02, AC-US2-03,
@@ -204,7 +205,7 @@ async function installBridgeShim(page: Page): Promise<BridgeFixture> {
         case "set_autostart":
           return undefined;
 
-        // ---------- auth (device-flow) ----------
+        // ---------- legacy auth IPC (kept for older bridge callers) ----------
         case "start_github_device_flow":
           s.pendingDeviceFlow = true;
           if (s.pollOutcomes.length === 0) {
@@ -364,18 +365,77 @@ test.describe("0831 T-030 — auth + folder + paywall regression", () => {
   );
 
   // -------------------------------------------------------------------------
-  // Test 1: AC-US1-01..05 — device-flow code panel + polling + chip swap.
+  // Test 1: AC-US1-01..05 — OAuth browser-open + polling + chip swap.
   // -------------------------------------------------------------------------
-  test("Test 1 — sign-in: device-code dialog → polling → user chip", async ({
+  test("Test 1 — sign-in: OAuth link opens browser → polling → user chip", async ({
     page,
   }) => {
     const bridge = await installBridgeShim(page);
+    const authUrl =
+      "https://github.com/login/oauth/authorize?client_id=test-client&state=oauth-state-token";
+    let signedIn = false;
+    let pollCount = 0;
 
-    // Default state has the queue ["pending","pending","granted"] so the
-    // poll must walk three calls before the chip flips. Studio polls at
-    // the IPC's returned `interval` (5s) — we shorten the wait by issuing
-    // a custom poll-outcomes sequence. The bridge default already does
-    // this; nothing to seed.
+    await page.route("**/api/v1/skills/stream**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: "event: heartbeat\ndata: {}\n\n",
+      });
+    });
+    await page.route("**/api/auth/me", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          signedIn,
+          user: signedIn
+            ? {
+                login: "anton-abyzov",
+                avatar_url: "https://avatars.githubusercontent.com/u/1234?v=4",
+                email: "anton@example.com",
+                cached_at: new Date().toISOString(),
+              }
+            : undefined,
+        }),
+      });
+    });
+    await page.route("**/api/oauth/github/start", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          state: "oauth-state-token",
+          authUrl,
+          expiresAt: Date.now() + 900_000,
+        }),
+      });
+    });
+    await page.route("**/api/oauth/github/status**", async (route) => {
+      pollCount += 1;
+      if (pollCount < 2) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ status: "pending" }),
+        });
+        return;
+      }
+      signedIn = true;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "ready",
+          user: {
+            login: "anton-abyzov",
+            avatar_url: "https://avatars.githubusercontent.com/u/1234?v=4",
+            email: "anton@example.com",
+            cached_at: new Date().toISOString(),
+          },
+        }),
+      });
+    });
 
     await page.goto("/index.html");
 
@@ -389,18 +449,22 @@ test.describe("0831 T-030 — auth + folder + paywall regression", () => {
     await bridge.clearCalls();
     await signInButton.click();
 
-    // Device-code dialog appears with the user_code.
+    // OAuth dialog appears and the bridge has opened GitHub in the default browser.
     const dialog = page.locator("[data-slot='sign-in-dialog']");
     await expect(dialog).toBeVisible({ timeout: 5_000 });
-    await expect(dialog).toContainText("WDJB-MJHT");
-    await expect(dialog).toContainText("github.com/login/device");
+    await expect(dialog).toContainText("Authorize Skill Studio in GitHub");
+    await expect(dialog).toContainText("github.com/login/oauth/authorize");
+    await expect.poll(async () => {
+      const calls = await bridge.calls();
+      return calls.some(
+        (c) => c.cmd === "open_external_url" && c.args?.url === authUrl,
+      );
+    })
+      .toBe(true);
 
-    // The IPC wiring fires `start_github_device_flow` once, then polls.
-    // With a 5s interval and 3 poll outcomes (pending, pending, granted),
-    // the chip swap can take up to ~15s — Playwright defaults to 5s for
-    // expect timeouts so we widen for the polling window.
+    // The sidecar status endpoint grants the flow, then the chip replaces the dialog.
     const chip = page.locator("[data-slot='user-chip']");
-    await expect(chip).toBeVisible({ timeout: 25_000 });
+    await expect(chip).toBeVisible({ timeout: 10_000 });
     await expect(chip).toContainText("anton-abyzov");
     // Avatar img inside the chip — assert it picked up the stub URL.
     const avatar = chip.locator("img");
@@ -409,13 +473,7 @@ test.describe("0831 T-030 — auth + folder + paywall regression", () => {
       /avatars\.githubusercontent\.com/,
     );
 
-    // Verify the IPC call sequence: start once + at least 1 poll +
-    // get_signed_in_user on cold-start before the click.
-    const calls = await bridge.calls();
-    const cmdCounts: Record<string, number> = {};
-    for (const c of calls) cmdCounts[c.cmd] = (cmdCounts[c.cmd] ?? 0) + 1;
-    expect(cmdCounts["start_github_device_flow"]).toBeGreaterThanOrEqual(1);
-    expect(cmdCounts["poll_github_device_flow"]).toBeGreaterThanOrEqual(1);
+    expect(pollCount).toBeGreaterThanOrEqual(1);
   });
 
   // -------------------------------------------------------------------------

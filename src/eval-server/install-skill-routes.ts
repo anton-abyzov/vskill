@@ -49,8 +49,13 @@ import { getAgent } from "../agents/agents-registry.js";
 import type { ParsedSkill } from "../installer/transformers/index.js";
 import { locateSkill } from "../clone/skill-locator.js";
 import { extractDescription } from "../installer/frontmatter.js";
+import {
+  collectSkillBundleFiles,
+  sanitizeSkillBundleFiles,
+} from "../installer/bundle-files.js";
 
 type InstallScope = "project" | "user" | "global";
+type MultiInstallScope = "project" | "user";
 
 const SAFE_NAME = /^[a-zA-Z0-9._@/\-]+$/;
 // Agent IDs are slug-shaped: lowercase alphanumeric + hyphens. Stricter
@@ -73,20 +78,25 @@ const JOBS = new Map<string, SpawnJob<SkillJobMeta>>();
 interface MultiInstallJob {
   id: string;
   done: boolean;
-  subscribers: Set<(event: JobEvent, data: unknown) => void>;
-  pastEvents: Array<{ event: JobEvent; data: unknown }>;
+  subscribers: Set<(event: MultiInstallJobEvent, data: unknown) => void>;
+  pastEvents: Array<{ event: MultiInstallJobEvent; data: unknown }>;
 }
 
 const MULTI_JOBS = new Map<string, MultiInstallJob>();
+type MultiInstallJobEvent = JobEvent | "result";
 
 function buildArgs(skill: string, scope: InstallScope): string[] {
   // No shell — every entry is a discrete argv element. Scope is from a
   // closed set; skill is regex-validated. Both flags map to vskill CLI.
-  if (scope === "global") return ["install", skill, "--global"];
+  if (scope === "global" || scope === "user") return ["install", skill, "--global"];
   return ["install", skill, "--scope", scope];
 }
 
-function emitMultiJob(job: MultiInstallJob, event: JobEvent, data: unknown): void {
+function normalizeInstallScope(scope: InstallScope): MultiInstallScope {
+  return scope === "project" ? "project" : "user";
+}
+
+function emitMultiJob(job: MultiInstallJob, event: MultiInstallJobEvent, data: unknown): void {
   job.pastEvents.push({ event, data });
   for (const sub of job.subscribers) {
     try { sub(event, data); } catch { /* subscriber dead — ignore */ }
@@ -96,11 +106,17 @@ function emitMultiJob(job: MultiInstallJob, event: JobEvent, data: unknown): voi
 function isValidParsedSkill(s: unknown): s is ParsedSkill {
   if (!s || typeof s !== "object") return false;
   const v = s as Record<string, unknown>;
-  return (
+  const requiredFieldsOk =
     typeof v.name === "string" &&
     typeof v.description === "string" &&
-    typeof v.body === "string"
-  );
+    typeof v.body === "string";
+  if (!requiredFieldsOk) return false;
+  try {
+    sanitizeSkillBundleFiles(v.files);
+  } catch {
+    return false;
+  }
+  return true;
 }
 
 const SERVER_FALLBACK_FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
@@ -161,12 +177,14 @@ export async function resolveParsedSkillFromIdentifier(
   }
   const name = nameFromFm || source.skillName;
   const description = extractDescription(body, name);
+  const files = await collectSkillBundleFiles(source.skillDir);
   return {
     name,
     description,
     body,
     originalFrontmatter,
     version,
+    files,
   };
 }
 
@@ -209,10 +227,11 @@ async function runMultiInstallJob(opts: {
         projectRoot: opts.projectRoot,
       });
       for (const agentResult of result.agents) {
-        emitMultiJob(job, "progress", agentResult);
+        emitMultiJob(job, "result", agentResult);
       }
       emitMultiJob(job, "done", {
         success: result.errorCount === 0,
+        results: result.agents,
         installedCount: result.installedCount,
         exportedCount: result.exportedCount,
         errorCount: result.errorCount,
@@ -264,17 +283,7 @@ export function registerInstallSkillRoutes(router: Router): void {
           sendJson(res, { error: validation.error }, 400, req);
           return;
         }
-        // Multi-install only supports "project" | "user" — "global" is a
-        // legacy CLI flag with no analogue in the in-process API.
-        if (scope !== "project" && scope !== "user") {
-          sendJson(
-            res,
-            { error: "multi-agent installs require scope: project|user" },
-            400,
-            req,
-          );
-          return;
-        }
+        const normalizedScope = normalizeInstallScope(scope as InstallScope);
         // 0845 closure fix: server-side fallback resolves parsedSkill from
         // the local skill registry when callers omit it. Keeps the frontend
         // payload minimal — the browser doesn't need to fetch + parse
@@ -282,7 +291,10 @@ export function registerInstallSkillRoutes(router: Router): void {
         // out-of-tree skills (e.g. authoring flows) keep working.
         let parsedSkill: ParsedSkill;
         if (isValidParsedSkill(body.parsedSkill)) {
-          parsedSkill = body.parsedSkill;
+          parsedSkill = {
+            ...body.parsedSkill,
+            files: sanitizeSkillBundleFiles(body.parsedSkill.files),
+          };
         } else if (body.parsedSkill !== undefined) {
           sendJson(
             res,
@@ -317,10 +329,19 @@ export function registerInstallSkillRoutes(router: Router): void {
         const job = await runMultiInstallJob({
           skill: parsedSkill,
           agentIds: validation.ids,
-          scope,
+          scope: normalizedScope,
           projectRoot,
         });
-        sendJson(res, { jobId: job.id, mode: "multi-agent" }, 202, req);
+        sendJson(
+          res,
+          {
+            jobId: job.id,
+            mode: "multi-agent",
+            streamPath: `/api/studio/install-skill/multi/${encodeURIComponent(job.id)}/stream`,
+          },
+          202,
+          req,
+        );
         return;
       }
 
@@ -369,7 +390,7 @@ export function registerInstallSkillRoutes(router: Router): void {
         try { res.end(); } catch { /* already closed */ }
         return;
       }
-      const subscriber = (event: JobEvent, data: unknown) => {
+      const subscriber = (event: MultiInstallJobEvent, data: unknown) => {
         try {
           if (event === "done") sendSSEDone(res, data);
           else sendSSE(res, event, data);
@@ -393,7 +414,9 @@ export const __test__ = {
   VALID_SCOPES,
   INSTALL_TIMEOUT_MS,
   buildArgs,
+  normalizeInstallScope,
   validateAgentIds,
   isValidParsedSkill,
   resolveParsedSkillFromIdentifier,
+  runMultiInstallJob,
 };

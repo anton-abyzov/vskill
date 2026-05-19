@@ -10,6 +10,7 @@
 
 import type { ParsedSkill } from "./transformers/index.js";
 import { getAgent } from "../agents/agents-registry.js";
+import { sanitizeSkillBundleFiles } from "./bundle-files.js";
 
 export interface ClipboardBlob {
   /** The text the user will paste into the cloud tool. */
@@ -43,12 +44,7 @@ export function buildClipboardBlob(
     );
   }
 
-  const blob =
-    `# ${skill.name}\n\n` +
-    `${skill.description}\n\n` +
-    `---\n\n` +
-    skill.body.trimEnd() +
-    "\n";
+  const blob = renderClipboardSkillBlob(skill);
 
   const result: ClipboardBlob = {
     blob,
@@ -56,4 +52,61 @@ export function buildClipboardBlob(
   };
   if (agent.docsUrl) result.docsUrl = agent.docsUrl;
   return result;
+}
+
+function renderClipboardSkillBlob(skill: ParsedSkill): string {
+  const sections: string[] = [
+    `# ${skill.name}`,
+    skill.description,
+    "---",
+    skill.body.trimEnd(),
+  ];
+
+  if (skill.originalFrontmatter.trim().length > 0) {
+    sections.push(
+      "## Skill frontmatter",
+      fenceBlock("yaml", skill.originalFrontmatter.trimEnd()),
+    );
+  }
+
+  const bundleFiles = sanitizeSkillBundleFiles(skill.files);
+  const openAiMetadata = bundleFiles["agents/openai.yaml"];
+  if (openAiMetadata !== undefined) {
+    sections.push(
+      "## OpenAI agent metadata (`agents/openai.yaml`)",
+      fenceBlock("yaml", openAiMetadata.trimEnd()),
+    );
+  }
+
+  const resourceEntries = Object.entries(bundleFiles)
+    .filter(([path]) => path !== "agents/openai.yaml")
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (resourceEntries.length > 0) {
+    sections.push("## Bundled resources");
+    for (const [path, content] of resourceEntries) {
+      sections.push(`### ${path}`, fenceBlock(languageForPath(path), content.trimEnd()));
+    }
+  }
+
+  return sections.filter((section) => section.length > 0).join("\n\n") + "\n";
+}
+
+function fenceBlock(language: string, content: string): string {
+  const tickRuns = content.match(/`{3,}/g) ?? [];
+  const fenceLength = Math.max(3, ...tickRuns.map((ticks) => ticks.length + 1));
+  const fence = "`".repeat(fenceLength);
+  return `${fence}${language}\n${content}\n${fence}`;
+}
+
+function languageForPath(path: string): string {
+  if (path.endsWith(".md")) return "markdown";
+  if (path.endsWith(".yaml") || path.endsWith(".yml")) return "yaml";
+  if (path.endsWith(".json")) return "json";
+  if (path.endsWith(".mjs") || path.endsWith(".js") || path.endsWith(".ts")) {
+    return "javascript";
+  }
+  if (path.endsWith(".py")) return "python";
+  if (path.endsWith(".svg") || path.endsWith(".xml")) return "xml";
+  if (path.endsWith(".sh")) return "bash";
+  return "text";
 }

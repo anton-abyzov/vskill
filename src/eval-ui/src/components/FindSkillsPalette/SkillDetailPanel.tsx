@@ -109,7 +109,7 @@ interface InstallVariant {
 //
 // AC-US1-02: the POST body to /api/studio/install-skill sends the literal
 // scope value `"user"` — the server (install-skill-routes.ts) accepts
-// project | user | global and maps "user" to `--scope user` internally.
+// project | user | global and maps "user"/"global" to a user-global install.
 type InstallScope = "project" | "user";
 
 /** Render the visible CLI flag in the copy-command. User → ` --global`. */

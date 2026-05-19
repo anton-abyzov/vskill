@@ -39,6 +39,12 @@ export interface ParsedSkill {
   originalFrontmatter: string;
   /** Convenience: parsed-out `version` field if present. */
   version?: string;
+  /**
+   * Optional bundled skill resources keyed by path relative to the skill root.
+   * Standard paths are `agents/`, `scripts/`, `references/`, `assets/`,
+   * `tests/`, and `.env.example`; callers validate path safety before write.
+   */
+  files?: Record<string, string>;
 }
 
 /**

@@ -38,6 +38,7 @@ import { ProjectCommandPalette } from "./components/ProjectCommandPalette";
 import { CreateSkillModal, type CreateSkillMode } from "./components/CreateSkillModal";
 import { MarketplaceDrawer } from "./components/MarketplaceDrawer";
 import { InstallProgressToast, type InstallJob } from "./components/InstallProgressToast";
+import { InstallTargetsModal, type InstallScope } from "./components/InstallTargetsModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { useApiKeyErrorToast } from "./hooks/useApiKeyErrorToast";
 import type { CredentialProvider } from "./hooks/useCredentialStorage";
@@ -55,6 +56,14 @@ import { useKeyboardShortcut } from "./hooks/useKeyboardShortcut";
 import { useIsCreateRoute, useIsUpdatesRoute } from "./hooks/useHashRoute";
 import { useTheme } from "./theme/useTheme";
 import { strings } from "./strings";
+
+interface OpenInstallTargetsDetail {
+  skill?: string;
+  skillDisplayName?: string;
+  scope?: InstallScope;
+  activeAgentId?: string | null;
+  preCheckedAgentIds?: string[];
+}
 
 // 0741 T-016: FindSkillsPalette (⌘K) is lazy-loaded —
 // the palette + ported components add ~30-40KB gzip and only mount when the
@@ -437,6 +446,26 @@ function Shell() {
   // 0700 phase 2B + 2C: MarketplaceDrawer + InstallProgressToast state.
   const [marketplaceOpen, setMarketplaceOpen] = useState(false);
   const [installJob, setInstallJob] = useState<InstallJob | null>(null);
+  const [installTargetsRequest, setInstallTargetsRequest] =
+    useState<Required<Pick<OpenInstallTargetsDetail, "skill" | "scope">> &
+      Omit<OpenInstallTargetsDetail, "skill" | "scope"> | null>(null);
+  useEffect(() => {
+    function onOpenInstallTargets(e: Event) {
+      if (!(e instanceof CustomEvent)) return;
+      const detail = e.detail as OpenInstallTargetsDetail | undefined;
+      if (!detail || typeof detail.skill !== "string" || detail.skill.length === 0) return;
+      setInstallTargetsRequest({
+        skill: detail.skill,
+        skillDisplayName: detail.skillDisplayName,
+        scope: detail.scope === "project" ? "project" : "user",
+        activeAgentId: detail.activeAgentId,
+        preCheckedAgentIds: detail.preCheckedAgentIds,
+      });
+    }
+    window.addEventListener("studio:open-install-targets-modal", onOpenInstallTargets);
+    return () =>
+      window.removeEventListener("studio:open-install-targets-modal", onOpenInstallTargets);
+  }, []);
   // 0767: ConfirmDialog gating for marketplace-driven Uninstall (replaces
   // window.confirm()). The pending-promise resolver lets the async onUninstall
   // callback await the user's choice before issuing the API call.
@@ -1281,6 +1310,22 @@ function Shell() {
           // On failure, leave the toast pinned so the user can expand it.
         }}
       />
+
+      {installTargetsRequest && (
+        <InstallTargetsModal
+          skill={installTargetsRequest.skill}
+          skillDisplayName={installTargetsRequest.skillDisplayName}
+          scope={installTargetsRequest.scope}
+          activeAgentId={
+            installTargetsRequest.activeAgentId === undefined
+              ? activeAgentId
+              : installTargetsRequest.activeAgentId
+          }
+          preCheckedAgentIds={installTargetsRequest.preCheckedAgentIds}
+          onClose={() => setInstallTargetsRequest(null)}
+          onSuccess={() => refreshSkills()}
+        />
+      )}
 
       {/* 0722: skill delete confirmation. Opened by studio:request-delete
           events from the context-menu router and DetailHeader trash button. */}

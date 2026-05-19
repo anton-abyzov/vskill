@@ -54,11 +54,13 @@ export async function fetchSupportedAgents(
 export interface InstallToAgentsRequest {
   skill: string;
   agentIds: string[];
-  scope: "project" | "user";
+  scope: "project" | "user" | "global";
 }
 
 export interface InstallToAgentsHandle {
   jobId: string;
+  streamPath?: string;
+  mode?: string;
 }
 
 /**
@@ -83,11 +85,21 @@ export async function installToAgents(
     const errBody = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(errBody.error || `install-skill failed: HTTP ${res.status}`);
   }
-  const json = (await res.json()) as { jobId?: string };
+  const json = (await res.json()) as {
+    jobId?: string;
+    streamPath?: string;
+    mode?: string;
+  };
   if (!json.jobId) {
     throw new Error("install-skill: server did not return a jobId");
   }
-  return { jobId: json.jobId };
+  return {
+    jobId: json.jobId,
+    ...(typeof json.streamPath === "string" && json.streamPath.startsWith("/")
+      ? { streamPath: json.streamPath }
+      : {}),
+    ...(typeof json.mode === "string" ? { mode: json.mode } : {}),
+  };
 }
 
 export interface InstallStreamCallbacks {
@@ -106,12 +118,15 @@ export interface InstallStreamHandle {
  * event carrying the full summary.
  */
 export function startInstallStream(
-  jobId: string,
+  jobIdOrStreamPath: string,
   callbacks: InstallStreamCallbacks,
   opts?: IoOptions,
 ): InstallStreamHandle {
   const ESCtor = resolveEventSource(opts);
-  const es = new ESCtor(`/api/studio/install-skill/${jobId}/stream`);
+  const streamUrl = jobIdOrStreamPath.startsWith("/")
+    ? jobIdOrStreamPath
+    : `/api/studio/install-skill/${encodeURIComponent(jobIdOrStreamPath)}/stream`;
+  const es = new ESCtor(streamUrl);
   const safetyTimer = setTimeout(() => {
     try { es.close(); } catch { /* */ }
   }, 200_000);

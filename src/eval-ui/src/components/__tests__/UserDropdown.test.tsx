@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // We mock useDesktopBridge to avoid pulling in the real Tauri internals.
 // Each test rebinds the bridge stub before mounting so we can drive the
 // component through its three render states (browser-mode, signed-out,
-// signed-in) and the device-flow lifecycle (start → poll-pending → poll-
-// granted).
+// signed-in) and the OAuth lifecycle (start → browser-open → poll-pending
+// → poll-granted).
 
 import type {
   DesktopBridge,
@@ -70,8 +70,8 @@ const SAMPLE_USER: SignedInUser = {
 };
 
 const SAMPLE_FLOW: DeviceFlowStartResponse = {
-  userCode: "WDJB-MJHT",
-  verificationUri: "https://github.com/login/device",
+  userCode: "oauth-state-token",
+  verificationUri: "https://github.com/login/oauth/authorize?client_id=test-client&state=oauth-state-token",
   interval: 1,
   expiresIn: 900,
 };
@@ -79,24 +79,32 @@ const SAMPLE_FLOW: DeviceFlowStartResponse = {
 describe("UserDropdown (0831 T-011)", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.spyOn(window, "open").mockImplementation(() => null);
   });
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
-  it("AC-US1-01: renders nothing in browser mode", async () => {
+  it("AC-US1-01: signed-out browser mode renders 'Sign in' button", async () => {
     bridgeStub.bridge = {
       available: false,
       mode: "browser",
       getSignedInUser: vi.fn().mockResolvedValue(null),
+      startGithubDeviceFlow: vi.fn(),
+      pollGithubDeviceFlow: vi.fn(),
+      signOut: vi.fn(),
     } as Partial<DesktopBridge>;
     const h = await mount();
     try {
-      // Browser mode short-circuits to `null`. The cold-start placeholder
-      // only renders for desktop mode; in browser we render literally
-      // nothing so the top-rail layout doesn't reserve space.
-      expect(h.container.querySelector("[data-slot='user-dropdown']")).toBeFalsy();
+      // Browser mode now uses the same sidecar HTTP OAuth flow as the
+      // Tauri WebView, so signed-out users still get the GitHub sign-in
+      // affordance after the async identity probe resolves.
+      await h.act(async () => { await flushMicrotasks(); });
+      expect(h.container.querySelector("[data-slot='user-dropdown']")).toBeTruthy();
+      const btn = h.container.querySelector("[data-slot='sign-in-button']");
+      expect(btn).toBeTruthy();
+      expect((btn as HTMLButtonElement).getAttribute("aria-label")).toBe("Sign in with GitHub");
       expect(h.container.querySelector("[data-slot='user-dropdown-placeholder']")).toBeFalsy();
     } finally {
       h.unmount();
@@ -126,11 +134,11 @@ describe("UserDropdown (0831 T-011)", () => {
     }
   });
 
-  it("AC-US1-01 / AC-US1-02: clicking 'Sign in' shows the user_code dialog", async () => {
+  it("AC-US1-01 / AC-US1-02: clicking 'Sign in' opens GitHub and shows the authorization dialog", async () => {
     const startSpy = vi.fn().mockResolvedValue(SAMPLE_FLOW);
+    const openExternalUrlSpy = vi.fn().mockResolvedValue(undefined);
     // Polling stays "pending" forever in this test — we only verify the
-    // dialog appears with the right code. The granted path is its own
-    // test below.
+    // browser launch + dialog. The granted path is its own test below.
     const pollSpy = vi.fn(
       async (): Promise<PollGithubDeviceFlowOutcome> => ({ status: "pending" }),
     );
@@ -140,6 +148,7 @@ describe("UserDropdown (0831 T-011)", () => {
       getSignedInUser: vi.fn().mockResolvedValue(null),
       startGithubDeviceFlow: startSpy,
       pollGithubDeviceFlow: pollSpy,
+      openExternalUrl: openExternalUrlSpy,
       signOut: vi.fn(),
     } as Partial<DesktopBridge>;
     const h = await mount();
@@ -147,13 +156,14 @@ describe("UserDropdown (0831 T-011)", () => {
       await h.act(async () => { await flushMicrotasks(); });
       const btn = h.container.querySelector("[data-slot='sign-in-button']") as HTMLButtonElement;
       await h.act(async () => { btn.click(); await flushMicrotasks(); });
-      // After the start IPC resolves, the dialog renders the user_code in
-      // a <code aria-label="Authorization code"> element.
+      // After the start IPC resolves, the dialog renders the auth URL and
+      // the bridge opens GitHub in the user's default browser.
       const dialog = h.container.querySelector("[data-slot='sign-in-dialog']");
       expect(dialog).toBeTruthy();
-      const code = dialog?.querySelector("code[aria-label='Authorization code']");
-      expect(code?.textContent).toBe("WDJB-MJHT");
+      const code = dialog?.querySelector("code[aria-label='Authorization URL']");
+      expect(code?.textContent).toContain("github.com/login/oauth/authorize");
       expect(startSpy).toHaveBeenCalledTimes(1);
+      expect(openExternalUrlSpy).toHaveBeenCalledWith(SAMPLE_FLOW.verificationUri);
     } finally {
       h.unmount();
     }
@@ -169,6 +179,7 @@ describe("UserDropdown (0831 T-011)", () => {
       getSignedInUser: vi.fn().mockResolvedValue(null),
       startGithubDeviceFlow: vi.fn().mockResolvedValue(SAMPLE_FLOW),
       pollGithubDeviceFlow: pollSpy,
+      openExternalUrl: vi.fn().mockResolvedValue(undefined),
       signOut: vi.fn(),
     } as Partial<DesktopBridge>;
     const h = await mount();
@@ -265,6 +276,7 @@ describe("UserDropdown (0831 T-011)", () => {
       getSignedInUser: vi.fn().mockResolvedValue(null),
       startGithubDeviceFlow: vi.fn().mockResolvedValue(SAMPLE_FLOW),
       pollGithubDeviceFlow: pollSpy,
+      openExternalUrl: vi.fn().mockResolvedValue(undefined),
       signOut: vi.fn(),
     } as Partial<DesktopBridge>;
     const h = await mount();

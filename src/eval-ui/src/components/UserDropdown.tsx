@@ -118,13 +118,16 @@ export function UserDropdown() {
     try {
       const flow = await bridge.startGithubDeviceFlow();
       // 2026-05-11 — `flow` now carries the OAuth Authorization Code state
-      // (userCode = state token, verificationUri = auth URL). Open the auth
-      // URL in the user's default browser via the bridge. Then stash the state
+      // (userCode = state token, verificationUri = auth URL). Stash the state
       // token on window so the bridge's pollGithubDeviceFlow can use it
       // without changing the bridge interface.
+      //
+      // Show the manual fallback before attempting to open the browser. Native
+      // browser launch is best-effort; a blocked or slow opener must not hide
+      // the link the user needs to finish authorization.
       (window as { __vskillOauthState?: string }).__vskillOauthState = flow.userCode;
-      await openExternal(flow.verificationUri);
       setSignInDialog(flow);
+      void openExternal(flow.verificationUri);
       // Drive the polling loop. We sleep `interval` seconds between calls
       // and honor `slow_down:N` by bumping the interval. Loop exits on
       // granted, denied, expired, error, or user cancel (abortRef).
@@ -323,7 +326,7 @@ export function UserDropdown() {
 
 // ---------------------------------------------------------------------------
 // SignInDialog — small popover anchored to the sign-in button. Shows the
-// user_code in a copyable mono font + "Open GitHub to authorize" + Cancel.
+// auth URL in a copyable mono font + "Authorize in GitHub" + Cancel.
 // Polling state (the spinner) is implicit: while the dialog is up and there
 // is no error, we are polling.
 // ---------------------------------------------------------------------------
@@ -341,6 +344,14 @@ function SignInDialog({
   onOpenGithub: () => void;
   onRetry: () => void;
 }) {
+  let displayUrl = response.verificationUri;
+  try {
+    const url = new URL(response.verificationUri);
+    displayUrl = `${url.host}${url.pathname}`;
+  } catch {
+    // Keep the raw string if URL parsing fails.
+  }
+
   const handleCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(response.verificationUri);
@@ -370,7 +381,7 @@ function SignInDialog({
       }}
     >
       <div style={{ fontSize: 13, marginBottom: 8 }}>
-        Authorize Skill Studio in GitHub. Your browser should open automatically.
+        Authorize Skill Studio in GitHub. If the browser did not open, use the button or copy the link.
       </div>
       <div
         style={{
@@ -382,6 +393,7 @@ function SignInDialog({
       >
         <code
           aria-label="Authorization URL"
+          title={response.verificationUri}
           style={{
             flex: 1,
             fontFamily: "var(--font-mono)",
@@ -396,7 +408,7 @@ function SignInDialog({
             whiteSpace: "nowrap",
           }}
         >
-          github.com/login/oauth/authorize
+          {displayUrl}
         </code>
         <button
           type="button"
@@ -438,6 +450,7 @@ function SignInDialog({
       <div style={{ display: "flex", gap: 8 }}>
         <button
           type="button"
+          data-slot="open-github-button"
           onClick={onOpenGithub}
           style={{
             flex: 1,
@@ -451,7 +464,7 @@ function SignInDialog({
             fontWeight: 600,
           }}
         >
-          Open GitHub
+          Authorize in GitHub
         </button>
         {error ? (
           <button

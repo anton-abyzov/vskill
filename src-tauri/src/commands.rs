@@ -1143,9 +1143,37 @@ pub fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
         return Err(format!("refused non-https URL: {url}"));
     }
     #[allow(deprecated)]
-    app.shell()
-        .open(&url, None)
-        .map_err(|e| format!("could not open {url}: {e}"))
+    if let Err(shell_err) = app.shell().open(&url, None) {
+        fallback_open_url(&url).map_err(|fallback_err| {
+            format!("could not open {url}: {shell_err}; fallback failed: {fallback_err}")
+        })?;
+    }
+    Ok(())
+}
+
+fn fallback_open_url(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = std::process::Command::new("open");
+        c.arg(url);
+        c
+    };
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut c = std::process::Command::new("rundll32");
+        c.arg("url.dll,FileProtocolHandler").arg(url);
+        c
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(url);
+        c
+    };
+
+    command.spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// T-026: re-fetch `/user` from GitHub using the keychain token and update

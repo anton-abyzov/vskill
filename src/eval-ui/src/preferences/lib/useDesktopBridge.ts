@@ -624,7 +624,8 @@ export function useDesktopBridge(): DesktopBridge {
     // The new flow:
     //   - POST /api/oauth/github/start  → returns auth URL with PKCE challenge
     //   - User opens URL in browser (caller does the open via tauri shell)
-    //   - GitHub redirects to /api/oauth/github/callback on the SAME sidecar
+    //   - GitHub redirects to the registered platform callback, which bounces
+    //     desktop states to /api/oauth/github/callback on the sidecar
     //   - Sidecar exchanges code and stores token via the native credential store
     //   - Caller polls /api/oauth/github/status until "ready"
     // The response shape stays {userCode, verificationUri, interval, expiresIn}
@@ -835,6 +836,13 @@ export function useDesktopBridge(): DesktopBridge {
           window.open(url, "_blank", "noopener,noreferrer");
         }
         return;
+      }
+      try {
+        const { open } = await import("@tauri-apps/plugin-shell");
+        await open(url);
+        return;
+      } catch (err) {
+        console.warn("tauri shell open failed; falling back to app command:", err);
       }
       await tauriInvoke<void>("open_external_url", { url });
     };

@@ -208,9 +208,10 @@ export interface DesktopBridge {
   resetSettings: () => Promise<void>;
   checkForUpdates: () => Promise<UpdateInfo>;
   downloadAndInstallUpdate: (
-    onProgress?: (chunk: number, total: number | null) => void,
+    onProgress?: (downloadedBytes: number, total: number | null) => void,
   ) => Promise<void>;
   cancelUpdate: () => Promise<void>;
+  restartApp: () => Promise<void>;
   openPreferences: (tab?: string) => Promise<void>;
   getAppMetadata: () => Promise<AppMetadata>;
   setAutostart: (enabled: boolean) => Promise<void>;
@@ -261,6 +262,47 @@ interface TauriWindow extends Window {
   __TAURI_INTERNALS__?: TauriInternals;
 }
 
+type RawSettingsSnapshot = Partial<SettingsSnapshot> & {
+  general?: Partial<SettingsSnapshot["general"]> & {
+    launch_at_login?: boolean;
+    default_project_folder?: string | null;
+  };
+  updates?: Partial<SettingsSnapshot["updates"]> & {
+    auto_check?: boolean;
+    last_checked_at?: string | null;
+    last_known_version?: string | null;
+    skipped_version?: string | null;
+    snoozed_until?: string | null;
+  };
+  privacy?: Partial<SettingsSnapshot["privacy"]> & {
+    telemetry_enabled?: boolean;
+    crash_reporting_enabled?: boolean;
+  };
+  advanced?: Partial<SettingsSnapshot["advanced"]> & {
+    log_level?: SettingsSnapshot["advanced"]["logLevel"];
+  };
+  studio?: Partial<SettingsSnapshot["studio"]> & {
+    lifecycle_default?: SettingsSnapshot["studio"]["lifecycleDefault"];
+  };
+};
+
+export type RawUpdateInfo = Partial<UpdateInfo> & {
+  version?: string | null;
+  notes?: string | null;
+  pub_date?: string | null;
+};
+
+interface UpdaterProgressPayload {
+  bytes?: number;
+  downloadedBytes?: number;
+  chunkBytes?: number;
+  total?: number | null;
+  totalBytes?: number | null;
+}
+
+type TauriEvent<T> = { payload: T };
+type Unlisten = () => void | Promise<void>;
+
 function detectMode(): BridgeMode {
   if (typeof window === "undefined") return "browser";
   return "__TAURI_INTERNALS__" in window ? "desktop" : "browser";
@@ -296,12 +338,82 @@ const BROWSER_DEFAULTS: SettingsSnapshot = {
 
 const BROWSER_STORAGE_KEY = "vskill:preferences:browser-shadow";
 
+function normalizeSettingsSnapshot(raw: RawSettingsSnapshot | null | undefined): SettingsSnapshot {
+  const general = raw?.general ?? {};
+  const updates = raw?.updates ?? {};
+  const privacy = raw?.privacy ?? {};
+  const advanced = raw?.advanced ?? {};
+  const studio = raw?.studio ?? {};
+
+  return {
+    version: raw?.version ?? BROWSER_DEFAULTS.version,
+    general: {
+      theme: general.theme ?? BROWSER_DEFAULTS.general.theme,
+      language: general.language ?? BROWSER_DEFAULTS.general.language,
+      defaultProjectFolder:
+        general.defaultProjectFolder ?? general.default_project_folder ?? null,
+      launchAtLogin:
+        general.launchAtLogin ?? general.launch_at_login ?? BROWSER_DEFAULTS.general.launchAtLogin,
+    },
+    updates: {
+      channel: updates.channel ?? BROWSER_DEFAULTS.updates.channel,
+      autoCheck: updates.autoCheck ?? updates.auto_check ?? BROWSER_DEFAULTS.updates.autoCheck,
+      lastCheckedAt: updates.lastCheckedAt ?? updates.last_checked_at ?? null,
+      lastKnownVersion: updates.lastKnownVersion ?? updates.last_known_version ?? null,
+      skippedVersion: updates.skippedVersion ?? updates.skipped_version ?? null,
+      snoozedUntil: updates.snoozedUntil ?? updates.snoozed_until ?? null,
+    },
+    privacy: {
+      telemetryEnabled:
+        privacy.telemetryEnabled ??
+        privacy.telemetry_enabled ??
+        BROWSER_DEFAULTS.privacy.telemetryEnabled,
+      crashReportingEnabled:
+        privacy.crashReportingEnabled ??
+        privacy.crash_reporting_enabled ??
+        BROWSER_DEFAULTS.privacy.crashReportingEnabled,
+    },
+    advanced: {
+      logLevel: advanced.logLevel ?? advanced.log_level ?? BROWSER_DEFAULTS.advanced.logLevel,
+    },
+    studio: {
+      lifecycleDefault:
+        studio.lifecycleDefault ??
+        studio.lifecycle_default ??
+        BROWSER_DEFAULTS.studio.lifecycleDefault,
+    },
+  };
+}
+
+export function normalizeUpdateInfo(raw: RawUpdateInfo, currentVersion: string): UpdateInfo {
+  return {
+    available: raw.available === true,
+    currentVersion: raw.currentVersion ?? currentVersion,
+    latestVersion: raw.latestVersion ?? raw.version ?? undefined,
+    releaseNotes: raw.releaseNotes ?? raw.notes ?? undefined,
+    releaseDate: raw.releaseDate ?? raw.pub_date ?? undefined,
+  };
+}
+
+export async function listenTauriEvent<T>(
+  event: string,
+  handler: (event: TauriEvent<T>) => void,
+): Promise<Unlisten | null> {
+  if (typeof window === "undefined") return null;
+  if (!("__TAURI_INTERNALS__" in window)) return null;
+  try {
+    const api = await import("@tauri-apps/api/event");
+    return await api.listen<T>(event, handler);
+  } catch {
+    return null;
+  }
+}
+
 function loadBrowserShadow(): SettingsSnapshot {
   try {
     const raw = localStorage.getItem(BROWSER_STORAGE_KEY);
     if (!raw) return structuredClone(BROWSER_DEFAULTS);
-    const parsed = JSON.parse(raw) as Partial<SettingsSnapshot>;
-    return { ...BROWSER_DEFAULTS, ...parsed } as SettingsSnapshot;
+    return normalizeSettingsSnapshot(JSON.parse(raw) as RawSettingsSnapshot);
   } catch {
     return structuredClone(BROWSER_DEFAULTS);
   }
@@ -343,7 +455,8 @@ export function useDesktopBridge(): DesktopBridge {
 
     const getSettings: DesktopBridge["getSettings"] = async () => {
       if (!available) return loadBrowserShadow();
-      return tauriInvoke<SettingsSnapshot>("get_settings");
+      const raw = await tauriInvoke<RawSettingsSnapshot>("get_settings");
+      return normalizeSettingsSnapshot(raw);
     };
 
     const setSetting: DesktopBridge["setSetting"] = async (path, value) => {
@@ -378,17 +491,47 @@ export function useDesktopBridge(): DesktopBridge {
 
     const checkForUpdates: DesktopBridge["checkForUpdates"] = async () => {
       if (!available) throw new BrowserModeError("checkForUpdates");
-      return tauriInvoke<UpdateInfo>("check_for_updates");
+      const [raw, metadata] = await Promise.all([
+        tauriInvoke<RawUpdateInfo>("check_for_updates"),
+        getAppMetadata().catch(() => ({
+          version: "unknown",
+          build: "n/a",
+          commit: "n/a",
+          target: "unknown",
+          arch: "unknown",
+        })),
+      ]);
+      return normalizeUpdateInfo(raw, metadata.version);
     };
 
-    const downloadAndInstallUpdate: DesktopBridge["downloadAndInstallUpdate"] = async () => {
+    const downloadAndInstallUpdate: DesktopBridge["downloadAndInstallUpdate"] = async (
+      onProgress,
+    ) => {
       if (!available) throw new BrowserModeError("downloadAndInstallUpdate");
-      await tauriInvoke<void>("download_and_install_update");
+      const unlisten = onProgress
+        ? await listenTauriEvent<UpdaterProgressPayload>("updater://progress", (event) => {
+            const payload = event.payload ?? {};
+            const downloadedBytes =
+              payload.downloadedBytes ?? payload.bytes ?? payload.chunkBytes ?? 0;
+            const total = payload.totalBytes ?? payload.total ?? null;
+            onProgress(downloadedBytes, total);
+          })
+        : null;
+      try {
+        await tauriInvoke<void>("download_and_install_update");
+      } finally {
+        await unlisten?.();
+      }
     };
 
     const cancelUpdate: DesktopBridge["cancelUpdate"] = async () => {
       if (!available) throw new BrowserModeError("cancelUpdate");
       await tauriInvoke<void>("cancel_update");
+    };
+
+    const restartApp: DesktopBridge["restartApp"] = async () => {
+      if (!available) throw new BrowserModeError("restartApp");
+      await tauriInvoke<void>("restart_app");
     };
 
     const openPreferences: DesktopBridge["openPreferences"] = async (tab) => {
@@ -482,7 +625,7 @@ export function useDesktopBridge(): DesktopBridge {
     //   - POST /api/oauth/github/start  → returns auth URL with PKCE challenge
     //   - User opens URL in browser (caller does the open via tauri shell)
     //   - GitHub redirects to /api/oauth/github/callback on the SAME sidecar
-    //   - Sidecar exchanges code, stores token via keychain.setGitHubToken
+    //   - Sidecar exchanges code and stores token via the native credential store
     //   - Caller polls /api/oauth/github/status until "ready"
     // The response shape stays {userCode, verificationUri, interval, expiresIn}
     // for backward-compatibility with UserDropdown's signature, but the
@@ -563,7 +706,7 @@ export function useDesktopBridge(): DesktopBridge {
 
     // 2026-05-11 — getSignedInUser reads /api/auth/me via HTTP. Works in
     // both Tauri WebView AND browser mode (npx vskill studio). The sidecar
-    // looks up the cached token via keychain.getGitHubToken() and calls
+    // looks up the cached token via the native credential store and calls
     // GitHub /user to validate. Returns null when no valid token exists.
     const getSignedInUser: DesktopBridge["getSignedInUser"] = async () => {
       try {
@@ -580,7 +723,7 @@ export function useDesktopBridge(): DesktopBridge {
     };
 
     // 2026-05-11 — signOut hits HTTP /api/auth/sign-out which clears the
-    // GitHub token via keychain.clearGitHubToken().
+    // GitHub token via the native credential store.
     const signOut: DesktopBridge["signOut"] = async () => {
       await fetch("/api/auth/sign-out", { method: "POST" });
     };
@@ -713,6 +856,7 @@ export function useDesktopBridge(): DesktopBridge {
       checkForUpdates,
       downloadAndInstallUpdate,
       cancelUpdate,
+      restartApp,
       openPreferences,
       getAppMetadata,
       setAutostart,

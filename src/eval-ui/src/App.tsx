@@ -17,6 +17,7 @@ import {
   type DetailTab,
 } from "./components/RightPanel";
 import { UpdateToast } from "./components/UpdateToast";
+import { AppUpdateToast } from "./components/AppUpdateToast";
 import { ToastProvider, useToast } from "./components/ToastProvider";
 import { ShortcutModal } from "./components/ShortcutModal";
 import { ContextMenu } from "./components/ContextMenu";
@@ -154,6 +155,7 @@ export function App() {
             <AccountProviderHost>
               <Shell />
               <UpdateToast />
+              <AppUpdateToast />
             </AccountProviderHost>
           </ToastProvider>
         </StudioProvider>

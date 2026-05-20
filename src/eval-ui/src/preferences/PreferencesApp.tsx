@@ -2,7 +2,11 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ToastStack, type ToastSpec } from "./components/primitives";
-import { useDesktopBridge, useSettingsSnapshot } from "./lib/useDesktopBridge";
+import {
+  listenTauriEvent,
+  useDesktopBridge,
+  useSettingsSnapshot,
+} from "./lib/useDesktopBridge";
 
 const GeneralTab = lazy(() => import("./tabs/GeneralTab").then((m) => ({ default: m.GeneralTab })));
 const UpdatesTab = lazy(() => import("./tabs/UpdatesTab").then((m) => ({ default: m.UpdatesTab })));
@@ -29,6 +33,7 @@ export function PreferencesApp() {
   const bridge = useDesktopBridge();
   const { snapshot, refresh } = useSettingsSnapshot(bridge);
   const [activeTab, setActiveTab] = useState<TabKey>(() => readHashTab());
+  const [updateCheckNonce, setUpdateCheckNonce] = useState(0);
   const [toasts, setToasts] = useState<ToastSpec[]>([]);
 
   const pushToast = useCallback((spec: Omit<ToastSpec, "id">) => {
@@ -44,6 +49,20 @@ export function PreferencesApp() {
     window.addEventListener("hashchange", handler);
     return () => window.removeEventListener("hashchange", handler);
   }, []);
+
+  useEffect(() => {
+    if (!bridge.available) return;
+    let unlisten: (() => void | Promise<void>) | null = null;
+    void listenTauriEvent("preferences-trigger-check", () => {
+      setActiveTab("updates");
+      setUpdateCheckNonce((n) => n + 1);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      void unlisten?.();
+    };
+  }, [bridge.available]);
 
   useEffect(() => {
     if (window.location.hash.slice(1) !== activeTab) {
@@ -122,6 +141,7 @@ export function PreferencesApp() {
               snapshot={snapshot}
               onSnapshotChanged={refresh}
               pushToast={pushToast}
+              triggerCheckNonce={updateCheckNonce}
             />
           ) : null}
           {activeTab === "privacy" ? (

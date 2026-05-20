@@ -24,7 +24,7 @@
 //   We use Playwright's `page.addInitScript()` to inject `__TAURI_INTERNALS__`
 //   with a stubbed `invoke()` BEFORE the React bundle parses, so the bundle
 //   takes the desktop code-path and dispatches every Tauri command (
-//   `get_settings`, `check_for_update`, `install_update_and_restart`, etc.)
+//   `get_settings`, `check_for_updates`, `download_and_install_update`, etc.)
 //   through our stub.
 //
 //   This isolates the *update flow* (UI states, status strings, dialog
@@ -103,9 +103,9 @@ function defaultSettings(version: string): SettingsSnapshotStub {
 interface BridgeStubConfig {
   /** Current version reported by `get_app_metadata`. */
   currentVersion: string;
-  /** What `check_for_update` returns. */
+  /** What `check_for_updates` returns. */
   checkResult: UpdateInfoStub;
-  /** What `install_update_and_restart` does. `null` = resolves; string = rejects with that message. */
+  /** What `download_and_install_update` does. `null` = resolves; string = rejects with that message. */
   installRejectsWith: string | null;
 }
 
@@ -163,8 +163,12 @@ async function installBridgeShimOnce(page: Page): Promise<void> {
         case "get_settings":
           return cfg.settings;
         case "set_setting": {
-          const { path, value } = (args ?? {}) as { path: string; value: unknown };
-          setNested(cfg.settings, path, value);
+          const { key, path, value } = (args ?? {}) as {
+            key?: string;
+            path?: string;
+            value: unknown;
+          };
+          setNested(cfg.settings, key ?? path ?? "", value);
           return undefined;
         }
         case "reset_settings":
@@ -177,16 +181,18 @@ async function installBridgeShimOnce(page: Page): Promise<void> {
             target: "aarch64-apple-darwin",
             arch: "aarch64",
           };
-        case "check_for_update":
+        case "check_for_updates":
           (cfg.settings as { updates: { lastCheckedAt: string | null } }).updates.lastCheckedAt =
             new Date().toISOString();
           return cfg.config.checkResult;
-        case "install_update_and_restart":
+        case "download_and_install_update":
           if (cfg.config.installRejectsWith) {
             throw new Error(cfg.config.installRejectsWith);
           }
           return undefined;
-        case "cancel_update_check":
+        case "restart_app":
+          return undefined;
+        case "cancel_update":
         case "open_preferences":
         case "set_autostart":
         case "pick_default_project_folder":
@@ -276,7 +282,7 @@ test.describe("0830 US-009 — Skill Studio auto-update smoke test", () => {
 
     // AC-US9-02: status row shows "Update available: 0.2.0".
     // (The i18n template is `Update available: {{version}}` — 0.2.0 is the
-    // unprefixed semver returned by check_for_update; the spec-text says
+    // unprefixed semver returned by check_for_updates; the spec-text says
     // "v0.2.0" but the actual translation has no leading "v".)
     const statusRow = page.locator(".pref-status-row").first();
     await expect(statusRow).toContainText("Update available: 0.2.0", { timeout: 5_000 });
@@ -294,22 +300,25 @@ test.describe("0830 US-009 — Skill Studio auto-update smoke test", () => {
     // and "Restart now" post-install).
     await dialog.getByRole("button", { name: "Install now" }).click();
 
-    // The IPC `install_update_and_restart` resolves; the dialog moves to
+    // The IPC `download_and_install_update` resolves; the dialog moves to
     // "ready-to-restart" and shows the "Restart now" button.
     await expect(dialog.getByRole("button", { name: "Restart now" })).toBeVisible({
       timeout: 5_000,
     });
+    await dialog.getByRole("button", { name: "Restart now" }).click();
 
-    // Verify the install IPC was called exactly once.
+    // Verify the install and restart IPCs were called exactly once.
     const callsAfterInstall = await getBridgeCalls(page);
-    const installCalls = callsAfterInstall.filter((c) => c.cmd === "install_update_and_restart");
+    const installCalls = callsAfterInstall.filter((c) => c.cmd === "download_and_install_update");
+    const restartCalls = callsAfterInstall.filter((c) => c.cmd === "restart_app");
     expect(installCalls.length).toBe(1);
+    expect(restartCalls.length).toBe(1);
 
     // ----- Phase 2: simulate the relaunch on v0.2.0 --------------------------
     // In production, `tauri-plugin-updater` exits the process and relaunches
     // the new bundle. For the HTTP-mock approach, we re-seed the shim's
     // behaviour config so that on the next navigation, `get_app_metadata`
-    // returns the new version and `check_for_update` reports up-to-date.
+    // returns the new version and `check_for_updates` reports up-to-date.
     // `addInitScript`s accumulate in registration order on every new
     // document, so the latest-registered config wins — exactly what we want.
     await seedBridgeConfig(page, {
@@ -397,10 +406,10 @@ test.describe("0830 US-009 — Skill Studio auto-update smoke test", () => {
     // Version stayed at 0.1.0 — no relaunch was attempted.
     await expect(currentVersionValue).toContainText("0.1.0");
 
-    // No second `install_update_and_restart` was attempted (the user has to
+    // No second `download_and_install_update` was attempted (the user has to
     // click Try again first; this test doesn't simulate that retry).
     const calls = await getBridgeCalls(page);
-    const installCalls = calls.filter((c) => c.cmd === "install_update_and_restart");
+    const installCalls = calls.filter((c) => c.cmd === "download_and_install_update");
     expect(installCalls.length).toBe(1);
   });
 });

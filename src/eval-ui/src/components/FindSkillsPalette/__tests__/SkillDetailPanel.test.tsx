@@ -22,6 +22,7 @@ async function mount(props: {
   selectedSkill?: { owner: string; repo: string; slug: string; displayName: string };
   onClose?: () => void;
   onToast?: (message: string, kind: "success" | "error") => void;
+  activeAgentId?: string | null;
 }): Promise<MountHandle> {
   const React = await import("react");
   const { createRoot } = await import("react-dom/client");
@@ -37,6 +38,7 @@ async function mount(props: {
         selectedSkill: props.selectedSkill ?? { owner: "obsidian", repo: "brain", slug: "wiki-sync", displayName: "Wiki Sync" },
         onClose: props.onClose ?? (() => {}),
         onToast: props.onToast,
+        activeAgentId: props.activeAgentId,
       }),
     );
   });
@@ -505,6 +507,61 @@ describe("SkillDetailPanel — 0845 T-022 (AC-US2-01): Install button opens Inst
     expect(installSkillPosts).toBe(0);
     // SkillDetailPanel.onClose is NOT invoked just by opening the modal.
     expect(onClose).not.toHaveBeenCalled();
+    await h.unmount();
+  });
+
+  it("passes the current Studio tool through so the matching target is preselected", async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (typeof url === "string" && url.includes("/api/studio/supported-agents")) {
+        return jsonResponse({
+          agents: [
+            {
+              id: "claude-code",
+              displayName: "Claude Code",
+              detected: true,
+              tier: 1,
+              installMode: "filesystem",
+              resolvedGlobalDir: "/home/user/.claude/skills",
+              resolvedLocalDir: ".claude/skills",
+            },
+            {
+              id: "codex",
+              displayName: "Codex CLI",
+              detected: true,
+              tier: 1,
+              installMode: "filesystem",
+              resolvedGlobalDir: "/home/user/.codex/skills",
+              resolvedLocalDir: ".codex/skills",
+            },
+          ],
+        });
+      }
+      if (typeof url === "string" && url.endsWith("/versions")) {
+        return jsonResponse({ versions: [{ version: "1.0.0", isLatest: true }] });
+      }
+      return jsonResponse({
+        displayName: "X",
+        ownerSlug: "obsidian",
+        repoSlug: "brain",
+        skillSlug: "wiki-sync",
+      });
+    }) as unknown as typeof fetch;
+
+    const h = await mount({ activeAgentId: "codex-cli" });
+    await flushMicrotasks();
+    const { act } = await import("react");
+    const installBtn = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
+    await act(async () => { installBtn.click(); });
+    await flushMicrotasks();
+
+    expect(document.querySelector("[data-testid='install-targets-modal']")).toBeTruthy();
+    expect(
+      document.querySelector("[data-testid='install-targets-row-codex']")?.getAttribute("data-checked"),
+    ).toBe("true");
+    expect(
+      document.querySelector("[data-testid='install-targets-row-claude-code']")?.getAttribute("data-checked"),
+    ).toBe("false");
+
     await h.unmount();
   });
 });

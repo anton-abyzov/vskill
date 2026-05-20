@@ -229,6 +229,8 @@ function replaceConst(source, name, value) {
 const routePath = process.env.ROUTE_PATH;
 let route = fs.readFileSync(routePath, "utf8");
 route = replaceRequired(route, /desktop-v[0-9]+\.[0-9]+\.[0-9]+/g, `desktop-v${version}`, "release base");
+route = replaceRequired(route, /Skill\.Studio_[0-9]+\.[0-9]+\.[0-9]+_x64-setup\.exe/g, `Skill.Studio_${version}_x64-setup.exe`, "windows asset URL");
+route = replaceRequired(route, /Skill\.Studio_[0-9]+\.[0-9]+\.[0-9]+_amd64\.AppImage/g, `Skill.Studio_${version}_amd64.AppImage`, "linux asset URL");
 route = replaceConst(route, "DARWIN_AARCH64_SIGNATURE", process.env.DARWIN_SIG);
 route = replaceConst(route, "WINDOWS_X86_64_SIGNATURE", process.env.WINDOWS_SIG);
 route = replaceConst(route, "LINUX_X86_64_SIGNATURE", process.env.LINUX_SIG);

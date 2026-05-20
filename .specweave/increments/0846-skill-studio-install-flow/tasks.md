@@ -1,7 +1,7 @@
 ---
 increment: 0846-skill-studio-install-flow
 total_tasks: 6
-completed_tasks: 5
+completed_tasks: 6
 ---
 
 # Tasks: Skill Studio Install Flow Reliability
@@ -49,7 +49,7 @@ completed_tasks: 5
 ### T-006: Record install proof and release
 **User Story**: US-003
 **Satisfies ACs**: AC-US3-01, AC-US3-02
-**Status**: [ ] pending
+**Status**: [x] completed
 
 **Test Plan** (BDD):
 - Given a fresh local project -> When Qmetry is installed -> Then the proof video shows the installed result before release.

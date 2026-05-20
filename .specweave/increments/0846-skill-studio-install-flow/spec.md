@@ -3,7 +3,7 @@ increment: 0846-skill-studio-install-flow
 title: "Skill Studio Install Flow Reliability"
 type: bugfix
 priority: P0
-status: active
+status: completed
 created: 2026-05-20
 ---
 
@@ -43,4 +43,4 @@ created: 2026-05-20
 
 **Acceptance Criteria**:
 - [x] **AC-US3-01**: Local install proof covers opening Find Skills, selecting Qmetry, installing, closing the modal, and finding it installed.
-- [ ] **AC-US3-02**: Release is cut only after tests and proof pass.
+- [x] **AC-US3-02**: Release is cut only after tests and proof pass.

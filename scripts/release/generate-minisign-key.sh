@@ -2,14 +2,13 @@
 # generate-minisign-key.sh — One-shot local generator for the Tauri Updater
 # minisign keypair. Run ONCE by the maintainer; never run in CI.
 #
-# This produces:
+# This produces a Rust-minisign-compatible keypair:
 #   ./minisign-priv.key  — KEEP SECRET. Goes into 1Password + GH Actions secret.
-#   ./minisign-pub.txt   — Public verifier key. Paste into tauri.conf.json.
+#   ./minisign-pub.txt   — Public verifier key file.
 #
 # After running this, you must:
-#   1. Copy the contents of minisign-pub.txt into
-#      src-tauri/tauri.conf.json under plugins.updater.pubkey
-#      (replacing the <MINISIGN_PUBKEY_PLACEHOLDER> string).
+#   1. Paste base64(full minisign-pub.txt file) into
+#      src-tauri/tauri.conf.json under plugins.updater.pubkey.
 #   2. base64-encode the private key + password into GH Actions secrets:
 #         TAURI_SIGNING_PRIVATE_KEY           = base64 of minisign-priv.key
 #         TAURI_SIGNING_PRIVATE_KEY_PASSWORD  = the passphrase you typed
@@ -25,11 +24,10 @@
 
 set -euo pipefail
 
-if ! command -v minisign >/dev/null 2>&1; then
-  echo "ERROR: minisign not installed." >&2
+if ! command -v rsign >/dev/null 2>&1; then
+  echo "ERROR: rsign not installed." >&2
   echo "Install:" >&2
-  echo "  macOS:    brew install minisign" >&2
-  echo "  Linux:    sudo apt-get install minisign  # or build from https://jedisct1.github.io/minisign/" >&2
+  echo "  cargo install rsign2" >&2
   exit 1
 fi
 
@@ -43,25 +41,24 @@ if [[ -e "$PRIV" || -e "$PUB" ]]; then
   exit 1
 fi
 
-echo "Generating minisign keypair (you will be prompted for a passphrase) ..."
-minisign -G -p "$PUB" -s "$PRIV"
+echo "Generating Rust minisign-compatible keypair (you will be prompted for a passphrase) ..."
+rsign generate -p "$PUB" -s "$PRIV" -f
 
 echo
 echo "==================================================================="
 echo "Public key (paste into src-tauri/tauri.conf.json plugins.updater.pubkey):"
 echo "==================================================================="
-# tauri.conf.json wants the second line of the .pub file (the actual key),
-# not the comment header. minisign-pub.txt has format:
-#   untrusted comment: ...
-#   <base64 pubkey>
-tail -n1 "$PUB"
+# Tauri expects base64 of the full minisign.pub file contents, not the raw
+# second-line key. This exact trap broke desktop-v1.0.13..v1.0.28.
+base64 -i "$PUB" | tr -d '\n\r\t '
+echo
 echo "==================================================================="
 echo
 echo "Private key written to:  $PRIV"
 echo "Public key written to:   $PUB"
 echo
 echo "Next steps:"
-echo "  1. Paste the pubkey above into tauri.conf.json (replace the placeholder)."
+echo "  1. Paste the base64(full pub file) value above into tauri.conf.json."
 echo "  2. base64 -i $PRIV | tr -d '\\n' | pbcopy"
 echo "     gh secret set TAURI_SIGNING_PRIVATE_KEY --body \"\$(pbpaste)\" --repo anton-abyzov/vskill"
 echo "  3. gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --body '<the passphrase>' --repo anton-abyzov/vskill"

@@ -237,9 +237,6 @@ jobs:
         # a stale `latest.json` asset on the GitHub Release that confuses
         # consumers.
         #
-        # `uploadUpdaterSignatures: true` (default) — ensures the .sig peer
-        # files are uploaded as Release assets even when the release is
-        # still in draft state (this was the gap in v1.0.12).
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
@@ -280,7 +277,6 @@ jobs:
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: false
-          uploadUpdaterSignatures: true
 
       - name: Verify .sig peer files were generated
         # Defensive — if tauri-action exited 0 but no .sig file landed next
@@ -391,28 +387,28 @@ jobs:
           name: ${{ matrix.os }}-artifacts
           if-no-files-found: error
           path: |
-            src-tauri/target/**/release/bundle/dmg/*.dmg
-            src-tauri/target/**/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/**/release/bundle/macos/*.app.tar.gz.sig
-            src-tauri/target/**/release/bundle/msi/*.msi
-            src-tauri/target/**/release/bundle/msi/*.msi.sig
-            src-tauri/target/**/release/bundle/msi/*.msi.zip
-            src-tauri/target/**/release/bundle/msi/*.msi.zip.sig
-            src-tauri/target/**/release/bundle/nsis/*-setup.exe
-            src-tauri/target/**/release/bundle/nsis/*-setup.exe.sig
-            src-tauri/target/**/release/bundle/nsis/*-setup.nsis.zip
-            src-tauri/target/**/release/bundle/nsis/*-setup.nsis.zip.sig
-            src-tauri/target/**/release/bundle/deb/*.deb
-            src-tauri/target/**/release/bundle/deb/*.deb.sig
-            src-tauri/target/**/release/bundle/deb/*.deb.asc
-            src-tauri/target/**/release/bundle/rpm/*.rpm
-            src-tauri/target/**/release/bundle/rpm/*.rpm.sig
-            src-tauri/target/**/release/bundle/rpm/*.rpm.asc
-            src-tauri/target/**/release/bundle/appimage/*.AppImage
-            src-tauri/target/**/release/bundle/appimage/*.AppImage.sig
-            src-tauri/target/**/release/bundle/appimage/*.AppImage.asc
-            src-tauri/target/**/release/bundle/appimage/*.AppImage.tar.gz
-            src-tauri/target/**/release/bundle/appimage/*.AppImage.tar.gz.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi.zip
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi.zip.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.nsis.zip
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.nsis.zip.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb.asc
+            src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm
+            src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm.asc
+            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage.asc
+            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage.tar.gz.sig
 
   publish:
     name: Publish to R2 + GitHub Release
@@ -440,6 +436,16 @@ jobs:
       - name: Generate release notes
         run: bash scripts/release/release-notes.sh "${{ github.ref_name }}"
 
+      - name: Publish to Cloudflare R2 + atomic latest.json
+        env:
+          CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          CLOUDFLARE_R2_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+        run: |
+          # Strip the desktop-v prefix → semver only.
+          VERSION="${GITHUB_REF_NAME#desktop-v}"
+          bash scripts/release/publish-manifest.sh "$VERSION" ./release-artifacts/
+
       - name: Create / update GitHub Release (mirror)
         uses: softprops/action-gh-release@v2
         with:
@@ -457,16 +463,6 @@ jobs:
             release-artifacts/**/*.AppImage
             release-artifacts/**/*.asc
             release-artifacts/**/*.sig
-
-      - name: Publish to Cloudflare R2 + atomic latest.json
-        env:
-          CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
-          CLOUDFLARE_R2_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
-          CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
-        run: |
-          # Strip the desktop-v prefix → semver only.
-          VERSION="${GITHUB_REF_NAME#desktop-v}"
-          bash scripts/release/publish-manifest.sh "$VERSION" ./release-artifacts/
 
       - name: Update Homebrew Cask (staging tap)
         if: ${{ !contains(github.ref_name, '-rc') }}

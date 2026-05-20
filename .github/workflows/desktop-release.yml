@@ -383,7 +383,7 @@ jobs:
           GPG_KEY_FPR: ${{ secrets.GPG_KEY_FPR }}
         run: |
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
-          bash scripts/release/sign-linux-artifacts.sh src-tauri/target/release/bundle/
+          bash scripts/release/sign-linux-artifacts.sh src-tauri/target/${{ matrix.target }}/release/bundle/
 
       - name: Upload platform artifacts
         uses: actions/upload-artifact@v4

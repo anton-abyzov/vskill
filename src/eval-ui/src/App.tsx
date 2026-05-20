@@ -1175,6 +1175,7 @@ function Shell() {
         <Suspense fallback={null}>
           <SkillDetailPanel
             selectedSkill={findDetailSkill}
+            activeAgentId={activeAgentId}
             onClose={() => setFindDetailSkill(null)}
           />
         </Suspense>
@@ -1324,7 +1325,13 @@ function Shell() {
           }
           preCheckedAgentIds={installTargetsRequest.preCheckedAgentIds}
           onClose={() => setInstallTargetsRequest(null)}
-          onSuccess={() => refreshSkills()}
+          onSuccess={(results) => {
+            refreshSkills();
+            const needsUserAction = results.some(
+              (result) => result.status === "error" || result.status === "exported",
+            );
+            if (!needsUserAction) setInstallTargetsRequest(null);
+          }}
         />
       )}
 

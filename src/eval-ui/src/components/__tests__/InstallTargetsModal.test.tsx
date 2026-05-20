@@ -179,6 +179,7 @@ function renderModal(propOverrides: {
   scope?: "project" | "user";
   preCheckedAgentIds?: string[];
   onClose?: () => void;
+  onSuccess?: (results: AgentInstallResult[]) => void;
 } = {}) {
   act(() => {
     root.render(
@@ -193,6 +194,7 @@ function renderModal(propOverrides: {
         }
         preCheckedAgentIds={propOverrides.preCheckedAgentIds}
         onClose={propOverrides.onClose ?? (() => {})}
+        onSuccess={propOverrides.onSuccess}
         fetchSupportedAgentsImpl={fetchSupportedAgentsImpl as unknown as never}
         installToAgentsImpl={installToAgentsImpl as unknown as never}
         startInstallStreamImpl={startInstallStreamImpl as unknown as never}
@@ -229,6 +231,13 @@ describe("InstallTargetsModal — AC-US2-02: tier-grouped sections", () => {
     expect(rows[1].getAttribute("data-detected")).toBe("true");
     expect(rows[2].getAttribute("data-detected")).toBe("false");
   });
+
+  it("renders above the skill detail dialog layer", async () => {
+    renderModal();
+    await flushAsync();
+    const backdrop = getByTestId("install-targets-modal-backdrop");
+    expect(Number(backdrop.style.zIndex)).toBeGreaterThan(9998);
+  });
 });
 
 describe("InstallTargetsModal — AC-US2-03: pre-check only the active tool", () => {
@@ -257,6 +266,25 @@ describe("InstallTargetsModal — AC-US2-03: pre-check only the active tool", ()
     ).toBe("true");
     expect(
       getByTestId("install-targets-row-codex").getAttribute("data-checked"),
+    ).toBe("true");
+  });
+
+  it("maps provider ids to install target ids before pre-checking", async () => {
+    renderModal({ activeAgentId: "codex-cli" });
+    await flushAsync();
+    expect(
+      getByTestId("install-targets-row-codex").getAttribute("data-checked"),
+    ).toBe("true");
+    expect(
+      getByTestId("install-targets-row-claude-code").getAttribute("data-checked"),
+    ).toBe("false");
+  });
+
+  it("falls back to a detected filesystem target when no active tool is known", async () => {
+    renderModal({ activeAgentId: null });
+    await flushAsync();
+    expect(
+      getByTestId("install-targets-row-claude-code").getAttribute("data-checked"),
     ).toBe("true");
   });
 });
@@ -359,6 +387,36 @@ describe("InstallTargetsModal — AC-US2-06: submit fires POST + consumes SSE", 
 });
 
 describe("InstallTargetsModal — AC-US2-07: per-target result toast (mixed outcomes)", () => {
+  it("calls onSuccess after a clean filesystem install and includes the installed path detail", async () => {
+    const onSuccess = vi.fn();
+    renderModal({ activeAgentId: "claude-code", onSuccess });
+    await flushAsync();
+    act(() => getByTestId("install-targets-modal-install").click());
+    await flushAsync();
+    act(() => {
+      lastStreamCallbacks!.onDone({
+        results: [
+          {
+            agentId: "claude-code",
+            status: "installed",
+            detail: "/tmp/home/.claude/skills/obsidian-brain/SKILL.md",
+          },
+        ],
+      });
+    });
+    await flushAsync();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(onSuccess.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({ agentId: "claude-code", status: "installed" }),
+    ]);
+    expect(getByTestId("install-targets-result-row-claude-code").textContent).toContain(
+      "/tmp/home/.claude/skills/obsidian-brain/SKILL.md",
+    );
+  });
+
   it("renders one row per agent with the right status, including a partial-failure row", async () => {
     renderModal({ activeAgentId: "claude-code" });
     await flushAsync();
@@ -482,6 +540,11 @@ describe("InstallTargetsModal — AC-US5-08: ClipboardExportDialog opens after S
 
     const dialog = getByTestId("clipboard-export-dialog");
     expect(dialog.getAttribute("data-agent-id")).toBe("chatgpt");
+    const clipboardBackdrop = getByTestId("clipboard-export-dialog-backdrop") as HTMLElement;
+    const installBackdrop = getByTestId("install-targets-modal-backdrop") as HTMLElement;
+    expect(Number(clipboardBackdrop.style.zIndex)).toBeGreaterThan(
+      Number(installBackdrop.style.zIndex),
+    );
     expect(getByTestId("clipboard-export-blob").textContent).toContain(
       "obsidian-brain",
     );

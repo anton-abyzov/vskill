@@ -7,7 +7,7 @@
 //   - Localhost gate (FR-007)
 //   - Validation helpers exported via __test__
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -20,6 +20,7 @@ const {
   buildArgs,
   normalizeInstallScope,
   resolveParsedSkillFromIdentifier,
+  resolveParsedSkillFromPlatform,
   runMultiInstallJob,
 } = __test__;
 
@@ -185,6 +186,67 @@ describe("resolveParsedSkillFromIdentifier (0845 closure fallback)", () => {
     );
   });
 
+  it("resolves a marketplace skill by fetching platform metadata and GitHub SKILL.md", async () => {
+    await withFixtureSkill(
+      async () => {
+        /* no local skill */
+      },
+      async (cwd, home) => {
+        const fetchImpl = vi.fn(async (url: string) => {
+          if (url === "https://platform.test/api/v1/skills/jorgemuza/orbit/qmetry") {
+            return {
+              ok: true,
+              json: async () => ({
+                skill: {
+                  displayName: "qmetry",
+                  description: "QMetry helper",
+                  repoUrl: "https://github.com/jorgemuza/orbit",
+                  skillPath: "skills/qmetry/SKILL.md",
+                  skillSlug: "qmetry",
+                },
+              }),
+            } as Response;
+          }
+          if (url === "https://platform.test/api/v1/skills/jorgemuza/orbit/qmetry/versions") {
+            return {
+              ok: true,
+              json: async () => ({
+                versions: [{ version: "1.0.0", gitSha: "abc123" }],
+              }),
+            } as Response;
+          }
+          if (url === "https://api.github.com/repos/jorgemuza/orbit/contents/skills/qmetry/SKILL.md?ref=abc123") {
+            return {
+              ok: true,
+              text: async () => [
+                "---",
+                "name: qmetry",
+                "description: Manage QMetry cases",
+                "version: 1.0.0",
+                "---",
+                "",
+                "Use orbit qm commands.",
+                "",
+              ].join("\n"),
+            } as Response;
+          }
+          return { ok: false, status: 404, json: async () => ({}), text: async () => "" } as Response;
+        }) as unknown as typeof fetch;
+        const resolved = await resolveParsedSkillFromIdentifier("jorgemuza/orbit/qmetry", {
+          cwd,
+          home,
+          fetchImpl,
+          platformBaseUrl: "https://platform.test",
+          githubTokenProvider: () => null,
+        });
+        expect(resolved).not.toBeNull();
+        expect(resolved!.name).toBe("qmetry");
+        expect(resolved!.version).toBe("1.0.0");
+        expect(resolved!.body).toContain("orbit qm");
+      },
+    );
+  });
+
   it("falls back to the directory basename when frontmatter omits name", async () => {
     await withFixtureSkill(
       async (cwd) => {
@@ -212,6 +274,16 @@ describe("resolveParsedSkillFromIdentifier (0845 closure fallback)", () => {
         expect(resolved!.name).toBe("no-name-skill");
       },
     );
+  });
+});
+
+describe("resolveParsedSkillFromPlatform", () => {
+  it("returns null for non-hierarchical identifiers", async () => {
+    const resolved = await resolveParsedSkillFromPlatform("qmetry", {
+      fetchImpl: vi.fn() as unknown as typeof fetch,
+      platformBaseUrl: "https://platform.test",
+    });
+    expect(resolved).toBeNull();
   });
 });
 
@@ -263,6 +335,7 @@ describe("runMultiInstallJob — desktop SSE contract", () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "multi-install-job-"));
     try {
       const job = await runMultiInstallJob({
+        identifier: "desktop-parity-skill",
         skill: {
           name: "desktop-parity-skill",
           description: "Desktop parity fixture",
@@ -299,6 +372,46 @@ describe("runMultiInstallJob — desktop SSE contract", () => {
       ]);
       expect(summary.exportedCount).toBe(1);
       expect(summary.errorCount).toBe(0);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("writes project vskill.lock for installed filesystem targets", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "multi-install-lock-"));
+    try {
+      const job = await runMultiInstallJob({
+        identifier: "jorgemuza/orbit/qmetry",
+        skill: {
+          name: "qmetry",
+          description: "QMetry helper",
+          body: "Use orbit qm commands.",
+          originalFrontmatter: [
+            "name: qmetry",
+            "description: QMetry helper",
+            "version: 1.2.3",
+          ].join("\n"),
+          version: "1.2.3",
+        },
+        agentIds: ["codex"],
+        scope: "project",
+        projectRoot: tmp,
+      });
+
+      await waitForDone(job);
+
+      const lock = JSON.parse(
+        await fs.readFile(path.join(tmp, "vskill.lock"), "utf-8"),
+      ) as {
+        agents: string[];
+        skills: Record<string, { version: string; source: string; scope: string }>;
+      };
+      expect(lock.agents).toContain("codex");
+      expect(lock.skills.qmetry).toMatchObject({
+        version: "1.2.3",
+        source: "marketplace:jorgemuza/orbit#qmetry",
+        scope: "project",
+      });
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }

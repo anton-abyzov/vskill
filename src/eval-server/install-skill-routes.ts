@@ -29,7 +29,7 @@ import * as http from "node:http";
 import * as os from "node:os";
 import { promises as fsPromises } from "node:fs";
 import { join as pathJoin } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
@@ -53,6 +53,9 @@ import {
   collectSkillBundleFiles,
   sanitizeSkillBundleFiles,
 } from "../installer/bundle-files.js";
+import { getDefaultKeychain } from "../lib/keychain.js";
+import { ensureLockfile, writeLockfile } from "../lockfile/lockfile.js";
+import type { SkillLockEntry } from "../lockfile/types.js";
 
 type InstallScope = "project" | "user" | "global";
 type MultiInstallScope = "project" | "user";
@@ -96,6 +99,10 @@ function normalizeInstallScope(scope: InstallScope): MultiInstallScope {
   return scope === "project" ? "project" : "user";
 }
 
+function userLockDir(): string {
+  return pathJoin(os.homedir(), ".agents");
+}
+
 function emitMultiJob(job: MultiInstallJob, event: MultiInstallJobEvent, data: unknown): void {
   job.pastEvents.push({ event, data });
   for (const sub of job.subscribers) {
@@ -122,6 +129,17 @@ function isValidParsedSkill(s: unknown): s is ParsedSkill {
 const SERVER_FALLBACK_FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 const SERVER_FALLBACK_NAME_RE = /^name:\s*(.+?)\s*$/m;
 const SERVER_FALLBACK_VERSION_RE = /^version:\s*(.+?)\s*$/m;
+const DEFAULT_PLATFORM_URL = "https://verified-skill.com";
+
+type FetchLike = typeof fetch;
+
+interface ResolveSkillOptions {
+  cwd?: string;
+  home?: string;
+  fetchImpl?: FetchLike;
+  platformBaseUrl?: string;
+  githubTokenProvider?: () => string | null;
+}
 
 function unquoteYaml(value: string): string {
   const trimmed = value.trim();
@@ -132,6 +150,212 @@ function unquoteYaml(value: string): string {
     return trimmed.slice(1, -1);
   }
   return trimmed;
+}
+
+function parseRawSkillMd(
+  raw: string,
+  fallbackName: string,
+  fallbackDescription?: string,
+): ParsedSkill {
+  const normalized = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+  const fmMatch = normalized.match(SERVER_FALLBACK_FRONTMATTER_RE);
+  let originalFrontmatter = "";
+  let body = normalized;
+  let nameFromFm: string | undefined;
+  let version: string | undefined;
+  let descriptionFromFm: string | undefined;
+  if (fmMatch) {
+    originalFrontmatter = fmMatch[1];
+    body = fmMatch[2];
+    const nameMatch = originalFrontmatter.match(SERVER_FALLBACK_NAME_RE);
+    if (nameMatch) nameFromFm = unquoteYaml(nameMatch[1]);
+    const versionMatch = originalFrontmatter.match(SERVER_FALLBACK_VERSION_RE);
+    if (versionMatch) version = unquoteYaml(versionMatch[1]);
+    const descMatch = originalFrontmatter.match(/^description:\s*(.+?)\s*$/m);
+    if (descMatch) descriptionFromFm = unquoteYaml(descMatch[1]);
+  }
+  const name = nameFromFm || fallbackName;
+  return {
+    name,
+    description: descriptionFromFm || fallbackDescription || extractDescription(body, name),
+    body,
+    originalFrontmatter,
+    version,
+  };
+}
+
+function stripIdentifierVersion(identifier: string): string {
+  const slash = identifier.lastIndexOf("/");
+  const at = identifier.lastIndexOf("@");
+  return at > slash ? identifier.slice(0, at) : identifier;
+}
+
+function platformApiPath(identifier: string): string | null {
+  const base = stripIdentifierVersion(identifier);
+  const parts = base.split("/").filter(Boolean);
+  if (parts.length !== 3) return null;
+  return `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}`;
+}
+
+function platformBaseUrl(opts?: ResolveSkillOptions): string {
+  const raw = opts?.platformBaseUrl || process.env.VSKILL_PLATFORM_URL || DEFAULT_PLATFORM_URL;
+  return raw.replace(/\/$/, "");
+}
+
+interface PlatformSkillRecord {
+  name?: string;
+  displayName?: string;
+  description?: string;
+  repoUrl?: string;
+  skillPath?: string;
+  ownerSlug?: string;
+  repoSlug?: string;
+  skillSlug?: string;
+}
+
+interface PlatformVersionRecord {
+  version?: string;
+  gitSha?: string | null;
+}
+
+function normalizePlatformSkill(body: unknown): PlatformSkillRecord | null {
+  if (!body || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  const candidate = record.skill && typeof record.skill === "object"
+    ? record.skill as Record<string, unknown>
+    : record;
+  return {
+    name: typeof candidate.name === "string" ? candidate.name : undefined,
+    displayName: typeof candidate.displayName === "string" ? candidate.displayName : undefined,
+    description: typeof candidate.description === "string" ? candidate.description : undefined,
+    repoUrl: typeof candidate.repoUrl === "string" ? candidate.repoUrl : undefined,
+    skillPath: typeof candidate.skillPath === "string" ? candidate.skillPath : undefined,
+    ownerSlug: typeof candidate.ownerSlug === "string" ? candidate.ownerSlug : undefined,
+    repoSlug: typeof candidate.repoSlug === "string" ? candidate.repoSlug : undefined,
+    skillSlug: typeof candidate.skillSlug === "string" ? candidate.skillSlug : undefined,
+  };
+}
+
+function normalizePlatformVersions(body: unknown): PlatformVersionRecord[] {
+  if (!body || typeof body !== "object") return [];
+  const versions = (body as Record<string, unknown>).versions;
+  if (!Array.isArray(versions)) return [];
+  return versions
+    .filter((v): v is Record<string, unknown> => Boolean(v) && typeof v === "object")
+    .map((v) => ({
+      version: typeof v.version === "string" ? v.version : undefined,
+      gitSha: typeof v.gitSha === "string" ? v.gitSha : null,
+    }));
+}
+
+function parseGitHubRepo(repoUrl: string | undefined): { owner: string; repo: string } | null {
+  if (!repoUrl) return null;
+  try {
+    const url = new URL(repoUrl);
+    if (url.hostname !== "github.com") return null;
+    const [owner, repoRaw] = url.pathname.replace(/^\/+/, "").split("/");
+    const repo = repoRaw?.replace(/\.git$/, "");
+    if (!owner || !repo) return null;
+    return { owner, repo };
+  } catch {
+    return null;
+  }
+}
+
+function isSafeSkillPath(skillPath: string | undefined): skillPath is string {
+  if (!skillPath) return false;
+  if (skillPath.startsWith("/") || skillPath.includes("\\")) return false;
+  const parts = skillPath.split("/");
+  if (parts.some((p) => !p || p === "." || p === "..")) return false;
+  return parts[parts.length - 1] === "SKILL.md";
+}
+
+function readGitHubToken(opts?: ResolveSkillOptions): string | null {
+  if (opts?.githubTokenProvider) return opts.githubTokenProvider();
+  try {
+    return getDefaultKeychain().getGitHubToken();
+  } catch {
+    return null;
+  }
+}
+
+async function fetchSkillMdFromGitHub(opts: {
+  repoUrl: string;
+  skillPath: string;
+  refs: string[];
+  fetchImpl: FetchLike;
+  token: string | null;
+}): Promise<string | null> {
+  const repo = parseGitHubRepo(opts.repoUrl);
+  if (!repo || !isSafeSkillPath(opts.skillPath)) return null;
+  const pathPart = opts.skillPath.split("/").map(encodeURIComponent).join("/");
+  const refs = Array.from(new Set(opts.refs.filter(Boolean)));
+  if (!refs.includes("")) refs.push("");
+  for (const ref of refs) {
+    const url = new URL(`https://api.github.com/repos/${repo.owner}/${repo.repo}/contents/${pathPart}`);
+    if (ref) url.searchParams.set("ref", ref);
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github.raw",
+      "User-Agent": "vskill-skill-studio",
+    };
+    if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
+    try {
+      const res = await opts.fetchImpl(url.toString(), { headers });
+      if (res.ok) return await res.text();
+    } catch {
+      // Try the next ref.
+    }
+  }
+  return null;
+}
+
+async function resolveParsedSkillFromPlatform(
+  identifier: string,
+  opts?: ResolveSkillOptions,
+): Promise<ParsedSkill | null> {
+  const apiPath = platformApiPath(identifier);
+  if (!apiPath) return null;
+  const fetchImpl = opts?.fetchImpl ?? fetch;
+  const baseUrl = platformBaseUrl(opts);
+  let skill: PlatformSkillRecord | null = null;
+  try {
+    const res = await fetchImpl(`${baseUrl}${apiPath}`, { headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    skill = normalizePlatformSkill(await res.json());
+  } catch {
+    return null;
+  }
+  if (!skill?.repoUrl || !isSafeSkillPath(skill.skillPath)) return null;
+
+  let versions: PlatformVersionRecord[] = [];
+  try {
+    const res = await fetchImpl(`${baseUrl}${apiPath}/versions`, { headers: { Accept: "application/json" } });
+    if (res.ok) versions = normalizePlatformVersions(await res.json());
+  } catch {
+    versions = [];
+  }
+  const requestedVersion = (() => {
+    const slash = identifier.lastIndexOf("/");
+    const at = identifier.lastIndexOf("@");
+    return at > slash ? identifier.slice(at + 1) : null;
+  })();
+  const selectedVersion = requestedVersion
+    ? versions.find((v) => v.version === requestedVersion)
+    : versions[0];
+  const refs = [
+    selectedVersion?.gitSha ?? "",
+    "main",
+    "master",
+  ];
+  const raw = await fetchSkillMdFromGitHub({
+    repoUrl: skill.repoUrl,
+    skillPath: skill.skillPath,
+    refs,
+    fetchImpl,
+    token: readGitHubToken(opts),
+  });
+  if (!raw) return null;
+  return parseRawSkillMd(raw, skill.skillSlug || skill.displayName || stripIdentifierVersion(identifier).split("/").pop() || "skill", skill.description);
 }
 
 /**
@@ -147,45 +371,24 @@ function unquoteYaml(value: string): string {
  */
 export async function resolveParsedSkillFromIdentifier(
   identifier: string,
-  opts?: { cwd?: string; home?: string },
+  opts?: ResolveSkillOptions,
 ): Promise<ParsedSkill | null> {
   const cwd = opts?.cwd ?? process.cwd();
   const home = opts?.home ?? os.homedir();
   const matches = await locateSkill(identifier, { cwd, home });
-  if (matches.length === 0) return null;
-  const source = matches[0];
-  const skillMdPath = pathJoin(source.skillDir, "SKILL.md");
-  let raw: string;
-  try {
-    raw = await fsPromises.readFile(skillMdPath, "utf-8");
-  } catch {
-    return null;
+  if (matches.length > 0) {
+    const source = matches[0];
+    const skillMdPath = pathJoin(source.skillDir, "SKILL.md");
+    try {
+      const raw = await fsPromises.readFile(skillMdPath, "utf-8");
+      const parsed = parseRawSkillMd(raw, source.skillName);
+      const files = await collectSkillBundleFiles(source.skillDir);
+      return { ...parsed, files };
+    } catch {
+      return null;
+    }
   }
-  const normalized = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
-  const fmMatch = normalized.match(SERVER_FALLBACK_FRONTMATTER_RE);
-  let originalFrontmatter = "";
-  let body = normalized;
-  let nameFromFm: string | undefined;
-  let version: string | undefined;
-  if (fmMatch) {
-    originalFrontmatter = fmMatch[1];
-    body = fmMatch[2];
-    const nameMatch = originalFrontmatter.match(SERVER_FALLBACK_NAME_RE);
-    if (nameMatch) nameFromFm = unquoteYaml(nameMatch[1]);
-    const versionMatch = originalFrontmatter.match(SERVER_FALLBACK_VERSION_RE);
-    if (versionMatch) version = unquoteYaml(versionMatch[1]);
-  }
-  const name = nameFromFm || source.skillName;
-  const description = extractDescription(body, name);
-  const files = await collectSkillBundleFiles(source.skillDir);
-  return {
-    name,
-    description,
-    body,
-    originalFrontmatter,
-    version,
-    files,
-  };
+  return resolveParsedSkillFromPlatform(identifier, opts);
 }
 
 function validateAgentIds(ids: unknown): { ok: true; ids: string[] } | { ok: false; error: string } {
@@ -202,7 +405,73 @@ function validateAgentIds(ids: unknown): { ok: true; ids: string[] } | { ok: fal
   return { ok: true, ids: validated };
 }
 
+function reconstructedSkillMd(skill: ParsedSkill): string {
+  const frontmatter = skill.originalFrontmatter.trim()
+    ? skill.originalFrontmatter.trim()
+    : [
+        `name: ${skill.name}`,
+        `description: ${JSON.stringify(skill.description)}`,
+        skill.version ? `version: ${skill.version}` : null,
+      ].filter(Boolean).join("\n");
+  return `---\n${frontmatter}\n---\n\n${skill.body.replace(/^\n+/, "")}`;
+}
+
+function computeSha(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function sourceFromIdentifier(identifier: string): Pick<
+  SkillLockEntry,
+  "source" | "sourceRepoUrl" | "sourceType"
+> {
+  const parts = stripIdentifierVersion(identifier).split("/").filter(Boolean);
+  if (parts.length >= 2) {
+    const [owner, repo, slug] = parts;
+    return {
+      source: slug
+        ? `marketplace:${owner}/${repo}#${slug}`
+        : `github:${owner}/${repo}`,
+      sourceRepoUrl: `https://github.com/${owner}/${repo}`,
+      sourceType: "github",
+    };
+  }
+  return {
+    source: `registry:${stripIdentifierVersion(identifier)}`,
+    sourceType: "registry",
+  };
+}
+
+function writeMultiInstallLockfile(opts: {
+  identifier: string;
+  skill: ParsedSkill;
+  scope: "project" | "user";
+  projectRoot: string;
+  results: AgentInstallResult[];
+}): void {
+  const installedAgentIds = opts.results
+    .filter((result) => result.status === "installed")
+    .map((result) => result.agentId);
+  if (installedAgentIds.length === 0) return;
+
+  const content = reconstructedSkillMd(opts.skill);
+  const lockDir = opts.scope === "user" ? userLockDir() : opts.projectRoot;
+  const lock = ensureLockfile(lockDir);
+  const files = ["SKILL.md", ...Object.keys(opts.skill.files ?? {})].sort();
+  lock.skills[opts.skill.name] = {
+    version: opts.skill.version || "1.0.0",
+    sha: computeSha(content),
+    tier: "VERIFIED",
+    installedAt: new Date().toISOString(),
+    scope: opts.scope,
+    files,
+    ...sourceFromIdentifier(opts.identifier),
+  };
+  lock.agents = [...new Set([...(lock.agents || []), ...installedAgentIds])];
+  writeLockfile(lock, lockDir);
+}
+
 async function runMultiInstallJob(opts: {
+  identifier: string;
   skill: ParsedSkill;
   agentIds: string[];
   scope: "project" | "user";
@@ -229,6 +498,13 @@ async function runMultiInstallJob(opts: {
       for (const agentResult of result.agents) {
         emitMultiJob(job, "result", agentResult);
       }
+      writeMultiInstallLockfile({
+        identifier: opts.identifier,
+        skill: opts.skill,
+        scope: opts.scope,
+        projectRoot: opts.projectRoot,
+        results: result.agents,
+      });
       emitMultiJob(job, "done", {
         success: result.errorCount === 0,
         results: result.agents,
@@ -247,7 +523,7 @@ async function runMultiInstallJob(opts: {
   return job;
 }
 
-export function registerInstallSkillRoutes(router: Router): void {
+export function registerInstallSkillRoutes(router: Router, root: string = process.cwd()): void {
   // POST /api/studio/install-skill
   // Body shape (legacy single-agent CLI spawn):    { skill: string, scope: "project"|"user"|"global" }
   // Body shape (new multi-agent in-process):       { skill: string, scope, agentIds: string[], parsedSkill: ParsedSkill, projectRoot?: string }
@@ -307,7 +583,7 @@ export function registerInstallSkillRoutes(router: Router): void {
           );
           return;
         } else {
-          const resolved = await resolveParsedSkillFromIdentifier(skill);
+          const resolved = await resolveParsedSkillFromIdentifier(skill, { cwd: root });
           if (!resolved) {
             sendJson(
               res,
@@ -325,8 +601,9 @@ export function registerInstallSkillRoutes(router: Router): void {
         }
         const projectRoot = typeof body.projectRoot === "string" && body.projectRoot
           ? body.projectRoot
-          : process.cwd();
+          : root;
         const job = await runMultiInstallJob({
+          identifier: skill,
           skill: parsedSkill,
           agentIds: validation.ids,
           scope: normalizedScope,
@@ -418,5 +695,8 @@ export const __test__ = {
   validateAgentIds,
   isValidParsedSkill,
   resolveParsedSkillFromIdentifier,
+  resolveParsedSkillFromPlatform,
+  fetchSkillMdFromGitHub,
   runMultiInstallJob,
+  writeMultiInstallLockfile,
 };

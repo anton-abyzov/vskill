@@ -61,6 +61,25 @@ interface LiveResultMap {
   [agentId: string]: AgentInstallResult;
 }
 
+const ACTIVE_AGENT_INSTALL_ALIASES: Readonly<Record<string, string>> =
+  Object.freeze({
+    "claude-cli": "claude-code",
+    "codex-cli": "codex",
+  });
+
+function normalizeActiveInstallAgentId(agentId: string | null | undefined): string | null {
+  if (!agentId) return null;
+  return ACTIVE_AGENT_INSTALL_ALIASES[agentId] ?? agentId;
+}
+
+function firstDetectedFilesystemAgentId(agents: SupportedAgent[]): string | null {
+  return (
+    agents.find((agent) => agent.detected && agent.installMode === "filesystem")?.id ??
+    agents.find((agent) => agent.installMode === "filesystem")?.id ??
+    null
+  );
+}
+
 function statusLabel(status: AgentInstallResult["status"]): string {
   switch (status) {
     case "installed":
@@ -139,11 +158,22 @@ export function InstallTargetsModal({
         // CTA) is unioned in so the AgentScopePicker can pre-select a
         // specific target without losing the active-tool default.
         const initial = new Set<string>();
-        if (activeAgentId && list.some((a) => a.id === activeAgentId)) {
-          initial.add(activeAgentId);
+        const normalizedActiveAgentId = normalizeActiveInstallAgentId(activeAgentId);
+        if (
+          normalizedActiveAgentId &&
+          list.some((a) => a.id === normalizedActiveAgentId)
+        ) {
+          initial.add(normalizedActiveAgentId);
         }
         for (const id of preCheckedAgentIds ?? []) {
-          if (list.some((a) => a.id === id)) initial.add(id);
+          const normalizedId = normalizeActiveInstallAgentId(id);
+          if (normalizedId && list.some((a) => a.id === normalizedId)) {
+            initial.add(normalizedId);
+          }
+        }
+        if (initial.size === 0) {
+          const fallbackAgentId = firstDetectedFilesystemAgentId(list);
+          if (fallbackAgentId) initial.add(fallbackAgentId);
         }
         setSelected(initial);
         setPhase("select");
@@ -249,11 +279,13 @@ export function InstallTargetsModal({
               setPendingClipboardQueue(exportRows);
               setActiveClipboard(exportRows[0] ?? null);
             }
-            try {
-              onSuccess?.(finalList);
-            } catch {
-              // non-fatal
-            }
+            globalThis.setTimeout(() => {
+              try {
+                onSuccess?.(finalList);
+              } catch {
+                // non-fatal
+              }
+            }, 0);
             return next;
           });
           setPhase("done");
@@ -314,7 +346,7 @@ export function InstallTargetsModal({
           alignItems: "flex-start",
           justifyContent: "center",
           paddingTop: "min(8vh, 64px)",
-          zIndex: 9990,
+          zIndex: 10020,
         }}
       >
         <div
@@ -842,7 +874,7 @@ function ResultsToast({
         const agent = agents.find((a) => a.id === r.agentId);
         const detail =
           r.status === "installed"
-            ? r.path
+            ? (r.path ?? r.detail)
             : r.status === "exported"
               ? r.detail && r.detail.includes("project-scoped")
                 ? r.detail

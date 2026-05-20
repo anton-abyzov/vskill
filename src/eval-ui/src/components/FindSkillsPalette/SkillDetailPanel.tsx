@@ -22,6 +22,8 @@ import TerminalBlock from "./components/TerminalBlock";
 import { skillApiPath } from "../../lib/skill-url";
 import { api, type InstallStateResponse } from "../../api";
 import { InstallTargetsModal } from "../InstallTargetsModal";
+import type { AgentInstallResult } from "../../types";
+import { getStudioPreference } from "../../hooks/useStudioPreferences";
 
 // ---------------------------------------------------------------------------
 // Types — minimal shape covering the platform's `/api/v1/skills/...` payload.
@@ -68,6 +70,8 @@ const PLATFORM_URL = "https://verified-skill.com";
 export interface SkillDetailPanelProps {
   selectedSkill: SelectedSkill;
   onClose: () => void;
+  /** Current install target selected in the Studio agent scope picker. */
+  activeAgentId?: string | null;
   /** Override for tests. */
   apiBase?: string;
   /** Override the install-copy telemetry endpoint (tests). */
@@ -216,6 +220,7 @@ function fireInstallCopyTelemetry(
 export function SkillDetailPanel({
   selectedSkill,
   onClose,
+  activeAgentId,
   telemetryInstallCopyUrl = DEFAULT_TELEMETRY_INSTALL_COPY,
   onToast,
 }: SkillDetailPanelProps) {
@@ -246,7 +251,16 @@ export function SkillDetailPanel({
   const dialogRef = useRef<HTMLDivElement>(null);
   const backLinkRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const installModalOpenRef = useRef(false);
   const skillName = fullName(selectedSkill);
+  const resolvedActiveAgentId =
+    activeAgentId === undefined
+      ? getStudioPreference<string | null>("activeAgent", null)
+      : activeAgentId;
+
+  useEffect(() => {
+    installModalOpenRef.current = installModalOpen;
+  }, [installModalOpen]);
 
   // Capture the focus trigger so we can restore on close (T-030).
   useEffect(() => {
@@ -376,6 +390,7 @@ export function SkillDetailPanel({
   // FindSkillsPalette persists this on every onSelect, T-014).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (installModalOpenRef.current) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         handleBack();
@@ -482,7 +497,18 @@ export function SkillDetailPanel({
   // install-state changed. The 0827 `studio:skill-installed` CustomEvent
   // is fired so the install-state listener at the top of this panel and
   // any other UI watching for it can re-fetch.
-  const handleInstallModalSuccess = useCallback(() => {
+  const handleInstallModalSuccess = useCallback((results: AgentInstallResult[]) => {
+    const failures = results.filter((r) => r.status === "error");
+    if (failures.length > 0) {
+      const first = failures[0];
+      const message = `Install finished with ${failures.length} error${failures.length === 1 ? "" : "s"}: ${first.detail ?? first.agentId}`;
+      if (onToast) {
+        try { onToast(message, "error"); } catch { /* non-fatal */ }
+      } else {
+        dispatchToastFallback(message, "error", 0);
+      }
+      return;
+    }
     if (typeof window !== "undefined") {
       try {
         window.dispatchEvent(
@@ -494,7 +520,20 @@ export function SkillDetailPanel({
         // non-fatal
       }
     }
-  }, [publisher, slug, scope]);
+    const installedCount = results.filter((r) => r.status === "installed").length;
+    const exportedCount = results.filter((r) => r.status === "exported").length;
+    const message = exportedCount > 0
+      ? `Installed ${displayName}; ${exportedCount} target${exportedCount === 1 ? "" : "s"} need paste.`
+      : `Installed ${displayName} to ${installedCount} target${installedCount === 1 ? "" : "s"}.`;
+    if (onToast) {
+      try { onToast(message, "success"); } catch { /* non-fatal */ }
+    } else {
+      dispatchToastFallback(message, "success", 5000);
+    }
+    if (exportedCount > 0) return;
+    setInstallModalOpen(false);
+    handleBack();
+  }, [publisher, slug, scope, displayName, onToast, handleBack]);
 
   const trustTier: TrustTier = (meta?.trustTier as TrustTier | undefined) ?? "T1";
   const certTier: CertificationTier =
@@ -976,7 +1015,7 @@ export function SkillDetailPanel({
         skill={`${publisher}/${slug}`}
         skillDisplayName={displayName}
         scope={scope}
-        activeAgentId={null}
+        activeAgentId={resolvedActiveAgentId}
         onClose={() => setInstallModalOpen(false)}
         onSuccess={handleInstallModalSuccess}
       />

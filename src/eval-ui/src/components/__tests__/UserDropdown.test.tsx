@@ -169,6 +169,42 @@ describe("UserDropdown (0831 T-011)", () => {
     }
   });
 
+  it("AC-US1-02: dialog shows a clickable GitHub fallback before the opener settles", async () => {
+    const startSpy = vi.fn().mockResolvedValue(SAMPLE_FLOW);
+    const openExternalUrlSpy = vi.fn(() => new Promise<void>(() => undefined));
+    const pollSpy = vi.fn(
+      async (): Promise<PollGithubDeviceFlowOutcome> => ({ status: "pending" }),
+    );
+    bridgeStub.bridge = {
+      available: true,
+      mode: "desktop",
+      getSignedInUser: vi.fn().mockResolvedValue(null),
+      startGithubDeviceFlow: startSpy,
+      pollGithubDeviceFlow: pollSpy,
+      openExternalUrl: openExternalUrlSpy,
+      signOut: vi.fn(),
+    } as Partial<DesktopBridge>;
+    const h = await mount();
+    try {
+      await h.act(async () => { await flushMicrotasks(); });
+      const btn = h.container.querySelector("[data-slot='sign-in-button']") as HTMLButtonElement;
+      await h.act(async () => { btn.click(); await flushMicrotasks(); });
+
+      const dialog = h.container.querySelector("[data-slot='sign-in-dialog']");
+      expect(dialog).toBeTruthy();
+      expect(dialog?.querySelector("code[aria-label='Authorization URL']")?.textContent)
+        .toContain("github.com/login/oauth/authorize");
+      const openButton = dialog?.querySelector("[data-slot='open-github-button']") as HTMLButtonElement;
+      expect(openButton).toBeTruthy();
+
+      await h.act(async () => { openButton.click(); await flushMicrotasks(); });
+      expect(openExternalUrlSpy).toHaveBeenCalledTimes(2);
+      expect(openExternalUrlSpy).toHaveBeenLastCalledWith(SAMPLE_FLOW.verificationUri);
+    } finally {
+      h.unmount();
+    }
+  });
+
   it("AC-US1-04 / AC-US1-05: poll outcome 'granted' clears dialog and shows user chip", async () => {
     const pollSpy = vi.fn(
       async (): Promise<PollGithubDeviceFlowOutcome> => ({ status: "granted", user: SAMPLE_USER }),

@@ -35,7 +35,8 @@
 //      → server returns {state, authUrl}
 //   2. JS: window.__TAURI__.shell.open(authUrl)   (no IPC ACL needed —
 //      shell:allow-open is in default capabilities)
-//   3. User authorizes in their browser → GitHub redirects to
+//   3. User authorizes in their browser → GitHub redirects to the registered
+//      verified-skill.com callback, which detects desktop state and 302s to
 //      http://localhost:<sidecar-port>/api/oauth/github/callback?code=&state=
 //   4. Sidecar callback handler:
 //      → looks up state → verifier in map (404 if not found / expired)
@@ -73,13 +74,10 @@ const STATE_TTL_MS = 10 * 60 * 1000;   // 10 minutes — GitHub auth pages
                                         // allow ~15 min before user code expires
 const STATE_GC_INTERVAL_MS = 60 * 1000;
 
-// 2026-05-11 (Option B per Anton): the vskill OAuth App's registered
-// callback URL at github.com is the verified-skill.com platform endpoint
-// (so web sign-in works). For the DESKTOP flow we use a bounce-redirect:
-// GitHub → verified-skill.com/api/v1/auth/github/desktop-callback → 302 to
-// http://localhost:<sidecar-port>/api/oauth/github/callback. The port is
-// encoded in `state` so the platform knows where to bounce.
-const DESKTOP_BOUNCE_REDIRECT = "https://verified-skill.com/api/v1/auth/github/desktop-callback";
+// 2026-05-20: GitHub requires redirect_uri to exactly match the OAuth App's
+// registered callback. The platform callback detects desktop state values and
+// bounces them to http://localhost:<sidecar-port>/api/oauth/github/callback.
+const DESKTOP_BOUNCE_REDIRECT = "https://verified-skill.com/api/v1/auth/github/callback";
 
 // Allow overriding the bounce URL via env (useful for local platform
 // development against http://localhost:3000 etc.).
@@ -144,9 +142,9 @@ function generatePkcePair(): { verifier: string; challenge: string } {
 // ---------------------------------------------------------------------------
 
 /**
- * The redirect_uri we send to GitHub. Always the verified-skill.com bounce
- * endpoint (which then 302s to localhost). Constant, registered in the
- * OAuth App at github.com.
+ * The redirect_uri we send to GitHub. This must be the registered platform
+ * callback; the platform callback handles the localhost bounce for desktop
+ * states after GitHub redirects back to it.
  */
 function buildGitHubRedirectUri(_req: http.IncomingMessage): string {
   return getRedirectUri();

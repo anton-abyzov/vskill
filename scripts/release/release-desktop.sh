@@ -12,10 +12,9 @@
 #   3.  Bumps src-tauri/Cargo.toml + tauri.conf.json + Cargo.lock + the
 #       dashboard /desktop page constants.
 #   4.  Commits + pushes main + tags desktop-v<version>.
-#   5.  Polls CI until completion (max 15 min).
+#   5.  Polls CI until completion (default max 2 hours).
 #   6.  On green:
-#        - downloads the new minisign .sig
-#        - base64-encodes it
+#        - downloads the new minisign .sig files
 #        - rewrites vskill-platform's latest.json route + /desktop page
 #        - rebuilds vskill-platform Worker bundle + redeploys to Cloudflare
 #        - promotes the GH release from draft → published
@@ -56,6 +55,7 @@ TAG="desktop-v${VERSION}"
 REPO="anton-abyzov/vskill"
 KEY_DIR="${HOME}/.config/skill-studio-release"
 PLATFORM_REPO_REL="repositories/anton-abyzov/vskill-platform"
+CI_TIMEOUT_SECONDS="${CI_TIMEOUT_SECONDS:-7200}"
 
 # ─── 0. Pre-flight ────────────────────────────────────────────────────────
 [[ -f "${KEY_DIR}/minisign.key" ]] || { echo "❌ missing ${KEY_DIR}/minisign.key" >&2; exit 1; }
@@ -135,11 +135,11 @@ sleep 8
 RUN_ID=$(gh run list -R "${REPO}" --workflow="Desktop Release" --limit 20 --json databaseId,headBranch --jq ".[] | select(.headBranch == \"${TAG}\") | .databaseId" | head -1)
 [[ -n "${RUN_ID}" ]] || { echo "❌ no Desktop Release CI run found for ${TAG}" >&2; exit 1; }
 echo ">> [5/8] CI run: https://github.com/${REPO}/actions/runs/${RUN_ID}"
-echo "   polling (up to 40 min)..."
+echo "   polling (up to $((CI_TIMEOUT_SECONDS / 60)) min)..."
 START=$(date +%s)
 until [[ "$(gh run view "${RUN_ID}" -R "${REPO}" --json status --jq .status)" = "completed" ]]; do
   ELAPSED=$(( $(date +%s) - START ))
-  if (( ELAPSED > 2400 )); then
+  if (( ELAPSED > CI_TIMEOUT_SECONDS )); then
     echo "❌ CI timeout"
     exit 1
   fi
@@ -156,9 +156,30 @@ echo "   ✅ CI green"
 
 # ─── 6. Update vskill-platform manifest ───────────────────────────────────
 echo ">> [6/8] updating vskill-platform manifest..."
-mkdir -p "/tmp/release-${VERSION}"
-gh release download "${TAG}" --repo "${REPO}" --pattern '*.app.tar.gz.sig' --dir "/tmp/release-${VERSION}" >/dev/null
-SIG_B64=$(cat /tmp/release-${VERSION}/*.app.tar.gz.sig | base64 | tr -d '\n')
+RELEASE_TMP="/tmp/release-${VERSION}"
+mkdir -p "${RELEASE_TMP}"
+rm -f "${RELEASE_TMP}"/*.sig
+gh release download "${TAG}" --repo "${REPO}" \
+  --pattern '*aarch64*.app.tar.gz.sig' \
+  --pattern '*x64-setup.exe.sig' \
+  --pattern '*amd64.AppImage.sig' \
+  --dir "${RELEASE_TMP}" >/dev/null
+
+read_sig() {
+  local pattern="$1"
+  local file
+  file="$(find "${RELEASE_TMP}" -type f -name "${pattern}" | head -1)"
+  [[ -f "${file}" ]] || { echo "❌ missing release signature matching ${pattern}" >&2; exit 1; }
+  tr -d '\n\r' < "${file}"
+}
+
+DARWIN_SIG="$(read_sig '*aarch64*.app.tar.gz.sig')"
+WINDOWS_SIG="$(read_sig '*x64-setup.exe.sig')"
+LINUX_SIG="$(read_sig '*amd64.AppImage.sig')"
+RELEASE_NOTES="$(gh release view "${TAG}" -R "${REPO}" --json body --jq .body 2>/dev/null || true)"
+if [[ -z "${RELEASE_NOTES//[[:space:]]/}" ]]; then
+  RELEASE_NOTES="Skill Studio v${VERSION}"
+fi
 PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 PLATFORM_DIR="${REPO_ROOT}/../../${PLATFORM_REPO_REL}"
@@ -173,21 +194,56 @@ PAGE="${PLATFORM_DIR}/src/app/desktop/page.tsx"
 [[ -f "${ROUTE}" ]] || { echo "❌ missing ${ROUTE}" >&2; exit 1; }
 [[ -f "${PAGE}" ]] || { echo "❌ missing ${PAGE}" >&2; exit 1; }
 
-# Update route.ts (RELEASE_BASE, version, signature, pub_date)
-node -e "
-const fs=require('fs');
-const p='${ROUTE}';
-let s=fs.readFileSync(p,'utf8');
-s = s.replace(/desktop-v[0-9]+\.[0-9]+\.[0-9]+/g, 'desktop-v${VERSION}');
-s = s.replace(/version: \"[0-9]+\.[0-9]+\.[0-9]+\"/, 'version: \"${VERSION}\"');
-s = s.replace(/const DARWIN_AARCH64_SIGNATURE =\s*\"[^\"]+\"/s, 'const DARWIN_AARCH64_SIGNATURE =\n  \"${SIG_B64}\"');
-s = s.replace(/pub_date: \"[^\"]+\"/, 'pub_date: \"${PUB_DATE}\"');
-fs.writeFileSync(p, s);
-"
-# Update page.tsx
-sed -i.bak -E "s/LATEST_VERSION = \"[0-9]+\.[0-9]+\.[0-9]+\"/LATEST_VERSION = \"${VERSION}\"/" "${PAGE}"
-sed -i.bak -E "s/RELEASE_TAG = \"desktop-v[0-9]+\.[0-9]+\.[0-9]+\"/RELEASE_TAG = \"desktop-v${VERSION}\"/" "${PAGE}"
-rm -f "${PAGE}.bak"
+RELEASE_VERSION="${VERSION}" \
+ROUTE_PATH="${ROUTE}" \
+PAGE_PATH="${PAGE}" \
+PUB_DATE="${PUB_DATE}" \
+DARWIN_SIG="${DARWIN_SIG}" \
+WINDOWS_SIG="${WINDOWS_SIG}" \
+LINUX_SIG="${LINUX_SIG}" \
+RELEASE_NOTES="${RELEASE_NOTES}" \
+node <<'NODE'
+const fs = require("fs");
+
+const version = process.env.RELEASE_VERSION;
+const pubDate = process.env.PUB_DATE;
+const notes = process.env.RELEASE_NOTES;
+
+function replaceRequired(source, pattern, replacement, label) {
+  const next = source.replace(pattern, replacement);
+  if (next === source) {
+    throw new Error(`failed to update ${label}`);
+  }
+  return next;
+}
+
+function replaceConst(source, name, value) {
+  return replaceRequired(
+    source,
+    new RegExp(`const ${name} =\\s*\\n?\\s*"[^"]+";`, "s"),
+    `const ${name} =\n  ${JSON.stringify(value)};`,
+    name,
+  );
+}
+
+const routePath = process.env.ROUTE_PATH;
+let route = fs.readFileSync(routePath, "utf8");
+route = replaceRequired(route, /desktop-v[0-9]+\.[0-9]+\.[0-9]+/g, `desktop-v${version}`, "release base");
+route = replaceConst(route, "DARWIN_AARCH64_SIGNATURE", process.env.DARWIN_SIG);
+route = replaceConst(route, "WINDOWS_X86_64_SIGNATURE", process.env.WINDOWS_SIG);
+route = replaceConst(route, "LINUX_X86_64_SIGNATURE", process.env.LINUX_SIG);
+route = replaceRequired(route, /version: "[0-9]+\.[0-9]+\.[0-9]+"/, `version: ${JSON.stringify(version)}`, "manifest version");
+route = replaceRequired(route, /notes:\s*"(?:[^"\\]|\\.)*"/s, `notes: ${JSON.stringify(notes)}`, "release notes");
+route = replaceRequired(route, /pub_date: "[^"]+"/, `pub_date: ${JSON.stringify(pubDate)}`, "pub_date");
+fs.writeFileSync(routePath, route);
+
+const pagePath = process.env.PAGE_PATH;
+let page = fs.readFileSync(pagePath, "utf8");
+page = replaceRequired(page, /LATEST_VERSION = "[0-9]+\.[0-9]+\.[0-9]+"/, `LATEST_VERSION = ${JSON.stringify(version)}`, "page version");
+page = replaceRequired(page, /RELEASE_TAG = "desktop-v[0-9]+\.[0-9]+\.[0-9]+"/, `RELEASE_TAG = ${JSON.stringify(`desktop-v${version}`)}`, "page tag");
+fs.writeFileSync(pagePath, page);
+NODE
+unset DARWIN_SIG WINDOWS_SIG LINUX_SIG RELEASE_NOTES
 echo "   ✅ manifest + dashboard updated"
 
 # ─── 7. Rebuild + redeploy vskill-platform ────────────────────────────────
@@ -197,6 +253,13 @@ echo ">> [7/8] rebuilding + redeploying vskill-platform to Cloudflare..."
   rm -rf .next .open-next
   npm run build >/tmp/release-${VERSION}/build.log 2>&1 || { echo "❌ npm run build failed (see /tmp/release-${VERSION}/build.log)"; exit 1; }
   npm run build:worker >/tmp/release-${VERSION}/build-worker.log 2>&1 || { echo "❌ npm run build:worker failed"; exit 1; }
+  if [[ -z "${CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE:-}" && -f .env ]]; then
+    LOCAL_HYPERDRIVE_URL="$(node -e "const fs=require('fs'); const text=fs.readFileSync('.env','utf8'); const line=text.split(/\\n/).find((entry)=>entry.startsWith('DATABASE_URL=')); if(!line) process.exit(0); let value=line.slice('DATABASE_URL='.length).trim(); if((value.startsWith('\\\"')&&value.endsWith('\\\"'))||(value.startsWith(\"'\")&&value.endsWith(\"'\"))) value=value.slice(1,-1); try{new URL(value); process.stdout.write(value);}catch{process.exit(0);}")"
+    if [[ -n "${LOCAL_HYPERDRIVE_URL}" ]]; then
+      export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="${LOCAL_HYPERDRIVE_URL}"
+    fi
+    unset LOCAL_HYPERDRIVE_URL
+  fi
   npm run deploy >/tmp/release-${VERSION}/deploy.log 2>&1 || { echo "❌ npm run deploy failed"; exit 1; }
 )
 sleep 5
@@ -219,9 +282,20 @@ for t in ${STALE}; do
 done
 echo "   ✅ promoted + drafts cleaned"
 
-# Commit the manifest update from the umbrella repo
-UMBRELLA_ROOT=$(cd "${REPO_ROOT}/../../.." && pwd)
-if [[ -d "${UMBRELLA_ROOT}/.git" ]]; then
+# Commit the manifest update from the platform repo when it is independently cloned.
+if [[ -d "${PLATFORM_DIR}/.git" ]]; then
+  (
+    cd "${PLATFORM_DIR}"
+    git add src/app/desktop/latest.json/route.ts src/app/desktop/page.tsx
+    if ! git diff --cached --quiet; then
+      git commit -m "release: desktop ${VERSION} platform manifest" >/dev/null
+      git push origin main >/dev/null 2>&1 || true
+    fi
+  )
+else
+  # Fallback for monorepo checkouts that track vskill-platform from the umbrella root.
+  UMBRELLA_ROOT=$(cd "${REPO_ROOT}/../../.." && pwd)
+  if [[ -d "${UMBRELLA_ROOT}/.git" ]]; then
   (
     cd "${UMBRELLA_ROOT}"
     git add "${PLATFORM_REPO_REL}/src/app/desktop/latest.json/route.ts" "${PLATFORM_REPO_REL}/src/app/desktop/page.tsx" 2>/dev/null || true
@@ -230,6 +304,7 @@ if [[ -d "${UMBRELLA_ROOT}/.git" ]]; then
       git push origin main >/dev/null 2>&1 || true
     fi
   )
+  fi
 fi
 
 echo ""

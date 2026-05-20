@@ -32,6 +32,7 @@ import { loadWorkspace, addProject, setActiveProject, projectIdFromPath } from "
 import { registerAuthoringRoutes } from "./authoring-routes.js";
 import { registerPluginCliRoutes } from "./plugin-cli-routes.js";
 import { registerGitRoutes } from "./git-routes.js";
+import { registerDesktopOpenRoutes } from "./desktop-open-routes.js";
 import { registerOauthGithubRoutes } from "./oauth-github-routes.js";
 import { handleActiveTenant } from "./active-tenant-routes.js";
 import { checkDistFreshness } from "./check-dist-freshness.js";
@@ -103,6 +104,7 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
   registerAuthoringRoutes(router, root);
   registerPluginCliRoutes(router, root);
   registerGitRoutes(router, root);
+  registerDesktopOpenRoutes(router);
   // 0843 followup (2026-05-11): GitHub OAuth Authorization Code + PKCE flow
   // (replaces the Tauri device-flow IPC path, which was double-broken by
   // (a) Tauri 2.x ACL rejecting all custom commands at runtime and

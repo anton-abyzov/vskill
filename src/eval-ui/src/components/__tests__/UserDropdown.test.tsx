@@ -80,6 +80,10 @@ describe("UserDropdown (0831 T-011)", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.spyOn(window, "open").mockImplementation(() => null);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -205,6 +209,37 @@ describe("UserDropdown (0831 T-011)", () => {
     }
   });
 
+  it("shows copied feedback after copying the GitHub sign-in link", async () => {
+    const startSpy = vi.fn().mockResolvedValue(SAMPLE_FLOW);
+    const pollSpy = vi.fn(
+      async (): Promise<PollGithubDeviceFlowOutcome> => ({ status: "pending" }),
+    );
+    bridgeStub.bridge = {
+      available: true,
+      mode: "desktop",
+      getSignedInUser: vi.fn().mockResolvedValue(null),
+      startGithubDeviceFlow: startSpy,
+      pollGithubDeviceFlow: pollSpy,
+      openExternalUrl: vi.fn().mockResolvedValue(undefined),
+      signOut: vi.fn(),
+    } as Partial<DesktopBridge>;
+    const h = await mount();
+    try {
+      await h.act(async () => { await flushMicrotasks(); });
+      const btn = h.container.querySelector("[data-slot='sign-in-button']") as HTMLButtonElement;
+      await h.act(async () => { btn.click(); await flushMicrotasks(); });
+
+      const copyButton = h.container.querySelector("button[aria-label='Copy sign-in link']") as HTMLButtonElement;
+      await h.act(async () => { copyButton.click(); await flushMicrotasks(); });
+
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(SAMPLE_FLOW.verificationUri);
+      expect(copyButton.textContent).toBe("Copied");
+      expect(h.container.querySelector("[data-slot='copy-feedback']")?.textContent).toBe("Link copied");
+    } finally {
+      h.unmount();
+    }
+  });
+
   it("AC-US1-04 / AC-US1-05: poll outcome 'granted' clears dialog and shows user chip", async () => {
     const pollSpy = vi.fn(
       async (): Promise<PollGithubDeviceFlowOutcome> => ({ status: "granted", user: SAMPLE_USER }),
@@ -262,11 +297,43 @@ describe("UserDropdown (0831 T-011)", () => {
       await h.act(async () => { chip.click(); await flushMicrotasks(); });
       const menu = h.container.querySelector("[data-slot='user-menu']");
       expect(menu).toBeTruthy();
+      const avatar = chip.querySelector("img") as HTMLImageElement;
+      expect(avatar.getAttribute("src")).toBe(SAMPLE_USER.avatar_url);
       // Menu must include "Sign out" (AC-US2-01).
       const items = Array.from(menu?.querySelectorAll("[role='menuitem']") ?? []) as HTMLElement[];
       const labels = items.map((el) => el.textContent ?? "");
       expect(labels).toContain("Sign out");
       expect(labels).toContain("View on GitHub");
+    } finally {
+      h.unmount();
+    }
+  });
+
+  it("AC-US2-01: clicking 'View on GitHub' opens the signed-in user's profile", async () => {
+    const openExternalUrlSpy = vi.fn().mockResolvedValue(undefined);
+    bridgeStub.bridge = {
+      available: true,
+      mode: "desktop",
+      getSignedInUser: vi.fn().mockResolvedValue(SAMPLE_USER),
+      startGithubDeviceFlow: vi.fn(),
+      pollGithubDeviceFlow: vi.fn(),
+      openExternalUrl: openExternalUrlSpy,
+      signOut: vi.fn(),
+    } as Partial<DesktopBridge>;
+    const h = await mount();
+    try {
+      await h.act(async () => { await flushMicrotasks(); });
+      const chip = h.container.querySelector("[data-slot='user-chip']") as HTMLButtonElement;
+      await h.act(async () => { chip.click(); await flushMicrotasks(); });
+      const menu = h.container.querySelector("[data-slot='user-menu']") as HTMLElement;
+      const viewItem = Array.from(menu.querySelectorAll("[role='menuitem']")).find(
+        (el) => el.textContent === "View on GitHub",
+      ) as HTMLButtonElement;
+
+      await h.act(async () => { viewItem.click(); await flushMicrotasks(); });
+
+      expect(openExternalUrlSpy).toHaveBeenCalledWith("https://github.com/octocat");
+      expect(h.container.querySelector("[data-slot='user-menu']")).toBeFalsy();
     } finally {
       h.unmount();
     }

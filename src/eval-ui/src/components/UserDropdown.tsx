@@ -287,6 +287,12 @@ export function UserDropdown() {
           alt=""
           width={20}
           height={20}
+          onError={(event) => {
+            const fallback = githubAvatarUrl(user.login);
+            if (event.currentTarget.src !== fallback) {
+              event.currentTarget.src = fallback;
+            }
+          }}
           style={{ borderRadius: "50%", display: "block" }}
         />
         <span style={{ maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -344,6 +350,13 @@ function SignInDialog({
   onOpenGithub: () => void;
   onRetry: () => void;
 }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const copyTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
+    };
+  }, []);
   let displayUrl = response.verificationUri;
   try {
     const url = new URL(response.verificationUri);
@@ -353,10 +366,14 @@ function SignInDialog({
   }
 
   const handleCopy = useCallback(async () => {
+    if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
     try {
-      await navigator.clipboard.writeText(response.verificationUri);
+      await copyText(response.verificationUri);
+      setCopyState("copied");
+      copyTimerRef.current = window.setTimeout(() => setCopyState("idle"), 1500);
     } catch {
-      // Clipboard denied (private mode, headless test) — silent fallback.
+      setCopyState("failed");
+      copyTimerRef.current = window.setTimeout(() => setCopyState("idle"), 1500);
     }
   }, [response.verificationUri]);
 
@@ -414,7 +431,7 @@ function SignInDialog({
           type="button"
           onClick={handleCopy}
           aria-label="Copy sign-in link"
-          title="Copy sign-in link"
+          title={copyState === "copied" ? "Copied" : "Copy sign-in link"}
           style={{
             height: 32,
             padding: "0 10px",
@@ -426,8 +443,16 @@ function SignInDialog({
             fontSize: 12,
           }}
         >
-          Copy link
+          {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy link"}
         </button>
+      </div>
+
+      <div
+        aria-live="polite"
+        data-slot="copy-feedback"
+        style={{ minHeight: 14, fontSize: 11, color: "var(--text-secondary)", marginBottom: 8 }}
+      >
+        {copyState === "copied" ? "Link copied" : copyState === "failed" ? "Copy failed" : ""}
       </div>
 
       {error ? (
@@ -568,4 +593,30 @@ async function sleep(ms: number, aborted: () => boolean): Promise<void> {
     const remaining = end - Date.now();
     await new Promise<void>((resolve) => setTimeout(resolve, Math.min(tick, remaining)));
   }
+}
+
+async function copyText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard?.writeText(text);
+    return;
+  } catch {
+    // Fall through to the WebView-safe selection path.
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("copy failed");
+}
+
+function githubAvatarUrl(login: string): string {
+  return `https://github.com/${encodeURIComponent(login)}.png?size=40`;
 }

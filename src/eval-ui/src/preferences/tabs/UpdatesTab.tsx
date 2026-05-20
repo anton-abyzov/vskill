@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Callout, Dialog, FormRow, Section, Segmented, Toggle } from "../components/primitives";
@@ -37,7 +37,13 @@ function detectErrorKind(message: string): ErrorKind {
   return "unknown";
 }
 
-export function UpdatesTab({ bridge, snapshot, onSnapshotChanged, pushToast }: TabProps) {
+export function UpdatesTab({
+  bridge,
+  snapshot,
+  onSnapshotChanged,
+  pushToast,
+  triggerCheckNonce,
+}: TabProps) {
   const { t } = useTranslation("preferences");
   const isBrowser = !bridge.available;
 
@@ -53,6 +59,7 @@ export function UpdatesTab({ bridge, snapshot, onSnapshotChanged, pushToast }: T
     progressBytes: 0,
     totalBytes: null,
   });
+  const lastTriggerNonce = useRef(triggerCheckNonce ?? 0);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,11 +141,11 @@ export function UpdatesTab({ bridge, snapshot, onSnapshotChanged, pushToast }: T
     if (!dialog.update) return;
     setDialog((prev) => ({ ...prev, installState: "preparing" }));
     try {
-      await bridge.downloadAndInstallUpdate((chunk, total) => {
+      await bridge.downloadAndInstallUpdate((downloadedBytes, total) => {
         setDialog((prev) => ({
           ...prev,
           installState: "downloading",
-          progressBytes: prev.progressBytes + chunk,
+          progressBytes: downloadedBytes,
           totalBytes: total,
         }));
       });
@@ -167,10 +174,21 @@ export function UpdatesTab({ bridge, snapshot, onSnapshotChanged, pushToast }: T
     await onSnapshotChanged();
   }, [bridge, onSnapshotChanged]);
 
-  const handleRestart = useCallback(() => {
-    setDialog((prev) => ({ ...prev, open: false }));
-    pushToast({ message: t("updates.dialog.restartNow"), variant: "success" });
-  }, [pushToast, t]);
+  const handleRestart = useCallback(async () => {
+    try {
+      await bridge.restartApp();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      pushToast({ message: message || "Couldn't restart Skill Studio.", variant: "error" });
+    }
+  }, [bridge, pushToast]);
+
+  useEffect(() => {
+    const nonce = triggerCheckNonce ?? 0;
+    if (nonce === 0 || nonce === lastTriggerNonce.current) return;
+    lastTriggerNonce.current = nonce;
+    void handleCheckNow();
+  }, [handleCheckNow, triggerCheckNonce]);
 
   const renderDialog = () => {
     if (!dialog.open || !dialog.update) return null;
@@ -226,7 +244,11 @@ export function UpdatesTab({ bridge, snapshot, onSnapshotChanged, pushToast }: T
               <p className="pref-dialog__body" style={{ marginRight: "auto" }}>
                 {t("updates.dialog.restartRequired")}
               </p>
-              <button type="button" className="pref-button" onClick={handleRestart}>
+              <button
+                type="button"
+                className="pref-button"
+                onClick={() => setDialog((prev) => ({ ...prev, open: false }))}
+              >
                 {t("updates.dialog.onQuit")}
               </button>
               <button

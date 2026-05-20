@@ -97,7 +97,7 @@ impl Default for GeneralSettings {
             theme: "system".to_string(),
             language: "auto".to_string(),
             launch_at_login: false,
-            default_project_folder: None,
+            default_project_folder: default_project_folder(),
         }
     }
 }
@@ -153,6 +153,24 @@ pub fn settings_path() -> PathBuf {
 
 fn settings_path_in(home: &std::path::Path) -> PathBuf {
     home.join(".vskill").join("settings.json")
+}
+
+fn default_project_folder() -> Option<String> {
+    let home = home_dir()?;
+    Some(
+        default_project_folder_in(&home)
+            .to_string_lossy()
+            .to_string(),
+    )
+}
+
+fn default_project_folder_in(home: &std::path::Path) -> PathBuf {
+    let projects = home.join("Projects");
+    if projects.is_dir() {
+        projects.join("Skill Studio")
+    } else {
+        home.join("Skill Studio Projects")
+    }
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -293,7 +311,8 @@ fn load_from_path(path: &std::path::Path) -> Settings {
     }
 
     match serde_json::from_value::<Settings>(probe.unwrap()) {
-        Ok(s) => {
+        Ok(mut s) => {
+            fill_missing_defaults(&mut s);
             tighten_perms_if_loose(path);
             s
         }
@@ -302,6 +321,12 @@ fn load_from_path(path: &std::path::Path) -> Settings {
             move_to_corrupt(path);
             Settings::default()
         }
+    }
+}
+
+fn fill_missing_defaults(settings: &mut Settings) {
+    if settings.general.default_project_folder.is_none() {
+        settings.general.default_project_folder = default_project_folder();
     }
 }
 
@@ -537,6 +562,25 @@ mod tests {
     }
 
     #[test]
+    fn test_default_project_folder_prefers_projects_subfolder() {
+        let home = fresh_tmp_dir();
+        std::fs::create_dir_all(home.join("Projects")).expect("projects dir");
+        assert_eq!(
+            default_project_folder_in(&home),
+            home.join("Projects").join("Skill Studio")
+        );
+    }
+
+    #[test]
+    fn test_default_project_folder_falls_back_outside_home_root() {
+        let home = fresh_tmp_dir();
+        assert_eq!(
+            default_project_folder_in(&home),
+            home.join("Skill Studio Projects")
+        );
+    }
+
+    #[test]
     fn test_load_with_missing_file_returns_defaults() {
         let path = fresh_path();
         assert!(!path.exists());
@@ -556,6 +600,26 @@ mod tests {
         let loaded = load_from_path(&path);
         assert_eq!(loaded.general.theme, "dark");
         assert_eq!(loaded.updates.channel, "beta");
+    }
+
+    #[test]
+    fn test_load_fills_missing_default_project_folder() {
+        let path = fresh_path();
+        if let Some(p) = path.parent() {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        std::fs::write(
+            &path,
+            r#"{"version":1,"general":{"theme":"system","language":"auto","launch_at_login":false,"default_project_folder":null}}"#,
+        )
+        .unwrap();
+
+        let loaded = load_from_path(&path);
+        assert!(loaded.general.default_project_folder.is_some());
+        assert_ne!(
+            loaded.general.default_project_folder.as_deref(),
+            home_dir().as_ref().and_then(|p| p.to_str())
+        );
     }
 
     #[test]

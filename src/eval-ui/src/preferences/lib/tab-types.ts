@@ -6,4 +6,5 @@ export interface TabProps {
   snapshot: SettingsSnapshot | null;
   onSnapshotChanged: () => Promise<void>;
   pushToast: (toast: Omit<ToastSpec, "id">) => void;
+  triggerCheckNonce?: number;
 }

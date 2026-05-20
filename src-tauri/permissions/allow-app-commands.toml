@@ -44,6 +44,7 @@ commands.allow = [
   "check_for_updates",
   "download_and_install_update",
   "cancel_update",
+  "restart_app",
   # Window / preferences
   "open_preferences",
   "get_app_metadata",

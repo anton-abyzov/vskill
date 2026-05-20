@@ -80,6 +80,7 @@ pub fn run() {
             commands::check_for_updates,
             commands::download_and_install_update,
             commands::cancel_update,
+            commands::restart_app,
             commands::open_preferences,
             commands::get_app_metadata,
             commands::set_autostart,

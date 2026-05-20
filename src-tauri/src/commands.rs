@@ -166,6 +166,12 @@ pub fn cancel_update(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn restart_app(app: AppHandle) -> Result<(), String> {
+    app.request_restart();
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn open_preferences(app: AppHandle, tab: Option<String>) -> Result<(), String> {
     crate::preferences::window::open_preferences(&app, tab.as_deref())
 }

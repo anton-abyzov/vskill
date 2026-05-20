@@ -232,6 +232,15 @@ describe("tokenGate (US-002 AC-US2-03, AC-US2-04, AC-US2-05)", () => {
     expect(state.ended).toBe(false);
   });
 
+  it("desktop GitHub OAuth completion is exempt from tokenGate (browser form POST)", () => {
+    const req = fakeReq({ url: "/api/oauth/github/desktop-complete", method: "POST" });
+    const { res, state } = fakeRes();
+    const passed = tokenGate(req, res);
+    expect(passed).toBe(true);
+    expect(state.status).toBeUndefined();
+    expect(state.ended).toBe(false);
+  });
+
   it("Codex H#4: absolute-form URL is gated by parsed pathname, not raw string", () => {
     // Some HTTP clients (curl, Rust reqwest, certain proxies) emit the
     // request target in absolute form. The raw req.url then contains the

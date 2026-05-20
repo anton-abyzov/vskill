@@ -3,6 +3,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -19,6 +20,9 @@ const HEALTH_TIMEOUT_MS: u64 = 10_000;
 const SHUTDOWN_GRACE_MS: u64 = 2_000;
 const STRIKE_WINDOW_MS: u128 = 60_000;
 const MAX_STRIKES: u32 = 3;
+const NO_PID: u32 = 0;
+
+static ACTIVE_SIDECAR_PID: AtomicU32 = AtomicU32::new(NO_PID);
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct SidecarStatus {
@@ -35,6 +39,9 @@ pub struct SidecarState {
     pub strike_count: u32,
     pub first_strike_at: Option<Instant>,
     pub last_strike_at: Option<Instant>,
+    /// PID currently expected to terminate because we initiated shutdown.
+    /// Used to suppress crash auto-restart when the user quits/restarts.
+    pub terminating_pid: Option<u32>,
     /// 0832: when set, the next `spawn_sidecar` call short-circuits with
     /// `Ok(port)` so the boot path can navigate to the external instance
     /// instead of spawning a new sidecar. Cleared after one consumption.
@@ -54,6 +61,50 @@ pub struct SidecarState {
 }
 
 pub type SharedSidecar = Arc<Mutex<SidecarState>>;
+
+fn track_sidecar_pid(pid: Option<u32>) {
+    ACTIVE_SIDECAR_PID.store(pid.unwrap_or(NO_PID), Ordering::SeqCst);
+}
+
+fn tracked_sidecar_pid() -> Option<u32> {
+    match ACTIVE_SIDECAR_PID.load(Ordering::SeqCst) {
+        NO_PID => None,
+        pid => Some(pid),
+    }
+}
+
+fn clear_tracked_sidecar_pid_if(pid: u32) {
+    let _ = ACTIVE_SIDECAR_PID.compare_exchange(pid, NO_PID, Ordering::SeqCst, Ordering::SeqCst);
+}
+
+/// Activity Monitor "Quit" sends SIGTERM to the app process and can bypass
+/// Tauri's RunEvent shutdown path. Keep this handler async-signal-safe:
+/// signal the sidecar PID from an atomic, then exit this process.
+#[cfg(unix)]
+pub fn install_termination_signal_handler() {
+    unsafe {
+        libc::signal(
+            libc::SIGTERM,
+            handle_termination_signal as *const () as libc::sighandler_t,
+        );
+    }
+}
+
+#[cfg(not(unix))]
+pub fn install_termination_signal_handler() {}
+
+#[cfg(unix)]
+extern "C" fn handle_termination_signal(_signal: libc::c_int) {
+    let pid = ACTIVE_SIDECAR_PID.load(Ordering::SeqCst);
+    if pid != NO_PID {
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        }
+    }
+    unsafe {
+        libc::_exit(128 + libc::SIGTERM);
+    }
+}
 
 /// Spawn the sidecar binary, wait for `LISTEN_PORT=<port>` on stdout, then
 /// poll `/api/health` until 200 OK. Returns the listening port on success.
@@ -81,9 +132,7 @@ pub fn spawn_sidecar<'a>(
                 s.skip_spawn_to_port.take()
             };
             if let Some(port) = skip_port {
-                log::info!(
-                    "sidecar spawn skipped — using external studio instance on port {port}"
-                );
+                log::info!("sidecar spawn skipped — using external studio instance on port {port}");
                 // 0832 F-001: clear `pid` on the use-existing early return so
                 // the Studio Instances submenu doesn't flag a stale or empty
                 // Tauri PID as the active app. The "this app" marker is
@@ -91,6 +140,7 @@ pub fn spawn_sidecar<'a>(
                 let mut s = state.lock().unwrap();
                 s.port = Some(port);
                 s.pid = None;
+                track_sidecar_pid(None);
                 return Ok(port);
             }
         }
@@ -115,6 +165,7 @@ pub fn spawn_sidecar<'a>(
         } else {
             crate::process_discovery::scan().await.unwrap_or_default()
         };
+        reap_orphaned_tauri_sidecars(&detected).await;
         let external: Vec<&crate::process_discovery::ProcessRecord> = detected
             .iter()
             .filter(|r| r.source != crate::process_discovery::ProcessSource::Tauri)
@@ -186,6 +237,7 @@ pub fn spawn_sidecar<'a>(
             s.child = Some(child);
             s.pid = Some(pid);
             s.port = None;
+            track_sidecar_pid(Some(pid));
             // 0836 US-002: reset studio token on a fresh spawn — the new
             // sidecar will emit a fresh `Studio token: <token>` banner on
             // stdout and we want the IPC to return None until that arrives.
@@ -197,6 +249,7 @@ pub fn spawn_sidecar<'a>(
 
         let app_clone = app.clone();
         let state_clone = state.clone();
+        let spawned_pid = pid;
         tokio::spawn(async move {
             let mut port_announced = false;
             let mut token_captured = false;
@@ -237,6 +290,10 @@ pub fn spawn_sidecar<'a>(
                             payload.code,
                             payload.signal
                         );
+                        if mark_child_terminated(&state_clone, spawned_pid) {
+                            log::info!("sidecar pid {spawned_pid} terminated during expected shutdown");
+                            break;
+                        }
                         handle_unexpected_exit(app_clone.clone(), state_clone.clone());
                         break;
                     }
@@ -245,16 +302,14 @@ pub fn spawn_sidecar<'a>(
             }
         });
 
-        let port = match tokio::time::timeout(
-            Duration::from_millis(HEALTH_TIMEOUT_MS),
-            port_rx.recv(),
-        )
-        .await
-        {
-            Ok(Some(p)) => p,
-            Ok(None) => return Err("sidecar exited before announcing port".into()),
-            Err(_) => return Err("timed out waiting for LISTEN_PORT from sidecar".into()),
-        };
+        let port =
+            match tokio::time::timeout(Duration::from_millis(HEALTH_TIMEOUT_MS), port_rx.recv())
+                .await
+            {
+                Ok(Some(p)) => p,
+                Ok(None) => return Err("sidecar exited before announcing port".into()),
+                Err(_) => return Err("timed out waiting for LISTEN_PORT from sidecar".into()),
+            };
 
         {
             let mut s = state.lock().unwrap();
@@ -286,10 +341,7 @@ fn parse_studio_token(line: &str) -> Option<String> {
     let needle = "Studio token:";
     let idx = line.find(needle)?;
     let rest = line[idx + needle.len()..].trim_start();
-    let tok = rest
-        .split(|c: char| c.is_whitespace())
-        .next()?
-        .trim();
+    let tok = rest.split(|c: char| c.is_whitespace()).next()?.trim();
     if tok.is_empty() {
         return None;
     }
@@ -328,6 +380,9 @@ async fn poll_health(port: u16) -> Result<(), String> {
 pub async fn graceful_shutdown(state: SharedSidecar) {
     let (port, child_taken, pid) = {
         let mut s = state.lock().unwrap();
+        if let Some(pid) = s.pid {
+            s.terminating_pid = Some(pid);
+        }
         (s.port, s.child.take(), s.pid)
     };
 
@@ -368,6 +423,7 @@ pub async fn graceful_shutdown(state: SharedSidecar) {
     let mut s = state.lock().unwrap();
     s.port = None;
     s.pid = None;
+    track_sidecar_pid(None);
 }
 
 /// Synchronous last-resort kill — invoked from RunEvent::Exit, which fires after
@@ -376,13 +432,66 @@ pub fn force_kill_pid(state: &SharedSidecar) {
     let pid = {
         let s = state.lock().unwrap();
         s.pid
-    };
+    }
+    .or_else(tracked_sidecar_pid);
     if let Some(pid) = pid {
         if pid_is_alive(pid) {
             log::warn!("RunEvent::Exit catch-all: SIGKILL on sidecar pid {pid}");
             send_signal(pid, Signal::Kill);
         }
+        clear_tracked_sidecar_pid_if(pid);
     }
+}
+
+fn mark_child_terminated(state: &SharedSidecar, pid: u32) -> bool {
+    let mut s = state.lock().unwrap();
+    let expected = s.terminating_pid == Some(pid);
+    if expected {
+        s.terminating_pid = None;
+    }
+    if s.pid == Some(pid) {
+        s.child = None;
+        s.pid = None;
+        s.port = None;
+        s.studio_token = None;
+    }
+    clear_tracked_sidecar_pid_if(pid);
+    expected
+}
+
+async fn reap_orphaned_tauri_sidecars(records: &[crate::process_discovery::ProcessRecord]) {
+    for record in records {
+        if record.source == crate::process_discovery::ProcessSource::Tauri
+            && is_orphaned_process(record.pid)
+        {
+            log::warn!(
+                "found orphaned Tauri sidecar pid {} on boot; terminating before spawning a new one",
+                record.pid
+            );
+            sigterm_with_grace(record.pid, Duration::from_millis(1_000)).await;
+        }
+    }
+}
+
+fn is_orphaned_process(pid: u32) -> bool {
+    matches!(parent_pid(pid), Some(1))
+}
+
+#[cfg(unix)]
+fn parent_pid(pid: u32) -> Option<u32> {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "ppid=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
+#[cfg(not(unix))]
+fn parent_pid(_pid: u32) -> Option<u32> {
+    None
 }
 
 #[derive(Copy, Clone)]
@@ -566,7 +675,13 @@ pub fn load_studio_url(app: &AppHandle, port: u16) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_listen_port, parse_studio_token};
+    use super::{
+        clear_tracked_sidecar_pid_if, mark_child_terminated, parse_listen_port,
+        parse_studio_token, track_sidecar_pid, tracked_sidecar_pid, SharedSidecar, SidecarState,
+    };
+    use std::sync::{Arc, Mutex};
+
+    static PID_TRACKER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn parses_basic_listen_port() {
@@ -583,7 +698,10 @@ mod tests {
 
     #[test]
     fn ignores_lines_without_listen_port() {
-        assert_eq!(parse_listen_port("Skill Studio: http://localhost:3077"), None);
+        assert_eq!(
+            parse_listen_port("Skill Studio: http://localhost:3077"),
+            None
+        );
     }
 
     #[test]
@@ -615,7 +733,10 @@ mod tests {
 
     #[test]
     fn ignores_lines_without_studio_token_marker() {
-        assert_eq!(parse_studio_token("Skill Studio: http://localhost:3077"), None);
+        assert_eq!(
+            parse_studio_token("Skill Studio: http://localhost:3077"),
+            None
+        );
         assert_eq!(parse_studio_token("LISTEN_PORT=3077"), None);
     }
 
@@ -633,5 +754,58 @@ mod tests {
             parse_studio_token("Studio token: tokenA other-field=x").as_deref(),
             Some("tokenA")
         );
+    }
+
+    #[test]
+    fn tracks_active_sidecar_pid_for_signal_shutdown() {
+        let _guard = PID_TRACKER_TEST_LOCK.lock().unwrap();
+        track_sidecar_pid(Some(4242));
+        assert_eq!(tracked_sidecar_pid(), Some(4242));
+
+        clear_tracked_sidecar_pid_if(1111);
+        assert_eq!(tracked_sidecar_pid(), Some(4242));
+
+        clear_tracked_sidecar_pid_if(4242);
+        assert_eq!(tracked_sidecar_pid(), None);
+    }
+
+    #[test]
+    fn expected_child_termination_clears_state_without_restart() {
+        let _guard = PID_TRACKER_TEST_LOCK.lock().unwrap();
+        let state: SharedSidecar = Arc::new(Mutex::new(SidecarState {
+            pid: Some(4243),
+            port: Some(3077),
+            terminating_pid: Some(4243),
+            studio_token: Some("token".to_string()),
+            ..SidecarState::default()
+        }));
+        track_sidecar_pid(Some(4243));
+
+        assert!(mark_child_terminated(&state, 4243));
+
+        let s = state.lock().unwrap();
+        assert_eq!(s.pid, None);
+        assert_eq!(s.port, None);
+        assert_eq!(s.terminating_pid, None);
+        assert_eq!(s.studio_token, None);
+        assert_eq!(tracked_sidecar_pid(), None);
+    }
+
+    #[test]
+    fn unexpected_child_termination_clears_state_and_allows_restart() {
+        let _guard = PID_TRACKER_TEST_LOCK.lock().unwrap();
+        let state: SharedSidecar = Arc::new(Mutex::new(SidecarState {
+            pid: Some(4244),
+            port: Some(3078),
+            ..SidecarState::default()
+        }));
+        track_sidecar_pid(Some(4244));
+
+        assert!(!mark_child_terminated(&state, 4244));
+
+        let s = state.lock().unwrap();
+        assert_eq!(s.pid, None);
+        assert_eq!(s.port, None);
+        assert_eq!(tracked_sidecar_pid(), None);
     }
 }

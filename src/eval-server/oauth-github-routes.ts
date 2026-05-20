@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// oauth-github-routes.ts — GitHub OAuth 2.0 Authorization Code + PKCE flow.
+// oauth-github-routes.ts — GitHub OAuth 2.0 Authorization Code flow.
 //
 // Why this replaces the Tauri IPC device-flow path (2026-05-11):
 //
@@ -15,32 +15,31 @@
 //      `allowed_commands` HashMap stayed empty for app-level commands. See
 //      `~/.claude/skills/tauri-desktop-release/SKILL.md` for the deep dive.
 //
-//   3. Doing OAuth entirely in the sidecar HTTP layer sidesteps both issues:
+//   3. Doing OAuth through the sidecar HTTP layer sidesteps both issues:
 //      - JS in the WebView already authenticates to the sidecar via
 //        X-Studio-Token (the v1.0.30 fix). All it needs to do is POST/GET.
-//      - The browser callback hits the SAME local sidecar (different path),
-//        so we get the auth code without any Tauri-level plumbing.
+//      - The browser callback first hits the registered verified-skill.com
+//        callback, which owns the GitHub client secret and exchanges the code.
+//        It then posts the resulting GitHub token back to the local sidecar.
 //
 // This mirrors how `claude-code` does it (Claude AI / Anthropic console
-// login): localhost HTTP server captures the redirect, exchanges the
-// authorization code for an access token via the OAuth provider's token
-// endpoint, then stores the token in the OS keychain (with file fallback).
+// login): localhost HTTP server starts the flow, validates the returning
+// state, then stores the token in the OS keychain (with file fallback).
 // See `anymodel-umb/repositories/antonoly/claude-code/services/oauth/`.
 //
 // Flow:
 //   1. JS: POST /api/oauth/github/start
-//      → server generates code_verifier + code_challenge (PKCE S256)
 //      → server generates random state (CSRF protection)
-//      → server stores {state → {verifier, expiresAt}} in in-memory map
+//      → server stores {state → {expiresAt}} in in-memory map
 //      → server returns {state, authUrl}
 //   2. JS: window.__TAURI__.shell.open(authUrl)   (no IPC ACL needed —
 //      shell:allow-open is in default capabilities)
 //   3. User authorizes in their browser → GitHub redirects to the registered
-//      verified-skill.com callback, which detects desktop state and 302s to
-//      http://localhost:<sidecar-port>/api/oauth/github/callback?code=&state=
-//   4. Sidecar callback handler:
-//      → looks up state → verifier in map (404 if not found / expired)
-//      → POSTs code + verifier + client_id to GitHub token endpoint
+//      verified-skill.com callback, which detects desktop state, exchanges
+//      the code using the platform client secret, and form-POSTs the token to
+//      http://localhost:<sidecar-port>/api/oauth/github/desktop-complete
+//   4. Sidecar desktop-complete handler:
+//      → looks up state in map (404 if not found / expired)
 //      → stores access_token via keychain.setGithubToken()
 //      → marks the state as "ready" with the user info
 //      → returns a small HTML "close this tab" success page
@@ -53,10 +52,10 @@
 // in the studio (per-skill streams, account API) continues working.
 // ---------------------------------------------------------------------------
 
-import { randomBytes, createHash } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import * as http from "node:http";
 import type { Router } from "./router.js";
-import { sendJson, readBody } from "./router.js";
+import { sendJson } from "./router.js";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -67,7 +66,6 @@ import { sendJson, readBody } from "./router.js";
 // PUBLIC value — no secret protection needed, intentionally hardcoded.
 const GITHUB_OAUTH_CLIENT_ID = "Ov23li6H8OpvPfuhyDEt";
 const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
-const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const GITHUB_USER_API = "https://api.github.com/user";
 const REQUESTED_SCOPE = "repo read:user user:email";
 const STATE_TTL_MS = 10 * 60 * 1000;   // 10 minutes — GitHub auth pages
@@ -75,8 +73,9 @@ const STATE_TTL_MS = 10 * 60 * 1000;   // 10 minutes — GitHub auth pages
 const STATE_GC_INTERVAL_MS = 60 * 1000;
 
 // 2026-05-20: GitHub requires redirect_uri to exactly match the OAuth App's
-// registered callback. The platform callback detects desktop state values and
-// bounces them to http://localhost:<sidecar-port>/api/oauth/github/callback.
+// registered callback. The platform callback detects desktop state values,
+// exchanges the code with its confidential client secret, then posts the
+// GitHub access token back to the local sidecar.
 const DESKTOP_BOUNCE_REDIRECT = "https://verified-skill.com/api/v1/auth/github/callback";
 
 // Allow overriding the bounce URL via env (useful for local platform
@@ -90,8 +89,6 @@ function getRedirectUri(): string {
 // ---------------------------------------------------------------------------
 
 interface OauthFlowState {
-  /** PKCE code_verifier (~43 chars base64url). Server-only; never sent to GH client. */
-  verifier: string;
   /** Unix ms when this flow expires + is GC'd. */
   expiresAt: number;
   /** Once the callback completes, transitions: "pending" → "ready" | "error". */
@@ -120,7 +117,7 @@ function gcExpiredFlows(): void {
 setInterval(gcExpiredFlows, STATE_GC_INTERVAL_MS).unref();
 
 // ---------------------------------------------------------------------------
-// PKCE helpers
+// OAuth helpers
 // ---------------------------------------------------------------------------
 
 function base64UrlEncode(buf: Buffer): string {
@@ -129,12 +126,6 @@ function base64UrlEncode(buf: Buffer): string {
 
 function generateState(): string {
   return base64UrlEncode(randomBytes(32));   // 43 chars
-}
-
-function generatePkcePair(): { verifier: string; challenge: string } {
-  const verifier = base64UrlEncode(randomBytes(32));
-  const challenge = base64UrlEncode(createHash("sha256").update(verifier).digest());
-  return { verifier, challenge };
 }
 
 // ---------------------------------------------------------------------------
@@ -164,51 +155,6 @@ function getLocalPort(req: http.IncomingMessage): number {
   }
   // No port in host → default 80. Should never happen for sidecar binds.
   return 80;
-}
-
-/**
- * Exchange the authorization code + PKCE verifier for an access token.
- * Returns the token + scopes, or throws with a human-friendly message.
- */
-async function exchangeCodeForToken(
-  code: string,
-  verifier: string,
-  redirectUri: string,
-): Promise<{ accessToken: string; scopes: string[] }> {
-  const body = new URLSearchParams({
-    client_id: GITHUB_OAUTH_CLIENT_ID,
-    code,
-    redirect_uri: redirectUri,
-    code_verifier: verifier,
-  });
-  const res = await fetch(GITHUB_TOKEN_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Accept": "application/json",
-    },
-    body: body.toString(),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`GitHub token exchange failed: HTTP ${res.status}: ${text.slice(0, 200)}`);
-  }
-  const data = (await res.json()) as {
-    access_token?: string;
-    scope?: string;
-    error?: string;
-    error_description?: string;
-  };
-  if (data.error) {
-    throw new Error(`GitHub: ${data.error}: ${data.error_description ?? ""}`.trim());
-  }
-  if (!data.access_token) {
-    throw new Error("GitHub returned no access_token");
-  }
-  return {
-    accessToken: data.access_token,
-    scopes: (data.scope ?? "").split(/[\s,]+/).filter(Boolean),
-  };
 }
 
 /**
@@ -285,6 +231,37 @@ async function persistGithubToken(token: string): Promise<void> {
   }
 }
 
+async function readUrlEncodedBody(req: http.IncomingMessage): Promise<URLSearchParams> {
+  const MAX_BODY_SIZE = 64 * 1024;
+  const TIMEOUT_MS = 10_000;
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const timer = setTimeout(() => {
+      req.destroy();
+      reject(new Error("Request body timeout"));
+    }, TIMEOUT_MS);
+    req.on("data", (chunk: Buffer | string) => {
+      size += chunk.length;
+      if (size > MAX_BODY_SIZE) {
+        clearTimeout(timer);
+        req.destroy();
+        reject(new Error("Request body too large"));
+        return;
+      }
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    req.on("end", () => {
+      clearTimeout(timer);
+      resolve(new URLSearchParams(Buffer.concat(chunks).toString()));
+    });
+    req.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Route registration
 // ---------------------------------------------------------------------------
@@ -304,11 +281,9 @@ export function registerOauthGithubRoutes(router: Router): void {
     // round-trips through GitHub → platform → localhost callback.
     const port = getLocalPort(req);
     const state = `${generateState()}.${port}`;
-    const { verifier, challenge } = generatePkcePair();
     const redirectUri = buildGitHubRedirectUri(req);
 
     flows.set(state, {
-      verifier,
       expiresAt: Date.now() + STATE_TTL_MS,
       status: "pending",
     });
@@ -318,8 +293,6 @@ export function registerOauthGithubRoutes(router: Router): void {
     authUrl.searchParams.set("redirect_uri", redirectUri);
     authUrl.searchParams.set("scope", REQUESTED_SCOPE);
     authUrl.searchParams.set("state", state);
-    authUrl.searchParams.set("code_challenge", challenge);
-    authUrl.searchParams.set("code_challenge_method", "S256");
     // Force GitHub to always show the authorize page (even if previously
     // authorized) — clearer UX when the user is debugging or rotating.
     authUrl.searchParams.set("allow_signup", "true");
@@ -332,15 +305,14 @@ export function registerOauthGithubRoutes(router: Router): void {
   });
 
   // -------------------------------------------------------------------------
-  // GET /api/oauth/github/callback?code=...&state=...
+  // GET /api/oauth/github/callback?error=...&state=...
   //
-  // Browser-driven callback. UNAUTHENTICATED (no X-Studio-Token header) —
-  // exempted from the token gate in router.ts. Validates state, exchanges
-  // code, persists token, marks the flow as ready, returns success HTML.
+  // Browser-driven error callback. Success callbacks are now exchanged on the
+  // platform and delivered to /desktop-complete so the local sidecar never
+  // needs the confidential GitHub client secret.
   // -------------------------------------------------------------------------
   router.get("/api/oauth/github/callback", async (req, res) => {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-    const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
     const errorParam = url.searchParams.get("error");
     const errorDesc = url.searchParams.get("error_description");
@@ -355,8 +327,37 @@ export function registerOauthGithubRoutes(router: Router): void {
       return;
     }
 
-    if (!code || !state) {
-      respondHtml(res, 400, errorPage("missing_params", "code or state not present in callback URL"));
+    if (!state) {
+      respondHtml(res, 400, errorPage("missing_params", "state not present in callback URL"));
+      return;
+    }
+
+    const flow = flows.get(state);
+    if (flow) {
+      flow.status = "error";
+      flow.errorMessage = "Outdated platform callback returned a code to the sidecar instead of posting a token.";
+    }
+    respondHtml(res, 400, errorPage(
+      "outdated_callback",
+      "Skill Studio received an old callback shape. Click Sign in again so the platform can exchange the code securely.",
+    ));
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/oauth/github/desktop-complete
+  //
+  // Browser-driven completion from verified-skill.com. UNAUTHENTICATED
+  // (no X-Studio-Token header) and CSRF-protected by the random in-memory
+  // state. The GitHub access token arrives in an application/x-www-form-urlencoded
+  // body, not in the URL, so it does not land in browser history.
+  // -------------------------------------------------------------------------
+  router.post("/api/oauth/github/desktop-complete", async (req, res) => {
+    const body = await readUrlEncodedBody(req);
+    const state = body.get("state");
+    const accessToken = body.get("github_token");
+
+    if (!state || !accessToken) {
+      respondHtml(res, 400, errorPage("missing_params", "state or github_token not present in callback body"));
       return;
     }
 
@@ -378,11 +379,6 @@ export function registerOauthGithubRoutes(router: Router): void {
     }
 
     try {
-      // The redirect_uri sent to the token endpoint MUST exactly match the
-      // one used in the authorize step (the platform bounce URL, NOT
-      // localhost), per the OAuth 2.0 spec.
-      const redirectUri = buildGitHubRedirectUri(req);
-      const { accessToken } = await exchangeCodeForToken(code, flow.verifier, redirectUri);
       await persistGithubToken(accessToken);
       const user = await fetchUserProfile(accessToken);
       flow.status = "ready";
@@ -394,8 +390,8 @@ export function registerOauthGithubRoutes(router: Router): void {
       flow.errorMessage = msg;
       // Log so a CI failure or upstream outage is visible in the sidecar log.
       // eslint-disable-next-line no-console
-      console.error("[oauth-github] callback exchange failed:", msg);
-      respondHtml(res, 502, errorPage("exchange_failed", msg));
+      console.error("[oauth-github] desktop completion failed:", msg);
+      respondHtml(res, 502, errorPage("completion_failed", msg));
     }
   });
 

@@ -133,8 +133,8 @@ discover_platform() {
 
 # Search inside the artifacts dir — agents in build matrix uploaded with names
 # like "macos-14-artifacts", "windows-2022-artifacts", "ubuntu-22.04-artifacts".
-discover_platform "darwin-aarch64"   "*aarch64*.app.tar.gz"        "$ARTIFACTS_DIR"
-discover_platform "darwin-x86_64"    "*x86_64*.app.tar.gz"         "$ARTIFACTS_DIR"
+discover_platform "darwin-aarch64"   "*aarch64*.app.tar.gz"        "$ARTIFACTS_DIR" || true
+discover_platform "darwin-x86_64"    "*x86_64*.app.tar.gz"         "$ARTIFACTS_DIR" || true
 # If only a universal2 build is produced, both keys point at the same bundle.
 if [[ -z "${PLATFORM_BUNDLE[darwin-aarch64]:-}" && -z "${PLATFORM_BUNDLE[darwin-x86_64]:-}" ]]; then
   discover_platform "darwin-aarch64" "*.app.tar.gz" "$ARTIFACTS_DIR"

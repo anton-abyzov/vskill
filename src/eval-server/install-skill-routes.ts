@@ -422,7 +422,7 @@ function computeSha(content: string): string {
 
 function sourceFromIdentifier(identifier: string): Pick<
   SkillLockEntry,
-  "source" | "sourceRepoUrl" | "sourceType"
+  "source" | "sourceRepoUrl"
 > {
   const parts = stripIdentifierVersion(identifier).split("/").filter(Boolean);
   if (parts.length >= 2) {
@@ -432,12 +432,10 @@ function sourceFromIdentifier(identifier: string): Pick<
         ? `marketplace:${owner}/${repo}#${slug}`
         : `github:${owner}/${repo}`,
       sourceRepoUrl: `https://github.com/${owner}/${repo}`,
-      sourceType: "github",
     };
   }
   return {
     source: `registry:${stripIdentifierVersion(identifier)}`,
-    sourceType: "registry",
   };
 }
 

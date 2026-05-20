@@ -397,10 +397,16 @@ function Shell() {
   // QuotaProvider is missing, which doubles as a context-wiring assertion.
   const tierState = useTier();
   const bridgeForCreate = useDesktopBridge();
-  // Suppress unused-import warning for PRICING_URL — exported alongside
-  // the tier hook so any future gate can open it via
-  // bridgeForCreate.openExternalUrl(PRICING_URL) without re-importing.
-  void PRICING_URL;
+  const openExternal = useCallback(
+    (url: string) => {
+      void bridgeForCreate.openExternalUrl(url).catch(() => {
+        if (typeof window !== "undefined") {
+          window.open(url, "_blank", "noopener,noreferrer");
+        }
+      });
+    },
+    [bridgeForCreate],
+  );
   const openCreateModal = useCallback(
     async (mode: CreateSkillMode = "standalone") => {
       // 0833 pivot: skill-create is no longer tier-gated. Free users
@@ -941,18 +947,11 @@ function Shell() {
     <AccountShell
       online={typeof navigator === "undefined" ? true : navigator.onLine !== false}
       onConnectRepo={() => {
-        if (typeof window !== "undefined") {
-          window.open(
-            "https://verified-skill.com/account/repos/connect",
-            "_blank",
-            "noopener,noreferrer",
-          );
-        }
+        openExternal("https://verified-skill.com/account/repos/connect");
       }}
+      onOpenRepoOnGitHub={openExternal}
       onUpgradeClick={() => {
-        if (typeof window !== "undefined") {
-          window.open(PRICING_URL, "_blank", "noopener,noreferrer");
-        }
+        openExternal(PRICING_URL);
       }}
     />
   ) : onUpdatesRoute ? (

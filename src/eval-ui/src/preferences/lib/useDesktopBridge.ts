@@ -260,6 +260,11 @@ interface TauriInternals {
 
 interface TauriWindow extends Window {
   __TAURI_INTERNALS__?: TauriInternals;
+  __TAURI__?: {
+    shell?: {
+      open?: (url: string) => Promise<void>;
+    };
+  };
 }
 
 type RawSettingsSnapshot = Partial<SettingsSnapshot> & {
@@ -290,6 +295,10 @@ export type RawUpdateInfo = Partial<UpdateInfo> & {
   version?: string | null;
   notes?: string | null;
   pub_date?: string | null;
+};
+
+export type RawSignedInUser = Partial<SignedInUser> & {
+  avatarUrl?: string | null;
 };
 
 interface UpdaterProgressPayload {
@@ -393,6 +402,59 @@ export function normalizeUpdateInfo(raw: RawUpdateInfo, currentVersion: string):
     releaseNotes: raw.releaseNotes ?? raw.notes ?? undefined,
     releaseDate: raw.releaseDate ?? raw.pub_date ?? undefined,
   };
+}
+
+export function normalizeSignedInUser(raw: RawSignedInUser | null | undefined): SignedInUser | null {
+  if (!raw || typeof raw.login !== "string" || raw.login.trim() === "") return null;
+  const login = raw.login.trim();
+  const avatar =
+    raw.avatar_url ??
+    raw.avatarUrl ??
+    `https://github.com/${encodeURIComponent(login)}.png?size=40`;
+  return {
+    login,
+    avatar_url: avatar,
+    email: raw.email ?? null,
+    cached_at: raw.cached_at ?? null,
+  };
+}
+
+export async function openExternalUrlViaDesktop(url: string): Promise<void> {
+  if (typeof window === "undefined") return;
+  const w = window as TauriWindow;
+  const invoke = w.__TAURI_INTERNALS__?.invoke;
+  if (invoke) {
+    try {
+      await invoke("open_external_url", { url });
+      return;
+    } catch (err) {
+      console.warn("open_external_url command failed; falling back to shell open:", err);
+    }
+  }
+  try {
+    const res = await fetch("/api/desktop/open-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    if (res.ok) return;
+    console.warn(`sidecar open-url failed: HTTP ${res.status}`);
+  } catch (err) {
+    console.warn("sidecar open-url failed; falling back to shell open:", err);
+  }
+  try {
+    const globalShellOpen = w.__TAURI__?.shell?.open;
+    if (typeof globalShellOpen === "function") {
+      await globalShellOpen(url);
+      return;
+    }
+    const { open } = await import("@tauri-apps/plugin-shell");
+    await open(url);
+    return;
+  } catch (err) {
+    console.warn("tauri shell open failed; falling back to window.open:", err);
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 export async function listenTauriEvent<T>(
@@ -688,11 +750,12 @@ export function useDesktopBridge(): DesktopBridge {
         }
         const data = (await res.json()) as {
           status: string;
-          user?: SignedInUser;
+          user?: RawSignedInUser;
           error?: string;
         };
-        if (data.status === "ready" && data.user) {
-          return { status: "granted", user: data.user };
+        const user = normalizeSignedInUser(data.user);
+        if (data.status === "ready" && user) {
+          return { status: "granted", user };
         }
         if (data.status === "pending") return { status: "pending" };
         if (data.status === "expired") return { status: "expired" };
@@ -715,9 +778,9 @@ export function useDesktopBridge(): DesktopBridge {
         if (!res.ok) return null;
         const data = (await res.json()) as {
           signedIn: boolean;
-          user?: SignedInUser;
+          user?: RawSignedInUser;
         };
-        return data.signedIn && data.user ? data.user : null;
+        return data.signedIn ? normalizeSignedInUser(data.user) : null;
       } catch {
         return null;
       }
@@ -837,14 +900,7 @@ export function useDesktopBridge(): DesktopBridge {
         }
         return;
       }
-      try {
-        const { open } = await import("@tauri-apps/plugin-shell");
-        await open(url);
-        return;
-      } catch (err) {
-        console.warn("tauri shell open failed; falling back to app command:", err);
-      }
-      await tauriInvoke<void>("open_external_url", { url });
+      await openExternalUrlViaDesktop(url);
     };
 
     const refreshUserIdentity: DesktopBridge["refreshUserIdentity"] = async () => {
@@ -852,7 +908,7 @@ export function useDesktopBridge(): DesktopBridge {
       const raw = await tauriInvoke<SignedInUser | null>(
         "refresh_user_identity",
       );
-      return raw ?? null;
+      return normalizeSignedInUser(raw);
     };
 
     return {

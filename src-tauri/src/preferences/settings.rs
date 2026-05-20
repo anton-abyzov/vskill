@@ -165,12 +165,7 @@ fn default_project_folder() -> Option<String> {
 }
 
 fn default_project_folder_in(home: &std::path::Path) -> PathBuf {
-    let projects = home.join("Projects");
-    if projects.is_dir() {
-        projects.join("Skill Studio")
-    } else {
-        home.join("Skill Studio Projects")
-    }
+    home.join("SkillStudio")
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -250,10 +245,9 @@ impl SettingsStore {
     pub async fn reset(&self) -> Result<(), String> {
         let mut guard = self.state.lock().await;
         if self.path.exists() {
-            let backup = self.path.with_extension(format!(
-                "json.bak.{}",
-                format_timestamp(SystemTime::now())
-            ));
+            let backup = self
+                .path
+                .with_extension(format!("json.bak.{}", format_timestamp(SystemTime::now())));
             if let Err(e) = std::fs::rename(&self.path, &backup) {
                 log::warn!("settings reset: could not rename to backup: {e}");
             }
@@ -325,9 +319,25 @@ fn load_from_path(path: &std::path::Path) -> Settings {
 }
 
 fn fill_missing_defaults(settings: &mut Settings) {
-    if settings.general.default_project_folder.is_none() {
+    let current = settings.general.default_project_folder.as_deref();
+    if current.is_none() || current.is_some_and(is_legacy_default_project_folder) {
         settings.general.default_project_folder = default_project_folder();
     }
+}
+
+fn is_legacy_default_project_folder(path: &str) -> bool {
+    let Some(home) = home_dir() else {
+        return false;
+    };
+    is_legacy_default_project_folder_in(path, &home)
+}
+
+fn is_legacy_default_project_folder_in(path: &str, home: &std::path::Path) -> bool {
+    let path = PathBuf::from(path);
+    path == home
+        || path == home.join("Projects").join("Skill Studio")
+        || path == home.join("Skill Studio")
+        || path == home.join("Skill Studio Projects")
 }
 
 fn move_to_corrupt(path: &std::path::Path) {
@@ -482,8 +492,7 @@ fn atomic_write(path: &std::path::Path, settings: &Settings) -> std::io::Result<
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ =
-                std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
         }
     }
 
@@ -562,22 +571,10 @@ mod tests {
     }
 
     #[test]
-    fn test_default_project_folder_prefers_projects_subfolder() {
+    fn test_default_project_folder_uses_skillstudio_under_home() {
         let home = fresh_tmp_dir();
         std::fs::create_dir_all(home.join("Projects")).expect("projects dir");
-        assert_eq!(
-            default_project_folder_in(&home),
-            home.join("Projects").join("Skill Studio")
-        );
-    }
-
-    #[test]
-    fn test_default_project_folder_falls_back_outside_home_root() {
-        let home = fresh_tmp_dir();
-        assert_eq!(
-            default_project_folder_in(&home),
-            home.join("Skill Studio Projects")
-        );
+        assert_eq!(default_project_folder_in(&home), home.join("SkillStudio"));
     }
 
     #[test]
@@ -620,6 +617,27 @@ mod tests {
             loaded.general.default_project_folder.as_deref(),
             home_dir().as_ref().and_then(|p| p.to_str())
         );
+    }
+
+    #[test]
+    fn test_legacy_default_project_folder_values_migrate_to_skillstudio() {
+        let home = fresh_tmp_dir();
+        for legacy in [
+            home.clone(),
+            home.join("Projects").join("Skill Studio"),
+            home.join("Skill Studio"),
+            home.join("Skill Studio Projects"),
+        ] {
+            assert!(
+                is_legacy_default_project_folder_in(&legacy.to_string_lossy(), &home),
+                "{legacy:?} should be recognized as a legacy default"
+            );
+        }
+
+        assert!(!is_legacy_default_project_folder_in(
+            &home.join("Work").join("Skill Studio").to_string_lossy(),
+            &home,
+        ));
     }
 
     #[test]
@@ -677,11 +695,7 @@ mod tests {
             std::fs::create_dir_all(p).unwrap();
         }
         // Version 0 — should be discarded.
-        std::fs::write(
-            &path,
-            r#"{"version": 0, "general": {"theme": "dark"}}"#,
-        )
-        .unwrap();
+        std::fs::write(&path, r#"{"version": 0, "general": {"theme": "dark"}}"#).unwrap();
 
         let loaded = load_from_path(&path);
         // Old payload discarded, defaults returned.
@@ -697,11 +711,7 @@ mod tests {
         if let Some(p) = path.parent() {
             std::fs::create_dir_all(p).unwrap();
         }
-        std::fs::write(
-            &path,
-            r#"{"version": 99, "general": {"theme": "dark"}}"#,
-        )
-        .unwrap();
+        std::fs::write(&path, r#"{"version": 99, "general": {"theme": "dark"}}"#).unwrap();
 
         let loaded = load_from_path(&path);
         assert_eq!(loaded, Settings::default());
@@ -791,10 +801,7 @@ mod tests {
         // Hammer 10 sets in quick succession.
         for i in 0..10 {
             store
-                .set_key(
-                    "general.theme",
-                    Value::String(format!("dark-{i}")),
-                )
+                .set_key("general.theme", Value::String(format!("dark-{i}")))
                 .await
                 .expect("set");
         }

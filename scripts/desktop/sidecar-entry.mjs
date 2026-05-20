@@ -34,6 +34,8 @@ import { createRequire } from "node:module";
 
 const requireCjs = createRequire(typeof __filename !== "undefined" ? __filename : import.meta.url);
 const fs = requireCjs("node:fs");
+const os = requireCjs("node:os");
+const path = requireCjs("node:path");
 const { Readable } = requireCjs("node:stream");
 
 let seaApi = null;
@@ -177,8 +179,37 @@ function parsePort(argv) {
   return n;
 }
 
+function parseRoot(argv) {
+  const idx = argv.indexOf("--root");
+  if (idx === -1) return null;
+  const raw = argv[idx + 1];
+  if (!raw || raw.startsWith("--")) {
+    process.stderr.write("invalid --root value\n");
+    process.exit(2);
+  }
+  return raw;
+}
+
+function defaultDesktopRoot() {
+  if (!seaApi) return null;
+  return path.join(os.homedir(), "SkillStudio");
+}
+
+function ensureRoot(root) {
+  if (!root) return null;
+  try {
+    fs.mkdirSync(root, { recursive: true });
+  } catch (err) {
+    process.stderr.write(
+      `sidecar: could not create desktop root ${root}: ${err && err.message ? err.message : err}\n`,
+    );
+  }
+  return root;
+}
+
 async function main() {
   const port = parsePort(process.argv);
+  const root = ensureRoot(parseRoot(process.argv) ?? defaultDesktopRoot());
 
   if (!process.env.VSKILL_TELEMETRY) {
     process.env.VSKILL_TELEMETRY_DISABLED = "1";
@@ -186,7 +217,7 @@ async function main() {
 
   let server;
   try {
-    server = await startEvalServer({ port });
+    server = await startEvalServer(root ? { port, root } : { port });
   } catch (err) {
     process.stderr.write(
       `sidecar: startEvalServer failed: ${err && err.stack ? err.stack : err}\n`,

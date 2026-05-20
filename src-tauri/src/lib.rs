@@ -1,6 +1,7 @@
 // Library entrypoint shared by `cargo tauri` (desktop) and any future mobile
 // runner. Keeps the bin thin and lets `cargo test` exercise pure-Rust logic.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::{Manager, RunEvent, RESTART_EXIT_CODE};
@@ -37,6 +38,8 @@ mod quota;
 mod sidecar;
 
 use sidecar::{SharedSidecar, SidecarState};
+
+static EXIT_CLEANUP_DONE: AtomicBool = AtomicBool::new(false);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -218,21 +221,28 @@ pub fn run() {
         .expect("error while building vSkill desktop")
         .run(move |app, event| match event {
             // ExitRequested fires BEFORE windows close. We block exit, run the
-            // async shutdown to completion (POST /api/shutdown → SIGTERM →
-            // SIGKILL), then re-issue exit. Without prevent_exit, the runtime
-            // can return while the sidecar is mid-shutdown and leak the child.
+            // async shutdown to completion (POST /api/shutdown -> SIGTERM ->
+            // SIGKILL), then re-issue normal exits once cleanup has completed.
+            // Restart exits cannot be prevented by Tauri; block in-place and
+            // let Tauri's restart_on_exit path relaunch after RunEvent::Exit.
             RunEvent::ExitRequested { api, code, .. } => {
-                api.prevent_exit();
-                let restart_requested = code == Some(RESTART_EXIT_CODE);
+                if !mark_exit_cleanup_started() {
+                    return;
+                }
+
+                let restart_requested = is_restart_exit(code);
+                if !restart_requested {
+                    api.prevent_exit();
+                }
+
                 let app_clone = app.clone();
                 let shutdown_state = app_clone.state::<SharedSidecar>().inner().clone();
                 tauri::async_runtime::block_on(async move {
                     sidecar::graceful_shutdown(shutdown_state).await;
                 });
-                if restart_requested {
-                    app_clone.restart();
-                } else {
-                    app_clone.exit(0);
+
+                if !restart_requested {
+                    app_clone.exit(code.unwrap_or(0));
                 }
             }
             // Final catch-all — fires last, after all windows are gone. If
@@ -244,6 +254,41 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+fn is_restart_exit(code: Option<i32>) -> bool {
+    code == Some(RESTART_EXIT_CODE)
+}
+
+fn mark_exit_cleanup_started() -> bool {
+    EXIT_CLEANUP_DONE
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static EXIT_CLEANUP_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn restart_exit_code_is_detected() {
+        assert!(is_restart_exit(Some(RESTART_EXIT_CODE)));
+        assert!(!is_restart_exit(Some(0)));
+        assert!(!is_restart_exit(None));
+    }
+
+    #[test]
+    fn exit_cleanup_runs_once() {
+        let _guard = EXIT_CLEANUP_TEST_LOCK.lock().unwrap();
+        EXIT_CLEANUP_DONE.store(false, Ordering::SeqCst);
+
+        assert!(mark_exit_cleanup_started());
+        assert!(!mark_exit_cleanup_started());
+
+        EXIT_CLEANUP_DONE.store(false, Ordering::SeqCst);
+    }
 }
 
 fn html_escape(s: &str) -> String {

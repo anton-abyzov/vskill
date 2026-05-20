@@ -166,7 +166,9 @@ pub fn cancel_update(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn restart_app(app: AppHandle) -> Result<(), String> {
+pub async fn restart_app(app: AppHandle) -> Result<(), String> {
+    let state: State<'_, SharedSidecar> = app.state();
+    sidecar::graceful_shutdown(state.inner().clone()).await;
     app.request_restart();
     Ok(())
 }
@@ -1142,13 +1144,20 @@ pub fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
     if !url.starts_with("https://") {
         return Err(format!("refused non-https URL: {url}"));
     }
+
+    let system_open_err = match fallback_open_url(&url) {
+        Ok(()) => return Ok(()),
+        Err(e) => e,
+    };
+
     #[allow(deprecated)]
-    if let Err(shell_err) = app.shell().open(&url, None) {
-        fallback_open_url(&url).map_err(|fallback_err| {
-            format!("could not open {url}: {shell_err}; fallback failed: {fallback_err}")
-        })?;
-    }
-    Ok(())
+    app.shell()
+        .open(&url, None)
+        .map_err(|shell_err| {
+            format!(
+                "could not open {url}: system open failed: {system_open_err}; shell open failed: {shell_err}"
+            )
+        })
 }
 
 fn fallback_open_url(url: &str) -> Result<(), String> {

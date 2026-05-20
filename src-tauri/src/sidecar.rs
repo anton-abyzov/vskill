@@ -166,15 +166,12 @@ pub fn spawn_sidecar<'a>(
             crate::process_discovery::scan().await.unwrap_or_default()
         };
         reap_orphaned_tauri_sidecars(&detected).await;
-        let external: Vec<&crate::process_discovery::ProcessRecord> = detected
-            .iter()
-            .filter(|r| r.source != crate::process_discovery::ProcessSource::Tauri)
-            .collect();
+        let external = reachable_lifecycle_candidates(&detected).await;
         // 0832 F-004: AC-US1-03 says "exactly one external instance found" — the
         // modal handles only the unambiguous case. Multi-external falls through
         // to normal spawn; the user can manage them via Window > Studio Instances.
         if external.len() == 1 {
-            let first = external[0];
+            let first = &external[0];
             log::info!(
                 "sidecar spawn paused — external instance detected at port {} pid {}",
                 first.port,
@@ -212,7 +209,7 @@ pub fn spawn_sidecar<'a>(
                 }
                 _ => {
                     // "ask" or unset → open the modal and pause.
-                    crate::lifecycle_modal::set_detected((*first).clone());
+                    crate::lifecycle_modal::set_detected(first.clone());
                     let _ = crate::lifecycle_modal::open(app, first);
                     return Err("lifecycle-modal-pending".to_string());
                 }
@@ -291,7 +288,9 @@ pub fn spawn_sidecar<'a>(
                             payload.signal
                         );
                         if mark_child_terminated(&state_clone, spawned_pid) {
-                            log::info!("sidecar pid {spawned_pid} terminated during expected shutdown");
+                            log::info!(
+                                "sidecar pid {spawned_pid} terminated during expected shutdown"
+                            );
                             break;
                         }
                         handle_unexpected_exit(app_clone.clone(), state_clone.clone());
@@ -368,6 +367,47 @@ async fn poll_health(port: u16) -> Result<(), String> {
         "sidecar health check timed out after {} ms ({})",
         HEALTH_TIMEOUT_MS, url
     ))
+}
+
+async fn reachable_lifecycle_candidates(
+    records: &[crate::process_discovery::ProcessRecord],
+) -> Vec<crate::process_discovery::ProcessRecord> {
+    let mut out = Vec::new();
+    for record in records {
+        if !is_lifecycle_candidate(record) {
+            continue;
+        }
+        if existing_studio_health_ok(record.port).await {
+            out.push(record.clone());
+        } else {
+            log::warn!(
+                "ignoring stale studio candidate at port {} pid {} — /api/health did not respond",
+                record.port,
+                record.pid
+            );
+        }
+    }
+    out
+}
+
+fn is_lifecycle_candidate(record: &crate::process_discovery::ProcessRecord) -> bool {
+    record.source != crate::process_discovery::ProcessSource::Tauri && record.port != 0
+}
+
+async fn existing_studio_health_ok(port: u16) -> bool {
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_millis(700))
+        .build()
+    else {
+        return false;
+    };
+    let url = format!("http://127.0.0.1:{port}/api/health");
+    client
+        .get(url)
+        .send()
+        .await
+        .map(|resp| resp.status().is_success())
+        .unwrap_or(false)
 }
 
 /// Graceful shutdown: POST /api/shutdown (2s budget) → SIGTERM → wait 1s → SIGKILL.
@@ -676,9 +716,11 @@ pub fn load_studio_url(app: &AppHandle, port: u16) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_tracked_sidecar_pid_if, mark_child_terminated, parse_listen_port,
-        parse_studio_token, track_sidecar_pid, tracked_sidecar_pid, SharedSidecar, SidecarState,
+        clear_tracked_sidecar_pid_if, is_lifecycle_candidate, mark_child_terminated,
+        parse_listen_port, parse_studio_token, track_sidecar_pid, tracked_sidecar_pid,
+        SharedSidecar, SidecarState,
     };
+    use crate::process_discovery::{ProcessRecord, ProcessSource};
     use std::sync::{Arc, Mutex};
 
     static PID_TRACKER_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -754,6 +796,26 @@ mod tests {
             parse_studio_token("Studio token: tokenA other-field=x").as_deref(),
             Some("tokenA")
         );
+    }
+
+    #[test]
+    fn lifecycle_candidates_must_be_external_and_have_a_port() {
+        let base = ProcessRecord {
+            pid: 4242,
+            port: 3077,
+            started_at: String::new(),
+            source: ProcessSource::NpxCli,
+            cmdline: "npx vskill studio".to_string(),
+        };
+        assert!(is_lifecycle_candidate(&base));
+        assert!(!is_lifecycle_candidate(&ProcessRecord {
+            source: ProcessSource::Tauri,
+            ..base.clone()
+        }));
+        assert!(!is_lifecycle_candidate(&ProcessRecord {
+            port: 0,
+            ..base
+        }));
     }
 
     #[test]

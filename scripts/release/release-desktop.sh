@@ -132,13 +132,14 @@ echo "   ✅ tag ${TAG} pushed"
 
 # ─── 5. Wait for CI ────────────────────────────────────────────────────────
 sleep 8
-RUN_ID=$(gh run list -R "${REPO}" --workflow="Desktop Release" --limit 1 --json databaseId --jq '.[0].databaseId')
+RUN_ID=$(gh run list -R "${REPO}" --workflow="Desktop Release" --limit 20 --json databaseId,headBranch --jq ".[] | select(.headBranch == \"${TAG}\") | .databaseId" | head -1)
+[[ -n "${RUN_ID}" ]] || { echo "❌ no Desktop Release CI run found for ${TAG}" >&2; exit 1; }
 echo ">> [5/8] CI run: https://github.com/${REPO}/actions/runs/${RUN_ID}"
-echo "   polling (up to 15 min)..."
+echo "   polling (up to 40 min)..."
 START=$(date +%s)
 until [[ "$(gh run view "${RUN_ID}" -R "${REPO}" --json status --jq .status)" = "completed" ]]; do
   ELAPSED=$(( $(date +%s) - START ))
-  if (( ELAPSED > 900 )); then
+  if (( ELAPSED > 2400 )); then
     echo "❌ CI timeout"
     exit 1
   fi

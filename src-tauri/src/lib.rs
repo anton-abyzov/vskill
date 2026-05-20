@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use tauri::{Manager, RunEvent};
+use tauri::{Manager, RunEvent, RESTART_EXIT_CODE};
 #[cfg(target_os = "macos")]
 use tauri_plugin_autostart::MacosLauncher;
 
@@ -44,6 +44,7 @@ pub fn run() {
         .try_init();
 
     let state: SharedSidecar = Arc::new(Mutex::new(SidecarState::default()));
+    sidecar::install_termination_signal_handler();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -220,14 +221,19 @@ pub fn run() {
             // async shutdown to completion (POST /api/shutdown → SIGTERM →
             // SIGKILL), then re-issue exit. Without prevent_exit, the runtime
             // can return while the sidecar is mid-shutdown and leak the child.
-            RunEvent::ExitRequested { api, .. } => {
+            RunEvent::ExitRequested { api, code, .. } => {
                 api.prevent_exit();
+                let restart_requested = code == Some(RESTART_EXIT_CODE);
                 let app_clone = app.clone();
                 let shutdown_state = app_clone.state::<SharedSidecar>().inner().clone();
                 tauri::async_runtime::block_on(async move {
                     sidecar::graceful_shutdown(shutdown_state).await;
                 });
-                app_clone.exit(0);
+                if restart_requested {
+                    app_clone.restart();
+                } else {
+                    app_clone.exit(0);
+                }
             }
             // Final catch-all — fires last, after all windows are gone. If
             // something raced past graceful_shutdown (force-quit, panic in the

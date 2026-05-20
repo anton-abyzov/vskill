@@ -183,13 +183,13 @@ export function tokenGate(
   // server, but the server has to be reachable to deliver it. Loopback bind
   // (US-001) is the network-level guard for /api/health.
   if (pathname === "/api/health") return true;
-  // 0843 followup (2026-05-11): the GitHub OAuth Authorization Code callback
-  // is hit by the user's browser AFTER they authorize at github.com — there's
-  // no way for that request to carry X-Studio-Token. It's effectively a
-  // browser-driven redirect, not a JS-initiated API call. The endpoint itself
-  // is CSRF-protected via the `state` param (validated against an in-memory
-  // per-flow store), so exempting from the token gate is safe.
+  // 0843 followup (2026-05-11): the GitHub OAuth browser callbacks are hit by
+  // the user's browser AFTER they authorize at github.com — there's no way
+  // for those requests to carry X-Studio-Token. The endpoints themselves are
+  // CSRF-protected via the `state` param (validated against an in-memory
+  // per-flow store), so exempting them from the token gate is safe.
   if (pathname === "/api/oauth/github/callback") return true;
+  if (pathname === "/api/oauth/github/desktop-complete") return true;
 
   const supplied = readHeader(req, "x-studio-token");
   const expected = getStudioToken();

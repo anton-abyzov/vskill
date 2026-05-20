@@ -49,10 +49,13 @@ test.skip(process.platform !== "darwin", "0830 US-009 AC-US9-04: darwin-only in 
 
 interface UpdateInfoStub {
   available: boolean;
-  currentVersion: string;
+  currentVersion?: string;
   latestVersion?: string;
   releaseNotes?: string;
   releaseDate?: string;
+  version?: string;
+  notes?: string;
+  pub_date?: string;
 }
 
 interface SettingsSnapshotStub {
@@ -125,10 +128,13 @@ async function installBridgeShimOnce(page: Page): Promise<void> {
           currentVersion: string;
           checkResult: {
             available: boolean;
-            currentVersion: string;
+            currentVersion?: string;
             latestVersion?: string;
             releaseNotes?: string;
             releaseDate?: string;
+            version?: string;
+            notes?: string;
+            pub_date?: string;
           };
           installRejectsWith: string | null;
         };
@@ -261,10 +267,9 @@ test.describe("0830 US-009 — Skill Studio auto-update smoke test", () => {
       currentVersion: "0.1.0",
       checkResult: {
         available: true,
-        currentVersion: "0.1.0",
-        latestVersion: "0.2.0",
-        releaseNotes: "Test release notes for the desktop auto-update smoke spec.",
-        releaseDate: "2026-05-07T00:00:00Z",
+        version: "0.2.0",
+        notes: "Test release notes for the desktop auto-update smoke spec.",
+        pub_date: "2026-05-07T00:00:00Z",
       },
       installRejectsWith: null,
     });
@@ -325,7 +330,6 @@ test.describe("0830 US-009 — Skill Studio auto-update smoke test", () => {
       currentVersion: "0.2.0",
       checkResult: {
         available: false,
-        currentVersion: "0.2.0",
       },
       installRejectsWith: null,
     });
@@ -361,9 +365,8 @@ test.describe("0830 US-009 — Skill Studio auto-update smoke test", () => {
       currentVersion: "0.1.0",
       checkResult: {
         available: true,
-        currentVersion: "0.1.0",
-        latestVersion: "0.2.0",
-        releaseNotes: "Test release with WRONG signing key (negative path fixture).",
+        version: "0.2.0",
+        notes: "Test release with WRONG signing key (negative path fixture).",
       },
       // Match the structured error shape `tauri-plugin-updater` raises when
       // minisign verification fails. The UI's `detectErrorKind()` matches on

@@ -51,11 +51,20 @@ pub enum UpdateState {
     #[default]
     Idle,
     Checking,
-    Available { version: String, notes: Option<String> },
+    Available {
+        version: String,
+        notes: Option<String>,
+    },
     UpToDate,
-    Downloading { bytes: u64, total: Option<u64> },
+    Downloading {
+        bytes: u64,
+        total: Option<u64>,
+    },
     Installing,
-    RestartRequired { version: String },
+    RestartRequired {
+        version: String,
+        notes: Option<String>,
+    },
     Error(String),
 }
 
@@ -228,6 +237,7 @@ pub async fn download_and_install_update<R: Runtime>(app: AppHandle<R>) -> Resul
     };
 
     let announced_version = update.version.clone();
+    let announced_notes = update.body.clone();
     set_state(
         &handles,
         UpdateState::Downloading {
@@ -285,12 +295,13 @@ pub async fn download_and_install_update<R: Runtime>(app: AppHandle<R>) -> Resul
                 &handles,
                 UpdateState::RestartRequired {
                     version: announced_version.clone(),
+                    notes: announced_notes.clone(),
                 },
             )
             .await;
             let _ = app.emit(
                 EVT_RESTART_REQUIRED,
-                json!({ "version": announced_version }),
+                json!({ "version": announced_version, "notes": announced_notes }),
             );
             Ok(())
         }
@@ -399,10 +410,7 @@ async fn touch_last_checked<R: Runtime>(app: &AppHandle<R>) {
         return;
     };
     let stamp = format_unix_iso(now_unix());
-    if let Err(e) = store
-        .set_key("updates.lastCheckedAt", json!(stamp))
-        .await
-    {
+    if let Err(e) = store.set_key("updates.lastCheckedAt", json!(stamp)).await {
         log::warn!("updater: could not persist lastCheckedAt: {e}");
     }
 }
@@ -484,10 +492,10 @@ fn state_to_info(state: &UpdateState) -> UpdateInfo {
             version: Some(version.clone()),
             notes: notes.clone(),
         },
-        UpdateState::RestartRequired { version } => UpdateInfo {
+        UpdateState::RestartRequired { version, notes } => UpdateInfo {
             available: true,
             version: Some(version.clone()),
-            notes: None,
+            notes: notes.clone(),
         },
         _ => UpdateInfo {
             available: false,
@@ -599,9 +607,11 @@ mod tests {
     fn test_state_to_info_restart_required_carries_version() {
         let info = state_to_info(&UpdateState::RestartRequired {
             version: "1.0.0".into(),
+            notes: Some("restart notes".into()),
         });
         assert!(info.available);
         assert_eq!(info.version.as_deref(), Some("1.0.0"));
+        assert_eq!(info.notes.as_deref(), Some("restart notes"));
     }
 
     #[test]

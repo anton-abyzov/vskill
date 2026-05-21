@@ -9,7 +9,7 @@
  */
 import type { CSSProperties } from "react";
 
-import { LockIcon } from "./private/PrivateBadge";
+import { StudioLockIcon } from "./private/PrivateBadge";
 
 export interface PrivateRepoChipProps {
   /** "owner/name" shown in the tooltip when present. */
@@ -55,7 +55,7 @@ export function PrivateRepoChip({
       data-variant={variant}
       style={baseStyle}
     >
-      <LockIcon size={11} />
+      <StudioLockIcon size={11} />
       {variant === "tag" ? <span>Private</span> : null}
     </span>
   );

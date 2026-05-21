@@ -1,5 +1,10 @@
 import type { SkillInfo } from "../types";
 import { SkillRow } from "./SkillRow";
+import {
+  parseGithubRepoSlug,
+  type RepoVisibility,
+} from "../hooks/useSkillRepoVisibility";
+import type { ConnectedRepoDTO } from "../types/account";
 
 export interface SelectedKey {
   plugin: string;
@@ -15,6 +20,13 @@ interface Props {
   onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>, skill: SkillInfo) => void;
   /** 0759 Phase 6: dirty IDs threaded through to each SkillRow. */
   dirtySkillIds?: Set<string>;
+  /**
+   * 0848: lookup map (owner/name lowercased → ConnectedRepoDTO) built once
+   * at the Sidebar level. PluginGroup walks `skill.repoUrl` against it to
+   * decide whether each row gets the amber PrivateRepoChip. Optional so
+   * existing tests that don't wrap Sidebar still render correctly.
+   */
+  repoVisibilityLookup?: Map<string, ConnectedRepoDTO>;
 }
 
 /**
@@ -25,7 +37,15 @@ interface Props {
  * No pill backgrounds. Count is tabular-nums. Header uses a very small
  * lighter-weight label so the rows underneath feel primary.
  */
-export function PluginGroup({ plugin, skills, selectedKey, onSelect, onContextMenu, dirtySkillIds }: Props) {
+export function PluginGroup({
+  plugin,
+  skills,
+  selectedKey,
+  onSelect,
+  onContextMenu,
+  dirtySkillIds,
+  repoVisibilityLookup,
+}: Props) {
   const sorted = [...skills].sort((a, b) => a.skill.localeCompare(b.skill));
   // 0802 AC-US2-04: friendly tool caption (e.g. "Claude Code") rendered
   // under the uppercased plugin folder. Suppress ONLY on exact-match-after-
@@ -94,9 +114,27 @@ export function PluginGroup({ plugin, skills, selectedKey, onSelect, onContextMe
         {sorted.map((s) => {
           const isSelected =
             !!selectedKey && selectedKey.plugin === s.plugin && selectedKey.skill === s.skill;
+          // 0848: derive visibility per row from the precomputed Sidebar
+          // lookup. When no lookup is supplied (legacy test mounts), the
+          // row falls back to its existing no-chip render.
+          const slug = repoVisibilityLookup ? parseGithubRepoSlug(s.repoUrl) : null;
+          const match = slug ? repoVisibilityLookup!.get(slug) ?? null : null;
+          const repoVisibility: RepoVisibility = match
+            ? match.isPrivate
+              ? "private"
+              : "public"
+            : "unknown";
           return (
             <div role="listitem" key={`${s.plugin}/${s.skill}`}>
-              <SkillRow skill={s} isSelected={isSelected} onSelect={() => onSelect(s)} onContextMenu={onContextMenu} dirty={dirtySkillIds?.has(`${s.plugin}/${s.skill}`)} />
+              <SkillRow
+                skill={s}
+                isSelected={isSelected}
+                onSelect={() => onSelect(s)}
+                onContextMenu={onContextMenu}
+                dirty={dirtySkillIds?.has(`${s.plugin}/${s.skill}`)}
+                repoVisibility={repoVisibility}
+                repoFullName={match?.repoFullName ?? null}
+              />
             </div>
           );
         })}

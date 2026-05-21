@@ -8,6 +8,9 @@ import { SymlinkChip } from "./SymlinkChip";
 import { UpdateBadge } from "./UpdateBadge";
 import { UpdateChip } from "./UpdateChip";
 import { VersionBadge } from "./VersionBadge";
+// 0848: tiny lock chip for skills that came from a private GitHub repo.
+import { PrivateRepoChip } from "./PrivateRepoChip";
+import type { RepoVisibility } from "../hooks/useSkillRepoVisibility";
 void SkillRowHoverCard;
 
 // 0686 T-015 (US-008): SkillInfo carries `isSymlink` + `symlinkTarget` once
@@ -31,6 +34,19 @@ interface Props {
    * Optional — pre-Phase-6 callers omit it; the dot stays hidden.
    */
   dirty?: boolean;
+  /**
+   * 0848: source-repo visibility resolved at the list level by the parent
+   * (via `useConnectedRepoLookup` + `resolveSkillRepoVisibility`). The row
+   * stays a pure presentational component — no hooks beyond memo — so the
+   * existing custom-render tests (which invoke the component as a plain
+   * function outside a React tree) keep working.
+   *
+   * Omit/`"unknown"`/`"public"` → no chip. Only `"private"` shows the amber
+   * lock chip per AC-US1-01.
+   */
+  repoVisibility?: RepoVisibility;
+  /** 0848: `owner/name` for the chip tooltip. Optional. */
+  repoFullName?: string | null;
 }
 
 /**
@@ -45,7 +61,15 @@ interface Props {
  * - `updateAvailable` chip renders an accent-colored "Update" pill with the
  *   latest version when applicable.
  */
-function SkillRowBase({ skill, isSelected, onSelect, onContextMenu, dirty }: Props) {
+function SkillRowBase({
+  skill,
+  isSelected,
+  onSelect,
+  onContextMenu,
+  dirty,
+  repoVisibility,
+  repoFullName,
+}: Props) {
   const dotColor = skill.origin === "installed" ? "var(--status-installed)" : "var(--status-own)";
 
   return (
@@ -175,6 +199,14 @@ function SkillRowBase({ skill, isSelected, onSelect, onContextMenu, dirty }: Pro
         showPrefix={false}
         data-testid="skill-row-version"
       />
+
+      {/* 0848 AC-US1-01: amber lock chip for private-repo skills. Visibility
+          is resolved by the parent list (Sidebar / MarketplaceDrawer) via
+          useConnectedRepoLookup and passed in as a prop so the row stays
+          a pure presentational component. */}
+      {repoVisibility === "private" && (
+        <PrivateRepoChip repoFullName={repoFullName ?? null} />
+      )}
 
       {/* 0686 US-008: chain-link glyph when the skill was installed via
           symlink. Renders when the server enriches SkillInfo with the

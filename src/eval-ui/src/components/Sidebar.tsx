@@ -22,6 +22,13 @@ import { SidebarGitHubIndicator } from "./SidebarGitHubIndicator";
 // 0843 US-001: signed-in users see ConnectedRepoWidget at the same mount point.
 import { ConnectedRepoWidget } from "./ConnectedRepoWidget";
 import { useAccountSummary } from "../hooks/useAccountSummary";
+// 0848: connected-repos lookup, threaded into each SectionList → PluginGroup
+// so private-repo skills get the amber lock chip.
+import {
+  parseGithubRepoSlug,
+  useConnectedRepoLookup,
+} from "../hooks/useSkillRepoVisibility";
+import type { ConnectedRepoDTO } from "../types/account";
 
 // Virtualization threshold: ADR / scope brief target is 200 rows combined.
 export const VIRTUALIZATION_THRESHOLD = 200;
@@ -386,6 +393,13 @@ export function Sidebar({
   const combinedFiltered = tri.own.filtered + tri.installed.filtered + tri.global.filtered;
   const useVirtual = combinedFiltered >= VIRTUALIZATION_THRESHOLD;
 
+  // 0848: resolve connected-repos lookup once at the Sidebar level. Threaded
+  // through SectionList → PluginGroup → SkillRow so private-repo skills get
+  // the amber lock chip. Returns an empty map when the user isn't signed in
+  // or has no connected repos — in that case every row resolves to "unknown"
+  // (no chip), which matches the pre-0848 behavior exactly.
+  const { lookup: repoVisibilityLookup } = useConnectedRepoLookup();
+
   // Flattened, alpha-sorted list across all rendered sections — used by j/k.
   // 0686 AC-US3-07: extends the legacy 2-section flatten to 3 sections when
   // tri-scope is active. In 2-section mode only own + installed are walked.
@@ -541,6 +555,7 @@ export function Sidebar({
                 onContextMenu={onContextMenu}
                 useVirtual={useVirtual}
                 dirtySkillIds={dirtySkillIds}
+                repoVisibilityLookup={repoVisibilityLookup}
               />
             )}
           </NamedScopeSection>
@@ -562,6 +577,7 @@ export function Sidebar({
                 onContextMenu={onContextMenu}
                 useVirtual={useVirtual}
                 dirtySkillIds={dirtySkillIds}
+                repoVisibilityLookup={repoVisibilityLookup}
               />
             )}
           </NamedScopeSection>
@@ -758,6 +774,7 @@ export function Sidebar({
                   onContextMenu={onContextMenu}
                   useVirtual={useVirtual}
                   dirtySkillIds={dirtySkillIds}
+                  repoVisibilityLookup={repoVisibilityLookup}
                 />
               </>
             )}
@@ -827,6 +844,7 @@ export function Sidebar({
                 onContextMenu={onContextMenu}
                 useVirtual={useVirtual}
                 dirtySkillIds={dirtySkillIds}
+                repoVisibilityLookup={repoVisibilityLookup}
               />
             )}
           </SidebarSection>
@@ -844,6 +862,7 @@ export function Sidebar({
                 onContextMenu={onContextMenu}
                 useVirtual={useVirtual}
                 dirtySkillIds={dirtySkillIds}
+                repoVisibilityLookup={repoVisibilityLookup}
               />
             )}
           </SidebarSection>
@@ -1066,6 +1085,7 @@ function SectionList({
   onContextMenu,
   useVirtual,
   dirtySkillIds,
+  repoVisibilityLookup,
 }: {
   items: Array<[plugin: string, skills: SkillInfo[]]>;
   selectedKey: SelectedKey | null;
@@ -1074,6 +1094,8 @@ function SectionList({
   useVirtual: boolean;
   /** 0759 Phase 6: dirty IDs threaded through to PluginGroup → SkillRow. */
   dirtySkillIds?: Set<string>;
+  /** 0848: connected-repos lookup forwarded to PluginGroup for privacy chips. */
+  repoVisibilityLookup?: Map<string, ConnectedRepoDTO>;
 }) {
   if (useVirtual) {
     const flat = flattenForVirtual(items);
@@ -1123,6 +1145,14 @@ function SectionList({
             const s = item.skill;
             const isSelected =
               !!selectedKey && selectedKey.plugin === s.plugin && selectedKey.skill === s.skill;
+            // 0848: derive visibility per row from the same lookup PluginGroup uses.
+            const slug = repoVisibilityLookup ? parseGithubRepoSlug(s.repoUrl) : null;
+            const match = slug ? repoVisibilityLookup!.get(slug) ?? null : null;
+            const repoVisibility = match
+              ? match.isPrivate
+                ? "private"
+                : "public"
+              : "unknown";
             return (
               <SkillRow
                 skill={s}
@@ -1130,6 +1160,8 @@ function SectionList({
                 onSelect={() => onSelect(s)}
                 onContextMenu={onContextMenu}
                 dirty={dirtySkillIds?.has(`${s.plugin}/${s.skill}`)}
+                repoVisibility={repoVisibility}
+                repoFullName={match?.repoFullName ?? null}
               />
             );
           }}
@@ -1149,6 +1181,7 @@ function SectionList({
           onSelect={onSelect}
           onContextMenu={onContextMenu}
           dirtySkillIds={dirtySkillIds}
+          repoVisibilityLookup={repoVisibilityLookup}
         />
       ))}
     </div>

@@ -130,7 +130,13 @@ export function useConnectedRepos() {
   const ctx = useAccountContext();
   return useSWR<ConnectedReposListDTO>(
     KEY.repos(),
-    () => request<ConnectedReposListDTO>(ctx, "/api/v1/account/repos"),
+    async () =>
+      connectedReposList(
+        await request<ConnectedReposListDTO | ConnectedRepoDTO[]>(
+          ctx,
+          "/api/v1/account/repos",
+        ),
+      ),
     { ttl: DEFAULT_TTL_MS },
   );
 }
@@ -140,6 +146,35 @@ export function reposArray(
   list: ConnectedReposListDTO | undefined,
 ): ReadonlyArray<ConnectedRepoDTO> {
   return list?.repos ?? [];
+}
+
+export function connectedReposList(
+  value: ConnectedReposListDTO | ConnectedRepoDTO[] | null | undefined,
+): ConnectedReposListDTO {
+  if (Array.isArray(value)) {
+    return {
+      repos: value,
+      totalCount: value.length,
+      publicCount: value.filter((repo) => !repo.isPrivate).length,
+      privateCount: value.filter((repo) => repo.isPrivate).length,
+    };
+  }
+  // 0848: defensive — when the server returns an unexpected envelope (e.g.
+  // a test fixture that omits `repos`), fall back to an empty list rather
+  // than crashing the fetcher. The prior `value.repos.length` access would
+  // throw a TypeError on the missing field, surfacing as a SWR errorState
+  // and an infinite-loop trap in Sidebar.reveal-style tests.
+  const repos: ReadonlyArray<ConnectedRepoDTO> = Array.isArray(value?.repos)
+    ? (value!.repos as ReadonlyArray<ConnectedRepoDTO>)
+    : [];
+  return {
+    repos: repos as ConnectedRepoDTO[],
+    totalCount: value?.totalCount ?? repos.length,
+    publicCount:
+      value?.publicCount ?? repos.filter((repo) => !repo.isPrivate).length,
+    privateCount:
+      value?.privateCount ?? repos.filter((repo) => repo.isPrivate).length,
+  };
 }
 
 export function useResyncRepo() {
@@ -176,9 +211,21 @@ export function useApiTokens() {
   const ctx = useAccountContext();
   return useSWR<ReadonlyArray<TokenDTO>>(
     KEY.tokens(),
-    () => request<ReadonlyArray<TokenDTO>>(ctx, "/api/v1/account/tokens"),
+    async () =>
+      tokensArray(
+        await request<ReadonlyArray<TokenDTO> | { tokens?: TokenDTO[] }>(
+          ctx,
+          "/api/v1/account/tokens",
+        ),
+      ),
     { ttl: DEFAULT_TTL_MS },
   );
+}
+
+export function tokensArray(
+  value: ReadonlyArray<TokenDTO> | { tokens?: TokenDTO[] },
+): ReadonlyArray<TokenDTO> {
+  return Array.isArray(value) ? value : value.tokens ?? [];
 }
 
 export function useCreateToken() {

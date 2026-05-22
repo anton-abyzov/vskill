@@ -88,7 +88,7 @@ async function renderTable(props: {
 }
 
 describe("ConnectedReposTable", () => {
-  it("renders empty state when no repos and triggers connect-new", async () => {
+  it("renders empty state when no repos and triggers connect-new from the canonical chip button (0849: no duplicate empty-state button)", async () => {
     const { container, unmount, spies } = await renderTable({ repos: [] });
 
     expect(
@@ -97,20 +97,20 @@ describe("ConnectedReposTable", () => {
     expect(
       container.querySelector("[data-testid='repos-table']"),
     ).toBeNull();
+    // 0849: the old empty-state button was removed — the SummaryChip's
+    // "Connect GitHub App" CTA is now the single canonical entry point.
+    expect(
+      container.querySelector("[data-testid='repos-empty-connect-button']"),
+    ).toBeNull();
 
-    const connectButtons = container.querySelectorAll<HTMLButtonElement>(
-      "button",
-    );
-    // Both summary chip + empty state CTA should fire onConnectNew.
-    let firedOnce = false;
-    for (const b of connectButtons) {
-      if (b.textContent && /connect a github repo/i.test(b.textContent)) {
-        b.click();
-        firedOnce = true;
-        break;
-      }
-    }
-    expect(firedOnce).toBe(true);
+    const connectButton = container.querySelector<HTMLButtonElement>(
+      "[data-testid='connect-new-repo-button']",
+    )!;
+    expect(connectButton).not.toBeNull();
+    expect(connectButton.textContent).toMatch(/connect github app/i);
+    expect(container.textContent).toMatch(/public repos on free/i);
+    expect(container.textContent).toMatch(/private repos on pro/i);
+    connectButton.click();
     expect(spies.onConnectNew).toHaveBeenCalled();
     unmount();
   });
@@ -150,8 +150,12 @@ describe("ConnectedReposTable", () => {
     expect(chip).not.toBeNull();
     const text = chip!.textContent ?? "";
     expect(text).toContain("3");
-    expect(text).toMatch(/1 public/);
-    expect(text).toMatch(/2 private/);
+    expect(text).toMatch(/Public\s*1/);
+    expect(text).toMatch(/Private\s*2/);
+    expect(text).toMatch(/Private repository connections require Pro/);
+    expect(
+      container.querySelector("[data-testid='connect-new-repo-button']"),
+    ).not.toBeNull();
     unmount();
   });
 

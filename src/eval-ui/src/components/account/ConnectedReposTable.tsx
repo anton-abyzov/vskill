@@ -55,13 +55,143 @@ export function ConnectedReposTable({
 }: ConnectedReposTableProps) {
   const summary = summarize(repos);
 
+  // 0849 — partition by visibility so the user sees an unambiguous "what's
+  // public, what's private" split. Private first because it's the
+  // higher-trust bucket (paid tier, account-scoped).
+  const privateRepos = repos
+    .filter((r) => r.isPrivate)
+    .slice()
+    .sort((a, b) => a.repoFullName.localeCompare(b.repoFullName));
+  const publicRepos = repos
+    .filter((r) => !r.isPrivate)
+    .slice()
+    .sort((a, b) => a.repoFullName.localeCompare(b.repoFullName));
+
   return (
     <div data-testid="connected-repos-table" style={{ width: "100%" }}>
-      <SummaryChip summary={summary} onConnectNew={onConnectNew} />
+      {/* 0849: SummaryChip is the ONE canonical "Connect GitHub App" CTA
+          in this surface — always visible (including empty state) so the
+          user never has to hunt for it. The old empty-state duplicate
+          button was removed. */}
+      <SummaryChip
+        summary={summary}
+        onConnectNew={onConnectNew}
+        showConnectAction={true}
+      />
 
       {repos.length === 0 ? (
-        <EmptyState onConnectNew={onConnectNew} />
-      ) : viewMode === "cards" ? (
+        <EmptyState />
+      ) : (
+        <>
+          {privateRepos.length > 0 ? (
+            <VisibilitySection
+              kind="private"
+              repos={privateRepos}
+              viewMode={viewMode}
+              pendingActions={pendingActions}
+              onOpenOnGitHub={onOpenOnGitHub}
+              onResync={onResync}
+              onDisconnect={onDisconnect}
+              now={now}
+            />
+          ) : null}
+          {publicRepos.length > 0 ? (
+            <VisibilitySection
+              kind="public"
+              repos={publicRepos}
+              viewMode={viewMode}
+              pendingActions={pendingActions}
+              onOpenOnGitHub={onOpenOnGitHub}
+              onResync={onResync}
+              onDisconnect={onDisconnect}
+              now={now}
+            />
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 0849 — section wrapper that gives each visibility bucket its own header
+ * + table. Mirrors the platform-side sectioning so the desktop AccountShell
+ * and the web cabinet feel like the same product.
+ */
+function VisibilitySection({
+  kind,
+  repos,
+  viewMode,
+  pendingActions,
+  onOpenOnGitHub,
+  onResync,
+  onDisconnect,
+  now,
+}: {
+  kind: "public" | "private";
+  repos: ConnectedRepoDTO[];
+  viewMode: "table" | "cards";
+  pendingActions?: Readonly<Record<string, "resync" | "disconnect">>;
+  onOpenOnGitHub: (repo: ConnectedRepoDTO) => void;
+  onResync: (repo: ConnectedRepoDTO) => void | Promise<void>;
+  onDisconnect: (repo: ConnectedRepoDTO) => void | Promise<void>;
+  now: Date;
+}) {
+  const isPrivate = kind === "private";
+  return (
+    <section
+      data-testid={`repos-section-${kind}`}
+      data-visibility={kind}
+      style={{
+        marginBottom: 16,
+        border: isPrivate
+          ? "1px solid rgba(245,158,11,0.45)"
+          : "1px solid var(--border-default, #e5e7eb)",
+        borderRadius: 8,
+        overflow: "hidden",
+      }}
+    >
+      <header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          flexWrap: "wrap",
+          padding: "8px 12px",
+          background: isPrivate
+            ? "rgba(245,158,11,0.10)"
+            : "var(--bg-canvas, #f9fafb)",
+          borderBottom: isPrivate
+            ? "1px solid rgba(245,158,11,0.35)"
+            : "1px solid var(--border-default, #e5e7eb)",
+          fontFamily: "var(--font-sans)",
+          fontSize: 12,
+        }}
+      >
+        <SectionGlyph kind={kind} />
+        <strong
+          style={{
+            color: isPrivate ? "#92400e" : "var(--text-primary)",
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+            fontSize: 11,
+          }}
+        >
+          {isPrivate ? "Private repositories" : "Public repositories"}
+        </strong>
+        <span style={{ color: "var(--text-tertiary)" }}>·</span>
+        <span style={{ color: "var(--text-secondary)", fontVariantNumeric: "tabular-nums" }}>
+          {repos.length}
+        </span>
+        <span style={{ flex: 1 }} />
+        <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>
+          {isPrivate
+            ? "Skills here stay scoped to your account / org."
+            : "Skills here are eligible for the public registry."}
+        </span>
+      </header>
+
+      {viewMode === "cards" ? (
         <CardList
           repos={repos}
           pendingActions={pendingActions}
@@ -80,7 +210,39 @@ export function ConnectedReposTable({
           now={now}
         />
       )}
-    </div>
+    </section>
+  );
+}
+
+function SectionGlyph({ kind }: { kind: "public" | "private" }) {
+  if (kind === "private") {
+    return (
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden="true"
+        style={{ flexShrink: 0, color: "#92400e" }}
+      >
+        <rect x="2.75" y="7" width="10.5" height="6.75" rx="1.25" fill="currentColor" fillOpacity="0.15" stroke="currentColor" strokeWidth="1.25" />
+        <path d="M5 7V5.25C5 3.59 6.34 2.25 8 2.25C9.66 2.25 11 3.59 11 5.25V7" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" fill="none" />
+        <circle cx="8" cy="10.25" r="0.9" fill="currentColor" />
+      </svg>
+    );
+  }
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+      style={{ flexShrink: 0, color: "var(--text-secondary)" }}
+    >
+      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.25" fill="none" />
+      <path d="M2 8H14M8 2C9.5 4 10 6 10 8C10 10 9.5 12 8 14M8 2C6.5 4 6 6 6 8C6 10 6.5 12 8 14" stroke="currentColor" strokeWidth="1" fill="none" />
+    </svg>
   );
 }
 
@@ -103,9 +265,11 @@ function summarize(repos: ReadonlyArray<ConnectedRepoDTO>): RepoSummary {
 function SummaryChip({
   summary,
   onConnectNew,
+  showConnectAction,
 }: {
   summary: RepoSummary;
   onConnectNew: () => void;
+  showConnectAction: boolean;
 }) {
   return (
     <div
@@ -126,52 +290,107 @@ function SummaryChip({
       <div
         style={{
           display: "flex",
-          alignItems: "center",
-          gap: 12,
-          color: "var(--text-primary)",
-          fontWeight: 500,
+          flexDirection: "column",
+          gap: 4,
+          minWidth: 0,
         }}
       >
-        <strong>{summary.total}</strong>
-        <span>{summary.total === 1 ? "repo" : "repos"} connected</span>
-        <span aria-hidden style={{ color: "var(--text-tertiary)" }}>·</span>
-        <span title="Public repos" aria-label="Public repos">
-          🌐 {summary.publicCount} public
-        </span>
-        <span aria-hidden style={{ color: "var(--text-tertiary)" }}>·</span>
-        <span title="Private repos" aria-label="Private repos">
-          🔒 {summary.privateCount} private
-        </span>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+            color: "var(--text-primary)",
+            fontWeight: 500,
+          }}
+        >
+          <strong>{summary.total}</strong>
+          <span>{summary.total === 1 ? "repo" : "repos"} connected</span>
+          <span aria-hidden style={{ color: "var(--text-tertiary)" }}>·</span>
+          <span title="Public repos" aria-label="Public repos">
+            <VisibilityBadge isPrivate={false} /> {summary.publicCount}
+          </span>
+          <span aria-hidden style={{ color: "var(--text-tertiary)" }}>·</span>
+          <span title="Private repos" aria-label="Private repos">
+            <VisibilityBadge isPrivate /> {summary.privateCount}
+          </span>
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            color: "var(--text-secondary)",
+            lineHeight: 1.4,
+          }}
+        >
+          Public repositories work on Free. Private repository connections
+          require Pro and GitHub App access.
+        </div>
       </div>
-      <button
-        type="button"
-        onClick={onConnectNew}
-        data-testid="connect-new-repo-button"
-        style={{
-          padding: "6px 14px",
-          fontSize: 13,
-          fontWeight: 500,
-          fontFamily: "inherit",
-          border: "1px solid var(--color-accent, #2563eb)",
-          background: "var(--color-accent, #2563eb)",
-          color: "#fff",
-          borderRadius: 6,
-          cursor: "pointer",
-        }}
-      >
-        Connect a repository
-      </button>
+      {showConnectAction ? (
+        <button
+          type="button"
+          onClick={onConnectNew}
+          data-testid="connect-new-repo-button"
+          style={{
+            padding: "6px 14px",
+            fontSize: 13,
+            fontWeight: 500,
+            fontFamily: "inherit",
+            border: "1px solid var(--color-accent, #2563eb)",
+            background: "var(--color-accent, #2563eb)",
+            color: "#fff",
+            borderRadius: 6,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          Connect GitHub App
+        </button>
+      ) : null}
     </div>
   );
 }
 
-function EmptyState({ onConnectNew }: { onConnectNew: () => void }) {
+function VisibilityBadge({ isPrivate }: { isPrivate: boolean }) {
+  return (
+    <span
+      aria-label={isPrivate ? "Private repository" : "Public repository"}
+      title={isPrivate ? "Private repository" : "Public repository"}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "2px 6px",
+        borderRadius: 999,
+        border: "1px solid var(--border-default, #e5e7eb)",
+        color: isPrivate ? "#92400e" : "#166534",
+        background: isPrivate
+          ? "rgba(245, 158, 11, 0.12)"
+          : "rgba(22, 163, 74, 0.10)",
+        fontSize: 11,
+        fontWeight: 600,
+        lineHeight: 1,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {isPrivate ? "Private" : "Public"}
+    </span>
+  );
+}
+
+/**
+ * 0849 — Empty state no longer contains a Connect button. The SummaryChip
+ * above is now ALWAYS visible (zero repos included) and owns the single
+ * canonical "Connect GitHub App" CTA. The empty state stays informational
+ * so the user knows what the button up there will do.
+ */
+function EmptyState() {
   return (
     <div
       data-testid="repos-empty-state"
       style={{
         textAlign: "center",
-        padding: "48px 24px",
+        padding: "32px 24px",
         background: "var(--bg-canvas, #f9fafb)",
         border: "1px dashed var(--border-default, #e5e7eb)",
         borderRadius: 8,
@@ -180,40 +399,25 @@ function EmptyState({ onConnectNew }: { onConnectNew: () => void }) {
     >
       <div
         style={{
-          fontSize: 16,
+          fontSize: 15,
           fontWeight: 600,
           color: "var(--text-primary)",
           marginBottom: 6,
         }}
       >
-        No repositories connected yet
+        No repositories connected yet.
       </div>
       <div
         style={{
           fontSize: 13,
           color: "var(--text-secondary)",
-          marginBottom: 16,
+          lineHeight: 1.5,
         }}
       >
-        Connect a GitHub repository to sync skills automatically.
+        Click the <strong style={{ color: "var(--text-primary)" }}>Connect GitHub App</strong>
+        {" "}button above. Install the app, pick the repos to share, then
+        Skill Studio syncs public repos on Free and private repos on Pro.
       </div>
-      <button
-        type="button"
-        onClick={onConnectNew}
-        style={{
-          padding: "8px 16px",
-          fontSize: 13,
-          fontWeight: 500,
-          fontFamily: "inherit",
-          border: "1px solid var(--color-accent, #2563eb)",
-          background: "var(--color-accent, #2563eb)",
-          color: "#fff",
-          borderRadius: 6,
-          cursor: "pointer",
-        }}
-      >
-        Connect a GitHub repo
-      </button>
     </div>
   );
 }
@@ -420,13 +624,7 @@ function RepoIdentity({ repo }: { repo: ConnectedRepoDTO }) {
     <div
       style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}
     >
-      <span
-        aria-label={repo.isPrivate ? "Private repo" : "Public repo"}
-        title={repo.isPrivate ? "Private" : "Public"}
-        style={{ fontSize: 14, lineHeight: 1 }}
-      >
-        {repo.isPrivate ? "🔒" : "🌐"}
-      </span>
+      <VisibilityBadge isPrivate={repo.isPrivate} />
       <span
         style={{
           fontFamily: "var(--font-mono)",

@@ -5,12 +5,15 @@ import type {
   MultiInstallResult,
   SupportedAgent,
 } from "../types";
+import type { InstallStateResponse } from "../types/install-state";
 import {
   fetchSupportedAgents,
   groupSupportedAgentsByTier,
   installToAgents,
   startInstallStream,
 } from "../api/install";
+import { removeSkillFromAgents, type RemoveSkillResponse } from "../api/remove";
+import { api } from "../api";
 import { ClipboardExportDialog } from "./ClipboardExportDialog";
 
 // ---------------------------------------------------------------------------
@@ -41,6 +44,9 @@ export interface InstallTargetsModalProps {
   skill: string;
   skillDisplayName?: string;
   scope: InstallScope;
+  /** 0850 — currently selected registry version. Drives the install-state
+   *  badge variants (Installed v / Update v / Newer v). */
+  targetVersion?: string | null;
   activeAgentId?: string | null;
   /** Optional set of agent ids that should start pre-checked, in addition
    *  to the active agent (e.g. when launched from the `+ Install here`
@@ -52,7 +58,62 @@ export interface InstallTargetsModalProps {
   fetchSupportedAgentsImpl?: typeof fetchSupportedAgents;
   installToAgentsImpl?: typeof installToAgents;
   startInstallStreamImpl?: typeof startInstallStream;
+  fetchInstallStateImpl?: (skill: string) => Promise<InstallStateResponse>;
+  removeSkillImpl?: typeof removeSkillFromAgents;
   writeClipboardImpl?: (text: string) => Promise<void>;
+}
+
+/** 0850 — per-agent install-state badge variants. */
+type InstallStateBadge =
+  | { kind: "not-installed" }
+  | { kind: "installed-current"; version: string | null }
+  | { kind: "update-available"; installed: string; target: string }
+  | { kind: "newer-installed"; installed: string; target: string }
+  | { kind: "installed-other-scope"; otherScope: "project" | "user"; version: string | null };
+
+function compareSemverLoose(a: string, b: string): number {
+  // Loose semver compare — splits on dot, compares numerically per segment.
+  // Unknown/non-numeric segments compare as 0. Good enough for badge UX.
+  const pa = a.split(/[.-]/).map((s) => Number.parseInt(s, 10));
+  const pb = b.split(/[.-]/).map((s) => Number.parseInt(s, 10));
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = Number.isFinite(pa[i]) ? pa[i] : 0;
+    const nb = Number.isFinite(pb[i]) ? pb[i] : 0;
+    if (na !== nb) return na - nb;
+  }
+  return 0;
+}
+
+function deriveBadge(
+  agentId: string,
+  scope: InstallScope,
+  installState: InstallStateResponse | null,
+  targetVersion: string | null | undefined,
+): InstallStateBadge {
+  if (!installState) return { kind: "not-installed" };
+  const thisScope = installState.scopes[scope];
+  const otherScopeKey = scope === "project" ? "user" : "project";
+  const otherScope = installState.scopes[otherScopeKey];
+  const inThisScope = thisScope.installed && thisScope.installedAgentTools.includes(agentId);
+  const inOtherScope = otherScope.installed && otherScope.installedAgentTools.includes(agentId);
+  if (!inThisScope) {
+    if (inOtherScope) {
+      return {
+        kind: "installed-other-scope",
+        otherScope: otherScopeKey,
+        version: otherScope.version,
+      };
+    }
+    return { kind: "not-installed" };
+  }
+  const installed = thisScope.version;
+  if (!installed || !targetVersion) {
+    return { kind: "installed-current", version: installed };
+  }
+  const cmp = compareSemverLoose(installed, targetVersion);
+  if (cmp === 0) return { kind: "installed-current", version: installed };
+  if (cmp < 0) return { kind: "update-available", installed, target: targetVersion };
+  return { kind: "newer-installed", installed, target: targetVersion };
 }
 
 type Phase = "loading" | "select" | "installing" | "done" | "error";
@@ -110,6 +171,7 @@ export function InstallTargetsModal({
   skill,
   skillDisplayName,
   scope,
+  targetVersion,
   activeAgentId,
   preCheckedAgentIds,
   onClose,
@@ -117,6 +179,8 @@ export function InstallTargetsModal({
   fetchSupportedAgentsImpl,
   installToAgentsImpl,
   startInstallStreamImpl,
+  fetchInstallStateImpl,
+  removeSkillImpl,
   writeClipboardImpl,
 }: InstallTargetsModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -126,6 +190,10 @@ export function InstallTargetsModal({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [installError, setInstallError] = useState<string | null>(null);
   const [results, setResults] = useState<LiveResultMap>({});
+  // 0850 — per-agent install-state for badges + Remove links.
+  const [installState, setInstallState] = useState<InstallStateResponse | null>(null);
+  const [installStateNonce, setInstallStateNonce] = useState(0);
+  const [removingAgents, setRemovingAgents] = useState<Set<string>>(new Set());
   const [pendingClipboardQueue, setPendingClipboardQueue] = useState<
     AgentInstallResult[]
   >([]);
@@ -133,17 +201,20 @@ export function InstallTargetsModal({
     useState<AgentInstallResult | null>(null);
   const streamHandleRef = useRef<{ close: () => void } | null>(null);
 
-  // ESC closes (only when no install is in flight).
+  // ESC closes only the top install surface. Capture + stopPropagation keeps
+  // the underlying detail/settings dialogs from also handling the same key.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (phase === "installing") return;
+      if (activeClipboard) return;
       e.preventDefault();
+      e.stopPropagation();
+      if (phase === "installing") return;
       onClose();
     };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [phase, onClose]);
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
+  }, [activeClipboard, phase, onClose]);
 
   // Fetch supported agents on mount.
   useEffect(() => {
@@ -198,6 +269,17 @@ export function InstallTargetsModal({
       }
     };
   }, []);
+
+  // 0850 — fetch install-state on mount and after install/remove operations.
+  useEffect(() => {
+    let cancelled = false;
+    const fetcher = fetchInstallStateImpl ?? ((s: string) => api.getSkillInstallState(s));
+    fetcher(skill).then(
+      (resp) => { if (!cancelled) setInstallState(resp); },
+      () => { if (!cancelled) setInstallState(null); },
+    );
+    return () => { cancelled = true; };
+  }, [skill, fetchInstallStateImpl, installStateNonce]);
 
   const tiered = useMemo(() => groupSupportedAgentsByTier(agents), [agents]);
 
@@ -254,11 +336,22 @@ export function InstallTargetsModal({
           // Merge: prefer authoritative per-agent results from the done
           // payload, fall back to the live results we accumulated.
           const merged: LiveResultMap = {};
+          const summaryError =
+            summary.success === false
+              ? (typeof summary.error === "string" && summary.error.trim())
+                || "Install failed before any target reported a result."
+              : null;
           for (const id of agentIds) {
-            merged[id] = { agentId: id, status: "skipped" };
+            merged[id] = summaryError
+              ? { agentId: id, status: "error", detail: summaryError }
+              : { agentId: id, status: "skipped" };
           }
-          for (const r of summary.results ?? []) {
-            merged[r.agentId] = r;
+          if (!summaryError) {
+            for (const r of summary.results ?? []) {
+              merged[r.agentId] = r;
+            }
+          } else {
+            setInstallError(summaryError);
           }
           // Live updates take precedence if the summary is sparse.
           setResults((prev) => {
@@ -269,10 +362,21 @@ export function InstallTargetsModal({
               }
             }
             const finalList = Object.values(next);
+            const hasWritableOutcome = finalList.some(
+              (r) => r.status === "installed" || r.status === "exported" || r.status === "error",
+            );
+            if (!hasWritableOutcome) {
+              const message = "Install finished without writing any selected target.";
+              for (const id of agentIds) {
+                next[id] = { agentId: id, status: "error", detail: message };
+              }
+              setInstallError(message);
+            }
             // AC-US5-08: open the ClipboardExportDialog for every Tier 3
             // export, sequentially. The dialog mounts AFTER the SSE
             // stream closes (we are inside onDone here — stream is done).
-            const exportRows = finalList.filter(
+            const visibleList = Object.values(next);
+            const exportRows = visibleList.filter(
               (r) => r.status === "exported" && typeof r.blob === "string",
             );
             if (exportRows.length > 0) {
@@ -281,13 +385,15 @@ export function InstallTargetsModal({
             }
             globalThis.setTimeout(() => {
               try {
-                onSuccess?.(finalList);
+                onSuccess?.(visibleList);
               } catch {
                 // non-fatal
               }
             }, 0);
             return next;
           });
+          // 0850 — re-fetch install-state so badges flip to Installed v<X>.
+          setInstallStateNonce((n) => n + 1);
           setPhase("done");
         },
         onError: (err) => {
@@ -307,6 +413,40 @@ export function InstallTargetsModal({
     startInstallStreamImpl,
     onSuccess,
   ]);
+
+  // 0850 — per-agent remove. Posts to /api/studio/remove-skill, then
+  // re-fetches install-state so the badge flips back to "Not installed".
+  const handleRemoveAgent = useCallback(async (agentId: string) => {
+    const removeFn = removeSkillImpl ?? removeSkillFromAgents;
+    setRemovingAgents((prev) => {
+      const next = new Set(prev);
+      next.add(agentId);
+      return next;
+    });
+    try {
+      const resp: RemoveSkillResponse = await removeFn({ skill, agentIds: [agentId], scope });
+      if (typeof window !== "undefined") {
+        try {
+          window.dispatchEvent(
+            new CustomEvent("studio:skill-installed", { detail: { skill, scope } }),
+          );
+        } catch { /* non-fatal */ }
+      }
+      // Trigger install-state re-fetch so the row badge updates.
+      setInstallStateNonce((n) => n + 1);
+      if (resp.errors.length > 0) {
+        setInstallError(`Remove failed for ${resp.errors[0].agentId}: ${resp.errors[0].message}`);
+      }
+    } catch (err) {
+      setInstallError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRemovingAgents((prev) => {
+        const next = new Set(prev);
+        next.delete(agentId);
+        return next;
+      });
+    }
+  }, [removeSkillImpl, skill, scope]);
 
   const advanceClipboardQueue = useCallback(() => {
     setPendingClipboardQueue((prev) => {
@@ -328,6 +468,9 @@ export function InstallTargetsModal({
     selected.size === 0 ? "Select at least one target" : undefined;
 
   const titleText = `Install ${skillDisplayName ?? skill} to:`;
+  const scopeSubLine = scope === "project"
+    ? "Project scope — writes under <project>/.claude/skills (or each tool's local dir)"
+    : "User scope — writes under ~/.claude/skills (or each tool's global dir)";
 
   return createPortal(
     <>
@@ -382,15 +525,27 @@ export function InstallTargetsModal({
               gap: "0.75rem",
             }}
           >
-            <div
-              data-testid="install-targets-modal-title"
-              style={{
-                fontFamily: "var(--font-serif, serif)",
-                fontSize: 16,
-                fontWeight: 500,
-              }}
-            >
-              {titleText}
+            <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+              <div
+                data-testid="install-targets-modal-title"
+                style={{
+                  fontFamily: "var(--font-serif, serif)",
+                  fontSize: 16,
+                  fontWeight: 500,
+                }}
+              >
+                {titleText}
+              </div>
+              <div
+                data-testid="install-targets-modal-scope-line"
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-secondary)",
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                {scopeSubLine}
+              </div>
             </div>
             <button
               type="button"
@@ -487,6 +642,25 @@ export function InstallTargetsModal({
                   </div>
                 </div>
 
+                {phase === "installing" && (
+                  <div
+                    data-testid="install-targets-modal-installing-status"
+                    role="status"
+                    aria-live="polite"
+                    style={{
+                      margin: "0 0 0.75rem 0",
+                      padding: "0.625rem 0.875rem",
+                      borderRadius: 6,
+                      border: "1px solid var(--color-rule, #E8E1D6)",
+                      background: "var(--surface-2, #F6F4EE)",
+                      color: "var(--text-primary)",
+                      fontSize: 12,
+                    }}
+                  >
+                    Installing {skillDisplayName ?? skill} to {selected.size} target{selected.size === 1 ? "" : "s"}…
+                  </div>
+                )}
+
                 <TierSection
                   testId="install-targets-section-dropin"
                   title="Drop-in"
@@ -496,6 +670,11 @@ export function InstallTargetsModal({
                   results={results}
                   phase={phase}
                   onToggle={toggleAgent}
+                  scope={scope}
+                  installState={installState}
+                  targetVersion={targetVersion ?? null}
+                  removingAgents={removingAgents}
+                  onRemove={handleRemoveAgent}
                 />
                 <TierSection
                   testId="install-targets-section-format-converted"
@@ -506,6 +685,11 @@ export function InstallTargetsModal({
                   results={results}
                   phase={phase}
                   onToggle={toggleAgent}
+                  scope={scope}
+                  installState={installState}
+                  targetVersion={targetVersion ?? null}
+                  removingAgents={removingAgents}
+                  onRemove={handleRemoveAgent}
                 />
                 <TierSection
                   testId="install-targets-section-cloud"
@@ -518,6 +702,11 @@ export function InstallTargetsModal({
                   onToggle={toggleAgent}
                   tierBadge="T3"
                   pathOverride="Copy to clipboard"
+                  scope={scope}
+                  installState={installState}
+                  targetVersion={targetVersion ?? null}
+                  removingAgents={removingAgents}
+                  onRemove={handleRemoveAgent}
                 />
               </>
             )}
@@ -529,7 +718,7 @@ export function InstallTargetsModal({
               />
             )}
 
-            {phase === "error" && installError && (
+            {(phase === "error" || phase === "done") && installError && (
               <div
                 data-testid="install-targets-modal-install-error"
                 role="alert"
@@ -661,6 +850,11 @@ function TierSection({
   onToggle,
   tierBadge,
   pathOverride,
+  scope,
+  installState,
+  targetVersion,
+  removingAgents,
+  onRemove,
 }: {
   testId: string;
   title: string;
@@ -672,6 +866,11 @@ function TierSection({
   onToggle: (agentId: string) => void;
   tierBadge?: string;
   pathOverride?: string;
+  scope: InstallScope;
+  installState: InstallStateResponse | null;
+  targetVersion: string | null;
+  removingAgents: Set<string>;
+  onRemove: (agentId: string) => void;
 }) {
   if (agents.length === 0) return null;
   return (
@@ -709,7 +908,14 @@ function TierSection({
           const isChecked = selected.has(agent.id);
           const result = results[agent.id];
           const disabled = phase === "installing" || phase === "done";
-          const path = pathOverride ?? agent.resolvedGlobalDir;
+          // 0850 (AC-US1-01/02): the path shown to the user must match the
+          // selected scope. Tier-3 cloud rows always override with the
+          // clipboard label.
+          const path =
+            pathOverride ??
+            (scope === "project" ? agent.resolvedLocalDir : agent.resolvedGlobalDir);
+          const badge = deriveBadge(agent.id, scope, installState, targetVersion);
+          const isRemoving = removingAgents.has(agent.id);
           return (
             <label
               key={agent.id}
@@ -785,6 +991,13 @@ function TierSection({
                       {tierBadge}
                     </span>
                   )}
+                  {/* 0850 — per-agent install-state badge (Not installed / Installed / Update / Newer / Installed elsewhere) */}
+                  <InstallStateBadgePill
+                    agentId={agent.id}
+                    badge={badge}
+                    isRemoving={isRemoving}
+                    onRemove={onRemove}
+                  />
                 </div>
                 <div
                   title={path}
@@ -954,6 +1167,93 @@ function ResultsToast({
         );
       })}
     </div>
+  );
+}
+
+// 0850 — install-state badge pill + inline Remove link.
+function InstallStateBadgePill({
+  agentId,
+  badge,
+  isRemoving,
+  onRemove,
+}: {
+  agentId: string;
+  badge: InstallStateBadge;
+  isRemoving: boolean;
+  onRemove: (agentId: string) => void;
+}) {
+  if (badge.kind === "not-installed") return null;
+  let label: string;
+  let bg: string;
+  let fg: string;
+  switch (badge.kind) {
+    case "installed-current":
+      label = badge.version ? `Installed v${badge.version}` : "Installed";
+      bg = "color-mix(in srgb, var(--color-ok, #22c55e) 14%, transparent)";
+      fg = "var(--color-ok, #22c55e)";
+      break;
+    case "update-available":
+      label = `Update v${badge.installed} → v${badge.target}`;
+      bg = "color-mix(in srgb, var(--color-own, #f59e0b) 18%, transparent)";
+      fg = "var(--color-own, #f59e0b)";
+      break;
+    case "newer-installed":
+      label = `Newer v${badge.installed} (target v${badge.target})`;
+      bg = "color-mix(in srgb, var(--accent-text, #3b82f6) 14%, transparent)";
+      fg = "var(--accent-text, #3b82f6)";
+      break;
+    case "installed-other-scope":
+      label = badge.version
+        ? `Installed v${badge.version} (${badge.otherScope} scope)`
+        : `Installed (${badge.otherScope} scope)`;
+      bg = "color-mix(in srgb, var(--text-tertiary) 18%, transparent)";
+      fg = "var(--text-secondary)";
+      break;
+  }
+  const isRemovable = badge.kind !== "installed-other-scope";
+  return (
+    <>
+      <span
+        data-testid={`install-targets-status-badge-${agentId}`}
+        data-badge-kind={badge.kind}
+        style={{
+          fontSize: 9,
+          padding: "1px 6px",
+          borderRadius: 8,
+          background: bg,
+          color: fg,
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </span>
+      {isRemovable && (
+        <button
+          type="button"
+          data-testid={`install-targets-remove-${agentId}`}
+          disabled={isRemoving}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onRemove(agentId);
+          }}
+          style={{
+            fontSize: 10,
+            padding: "1px 6px",
+            borderRadius: 8,
+            background: "transparent",
+            border: "1px solid var(--color-rule, #E8E1D6)",
+            color: "var(--color-error, #dc2626)",
+            cursor: isRemoving ? "wait" : "pointer",
+            fontFamily: "var(--font-sans)",
+          }}
+        >
+          {isRemoving ? "Removing…" : "Remove"}
+        </button>
+      )}
+    </>
   );
 }
 

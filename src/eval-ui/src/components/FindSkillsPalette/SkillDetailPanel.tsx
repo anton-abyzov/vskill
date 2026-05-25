@@ -391,6 +391,12 @@ export function SkillDetailPanel({
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (installModalOpenRef.current) return;
+      const higherModalOpen =
+        typeof document !== "undefined" &&
+        document.querySelector(
+          "[data-testid='settings-modal'], [data-testid='install-targets-modal'], [data-testid='clipboard-export-dialog']",
+        );
+      if (higherModalOpen) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         handleBack();
@@ -509,6 +515,17 @@ export function SkillDetailPanel({
       }
       return;
     }
+    const installedCount = results.filter((r) => r.status === "installed").length;
+    const exportedCount = results.filter((r) => r.status === "exported").length;
+    if (installedCount === 0 && exportedCount === 0) {
+      const message = "Install finished without writing any selected target. Check the selected tool and try again.";
+      if (onToast) {
+        try { onToast(message, "error"); } catch { /* non-fatal */ }
+      } else {
+        dispatchToastFallback(message, "error", 0);
+      }
+      return;
+    }
     if (typeof window !== "undefined") {
       try {
         window.dispatchEvent(
@@ -520,20 +537,18 @@ export function SkillDetailPanel({
         // non-fatal
       }
     }
-    const installedCount = results.filter((r) => r.status === "installed").length;
-    const exportedCount = results.filter((r) => r.status === "exported").length;
     const message = exportedCount > 0
       ? `Installed ${displayName}; ${exportedCount} target${exportedCount === 1 ? "" : "s"} need paste.`
       : `Installed ${displayName} to ${installedCount} target${installedCount === 1 ? "" : "s"}.`;
+    // 0850 (AC-US2-01): don't auto-close the modal on success — the user
+    // needs to read the install path and the "Installed v<X>" badge.
+    // Modal stays in phase "done" until the user clicks the Done button.
     if (onToast) {
       try { onToast(message, "success"); } catch { /* non-fatal */ }
     } else {
       dispatchToastFallback(message, "success", 5000);
     }
-    if (exportedCount > 0) return;
-    setInstallModalOpen(false);
-    handleBack();
-  }, [publisher, slug, scope, displayName, onToast, handleBack]);
+  }, [publisher, slug, scope, displayName, onToast]);
 
   const trustTier: TrustTier = (meta?.trustTier as TrustTier | undefined) ?? "T1";
   const certTier: CertificationTier =
@@ -1015,6 +1030,7 @@ export function SkillDetailPanel({
         skill={`${publisher}/${slug}`}
         skillDisplayName={displayName}
         scope={scope}
+        targetVersion={selectedVersion}
         activeAgentId={resolvedActiveAgentId}
         onClose={() => setInstallModalOpen(false)}
         onSuccess={handleInstallModalSuccess}

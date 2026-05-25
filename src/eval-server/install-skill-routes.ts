@@ -483,6 +483,14 @@ async function runMultiInstallJob(opts: {
   };
   MULTI_JOBS.set(job.id, job);
 
+  // 0850 — terminal trace so users have visible evidence the install ran.
+  console.log("[install] start", JSON.stringify({
+    skill: opts.identifier,
+    scope: opts.scope,
+    agentIds: opts.agentIds,
+    projectRoot: opts.projectRoot,
+  }));
+
   // Run install async — caller returns the jobId synchronously, then
   // streams progress + final done event as agents complete.
   (async () => {
@@ -494,6 +502,12 @@ async function runMultiInstallJob(opts: {
         projectRoot: opts.projectRoot,
       });
       for (const agentResult of result.agents) {
+        console.log("[install] result", JSON.stringify({
+          skill: opts.identifier,
+          agentId: agentResult.agentId,
+          status: agentResult.status,
+          path: agentResult.detail,
+        }));
         emitMultiJob(job, "result", agentResult);
       }
       writeMultiInstallLockfile({

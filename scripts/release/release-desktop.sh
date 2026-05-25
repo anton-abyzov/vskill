@@ -246,15 +246,43 @@ page = replaceRequired(page, /RELEASE_TAG = "desktop-v[0-9]+\.[0-9]+\.[0-9]+"/, 
 fs.writeFileSync(pagePath, page);
 NODE
 unset DARWIN_SIG WINDOWS_SIG LINUX_SIG RELEASE_NOTES
-echo "   ✅ manifest + dashboard updated"
+
+# v1.0.47 lesson: the node block above said "updated" but the disk was clean
+# when step [7/8] reached `npm run build`. Fail fast here if the writes did not
+# actually land on the platform repo working tree.
+if [[ -d "${PLATFORM_DIR}/.git" ]]; then
+  ROUTE_DIFF=$(git -C "${PLATFORM_DIR}" diff --shortstat -- src/app/desktop/latest.json/route.ts 2>/dev/null || true)
+  PAGE_DIFF=$(git -C "${PLATFORM_DIR}" diff --shortstat -- src/app/desktop/page.tsx 2>/dev/null || true)
+  if [[ -z "${ROUTE_DIFF}" && -z "${PAGE_DIFF}" ]]; then
+    echo "❌ manifest+dashboard files not modified on disk after node write." >&2
+    echo "   route: ${ROUTE}" >&2
+    echo "   page:  ${PAGE}" >&2
+    echo "   git -C ${PLATFORM_DIR} status -s:" >&2
+    git -C "${PLATFORM_DIR}" status -s -- src/app/desktop/ >&2 || true
+    exit 1
+  fi
+  echo "   ✅ manifest + dashboard updated (route:${ROUTE_DIFF:-clean} page:${PAGE_DIFF:-clean})"
+else
+  echo "   ✅ manifest + dashboard updated (platform repo not git — skipped diff verify)"
+fi
 
 # ─── 7. Rebuild + redeploy vskill-platform ────────────────────────────────
 echo ">> [7/8] rebuilding + redeploying vskill-platform to Cloudflare..."
 (
   cd "${PLATFORM_DIR}"
+  # v1.0.47 lesson: Node 20 makes Next.js's `Collecting build traces` phase
+  # silently drop *.nft.json files, then `npx @opennextjs/cloudflare build`
+  # crashes with ENOENT. Node 22 works. Force it here regardless of the
+  # interactive shell's `nvm use`.
+  if [[ -s "${HOME}/.nvm/nvm.sh" ]]; then
+    # shellcheck disable=SC1091
+    . "${HOME}/.nvm/nvm.sh" >/dev/null 2>&1
+    nvm use 22 >/dev/null 2>&1 || echo "⚠️  nvm use 22 failed — proceeding with $(node --version)"
+  fi
+  echo "   using node $(node --version)"
   rm -rf .next .open-next
   npm run build >/tmp/release-${VERSION}/build.log 2>&1 || { echo "❌ npm run build failed (see /tmp/release-${VERSION}/build.log)"; exit 1; }
-  npm run build:worker >/tmp/release-${VERSION}/build-worker.log 2>&1 || { echo "❌ npm run build:worker failed"; exit 1; }
+  npm run build:worker >/tmp/release-${VERSION}/build-worker.log 2>&1 || { echo "❌ npm run build:worker failed (see /tmp/release-${VERSION}/build-worker.log)"; exit 1; }
   if [[ -z "${CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE:-}" && -f .env ]]; then
     LOCAL_HYPERDRIVE_URL="$(node -e "const fs=require('fs'); const text=fs.readFileSync('.env','utf8'); const line=text.split(/\\n/).find((entry)=>entry.startsWith('DATABASE_URL=')); if(!line) process.exit(0); let value=line.slice('DATABASE_URL='.length).trim(); if((value.startsWith('\\\"')&&value.endsWith('\\\"'))||(value.startsWith(\"'\")&&value.endsWith(\"'\"))) value=value.slice(1,-1); try{new URL(value); process.stdout.write(value);}catch{process.exit(0);}")"
     if [[ -n "${LOCAL_HYPERDRIVE_URL}" ]]; then

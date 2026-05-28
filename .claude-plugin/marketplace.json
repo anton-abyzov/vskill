@@ -22,9 +22,9 @@
     },
     {
       "name": "marketing",
-      "description": "Marketing automation — social media content creation, posting, and engagement across 11 platforms, plus Slack messaging",
+      "description": "Marketing automation — social media content creation, posting, and engagement across 11 platforms, Blotato batch scheduling (X/TikTok/IG/LinkedIn/YT/FB/Threads), plus Slack messaging",
       "source": "./plugins/marketing",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "category": "marketing"
     },
     {

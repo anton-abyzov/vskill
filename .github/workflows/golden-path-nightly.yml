@@ -1,0 +1,93 @@
+# 0858 — Twice-daily regression guard for the golden path:
+#   create-skill -> install -> run-with-a-non-default-model.
+#
+# This is the always-on backstop. The deterministic `stub` provider lane
+# (increment 0857) needs NO API key and NO local `claude` binary, so it runs
+# green on GitHub-hosted runners and proves the create/install/run-with-model
+# wiring never regresses. The matrix loud-skip gate guarantees a SKIP can never
+# masquerade as a pass — an all-skip run fails.
+#
+# The real local-model leg (claude-cli default + lm-studio/ollama) cannot run
+# here (hosted runners have no authenticated `claude` session / no localhost
+# model server). That leg is covered by the Mac-local scheduled task
+# `vskill-regression-daily`; this workflow's staleness step alerts if that
+# Mac run has gone stale.
+name: Golden Path (regression)
+
+on:
+  schedule:
+    # 06:00 and 18:00 UTC — twice daily, off US business hours.
+    - cron: "0 6,18 * * *"
+  workflow_dispatch: {}
+  # Also gate PRs that touch the model/install/create seams or the harness.
+  pull_request:
+    paths:
+      - "src/eval/**"
+      - "src/eval-server/**"
+      - "src/commands/**"
+      - "test/verify/**"
+
+concurrency:
+  group: golden-path-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Map secrets to job-level env so step-level `if:` can test them
+    # (the `secrets` context is not available inside `if:` expressions).
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (CLI + eval-ui bundle)
+        run: |
+          npm run build
+          npm run build:eval-ui
+
+      # Hermetic stub lane — the guaranteed always-on regression guard.
+      - name: Verify golden path (stub provider)
+        run: npm run verify
+
+      - name: Loud-skip gate (a SKIP must never read as green)
+        run: npm run verify:matrix
+
+      # Optional real-provider lane. Runs ONLY when ANTHROPIC_API_KEY is present;
+      # allowed to skip-loud, never to silently pass. Non-blocking by design.
+      - name: Verify golden path (real anthropic/haiku lane)
+        if: ${{ env.ANTHROPIC_API_KEY != '' }}
+        continue-on-error: true
+        env:
+          VSKILL_EVAL_PROVIDER: anthropic
+          VSKILL_EVAL_MODEL: claude-haiku-4-5
+        run: npm run verify
+
+      - name: Upload verify report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-result
+          path: test/verify/reports/
+          retention-days: 14
+
+      # Optional Slack alert on failure. No-op unless SLACK_WEBHOOK_URL is set,
+      # so the workflow stays self-contained; GitHub's scheduled-failure email
+      # to the repo owner is the always-on fallback.
+      - name: Notify Slack on failure
+        if: ${{ failure() && env.SLACK_WEBHOOK_URL != '' }}
+        run: |
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d "{\"text\":\"🔴 vskill golden-path regression FAILED on ${{ github.ref_name }} — run ${{ github.run_id }}\"}" \
+            "$SLACK_WEBHOOK_URL"

@@ -1,0 +1,6 @@
+{
+  "name": "tiny-test-plugin",
+  "version": "1.0.0",
+  "description": "Tiny local plugin used by 0853 verify harness",
+  "skills": ["./skills/hello-world"]
+}

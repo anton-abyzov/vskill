@@ -16,6 +16,8 @@
     "dev": "tsc --watch",
     "dev:eval-ui": "vite dev --config src/eval-ui/vite.config.ts",
     "test": "vitest run",
+    "verify": "node test/verify/run-verify.mjs",
+    "verify:matrix": "node --test test/verify/matrix.test.mjs",
     "test:e2e": "playwright test",
     "test:e2e:desktop": "playwright test --project=desktop",
     "test:bundle-size": "npx tsx scripts/check-bundle-size.ts",

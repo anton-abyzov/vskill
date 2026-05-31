@@ -48,7 +48,7 @@ export interface LlmClient {
   readonly model: string;
 }
 
-export type ProviderName = "anthropic" | "claude-cli" | "codex-cli" | "gemini-cli" | "lm-studio" | "ollama" | "openai" | "openrouter";
+export type ProviderName = "anthropic" | "claude-cli" | "codex-cli" | "gemini-cli" | "lm-studio" | "ollama" | "openai" | "openrouter" | "stub";
 
 function detectProvider(): ProviderName {
   return "claude-cli";
@@ -88,6 +88,7 @@ export function estimateDurationSec(
     "lm-studio":   [5, 30],
     "openai":      [4, 15],
     "openrouter":  [4, 15],
+    "stub":        [0, 0],
   };
   const [lo, hi] = perCall[provider] ?? [5, 20];
   const totalCalls = totalCases + totalAssertions; // 1 generate + N judges
@@ -119,6 +120,8 @@ export function createLlmClient(overrides?: LlmOverrides): LlmClient {
       return createOpenAIClient(modelOverride);
     case "openrouter":
       return createOpenRouterClient(modelOverride);
+    case "stub":
+      return createStubClient(modelOverride);
     default:
       throw new Error(
         `Unknown VSKILL_EVAL_PROVIDER: "${provider}". Use "claude-cli", "codex-cli", "gemini-cli", "anthropic", "openai", "ollama", "lm-studio", or "openrouter".`,
@@ -137,6 +140,7 @@ const CLAUDE_CLI_NORMALIZE: Record<string, string> = {
   "claude-haiku": "haiku",
   "claude-sonnet-4-6": "sonnet",
   "claude-sonnet-4-20250514": "sonnet",
+  "claude-opus-4-8": "opus",
   "claude-opus-4-7": "opus",
   "claude-opus-4-6": "opus",
   "claude-opus-4-20250514": "opus",
@@ -634,6 +638,111 @@ function createLmStudioClient(modelOverride?: string): LlmClient {
         durationMs: Date.now() - start,
         inputTokens,
         outputTokens,
+        cost: 0,
+        billingMode: "free" as const,
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Provider: stub (deterministic, in-process — TEST SEAM, NOT user-facing)
+//
+// 0857: a content-addressed fake provider that makes the
+// create-skill -> install -> run-with-a-non-default-model pipeline runnable in
+// CI with zero network, zero API key, and zero `claude` binary. It is the
+// regression-guarantee engine behind `test/verify/units/golden-path.verify.mjs`.
+//
+// HIDDEN BY DESIGN: `stub` is NOT in `KNOWN_PROVIDER_NAMES` or
+// `detectAvailableProviders()` (src/eval-server/api-routes.ts), so it never
+// appears in /api/config or the Studio model picker. It is selectable ONLY when
+// `overrides.provider === "stub"` OR `process.env.VSKILL_EVAL_PROVIDER === "stub"`.
+//
+// Determinism: `generate()` is a pure function of (systemPrompt, userPrompt).
+// The same prompt yields byte-identical output across calls and processes
+// (FNV-1a 32-bit hash → stable slug). No clock, no randomness in the payload.
+//
+// Model honoring: the resolved model (override → VSKILL_EVAL_MODEL → "sonnet")
+// is exposed as `client.model` AND echoed inside the JSON envelope's `model`
+// field, so "non-default model selection is honored" is directly assertable at
+// both the client surface and in the emitted SKILL.md / benchmark.json.
+//
+// Single-envelope contract: the returned text is one JSON object carrying every
+// field each downstream parser needs, so the SAME stub serves the skill-gen
+// body parser (`name/description/model/body`), the skill-gen evals parser
+// (`evals`), and the judge parser (`pass/reasoning`) without branching on which
+// caller invoked it.
+// ---------------------------------------------------------------------------
+
+/** FNV-1a 32-bit hash → stable hex string. Pure, no deps. */
+function fnv1a(input: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    // 32-bit FNV prime multiply (use Math.imul to stay in 32-bit space).
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+function createStubClient(modelOverride?: string): LlmClient {
+  const model = modelOverride || process.env.VSKILL_EVAL_MODEL || "sonnet";
+
+  return {
+    model,
+    async generate(systemPrompt: string, userPrompt: string): Promise<GenerateResult> {
+      const start = Date.now();
+      // Content address: stable across calls/processes for the same prompt.
+      const digest = fnv1a(`${systemPrompt}\n\n${userPrompt}`);
+      // Skill slug must be lowercase-alphanumeric-dash to satisfy
+      // parseBodyResponse's name sanitizer. Derive it deterministically.
+      const slug = `stub-skill-${digest}`;
+
+      // ONE envelope satisfies every consumer. Extra keys are ignored by each
+      // parser, so every caller reads what it needs from this single object:
+      //   - skill-gen body  (parseBodyResponse / cleanAndParseJson): name, model, body
+      //   - skill-gen evals (parseEvalsResponse): evals
+      //   - eval-init gen   (parseGeneratedEvals): skill_name + non-empty evals
+      //   - judge           (parseJudgeResponse): pass, reasoning
+      const envelope = {
+        // eval-init generator requires skill_name + a non-empty evals array.
+        skill_name: slug,
+        // skill-gen body parser
+        name: slug,
+        description: `Deterministic stub skill (model=${model}, digest=${digest}). Generated by the 0857 stub provider for the verify harness.`,
+        // echo the requested model so SKILL.md frontmatter + benchmark.model
+        // both reflect the chosen (possibly non-default) model.
+        model,
+        allowedTools: "",
+        body: `# ${slug}\n\nDeterministic stub output for content address ${digest}.\nOutput the line: \`hello from ${slug}\`.\n`,
+        // skill-gen + eval-init evals parsers
+        evals: [
+          {
+            id: 1,
+            name: "stub deterministic case",
+            prompt: "Say hello.",
+            expected_output: `hello from ${slug}`,
+            files: [],
+            assertions: [
+              { id: "a1", text: "Output greets deterministically", type: "boolean" },
+            ],
+          },
+        ],
+        // judge parser — every assertion passes deterministically.
+        pass: true,
+        reasoning: `stub judge: deterministic pass for digest ${digest}`,
+      };
+
+      // Wrap in a ```json fence: the eval-init generator REQUIRES a fence, while
+      // every other consumer (body cleanAndParseJson, judge parseJudgeResponse)
+      // strips or fence-matches first, so one fenced envelope serves them all.
+      const text = "```json\n" + JSON.stringify(envelope) + "\n```";
+
+      return {
+        text,
+        durationMs: Date.now() - start,
+        inputTokens: null,
+        outputTokens: null,
         cost: 0,
         billingMode: "free" as const,
       };

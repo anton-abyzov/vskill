@@ -15,6 +15,10 @@ async function snapshotInstallState(port, token, skill) {
 registerUnit({
   id: "U-STUDIO-API-INSTALL-STATE",
   command: "GET /api/studio/install-state?skill=hello-world (vskill studio)",
+  // 0858: spawns `vskill studio` (a real HTTP server serving the prebuilt
+  // bundle) and drives its API. Not hermetic on a bare runner.
+  ciSafe: false,
+  ciSkipReason: "requires a spawnable vskill studio server (HTTP install-state API)",
   surfaceSchema: simpleValidator({ scenario: "string" }),
   invariants: [
     { id: "studio-started",

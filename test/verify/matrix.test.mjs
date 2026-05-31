@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 
 import { listUnits } from "./registry.mjs";
 import { runUnit } from "./runner.mjs";
+import { isCiMode, isCiSafe } from "./ci-mode.mjs";
 // Imports register the units.
 import "./units/install.verify.mjs";
 import "./units/skill-new.verify.mjs";
@@ -23,8 +24,23 @@ import "./units/studio-api.verify.mjs";
 // 0857: the model-run regression-guarantee unit.
 import "./units/golden-path.verify.mjs";
 
+const CI = isCiMode();
+
+// 0858: structural assertions are hermetic (they only read declarations, never
+// execute a unit), so they hold on a bare runner. But to honor the CI contract —
+// "if it iterates all units, skip ciSafe:false ones under CI with a warning,
+// mirroring run-verify" — we filter the iteration under CI and warn loudly.
+function unitsForIteration() {
+  if (!CI) return listUnits();
+  return listUnits().filter((u) => {
+    if (isCiSafe(u)) return true;
+    console.warn(`::warning:: verify CI-SKIP (matrix) ${u.id} — ${u.ciSkipReason || "ciSafe:false"}`);
+    return false;
+  });
+}
+
 test("AC-US2-01: every unit has at least one probe fixture", () => {
-  for (const u of listUnits()) {
+  for (const u of unitsForIteration()) {
     const probes = u.fixtures.filter((f) => f.probe === true);
     assert.ok(
       probes.length >= 1,
@@ -34,7 +50,7 @@ test("AC-US2-01: every unit has at least one probe fixture", () => {
 });
 
 test("AC-US2-02: every unit declares at least one invariant", () => {
-  for (const u of listUnits()) {
+  for (const u of unitsForIteration()) {
     assert.ok(
       u.invariants.length >= 1,
       `Unit "${u.id}" declares zero invariants — surface would be unverified beyond schema.`,
@@ -64,6 +80,14 @@ test("AC-US2-01/02: loud-skip gate — ≥1 model-run PASS, every SKIP warns", a
   const golden = listUnits().find((u) => u.id === "U-GOLDEN");
   assert.ok(golden, "U-GOLDEN unit must be registered for the loud-skip gate");
 
+  // 0858: the core invariant — U-GOLDEN MUST be ciSafe so it still EXECUTES (and
+  // must PASS) under CI. If it were ever marked ciSafe:false, CI mode would mask
+  // a real golden-path regression. Guard against that here.
+  assert.ok(
+    isCiSafe(golden),
+    "U-GOLDEN must be ciSafe (it must run + PASS in CI to guard the golden path)",
+  );
+
   const result = await runUnit(golden);
 
   // The probe fixtures encode lie-detectors (expected BLOCKED / FAIL), so the
@@ -90,4 +114,47 @@ test("AC-US2-01/02: loud-skip gate — ≥1 model-run PASS, every SKIP warns", a
     `LOUD-SKIP GATE: zero model-run lanes PASSed (${happy.length} happy fixtures, ${skipCount} BLOCKED). ` +
       `An all-SKIP run must NOT be green — the deterministic stub lane is expected to PASS without any binary/key.`,
   );
+});
+
+// ---------------------------------------------------------------------------
+// 0858 AC-US1-01/02 — CI-SKIP CLASSIFICATION GUARD.
+//
+// Pin the exact set of env-dependent (ciSafe:false) units so a future edit can't
+// silently flip the core regression-guarantee unit (U-GOLDEN) — or any hermetic
+// unit — into the skipped bucket and mask a real failure on the CI lane.
+// ---------------------------------------------------------------------------
+test("AC-US1-01/02: CI-skip classification is exactly the env-dependent units", () => {
+  const EXPECTED_CI_SKIPPED = [
+    "U-INSTALL",
+    "U-LIST",
+    "U-PIN",
+    "U-LOCKFILE-CYCLE",
+    "U-STUDIO-API-INSTALL-STATE",
+  ].sort();
+  const HERMETIC = ["U-GOLDEN", "U-SKILL-NEW", "U-REMOVE", "U-INFO", "U-OUTDATED", "U-AUDIT", "U-INIT"];
+
+  const actualSkipped = listUnits()
+    .filter((u) => !isCiSafe(u))
+    .map((u) => u.id)
+    .sort();
+  assert.deepEqual(
+    actualSkipped,
+    EXPECTED_CI_SKIPPED,
+    "ciSafe:false set drifted — env-dependent classification must stay pinned",
+  );
+
+  // Every ciSafe:false unit must carry a human reason for the ::warning::.
+  for (const u of listUnits().filter((x) => !isCiSafe(x))) {
+    assert.ok(
+      typeof u.ciSkipReason === "string" && u.ciSkipReason.length > 0,
+      `Unit "${u.id}" is ciSafe:false but has no ciSkipReason — CI annotation would be empty.`,
+    );
+  }
+
+  // The hermetic core (incl. U-GOLDEN) must NEVER be CI-skipped.
+  for (const id of HERMETIC) {
+    const u = listUnits().find((x) => x.id === id);
+    assert.ok(u, `expected hermetic unit ${id} to be registered`);
+    assert.ok(isCiSafe(u), `${id} must stay ciSafe (hermetic, must run in CI)`);
+  }
 });

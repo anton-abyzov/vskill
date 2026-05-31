@@ -21,6 +21,10 @@ function readListSurface(workdir, runResult) {
 registerUnit({
   id: "U-LIST",
   command: "vskill list --installed --json",
+  // 0858: depends on installBaseline cross-installing across detected coding
+  // agents; on a bare runner the after-install list surface differs.
+  ciSafe: false,
+  ciSkipReason: "requires real coding agents installed (baseline install cross-agent layout)",
   surfaceSchema: simpleValidator({ exitCode: "number", filesystemInstalled: "array" }),
   invariants: [
     { id: "exit-defined", description: "list exits with a defined code (not killed)",

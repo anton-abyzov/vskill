@@ -113,6 +113,11 @@ function runInstall(ctx) {
 registerUnit({
   id: "U-INSTALL",
   command: "vskill install --plugin-dir <local> --plugin tiny-test-plugin --no-enable",
+  // 0858: the `cross-agent-install` invariant asserts ≥4 detected coding agents
+  // (claude/cursor/codex/kiro/aider/pi). A bare GitHub runner has none installed,
+  // so that invariant FAILs for environmental reasons, not a real regression.
+  ciSafe: false,
+  ciSkipReason: "requires real coding agents installed (cross-agent install asserts ≥4 detected agents)",
   surfaceSchema: {
     // Inline minimal validator — no Zod dep needed in umbrella.
     safeParse(s) {

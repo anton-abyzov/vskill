@@ -6,6 +6,10 @@ import { runVskill, installBaseline, readInstalledSkills, readLockfile, simpleVa
 registerUnit({
   id: "U-LOCKFILE-CYCLE",
   command: "install → pin → remove → re-install lifecycle",
+  // 0858: the probe asserts "hello-world present exactly once PER detected agent"
+  // — on a bare runner with no coding agents there are zero agent dirs to count.
+  ciSafe: false,
+  ciSkipReason: "requires real coding agents installed (per-agent once-only count over cross-agent dirs)",
   surfaceSchema: simpleValidator({ steps: "array" }),
   invariants: [
     { id: "every-step-exits-defined",

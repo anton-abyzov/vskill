@@ -11,6 +11,13 @@ const mocks = vi.hoisted(() => ({
   mkdirSync: vi.fn(),
   unlinkSync: vi.fn(),
   generate: vi.fn(),
+  // 0857: a real spy so we can assert createLlmClient is called with the
+  // parsed { provider, model } from --judge-model. `model` echoes the override
+  // (or "test-model") so the run still produces a benchmark.
+  createLlmClient: vi.fn((overrides?: { provider?: string; model?: string }) => ({
+    generate: mocks.generate,
+    model: overrides?.model ?? "test-model",
+  })),
 }));
 
 vi.mock("node:fs", () => ({
@@ -22,10 +29,7 @@ vi.mock("node:fs", () => ({
 }));
 
 vi.mock("../../../eval/llm.js", () => ({
-  createLlmClient: () => ({
-    generate: mocks.generate,
-    model: "test-model",
-  }),
+  createLlmClient: mocks.createLlmClient,
   estimateDurationSec: () => ({ minSec: 30, maxSec: 60, label: "30s\u201360s" }),
 }));
 
@@ -91,6 +95,14 @@ const VALID_EVALS = {
 describe("runEvalRun", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    // 0857: vi.resetAllMocks() clears the hoisted createLlmClient factory impl —
+    // re-establish it so each test gets a client whose model echoes any override.
+    mocks.createLlmClient.mockImplementation(
+      (overrides?: { provider?: string; model?: string }) => ({
+        generate: mocks.generate,
+        model: overrides?.model ?? "test-model",
+      }),
+    );
     // Default: evals.json and SKILL.md both exist
     mocks.existsSync.mockReturnValue(true);
     mocks.readFileSync.mockImplementation((path: string) => {
@@ -217,5 +229,51 @@ describe("runEvalRun", () => {
     );
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
+  });
+
+  // -------------------------------------------------------------------------
+  // 0857 — model-selection plumbing guard.
+  //
+  // A regression that drops the `--judge-model` flag would make every judge
+  // call fall back to the default client. This test pins that the parsed
+  // { provider, model } reaches createLlmClient, so the flag can never be
+  // silently ignored.
+  // -------------------------------------------------------------------------
+  it("threads --judge-model into createLlmClient as { provider, model }", async () => {
+    mocks.generate.mockImplementation(async () => {
+      return { text: JSON.stringify({ pass: true, reasoning: "ok" }) };
+    });
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await runEvalRun("/skills/test-skill", { judgeModel: "anthropic/claude-opus-4-6" });
+
+    // The judge client MUST be constructed from the parsed flag — not defaulted.
+    expect(mocks.createLlmClient).toHaveBeenCalledWith({
+      provider: "anthropic",
+      model: "claude-opus-4-6",
+    });
+
+    vi.restoreAllMocks();
+  });
+
+  it("does not pass a judge provider/model when --judge-model is absent", async () => {
+    mocks.generate.mockImplementation(async () => {
+      return { text: JSON.stringify({ pass: true, reasoning: "ok" }) };
+    });
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runEvalRun("/skills/test-skill");
+
+    // Only the main client is built (no overrides object with provider+model).
+    const sawJudgeProviderModel = mocks.createLlmClient.mock.calls.some(
+      (c: unknown[]) => {
+        const arg = c[0] as { provider?: string; model?: string } | undefined;
+        return !!arg && typeof arg.provider === "string" && typeof arg.model === "string";
+      },
+    );
+    expect(sawJudgeProviderModel).toBe(false);
+
+    vi.restoreAllMocks();
   });
 });

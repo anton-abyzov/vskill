@@ -154,6 +154,22 @@ export function tokensEqual(
  *   - any non-/api/* path (static files, root, eval-ui shell)
  *   - OPTIONS preflight (CORS handshake; no token possible from XHR)
  */
+// 0855: GET EventSource stream paths that the browser opens via `new
+// EventSource(url)`. The EventSource API CANNOT set request headers, so these
+// streams authenticate via a `?studioToken=<t>` query param instead of the
+// `X-Studio-Token` header — validated with the same timing-safe compare. The
+// exemption is GET-only and limited to this allowlist so it cannot widen the
+// 0836 gate for any other path or method.
+//   - /api/v1/skills/stream — notification stream (proxied to the platform
+//     UpdateHub). This is the one that 0836 silently broke (no live toasts).
+//   - /api/events / /api/studio/ops/stream — local eval-server SSE streams
+//     opened by EventSource; same header-less limitation applies.
+const EVENTSOURCE_STREAM_PATHS = new Set<string>([
+  "/api/v1/skills/stream",
+  "/api/events",
+  "/api/studio/ops/stream",
+]);
+
 export function tokenGate(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -164,18 +180,20 @@ export function tokenGate(
   // gates by its parsed pathname, not by the raw string. Without this,
   // `rawUrl.startsWith("/api/")` returns false for absolute-form URLs and
   // the router's pathname-based dispatch happily executes the route.
-  let pathname: string;
+  let parsedUrl: URL;
   try {
-    pathname = new URL(rawUrl, "http://127.0.0.1").pathname;
+    parsedUrl = new URL(rawUrl, "http://127.0.0.1");
   } catch {
     // Truly malformed URL — let the underlying handlers reject it.
     return true;
   }
+  const pathname = parsedUrl.pathname;
+  const method = (req.method || "GET").toUpperCase();
 
   // Non-/api paths are static / SPA shell — never gated.
   if (!pathname.startsWith("/api/")) return true;
   // CORS preflight cannot send custom headers; let it pass.
-  if ((req.method || "GET").toUpperCase() === "OPTIONS") return true;
+  if (method === "OPTIONS") return true;
   // 0836 followup (Codex C#1): /api/health is the unauthenticated liveness
   // probe used by the desktop sidecar boot. The Tauri shell calls it BEFORE
   // it has parsed the studio_token from the sidecar's stdout, so token-gating
@@ -191,8 +209,27 @@ export function tokenGate(
   if (pathname === "/api/oauth/github/callback") return true;
   if (pathname === "/api/oauth/github/desktop-complete") return true;
 
-  const supplied = readHeader(req, "x-studio-token");
   const expected = getStudioToken();
+
+  // 0855: EventSource streams carry the token in a `?studioToken=<t>` query
+  // param because the browser EventSource API cannot set request headers.
+  // Scope: GET only + an allowlist of known stream paths. Validate with the
+  // SAME timing-safe compare used for the header. On success, STRIP the
+  // studioToken param from req.url BEFORE returning so it never reaches the
+  // upstream platform proxy (which reads req.url after the gate) and never
+  // leaks to verified-skill.com. The token is never logged.
+  if (method === "GET" && EVENTSOURCE_STREAM_PATHS.has(pathname)) {
+    const qpToken = parsedUrl.searchParams.get("studioToken");
+    if (tokensEqual(qpToken, expected)) {
+      parsedUrl.searchParams.delete("studioToken");
+      req.url = `${parsedUrl.pathname}${parsedUrl.search}`;
+      return true;
+    }
+    // Wrong/missing query token falls through to the header check below; if
+    // that also fails the request is rejected (boundary preserved).
+  }
+
+  const supplied = readHeader(req, "x-studio-token");
   if (tokensEqual(supplied, expected)) return true;
 
   // Reject. Empty body avoids leaking the expected-length info beyond what
@@ -205,7 +242,7 @@ export function tokenGate(
   }
   // eslint-disable-next-line no-console
   console.warn(
-    `[router] X-Studio-Token rejected for ${req.method || "GET"} ${pathname}`,
+    `[router] X-Studio-Token rejected for ${method} ${pathname}`,
   );
   return false;
 }

@@ -191,3 +191,22 @@ export function _resetStudioTokenBridgeForTests(): void {
 export function getStudioTokenForTesting(): string | null {
   return cachedToken;
 }
+
+/**
+ * 0855: synchronous accessor for non-fetch callers that need to embed the
+ * per-process token in a URL — specifically the notification `EventSource`,
+ * which CANNOT set request headers and therefore can't ride the patched
+ * `globalThis.fetch`. Returns the cached token, or reads it from the injected
+ * DOM script (the primary source in both browser and Tauri). Returns `null`
+ * on verified-skill.com (no injected token) so the platform's cookie-auth
+ * stream URL stays untouched.
+ */
+export function getStudioTokenForUrl(): string | null {
+  if (cachedToken) return cachedToken;
+  const fromDom = readStudioTokenFromDom();
+  if (fromDom) {
+    cachedToken = fromDom;
+    return fromDom;
+  }
+  return null;
+}

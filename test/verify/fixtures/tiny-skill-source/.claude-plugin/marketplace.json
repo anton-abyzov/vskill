@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "tiny-verify-marketplace",
+  "owner": { "name": "0853-verify-harness", "email": "noreply@example.com" },
+  "plugins": [
+    {
+      "name": "tiny-test-plugin",
+      "source": "./plugins/tiny-test-plugin",
+      "version": "1.0.0",
+      "description": "Tiny local plugin used by 0853 verify harness",
+      "category": "developer-tools"
+    }
+  ]
+}

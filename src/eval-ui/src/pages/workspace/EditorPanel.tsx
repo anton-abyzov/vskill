@@ -568,6 +568,7 @@ export function EditorPanel() {
           >
             <textarea
               ref={textareaRef}
+              data-testid="skill-editor-textarea"
               value={skillContent}
               onChange={(e) => { if (!isReadOnly && !saving) dispatch({ type: "SET_CONTENT", content: e.target.value }); }}
               onKeyDown={handleKeyDown}

@@ -1,0 +1,77 @@
+# 0860 — Nightly submission-lifecycle + theme-readability E2E.
+#
+# ADDITIVE sibling to e2e-live-nightly.yml. This lane is deliberately SEPARATE
+# and self-contained:
+#
+#   - The submission-lifecycle spec (e2e/submission-lifecycle-live.spec.ts) is
+#     fully STUBBED on the local eval-server origin (page.route on /api/git/*
+#     and /api/v1/submissions*). It drives the whole in-app lifecycle —
+#     improve → Publish drawer → in-app submit → My Queue → forced terminal
+#     decision (APPROVED + REJECTED) → bell + update-locally — WITHOUT a live
+#     wrangler/Postgres platform. So this lane does NOT pay the wrangler
+#     cold-start cost and does NOT set PLAYWRIGHT_RUN_LIVE=1 (no globalSetup,
+#     no sibling-repo checkout).
+#
+#   - The theme-readability guard (e2e/account-theme-readability.spec.ts, the
+#     default project) is the regression guard for the `--bg-elevated` fix in
+#     src/eval-ui/src/styles/globals.css. It only needs the eval-ui shell, so
+#     it runs here too as a fast WCAG-contrast tripwire.
+#
+# The existing e2e-live-nightly.yml (real wrangler + Postgres push pipeline) is
+# untouched — both lanes run on their own cron and report independently.
+
+name: E2E Lifecycle (nightly)
+
+on:
+  schedule:
+    # 05:30 UTC daily — 30 min ahead of the live-wire lane so the two reports
+    # don't land at the same minute.
+    - cron: "30 5 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  lifecycle-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout vskill
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      # Build BOTH the CLI (dist/index.js — the eval-server entrypoint) and the
+      # eval-ui bundle. The lifecycle spec depends on the `skill-editor-textarea`
+      # testid added to EditorPanel.tsx, so the bundle MUST be freshly built.
+      - name: Build vskill (CLI + eval-ui)
+        run: |
+          npm run build
+          npm run build:eval-ui
+
+      - name: Install Playwright browser (chromium)
+        run: npx playwright install --with-deps chromium
+
+      # Submission lifecycle — `live` project, but NO PLAYWRIGHT_RUN_LIVE: the
+      # spec stubs the platform, so the default eval-server webServer (port
+      # 3077) is all it needs. The `live` project's `grep: /@live/` + the
+      # `-live.spec.ts` testMatch select exactly this spec.
+      - name: Run submission-lifecycle E2E (stubbed)
+        run: npx playwright test --project=live e2e/submission-lifecycle-live.spec.ts
+
+      # Theme-readability guard — default project, eval-ui only.
+      - name: Run Account theme-readability guard
+        run: npx playwright test --project=default e2e/account-theme-readability.spec.ts
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-lifecycle
+          path: playwright-report/
+          retention-days: 7

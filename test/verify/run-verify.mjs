@@ -49,6 +49,7 @@ function verdictBadge(v) {
   if (v === "PASS") return c("green", "PASS");
   if (v === "FAIL") return c("red", "FAIL");
   if (v === "BLOCKED") return c("yellow", "BLOCKED");
+  if (v === "SKIP") return c("yellow", "SKIP");
   return c("dim", v);
 }
 
@@ -66,9 +67,15 @@ function verdictBadge(v) {
   // Print the grid.
   console.log("");
   console.log(c("bold", "Verify runtime — phase-3-verify port (0853)"));
+  if (result.ci) {
+    console.log(c("yellow", "CI mode: env-dependent units (ciSafe:false) SKIP-LOUD; hermetic units still run."));
+  }
   console.log(c("dim", "─".repeat(64)));
   for (const u of result.units) {
     console.log(`${verdictBadge(u.verdict)}  ${c("bold", u.unitId)}  ${c("dim", u.command)}`);
+    if (u.verdict === "SKIP") {
+      console.log(c("yellow", `   ⊘ CI-SKIP — ${u.skipReason ?? "ciSafe:false"}`));
+    }
     for (const f of u.fixtures) {
       const tag = f.probe ? c("cyan", "🔍 probe") : "✅ happy";
       const ms = `${f.durationMs}ms`;
@@ -87,7 +94,10 @@ function verdictBadge(v) {
     }
   }
   console.log(c("dim", "─".repeat(64)));
-  console.log(`Overall: ${verdictBadge(result.verdict)}    Report: ${c("dim", REPORT_PATH)}`);
+  const ran = result.units.filter((u) => u.verdict !== "SKIP").length;
+  const skipped = result.units.length - ran;
+  const tally = result.ci ? `  (${ran} ran, ${skipped} CI-skipped)` : "";
+  console.log(`Overall: ${verdictBadge(result.verdict)}${c("dim", tally)}    Report: ${c("dim", REPORT_PATH)}`);
   console.log(`Agent handle: ${c("dim", AGENT_HANDLE_PATH)}`);
 
   process.exit(result.verdict === "PASS" ? 0 : 1);

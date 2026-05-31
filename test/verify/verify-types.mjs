@@ -36,6 +36,11 @@
  * @property {any}    surfaceSchema     - Zod schema for surface
  * @property {Invariant[]} invariants
  * @property {Fixture[]} fixtures
+ * @property {boolean} [ciSafe]         - 0858: false = SKIP-LOUD under CI (needs a
+ *   developer machine: real coding agents installed or a spawnable studio).
+ *   Defaults to true (hermetic, always runs).
+ * @property {string} [ciSkipReason]    - 0858: human reason surfaced in the
+ *   ::warning:: annotation when this unit is CI-skipped.
  *
  * @typedef {Object} FixtureResult
  * @property {string} unitId
@@ -54,10 +59,13 @@
  * @property {string} command
  * @property {Verdict} verdict
  * @property {FixtureResult[]} fixtures
+ * @property {boolean} [skipped]    - 0858: true when CI-skipped (not executed)
+ * @property {string} [skipReason]  - 0858: ciSkipReason echoed onto the result
  *
  * @typedef {Object} RunAllResult
  * @property {string} version
  * @property {string} runAt
+ * @property {boolean} [ci]         - 0858: true when run under CI-skip semantics
  * @property {Verdict} verdict
  * @property {UnitResult[]} units
  */

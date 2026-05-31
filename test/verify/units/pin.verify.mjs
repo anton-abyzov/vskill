@@ -5,6 +5,10 @@ import { runVskill, installBaseline, readLockfile, simpleValidator } from "../li
 registerUnit({
   id: "U-PIN",
   command: "vskill pin hello-world 1.0.0",
+  // 0858: pin lifecycle runs against a baseline install whose scope/lockfile
+  // shape depends on detected coding agents — not reproducible on a bare runner.
+  ciSafe: false,
+  ciSkipReason: "requires real coding agents installed (pin runs against cross-agent baseline install)",
   surfaceSchema: simpleValidator({ exitCode: "number" }),
   invariants: [
     { id: "pin-exits-defined", description: "pin always exits with a defined code (real bug if it hangs)",

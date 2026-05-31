@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { runSchema } from "./verifiers/schema.mjs";
 import { runInvariants } from "./verifiers/invariants.mjs";
 import { listUnits, buildManifest } from "./registry.mjs";
+import { isCiMode, isCiSafe, warnCiSkip } from "./ci-mode.mjs";
 
 /**
  * @param {import("./verify-types.mjs").VerifiableUnit} unit
@@ -84,21 +85,53 @@ export async function runUnit(unit) {
   return { unitId: unit.id, command: unit.command, verdict, fixtures };
 }
 
-/** @returns {Promise<import("./verify-types.mjs").RunAllResult>} */
-export async function runAll() {
+/**
+ * 0858: a CI-skipped unit is NOT executed. It records a SKIP verdict with the
+ * declared reason and zero fixtures, and is excluded from the overall roll-up.
+ * @param {import("./verify-types.mjs").VerifiableUnit} unit
+ * @returns {import("./verify-types.mjs").UnitResult}
+ */
+function skipUnit(unit) {
+  return {
+    unitId: unit.id,
+    command: unit.command,
+    verdict: "SKIP",
+    skipped: true,
+    skipReason: unit.ciSkipReason || "ciSafe:false",
+    fixtures: [],
+  };
+}
+
+/**
+ * @param {{ ci?: boolean }} [opts]
+ * @returns {Promise<import("./verify-types.mjs").RunAllResult>}
+ */
+export async function runAll(opts = {}) {
+  const ci = opts.ci ?? isCiMode();
   /** @type {import("./verify-types.mjs").UnitResult[]} */
   const units = [];
   for (const u of listUnits()) {
+    // CI mode: SKIP-LOUD any unit that declares ciSafe:false. It is not run, so
+    // it can neither PASS nor FAIL — it is excluded from the roll-up entirely.
+    if (ci && !isCiSafe(u)) {
+      warnCiSkip(u);
+      units.push(skipUnit(u));
+      continue;
+    }
     units.push(await runUnit(u));
   }
-  const verdict = units.some((u) => u.verdict === "FAIL")
+  // SKIP units never count toward the verdict. A real FAIL still fails; a real
+  // BLOCKED (act-time throw on a unit that DID run) still blocks.
+  const scored = units.filter((u) => u.verdict !== "SKIP");
+  const verdict = scored.some((u) => u.verdict === "FAIL")
     ? "FAIL"
-    : units.some((u) => u.verdict === "BLOCKED")
+    : scored.some((u) => u.verdict === "BLOCKED")
       ? "BLOCKED"
       : "PASS";
   return {
     version: "1.0",
     runAt: new Date().toISOString(),
+    ci,
     verdict,
     units,
   };

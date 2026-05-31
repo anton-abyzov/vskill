@@ -269,6 +269,173 @@ describe("tokenGate (US-002 AC-US2-03, AC-US2-04, AC-US2-05)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// 0855 US-001 / US-002 — query-param studioToken exemption for EventSource
+// streams. The browser `EventSource` API cannot set request headers, so the
+// notification stream (`GET /api/v1/skills/stream`) was being 401'd by the
+// 0836 header-only gate — killing live toasts. The fix: accept the token as
+// a `?studioToken=<t>` query param on known GET stream paths, validated with
+// the SAME timing-safe compare. The token must be stripped from req.url
+// before the request is proxied upstream, and must never be logged.
+// ---------------------------------------------------------------------------
+describe("tokenGate EventSource query-param exemption (0855 US-001/US-002)", () => {
+  beforeEach(() => {
+    _resetStudioTokenForTests();
+  });
+
+  it("AC-US1-01: GET /api/v1/skills/stream?studioToken=<valid> passes the gate", () => {
+    const token = getStudioToken();
+    const req = fakeReq({
+      url: `/api/v1/skills/stream?skills=a,b&studioToken=${token}`,
+    });
+    const { res, state } = fakeRes();
+    const passed = tokenGate(req, res);
+    expect(passed).toBe(true);
+    expect(state.ended).toBe(false);
+    expect(state.status).toBeUndefined();
+  });
+
+  it("AC-US2-04: the studioToken param is stripped from req.url before proxy", () => {
+    const token = getStudioToken();
+    const req = fakeReq({
+      url: `/api/v1/skills/stream?skills=a,b&studioToken=${token}`,
+    });
+    const { res } = fakeRes();
+    const passed = tokenGate(req, res);
+    expect(passed).toBe(true);
+    // The proxy reads req.url AFTER the gate returns. The token must be gone,
+    // but the legitimate ?skills= filter must survive.
+    expect(req.url).not.toContain("studioToken");
+    expect(req.url).not.toContain(token);
+    expect(req.url).toContain("skills=a%2Cb");
+    expect(req.url?.startsWith("/api/v1/skills/stream")).toBe(true);
+  });
+
+  it("AC-US2-01: GET /api/v1/skills/stream with NO token is still 401", () => {
+    const req = fakeReq({ url: "/api/v1/skills/stream?skills=a,b" });
+    const { res, state } = fakeRes();
+    const passed = tokenGate(req, res);
+    expect(passed).toBe(false);
+    expect(state.status).toBe(401);
+  });
+
+  it("AC-US2-02: GET /api/v1/skills/stream?studioToken=<wrong-same-length> is 401", () => {
+    const token = getStudioToken();
+    const wrong = "X".repeat(token.length);
+    const req = fakeReq({
+      url: `/api/v1/skills/stream?studioToken=${wrong}`,
+    });
+    const { res, state } = fakeRes();
+    const passed = tokenGate(req, res);
+    expect(passed).toBe(false);
+    expect(state.status).toBe(401);
+  });
+
+  it("AC-US2-02: GET /api/v1/skills/stream?studioToken=<wrong-length> is 401", () => {
+    const req = fakeReq({
+      url: "/api/v1/skills/stream?studioToken=too-short",
+    });
+    const { res, state } = fakeRes();
+    const passed = tokenGate(req, res);
+    expect(passed).toBe(false);
+    expect(state.status).toBe(401);
+  });
+
+  it("AC-US2-05: the query token NEVER appears in any log line on rejection", () => {
+    const token = getStudioToken();
+    const wrong = "wrongtoken-leak-canary-aaa-bbb-ccc-ddd-eee".slice(
+      0,
+      token.length,
+    );
+    const logs: string[] = [];
+    const origLog = console.log;
+    const origWarn = console.warn;
+    console.log = (...a: unknown[]) => logs.push(a.map(String).join(" "));
+    console.warn = (...a: unknown[]) => logs.push(a.map(String).join(" "));
+    try {
+      const req = fakeReq({
+        url: `/api/v1/skills/stream?studioToken=${wrong}`,
+      });
+      const { res } = fakeRes();
+      tokenGate(req, res);
+    } finally {
+      console.log = origLog;
+      console.warn = origWarn;
+    }
+    for (const line of logs) {
+      expect(line).not.toContain(wrong);
+    }
+  });
+
+  it("AC-US2-05: even a VALID query token never appears in any log line", () => {
+    const token = getStudioToken();
+    const logs: string[] = [];
+    const origLog = console.log;
+    const origWarn = console.warn;
+    console.log = (...a: unknown[]) => logs.push(a.map(String).join(" "));
+    console.warn = (...a: unknown[]) => logs.push(a.map(String).join(" "));
+    try {
+      const req = fakeReq({
+        url: `/api/v1/skills/stream?studioToken=${token}`,
+      });
+      const { res } = fakeRes();
+      tokenGate(req, res);
+    } finally {
+      console.log = origLog;
+      console.warn = origWarn;
+    }
+    for (const line of logs) {
+      expect(line).not.toContain(token);
+    }
+  });
+
+  it("AC-US2-06: a POST with ?studioToken= is NOT exempted by the query mechanism", () => {
+    const token = getStudioToken();
+    const req = fakeReq({
+      method: "POST",
+      url: `/api/v1/skills/stream?studioToken=${token}`,
+    });
+    const { res, state } = fakeRes();
+    const passed = tokenGate(req, res);
+    // POST is outside the EventSource exemption; with no header it must 401.
+    expect(passed).toBe(false);
+    expect(state.status).toBe(401);
+  });
+
+  it("AC-US2-06: a non-stream /api path with ?studioToken= is NOT exempted", () => {
+    const token = getStudioToken();
+    const req = fakeReq({
+      url: `/api/skills?studioToken=${token}`,
+    });
+    const { res, state } = fakeRes();
+    const passed = tokenGate(req, res);
+    expect(passed).toBe(false);
+    expect(state.status).toBe(401);
+  });
+
+  it("local GET stream paths (/api/events) also accept the query token", () => {
+    const token = getStudioToken();
+    const req = fakeReq({ url: `/api/events?studioToken=${token}` });
+    const { res, state } = fakeRes();
+    const passed = tokenGate(req, res);
+    expect(passed).toBe(true);
+    expect(state.status).toBeUndefined();
+    expect(req.url).not.toContain("studioToken");
+  });
+
+  it("a valid X-Studio-Token header still works on the stream path (no regression)", () => {
+    const token = getStudioToken();
+    const req = fakeReq({
+      url: "/api/v1/skills/stream?skills=a",
+      headers: { "x-studio-token": token },
+    });
+    const { res, state } = fakeRes();
+    const passed = tokenGate(req, res);
+    expect(passed).toBe(true);
+    expect(state.status).toBeUndefined();
+  });
+});
+
 describe("Router.handle integrated with tokenGate (US-002 AC-US2-04)", () => {
   beforeEach(() => {
     _resetStudioTokenForTests();

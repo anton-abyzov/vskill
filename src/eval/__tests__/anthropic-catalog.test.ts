@@ -30,11 +30,15 @@ describe("ANTHROPIC_CATALOG_SNAPSHOT — integrity", () => {
     ).toBeLessThan(SIX_MONTHS_MS);
   });
 
-  it("includes both Opus 4.7 and Sonnet 4.6 (current default-tier active models)", () => {
+  it("includes Opus 4.8 (new opus/best default) and Sonnet 4.6 (current default-tier active models)", () => {
     const opus = findAnthropicModel("opus");
     const sonnet = findAnthropicModel("sonnet");
-    expect(opus?.id).toBe("claude-opus-4-7");
+    expect(opus?.id).toBe("claude-opus-4-8");
     expect(sonnet?.id).toBe("claude-sonnet-4-6");
+  });
+
+  it("still exposes Opus 4.7 by its canonical id after the default moved to 4.8", () => {
+    expect(findAnthropicModel("claude-opus-4-7")?.id).toBe("claude-opus-4-7");
   });
 
   it("every model has positive prompt + completion pricing", () => {
@@ -66,22 +70,23 @@ describe("ANTHROPIC_CATALOG_SNAPSHOT — integrity", () => {
 
 describe("findAnthropicModel — alias + canonical lookup", () => {
   it("finds by canonical id", () => {
+    expect(findAnthropicModel("claude-opus-4-8")?.displayName).toBe("Claude Opus 4.8");
     expect(findAnthropicModel("claude-opus-4-7")?.displayName).toBe("Claude Opus 4.7");
   });
 
   it("finds by short alias", () => {
-    expect(findAnthropicModel("opus")?.id).toBe("claude-opus-4-7");
+    expect(findAnthropicModel("opus")?.id).toBe("claude-opus-4-8");
     expect(findAnthropicModel("sonnet")?.id).toBe("claude-sonnet-4-6");
     expect(findAnthropicModel("haiku")?.id).toBe("claude-haiku-4-5-20251001");
   });
 
   it("finds by alias with the [1m] context-window suffix", () => {
-    expect(findAnthropicModel("opus[1m]")?.id).toBe("claude-opus-4-7");
+    expect(findAnthropicModel("opus[1m]")?.id).toBe("claude-opus-4-8");
     expect(findAnthropicModel("claude-sonnet-4-6[1m]")?.id).toBe("claude-sonnet-4-6");
   });
 
   it("is case-insensitive on input", () => {
-    expect(findAnthropicModel("OPUS")?.id).toBe("claude-opus-4-7");
+    expect(findAnthropicModel("OPUS")?.id).toBe("claude-opus-4-8");
     expect(findAnthropicModel("CLAUDE-SONNET-4-6")?.id).toBe("claude-sonnet-4-6");
   });
 
@@ -92,7 +97,7 @@ describe("findAnthropicModel — alias + canonical lookup", () => {
   });
 
   it("does not match deprecated `best` from a wrong tier (best resolves to opus)", () => {
-    expect(findAnthropicModel("best")?.id).toBe("claude-opus-4-7");
+    expect(findAnthropicModel("best")?.id).toBe("claude-opus-4-8");
   });
 });
 

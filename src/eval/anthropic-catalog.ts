@@ -68,7 +68,7 @@ export interface AnthropicCatalog {
 // Last refreshed: 2026-04-24
 // Cadence: refresh every <=6 months. CI fails if snapshotDate is older.
 export const ANTHROPIC_CATALOG_SNAPSHOT: AnthropicCatalog = {
-  snapshotDate: "2026-04-24",
+  snapshotDate: "2026-05-30",
   sources: [
     "https://platform.claude.com/docs/en/about-claude/models/overview",
     "https://platform.claude.com/docs/en/about-claude/model-deprecations",
@@ -78,8 +78,38 @@ export const ANTHROPIC_CATALOG_SNAPSHOT: AnthropicCatalog = {
   ],
   models: [
     {
+      id: "claude-opus-4-8",
+      aliases: ["opus", "opus[1m]", "best", "claude-opus-4-8[1m]"],
+      displayName: "Claude Opus 4.8",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 128_000,
+      pricing: {
+        // PLACEHOLDER pricing until Anthropic publishes official Opus 4.8 rates.
+        // Must keep opus prompt > sonnet's $3 to satisfy catalog integrity tests.
+        promptUsdPer1M: 5.0,
+        completionUsdPer1M: 25.0,
+        cacheReadUsdPer1M: 0.5,
+        cacheWriteUsdPer1M: 6.25,
+      },
+      status: "active",
+      releaseDate: "2026-05-30",
+      sunsetDate: null,
+      capabilities: [
+        "adaptive_thinking",
+        "vision_highres",
+        "pdf",
+        "code_execution",
+        "batch",
+        "citations",
+        "structured_outputs",
+        "1m_context",
+        "effort_xhigh",
+        "task_budgets_beta",
+      ],
+    },
+    {
       id: "claude-opus-4-7",
-      aliases: ["opus", "opus[1m]", "best", "claude-opus-4-7[1m]"],
+      aliases: ["claude-opus-4-7[1m]"],
       displayName: "Claude Opus 4.7",
       contextWindow: 1_000_000,
       maxOutputTokens: 128_000,

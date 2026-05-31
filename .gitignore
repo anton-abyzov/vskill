@@ -1,6 +1,10 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# verify harness run artifacts (0857) — regenerated on every `npm run verify`
+test/verify/reports/
+.specweave/state/verify-current.json
 .env
 .env.local
 

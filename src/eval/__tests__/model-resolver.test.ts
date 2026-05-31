@@ -28,13 +28,26 @@ describe("resolveAnthropicModel — alias + id lookup", () => {
     else delete process.env.VSKILL_DEFAULT_MODEL_ANTHROPIC;
   });
 
-  it("resolves the bare 'opus' alias to claude-opus-4-7 (snapshot source)", () => {
+  it("resolves the bare 'opus' alias to claude-opus-4-8 (snapshot source)", () => {
     const r = resolveAnthropicModel("opus");
-    expect(r.resolvedId).toBe("claude-opus-4-7");
-    expect(r.displayName).toBe("Claude Opus 4.7");
+    expect(r.resolvedId).toBe("claude-opus-4-8");
+    expect(r.displayName).toBe("Claude Opus 4.8");
     expect(r.source).toBe("snapshot");
     expect(r.pricing?.promptUsdPer1M).toBe(5.0);
     expect(r.snapshotDate).toBe(ANTHROPIC_CATALOG_SNAPSHOT.snapshotDate);
+  });
+
+  it("resolves the 'best' alias to claude-opus-4-8 (new default, snapshot source)", () => {
+    const r = resolveAnthropicModel("best");
+    expect(r.resolvedId).toBe("claude-opus-4-8");
+    expect(r.source).toBe("snapshot");
+  });
+
+  it("resolves the full claude-opus-4-8 id from the snapshot (not passthrough)", () => {
+    const r = resolveAnthropicModel("claude-opus-4-8");
+    expect(r.resolvedId).toBe("claude-opus-4-8");
+    expect(r.source).toBe("snapshot");
+    expect(r.pricing?.promptUsdPer1M).toBe(5.0);
   });
 
   it("resolves a full canonical id straight through", () => {
@@ -46,13 +59,15 @@ describe("resolveAnthropicModel — alias + id lookup", () => {
 
   it("preserves the [1m] suffix on the requested alias for context-window provenance", () => {
     const r = resolveAnthropicModel("opus[1m]");
-    expect(r.resolvedId).toBe("claude-opus-4-7");
+    expect(r.resolvedId).toBe("claude-opus-4-8");
     expect(r.requestedAlias).toBe("opus[1m]");
   });
 
   it("returns source='passthrough' for unknown future ids", () => {
-    const r = resolveAnthropicModel("claude-opus-4-8-20260601");
-    expect(r.resolvedId).toBe("claude-opus-4-8-20260601");
+    // Re-pointed from claude-opus-4-8-* (now a known snapshot entry) to the
+    // still-unknown 4.9 id so this keeps exercising the passthrough path.
+    const r = resolveAnthropicModel("claude-opus-4-9");
+    expect(r.resolvedId).toBe("claude-opus-4-9");
     expect(r.source).toBe("passthrough");
     expect(r.pricing).toBeNull();
   });
@@ -101,7 +116,7 @@ describe("resolveAnthropicModel — ENV override (VSKILL_DEFAULT_MODEL_ANTHROPIC
   it("ignores empty / whitespace-only override values", () => {
     process.env.VSKILL_DEFAULT_MODEL_ANTHROPIC = "   ";
     const r = resolveAnthropicModel("opus");
-    expect(r.resolvedId).toBe("claude-opus-4-7");
+    expect(r.resolvedId).toBe("claude-opus-4-8");
     expect(r.source).toBe("snapshot");
   });
 });

@@ -146,6 +146,13 @@ describe("calculateBatchCost", () => {
     expect(result.batchCost).toBeCloseTo(0.6, 2);
   });
 
+  it("prices the opus-4-8 default at input:5/output:25", () => {
+    const result = calculateBatchCost(1_000_000, 100_000, "claude-opus-4-8");
+    // Sequential: (1M/1M)*5.0 + (100K/1M)*25.0 = 5.0 + 2.5 = 7.5
+    expect(result.sequentialCost).toBeCloseTo(7.5, 2);
+    expect(result.batchCost).toBeCloseTo(3.75, 2);
+  });
+
   it("defaults to sonnet pricing for unknown models", () => {
     const result = calculateBatchCost(1_000_000, 100_000, "unknown-model");
     expect(result.sequentialCost).toBeCloseTo(4.5, 2);

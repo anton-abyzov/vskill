@@ -94,6 +94,25 @@ export function nonEmptyString(v: unknown): v is string {
 }
 
 /**
+ * 0859: build the UpdateHub user-channel selector for a signed-in user.
+ *
+ * The desktop appends this id to its `?skills` SSE filter so the UpdateHub DO
+ * fans out `submission_decision` events for the user's own submissions over the
+ * existing reliable connection (the DO matcher does `filter.includes(skillSlug)`
+ * and the platform sets `skillSlug = "usr_" + userId`). Returns `null` for an
+ * absent / blank userId so a signed-out studio never subscribes to a user
+ * channel (AC-US2-02). Exported so the producer (StudioContext) and the
+ * serializer (useSkillUpdates) share one definition of the selector format.
+ */
+export function userSubscriptionChannelId(
+  userId: string | undefined | null,
+): string | null {
+  if (typeof userId !== "string") return null;
+  const trimmed = userId.trim();
+  return trimmed.length > 0 ? `usr_${trimmed}` : null;
+}
+
+/**
  * Map installed skills to their UpdateHub-compatible subscription IDs.
  *
  * Returns one entry per skill that has at least one resolvable platform ID.
@@ -154,8 +173,8 @@ export async function resolveSubscriptionIdsWithSourceOrigin(args: {
 
   const sourceOriginResolved: ResolvedSubscriptionId[] = [];
   for (const r of rows) {
-    const hasUuid = typeof r.uuid === "string" && r.uuid.length > 0;
-    const hasSlug = typeof r.slug === "string" && r.slug.length > 0;
+    const hasUuid = nonEmptyString(r.uuid);
+    const hasSlug = nonEmptyString(r.slug);
     if (!hasUuid && !hasSlug) continue;
     const entry: ResolvedSubscriptionId = {};
     if (hasUuid) entry.uuid = r.uuid;

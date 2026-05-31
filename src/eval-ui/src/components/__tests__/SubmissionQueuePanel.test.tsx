@@ -24,6 +24,7 @@ vi.mock("../../api", async () => {
 });
 
 import { SubmissionQueuePanel } from "../SubmissionQueuePanel";
+import { resetDecisionDedupe } from "../../hooks/useSubmissionNotifications";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -52,6 +53,7 @@ beforeEach(() => {
   mockGetMyQueue.mockReset();
   closeSpy.mockReset();
   notifySpy.mockClear();
+  resetDecisionDedupe();
   emit = null;
   lastOptions = null;
   lastUrl = null;

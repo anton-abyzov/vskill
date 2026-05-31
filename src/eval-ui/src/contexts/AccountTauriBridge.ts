@@ -44,6 +44,15 @@ export interface AccountUserSummary {
   login: string | null;
   avatarUrl: string | null;
   tier: "free" | "pro" | "enterprise";
+  /**
+   * 0859: the platform user id (`User.id`). Optional + forward-compatible —
+   * the Rust `account_get_user_summary` IPC only populates it for a cached,
+   * signed-in identity; older bundles (and the signed-out / web fallback) omit
+   * it. Consumed by StudioContext to build the `usr_<userId>` skills-stream
+   * subscription channel for reliable submission_decision notifications.
+   * Absent / undefined ⇒ no user channel is subscribed.
+   */
+  userId?: string;
 }
 
 /**

@@ -6,6 +6,7 @@ import type { SkillUpdateInfo } from "./api";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useSkillUpdates } from "./hooks/useSkillUpdates";
 import { resolveSubscriptionIds } from "./utils/resolveSubscriptionIds";
+import { useAccountSummary } from "./hooks/useAccountSummary";
 
 // ---------------------------------------------------------------------------
 // State
@@ -426,9 +427,21 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     return [...new Set([...installedIds, ...sourceIds])];
   }, [resolvedIdsCsv, sourceOriginIdsCsv]);
 
+  // 0859: source the signed-in platform user id so useSkillUpdates can append
+  // the `usr_<userId>` user-channel selector to the skills-stream filter and
+  // receive reliable submission_decision notifications (AC-US1-02). The id
+  // rides the existing `account_get_user_summary` IPC (no network, no extra
+  // round-trip) — it is populated Rust-side only for a cached, signed-in
+  // identity. When signed-out (or on web / npx-studio where the IPC returns the
+  // default summary) `userId` is undefined → no user channel is subscribed
+  // (AC-US2-02).
+  const accountSummary = useAccountSummary();
+  const userId = accountSummary.signedIn ? accountSummary.userId : undefined;
+
   const skillUpdates = useSkillUpdates({
     skillIds: resolvedSseIds,
     trackingSkillIds: allSkillIds,
+    userId,
   });
 
   // 0838 AC-US4-02: count of tracked skills (installed-with-platform-id +

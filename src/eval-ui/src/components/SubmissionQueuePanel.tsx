@@ -25,6 +25,8 @@ import { api, type SubmissionRow } from "../api";
 import { openFetchEventStream, type FetchEventStreamHandle } from "../api/sse";
 import {
   notifySubmissionOutcome,
+  claimDecisionNotification,
+  markDecisionNotified,
   APPROVED_STATES,
   REJECTED_STATES,
 } from "../hooks/useSubmissionNotifications";
@@ -95,9 +97,6 @@ export function SubmissionQueuePanel({
   // filter for the global stream. Held in a ref so the long-lived SSE handler
   // reads the current set without re-subscribing on every row change.
   const ownIdsRef = useRef<Set<string>>(new Set());
-  // Ids that have already fired a terminal notification — dedupe guard so a
-  // re-emitted terminal event doesn't double-notify.
-  const notifiedRef = useRef<Set<string>>(new Set());
   const mountedRef = useRef(true);
 
   const loadFeed = useCallback(async () => {
@@ -110,10 +109,11 @@ export function SubmissionQueuePanel({
       setRows(list);
       setPositions(res.queuePositions ?? {});
       ownIdsRef.current = new Set(list.map((r) => r.id));
-      // Seed the dedupe guard with rows already terminal at load time so we
-      // don't notify for outcomes that happened before the panel opened.
+      // Seed the SHARED dedupe guard with rows already terminal at load time so
+      // neither transport notifies for outcomes that happened before the panel
+      // opened.
       for (const r of list) {
-        if (TERMINAL_STATES.has(r.state)) notifiedRef.current.add(r.id);
+        if (TERMINAL_STATES.has(r.state)) markDecisionNotified(r.id, r.state);
       }
     } catch (err) {
       if (!mountedRef.current) return;
@@ -150,8 +150,10 @@ export function SubmissionQueuePanel({
           delete copy[evt.submissionId];
           return copy;
         });
-        if (!notifiedRef.current.has(evt.submissionId)) {
-          notifiedRef.current.add(evt.submissionId);
+        // Shared cross-transport guard (0859 T-006): fires at most once per
+        // (submissionId, state) even when the reliable skills-stream delivers
+        // the same decision concurrently.
+        if (claimDecisionNotification(evt.submissionId, evt.state)) {
           void notify(evt.submissionId, evt.skillName, evt.state);
         }
       }

@@ -99,6 +99,81 @@ export function deriveScopeSource(scope: SkillScope): SkillSource {
   return scope.slice(idx + 1) as SkillSource;
 }
 
+// ---------------------------------------------------------------------------
+// 0856 — In-app submission queue DTOs.
+//
+// Source of truth: vskill-platform `/api/v1/submissions` (POST + GET) and
+// `/api/v1/submissions/positions`. Mirrored here so eval-ui compiles
+// standalone (same pattern as the tenant DTOs below). These ride the
+// eval-server platform proxy (`/api/v1/submissions` is in PROXY_PREFIXES),
+// so the WebView issues same-origin relative requests and the X-Studio-Token
+// bridge handles auth — no token plumbing in the UI.
+// ---------------------------------------------------------------------------
+
+/** Terminal + transient submission states (mirror of platform SubmissionState). */
+export type SubmissionState =
+  | "RECEIVED"
+  | "TIER1_SCANNING"
+  | "TIER1_FAILED"
+  | "TIER2_SCANNING"
+  | "AUTO_APPROVED"
+  | "PUBLISHED"
+  | "REJECTED"
+  | "VENDOR_APPROVED"
+  | "DEQUEUED"
+  | "RESCAN_REQUIRED"
+  | "EXPANDED"
+  | "BLOCKED";
+
+/** One row in the GET /api/v1/submissions list response. */
+export interface SubmissionRow {
+  id: string;
+  skillName: string;
+  repoUrl: string;
+  state: SubmissionState | string;
+  priority?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** GET /api/v1/submissions response envelope (subset the Studio consumes). */
+export interface SubmissionListResponse {
+  submissions: SubmissionRow[];
+  total?: number;
+  /** Map of submissionId → queue position. Present on the active feed. */
+  queuePositions?: Record<string, number> | null;
+}
+
+/** POST /api/v1/submissions body for a single-skill in-app submit. */
+export interface SubmitToQueueBody {
+  repoUrl: string;
+  skillName: string;
+  skillPath?: string;
+  /** Free-form attribution string, e.g. "studio-submit". */
+  source?: string;
+  privacy?: "public" | "private" | "decide-later" | string;
+  /** Required by the platform when privacy === "private". */
+  tenantId?: string;
+}
+
+/**
+ * Discriminated outcomes of POST /api/v1/submissions (single-skill path).
+ * The platform returns a different flat JSON body per branch — the UI renders
+ * a structured inline outcome from this so a submit never looks like a no-op.
+ */
+export type SubmitToQueueResult =
+  | { kind: "created"; id: string; skillName: string; skillPath: string; state: string; createdAt: string }
+  | { kind: "duplicate"; id: string; state: string }
+  | { kind: "alreadyVerified"; skillId?: string; skillName?: string }
+  | { kind: "requeued"; id: string; state: string }
+  | { kind: "blocked"; submissionId: string };
+
+/** GET /api/v1/submissions/positions response. */
+export interface SubmissionPositionsResponse {
+  positions: Record<string, number>;
+  total: number;
+}
+
 const BASE = "";
 
 // 0836 hardening (F-004): diagnostic-only logger gated on the same
@@ -1348,6 +1423,89 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(opts ?? {}),
     });
+  },
+
+  // ---------------------------------------------------------------------------
+  // 0856 — In-app submission queue.
+  //
+  // These hit the eval-server platform proxy (same-origin relative URLs). The
+  // POST/GETs are forwarded upstream because `/api/v1/submissions` is in the
+  // proxy's PROXY_PREFIXES; the X-Studio-Token bridge auto-injects auth, and
+  // the eval-server injects the user's vsk_* keychain token server-side so an
+  // in-app submit is attributed to the signed-in user. The browser never calls
+  // verified-skill.com directly (CORS-free localhost-only invariant).
+  // ---------------------------------------------------------------------------
+
+  /**
+   * POST /api/v1/submissions — submit a freshly-pushed skill to the queue.
+   * Maps the platform's flat per-branch JSON body onto a discriminated
+   * {@link SubmitToQueueResult} so the caller can render a structured inline
+   * outcome (created / duplicate / alreadyVerified / requeued / blocked).
+   * 400 / 429 / 5xx still throw {@link ApiError} (forwarded `details`).
+   */
+  async submitToQueue(body: SubmitToQueueBody): Promise<SubmitToQueueResult> {
+    const raw = await fetchJson<Record<string, unknown>>("/api/v1/submissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    // The platform returns mutually-exclusive flags per branch. Order matters:
+    // check the explicit flags before the bare-created shape.
+    if (raw.alreadyVerified === true) {
+      return {
+        kind: "alreadyVerified",
+        skillId: typeof raw.skillId === "string" ? raw.skillId : undefined,
+        skillName: typeof raw.skillName === "string" ? raw.skillName : undefined,
+      };
+    }
+    if (raw.blocked === true) {
+      return { kind: "blocked", submissionId: String(raw.submissionId ?? raw.id ?? "") };
+    }
+    if (raw.requeued === true) {
+      return { kind: "requeued", id: String(raw.id ?? ""), state: String(raw.state ?? "RECEIVED") };
+    }
+    if (raw.duplicate === true) {
+      return { kind: "duplicate", id: String(raw.id ?? ""), state: String(raw.state ?? "") };
+    }
+    return {
+      kind: "created",
+      id: String(raw.id ?? ""),
+      skillName: String(raw.skillName ?? body.skillName),
+      skillPath: String(raw.skillPath ?? body.skillPath ?? ""),
+      state: String(raw.state ?? "RECEIVED"),
+      createdAt: String(raw.createdAt ?? new Date().toISOString()),
+    };
+  },
+
+  /**
+   * GET /api/v1/submissions?mine=1 — the signed-in user's own submission feed.
+   * Returns the list envelope including `queuePositions` for active rows.
+   */
+  getMyQueue(): Promise<SubmissionListResponse> {
+    return fetchJson<SubmissionListResponse>("/api/v1/submissions?mine=1");
+  },
+
+  /**
+   * GET /api/v1/submissions/:id — full detail for a single submission. The
+   * envelope is broad; callers narrow to the fields they need.
+   */
+  getSubmission(id: string): Promise<Record<string, unknown>> {
+    return fetchJson<Record<string, unknown>>(
+      `/api/v1/submissions/${encodeURIComponent(id)}`,
+    );
+  },
+
+  /**
+   * GET /api/v1/submissions/positions — queue positions for active rows.
+   * Optional `ids` narrows the response to the caller's own submissions.
+   */
+  getPositions(ids?: string[]): Promise<SubmissionPositionsResponse> {
+    const qs = ids && ids.length > 0
+      ? `?ids=${encodeURIComponent(ids.join(","))}`
+      : "";
+    return fetchJson<SubmissionPositionsResponse>(
+      `/api/v1/submissions/positions${qs}`,
+    );
   },
 
   // ---------------------------------------------------------------------------

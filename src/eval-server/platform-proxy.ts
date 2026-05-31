@@ -94,6 +94,18 @@ const PROXY_PREFIXES = [
   "/api/v1/studio/search",
   "/api/v1/studio/telemetry/",
   "/api/v1/stats",
+  // In-app submission queue (0856): the WebView POSTs /api/v1/submissions and
+  // streams /api/v1/submissions/stream/[id] + GET /positions/[id]. Proxying
+  // here keeps the CORS-free browser→localhost-only invariant and lets the
+  // eval-server inject the user's vsk_* keychain token server-side so an
+  // in-app submit is attributed to the signed-in user (not anonymous).
+  //
+  // Prefix has NO trailing slash so it matches BOTH the bare POST target
+  // (`/api/v1/submissions`) and the sub-resource GETs
+  // (`/api/v1/submissions/stream/<id>`, `/api/v1/submissions/positions/<id>`).
+  // This is deliberately distinct from the trailing-slash prefixes below so
+  // private/tenant/account paths keep their exact-segment semantics.
+  "/api/v1/submissions",
   // Private (org-scoped) routes that must carry the user's GitHub bearer token
   // to the platform. The browser never sees this token; injection happens here.
   "/api/v1/private/",
@@ -117,6 +129,10 @@ const PROXY_PREFIXES = [
  * function in the public skill catalog.
  */
 const AUTH_REQUIRED_PREFIXES = [
+  // 0856: in-app submissions carry the user's vsk_* keychain token (NOT gho_*)
+  // — see TOKEN_KIND_BY_PREFIX below. Any client-supplied Authorization is
+  // stripped here so the browser can never spoof identity to the platform.
+  "/api/v1/submissions",
   "/api/v1/private/",
   "/api/v1/tenants/",
   // 0836 US-003: every /api/v1/account/* route requires the user's bearer
@@ -135,9 +151,41 @@ export function shouldInjectAuth(url: string | undefined): boolean {
   return AUTH_REQUIRED_PREFIXES.some((p) => url.startsWith(p));
 }
 
+// Two kinds of bearer token can be injected at the proxy boundary:
+//   - "github" (gho_*): account/private/tenant routes. The platform validates
+//     it as a GitHub OAuth token.
+//   - "vskill" (vsk_*): the in-app submission queue (0856). The platform's
+//     submissions handler attributes the submit to the signed-in user via the
+//     vsk_* API token (requireUserOrGithubBearer), so an in-app submit is NOT
+//     anonymous — injecting gho_* here would mis-attribute it.
+type TokenKind = "github" | "vskill";
+
+// Which token kind each AUTH_REQUIRED prefix needs. Default (and the only
+// non-github entry) is the submissions prefix → vskill. Everything else uses
+// the GitHub token as before. Kept as an explicit, ordered list so the
+// longest/most-specific prefix wins and the selection is obvious at a glance.
+const TOKEN_KIND_BY_PREFIX: ReadonlyArray<readonly [string, TokenKind]> = [
+  ["/api/v1/submissions", "vskill"],
+] as const;
+
+/** Select the bearer-token kind for a given upstream path. */
+export function tokenKindForPath(path: string | undefined): TokenKind {
+  if (path) {
+    for (const [prefix, kind] of TOKEN_KIND_BY_PREFIX) {
+      if (path.startsWith(prefix)) return kind;
+    }
+  }
+  return "github";
+}
+
 // In-process token cache so a burst of proxy requests doesn't repeatedly hit
 // the OS keychain. The keychain itself is fast on macOS but can be slower on
 // Linux libsecret.
+//
+// Cached PER token-kind: a gho_* request and a vsk_* request must never serve
+// each other's cached value. Naively caching a single global token (the
+// pre-0856 behaviour) would leak the wrong token across prefixes once the
+// submissions path was added.
 //
 // 0836 hardening (F-005): TTL kept intentionally short (5s) so that a desktop
 // `sign_out` IPC — which clears the Rust keychain in a separate process —
@@ -145,28 +193,42 @@ export function shouldInjectAuth(url: string | undefined): boolean {
 // Cross-process cache invalidation would require a control-channel from the
 // Tauri shell into the sidecar; bounding the staleness window achieves the
 // same UX guarantee with no extra plumbing.
-let _cachedToken: { value: string | null; expiresAt: number } | null = null;
+const _cachedTokens: Partial<
+  Record<TokenKind, { value: string | null; expiresAt: number }>
+> = {};
 const TOKEN_CACHE_MS = 5_000;
 
-function readTokenForProxy(now: number = Date.now()): string | null {
-  if (_cachedToken && _cachedToken.expiresAt > now) return _cachedToken.value;
-  let token: string | null = null;
+function readKeychainToken(kind: TokenKind): string | null {
   try {
-    token = getDefaultKeychain().getGitHubToken();
+    return kind === "vskill"
+      ? getDefaultKeychain().getVskillToken()
+      : getDefaultKeychain().getGitHubToken();
   } catch {
-    token = null;
+    return null;
   }
-  _cachedToken = { value: token, expiresAt: now + TOKEN_CACHE_MS };
+}
+
+function readTokenForProxy(
+  kind: TokenKind = "github",
+  now: number = Date.now(),
+): string | null {
+  const cached = _cachedTokens[kind];
+  if (cached && cached.expiresAt > now) return cached.value;
+  const token = readKeychainToken(kind);
+  _cachedTokens[kind] = { value: token, expiresAt: now + TOKEN_CACHE_MS };
   return token;
 }
 
 /**
  * Public invalidation hook so callers (e.g. an HTTP control endpoint, or a
  * future SIGUSR1 handler) can drop the cached token immediately on auth
- * state changes. Tests use this to reset between cases as well.
+ * state changes. Tests use this to reset between cases as well. Clears ALL
+ * token kinds.
  */
 export function invalidatePlatformProxyTokenCache(): void {
-  _cachedToken = null;
+  for (const k of Object.keys(_cachedTokens) as TokenKind[]) {
+    delete _cachedTokens[k];
+  }
 }
 
 /** @deprecated Prefer `invalidatePlatformProxyTokenCache`. Kept for any
@@ -203,7 +265,10 @@ export function pickHeadersForUpstream(
   out["x-forwarded-for"] = xff ? `${xff}, 127.0.0.1` : "127.0.0.1";
 
   if (opts.path && shouldInjectAuth(opts.path)) {
-    const tokenProvider = opts.tokenProvider ?? (() => readTokenForProxy());
+    // Per-prefix token kind: submissions → vsk_*, everything else → gho_*.
+    // A test-supplied tokenProvider override always wins (kind-agnostic).
+    const kind = tokenKindForPath(opts.path);
+    const tokenProvider = opts.tokenProvider ?? (() => readTokenForProxy(kind));
     const token = tokenProvider();
     if (token) {
       out["authorization"] = `Bearer ${token}`;

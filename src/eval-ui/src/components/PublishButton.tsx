@@ -11,7 +11,8 @@
 
 import { useCallback, useState } from "react";
 import { api } from "../api";
-import { buildSubmitUrlFromRemote } from "../utils/normalizeRemoteUrl";
+import { buildSubmitUrlFromRemote, normalizeRemoteUrl } from "../utils/normalizeRemoteUrl";
+import { openExternalUrlViaDesktop } from "../preferences/lib/useDesktopBridge";
 import { PublishDrawer } from "./PublishDrawer";
 
 function emitToast(message: string, severity: "info" | "error"): void {
@@ -19,6 +20,22 @@ function emitToast(message: string, severity: "info" | "error"): void {
   window.dispatchEvent(
     new CustomEvent("studio:toast", { detail: { message, severity } }),
   );
+}
+
+/**
+ * Build the website submit URL from a raw remote, degrading to the bare submit
+ * page when the remote isn't a recognizable github URL. `buildSubmitUrlFrom-
+ * Remote` throws on a non-normalizable remote; a successful push must NEVER be
+ * reported as a failure, so we swallow that and send the user to the generic
+ * submit page (where they can pick the repo manually).
+ */
+const BARE_SUBMIT_URL = "https://verified-skill.com/submit";
+function websiteSubmitUrl(rawRemoteUrl: string): string {
+  try {
+    return buildSubmitUrlFromRemote(rawRemoteUrl);
+  } catch {
+    return BARE_SUBMIT_URL;
+  }
 }
 
 interface Props {
@@ -32,9 +49,18 @@ interface Props {
   provider?: string;
   /** Studio-configured LLM model — passed through to PublishDrawer. */
   model?: string;
+  /** 0856: the skill being published — enables the in-app submit flow. When
+   *  absent, both the clean-tree path and the drawer fall back to the website. */
+  skillName?: string;
+  /** 0856: repo-relative skill path (optional — platform discovers it). */
+  skillPath?: string;
+  /** 0856: privacy choice forwarded to the submission. Default "public". */
+  privacy?: "public" | "private" | "decide-later";
+  /** 0856: tenant the user is publishing under (required for private). */
+  tenantId?: string;
 }
 
-export function PublishButton({ remoteUrl, provider, model }: Props): React.ReactElement {
+export function PublishButton({ remoteUrl, provider, model, skillName, skillPath, privacy, tenantId }: Props): React.ReactElement {
   const [publishing, setPublishing] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerFileCount, setDrawerFileCount] = useState(0);
@@ -65,11 +91,45 @@ export function PublishButton({ remoteUrl, provider, model }: Props): React.Reac
 
       const result = await api.gitPublish();
       const effectiveRemote = result.remoteUrl ?? remoteUrl;
-      const submitUrl = buildSubmitUrlFromRemote(effectiveRemote);
-      window.open(submitUrl, "_blank", "noopener,noreferrer");
       const shortSha = (result.commitSha ?? "").slice(0, 7);
       const branch = result.branch ?? "";
-      emitToast(`Opening verified-skill.com — ${shortSha} on ${branch}`, "info");
+
+      // 0856: clean-tree path. When we know the skill, submit IN-APP instead of
+      // opening verified-skill.com. The drawer owns the rich inline-outcome UX;
+      // here (no dirty changes → no drawer) we submit directly and toast the
+      // outcome. Falls back to the website when the skill / remote is unknown.
+      if (skillName) {
+        let repoUrl: string | null = null;
+        try {
+          repoUrl = normalizeRemoteUrl(effectiveRemote);
+        } catch {
+          repoUrl = null;
+        }
+        if (repoUrl) {
+          const submitRes = await api.submitToQueue({
+            repoUrl,
+            skillName,
+            skillPath,
+            source: "studio-submit",
+            privacy: privacy ?? "public",
+            tenantId,
+          });
+          emitToast(submitToastMessage(submitRes, skillName, shortSha, branch), "info");
+        } else {
+          // Non-normalizable remote (e.g. GitLab/self-hosted). The push already
+          // SUCCEEDED — never surface "Publish failed" here. buildSubmitUrl-
+          // FromRemote re-runs normalizeRemoteUrl and would re-throw, so guard
+          // it and degrade to the bare submit page instead of letting the throw
+          // escape to the outer catch.
+          void openExternalUrlViaDesktop(websiteSubmitUrl(effectiveRemote));
+          emitToast(`Pushed ${shortSha} on ${branch} — open the website to submit`, "info");
+        }
+      } else {
+        // No skill identity → website-open fallback. Same guard: a non-github
+        // remote must not turn a successful push into "Publish failed".
+        void openExternalUrlViaDesktop(websiteSubmitUrl(effectiveRemote));
+        emitToast(`Opening verified-skill.com — ${shortSha} on ${branch}`, "info");
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // Cap at 200 chars for the toast surface
@@ -78,7 +138,7 @@ export function PublishButton({ remoteUrl, provider, model }: Props): React.Reac
     } finally {
       setPublishing(false);
     }
-  }, [publishing, drawerOpen, remoteUrl]);
+  }, [publishing, drawerOpen, remoteUrl, skillName, skillPath, privacy, tenantId]);
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
@@ -108,9 +168,35 @@ export function PublishButton({ remoteUrl, provider, model }: Props): React.Reac
           fileCount={drawerFileCount}
           provider={provider}
           model={model}
+          skillName={skillName}
+          skillPath={skillPath}
+          privacy={privacy}
+          tenantId={tenantId}
           onClose={closeDrawer}
         />
       )}
     </>
   );
+}
+
+// 0856: map an in-app submit outcome to a short toast line for the clean-tree
+// (no-drawer) path. The drawer path renders a richer inline block instead.
+function submitToastMessage(
+  result: import("../api").SubmitToQueueResult,
+  skillName: string,
+  shortSha: string,
+  branch: string,
+): string {
+  switch (result.kind) {
+    case "created":
+      return `Submitted ${skillName} — ${shortSha} on ${branch}`;
+    case "requeued":
+      return `Re-queued ${skillName} for review — ${shortSha}`;
+    case "duplicate":
+      return `${skillName} is already in the queue`;
+    case "alreadyVerified":
+      return `${skillName} is already verified`;
+    case "blocked":
+      return `${skillName} is blocked and can’t be submitted`;
+  }
 }

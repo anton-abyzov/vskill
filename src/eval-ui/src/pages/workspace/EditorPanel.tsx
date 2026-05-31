@@ -510,6 +510,7 @@ export function EditorPanel() {
                 remoteUrl={gitRemote.remoteUrl}
                 provider={config?.provider}
                 model={config?.model}
+                skillName={skill || undefined}
               />
             )}
           </div>

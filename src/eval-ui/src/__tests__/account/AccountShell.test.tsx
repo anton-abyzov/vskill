@@ -168,7 +168,7 @@ afterEach(async () => {
 });
 
 describe("AccountShell", () => {
-  it("renders 7 sidebar tabs in the spec order", async () => {
+  it("renders 8 sidebar tabs in the spec order", async () => {
     const { container } = await renderShell();
     const sideNav = container.querySelector("[data-testid='account-shell-sidenav']")!;
     const tabs = sideNav.querySelectorAll<HTMLButtonElement>(
@@ -180,6 +180,7 @@ describe("AccountShell", () => {
       "Plan & billing",
       "Connected repositories",
       "Skills",
+      "My queue",
       "API tokens",
       "Notifications",
       "Danger zone",
@@ -220,6 +221,17 @@ describe("AccountShell", () => {
       "[data-testid='account-tab-tokens']",
     )!;
     expect(tab.getAttribute("data-active")).toBe("true");
+  });
+
+  it("renders a clear API-token error instead of a blank tab", async () => {
+    const { container } = await renderShell(
+      { initialTab: "tokens" },
+      { profile: PROFILE },
+    );
+    const alert = container.querySelector("[data-testid='account-shell-section-error']");
+    expect(alert).not.toBeNull();
+    expect(alert?.textContent).toMatch(/CLI and automation tokens/);
+    expect(alert?.textContent).toMatch(/separate from GitHub repository access/);
   });
 
   it("header shows profile display name + handle once loaded", async () => {

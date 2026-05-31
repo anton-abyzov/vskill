@@ -9,6 +9,11 @@ import {
   type QueuedToast,
 } from "../utils/toastQueue";
 import { getStudioTokenForUrl } from "../contexts/StudioTokenBridge";
+import {
+  notifySubmissionOutcome,
+  claimDecisionNotification,
+} from "./useSubmissionNotifications";
+import { userSubscriptionChannelId } from "../utils/resolveSubscriptionIds";
 
 /**
  * Shared update hook — polling (0683) + SSE push (0708).
@@ -69,6 +74,14 @@ export interface UseSkillUpdatesOptions {
    */
   trackingSkillIds?: string[];
   /**
+   * 0859: the signed-in platform user id. When present, the user-channel
+   * selector `usr_<userId>` is appended to the `?skills` SSE filter so the
+   * desktop receives `submission_decision` events for its own submissions over
+   * the existing reliable UpdateHub connection (AC-US1-02). Undefined / empty
+   * when signed-out → no user channel is subscribed (AC-US2-02).
+   */
+  userId?: string;
+  /**
    * 0708 fallback watchdog — how long to wait for a sustained `connected`
    * signal before flipping `status: "fallback"`. Defaults to 60 s per AC-US5-05.
    */
@@ -118,6 +131,12 @@ const DEFAULT_STALE = 60_000;
 const DEFAULT_FALLBACK_MS = 60_000;
 const DEFAULT_STREAM_BASE = "/api/v1/skills/stream";
 const DEFAULT_REPLAY_INTERVAL_MS = 250;
+
+// 0859: hard cap on the `?skills` subscription filter. The user-channel
+// selector (`usr_<userId>`) MUST always survive this cap, so it is prepended
+// and the cap slices the installed-skill ids that follow it. The platform
+// matcher only needs the user channel + as many installed-skill ids as fit.
+const MAX_SUBSCRIPTION_IDS = 500;
 const TELEMETRY_ENDPOINT = "/api/v1/studio/telemetry/sse";
 const SESSION_ID_KEY = "vskill.studio.sse.sessionId";
 
@@ -266,6 +285,36 @@ function isSkillUpdateEvent(v: unknown): v is SkillUpdateEvent {
 }
 
 // ---------------------------------------------------------------------------
+// 0859: submission_decision named SSE event
+// ---------------------------------------------------------------------------
+
+/**
+ * 0859: wire shape of a `submission_decision` event. The platform publishes it
+ * through the same UpdateHub fan-out as skill-update events (keyed on the
+ * `usr_<userId>` channel), and `/api/v1/skills/stream` surfaces it as a NAMED
+ * SSE event (`event: submission_decision`). `skillName` may be absent for very
+ * old submissions — the notifier defaults it, so only `submissionId` + `state`
+ * are required here. `state` carries the terminal state
+ * (PUBLISHED / REJECTED / …) consumed by {@link planSubmissionNotification}.
+ */
+interface SubmissionDecisionEvent {
+  submissionId: string;
+  state: string;
+  skillName?: string;
+}
+
+function isSubmissionDecisionEvent(v: unknown): v is SubmissionDecisionEvent {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.submissionId === "string" &&
+    r.submissionId.length > 0 &&
+    typeof r.state === "string" &&
+    r.state.length > 0
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
@@ -281,10 +330,28 @@ export function useSkillUpdates(
   const replayIntervalMs = opts?.replayIntervalMs ?? DEFAULT_REPLAY_INTERVAL_MS;
 
   // Sort-stable CSV so url identity is deterministic.
+  //
+  // 0859: when signed-in, the `usr_<userId>` user-channel selector is appended
+  // so the desktop receives `submission_decision` events for its own user over
+  // the existing reliable SSE connection (AC-US1-02). The user channel is
+  // guaranteed to survive the 500-id cap: installed-skill ids are sorted and
+  // sliced first, then the user channel is appended and the whole list sorted
+  // so the URL identity stays deterministic.
+  const userChannel = userSubscriptionChannelId(opts?.userId);
   const skillsCsv = useMemo(() => {
-    if (!opts?.skillIds || opts.skillIds.length === 0) return "";
-    return [...opts.skillIds].sort().join(",");
-  }, [opts?.skillIds]);
+    const base = opts?.skillIds ?? [];
+    if (base.length === 0 && !userChannel) return "";
+    // Reserve one slot for the user channel so it can never be dropped by the
+    // cap. De-dupe in case usr_<id> somehow also appears in the installed list.
+    const reserve = userChannel ? 1 : 0;
+    const installed = [...new Set(base)]
+      .filter((id) => id !== userChannel)
+      .sort()
+      .slice(0, MAX_SUBSCRIPTION_IDS - reserve);
+    const all = userChannel ? [...installed, userChannel] : installed;
+    if (all.length === 0) return "";
+    return all.sort().join(",");
+  }, [opts?.skillIds, userChannel]);
 
   // Wider list for tracking-state reconciliation (AC-US5-09).
   const trackingCsv = useMemo(() => {
@@ -324,6 +391,13 @@ export function useSkillUpdates(
   // 0838: timestamp of the most recent `connected` event (for
   // durationSinceOpenMs in subsequent transitions).
   const lastConnectedAtRef = useRef<number | null>(null);
+
+  // 0859: per-session dedupe for submission_decision native notifications.
+  // An SSE reconnect can replay the same decision via Last-Event-ID, and the
+  // outbox/queue can re-emit on retry — without this guard the native
+  // notification would fire twice for one decision (AC-US2-03). Keyed by a
+  // stable (submissionId + state) signature so a genuine state change for the
+  // same submission can still notify. Lives across reconnects (ref, not state).
 
   // External-store snapshot for the push-driven map.
   const updatesById = useSyncExternalStore(
@@ -746,6 +820,43 @@ export function useSkillUpdates(
       void reconcileCheckUpdates(ids);
     };
 
+    // 0859: a submission reached a terminal state on the user's own channel.
+    // Fire the native desktop notification (approved → informational; rejected
+    // → clickable → /submit/<id>) via the shared 0847 notifier. This is purely
+    // additive: it never touches the update store and never emits a
+    // `studio:toast`, so the skill-update toast path is unaffected (AC-US2-01).
+    // `notifySubmissionOutcome` self-guards the non-Tauri context (no-ops on
+    // web / vitest jsdom), so no extra host branch is needed here.
+    const onSubmissionDecision = (evt: MessageEvent) => {
+      if (!mountedRef.current) return;
+      let payload: unknown;
+      try {
+        payload = JSON.parse(evt.data);
+      } catch {
+        return;
+      }
+      if (!isSubmissionDecisionEvent(payload)) return;
+      // Dedupe on (submissionId, state) via the SHARED cross-transport guard so
+      // a Last-Event-ID replay, an outbox/queue retry, OR the panel's best-effort
+      // ?mine stream can't double-notify (AC-US2-03 + 0859 T-006).
+      if (!claimDecisionNotification(payload.submissionId, payload.state)) {
+        debugSse("submission-decision-duplicate", {
+          submissionId: payload.submissionId,
+          state: payload.state,
+        });
+        return;
+      }
+      debugSse("submission-decision", {
+        submissionId: payload.submissionId,
+        state: payload.state,
+      });
+      void notifySubmissionOutcome(
+        payload.submissionId,
+        payload.skillName ?? "",
+        payload.state,
+      );
+    };
+
     const openStream = () => {
       if (!mountedRef.current) return;
       es = new EventSource(url);
@@ -771,6 +882,8 @@ export function useSkillUpdates(
 
       es.onmessage = onMessage;
       es.addEventListener("gone", onGone);
+      // 0859: named SSE event carrying the user's own submission decisions.
+      es.addEventListener("submission_decision", onSubmissionDecision);
     };
 
     openStream();
@@ -783,6 +896,9 @@ export function useSkillUpdates(
       }
       if (es) {
         try { es.removeEventListener("gone", onGone); } catch { /* noop */ }
+        // 0859: mirror the `gone` removal so the submission_decision listener
+        // doesn't leak across every skillsCsv-driven reconnect.
+        try { es.removeEventListener("submission_decision", onSubmissionDecision); } catch { /* noop */ }
         try { es.close(); } catch { /* noop */ }
       }
       // 0838 F-005: cancel any in-flight replay-toast timers so a queued

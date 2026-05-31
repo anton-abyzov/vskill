@@ -14,8 +14,10 @@
 //
 // Click flow:
 //   open → user picks mode → (AI mode: click Generate, see message, edit) →
-//   Commit & Push → /api/git/publish → success: window.open verified-skill.com
-//   + close drawer; failure: inline error block, drawer stays open.
+//   Commit & Push → /api/git/publish → submit IN-APP via api.submitToQueue →
+//   show the structured inline outcome (created/duplicate/alreadyVerified/
+//   requeued/blocked). No browser redirect; "Open on website" is a secondary
+//   link. Failure: inline error block, drawer stays open.
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from "react";

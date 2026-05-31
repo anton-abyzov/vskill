@@ -7,7 +7,10 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect } from "vitest";
-import { resolveSubscriptionIds } from "../utils/resolveSubscriptionIds";
+import {
+  resolveSubscriptionIds,
+  userSubscriptionChannelId,
+} from "../utils/resolveSubscriptionIds";
 
 describe("resolveSubscriptionIds", () => {
   it("AC-US3-01: returns uuid when skill has uuid but no slug", () => {
@@ -76,5 +79,28 @@ describe("resolveSubscriptionIds", () => {
     // Flatten to all IDs as useSkillUpdates would do
     const ids = resolved.flatMap((r) => [r.uuid, r.slug].filter(Boolean) as string[]);
     expect(ids).toEqual(["u1", "sk_published_a/b/c", "u2"]);
+  });
+});
+
+describe("userSubscriptionChannelId (0859)", () => {
+  it("AC-US1-02: builds usr_<userId> for a signed-in user", () => {
+    expect(userSubscriptionChannelId("u123")).toBe("usr_u123");
+  });
+
+  it("AC-US2-02: returns null for undefined (signed-out)", () => {
+    expect(userSubscriptionChannelId(undefined)).toBeNull();
+  });
+
+  it("AC-US2-02: returns null for null", () => {
+    expect(userSubscriptionChannelId(null)).toBeNull();
+  });
+
+  it("returns null for an empty / whitespace-only userId", () => {
+    expect(userSubscriptionChannelId("")).toBeNull();
+    expect(userSubscriptionChannelId("   ")).toBeNull();
+  });
+
+  it("trims surrounding whitespace before building the channel id", () => {
+    expect(userSubscriptionChannelId("  u9 ")).toBe("usr_u9");
   });
 });

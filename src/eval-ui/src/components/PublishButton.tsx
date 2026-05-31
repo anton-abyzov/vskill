@@ -1,12 +1,14 @@
 // ---------------------------------------------------------------------------
-// 0759 — PublishButton.
+// 0759 — PublishButton (in-app submit since 0847).
 //
-// Click → POST /api/git/publish (real `git push` on the eval-server side).
-// On success: window.open verified-skill.com/submit?repo=<encoded> in a new
-// tab and emit a studio:toast info event with short SHA + branch.
-// On failure: emit a studio:toast error event with stderr summary; do NOT
-// open the browser. The full 0742 build will replace this with a richer
-// drawer (dirty pill, AI commit messages, gh-CLI repo creation).
+// Click → if the skill has uncommitted changes, open the PublishDrawer (rich
+// in-app commit → push → submit with a structured inline outcome). On a clean
+// tree, POST /api/git/publish (real `git push`), then submit IN-APP via
+// api.submitToQueue (proxied through the local eval-server — NO browser
+// redirect) and toast the structured outcome. The website is only opened as a
+// graceful fallback when the remote is not a recognizable GitHub URL or the
+// skill identity is unknown. On failure: studio:toast error; never open the
+// browser on a successful push.
 // ---------------------------------------------------------------------------
 
 import { useCallback, useState } from "react";
@@ -151,7 +153,7 @@ export function PublishButton({ remoteUrl, provider, model, skillName, skillPath
         disabled={publishing}
         className="btn btn-primary text-[11px]"
         style={{ padding: "5px 14px" }}
-        title="Push committed changes and open verified-skill.com to submit"
+        title="Commit, push, and submit to the review queue — in-app, no browser redirect"
       >
         {publishing ? (
           <>

@@ -34,6 +34,53 @@ export const REJECTED_STATES = new Set<string>([
 
 export type TerminalOutcome = "approved" | "rejected";
 
+// ── Cross-transport single-fire dedupe (0859 T-006) ────────────────────────
+// A submission decision can arrive via BOTH transports at once:
+//   • the reliable UpdateHub `usr_<userId>` skills-stream (useSkillUpdates), and
+//   • the best-effort `/api/v1/submissions/stream?mine=1` panel stream
+//     (SubmissionQueuePanel).
+// Before this guard each consumer kept its OWN dedupe set, so a decision that
+// landed while the queue panel was open fired TWO native notifications. Both
+// consumers now consult this single module-level guard, so a decision notifies
+// exactly once per session. Keyed by `submissionId::state` so a genuinely new
+// decision (e.g. a requeue resolving to a different terminal state) can still
+// notify once.
+const notifiedDecisions = new Set<string>();
+
+function decisionKey(submissionId: string, state: string): string {
+  return `${submissionId}::${state}`;
+}
+
+/**
+ * Check-and-claim. Returns `true` exactly ONCE per (submissionId, state) per
+ * session, `false` thereafter. Synchronous + atomic, so two near-simultaneous
+ * callers (the two streams) can never both win the race. Callers should only
+ * fire the notification when this returns `true`.
+ */
+export function claimDecisionNotification(
+  submissionId: string,
+  state: string,
+): boolean {
+  const key = decisionKey(submissionId, state);
+  if (notifiedDecisions.has(key)) return false;
+  notifiedDecisions.add(key);
+  return true;
+}
+
+/**
+ * Seed a decision as already-notified WITHOUT firing — used for rows that were
+ * already terminal before the panel opened, so a later replay/redelivery of
+ * that same outcome does not produce a stale notification.
+ */
+export function markDecisionNotified(submissionId: string, state: string): void {
+  notifiedDecisions.add(decisionKey(submissionId, state));
+}
+
+/** Test-only: clear the session dedupe guard between cases. */
+export function resetDecisionDedupe(): void {
+  notifiedDecisions.clear();
+}
+
 export interface SubmissionNotificationPlan {
   outcome: TerminalOutcome;
   title: string;

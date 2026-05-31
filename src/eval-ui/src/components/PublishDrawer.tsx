@@ -19,16 +19,40 @@
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../api";
-import { buildSubmitUrlFromRemote } from "../utils/normalizeRemoteUrl";
+import { api, type SubmitToQueueResult } from "../api";
+import { buildSubmitUrlFromRemote, normalizeRemoteUrl } from "../utils/normalizeRemoteUrl";
+import { openExternalUrlViaDesktop } from "../preferences/lib/useDesktopBridge";
 
 type Mode = "manual" | "ai";
+
+// 0856: structured, in-app submit outcome — drives the inline result block so
+// a submit NEVER looks like it "did nothing". Mirrors SubmitToQueueResult plus
+// a website-fallback variant for the not-logged-in / unknown-skill path.
+type SubmitOutcome =
+  | { ok: true; result: SubmitToQueueResult; submitUrl: string }
+  | { ok: false; websiteUrl: string };
 
 function emitToast(message: string, severity: "info" | "error"): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(
     new CustomEvent("studio:toast", { detail: { message, severity } }),
   );
+}
+
+/**
+ * Build the website submit URL from a raw remote, degrading to the bare submit
+ * page when the remote isn't a recognizable github URL. `buildSubmitUrlFrom-
+ * Remote` throws on a non-normalizable remote; a successful push must NEVER be
+ * reported as a failure, so we swallow that and send the user to the generic
+ * submit page (where they can pick the repo manually).
+ */
+const BARE_SUBMIT_URL = "https://verified-skill.com/submit";
+function websiteSubmitUrl(rawRemoteUrl: string): string {
+  try {
+    return buildSubmitUrlFromRemote(rawRemoteUrl);
+  } catch {
+    return BARE_SUBMIT_URL;
+  }
 }
 
 interface Props {
@@ -40,6 +64,17 @@ interface Props {
   /** Optional: open in AI mode instead of manual. Used by tests + future
    *  preference. Default = "manual" (user types their own message). */
   defaultMode?: Mode;
+  /** 0856: the skill being published. When present, Commit & Push submits the
+   *  skill to the queue IN-APP (POST /api/v1/submissions) instead of opening
+   *  verified-skill.com. Absent → falls back to the website-open flow. */
+  skillName?: string;
+  /** 0856: repo-relative path to the skill dir. Optional — the platform
+   *  discovers it from the repo when omitted. */
+  skillPath?: string;
+  /** 0856: privacy choice forwarded to the submission. Default "public". */
+  privacy?: "public" | "private" | "decide-later";
+  /** 0856: tenant the user is publishing under (required for private). */
+  tenantId?: string;
 }
 
 export function PublishDrawer({
@@ -49,6 +84,10 @@ export function PublishDrawer({
   model,
   onClose,
   defaultMode = "manual",
+  skillName,
+  skillPath,
+  privacy,
+  tenantId,
 }: Props): React.ReactElement {
   const [mode, setMode] = useState<Mode>(defaultMode);
   const [message, setMessage] = useState("");
@@ -56,6 +95,10 @@ export function PublishDrawer({
   const [publishing, setPublishing] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
+  // 0856: inline submit outcome — when set, the drawer shows the result block
+  // (created / duplicate / alreadyVerified / requeued / blocked) and stays
+  // open so the user sees confirmation. `null` until the first submit settles.
+  const [outcome, setOutcome] = useState<SubmitOutcome | null>(null);
 
   const generate = useCallback(async () => {
     setGenerating(true);
@@ -98,15 +141,51 @@ export function PublishDrawer({
     if (!trimmed || publishing) return;
     setPublishing(true);
     setPublishError(null);
+    setOutcome(null);
     try {
+      // Step 1 — commit + push (server-side `git add -A && commit && push`).
       const result = await api.gitPublish({ commitMessage: trimmed });
       const effectiveRemote = result.remoteUrl ?? remoteUrl;
-      const submitUrl = buildSubmitUrlFromRemote(effectiveRemote);
-      window.open(submitUrl, "_blank", "noopener,noreferrer");
       const shortSha = (result.commitSha ?? "").slice(0, 7);
       const branch = result.branch ?? "";
-      emitToast(`Opening verified-skill.com — ${shortSha} on ${branch}`, "info");
-      onClose();
+
+      // Step 2 — submit to the queue IN-APP when we know the skill identity.
+      // Without a skillName we can't form a valid POST body, so fall back to
+      // the website submit page (which lets the user pick the skill).
+      if (skillName) {
+        let repoUrl: string;
+        try {
+          repoUrl = normalizeRemoteUrl(effectiveRemote);
+        } catch {
+          // Non-github remote → can't submit in-app; degrade to the website.
+          // buildSubmitUrlFromRemote re-runs normalizeRemoteUrl and would
+          // re-throw on a non-normalizable remote, escaping to the outer catch
+          // and surfacing "Publish failed" even though the push SUCCEEDED.
+          // Guard it and fall back to the bare submit page instead.
+          setOutcome({ ok: false, websiteUrl: websiteSubmitUrl(effectiveRemote) });
+          emitToast(`Pushed ${shortSha} on ${branch} — open the website to submit`, "info");
+          return;
+        }
+        const submitRes = await api.submitToQueue({
+          repoUrl,
+          skillName,
+          skillPath,
+          source: "studio-submit",
+          privacy: privacy ?? "public",
+          tenantId,
+        });
+        const submitUrl = `https://verified-skill.com/submit?repo=${encodeURIComponent(repoUrl)}`;
+        setOutcome({ ok: true, result: submitRes, submitUrl });
+        emitToast(`Submitted ${skillName} — ${shortSha} on ${branch}`, "info");
+        // Drawer stays open so the inline outcome is visible. The user closes
+        // it explicitly via Done / Cancel.
+      } else {
+        // No skill identity → website-open fallback (legacy behavior). Same
+        // guard: a non-github remote must not turn a successful push into
+        // "Publish failed".
+        setOutcome({ ok: false, websiteUrl: websiteSubmitUrl(effectiveRemote) });
+        emitToast(`Pushed ${shortSha} on ${branch} — open the website to submit`, "info");
+      }
     } catch (err) {
       const summary = err instanceof Error ? err.message : String(err);
       const capped = summary.length > 200 ? summary.slice(0, 200) + "…" : summary;
@@ -117,7 +196,13 @@ export function PublishDrawer({
     } finally {
       setPublishing(false);
     }
-  }, [message, publishing, remoteUrl, onClose]);
+  }, [message, publishing, remoteUrl, skillName, skillPath, privacy, tenantId]);
+
+  const openWebsite = useCallback((url: string) => {
+    // Reuse the tiered desktop shell-open seam (Tauri invoke → sidecar →
+    // plugin-shell → window.open). Works identically in the browser build.
+    void openExternalUrlViaDesktop(url);
+  }, []);
 
   const canCommit = message.trim().length > 0 && !publishing && !generating;
 
@@ -428,6 +513,16 @@ export function PublishDrawer({
             </div>
           )}
 
+          {/* ── Inline submit outcome (0856) ──────────────────────── */}
+          {outcome && (
+            <SubmitOutcomeBlock
+              outcome={outcome}
+              onOpenWebsite={openWebsite}
+              border={MODAL_BORDER}
+              textMuted={MODAL_TEXT_MUTED}
+            />
+          )}
+
           {/* ── Footer row ────────────────────────────────────────── */}
           <div
             style={{
@@ -455,46 +550,72 @@ export function PublishDrawer({
               )}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                aria-label="Cancel"
-                onClick={onClose}
-                disabled={publishing}
-                style={{
-                  padding: "8px 14px",
-                  background: "transparent",
-                  color: MODAL_TEXT,
-                  border: `1px solid ${MODAL_BORDER}`,
-                  borderRadius: 6,
-                  fontFamily: "var(--font-mono, monospace)",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  cursor: publishing ? "not-allowed" : "pointer",
-                  opacity: publishing ? 0.5 : 1,
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                aria-label="Commit & Push"
-                onClick={onCommitPush}
-                disabled={!canCommit}
-                data-testid="publish-commit-push"
-                style={{
-                  padding: "8px 16px",
-                  background: canCommit ? "#22C55E" : "rgba(255,255,255,0.06)",
-                  color: canCommit ? "#0B0F12" : MODAL_TEXT_MUTED,
-                  border: "1px solid " + (canCommit ? "#22C55E" : MODAL_BORDER),
-                  borderRadius: 6,
-                  fontFamily: "var(--font-mono, monospace)",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: canCommit ? "pointer" : "not-allowed",
-                }}
-              >
-                {publishing ? "Publishing…" : "Commit & Push"}
-              </button>
+              {outcome ? (
+                // 0856: post-submit — the result is shown inline; a single
+                // "Done" button dismisses. No re-submit (would duplicate).
+                <button
+                  type="button"
+                  aria-label="Done"
+                  onClick={onClose}
+                  data-testid="publish-done"
+                  style={{
+                    padding: "8px 16px",
+                    background: "#22C55E",
+                    color: "#0B0F12",
+                    border: "1px solid #22C55E",
+                    borderRadius: 6,
+                    fontFamily: "var(--font-mono, monospace)",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Done
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Cancel"
+                    onClick={onClose}
+                    disabled={publishing}
+                    style={{
+                      padding: "8px 14px",
+                      background: "transparent",
+                      color: MODAL_TEXT,
+                      border: `1px solid ${MODAL_BORDER}`,
+                      borderRadius: 6,
+                      fontFamily: "var(--font-mono, monospace)",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: publishing ? "not-allowed" : "pointer",
+                      opacity: publishing ? 0.5 : 1,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Commit & Push"
+                    onClick={onCommitPush}
+                    disabled={!canCommit}
+                    data-testid="publish-commit-push"
+                    style={{
+                      padding: "8px 16px",
+                      background: canCommit ? "#22C55E" : "rgba(255,255,255,0.06)",
+                      color: canCommit ? "#0B0F12" : MODAL_TEXT_MUTED,
+                      border: "1px solid " + (canCommit ? "#22C55E" : MODAL_BORDER),
+                      borderRadius: 6,
+                      fontFamily: "var(--font-mono, monospace)",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: canCommit ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    {publishing ? "Publishing…" : "Commit & Push"}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -514,4 +635,130 @@ export function PublishDrawer({
       `}</style>
     </>
   );
+}
+
+// ---------------------------------------------------------------------------
+// 0856 — inline submit outcome block.
+//
+// Renders the structured result of the in-app submit so the flow never looks
+// like a no-op. Each branch gets its own copy + tone; a secondary "Open on
+// website" link is always available (in-app is the default when logged in).
+// ---------------------------------------------------------------------------
+
+interface SubmitOutcomeBlockProps {
+  outcome: SubmitOutcome;
+  onOpenWebsite: (url: string) => void;
+  border: string;
+  textMuted: string;
+}
+
+function SubmitOutcomeBlock({
+  outcome,
+  onOpenWebsite,
+  border,
+  textMuted,
+}: SubmitOutcomeBlockProps): React.ReactElement {
+  // Website fallback (not logged in / non-github remote / unknown skill).
+  if (!outcome.ok) {
+    return (
+      <div
+        role="status"
+        data-testid="publish-outcome"
+        data-outcome="website-fallback"
+        style={outcomeBoxStyle(border, "#F59E0B")}
+      >
+        <strong style={{ fontWeight: 600, color: "#F59E0B" }}>Pushed to GitHub.</strong>{" "}
+        <span style={{ color: textMuted }}>
+          Finish submitting on the website.
+        </span>{" "}
+        <button
+          type="button"
+          data-testid="publish-open-website"
+          onClick={() => onOpenWebsite(outcome.websiteUrl)}
+          style={outcomeLinkStyle()}
+        >
+          Open on website ↗
+        </button>
+      </div>
+    );
+  }
+
+  const { result, submitUrl } = outcome;
+  let tone = "#22C55E";
+  let title = "Submitted to the queue.";
+  let detail = "";
+  switch (result.kind) {
+    case "created":
+      tone = "#22C55E";
+      title = "Submitted to the queue.";
+      detail = `${result.skillName} is now ${result.state}. We’ll notify you when review completes.`;
+      break;
+    case "requeued":
+      tone = "#22C55E";
+      title = "Re-queued for review.";
+      detail = `This skill was already submitted — it’s back in the queue (${result.state}).`;
+      break;
+    case "duplicate":
+      tone = "#F59E0B";
+      title = "Already in the queue.";
+      detail = `This skill is already submitted (${result.state}). No new entry was created.`;
+      break;
+    case "alreadyVerified":
+      tone = "#3B82F6";
+      title = "Already verified.";
+      detail = `${result.skillName ?? "This skill"} is already published — nothing to submit.`;
+      break;
+    case "blocked":
+      tone = "#EF4444";
+      title = "Submission blocked.";
+      detail = "This skill is on the blocklist and can’t be submitted. Tap to see why.";
+      break;
+  }
+
+  return (
+    <div
+      role="status"
+      data-testid="publish-outcome"
+      data-outcome={result.kind}
+      style={outcomeBoxStyle(border, tone)}
+    >
+      <strong style={{ fontWeight: 600, color: tone }}>{title}</strong>{" "}
+      <span style={{ color: textMuted }}>{detail}</span>{" "}
+      <button
+        type="button"
+        data-testid="publish-open-website"
+        onClick={() => onOpenWebsite(submitUrl)}
+        style={outcomeLinkStyle()}
+      >
+        Open on website ↗
+      </button>
+    </div>
+  );
+}
+
+function outcomeBoxStyle(border: string, tone: string): React.CSSProperties {
+  return {
+    marginTop: 10,
+    padding: "8px 12px",
+    border: `1px solid ${border}`,
+    borderLeft: `3px solid ${tone}`,
+    background: "rgba(255,255,255,0.03)",
+    borderRadius: 4,
+    fontSize: 11,
+    fontFamily: "var(--font-mono, monospace)",
+    lineHeight: 1.55,
+  };
+}
+
+function outcomeLinkStyle(): React.CSSProperties {
+  return {
+    background: "none",
+    border: "none",
+    color: "var(--color-accent, #60A5FA)",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: "inherit",
+    textDecoration: "underline",
+    padding: 0,
+  };
 }

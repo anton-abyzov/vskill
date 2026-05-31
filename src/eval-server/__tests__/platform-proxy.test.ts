@@ -263,6 +263,36 @@ describe("proxyToPlatform — request forwarding", () => {
     });
   });
 
+  // Regression (0856 cross-cutting): an in-app submit through the submissions
+  // allowlist carries an injected vsk_* keychain token. If that token is
+  // expired the platform answers 401 token_expired — the proxy MUST forward
+  // that 401 verbatim to the WebView (NOT mask it as 502 or a fake 201) so the
+  // PublishDrawer can prompt the user to re-auth. The existing verbatim-status
+  // test only covers 405 on the public check-updates path; this asserts the
+  // 401 seam specifically on the POST /api/v1/submissions path.
+  it("forwards an upstream 401 token_expired verbatim on POST /api/v1/submissions", async () => {
+    nextResponse = {
+      status: 401,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ error: "token_expired" }),
+    };
+    await withProxyServer(async (port) => {
+      const res = await fetch(
+        `http://127.0.0.1:${port}/api/v1/submissions`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ repoUrl: "https://github.com/x/y" }),
+        },
+      );
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: "token_expired" });
+    });
+    // The request still reached upstream (it was proxied, not blocked locally).
+    expect(lastCaptured?.method).toBe("POST");
+    expect(lastCaptured?.url).toBe("/api/v1/submissions");
+  });
+
   it("returns 502 with structured envelope when upstream is unreachable", async () => {
     const original = process.env.VSKILL_PLATFORM_URL;
     process.env.VSKILL_PLATFORM_URL = "http://127.0.0.1:1"; // unreachable

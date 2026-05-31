@@ -13,7 +13,14 @@
 //
 // Tabs follow the same order as the web /account sidebar so users
 // switching surfaces don't have to re-learn anything: Profile · Plan ·
-// Repos · Skills · Tokens · Notifications · Danger.
+// Repos · Skills · My queue · Tokens · Notifications · Danger.
+//
+// 0856 — "My queue" tab. The cabinet is the natural in-app home for the
+// signed-in user's submission queue: it already lives behind the same
+// AccountSidebarEntry, reuses the SideNav/TabPane pattern, and sits next
+// to "Skills". The panel is self-contained (loads its own feed, subscribes
+// to the SSE stream, owns its empty/error states), so the tab is a thin
+// mount — no extra data plumbing here.
 
 import { useState } from "react";
 import {
@@ -24,6 +31,7 @@ import {
   ProfileForm,
   TokensTable,
 } from "./account";
+import { SubmissionQueuePanel } from "./SubmissionQueuePanel";
 import {
   useAccount,
   useAccountProfile,
@@ -40,6 +48,7 @@ import {
   useRequestExport,
   useDeleteAccount,
   useAccountExports,
+  reposArray,
 } from "../hooks/useAccount";
 import type { TokenCreateResponseDTO } from "../types/account";
 
@@ -48,6 +57,7 @@ export type AccountTabKey =
   | "billing"
   | "repos"
   | "skills"
+  | "queue"
   | "tokens"
   | "notifications"
   | "danger";
@@ -57,6 +67,7 @@ const TABS: ReadonlyArray<{ key: AccountTabKey; label: string }> = [
   { key: "billing", label: "Plan & billing" },
   { key: "repos", label: "Connected repositories" },
   { key: "skills", label: "Skills" },
+  { key: "queue", label: "My queue" },
   { key: "tokens", label: "API tokens" },
   { key: "notifications", label: "Notifications" },
   { key: "danger", label: "Danger zone" },
@@ -292,6 +303,8 @@ function TabPane({
       );
     case "skills":
       return <SkillsTab />;
+    case "queue":
+      return <QueueTab />;
     case "tokens":
       return <TokensTab />;
     case "notifications":
@@ -365,7 +378,7 @@ function ReposTab({
 
   return (
     <ConnectedReposTable
-      repos={reposList?.repos ?? []}
+      repos={reposArray(reposList)}
       pendingActions={pending}
       onConnectNew={() => onConnectRepo?.()}
       onOpenOnGitHub={(repo) => {
@@ -492,6 +505,22 @@ function StatTile({ label, value }: { label: string; value: number }) {
   );
 }
 
+// 0856 — My queue tab. SubmissionQueuePanel is fully self-contained: it
+// loads the user's feed via api.getMyQueue(), subscribes to the SSE stream,
+// and renders its own loading / empty / error states. When the user is not
+// signed in or has no submissions the panel falls back to its empty state
+// ("No submissions yet…"), so no parent-side gating is required here.
+function QueueTab() {
+  return (
+    <section
+      data-testid="account-queue-tab"
+      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+    >
+      <SubmissionQueuePanel />
+    </section>
+  );
+}
+
 function TokensTab() {
   const { data: tokens, loading, error } = useApiTokens();
   const create = useCreateToken();
@@ -502,6 +531,15 @@ function TokensTab() {
     useState<TokenCreateResponseDTO | null>(null);
 
   if (loading && !tokens) return <Loading error={error} />;
+  if (error && !tokens) {
+    return (
+      <SectionError
+        title="API tokens are unavailable"
+        message="This page is for CLI and automation tokens, separate from GitHub repository access. Sign in again, then retry token management."
+        detail={error.message}
+      />
+    );
+  }
 
   return (
     <TokensTable
@@ -528,6 +566,48 @@ function TokensTab() {
         }
       }}
     />
+  );
+}
+
+function SectionError({
+  title,
+  message,
+  detail,
+}: {
+  title: string;
+  message: string;
+  detail?: string;
+}) {
+  return (
+    <div
+      role="alert"
+      data-testid="account-shell-section-error"
+      style={{
+        padding: 16,
+        border: "1px solid rgba(220, 38, 38, 0.35)",
+        background: "rgba(220, 38, 38, 0.06)",
+        borderRadius: 8,
+        color: "#7f1d1d",
+        fontSize: 13,
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <strong style={{ color: "#991b1b" }}>{title}</strong>
+      <span>{message}</span>
+      {detail ? (
+        <code
+          style={{
+            color: "#991b1b",
+            fontSize: 12,
+            wordBreak: "break-word",
+          }}
+        >
+          {detail}
+        </code>
+      ) : null}
+    </div>
   );
 }
 

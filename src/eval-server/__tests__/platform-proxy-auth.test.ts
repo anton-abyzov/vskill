@@ -71,4 +71,16 @@ describe("platform-proxy auth injection", () => {
     expect(shouldInjectAuth("/api/v1/skills/list")).toBe(false);
     expect(shouldInjectAuth("/api/v1/studio/search")).toBe(false);
   });
+
+  // 0856: in-app submissions are proxied AND auth-required, but carry the
+  // vsk_* token (see platform-proxy-submissions.test.ts for the kind proof).
+  it("shouldProxyToPlatform recognizes the submissions prefix", () => {
+    expect(shouldProxyToPlatform("/api/v1/submissions")).toBe(true);
+    expect(shouldProxyToPlatform("/api/v1/submissions/stream/x")).toBe(true);
+  });
+
+  it("shouldInjectAuth requires auth on the submissions prefix", () => {
+    expect(shouldInjectAuth("/api/v1/submissions")).toBe(true);
+    expect(shouldInjectAuth("/api/v1/submissions/positions/x")).toBe(true);
+  });
 });

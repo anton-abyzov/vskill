@@ -1,15 +1,18 @@
 // @vitest-environment jsdom
 // ---------------------------------------------------------------------------
-// 0759 Phase 5 — PublishDrawer tests.
+// 0759 Phase 5 / 0856 — PublishDrawer tests.
 // Suppress React act() environment warning in Vitest + jsdom:
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 //
 // PublishDrawer is the dirty-tree commit flow:
 //   - mounts when the user clicks Publish on a dirty workspace
-//   - on mount, auto-fires api.gitCommitMessage to populate the textarea
+//   - in AI mode auto-fires api.gitCommitMessage to populate the textarea
 //   - user can edit the message
-//   - "Commit & Push" calls api.gitPublish({ commitMessage }) and on success
-//     opens verified-skill.com/submit + dispatches a studio:toast info event
+//   - "Commit & Push" calls api.gitPublish({ commitMessage }) then, when a
+//     skillName is known (0856), submits IN-APP via api.submitToQueue and
+//     renders a structured inline outcome (the drawer stays open, no redirect).
+//     Without a skillName it falls back to opening verified-skill.com via the
+//     desktop shell bridge.
 //   - "Cancel" closes the drawer without doing anything
 // ---------------------------------------------------------------------------
 
@@ -19,18 +22,24 @@ import { createRoot, type Root } from "react-dom/client";
 
 const mockGitCommitMessage = vi.fn();
 const mockGitPublish = vi.fn();
+const mockSubmitToQueue = vi.fn();
 vi.mock("../../api", async () => ({
   api: {
     gitCommitMessage: (...a: unknown[]) => mockGitCommitMessage(...a),
     gitPublish: (...a: unknown[]) => mockGitPublish(...a),
+    submitToQueue: (...a: unknown[]) => mockSubmitToQueue(...a),
   },
+}));
+
+const mockOpenExternal = vi.fn(async () => {});
+vi.mock("../../preferences/lib/useDesktopBridge", () => ({
+  openExternalUrlViaDesktop: (...a: unknown[]) => mockOpenExternal(...a),
 }));
 
 import { PublishDrawer } from "../PublishDrawer";
 
 let container: HTMLDivElement;
 let root: Root;
-let openSpy: ReturnType<typeof vi.fn>;
 let dispatchEventSpy: ReturnType<typeof vi.spyOn>;
 let onClose: ReturnType<typeof vi.fn>;
 
@@ -38,11 +47,11 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  openSpy = vi.fn(() => null);
-  Object.defineProperty(window, "open", { value: openSpy, configurable: true, writable: true });
   dispatchEventSpy = vi.spyOn(window, "dispatchEvent");
   mockGitCommitMessage.mockReset();
   mockGitPublish.mockReset();
+  mockSubmitToQueue.mockReset();
+  mockOpenExternal.mockClear();
   onClose = vi.fn();
 });
 
@@ -58,15 +67,8 @@ async function flush() {
   await Promise.resolve();
 }
 
-// React 19 + controlled textareas: setting `.value` directly doesn't notify
-// React. We have to call the native HTMLTextAreaElement value setter so the
-// onChange handler fires. This pattern is the no-@testing-library equivalent
-// of fireEvent.change().
 function reactTypeInto(textarea: HTMLTextAreaElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(
-    HTMLTextAreaElement.prototype,
-    "value",
-  )!.set!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
   setter.call(textarea, value);
   textarea.dispatchEvent(new Event("input", { bubbles: true }));
 }
@@ -84,26 +86,24 @@ function findButton(name: string): HTMLButtonElement {
   return b as HTMLButtonElement;
 }
 
-describe("PublishDrawer", () => {
+const PUBLISH_OK = {
+  success: true,
+  commitSha: "abc1234def5678",
+  branch: "main",
+  remoteUrl: "git@github.com:owner/repo.git",
+  stdout: "",
+  stderr: "",
+};
+
+describe("PublishDrawer — message generation (regression)", () => {
   it("calls api.gitCommitMessage with provider+model on mount and populates textarea", async () => {
     mockGitCommitMessage.mockResolvedValueOnce({ message: "feat: add x" });
-
     await act(async () => {
       root.render(
-        // 0759 Phase 9: drawer now defaults to manual mode. Tests that assert
-        // auto-generation pass defaultMode="ai" to opt into the old behavior.
-        <PublishDrawer
-          provider="claude-cli"
-          model="sonnet"
-          remoteUrl="git@github.com:owner/repo.git"
-          fileCount={3}
-          onClose={onClose}
-          defaultMode="ai"
-        />,
+        <PublishDrawer provider="claude-cli" model="sonnet" remoteUrl="git@github.com:owner/repo.git" fileCount={3} onClose={onClose} defaultMode="ai" />,
       );
       await flush();
     });
-
     expect(mockGitCommitMessage).toHaveBeenCalledTimes(1);
     expect(mockGitCommitMessage).toHaveBeenCalledWith({ provider: "claude-cli", model: "sonnet" });
     expect(findTextarea().value).toBe("feat: add x");
@@ -112,182 +112,308 @@ describe("PublishDrawer", () => {
   it("renders the file count in the header", async () => {
     mockGitCommitMessage.mockResolvedValueOnce({ message: "x" });
     await act(async () => {
-      root.render(
-        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={5} onClose={onClose} defaultMode="ai" />,
-      );
+      root.render(<PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={5} onClose={onClose} defaultMode="ai" />);
       await flush();
     });
     expect(container.textContent).toContain("5");
-  });
-
-  it("Commit & Push: calls gitPublish with current textarea value, opens verified-skill.com, dispatches success toast", async () => {
-    mockGitCommitMessage.mockResolvedValueOnce({ message: "feat: ai message" });
-    mockGitPublish.mockResolvedValueOnce({
-      success: true,
-      commitSha: "abc1234def5678",
-      branch: "main",
-      remoteUrl: "git@github.com:owner/repo.git",
-      stdout: "[main abc1234] feat: ai message\n",
-      stderr: "",
-    });
-
-    await act(async () => {
-      root.render(
-        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:owner/repo.git" fileCount={1} onClose={onClose} defaultMode="ai" />,
-      );
-      await flush();
-    });
-
-    // User edits the AI suggestion before pushing.
-    const textarea = findTextarea();
-    await act(async () => {
-      reactTypeInto(textarea, "feat: my edit");
-      await flush();
-    });
-
-    await act(async () => {
-      findButton("Commit & Push").click();
-      await flush();
-    });
-
-    expect(mockGitPublish).toHaveBeenCalledWith({ commitMessage: "feat: my edit" });
-    expect(openSpy).toHaveBeenCalledTimes(1);
-    const [url, target, features] = openSpy.mock.calls[0] as [string, string, string];
-    expect(url).toBe(
-      "https://verified-skill.com/submit?repo=https%3A%2F%2Fgithub.com%2Fowner%2Frepo",
-    );
-    expect(target).toBe("_blank");
-    expect(features).toContain("noopener");
-
-    const toastCall = dispatchEventSpy.mock.calls.find(
-      (c) => (c[0] as Event).type === "studio:toast",
-    );
-    expect(toastCall).toBeTruthy();
-    const ev = toastCall![0] as CustomEvent<{ message: string; severity: "info" | "error" }>;
-    expect(ev.detail.severity).toBe("info");
-    expect(ev.detail.message).toContain("abc1234");
-    expect(ev.detail.message).toContain("main");
-  });
-
-  it("Commit & Push is disabled while gitPublish is in flight", async () => {
-    mockGitCommitMessage.mockResolvedValueOnce({ message: "x" });
-    let resolvePublish: (v: unknown) => void = () => {};
-    mockGitPublish.mockImplementationOnce(
-      () => new Promise((r) => { resolvePublish = r; }),
-    );
-
-    await act(async () => {
-      root.render(
-        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" />,
-      );
-      await flush();
-    });
-
-    await act(async () => {
-      findButton("Commit & Push").click();
-      await flush();
-    });
-
-    expect(findButton("Commit & Push").disabled).toBe(true);
-
-    await act(async () => {
-      resolvePublish({
-        success: true,
-        commitSha: "abc1234",
-        branch: "main",
-        remoteUrl: "git@github.com:o/r.git",
-        stdout: "",
-        stderr: "",
-      });
-      await flush();
-    });
-
-    // After settle, drawer should call onClose to dismiss itself.
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it("on publish failure: dispatches error toast, does NOT call window.open, does NOT call onClose", async () => {
-    mockGitCommitMessage.mockResolvedValueOnce({ message: "x" });
-    mockGitPublish.mockRejectedValueOnce(new Error("rejected: hook failed"));
-
-    await act(async () => {
-      root.render(
-        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" />,
-      );
-      await flush();
-    });
-
-    await act(async () => {
-      findButton("Commit & Push").click();
-      await flush();
-    });
-
-    expect(openSpy).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-    const toastCall = dispatchEventSpy.mock.calls.find(
-      (c) => (c[0] as Event).type === "studio:toast",
-    );
-    const ev = toastCall![0] as CustomEvent<{ severity: string; message: string }>;
-    expect(ev.detail.severity).toBe("error");
-    expect(ev.detail.message).toContain("hook failed");
-  });
-
-  it("Cancel: calls onClose without invoking gitPublish", async () => {
-    mockGitCommitMessage.mockResolvedValueOnce({ message: "x" });
-    await act(async () => {
-      root.render(
-        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" />,
-      );
-      await flush();
-    });
-
-    await act(async () => {
-      findButton("Cancel").click();
-      await flush();
-    });
-
-    expect(onClose).toHaveBeenCalled();
-    expect(mockGitPublish).not.toHaveBeenCalled();
   });
 
   it("Regenerate: re-fires gitCommitMessage and replaces textarea content", async () => {
     mockGitCommitMessage
       .mockResolvedValueOnce({ message: "feat: first" })
       .mockResolvedValueOnce({ message: "fix: second" });
-
     await act(async () => {
-      root.render(
-        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" />,
-      );
+      root.render(<PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" />);
       await flush();
     });
-
     expect(findTextarea().value).toBe("feat: first");
-
     await act(async () => {
       findButton("Regenerate").click();
       await flush();
     });
-
     expect(mockGitCommitMessage).toHaveBeenCalledTimes(2);
     expect(findTextarea().value).toBe("fix: second");
   });
 
-  it("Commit & Push refuses an empty commit message (does not call gitPublish, no error toast)", async () => {
+  it("Commit & Push refuses an empty commit message", async () => {
     mockGitCommitMessage.mockResolvedValueOnce({ message: "feat: x" });
     await act(async () => {
+      root.render(<PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" />);
+      await flush();
+    });
+    await act(async () => {
+      reactTypeInto(findTextarea(), "   ");
+      await flush();
+    });
+    expect(findButton("Commit & Push").disabled).toBe(true);
+    expect(mockGitPublish).not.toHaveBeenCalled();
+  });
+
+  it("Cancel: calls onClose without invoking gitPublish", async () => {
+    mockGitCommitMessage.mockResolvedValueOnce({ message: "x" });
+    await act(async () => {
+      root.render(<PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" />);
+      await flush();
+    });
+    await act(async () => {
+      findButton("Cancel").click();
+      await flush();
+    });
+    expect(onClose).toHaveBeenCalled();
+    expect(mockGitPublish).not.toHaveBeenCalled();
+  });
+});
+
+describe("PublishDrawer — in-app submit (0856)", () => {
+  it("Commit & Push: pushes, then submits IN-APP and renders the created outcome", async () => {
+    mockGitCommitMessage.mockResolvedValueOnce({ message: "feat: ai message" });
+    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
+    mockSubmitToQueue.mockResolvedValueOnce({
+      kind: "created",
+      id: "sub-1",
+      skillName: "greet",
+      skillPath: "skills/greet",
+      state: "RECEIVED",
+      createdAt: "x",
+    });
+
+    await act(async () => {
       root.render(
-        <PublishDrawer provider="claude-cli" remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" />,
+        <PublishDrawer
+          provider="claude-cli"
+          remoteUrl="git@github.com:owner/repo.git"
+          fileCount={1}
+          onClose={onClose}
+          defaultMode="ai"
+          skillName="greet"
+          skillPath="skills/greet"
+        />,
       );
       await flush();
     });
 
-    const textarea = findTextarea();
     await act(async () => {
-      reactTypeInto(textarea, "   ");
+      findButton("Commit & Push").click();
       await flush();
     });
 
+    // pushed with the (edited or generated) message
+    expect(mockGitPublish).toHaveBeenCalledWith({ commitMessage: "feat: ai message" });
+    // submitted in-app with the canonical https repoUrl + studio source
+    expect(mockSubmitToQueue).toHaveBeenCalledWith({
+      repoUrl: "https://github.com/owner/repo",
+      skillName: "greet",
+      skillPath: "skills/greet",
+      source: "studio-submit",
+      privacy: "public",
+      tenantId: undefined,
+    });
+    // inline outcome rendered, drawer NOT closed, website NOT opened
+    const outcome = container.querySelector('[data-testid="publish-outcome"]');
+    expect(outcome).toBeTruthy();
+    expect(outcome?.getAttribute("data-outcome")).toBe("created");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(mockOpenExternal).not.toHaveBeenCalled();
+    // a "Done" button replaces Commit & Push
+    expect(container.querySelector('[data-testid="publish-done"]')).toBeTruthy();
+  });
+
+  it("renders the duplicate outcome inline", async () => {
+    mockGitCommitMessage.mockResolvedValueOnce({ message: "m" });
+    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
+    mockSubmitToQueue.mockResolvedValueOnce({ kind: "duplicate", id: "s2", state: "TIER1_SCANNING" });
+
+    await act(async () => {
+      root.render(
+        <PublishDrawer remoteUrl="git@github.com:owner/repo.git" fileCount={1} onClose={onClose} defaultMode="ai" skillName="greet" />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+
+    const outcome = container.querySelector('[data-testid="publish-outcome"]');
+    expect(outcome?.getAttribute("data-outcome")).toBe("duplicate");
+    expect(outcome?.textContent?.toLowerCase()).toContain("already in the queue");
+  });
+
+  it("renders the blocked outcome inline", async () => {
+    mockGitCommitMessage.mockResolvedValueOnce({ message: "m" });
+    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
+    mockSubmitToQueue.mockResolvedValueOnce({ kind: "blocked", submissionId: "s9" });
+
+    await act(async () => {
+      root.render(
+        <PublishDrawer remoteUrl="git@github.com:owner/repo.git" fileCount={1} onClose={onClose} defaultMode="ai" skillName="evil" />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+
+    const outcome = container.querySelector('[data-testid="publish-outcome"]');
+    expect(outcome?.getAttribute("data-outcome")).toBe("blocked");
+    expect(outcome?.textContent?.toLowerCase()).toContain("blocked");
+  });
+
+  it("'Open on website' link opens via the desktop shell bridge", async () => {
+    mockGitCommitMessage.mockResolvedValueOnce({ message: "m" });
+    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
+    mockSubmitToQueue.mockResolvedValueOnce({ kind: "created", id: "s1", skillName: "greet", skillPath: "p", state: "RECEIVED", createdAt: "x" });
+
+    await act(async () => {
+      root.render(
+        <PublishDrawer remoteUrl="git@github.com:owner/repo.git" fileCount={1} onClose={onClose} defaultMode="ai" skillName="greet" />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+    await act(async () => {
+      (container.querySelector('[data-testid="publish-open-website"]') as HTMLButtonElement).click();
+      await flush();
+    });
+    expect(mockOpenExternal).toHaveBeenCalledTimes(1);
+    expect(mockOpenExternal.mock.calls[0][0]).toContain("verified-skill.com/submit");
+  });
+
+  it("Done button dismisses the drawer after a submit", async () => {
+    mockGitCommitMessage.mockResolvedValueOnce({ message: "m" });
+    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
+    mockSubmitToQueue.mockResolvedValueOnce({ kind: "created", id: "s1", skillName: "greet", skillPath: "p", state: "RECEIVED", createdAt: "x" });
+
+    await act(async () => {
+      root.render(
+        <PublishDrawer remoteUrl="git@github.com:owner/repo.git" fileCount={1} onClose={onClose} defaultMode="ai" skillName="greet" />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+    await act(async () => {
+      findButton("Done").click();
+      await flush();
+    });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("on push failure: inline error, no submit, drawer stays open", async () => {
+    mockGitCommitMessage.mockResolvedValueOnce({ message: "x" });
+    mockGitPublish.mockRejectedValueOnce(new Error("rejected: hook failed"));
+
+    await act(async () => {
+      root.render(
+        <PublishDrawer remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" skillName="greet" />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+
+    expect(mockSubmitToQueue).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="publish-error-push"]')).toBeTruthy();
+    const toastCall = dispatchEventSpy.mock.calls.find((c) => (c[0] as Event).type === "studio:toast");
+    const ev = toastCall![0] as CustomEvent<{ severity: string; message: string }>;
+    expect(ev.detail.severity).toBe("error");
+    expect(ev.detail.message).toContain("hook failed");
+  });
+
+  it("non-github remote + skillName: push succeeds → website-fallback outcome, NOT 'Publish failed'", async () => {
+    // GitLab remote → normalizeRemoteUrl throws inside the skillName branch.
+    // The push already succeeded, so the drawer must degrade to the website-
+    // fallback outcome (info toast) instead of letting buildSubmitUrlFromRemote
+    // re-throw and surface a "Publish failed" error.
+    mockGitCommitMessage.mockResolvedValueOnce({ message: "feat: x" });
+    mockGitPublish.mockResolvedValueOnce({
+      ...PUBLISH_OK,
+      remoteUrl: "git@gitlab.com:owner/repo.git",
+    });
+
+    await act(async () => {
+      root.render(
+        <PublishDrawer remoteUrl="git@gitlab.com:owner/repo.git" fileCount={1} onClose={onClose} defaultMode="ai" skillName="greet" />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+
+    // No in-app submit (no valid github repoUrl) and no push-failure error block.
+    expect(mockSubmitToQueue).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="publish-error-push"]')).toBeNull();
+    // Website-fallback outcome rendered (drawer stays open, push acknowledged).
+    const outcome = container.querySelector('[data-testid="publish-outcome"]');
+    expect(outcome?.getAttribute("data-outcome")).toBe("website-fallback");
+    // The fallback link points at the bare submit page (remote not normalizable).
+    await act(async () => {
+      (container.querySelector('[data-testid="publish-open-website"]') as HTMLButtonElement).click();
+      await flush();
+    });
+    expect(mockOpenExternal.mock.calls[0][0]).toBe("https://verified-skill.com/submit");
+    // Toast is INFO, never the error "Publish failed".
+    const toasts = dispatchEventSpy.mock.calls
+      .filter((c) => (c[0] as Event).type === "studio:toast")
+      .map((c) => (c[0] as CustomEvent<{ message: string; severity: string }>).detail);
+    expect(toasts.some((t) => t.severity === "error")).toBe(false);
+    expect(toasts.some((t) => t.message.includes("Publish failed"))).toBe(false);
+  });
+
+  it("without a skillName: falls back to the website-open flow (no in-app submit)", async () => {
+    mockGitCommitMessage.mockResolvedValueOnce({ message: "x" });
+    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
+
+    await act(async () => {
+      root.render(
+        <PublishDrawer remoteUrl="git@github.com:owner/repo.git" fileCount={1} onClose={onClose} defaultMode="ai" />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+
+    expect(mockSubmitToQueue).not.toHaveBeenCalled();
+    const outcome = container.querySelector('[data-testid="publish-outcome"]');
+    expect(outcome?.getAttribute("data-outcome")).toBe("website-fallback");
+  });
+
+  it("Commit & Push is disabled while the request is in flight", async () => {
+    mockGitCommitMessage.mockResolvedValueOnce({ message: "x" });
+    let resolvePublish: (v: unknown) => void = () => {};
+    mockGitPublish.mockImplementationOnce(() => new Promise((r) => { resolvePublish = r; }));
+
+    await act(async () => {
+      root.render(
+        <PublishDrawer remoteUrl="git@github.com:owner/repo.git" fileCount={1} onClose={onClose} defaultMode="ai" skillName="greet" />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
     expect(findButton("Commit & Push").disabled).toBe(true);
+
+    mockSubmitToQueue.mockResolvedValueOnce({ kind: "created", id: "s1", skillName: "greet", skillPath: "p", state: "RECEIVED", createdAt: "x" });
+    await act(async () => {
+      resolvePublish(PUBLISH_OK);
+      await flush();
+    });
+    // Settled → outcome shown, Done button available.
+    expect(container.querySelector('[data-testid="publish-done"]')).toBeTruthy();
   });
 });

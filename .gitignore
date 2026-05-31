@@ -58,3 +58,8 @@ src-tauri/.cargo/
 # Ignoring it caused the Publish button to silently drop newly-authored
 # skill files: `git add -A` skipped them and only stray tracked files
 # (e.g. agents.json regen) ended up in the commit.
+
+# 0862 demo video artifacts (binaries — delivered directly, not committed)
+e2e/demo-output/
+test-results/
+playwright-report/

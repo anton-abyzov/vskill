@@ -57,12 +57,19 @@ export default defineConfig({
   projects: [
     {
       name: "default",
-      testIgnore: [/-live\.spec\.ts$/, /e2e\/desktop\//],
+      testIgnore: [/-live\.spec\.ts$/, /e2e\/desktop\//, /lifecycle-demo-video\.spec\.ts$/],
     },
     {
       name: "live",
       testMatch: /-live\.spec\.ts$/,
       grep: /@live/,
+    },
+    // Dedicated VIDEO-DEMO lane. Records the full anton-grid submission →
+    // update lifecycle to test-results/ with on-screen captions. Runs only
+    // when explicitly selected (`--project=demo`); the default lane ignores it.
+    {
+      name: "demo",
+      testMatch: /lifecycle-demo-video\.spec\.ts$/,
     },
     {
       name: "desktop",

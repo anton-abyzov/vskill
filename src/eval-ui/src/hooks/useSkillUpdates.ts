@@ -12,6 +12,7 @@ import { getStudioTokenForUrl } from "../contexts/StudioTokenBridge";
 import {
   notifySubmissionOutcome,
   claimDecisionNotification,
+  APPROVED_STATES,
 } from "./useSubmissionNotifications";
 import { userSubscriptionChannelId } from "../utils/resolveSubscriptionIds";
 
@@ -855,6 +856,13 @@ export function useSkillUpdates(
         payload.skillName ?? "",
         payload.state,
       );
+      // 0862: an APPROVED decision means a new published version now exists on
+      // the registry — proactively re-check updates so the bell relights for the
+      // installed copy IMMEDIATELY, instead of waiting for the 5-min poll or the
+      // 60s-stale visibility refresh. (Rejections create no update → no refetch.)
+      if (APPROVED_STATES.has(payload.state)) {
+        void refresh();
+      }
     };
 
     const openStream = () => {

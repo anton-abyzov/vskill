@@ -199,6 +199,16 @@ describe("0701 T-003: PROVIDER_MODELS anthropic pricing map", () => {
     expect(entry?.pricing).toEqual({ prompt: 5, completion: 25 });
   });
 
+  it("pins Claude Opus 4.8 (new opus/best default) at $5 / $25 per 1M tokens", () => {
+    // 0856: Opus 4.8 added as the new opus/best default. Pricing is a
+    // PLACEHOLDER mirroring 4.7 until Anthropic publishes official rates.
+    const entry = PROVIDER_MODELS["anthropic"].find(
+      (m) => m.id === "claude-opus-4-8",
+    );
+    expect(entry, "claude-opus-4-8 missing from PROVIDER_MODELS[anthropic]").toBeDefined();
+    expect(entry?.pricing).toEqual({ prompt: 5, completion: 25 });
+  });
+
   it("pins Claude Haiku 4.5 at $1 / $5 per 1M tokens", () => {
     const entry = PROVIDER_MODELS["anthropic"].find(
       (m) => m.id === "claude-haiku-4-5-20251001",

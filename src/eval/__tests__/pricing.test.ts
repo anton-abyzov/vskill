@@ -70,7 +70,7 @@ describe("pricing engine", () => {
       expect(pricing!.inputPerMillion).toBe(3);
     });
 
-    it("resolves 'opus' alias to claude-opus-4-7 for anthropic", () => {
+    it("resolves 'opus' alias to claude-opus-4-8 for anthropic", () => {
       const pricing = getProviderPricing("anthropic", "opus");
       expect(pricing).not.toBeNull();
       expect(pricing!.inputPerMillion).toBe(5);

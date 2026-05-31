@@ -8,6 +8,7 @@ import {
   drain as drainToastQueue,
   type QueuedToast,
 } from "../utils/toastQueue";
+import { getStudioTokenForUrl } from "../contexts/StudioTokenBridge";
 
 /**
  * Shared update hook — polling (0683) + SSE push (0708).
@@ -305,6 +306,11 @@ export function useSkillUpdates(
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  // 0838 F-005: track all in-flight replay-queue setTimeouts so the visibility
+  // effect cleanup can clear them before the SSE pipeline tears down for a new
+  // skillsCsv/trackingCsv. Without this, queued toasts can fire against a
+  // stale subscription set after `skillsCsv` changes mid-replay.
+  const replayTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
   // ----- SSE state (0708) --------------------------------------------------
   const [status, setStatus] = useState<StreamStatus>(() =>
@@ -435,7 +441,13 @@ export function useSkillUpdates(
     // emit — the user opted out of seeing the live indicator, but the
     // queued toast represents an arrival they couldn't perceive.
     drained.forEach((entry, idx) => {
+      // 0838 F-005: capture the timer ID in a closure-stable handle so we can
+      // self-evict on dispatch and so the visibility effect cleanup can clear
+      // any still-pending timers when the SSE pipeline tears down (e.g.
+      // skillsCsv changes mid-replay).
+      let timerId: ReturnType<typeof setTimeout>;
       const dispatchOne = () => {
+        replayTimersRef.current.delete(timerId);
         if (!mountedRef.current) return;
         const storeEntry = updateStore.getSnapshot().get(entry.skillId);
         if (storeEntry && storeEntry.eventId !== entry.eventId) {
@@ -465,9 +477,30 @@ export function useSkillUpdates(
       };
       // First entry fires on the next tick; subsequent entries spaced by
       // replayIntervalMs (AC-US3-03).
-      setTimeout(dispatchOne, idx * replayIntervalMs);
+      timerId = setTimeout(dispatchOne, idx * replayIntervalMs);
+      replayTimersRef.current.add(timerId);
     });
   }, [replayIntervalMs]);
+
+  /**
+   * 0838 F-005: cancel any pending replay-toast timers. Called from cleanup
+   * paths where the SSE pipeline tears down (visibility unmount, skillsCsv
+   * change) so queued toasts can't fire against a stale subscription set.
+   *
+   * INVARIANT (dual-ownership): this is called from BOTH the mount-effect
+   * cleanup (full unmount) and the SSE-lifecycle effect cleanup (skillsCsv
+   * change). The function MUST stay idempotent: clearTimeout on a stale id is
+   * a no-op, and `Set.clear()` is safe on an empty set. Do NOT add
+   * non-idempotent side effects here (e.g. analytics emits) — they would fire
+   * twice on a full unmount where both effects tear down. If a side effect is
+   * needed, route it through a single owner (the SSE effect) instead.
+   */
+  const cancelReplayTimers = useCallback(() => {
+    for (const timer of replayTimersRef.current) {
+      clearTimeout(timer);
+    }
+    replayTimersRef.current.clear();
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -513,6 +546,9 @@ export function useSkillUpdates(
         document.removeEventListener("visibilitychange", onVis);
       }
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      // 0838 F-005: clear any in-flight replay-toast timers so they can't fire
+      // against a torn-down subscription after unmount.
+      cancelReplayTimers();
       stopInterval();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -602,7 +638,17 @@ export function useSkillUpdates(
 
     setStatus("connecting");
     const ids = csvForSubscribe.split(",");
-    const url = `${streamBase}?skills=${encodeURIComponent(csvForSubscribe)}`;
+    // 0855: the browser EventSource API cannot set request headers, so the
+    // eval-server's X-Studio-Token gate (0836) would 401 this stream and kill
+    // live toasts. Carry the per-process token as a ?studioToken query param
+    // instead — the gate validates it with the same timing-safe compare and
+    // strips it before proxying upstream. On verified-skill.com there's no
+    // injected token (cookie auth handles it), so the URL is unchanged.
+    let url = `${streamBase}?skills=${encodeURIComponent(csvForSubscribe)}`;
+    const studioToken = getStudioTokenForUrl();
+    if (studioToken) {
+      url += `&studioToken=${encodeURIComponent(studioToken)}`;
+    }
     let es: EventSource | null = null;
 
     let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -739,8 +785,12 @@ export function useSkillUpdates(
         try { es.removeEventListener("gone", onGone); } catch { /* noop */ }
         try { es.close(); } catch { /* noop */ }
       }
+      // 0838 F-005: cancel any in-flight replay-toast timers so a queued
+      // dispatch can't fire after the subscription set has changed (e.g.
+      // skillsCsv/trackingCsv flipped while replay was draining).
+      cancelReplayTimers();
     };
-  }, [skillsCsv, trackingCsv, streamBase, fallbackMs, reconcileCheckUpdates, emitTelemetry]);
+  }, [skillsCsv, trackingCsv, streamBase, fallbackMs, reconcileCheckUpdates, emitTelemetry, cancelReplayTimers]);
 
   useEffect(() => {
     if (!trackingCsv) return;

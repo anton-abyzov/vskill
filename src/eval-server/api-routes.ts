@@ -1209,6 +1209,12 @@ export const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
   // what models the user has loaded. The probe at probeLmStudio() populates
   // this dynamically from GET /v1/models.
   "lm-studio": [],
+  // 0857: `stub` is a deterministic TEST SEAM (src/eval/llm.ts createStubClient),
+  // NOT a user-facing provider. This empty list exists only to satisfy the
+  // `Record<ProviderName, ModelOption[]>` exhaustiveness check — `stub` is
+  // deliberately excluded from `detectAvailableProviders()` and
+  // `KNOWN_PROVIDER_NAMES`, so it never reaches /api/config or the picker.
+  "stub": [],
 };
 
 // ---------------------------------------------------------------------------

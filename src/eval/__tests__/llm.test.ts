@@ -685,6 +685,87 @@ describe("createLlmClient", () => {
   });
 
   // -------------------------------------------------------------------------
+  // 0857 — claude-cli argv contract (cross-model)
+  //
+  // Pins that the claude-cli adapter spawns `['-p', '--model', <model>]` and
+  // that `client.model` equals the NORMALIZED input for both the default and a
+  // non-default alias. A refactor that drops `--model` or mis-normalizes would
+  // fail here — fast PR feedback before the e2e verify harness runs.
+  // -------------------------------------------------------------------------
+  describe("claude-cli argv + model normalization (0857)", () => {
+    it.each([
+      ["sonnet", "sonnet"],
+      ["opus", "opus"],
+      ["haiku", "haiku"],
+      // 0856 normalization: dated/displayModel ids collapse to the CLI alias.
+      ["claude-opus-4-8", "opus"],
+      ["claude-sonnet-4-6", "sonnet"],
+    ])("model=%s → client.model=%s and argv ['-p','--model',%s]", async (input, normalized) => {
+      mockSpawn.mockReturnValue(createFakeProc("ok\n"));
+
+      const client = createLlmClient({ provider: "claude-cli", model: input });
+      expect(client.model).toBe(normalized);
+
+      await client.generate("sys", "usr");
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "claude",
+        ["-p", "--model", normalized],
+        expect.objectContaining({ stdio: ["pipe", "pipe", "pipe"] }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 0857 — stub provider (deterministic test seam)
+  // -------------------------------------------------------------------------
+
+  describe("stub provider", () => {
+    it("echoes back the requested non-default model", () => {
+      const client = createLlmClient({ provider: "stub", model: "haiku" });
+      expect(client.model).toBe("haiku");
+    });
+
+    it("honors VSKILL_EVAL_MODEL when no override is given", () => {
+      process.env.VSKILL_EVAL_PROVIDER = "stub";
+      process.env.VSKILL_EVAL_MODEL = "opus";
+      const client = createLlmClient();
+      expect(client.model).toBe("opus");
+    });
+
+    it("is deterministic — same prompt yields byte-identical output across calls", async () => {
+      const client = createLlmClient({ provider: "stub", model: "haiku" });
+      const a = await client.generate("system prompt", "user prompt");
+      const b = await client.generate("system prompt", "user prompt");
+      expect(a.text).toBe(b.text);
+      // Different prompt → different content address.
+      const c = await client.generate("system prompt", "DIFFERENT");
+      expect(c.text).not.toBe(a.text);
+    });
+
+    it("emits the requested model inside the JSON envelope (frontmatter/benchmark source)", async () => {
+      const client = createLlmClient({ provider: "stub", model: "opus" });
+      const { text } = await client.generate("sys", "usr");
+      const json = text.replace(/^```json\n/, "").replace(/\n```$/, "");
+      const env = JSON.parse(json);
+      expect(env.model).toBe("opus");
+      expect(typeof env.name).toBe("string");
+      expect(Array.isArray(env.evals)).toBe(true);
+      expect(env.pass).toBe(true);
+    });
+
+    it("makes no network call and reports free billing", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      const client = createLlmClient({ provider: "stub", model: "haiku" });
+      const result = await client.generate("sys", "usr");
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(mockSpawn).not.toHaveBeenCalled();
+      expect(result.billingMode).toBe("free");
+      expect(result.cost).toBe(0);
+      fetchSpy.mockRestore();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Ollama provider
   // -------------------------------------------------------------------------
 

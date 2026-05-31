@@ -27,6 +27,7 @@ import {
   getUniversalAgents,
 } from "../agents/agents-registry.js";
 import { generateSkill, type GenerateSkillResult } from "../core/skill-generator.js";
+import type { ProviderName } from "../eval/llm.js";
 import { isSkillCreatorInstalled } from "../utils/skill-creator-detection.js";
 import { bold, cyan, dim, green, red, yellow } from "../utils/output.js";
 import { listCommand } from "./list.js";
@@ -179,6 +180,10 @@ interface SkillNewOpts {
   prompt?: string;
   targets?: string;
   engine?: string;
+  /** 0857: LLM provider for generation (threads into generateSkill → createLlmClient). */
+  provider?: string;
+  /** 0857: model id/alias to generate with (e.g. opus, haiku). */
+  model?: string;
 }
 
 async function skillNewCommand(opts: SkillNewOpts): Promise<void> {
@@ -256,8 +261,19 @@ async function skillNewCommand(opts: SkillNewOpts): Promise<void> {
       reasoning: "",
     };
   } else {
+    // 0857: thread --provider/--model through to the generator so a non-default
+    // model selection (e.g. --provider stub --model opus) is honored end-to-end.
+    // Both are optional; generateSkill defaults to { claude-cli, sonnet }.
     generated = await generateSkill(
-      { prompt: promptText, targetAgents: targets },
+      {
+        prompt: promptText,
+        targetAgents: targets,
+        // Cast: the CLI flag is a free string; an unknown provider surfaces at
+        // createLlmClient() runtime with a clear "Unknown VSKILL_EVAL_PROVIDER"
+        // error rather than being silently ignored here.
+        ...(opts.provider ? { provider: opts.provider as ProviderName } : {}),
+        ...(opts.model ? { model: opts.model } : {}),
+      },
       { root: cwd },
     );
   }
@@ -460,6 +476,14 @@ export function registerSkillCommand(program: Command): void {
     .option(
       "--engine <mode>",
       "Generator engine: 'universal' (default) or 'anthropic-skill-creator'",
+    )
+    .option(
+      "--provider <id>",
+      "LLM provider for generation (claude-cli, anthropic, ollama, ...). Default: claude-cli",
+    )
+    .option(
+      "--model <id>",
+      "Model id/alias to generate with (e.g. opus, haiku). Default: provider default",
     )
     .action(async (opts: SkillNewOpts) => {
       await skillNewCommand(opts);

@@ -313,6 +313,60 @@ describe("vskill auth status / logout", () => {
     expect(parsed.login).toBe("anton");
   });
 
+  it("0855 — status reports verified-skill token PRESENT (redacted, no raw value)", async () => {
+    const f = fakeIO();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { login: "anton", id: 9 })) as unknown as typeof fetch;
+    const exit = await authCommand(["status"], {
+      io: f.io,
+      keychain: fakeKeychain({ token: "ghu_x", vskToken: "vsk_secret_1234" }),
+      fetchImpl,
+      sleep: () => Promise.resolve(),
+      clientId: "Iv1.test",
+    });
+    expect(exit).toBe(0);
+    expect(f.stdoutBuf).toMatch(/verified-skill token: present/i);
+    // Redacted: shows last-4 but NEVER the full secret.
+    expect(f.stdoutBuf).toContain("1234");
+    expect(f.stdoutBuf).not.toContain("vsk_secret_1234");
+  });
+
+  it("0855 — status reports verified-skill token ABSENT when no vsk_ stored", async () => {
+    const f = fakeIO();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { login: "anton", id: 9 })) as unknown as typeof fetch;
+    const exit = await authCommand(["status"], {
+      io: f.io,
+      keychain: fakeKeychain({ token: "ghu_x", vskToken: null }),
+      fetchImpl,
+      sleep: () => Promise.resolve(),
+      clientId: "Iv1.test",
+    });
+    expect(exit).toBe(0);
+    expect(f.stdoutBuf).toMatch(/verified-skill token: absent/i);
+  });
+
+  it("0855 — status --json includes vskToken boolean", async () => {
+    const f = fakeIO();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { login: "anton", id: 9 })) as unknown as typeof fetch;
+    const exit = await authCommand(["status", "--json"], {
+      io: f.io,
+      keychain: fakeKeychain({ token: "ghu_x", vskToken: "vsk_present" }),
+      fetchImpl,
+      sleep: () => Promise.resolve(),
+      clientId: "Iv1.test",
+    });
+    expect(exit).toBe(0);
+    const parsed = JSON.parse(f.stdoutBuf.trim());
+    expect(parsed.vskToken).toBe(true);
+    // Must not leak the raw token in JSON either.
+    expect(f.stdoutBuf).not.toContain("vsk_present");
+  });
+
   it("logout clears keychain and prints confirmation", async () => {
     const f = fakeIO();
     const ks: FakeKeychainState = { token: "ghu_present" };

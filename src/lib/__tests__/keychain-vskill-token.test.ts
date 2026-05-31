@@ -196,6 +196,63 @@ describe("keychain — vsk_ token helpers (0839 US-005)", () => {
     expect(stored!.content).toContain(`${VSKILL_TOKEN_KEY}=vsk_fallback_token`);
   });
 
+  it("0855 — setVskillToken DUAL-WRITES the keys.env fallback even when the keyring write succeeds", () => {
+    const kr = fakeKeyring(); // keyring available + working
+    const fsState = fakeFs();
+    const k = createKeychain({
+      keyring: kr,
+      fs: makeFsAdapter(fsState),
+      fallbackPath: "/tmp/vskill-test-keys.env",
+      warn: vi.fn(),
+    });
+
+    k.setVskillToken("vsk_dualwrite");
+
+    // Keyring copy is present (keyring-first reader path).
+    expect(kr.store.get(`${VSKILL_TOKEN_SERVICE}::${VSKILL_TOKEN_KEY}`)).toBe(
+      "vsk_dualwrite",
+    );
+    // AND the fallback file is also written, so a keyring-less reader
+    // (headless `vskill studio`) can still read the token.
+    const stored = fsState.files.get("/tmp/vskill-test-keys.env");
+    expect(stored).toBeTruthy();
+    expect(stored!.mode).toBe(0o600);
+    expect(stored!.content).toContain(`${VSKILL_TOKEN_KEY}=vsk_dualwrite`);
+  });
+
+  it("0855 — a keyring-less reader resolves the vsk_ token from the dual-written fallback", () => {
+    // Writer HAS a working keyring; reader simulates a process that CANNOT
+    // read the keyring (e.g., headless studio). They share the same keys.env.
+    const fsState = fakeFs();
+    const writer = createKeychain({
+      keyring: fakeKeyring(),
+      fs: makeFsAdapter(fsState),
+      fallbackPath: "/tmp/vskill-test-keys.env",
+      warn: vi.fn(),
+    });
+    writer.setVskillToken("vsk_crossproc");
+
+    const reader = createKeychain({
+      keyring: null, // no keyring at all in this process
+      fs: makeFsAdapter(fsState),
+      fallbackPath: "/tmp/vskill-test-keys.env",
+      warn: vi.fn(),
+    });
+    expect(reader.getVskillToken()).toBe("vsk_crossproc");
+  });
+
+  it("0855 — dual-write does NOT emit the 'keychain unavailable' warning when the keyring works", () => {
+    const warn = vi.fn();
+    const k = createKeychain({
+      keyring: fakeKeyring(),
+      fs: makeFsAdapter(fakeFs()),
+      fallbackPath: "/tmp/vskill-test-keys.env",
+      warn,
+    });
+    k.setVskillToken("vsk_nowarn");
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("setVskillToken throws when token is empty", () => {
     const kr = fakeKeyring();
     const k = createKeychain({

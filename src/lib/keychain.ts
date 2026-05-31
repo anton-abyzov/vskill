@@ -338,11 +338,28 @@ export function createKeychain(opts: KeychainOptions = {}): Keychain {
       if (!token || typeof token !== "string") {
         throw new Error("setVskillToken: token must be a non-empty string");
       }
+      // 0855 — DUAL-WRITE: unlike the GitHub token, the vsk_ token must ALSO
+      // land in the keys.env fallback even when the keyring write succeeds.
+      // Rationale: a headless / CLI-spawned `vskill studio` process often
+      // cannot read the macOS login Keychain (no GUI session), so the
+      // eval-server proxy — which injects vsk_ for /api/v1/submissions —
+      // would otherwise get null and return 401. The 0600 file is readable
+      // from any spawned process, so it's the reliable cross-process channel.
+      // We attempt the keyring (best-effort, for tools that CAN read it) and
+      // unconditionally also write the fallback. Reads stay keyring-first via
+      // getVskillToken, so the keyring copy still wins when both are present.
       const r = tryKeyring((kr) =>
         kr.setPassword(VSKILL_TOKEN_SERVICE, VSKILL_TOKEN_KEY, token),
       );
-      if (r.ok) return;
-      ensureFallbackWarned();
+      if (!r.ok) {
+        // Keyring genuinely unavailable — surface the one-time fallback warning.
+        ensureFallbackWarned();
+      } else {
+        // Keyring worked, but we still mirror to the file for headless readers.
+        // Mark the fallback as in-use WITHOUT emitting the "keychain
+        // unavailable" warning, which would be misleading here.
+        fallbackInUse = true;
+      }
       const map = readFallback();
       map.set(VSKILL_TOKEN_KEY, token);
       writeFallback(map);

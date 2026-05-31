@@ -262,6 +262,12 @@ async function loginCmd(deps: Required<Pick<AuthCommandDeps, "fetchImpl" | "slee
         keychain.setVskillToken(resp.token);
         // 0839 F-004 — bust again so vsk_ replaces gho_ in the cache.
         if (deps.invalidateAuthCache) deps.invalidateAuthCache();
+        // 0855 — confirm the verified-skill token was minted so the user
+        // knows the in-app submit/queue is enabled.
+        io.stdout.write(
+          `\nLogged in as @${login} (verified-skill token minted — in-app submit/queue enabled).\n`,
+        );
+        return 0;
       } else {
         io.stdout.write(
           `\nLogged in as @${login} (legacy mode — exchange returned no token).\n`,
@@ -317,12 +323,41 @@ async function statusCmd(args: string[], deps: Required<Pick<AuthCommandDeps, "f
     return 1;
   }
   const u = user.body as { login: string; id: number };
+  // 0855 — also report whether a verified-skill vsk_ token is present so the
+  // user knows the in-app submit/queue (which the eval-server proxy gates on
+  // vsk_) will work. Never print the token value — only a redacted prefix.
+  const vsk = keychain.getVskillToken();
+  const vskPresent = typeof vsk === "string" && vsk.length > 0;
   if (json) {
-    io.stdout.write(JSON.stringify({ loggedIn: true, login: u.login, id: u.id }) + "\n");
+    io.stdout.write(
+      JSON.stringify({
+        loggedIn: true,
+        login: u.login,
+        id: u.id,
+        vskToken: vskPresent,
+      }) + "\n",
+    );
   } else {
     io.stdout.write(`Logged in as @${u.login} (id=${u.id}).\n`);
+    if (vskPresent) {
+      io.stdout.write(`verified-skill token: present (${redactVsk(vsk!)}).\n`);
+    } else {
+      io.stdout.write(
+        "verified-skill token: absent (run `vskill auth login` to mint one; in-app submit/queue needs it).\n",
+      );
+    }
   }
   return 0;
+}
+
+/**
+ * 0855 — log-safe rendering of a vsk_ token for `auth status`. Keeps the
+ * recognisable `vsk_` prefix + last 4 chars, masks the middle. Never emits
+ * the full secret.
+ */
+function redactVsk(token: string): string {
+  if (token.length <= 8) return "vsk_****";
+  return `vsk_…${token.slice(-4)}`;
 }
 
 async function logoutCmd(deps: AuthCommandDeps): Promise<number> {

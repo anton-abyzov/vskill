@@ -82,6 +82,13 @@
 :root {
   --bg-canvas: var(--color-paper);
   --bg-surface: var(--color-surface);
+  /* Account-cabinet panels (AccountShell/SideNav, PlanCard, TokensTable,
+     ProfileForm, NotificationsForm, DangerZone, ConnectedReposTable) reference
+     --bg-elevated. It was never defined → fell back to #fff, so in DARK theme
+     those panels rendered white with light --text-primary text (1.18:1, the
+     "My queue"/Account tabs were unreadable). Map it to the theme-aware surface
+     so it is dark in dark theme and light in light theme. */
+  --bg-elevated: var(--color-surface);
   --text-primary: var(--color-ink);
   --text-secondary: var(--color-ink-muted);
   --text-accent: var(--color-accent-ink);

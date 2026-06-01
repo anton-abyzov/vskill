@@ -17,7 +17,9 @@ import {
   type DetailTab,
 } from "./components/RightPanel";
 import { UpdateToast } from "./components/UpdateToast";
-import { AppUpdateToast } from "./components/AppUpdateToast";
+import { AppUpdateButton } from "./components/AppUpdateButton";
+import { UpdateBanner } from "./components/UpdateBanner";
+import { AppUpdaterProvider } from "./hooks/useAppUpdater";
 import { ToastProvider, useToast } from "./components/ToastProvider";
 import { ShortcutModal } from "./components/ShortcutModal";
 import { ContextMenu } from "./components/ContextMenu";
@@ -153,9 +155,10 @@ export function App() {
         <StudioProvider>
           <ToastProvider>
             <AccountProviderHost>
-              <Shell />
-              <UpdateToast />
-              <AppUpdateToast />
+              <AppUpdaterProvider>
+                <Shell />
+                <UpdateToast />
+              </AppUpdaterProvider>
             </AccountProviderHost>
           </ToastProvider>
         </StudioProvider>
@@ -979,7 +982,12 @@ function Shell() {
       <StudioLayout
         sidebarWidth={sidebarWidth}
         sidebarHidden={sidebarToggledHidden || (state.isMobile && state.mobileView === "detail")}
-        banner={<DisconnectBanner connected={sseConnected} />}
+        banner={
+          <>
+            <UpdateBanner />
+            <DisconnectBanner connected={sseConnected} />
+          </>
+        }
         liveMessage={liveMessage}
         topRail={
           <TopRail
@@ -998,6 +1006,7 @@ function Shell() {
               ) : undefined
             }
             findSkillsSlot={<FindSkillsNavButton />}
+            appUpdateSlot={<AppUpdateButton />}
             userDropdownSlot={
               <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                 {/* 0831 US-010: grace banner — invisible while fresh, yellow at

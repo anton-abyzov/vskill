@@ -42,6 +42,9 @@ use crate::commands::UpdateInfo;
 use crate::preferences::SettingsStore;
 
 const AUTO_CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60;
+// On a failed background check (e.g. transient network/endpoint error) retry in
+// an hour instead of blackholing for the full 24h interval.
+const AUTO_CHECK_ERROR_RETRY_SECS: u64 = 60 * 60;
 
 /// Lifecycle state for the update flow. Owned by the `UpdaterState` resource
 /// stored in app-managed state. UI is a projection — it does not own state.
@@ -365,18 +368,27 @@ pub fn spawn_auto_check_task<R: Runtime>(app: AppHandle<R>) {
                 None => true,
             };
 
+            // Default to the full interval; shorten it if a check errors so a
+            // transient failure retries within the hour instead of a full day.
+            let mut next_sleep_secs = AUTO_CHECK_INTERVAL_SECS;
+
             if elapsed_ok {
                 // Best-effort silent check — surface "available" as an ambient
                 // event so the UI can show a notification dot. The Updates tab
                 // is the explicit surface.
-                if let Ok(info) = check_for_updates(app.clone()).await {
-                    if info.available {
-                        let _ = app.emit(EVT_AVAILABLE, info);
+                match check_for_updates(app.clone()).await {
+                    Ok(info) => {
+                        if info.available {
+                            let _ = app.emit(EVT_AVAILABLE, info);
+                        }
+                    }
+                    Err(_) => {
+                        next_sleep_secs = AUTO_CHECK_ERROR_RETRY_SECS;
                     }
                 }
             }
 
-            tokio::time::sleep(Duration::from_secs(AUTO_CHECK_INTERVAL_SECS)).await;
+            tokio::time::sleep(Duration::from_secs(next_sleep_secs)).await;
         }
     });
 }
@@ -672,5 +684,13 @@ mod tests {
     fn test_auto_check_interval_is_24h() {
         // AC-US3-05 fixes this at 24h in v1.
         assert_eq!(AUTO_CHECK_INTERVAL_SECS, 86_400);
+    }
+
+    #[test]
+    fn test_auto_check_error_retry_is_one_hour() {
+        // 0864 AC-US4-01: a failed background check retries within the hour
+        // instead of waiting out the full 24h interval.
+        assert_eq!(AUTO_CHECK_ERROR_RETRY_SECS, 3_600);
+        assert!(AUTO_CHECK_ERROR_RETRY_SECS < AUTO_CHECK_INTERVAL_SECS);
     }
 }

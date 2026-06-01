@@ -33,6 +33,8 @@ interface Props {
    * passes `null` from App.tsx since the feature is desktop-only.
    */
   userDropdownSlot?: ReactNode;
+  /** Whole-app desktop update action shown when a new Skill Studio version is available. */
+  appUpdateSlot?: ReactNode;
 }
 
 // T-059: Breadcrumb segments dispatch a `studio:navigate-scope` CustomEvent
@@ -97,6 +99,7 @@ export function TopRail({
   onRequestCreateSkill,
   findSkillsSlot,
   userDropdownSlot,
+  appUpdateSlot,
 }: Props) {
   // 0801: breadcrumb scope label derives from the 3-way `source` field
   // (project|personal|plugin) on SelectedSkill. Pre-0801 the label came from
@@ -274,6 +277,11 @@ export function TopRail({
           <span data-slot="agent-model-picker" style={{ minWidth: 200 }}>
             <AgentModelPicker />
           </span>
+          {appUpdateSlot && (
+            <span data-slot="app-update" style={{ display: "inline-flex" }}>
+              {appUpdateSlot}
+            </span>
+          )}
           <span data-slot="update-bell" style={{ display: "inline-flex" }}>
             <UpdateBell />
           </span>

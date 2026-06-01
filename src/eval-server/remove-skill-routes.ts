@@ -66,10 +66,12 @@ function validateAgentIds(ids: unknown): { ok: true; ids: string[] } | { ok: fal
   return { ok: true, ids: out };
 }
 
-export function registerRemoveSkillRoutes(router: Router, root: string = process.cwd()): void {
+export function registerRemoveSkillRoutes(router: Router, rootArg: string | (() => string) = () => process.cwd()): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   router.post(
     "/api/studio/remove-skill",
     async (req: http.IncomingMessage, res: http.ServerResponse) => {
+      const root = getRoot();
       if (!isLocalhost(req)) {
         sendJson(res, { error: "localhost-only endpoint" }, 403, req);
         return;

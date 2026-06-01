@@ -547,19 +547,27 @@ export function makeConvertToPluginHandler(root: string) {
   };
 }
 
-export function registerAuthoringRoutes(router: Router, root: string): void {
-  const handler = makeCreateSkillHandler(root);
-  router.post("/api/authoring/create-skill", (req, res) => handler(req, res));
+export function registerAuthoringRoutes(router: Router, rootArg: string | (() => string)): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
+  // 0863: handler factories below take a frozen `root` snapshot. To keep them
+  // live across a project switch, resolve `getRoot()` per request inside thin
+  // wrappers rather than once at registration time.
+  router.post("/api/authoring/create-skill", (req, res) =>
+    makeCreateSkillHandler(getRoot())(req, res),
+  );
 
-  const convertHandler = makeConvertToPluginHandler(root);
-  router.post("/api/authoring/convert-to-plugin", (req, res) => convertHandler(req, res));
+  router.post("/api/authoring/convert-to-plugin", (req, res) =>
+    makeConvertToPluginHandler(getRoot())(req, res),
+  );
 
-  const existsHandler = makeSkillExistsHandler(root);
-  router.get("/api/authoring/skill-exists", (req, res) => existsHandler(req, res));
+  router.get("/api/authoring/skill-exists", (req, res) =>
+    makeSkillExistsHandler(getRoot())(req, res),
+  );
 
   // Helper endpoint: list authored plugins in the current root so the modal
   // can populate the "existing plugin" dropdown.
   router.get("/api/authoring/plugins", (_req, res) => {
+    const root = getRoot();
     const found: Array<{ name: string; path: string; manifestPath: string }> = [];
     try {
       // Shallow walk — depth 4 matches scanAuthoredPluginSkills default.

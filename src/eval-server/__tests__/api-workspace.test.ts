@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
 import { makeWorkspaceHandlers } from "../workspace-routes.js";
 import type { WorkspaceConfig } from "../workspace-store.js";
+import { createActiveRootStore } from "../active-root-store.js";
 
 // --- Minimal fake req/res helpers for pure-handler testing --------------------
 
@@ -198,5 +199,83 @@ describe("POST /api/workspace/active (0698 T-012)", () => {
     const res = new FakeRes();
     await h.postActive(new FakeReq({}) as any, res as any);
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("POST /api/workspace/active re-roots the running server (0863)", () => {
+  it("AC-US1-03/05: switching to a valid project sets the store root + returns skillCount", async () => {
+    const pa = makeProjectPath("a");
+    const pb = makeProjectPath("b");
+    const rootStore = createActiveRootStore(pa);
+    const h = makeWorkspaceHandlers({
+      workspaceDir,
+      rootStore,
+      countSkills: async (r) => (r === pb ? 3 : 0),
+    });
+    await h.postProject(new FakeReq({ path: pa }) as any, new FakeRes() as any);
+    const addBRes = new FakeRes();
+    await h.postProject(new FakeReq({ path: pb }) as any, addBRes as any);
+    const bId = (addBRes.json as WorkspaceConfig).projects[1].id;
+
+    const res = new FakeRes();
+    await h.postActive(new FakeReq({ id: bId }) as any, res as any);
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json as { ok: boolean; root: string; skillCount: number; activeProjectId: string };
+    expect(body.ok).toBe(true);
+    expect(body.root).toBe(pb);
+    expect(body.skillCount).toBe(3);
+    expect(body.activeProjectId).toBe(bId);
+    // The running server is now re-rooted to B.
+    expect(rootStore.getRoot()).toBe(pb);
+  });
+
+  it("AC-US4-01: switching to an empty folder succeeds with skillCount 0 (not an error)", async () => {
+    const pa = makeProjectPath("a");
+    const empty = makeProjectPath("empty");
+    const rootStore = createActiveRootStore(pa);
+    const h = makeWorkspaceHandlers({
+      workspaceDir,
+      rootStore,
+      countSkills: async () => 0,
+    });
+    await h.postProject(new FakeReq({ path: pa }) as any, new FakeRes() as any);
+    const addRes = new FakeRes();
+    await h.postProject(new FakeReq({ path: empty }) as any, addRes as any);
+    const emptyId = (addRes.json as WorkspaceConfig).projects[1].id;
+
+    const res = new FakeRes();
+    await h.postActive(new FakeReq({ id: emptyId }) as any, res as any);
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json as { ok: boolean; skillCount: number };
+    expect(body.ok).toBe(true);
+    expect(body.skillCount).toBe(0);
+    expect(rootStore.getRoot()).toBe(empty);
+  });
+
+  it("AC-US4-02: 409 + fallbackCommand when the target path is gone; old root preserved", async () => {
+    const pa = makeProjectPath("a");
+    const pb = makeProjectPath("b");
+    const rootStore = createActiveRootStore(pa);
+    const h = makeWorkspaceHandlers({ workspaceDir, rootStore, countSkills: async () => 9 });
+    await h.postProject(new FakeReq({ path: pa }) as any, new FakeRes() as any);
+    const addBRes = new FakeRes();
+    await h.postProject(new FakeReq({ path: pb }) as any, addBRes as any);
+    const bId = (addBRes.json as WorkspaceConfig).projects[1].id;
+
+    // Delete B's folder AFTER registering it.
+    rmSync(pb, { recursive: true, force: true });
+
+    const res = new FakeRes();
+    await h.postActive(new FakeReq({ id: bId }) as any, res as any);
+
+    expect(res.statusCode).toBe(409);
+    const body = res.json as { ok: boolean; error: string; fallbackCommand: string };
+    expect(body.ok).toBe(false);
+    expect(body.fallbackCommand).toContain(pb);
+    expect(body.fallbackCommand).toContain("npx vskill@latest studio");
+    // The store keeps serving the previous (still-valid) root.
+    expect(rootStore.getRoot()).toBe(pa);
   });
 });

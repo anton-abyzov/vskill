@@ -4,10 +4,18 @@
 //   GET    /api/workspace                 → WorkspaceConfig
 //   POST   /api/workspace/projects        { path, name? }  → WorkspaceConfig
 //   DELETE /api/workspace/projects/:id    → WorkspaceConfig
-//   POST   /api/workspace/active          { id | null }    → WorkspaceConfig
+//   POST   /api/workspace/active          { id | null }    → WorkspaceConfig (+0863 fields)
 //
 // Error envelope (non-2xx): { ok: false, error: <sanitized message> }.
 // 400 duplicate / 404 unknown id / 400 path-does-not-exist.
+//
+// 0863: POST /api/workspace/active now also RE-ROOTS the running eval-server.
+// When a `rootStore` is injected, switching to a project updates the in-memory
+// scan root so the next GET /api/skills scans the new folder — no restart. The
+// success body becomes { ok:true, ...WorkspaceConfig, root, skillCount }. If the
+// target path is missing/unreadable, the active project is NOT changed, the old
+// root keeps being served, and the handler returns 409 with a `fallbackCommand`
+// the UI can surface (the legacy "relaunch from a terminal" hint).
 //
 // Handlers are exported as pure functions (`makeWorkspaceHandlers`) so tests
 // can call them directly with fake req/res. The Router registration wrapper
@@ -15,6 +23,7 @@
 // ---------------------------------------------------------------------------
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { statSync } from "node:fs";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import {
@@ -24,10 +33,22 @@ import {
   setActiveProject,
 } from "./workspace-store.js";
 import type { WorkspaceConfig } from "./workspace-store.js";
+import type { ActiveRootStore } from "./active-root-store.js";
 
 export interface WorkspaceRoutesOptions {
   /** Where ~/.vskill lives (test injection). Defaults to join(os.homedir(), ".vskill"). */
   workspaceDir: string;
+  /**
+   * 0863: when present, switching the active project re-roots the running
+   * server via `rootStore.setRoot(path)`. Omitted in unit tests that only
+   * exercise the persistence layer (those keep the legacy response shape).
+   */
+  rootStore?: ActiveRootStore;
+  /**
+   * 0863: counts skills under a root for the switch response (`skillCount`),
+   * so the UI can size its skeleton grid and toast. Best-effort: errors → undefined.
+   */
+  countSkills?: (root: string) => Promise<number>;
 }
 
 export interface WorkspaceHandlers {
@@ -44,7 +65,7 @@ export interface WorkspaceHandlers {
 export function makeWorkspaceHandlers(
   opts: WorkspaceRoutesOptions,
 ): WorkspaceHandlers {
-  const { workspaceDir } = opts;
+  const { workspaceDir, rootStore, countSkills } = opts;
 
   function send(res: ServerResponse, ws: WorkspaceConfig, status = 200): void {
     sendJson(res, ws, status);
@@ -111,6 +132,56 @@ export function makeWorkspaceHandlers(
         return sendError(res, 400, "Field 'id' must be a string or null");
       }
       const ws = loadWorkspace(workspaceDir);
+
+      // 0863: switching to a real project with a live rootStore re-roots the
+      // running server. Guard the path BEFORE persisting so a bad path never
+      // becomes the active project and the old root keeps being served.
+      if (id !== null && rootStore) {
+        const project = ws.projects.find((p) => p.id === id);
+        if (!project) return sendError(res, 404, `Project id not found: ${id}`);
+
+        let usable = false;
+        try {
+          usable = statSync(project.path).isDirectory();
+        } catch {
+          usable = false;
+        }
+        if (!usable) {
+          return sendJson(
+            res,
+            {
+              ok: false,
+              error: `Project path is not accessible: ${project.path}`,
+              fallbackCommand: `cd "${project.path}" && npx vskill@latest studio`,
+            },
+            409,
+          );
+        }
+
+        try {
+          const next = setActiveProject(workspaceDir, ws, id);
+          rootStore.setRoot(project.path);
+
+          let skillCount: number | undefined;
+          if (countSkills) {
+            try {
+              skillCount = await countSkills(project.path);
+            } catch {
+              skillCount = undefined;
+            }
+          }
+          return sendJson(res, { ok: true, ...next, root: project.path, skillCount }, 200);
+        } catch (err) {
+          // Mirror the legacy branch's error mapping so a persistence failure
+          // returns a consistent envelope instead of a bare 500.
+          const message = err instanceof Error ? err.message : String(err);
+          if (/not found|unknown/i.test(message)) return sendError(res, 404, message);
+          return sendError(res, 400, message);
+        }
+      }
+
+      // Legacy path: clearing the active project (id === null) or persistence-only
+      // contexts (no rootStore, e.g. unit tests) keep the original response shape.
       try {
         const next = setActiveProject(workspaceDir, ws, id);
         send(res, next);

@@ -118,7 +118,8 @@ export interface SupportedAgentsResponse {
   agents: SupportedAgent[];
 }
 
-export function registerInstallStateRoutes(router: Router, root: string): void {
+export function registerInstallStateRoutes(router: Router, rootArg: string | (() => string)): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   // 0845 T-005 (AC-US1-01, AC-US1-02, AC-US6-02): GET /api/studio/supported-agents
   // returns every registry entry whose installMode is filesystem|clipboard,
   // enriched with the detection flag + resolved install paths. Distinct from
@@ -140,6 +141,7 @@ export function registerInstallStateRoutes(router: Router, root: string): void {
   router.get(
     "/api/studio/install-state",
     async (req: http.IncomingMessage, res: http.ServerResponse) => {
+      const root = getRoot();
       if (!isLocalhost(req)) {
         sendJson(res, { error: "localhost-only endpoint" }, 403, req);
         return;

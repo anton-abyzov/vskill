@@ -13,11 +13,13 @@ import { resolveAllCredentials, writeCredential, resolveCredential, parseDotenv 
 import { runIntegrationCase, isFirstRun, recordRun, promptConfirmation } from "../eval/integration-runner.js";
 import type { IntegrationEvalCase } from "../eval/integration-types.js";
 
-export function registerIntegrationRoutes(router: Router, root: string): void {
+export function registerIntegrationRoutes(router: Router, rootArg: string | (() => string)): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   // -------------------------------------------------------------------------
   // POST /api/skills/:plugin/:skill/integration-run -- SSE integration test
   // -------------------------------------------------------------------------
   router.post("/api/skills/:plugin/:skill/integration-run", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const body = (await readBody(req)) as {
       eval_ids?: number[];
@@ -87,6 +89,7 @@ export function registerIntegrationRoutes(router: Router, root: string): void {
   // GET /api/credentials/:plugin/:skill -- credential status
   // -------------------------------------------------------------------------
   router.get("/api/credentials/:plugin/:skill", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
 
     // Skills without evals/evals.json have no integration-test credentials.
@@ -132,6 +135,7 @@ export function registerIntegrationRoutes(router: Router, root: string): void {
   // PUT /api/credentials/:plugin/:skill -- save a credential to .env.local
   // -------------------------------------------------------------------------
   router.put("/api/credentials/:plugin/:skill", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
 
     try {
@@ -182,6 +186,7 @@ export function registerIntegrationRoutes(router: Router, root: string): void {
   // GET /api/credentials/:plugin/:skill/params -- read all .env.local params
   // -------------------------------------------------------------------------
   router.get("/api/credentials/:plugin/:skill/params", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
 
     try {

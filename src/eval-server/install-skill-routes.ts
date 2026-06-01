@@ -535,13 +535,15 @@ async function runMultiInstallJob(opts: {
   return job;
 }
 
-export function registerInstallSkillRoutes(router: Router, root: string = process.cwd()): void {
+export function registerInstallSkillRoutes(router: Router, rootArg: string | (() => string) = () => process.cwd()): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   // POST /api/studio/install-skill
   // Body shape (legacy single-agent CLI spawn):    { skill: string, scope: "project"|"user"|"global" }
   // Body shape (new multi-agent in-process):       { skill: string, scope, agentIds: string[], parsedSkill: ParsedSkill, projectRoot?: string }
   router.post(
     "/api/studio/install-skill",
     async (req: http.IncomingMessage, res: http.ServerResponse) => {
+      const root = getRoot();
       if (!isLocalhost(req)) {
         sendJson(res, { error: "localhost-only endpoint" }, 403, req);
         return;

@@ -28,12 +28,14 @@ import type { SkillScope, StudioOp, TransferEvent } from "../types.js";
 
 export function registerTestInstallRoute(
   router: Router,
-  root: string,
+  rootArg: string | (() => string),
   home: string = homedir(),
 ): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   router.post(
     "/api/skills/:plugin/:skill/test-install",
     async (req: http.IncomingMessage, res: http.ServerResponse, params: Record<string, string>) => {
+      const root = getRoot();
       const { plugin, skill } = params;
       const query = parseQuery(req.url);
       const overwrite = query.get("overwrite") === "true";

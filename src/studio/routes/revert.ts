@@ -30,12 +30,14 @@ import type { StudioOp, TransferEvent } from "../types.js";
 
 export function registerRevertRoute(
   router: Router,
-  root: string,
+  rootArg: string | (() => string),
   home: string = homedir(),
 ): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   router.post(
     "/api/skills/:plugin/:skill/revert",
     async (req: http.IncomingMessage, res: http.ServerResponse, params: Record<string, string>) => {
+      const root = getRoot();
       const { plugin, skill } = params;
       const ownDir = resolveScopePath("own", root, skill, home);
       const opId = randomUUID();

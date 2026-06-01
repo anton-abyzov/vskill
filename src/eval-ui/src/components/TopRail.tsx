@@ -153,6 +153,14 @@ export function TopRail({
             </span>
           )
         )}
+        {/* Whole-app update chip sits right beside the project picker — the
+            developer's eye-path — so a new desktop version is impossible to
+            miss. Renders null until an update is available (desktop only). */}
+        {appUpdateSlot && (
+          <span data-slot="app-update" style={{ display: "inline-flex", flexShrink: 0 }}>
+            {appUpdateSlot}
+          </span>
+        )}
       </div>
 
       {/* Breadcrumb */}
@@ -277,11 +285,6 @@ export function TopRail({
           <span data-slot="agent-model-picker" style={{ minWidth: 200 }}>
             <AgentModelPicker />
           </span>
-          {appUpdateSlot && (
-            <span data-slot="app-update" style={{ display: "inline-flex" }}>
-              {appUpdateSlot}
-            </span>
-          )}
           <span data-slot="update-bell" style={{ display: "inline-flex" }}>
             <UpdateBell />
           </span>

@@ -35,14 +35,8 @@ interface AppUpdaterContextValue {
   phase: AppUpdatePhase;
   progress: AppUpdateProgress;
   error: string | null;
-  /** An update exists and is not suppressed — drives the compact TopRail pill. */
+  /** An update exists and is not suppressed — drives the highlighted top-rail chip. */
   available: boolean;
-  /** The big top banner has been dismissed for the current version. */
-  bannerDismissed: boolean;
-  /** Whether the big top banner should render (available && not banner-dismissed). */
-  bannerVisible: boolean;
-  /** Hide the big banner for the current version (the pill stays). */
-  dismiss: () => void;
   checkNow: () => Promise<UpdateInfo | null>;
   install: () => Promise<boolean>;
   restart: () => Promise<boolean>;
@@ -76,7 +70,6 @@ export function AppUpdaterProvider({ children }: { children: ReactNode }) {
   const lastCheckAtRef = useRef(0);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [phase, setPhase] = useState<AppUpdatePhase>("idle");
-  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
   const [progress, setProgress] = useState<AppUpdateProgress>({
     bytes: 0,
     total: null,
@@ -259,28 +252,18 @@ export function AppUpdaterProvider({ children }: { children: ReactNode }) {
     if (installed) await restart();
   }, [install, phase, restart, update]);
 
-  const dismiss = useCallback(() => {
-    setDismissedVersion(update?.latestVersion ?? "unknown");
-  }, [update]);
-
   const openDetails = useCallback(
     () => bridge.openPreferences("updates").catch(() => undefined),
     [bridge],
   );
 
   const value = useMemo<AppUpdaterContextValue>(() => {
-    const available = Boolean(update);
-    const bannerDismissed =
-      update?.latestVersion != null && dismissedVersion === update.latestVersion;
     return {
       update,
       phase,
       progress,
       error,
-      available,
-      bannerDismissed,
-      bannerVisible: available && !bannerDismissed,
-      dismiss,
+      available: Boolean(update),
       checkNow,
       install,
       restart,
@@ -289,11 +272,9 @@ export function AppUpdaterProvider({ children }: { children: ReactNode }) {
     };
   }, [
     update,
-    dismissedVersion,
     phase,
     progress,
     error,
-    dismiss,
     checkNow,
     install,
     restart,

@@ -68,7 +68,7 @@ interface EngineJobMeta {
 
 const JOBS = new Map<string, SpawnJob<EngineJobMeta>>();
 
-export function registerInstallEngineRoutes(router: Router, _root: string): void {
+export function registerInstallEngineRoutes(router: Router, _rootArg: string | (() => string)): void {
   // POST /api/studio/install-engine
   router.post(
     "/api/studio/install-engine",

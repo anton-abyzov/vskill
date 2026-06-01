@@ -26,10 +26,12 @@ export interface DetectEnginesResponse {
   anthropicPath: string | null;
 }
 
-export function registerDetectEnginesRoute(router: Router, root: string): void {
+export function registerDetectEnginesRoute(router: Router, rootArg: string | (() => string)): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   router.get(
     "/api/studio/detect-engines",
     async (req: http.IncomingMessage, res: http.ServerResponse) => {
+      const root = getRoot();
       const skillBuilder = isSkillBuilderInstalled(root);
       const skillCreator = isSkillCreatorInstalled(root);
       const skillCreatorPath = skillCreator ? findSkillCreatorPath(root) : null;

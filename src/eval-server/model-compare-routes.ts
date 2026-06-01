@@ -21,8 +21,10 @@ interface ModelSpec {
   model: string;
 }
 
-export function registerModelCompareRoutes(router: Router, root: string): void {
+export function registerModelCompareRoutes(router: Router, rootArg: string | (() => string)): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   router.post("/api/skills/:plugin/:skill/compare-models", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     let aborted = false;
     res.on("close", () => { aborted = true; });

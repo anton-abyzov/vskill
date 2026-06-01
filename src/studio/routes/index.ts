@@ -20,20 +20,21 @@ import { registerSupportedAgentsRoutes } from "../../eval-server/supported-agent
 import { registerExportSkillRoutes } from "../../eval-server/export-skill-routes.js";
 import { registerRemoveSkillRoutes } from "../../eval-server/remove-skill-routes.js";
 
-export function registerScopeTransferRoutes(router: Router, root: string): void {
-  registerPromoteRoute(router, root);
-  registerTestInstallRoute(router, root);
-  registerRevertRoute(router, root);
+export function registerScopeTransferRoutes(router: Router, rootArg: string | (() => string)): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
+  registerPromoteRoute(router, getRoot);
+  registerTestInstallRoute(router, getRoot);
+  registerRevertRoute(router, getRoot);
   registerOpsRoutes(router);
-  registerDetectEnginesRoute(router, root);
-  registerInstallEngineRoutes(router, root);
-  registerInstallSkillRoutes(router, root);
+  registerDetectEnginesRoute(router, getRoot);
+  registerInstallEngineRoutes(router, getRoot);
+  registerInstallSkillRoutes(router, getRoot);
   // 0827 — per-skill install-state for the panel's scope picker.
-  registerInstallStateRoutes(router, root);
+  registerInstallStateRoutes(router, getRoot);
   // 0845 — cross-tool install targets (every supported agent, detected or not).
   registerSupportedAgentsRoutes(router);
   // 0845 T-015 — Tier-3 clipboard export (ChatGPT, v0, bolt.new).
   registerExportSkillRoutes(router);
   // 0850 — per-agent skill remove from the InstallTargetsModal.
-  registerRemoveSkillRoutes(router, root);
+  registerRemoveSkillRoutes(router, getRoot);
 }

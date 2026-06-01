@@ -18,11 +18,38 @@
 
 import * as React from "react";
 import type { ProjectConfigRaw } from "../hooks/useWorkspace";
+import { isTauriHost } from "../contexts/AccountTauriBridge";
+
+/** 0863: tiny inline spinner for the "Switching…" row state. */
+function Spinner(): React.ReactElement {
+  return (
+    <>
+      <style>{`@keyframes vskillProjSpin { to { transform: rotate(360deg); } }`}</style>
+      <span
+        aria-hidden
+        style={{
+          width: 9,
+          height: 9,
+          borderRadius: "50%",
+          border: "2px solid color-mix(in oklch, currentColor 30%, transparent)",
+          borderTopColor: "currentColor",
+          display: "inline-block",
+          animation: "vskillProjSpin 600ms linear infinite",
+        }}
+      />
+    </>
+  );
+}
 
 export interface ProjectPickerProps {
   workspace: { projects: ProjectConfigRaw[]; activeProjectId: string | null } | undefined;
-  onSwitch: (id: string) => void | Promise<void>;
-  onAdd: (input: { path: string; name?: string }) => void | Promise<void>;
+  /**
+   * 0863: switching re-roots the running server. Resolves with the new folder's
+   * skill count (for the success toast); rejects with an error carrying an
+   * optional `fallbackCommand` when the folder can't be served.
+   */
+  onSwitch: (id: string) => void | Promise<{ skillCount?: number } | void>;
+  onAdd: (input: { path: string; name?: string }) => void | Promise<{ id?: string } | void>;
   onRemove: (id: string) => void | Promise<void>;
   isPathStale?: (path: string) => boolean;
 }
@@ -39,9 +66,75 @@ export function ProjectPicker({
   const [inputPath, setInputPath] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [hoveredId, setHoveredId] = React.useState<string | null>(null);
+  // 0863: the cd-command modal is now an ERROR fallback only — shown when a
+  // switch fails. `switchHint` is the project we tried to switch to; the
+  // accompanying command comes from the 409 `fallbackCommand` when present.
   const [switchHint, setSwitchHint] = React.useState<ProjectConfigRaw | null>(null);
+  const [switchFallbackCmd, setSwitchFallbackCmd] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
+  // 0863: id of the project currently being switched to (optimistic + lock).
+  const [switching, setSwitching] = React.useState<string | null>(null);
   const containerRef = React.useRef<HTMLDivElement>(null);
+
+  // 0863: switch on click — calls onSwitch (the wired re-root pipeline), shows
+  // optimistic active state, disables the picker while in flight, fires a
+  // success toast, and falls back to the cd-command modal only on failure.
+  async function handleSwitch(p: { id: string; name: string; path: string }): Promise<boolean> {
+    if (switching) return false;
+    setSwitching(p.id);
+    setError(null);
+    try {
+      const result = await onSwitch(p.id);
+      const count =
+        result && typeof result === "object" && "skillCount" in result
+          ? (result as { skillCount?: number }).skillCount
+          : undefined;
+      const skillsLabel =
+        count != null ? ` — ${count} ${count === 1 ? "skill" : "skills"}` : "";
+      window.dispatchEvent(
+        new CustomEvent("studio:toast", {
+          detail: { message: `Switched to ${p.name}${skillsLabel}`, severity: "success" },
+        }),
+      );
+      setOpen(false);
+      return true;
+    } catch (err) {
+      const fallback =
+        err && typeof err === "object" && "fallbackCommand" in err
+          ? (err as { fallbackCommand?: string }).fallbackCommand
+          : undefined;
+      setSwitchFallbackCmd(fallback ?? `cd "${p.path}" && npx vskill@latest studio`);
+      setSwitchHint({ id: p.id, name: p.name, path: p.path } as ProjectConfigRaw);
+      return false;
+    } finally {
+      setSwitching(null);
+    }
+  }
+
+  /**
+   * Open an arbitrary folder ("select whatever you want"): register it if new,
+   * then switch to it. If it's already registered, just switch. Returns true
+   * when the popover was closed (switch succeeded), false on error.
+   */
+  async function handleOpenFolder(absPath: string): Promise<boolean> {
+    const existing = projects.find((p) => p.path === absPath);
+    if (existing) return handleSwitch(existing);
+    try {
+      const result = await onAdd({ path: absPath });
+      const id = result && typeof result === "object" ? result.id : undefined;
+      const name = absPath.split(/[\\/]/).filter(Boolean).pop() ?? absPath;
+      if (id) return handleSwitch({ id, name, path: absPath });
+      setOpen(false);
+      return true;
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      if (/does not exist/i.test(raw)) setError(`Path not found on disk: ${absPath}`);
+      else if (/duplicate/i.test(raw)) setError("That project is already registered.");
+      else setError(raw);
+      setAdding(true);
+      return false;
+    }
+  }
 
   const projects = workspace?.projects ?? [];
   const active = projects.find((p) => p.id === workspace?.activeProjectId);
@@ -76,37 +169,32 @@ export function ProjectPicker({
       );
       return;
     }
-    try {
-      await onAdd({ path: trimmed });
-      setInputPath("");
-      setAdding(false);
-    } catch (err) {
-      const raw = err instanceof Error ? err.message : String(err);
-      if (/does not exist/i.test(raw)) {
-        setError(`Path not found on disk: ${trimmed}`);
-      } else if (/Duplicate/i.test(raw)) {
-        setError("That project is already registered.");
-      } else {
-        setError(raw);
-      }
-    }
+    // Register AND switch (so manual entry matches "open this folder now").
+    const ok = await handleOpenFolder(trimmed);
+    if (ok) setInputPath("");
   }
 
   async function handleBrowse(): Promise<void> {
     setError(null);
-    if (typeof window !== "undefined" && "showDirectoryPicker" in window) {
+    // Desktop: a real native folder picker (the Tauri dialog plugin). The chosen
+    // absolute path is registered and switched to in one step.
+    if (isTauriHost()) {
       try {
-        const handle = await (
-          window as Window & { showDirectoryPicker?: () => Promise<{ name: string }> }
-        ).showDirectoryPicker!();
-        setInputPath(handle.name);
-        setAdding(true);
-      } catch {
-        /* user cancelled */
+        const { open } = await import("@tauri-apps/plugin-dialog");
+        const picked = await open({
+          directory: true,
+          multiple: false,
+          title: "Open project folder",
+        });
+        if (typeof picked === "string" && picked) await handleOpenFolder(picked);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
       }
-    } else {
-      setAdding(true);
+      return;
     }
+    // Browser/npx: the File System Access API only exposes a folder NAME (not an
+    // absolute path the server can scan), so fall back to reliable path entry.
+    setAdding(true);
   }
 
   function truncatePath(path: string): string {
@@ -225,25 +313,31 @@ export function ProjectPicker({
                 const stale = isPathStale ? isPathStale(p.path) : false;
                 const isActive = p.id === workspace?.activeProjectId;
                 const isHovered = hoveredId === p.id;
+                const busy = switching !== null;
+                const isSwitchingThis = switching === p.id;
+                // 0863: optimistic — the target row reads as active the instant
+                // it's clicked, before the round trip + workspace refetch land.
+                const showActive = isActive || isSwitchingThis;
 
                 return (
                   <li
                     key={p.id}
                     role="menuitem"
                     data-stale={stale ? "true" : "false"}
+                    data-switching={isSwitchingThis ? "true" : "false"}
+                    aria-busy={isSwitchingThis || undefined}
                     onMouseEnter={() => setHoveredId(p.id)}
                     onMouseLeave={() => setHoveredId((h) => (h === p.id ? null : h))}
                     onClick={() => {
-                      if (stale) return;
-                      // The server's skill scanner is tied to the launch --root
-                      // and can't be re-rooted from the browser — so clicking
-                      // a non-active project shows instructions to relaunch
-                      // from there. Active project row is a no-op.
+                      // 0863: clicking a non-active row now switches in place
+                      // (re-roots the running server). Active row closes the
+                      // popover; stale paths and in-flight switches are locked.
+                      if (stale || busy) return;
                       if (isActive) {
                         setOpen(false);
                         return;
                       }
-                      setSwitchHint(p);
+                      void handleSwitch(p);
                     }}
                     style={{
                       display: "flex",
@@ -251,14 +345,15 @@ export function ProjectPicker({
                       gap: 10,
                       padding: "8px 10px",
                       borderRadius: 6,
-                      cursor: stale ? "not-allowed" : "pointer",
-                      background: isHovered && !stale
+                      cursor: stale || busy ? (isSwitchingThis ? "progress" : "not-allowed") : "pointer",
+                      background: isHovered && !stale && !busy
                         ? "var(--surface-2, rgba(0,0,0,0.04))"
-                        : isActive
+                        : showActive
                           ? "var(--surface-1, rgba(0,0,0,0.02))"
                           : "transparent",
-                      opacity: stale ? 0.5 : 1,
-                      transition: "background-color 120ms ease",
+                      // Dim the non-target rows while a switch is in flight.
+                      opacity: stale ? 0.5 : busy && !isSwitchingThis ? 0.55 : 1,
+                      transition: "background-color 120ms ease, opacity 120ms ease",
                     }}
                   >
                     <span
@@ -269,7 +364,7 @@ export function ProjectPicker({
                         borderRadius: "50%",
                         flexShrink: 0,
                         backgroundColor: p.colorDot,
-                        boxShadow: isActive
+                        boxShadow: showActive
                           ? "0 0 0 2px color-mix(in oklch, currentColor 20%, transparent)"
                           : "none",
                       }}
@@ -282,7 +377,7 @@ export function ProjectPicker({
                           alignItems: "center",
                           gap: 6,
                           fontSize: 13,
-                          fontWeight: isActive ? 600 : 500,
+                          fontWeight: showActive ? 600 : 500,
                           color: "var(--text-primary)",
                           lineHeight: 1.3,
                         }}
@@ -296,10 +391,13 @@ export function ProjectPicker({
                         >
                           {p.name}
                         </span>
-                        {isActive && (
+                        {isSwitchingThis ? (
                           <span
-                            aria-label="Active"
+                            aria-label="Switching"
                             style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 5,
                               fontSize: 10,
                               color: "var(--color-action, #2F5B8E)",
                               letterSpacing: "0.05em",
@@ -307,8 +405,24 @@ export function ProjectPicker({
                               fontWeight: 600,
                             }}
                           >
-                            Active
+                            <Spinner />
+                            Switching…
                           </span>
+                        ) : (
+                          isActive && (
+                            <span
+                              aria-label="Active"
+                              style={{
+                                fontSize: 10,
+                                color: "var(--color-action, #2F5B8E)",
+                                letterSpacing: "0.05em",
+                                textTransform: "uppercase",
+                                fontWeight: 600,
+                              }}
+                            >
+                              Active
+                            </span>
+                          )
                         )}
                       </div>
                       <div
@@ -444,7 +558,7 @@ export function ProjectPicker({
                   <line x1="12" y1="5" x2="12" y2="19" />
                   <line x1="5" y1="12" x2="19" y2="12" />
                 </svg>
-                Add project
+                Open folder…
               </button>
             )}
             {adding && (
@@ -522,15 +636,15 @@ export function ProjectPicker({
         </div>
       )}
 
-      {/* Switch-project hint modal. The server's skill scanner is bound to
-          its launch --root, so clicking a non-active project can't retarget
-          it from the browser. Instead we show the exact command the user
-          should run in their terminal. */}
+      {/* 0863: ERROR-ONLY fallback modal. Switching now happens in place; this
+          appears only when a switch fails (e.g. the folder is missing/unreadable,
+          HTTP 409). It surfaces the server-provided `fallbackCommand` so the user
+          can relaunch from a terminal as a last resort. */}
       {switchHint && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Switch project instructions"
+          aria-label="Switch project failed"
           style={{
             position: "fixed",
             inset: 0,
@@ -539,7 +653,10 @@ export function ProjectPicker({
             alignItems: "center",
             justifyContent: "center",
           }}
-          onClick={() => setSwitchHint(null)}
+          onClick={() => {
+            setSwitchHint(null);
+            setSwitchFallbackCmd(null);
+          }}
         >
           <div
             style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.40)" }}
@@ -567,7 +684,7 @@ export function ProjectPicker({
                 marginBottom: 8,
               }}
             >
-              Switch to {switchHint.name}
+              Couldn't switch to {switchHint.name}
             </h2>
             <p
               style={{
@@ -578,9 +695,9 @@ export function ProjectPicker({
                 marginBottom: 12,
               }}
             >
-              Skill Studio's skill scanner reads from the folder it was launched in,
-              so switching projects from the browser isn't possible. Quit this server
-              and relaunch from the target folder:
+              That folder couldn't be loaded — it may have moved or become unreadable.
+              The current project is still active. As a last resort you can relaunch
+              Skill Studio directly from the target folder:
             </p>
             <div
               style={{
@@ -596,7 +713,7 @@ export function ProjectPicker({
                 border: "1px solid var(--border-subtle, rgba(255,255,255,0.08))",
               }}
             >
-              {`cd "${switchHint.path}" && npx vskill@latest studio`}
+              {switchFallbackCmd ?? `cd "${switchHint.path}" && npx vskill@latest studio`}
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
               <button
@@ -604,7 +721,7 @@ export function ProjectPicker({
                 onClick={async () => {
                   try {
                     await navigator.clipboard.writeText(
-                      `cd "${switchHint.path}" && npx vskill@latest studio`,
+                      switchFallbackCmd ?? `cd "${switchHint.path}" && npx vskill@latest studio`,
                     );
                     setCopied(true);
                     setTimeout(() => setCopied(false), 1600);
@@ -628,7 +745,10 @@ export function ProjectPicker({
               </button>
               <button
                 type="button"
-                onClick={() => setSwitchHint(null)}
+                onClick={() => {
+                  setSwitchHint(null);
+                  setSwitchFallbackCmd(null);
+                }}
                 style={{
                   padding: "7px 12px",
                   fontSize: 13,

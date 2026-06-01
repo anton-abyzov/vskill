@@ -13,9 +13,11 @@ import { buildEvalSystemPrompt } from "../eval/prompt-builder.js";
 import { runSweep, listLeaderboard, readLeaderboardEntry } from "./sweep-runner.js";
 import type { SweepOpts } from "./sweep-runner.js";
 
-export function registerSweepRoutes(router: Router, root: string): void {
+export function registerSweepRoutes(router: Router, rootArg: string | (() => string)): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   // POST /api/skills/:plugin/:skill/sweep — run multi-model sweep (SSE)
   router.post("/api/skills/:plugin/:skill/sweep", async (req, res, params) => {
+    const root = getRoot();
     const body = (await readBody(req)) as {
       models?: string[];
       judge?: string;
@@ -85,6 +87,7 @@ export function registerSweepRoutes(router: Router, root: string): void {
 
   // GET /api/skills/:plugin/:skill/leaderboard — list sweep results
   router.get("/api/skills/:plugin/:skill/leaderboard", async (_req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     if (!skillDir) {
       sendJson(res, { entries: [] });
@@ -97,6 +100,7 @@ export function registerSweepRoutes(router: Router, root: string): void {
 
   // GET /api/skills/:plugin/:skill/leaderboard/:timestamp — single sweep result
   router.get("/api/skills/:plugin/:skill/leaderboard/:timestamp", async (_req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     if (!skillDir) {
       sendJson(res, { error: "Skill not found" }, 404);

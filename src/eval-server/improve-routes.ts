@@ -17,9 +17,11 @@ import { classifyError } from "./error-classifier.js";
 import { extractFrontmatterVersion, bumpPatch, setFrontmatterVersion } from "../utils/version.js";
 import { submitSkillUpdateEvent } from "./platform-proxy.js";
 
-export function registerImproveRoutes(router: Router, root: string): void {
+export function registerImproveRoutes(router: Router, rootArg: string | (() => string)): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   // POST /api/skills/:plugin/:skill/improve
   router.post("/api/skills/:plugin/:skill/improve", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const skillMdPath = join(skillDir, "SKILL.md");
 
@@ -333,6 +335,7 @@ After the improved content, on a new line, write "---REASONING---" followed by a
   // internal publish queue. This is a no-op in production where the studio
   // doesn't carry INTERNAL_BROADCAST_KEY — see platform-proxy.submitSkillUpdateEvent.
   router.post("/api/skills/:plugin/:skill/apply-improvement", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const skillMdPath = join(skillDir, "SKILL.md");
 

@@ -1495,7 +1495,8 @@ export async function detectAvailableProviders(): Promise<Array<{
   return providers;
 }
 
-export function registerRoutes(router: Router, root: string, projectName?: string): void {
+export function registerRoutes(router: Router, rootArg: string | (() => string), projectName?: string): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   // Health check
   router.get("/api/health", (_req, res) => {
     sendJson(res, { ok: true });
@@ -1515,6 +1516,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // shared-folder grouping. 30s detection cache (mirrors Ollama/LM Studio
   // probe pattern from 0677).
   router.get("/api/agents", async (req, res) => {
+    const root = getRoot();
     try {
       const detected = await detectInstalledAgents();
       const detectedBinaries = new Set(detected.map((a) => a.id));
@@ -1736,6 +1738,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // (e.g. "claude-sonnet"). The frontend round-trips config.model back to
   // generate-evals and other endpoints, so it must be a valid CLI model ID.
   router.get("/api/config", async (_req, res) => {
+    const root = getRoot();
     // 0682 F-001 — Boot-time restoration of .vskill/studio.json selection.
     // Use a dedicated `studioLoaded` flag rather than checking
     // `!currentOverrides.provider` because the module default
@@ -1806,6 +1809,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Update config — change provider/model at runtime and persist atomically.
   router.post("/api/config", async (req, res) => {
+    const root = getRoot();
     const body = (await readBody(req)) as { provider?: ProviderName; model?: string };
 
     // 0682 F-001 (review iter 3): validate the incoming provider against the
@@ -1867,6 +1871,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   //     unknown/missing fields default to `null` (not undefined) so the shape
   //     remains JSON-stable for all consumers.
   router.get("/api/skills", async (req, res) => {
+    const root = getRoot();
     // 0686: ?scope=own|installed|global and ?agent=<id> query params.
     // When either is present, switch to tri-scope scanning so the response
     // carries the new `scope`/`isSymlink`/`symlinkTarget`/`installMethod`/
@@ -2026,6 +2031,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   });
 
   router.get("/api/skills/updates", async (req, res) => {
+    const root = getRoot();
     try {
       const { getOutdatedJson } = await import("../commands/outdated.js");
       const { scanSkillInstallLocations } = await import("./utils/scan-install-locations.js");
@@ -2084,7 +2090,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
    * git remote parse for skills authored in this repo. See skill-name-resolver.ts.
    */
   function resolveSkillApiName(skill: string, plugin: string | null = null): Promise<string> {
-    return resolveSkillApiNameImpl(skill, root, plugin);
+    return resolveSkillApiNameImpl(skill, getRoot(), plugin);
   }
 
   // T-009 (proxy) + 0707 T-021 (harden): Versions endpoint
@@ -2107,7 +2113,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
     skill: string,
     plugin: string | null,
   ): Promise<{ apiPathRoot: string; origin: Awaited<ReturnType<typeof resolveSkillOrigin>> }> {
-    const origin = await resolveSkillOrigin(skill, plugin, root);
+    const origin = await resolveSkillOrigin(skill, plugin, getRoot());
     if (origin.owner && origin.repo) {
       return {
         apiPathRoot: `/api/v1/skills/${encodeURIComponent(origin.owner)}/${encodeURIComponent(origin.repo)}/${encodeURIComponent(skill)}`,
@@ -2125,6 +2131,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   }
 
   router.get("/api/skills/:plugin/:skill/versions", async (req, res, params) => {
+    const root = getRoot();
     // 0823: comprehensive origin resolver via shared buildSkillApiPath.
     const { apiPathRoot, origin } = await buildSkillApiPath(params.skill, params.plugin);
     const apiPath = `${apiPathRoot}/versions`;
@@ -2312,6 +2319,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   //
   // Idempotent + side-effect free on disk.
   router.post("/api/v1/skills/:id/rescan", async (req, res, params) => {
+    const root = getRoot();
     const rawId = String(params.id ?? "");
     const decoded = (() => {
       try {
@@ -2405,6 +2413,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   });
 
   router.post("/api/skills/:plugin/:skill/update", async (req, res, params) => {
+    const root = getRoot();
     initSSE(res, req);
     const skillName = params.skill;
 
@@ -2487,6 +2496,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   let batchUpdateInProgress = false;
 
   router.post("/api/skills/batch-update", async (req, res) => {
+    const root = getRoot();
     if (batchUpdateInProgress) {
       sendJson(res, { error: "Update already in progress" }, 409, req);
       return;
@@ -2561,7 +2571,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   const skillFsAllowedRoots = (): string[] => {
     const home = homedir();
     return [
-      root,
+      getRoot(),
       join(home, ".claude/plugins/cache"),
       join(home, ".claude/plugins/marketplaces"),
       join(home, ".claude/skills"),
@@ -2578,7 +2588,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // path via setSkillDirEntry inside ensurePluginCacheEntry.
   const resolveSkillDirForFsRoute = async (plugin: string, skill: string): Promise<string> => {
     await ensurePluginCacheEntry(plugin, skill);
-    return resolveAllowedSkillDir(root, plugin, skill, skillFsAllowedRoots());
+    return resolveAllowedSkillDir(getRoot(), plugin, skill, skillFsAllowedRoots());
   };
 
   // Get skill detail
@@ -2773,6 +2783,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Save (create/overwrite) a file inside a skill directory
   router.put("/api/skills/:plugin/:skill/file", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     if (!resolve(skillDir).startsWith(resolve(root))) {
       sendJson(res, { error: "Invalid skill path" }, 400, req);
@@ -2806,6 +2817,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Delete a source skill (recursively removes its directory)
   router.delete("/api/skills/:plugin/:skill", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     // Path containment guard — prevent path traversal via ".." in params
     if (!resolve(skillDir).startsWith(resolve(root))) {
@@ -2846,6 +2858,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // this route is the canonical uninstall path for lockfile-tracked
   // installed skills.
   router.post("/api/skills/:plugin/:skill/uninstall", async (req, res, params) => {
+    const root = getRoot();
     // Skill-name validation — same kebab-case regex used by skill-create
     // routes. Performed BEFORE any filesystem access to defang path-traversal
     // attempts (e.g. `../../etc/passwd`).
@@ -2960,6 +2973,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Get skill description (for activation testing preview)
   router.get("/api/skills/:plugin/:skill/description", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const skillMdPath = join(skillDir, "SKILL.md");
     let skillContent = "";
@@ -2985,6 +2999,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // generic client errors — 422 Unprocessable Entity is the correct semantic
   // for well-formed requests whose payload fails validation.
   router.get("/api/skills/:plugin/:skill/evals", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const evalsPath = join(skillDir, "evals", "evals.json");
     if (!existsSync(evalsPath)) {
@@ -3008,6 +3023,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Save evals.json
   router.put("/api/skills/:plugin/:skill/evals", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const body = (await readBody(req)) as EvalsFile;
 
@@ -3028,6 +3044,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // Generate evals using AI — reads SKILL.md and returns generated EvalsFile
   // Accepts optional { provider, model, testType } in request body
   router.post("/api/skills/:plugin/:skill/generate-evals", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const skillMdPath = join(skillDir, "SKILL.md");
 
@@ -3153,6 +3170,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Run benchmark (SSE) — optionally accepts { eval_ids, concurrency, judgeModel, noCache }
   router.post("/api/skills/:plugin/:skill/benchmark", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     let aborted = false;
     res.on("close", () => { aborted = true; });
@@ -3219,6 +3237,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Run baseline (SSE) — same as benchmark but without skill content
   router.post("/api/skills/:plugin/:skill/baseline", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     let aborted = false;
     res.on("close", () => { aborted = true; });
@@ -3250,6 +3269,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Run single case (SSE) — per-case endpoint with semaphore
   router.post("/api/skills/:plugin/:skill/benchmark/case/:evalId", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const evalId = parseInt(params.evalId, 10);
     if (isNaN(evalId)) { sendJson(res, { error: "Invalid evalId" }, 400, req); return; }
@@ -3324,6 +3344,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Bulk save — client assembles result from per-case runs and saves as one history entry
   router.post("/api/skills/:plugin/:skill/benchmark/bulk-save", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     try {
       const body = await readBody(req) as { result: BenchmarkResult };
@@ -3339,6 +3360,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Run comparison (SSE)
   router.post("/api/skills/:plugin/:skill/compare", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     let aborted = false;
     res.on("close", () => { aborted = true; });
@@ -3600,6 +3622,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // List benchmark history (with optional filters)
   router.get("/api/skills/:plugin/:skill/history", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const url = new URL(req.url!, `http://localhost`);
     const filter: HistoryFilter = {};
@@ -3620,6 +3643,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Compare two history runs
   router.get("/api/skills/:plugin/:skill/history-compare", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const url = new URL(req.url!, `http://localhost`);
     const tsA = url.searchParams.get("a");
@@ -3690,6 +3714,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Per-case history
   router.get("/api/skills/:plugin/:skill/history/case/:evalId", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const evalId = parseInt(params.evalId, 10);
     if (isNaN(evalId)) {
@@ -3704,6 +3729,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Get specific history entry
   router.get("/api/skills/:plugin/:skill/history/:timestamp", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const entry = await readHistoryEntry(skillDir, params.timestamp);
     if (!entry) {
@@ -3715,6 +3741,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Delete history entry
   router.delete("/api/skills/:plugin/:skill/history/:timestamp", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const deleted = await deleteHistoryEntry(skillDir, params.timestamp);
     if (!deleted) {
@@ -3726,6 +3753,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Get aggregated stats
   router.get("/api/skills/:plugin/:skill/stats", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const stats = await computeStats(skillDir);
     sendJson(res, stats, 200, req);
@@ -3741,6 +3769,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // Works for any plugin slug (including dashes like `google-workspace`)
   // because routing uses `[^/]+` groups (see router.ts T-020).
   router.get("/api/skills/:plugin/:skill/benchmark/latest", async (req, res, params) => {
+    const root = getRoot();
     // 0704: always 200; body null = no benchmark persisted yet.
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const benchmark = await readBenchmark(skillDir);
@@ -3749,6 +3778,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // Run activation test (SSE)
   router.post("/api/skills/:plugin/:skill/activation-test", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     let aborted = false;
     res.on("close", () => { aborted = true; });
@@ -3826,6 +3856,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // GET parsed `## Test Cases` block from SKILL.md (increment 0776)
   router.get("/api/skills/:plugin/:skill/test-cases", (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const skillMdPath = join(skillDir, "SKILL.md");
     const content = existsSync(skillMdPath) ? readFileSync(skillMdPath, "utf-8") : "";
@@ -3837,6 +3868,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
   // Empty prompts array removes the section. Frontmatter and other body
   // sections are preserved verbatim.
   router.put("/api/skills/:plugin/:skill/test-cases", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const skillMdPath = join(skillDir, "SKILL.md");
     const body = (await readBody(req)) as { prompts?: ParsedTestCase[] };
@@ -3870,6 +3902,7 @@ export function registerRoutes(router: Router, root: string, projectName?: strin
 
   // AI-generate activation test prompts (SSE)
   router.post("/api/skills/:plugin/:skill/activation-prompts", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     let aborted = false;
     res.on("close", () => { aborted = true; });
@@ -3947,6 +3980,7 @@ Return ONLY the JSON lines, no other text.`;
   //   500 { error }                           only for unexpected I/O failures
   //                                           (ENOENT is explicitly not one)
   router.get("/api/skills/:plugin/:skill/activation-history", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     try {
       const runs = await listActivationRuns(skillDir);
@@ -3965,6 +3999,7 @@ Return ONLY the JSON lines, no other text.`;
 
   // Get full activation test run by ID
   router.get("/api/skills/:plugin/:skill/activation-history/:runId", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const run = await getActivationRun(skillDir, params.runId);
     if (!run) {
@@ -3976,6 +4011,7 @@ Return ONLY the JSON lines, no other text.`;
 
   // Get skill dependencies (MCP + skill-to-skill)
   router.get("/api/skills/:plugin/:skill/dependencies", async (req, res, params) => {
+    const root = getRoot();
     const skillDir = resolveSkillDir(root, params.plugin, params.skill);
     const skillMdPath = join(skillDir, "SKILL.md");
     if (!existsSync(skillMdPath)) {
@@ -3994,6 +4030,7 @@ Return ONLY the JSON lines, no other text.`;
   // server-side via scanSkillInstallLocations and rejects any non-basename
   // `file`. Spawn is detached + unref'd so the response returns immediately.
   router.post("/api/skills/reveal-in-editor", async (req, res) => {
+    const root = getRoot();
     let body: { plugin?: unknown; skill?: unknown; file?: unknown };
     try {
       body = (await readBody(req)) as typeof body;
@@ -4130,6 +4167,7 @@ Return ONLY the JSON lines, no other text.`;
   //   500 { error: "clone_failed", message: <stderr tail>, exitCode }
   // -------------------------------------------------------------------------
   router.post("/api/skills/clone", async (req, res) => {
+    const root = getRoot();
     let body: {
       source?: unknown;
       sourcePlugin?: unknown;

@@ -37,17 +37,50 @@ export async function fetchWorkspaceApi(): Promise<WorkspaceConfigRaw> {
   return (await res.json()) as WorkspaceConfigRaw;
 }
 
-export async function postActiveProjectApi(id: string | null): Promise<WorkspaceConfigRaw> {
+/**
+ * 0863: the switch response is a superset of WorkspaceConfigRaw — the server
+ * re-roots in place and reports the new root + a fresh skill count.
+ */
+export interface SwitchActiveResult extends WorkspaceConfigRaw {
+  ok?: boolean;
+  root?: string;
+  skillCount?: number;
+}
+
+/**
+ * 0863: thrown when a switch fails (e.g. the target folder is missing/unreadable
+ * → HTTP 409). Carries the `fallbackCommand` so the UI can show the legacy
+ * "relaunch from a terminal" escape hatch as an ERROR fallback (not the default).
+ */
+export class SwitchProjectError extends Error {
+  readonly status: number;
+  readonly fallbackCommand?: string;
+  constructor(message: string, status: number, fallbackCommand?: string) {
+    super(message);
+    this.name = "SwitchProjectError";
+    this.status = status;
+    this.fallbackCommand = fallbackCommand;
+  }
+}
+
+export async function postActiveProjectApi(id: string | null): Promise<SwitchActiveResult> {
   const res = await fetch("/api/workspace/active", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id }),
   });
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `POST /api/workspace/active failed: ${res.status}`);
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      fallbackCommand?: string;
+    };
+    throw new SwitchProjectError(
+      body.error ?? `POST /api/workspace/active failed: ${res.status}`,
+      res.status,
+      body.fallbackCommand,
+    );
   }
-  return (await res.json()) as WorkspaceConfigRaw;
+  return (await res.json()) as SwitchActiveResult;
 }
 
 export async function postAddProjectApi(input: {
@@ -77,10 +110,18 @@ export async function deleteProjectApi(id: string): Promise<WorkspaceConfigRaw> 
   return (await res.json()) as WorkspaceConfigRaw;
 }
 
-/** Invalidate skills + agents SWR caches so the sidebar refetches against the new project. */
+/**
+ * Invalidate skills + agents SWR caches AND notify the StudioContext skill list
+ * (which loads via its own `loadSkills`, not an SWR key) so the sidebar refetches
+ * against the newly active project root. The `studio:project-changed` event is
+ * the project-level analogue of `studio:agent-changed`.
+ */
 export function invalidateWorkspaceDependents(): void {
   for (const key of SKILLS_CACHE_KEYS) {
     mutate(key);
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("studio:project-changed"));
   }
 }
 
@@ -89,10 +130,15 @@ export interface UseWorkspaceResult {
   activeProject: ProjectConfigRaw | undefined;
   loading: boolean;
   error: Error | undefined;
-  /** Switch active project. Invalidates skills + agents caches so sidebar refetches. */
-  switchProject: (id: string | null) => Promise<void>;
-  /** Add a project by absolute path. */
-  addProject: (input: { path: string; name?: string }) => Promise<void>;
+  /**
+   * Switch active project. Re-roots the running server (POST /api/workspace/active),
+   * then invalidates skills + agents caches so the sidebar refetches against the
+   * new folder. Resolves with the server-reported skill count for the success toast.
+   * Rejects with a {@link SwitchProjectError} (carrying `fallbackCommand`) on failure.
+   */
+  switchProject: (id: string | null) => Promise<{ skillCount?: number }>;
+  /** Add a project by absolute path. Resolves with the new project's id so the caller can switch to it. */
+  addProject: (input: { path: string; name?: string }) => Promise<{ id?: string }>;
   /** Remove a project by id. */
   removeProject: (id: string) => Promise<void>;
   /** Force re-fetch. */
@@ -109,15 +155,22 @@ export function useWorkspace(): UseWorkspaceResult {
   const activeProject = workspace?.projects.find((p) => p.id === workspace.activeProjectId);
 
   const switchProject = useCallback(async (id: string | null) => {
-    await postActiveProjectApi(id);
+    // POST resolves only after the server has applied the new root and counted
+    // its skills, so by the time this awaits, the next refetch is guaranteed to
+    // hit the new folder. The SWR invalidations below drive the skeleton reload.
+    const result = await postActiveProjectApi(id);
     mutate(WORKSPACE_KEY);
     invalidateWorkspaceDependents();
+    return { skillCount: result.skillCount };
   }, []);
 
   const addProjectFn = useCallback(async (input: { path: string; name?: string }) => {
-    await postAddProjectApi(input);
+    const next = await postAddProjectApi(input);
     mutate(WORKSPACE_KEY);
     invalidateWorkspaceDependents();
+    // Surface the new project's id so callers (e.g. "Open folder…") can switch to it.
+    const added = next.projects.find((p) => p.path === input.path);
+    return { id: added?.id };
   }, []);
 
   const removeProjectFn = useCallback(async (id: string) => {

@@ -82,15 +82,17 @@ export interface PluginCliRoutesOptions {
 
 export function registerPluginCliRoutes(
   router: Router,
-  root: string,
+  rootArg: string | (() => string),
   options: PluginCliRoutesOptions = {},
 ): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   const cacheRoot = options.cacheRoot ?? join(homedir(), ".claude", "plugins", "cache");
   // GET /api/plugins — list installed plugins.
   // 0795: was shelling out to `claude plugin list`, but Claude Code removed
   // that subcommand. We now walk the plugin cache + read enabledPlugins from
   // settings.json directly. Same response contract.
   router.get("/api/plugins", (_req, res) => {
+    const root = getRoot();
     try {
       const plugins = discoverInstalledPlugins({ cacheRoot, projectDir: root });
       sendJson(res, { plugins });
@@ -153,6 +155,7 @@ export function registerPluginCliRoutes(
   // `data: {"line": "..."}` events as stdout arrives, then `data: {"done": true, "ok": <bool>, "code": <n>}`.
   // (0700 phase 2C: powers the progress toast/drawer during slow network ops.)
   router.post("/api/plugins/install/stream", async (req, res) => {
+    const root = getRoot();
     const body = await safeReadBody(req);
     const plugin = typeof body.plugin === "string" ? body.plugin : "";
     if (!PLUGIN_REF.test(plugin)) {
@@ -205,6 +208,7 @@ export function registerPluginCliRoutes(
 
   // POST /api/plugins/marketplaces — add a marketplace (owner/repo, URL, or path)
   router.post("/api/plugins/marketplaces", async (req, res) => {
+    const root = getRoot();
     const body = await safeReadBody(req);
     const source = typeof body.source === "string" ? body.source.trim() : "";
     if (!source) {
@@ -236,6 +240,7 @@ export function registerPluginCliRoutes(
 
   // GET /api/plugins/marketplaces — list configured marketplaces
   router.get("/api/plugins/marketplaces", async (_req, res) => {
+    const root = getRoot();
     try {
       const result = await runClaudePlugin(["marketplace", "list"], { cwd: root, timeout: 15_000 });
       if (result.code !== 0) {
@@ -250,6 +255,7 @@ export function registerPluginCliRoutes(
 
   // POST /api/plugins/:name/enable
   router.post("/api/plugins/:name/enable", async (req, res, params) => {
+    const root = getRoot();
     const name = params.name;
     if (!PLUGIN_REF.test(name)) {
       return sendError(res, 400, "invalid-plugin-name", `Invalid plugin name: ${name}`);
@@ -259,13 +265,14 @@ export function registerPluginCliRoutes(
     if (scope !== undefined && !isValidScope(scope)) {
       return sendError(res, 400, "invalid-scope", `Invalid scope: ${scope}`);
     }
-    const ref = resolvePluginRef(name, await fetchPluginList(root));
+    const ref = resolvePluginRef(name, await fetchPluginList(root, cacheRoot));
     const args = ["enable", ref, ...(scope ? ["--scope", scope] : [])];
-    await runAndRespond(args, root, res);
+    await runAndRespond(args, root, res, { cacheRoot });
   });
 
   // POST /api/plugins/:name/disable
   router.post("/api/plugins/:name/disable", async (req, res, params) => {
+    const root = getRoot();
     const name = params.name;
     if (!PLUGIN_REF.test(name)) {
       return sendError(res, 400, "invalid-plugin-name", `Invalid plugin name: ${name}`);
@@ -275,13 +282,14 @@ export function registerPluginCliRoutes(
     if (scope !== undefined && !isValidScope(scope)) {
       return sendError(res, 400, "invalid-scope", `Invalid scope: ${scope}`);
     }
-    const ref = resolvePluginRef(name, await fetchPluginList(root));
+    const ref = resolvePluginRef(name, await fetchPluginList(root, cacheRoot));
     const args = ["disable", ref, ...(scope ? ["--scope", scope] : [])];
-    await runAndRespond(args, root, res);
+    await runAndRespond(args, root, res, { cacheRoot });
   });
 
   // POST /api/plugins/install body { plugin: "name@marketplace", scope? }
   router.post("/api/plugins/install", async (req, res) => {
+    const root = getRoot();
     const body = await safeReadBody(req);
     const plugin = typeof body.plugin === "string" ? body.plugin : "";
     if (!PLUGIN_REF.test(plugin)) {
@@ -292,11 +300,12 @@ export function registerPluginCliRoutes(
       return sendError(res, 400, "invalid-scope", `Invalid scope: ${scope}`);
     }
     const args = ["install", plugin, ...(scope ? ["--scope", scope] : [])];
-    await runAndRespond(args, root, res, { timeout: 60_000 });
+    await runAndRespond(args, root, res, { timeout: 60_000, cacheRoot });
   });
 
   // POST /api/plugins/:name/uninstall
   router.post("/api/plugins/:name/uninstall", async (req, res, params) => {
+    const root = getRoot();
     const name = params.name;
     if (!PLUGIN_REF.test(name)) {
       return sendError(res, 400, "invalid-plugin-name", `Invalid plugin name: ${name}`);
@@ -310,13 +319,13 @@ export function registerPluginCliRoutes(
     // (bare name returns "not found in installed plugins"). Resolve the bare
     // name against the installed-list output so the UI can keep using the
     // short name while we shell out with the right ref.
-    const ref = resolvePluginRef(name, await fetchPluginList(root));
+    const ref = resolvePluginRef(name, await fetchPluginList(root, cacheRoot));
     const args = ["uninstall", ref, ...(scope ? ["--scope", scope] : [])];
 
     try {
       const result = await runClaudePlugin(args, { cwd: root, timeout: 30_000 });
       if (result.code === 0) {
-        const plugins = await fetchPluginList(root);
+        const plugins = await fetchPluginList(root, cacheRoot);
         sendJson(res, { ok: true, stdout: result.stdout, plugins });
         return;
       }
@@ -330,7 +339,7 @@ export function registerPluginCliRoutes(
         if (orphans.length > 0) {
           const cleanup = removeOrphanPluginCacheDirs(orphans, cacheRoot);
           if (cleanup.removed.length > 0) {
-            const plugins = await fetchPluginList(root);
+            const plugins = await fetchPluginList(root, cacheRoot);
             sendJson(res, {
               ok: true,
               fallback: "orphan-cache-removed",
@@ -363,7 +372,7 @@ async function runAndRespond(
   args: string[],
   cwd: string,
   res: ServerResponse,
-  opts: { timeout?: number } = {},
+  opts: { timeout?: number; cacheRoot?: string } = {},
 ): Promise<void> {
   try {
     const result = await runClaudePlugin(args, { cwd, timeout: opts.timeout ?? 20_000 });
@@ -373,7 +382,7 @@ async function runAndRespond(
       return;
     }
     // Re-fetch the plugin list so the UI can refresh without a second call.
-    const plugins = await fetchPluginList(cwd);
+    const plugins = await fetchPluginList(cwd, opts.cacheRoot);
     sendJson(res, { ok: true, stdout: result.stdout, plugins });
   } catch (err) {
     sendError(res, 500, "unexpected", err instanceof Error ? err.message : String(err));

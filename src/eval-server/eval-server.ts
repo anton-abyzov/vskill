@@ -29,6 +29,8 @@ import { registerIntegrationRoutes } from "./integration-routes.js";
 import { registerScopeTransferRoutes } from "../studio/routes/index.js";
 import { registerWorkspaceRoutes } from "./workspace-routes.js";
 import { loadWorkspace, addProject, setActiveProject, projectIdFromPath } from "./workspace-store.js";
+import { createActiveRootStore, resolveActiveRoot } from "./active-root-store.js";
+import { scanSkills } from "../eval/skill-scanner.js";
 import { registerAuthoringRoutes } from "./authoring-routes.js";
 import { registerPluginCliRoutes } from "./plugin-cli-routes.js";
 import { registerGitRoutes } from "./git-routes.js";
@@ -84,8 +86,18 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
   // we fall back to cwd so the server can boot with a minimal empty state.
   const root = opts.root ?? resolveActiveRoot(workspaceDir) ?? process.cwd();
 
+  // 0863: the scan root is no longer frozen into route closures. Route handlers
+  // read it per-request via `rootStore.getRoot()`, and POST /api/workspace/active
+  // calls `rootStore.setRoot(path)` to re-root the running server on a project
+  // switch — no process restart, no port change, no studio-token re-mint.
+  const rootStore = createActiveRootStore(root);
+  const getRoot = (): string => rootStore.getRoot();
+  // Best-effort per-project skill count for the switch response (skeleton + toast).
+  const countSkills = async (r: string): Promise<number> => (await scanSkills(r)).length;
+
   // Register workspace endpoints FIRST so legacy routes can consult the store.
-  registerWorkspaceRoutes(router, { workspaceDir });
+  // rootStore + countSkills let POST /api/workspace/active re-root in place.
+  registerWorkspaceRoutes(router, { workspaceDir, rootStore, countSkills });
 
   // If --root was passed but workspace is empty, seed it with that project
   // so CLI parity holds (user sees the same sidebar with multi-project UI).
@@ -93,17 +105,18 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
     seedWorkspaceFromRoot(workspaceDir, opts.root);
   }
 
-  // Register API routes
-  registerRoutes(router, root, opts.projectName);
-  registerImproveRoutes(router, root);
-  registerModelCompareRoutes(router, root);
-  registerSkillCreateRoutes(router, root);
-  registerSweepRoutes(router, root);
-  registerIntegrationRoutes(router, root);
-  registerScopeTransferRoutes(router, root);
-  registerAuthoringRoutes(router, root);
-  registerPluginCliRoutes(router, root);
-  registerGitRoutes(router, root);
+  // Register API routes. Each registration receives the `getRoot` accessor
+  // instead of a frozen root string, so a runtime switch re-targets them all.
+  registerRoutes(router, getRoot, opts.projectName);
+  registerImproveRoutes(router, getRoot);
+  registerModelCompareRoutes(router, getRoot);
+  registerSkillCreateRoutes(router, getRoot);
+  registerSweepRoutes(router, getRoot);
+  registerIntegrationRoutes(router, getRoot);
+  registerScopeTransferRoutes(router, getRoot);
+  registerAuthoringRoutes(router, getRoot);
+  registerPluginCliRoutes(router, getRoot);
+  registerGitRoutes(router, getRoot);
   registerDesktopOpenRoutes(router);
   // 0843 followup (2026-05-11): GitHub OAuth Authorization Code + PKCE flow
   // (replaces the Tauri device-flow IPC path, which was double-broken by
@@ -226,18 +239,9 @@ export async function startEvalServer(opts: EvalServerOptions): Promise<http.Ser
 
 // ---------------------------------------------------------------------------
 // 0698 T-013: workspace-aware root resolution + CLI --root seed.
+// 0863: `resolveActiveRoot` now lives in active-root-store.ts (shared with the
+// runtime root store) and is imported above — no local duplicate.
 // ---------------------------------------------------------------------------
-
-function resolveActiveRoot(workspaceDir: string): string | null {
-  try {
-    const ws = loadWorkspace(workspaceDir);
-    if (!ws.activeProjectId) return null;
-    const active = ws.projects.find((p) => p.id === ws.activeProjectId);
-    return active ? active.path : null;
-  } catch {
-    return null;
-  }
-}
 
 function seedWorkspaceFromRoot(workspaceDir: string, root: string): void {
   try {

@@ -27,12 +27,14 @@ import type { Provenance, SkillScope, StudioOp, TransferEvent } from "../types.j
 
 export function registerPromoteRoute(
   router: Router,
-  root: string,
+  rootArg: string | (() => string),
   home: string = homedir(),
 ): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   router.post(
     "/api/skills/:plugin/:skill/promote",
     async (req: http.IncomingMessage, res: http.ServerResponse, params: Record<string, string>) => {
+      const root = getRoot();
       const { plugin, skill } = params;
       const query = parseQuery(req.url);
       const overwrite = query.get("overwrite") === "true";

@@ -117,12 +117,14 @@ function isRequestAllowed(req: IncomingMessage): boolean {
 // ---------------------------------------------------------------------------
 // GET /api/git/remote
 // ---------------------------------------------------------------------------
-export function makeGetGitRemoteHandler(root: string) {
+export function makeGetGitRemoteHandler(rootArg: string | (() => string)) {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   return async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!isRequestAllowed(req)) {
       sendJson(res, { error: "forbidden" }, 403);
       return;
     }
+    const root = getRoot();
     const timeout = getTimeoutMs();
     const [remote, branchResult] = await Promise.all([
       runGitCommand(["remote", "get-url", "origin"], root, timeout),
@@ -184,12 +186,14 @@ async function collectDiffSummary(root: string, timeoutMs: number): Promise<Diff
 
 const PORCELAIN_PREFIX_RE = /^[ MADRCU?!]{1,2} +/;
 
-export function makeGetGitStatusHandler(root: string) {
+export function makeGetGitStatusHandler(rootArg: string | (() => string)) {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   return async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!isRequestAllowed(req)) {
       sendJson(res, { error: "forbidden" }, 403);
       return;
     }
+    const root = getRoot();
     const result = await runGitCommand(["status", "--porcelain"], root, getTimeoutMs());
     if (result.exitCode !== 0) {
       // Not a git repo / detached / network — fail soft so the UI just shows
@@ -212,12 +216,14 @@ export function makeGetGitStatusHandler(root: string) {
 // The UI calls this when the user clicks Publish to decide whether to open
 // the commit-message drawer (dirty) or just push (clean).
 // ---------------------------------------------------------------------------
-export function makePostGitDiffHandler(root: string) {
+export function makePostGitDiffHandler(rootArg: string | (() => string)) {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   return async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!isRequestAllowed(req)) {
       sendJson(res, { error: "forbidden" }, 403);
       return;
     }
+    const root = getRoot();
     const summary = await collectDiffSummary(root, getTimeoutMs());
     sendJson(res, summary, 200);
   };
@@ -242,8 +248,10 @@ const COMMIT_MESSAGE_SYSTEM_PROMPT =
 
 const DIFF_TRUNCATION_CAP = 10_000;
 
-export function makePostGitCommitMessageHandler(root: string) {
+export function makePostGitCommitMessageHandler(rootArg: string | (() => string)) {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   return async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const root = getRoot();
     if (!isRequestAllowed(req)) {
       sendJson(res, { error: "forbidden" }, 403);
       return;
@@ -295,8 +303,10 @@ export function makePostGitCommitMessageHandler(root: string) {
 // before push. The full 0742 increment may layer dirty-pill, SSE streaming,
 // and gh-CLI repo creation on top.
 // ---------------------------------------------------------------------------
-export function makePostGitPublishHandler(root: string) {
+export function makePostGitPublishHandler(rootArg: string | (() => string)) {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   return async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const root = getRoot();
     if (!isRequestAllowed(req)) {
       const msg = "forbidden: publish only allowed from loopback";
       sendJson(res, { success: false, error: msg, stderr: msg }, 403);
@@ -506,20 +516,21 @@ export function makeGetRepoInfoHandler() {
   };
 }
 
-export function registerGitRoutes(router: Router, root: string): void {
-  const remoteHandler = makeGetGitRemoteHandler(root);
+export function registerGitRoutes(router: Router, rootArg: string | (() => string)): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
+  const remoteHandler = makeGetGitRemoteHandler(getRoot);
   router.get("/api/git/remote", (req, res) => remoteHandler(req, res));
 
-  const statusHandler = makeGetGitStatusHandler(root);
+  const statusHandler = makeGetGitStatusHandler(getRoot);
   router.get("/api/git/status", (req, res) => statusHandler(req, res));
 
-  const diffHandler = makePostGitDiffHandler(root);
+  const diffHandler = makePostGitDiffHandler(getRoot);
   router.post("/api/git/diff", (req, res) => diffHandler(req, res));
 
-  const commitMessageHandler = makePostGitCommitMessageHandler(root);
+  const commitMessageHandler = makePostGitCommitMessageHandler(getRoot);
   router.post("/api/git/commit-message", (req, res) => commitMessageHandler(req, res));
 
-  const publishHandler = makePostGitPublishHandler(root);
+  const publishHandler = makePostGitPublishHandler(getRoot);
   router.post("/api/git/publish", (req, res) => publishHandler(req, res));
 
   // 2026-05-11 — replaces the blocked Tauri get_repo_info IPC.

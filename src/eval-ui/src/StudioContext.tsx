@@ -312,6 +312,18 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => { loadSkills(); }, [loadSkills]);
 
+  // 0863: re-scan when the active PROJECT (scan root) changes. ProjectPicker /
+  // ⌘P dispatch `studio:project-changed` after POST /api/workspace/active
+  // re-roots the running server in place, so the sidebar reflects the new
+  // folder's skills without a full page reload (mirrors `studio:agent-changed`).
+  useEffect(() => {
+    function onProjectChanged() {
+      void loadSkills();
+    }
+    window.addEventListener("studio:project-changed", onProjectChanged);
+    return () => window.removeEventListener("studio:project-changed", onProjectChanged);
+  }, [loadSkills]);
+
   const selectSkill = useCallback((skill: SelectedSkill) => {
     dispatch({ type: "SELECT_SKILL", skill });
     // 0801: 3-segment hash when source is known so reload preserves the

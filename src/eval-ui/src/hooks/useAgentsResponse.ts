@@ -44,11 +44,17 @@ export function useAgentsResponse(): UseAgentsResponseResult {
     void load();
   }, [load]);
 
-  // Refresh whenever the active agent changes elsewhere in the app.
+  // Refresh whenever the active agent OR project changes elsewhere in the app.
+  // 0863: the per-agent skill counts (own/installed/global) are scoped to the
+  // active project's scan root, so a project switch must re-fetch /api/agents.
   useEffect(() => {
     const handler = () => void load();
     window.addEventListener("studio:agent-changed", handler as EventListener);
-    return () => window.removeEventListener("studio:agent-changed", handler as EventListener);
+    window.addEventListener("studio:project-changed", handler as EventListener);
+    return () => {
+      window.removeEventListener("studio:agent-changed", handler as EventListener);
+      window.removeEventListener("studio:project-changed", handler as EventListener);
+    };
   }, [load]);
 
   return { status, response, error, refresh: () => void load() };

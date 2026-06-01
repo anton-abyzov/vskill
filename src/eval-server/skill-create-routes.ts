@@ -1242,9 +1242,11 @@ async function resolveProviderModel(
 // Route registration
 // ---------------------------------------------------------------------------
 
-export function registerSkillCreateRoutes(router: Router, root: string): void {
+export function registerSkillCreateRoutes(router: Router, rootArg: string | (() => string)): void {
+  const getRoot = typeof rootArg === "function" ? rootArg : () => rootArg;
   // GET /api/project-layout — detect project layout and suggest placement
   router.get("/api/project-layout", async (_req, res) => {
+    const root = getRoot();
     try {
       const layout = detectProjectLayout(root);
       sendJson(res, layout, 200, _req);
@@ -1256,6 +1258,7 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
   // 0772 US-005: GET /api/project/github-status — quick probe of git +
   // GitHub origin so the UI can surface a "connect GitHub to publish" hint.
   router.get("/api/project/github-status", async (_req, res) => {
+    const root = getRoot();
     try {
       const status = detectProjectGitHubStatus(root);
       sendJson(res, status, 200, _req);
@@ -1273,6 +1276,7 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
 
   // POST /api/skills/create — create a new skill
   router.post("/api/skills/create", async (req, res) => {
+    const root = getRoot();
     const body = (await readBody(req)) as CreateSkillRequest;
 
     // Validate name
@@ -1488,6 +1492,7 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
 
   // POST /api/skills/save-draft — auto-save AI-generated skill as draft
   router.post("/api/skills/save-draft", async (req, res) => {
+    const root = getRoot();
     const body = (await readBody(req)) as SaveDraftRequest;
 
     if (!body.name || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(body.name)) {
@@ -1588,6 +1593,7 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
 
   // GET /api/skill-creator-status — check if skill-creator is installed
   router.get("/api/skill-creator-status", async (_req, res) => {
+    const root = getRoot();
     const installed = isSkillCreatorInstalled(root);
     sendJson(res, {
       installed,
@@ -1598,6 +1604,7 @@ export function registerSkillCreateRoutes(router: Router, root: string): void {
   // POST /api/skills/generate — AI-assisted skill generation (parallel body + evals)
   // 0670 T-002: thin wrapper over src/core/skill-generator.ts:generateSkill.
   router.post("/api/skills/generate", async (req, res) => {
+    const root = getRoot();
     const body = (await readBody(req)) as GenerateSkillRequest;
     if (!body.prompt || !body.prompt.trim())
       return sendJson(res, { error: "Describe what your skill should do" }, 400, req);

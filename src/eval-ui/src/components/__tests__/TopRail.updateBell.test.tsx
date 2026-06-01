@@ -85,4 +85,51 @@ describe("TopRail.updateBell (0683 T-008)", () => {
     walk(rightCluster[0]);
     expect(markers).toEqual(["palette", "agent-model-picker", "update-bell"]);
   });
+
+  it("places the app update chip in the left group beside the project picker, not the right cluster", () => {
+    // 0864 follow-up: the whole-app update affordance moved OUT of Group B and
+    // into the left logo group — directly after the project/folder picker, the
+    // developer's eye-path — so a new desktop version is impossible to miss.
+    const APP_UPDATE_MARKER = "APP_UPDATE_SLOT_MARKER";
+    const PROJECT_PICKER_MARKER = "PROJECT_PICKER_SLOT_MARKER";
+    const tree = expand(TopRail({
+      projectName: "vskill",
+      selected: null,
+      appUpdateSlot: APP_UPDATE_MARKER,
+      projectPickerSlot: PROJECT_PICKER_MARKER,
+    }));
+
+    // It must NOT live in the right action cluster anymore.
+    const rightCluster = findElements(tree, (el) => el.props?.["data-toprail-right"] === "true");
+    expect(rightCluster).toHaveLength(1);
+    const rightHasAppUpdate = findElements(
+      rightCluster[0],
+      (el) => el.props?.["data-slot"] === "app-update",
+    ).length;
+    expect(rightHasAppUpdate).toBe(0);
+
+    // In DOM order across the rail: logo → project picker → app-update chip.
+    const order: string[] = [];
+    const walk = (n: unknown) => {
+      if (n == null) return;
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (typeof n === "string") {
+        if ((n as string).includes(PROJECT_PICKER_MARKER) && !order.includes("project-picker")) {
+          order.push("project-picker");
+        }
+        if ((n as string).includes(APP_UPDATE_MARKER) && !order.includes("app-update")) {
+          order.push("app-update");
+        }
+        return;
+      }
+      if (typeof n !== "object") return;
+      const el = n as ReactEl;
+      if (el.props?.["data-slot-marker"] === "studio-logo" && !order.includes("studio-logo")) {
+        order.push("studio-logo");
+      }
+      if (el.props?.children != null) walk(el.props.children);
+    };
+    walk(tree);
+    expect(order).toEqual(["studio-logo", "project-picker", "app-update"]);
+  });
 });

@@ -18,7 +18,6 @@ import {
 } from "./components/RightPanel";
 import { UpdateToast } from "./components/UpdateToast";
 import { AppUpdateButton } from "./components/AppUpdateButton";
-import { UpdateBanner } from "./components/UpdateBanner";
 import { AppUpdaterProvider } from "./hooks/useAppUpdater";
 import { ToastProvider, useToast } from "./components/ToastProvider";
 import { ShortcutModal } from "./components/ShortcutModal";
@@ -982,12 +981,7 @@ function Shell() {
       <StudioLayout
         sidebarWidth={sidebarWidth}
         sidebarHidden={sidebarToggledHidden || (state.isMobile && state.mobileView === "detail")}
-        banner={
-          <>
-            <UpdateBanner />
-            <DisconnectBanner connected={sseConnected} />
-          </>
-        }
+        banner={<DisconnectBanner connected={sseConnected} />}
         liveMessage={liveMessage}
         topRail={
           <TopRail
@@ -1336,6 +1330,26 @@ function Shell() {
           onClose={() => setInstallTargetsRequest(null)}
           onSuccess={(results) => {
             refreshSkills();
+            const installedCount = results.filter((result) => result.status === "installed").length;
+            const exportedCount = results.filter((result) => result.status === "exported").length;
+            const firstError = results.find((result) => result.status === "error");
+            const skillName = installTargetsRequest.skillDisplayName ?? installTargetsRequest.skill;
+            if (firstError) {
+              toast({
+                message: firstError.detail || `Could not install ${skillName}.`,
+                severity: "error",
+              });
+            } else if (exportedCount > 0) {
+              toast({
+                message: `Installed ${skillName}; ${exportedCount} target${exportedCount === 1 ? "" : "s"} need paste.`,
+                severity: "info",
+              });
+            } else if (installedCount > 0) {
+              toast({
+                message: `Installed ${skillName} to ${installedCount} target${installedCount === 1 ? "" : "s"}.`,
+                severity: "success",
+              });
+            }
             const needsUserAction = results.some(
               (result) => result.status === "error" || result.status === "exported",
             );

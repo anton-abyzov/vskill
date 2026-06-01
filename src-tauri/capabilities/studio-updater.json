@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "studio-updater",
+  "description": "Lets the localhost-served studio (main) window drive the in-app update banner. Scoped to the updater surface only — the broad app-command set stays local-only so untrusted marketplace content in this window cannot reach shell/fs/dialog/OAuth/quota/lifecycle commands.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*", "http://localhost:*"]
+  },
+  "permissions": [
+    "core:event:default",
+    "updater:default",
+    "allow-updater-commands"
+  ]
+}

@@ -168,14 +168,27 @@ export function PublishDrawer({
           emitToast(`Pushed ${shortSha} on ${branch} — open the website to submit`, "info");
           return;
         }
-        const submitRes = await api.submitToQueue({
-          repoUrl,
-          skillName,
-          skillPath,
-          source: "studio-submit",
-          privacy: privacy ?? "public",
-          tenantId,
-        });
+        let submitRes: SubmitToQueueResult;
+        try {
+          submitRes = await api.submitToQueue({
+            repoUrl,
+            skillName,
+            skillPath,
+            source: "studio-submit",
+            privacy: privacy ?? "public",
+            tenantId,
+          });
+        } catch {
+          // The push already SUCCEEDED — only the in-app queue submit failed,
+          // almost always because the user isn't signed in to verified-skill
+          // (401) or is offline. A push success must NEVER read as "Publish
+          // failed". Degrade to the website submit flow, which carries the
+          // ?repo= URL param so the user can sign in there and finish in one
+          // click (the prior browser-submit UX).
+          setOutcome({ ok: false, websiteUrl: websiteSubmitUrl(effectiveRemote) });
+          emitToast(`Pushed ${shortSha} on ${branch} — sign in or finish on the website to submit`, "info");
+          return;
+        }
         const submitUrl = `https://verified-skill.com/submit?repo=${encodeURIComponent(repoUrl)}`;
         setOutcome({ ok: true, result: submitRes, submitUrl });
         emitToast(`Submitted ${skillName} — ${shortSha} on ${branch}`, "info");
@@ -671,7 +684,7 @@ function SubmitOutcomeBlock({
       >
         <strong style={{ fontWeight: 600, color: "#F59E0B" }}>Pushed to GitHub.</strong>{" "}
         <span style={{ color: textMuted }}>
-          Finish submitting on the website.
+          Sign in to submit in-app, or finish on the website.
         </span>{" "}
         <button
           type="button"

@@ -18,6 +18,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { enhancedSpawnEnv } from "../utils/resolve-binary.js";
 import { join, resolve, dirname, basename, relative } from "node:path";
 import { readLockfile } from "../lockfile/lockfile.js";
 
@@ -95,6 +96,7 @@ export function detectAuthoredSourceLink(
     try {
       remote = execFileSync("git", ["config", "--get", "remote.origin.url"], {
         cwd: gitRoot,
+        env: enhancedSpawnEnv(),
         timeout: 1500,
         stdio: ["ignore", "pipe", "ignore"],
         encoding: "utf-8",
@@ -110,6 +112,7 @@ export function detectAuthoredSourceLink(
     try {
       const tracked = execFileSync("git", ["ls-files", "--full-name", "SKILL.md"], {
         cwd: absDir,
+        env: enhancedSpawnEnv(),
         timeout: 1500,
         stdio: ["ignore", "pipe", "ignore"],
         encoding: "utf-8",

@@ -27,6 +27,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
+import { enhancedSpawnEnv } from "../utils/resolve-binary.js";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import {
@@ -178,7 +179,9 @@ export function registerPluginCliRoutes(
     }
 
     const args = ["plugin", "install", plugin, ...(scope ? ["--scope", scope] : [])];
-    const child = spawn("claude", args, { cwd: root, env: process.env });
+    // enhancedSpawnEnv() so a Dock-launched studio (truncated PATH) resolves
+    // the `claude` CLI (Homebrew/npm-global, not in /usr/bin).
+    const child = spawn("claude", args, { cwd: root, env: enhancedSpawnEnv() });
 
     send({ type: "start", plugin, scope: scope ?? "user" });
 

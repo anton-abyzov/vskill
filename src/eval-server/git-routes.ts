@@ -22,7 +22,7 @@ import { sendJson, readBody } from "./router.js";
 // as LOCALHOST_ORIGIN_RE — inlined here as the only remaining caller.
 const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 import { createLlmClient, type ProviderName } from "../eval/llm.js";
-import { enhancedPath } from "../utils/resolve-binary.js";
+import { enhancedSpawnEnv } from "../utils/resolve-binary.js";
 
 interface GitResult {
   exitCode: number | null;
@@ -40,25 +40,6 @@ function getTimeoutMs(): number {
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_TIMEOUT_MS;
 }
 
-// macOS GUI apps (Dock/Spotlight-launched) and systemd services inherit a
-// truncated PATH that omits /opt/homebrew/bin, /usr/local/bin, etc. That breaks
-// git AND its hooks — most visibly the Git-LFS `pre-push` hook, which shells out
-// to `git-lfs` and aborts the push with "this repository is configured for Git
-// LFS but 'git-lfs' was not found on your path" when the binary isn't reachable.
-// Spawning git with an enhanced PATH lets hooks + credential/LFS helpers resolve
-// regardless of how the studio process was launched. `enhancedPath` runs an
-// execSync (npm prefix) + fs probes, so memoize it for the process lifetime.
-let cachedGitPath: string | undefined;
-function gitSpawnEnv(): NodeJS.ProcessEnv {
-  if (cachedGitPath === undefined) cachedGitPath = enhancedPath(process.env.PATH);
-  return { ...process.env, PATH: cachedGitPath };
-}
-
-/** Test-only: drop the memoized enhanced PATH so cases can vary process.env. */
-export function _resetGitEnvCacheForTests(): void {
-  cachedGitPath = undefined;
-}
-
 // argv-only spawn helper. Never accepts a single command string and never
 // passes shell:true — both are documented shell-injection vectors.
 function runGitCommand(
@@ -67,7 +48,10 @@ function runGitCommand(
   timeoutMs: number,
 ): Promise<GitResult> {
   return new Promise((resolve) => {
-    const proc = spawn("git", args as string[], { cwd, env: gitSpawnEnv() });
+    // enhancedSpawnEnv() restores a full PATH so git AND its hooks (notably the
+    // Git-LFS `pre-push` hook shelling out to `git-lfs`) resolve even when the
+    // studio process was Dock/Spotlight-launched with a truncated PATH.
+    const proc = spawn("git", args as string[], { cwd, env: enhancedSpawnEnv() });
     let stdout = "";
     let stderr = "";
     let settled = false;

@@ -23,7 +23,7 @@ vi.mock("node:os", () => ({
   homedir: mockHomedir,
 }));
 
-const { resolveCliBinary, enhancedPath, clearResolveCache } = await import(
+const { resolveCliBinary, enhancedPath, clearResolveCache, enhancedSpawnEnv, _resetEnhancedSpawnEnvCache } = await import(
   "../resolve-binary.js"
 );
 
@@ -242,5 +242,61 @@ describe("enhancedPath", () => {
 
     expect(result).toBe("/test/path");
     process.env.PATH = origPath;
+  });
+});
+
+describe("enhancedSpawnEnv", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    _resetEnhancedSpawnEnvCache();
+    mockHomedir.mockReturnValue("/home/testuser");
+    // No npm prefix available — getExtraPaths swallows the throw and skips it.
+    mockExecSync.mockImplementation(() => {
+      throw new Error("npm not available");
+    });
+  });
+
+  it("returns process.env with an enhanced PATH (existing extra dirs appended)", () => {
+    mockExistsSync.mockImplementation((p: string) => p === "/opt/homebrew/bin");
+    const orig = process.env.PATH;
+    process.env.PATH = "/usr/bin:/bin";
+    try {
+      const env = enhancedSpawnEnv();
+      expect(env.PATH).toBe(enhancedPath("/usr/bin:/bin"));
+      expect(env.PATH).toContain("/usr/bin");
+      expect(env.PATH).toContain("/opt/homebrew/bin");
+    } finally {
+      process.env.PATH = orig;
+    }
+  });
+
+  it("preserves the other process.env vars unchanged", () => {
+    mockExistsSync.mockReturnValue(false);
+    const env = enhancedSpawnEnv();
+    for (const [k, v] of Object.entries(process.env)) {
+      if (k === "PATH") continue;
+      expect(env[k]).toBe(v);
+    }
+  });
+
+  it("memoizes the default process-env result; reset forces recompute", () => {
+    mockExistsSync.mockReturnValue(false);
+    enhancedSpawnEnv();
+    const probesAfterFirst = mockExistsSync.mock.calls.length;
+    enhancedSpawnEnv();
+    // second call served from cache — no new fs probing
+    expect(mockExistsSync.mock.calls.length).toBe(probesAfterFirst);
+    _resetEnhancedSpawnEnvCache();
+    enhancedSpawnEnv();
+    expect(mockExistsSync.mock.calls.length).toBeGreaterThan(probesAfterFirst);
+  });
+
+  it("does NOT memoize when given a custom base env", () => {
+    mockExistsSync.mockImplementation((p: string) => p === "/opt/homebrew/bin");
+    const env = enhancedSpawnEnv({ PATH: "/custom/bin", FOO: "bar" } as NodeJS.ProcessEnv);
+    expect(env.FOO).toBe("bar");
+    expect(env.PATH).toBe(enhancedPath("/custom/bin"));
+    expect(env.PATH).toContain("/custom/bin");
+    expect(env.PATH).toContain("/opt/homebrew/bin");
   });
 });

@@ -121,6 +121,34 @@ export function clearResolveCache(): void {
   resolvedCache.clear();
 }
 
+/**
+ * Build a child-process env whose PATH is enhanced (see `enhancedPath`) so a
+ * spawned binary AND its subprocesses/hooks resolve even when the parent
+ * inherited a truncated PATH (macOS Dock/Spotlight launch, systemd service,
+ * etc.). Node resolves a bare command name via `options.env.PATH`, so passing
+ * this single env is enough to BOTH locate the binary (e.g. `claude`, `vskill`,
+ * `gh`, `git`) and fix hook/helper lookups (e.g. the Git-LFS `pre-push` hook
+ * shelling out to `git-lfs`). `enhancedPath` runs an execSync + fs probes, so
+ * the default-process-env result is memoized for the process lifetime.
+ */
+let cachedProcessEnvPath: string | undefined;
+export function enhancedSpawnEnv(
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  if (baseEnv === process.env) {
+    if (cachedProcessEnvPath === undefined) {
+      cachedProcessEnvPath = enhancedPath(process.env.PATH);
+    }
+    return { ...process.env, PATH: cachedProcessEnvPath };
+  }
+  return { ...baseEnv, PATH: enhancedPath(baseEnv.PATH) };
+}
+
+/** Test-only: drop the memoized process-env enhanced PATH. */
+export function _resetEnhancedSpawnEnvCache(): void {
+  cachedProcessEnvPath = undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Internal
 // ---------------------------------------------------------------------------

@@ -56,7 +56,8 @@ vi.mock("node:child_process", () => ({
 }));
 
 // Now import the module under test (after the mock is registered).
-const { makeGetGitRemoteHandler, makePostGitPublishHandler } = await import("../git-routes.js");
+const { makeGetGitRemoteHandler, makePostGitPublishHandler, _resetGitEnvCacheForTests } = await import("../git-routes.js");
+const { enhancedPath } = await import("../../utils/resolve-binary.js");
 
 class FakeReq extends EventEmitter {
   headers: Record<string, string> = {};
@@ -198,6 +199,29 @@ describe("GET /api/git/remote", () => {
 // ---------------------------------------------------------------------------
 
 describe("POST /api/git/publish", () => {
+  it("spawns git with an enhanced PATH so the Git-LFS pre-push hook can find git-lfs", async () => {
+    // Regression: a Dock/Spotlight-launched studio inherits a truncated PATH
+    // (no /opt/homebrew/bin). git push then runs the repo's LFS `pre-push`
+    // hook, which shells out to `git-lfs` and aborts with "git-lfs was not
+    // found on your path". The handler must spawn git with enhancedPath() so
+    // hooks + credential/LFS helpers resolve regardless of launch context.
+    _resetGitEnvCacheForTests();
+    queueProcess({ stdout: "", stderr: "", exitCode: 0 }); // push
+    queueProcess({ stdout: "abc1234\n", stderr: "", exitCode: 0 }); // rev-parse HEAD
+    queueProcess({ stdout: "https://github.com/o/r.git\n", stderr: "", exitCode: 0 }); // remote
+    queueProcess({ stdout: "main\n", stderr: "", exitCode: 0 }); // abbrev-ref
+
+    const h = makePostGitPublishHandler(root);
+    await h(new FakeReq("POST", "/api/git/publish", {}) as never, new FakeRes() as never);
+
+    const expectedPath = enhancedPath(process.env.PATH);
+    expect(spawnMock).toHaveBeenCalled();
+    for (const call of spawnMock.mock.calls) {
+      const [, , opts] = call as [string, string[], { env?: NodeJS.ProcessEnv } | undefined];
+      expect(opts?.env?.PATH).toBe(expectedPath);
+    }
+  });
+
   it("returns success=true with stdout/stderr on exit 0", async () => {
     // git push, git rev-parse HEAD, git remote get-url, git rev-parse abbrev-ref
     queueProcess({ stdout: "Everything up-to-date\n", stderr: "", exitCode: 0 });

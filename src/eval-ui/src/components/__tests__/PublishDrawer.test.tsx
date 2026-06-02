@@ -218,6 +218,53 @@ describe("PublishDrawer — in-app submit (0856)", () => {
     expect(container.querySelector('[data-testid="publish-done"]')).toBeTruthy();
   });
 
+  it("submit fails because not signed in (401) → website-fallback, NOT 'Publish failed'", async () => {
+    // The push SUCCEEDS but the in-app queue submit 401s because the user is not
+    // signed in to verified-skill. The drawer must degrade to the website submit
+    // flow (?repo= URL) — never surface a scary "Publish failed" — and emit an
+    // info (not error) toast. Regression for the not-signed-in publish UX.
+    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
+    mockSubmitToQueue.mockRejectedValueOnce(new Error("401 unauthorized"));
+
+    await act(async () => {
+      root.render(
+        <PublishDrawer
+          remoteUrl="git@github.com:owner/repo.git"
+          fileCount={1}
+          onClose={onClose}
+          defaultMode="manual"
+          skillName="greet"
+        />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      reactTypeInto(findTextarea(), "feat: update greet");
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+
+    // pushed, attempted submit, then fell back to website (push success preserved)
+    expect(mockGitPublish).toHaveBeenCalledTimes(1);
+    expect(mockSubmitToQueue).toHaveBeenCalledTimes(1);
+    const outcome = container.querySelector('[data-testid="publish-outcome"]');
+    expect(outcome?.getAttribute("data-outcome")).toBe("website-fallback");
+    // NOT a "Publish failed" error block, and drawer stays open
+    expect(container.querySelector('[data-testid="publish-error-push"]')).toBeNull();
+    expect(container.textContent).toContain("Pushed to GitHub");
+    expect(onClose).not.toHaveBeenCalled();
+    // info toast emitted, never an error toast
+    const toasts = dispatchEventSpy.mock.calls
+      .map((c) => c[0])
+      .filter((e): e is CustomEvent => e instanceof CustomEvent && e.type === "studio:toast")
+      .map((e) => (e.detail as { severity: string }).severity);
+    expect(toasts).toContain("info");
+    expect(toasts).not.toContain("error");
+  });
+
   it("renders the duplicate outcome inline", async () => {
     mockGitCommitMessage.mockResolvedValueOnce({ message: "m" });
     mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);

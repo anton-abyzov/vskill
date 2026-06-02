@@ -215,6 +215,7 @@ describe("App-mount integration (matches App.tsx wiring)", () => {
       "Plan & billing",
       "Connected repositories",
       "Skills",
+      "My queue",
       "API tokens",
       "Notifications",
       "Danger zone",

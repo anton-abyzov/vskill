@@ -397,7 +397,12 @@ export interface AgentInstallResult {
 }
 
 export interface MultiInstallResult {
+  success?: boolean;
+  error?: string;
   results: AgentInstallResult[];
+  installedCount?: number;
+  exportedCount?: number;
+  errorCount?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -867,4 +872,3 @@ export interface OpenRouterModel {
   /** USD per 1M tokens (canonical wire unit; canonicalized server-side at /api/openrouter/models — see 0710). */
   pricing: { prompt: number; completion: number };
 }
-

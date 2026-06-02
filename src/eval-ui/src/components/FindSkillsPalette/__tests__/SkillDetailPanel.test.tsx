@@ -18,6 +18,30 @@ function statusResponse(status: number, body: unknown = {}): Response {
   return { ok: status < 400, status, json: () => Promise.resolve(body) } as unknown as Response;
 }
 
+function sseResponse(frame: string): Response {
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(frame));
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream" },
+  });
+}
+
+function installStateResponse(skill = "obsidian/brain/wiki-sync"): Response {
+  return jsonResponse({
+    skill,
+    detectedAgentTools: [],
+    scopes: {
+      project: { installed: false, installedAgentTools: [], version: null },
+      user: { installed: false, installedAgentTools: [], version: null },
+    },
+  });
+}
+
 async function mount(props: {
   selectedSkill?: { owner: string; repo: string; slug: string; displayName: string };
   onClose?: () => void;
@@ -562,6 +586,76 @@ describe("SkillDetailPanel — 0845 T-022 (AC-US2-01): Install button opens Inst
       document.querySelector("[data-testid='install-targets-row-claude-code']")?.getAttribute("data-checked"),
     ).toBe("false");
 
+    await h.unmount();
+  });
+
+  it("successful filesystem install keeps the overlay in done phase without reopening Find Skills", async () => {
+    const onClose = vi.fn();
+    const onToast = vi.fn();
+    const openFindSkills = vi.fn();
+    window.addEventListener("openFindSkills", openFindSkills);
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (typeof url === "string" && url.includes("/api/studio/install-state")) {
+        return installStateResponse();
+      }
+      if (typeof url === "string" && url.includes("/api/studio/supported-agents")) {
+        return jsonResponse({
+          agents: [
+            {
+              id: "claude-code",
+              displayName: "Claude Code",
+              detected: true,
+              tier: 1,
+              installMode: "filesystem",
+              resolvedGlobalDir: "/home/user/.claude/skills",
+              resolvedLocalDir: ".claude/skills",
+            },
+          ],
+        });
+      }
+      if (typeof url === "string" && url.includes("/api/studio/install-skill") && init?.method === "POST") {
+        return jsonResponse({ jobId: "job-multi" });
+      }
+      if (typeof url === "string" && url.includes("/api/studio/install-skill/job-multi/stream")) {
+        return sseResponse(
+          'event: done\ndata: {"success":true,"results":[{"agentId":"claude-code","status":"installed","path":"/home/user/.claude/skills/wiki-sync/SKILL.md"}]}\n\n',
+        );
+      }
+      if (typeof url === "string" && url.endsWith("/versions")) {
+        return jsonResponse({ versions: [{ version: "1.0.0", isLatest: true }] });
+      }
+      return jsonResponse({
+        displayName: "Wiki Sync",
+        ownerSlug: "obsidian",
+        repoSlug: "brain",
+        skillSlug: "wiki-sync",
+      });
+    }) as unknown as typeof fetch;
+
+    const h = await mount({ onClose, onToast, activeAgentId: "claude-code" });
+    await flushMicrotasks();
+    const { act } = await import("react");
+    const installBtn = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
+    await act(async () => { installBtn.click(); });
+    await flushMicrotasks();
+    const modalInstall = document.querySelector("[data-testid='install-targets-modal-install']") as HTMLButtonElement;
+    await act(async () => { modalInstall.click(); });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    // 0850 (AC-US2-01): a successful install does NOT auto-close. The modal
+    // stays in "done" phase so the user can read the install path + "Installed"
+    // badge and dismiss via the Done/Close button. SkillDetailPanel's onClose
+    // is the *detail panel* close, which a successful install never triggers.
+    // The Find Skills palette must NOT reopen on install.
+    expect(openFindSkills).not.toHaveBeenCalled();
+    expect(onToast).toHaveBeenCalledWith("Installed Wiki Sync to 1 target.", "success");
+    expect(document.querySelector("[data-testid='install-targets-modal']")).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+
+    window.removeEventListener("openFindSkills", openFindSkills);
     await h.unmount();
   });
 });

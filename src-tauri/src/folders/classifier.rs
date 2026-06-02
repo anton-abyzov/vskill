@@ -363,12 +363,9 @@ mod tests {
         // generic `~/.claude/` prefix-match in Rule 2a, but the spec lists
         // this exact path so we pin it down with a dedicated test in case
         // the prefix list gets pruned later.
-        let probe = FakeProbe::new(Some("/Users/maria"))
-            .with_dir("/Users/maria/.claude/agents/skills");
-        let result = classify(
-            Path::new("/Users/maria/.claude/agents/skills"),
-            &probe,
-        );
+        let probe =
+            FakeProbe::new(Some("/Users/maria")).with_dir("/Users/maria/.claude/agents/skills");
+        let result = classify(Path::new("/Users/maria/.claude/agents/skills"), &probe);
         assert_eq!(result, FolderClassification::PersonalScope);
     }
 
@@ -379,10 +376,7 @@ mod tests {
         let probe = FakeProbe::new(Some("/Users/devon"))
             .with_dir("/Users/devon/projects/app")
             .with_child("/Users/devon/projects/app", ".git")
-            .with_remote(
-                "/Users/devon/projects/app",
-                "git@github.com:devon/app.git",
-            );
+            .with_remote("/Users/devon/projects/app", "git@github.com:devon/app.git");
         let result = classify(Path::new("/Users/devon/projects/app"), &probe);
         assert_eq!(
             result,

@@ -90,8 +90,12 @@ vi.mock("../api/client.js", () => ({
 }));
 
 const mockDiscoverSkills = vi.fn();
+const mockGetDefaultBranch = vi.fn().mockResolvedValue("main");
+const mockGetBranchHeadSha = vi.fn().mockResolvedValue("abc1234def567890abc1234def567890abc1234d");
 vi.mock("../discovery/github-tree.js", () => ({
   discoverSkills: (...args: unknown[]) => mockDiscoverSkills(...args),
+  getDefaultBranch: (...args: unknown[]) => mockGetDefaultBranch(...args),
+  getBranchHeadSha: (...args: unknown[]) => mockGetBranchHeadSha(...args),
 }));
 
 // ---------------------------------------------------------------------------

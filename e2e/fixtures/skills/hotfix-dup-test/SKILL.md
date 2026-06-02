@@ -1,10 +1,6 @@
 ---
-description: "Pre-seeded skill used by the 0703 E2E duplicate-name regression guard. Do not remove."
-allowed-tools: Read
-model: sonnet
+version: "1.0.7"
 ---
 
-# /hotfix-dup-test
 
-Fixture skill used only to prove the CreateSkillModal pre-flight duplicate check
-rejects colliding names before navigating to /#/create.
+<!-- 0860 e2e improvement -->

@@ -3,6 +3,34 @@ import { describe, expect, it, vi } from "vitest";
 import { installToAgents, startInstallStream } from "./install";
 
 describe("install API desktop multi-agent stream contract", () => {
+  async function waitForAssertion(assertion: () => void): Promise<void> {
+    let lastError: unknown;
+    for (let i = 0; i < 20; i += 1) {
+      try {
+        assertion();
+        return;
+      } catch (err) {
+        lastError = err;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+    throw lastError;
+  }
+
+  function sseResponse(frames: string[]): Response {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const frame of frames) controller.enqueue(encoder.encode(frame));
+        controller.close();
+      },
+    });
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  }
+
   it("preserves the server-provided multi-agent streamPath", async () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
@@ -29,53 +57,37 @@ describe("install API desktop multi-agent stream contract", () => {
     });
   });
 
-  it("subscribes to an explicit multi-agent streamPath and consumes result frames", () => {
-    type Listener = (ev: MessageEvent) => void;
-    class FakeEventSource {
-      static instances: FakeEventSource[] = [];
-      listeners = new Map<string, Listener[]>();
-      closed = false;
-      onerror: (() => void) | null = null;
-
-      constructor(readonly url: string) {
-        FakeEventSource.instances.push(this);
-      }
-
-      addEventListener(type: string, cb: Listener): void {
-        const list = this.listeners.get(type) ?? [];
-        list.push(cb);
-        this.listeners.set(type, list);
-      }
-
-      emit(type: string, data: unknown): void {
-        const ev = { data: JSON.stringify(data) } as MessageEvent;
-        for (const cb of this.listeners.get(type) ?? []) cb(ev);
-      }
-
-      close(): void {
-        this.closed = true;
-      }
-    }
-
+  it("subscribes to an explicit multi-agent streamPath with fetch and consumes result frames", async () => {
     const onResult = vi.fn();
     const onDone = vi.fn();
+    const fetchImpl = vi.fn(async () =>
+      sseResponse([
+        `event: result\ndata: ${JSON.stringify({ agentId: "chatgpt", status: "exported" })}\n\n`,
+        `event: done\ndata: ${JSON.stringify({
+          results: [{ agentId: "chatgpt", status: "exported" }],
+          exportedCount: 1,
+          errorCount: 0,
+        })}\n\n`,
+      ]),
+    ) as unknown as typeof fetch;
 
     startInstallStream(
       "/api/studio/install-skill/multi/job-123/stream",
       { onResult, onDone },
-      { eventSourceCtor: FakeEventSource as unknown as typeof EventSource },
+      { fetchImpl },
     );
 
-    const source = FakeEventSource.instances[0];
-    expect(source.url).toBe("/api/studio/install-skill/multi/job-123/stream");
-
-    source.emit("result", { agentId: "chatgpt", status: "exported" });
-    source.emit("done", {
-      results: [{ agentId: "chatgpt", status: "exported" }],
-      exportedCount: 1,
-      errorCount: 0,
+    await waitForAssertion(() => {
+      expect(onDone).toHaveBeenCalledTimes(1);
     });
 
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "/api/studio/install-skill/multi/job-123/stream",
+      expect.objectContaining({
+        headers: { Accept: "text/event-stream" },
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(onResult).toHaveBeenCalledWith({
       agentId: "chatgpt",
       status: "exported",
@@ -85,6 +97,31 @@ describe("install API desktop multi-agent stream contract", () => {
       exportedCount: 1,
       errorCount: 0,
     });
-    expect(source.closed).toBe(true);
+  });
+
+  it("reports rejected stream responses instead of hanging the modal", async () => {
+    const onResult = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const fetchImpl = vi.fn(async () =>
+      new Response("unauthorized", {
+        status: 401,
+        statusText: "Unauthorized",
+      }),
+    ) as unknown as typeof fetch;
+
+    startInstallStream(
+      "/api/studio/install-skill/multi/job-401/stream",
+      { onResult, onDone, onError },
+      { fetchImpl },
+    );
+
+    await waitForAssertion(() => {
+      expect(onError).toHaveBeenCalledTimes(1);
+    });
+
+    expect(onResult).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+    expect((onError.mock.calls[0]?.[0] as Error).message).toContain("HTTP 401");
   });
 });

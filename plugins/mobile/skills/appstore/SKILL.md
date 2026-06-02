@@ -3,7 +3,8 @@ description: "iOS/macOS app deployment and App Store Connect automation using th
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 model: opus
 context: fork
-version: 2.3.2
+version: 1.0.4
+
 ---
 
 <!-- v2.3.2 (2026-04-26) -->

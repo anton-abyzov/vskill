@@ -94,7 +94,7 @@ export function ClipboardExportDialog({
         alignItems: "flex-start",
         justifyContent: "center",
         paddingTop: "min(10vh, 80px)",
-        zIndex: 9999,
+        zIndex: 10040,
       }}
     >
       <div

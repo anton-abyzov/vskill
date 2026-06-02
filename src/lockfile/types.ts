@@ -24,6 +24,14 @@ export interface SkillLockEntry {
   sourceRepoUrl?: string;
   /** 0737 — relative path from the source repo root to the skill's SKILL.md (e.g. "skills/foo/SKILL.md"). */
   sourceSkillPath?: string;
+  /** Stable source kind for provenance-aware update checks. */
+  sourceType?: "github" | "registry" | "plugin" | "local";
+  /** Git ref/branch used when the skill was installed. */
+  sourceBranch?: string;
+  /** Upstream commit SHA at install time, when resolvable. */
+  sourceCommitSha?: string;
+  /** Plugin namespace that provided this skill, when installed from a plugin layout. */
+  sourcePluginName?: string;
 }
 
 export interface VskillLock {

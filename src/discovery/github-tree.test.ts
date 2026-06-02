@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   discoverSkills,
   extractDescription,
+  getBranchHeadSha,
   getDefaultBranch,
   checkRepoExists,
   _resetBranchCache,
@@ -236,6 +237,68 @@ describe("discoverSkills", () => {
       "https://raw.githubusercontent.com/owner/repo/master/SKILL.md"
     );
   });
+
+  it("uses a supplied token for private repo metadata, tree, and description fetches", async () => {
+    const token = "ghp_private_fixture_token";
+    const mockFetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.endsWith("/repos/owner/repo")) {
+        return makeBranchResponse("main");
+      }
+      if (u.includes("/git/trees/main")) {
+        return {
+          ok: true,
+          json: async () => makeTreeResponse([
+            "SKILL.md",
+            "skills/private-one/SKILL.md",
+            "plugins/custom/skills/private-two/SKILL.md",
+          ]),
+        };
+      }
+      if (u.includes("/contents/")) {
+        return {
+          ok: true,
+          json: async () => ({
+            type: "file",
+            encoding: "base64",
+            content: Buffer.from("# Private\n\nPrivate description").toString("base64"),
+          }),
+        };
+      }
+      if (u.includes("raw.githubusercontent.com")) {
+        return {
+          ok: true,
+          text: async () => "# Private\n\nPrivate description",
+        };
+      }
+      return { ok: false, status: 404 };
+    });
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const discoverWithOptions = discoverSkills as unknown as (
+      owner: string,
+      repo: string,
+      options: { token: string },
+    ) => Promise<Awaited<ReturnType<typeof discoverSkills>>>;
+    const result = await discoverWithOptions("owner", "repo", { token });
+
+    expect(result.map((s) => s.path).sort()).toEqual([
+      "SKILL.md",
+      "plugins/custom/skills/private-two/SKILL.md",
+      "skills/private-one/SKILL.md",
+    ]);
+
+    const githubCalls = mockFetch.mock.calls.filter(([url]) => {
+      const u = typeof url === "string" ? url : url.toString();
+      return u.includes("api.github.com");
+    });
+    expect(githubCalls.length).toBeGreaterThanOrEqual(2);
+    for (const [, init] of githubCalls) {
+      expect(init?.headers).toEqual(
+        expect.objectContaining({ Authorization: `Bearer ${token}` }),
+      );
+    }
+  });
 });
 
 describe("extractDescription", () => {
@@ -323,6 +386,42 @@ describe("getDefaultBranch", () => {
     expect(second).toBe("master");
     // Only one fetch call — second was served from cache
     expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getBranchHeadSha", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("returns the branch head commit sha", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ sha: "abc1234def567890abc1234def567890abc1234d" }),
+    }) as unknown as typeof fetch;
+
+    const sha = await getBranchHeadSha("owner", "repo", "main", { token: "ghp_private_fixture_token" });
+
+    expect(sha).toBe("abc1234def567890abc1234def567890abc1234d");
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://api.github.com/repos/owner/repo/commits/main",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer ghp_private_fixture_token",
+        }),
+      }),
+    );
+  });
+
+  it("returns null when the commit lookup fails", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    }) as unknown as typeof fetch;
+
+    await expect(getBranchHeadSha("owner", "repo", "missing", { token: "ghp_private_fixture_token" })).resolves.toBeNull();
   });
 });
 

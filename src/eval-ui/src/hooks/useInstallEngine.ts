@@ -4,7 +4,7 @@
 //
 // State machine:
 //   idle → spawning (POST /api/studio/install-engine fires)
-//        → streaming (EventSource open, progress events arriving)
+//        → streaming (fetch SSE open, progress events arriving)
 //        → success | failure
 //
 // On success the caller should re-fetch /api/studio/detect-engines so the UI
@@ -13,6 +13,7 @@
 
 import React from "react";
 import type { Engine } from "../components/EngineSelector";
+import { openFetchEventStream, type FetchEventStreamHandle } from "../api/sse";
 
 export type InstallStatus = "idle" | "spawning" | "streaming" | "success" | "failure";
 
@@ -42,8 +43,6 @@ const INITIAL_STATE: InstallEngineState = {
 };
 
 export interface UseInstallEngineOpts {
-  /** Override for tests — defaults to the global EventSource. */
-  eventSourceCtor?: typeof EventSource;
   /** Override for tests — defaults to the global fetch. */
   fetchImpl?: typeof fetch;
 }
@@ -57,11 +56,10 @@ export interface UseInstallEngineResult {
 
 export function useInstallEngine(opts: UseInstallEngineOpts = {}): UseInstallEngineResult {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
-  const ESCtor = opts.eventSourceCtor ?? (globalThis as { EventSource?: typeof EventSource }).EventSource;
 
   const [state, setState] = React.useState<InstallEngineState>(INITIAL_STATE);
   const lastEngineRef = React.useRef<Exclude<Engine, "none"> | null>(null);
-  const sourceRef = React.useRef<EventSource | null>(null);
+  const sourceRef = React.useRef<FetchEventStreamHandle | null>(null);
 
   React.useEffect(() => {
     return () => {
@@ -78,10 +76,6 @@ export function useInstallEngine(opts: UseInstallEngineOpts = {}): UseInstallEng
 
   const install = React.useCallback(
     async (engine: Exclude<Engine, "none">) => {
-      if (!ESCtor) {
-        setState({ ...INITIAL_STATE, status: "failure", error: "EventSource not available" });
-        return;
-      }
       lastEngineRef.current = engine;
       setState({ ...INITIAL_STATE, status: "spawning" });
 
@@ -111,51 +105,55 @@ export function useInstallEngine(opts: UseInstallEngineOpts = {}): UseInstallEng
         return;
       }
 
-      const source = new ESCtor(`/api/studio/install-engine/${jobId}/stream`);
+      let source: FetchEventStreamHandle;
+      source = openFetchEventStream(`/api/studio/install-engine/${jobId}/stream`, {
+        fetchImpl,
+        timeoutMessage: "install-engine SSE stream timed out",
+        onEvent: ({ event, data: rawData }) => {
+          if (event === "progress") {
+            try {
+              const data = JSON.parse(rawData) as InstallProgressLine;
+              setState((prev) => ({
+                ...prev,
+                liveTail: data.line.length > 60 ? data.line.slice(0, 60) + "…" : data.line,
+                progress: [...prev.progress, data].slice(-200), // cap memory
+              }));
+            } catch { /* ignore malformed frames */ }
+            return;
+          }
+
+          if (event === "done") {
+            try {
+              const data = JSON.parse(rawData) as { success: boolean; exitCode: number; stderr: string };
+              source.close();
+              sourceRef.current = null;
+              setState((prev) => ({
+                ...prev,
+                status: data.success ? "success" : "failure",
+                exitCode: data.exitCode,
+                stderr: data.stderr,
+                error: data.success ? null : data.stderr || `exit ${data.exitCode}`,
+              }));
+            } catch {
+              source.close();
+              sourceRef.current = null;
+              setState((prev) => ({ ...prev, status: "failure", error: "malformed done event" }));
+            }
+          }
+        },
+        onError: (err) => {
+          sourceRef.current = null;
+          setState((prev) => ({
+            ...prev,
+            status: prev.status === "streaming" ? "failure" : prev.status,
+            error: prev.error ?? err.message,
+          }));
+        },
+      });
       sourceRef.current = source;
       setState((prev) => ({ ...prev, status: "streaming" }));
-
-      source.addEventListener("progress", (ev: MessageEvent) => {
-        try {
-          const data = JSON.parse(ev.data) as InstallProgressLine;
-          setState((prev) => ({
-            ...prev,
-            liveTail: data.line.length > 60 ? data.line.slice(0, 60) + "…" : data.line,
-            progress: [...prev.progress, data].slice(-200), // cap memory
-          }));
-        } catch { /* ignore malformed frames */ }
-      });
-
-      source.addEventListener("done", (ev: MessageEvent) => {
-        try {
-          const data = JSON.parse(ev.data) as { success: boolean; exitCode: number; stderr: string };
-          source.close();
-          sourceRef.current = null;
-          setState((prev) => ({
-            ...prev,
-            status: data.success ? "success" : "failure",
-            exitCode: data.exitCode,
-            stderr: data.stderr,
-            error: data.success ? null : data.stderr || `exit ${data.exitCode}`,
-          }));
-        } catch {
-          source.close();
-          sourceRef.current = null;
-          setState((prev) => ({ ...prev, status: "failure", error: "malformed done event" }));
-        }
-      });
-
-      source.addEventListener("error", () => {
-        source.close();
-        sourceRef.current = null;
-        setState((prev) => ({
-          ...prev,
-          status: prev.status === "streaming" ? "failure" : prev.status,
-          error: prev.error ?? "stream error",
-        }));
-      });
     },
-    [ESCtor, fetchImpl],
+    [fetchImpl],
   );
 
   const retry = React.useCallback(async () => {

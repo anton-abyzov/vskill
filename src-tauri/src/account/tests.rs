@@ -17,10 +17,7 @@ use crate::quota::cache::{QuotaCache, QuotaResponse, QuotaTier, GRACE_PERIOD_DAY
 
 #[test]
 fn platform_url_default_when_no_env() {
-    assert_eq!(
-        resolve_platform_url(None),
-        "https://verified-skill.com",
-    );
+    assert_eq!(resolve_platform_url(None), "https://verified-skill.com",);
 }
 
 #[test]
@@ -41,10 +38,7 @@ fn platform_url_trims_whitespace_and_trailing_slash() {
 
 #[test]
 fn platform_url_falls_back_when_override_is_empty() {
-    assert_eq!(
-        resolve_platform_url(Some("")),
-        "https://verified-skill.com",
-    );
+    assert_eq!(resolve_platform_url(Some("")), "https://verified-skill.com",);
     assert_eq!(
         resolve_platform_url(Some("   ")),
         "https://verified-skill.com",
@@ -125,10 +119,7 @@ fn user_summary_signed_in_with_pro_quota_reports_pro_tier() {
         email: None,
         cached_at: None,
     };
-    let summary = build_user_summary(
-        Some(identity),
-        Some(make_quota_cache(QuotaTier::Pro)),
-    );
+    let summary = build_user_summary(Some(identity), Some(make_quota_cache(QuotaTier::Pro)));
     assert!(summary.signed_in);
     assert_eq!(summary.login.as_deref(), Some("octocat"));
     assert_eq!(summary.tier, "pro");

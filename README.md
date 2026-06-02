@@ -173,7 +173,8 @@ private catalog.
 ```bash
 npx vskill@latest auth login    # interactive Device Flow — copy code, visit URL
 npx vskill@latest auth status   # show the current GitHub identity
-npx vskill@latest auth logout   # forget the GitHub token
+npx vskill@latest auth logout   # forget all stored tokens
+npx vskill@latest whoami        # combined identity + active tenant snapshot
 ```
 
 How it works:
@@ -181,31 +182,81 @@ How it works:
 1. `vskill auth login` requests a device + user code from `github.com/login/device/code`.
 2. You visit `https://github.com/login/device` and enter the 8-character code (rendered as `XXXX-XXXX`).
 3. The CLI polls `github.com/login/oauth/access_token` until you authorize, then validates against `api.github.com/user`.
-4. The resulting token is stored in your **OS keychain** (macOS Keychain / Windows DPAPI / libsecret).
-   On systems without a keyring daemon, the token falls back to `~/.vskill/keys.env` with mode `0600` and a startup warning.
+4. The CLI calls `POST /api/v1/auth/github/exchange-for-vsk-token` to mint a verified-skill API token (`vsk_…`) scoped to the same identity.
+5. **Both** tokens are stored in your **OS keychain** (macOS Keychain / Windows DPAPI / libsecret) under distinct service names:
+   - `com.verifiedskill.desktop` / `github-oauth-token` → `gho_…` (raw GitHub OAuth)
+   - `com.verifiedskill.desktop` / `vskill-token` → `vsk_…` (verified-skill API token)
 
-Where the token is used:
+   On systems without a keyring daemon, both fall back to `~/.vskill/keys.env` with mode `0600` and a startup warning.
 
+If the exchange step fails (network error, 5xx), login still succeeds with just the `gho_…` token and the CLI prints `Logged in (legacy mode — some features unavailable)`. Re-run `vskill auth login` later to mint the `vsk_…` token without losing your session.
+
+Where the tokens are used:
+
+- **`vskill add <skill>`, `vskill list`, `vskill marketplace`** — every request to `verified-skill.com` carries `Authorization: Bearer <vsk_… or gho_…>` (preferring `vsk_` when present). Anonymous requests for public skills still work when no token is stored.
 - **`vskill install <github-url>`** — added as `Authorization: Bearer …` on every fetch to `api.github.com` and `raw.githubusercontent.com`. Public skills still install anonymously.
 - **`vskill studio`** — the local eval-server proxies private routes (`/api/v1/private/*`, `/api/v1/tenants/*`) to verified-skill.com with the bearer header injected at the proxy boundary. Your browser never holds the token.
 
 Configuration:
 
 - `VSKILL_GITHUB_CLIENT_ID` — the OAuth/App `client_id` used during Device Flow. Defaults are baked in for the public Skill Studio App; set this only if you are running a self-hosted variant.
+- `VSKILL_TENANT` — overrides the active tenant for a single invocation (CI / scripted use). See "Tenant resolution priority" below.
 
 Inspect status of all credentials in one place:
 
 ```bash
 npx vskill@latest keys list      # shows AI provider keys + the github slot
+npx vskill@latest whoami         # email, token prefix, active tenant, all tenants
 ```
+
+### Tenants and `vskill orgs`
+
+When your GitHub identity belongs to multiple organizations that have the Skill Studio App installed, each org is a **tenant** in verified-skill.com. The CLI calls them "orgs" for symmetry with `gh org`, `gcloud config configurations`, and `kubectl config use-context`.
+
+```bash
+npx vskill@latest orgs list           # table: slug | name | role | active (* marks the active tenant)
+npx vskill@latest orgs use <slug>     # write currentTenant to ~/.vskill/config.json
+npx vskill@latest orgs current        # print the active tenant slug, or `(none)`
+```
+
+`orgs` and `whoami` are anonymous-safe — running them without a stored token prints `Not logged in. Run \`vskill auth login\`.` and exits non-zero (orgs returns 0; whoami returns 1) without crashing.
+
+#### Tenant resolution priority
+
+When a tenant-scoped command (`vskill add`, `vskill install` for a private skill, etc.) needs to pick an active tenant, it walks this list in order — first match wins:
+
+1. **`--tenant <slug>` flag** — per-command override (highest precedence).
+2. **`VSKILL_TENANT` env var** — non-interactive / CI use.
+3. **`currentTenant` in `~/.vskill/config.json`** — the persistent active tenant set by `vskill orgs use` or the Studio sidebar picker.
+4. **Auto-pick when N=1** — if you belong to exactly one tenant, that one is used silently.
+5. **Error** — if you belong to N>1 tenants and none of (1)–(3) is set, the CLI prints `Multiple tenants available — set one with \`vskill orgs use <slug>\`.` and exits non-zero. The CLI never silently picks one of N>1.
+
+The same `~/.vskill/config.json` is shared with Skill Studio — switching tenants in Studio's sidebar picker updates the same file the CLI reads, so the two surfaces stay in sync.
+
+#### `vskill add` resolution order (private skills)
+
+When you run `vskill add <skill>`, the resolver tries:
+
+1. The public registry.
+2. The active tenant's scoped registry (resolved via the priority above).
+3. Other tenants you belong to, in parallel HEAD requests — first match wins.
+
+If a `--tenant <slug>` flag is set, only the public registry and that tenant are tried.
+
+Common error messages:
+
+- `Skill found in multiple tenants: acme, contoso. Re-run with --tenant <slug> or set an active tenant: vskill orgs use <slug>.` — ambiguity guard for N>1 with no active tenant.
+- `Authentication failed. Run \`vskill auth login\` to re-authenticate.` — the registry returned 401. The keychain is **not** auto-cleared (you might be on a flaky network).
+- `Upgrade required: <message> (<upgradeUrl>)` — the registry returned 402: skill exists in this tenant but you lack entitlement.
 
 ### Private skill workflow
 
-Once authenticated, installing a private org skill is identical to a public one — the CLI silently attaches the keychain token to every `api.github.com` and `raw.githubusercontent.com` request:
+Once authenticated, installing a private org skill is identical to a public one — the CLI silently attaches the keychain token to every request:
 
 ```bash
-npx vskill@latest auth login                                # one-time setup
-npx vskill@latest add https://github.com/<org>/<repo>       # private skill installs same as public
+npx vskill@latest auth login                                # one-time setup (mints gho_ + vsk_)
+npx vskill@latest orgs use acme                             # pick a tenant if you belong to multiple
+npx vskill@latest add private-skill                         # private skill installs same as public
 ```
 
 The local skill bundle on disk **never contains** your GitHub token — the token is used only at fetch time. Your project's `vskill.lock` records `source: "private"` and the org name so future updates re-authenticate correctly.

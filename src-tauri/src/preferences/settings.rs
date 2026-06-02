@@ -165,7 +165,7 @@ fn default_project_folder() -> Option<String> {
 }
 
 fn default_project_folder_in(home: &std::path::Path) -> PathBuf {
-    home.join("SkillStudio")
+    home.join("SkillProject")
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -335,6 +335,7 @@ fn is_legacy_default_project_folder(path: &str) -> bool {
 fn is_legacy_default_project_folder_in(path: &str, home: &std::path::Path) -> bool {
     let path = PathBuf::from(path);
     path == home
+        || path == home.join("SkillStudio")
         || path == home.join("Projects").join("Skill Studio")
         || path == home.join("Skill Studio")
         || path == home.join("Skill Studio Projects")
@@ -571,10 +572,10 @@ mod tests {
     }
 
     #[test]
-    fn test_default_project_folder_uses_skillstudio_under_home() {
+    fn test_default_project_folder_uses_skillproject_under_home() {
         let home = fresh_tmp_dir();
         std::fs::create_dir_all(home.join("Projects")).expect("projects dir");
-        assert_eq!(default_project_folder_in(&home), home.join("SkillStudio"));
+        assert_eq!(default_project_folder_in(&home), home.join("SkillProject"));
     }
 
     #[test]
@@ -624,6 +625,7 @@ mod tests {
         let home = fresh_tmp_dir();
         for legacy in [
             home.clone(),
+            home.join("SkillStudio"),
             home.join("Projects").join("Skill Studio"),
             home.join("Skill Studio"),
             home.join("Skill Studio Projects"),

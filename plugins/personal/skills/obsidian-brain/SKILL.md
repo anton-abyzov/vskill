@@ -1,6 +1,7 @@
 ---
 name: obsidian-brain
 description: "Autonomous Obsidian vault management using the PARA + LLM Wiki pattern. Three operations: ingest (inbox to wiki + PARA routing), query (cross-vault synthesis), lint (health check). Scheduled via CronCreate 4x/day. Filesystem-only -- no Obsidian app dependency. Activate when the user mentions 'ingest', 'vault', 'wiki page', 'obsidian brain', 'vault lint', 'inbox', 'wiki index', 'knowledge base query', or wants to process, organize, query, or audit their Obsidian vault."
+version: 1.0.12
 allowed-tools:
   - Read
   - Write

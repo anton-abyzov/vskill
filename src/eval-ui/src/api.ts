@@ -1431,7 +1431,7 @@ export const api = {
   // These hit the eval-server platform proxy (same-origin relative URLs). The
   // POST/GETs are forwarded upstream because `/api/v1/submissions` is in the
   // proxy's PROXY_PREFIXES; the X-Studio-Token bridge auto-injects auth, and
-  // the eval-server injects the user's vsk_* keychain token server-side so an
+  // the eval-server injects the user's vsk_* credential-store token server-side so an
   // in-app submit is attributed to the signed-in user. The browser never calls
   // verified-skill.com directly (CORS-free localhost-only invariant).
   // ---------------------------------------------------------------------------

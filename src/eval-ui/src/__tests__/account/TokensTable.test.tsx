@@ -94,6 +94,9 @@ describe("TokensTable", () => {
   it("renders empty state with generate CTA when no tokens", async () => {
     const { container, unmount } = await render({});
     expect(container.querySelector("[data-testid='tokens-empty-state']")).not.toBeNull();
+    expect(container.querySelector("[data-testid='tokens-scope-note']")).not.toBeNull();
+    expect(container.textContent).toMatch(/CLI and automation access/);
+    expect(container.textContent).toMatch(/repository access is managed separately/i);
     expect(container.querySelector("[data-testid='tokens-table']")).toBeNull();
     unmount();
   });

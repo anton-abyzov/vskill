@@ -87,8 +87,7 @@ impl QuotaCache {
     /// at the moment of receipt. `local_now_iso` should be `chrono::Utc::now()
     /// .to_rfc3339()` in production; tests inject a fixed value.
     pub fn from_response(response: QuotaResponse, local_now_iso: String) -> Self {
-        let clock_skew_ms =
-            compute_skew_ms(&local_now_iso, &response.server_now).unwrap_or(0);
+        let clock_skew_ms = compute_skew_ms(&local_now_iso, &response.server_now).unwrap_or(0);
         Self {
             response,
             local_at_sync: local_now_iso,
@@ -166,17 +165,15 @@ fn cache_path() -> Option<PathBuf> {
 /// Persist `cache` to disk. Best-effort — failure is logged at `warn` by the
 /// caller; we still have the value in memory for the lifetime of the process.
 pub fn save_quota_cache(cache: &QuotaCache) -> Result<(), QuotaCacheError> {
-    let path = cache_path().ok_or_else(|| {
-        QuotaCacheError::Io("could not resolve $HOME for quota cache".into())
-    })?;
+    let path = cache_path()
+        .ok_or_else(|| QuotaCacheError::Io("could not resolve $HOME for quota cache".into()))?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| QuotaCacheError::Io(format!("mkdir {parent:?}: {e}")))?;
     }
     let json = serde_json::to_string_pretty(cache)
         .map_err(|e| QuotaCacheError::Parse(format!("serialize: {e}")))?;
-    std::fs::write(&path, json)
-        .map_err(|e| QuotaCacheError::Io(format!("write {path:?}: {e}")))
+    std::fs::write(&path, json).map_err(|e| QuotaCacheError::Io(format!("write {path:?}: {e}")))
 }
 
 /// Read the disk cache. Returns `Ok(None)` if the file doesn't exist (clean
@@ -188,9 +185,8 @@ pub fn load_quota_cache() -> Result<Option<QuotaCache>, QuotaCacheError> {
     };
     match std::fs::read_to_string(&path) {
         Ok(text) => {
-            let parsed: QuotaCache = serde_json::from_str(&text).map_err(|e| {
-                QuotaCacheError::Parse(format!("parse quota cache {path:?}: {e}"))
-            })?;
+            let parsed: QuotaCache = serde_json::from_str(&text)
+                .map_err(|e| QuotaCacheError::Parse(format!("parse quota cache {path:?}: {e}")))?;
             Ok(Some(parsed))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),

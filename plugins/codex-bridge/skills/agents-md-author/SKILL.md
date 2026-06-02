@@ -1,6 +1,7 @@
 ---
 name: agents-md-author
 description: "Bootstrap or update project AI-agent instruction files (AGENTS.md for Codex, CLAUDE.md for Claude Code, or both) from the current project's structure. Triggers on: write AGENTS.md, write CLAUDE.md, generate AGENTS.md, agent instructions, project conventions for AI, bootstrap agent docs, set up project memory for Codex/Claude, document dev/test/build commands for AI coding tools, single-source project instructions for any AI agent."
+version: 1.0.1
 ---
 
 # agents-md-author

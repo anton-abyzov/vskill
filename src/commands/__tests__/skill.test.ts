@@ -225,7 +225,10 @@ describe("vskill skill new — target resolution (AC-US3-03, AC-US3-04)", () => 
     );
   });
 
-  it("--targets=all resolves to all 53 agents", async () => {
+  it("--targets=all resolves to all registered agents (54 = 53 base + chatgpt from 0845 T-003)", async () => {
+    // 0845 T-003: chatgpt is the first new registry entry since 0694; total
+    // bumps to 54. The TOTAL_AGENTS export is the authoritative count.
+    const { TOTAL_AGENTS } = await import("../../agents/agents-registry.js");
     const { exitCode } = await invokeSkill([
       "new",
       "--prompt",
@@ -235,7 +238,7 @@ describe("vskill skill new — target resolution (AC-US3-03, AC-US3-04)", () => 
     ]);
     expect(exitCode ?? 0).toBe(0);
     const opts = mocks.emitSkill.mock.calls[0][1] as { targetAgents: string[] };
-    expect(opts.targetAgents).toHaveLength(53);
+    expect(opts.targetAgents).toHaveLength(TOTAL_AGENTS);
   });
 
   it("--targets=claude-code,codex resolves to exactly those two", async () => {

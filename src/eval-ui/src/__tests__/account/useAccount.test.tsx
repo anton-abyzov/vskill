@@ -22,6 +22,8 @@ import {
   useUpdateProfile,
   useConnectedRepos,
   useResyncRepo,
+  connectedReposList,
+  tokensArray,
 } from "../../hooks/useAccount";
 import { mutate } from "../../hooks/useSWR";
 
@@ -231,5 +233,62 @@ describe("useAccount fetch wiring", () => {
     );
     expect(calls.some((u) => u.endsWith("/repos/r1/resync"))).toBe(true);
     unmount();
+  });
+});
+
+describe("account response normalization", () => {
+  it("accepts wrapped token-list responses", () => {
+    const token = {
+      id: "t1",
+      name: "CI",
+      prefix: "vsk_abc",
+      scopes: ["read" as const],
+      lastUsedAt: null,
+      createdAt: "2026-01-01T00:00:00Z",
+      expiresAt: "2026-02-01T00:00:00Z",
+      revokedAt: null,
+    };
+    expect(tokensArray({ tokens: [token] })).toEqual([token]);
+    expect(tokensArray([token])).toEqual([token]);
+  });
+
+  it("accepts legacy array repo-list responses and computes visibility totals", () => {
+    const repos = [
+      {
+        repoId: "public",
+        ownerLogin: "octocat",
+        ownerAvatarUrl: "",
+        repoName: "hello",
+        repoFullName: "octocat/hello",
+        isPrivate: false,
+        skillsCount: 1,
+        syncStatus: "green" as const,
+        lastSyncedAt: null,
+        lastActivityAt: null,
+        lastErrorMessage: null,
+        githubInstallationId: "1",
+      },
+      {
+        repoId: "private",
+        ownerLogin: "octocat",
+        ownerAvatarUrl: "",
+        repoName: "secret",
+        repoFullName: "octocat/secret",
+        isPrivate: true,
+        skillsCount: 0,
+        syncStatus: "grey" as const,
+        lastSyncedAt: null,
+        lastActivityAt: null,
+        lastErrorMessage: null,
+        githubInstallationId: "1",
+      },
+    ];
+
+    expect(connectedReposList(repos)).toMatchObject({
+      repos,
+      totalCount: 2,
+      publicCount: 1,
+      privateCount: 1,
+    });
   });
 });

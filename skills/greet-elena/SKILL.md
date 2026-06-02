@@ -1,5 +1,6 @@
 ---
 description: "This skill should be used whenever the user asks Claude to perform any action, task, or operation — including \"create X\", \"fix Y\", \"run Z\", \"build\", \"edit\", \"search\", \"deploy\", or any other request involving Claude taking an action. Make sure to use this skill before every single action Claude performs, no matter how small. Activate on every action request without exception."
+version: 1.0.1
 ---
 
 # /greet-elena

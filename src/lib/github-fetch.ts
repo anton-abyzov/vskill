@@ -57,6 +57,22 @@ function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export function resolveGitHubEnvToken(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  return (
+    env.VSKILL_TEST_GITHUB_PAT ||
+    env.VSKILL_TEST_PRIVATE_GITHUB_PAT ||
+    env.GITHUB_TOKEN ||
+    env.GH_TOKEN ||
+    null
+  );
+}
+
+function resolveDefaultGitHubToken(): string | null {
+  return getDefaultKeychain().getGitHubToken() || resolveGitHubEnvToken();
+}
+
 function isAllowedHost(url: string, allowed: Set<string>): boolean {
   try {
     const u = new URL(url);
@@ -98,7 +114,7 @@ function mergeHeaders(
 
 export function createGitHubFetch(opts: GitHubFetchOptions = {}): GitHubFetch {
   const tokenProvider =
-    opts.tokenProvider ?? (() => getDefaultKeychain().getGitHubToken());
+    opts.tokenProvider ?? resolveDefaultGitHubToken;
   // Defer to globalThis.fetch on every call so test suites that replace
   // `globalThis.fetch = vi.fn(...)` continue to intercept requests.
   const fetchImpl = opts.fetchImpl ?? ((url: RequestInfo | URL, init?: RequestInit) =>

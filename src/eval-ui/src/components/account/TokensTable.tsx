@@ -80,7 +80,8 @@ export function TokensTable({
               color: "var(--text-secondary)",
             }}
           >
-            Use these to authenticate the CLI or scripted integrations.
+            For CLI and automation access; repository sync uses GitHub
+            connections instead.
           </p>
         </div>
         <button
@@ -103,6 +104,23 @@ export function TokensTable({
         >
           Generate new token
         </button>
+      </div>
+
+      <div
+        data-testid="tokens-scope-note"
+        style={{
+          marginBottom: 12,
+          padding: "10px 12px",
+          border: "1px solid var(--border-default, #e5e7eb)",
+          borderRadius: 8,
+          background: "var(--bg-elevated, #fff)",
+          color: "var(--text-secondary)",
+          fontSize: 12,
+          lineHeight: 1.45,
+        }}
+      >
+        Keep this page for scripts that call verified-skill APIs. To connect
+        public or private repositories, use Connected repositories.
       </div>
 
       {tokens.length === 0 ? (
@@ -234,7 +252,17 @@ function EmptyState({ onGenerateClick }: { onGenerateClick: () => void }) {
       }}
     >
       <div style={{ fontSize: 14, color: "var(--text-primary)", marginBottom: 6 }}>
-        No tokens yet — generate one to use the CLI.
+        No API tokens yet
+      </div>
+      <div
+        style={{
+          fontSize: 13,
+          color: "var(--text-secondary)",
+          marginBottom: 14,
+        }}
+      >
+        Generate one only for local CLI auth, CI, or another scripted
+        integration. GitHub repository access is managed separately.
       </div>
       <button
         type="button"

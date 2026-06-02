@@ -150,7 +150,7 @@ export function ToastStack({ toasts, onDismiss, liveMessage, liveAssertiveMessag
             display: "flex",
             flexDirection: "column-reverse",
             gap: 8,
-            zIndex: 50,
+            zIndex: 20000,
             pointerEvents: "none",
           }}
         >

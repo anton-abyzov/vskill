@@ -27,6 +27,12 @@ export interface BuildGitHubInstallLockEntryArgs {
    * (likely-wrong) GitHub blob URL.
    */
   sourceSkillPath: string | null;
+  /** Branch/ref used when installing from GitHub. */
+  branch?: string | null;
+  /** Commit SHA at install time. */
+  commitSha?: string | null;
+  /** Plugin namespace that owns this skill, if discovered from plugins/<name>/skills/. */
+  pluginName?: string | null;
   /** Whether this is a user-global install (`--global`) vs project-local. */
   global: boolean;
   /** ISO timestamp; injected for deterministic tests, defaults to `now`. */
@@ -44,10 +50,20 @@ export function buildGitHubInstallLockEntry(
     source: `github:${args.owner}/${args.repo}`,
     scope: args.global ? "user" : "project",
     files: ["SKILL.md"],
+    sourceType: "github",
     sourceRepoUrl: `https://github.com/${args.owner}/${args.repo}`,
   };
   if (args.sourceSkillPath) {
     entry.sourceSkillPath = args.sourceSkillPath;
+  }
+  if (args.branch) {
+    entry.sourceBranch = args.branch;
+  }
+  if (args.commitSha) {
+    entry.sourceCommitSha = args.commitSha;
+  }
+  if (args.pluginName) {
+    entry.sourcePluginName = args.pluginName;
   }
   return entry;
 }

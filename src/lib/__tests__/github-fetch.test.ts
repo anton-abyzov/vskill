@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi } from "vitest";
-import { createGitHubFetch, GitHubFetchError } from "../github-fetch.js";
+import { createGitHubFetch, GitHubFetchError, resolveGitHubEnvToken } from "../github-fetch.js";
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -13,6 +13,22 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
 }
 
 describe("github-fetch", () => {
+  it("resolves GitHub token env fallbacks in sandbox-safe priority order", () => {
+    expect(resolveGitHubEnvToken({
+      GITHUB_TOKEN: "github-token",
+      GH_TOKEN: "gh-token",
+    })).toBe("github-token");
+    expect(resolveGitHubEnvToken({
+      VSKILL_TEST_PRIVATE_GITHUB_PAT: "private-token",
+      GITHUB_TOKEN: "github-token",
+    })).toBe("private-token");
+    expect(resolveGitHubEnvToken({
+      VSKILL_TEST_GITHUB_PAT: "test-token",
+      VSKILL_TEST_PRIVATE_GITHUB_PAT: "private-token",
+    })).toBe("test-token");
+    expect(resolveGitHubEnvToken({})).toBeNull();
+  });
+
   it("attaches Authorization header for api.github.com when token present", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ ok: true })) as unknown as typeof fetch;
     const gh = createGitHubFetch({

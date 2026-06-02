@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { yellow } from "../utils/output.js";
+import { createGitHubFetch, githubFetch } from "../lib/github-fetch.js";
 
 // ---- Rate-limit warning (deduplicated per CLI invocation) -----------------
 
@@ -27,6 +28,120 @@ export function warnRateLimitOnce(res: Response): void {
   );
 }
 
+export type GitHubDiscoveryFailureCode =
+  | "unauthorized"
+  | "missing"
+  | "rate_limited"
+  | "transient";
+
+export interface GitHubDiscoveryFailure {
+  code: GitHubDiscoveryFailureCode;
+  status?: number;
+  message: string;
+}
+
+export interface GitHubDiscoveryOptions {
+  /** Explicit GitHub token for tests/sandbox flows. Omit to use the CLI keychain. */
+  token?: string | null;
+  /** Fetch implementation for tests. Defaults to the shared GitHub fetch helper. */
+  fetchImpl?: typeof fetch;
+}
+
+export interface GitHubDiscoveryResult {
+  skills: DiscoveredSkill[];
+  error?: GitHubDiscoveryFailure;
+}
+
+function hasOwn<K extends PropertyKey>(obj: object, key: K): obj is Record<K, unknown> {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function hasExplicitToken(options?: GitHubDiscoveryOptions): boolean {
+  return !!options && hasOwn(options, "token") && !!options.token;
+}
+
+function githubApiHeaders(token?: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github.v3+json",
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+function mergeHeaders(base: Record<string, string>, init?: HeadersInit): Record<string, string> {
+  const headers = { ...base };
+  if (!init) return headers;
+  if (init instanceof Headers) {
+    init.forEach((value, key) => {
+      headers[key] = value;
+    });
+    return headers;
+  }
+  if (Array.isArray(init)) {
+    for (const [key, value] of init) headers[key] = value;
+    return headers;
+  }
+  return { ...headers, ...(init as Record<string, string>) };
+}
+
+function branchCacheKey(owner: string, repo: string, options?: GitHubDiscoveryOptions): string {
+  return `${owner}/${repo}:${hasExplicitToken(options) ? "explicit-auth" : "default-auth"}`;
+}
+
+function requestGitHub(
+  url: string,
+  init: RequestInit = {},
+  options?: GitHubDiscoveryOptions,
+): Promise<Response> {
+  const headers = mergeHeaders(githubApiHeaders(options?.token), init.headers);
+  const requestInit = { ...init, headers };
+  if (options?.fetchImpl) return options.fetchImpl(url, requestInit);
+  if (options && hasOwn(options, "token")) {
+    return createGitHubFetch({
+      tokenProvider: () => options.token || null,
+    })(url, requestInit);
+  }
+  return githubFetch(url, requestInit);
+}
+
+export function classifyGitHubFailure(res: Pick<Response, "status" | "headers">): GitHubDiscoveryFailure {
+  const status = res.status;
+  const rateRemaining = res.headers?.get("x-ratelimit-remaining");
+  if (status === 401 || (status === 403 && rateRemaining !== "0")) {
+    return {
+      code: "unauthorized",
+      status,
+      message: "GitHub authentication failed or the token lacks access to this repository.",
+    };
+  }
+  if (status === 403 && rateRemaining === "0") {
+    return {
+      code: "rate_limited",
+      status,
+      message: "GitHub API rate limit exceeded.",
+    };
+  }
+  if (status === 404) {
+    return {
+      code: "missing",
+      status,
+      message: "GitHub repository, branch, or skill path was not found.",
+    };
+  }
+  if (status === 429 || status >= 500) {
+    return {
+      code: "transient",
+      status,
+      message: `GitHub returned a transient HTTP ${status} response.`,
+    };
+  }
+  return {
+    code: "transient",
+    status,
+    message: `GitHub returned HTTP ${status}.`,
+  };
+}
+
 // ---- Branch cache ---------------------------------------------------------
 
 /**
@@ -40,16 +155,18 @@ export function _resetBranchCache(): void {
   branchCache.clear();
 }
 
-export async function getDefaultBranch(owner: string, repo: string): Promise<string> {
-  const key = `${owner}/${repo}`;
+export async function getDefaultBranch(
+  owner: string,
+  repo: string,
+  options?: GitHubDiscoveryOptions,
+): Promise<string> {
+  const key = branchCacheKey(owner, repo, options);
   const cached = branchCache.get(key);
   if (cached) return cached;
 
   let branch = "main";
   try {
-    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-      headers: { Accept: "application/vnd.github.v3+json" },
-    });
+    const res = await requestGitHub(`https://api.github.com/repos/${owner}/${repo}`, {}, options);
     if (res.ok) {
       const data = (await res.json()) as { default_branch?: string };
       branch = data.default_branch || "main";
@@ -61,15 +178,37 @@ export async function getDefaultBranch(owner: string, repo: string): Promise<str
   return branch;
 }
 
+export async function getBranchHeadSha(
+  owner: string,
+  repo: string,
+  branch: string,
+  options?: GitHubDiscoveryOptions,
+): Promise<string | null> {
+  try {
+    const res = await requestGitHub(
+      `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(branch)}`,
+      {},
+      options,
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as { sha?: unknown };
+    return typeof data.sha === "string" && data.sha ? data.sha : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Check whether a GitHub repo exists. Returns false only on 404.
  * Fails open on network errors or rate limits (returns true).
  */
-export async function checkRepoExists(owner: string, repo: string): Promise<boolean> {
+export async function checkRepoExists(
+  owner: string,
+  repo: string,
+  options?: GitHubDiscoveryOptions,
+): Promise<boolean> {
   try {
-    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-      headers: { Accept: "application/vnd.github.v3+json" },
-    });
+    const res = await requestGitHub(`https://api.github.com/repos/${owner}/${repo}`, {}, options);
     if (res.status === 404) return false;
     return true;
   } catch {
@@ -125,6 +264,51 @@ export function extractDescription(content: string): string | undefined {
   return undefined;
 }
 
+function encodeRepoPath(path: string): string {
+  return path
+    .replace(/^\/+/, "")
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+export async function fetchGitHubFileText(
+  owner: string,
+  repo: string,
+  branch: string,
+  path: string,
+  options?: GitHubDiscoveryOptions,
+): Promise<string | null> {
+  try {
+    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeRepoPath(path)}?ref=${encodeURIComponent(branch)}`;
+    const res = await requestGitHub(url, {
+      signal: AbortSignal.timeout(10000),
+      headers: { Accept: "application/vnd.github+json" },
+    }, options);
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      type?: string;
+      encoding?: string;
+      content?: string;
+      download_url?: string | null;
+    } | Array<unknown>;
+    if (Array.isArray(data)) return null;
+    if (data.encoding === "base64" && typeof data.content === "string") {
+      return Buffer.from(data.content.replace(/\s/g, ""), "base64").toString("utf8");
+    }
+    if (typeof data.content === "string") return data.content;
+    if (data.download_url) {
+      const rawRes = await requestGitHub(data.download_url, {
+        signal: AbortSignal.timeout(10000),
+      }, options);
+      if (rawRes.ok) return await rawRes.text();
+    }
+  } catch {
+    // File not found, timeout, or malformed GitHub payload.
+  }
+  return null;
+}
+
 /**
  * Discover all SKILL.md files in a GitHub repo using the Trees API.
  *
@@ -141,24 +325,38 @@ export function extractDescription(content: string): string | undefined {
 export async function discoverSkills(
   owner: string,
   repo: string,
+  options?: GitHubDiscoveryOptions,
 ): Promise<DiscoveredSkill[]> {
-  const branch = await getDefaultBranch(owner, repo);
+  const result = await discoverSkillsDetailed(owner, repo, options);
+  return result.skills;
+}
+
+export async function discoverSkillsDetailed(
+  owner: string,
+  repo: string,
+  options?: GitHubDiscoveryOptions,
+): Promise<GitHubDiscoveryResult> {
+  const branch = await getDefaultBranch(owner, repo, options);
   const url = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
 
   let tree: Array<{ path: string; type: string }>;
   try {
-    const res = await fetch(url, {
-      headers: { Accept: "application/vnd.github.v3+json" },
-    });
+    const res = await requestGitHub(url, {}, options);
     if (!res.ok) {
       warnRateLimitOnce(res);
-      return [];
+      return { skills: [], error: classifyGitHubFailure(res) };
     }
     const data = (await res.json()) as { tree?: unknown };
-    if (!Array.isArray(data?.tree)) return [];
+    if (!Array.isArray(data?.tree)) return { skills: [] };
     tree = data.tree as Array<{ path: string; type: string }>;
   } catch {
-    return [];
+    return {
+      skills: [],
+      error: {
+        code: "transient",
+        message: "Failed to connect to GitHub.",
+      },
+    };
   }
 
   const skills: DiscoveredSkill[] = [];
@@ -250,12 +448,20 @@ export async function discoverSkills(
   await Promise.allSettled(
     skills.map(async (skill) => {
       try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 3000);
-        const res = await fetch(skill.rawUrl, { signal: controller.signal });
-        clearTimeout(timer);
-        if (!res.ok) return;
-        const content = await res.text();
+        let content: string | null = null;
+        if (hasExplicitToken(options)) {
+          content = await fetchGitHubFileText(owner, repo, branch, skill.path, options);
+        } else {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 3000);
+          try {
+            const res = await requestGitHub(skill.rawUrl, { signal: controller.signal }, options);
+            if (res.ok) content = await res.text();
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+        if (!content) return;
         skill.description = extractDescription(content);
       } catch {
         // Timeout or network error — leave description undefined
@@ -263,5 +469,5 @@ export async function discoverSkills(
     }),
   );
 
-  return skills;
+  return { skills };
 }

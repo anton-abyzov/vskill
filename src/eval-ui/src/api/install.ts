@@ -15,21 +15,16 @@ import type {
   SupportedAgent,
   SupportedAgentsResponse,
 } from "../types";
+import { openFetchEventStream, type FetchEventStreamHandle } from "./sse";
 
 type FetchLike = typeof fetch;
-type EventSourceCtor = typeof EventSource;
 
 interface IoOptions {
   fetchImpl?: FetchLike;
-  eventSourceCtor?: EventSourceCtor;
 }
 
 function resolveFetch(opts?: IoOptions): FetchLike {
   return opts?.fetchImpl ?? fetch;
-}
-
-function resolveEventSource(opts?: IoOptions): EventSourceCtor {
-  return opts?.eventSourceCtor ?? (EventSource as EventSourceCtor);
 }
 
 /**
@@ -122,46 +117,40 @@ export function startInstallStream(
   callbacks: InstallStreamCallbacks,
   opts?: IoOptions,
 ): InstallStreamHandle {
-  const ESCtor = resolveEventSource(opts);
+  const f = resolveFetch(opts);
   const streamUrl = jobIdOrStreamPath.startsWith("/")
     ? jobIdOrStreamPath
     : `/api/studio/install-skill/${encodeURIComponent(jobIdOrStreamPath)}/stream`;
-  const es = new ESCtor(streamUrl);
-  const safetyTimer = setTimeout(() => {
-    try { es.close(); } catch { /* */ }
-  }, 200_000);
+  let stream: FetchEventStreamHandle;
+  stream = openFetchEventStream(streamUrl, {
+    fetchImpl: f,
+    timeoutMessage: "install-skill SSE stream timed out",
+    onEvent: ({ event, data: rawData }) => {
+      if (event === "result") {
+        try {
+          const data = JSON.parse(rawData) as AgentInstallResult;
+          callbacks.onResult(data);
+        } catch (err) {
+          callbacks.onError?.(err instanceof Error ? err : new Error(String(err)));
+        }
+        return;
+      }
 
-  const closeStream = () => {
-    clearTimeout(safetyTimer);
-    try { es.close(); } catch { /* */ }
-  };
-
-  es.addEventListener("result", (ev) => {
-    try {
-      const data = JSON.parse((ev as MessageEvent).data) as AgentInstallResult;
-      callbacks.onResult(data);
-    } catch (err) {
-      callbacks.onError?.(err instanceof Error ? err : new Error(String(err)));
-    }
+      if (event === "done") {
+        let summary: MultiInstallResult = { results: [] };
+        try {
+          summary = JSON.parse(rawData) as MultiInstallResult;
+        } catch {
+          // ignore parse error — emit empty summary
+        }
+        stream.close();
+        callbacks.onDone(summary);
+      }
+    },
+    onError: (err) => callbacks.onError?.(err),
   });
 
-  es.addEventListener("done", (ev) => {
-    let summary: MultiInstallResult = { results: [] };
-    try {
-      summary = JSON.parse((ev as MessageEvent).data) as MultiInstallResult;
-    } catch {
-      // ignore parse error — emit empty summary
-    }
-    closeStream();
-    callbacks.onDone(summary);
-  });
-
-  es.onerror = () => {
-    closeStream();
-    callbacks.onError?.(new Error("install-skill SSE stream errored"));
-  };
-
-  return { close: closeStream };
+  return stream;
 }
 
 // ---------------------------------------------------------------------------

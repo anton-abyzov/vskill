@@ -31,7 +31,7 @@ import type { BlocklistEntry, RejectionInfo } from "../blocklist/types.js";
 import { getSkill, searchSkills } from "../api/client.js";
 import type { SkillSearchResult } from "../api/client.js";
 import { checkPlatformSecurity } from "../security/index.js";
-import { discoverSkills, getDefaultBranch, checkRepoExists, warnRateLimitOnce } from "../discovery/github-tree.js";
+import { discoverSkills, getDefaultBranch, getBranchHeadSha, checkRepoExists, warnRateLimitOnce } from "../discovery/github-tree.js";
 import { githubFetch, GitHubFetchError } from "../lib/github-fetch.js";
 import { parseGitHubSource, classifyIdentifier } from "../utils/validation.js";
 import {
@@ -83,6 +83,12 @@ function isGitHubDownloadUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+function pluginNameFromSkillPath(path: string | undefined): string | null {
+  if (!path) return null;
+  const match = path.match(/^plugins\/([^/]+)\/skills\/[^/]+\/SKILL\.md$/);
+  return match?.[1] ?? null;
 }
 
 // Marketplace detection — auto-detect Claude Code plugin marketplaces
@@ -2255,6 +2261,8 @@ async function addCommandInner(
   // `sourceSkillPath` are persisted alongside the legacy `source` string.
   const lockDir = lockfileRoot(opts);
   const lock = ensureLockfile(lockDir);
+  const sourceBranch = await getDefaultBranch(owner, repo);
+  const sourceCommitSha = await getBranchHeadSha(owner, repo, sourceBranch);
   for (const r of results) {
     if (r.installed && r.sha) {
       lock.skills[r.skillName] = buildGitHubInstallLockEntry({
@@ -2263,6 +2271,9 @@ async function addCommandInner(
         owner,
         repo,
         sourceSkillPath: r.sourceSkillPath ?? null,
+        branch: sourceBranch,
+        commitSha: sourceCommitSha,
+        pluginName: pluginNameFromSkillPath(r.sourceSkillPath),
         global: !!opts.global,
       });
     }
@@ -2776,6 +2787,7 @@ async function installSingleSkillLegacy(
   }
 
   const branch = await getDefaultBranch(owner, repo);
+  const sourceCommitSha = await getBranchHeadSha(owner, repo, branch);
   const skillSubpath = skillSubpathOverride || (skill ? `skills/${skill}/SKILL.md` : "SKILL.md");
   const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${skillSubpath}`;
 
@@ -2940,6 +2952,9 @@ async function installSingleSkillLegacy(
     owner,
     repo,
     sourceSkillPath: skillSubpath,
+    branch,
+    commitSha: sourceCommitSha,
+    pluginName: pluginNamespace ?? pluginNameFromSkillPath(skillSubpath),
     global: !!opts.global,
   });
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];

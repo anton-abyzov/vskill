@@ -16,51 +16,41 @@ import { createRoot, type Root } from "react-dom/client";
 import { InstallEngineModal } from "../InstallEngineModal";
 
 // ---------------------------------------------------------------------------
-// Fake EventSource — emits events on demand from the test.
+// Fake fetch stream — emits SSE frames on demand from the test.
 // ---------------------------------------------------------------------------
-
-type Listener = (ev: MessageEvent) => void;
-
-class FakeEventSource {
-  url: string;
-  listeners = new Map<string, Listener[]>();
-  readyState = 0;
-  closed = false;
-  static instances: FakeEventSource[] = [];
-  constructor(url: string) {
-    this.url = url;
-    FakeEventSource.instances.push(this);
-  }
-  addEventListener(type: string, cb: Listener): void {
-    const list = this.listeners.get(type) ?? [];
-    list.push(cb);
-    this.listeners.set(type, list);
-  }
-  emit(type: string, data: unknown): void {
-    const list = this.listeners.get(type) ?? [];
-    const ev = new MessageEvent(type, { data: JSON.stringify(data) });
-    for (const cb of list) cb(ev);
-  }
-  close(): void {
-    this.closed = true;
-  }
-}
 
 let container: HTMLDivElement;
 let root: Root;
 let fakeFetch: ReturnType<typeof vi.fn>;
+let streamControllers: ReadableStreamDefaultController<Uint8Array>[];
+const encoder = new TextEncoder();
 
 beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  FakeEventSource.instances = [];
-  fakeFetch = vi.fn(async () =>
-    new Response(JSON.stringify({ jobId: "job-uuid-123" }), {
-      status: 202,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
+  streamControllers = [];
+  fakeFetch = vi.fn(async (input: unknown) => {
+    const url = String(input);
+    if (url === "/api/studio/install-engine") {
+      return new Response(JSON.stringify({ jobId: "job-uuid-123" }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url === "/api/studio/install-engine/job-uuid-123/stream") {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          streamControllers.push(controller);
+        },
+      });
+      return new Response(body, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  });
 });
 
 afterEach(() => {
@@ -95,11 +85,16 @@ function renderModal(props: { engine: "vskill" | "anthropic-skill-creator"; onCl
         onSuccess={props.onSuccess ?? (() => {})}
         hookOpts={{
           fetchImpl: fakeFetch as unknown as typeof fetch,
-          eventSourceCtor: FakeEventSource as unknown as typeof EventSource,
         }}
       />,
     );
   });
+}
+
+function emitStreamEvent(type: string, data: unknown): void {
+  const controller = streamControllers[streamControllers.length - 1];
+  if (!controller) throw new Error("stream controller not found");
+  controller.enqueue(encoder.encode(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`));
 }
 
 // ---------------------------------------------------------------------------
@@ -134,17 +129,18 @@ describe("AC-US5-04: confirm stage shows the exact command + security note", () 
 });
 
 describe("AC-US5-05 + AC-US5-10: success path — confirm → run → stream → success", () => {
-  it("clicking [Run install] POSTs and opens an EventSource to the streaming endpoint", async () => {
+  it("clicking [Run install] POSTs and opens a fetch stream to the streaming endpoint", async () => {
     renderModal({ engine: "vskill" });
     act(() => getByTestId("install-run").click());
     await flushAsync();
 
-    expect(fakeFetch).toHaveBeenCalledWith(
+    expect(fakeFetch.mock.calls[0]).toEqual([
       "/api/studio/install-engine",
       expect.objectContaining({ method: "POST" }),
-    );
-    expect(FakeEventSource.instances).toHaveLength(1);
-    expect(FakeEventSource.instances[0].url).toBe("/api/studio/install-engine/job-uuid-123/stream");
+    ]);
+    expect(fakeFetch.mock.calls[1]?.[0]).toBe("/api/studio/install-engine/job-uuid-123/stream");
+    expect(new Headers(fakeFetch.mock.calls[1]?.[1]?.headers).get("Accept")).toBe("text/event-stream");
+    expect(streamControllers).toHaveLength(1);
     expect(getByTestId("install-spinner")).toBeTruthy();
   });
 
@@ -155,17 +151,17 @@ describe("AC-US5-05 + AC-US5-10: success path — confirm → run → stream →
     act(() => getByTestId("install-run").click());
     await flushAsync();
 
-    const source = FakeEventSource.instances[0];
-    act(() => source.emit("progress", { stream: "stdout", line: "Resolving..." }));
-    act(() => source.emit("progress", { stream: "stdout", line: "Installed." }));
+    emitStreamEvent("progress", { stream: "stdout", line: "Resolving..." });
+    await flushAsync();
+    emitStreamEvent("progress", { stream: "stdout", line: "Installed." });
+    await flushAsync();
     expect(getByTestId("install-live-tail").textContent).toContain("Installed.");
 
-    act(() => source.emit("done", { success: true, exitCode: 0, stderr: "" }));
+    emitStreamEvent("done", { success: true, exitCode: 0, stderr: "" });
     await flushAsync();
 
     expect(findByTestId("install-success")).toBeTruthy();
     expect(onSuccess).toHaveBeenCalledTimes(1);
-    expect(source.closed).toBe(true);
   });
 });
 
@@ -176,9 +172,9 @@ describe("AC-US5-05: failure path — non-zero exit shows stderr + retry", () =>
     act(() => getByTestId("install-run").click());
     await flushAsync();
 
-    const source = FakeEventSource.instances[0];
-    act(() => source.emit("progress", { stream: "stderr", line: "network unreachable" }));
-    act(() => source.emit("done", { success: false, exitCode: 1, stderr: "network unreachable" }));
+    emitStreamEvent("progress", { stream: "stderr", line: "network unreachable" });
+    await flushAsync();
+    emitStreamEvent("done", { success: false, exitCode: 1, stderr: "network unreachable" });
     await flushAsync();
 
     expect(findByTestId("install-failure")).toBeTruthy();
@@ -188,8 +184,8 @@ describe("AC-US5-05: failure path — non-zero exit shows stderr + retry", () =>
     fakeFetch.mockClear();
     act(() => getByTestId("install-retry").click());
     await flushAsync();
-    expect(fakeFetch).toHaveBeenCalledTimes(1);
-    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(fakeFetch).toHaveBeenCalledTimes(2);
+    expect(streamControllers).toHaveLength(2);
   });
 
   it("412 prerequisite-missing response surfaces remediation in failure stage", async () => {
@@ -209,7 +205,7 @@ describe("AC-US5-05: failure path — non-zero exit shows stderr + retry", () =>
     expect(findByTestId("install-failure")).toBeTruthy();
     // The error message contains the remediation text.
     expect(container.textContent).toContain("Install Claude Code CLI first");
-    // No EventSource opened for a pre-flight failure.
-    expect(FakeEventSource.instances).toHaveLength(0);
+    // No stream opened for a pre-flight failure.
+    expect(streamControllers).toHaveLength(0);
   });
 });

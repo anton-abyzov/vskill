@@ -4,6 +4,7 @@ description: >
   Meta-skill for creating new skills from natural language. Trigger phrases:
   "new skill", "create a skill", "build a skill", "make a skill",
   "generate a skill", "author a skill", "skill builder".
+version: 1.0.5
 metadata:
   version: 1.0.4
   homepage: https://verified-skill.com/skills/skill-builder

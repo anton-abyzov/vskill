@@ -276,12 +276,7 @@ fn parse_iso8601_to_unix(iso: &str) -> Option<i64> {
     let doy = (153 * if m > 2 { m - 3 } else { m + 9 } + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days_since_epoch = era * 146_097 + doe as i64 - 719_468;
-    Some(
-        days_since_epoch * 86_400
-            + (hour as i64) * 3600
-            + (min as i64) * 60
-            + (sec as i64),
-    )
+    Some(days_since_epoch * 86_400 + (hour as i64) * 3600 + (min as i64) * 60 + (sec as i64))
 }
 
 #[cfg(unix)]
@@ -410,11 +405,7 @@ async fn scan_linux() -> Result<Vec<ProcessRecord>, String> {
         Err(_) => return Ok(out),
     };
     for entry in entries.flatten() {
-        let pid = match entry
-            .file_name()
-            .to_string_lossy()
-            .parse::<u32>()
-        {
+        let pid = match entry.file_name().to_string_lossy().parse::<u32>() {
             Ok(p) => p,
             Err(_) => continue,
         };
@@ -492,10 +483,7 @@ async fn pgrep_f(pattern: &str) -> Result<Vec<u32>, String> {
         .await
         .map_err(|e| format!("pgrep launch failed: {e}"))?;
     let text = String::from_utf8_lossy(&out.stdout);
-    let pids: Vec<u32> = text
-        .lines()
-        .filter_map(|l| l.trim().parse().ok())
-        .collect();
+    let pids: Vec<u32> = text.lines().filter_map(|l| l.trim().parse().ok()).collect();
     Ok(pids)
 }
 
@@ -698,10 +686,7 @@ mod tests {
         );
         // Anything unknown falls back to NpxCli (lock files written by the CLI
         // never set source="" but defensive default catches future variants).
-        assert_eq!(
-            ProcessSource::from_str_lossy("nope"),
-            ProcessSource::NpxCli
-        );
+        assert_eq!(ProcessSource::from_str_lossy("nope"), ProcessSource::NpxCli);
     }
 
     #[test]

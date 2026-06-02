@@ -192,7 +192,7 @@ function parseRoot(argv) {
 
 function defaultDesktopRoot() {
   if (!seaApi) return null;
-  return path.join(os.homedir(), "SkillStudio");
+  return path.join(os.homedir(), "SkillProject");
 }
 
 function ensureRoot(root) {

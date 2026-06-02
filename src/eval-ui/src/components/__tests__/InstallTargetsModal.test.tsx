@@ -130,7 +130,7 @@ let startInstallStreamImpl: ReturnType<typeof vi.fn>;
 let writeClipboardImpl: ReturnType<typeof vi.fn>;
 let lastStreamCallbacks: {
   onResult: (r: AgentInstallResult) => void;
-  onDone: (s: { results: AgentInstallResult[] }) => void;
+  onDone: (s: { success?: boolean; error?: string; results: AgentInstallResult[] }) => void;
   onError?: (err: Error) => void;
 } | null = null;
 
@@ -372,6 +372,9 @@ describe("InstallTargetsModal — AC-US2-06: submit fires POST + consumes SSE", 
     await flushAsync();
     act(() => getByTestId("install-targets-modal-install").click());
     await flushAsync();
+    expect(getByTestId("install-targets-modal-installing-status").textContent).toContain(
+      "Installing obsidian-brain to 1 target",
+    );
     expect(lastStreamCallbacks).not.toBeNull();
     act(() => {
       lastStreamCallbacks!.onResult({
@@ -415,6 +418,34 @@ describe("InstallTargetsModal — AC-US2-07: per-target result toast (mixed outc
     expect(getByTestId("install-targets-result-row-claude-code").textContent).toContain(
       "/tmp/home/.claude/skills/obsidian-brain/SKILL.md",
     );
+  });
+
+  it("turns a terminal SSE failure with no rows into a visible per-target error", async () => {
+    const onSuccess = vi.fn();
+    renderModal({ activeAgentId: "claude-code", onSuccess });
+    await flushAsync();
+    act(() => getByTestId("install-targets-modal-install").click());
+    await flushAsync();
+    act(() => {
+      lastStreamCallbacks!.onDone({
+        success: false,
+        error: "Skill archive could not be written",
+        results: [],
+      });
+    });
+    await flushAsync();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const row = getByTestId("install-targets-result-row-claude-code");
+    expect(row.getAttribute("data-status")).toBe("error");
+    expect(row.textContent).toContain("Skill archive could not be written");
+    expect(getByTestId("install-targets-modal-install-error").textContent).toContain(
+      "Skill archive could not be written",
+    );
+    expect(onSuccess.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({ agentId: "claude-code", status: "error" }),
+    ]);
   });
 
   it("renders one row per agent with the right status, including a partial-failure row", async () => {

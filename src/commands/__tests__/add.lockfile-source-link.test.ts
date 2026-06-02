@@ -29,6 +29,8 @@ describe("0743: buildGitHubInstallLockEntry persists source-link provenance", ()
     sha: "abc123",
     owner: "anton-abyzov",
     repo: "vskill",
+    branch: "main",
+    commitSha: "abc1234def567890abc1234def567890abc1234d",
     global: false,
     installedAt: "2026-04-26T05:10:00.000Z",
   };
@@ -45,6 +47,9 @@ describe("0743: buildGitHubInstallLockEntry persists source-link provenance", ()
     // still inspect the legacy `source` string (resolveSourceLink falls
     // through to it when `sourceRepoUrl` is absent).
     expect(entry.source).toBe("github:anton-abyzov/vskill");
+    expect(entry.sourceType).toBe("github");
+    expect(entry.sourceBranch).toBe("main");
+    expect(entry.sourceCommitSha).toBe("abc1234def567890abc1234def567890abc1234d");
     expect(entry.version).toBe("1.0.1");
     expect(entry.sha).toBe("abc123");
     expect(entry.tier).toBe("VERIFIED");
@@ -87,5 +92,15 @@ describe("0743: buildGitHubInstallLockEntry persists source-link provenance", ()
     });
 
     expect(entry.scope).toBe("user");
+  });
+
+  it("persists plugin namespace when discovered from a plugin-backed skill path", () => {
+    const entry = buildGitHubInstallLockEntry({
+      ...baseArgs,
+      sourceSkillPath: "plugins/custom/skills/scout/SKILL.md",
+      pluginName: "custom",
+    });
+
+    expect(entry.sourcePluginName).toBe("custom");
   });
 });

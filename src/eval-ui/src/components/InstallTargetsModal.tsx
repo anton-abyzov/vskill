@@ -90,10 +90,11 @@ function deriveBadge(
   installState: InstallStateResponse | null,
   targetVersion: string | null | undefined,
 ): InstallStateBadge {
-  if (!installState) return { kind: "not-installed" };
-  const thisScope = installState.scopes[scope];
+  if (!installState || !installState.scopes) return { kind: "not-installed" };
   const otherScopeKey = scope === "project" ? "user" : "project";
+  const thisScope = installState.scopes[scope];
   const otherScope = installState.scopes[otherScopeKey];
+  if (!thisScope || !otherScope) return { kind: "not-installed" };
   const inThisScope = thisScope.installed && thisScope.installedAgentTools.includes(agentId);
   const inOtherScope = otherScope.installed && otherScope.installedAgentTools.includes(agentId);
   if (!inThisScope) {

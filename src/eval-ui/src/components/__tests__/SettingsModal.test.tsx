@@ -143,6 +143,45 @@ describe("0702 T-050: SettingsModal v2 — no tier, 3 providers, storage path", 
     }
   });
 
+  it("renders above stacked skill dialogs", async () => {
+    const fetchHandle = installFetchMock({});
+    try {
+      const { container, root, act } = await renderModal();
+      const modal = document.querySelector("[data-testid='settings-modal']") as HTMLElement;
+      expect(Number(modal.style.zIndex)).toBeGreaterThan(9998);
+
+      act(() => root.unmount());
+      container.remove();
+    } finally {
+      fetchHandle.restore();
+    }
+  });
+
+  it("Escape closes Settings without leaking to underlying key handlers", async () => {
+    const fetchHandle = installFetchMock({});
+    const onClose = vi.fn();
+    const bodyKey = vi.fn();
+    document.body.addEventListener("keydown", bodyKey);
+    try {
+      const { container, root, act } = await renderModal({ onClose });
+
+      await act(async () => {
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        );
+      });
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(bodyKey).not.toHaveBeenCalled();
+
+      act(() => root.unmount());
+      container.remove();
+    } finally {
+      document.body.removeEventListener("keydown", bodyKey);
+      fetchHandle.restore();
+    }
+  });
+
   it("does NOT render a tier radio (no input[name=storage-tier])", async () => {
     const fetchHandle = installFetchMock({});
     try {

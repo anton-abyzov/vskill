@@ -89,7 +89,7 @@ async function fetchGitHubFlat(
   skillName: string,
   entry: SkillLockEntry,
 ): Promise<FetchResult | null> {
-  const branch = await getDefaultBranch(owner, repo);
+  const branch = entry.sourceBranch || await getDefaultBranch(owner, repo);
   const base = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}`;
 
   // Honor the lockfile-recorded path first when present. Installs that record
@@ -129,7 +129,7 @@ async function fetchPlugin(
   pluginName: string,
   entry: SkillLockEntry,
 ): Promise<FetchResult | null> {
-  const branch = await getDefaultBranch(owner, repo);
+  const branch = entry.sourceBranch || await getDefaultBranch(owner, repo);
   const base = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}`;
   const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
 

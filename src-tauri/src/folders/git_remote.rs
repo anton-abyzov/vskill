@@ -110,11 +110,20 @@ pub fn detect_sync_state(path: &Path) -> SyncState {
 
     // Ahead/behind via the symmetric-difference count form. Output is a
     // single line: "<ahead>\t<behind>".
-    if let Some(counts) = run_git(path, &["rev-list", "--left-right", "--count", "HEAD...@{u}"]) {
+    if let Some(counts) = run_git(
+        path,
+        &["rev-list", "--left-right", "--count", "HEAD...@{u}"],
+    ) {
         let trimmed = counts.trim();
         let mut parts = trimmed.split_whitespace();
-        let ahead = parts.next().and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
-        let behind = parts.next().and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+        let ahead = parts
+            .next()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
+        let behind = parts
+            .next()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
         if ahead > 0 {
             return SyncState::Ahead { count: ahead };
         }
@@ -288,10 +297,7 @@ mod tests {
             parse_github_url("https://gitlab.com/anton/vskill.git"),
             None
         );
-        assert_eq!(
-            parse_github_url("git@bitbucket.org:anton/vskill.git"),
-            None
-        );
+        assert_eq!(parse_github_url("git@bitbucket.org:anton/vskill.git"), None);
         assert_eq!(parse_github_url("https://gitea.local/anton/repo"), None);
     }
 

@@ -107,10 +107,12 @@ export function SettingsModal({ open, onClose, initialProvider, onToast }: Setti
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        e.stopPropagation();
         onClose();
         return;
       }
       if (e.key === "Tab" && dialogRef.current) {
+        e.stopPropagation();
         const focusables = dialogRef.current.querySelectorAll<HTMLElement>(
           "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
         );
@@ -126,8 +128,8 @@ export function SettingsModal({ open, onClose, initialProvider, onToast }: Setti
         }
       }
     };
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
+    document.addEventListener("keydown", handleKey, true);
+    return () => document.removeEventListener("keydown", handleKey, true);
   }, [open, onClose]);
 
   const copyPath = useCallback(async () => {
@@ -155,7 +157,7 @@ export function SettingsModal({ open, onClose, initialProvider, onToast }: Setti
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 100,
+        zIndex: 10080,
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();

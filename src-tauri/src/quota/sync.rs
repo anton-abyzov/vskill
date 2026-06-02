@@ -112,9 +112,7 @@ fn format_unix_to_iso(secs_since_epoch: i64, ms: u32) -> String {
     let hour = secs_of_day / 3600;
     let minute = (secs_of_day % 3600) / 60;
     let second = secs_of_day % 60;
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{ms:03}Z"
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{ms:03}Z")
 }
 
 #[derive(Debug, Deserialize)]
@@ -133,10 +131,7 @@ struct WireQuotaResponse {
 ///   - The 1h background tokio task (T-018).
 ///   - The post-sign-in init in `lib.rs::run`.
 ///   - The paywall race-resolution path (T-021) with `fresh=true`.
-pub async fn force_sync(
-    app: tauri::AppHandle,
-    fresh: bool,
-) -> Result<QuotaCache, QuotaSyncError> {
+pub async fn force_sync(app: tauri::AppHandle, fresh: bool) -> Result<QuotaCache, QuotaSyncError> {
     let token = TokenStore::new()
         .load()
         .map_err(|e| QuotaSyncError::Network(format!("keychain: {e}")))?
@@ -174,7 +169,10 @@ pub async fn report_count(skill_count: i64) -> Result<(), QuotaSyncError> {
         .map_err(|e| QuotaSyncError::Network(format!("build client: {e}")))?;
     let resp = client
         .post(&url)
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token.as_str()))
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {}", token.as_str()),
+        )
         .header(reqwest::header::ACCEPT, "application/json")
         .json(&serde_json::json!({ "skillCount": skill_count }))
         .send()
@@ -197,10 +195,7 @@ pub async fn report_count(skill_count: i64) -> Result<(), QuotaSyncError> {
     Ok(())
 }
 
-async fn fetch_quota(
-    token: &str,
-    fresh: bool,
-) -> Result<WireQuotaResponse, QuotaSyncError> {
+async fn fetch_quota(token: &str, fresh: bool) -> Result<WireQuotaResponse, QuotaSyncError> {
     let mut url = format!("{}/api/v1/billing/quota", quota_base());
     if fresh {
         url.push_str("?fresh=1");
@@ -214,7 +209,11 @@ async fn fetch_quota(
     // Exponential backoff: 0s / 1s / 4s. Three attempts max for transient
     // failures; 401 short-circuits.
     let mut last_err: Option<QuotaSyncError> = None;
-    let backoffs = [Duration::ZERO, Duration::from_secs(1), Duration::from_secs(4)];
+    let backoffs = [
+        Duration::ZERO,
+        Duration::from_secs(1),
+        Duration::from_secs(4),
+    ];
     for backoff in backoffs {
         if backoff > Duration::ZERO {
             tokio::time::sleep(backoff).await;
@@ -269,9 +268,7 @@ fn into_internal(wire: WireQuotaResponse) -> Result<QuotaResponse, QuotaSyncErro
         "pro" => super::cache::QuotaTier::Pro,
         "enterprise" => super::cache::QuotaTier::Enterprise,
         other => {
-            return Err(QuotaSyncError::Parse(format!(
-                "unrecognized tier: {other}"
-            )));
+            return Err(QuotaSyncError::Parse(format!("unrecognized tier: {other}")));
         }
     };
     Ok(QuotaResponse {

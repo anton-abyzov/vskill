@@ -67,10 +67,7 @@ fn revoke_url(platform_url: Option<&str>) -> String {
 /// collapse 404 to `AlreadyInvalid`: doing so would make a missing-endpoint
 /// deployment indistinguishable from a successful revocation in field
 /// telemetry. 401 is the only "already invalid" status we trust per AC-US5-04.
-pub async fn revoke_grant(
-    token: &str,
-    platform_url: Option<&str>,
-) -> RevocationOutcome {
+pub async fn revoke_grant(token: &str, platform_url: Option<&str>) -> RevocationOutcome {
     let url = revoke_url(platform_url);
 
     let client = match reqwest::Client::builder()
@@ -167,8 +164,7 @@ mod tests {
             .create_async()
             .await;
 
-        let outcome =
-            revoke_grant("gho_test_token_value", Some(&server.url())).await;
+        let outcome = revoke_grant("gho_test_token_value", Some(&server.url())).await;
         assert_eq!(outcome, RevocationOutcome::Revoked);
         mock.assert_async().await;
     }
@@ -350,7 +346,10 @@ mod tests {
         // perform_sign_out returns Ok with the failed outcome — the caller
         // logs WARN but the user-facing sign-out still succeeds.
         assert!(matches!(result, Ok(RevocationOutcome::Failed(_))));
-        assert!(*cleared.lock().unwrap(), "clear must run despite revoke failure");
+        assert!(
+            *cleared.lock().unwrap(),
+            "clear must run despite revoke failure"
+        );
     }
 
     #[tokio::test]
@@ -379,7 +378,10 @@ mod tests {
         .await;
 
         assert_eq!(result.unwrap(), RevocationOutcome::AlreadyInvalid);
-        assert!(!*revoke_called.lock().unwrap(), "revoke_fn must NOT run with no token");
+        assert!(
+            !*revoke_called.lock().unwrap(),
+            "revoke_fn must NOT run with no token"
+        );
         assert!(*cleared.lock().unwrap(), "clear must always run");
     }
 

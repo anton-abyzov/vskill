@@ -31,10 +31,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
                 .accelerator("CmdOrCtrl+,")
                 .build(app)?,
         )
-        .item(
-            &MenuItemBuilder::with_id("check_for_updates", "Check for Updates...")
-                .build(app)?,
-        )
+        .item(&MenuItemBuilder::with_id("check_for_updates", "Check for Updates...").build(app)?)
         .separator()
         .item(&PredefinedMenuItem::services(app, None)?)
         .separator()
@@ -117,29 +114,17 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&PredefinedMenuItem::minimize(app, None)?)
         .item(&PredefinedMenuItem::maximize(app, None)?)
         .separator()
-        .item(
-            &MenuItemBuilder::with_id("studio_instances", "Studio Instances...")
-                .build(app)?,
-        )
+        .item(&MenuItemBuilder::with_id("studio_instances", "Studio Instances...").build(app)?)
         .separator()
         .item(&PredefinedMenuItem::close_window(app, None)?)
         .build()?;
 
     // Help menu.
     let help_submenu = SubmenuBuilder::new(app, "Help")
-        .item(
-            &MenuItemBuilder::with_id("show_logs", "Show Logs")
-                .build(app)?,
-        )
-        .item(
-            &MenuItemBuilder::with_id("restart_server", "Restart Server")
-                .build(app)?,
-        )
+        .item(&MenuItemBuilder::with_id("show_logs", "Show Logs").build(app)?)
+        .item(&MenuItemBuilder::with_id("restart_server", "Restart Server").build(app)?)
         .separator()
-        .item(
-            &MenuItemBuilder::with_id("about_vskill", "About Skill Studio")
-                .build(app)?,
-        )
+        .item(&MenuItemBuilder::with_id("about_vskill", "About Skill Studio").build(app)?)
         .build()?;
 
     MenuBuilder::new(app)
@@ -176,7 +161,8 @@ pub fn handle_event(app: &AppHandle, id: &str) {
                 }
             }
         }
-        "toggle_devtools" => {
+        "toggle_devtools" =>
+        {
             #[cfg(debug_assertions)]
             if let Some(w) = app.get_webview_window("main") {
                 if w.is_devtools_open() {
@@ -214,9 +200,7 @@ pub fn handle_event(app: &AppHandle, id: &str) {
             // updater check as soon as the tab paints. The trigger event is
             // emitted regardless of whether we created a new window or focused
             // an existing one — the open helper already routed the tab hint.
-            if let Err(e) =
-                crate::preferences::window::open_preferences(app, Some("updates"))
-            {
+            if let Err(e) = crate::preferences::window::open_preferences(app, Some("updates")) {
                 log::error!("open_preferences(updates) failed: {e}");
                 return;
             }
@@ -227,11 +211,7 @@ pub fn handle_event(app: &AppHandle, id: &str) {
             }
         }
         "about_vskill" => {
-            let _ = app.emit_to(
-                "main",
-                "menu-action",
-                serde_json::json!({ "action": id }),
-            );
+            let _ = app.emit_to("main", "menu-action", serde_json::json!({ "action": id }));
         }
         "studio_instances" => {
             // 0832 T-012: open a dedicated window that lists every detected

@@ -110,8 +110,9 @@ async function mountHook(opts?: Parameters<typeof import("../useSkillUpdates").u
   const { useSkillUpdates } = await import("../useSkillUpdates");
 
   const apiRef: { current: import("../useSkillUpdates").UseSkillUpdatesReturn | null } = { current: null };
+  let currentOpts = opts;
   function Probe() {
-    apiRef.current = useSkillUpdates(opts);
+    apiRef.current = useSkillUpdates(currentOpts);
     return null;
   }
   const container = document.createElement("div");
@@ -123,6 +124,12 @@ async function mountHook(opts?: Parameters<typeof import("../useSkillUpdates").u
   return {
     api() { return apiRef.current!; },
     act: (fn: () => void | Promise<void>) => act(async () => { await fn(); }),
+    rerender(nextOpts: Parameters<typeof import("../useSkillUpdates").useSkillUpdates>[0]) {
+      currentOpts = nextOpts;
+      return act(async () => {
+        root.render(React.createElement(Probe));
+      });
+    },
     unmount() {
       act(() => root.unmount());
       container.remove();
@@ -240,6 +247,73 @@ describe("useSkillUpdates — visibility queue (T-006)", () => {
         if (raw !== null) {
           expect(JSON.parse(raw)).toEqual([]);
         }
+      } finally {
+        h.unmount();
+      }
+    } finally {
+      window.removeEventListener("studio:toast", listener);
+    }
+  });
+
+  it("0838 F-005: cancels pending replay timers when skillIds change mid-drain", async () => {
+    setVisibility("hidden");
+    const toasts: Array<{ eventId: string }> = [];
+    const listener = (e: Event) => {
+      if (!(e instanceof CustomEvent)) return;
+      toasts.push(e.detail);
+    };
+    window.addEventListener("studio:toast", listener);
+    try {
+      const h = await mountHook({ skillIds: ["skill-A"] });
+      try {
+        // Three hidden events for distinct skills land in the queue. (Each
+        // event must target a distinct skillId so the updateStore doesn't
+        // supersede earlier entries — that's what the dedupe-by-eventId path
+        // is for, and we want a clean replay queue here to test cancellation.)
+        await h.act(async () => {
+          fireOpen(latestES());
+          fireMessage(latestES(), mkEvent(1, "skill-A"));
+          fireMessage(latestES(), mkEvent(2, "skill-B"));
+          fireMessage(latestES(), mkEvent(3, "skill-C"));
+          await flushMicrotasks();
+        });
+        expect(toasts.length).toBe(0);
+
+        // Flip to visible — drain begins. First toast fires immediately, the
+        // remaining two are scheduled at 250 ms intervals.
+        await h.act(async () => {
+          setVisibility("visible");
+          await flushMicrotasks();
+        });
+        await h.act(async () => {
+          vi.advanceTimersByTime(0);
+          await flushMicrotasks();
+        });
+        const toastsAfterFirstDispatch = toasts.length;
+        // At least the first toast should have fired (idx=0 schedules at
+        // 0 ms). The other two are still queued at +250 ms and +500 ms.
+        expect(toastsAfterFirstDispatch).toBeGreaterThanOrEqual(1);
+        expect(toastsAfterFirstDispatch).toBeLessThan(3);
+
+        // Now change skillsCsv — the SSE effect re-runs, its cleanup MUST
+        // cancel any pending replay timers so the still-queued toasts can't
+        // fire against the now-stale subscription set.
+        await h.rerender({ skillIds: ["skill-Z"] });
+        await h.act(async () => {
+          await flushMicrotasks();
+        });
+
+        const toastsAfterRerender = toasts.length;
+
+        // Advance past where the remaining timers WOULD have fired. If they
+        // weren't cancelled, we'd see toasts.length grow. With the F-005 fix,
+        // no additional dispatches happen.
+        await h.act(async () => {
+          vi.advanceTimersByTime(1000);
+          await flushMicrotasks();
+        });
+
+        expect(toasts.length).toBe(toastsAfterRerender);
       } finally {
         h.unmount();
       }

@@ -200,4 +200,21 @@ describe("discoverInstalledPlugins", () => {
       process.env.PATH = originalPath;
     }
   });
+
+  it("scales to 50 cached plugins without duplicate rows", () => {
+    const enabled: Record<string, boolean> = {};
+    for (let i = 0; i < 50; i++) {
+      const name = `scale-fixture-${String(i).padStart(2, "0")}`;
+      seedPlugin(cacheRoot, "scale-mp", name, "1.0.0");
+      enabled[`${name}@scale-mp`] = true;
+    }
+    setProjectEnabled(enabled);
+
+    const plugins = discoverInstalledPlugins({ cacheRoot, projectDir });
+    const ids = plugins.map((p) => `${p.name}@${p.marketplace}:${p.scope}`);
+
+    expect(plugins).toHaveLength(50);
+    expect(new Set(ids).size).toBe(50);
+    expect(plugins.every((p) => p.enabled && p.scope === "project")).toBe(true);
+  });
 });

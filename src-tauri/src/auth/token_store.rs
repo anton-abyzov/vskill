@@ -161,8 +161,7 @@ pub fn save_identity_cache(identity: &UserIdentity) -> Result<(), TokenStoreErro
     }
     let json = serde_json::to_string_pretty(identity)
         .map_err(|e| TokenStoreError::Cache(format!("serialize: {e}")))?;
-    std::fs::write(&path, json)
-        .map_err(|e| TokenStoreError::Cache(format!("write {path:?}: {e}")))
+    std::fs::write(&path, json).map_err(|e| TokenStoreError::Cache(format!("write {path:?}: {e}")))
 }
 
 /// Read the cached identity snapshot. Returns `Ok(None)` if the file does
@@ -262,8 +261,7 @@ mod tests {
         // Older snapshots may not have `email` / `cached_at`. Forward-compat
         // promise: the deserializer fills them with None.
         let legacy = r#"{"login":"x","avatar_url":"https://x"}"#;
-        let parsed: UserIdentity =
-            serde_json::from_str(legacy).expect("legacy payload must parse");
+        let parsed: UserIdentity = serde_json::from_str(legacy).expect("legacy payload must parse");
         assert_eq!(parsed.email, None);
         assert_eq!(parsed.cached_at, None);
     }

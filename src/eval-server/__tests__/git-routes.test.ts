@@ -56,8 +56,8 @@ vi.mock("node:child_process", () => ({
 }));
 
 // Now import the module under test (after the mock is registered).
-const { makeGetGitRemoteHandler, makePostGitPublishHandler, _resetGitEnvCacheForTests } = await import("../git-routes.js");
-const { enhancedPath } = await import("../../utils/resolve-binary.js");
+const { makeGetGitRemoteHandler, makePostGitPublishHandler } = await import("../git-routes.js");
+const { enhancedPath, _resetEnhancedSpawnEnvCache } = await import("../../utils/resolve-binary.js");
 
 class FakeReq extends EventEmitter {
   headers: Record<string, string> = {};
@@ -205,7 +205,7 @@ describe("POST /api/git/publish", () => {
     // hook, which shells out to `git-lfs` and aborts with "git-lfs was not
     // found on your path". The handler must spawn git with enhancedPath() so
     // hooks + credential/LFS helpers resolve regardless of launch context.
-    _resetGitEnvCacheForTests();
+    _resetEnhancedSpawnEnvCache();
     queueProcess({ stdout: "", stderr: "", exitCode: 0 }); // push
     queueProcess({ stdout: "abc1234\n", stderr: "", exitCode: 0 }); // rev-parse HEAD
     queueProcess({ stdout: "https://github.com/o/r.git\n", stderr: "", exitCode: 0 }); // remote

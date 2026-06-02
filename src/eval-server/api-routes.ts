@@ -20,6 +20,7 @@ import { getSkillSemaphore } from "./concurrency.js";
 import { resolveSkillDir, resolveAllowedSkillDir } from "./skill-resolver.js";
 import { scanSkillInstallLocations, pickHighestPrecedenceLocation } from "./utils/scan-install-locations.js";
 import { whichSync } from "./utils/which.js";
+import { enhancedSpawnEnv } from "../utils/resolve-binary.js";
 import { resolveEditorCommand, NoEditorError } from "./utils/resolve-editor.js";
 import { setSkillDirEntry, ensurePluginCacheEntry } from "./skill-dir-registry.js";
 import {
@@ -2471,6 +2472,7 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
       // SKILL.md frontmatter stale (the bell would refresh, but the version
       // chip wouldn't).
       execFileSync("vskill", args, {
+        env: enhancedSpawnEnv(),
         timeout: 60_000,
         encoding: "utf-8",
         stdio: ["ignore", "pipe", "pipe"],
@@ -2532,6 +2534,7 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
           // form so request-body values can never reach the shell.
           // 0765: pin cwd (see single-skill update handler above).
           execFileSync("vskill", ["update", skill], {
+            env: enhancedSpawnEnv(),
             timeout: 60_000,
             encoding: "utf-8",
             stdio: ["ignore", "pipe", "pipe"],
@@ -4118,6 +4121,9 @@ Return ONLY the JSON lines, no other text.`;
       await new Promise<void>((resolvePromise, rejectPromise) => {
         const child = spawn(launch.command, launch.args, {
           detached: true,
+          // enhancedSpawnEnv() so a bare editor command ($EDITOR/code/cursor)
+          // resolves under a Dock-launched studio's truncated PATH.
+          env: enhancedSpawnEnv(),
           stdio: "ignore",
         });
         child.once("error", rejectPromise);
@@ -4281,6 +4287,7 @@ Return ONLY the JSON lines, no other text.`;
     const exitCode: number | null = await new Promise((resolveCode) => {
       const child = spawn("vskill", cliArgs, {
         cwd: root,
+        env: enhancedSpawnEnv(),
         stdio: ["ignore", "pipe", "pipe"],
       });
       child.stdout?.on("data", (c) => { stdout += c.toString(); });

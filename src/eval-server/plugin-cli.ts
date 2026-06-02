@@ -17,6 +17,7 @@
 // ---------------------------------------------------------------------------
 
 import { spawn } from "node:child_process";
+import { enhancedSpawnEnv } from "../utils/resolve-binary.js";
 
 export type PluginScope = "user" | "project" | "local";
 
@@ -48,9 +49,11 @@ export function runClaudePlugin(
   opts: { cwd?: string; timeout?: number } = {},
 ): Promise<ClaudeCliResult> {
   return new Promise((resolve) => {
+    // enhancedSpawnEnv() so a Dock/Spotlight-launched studio (truncated PATH)
+    // can still find the `claude` CLI (Homebrew/npm-global, not in /usr/bin).
     const child = spawn("claude", ["plugin", ...args], {
       cwd: opts.cwd,
-      env: process.env,
+      env: enhancedSpawnEnv(),
     });
     let stdout = "";
     let stderr = "";

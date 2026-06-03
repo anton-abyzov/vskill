@@ -18,6 +18,7 @@
 // ---------------------------------------------------------------------------
 
 import { execFileSync } from "node:child_process";
+import { enhancedSpawnEnv } from "../../utils/resolve-binary.js";
 
 const SAFE_CMD = /^[a-zA-Z0-9._-]+$/;
 
@@ -25,8 +26,12 @@ const cache = new Map<string, boolean>();
 
 function defaultProbe(cmd: string): boolean {
   try {
+    // enhancedSpawnEnv() so detection works under a Dock/Spotlight-launched
+    // studio's truncated PATH — otherwise `which code`/`cursor`/CLI presence
+    // checks return false even when the tool is installed in Homebrew/npm-global.
+    const env = enhancedSpawnEnv();
     if (process.platform === "win32") {
-      execFileSync("where", [cmd], { stdio: "ignore", timeout: 1000 });
+      execFileSync("where", [cmd], { stdio: "ignore", timeout: 1000, env });
     } else {
       // `command -v` is the POSIX-portable lookup. We invoke it via /bin/sh
       // because `command` is a shell builtin, not a binary on PATH. Args are
@@ -38,6 +43,7 @@ function defaultProbe(cmd: string): boolean {
         stdio: "ignore",
         timeout: 1000,
         shell: "/bin/sh",
+        env,
       });
     }
     return true;

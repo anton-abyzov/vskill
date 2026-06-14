@@ -18,9 +18,17 @@ const FIXTURE_SOURCE = join(import.meta.dirname, "..", "fixtures", "tiny-skill-s
 
 /** Read installed-skills surface from every agent dir vskill writes to. */
 function readInstallSurface(workdir, runResult) {
-  // vskill 1.0.18 cross-installs to every detected agent. We discover all of
-  // them rather than hardcode .claude — the surface MUST reflect reality.
-  const AGENT_DIRS = [".claude", ".cursor", ".codex", ".kiro", ".aider", ".pi"];
+  // vskill cross-installs to every agent it DETECTS on the host (binary on
+  // PATH or config dir), and the detected set varies per machine and registry
+  // version (1.0.21 targets claude/codex/gemini/openclaw/opencode here, not
+  // the 1.0.18-era cursor/kiro/aider/pi). Discover agent dirs dynamically —
+  // any dot-dir in the workdir with a skills/ subtree IS an agent dir — so
+  // the surface reflects reality instead of a stale hardcoded list.
+  const AGENT_DIRS = readdirSync(workdir).filter((d) => {
+    if (!d.startsWith(".")) return false;
+    const skillsRoot = join(workdir, d, "skills");
+    return existsSync(skillsRoot) && statSync(skillsRoot).isDirectory();
+  });
   /** @type {{agent:string,plugin:string,name:string,path:string,bytes:number,frontmatterName?:string}[]} */
   const installed = [];
   for (const agentDir of AGENT_DIRS) {

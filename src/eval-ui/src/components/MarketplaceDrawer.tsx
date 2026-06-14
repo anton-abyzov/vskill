@@ -43,6 +43,17 @@ export interface MarketplaceDetail {
   plugins: MarketplacePlugin[];
 }
 
+/**
+ * 0848 T-007: a plugin that came from a private GitHub repo the user has
+ * connected. Surfaced in the amber "Your private plugins" section above the
+ * public marketplaces so private sources are visibly distinct.
+ */
+export interface PrivatePluginEntry {
+  name: string;
+  /** "owner/name" of the private source repo, shown as the muted subtitle. */
+  repoFullName: string;
+}
+
 export interface MarketplaceDrawerProps {
   open: boolean;
   onClose: () => void;
@@ -56,6 +67,12 @@ export interface MarketplaceDrawerProps {
   onUninstall?: (plugin: string) => Promise<void>;
   /** Names of already-installed plugins — so rows can show an "Installed" chip. */
   installedNames: Set<string>;
+  /**
+   * 0848 T-007: plugins sourced from the user's connected private repos.
+   * When non-empty, an amber "Your private plugins" section renders above the
+   * public marketplaces. Optional — omitting it preserves the prior layout.
+   */
+  privatePlugins?: PrivatePluginEntry[];
 }
 
 export function MarketplaceDrawer({
@@ -64,6 +81,7 @@ export function MarketplaceDrawer({
   onInstall,
   onUninstall,
   installedNames,
+  privatePlugins,
 }: MarketplaceDrawerProps): React.ReactElement | null {
   const [uninstallingPlugin, setUninstallingPlugin] = React.useState<string | null>(null);
   const [marketplaces, setMarketplaces] = React.useState<MarketplaceSummary[]>([]);
@@ -241,6 +259,13 @@ export function MarketplaceDrawer({
             >
               {error}
             </div>
+          )}
+
+          {/* 0848 T-007: private plugins from connected private repos sit at
+              the top, above the public marketplaces, with an amber tint so the
+              private source is unmistakable. Only on the top-level view. */}
+          {!selectedName && privatePlugins && privatePlugins.length > 0 && (
+            <PrivatePluginsSection plugins={privatePlugins} />
           )}
 
           {/* Marketplace list */}
@@ -510,6 +535,69 @@ function SearchInput({
         }}
       />
     </div>
+  );
+}
+
+/**
+ * 0848 T-007: amber-tinted "Your private plugins" section. Lists plugins that
+ * originate from the user's connected private repos so the private source is
+ * visibly distinct from the public marketplaces below.
+ */
+function PrivatePluginsSection({ plugins }: { plugins: PrivatePluginEntry[] }): React.ReactElement {
+  return (
+    <section
+      data-testid="marketplace-private-plugins"
+      aria-label="Your private plugins"
+      style={{
+        marginBottom: 12,
+        padding: "10px 10px 6px",
+        borderRadius: 6,
+        // amber tint — matches the PrivateBadge / PrivateRepoChip palette.
+        background: "#FFFBEB", // amber-50
+        border: "1px solid #FCD34D", // amber-300
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          marginBottom: 6,
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+          color: "#92400E", // amber-800
+        }}
+      >
+        <span aria-hidden="true">🔒</span>
+        Your private plugins
+      </div>
+      {plugins.map((p) => (
+        <div
+          key={p.name}
+          style={{
+            padding: "6px 4px",
+            borderTop: "1px solid rgba(146,64,14,0.12)",
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#7C2D12" }}>{p.name}</div>
+          <div
+            style={{
+              fontSize: 11,
+              color: "#92400E",
+              fontFamily: "var(--font-mono)",
+              opacity: 0.8,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {p.repoFullName}
+          </div>
+        </div>
+      ))}
+    </section>
   );
 }
 

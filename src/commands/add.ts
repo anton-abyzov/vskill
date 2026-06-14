@@ -52,7 +52,7 @@ import {
   formatInstalls,
 } from "../utils/output.js";
 import { isTTY, createPrompter } from "../utils/prompts.js";
-import { installSymlink, installCopy } from "../installer/canonical.js";
+import { installSkillToAgents } from "../installer/multi-install.js";
 import { ensureFrontmatter } from "../installer/frontmatter.js";
 import { ensureSkillMdNaming, cleanStaleNesting } from "../installer/migrate.js";
 import { getMarketplaceName } from "../marketplace/index.js";
@@ -1236,6 +1236,31 @@ function resolvePluginDir(
 }
 
 /**
+ * List plugin names available under a --plugin-dir root: marketplace.json
+ * entries first, then plugins/ subdirectories (mirrors resolvePluginDir).
+ */
+function listPluginDirPlugins(basePath: string): string[] {
+  const names = new Set<string>();
+  const mktPath = join(basePath, ".claude-plugin", "marketplace.json");
+  if (existsSync(mktPath)) {
+    try {
+      for (const p of getAvailablePlugins(readFileSync(mktPath, "utf-8"))) {
+        names.add(p.name);
+      }
+    } catch { /* unreadable manifest — fall through to plugins/ listing */ }
+  }
+  const pluginsRoot = join(basePath, "plugins");
+  if (existsSync(pluginsRoot)) {
+    try {
+      for (const d of readdirSync(pluginsRoot, { withFileTypes: true })) {
+        if (d.isDirectory()) names.add(d.name);
+      }
+    } catch { /* best-effort */ }
+  }
+  return [...names];
+}
+
+/**
  * Collect all file contents from a plugin directory for security scanning.
  * Concatenates content from all readable files.
  */
@@ -1394,10 +1419,12 @@ async function installPluginDir(
   const selectedAgents = selections.agents;
   if (selections.global) opts.global = true;
 
-  // Read version from marketplace.json
+  // Read version from marketplace.json — absent when the plugin resolved via
+  // the plugins/<name>/ fallback, so default instead of crashing with ENOENT
   const mktPath = join(basePath, ".claude-plugin", "marketplace.json");
-  const mktContent = readFileSync(mktPath, "utf-8");
-  const version = getPluginVersion(pluginName, mktContent) || "0.0.0";
+  const version = existsSync(mktPath)
+    ? getPluginVersion(pluginName, readFileSync(mktPath, "utf-8")) || "0.0.0"
+    : "0.0.0";
 
   // Extract git remote URL for install tracking
   let gitUrl: string | undefined;
@@ -1599,16 +1626,22 @@ async function installOneGitHubSkill(
     if (Object.keys(agentFiles).length === 0) agentFiles = undefined;
   }
 
-  // Install to each agent using canonical installer
+  // Install to each agent. F9: route through the SAME per-agent dispatch as
+  // Studio so Tier-2 agents (cursor/windsurf/aider/copilot) get their real
+  // artifact instead of a dead-letter <agent>/skills/<name>/SKILL.md. Tier-1
+  // agents keep the canonical symlink/copy batch behaviour.
   const sha = computeSha(content);
-  const installOpts = { global: !!opts.global, projectRoot };
 
   try {
-    if (opts.copy) {
-      installCopy(skillName, content, agents as AgentDefinition[], installOpts, agentFiles);
-    } else {
-      installSymlink(skillName, content, agents as AgentDefinition[], installOpts, agentFiles);
-    }
+    installSkillToAgents({
+      skillName,
+      rawContent: content,
+      agents: agents as AgentDefinition[],
+      scope: opts.global ? "user" : "project",
+      projectRoot,
+      copy: !!opts.copy,
+      bundleFiles: agentFiles,
+    });
   } catch (err) {
     console.error(red(`  Failed to install skill "${skillName}": ${(err as Error).message}`));
     return { skillName, installed: false, verdict: "WRITE_ERROR", score: scanResult.score };
@@ -1709,32 +1742,31 @@ async function installRepoPlugin(
     throw new Error("--repo must be in owner/repo format (e.g. anton-abyzov/vskill)");
   }
 
-  // Fetch marketplace.json from GitHub
+  // Fetch marketplace.json from GitHub. A missing manifest is NOT fatal:
+  // the --plugin help text promises "checks marketplace.json, then plugins/
+  // folder", so we fall through to the plugins/<name>/ probe below (F3).
   const branch = await getDefaultBranch(owner, repo);
   const manifestUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/.claude-plugin/marketplace.json`;
   const manifestSpin = spinner("Fetching marketplace.json");
-  let manifestContent: string;
+  let manifestContent: string | null = null;
   try {
     const res = await githubFetch(manifestUrl);
-    if (!res.ok) {
-      manifestSpin.stop();
-      throw new Error(
-        `marketplace.json not found at ${owner}/${repo}. ` +
-          "Ensure the repo has .claude-plugin/marketplace.json on the default branch."
-      );
+    if (res.ok) {
+      manifestContent = await res.text();
+      manifestSpin.stop(green("Found marketplace.json"));
+    } else {
+      manifestSpin.stop(yellow(`No marketplace.json at ${owner}/${repo} — checking plugins/ folder`));
     }
-    manifestContent = await res.text();
-    manifestSpin.stop(green("Found marketplace.json"));
   } catch (err) {
     manifestSpin.stop();
-    if (err instanceof Error && err.message.startsWith("marketplace.json not found")) throw err;
     throw new Error(`Network error: ${(err as Error).message}`);
   }
 
   // Find the plugin in the marketplace (or use override for unregistered plugins)
-  let pluginSource = overrideSource || getPluginSource(pluginName, manifestContent);
+  let pluginSource =
+    overrideSource || (manifestContent ? getPluginSource(pluginName, manifestContent) : null);
   if (!pluginSource) {
-    // Not in marketplace.json — probe plugins/<name>/ folder in the repo
+    // Not in marketplace.json (or no manifest at all) — probe plugins/<name>/
     const probeSpin = spinner(`Looking for "${pluginName}" folder in repo`);
     try {
       const probeRes = await githubFetch(
@@ -1751,6 +1783,12 @@ async function installRepoPlugin(
     } catch { /* network error — fall through */ }
     if (!pluginSource) {
       probeSpin.stop();
+      if (!manifestContent) {
+        throw new Error(
+          `"${pluginName}" not found at ${owner}/${repo}: the repo has no ` +
+            `.claude-plugin/marketplace.json and no plugins/${pluginName}/ folder.`
+        );
+      }
       const available = getAvailablePlugins(manifestContent).map((p) => p.name);
       throw new Error(
         `"${pluginName}" not found in marketplace.json or as a folder in the repo.\n` +
@@ -1758,7 +1796,10 @@ async function installRepoPlugin(
       );
     }
   }
-  const pluginVersion = overrideSource ? "0.0.0" : (getPluginVersion(pluginName, manifestContent) || "0.0.0");
+  const pluginVersion =
+    overrideSource || !manifestContent
+      ? "0.0.0"
+      : getPluginVersion(pluginName, manifestContent) || "0.0.0";
   const pluginPath = pluginSource.replace(/^\.\//, "");
 
   // Blocklist + rejection check BEFORE fetching content
@@ -1961,6 +2002,31 @@ async function installRepoPlugin(
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock, lockDir);
 
+  // 0724 T-006 / 0826 parity: the claude-plugin enable gate previously lived
+  // only in installMarketplaceRepo, so --scope/--global/--dry-run/--no-enable
+  // were silently ignored on the --repo --plugin path. Repo-plugin installs
+  // write SKILL.md straight into each agent's skills dir and the lockfile
+  // entry carries no `marketplace`, so resolvePluginId() is null and
+  // enableAfterInstall never shells out to the claude CLI (it cannot throw,
+  // hence no rollback wiring here) — the gate only surfaces the same
+  // acknowledgement + per-agent report as the marketplace path. The identical
+  // opt-in condition keeps the default flow unchanged (NFR-005).
+  const userOptedIn =
+    opts.scope !== undefined ||
+    opts.global === true ||
+    opts.dryRun === true ||
+    opts.enable === false;
+  if (userOptedIn) {
+    const enableResult = enableAfterInstall(pluginName, lock.skills[pluginName], opts);
+    const report = buildPerAgentReport({
+      skill: pluginName,
+      scope: enableResult.scope,
+      action: enableResult.invoked ? "enabled" : "not-applicable",
+      agents: selectedAgents,
+    });
+    for (const line of report) console.log(`  ${dim(">")} ${line.line}`);
+  }
+
   // Summary
   console.log(
     green(
@@ -2069,6 +2135,20 @@ async function addCommandInner(
     return installPluginDir(opts.pluginDir, opts.plugin, opts);
   }
 
+  // --plugin-dir without --plugin: explain what's needed and list what the
+  // directory offers, instead of the misleading "provide a source" error.
+  if (opts.pluginDir) {
+    const names = listPluginDirPlugins(opts.pluginDir);
+    console.error(
+      red("--plugin-dir requires --plugin <name> to select which plugin to install.") +
+        (names.length > 0
+          ? `\nAvailable plugins in ${opts.pluginDir}: ${names.map((n) => bold(n)).join(", ")}`
+          : dim(`\nNo plugins found in ${opts.pluginDir} (checked .claude-plugin/marketplace.json and plugins/).`))
+    );
+    process.exit(1);
+    return;
+  }
+
   // All other modes require source
   if (!source) {
     console.error(red("Please provide a source (owner/repo, URL, or local path)"));
@@ -2110,6 +2190,25 @@ async function addCommandInner(
   // Normalize full GitHub URLs to owner/repo shorthand
   const parsed = parseGitHubSource(source);
   if (parsed) {
+    // F1: a deep link (/tree/<ref>/<dir> or /blob/<ref>/.../SKILL.md) pins a
+    // single skill — install ONLY that one instead of discovering the repo.
+    if (parsed.skillPath !== undefined) {
+      const skillName = parsed.skillPath
+        ? parsed.skillPath.split("/").pop()
+        : undefined;
+      const subpath = parsed.skillPath
+        ? `${parsed.skillPath}/SKILL.md`
+        : "SKILL.md";
+      return installSingleSkillLegacy(
+        parsed.owner,
+        parsed.repo,
+        skillName,
+        opts,
+        subpath,
+        undefined,
+        parsed.ref,
+      );
+    }
     source = `${parsed.owner}/${parsed.repo}`;
   }
 
@@ -2757,6 +2856,7 @@ async function installSingleSkillLegacy(
   opts: AddOptions,
   skillSubpathOverride?: string,
   pluginNamespace?: string,
+  refOverride?: string,
 ): Promise<void> {
   // Blocklist + rejection check BEFORE fetching (prevents misleading 404)
   const skillName = skill || repo;
@@ -2786,7 +2886,7 @@ async function installSingleSkillLegacy(
     return process.exit(1);
   }
 
-  const branch = await getDefaultBranch(owner, repo);
+  const branch = refOverride || (await getDefaultBranch(owner, repo));
   const sourceCommitSha = await getBranchHeadSha(owner, repo, branch);
   const skillSubpath = skillSubpathOverride || (skill ? `skills/${skill}/SKILL.md` : "SKILL.md");
   const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${skillSubpath}`;
@@ -2801,7 +2901,9 @@ async function installSingleSkillLegacy(
       const agentsBasePath = skillSubpathOverride
         ? skillSubpathOverride.replace(/\/SKILL\.md$/, "/agents")
         : `skills/${skill}/agents`;
-      const agentsDirUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${agentsBasePath}`;
+      // ?ref= keeps the agents/ listing on the same branch as SKILL.md
+      // (deep links may pin a non-default branch).
+      const agentsDirUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${agentsBasePath}?ref=${encodeURIComponent(branch)}`;
       const dirRes = await githubFetch(agentsDirUrl, { headers: { Accept: "application/vnd.github.v3+json" } });
       if (dirRes.ok) {
         const entries = (await dirRes.json()) as Array<{ name: string; download_url?: string }>;
@@ -2933,11 +3035,21 @@ async function installSingleSkillLegacy(
     : content;
   const sha = computeSha(content);
   const projectRoot = safeProjectRoot();
-  const installOpts = { global: !!opts.global, projectRoot };
 
-  const locations = opts.copy
-    ? installCopy(skillName, namespacedContent, selectedAgents, installOpts, legacyAgentFiles)
-    : installSymlink(skillName, namespacedContent, selectedAgents, installOpts, legacyAgentFiles);
+  // F9: dispatch through the shared per-agent mechanism so Tier-2 agents get
+  // their real format-transformed artifact (cursor → .cursor/rules/<name>.mdc,
+  // windsurf → rules/<name>.md, copilot → instructions, aider → conventions +
+  // conf.yml) instead of a dead-letter skills/<name>/SKILL.md. Tier-1 agents
+  // keep the canonical symlink/copy store + claude-code COPY_FALLBACK.
+  const locations = installSkillToAgents({
+    skillName,
+    rawContent: namespacedContent,
+    agents: selectedAgents,
+    scope: opts.global ? "user" : "project",
+    projectRoot,
+    copy: !!opts.copy,
+    bundleFiles: legacyAgentFiles,
+  });
 
   // Update lockfile (global → ~/.agents/, project → project root).
   // 0743: persist `sourceSkillPath` from the locally-derived `skillSubpath`

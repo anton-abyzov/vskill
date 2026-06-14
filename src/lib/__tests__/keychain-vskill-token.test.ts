@@ -253,6 +253,22 @@ describe("keychain — vsk_ token helpers (0839 US-005)", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it("F10 — read-only getVskillToken does NOT warn when keyring is unavailable and nothing is written", () => {
+    const kr = fakeKeyring({ available: false });
+    const fsState = fakeFs();
+    const warn = vi.fn();
+    const k = createKeychain({
+      keyring: kr,
+      fs: makeFsAdapter(fsState),
+      fallbackPath: "/tmp/vskill-test-keys.env",
+      warn,
+    });
+
+    expect(k.getVskillToken()).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+    expect(fsState.files.size).toBe(0);
+  });
+
   it("setVskillToken throws when token is empty", () => {
     const kr = fakeKeyring();
     const k = createKeychain({

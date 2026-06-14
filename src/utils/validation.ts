@@ -16,14 +16,49 @@ export function validateRepoSegment(segment: string): boolean {
   return REPO_SEGMENT_RE.test(segment);
 }
 
+export interface ParsedGitHubSource {
+  owner: string;
+  repo: string;
+  /** Branch/ref from a /tree/<ref>/... or /blob/<ref>/... deep link. */
+  ref?: string;
+  /** Repo-relative skill directory from a deep link ("" = repo root). */
+  skillPath?: string;
+}
+
+/**
+ * Extract a skill deep link from URL path segments after owner/repo.
+ * Recognizes /tree/<ref>/<skill-dir> and /blob/<ref>/<...>/SKILL.md.
+ * Returns null when the segments don't pin a single skill (bare repo,
+ * /tree/<ref> with no path, blob of a non-SKILL.md file, or any segment
+ * that fails validation).
+ */
+function parseSkillDeepLink(
+  segments: string[]
+): { ref: string; skillPath: string } | null {
+  if (segments.length < 2) return null;
+  const [kind, ref, ...path] = segments;
+  if (!validateRepoSegment(ref)) return null;
+  if (kind === "tree") {
+    if (path.length === 0 || !path.every(validateRepoSegment)) return null;
+    return { ref, skillPath: path.join("/") };
+  }
+  if (kind === "blob") {
+    if (path[path.length - 1] !== "SKILL.md") return null;
+    const dir = path.slice(0, -1);
+    if (!dir.every(validateRepoSegment)) return null;
+    return { ref, skillPath: dir.join("/") };
+  }
+  return null;
+}
+
 /**
  * Parse a GitHub source — accepts both `owner/repo` shorthand and full GitHub URLs.
- * Handles .git suffix, trailing slashes, and extra path segments (e.g. /tree/main/...).
+ * Handles .git suffix and trailing slashes. URLs deep-linking a skill
+ * (/tree/<ref>/<skill-dir> or /blob/<ref>/<...>/SKILL.md) also carry `ref`
+ * and `skillPath` so callers install ONLY that skill, not the whole repo.
  * Returns null for invalid or non-GitHub input.
  */
-export function parseGitHubSource(
-  source: string
-): { owner: string; repo: string } | null {
+export function parseGitHubSource(source: string): ParsedGitHubSource | null {
   if (!source) return null;
 
   // Full GitHub URL
@@ -42,7 +77,8 @@ export function parseGitHubSource(
     const owner = segments[0];
     const repo = segments[1].replace(/\.git$/, "");
     if (!validateRepoSegment(owner) || !validateRepoSegment(repo)) return null;
-    return { owner, repo };
+    const deepLink = parseSkillDeepLink(segments.slice(2));
+    return deepLink ? { owner, repo, ...deepLink } : { owner, repo };
   }
 
   // owner/repo shorthand

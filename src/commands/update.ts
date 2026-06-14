@@ -245,7 +245,8 @@ export async function updateCommand(
           const remote = await getSkill(name);
           if (remote.content) {
             const files: Record<string, string> = { "SKILL.md": remote.content };
-            const sha = computeSha(files);
+            // String mode — install writes computeSha(content) to the lockfile.
+            const sha = computeSha(remote.content);
             result = {
               content: remote.content,
               version: remote.version || entry.version,
@@ -279,7 +280,12 @@ export async function updateCommand(
       // version, this is a metadata-only bump — content already matches
       // (SHA equal), so we sync frontmatter + lockfile to the new version
       // and skip the install rewrite entirely.
-      if (result.sha === entry.sha) {
+      // F4: older vskill versions wrote the files-map sha into the lockfile
+      // on update, while install always writes the content-string sha. Accept
+      // the legacy map-mode sha on compare (and heal it to canonical below)
+      // so unchanged skills don't phantom-update.
+      const legacySha = result.files ? computeSha(result.files) : null;
+      if (result.sha === entry.sha || legacySha === entry.sha) {
         const canonical = canonicalNameFromParsedSource(parsed, name);
         let platformResult: Awaited<ReturnType<typeof getSkill>> | null = null;
         if (canonical) {
@@ -296,6 +302,8 @@ export async function updateCommand(
           lock.skills[name] = {
             ...entry,
             version: platformResult.version,
+            // Canonical (string-mode) sha — heals legacy map-mode entries.
+            sha: result.sha,
             tier: platformResult.tier || entry.tier,
             installedAt: new Date().toISOString(),
           };
@@ -304,6 +312,11 @@ export async function updateCommand(
           );
           updated++;
           continue;
+        }
+        // Heal a legacy map-mode sha to the canonical install identity
+        // without reporting an update (content is unchanged).
+        if (entry.sha !== result.sha) {
+          lock.skills[name] = { ...entry, sha: result.sha };
         }
         console.log(dim(`${name}: already up to date`));
         continue;

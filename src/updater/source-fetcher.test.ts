@@ -497,6 +497,52 @@ describe("fetchGitHubFlat version resolution", () => {
 });
 
 // ---------------------------------------------------------------------------
+// F4: installed-skill sha identity — install writes computeSha(content)
+// (string mode), so single-skill update fetches must hash the same way or
+// every unchanged GitHub/registry skill reports a phantom update and the
+// lockfile sha gets rewritten to a value that matches nothing on disk.
+// ---------------------------------------------------------------------------
+describe("sha mode parity with install (F4)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetDefaultBranch.mockResolvedValue("main");
+  });
+
+  it("github flat: result.sha equals install-time computeSha(content)", async () => {
+    const content = "# GitHub flat skill";
+    mockFetch.mockResolvedValue(mockFetchOk(content));
+
+    const result = await fetchFromSource(
+      { type: "github", owner: "foo", repo: "bar" },
+      "myskill",
+      MOCK_LOCK_ENTRY,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.sha).toBe(computeSha(content));
+  });
+
+  it("registry: result.sha equals install-time computeSha(content)", async () => {
+    const content = "# Registry skill";
+    mockGetSkill.mockResolvedValue({
+      content,
+      version: "2.0.0",
+      sha: "abc123",
+      tier: "VERIFIED",
+    });
+
+    const result = await fetchFromSource(
+      { type: "registry", skillName: "architect" },
+      "architect",
+      MOCK_LOCK_ENTRY,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.sha).toBe(computeSha(content));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // normalizeContent
 // ---------------------------------------------------------------------------
 describe("normalizeContent", () => {

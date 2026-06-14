@@ -24,8 +24,14 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type SubmitToQueueResult } from "../api";
 import { buildSubmitUrlFromRemote, normalizeRemoteUrl } from "../utils/normalizeRemoteUrl";
 import { openExternalUrlViaDesktop } from "../preferences/lib/useDesktopBridge";
+import { useTier } from "../hooks/useTier";
+import { PaywallModal } from "./PaywallModal";
 
 type Mode = "manual" | "ai";
+
+// 0874 — publish-visibility choice. "public" is the world-visible registry;
+// "private" is tenant-scoped and gated to paid tiers; "decide-later" defers.
+type Privacy = "public" | "private" | "decide-later";
 
 // 0856: structured, in-app submit outcome — drives the inline result block so
 // a submit NEVER looks like it "did nothing". Mirrors SubmitToQueueResult plus
@@ -95,6 +101,11 @@ export function PublishDrawer({
   const [message, setMessage] = useState("");
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  // 0874 — publish-visibility chooser. Seed from the prop when supplied,
+  // otherwise default to "public". Free users can't pick "private" (locked).
+  const [privacyChoice, setPrivacyChoice] = useState<Privacy>(privacy ?? "public");
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const { isFree } = useTier();
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   // 0856: inline submit outcome — when set, the drawer shows the result block
@@ -175,7 +186,7 @@ export function PublishDrawer({
             skillName,
             skillPath,
             source: "studio-submit",
-            privacy: privacy ?? "public",
+            privacy: privacyChoice,
             tenantId,
           });
         } catch {
@@ -211,7 +222,7 @@ export function PublishDrawer({
     } finally {
       setPublishing(false);
     }
-  }, [message, publishing, remoteUrl, skillName, skillPath, privacy, tenantId]);
+  }, [message, publishing, remoteUrl, skillName, skillPath, privacyChoice, tenantId]);
 
   const openWebsite = useCallback((url: string) => {
     // Reuse the tiered desktop shell-open seam (Tauri invoke → sidecar →
@@ -406,6 +417,20 @@ export function PublishDrawer({
               {generating && mode === "ai" ? "Generating…" : "Generate with AI"}
             </button>
           </div>
+
+          {/* ── Privacy chooser (0874) ────────────────────────────── */}
+          <span style={labelStyle}>Visibility</span>
+          <PrivacyChooser
+            value={privacyChoice}
+            onChange={setPrivacyChoice}
+            isFree={isFree}
+            onUpgrade={() => setPaywallOpen(true)}
+            disabled={publishing}
+            border={MODAL_BORDER}
+            text={MODAL_TEXT}
+            textMuted={MODAL_TEXT_MUTED}
+            inputBg={MODAL_INPUT_BG}
+          />
 
           {/* ── Commit message field ──────────────────────────────── */}
           <label htmlFor="commit-message" style={labelStyle}>
@@ -648,7 +673,126 @@ export function PublishDrawer({
           [role="dialog"][aria-label="Publish"] + * { animation: none !important }
         }
       `}</style>
+      {/* 0874 — paywall opened from the locked PRIVATE option. Resolving it to a
+          paid tier auto-selects private so the user lands back where they were. */}
+      <PaywallModal
+        open={paywallOpen}
+        onClose={() => setPaywallOpen(false)}
+        onProceed={() => setPrivacyChoice("private")}
+        skillName={skillName}
+      />
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 0874 — PrivacyChooser.
+//
+// Adapted from the platform's PrivacyTernaryField (PUBLIC / PRIVATE /
+// decide-later radiogroup). Tier-gated: free users see the PRIVATE option
+// rendered as LOCKED with an inline "Upgrade to publish privately" CTA that
+// opens the paywall; paid users can select it. The modal's dark surface tokens
+// are threaded in so the chooser reads correctly in every host theme.
+// ---------------------------------------------------------------------------
+
+interface PrivacyChooserProps {
+  value: Privacy;
+  onChange: (next: Privacy) => void;
+  isFree: boolean;
+  onUpgrade: () => void;
+  disabled?: boolean;
+  border: string;
+  text: string;
+  textMuted: string;
+  inputBg: string;
+}
+
+function PrivacyChooser({
+  value,
+  onChange,
+  isFree,
+  onUpgrade,
+  disabled,
+  border,
+  text,
+  textMuted,
+  inputBg,
+}: PrivacyChooserProps): React.ReactElement {
+  const segment = (selected: boolean): React.CSSProperties => ({
+    flex: 1,
+    minWidth: 120,
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    padding: "10px 12px",
+    border: `1px solid ${selected ? "#22C55E" : border}`,
+    borderRadius: 6,
+    background: selected ? "rgba(34,197,94,0.08)" : inputBg,
+    color: text,
+    cursor: disabled ? "not-allowed" : "pointer",
+    textAlign: "left",
+    fontFamily: "var(--font-mono, monospace)",
+  });
+  const title: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: text };
+  const hint: React.CSSProperties = { fontSize: 10.5, color: textMuted, lineHeight: 1.4 };
+
+  return (
+    <div role="radiogroup" aria-label="Visibility" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={value === "public"}
+        data-testid="publish-privacy-public"
+        onClick={() => !disabled && onChange("public")}
+        disabled={disabled}
+        style={segment(value === "public")}
+      >
+        <span style={title}>Public</span>
+        <span style={hint}>Visible to everyone on verified-skill.com.</span>
+      </button>
+
+      {isFree ? (
+        // Locked PRIVATE — clicking opens the paywall instead of selecting it.
+        <button
+          type="button"
+          role="radio"
+          aria-checked={value === "private"}
+          data-testid="publish-privacy-locked"
+          onClick={() => !disabled && onUpgrade()}
+          disabled={disabled}
+          style={{ ...segment(false), opacity: 0.85 }}
+        >
+          <span style={title}>🔒 Private</span>
+          <span style={{ ...hint, color: "#F59E0B" }}>Upgrade to publish privately</span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          role="radio"
+          aria-checked={value === "private"}
+          data-testid="publish-privacy-private"
+          onClick={() => !disabled && onChange("private")}
+          disabled={disabled}
+          style={segment(value === "private")}
+        >
+          <span style={title}>🔒 Private</span>
+          <span style={hint}>Only your org can see, search, or install it.</span>
+        </button>
+      )}
+
+      <button
+        type="button"
+        role="radio"
+        aria-checked={value === "decide-later"}
+        data-testid="publish-privacy-decide-later"
+        onClick={() => !disabled && onChange("decide-later")}
+        disabled={disabled}
+        style={segment(value === "decide-later")}
+      >
+        <span style={title}>Decide later</span>
+        <span style={hint}>Submit without choosing visibility yet.</span>
+      </button>
+    </div>
   );
 }
 

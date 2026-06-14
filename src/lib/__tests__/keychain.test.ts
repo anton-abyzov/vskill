@@ -143,6 +143,46 @@ describe("keychain", () => {
     expect(warn.mock.calls[0][0]).toMatch(/keychain unavailable/i);
   });
 
+  it("F10 — read-only getGitHubToken does NOT warn when keyring is unavailable and nothing is written", () => {
+    const kr = fakeKeyring({ available: false });
+    const fsState = fakeFs();
+    const warn = vi.fn();
+    const k = createKeychain({
+      keyring: kr,
+      fs: makeFsAdapter(fsState),
+      fallbackPath: "/tmp/vskill-test-keys.env",
+      warn,
+    });
+
+    expect(k.getGitHubToken()).toBeNull();
+    expect(k.getGitHubToken()).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+    // No keys.env created by a read.
+    expect(fsState.files.size).toBe(0);
+    // Introspection still reports fallback mode for `vskill auth status`.
+    expect(k.usingFallback()).toBe(true);
+  });
+
+  it("F10 — warning fires exactly once, at write time, even after prior read-only fallback use", () => {
+    const kr = fakeKeyring({ available: false });
+    const fsState = fakeFs();
+    const warn = vi.fn();
+    const k = createKeychain({
+      keyring: kr,
+      fs: makeFsAdapter(fsState),
+      fallbackPath: "/tmp/vskill-test-keys.env",
+      warn,
+    });
+
+    k.getGitHubToken(); // read — silent
+    expect(warn).not.toHaveBeenCalled();
+    k.setGitHubToken("write-token"); // write — warns
+    k.getGitHubToken();
+    k.setGitHubToken("write-token-2"); // second write — no re-warn
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/keychain unavailable/i);
+  });
+
   it("returns null when neither keyring nor fallback file has the token", () => {
     const kr = fakeKeyring();
     const k = createKeychain({

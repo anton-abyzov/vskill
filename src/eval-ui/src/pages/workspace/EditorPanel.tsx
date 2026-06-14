@@ -511,6 +511,7 @@ export function EditorPanel() {
                 provider={config?.provider}
                 model={config?.model}
                 skillName={skill || undefined}
+                privacy="public"
               />
             )}
           </div>

@@ -129,6 +129,31 @@ describe("0845 T-003 — tier + installMode classification", () => {
     }
   });
 
+  // F7 — github-copilot-ext: VS Code reads workspace instructions from
+  // `.github/instructions/`, NOT the parent of localSkillsDir
+  // (`.github/copilot`). The registry pins `localInstallRoot: '.github'` and
+  // wires the transformer that emits `instructions/<name>.instructions.md`.
+  // Locking BOTH config knobs here so config drift fails fast at the source.
+  it("F7: github-copilot-ext pins localInstallRoot to .github and emits instructions/<name>.instructions.md", () => {
+    const a = getAgent("github-copilot-ext");
+    expect(a).toBeDefined();
+    expect(a!.localSkillsDir).toBe(".github/copilot/skills");
+    expect(a!.localInstallRoot).toBe(".github");
+    expect(a!.formatTransformer).toBeTypeOf("function");
+
+    const files = a!.formatTransformer!(
+      { name: "obsidian-brain", body: "body", frontmatter: {} } as any,
+      "project",
+    );
+    expect(files).toHaveLength(1);
+    expect(files[0].relativePath).toBe("instructions/obsidian-brain.instructions.md");
+    // localInstallRoot ('.github') + relativePath ('instructions/...') must
+    // compose to `.github/instructions/...` — where VS Code actually reads.
+    expect(`${a!.localInstallRoot}/${files[0].relativePath}`).toBe(
+      ".github/instructions/obsidian-brain.instructions.md",
+    );
+  });
+
   it("Core Tier 1 agents declared (claude-code, codex, antigravity, gemini-cli, openclaw, opencode)", () => {
     const tier1Core = ["claude-code", "codex", "antigravity", "gemini-cli", "openclaw", "opencode"];
     for (const id of tier1Core) {

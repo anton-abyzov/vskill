@@ -12,11 +12,18 @@
 //
 // The conf.yml relativePath ascends ONE level: the Aider install root is
 // `~/.aider` (the parent of `~/.aider/skills`), so `../` from there lands
-// at `$HOME` where `.aider.conf.yml` lives.
+// at `$HOME` where `.aider.conf.yml` lives. For project scope the same
+// ascent lands at the project root, where Aider also looks for
+// `.aider.conf.yml` — so the `read:` value must be project-relative
+// (`.aider/conventions/...`), not a `~/` path that was never written.
 
 import type { FormatTransformer, TransformedFile } from "./index.js";
 
-export const aiderTransformer: FormatTransformer = (skill): TransformedFile[] => {
+export const aiderTransformer: FormatTransformer = (skill, scope): TransformedFile[] => {
+  const conventionsRef =
+    scope === "project"
+      ? `.aider/conventions/${skill.name}.md`
+      : `~/.aider/conventions/${skill.name}.md`;
   return [
     {
       relativePath: `conventions/${skill.name}.md`,
@@ -28,7 +35,7 @@ export const aiderTransformer: FormatTransformer = (skill): TransformedFile[] =>
       content: "",
       op: "append-yaml-list",
       yamlListKey: "read",
-      yamlListValue: `~/.aider/conventions/${skill.name}.md`,
+      yamlListValue: conventionsRef,
     },
   ];
 };

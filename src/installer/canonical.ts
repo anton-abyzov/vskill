@@ -262,6 +262,22 @@ export function resolveAgentInstallRoot(
   if (opts.global && process.platform === "win32" && agent.win32PathOverride) {
     return agent.win32PathOverride;
   }
+  // F7: explicit project-scope root override for agents whose tool reads
+  // transformed output from a directory that is NOT the parent of
+  // `localSkillsDir` (github-copilot-ext: VS Code reads
+  // `.github/instructions/`, but localSkillsDir is `.github/copilot/skills`).
+  // Same path-traversal guard as `resolveAgentSkillsDir`.
+  if (!opts.global && agent.localInstallRoot) {
+    const resolved = join(opts.projectRoot, agent.localInstallRoot);
+    const normalizedRoot = join(opts.projectRoot, ".");
+    const rel = relative(normalizedRoot, resolved);
+    if (rel === ".." || rel.startsWith(".." + pathSep) || rel.startsWith("../")) {
+      throw new Error(
+        `Path traversal detected: ${agent.localInstallRoot} resolves above project root ${opts.projectRoot}`,
+      );
+    }
+    return resolved;
+  }
   // Reuse `resolveAgentSkillsDir` so env overrides + project-traversal
   // guards stay in one place. Then climb one level to the install root.
   const skillsDir = resolveAgentSkillsDir(agent, opts);

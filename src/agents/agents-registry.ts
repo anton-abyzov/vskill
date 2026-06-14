@@ -112,6 +112,14 @@ export interface AgentDefinition {
    *  install root. Only set for Tier 2 agents. */
   formatTransformer?: FormatTransformer;
 
+  /** F7: project-scope Tier-2 install-root override, relative to
+   *  projectRoot. Used when the tool reads transformed output from a
+   *  directory that is NOT the parent of `localSkillsDir` — VS Code
+   *  Copilot reads `.github/instructions/`, but `localSkillsDir` is
+   *  `.github/copilot/skills`. Ignored for user scope. Subject to the
+   *  same path-traversal guard as `localSkillsDir`. */
+  localInstallRoot?: string;
+
   /** 0845 T-001 (AC-US4-01): Tier 3 only — URL of the tool's docs page
    *  explaining how to paste the exported blob. */
   pasteInstructionsUrl?: string;
@@ -231,9 +239,13 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     parentCompany: 'GitHub (Microsoft)',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
     // 0845 T-003: Tier 2 — emits `.github/instructions/<name>.instructions.md`.
+    // F7: VS Code reads workspace instructions from `.github/instructions/`,
+    // so the project-scope install root is `.github` — NOT the parent of
+    // localSkillsDir (`.github/copilot`).
     tier: 2,
     installMode: 'filesystem',
     formatTransformer: githubCopilotTransformer,
+    localInstallRoot: '.github',
   },
   {
     id: 'kimi-cli',

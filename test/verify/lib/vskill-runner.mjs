@@ -19,7 +19,18 @@ export const REPO_ROOT = resolve(__dirname, "../../..");
 export const VSKILL_BIN = join(REPO_ROOT, "dist/bin.js");
 export const FIXTURE_SOURCE = join(__dirname, "..", "fixtures", "tiny-skill-source");
 
-const AGENT_DIRS = [".claude", ".cursor", ".codex", ".kiro", ".aider", ".pi"];
+// Agent dot-dirs are discovered dynamically: vskill cross-installs to every
+// agent it detects on the host (binary on PATH or config dir), and that set
+// varies per machine and registry version (e.g. 1.0.21 targets
+// claude/codex/gemini/openclaw/opencode — not the 1.0.18-era cursor/kiro/
+// aider/pi). Any dot-dir in the workdir with a skills/ subtree is an agent dir.
+function discoverAgentDirs(workdir) {
+  return readdirSync(workdir).filter((d) => {
+    if (!d.startsWith(".")) return false;
+    const skillsRoot = join(workdir, d, "skills");
+    return existsSync(skillsRoot) && statSync(skillsRoot).isDirectory();
+  });
+}
 
 /** Spawn vskill in a workdir with HOME redirected. Returns { status, stdout, stderr } */
 export function runVskill(args, ctx, opts = {}) {
@@ -62,7 +73,7 @@ export function installBaseline(ctx, extraArgs = []) {
 /** Walk every detected agent dir and return all installed skills as flat list. */
 export function readInstalledSkills(workdir) {
   const installed = [];
-  for (const ag of AGENT_DIRS) {
+  for (const ag of discoverAgentDirs(workdir)) {
     const root = join(workdir, ag, "skills");
     if (!existsSync(root)) continue;
     for (const plugin of readdirSync(root)) {

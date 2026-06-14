@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { join } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Mock node:fs
@@ -305,5 +306,110 @@ describe("removeCommand", () => {
     expect(Array.isArray(parsed.perAgent)).toBe(true);
     expect(parsed.perAgent.length).toBeGreaterThanOrEqual(1);
     logSpy.mockRestore();
+  });
+
+  // F5 — canonical .agents/skills/<name> payload cleanup ------------------
+  // remove previously only deleted per-agent copies/symlinks; the canonical
+  // store written by installSymlink() was stranded on disk forever.
+  describe("F5: canonical store cleanup", () => {
+    const ENTRY = {
+      version: "1.0.0",
+      sha: "abc123",
+      tier: "VERIFIED",
+      installedAt: "2026-01-01T00:00:00.000Z",
+      source: "local:/path",
+    };
+    const PROJECT_CANONICAL = join(process.cwd(), ".agents", "skills", "sw");
+    const GLOBAL_AGENTS_ROOT = "/home/testuser/.agents";
+    const GLOBAL_CANONICAL = join(GLOBAL_AGENTS_ROOT, "skills", "sw");
+
+    it("removes the project canonical payload once the lockfile entry is gone", async () => {
+      mockReadLockfile
+        .mockReturnValueOnce(makeLockfile({ sw: ENTRY })) // initial read
+        .mockReturnValue(makeLockfile({})); // re-reads after removeSkillFromLock
+      mockExistsSync.mockImplementation((p: string) => p === PROJECT_CANONICAL);
+
+      await removeCommand("sw", { force: true, local: true });
+
+      expect(mockRmSync).toHaveBeenCalledWith(PROJECT_CANONICAL, {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    it("removes the global canonical payload on --global, leaving project alone", async () => {
+      mockReadLockfile
+        .mockReturnValueOnce(makeLockfile({ sw: ENTRY }))
+        .mockReturnValue(makeLockfile({}));
+      mockExistsSync.mockImplementation((p: string) => p === GLOBAL_CANONICAL);
+
+      await removeCommand("sw", { force: true, global: true });
+
+      expect(mockRmSync).toHaveBeenCalledWith(GLOBAL_CANONICAL, {
+        recursive: true,
+        force: true,
+      });
+      expect(mockRmSync).not.toHaveBeenCalledWith(
+        PROJECT_CANONICAL,
+        expect.anything(),
+      );
+    });
+
+    it("drops the global lockfile entry but keeps the canonical while still referenced", async () => {
+      // Global lockfile stubbornly keeps the entry (removal did not land) —
+      // the still-referenced global canonical payload must survive.
+      let projectReads = 0;
+      mockReadLockfile.mockImplementation((dir?: string) => {
+        if (dir === GLOBAL_AGENTS_ROOT) return makeLockfile({ sw: ENTRY });
+        projectReads++;
+        return projectReads === 1
+          ? makeLockfile({ sw: ENTRY })
+          : makeLockfile({});
+      });
+      mockExistsSync.mockImplementation(
+        (p: string) => p === GLOBAL_CANONICAL || p === PROJECT_CANONICAL,
+      );
+
+      await removeCommand("sw", { force: true });
+
+      // remove syncs the global lockfile for the global files it deletes
+      expect(mockRemoveSkillFromLock).toHaveBeenCalledWith(
+        "sw",
+        GLOBAL_AGENTS_ROOT,
+      );
+      // ...but the still-referenced global canonical stays on disk
+      expect(mockRmSync).not.toHaveBeenCalledWith(
+        GLOBAL_CANONICAL,
+        expect.anything(),
+      );
+      // project canonical (no longer referenced) is removed
+      expect(mockRmSync).toHaveBeenCalledWith(PROJECT_CANONICAL, {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    it("reports action 'removed' only for agents whose files were deleted", async () => {
+      mockReadLockfile
+        .mockReturnValueOnce(makeLockfile({ sw: ENTRY }))
+        .mockReturnValue(makeLockfile({}));
+      // Only Cursor has installed files
+      mockExistsSync.mockImplementation((p: string) => p.includes(".cursor"));
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await removeCommand("sw", { force: true, json: true });
+
+      const last = logSpy.mock.calls[logSpy.mock.calls.length - 1];
+      const parsed = JSON.parse(last.join(" "));
+      const cursor = parsed.perAgent.find(
+        (r: { id: string }) => r.id === "cursor",
+      );
+      const cc = parsed.perAgent.find(
+        (r: { id: string }) => r.id === "claude-code",
+      );
+      expect(cursor.action).toBe("removed");
+      expect(cc.action).toBe("not-applicable");
+      logSpy.mockRestore();
+    });
   });
 });

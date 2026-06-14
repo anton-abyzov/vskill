@@ -67,6 +67,9 @@ export async function removeCommand(
   const agents = await detectInstalledAgents();
   let removedCount = 0;
   const removedFrom: string[] = [];
+  // F5: track which agents actually had files deleted so the per-agent
+  // report can say "removed" instead of "not-applicable" for them.
+  const removedAgentIds = new Set<string>();
 
   for (const agent of agents) {
     const paths: Array<{ label: string; dir: string }> = [];
@@ -93,6 +96,7 @@ export async function removeCommand(
           rmSync(dir, { recursive: true, force: true });
           removedFrom.push(label);
           removedCount++;
+          removedAgentIds.add(agent.id);
         } catch (err) {
           console.error(
             yellow(`Failed to remove from ${label}: `) +
@@ -106,6 +110,46 @@ export async function removeCommand(
   // Update lockfile
   if (skillEntry) {
     removeSkillFromLock(skillName);
+  }
+
+  // F5: clean up the canonical .agents/skills/<name> payload that
+  // installSymlink() writes. The loop above only deletes per-agent
+  // copies/symlinks — without this, the canonical store (the symlink
+  // target) is stranded on disk forever.
+  const globalAgentsRoot = resolveTilde("~/.agents");
+  if (!opts.local && readLockfile(globalAgentsRoot)?.skills[skillName]) {
+    // Global installs keep their lockfile at ~/.agents/vskill.lock; drop the
+    // entry there too since the loop above deleted the global agent files.
+    removeSkillFromLock(skillName, globalAgentsRoot);
+  }
+
+  const canonicalTargets: Array<{ label: string; dir: string; lockDir?: string }> = [];
+  if (!opts.global) {
+    canonicalTargets.push({
+      label: "canonical store (project)",
+      dir: join(process.cwd(), ".agents", "skills", skillName),
+    });
+  }
+  if (!opts.local) {
+    canonicalTargets.push({
+      label: "canonical store (global)",
+      dir: join(globalAgentsRoot, "skills", skillName),
+      lockDir: globalAgentsRoot,
+    });
+  }
+  for (const { label, dir, lockDir } of canonicalTargets) {
+    // Only delete the payload once no lockfile entry references it.
+    if (readLockfile(lockDir)?.skills[skillName]) continue;
+    if (!existsSync(dir)) continue;
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      removedFrom.push(label);
+      removedCount++;
+    } catch (err) {
+      console.error(
+        yellow(`Failed to remove ${label}: `) + dim((err as Error).message),
+      );
+    }
   }
 
   // Uninstall marketplace plugin via claude CLI (handles settings.json + cache)
@@ -171,6 +215,9 @@ export async function removeCommand(
     skill: skillName,
     scope,
     action,
+    // F5: agents whose files we deleted report "removed" — previously they
+    // all inherited the plugin-uninstall action and showed "not-applicable".
+    actionFor: (agent) => (removedAgentIds.has(agent.id) ? "removed" : action),
     agents,
   });
 

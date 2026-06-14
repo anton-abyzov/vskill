@@ -45,6 +45,7 @@ export type LifecycleAction =
   | "already-enabled"
   | "disabled"
   | "already-disabled"
+  | "removed"
   | "not-applicable";
 
 export interface PerAgentReportEntry {
@@ -67,6 +68,12 @@ export interface BuildPerAgentReportOptions {
   scope: "user" | "project";
   /** The action that triggered the report. Auto-discover agents always map to `not-applicable` for enable/disable actions. */
   action: LifecycleAction;
+  /**
+   * F5: optional per-agent override of `action`. `vskill remove` deletes
+   * files from some agents but not others, so it reports "removed" only for
+   * the agents it actually cleaned. Falls back to `action` when absent.
+   */
+  actionFor?: (agent: AgentDefinition) => LifecycleAction;
   /** The list of agents detected on the local machine. */
   agents: AgentDefinition[];
 }
@@ -151,6 +158,11 @@ function lineFor(
           action: "already-disabled",
           line: `${agent.displayName} (${scope}) — already disabled`,
         };
+      case "removed":
+        return {
+          action: "removed",
+          line: `${agent.displayName} (${scope}) — removed (skill files deleted)`,
+        };
       case "not-applicable":
         return {
           action: "not-applicable",
@@ -175,6 +187,13 @@ function lineFor(
         action: "not-applicable",
         line: `${agent.displayName} — auto-discovers from ${agent.localSkillsDir} (no plugin entry to disable; run vskill remove to stop loading)`,
       };
+    // File deletion IS the un-load mechanism for auto-discover surfaces, so
+    // unlike enable/disable this is a real action, not a no-op.
+    case "removed":
+      return {
+        action: "removed",
+        line: `${agent.displayName} — removed (skill files deleted)`,
+      };
     case "not-applicable":
       return {
         action: "not-applicable",
@@ -196,7 +215,12 @@ export function buildPerAgentReport(
 ): PerAgentReportEntry[] {
   return opts.agents.map((agent) => {
     const surface = classifyAgentSurface(agent);
-    const { action, line } = lineFor(agent, surface, opts.action, opts.scope);
+    const { action, line } = lineFor(
+      agent,
+      surface,
+      opts.actionFor?.(agent) ?? opts.action,
+      opts.scope,
+    );
     return {
       id: agent.id,
       displayName: agent.displayName,

@@ -82,11 +82,21 @@ export interface TransformedFile {
   yamlListValue?: string;
 }
 
+/** Install scope, threaded from MultiInstallOptions to transformers. */
+export type InstallScope = "project" | "user";
+
 /**
  * Per-tool format transformer. Pure function — no I/O. Given a
  * `ParsedSkill`, returns the list of files to write under the
  * agent's install root. Re-running with the same input MUST
  * produce byte-equal output (idempotency contract enforced by
  * each transformer's unit tests).
+ *
+ * `scope` is optional (defaults to user) — most transformers emit
+ * scope-independent paths; Aider needs it because its conf.yml `read:`
+ * entry must reference the conventions file where it actually landed.
  */
-export type FormatTransformer = (skill: ParsedSkill) => TransformedFile[];
+export type FormatTransformer = (
+  skill: ParsedSkill,
+  scope?: InstallScope,
+) => TransformedFile[];

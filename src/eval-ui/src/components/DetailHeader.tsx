@@ -7,6 +7,10 @@ import { VersionBadge } from "./VersionBadge";
 import { AuthorLink } from "./AuthorLink";
 import { RepoLink } from "./RepoLink";
 import { SourceFileLink } from "./SourceFileLink";
+// 0874/0848 T-001: orphaned amber lock badge mounted on the detail header so
+// a private-repo skill is visibly distinct in the workspace detail pane.
+import { PrivateBadge } from "./private/PrivateBadge";
+import type { RepoVisibility } from "../hooks/useSkillRepoVisibility";
 
 // T-065: Dispatching a CustomEvent keeps DetailHeader test-mode-friendly
 // (no hook subscription to ToastProvider) while still surfacing a real
@@ -47,6 +51,20 @@ interface NewProps {
   state?: undefined;
   isReadOnly?: boolean;
   onDelete?: () => void;
+  /**
+   * 0874/0848 T-001: source-repo visibility, resolved by the caller
+   * (RightPanel via useSkillRepoVisibility) so the header stays a pure
+   * function. Only `"private"` mounts the amber PrivateBadge — `"public"`
+   * and `"unknown"` (the default) render no Private indicator.
+   *
+   * Limitation: this is repo-visibility (was the skill installed from a
+   * private GitHub repo), NOT publish-visibility (the enterprise
+   * private-publish concept). They differ; this is the best available
+   * signal client-side until SkillInfo carries an explicit privacy field.
+   */
+  repoVisibility?: RepoVisibility;
+  /** 0874/0848 T-001: tenant/org name shown after "Private ·" in the badge. */
+  tenantName?: string | null;
 }
 
 type Props = NewProps | LegacyProps;
@@ -55,7 +73,11 @@ export function DetailHeader(props: Props) {
   if (props.skill) {
     // Call as a function (not as JSX) so tests inspecting the returned tree
     // see the card `<div>` at the root instead of a wrapper component type.
-    return NewDetailHeader({ skill: props.skill });
+    return NewDetailHeader({
+      skill: props.skill,
+      repoVisibility: props.repoVisibility,
+      tenantName: props.tenantName,
+    });
   }
   return LegacyDetailHeader({ state: props.state, isReadOnly: props.isReadOnly, onDelete: props.onDelete });
 }
@@ -76,8 +98,19 @@ function truncatePath(p: string, max = 48): string {
 // New header (Phase 3)
 // ---------------------------------------------------------------------------
 
-function NewDetailHeader({ skill }: { skill: SkillInfo }) {
+function NewDetailHeader({
+  skill,
+  repoVisibility,
+  tenantName,
+}: {
+  skill: SkillInfo;
+  repoVisibility?: RepoVisibility;
+  tenantName?: string | null;
+}) {
   const [copied, setCopied] = useState(false);
+  // 0874/0848 T-001: only private-repo skills carry the amber badge; public
+  // and unknown render no Private indicator (mirrors SkillRow's chip rule).
+  const isPrivate = repoVisibility === "private";
 
   // 0769 T-013: prefer the editable upstream marketplace clone over the
   // per-version cache snapshot. For plugin-cache installs `sourcePath` points
@@ -164,6 +197,14 @@ function NewDetailHeader({ skill }: { skill: SkillInfo }) {
           />
           {originLabel}
         </span>
+        {/* 0874/0848 T-001: amber lock badge for private-repo skills. Pushed
+            to the right of the breadcrumb so it reads as a status indicator
+            without disturbing the existing plugin › origin layout. */}
+        {isPrivate && (
+          <span style={{ marginLeft: "auto" }}>
+            <PrivateBadge tenantName={tenantName ?? "your org"} variant="inline" />
+          </span>
+        )}
       </div>
 
       {/* Row 2: skill name (serif) + VersionBadge (0707 T-008) */}

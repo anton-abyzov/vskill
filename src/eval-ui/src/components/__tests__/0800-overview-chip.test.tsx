@@ -20,6 +20,11 @@ vi.mock("react", () => ({
   useRef: (init: unknown) => ({ current: init }),
   useCallback: <T,>(fn: T) => fn,
   useMemo: <T,>(fn: () => T) => fn(),
+  // 0874: PublishStatusRow → PublishButton → PublishDrawer now transitively
+  // imports QuotaContext (via useTier), which calls createContext at module
+  // load. Provide a no-op so this shallow-render test module loads.
+  createContext: () => ({ Provider: () => null, Consumer: () => null }),
+  useContext: () => null,
 }));
 
 import { SkillOverview } from "../SkillOverview";

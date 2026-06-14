@@ -24,6 +24,12 @@ vi.mock("../CheckNowButton", () => ({ CheckNowButton: () => null }));
 vi.mock("../../pages/UpdatesPanel", () => ({ UpdatesPanel: () => null }));
 vi.mock("../DetailHeader", () => ({ DetailHeader: () => null }));
 vi.mock("../SkillOverview", () => ({ SkillOverview: () => null }));
+// 0874/0848 T-001: RightPanel's detail header now resolves repo-visibility via
+// this hook (live SWR fetch). Stub it so the read-only banner mounts without a
+// hanging network call in jsdom.
+vi.mock("../../hooks/useSkillRepoVisibility", () => ({
+  useSkillRepoVisibility: () => ({ visibility: "unknown", repo: null }),
+}));
 vi.mock("../../StudioContext", () => ({
   useStudio: () => ({
     state: { skills: [], selectedSkill: null, isMobile: false, mode: "browse", skillsLoading: false, skillsError: null },

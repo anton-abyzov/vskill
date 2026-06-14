@@ -18,6 +18,12 @@ export interface FetchResult {
   /** Skill content. For plugin-dir sources: combined content of all skills. */
   content: string;
   version: string;
+  /**
+   * Installed-skill identity sha. Single-skill sources MUST hash the SKILL.md
+   * content string — the same identity `vskill add` writes to the lockfile —
+   * or unchanged skills phantom-update. Multi-file plugin/local sources hash
+   * the files map.
+   */
   sha: string;
   tier: string;
   /** Path-to-content map of all files in this skill. */
@@ -67,7 +73,8 @@ async function fetchRegistry(skillName: string, entry: SkillLockEntry): Promise<
     const remote = await getSkill(skillName);
     if (!remote.content) return null;
     const files: Record<string, string> = { "SKILL.md": remote.content };
-    const sha = computeSha(files);
+    // String mode — must match the install-time lockfile sha (see FetchResult.sha).
+    const sha = computeSha(remote.content);
     return {
       content: remote.content,
       version: remote.version || entry.version,
@@ -114,7 +121,8 @@ async function fetchGitHubFlat(
   return {
     content,
     version: extractFrontmatterVersion(content) || entry.version,
-    sha: computeSha(files),
+    // String mode — must match the install-time lockfile sha (see FetchResult.sha).
+    sha: computeSha(content),
     tier: entry.tier,
     files,
   };

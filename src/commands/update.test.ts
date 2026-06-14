@@ -280,6 +280,36 @@ describe("updateCommand", () => {
     expect(mockWriteFileSync).not.toHaveBeenCalled();
   });
 
+  it("F4: registry fallback computes sha in string mode (install identity)", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: ["claude-code"],
+      skills: {
+        frontend: {
+          version: "1.0.0",
+          sha: "aaa111bbb222",
+          tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z",
+          source: "",  // unknown type → registry fallback path
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockFetchFromSource.mockResolvedValue(null);
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    // The mocked computeSha returns "a"x64 for string input and "b"x64 for
+    // files-map input. Install writes the string-mode sha, so the fallback
+    // must store the string-mode value or the next update phantom-fires.
+    const writtenLock = mockWriteLockfile.mock.calls[0][0] as {
+      skills: Record<string, { sha: string }>;
+    };
+    expect(writtenLock.skills["frontend"].sha).toBe("a".repeat(64));
+  });
+
   it("skips skill when SHA is unchanged", async () => {
     // fetchFromSource returns same SHA as lockfile
     mockFetchFromSource.mockResolvedValue({

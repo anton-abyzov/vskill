@@ -9,6 +9,8 @@ import { SidebarSection } from "./SidebarSection";
 // GroupHeader + NamedScopeSection below). See plan.md for the F-001 resolution.
 import { SidebarSearch, matchSkillQuery } from "./SidebarSearch";
 import { PluginGroup, type SelectedKey } from "./PluginGroup";
+// 0848 T-003: private/public sub-grouping inside a section when visibility mixes.
+import { SectionPrivacySubgroup } from "./SectionPrivacySubgroup";
 import { PluginTreeGroup } from "./PluginTreeGroup";
 import { PluginActionMenu } from "./PluginActionMenu";
 import { ConvertToPluginDialog } from "./ConvertToPluginDialog";
@@ -556,6 +558,8 @@ export function Sidebar({
                 useVirtual={useVirtual}
                 dirtySkillIds={dirtySkillIds}
                 repoVisibilityLookup={repoVisibilityLookup}
+                agentId={resolvedAgentId}
+                sectionName="available-project"
               />
             )}
           </NamedScopeSection>
@@ -578,6 +582,8 @@ export function Sidebar({
                 useVirtual={useVirtual}
                 dirtySkillIds={dirtySkillIds}
                 repoVisibilityLookup={repoVisibilityLookup}
+                agentId={resolvedAgentId}
+                sectionName="available-personal"
               />
             )}
           </NamedScopeSection>
@@ -775,6 +781,8 @@ export function Sidebar({
                   useVirtual={useVirtual}
                   dirtySkillIds={dirtySkillIds}
                   repoVisibilityLookup={repoVisibilityLookup}
+                  agentId={resolvedAgentId}
+                  sectionName="authoring-project"
                 />
               </>
             )}
@@ -845,6 +853,8 @@ export function Sidebar({
                 useVirtual={useVirtual}
                 dirtySkillIds={dirtySkillIds}
                 repoVisibilityLookup={repoVisibilityLookup}
+                agentId={resolvedAgentId}
+                sectionName="own"
               />
             )}
           </SidebarSection>
@@ -863,6 +873,8 @@ export function Sidebar({
                 useVirtual={useVirtual}
                 dirtySkillIds={dirtySkillIds}
                 repoVisibilityLookup={repoVisibilityLookup}
+                agentId={resolvedAgentId}
+                sectionName="installed"
               />
             )}
           </SidebarSection>
@@ -1086,6 +1098,8 @@ function SectionList({
   useVirtual,
   dirtySkillIds,
   repoVisibilityLookup,
+  agentId,
+  sectionName,
 }: {
   items: Array<[plugin: string, skills: SkillInfo[]]>;
   selectedKey: SelectedKey | null;
@@ -1096,6 +1110,9 @@ function SectionList({
   dirtySkillIds?: Set<string>;
   /** 0848: connected-repos lookup forwarded to PluginGroup for privacy chips. */
   repoVisibilityLookup?: Map<string, ConnectedRepoDTO>;
+  /** 0848 T-003: agent id + section name scope the sub-group collapse keys. */
+  agentId?: string;
+  sectionName?: string;
 }) {
   if (useVirtual) {
     const flat = flattenForVirtual(items);
@@ -1170,20 +1187,36 @@ function SectionList({
     );
   }
 
+  const pluginGroups = items.map(([plugin, list]) => (
+    <PluginGroup
+      key={plugin}
+      plugin={plugin}
+      skills={list}
+      selectedKey={selectedKey}
+      onSelect={onSelect}
+      onContextMenu={onContextMenu}
+      dirtySkillIds={dirtySkillIds}
+      repoVisibilityLookup={repoVisibilityLookup}
+    />
+  ));
+
   return (
     <div data-virtualized="false">
-      {items.map(([plugin, list]) => (
-        <PluginGroup
-          key={plugin}
-          plugin={plugin}
-          skills={list}
-          selectedKey={selectedKey}
-          onSelect={onSelect}
-          onContextMenu={onContextMenu}
-          dirtySkillIds={dirtySkillIds}
-          repoVisibilityLookup={repoVisibilityLookup}
-        />
-      ))}
+      {/* 0848 T-003: when this section mixes private + public source-repo
+          skills, SectionPrivacySubgroup splits into 🔒/🌐 sub-headers;
+          otherwise it renders the plugin groups unchanged. */}
+      <SectionPrivacySubgroup
+        items={items}
+        agentId={agentId ?? "claude-cli"}
+        sectionName={sectionName ?? "section"}
+        repoVisibilityLookup={repoVisibilityLookup}
+        selectedKey={selectedKey}
+        onSelect={onSelect}
+        onContextMenu={onContextMenu}
+        dirtySkillIds={dirtySkillIds}
+      >
+        {pluginGroups}
+      </SectionPrivacySubgroup>
     </div>
   );
 }

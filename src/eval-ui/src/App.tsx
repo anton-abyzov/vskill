@@ -30,6 +30,9 @@ import { ApiError } from "./api";
 import { PendingActionsContext } from "./PendingActionsContext";
 import { SetupDrawer } from "./components/SetupDrawer";
 import { useSetupDrawer } from "./hooks/useSetupDrawer";
+// 0848 T-007: derive private-repo plugins for the MarketplaceDrawer's amber section.
+import { useConnectedRepoLookup, parseGithubRepoSlug } from "./hooks/useSkillRepoVisibility";
+import type { PrivatePluginEntry } from "./components/MarketplaceDrawer";
 import { AgentScopePicker, agentsResponseToPickerEntries } from "./components/AgentScopePicker";
 import { ClaudeCodeFirstUseBanner } from "./components/ClaudeCodeFirstUseBanner";
 import { ConnectedRepoWidget } from "./components/ConnectedRepoWidget";
@@ -500,6 +503,26 @@ function Shell() {
     }
     return set;
   }, [state.skills]);
+
+  // 0848 T-007: plugins sourced from connected PRIVATE repos. We join the
+  // Sidebar skills (which carry `repoUrl`) against the connected-repos lookup
+  // and group by plugin so the MarketplaceDrawer can list them in its amber
+  // "Your private plugins" section. One entry per (plugin, private repo).
+  const { lookup: connectedRepoLookup } = useConnectedRepoLookup();
+  const privatePlugins = useMemo<PrivatePluginEntry[]>(() => {
+    const byPlugin = new Map<string, PrivatePluginEntry>();
+    for (const s of state.skills) {
+      const slug = parseGithubRepoSlug(s.repoUrl);
+      if (!slug) continue;
+      const repo = connectedRepoLookup.get(slug);
+      if (!repo || !repo.isPrivate) continue;
+      const name = s.pluginName ?? s.plugin;
+      if (!byPlugin.has(name)) {
+        byPlugin.set(name, { name, repoFullName: repo.repoFullName });
+      }
+    }
+    return Array.from(byPlugin.values());
+  }, [state.skills, connectedRepoLookup]);
   useKeyboardShortcut(
     [
       {
@@ -1239,6 +1262,7 @@ function Shell() {
         open={marketplaceOpen}
         onClose={() => setMarketplaceOpen(false)}
         installedNames={installedPluginNames}
+        privatePlugins={privatePlugins}
         onInstall={(plugin, marketplace) => {
           setInstallJob({
             plugin,

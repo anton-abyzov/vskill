@@ -4,6 +4,8 @@
 //   1. conventions/<name>.md      → op:"write", plain markdown body
 //   2. ../../.aider.conf.yml      → op:"append-yaml-list", key:"read",
 //                                   value:"~/.aider/conventions/<name>.md"
+//                                   (user scope; project scope emits the
+//                                   project-relative ".aider/conventions/...")
 //
 // The dispatcher in multi-install.ts is responsible for resolving the
 // tilde + applying safeAppendYamlList; this test only asserts the contract
@@ -46,5 +48,26 @@ describe("aiderTransformer", () => {
 
   it("is idempotent — byte-equal on re-invocation", () => {
     expect(aiderTransformer(skill)).toEqual(aiderTransformer(skill));
+  });
+});
+
+describe("aiderTransformer — scope-aware read: path", () => {
+  it("project scope emits a project-relative path (no HOME tilde)", () => {
+    const [, conf] = aiderTransformer(skill, "project");
+    // Project installs write the conventions file to
+    // <project>/.aider/conventions/ and the conf.yml to <project>/, so the
+    // read: entry must be relative to the project root — a ~/ path would
+    // point at a nonexistent HOME file.
+    expect(conf.yamlListValue).toBe(".aider/conventions/obsidian-brain.md");
+  });
+
+  it("user scope keeps the tilde HOME path", () => {
+    const [, conf] = aiderTransformer(skill, "user");
+    expect(conf.yamlListValue).toBe("~/.aider/conventions/obsidian-brain.md");
+  });
+
+  it("omitted scope defaults to the user-scope tilde path (back-compat)", () => {
+    const [, conf] = aiderTransformer(skill);
+    expect(conf.yamlListValue).toBe("~/.aider/conventions/obsidian-brain.md");
   });
 });

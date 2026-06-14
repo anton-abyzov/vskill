@@ -411,6 +411,141 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
     });
   });
 
+  // F2: --plugin-dir with NO marketplace.json (plugins/<name>/ fallback only)
+  describe("F2: missing marketplace.json does not crash installPluginDir", () => {
+    it("installs from plugins/<name>/ and records version 0.0.0 when marketplace.json is absent", async () => {
+      const localPath = "/tmp/no-mkt-repo";
+
+      mockExistsSync.mockImplementation((p: string) => {
+        // No .claude-plugin/marketplace.json anywhere
+        if (typeof p === "string" && p.includes(".claude-plugin")) return false;
+        if (typeof p === "string" && p.includes("plugins/myplugin")) return true;
+        return false;
+      });
+
+      mockStatSync.mockImplementation((p: string) => ({
+        isDirectory: () => typeof p === "string" && p.endsWith("plugins/myplugin"),
+        isFile: () => !(typeof p === "string" && p.endsWith("plugins/myplugin")),
+      }));
+
+      // Mirror real fs: reading the absent marketplace.json throws ENOENT
+      mockReadFileSync.mockImplementation((p: string) => {
+        if (typeof p === "string" && p.includes("marketplace.json")) {
+          const err = new Error(
+            `ENOENT: no such file or directory, open '${p}'`
+          ) as NodeJS.ErrnoException;
+          err.code = "ENOENT";
+          throw err;
+        }
+        return "# Skill content";
+      });
+
+      mockReaddirSync.mockImplementation((_dir: string, opts?: unknown) => {
+        if (typeof opts === "object" && opts !== null && (opts as Record<string, unknown>).recursive) {
+          return ["skills/SKILL.md"];
+        }
+        return ["SKILL.md"];
+      });
+
+      mockRunTier1Scan.mockReturnValue(makeScanResult());
+      mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+      mockEnsureLockfile.mockReturnValue({
+        version: 1,
+        agents: [],
+        skills: {},
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      await addCommand(localPath, { plugin: "myplugin", pluginDir: localPath });
+
+      const lockArg = mockWriteLockfile.mock.calls[0][0];
+      expect(lockArg.skills["myplugin"]).toBeDefined();
+      expect(lockArg.skills["myplugin"].version).toBe("0.0.0");
+    });
+  });
+
+  // F2: --plugin-dir WITHOUT --plugin must give actionable guidance,
+  // not the misleading "Please provide a source" error.
+  describe("F2: --plugin-dir without --plugin lists available plugins", () => {
+    it("errors with --plugin guidance listing plugins from marketplace.json", async () => {
+      const localPath = "/tmp/test-repo";
+
+      mockExistsSync.mockImplementation(
+        (p: string) => typeof p === "string" && p.includes("marketplace.json")
+      );
+      mockReadFileSync.mockImplementation((p: string) => {
+        if (typeof p === "string" && p.includes("marketplace.json")) {
+          return JSON.stringify({
+            name: "specweave",
+            plugins: [
+              { name: "sw", source: "./plugins/specweave", version: "1.0.0" },
+              { name: "frontend", source: "./plugins/frontend", version: "1.0.0" },
+            ],
+          });
+        }
+        return "";
+      });
+
+      const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
+        throw new Error("process.exit");
+      });
+
+      await expect(
+        addCommand(undefined, { pluginDir: localPath })
+      ).rejects.toThrow("process.exit");
+      expect(mockExit).toHaveBeenCalledWith(1);
+
+      const errorOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+        .map((c: unknown[]) => String(c[0]))
+        .join("\n");
+      expect(errorOutput).toContain("--plugin");
+      expect(errorOutput).toContain("sw");
+      expect(errorOutput).toContain("frontend");
+      expect(errorOutput).not.toContain("Please provide a source");
+
+      mockExit.mockRestore();
+    });
+
+    it("errors with --plugin guidance listing plugins/ subdirectories when marketplace.json is absent", async () => {
+      const localPath = "/tmp/test-repo";
+
+      mockExistsSync.mockImplementation((p: string) => {
+        if (typeof p === "string" && p.includes("marketplace.json")) return false;
+        return typeof p === "string" && p.endsWith("plugins");
+      });
+      mockReaddirSync.mockImplementation((_dir: string, opts?: unknown) => {
+        if (typeof opts === "object" && opts !== null && (opts as Record<string, unknown>).withFileTypes) {
+          return [
+            { name: "alpha", isDirectory: () => true },
+            { name: "beta", isDirectory: () => true },
+            { name: "README.md", isDirectory: () => false },
+          ];
+        }
+        return [];
+      });
+
+      const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
+        throw new Error("process.exit");
+      });
+
+      await expect(
+        addCommand(undefined, { pluginDir: localPath })
+      ).rejects.toThrow("process.exit");
+      expect(mockExit).toHaveBeenCalledWith(1);
+
+      const errorOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+        .map((c: unknown[]) => String(c[0]))
+        .join("\n");
+      expect(errorOutput).toContain("--plugin");
+      expect(errorOutput).toContain("alpha");
+      expect(errorOutput).toContain("beta");
+      expect(errorOutput).not.toContain("Please provide a source");
+
+      mockExit.mockRestore();
+    });
+  });
+
   // TC-002: Full directory structure preserved on installation
   describe("TC-002: full directory structure is preserved", () => {
     it("recursively copies all subdirectories (skills, hooks, commands, agents, .claude-plugin) to cache", async () => {
@@ -1304,6 +1439,55 @@ describe("addCommand source format routing", () => {
     expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
   });
 
+  // F1: tree deep link installs ONLY the referenced skill, not the whole repo
+  it("GitHub tree URL with skill path installs only that skill (no discovery)", async () => {
+    await addCommand("https://github.com/owner/repo/tree/main/skills/git-bisect-detective", {});
+
+    expect(mockDiscoverSkills).not.toHaveBeenCalled();
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://raw.githubusercontent.com/owner/repo/main/skills/git-bisect-detective/SKILL.md",
+      expect.anything(),
+    );
+    const lockArg = mockWriteLockfile.mock.calls[0][0];
+    expect(Object.keys(lockArg.skills)).toEqual(["git-bisect-detective"]);
+  });
+
+  // F1: blob deep link to SKILL.md installs that single skill
+  it("GitHub blob URL ending in SKILL.md installs only that skill", async () => {
+    await addCommand("https://github.com/owner/repo/blob/main/skills/my-skill/SKILL.md", {});
+
+    expect(mockDiscoverSkills).not.toHaveBeenCalled();
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md",
+      expect.anything(),
+    );
+    const lockArg = mockWriteLockfile.mock.calls[0][0];
+    expect(Object.keys(lockArg.skills)).toEqual(["my-skill"]);
+  });
+
+  // F1: branch in the deep link is preserved (not replaced by default branch)
+  it("deep GitHub URL preserves its branch for fetch and lockfile", async () => {
+    await addCommand("https://github.com/owner/repo/tree/develop/skills/my-skill", {});
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://raw.githubusercontent.com/owner/repo/develop/skills/my-skill/SKILL.md",
+      expect.anything(),
+    );
+    const lockArg = mockWriteLockfile.mock.calls[0][0];
+    expect(lockArg.skills["my-skill"].sourceBranch).toBe("develop");
+  });
+
+  // F1: bare repo URL keeps whole-repo discovery behavior
+  it("bare GitHub URL still routes to whole-repo discovery", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "repo", path: "SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/SKILL.md" },
+    ]);
+
+    await addCommand("https://github.com/owner/repo", {});
+
+    expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
+  });
+
   // TC-022: No source provided exits with error
   it("exits with error when source is undefined and no flags set", async () => {
     const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
@@ -1994,6 +2178,122 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     exitSpy.mockRestore();
+  });
+
+  it("F3: installs from plugins/ folder when repo has no marketplace.json at all", async () => {
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
+    mockRunTier1Scan.mockReturnValue(makeScanResult());
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockFindProjectRoot.mockReturnValue("/project");
+    mockExistsSync.mockReturnValue(false);
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {},
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      // No marketplace.json on the default branch
+      if (url.includes("marketplace.json")) {
+        return { ok: false, status: 404 };
+      }
+      if (url.includes("/contents/plugins/orphan/skills")) {
+        return { ok: true, json: async () => [{ name: "react", type: "dir" }] };
+      }
+      if (url.includes("/contents/plugins/orphan/commands")) {
+        return { ok: true, json: async () => [] };
+      }
+      // Folder probe: plugins/orphan/ exists as a directory
+      if (url.includes("/contents/plugins/orphan")) {
+        return { ok: true, json: async () => [{ name: "skills", type: "dir" }] };
+      }
+      if (url.includes("/skills/react/SKILL.md")) {
+        return { ok: true, text: async () => "# React Skill\nUI library" };
+      }
+      return { ok: false };
+    }) as unknown as typeof fetch;
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+    try {
+      await addCommand("ignored", { repo: "anton-abyzov/vskill", plugin: "orphan" });
+    } catch { /* only thrown while the bug exists */ }
+    expect(exitSpy).not.toHaveBeenCalled();
+    exitSpy.mockRestore();
+
+    // Skill installed under the plugin namespace
+    const writeCalls = mockWriteFileSync.mock.calls as [string, string][];
+    const skillPaths = writeCalls.filter(([p]) => p.includes("SKILL.md")).map(([p]) => p);
+    expect(skillPaths.length).toBe(1);
+    expect(skillPaths[0]).toContain("/orphan/react/SKILL.md");
+
+    // Security scan still runs on the fetched content
+    expect(mockRunTier1Scan).toHaveBeenCalledTimes(1);
+
+    // Lockfile provenance identical to the marketplace-probe path
+    expect(mockWriteLockfile).toHaveBeenCalled();
+    const lock = mockWriteLockfile.mock.calls[0][0];
+    expect(lock.skills.orphan).toBeDefined();
+    expect(lock.skills.orphan.version).toBe("0.0.0");
+    expect(lock.skills.orphan.source).toBe("github:anton-abyzov/vskill#plugin:orphan");
+  });
+
+  it("F3: errors with a clear message when repo has neither marketplace.json nor plugins/<name>/", async () => {
+    mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
+    globalThis.fetch = vi.fn().mockImplementation(async () => ({ ok: false })) as unknown as typeof fetch;
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+    try {
+      await addCommand("ignored", { repo: "anton-abyzov/vskill", plugin: "ghost" });
+    } catch { /* expected */ }
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const errorOutput = (console.error as ReturnType<typeof vi.fn>).mock.calls
+      .flat()
+      .join("\n");
+    // Message must name BOTH lookup locations, not just marketplace.json
+    expect(errorOutput).toContain("plugins/ghost");
+    exitSpy.mockRestore();
+  });
+
+  it("repo-plugin path honors --no-enable via the enable gate (no claude CLI call)", async () => {
+    setupHappyPath();
+
+    await addCommand("ignored", { repo: "anton-abyzov/vskill", plugin: "frontend", enable: false });
+
+    // No marketplace provenance on repo-plugin lockfile entries → pluginId
+    // is null → enable is reported as auto-discovered, never shelled out.
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+    const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
+      .flat()
+      .join("\n");
+    expect(logOutput).toContain("no enable step needed");
+  });
+
+  it("repo-plugin path emits per-agent report on --dry-run without invoking claude CLI", async () => {
+    setupHappyPath();
+
+    await addCommand("ignored", { repo: "anton-abyzov/vskill", plugin: "frontend", dryRun: true });
+
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+    const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
+      .flat()
+      .join("\n");
+    expect(logOutput).toContain("Claude Code (project) — not applicable");
+  });
+
+  it("repo-plugin path leaves the default flow unchanged (no enable gate without opt-in)", async () => {
+    setupHappyPath();
+
+    await addCommand("ignored", { repo: "anton-abyzov/vskill", plugin: "frontend" });
+
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+    const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
+      .flat()
+      .join("\n");
+    expect(logOutput).not.toContain("no enable step needed");
+    expect(logOutput).not.toContain("not applicable");
   });
 
   it("runs security scan on combined skill content", async () => {

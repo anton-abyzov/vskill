@@ -213,7 +213,15 @@ export function createKeychain(opts: KeychainOptions = {}): Keychain {
     }
   }
 
-  function ensureFallbackWarned(): void {
+  // F10: read-only fallback paths mark the mode for `usingFallback()`
+  // introspection but stay silent — the warning claims a token is being
+  // STORED at the fallback path, so it must only fire when a fallback
+  // write actually happens (and at most once per process).
+  function markFallbackInUse(): void {
+    fallbackInUse = true;
+  }
+
+  function warnFallbackWrite(): void {
     fallbackInUse = true;
     if (warnedFallback) return;
     warnedFallback = true;
@@ -245,7 +253,7 @@ export function createKeychain(opts: KeychainOptions = {}): Keychain {
       }
       const r = tryKeyring((kr) => kr.setPassword(SERVICE_NAME, GITHUB_TOKEN_KEY, token));
       if (r.ok) return;
-      ensureFallbackWarned();
+      warnFallbackWrite();
       const map = readFallback();
       map.set(GITHUB_TOKEN_KEY, token);
       writeFallback(map);
@@ -297,7 +305,7 @@ export function createKeychain(opts: KeychainOptions = {}): Keychain {
         // one-release window as the legacy keyring service.
         return map.get(LEGACY_TOKEN_KEY) ?? null;
       }
-      ensureFallbackWarned();
+      markFallbackInUse();
       const map = readFallback();
       if (map.has(GITHUB_TOKEN_KEY)) return map.get(GITHUB_TOKEN_KEY) ?? null;
       return map.get(LEGACY_TOKEN_KEY) ?? null;
@@ -353,7 +361,7 @@ export function createKeychain(opts: KeychainOptions = {}): Keychain {
       );
       if (!r.ok) {
         // Keyring genuinely unavailable — surface the one-time fallback warning.
-        ensureFallbackWarned();
+        warnFallbackWrite();
       } else {
         // Keyring worked, but we still mirror to the file for headless readers.
         // Mark the fallback as in-use WITHOUT emitting the "keychain
@@ -377,7 +385,7 @@ export function createKeychain(opts: KeychainOptions = {}): Keychain {
         const map = readFallback();
         return map.get(VSKILL_TOKEN_KEY) ?? null;
       }
-      ensureFallbackWarned();
+      markFallbackInUse();
       const map = readFallback();
       return map.get(VSKILL_TOKEN_KEY) ?? null;
     },

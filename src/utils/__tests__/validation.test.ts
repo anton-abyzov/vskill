@@ -75,8 +75,61 @@ describe("parseGitHubSource", () => {
     expect(parseGitHubSource("https://github.com/myorg/myskill/")).toEqual({ owner: "myorg", repo: "myskill" });
   });
 
-  it("TC-010: handles tree/branch path segments", () => {
-    expect(parseGitHubSource("https://github.com/myorg/myskill/tree/main/src")).toEqual({ owner: "myorg", repo: "myskill" });
+  it("TC-010: tree/branch URL with path resolves to a skill deep link", () => {
+    expect(parseGitHubSource("https://github.com/myorg/myskill/tree/main/src")).toEqual({
+      owner: "myorg",
+      repo: "myskill",
+      ref: "main",
+      skillPath: "src",
+    });
+  });
+
+  // F1: deep links must pin a single skill instead of the whole repo
+  it("extracts skill path and ref from /tree/<branch>/<path> URLs", () => {
+    expect(
+      parseGitHubSource("https://github.com/anton-abyzov/vskill-test-public-skills-826/tree/main/skills/git-bisect-detective")
+    ).toEqual({
+      owner: "anton-abyzov",
+      repo: "vskill-test-public-skills-826",
+      ref: "main",
+      skillPath: "skills/git-bisect-detective",
+    });
+  });
+
+  it("extracts skill path and ref from /blob/<branch>/<path>/SKILL.md URLs", () => {
+    expect(
+      parseGitHubSource("https://github.com/myorg/myrepo/blob/main/skills/my-skill/SKILL.md")
+    ).toEqual({ owner: "myorg", repo: "myrepo", ref: "main", skillPath: "skills/my-skill" });
+  });
+
+  it("blob URL for root SKILL.md yields empty skillPath", () => {
+    expect(parseGitHubSource("https://github.com/myorg/myrepo/blob/develop/SKILL.md")).toEqual({
+      owner: "myorg",
+      repo: "myrepo",
+      ref: "develop",
+      skillPath: "",
+    });
+  });
+
+  it("preserves non-default branch from tree URLs", () => {
+    expect(parseGitHubSource("https://github.com/myorg/myrepo/tree/develop/skills/x")).toEqual({
+      owner: "myorg",
+      repo: "myrepo",
+      ref: "develop",
+      skillPath: "skills/x",
+    });
+  });
+
+  it("bare repo URL yields no skillPath or ref", () => {
+    expect(parseGitHubSource("https://github.com/myorg/myrepo")).toEqual({ owner: "myorg", repo: "myrepo" });
+  });
+
+  it("tree URL without a path stays a bare repo", () => {
+    expect(parseGitHubSource("https://github.com/myorg/myrepo/tree/main")).toEqual({ owner: "myorg", repo: "myrepo" });
+  });
+
+  it("blob URL not pointing at SKILL.md stays a bare repo", () => {
+    expect(parseGitHubSource("https://github.com/myorg/myrepo/blob/main/README.md")).toEqual({ owner: "myorg", repo: "myrepo" });
   });
 
   it("TC-011: rejects non-GitHub URLs", () => {

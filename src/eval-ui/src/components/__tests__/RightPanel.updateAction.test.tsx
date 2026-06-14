@@ -56,6 +56,13 @@ vi.mock("../CheckNowButton", () => ({
   CheckNowButton: () => null,
 }));
 
+// 0874/0848 T-001: the detail header now resolves repo-visibility via this
+// hook. This suite exercises RightPanel as a pure function (no React render
+// context), so stub the hook to a plain return — it must not call other hooks.
+vi.mock("../../hooks/useSkillRepoVisibility", () => ({
+  useSkillRepoVisibility: () => ({ visibility: "unknown", repo: null }),
+}));
+
 // Replace UpdateAction with a stub so this test only verifies mount ordering.
 vi.mock("../UpdateAction", () => ({
   UpdateAction: ({ skill }: { skill: import("../../types").SkillInfo | null }) => {

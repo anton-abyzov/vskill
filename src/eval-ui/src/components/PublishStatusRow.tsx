@@ -128,6 +128,7 @@ export function PublishStatusRow(props: Props = {}): React.ReactElement | null {
             remoteUrl={status.githubOrigin ?? ""}
             provider={props.provider}
             model={props.model}
+            privacy="public"
           />
         </div>
       </div>

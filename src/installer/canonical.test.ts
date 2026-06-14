@@ -713,6 +713,49 @@ describe("canonical installer", () => {
       }
     });
 
+    // F7 — github-copilot-ext: VS Code reads workspace instructions from
+    // `.github/instructions/`, NOT from the parent of localSkillsDir
+    // (`.github/copilot`). `localInstallRoot` overrides the derived
+    // project-scope root so transformer output lands where the tool reads.
+    describe("localInstallRoot override (F7)", () => {
+      it("honors localInstallRoot for project scope", () => {
+        const agent = makeAgent({
+          localSkillsDir: ".github/copilot/skills",
+          localInstallRoot: ".github",
+        });
+        const root = resolveAgentInstallRoot(agent, {
+          global: false,
+          projectRoot: tempDir,
+        });
+        expect(root).toBe(join(tempDir, ".github"));
+      });
+
+      it("rejects path traversal via localInstallRoot", () => {
+        const agent = makeAgent({
+          localSkillsDir: ".github/copilot/skills",
+          localInstallRoot: "../.evil",
+        });
+        expect(() =>
+          resolveAgentInstallRoot(agent, {
+            global: false,
+            projectRoot: tempDir,
+          }),
+        ).toThrow("Path traversal");
+      });
+
+      it("ignores localInstallRoot for user scope (global root unchanged)", () => {
+        const agent = makeAgent({
+          globalSkillsDir: "~/.config/github-copilot/skills",
+          localInstallRoot: ".github",
+        });
+        const root = resolveAgentInstallRoot(agent, {
+          global: true,
+          projectRoot: tempDir,
+        });
+        expect(root.endsWith(join(".config", "github-copilot"))).toBe(true);
+      });
+    });
+
     it("ignores win32PathOverride for project scope even on win32", () => {
       const agent = makeAgent({
         localSkillsDir: ".cursor/skills",

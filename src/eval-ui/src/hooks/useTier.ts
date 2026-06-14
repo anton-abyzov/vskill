@@ -119,8 +119,13 @@ export function useTier(): UseTierResult {
 /**
  * Centralized pricing URL — single source of truth so all upgrade buttons
  * point at the same target. Per AC-US8-03.
+ *
+ * 0874: honors a Vite override (`VITE_PRICING_URL`) so the demo can point
+ * upgrade CTAs at a local Stripe checkout; defaults to the production
+ * pricing page in normal builds.
  */
-export const PRICING_URL = "https://verified-skill.com/pricing";
+export const PRICING_URL =
+  import.meta.env.VITE_PRICING_URL || "https://verified-skill.com/pricing";
 
 /**
  * Centralized GitHub App install URL. Per AC-US7-02.

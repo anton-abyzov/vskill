@@ -7,7 +7,7 @@
 // scope downgrades to user-scope blob with detail warning (T-016).
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -65,6 +65,25 @@ describe("installSkillToMultipleAgents — dispatch matrix", () => {
     const content = readFileSync(expected, "utf8");
     expect(content).toContain("alwaysApply: false");
     expect(content).toContain(skill.body);
+  });
+
+  it("Tier 2 (github-copilot-ext) project scope writes .github/instructions/<name>.instructions.md (F7)", async () => {
+    const result = await installSkillToMultipleAgents({
+      skill,
+      agentIds: ["github-copilot-ext"],
+      scope: "project",
+      projectRoot: workDir,
+    });
+    expect(result.agents[0].status).toBe("installed");
+    // VS Code reads workspace instructions from `.github/instructions/`,
+    // NOT `.github/copilot/instructions/` (parent of localSkillsDir).
+    const expected = join(workDir, ".github", "instructions", "obsidian-brain.instructions.md");
+    expect(existsSync(expected)).toBe(true);
+    expect(readFileSync(expected, "utf8")).toContain(`applyTo: "**"`);
+    const wrongLocation = join(
+      workDir, ".github", "copilot", "instructions", "obsidian-brain.instructions.md",
+    );
+    expect(existsSync(wrongLocation)).toBe(false);
   });
 
   it("Tier 3 (chatgpt) is `exported` with a blob and NO filesystem write", async () => {
@@ -233,6 +252,29 @@ describe("installSkillToMultipleAgents — Aider conf.yml mutation", () => {
     const content = readFileSync(confPath, "utf8");
     const occurrences = content.match(/obsidian-brain/g) ?? [];
     expect(occurrences).toHaveLength(1);
+  });
+
+  it("project scope writes a project-relative read: path to <project>/.aider.conf.yml", async () => {
+    // Distinct projectRoot so a HOME-path regression cannot accidentally
+    // resolve to the same file (HOME is sandboxed to workDir above).
+    const projDir = join(workDir, "proj");
+    mkdirSync(projDir, { recursive: true });
+    const result = await installSkillToMultipleAgents({
+      skill,
+      agentIds: ["aider"],
+      scope: "project",
+      projectRoot: projDir,
+    });
+    expect(result.agents[0].status).toBe("installed");
+    const convPath = join(projDir, ".aider", "conventions", "obsidian-brain.md");
+    expect(existsSync(convPath)).toBe(true);
+    const confPath = join(projDir, ".aider.conf.yml");
+    expect(existsSync(confPath)).toBe(true);
+    const content = readFileSync(confPath, "utf8");
+    // read: entry must point at the file that was actually written —
+    // relative to the project root, NOT under HOME.
+    expect(content).toContain(".aider/conventions/obsidian-brain.md");
+    expect(content).not.toContain("~/.aider/conventions/obsidian-brain.md");
   });
 
   it("conf.yml with pre-existing read: list is appended to, not replaced", async () => {

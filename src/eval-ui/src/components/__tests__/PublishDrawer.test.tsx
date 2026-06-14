@@ -36,6 +36,20 @@ vi.mock("../../preferences/lib/useDesktopBridge", () => ({
   openExternalUrlViaDesktop: (...a: unknown[]) => mockOpenExternal(...a),
 }));
 
+// 0874 — PublishDrawer now reads useTier (for the privacy chooser gate) and
+// mounts PaywallModal. Stub both so these legacy tests stay provider-free.
+vi.mock("../../hooks/useTier", () => ({
+  useTier: () => ({ isFree: false, isPro: true }),
+  PRICING_URL: "https://verified-skill.com/pricing",
+}));
+vi.mock("../PaywallModal", () => ({
+  PaywallModal: ({ open }: { open: boolean }) => {
+    if (!open) return null;
+    const React = require("react");
+    return React.createElement("div", { "data-testid": "paywall-modal" });
+  },
+}));
+
 import { PublishDrawer } from "../PublishDrawer";
 
 let container: HTMLDivElement;

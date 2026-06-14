@@ -21,6 +21,7 @@ import { CreateSkillInline } from "./CreateSkillInline";
 import { EmptyState } from "./EmptyState";
 import { UpdatesPanel } from "../pages/UpdatesPanel";
 import { DetailHeader } from "./DetailHeader";
+import { useSkillRepoVisibility } from "../hooks/useSkillRepoVisibility";
 import { SkillOverview } from "./SkillOverview";
 import { UpdateAction } from "./UpdateAction";
 import { CheckNowButton } from "./CheckNowButton";
@@ -689,6 +690,20 @@ function WorkspaceTabSync({ active, sub }: { active: DetailTab; sub: string }) {
   return null;
 }
 
+// 0874/0848 T-001: thin React wrapper that resolves the skill's source-repo
+// visibility (via the connected-repos join) and threads it into DetailHeader
+// so a private-repo skill mounts the amber PrivateBadge. Kept as a real
+// component (not inlined into the plain `renderSkillDetail` helper) so the
+// hook call is legal; `renderSkillDetail` mounts it as JSX.
+function DetailHeaderWithPrivacy({ skill }: { skill: SkillInfo }) {
+  const { visibility, repo } = useSkillRepoVisibility(skill.repoUrl ?? null);
+  return DetailHeader({
+    skill,
+    repoVisibility: visibility,
+    tenantName: repo?.ownerLogin ?? null,
+  });
+}
+
 function renderSkillDetail(
   skill: SkillInfo,
   active: DetailTab,
@@ -819,7 +834,9 @@ function renderSkillDetail(
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-canvas)" }}>
       <div style={{ padding: 16, paddingBottom: 12 }}>
-        {DetailHeader({ skill })}
+        {/* 0874/0848 T-001: wrapper resolves repo-visibility → mounts the
+            PrivateBadge on the header for private-repo skills. */}
+        <DetailHeaderWithPrivacy skill={skill} />
       </div>
       <UpdateAction skill={skill} />
       {installedBanner}

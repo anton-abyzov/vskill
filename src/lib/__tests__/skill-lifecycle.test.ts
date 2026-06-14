@@ -158,6 +158,42 @@ describe("buildPerAgentReport", () => {
     expect(report[0].line).toMatch(/auto-discover/i);
   });
 
+  // F5: `vskill remove` reports actual file deletion per agent ------------
+  it("F5: 'removed' action emits removed wording for both surface classes", () => {
+    const agents = [
+      agent({ id: "claude-code", displayName: "Claude Code" }),
+      agent({ id: "cursor", displayName: "Cursor" }),
+    ];
+    const report = buildPerAgentReport({
+      skill: "foo",
+      scope: "user",
+      action: "removed",
+      agents,
+    });
+    for (const r of report) {
+      expect(r.action).toBe("removed");
+      expect(r.line).toMatch(/removed/i);
+    }
+  });
+
+  it("F5: actionFor overrides the base action per agent", () => {
+    const agents = [
+      agent({ id: "claude-code", displayName: "Claude Code" }),
+      agent({ id: "cursor", displayName: "Cursor" }),
+    ];
+    const report = buildPerAgentReport({
+      skill: "foo",
+      scope: "user",
+      action: "not-applicable",
+      actionFor: (a) => (a.id === "cursor" ? "removed" : "not-applicable"),
+      agents,
+    });
+    expect(report.find((r) => r.id === "cursor")!.action).toBe("removed");
+    expect(report.find((r) => r.id === "claude-code")!.action).toBe(
+      "not-applicable",
+    );
+  });
+
   it("returns an empty array when given no agents", () => {
     const report = buildPerAgentReport({
       skill: "foo",

@@ -31,6 +31,20 @@ vi.mock("../../preferences/lib/useDesktopBridge", () => ({
   openExternalUrlViaDesktop: (...a: unknown[]) => mockOpenExternal(...a),
 }));
 
+// 0874 — the dirty-tree path mounts PublishDrawer, which now reads useTier and
+// mounts PaywallModal. Stub both so this test stays provider-free.
+vi.mock("../../hooks/useTier", () => ({
+  useTier: () => ({ isFree: false, isPro: true }),
+  PRICING_URL: "https://verified-skill.com/pricing",
+}));
+vi.mock("../PaywallModal", () => ({
+  PaywallModal: ({ open }: { open: boolean }) => {
+    if (!open) return null;
+    const React = require("react");
+    return React.createElement("div", { "data-testid": "paywall-modal" });
+  },
+}));
+
 import { PublishButton } from "../PublishButton";
 
 let container: HTMLDivElement;

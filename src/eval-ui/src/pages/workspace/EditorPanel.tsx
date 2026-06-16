@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useWorkspace } from "./WorkspaceContext";
+import { useStudio } from "../../StudioContext";
 import { useConfig } from "../../ConfigContext";
 import { parseFrontmatter } from "../../utils/parseFrontmatter";
 import { renderMarkdown } from "../../utils/renderMarkdown";
@@ -81,6 +82,16 @@ function IconSparkle({ size = 15 }: { size?: number }) {
 export function EditorPanel() {
   const { state, dispatch, saveContent, isReadOnly } = useWorkspace();
   const { plugin, skill, skillContent, isDirty, improveTarget, aiEditOpen } = state;
+  // 0875 — repo-relative SKILL.md path for the active skill (e.g.
+  // "skills/greet-anton/SKILL.md"). Without this, publishing a skill that lives
+  // in a subdirectory submits with no skillPath and the registry looks at the
+  // repo root, failing with "SKILL.md not found in the repository". The
+  // SkillInfo list (with skillPath) lives in the Studio context, the same
+  // source RightPanel/DetailHeader use.
+  const { state: studioState } = useStudio();
+  const activeSkillPath =
+    studioState.skills.find((s) => s.plugin === plugin && s.skill === skill)?.skillPath ??
+    undefined;
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [saving, setSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -511,6 +522,7 @@ export function EditorPanel() {
                 provider={config?.provider}
                 model={config?.model}
                 skillName={skill || undefined}
+                skillPath={activeSkillPath}
                 privacy="public"
               />
             )}

@@ -1417,6 +1417,16 @@ export const api = {
     remoteUrl: string | null;
     stdout: string;
     stderr: string;
+    // 0875 — auto-reconcile fields. `reconciled` is set on success when a
+    // non-fast-forward push was rebased + retried (HTTP 200). `conflict` is set
+    // when the rebase hit a merge conflict — this is ALSO an HTTP 200 response
+    // (success:false) so fetchJson resolves it instead of throwing, letting the
+    // UI surface the conflicted files rather than a generic error toast.
+    reconciled?: boolean;
+    conflict?: boolean;
+    reason?: string;
+    conflictedFiles?: string[];
+    error?: string;
   }> {
     return fetchJson("/api/git/publish", {
       method: "POST",

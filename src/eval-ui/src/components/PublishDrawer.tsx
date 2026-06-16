@@ -20,11 +20,12 @@
 //   link. Failure: inline error block, drawer stays open.
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type SubmitToQueueResult } from "../api";
 import { buildSubmitUrlFromRemote, normalizeRemoteUrl } from "../utils/normalizeRemoteUrl";
 import { openExternalUrlViaDesktop } from "../preferences/lib/useDesktopBridge";
 import { useTier } from "../hooks/useTier";
+import { useAgentCatalog } from "../hooks/useAgentCatalog";
 import { PaywallModal } from "./PaywallModal";
 
 type Mode = "manual" | "ai";
@@ -113,11 +114,33 @@ export function PublishDrawer({
   // open so the user sees confirmation. `null` until the first submit settles.
   const [outcome, setOutcome] = useState<SubmitOutcome | null>(null);
 
+  // 0875 WS2 — resolve the studio's selected DEFAULT model from the SAME
+  // source the header picker (AgentModelPicker) reads, so Generate-with-AI
+  // writes the commit message with the model the user actually selected and
+  // can SEE which model that is. Falls back to the config props (which may be
+  // stale) when the catalog hasn't loaded yet.
+  const { catalog } = useAgentCatalog();
+  const activeModelInfo = useMemo(() => {
+    if (!catalog?.activeAgent || !catalog.activeModel) return null;
+    const agent = catalog.agents.find((a) => a.id === catalog.activeAgent);
+    const entry = agent?.models.find((m) => m.id === catalog.activeModel);
+    return {
+      provider: catalog.activeAgent,
+      model: catalog.activeModel,
+      displayName: entry?.displayName ?? catalog.activeModel,
+    };
+  }, [catalog]);
+  const effectiveProvider = activeModelInfo?.provider ?? provider;
+  const effectiveModel = activeModelInfo?.model ?? model;
+
   const generate = useCallback(async () => {
     setGenerating(true);
     setGenerateError(null);
     try {
-      const result = await api.gitCommitMessage({ provider, model });
+      const result = await api.gitCommitMessage({
+        provider: effectiveProvider,
+        model: effectiveModel,
+      });
       setMessage(result.message);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -125,7 +148,7 @@ export function PublishDrawer({
     } finally {
       setGenerating(false);
     }
-  }, [provider, model]);
+  }, [effectiveProvider, effectiveModel]);
 
   // Auto-fire generation only when the drawer opens directly in AI mode AND
   // there is no message yet (e.g. first mount). Manual mode never auto-fires.
@@ -158,9 +181,31 @@ export function PublishDrawer({
     try {
       // Step 1 — commit + push (server-side `git add -A && commit && push`).
       const result = await api.gitPublish({ commitMessage: trimmed });
+
+      // 0875 — a non-fast-forward push that couldn't be rebased cleanly comes
+      // back as HTTP 200 with { success:false, conflict:true } (so fetchJson
+      // resolves it instead of throwing). Surface the conflicted files inline
+      // — not the generic toast — so the user knows exactly what to resolve
+      // before publishing again.
+      if (result.conflict) {
+        const files = result.conflictedFiles ?? [];
+        const detail =
+          result.error ??
+          (files.length > 0
+            ? `Remote has changes that conflict with yours in: ${files.join(", ")}. ` +
+              "Pull and resolve manually, then publish again."
+            : "Remote has changes that conflict with yours. Pull and resolve manually, then publish again.");
+        setPublishError(detail);
+        emitToast("Publish blocked: remote conflict — resolve and retry", "error");
+        return;
+      }
+
       const effectiveRemote = result.remoteUrl ?? remoteUrl;
       const shortSha = (result.commitSha ?? "").slice(0, 7);
       const branch = result.branch ?? "";
+      // 0875 — when a non-fast-forward push was auto-rebased and retried, note
+      // it so the success messaging reflects that we reconciled with the remote.
+      const reconciledNote = result.reconciled ? " (reconciled with remote)" : "";
 
       // Step 2 — submit to the queue IN-APP when we know the skill identity.
       // Without a skillName we can't form a valid POST body, so fall back to
@@ -176,7 +221,7 @@ export function PublishDrawer({
           // and surfacing "Publish failed" even though the push SUCCEEDED.
           // Guard it and fall back to the bare submit page instead.
           setOutcome({ ok: false, websiteUrl: websiteSubmitUrl(effectiveRemote) });
-          emitToast(`Pushed ${shortSha} on ${branch} — open the website to submit`, "info");
+          emitToast(`Pushed ${shortSha} on ${branch}${reconciledNote} — open the website to submit`, "info");
           return;
         }
         let submitRes: SubmitToQueueResult;
@@ -197,7 +242,7 @@ export function PublishDrawer({
           // ?repo= URL param so the user can sign in there and finish in one
           // click (the prior browser-submit UX).
           setOutcome({ ok: false, websiteUrl: websiteSubmitUrl(effectiveRemote) });
-          emitToast(`Pushed ${shortSha} on ${branch} — sign in or finish on the website to submit`, "info");
+          emitToast(`Pushed ${shortSha} on ${branch}${reconciledNote} — sign in or finish on the website to submit`, "info");
           return;
         }
         const submitUrl = `https://verified-skill.com/submit?repo=${encodeURIComponent(repoUrl)}`;
@@ -210,7 +255,7 @@ export function PublishDrawer({
         // guard: a non-github remote must not turn a successful push into
         // "Publish failed".
         setOutcome({ ok: false, websiteUrl: websiteSubmitUrl(effectiveRemote) });
-        emitToast(`Pushed ${shortSha} on ${branch} — open the website to submit`, "info");
+        emitToast(`Pushed ${shortSha} on ${branch}${reconciledNote} — open the website to submit`, "info");
       }
     } catch (err) {
       const summary = err instanceof Error ? err.message : String(err);
@@ -463,6 +508,24 @@ export function PublishDrawer({
               outline: "none",
             }}
           />
+
+          {/* 0875 WS2 — show WHICH model writes the commit message. Resolved
+              from the studio's active catalog selection (same as the header
+              picker), so it stays in sync with what the user picked. Only in
+              AI mode, only when the catalog has surfaced an active model. */}
+          {mode === "ai" && activeModelInfo && (
+            <div
+              data-testid="publish-ai-model"
+              style={{
+                marginTop: 10,
+                fontSize: 11,
+                color: MODAL_TEXT_MUTED,
+                fontFamily: "var(--font-mono, monospace)",
+              }}
+            >
+              Using {activeModelInfo.displayName}
+            </div>
+          )}
 
           {/* 0784 hotfix — explicit Generate button so the user doesn't have
               to discover that switching modes triggers generation. Visible

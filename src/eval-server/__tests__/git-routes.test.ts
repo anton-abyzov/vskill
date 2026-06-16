@@ -249,11 +249,13 @@ describe("POST /api/git/publish", () => {
     expect(body.stdout).toContain("Everything up-to-date");
   });
 
-  it("returns HTTP 500 with success=false + stderr when push exits non-zero", async () => {
+  it("returns HTTP 500 with success=false + stderr when push exits non-zero (non-reconcilable error)", async () => {
+    // A failure that is NOT a non-fast-forward rejection (e.g. auth) must still
+    // surface as a hard 500 with the raw stderr — no rebase reconciliation.
     queueProcess({
       stdout: "",
-      stderr: "! [rejected]        main -> main (non-fast-forward)\n",
-      exitCode: 1,
+      stderr: "fatal: Authentication failed for 'https://github.com/o/r.git/'\n",
+      exitCode: 128,
     });
 
     const h = makePostGitPublishHandler(root);
@@ -264,7 +266,7 @@ describe("POST /api/git/publish", () => {
     expect(res.statusCode).toBe(500);
     const body = res.json as { success: boolean; stderr: string };
     expect(body.success).toBe(false);
-    expect(body.stderr).toContain("non-fast-forward");
+    expect(body.stderr).toContain("Authentication failed");
   });
 
   it("kills subprocess and returns timeout error when push exceeds GIT_PUBLISH_TIMEOUT_MS", async () => {
@@ -328,10 +330,11 @@ describe("POST /api/git/publish", () => {
   it("body.error is present and contains stderr message on push failure (fetchJson regression)", async () => {
     // This test validates the contract between eval-server and the UI's fetchJson:
     // non-2xx responses MUST include `error` so the error toast shows real stderr.
+    // Uses a non-reconcilable failure (a non-fast-forward would now auto-rebase).
     queueProcess({
       stdout: "",
-      stderr: "! [rejected]        main -> main (non-fast-forward)\n",
-      exitCode: 1,
+      stderr: "fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host\n",
+      exitCode: 128,
     });
 
     const h = makePostGitPublishHandler(root);
@@ -344,9 +347,124 @@ describe("POST /api/git/publish", () => {
     expect(body.success).toBe(false);
     // `error` field must be present and contain actionable text (not "HTTP 500")
     expect(typeof body.error).toBe("string");
-    expect(body.error).toContain("non-fast-forward");
+    expect(body.error).toContain("Could not resolve host");
     // stderr is also preserved for diagnostics
-    expect(body.stderr).toContain("non-fast-forward");
+    expect(body.stderr).toContain("Could not resolve host");
+  });
+
+  // -------------------------------------------------------------------------
+  // 0875 — auto-reconcile non-fast-forward push (pull --rebase --autostash).
+  // -------------------------------------------------------------------------
+
+  it("auto-reconciles a non-fast-forward push: pull --rebase ok → retry push ok → success+reconciled", async () => {
+    // 1) push → rejected (non-fast-forward)
+    queueProcess({
+      stdout: "",
+      stderr: "! [rejected]        main -> main (non-fast-forward)\nhint: Updates were rejected because the tip of your current branch is behind\n",
+      exitCode: 1,
+    });
+    // 2) rev-parse --abbrev-ref HEAD → branch name
+    queueProcess({ stdout: "main\n", stderr: "", exitCode: 0 });
+    // 3) pull --rebase --autostash origin main → ok
+    queueProcess({ stdout: "Successfully rebased and updated refs/heads/main.\n", stderr: "", exitCode: 0 });
+    // 4) retry push → ok
+    queueProcess({ stdout: "To github.com:o/r.git\n   abc..def  main -> main\n", stderr: "", exitCode: 0 });
+    // 5) rev-parse HEAD, 6) remote get-url, 7) rev-parse abbrev-ref (success metadata)
+    queueProcess({ stdout: "def5678\n", stderr: "", exitCode: 0 });
+    queueProcess({ stdout: "https://github.com/o/r.git\n", stderr: "", exitCode: 0 });
+    queueProcess({ stdout: "main\n", stderr: "", exitCode: 0 });
+
+    const h = makePostGitPublishHandler(root);
+    const req = new FakeReq("POST", "/api/git/publish", {});
+    const res = new FakeRes();
+    await h(req as never, res as never);
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json as { success: boolean; reconciled: boolean; commitSha: string; branch: string };
+    expect(body.success).toBe(true);
+    expect(body.reconciled).toBe(true);
+    expect(body.commitSha).toBe("def5678");
+    expect(body.branch).toBe("main");
+
+    // The reconcile path must invoke `git pull --rebase --autostash origin main`.
+    const pullCall = spawnMock.mock.calls.find(
+      (c) => Array.isArray(c[1]) && (c[1] as string[])[0] === "pull",
+    ) as [string, string[], unknown] | undefined;
+    expect(pullCall).toBeDefined();
+    expect(pullCall![1]).toEqual(["pull", "--rebase", "--autostash", "origin", "main"]);
+  });
+
+  it("returns conflict=true + conflictedFiles when pull --rebase conflicts (and aborts the rebase)", async () => {
+    // 1) push → rejected (non-fast-forward)
+    queueProcess({
+      stdout: "",
+      stderr: "! [rejected]        main -> main (fetch first)\nUpdates were rejected because the remote contains work that you do not have locally\n",
+      exitCode: 1,
+    });
+    // 2) rev-parse --abbrev-ref HEAD → branch name
+    queueProcess({ stdout: "main\n", stderr: "", exitCode: 0 });
+    // 3) pull --rebase --autostash origin main → CONFLICT
+    queueProcess({
+      stdout: "Auto-merging skill.md\nCONFLICT (content): Merge conflict in skill.md\n",
+      stderr: "error: could not apply abc123... edit skill\n",
+      exitCode: 1,
+    });
+    // 4) diff --name-only --diff-filter=U → conflicted files (collected BEFORE abort)
+    queueProcess({ stdout: "skill.md\nREADME.md\n", stderr: "", exitCode: 0 });
+    // 5) rebase --abort → ok (best-effort restore)
+    queueProcess({ stdout: "", stderr: "", exitCode: 0 });
+
+    const h = makePostGitPublishHandler(root);
+    const req = new FakeReq("POST", "/api/git/publish", {});
+    const res = new FakeRes();
+    await h(req as never, res as never);
+
+    const body = res.json as {
+      success: boolean;
+      conflict: boolean;
+      reason: string;
+      conflictedFiles: string[];
+      error: string;
+    };
+    expect(body.success).toBe(false);
+    expect(body.conflict).toBe(true);
+    expect(body.reason).toBe("rebase_conflict");
+    expect(body.conflictedFiles).toEqual(["skill.md", "README.md"]);
+    expect(body.error).toContain("skill.md");
+
+    // `git rebase --abort` MUST have been called to restore a clean tree.
+    const abortCall = spawnMock.mock.calls.find(
+      (c) => Array.isArray(c[1]) && (c[1] as string[])[0] === "rebase" && (c[1] as string[])[1] === "--abort",
+    );
+    expect(abortCall).toBeDefined();
+  });
+
+  it("does NOT pull/rebase when the first push succeeds (happy path unchanged)", async () => {
+    // push, rev-parse HEAD, remote get-url, rev-parse abbrev-ref — no pull/rebase.
+    queueProcess({ stdout: "Everything up-to-date\n", stderr: "", exitCode: 0 });
+    queueProcess({ stdout: "abc1234\n", stderr: "", exitCode: 0 });
+    queueProcess({ stdout: "https://github.com/o/r.git\n", stderr: "", exitCode: 0 });
+    queueProcess({ stdout: "main\n", stderr: "", exitCode: 0 });
+
+    const h = makePostGitPublishHandler(root);
+    const req = new FakeReq("POST", "/api/git/publish", {});
+    const res = new FakeRes();
+    await h(req as never, res as never);
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json as { success: boolean; reconciled?: boolean };
+    expect(body.success).toBe(true);
+    // No reconciliation occurred — `reconciled` is absent/falsy on the clean path.
+    expect(body.reconciled).toBeFalsy();
+    // No pull and no rebase were ever spawned.
+    const sawPull = spawnMock.mock.calls.some(
+      (c) => Array.isArray(c[1]) && (c[1] as string[])[0] === "pull",
+    );
+    const sawRebase = spawnMock.mock.calls.some(
+      (c) => Array.isArray(c[1]) && (c[1] as string[])[0] === "rebase",
+    );
+    expect(sawPull).toBe(false);
+    expect(sawRebase).toBe(false);
   });
 
   it("passes cwd=root to spawn so git operates in the workspace", async () => {

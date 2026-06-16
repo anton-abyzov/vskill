@@ -354,7 +354,7 @@ export function makePostGitPublishHandler(rootArg: string | (() => string)) {
       }
     }
 
-    const push = await runGitCommand(["push"], root, timeout);
+    let push = await runGitCommand(["push"], root, timeout);
 
     if (push.timedOut) {
       const timeoutMsg = "timeout: git push exceeded GIT_PUBLISH_TIMEOUT_MS";
@@ -365,6 +365,61 @@ export function makePostGitPublishHandler(rootArg: string | (() => string)) {
       );
       return;
     }
+
+    // 0875 — auto-reconcile a non-fast-forward rejection. When origin/<branch>
+    // has moved ahead, `git push` aborts with a "non-fast-forward" / "[rejected]"
+    // / "fetch first" / "Updates were rejected" message and the user is stuck.
+    // Instead of dumping that raw stderr, pull --rebase --autostash and retry the
+    // push so a clean, conflict-free divergence resolves transparently.
+    let reconciled = false;
+    if (push.exitCode !== 0 && isNonFastForward(push)) {
+      const branchProbe = await runGitCommand(["rev-parse", "--abbrev-ref", "HEAD"], root, timeout);
+      const branch = branchProbe.exitCode === 0 ? branchProbe.stdout.trim() : "";
+      if (branch && branch !== "HEAD") {
+        const pull = await runGitCommand(
+          ["pull", "--rebase", "--autostash", "origin", branch],
+          root,
+          timeout,
+        );
+        if (pull.exitCode === 0) {
+          // Rebase landed cleanly — retry the push. If it still fails we fall
+          // through to the generic error handler below with the retry's output.
+          push = await runGitCommand(["push"], root, timeout);
+          if (push.exitCode === 0) reconciled = true;
+        } else {
+          // Rebase conflicted (or otherwise failed). Collect the conflicted
+          // paths BEFORE aborting (abort wipes the conflict state), then run
+          // `git rebase --abort` best-effort to restore a clean working tree.
+          const conflictedProbe = await runGitCommand(
+            ["diff", "--name-only", "--diff-filter=U"],
+            root,
+            timeout,
+          );
+          const conflictedFiles = conflictedProbe.exitCode === 0
+            ? conflictedProbe.stdout.split("\n").map((l) => l.trim()).filter(Boolean)
+            : parseConflictFilesFromPull(pull.stdout);
+          await runGitCommand(["rebase", "--abort"], root, timeout); // best-effort
+          const fileList = conflictedFiles.length > 0 ? conflictedFiles.join(", ") : "the remote branch";
+          sendJson(
+            res,
+            {
+              success: false,
+              conflict: true,
+              reason: "rebase_conflict",
+              conflictedFiles,
+              error:
+                `Remote has changes that conflict with yours in: ${fileList}. ` +
+                "Pull and resolve manually, then publish again.",
+              stdout: pull.stdout,
+              stderr: pull.stderr,
+            },
+            200,
+          );
+          return;
+        }
+      }
+    }
+
     if (push.exitCode !== 0) {
       // `error` is read by fetchJson on the UI side to surface a human-readable
       // message in the error toast. Prefer stderr (git push writes there on
@@ -389,12 +444,34 @@ export function makePostGitPublishHandler(rootArg: string | (() => string)) {
         commitSha: sha.exitCode === 0 ? sha.stdout.trim() : null,
         branch: branchResult.exitCode === 0 ? branchResult.stdout.trim() : null,
         remoteUrl: remote.exitCode === 0 ? remote.stdout.trim() : null,
+        // 0875 — set only when a non-fast-forward push was rebased + retried so
+        // the UI can note "reconciled with remote". Absent on the clean path.
+        ...(reconciled ? { reconciled: true } : {}),
         stdout: push.stdout,
         stderr: push.stderr,
       },
       200,
     );
   };
+}
+
+// 0875 — a non-fast-forward push rejection. git writes the marker to stderr on
+// push, but we also scan stdout for robustness across git versions/locales.
+const NON_FAST_FORWARD_RE = /non-fast-forward|\[rejected\]|fetch first|Updates were rejected/i;
+function isNonFastForward(push: GitResult): boolean {
+  return NON_FAST_FORWARD_RE.test(`${push.stderr}\n${push.stdout}`);
+}
+
+// Fallback conflict-file extraction from `git pull --rebase` output when the
+// `git diff --diff-filter=U` probe is unavailable. Parses "CONFLICT (...): ...
+// in <file>" lines that git prints during a failed rebase.
+function parseConflictFilesFromPull(output: string): string[] {
+  const files: string[] = [];
+  for (const line of output.split("\n")) {
+    const m = line.match(/^CONFLICT \([^)]*\):.*?\bin\s+(.+?)\s*$/);
+    if (m) files.push(m[1].trim());
+  }
+  return files;
 }
 
 // ---------------------------------------------------------------------------

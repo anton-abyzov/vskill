@@ -390,6 +390,109 @@ describe("PublishDrawer — in-app submit (0856)", () => {
     expect(ev.detail.message).toContain("hook failed");
   });
 
+  it("rebase_conflict (HTTP 200 conflict:true): renders conflicted files inline + 'remote conflict' toast, no submit", async () => {
+    // 0875 AC-US1-03 — a non-fast-forward push that couldn't rebase cleanly comes
+    // back as { success:false, conflict:true, reason:"rebase_conflict", conflictedFiles }.
+    // The drawer must surface the conflicted files INLINE (publish-error-push), not
+    // close, not submit, and emit a conflict-framed error toast.
+    mockGitCommitMessage.mockResolvedValueOnce({ message: "feat: x" });
+    mockGitPublish.mockResolvedValueOnce({
+      success: false,
+      conflict: true,
+      reason: "rebase_conflict",
+      conflictedFiles: ["skill.md", "README.md"],
+      error: "Remote has changes that conflict with yours in: skill.md, README.md. Pull and resolve manually, then publish again.",
+      stdout: "",
+      stderr: "",
+    });
+
+    await act(async () => {
+      root.render(
+        <PublishDrawer remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" skillName="greet" />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+
+    expect(mockSubmitToQueue).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    const inline = container.querySelector('[data-testid="publish-error-push"]');
+    expect(inline).toBeTruthy();
+    expect(inline?.textContent).toContain("skill.md");
+    expect(inline?.textContent).toContain("README.md");
+    const toastCall = dispatchEventSpy.mock.calls.find((c) => (c[0] as Event).type === "studio:toast");
+    const ev = toastCall![0] as CustomEvent<{ severity: string; message: string }>;
+    expect(ev.detail.severity).toBe("error");
+    expect(ev.detail.message.toLowerCase()).toContain("remote conflict");
+  });
+
+  it("rebase_failed (no conflicted files): toast says 'could not rebase' — NOT framed as a conflict", async () => {
+    // 0875 — a non-conflict rebase failure (network/auth/autostash) returns
+    // reason:"rebase_failed" with no conflicted files. The toast must not claim a
+    // content conflict; the inline body uses the server's error message.
+    mockGitCommitMessage.mockResolvedValueOnce({ message: "feat: x" });
+    mockGitPublish.mockResolvedValueOnce({
+      success: false,
+      conflict: true,
+      reason: "rebase_failed",
+      conflictedFiles: [],
+      error: "Could not rebase onto the remote (no conflicting files detected — this may be a network, auth, or autostash problem). Pull manually and try again.",
+      stdout: "",
+      stderr: "",
+    });
+
+    await act(async () => {
+      root.render(
+        <PublishDrawer remoteUrl="git@github.com:o/r.git" fileCount={1} onClose={onClose} defaultMode="ai" skillName="greet" />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+
+    const inline = container.querySelector('[data-testid="publish-error-push"]');
+    expect(inline?.textContent?.toLowerCase()).toContain("could not rebase");
+    const toastCall = dispatchEventSpy.mock.calls.find((c) => (c[0] as Event).type === "studio:toast");
+    const ev = toastCall![0] as CustomEvent<{ severity: string; message: string }>;
+    expect(ev.detail.severity).toBe("error");
+    expect(ev.detail.message.toLowerCase()).toContain("could not rebase");
+    expect(ev.detail.message.toLowerCase()).not.toContain("remote conflict");
+  });
+
+  it("reconciled push (reconciled:true): success messaging notes '(reconciled with remote)'", async () => {
+    // 0875 AC-US1-03 — when a non-fast-forward push was auto-rebased and retried,
+    // the success toast must note that we reconciled with the remote.
+    mockGitCommitMessage.mockResolvedValueOnce({ message: "feat: x" });
+    mockGitPublish.mockResolvedValueOnce({ ...PUBLISH_OK, reconciled: true });
+    // Make the in-app submit 401 so we take the website-fallback info-toast path
+    // (which echoes the reconciledNote), rather than the created-outcome path.
+    mockSubmitToQueue.mockRejectedValueOnce(new Error("401 unauthorized"));
+
+    await act(async () => {
+      root.render(
+        <PublishDrawer remoteUrl="git@github.com:owner/repo.git" fileCount={1} onClose={onClose} defaultMode="ai" skillName="greet" />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+
+    const infoToast = dispatchEventSpy.mock.calls
+      .map((c) => c[0])
+      .filter((e): e is CustomEvent => e instanceof CustomEvent && e.type === "studio:toast")
+      .map((e) => e.detail as { severity: string; message: string })
+      .find((d) => d.severity === "info");
+    expect(infoToast).toBeTruthy();
+    expect(infoToast!.message).toContain("reconciled with remote");
+  });
+
   it("non-github remote + skillName: push succeeds → website-fallback outcome, NOT 'Publish failed'", async () => {
     // GitLab remote → normalizeRemoteUrl throws inside the skillName branch.
     // The push already succeeded, so the drawer must degrade to the website-

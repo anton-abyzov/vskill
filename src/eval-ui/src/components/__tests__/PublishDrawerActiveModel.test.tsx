@@ -209,7 +209,11 @@ describe("PublishDrawer — active default model (0875 WS2)", () => {
       provider: "claude-cli",
       model: "sonnet",
     });
-    // No active model resolvable → no "Using" line.
-    expect(container.querySelector('[data-testid="publish-ai-model"]')).toBeNull();
+    // 0875 AC-US2-03 — AI mode ALWAYS shows which model writes the message. During
+    // the pre-catalog-load window the indicator falls back to the effective model
+    // id (the config prop) rather than rendering blank.
+    const indicator = container.querySelector('[data-testid="publish-ai-model"]');
+    expect(indicator).not.toBeNull();
+    expect(indicator?.textContent).toContain("sonnet");
   });
 });

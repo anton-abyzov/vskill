@@ -132,6 +132,11 @@ export function PublishDrawer({
   }, [catalog]);
   const effectiveProvider = activeModelInfo?.provider ?? provider;
   const effectiveModel = activeModelInfo?.model ?? model;
+  // 0875 WS2 — the human-readable label for the indicator. Prefer the catalog's
+  // displayName; before the catalog loads (or for a model with no catalog entry)
+  // fall back to the raw effective model id so AI mode ALWAYS shows which model
+  // writes the message (AC-US2-03), never a blank during the pre-load window.
+  const effectiveModelLabel = activeModelInfo?.displayName ?? effectiveModel;
 
   const generate = useCallback(async () => {
     setGenerating(true);
@@ -196,7 +201,15 @@ export function PublishDrawer({
               "Pull and resolve manually, then publish again."
             : "Remote has changes that conflict with yours. Pull and resolve manually, then publish again.");
         setPublishError(detail);
-        emitToast("Publish blocked: remote conflict — resolve and retry", "error");
+        // 0875 — keep the toast honest about WHY. A true content conflict
+        // (reason="rebase_conflict") is "remote conflict"; a non-conflict rebase
+        // failure (reason="rebase_failed" — network/auth/autostash) is not a
+        // conflict and shouldn't be framed as one.
+        const toast =
+          result.reason === "rebase_failed"
+            ? "Publish blocked: could not rebase onto the remote — pull manually and retry"
+            : "Publish blocked: remote conflict — resolve and retry";
+        emitToast(toast, "error");
         return;
       }
 
@@ -511,9 +524,10 @@ export function PublishDrawer({
 
           {/* 0875 WS2 — show WHICH model writes the commit message. Resolved
               from the studio's active catalog selection (same as the header
-              picker), so it stays in sync with what the user picked. Only in
-              AI mode, only when the catalog has surfaced an active model. */}
-          {mode === "ai" && activeModelInfo && (
+              picker), so it stays in sync with what the user picked. Shown for
+              the whole AI mode — using the effective label so the pre-catalog-
+              load window still shows the (fallback) model instead of a blank. */}
+          {mode === "ai" && effectiveModelLabel && (
             <div
               data-testid="publish-ai-model"
               style={{
@@ -523,7 +537,7 @@ export function PublishDrawer({
                 fontFamily: "var(--font-mono, monospace)",
               }}
             >
-              Using {activeModelInfo.displayName}
+              Using {effectiveModelLabel}
             </div>
           )}
 

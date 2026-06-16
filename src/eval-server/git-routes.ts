@@ -12,6 +12,8 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { isAbsolute, join, dirname } from "node:path";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 
@@ -51,7 +53,15 @@ function runGitCommand(
     // enhancedSpawnEnv() restores a full PATH so git AND its hooks (notably the
     // Git-LFS `pre-push` hook shelling out to `git-lfs`) resolve even when the
     // studio process was Dock/Spotlight-launched with a truncated PATH.
-    const proc = spawn("git", args as string[], { cwd, env: enhancedSpawnEnv() });
+    //
+    // GIT_TERMINAL_PROMPT=0 — this is a headless server context with no TTY, so
+    // a credentials-required push/pull (incl. the 0875 auto-reconcile
+    // pull --rebase / retry push) must FAIL FAST instead of blocking the whole
+    // GIT_PUBLISH_TIMEOUT_MS window on an invisible interactive prompt.
+    const proc = spawn("git", args as string[], {
+      cwd,
+      env: { ...enhancedSpawnEnv(), GIT_TERMINAL_PROMPT: "0" },
+    });
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -328,6 +338,19 @@ export function makePostGitPublishHandler(rootArg: string | (() => string)) {
 
     const timeout = getTimeoutMs();
 
+    // 0875 — mid-rebase pre-flight guard. If a PREVIOUS auto-reconcile left the
+    // repo mid-rebase (e.g. a `git rebase --abort` that itself failed), running
+    // `git add -A && git commit` here would commit onto an interrupted-rebase
+    // tree and make things worse. Detect that state up front and bail with a
+    // clear, actionable message instead.
+    if (await isMidRebase(root, timeout)) {
+      const msg =
+        "A previous publish left this repository mid-rebase. Run `git rebase --abort` " +
+        "(or finish the rebase) in the skill folder, then publish again.";
+      sendJson(res, { success: false, error: msg, stderr: msg, reason: "mid_rebase" }, 409);
+      return;
+    }
+
     // Optional commit phase. We only commit when the caller supplied a message
     // AND there's something to commit. A clean tree with a stray message is a
     // no-op (we still push, in case there are unpushed commits).
@@ -385,11 +408,23 @@ export function makePostGitPublishHandler(rootArg: string | (() => string)) {
           // Rebase landed cleanly — retry the push. If it still fails we fall
           // through to the generic error handler below with the retry's output.
           push = await runGitCommand(["push"], root, timeout);
+          if (push.timedOut) {
+            // Mirror the first-push timeout handling — a bare fall-through would
+            // hit the generic handler with an empty `error` and surface a
+            // detail-less "Publish failed." in the UI.
+            const timeoutMsg = "timeout: git push (retry after rebase) exceeded GIT_PUBLISH_TIMEOUT_MS";
+            sendJson(
+              res,
+              { success: false, error: timeoutMsg, stdout: push.stdout, stderr: timeoutMsg },
+              500,
+            );
+            return;
+          }
           if (push.exitCode === 0) reconciled = true;
         } else {
           // Rebase conflicted (or otherwise failed). Collect the conflicted
           // paths BEFORE aborting (abort wipes the conflict state), then run
-          // `git rebase --abort` best-effort to restore a clean working tree.
+          // `git rebase --abort` to restore a clean working tree.
           const conflictedProbe = await runGitCommand(
             ["diff", "--name-only", "--diff-filter=U"],
             root,
@@ -398,18 +433,33 @@ export function makePostGitPublishHandler(rootArg: string | (() => string)) {
           const conflictedFiles = conflictedProbe.exitCode === 0
             ? conflictedProbe.stdout.split("\n").map((l) => l.trim()).filter(Boolean)
             : parseConflictFilesFromPull(pull.stdout);
-          await runGitCommand(["rebase", "--abort"], root, timeout); // best-effort
-          const fileList = conflictedFiles.length > 0 ? conflictedFiles.join(", ") : "the remote branch";
+          const abort = await runGitCommand(["rebase", "--abort"], root, timeout);
+          // If the abort itself failed, the repo is left mid-rebase — the next
+          // publish would re-enter auto-reconcile against a dirty state. Say so
+          // explicitly instead of silently swallowing the abort failure.
+          const abortNote = abort.exitCode !== 0
+            ? " (warning: `git rebase --abort` also failed — your working tree may be mid-rebase; " +
+              "run `git rebase --abort` manually before publishing again)"
+            : "";
+          // Distinguish a true content conflict from a non-conflict pull failure
+          // (autostash / network / auth). Only the former is a "rebase_conflict";
+          // the latter gets a generic reason so the message isn't misleading.
+          const isContentConflict = conflictedFiles.length > 0;
+          const fileList = isContentConflict ? conflictedFiles.join(", ") : "the remote branch";
+          const error = isContentConflict
+            ? `Remote has changes that conflict with yours in: ${fileList}. ` +
+              "Pull and resolve manually, then publish again." + abortNote
+            : "Could not rebase onto the remote (no conflicting files detected — " +
+              "this may be a network, auth, or autostash problem). " +
+              "Pull manually and try again." + abortNote;
           sendJson(
             res,
             {
               success: false,
               conflict: true,
-              reason: "rebase_conflict",
+              reason: isContentConflict ? "rebase_conflict" : "rebase_failed",
               conflictedFiles,
-              error:
-                `Remote has changes that conflict with yours in: ${fileList}. ` +
-                "Pull and resolve manually, then publish again.",
+              error,
               stdout: pull.stdout,
               stderr: pull.stderr,
             },
@@ -472,6 +522,23 @@ function parseConflictFilesFromPull(output: string): string[] {
     if (m) files.push(m[1].trim());
   }
   return files;
+}
+
+// 0875 — true when the repo is mid-rebase (a `.git/rebase-merge` or
+// `.git/rebase-apply` dir exists). Worktree-safe: resolves the git dir once via
+// `git rev-parse --git-path` (single spawn), then checks both rebase-state dirs
+// with existsSync. Best-effort — on probe failure we assume NOT mid-rebase so we
+// never block a legitimate publish on a false positive.
+async function isMidRebase(root: string, timeoutMs: number): Promise<boolean> {
+  const probe = await runGitCommand(["rev-parse", "--git-path", "rebase-merge"], root, timeoutMs);
+  if (probe.exitCode !== 0) return false;
+  const rel = probe.stdout.trim();
+  if (!rel) return false;
+  const rebaseMerge = isAbsolute(rel) ? rel : join(root, rel);
+  // `<git-dir>/rebase-merge` (interactive/merge rebase) and the sibling
+  // `rebase-apply` (am/--apply rebase) cover both rebase styles.
+  const rebaseApply = join(dirname(rebaseMerge), "rebase-apply");
+  return existsSync(rebaseMerge) || existsSync(rebaseApply);
 }
 
 // ---------------------------------------------------------------------------

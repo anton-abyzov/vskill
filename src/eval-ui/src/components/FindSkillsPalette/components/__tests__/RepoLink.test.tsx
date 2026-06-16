@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 
 async function render(props: {
   repoUrl?: string | null;
+  skillName?: string | null;
   showPlaceholder?: boolean;
 }) {
   const React = await import("react");
@@ -36,6 +37,14 @@ describe("RepoLink (ported)", () => {
     expect(a.getAttribute("href")).toBe("https://github.com/foo/bar");
     expect(a.getAttribute("target")).toBe("_blank");
     expect(a.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(a.textContent).toBe("foo/bar");
+    h.unmount();
+  });
+
+  it("renders verified-skill.com skill href when skillName is provided", async () => {
+    const h = await render({ repoUrl: "https://github.com/Foo/Bar", skillName: "wiki-sync" });
+    const a = h.container.querySelector("[data-testid='repo-link']") as HTMLAnchorElement;
+    expect(a.getAttribute("href")).toBe("https://verified-skill.com/skills/foo/bar/wiki-sync");
     expect(a.textContent).toBe("foo/bar");
     h.unmount();
   });

@@ -700,7 +700,7 @@ export function SkillDetailPanel({
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
                   <TrustBadge tier={trustTier} />
                   <TierBadge tier={certTier} isTainted={meta?.isTainted} />
-                  <RepoLink repoUrl={meta?.repoUrl ?? null} />
+                  <RepoLink repoUrl={meta?.repoUrl ?? null} skillName={slug} />
                   <RepoHealthBadge skillName={skillName} repoUrl={meta?.repoUrl} />
                 </div>
               </section>

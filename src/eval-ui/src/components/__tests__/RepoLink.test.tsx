@@ -17,7 +17,7 @@ vi.mock("react", () => ({
   useMemo: <T,>(fn: () => T) => fn(),
 }));
 
-import { RepoLink, parseOwnerRepo } from "../RepoLink";
+import { RepoLink, buildVerifiedSkillUrl, parseOwnerRepo } from "../RepoLink";
 
 type ReactEl = { type: unknown; props: Record<string, unknown> };
 
@@ -94,6 +94,16 @@ describe("0809 parseOwnerRepo", () => {
 });
 
 describe("0809 RepoLink", () => {
+  it("builds a verified-skill.com skill URL when skillName is present", () => {
+    expect(buildVerifiedSkillUrl({ owner: "anton-abyzov", repo: "vskill" }, "remotion-best-practices"))
+      .toBe("https://verified-skill.com/skills/anton-abyzov/vskill/remotion-best-practices");
+  });
+
+  it("uses the final path segment when skillName is hierarchical", () => {
+    expect(buildVerifiedSkillUrl({ owner: "anton-abyzov", repo: "vskill" }, "anton-abyzov/vskill/sw:do"))
+      .toBe("https://verified-skill.com/skills/anton-abyzov/vskill/sw%3Ado");
+  });
+
   it("TC-019: renders an anchor with the canonical href and visible owner/repo text", () => {
     const tree = RepoLink({
       repoUrl: "https://github.com/anton-abyzov/greet-anton-test",
@@ -105,6 +115,15 @@ describe("0809 RepoLink", () => {
     expect(tree.props.rel).toBe("noopener noreferrer");
     expect(tree.props["data-testid"]).toBe("repo-link");
     expect(collectText(tree)).toBe("anton-abyzov/greet-anton-test");
+  });
+
+  it("renders a verified-skill.com href when skillName is provided", () => {
+    const tree = RepoLink({
+      repoUrl: "https://github.com/anton-abyzov/vskill",
+      skillName: "remotion-best-practices",
+    }) as unknown as ReactEl;
+    expect(tree.props.href).toBe("https://verified-skill.com/skills/anton-abyzov/vskill/remotion-best-practices");
+    expect(collectText(tree)).toBe("anton-abyzov/vskill");
   });
 
   it("TC-020: returns null when repoUrl is null", () => {

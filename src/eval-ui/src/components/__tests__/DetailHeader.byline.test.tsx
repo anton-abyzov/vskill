@@ -127,7 +127,9 @@ describe("DetailHeader — T-008 byline + version badge integration", () => {
     expect(repo.length).toBe(1);
     expect(sourceFile.length).toBe(1);
 
-    expect(String(repo[0].props.href)).toBe("https://github.com/anton-abyzov/greet-anton-test");
+    expect(String(repo[0].props.href)).toBe(
+      "https://verified-skill.com/skills/anton-abyzov/greet-anton-test/tournament-manager",
+    );
     expect(String(sourceFile[0].props.href)).toBe(
       "https://github.com/anton-abyzov/greet-anton-test/blob/HEAD/SKILL.md",
     );
@@ -152,6 +154,6 @@ describe("DetailHeader — T-008 byline + version badge integration", () => {
     const byline = findAll(tree, (el) => el.props?.["data-testid"] === "detail-header-byline")[0];
     const repo = findAll(byline, (el) => el.props?.["data-testid"] === "repo-link")[0];
     expect(repo).toBeDefined();
-    expect(String(repo.props.href)).toBe("https://github.com/x/y");
+    expect(String(repo.props.href)).toBe("https://verified-skill.com/skills/x/y/tournament-manager");
   });
 });

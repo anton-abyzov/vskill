@@ -52,14 +52,29 @@ export function parseOwnerRepo(repoUrl: string | null | undefined): { owner: str
 export interface RepoLinkProps {
   /** Optional repo URL — any /tree/, /blob/, .git, or www. variant accepted. */
   repoUrl?: string | null;
+  /** Optional skill slug/name. When set, the chip opens verified-skill.com. */
+  skillName?: string | null;
   /** Optional data-testid override (default: "repo-link"). */
   "data-testid"?: string;
+}
+
+function skillSlugForUrl(skillName: string | null | undefined): string | null {
+  if (!skillName || typeof skillName !== "string") return null;
+  const parts = skillName.trim().split("/").map((p) => p.trim()).filter(Boolean);
+  return parts.at(-1) ?? null;
+}
+
+export function buildVerifiedSkillUrl(parsed: { owner: string; repo: string }, skillName: string | null | undefined): string | null {
+  const skillSlug = skillSlugForUrl(skillName);
+  if (!skillSlug) return null;
+  return `https://verified-skill.com/skills/${[parsed.owner, parsed.repo, skillSlug].map(encodeURIComponent).join("/")}`;
 }
 
 export function RepoLink(props: RepoLinkProps) {
   const parsed = parseOwnerRepo(props.repoUrl ?? null);
   if (!parsed) return null;
-  const href = `https://github.com/${parsed.owner}/${parsed.repo}`;
+  const href = buildVerifiedSkillUrl(parsed, props.skillName)
+    ?? `https://github.com/${parsed.owner}/${parsed.repo}`;
   return (
     <a
       data-testid={props["data-testid"] ?? "repo-link"}

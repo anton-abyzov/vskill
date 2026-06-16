@@ -6,13 +6,27 @@ import { parseRepoUrl } from "../../../lib/repo-utils";
 
 interface RepoLinkProps {
   repoUrl: string | null | undefined;
+  skillName?: string | null;
   mono?: string;
   fontSize?: string;
   showPlaceholder?: boolean;
 }
 
+function skillSlugForUrl(skillName: string | null | undefined): string | null {
+  if (!skillName) return null;
+  const parts = skillName.trim().split("/").map((p) => p.trim()).filter(Boolean);
+  return parts.at(-1) ?? null;
+}
+
+function verifiedSkillUrl(owner: string, repo: string, skillName: string | null | undefined): string | null {
+  const skillSlug = skillSlugForUrl(skillName);
+  if (!skillSlug) return null;
+  return `https://verified-skill.com/skills/${[owner, repo, skillSlug].map(encodeURIComponent).join("/")}`;
+}
+
 export function RepoLink({
   repoUrl,
+  skillName,
   mono = "var(--font-geist-mono)",
   fontSize = "0.75rem",
   showPlaceholder = true,
@@ -36,7 +50,7 @@ export function RepoLink({
   return (
     <a
       data-testid="repo-link"
-      href={parsed.url}
+      href={verifiedSkillUrl(parsed.owner, parsed.name, skillName) ?? parsed.url}
       target="_blank"
       rel="noopener noreferrer"
       onClick={(e) => e.stopPropagation()}

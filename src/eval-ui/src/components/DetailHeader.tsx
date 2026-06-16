@@ -356,7 +356,7 @@ function NewDetailHeader({
             skill page header. Renders only when skill.repoUrl parses as a
             github.com URL; otherwise returns null and the byline keeps its
             existing 2-chip layout (author + file). */}
-        <RepoLink repoUrl={skill.repoUrl ?? null} />
+        <RepoLink repoUrl={skill.repoUrl ?? null} skillName={skill.skill} />
         <SourceFileLink
           repoUrl={skill.repoUrl ?? null}
           skillPath={skill.skillPath ?? null}

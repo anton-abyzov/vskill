@@ -2,6 +2,20 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "vskill-studio-0859-evidence",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/dist/bin.js",
+        "studio",
+        "--port",
+        "3201",
+        "--no-open",
+        "--root",
+        "/Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill"
+      ],
+      "port": 3201
+    },
+    {
       "name": "vskill-studio-0747",
       "runtimeExecutable": "node",
       "runtimeArgs": ["dist/bin.js", "studio", "--port", "3185", "--no-open"],
@@ -84,6 +98,30 @@
         "/Users/antonabyzov/Projects/github/specweave-umb"
       ],
       "port": 3114
+    },
+    {
+      "name": "vskill-studio-repro",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "dist/bin.js",
+        "studio",
+        "--port",
+        "3199",
+        "--no-open"
+      ],
+      "port": 3199
+    },
+    {
+      "name": "vskill-eval-ui-0834",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "3178",
+        "--root",
+        "/Users/antonabyzov/Projects/github/specweave-umb/repositories/anton-abyzov/vskill/src/eval-ui"
+      ],
+      "port": 3178
     }
   ]
 }

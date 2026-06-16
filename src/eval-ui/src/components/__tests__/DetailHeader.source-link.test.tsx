@@ -103,7 +103,7 @@ describe("0737: DetailHeader byline renders source-file anchor", () => {
   it("AuthorLink + RepoLink + SourceFileLink all render in the byline (US-002 + 0809)", () => {
     // 0707 contract: AuthorLink anchor → publisher PROFILE (github.com/{owner}).
     // 0737 contract: SourceFileLink anchor → SKILL.md blob URL.
-    // 0809 (this increment): RepoLink anchor → repo root (github.com/{owner}/{repo}).
+    // 0809 + 0873 contract: RepoLink anchor → verified-skill skill page.
     // All three coexist in the byline when repoUrl is populated. By
     // data-testid we assert both their presence and their exact targets.
     const tree = DetailHeader({ skill: makeSkill() });
@@ -118,7 +118,9 @@ describe("0737: DetailHeader byline renders source-file anchor", () => {
     expect(sourceFile).toBeDefined();
 
     expect(String(author.props.href)).toBe("https://github.com/coreyhaines31");
-    expect(String(repo.props.href)).toBe("https://github.com/coreyhaines31/marketingskills");
+    expect(String(repo.props.href)).toBe(
+      "https://verified-skill.com/skills/coreyhaines31/marketingskills/analytics-tracking",
+    );
     expect(String(sourceFile.props.href)).toBe(
       "https://github.com/coreyhaines31/marketingskills/blob/HEAD/skills/analytics-tracking/SKILL.md",
     );

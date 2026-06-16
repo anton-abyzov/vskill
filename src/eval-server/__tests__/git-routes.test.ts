@@ -5,14 +5,14 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
 
 // Hoist a controllable spawn mock so handlers see whatever stdout/stderr/exit
 // each test queues up.
-const { spawnMock, queueProcess } = vi.hoisted(() => {
+const { spawnMock, queueProcess, setGitPathProbe } = vi.hoisted(() => {
   type Queued = {
     stdout: string;
     stderr: string;
@@ -20,7 +20,31 @@ const { spawnMock, queueProcess } = vi.hoisted(() => {
     delayMs?: number;
   };
   const queue: Queued[] = [];
+  // 0875 — when non-empty, the mid-rebase pre-flight `git rev-parse --git-path`
+  // probe resolves to this path (point it at a real dir to simulate mid-rebase).
+  const gitPathProbe = { value: "" };
   const spawnMock = vi.fn((_cmd: string, _args: readonly string[], _opts?: unknown) => {
+    // 0875 — the publish handler runs a mid-rebase pre-flight via
+    // `git rev-parse --git-path rebase-merge|rebase-apply` BEFORE the normal
+    // flow. Tests don't queue those probes, so intercept them here and return
+    // an empty path (→ existsSync false → not mid-rebase) WITHOUT consuming the
+    // queue, keeping every existing test's queued sequence intact. A test that
+    // wants to simulate mid-rebase points the probe at a real dir via
+    // `setGitPathProbe(<absolute path that exists>)`.
+    const args = _args as readonly string[];
+    if (args[0] === "rev-parse" && args[1] === "--git-path") {
+      const proc = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: () => boolean; killed: boolean };
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.killed = false;
+      proc.kill = () => true;
+      const out = gitPathProbe.value;
+      setImmediate(() => {
+        if (out) proc.stdout.emit("data", Buffer.from(out + "\n"));
+        proc.emit("close", 0, null);
+      });
+      return proc;
+    }
     const q = queue.shift() ?? { stdout: "", stderr: "", exitCode: 0 };
     const proc = new EventEmitter() as EventEmitter & {
       stdout: EventEmitter;
@@ -48,7 +72,8 @@ const { spawnMock, queueProcess } = vi.hoisted(() => {
     return proc;
   });
   const queueProcess = (q: Queued) => queue.push(q);
-  return { spawnMock, queueProcess };
+  const setGitPathProbe = (p: string) => { gitPathProbe.value = p; };
+  return { spawnMock, queueProcess, setGitPathProbe };
 });
 
 vi.mock("node:child_process", () => ({
@@ -111,6 +136,7 @@ let root: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "vskill-git-"));
   spawnMock.mockClear();
+  setGitPathProbe(""); // 0875 — default: not mid-rebase
 });
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
@@ -296,11 +322,16 @@ describe("POST /api/git/publish", () => {
       new FakeRes() as never,
     );
 
-    // First spawn call MUST be `git push` with argv array, no shell:true
-    const firstCall = spawnMock.mock.calls[0] as [string, string[], { shell?: boolean }];
-    expect(firstCall[0]).toBe("git");
-    expect(firstCall[1]).toEqual(["push"]);
-    expect(firstCall[2]?.shell).not.toBe(true);
+    // The `git push` spawn MUST use an argv array, no shell:true. (A mid-rebase
+    // pre-flight `rev-parse --git-path` probe runs first now, so locate the
+    // push call rather than assuming it is call index 0.)
+    const pushCall = spawnMock.mock.calls.find(
+      (c) => Array.isArray(c[1]) && (c[1] as string[]).length === 1 && (c[1] as string[])[0] === "push",
+    ) as [string, string[], { shell?: boolean }] | undefined;
+    expect(pushCall).toBeDefined();
+    expect(pushCall![0]).toBe("git");
+    expect(pushCall![1]).toEqual(["push"]);
+    expect(pushCall![2]?.shell).not.toBe(true);
   });
 
   it("returns HTTP 403 when request comes from a non-loopback address", async () => {
@@ -439,6 +470,139 @@ describe("POST /api/git/publish", () => {
     expect(abortCall).toBeDefined();
   });
 
+  it("reports rebase_failed (not rebase_conflict) when pull fails with NO conflicted files", async () => {
+    // A non-conflict pull failure (autostash/network/auth) must not be mislabeled
+    // a content conflict — there are no conflicted files to resolve.
+    // 1) push → rejected (non-fast-forward)
+    queueProcess({
+      stdout: "",
+      stderr: "! [rejected]        main -> main (non-fast-forward)\n",
+      exitCode: 1,
+    });
+    // 2) rev-parse --abbrev-ref HEAD → branch name
+    queueProcess({ stdout: "main\n", stderr: "", exitCode: 0 });
+    // 3) pull --rebase --autostash origin main → fails, but not a content conflict
+    queueProcess({
+      stdout: "",
+      stderr: "fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host\n",
+      exitCode: 128,
+    });
+    // 4) diff --name-only --diff-filter=U → no conflicted files
+    queueProcess({ stdout: "", stderr: "", exitCode: 0 });
+    // 5) rebase --abort → ok
+    queueProcess({ stdout: "", stderr: "", exitCode: 0 });
+
+    const h = makePostGitPublishHandler(root);
+    const res = new FakeRes();
+    await h(new FakeReq("POST", "/api/git/publish", {}) as never, res as never);
+
+    const body = res.json as { success: boolean; conflict: boolean; reason: string; conflictedFiles: string[]; error: string };
+    expect(body.success).toBe(false);
+    expect(body.conflict).toBe(true);
+    expect(body.reason).toBe("rebase_failed");
+    expect(body.conflictedFiles).toEqual([]);
+    // The message must NOT claim a content conflict; it points at a network/auth/autostash cause.
+    expect(body.error).not.toContain("conflict with yours in:");
+    expect(body.error.toLowerCase()).toContain("network");
+  });
+
+  it("warns when `git rebase --abort` itself fails (tree may be left mid-rebase)", async () => {
+    // 1) push → rejected
+    queueProcess({ stdout: "", stderr: "! [rejected] main -> main (fetch first)\n", exitCode: 1 });
+    // 2) rev-parse --abbrev-ref HEAD
+    queueProcess({ stdout: "main\n", stderr: "", exitCode: 0 });
+    // 3) pull --rebase → CONFLICT
+    queueProcess({
+      stdout: "CONFLICT (content): Merge conflict in skill.md\n",
+      stderr: "error: could not apply\n",
+      exitCode: 1,
+    });
+    // 4) diff --diff-filter=U → conflicted files
+    queueProcess({ stdout: "skill.md\n", stderr: "", exitCode: 0 });
+    // 5) rebase --abort → ALSO FAILS
+    queueProcess({ stdout: "", stderr: "fatal: no rebase in progress?\n", exitCode: 128 });
+
+    const h = makePostGitPublishHandler(root);
+    const res = new FakeRes();
+    await h(new FakeReq("POST", "/api/git/publish", {}) as never, res as never);
+
+    const body = res.json as { reason: string; error: string };
+    expect(body.reason).toBe("rebase_conflict");
+    // Abort failure must be surfaced so the user knows the tree may be dirty.
+    expect(body.error.toLowerCase()).toContain("rebase --abort");
+    expect(body.error.toLowerCase()).toContain("mid-rebase");
+  });
+
+  it("skips auto-reconcile on a detached HEAD (branch == 'HEAD')", async () => {
+    // 1) push → rejected (non-fast-forward)
+    queueProcess({ stdout: "", stderr: "! [rejected] HEAD -> main (non-fast-forward)\n", exitCode: 1 });
+    // 2) rev-parse --abbrev-ref HEAD → "HEAD" (detached)
+    queueProcess({ stdout: "HEAD\n", stderr: "", exitCode: 0 });
+
+    const h = makePostGitPublishHandler(root);
+    const res = new FakeRes();
+    await h(new FakeReq("POST", "/api/git/publish", {}) as never, res as never);
+
+    // No pull/rebase may be attempted on a detached HEAD — it falls through to
+    // the generic push-failure handler instead.
+    const sawPull = spawnMock.mock.calls.some(
+      (c) => Array.isArray(c[1]) && (c[1] as string[])[0] === "pull",
+    );
+    expect(sawPull).toBe(false);
+    expect(res.statusCode).toBe(500);
+    const body = res.json as { success: boolean; reconciled?: boolean };
+    expect(body.success).toBe(false);
+    expect(body.reconciled).toBeFalsy();
+  });
+
+  it("blocks publish with 409 mid_rebase when the repo is left mid-rebase", async () => {
+    // 0875 — a prior auto-reconcile left .git/rebase-merge behind. The publish
+    // handler must bail BEFORE add/commit instead of committing onto a dirty,
+    // interrupted-rebase tree.
+    const rebaseDir = join(root, ".git", "rebase-merge");
+    mkdirSync(rebaseDir, { recursive: true });
+    setGitPathProbe(rebaseDir);
+
+    const h = makePostGitPublishHandler(root);
+    const res = new FakeRes();
+    await h(new FakeReq("POST", "/api/git/publish", { commitMessage: "feat: x" }) as never, res as never);
+
+    expect(res.statusCode).toBe(409);
+    const body = res.json as { success: boolean; reason: string; error: string };
+    expect(body.success).toBe(false);
+    expect(body.reason).toBe("mid_rebase");
+    expect(body.error.toLowerCase()).toContain("mid-rebase");
+
+    // It must NOT have proceeded to add/commit/push.
+    const sawAdd = spawnMock.mock.calls.some(
+      (c) => Array.isArray(c[1]) && (c[1] as string[])[0] === "add",
+    );
+    expect(sawAdd).toBe(false);
+  });
+
+  it("returns a timeout error when the RETRY push (after a clean rebase) times out", async () => {
+    process.env.GIT_PUBLISH_TIMEOUT_MS = "50";
+    // 1) push → rejected (non-fast-forward)
+    queueProcess({ stdout: "", stderr: "! [rejected] main -> main (non-fast-forward)\n", exitCode: 1 });
+    // 2) rev-parse --abbrev-ref HEAD
+    queueProcess({ stdout: "main\n", stderr: "", exitCode: 0 });
+    // 3) pull --rebase --autostash → clean
+    queueProcess({ stdout: "Successfully rebased and updated refs/heads/main.\n", stderr: "", exitCode: 0 });
+    // 4) retry push → NEVER exits (timeout)
+    queueProcess({ stdout: "", stderr: "", exitCode: null });
+
+    const h = makePostGitPublishHandler(root);
+    const res = new FakeRes();
+    await h(new FakeReq("POST", "/api/git/publish", {}) as never, res as never);
+
+    expect(res.statusCode).toBe(500);
+    const body = res.json as { success: boolean; error: string; stderr: string };
+    expect(body.success).toBe(false);
+    // Must be a detailed timeout, not an empty-string "Publish failed." fall-through.
+    expect(body.error.toLowerCase()).toContain("timeout");
+    expect(body.error.toLowerCase()).toContain("retry");
+  });
+
   it("does NOT pull/rebase when the first push succeeds (happy path unchanged)", async () => {
     // push, rev-parse HEAD, remote get-url, rev-parse abbrev-ref — no pull/rebase.
     queueProcess({ stdout: "Everything up-to-date\n", stderr: "", exitCode: 0 });
@@ -479,7 +643,11 @@ describe("POST /api/git/publish", () => {
       new FakeRes() as never,
     );
 
-    const firstCall = spawnMock.mock.calls[0] as [string, string[], { cwd?: string }];
-    expect(firstCall[2]?.cwd).toBe(root);
+    // Every git spawn (the mid-rebase probe AND the push) must run with cwd=root.
+    const pushCall = spawnMock.mock.calls.find(
+      (c) => Array.isArray(c[1]) && (c[1] as string[])[0] === "push",
+    ) as [string, string[], { cwd?: string }] | undefined;
+    expect(pushCall).toBeDefined();
+    expect(pushCall![2]?.cwd).toBe(root);
   });
 });

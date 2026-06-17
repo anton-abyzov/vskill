@@ -76,9 +76,13 @@ interface ServerConfigResponse {
 }
 
 interface OpenRouterModelsResponse {
-  models: Array<{
-    id: string;
-    name: string;
+  // 0876 US-002 — `models` and the per-row `id`/`name` are typed loosely
+  // (optional + nullable) because the upstream OpenRouter catalog has been
+  // observed to return malformed shapes (missing `models`, null `name`). The
+  // hover path must tolerate this rather than assume a well-formed response.
+  models?: Array<{
+    id?: string | null;
+    name?: string | null;
     contextWindow?: number;
     pricing?: { prompt: number; completion: number };
   }>;
@@ -310,13 +314,25 @@ export function useAgentCatalog(opts?: {
         if (!prev) return prev;
         const next = prev.agents.map((a) => {
           if (a.id !== "openrouter") return a;
-          const models: ModelEntry[] = data.models.map((m) => ({
-            id: m.id,
-            displayName: m.name,
-            contextWindow: m.contextWindow,
-            pricing: m.pricing,
-            billingMode: "per-token",
-          }));
+          // 0876 US-002 — Guard against a malformed OpenRouter catalog: a
+          // response missing `models` (or with a non-array) must not throw on
+          // the hover path, and a row whose `name` is null must still yield a
+          // valid ModelEntry. Drop rows lacking both id and name so the
+          // resulting displayName fallback always has a non-empty id to use.
+          const list = Array.isArray(data.models) ? data.models : [];
+          const models: ModelEntry[] = list
+            .filter((m) => m.id || m.name)
+            .map((m) => {
+              // Filter above guarantees at least one of id/name is truthy.
+              const id = (m.id || m.name) as string;
+              return {
+                id,
+                displayName: m.name ?? id,
+                contextWindow: m.contextWindow,
+                pricing: m.pricing,
+                billingMode: "per-token" as const,
+              };
+            });
           const entry: AgentEntry = {
             ...a,
             models,

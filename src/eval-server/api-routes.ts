@@ -1169,12 +1169,11 @@ export const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
     { id: "haiku", ...aliasInfo("haiku", "Claude Haiku") },
   ],
   "anthropic": buildAnthropicProviderModels(),
-  "ollama": [
-    { id: "llama3.1:8b", label: "Llama 3.1 8B" },
-    { id: "qwen2.5:32b", label: "Qwen 2.5 32B" },
-    { id: "gemma2:9b", label: "Gemma 2 9B" },
-    { id: "mistral:7b", label: "Mistral 7B" },
-  ],
+  // Ollama's model list is dynamic — populated by probeOllama() from GET
+  // /api/tags. Empty by default (parity with "lm-studio") so an unreachable
+  // or timed-out probe surfaces zero models instead of leaking a hardcoded
+  // fallback that isn't actually installed (0876 US-001).
+  "ollama": [],
   "gemini-cli": [
     { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
     { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
@@ -1279,11 +1278,11 @@ async function probeOllama(): Promise<{ available: boolean; models: ModelOption[
   if (ollamaCache && now - ollamaCache.ts < PROBE_CACHE_TTL) {
     return ollamaCache;
   }
-  let models = PROVIDER_MODELS["ollama"];
+  let models: ModelOption[] = [];
   let available = false;
   try {
     const baseUrl = resolveOllamaBaseUrl(process.env);
-    const resp = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(500) });
+    const resp = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(2000) });
     if (resp.ok) {
       const data = await resp.json() as { models?: Array<{ name: string }> };
       // Only mark available after JSON parses cleanly — protects against 200-with-bad-body proxies.
@@ -1302,7 +1301,7 @@ async function probeOllama(): Promise<{ available: boolean; models: ModelOption[
 // ---------------------------------------------------------------------------
 // probeLmStudio — hits GET <base>/models to detect LM Studio and populate the
 // model list from the server's loaded models. Mirrors the Ollama pattern:
-// 500ms AbortSignal timeout, 30s in-memory cache, silent failure on any
+// 2000ms AbortSignal timeout, 30s in-memory cache, silent failure on any
 // exception. Base URL is overridable via LM_STUDIO_BASE_URL.
 // ---------------------------------------------------------------------------
 async function probeLmStudio(): Promise<{ available: boolean; models: ModelOption[] }> {
@@ -1314,7 +1313,7 @@ async function probeLmStudio(): Promise<{ available: boolean; models: ModelOptio
   let available = false;
   try {
     const baseUrl = process.env.LM_STUDIO_BASE_URL || "http://localhost:1234/v1";
-    const resp = await fetch(`${baseUrl}/models`, { signal: AbortSignal.timeout(500) });
+    const resp = await fetch(`${baseUrl}/models`, { signal: AbortSignal.timeout(2000) });
     if (resp.ok) {
       const data = await resp.json() as { data?: Array<{ id: string }> };
       // Only mark available after JSON parses cleanly — protects against 200-with-bad-body proxies.

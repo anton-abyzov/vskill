@@ -172,8 +172,9 @@ describe("detectAvailableProviders — LM Studio detection", () => {
   // AC-US2-05: LM Studio + Ollama probes run concurrently (Promise.all)
   // -------------------------------------------------------------------------
 
-  it("runs LM Studio + Ollama probes concurrently (under 550ms even if both time out)", async () => {
-    // Both probes time out at 500ms. If serial they'd take ~1000ms.
+  it("runs LM Studio + Ollama probes concurrently (under one timeout window even if both time out)", async () => {
+    // Both probes time out at 2000ms (0876 T-003). If serial they'd take ~4000ms;
+    // concurrent execution keeps the total within one timeout window + slack.
     fetchSpy.mockImplementation(((_url: string, init?: RequestInit) => {
       return new Promise<Response>((_resolve, reject) => {
         const signal = init?.signal;
@@ -189,7 +190,7 @@ describe("detectAvailableProviders — LM Studio detection", () => {
     await detectAvailableProviders();
     const elapsed = Date.now() - start;
 
-    expect(elapsed).toBeLessThan(700); // 500ms timeout + slack, well under 1000ms
+    expect(elapsed).toBeLessThan(2500); // 2000ms timeout + slack, well under the ~4000ms serial path
   });
 
   // -------------------------------------------------------------------------

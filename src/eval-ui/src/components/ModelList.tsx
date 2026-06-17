@@ -52,15 +52,24 @@ function formatMetadata(model: ModelEntry): string {
   return ctx ? `${ctx} ctx · ${price}` : price;
 }
 
+// 0876 US-002 — `displayName` can be null/missing on a malformed OpenRouter
+// row (upstream `name` was null). Fall back to the id (then ""), so the search
+// box — which auto-focuses on hover — never dereferences null and throws.
+function rankName(m: ModelEntry): string {
+  return m.displayName ?? m.id ?? "";
+}
+
 function rankFiltered(models: ModelEntry[], q: string): ModelEntry[] {
   if (!q) return models;
   const query = q.toLowerCase();
-  const matches = models.filter((m) => m.displayName.toLowerCase().includes(query));
+  const matches = models.filter((m) => rankName(m).toLowerCase().includes(query));
   return matches.sort((a, b) => {
-    const ai = a.displayName.toLowerCase().indexOf(query);
-    const bi = b.displayName.toLowerCase().indexOf(query);
+    const an = rankName(a);
+    const bn = rankName(b);
+    const ai = an.toLowerCase().indexOf(query);
+    const bi = bn.toLowerCase().indexOf(query);
     if (ai !== bi) return ai - bi;
-    return a.displayName.length - b.displayName.length;
+    return an.length - bn.length;
   });
 }
 
@@ -81,6 +90,21 @@ export function ModelList({ agent, activeModelId, focusedIndex = -1, onSelect, o
       searchRef.current.focus();
     }
   }, [agent.id, agent.available]);
+
+  // 0876 US-002 — These two hooks MUST run before any early return. ModelList
+  // is rendered at a fixed position in AgentModelPicker; switching the
+  // displayed agent from an available provider (full render) to
+  // OpenRouter-without-a-key (the empty-card early return below) would
+  // otherwise change the hook count between renders of the same component
+  // instance → React error #300 ("rendered fewer hooks than expected"), which
+  // crashed the whole picker on hover. Hoisting them keeps the hook sequence
+  // identical on every render. (filtered/v are harmless when models is empty.)
+  const filtered = useMemo(
+    () => rankFiltered(agent.models, debouncedQuery),
+    [agent.models, debouncedQuery],
+  );
+
+  const v = useVirtualList(filtered.length, ROW_HEIGHT, VIEWPORT_HEIGHT);
 
   // Empty-state CTA for OpenRouter without a key.
   if (agent.id === "openrouter" && !agent.available) {
@@ -118,13 +142,6 @@ export function ModelList({ agent, activeModelId, focusedIndex = -1, onSelect, o
       </div>
     );
   }
-
-  const filtered = useMemo(
-    () => rankFiltered(agent.models, debouncedQuery),
-    [agent.models, debouncedQuery],
-  );
-
-  const v = useVirtualList(filtered.length, ROW_HEIGHT, VIEWPORT_HEIGHT);
 
   return (
     <div

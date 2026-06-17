@@ -135,4 +135,60 @@ test.describe("0682 — Agent + Model picker", () => {
     const summaryCount = await summary.count();
     expect(glyphCount + summaryCount).toBeGreaterThan(0);
   });
+
+  // 0876 US-001 — the Ollama model list is dynamic (probeOllama → GET
+  // /api/tags). The four hardcoded fallback models that used to leak when the
+  // probe failed/timed out (llama3.1:8b, qwen2.5:32b, gemma2:9b, mistral:7b)
+  // must never appear. Robust in every env: with Ollama down the list is
+  // empty + the start-service CTA; with Ollama up it shows the real installed
+  // models — neither contains the removed fallback names.
+  test("0876 US-001: Ollama list shows no hardcoded fallback models", async ({ page }) => {
+    await waitForStudioReady(page);
+    await page.keyboard.press(`${mod()}+Shift+M`);
+    await page.waitForSelector("[data-testid='agent-list']", { timeout: 2000 });
+    await page.locator("[data-testid='agent-row-ollama']").hover();
+    await page.waitForTimeout(300); // let the focused model pane render
+    const popover = (await page.locator("[data-testid='agent-model-picker-popover']").textContent()) ?? "";
+    expect(popover).not.toMatch(/llama3\.1:8b|qwen2\.5:32b|gemma2:9b|mistral:7b/i);
+  });
+
+  // 0876 US-002 — hovering OpenRouter triggers hydrateOpenRouter(). A
+  // malformed upstream catalog (null `name`, junk all-null row) must not throw
+  // an uncaught error on the hover path. The page `pageerror` listener is the
+  // direct crash signal. The deterministic search-box → rankFiltered crash
+  // path (which needs OpenRouter to be key-unlocked) is covered separately by
+  // ModelList.0876-nullsafe.test.tsx; here we guard the real-browser hover.
+  test("0876 US-002: hovering OpenRouter with a malformed catalog does not crash", async ({ page }) => {
+    const pageErrors: Error[] = [];
+    page.on("pageerror", (e) => pageErrors.push(e));
+    await page.route("**/api/openrouter/models", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          models: [
+            { id: "meta-llama/llama-3.3-70b-instruct", name: null },
+            { id: null, name: null },
+          ],
+        }),
+      }),
+    );
+    await waitForStudioReady(page);
+    await page.keyboard.press(`${mod()}+Shift+M`);
+    await page.waitForSelector("[data-testid='agent-list']", { timeout: 2000 });
+    await page.locator("[data-testid='agent-row-openrouter']").hover();
+    await page.waitForTimeout(300);
+    // If OpenRouter is unlocked in this env, exercise the search/rankFiltered path too.
+    const search = page.locator("[data-testid='model-search-input']");
+    if (await search.count()) {
+      await search.first().fill("llama");
+      await page.waitForTimeout(150);
+    }
+    // The real crash signal is an uncaught error on the hover/hydrate/filter
+    // path — a render throw unmounts the React root. (The popover wrapper may
+    // close benignly on outside-click/Esc, so it is not a reliable liveness
+    // probe; the always-present picker trigger is.)
+    expect(pageErrors, pageErrors.map((e) => e.message).join("; ")).toHaveLength(0);
+    await expect(page.locator("[data-testid='agent-model-picker-trigger']")).toBeVisible();
+  });
 });

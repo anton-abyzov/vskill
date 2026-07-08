@@ -17,6 +17,8 @@
  * Exits with code 1 when any violation is found, 0 otherwise.
  */
 
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 
@@ -145,4 +147,4 @@ if (isMain()) {
   // eslint-disable-next-line no-console
   console.log("check-no-shimmer: clean.");
   process.exit(0);
-}
+};

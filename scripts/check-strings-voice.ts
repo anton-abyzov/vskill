@@ -21,6 +21,8 @@
  * ADR refs: US-010 (tone/voice), tasks.md T-035/T-036.
  */
 
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
 

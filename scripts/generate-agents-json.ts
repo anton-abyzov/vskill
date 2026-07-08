@@ -21,6 +21,8 @@
  * vskill-platform copies this file in via its prebuild step
  * (scripts/sync-agents-json.cjs).
  */
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

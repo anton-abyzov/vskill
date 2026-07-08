@@ -14,6 +14,8 @@
  * pure-function core (`summarizeAssets`, `evaluateBudget`) so the logic is
  * unit-testable without a build.
  */
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 import { promises as fs } from "node:fs";
 import { gzipSync } from "node:zlib";
 import path from "node:path";
@@ -216,4 +218,4 @@ if (invokedDirectly) {
     console.error(err);
     process.exit(3);
   });
-}
+};

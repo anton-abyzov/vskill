@@ -27,6 +27,8 @@
  *   2 — configuration error (no files found is fine; exit 0 with a notice)
  */
 
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { spawnSync } from "node:child_process";

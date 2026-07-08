@@ -801,3 +801,87 @@ describe("checkRepoExists", () => {
     expect(exists).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 0851 — root-level {name}/SKILL.md discovery (higgsfield-ai/skills layout)
+// ---------------------------------------------------------------------------
+
+describe("discoverSkills — root-level skill directories", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    _resetBranchCache();
+  });
+
+  it("discovers {name}/SKILL.md at repo root (higgsfield-ai/skills layout)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse([
+          "README.md",
+          "higgsfield-generate/SKILL.md",
+          "higgsfield-generate/references/model-catalog.md",
+          "higgsfield-websites/SKILL.md",
+        ]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("higgsfield-ai", "skills");
+
+    expect(result.map((s) => s.name).sort()).toEqual([
+      "higgsfield-generate",
+      "higgsfield-websites",
+    ]);
+    const gen = result.find((s) => s.name === "higgsfield-generate")!;
+    expect(gen.path).toBe("higgsfield-generate/SKILL.md");
+    expect(gen.rawUrl).toBe(
+      "https://raw.githubusercontent.com/higgsfield-ai/skills/main/higgsfield-generate/SKILL.md",
+    );
+  });
+
+  it("prefers skills/{name}/SKILL.md over a root-level dir with the same name", async () => {
+    for (const order of [
+      ["foo/SKILL.md", "skills/foo/SKILL.md"],
+      ["skills/foo/SKILL.md", "foo/SKILL.md"],
+    ]) {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => makeTreeResponse(order),
+      }) as unknown as typeof fetch;
+
+      const result = await discoverSkills("owner", "repo");
+      expect(result).toHaveLength(1);
+      expect(result[0].path).toBe("skills/foo/SKILL.md");
+      _resetBranchCache();
+    }
+  });
+
+  it("ignores literal skills/SKILL.md and plugins/SKILL.md files", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse(["skills/SKILL.md", "plugins/SKILL.md"]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+    expect(result).toHaveLength(0);
+  });
+
+  it("attaches {name}/agents/*.md files to root-level skills", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () =>
+        makeTreeResponse([
+          "my-skill/SKILL.md",
+          "my-skill/agents/helper.md",
+        ]),
+    }) as unknown as typeof fetch;
+
+    const result = await discoverSkills("owner", "repo");
+    expect(result).toHaveLength(1);
+    expect(result[0].agentRawUrls).toEqual({
+      "agents/helper.md":
+        "https://raw.githubusercontent.com/owner/repo/main/my-skill/agents/helper.md",
+    });
+  });
+});

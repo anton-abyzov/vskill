@@ -2888,39 +2888,63 @@ async function installSingleSkillLegacy(
 
   const branch = refOverride || (await getDefaultBranch(owner, repo));
   const sourceCommitSha = await getBranchHeadSha(owner, repo, branch);
-  const skillSubpath = skillSubpathOverride || (skill ? `skills/${skill}/SKILL.md` : "SKILL.md");
-  const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${skillSubpath}`;
+  // Candidate subpaths: explicit override wins; otherwise try the conventional
+  // skills/{name}/ layout first, then root-level {name}/ (e.g. higgsfield-ai/skills).
+  const subpathCandidates = skillSubpathOverride
+    ? [skillSubpathOverride]
+    : skill
+      ? [`skills/${skill}/SKILL.md`, `${skill}/SKILL.md`]
+      : ["SKILL.md"];
 
-  // Fetch SKILL.md
-  const content = await fetchSkillContent(url);
+  // Fetch SKILL.md — first candidate that exists wins
+  let skillSubpath = subpathCandidates[0];
+  let content: string | undefined;
+  for (let i = 0; i < subpathCandidates.length; i++) {
+    const candidate = subpathCandidates[i];
+    const candidateUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${candidate}`;
+    const isLast = i === subpathCandidates.length - 1;
+    if (isLast) {
+      content = await fetchSkillContent(candidateUrl);
+      skillSubpath = candidate;
+      break;
+    }
+    const probe = await githubFetch(candidateUrl);
+    if (probe.ok) {
+      content = await probe.text();
+      skillSubpath = candidate;
+      break;
+    }
+  }
+  if (content === undefined) return process.exit(1);
 
-  // Fetch agents/*.md if skill is in a subdirectory (skills/{name}/)
+  // Fetch agents/*.md and references/*.md if skill is in a subdirectory.
+  // Both directories are part of the skill-authoring convention: agents/ holds
+  // sub-agent prompts, references/ holds docs the SKILL.md links to — a skill
+  // installed without its references is silently degraded.
   let legacyAgentFiles: Record<string, string> | undefined;
   if (skill) {
-    try {
-      const agentsBasePath = skillSubpathOverride
-        ? skillSubpathOverride.replace(/\/SKILL\.md$/, "/agents")
-        : `skills/${skill}/agents`;
-      // ?ref= keeps the agents/ listing on the same branch as SKILL.md
-      // (deep links may pin a non-default branch).
-      const agentsDirUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${agentsBasePath}?ref=${encodeURIComponent(branch)}`;
-      const dirRes = await githubFetch(agentsDirUrl, { headers: { Accept: "application/vnd.github.v3+json" } });
-      if (dirRes.ok) {
+    for (const subdir of ["agents", "references"] as const) {
+      try {
+        const basePath = skillSubpath.replace(/\/SKILL\.md$/, `/${subdir}`);
+        // ?ref= keeps the listing on the same branch as SKILL.md
+        // (deep links may pin a non-default branch).
+        const dirUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${basePath}?ref=${encodeURIComponent(branch)}`;
+        const dirRes = await githubFetch(dirUrl, { headers: { Accept: "application/vnd.github.v3+json" } });
+        if (!dirRes.ok) continue;
         const entries = (await dirRes.json()) as Array<{ name: string; download_url?: string }>;
         const mdEntries = entries.filter((e) => e.name.endsWith(".md") && e.download_url && isGitHubDownloadUrl(e.download_url!));
-        if (mdEntries.length > 0) {
-          legacyAgentFiles = {};
-          const fetches = mdEntries.map(async (entry) => {
-            try {
-              const res = await githubFetch(entry.download_url!);
-              if (res.ok) legacyAgentFiles![`agents/${entry.name}`] = await res.text();
-            } catch { /* skip */ }
-          });
-          await Promise.allSettled(fetches);
-          if (Object.keys(legacyAgentFiles).length === 0) legacyAgentFiles = undefined;
-        }
-      }
-    } catch { /* agents/ dir doesn't exist or API error — fine */ }
+        if (mdEntries.length === 0) continue;
+        legacyAgentFiles ??= {};
+        const fetches = mdEntries.map(async (entry) => {
+          try {
+            const res = await githubFetch(entry.download_url!);
+            if (res.ok) legacyAgentFiles![`${subdir}/${entry.name}`] = await res.text();
+          } catch { /* skip */ }
+        });
+        await Promise.allSettled(fetches);
+      } catch { /* subdir doesn't exist or API error — fine */ }
+    }
+    if (legacyAgentFiles && Object.keys(legacyAgentFiles).length === 0) legacyAgentFiles = undefined;
   }
 
   // Platform security check (best-effort, non-blocking on network error)

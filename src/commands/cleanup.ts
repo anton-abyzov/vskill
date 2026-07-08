@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { readLockfile } from "../lockfile/index.js";
 import { listEnabledPlugins, purgeStalePlugins } from "../settings/index.js";
 import { uninstallStalePlugins } from "../utils/claude-plugin.js";
+import { healAllMarketplaceManifests } from "../marketplace/manifest-conflict.js";
 import { bold, cyan, green, dim, yellow } from "../utils/output.js";
 
 interface CleanupOptions {
@@ -101,6 +102,16 @@ export async function cleanupCommand(opts: CleanupOptions = {}): Promise<void> {
 
   if (orphanedCount > 0) {
     console.log(green(`\nRemoved ${orphanedCount} orphaned cache director${orphanedCount === 1 ? "y" : "ies"}.`));
+  }
+
+  // 0851: heal Postiz-class manifest conflicts (marketplace entry + plugin.json
+  // both specifying components — Claude Code refuses to load such plugins).
+  const healedManifests = healAllMarketplaceManifests();
+  if (healedManifests.length > 0) {
+    console.log(green(`\nHealed ${healedManifests.length} conflicting marketplace manifest entr${healedManifests.length === 1 ? "y" : "ies"}:`));
+    for (const id of healedManifests) {
+      console.log(dim(`  Fixed: ${id} (set strict: true, removed duplicate component specs)`));
+    }
   }
 
   // 0724 T-008 AC-US7-03: reconciliation summary

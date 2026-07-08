@@ -44,6 +44,7 @@ import {
   removeOrphanPluginCacheDirs,
 } from "./plugin-orphan-cleanup.js";
 import { discoverInstalledPlugins } from "./plugin-discovery.js";
+import { healAllMarketplaceManifests } from "../marketplace/manifest-conflict.js";
 
 const VALID_SCOPES: readonly PluginScope[] = ["user", "project", "local"] as const;
 
@@ -238,7 +239,10 @@ export function registerPluginCliRoutes(
         500,
       );
     }
-    sendJson(res, { ok: true, stdout: result.stdout });
+    // 0851: normalize Postiz-class manifest conflicts in the freshly
+    // registered marketplace so installs from it load cleanly.
+    const healed = healAllMarketplaceManifests();
+    sendJson(res, { ok: true, stdout: result.stdout, ...(healed.length ? { healed } : {}) });
   });
 
   // GET /api/plugins/marketplaces — list configured marketplaces
@@ -302,8 +306,13 @@ export function registerPluginCliRoutes(
     if (scope !== undefined && !isValidScope(scope)) {
       return sendError(res, 400, "invalid-scope", `Invalid scope: ${scope}`);
     }
+    // 0851: heal Postiz-class manifest conflicts BEFORE install (so the
+    // cache copy inherits a clean manifest) and after (belt-and-braces for
+    // marketplaces registered outside Studio in a broken state).
+    healAllMarketplaceManifests();
     const args = ["install", plugin, ...(scope ? ["--scope", scope] : [])];
     await runAndRespond(args, root, res, { timeout: 60_000, cacheRoot });
+    healAllMarketplaceManifests();
   });
 
   // POST /api/plugins/:name/uninstall

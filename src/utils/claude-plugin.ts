@@ -8,6 +8,7 @@
 import { execFileSync } from "node:child_process";
 import { resolveCliBinary } from "./resolve-binary.js";
 import { purgeStalePlugins } from "../settings/index.js";
+import { healAllMarketplaceManifests } from "../marketplace/manifest-conflict.js";
 
 /**
  * 0826: Add a Claude Code plugin marketplace via the claude CLI.
@@ -35,6 +36,10 @@ export function claudePluginMarketplaceAdd(
     ["plugin", "marketplace", "add", "--scope", scope, "--", source],
     { stdio: "pipe", timeout: 180_000 },
   );
+  // 0851: third-party marketplaces may ship Postiz-class manifest conflicts
+  // (entry + plugin.json both specify components). Normalize the local cache
+  // right after registration so the subsequent install copies a clean manifest.
+  healAllMarketplaceManifests();
 }
 
 /**
@@ -95,6 +100,9 @@ export function claudePluginInstall(
     ["plugin", "install", "--scope", scope, "--", pluginId],
     { stdio: "pipe", timeout: 30_000, ...(opts?.cwd ? { cwd: opts.cwd } : {}) },
   );
+  // 0851: heal manifest conflicts in the cache copy the install just created
+  // (covers marketplaces that were already registered in a broken state).
+  healAllMarketplaceManifests();
 }
 
 /**

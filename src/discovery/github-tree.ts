@@ -216,6 +216,32 @@ export async function checkRepoExists(
   }
 }
 
+/**
+ * Root directories that are never skills even when they contain a SKILL.md
+ * (documentation, samples, build output, framework dirs). Keeps root-level
+ * {name}/SKILL.md discovery from producing phantom skills.
+ */
+const NON_SKILL_ROOT_DIRS = new Set([
+  "skills",
+  "plugins",
+  "docs",
+  "doc",
+  "examples",
+  "example",
+  "samples",
+  "sample",
+  "node_modules",
+  "test",
+  "tests",
+  "scripts",
+  "src",
+  "dist",
+  "build",
+  "templates",
+  "template",
+  ".github",
+]);
+
 export interface DiscoveredSkill {
   name: string;
   path: string;
@@ -395,6 +421,27 @@ export async function discoverSkillsDetailed(
       continue;
     }
 
+    // {name}/SKILL.md — root-level skill directories (e.g. higgsfield-ai/skills
+    // keeps each skill as a top-level folder). Lower priority than skills/{name}:
+    // never overwrites an existing entry, and skills/{name} replaces it later.
+    // Common non-skill directories are excluded so docs/examples layouts don't
+    // produce phantom skills.
+    const rootDirMatch = entry.path.match(/^([^/]+)\/SKILL\.md$/);
+    if (rootDirMatch) {
+      const skillName = rootDirMatch[1];
+      if (
+        !NON_SKILL_ROOT_DIRS.has(skillName.toLowerCase()) &&
+        !skills.some((s) => s.name === skillName)
+      ) {
+        skills.push({
+          name: skillName,
+          path: entry.path,
+          rawUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${entry.path}`,
+        });
+      }
+      continue;
+    }
+
     // plugins/{non-specweave}/skills/{name}/SKILL.md — non-framework plugin skills
     const pluginMatch = entry.path.match(
       /^plugins\/(?!specweave)[^/]+\/skills\/([^/]+)\/SKILL\.md$/,
@@ -420,6 +467,20 @@ export async function discoverSkillsDetailed(
         agentFilesBySkill.set(skillName, map);
       }
       map[`agents/${agentFilename}`] = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${entry.path}`;
+    }
+
+    // {name}/agents/*.md — agent files for root-level skill directories
+    const rootAgentMatch = entry.path.match(/^([^/]+)\/agents\/([^/]+\.md)$/);
+    if (rootAgentMatch && !NON_SKILL_ROOT_DIRS.has(rootAgentMatch[1].toLowerCase())) {
+      const skillName = rootAgentMatch[1];
+      const agentFilename = rootAgentMatch[2];
+      let map = agentFilesBySkill.get(skillName);
+      if (!map) {
+        map = {};
+        agentFilesBySkill.set(skillName, map);
+      }
+      map[`agents/${agentFilename}`] = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${entry.path}`;
+      continue;
     }
 
     // plugins/{non-specweave}/skills/{name}/agents/*.md — plugin agent files

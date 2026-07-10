@@ -22,8 +22,6 @@
  * Exits 1 on any violation, 0 otherwise.
  */
 
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 
@@ -150,4 +148,4 @@ if (isMain()) {
   // eslint-disable-next-line no-console
   console.log("check-serif-scope: clean.");
   process.exit(0);
-};
+}

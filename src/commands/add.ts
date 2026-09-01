@@ -75,6 +75,33 @@ import {
 } from "../lib/skill-lifecycle.js";
 
 // ---------------------------------------------------------------------------
+/**
+ * Subdirectories fetched alongside SKILL.md when installing a skill that lives
+ * in a repo subdirectory. Must stay a subset of the prefixes the installer
+ * accepts in installer/bundle-files.ts, or the write is rejected.
+ */
+export const BUNDLE_SUBDIRS = ["agents", "references", "scripts", "assets", "tests"] as const;
+
+/**
+ * Extensions carried in a skill bundle. Bundle contents are transported as
+ * UTF-8 strings, so this is a text-only allowlist — binaries would be corrupted.
+ */
+const BUNDLE_TEXT_EXTENSIONS = [
+  ".md", ".txt", ".json", ".jsonc", ".yaml", ".yml", ".toml", ".csv",
+  ".py", ".sh", ".bash", ".zsh", ".js", ".mjs", ".cjs", ".ts", ".sql",
+  ".excalidraw", ".svg", ".css", ".html",
+] as const;
+
+/** Per-file and per-skill ceilings, so one fat repo cannot stall an install. */
+const MAX_BUNDLE_FILE_BYTES = 512 * 1024;
+const MAX_BUNDLE_FILES = 100;
+
+export function isBundleTextFile(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (lower.startsWith(".")) return false; // .DS_Store, dotfiles
+  return BUNDLE_TEXT_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
 /** Validate that a download_url from GitHub Contents API points to a trusted GitHub domain. */
 function isGitHubDownloadUrl(url: string): boolean {
   try {
@@ -2917,13 +2944,17 @@ async function installSingleSkillLegacy(
   }
   if (content === undefined) return process.exit(1);
 
-  // Fetch agents/*.md and references/*.md if skill is in a subdirectory.
-  // Both directories are part of the skill-authoring convention: agents/ holds
-  // sub-agent prompts, references/ holds docs the SKILL.md links to — a skill
-  // installed without its references is silently degraded.
+  // Fetch the skill's bundled subdirectories when the skill lives in a
+  // subdirectory of the repo. These are the skill-authoring convention and the
+  // same prefixes the installer accepts (see installer/bundle-files.ts):
+  // agents/ holds sub-agent prompts, references/ the docs SKILL.md links to,
+  // scripts/ the executable tooling, assets/ static files, tests/ its tests.
+  // A skill whose SKILL.md says "run scripts/foo.py" and installs without
+  // scripts/ is not degraded — it is broken.
   let legacyAgentFiles: Record<string, string> | undefined;
   if (skill) {
-    for (const subdir of ["agents", "references"] as const) {
+    let fetched = 0;
+    for (const subdir of BUNDLE_SUBDIRS) {
       try {
         const basePath = skillSubpath.replace(/\/SKILL\.md$/, `/${subdir}`);
         // ?ref= keeps the listing on the same branch as SKILL.md
@@ -2931,17 +2962,32 @@ async function installSingleSkillLegacy(
         const dirUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${basePath}?ref=${encodeURIComponent(branch)}`;
         const dirRes = await githubFetch(dirUrl, { headers: { Accept: "application/vnd.github.v3+json" } });
         if (!dirRes.ok) continue;
-        const entries = (await dirRes.json()) as Array<{ name: string; download_url?: string }>;
-        const mdEntries = entries.filter((e) => e.name.endsWith(".md") && e.download_url && isGitHubDownloadUrl(e.download_url!));
-        if (mdEntries.length === 0) continue;
+        const entries = (await dirRes.json()) as Array<{
+          name: string;
+          type?: string;
+          size?: number;
+          download_url?: string;
+        }>;
+        const wanted = entries.filter(
+          (e) =>
+            e.type !== "dir" &&
+            isBundleTextFile(e.name) &&
+            (e.size ?? 0) <= MAX_BUNDLE_FILE_BYTES &&
+            e.download_url &&
+            isGitHubDownloadUrl(e.download_url),
+        );
+        if (wanted.length === 0) continue;
         legacyAgentFiles ??= {};
-        const fetches = mdEntries.map(async (entry) => {
+        const budget = wanted.slice(0, Math.max(0, MAX_BUNDLE_FILES - fetched));
+        fetched += budget.length;
+        const fetches = budget.map(async (entry) => {
           try {
             const res = await githubFetch(entry.download_url!);
             if (res.ok) legacyAgentFiles![`${subdir}/${entry.name}`] = await res.text();
           } catch { /* skip */ }
         });
         await Promise.allSettled(fetches);
+        if (fetched >= MAX_BUNDLE_FILES) break;
       } catch { /* subdir doesn't exist or API error — fine */ }
     }
     if (legacyAgentFiles && Object.keys(legacyAgentFiles).length === 0) legacyAgentFiles = undefined;

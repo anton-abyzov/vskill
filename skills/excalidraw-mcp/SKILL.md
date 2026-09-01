@@ -1,7 +1,7 @@
 ---
 name: excalidraw-mcp
 description: Build Excalidraw diagrams through the official Excalidraw MCP and turn the same source into a real .excalidraw file on disk or an Obsidian .excalidraw.md drawing. Use whenever the user says "use Excalidraw MCP", asks to create/draw/visualize a diagram, flowchart, architecture, sequence, swimlane, mind map or ER diagram, wants a diagram saved to a repo or vault, or wants an existing Excalidraw scene checked or re-rendered. Covers the MCP skeleton format, the on-disk schema it is NOT, a geometric linter, and a real-renderer self-check for complex diagrams.
-version: 1.1.1
+version: 1.2.0
 license: MIT
 repository: anton-abyzov/vskill
 mcp-deps: [excalidraw]
@@ -27,27 +27,52 @@ Second fact: hand-authored diagrams do not degrade gradually with size — they 
 layout formula had a 0.00 defect rate; bespoke one-off elements had 0.71. So compute
 positions with a formula, and let the linter check the result.
 
-## Setup on a new machine
+## Preflight on a new machine
 
 Installing this skill does **not** install the MCP server — `mcp-deps` is a declaration
-that `vskill check` verifies, not an installer. Add the server once per machine:
+that `vskill check` verifies, not an installer. **If the `mcp__excalidraw__*` tools are
+not available, run this first** — it detects and registers the server, on any OS:
 
 ```bash
-claude mcp add --transport http --scope user excalidraw https://mcp.excalidraw.com
+python3 scripts/ensure_mcp.py --install
 ```
 
-`--scope user` registers it for every project on that machine (written to
-`~/.claude.json`). Drop the flag for the current project only, or use
-`--scope project` to commit it to the repo's `.mcp.json` so teammates get it on clone.
-Verify with `claude mcp list`, or `vskill check excalidraw-mcp`.
+It reports where the server was found, or runs
+`claude mcp add --transport http --scope user excalidraw https://mcp.excalidraw.com`
+and re-verifies. Exit 0 configured, 1 missing, 2 could not register (no Claude CLI on
+PATH — it prints the command to run by hand). Claude Code needs a restart afterwards to
+pick up a newly added server.
 
-Without the MCP the skill still works for everything except the live inline render:
-`excalidraw_build.py` and `excalidraw_lint.py` are plain Python 3 with no dependencies
-and no network, so files and validation keep working. `excalidraw_render.py` additionally
-wants `pip install playwright && playwright install chromium`.
+Scopes: `--scope user` (default) covers every project on the machine via `~/.claude.json`;
+`--scope project` writes `./.mcp.json` so teammates get it on clone; `--scope local` is
+this project only. A server registered under a *different* project counts as missing —
+Claude Code will not load it here, and the script says so.
+
+**Without the MCP everything except the live inline render still works.**
+`excalidraw_build.py` and `excalidraw_lint.py` are stdlib-only Python 3 — no packages, no
+network. Build files, lint them, ship them. `excalidraw_render.py` additionally needs
+`pip install playwright && playwright install chromium`.
+
+### Windows
+
+Use `py -3` and backslashes; **`python3` on Windows is a Microsoft Store stub** that opens
+the Store instead of running anything.
+
+```powershell
+py -3 scripts\ensure_mcp.py --install
+py -3 scripts\excalidraw_build.py scene.json -o out.excalidraw
+```
+
+Everything else is portable: paths go through `pathlib`, output is written with explicit
+UTF-8 and `\n` newlines so a Windows run does not bake CRLF into the scene JSON, and the
+preflight resolves `claude.cmd` / `claude.exe` as well as `claude`. If `vskill i` warns
+that symlinks are unavailable, it falls back to copying — enable Developer Mode to get
+symlinks back.
 
 ## Workflow
 
+0. **Preflight** (new machine only): if the `mcp__excalidraw__*` tools are missing,
+   `python3 scripts/ensure_mcp.py --install` (`py -3` on Windows).
 1. **Author the skeleton.** One JSON array, the same one `create_view` takes. Positions
    come from a layout formula (see `references/layout-recipes.md`), never from eyeballing.
 2. **Lint it** — offline, no dependencies, catches overflow/collision/geometry:
@@ -129,6 +154,7 @@ skeleton file on disk in sync, since that file is what builds and lints.
   radial and matrix layouts, plus how to keep a 60-element diagram legible.
 - `references/obsidian.md` — the `.excalidraw.md` wrapper, block-ref rules, and the
   compressed-scene gotcha.
+- `scripts/ensure_mcp.py` — detect and register the Excalidraw MCP server on any OS.
 - `scripts/split_excalidraw_library.py` — split an `.excalidrawlib` (AWS/GCP/K8s icon
   packs from libraries.excalidraw.com) into per-icon JSON plus a lookup table, so icon
   data never enters context.
@@ -144,6 +170,10 @@ skeleton file on disk in sync, since that file is what builds and lints.
 
 ## Changelog
 
+- **1.2.0** — `scripts/ensure_mcp.py`: cross-platform preflight that detects the MCP
+  server (including `~/.claude.json`'s per-project map) and registers it when missing.
+  Windows support: documented `py -3`, `claude.cmd` resolution, explicit UTF-8 and `\n`
+  newlines on every write.
 - **1.1.1** — linter no longer applies the box-fit rules (R1/R2) to arrow
   containers; arrow labels are laid along the path and are covered by R10.
 - **1.1.0** — moved into the vskill monorepo at `skills/excalidraw-mcp/`, matching

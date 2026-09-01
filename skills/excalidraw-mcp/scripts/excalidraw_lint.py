@@ -60,7 +60,7 @@ class Report:
 
 def load(path: Path) -> tuple[list[dict], bool]:
     """Return (elements, is_skeleton)."""
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     if path.name.endswith(".excalidraw.md") or text.lstrip().startswith("---"):
         m = re.search(r"##? Drawing\n```(?:json|compressed-json)\n([\s\S]*?)```", text)
         if not m:

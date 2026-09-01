@@ -3,7 +3,10 @@
 //
 // Reads a skill's SKILL.md frontmatter and verifies that every declared
 // dependency is satisfied before the skill runs:
-//   - mcpDeps[]      → present in ~/.claude/mcp.json or project .claude/mcp.json
+//   - mcpDeps[]      → present in any known Claude config: project .mcp.json /
+//                      .claude/mcp.json, ~/.claude/mcp.json, Claude Desktop, or
+//                      ~/.claude.json (both top-level mcpServers and the
+//                      per-project projects[<dir>].mcpServers map)
 //   - secrets[]      → resolvable via env or .env.local (resolveCredential)
 //   - runtime.python → `python3 --version` ≥ declared minimum
 //   - runtime.pip    → declared (informational; we don't auto-install)
@@ -77,28 +80,127 @@ export function findSkillDir(name: string, root: string): string | null {
   return null;
 }
 
-/**
- * Check whether a named MCP server is configured in any known Claude config
- * file. Returns "configured" if found, "missing" otherwise. Tolerant of
- * malformed JSON — a parse error is treated as "not configured here".
- */
-export function checkMcpConfigured(serverName: string, projectRoot: string): "configured" | "missing" {
-  const candidates = [
-    join(projectRoot, ".claude", "mcp.json"),
-    join(homedir(), ".claude", "mcp.json"),
-    join(homedir(), "Library", "Application Support", "Claude", "claude_desktop_config.json"),
-  ];
-  for (const p of candidates) {
-    if (!existsSync(p)) continue;
-    try {
-      const cfg = JSON.parse(readFileSync(p, "utf-8")) as Record<string, unknown>;
-      const servers = cfg.mcpServers;
-      if (servers && typeof servers === "object" && serverName in (servers as Record<string, unknown>)) {
-        return "configured";
-      }
-    } catch { /* ignore parse error */ }
+/** Where an MCP server declaration was found. */
+export type McpScope =
+  /** A project-level config file (.mcp.json or .claude/mcp.json) in the project root. */
+  | "project-file"
+  /** Top-level mcpServers in a user-wide config. */
+  | "user-global"
+  /** ~/.claude.json → projects[<dir>].mcpServers — Claude Code's per-project store. */
+  | "project-scoped"
+  /** Claude Desktop's claude_desktop_config.json. */
+  | "desktop";
+
+export interface McpLocation {
+  status: "configured" | "missing";
+  scope?: McpScope;
+  /** Config file the declaration was read from. */
+  source?: string;
+  /** For "project-scoped": the project directory the server is registered under. */
+  projectPath?: string;
+  /** True when a project-scoped hit belongs to a DIFFERENT project than the one checked. */
+  otherProject?: boolean;
+}
+
+function hasServer(container: unknown, serverName: string): boolean {
+  return (
+    !!container &&
+    typeof container === "object" &&
+    serverName in (container as Record<string, unknown>)
+  );
+}
+
+function readJson(path: string): Record<string, unknown> | null {
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+  } catch {
+    return null; // malformed config is treated as "not configured here"
   }
-  return "missing";
+}
+
+/**
+ * Locate a named MCP server across every known Claude config layout, reporting
+ * WHERE it was found.
+ *
+ * Claude Code stores servers in three different shapes, and a skill can legally
+ * depend on any of them:
+ *   - <projectRoot>/.mcp.json            → checked-in project servers
+ *   - <projectRoot>/.claude/mcp.json     → local project servers
+ *   - ~/.claude.json  mcpServers         → user-global servers
+ *   - ~/.claude.json  projects[<dir>].mcpServers → per-project servers (the common case
+ *                                          for anything added with `claude mcp add`)
+ *   - ~/.claude/mcp.json                 → user-global servers
+ *   - Claude Desktop's claude_desktop_config.json
+ *
+ * `homeDir` is injectable so tests can exercise the user-level layouts without
+ * touching the real home directory.
+ */
+export function locateMcpServer(
+  serverName: string,
+  projectRoot: string,
+  homeDir: string = homedir(),
+): McpLocation {
+  const fileCandidates: Array<{ path: string; scope: McpScope }> = [
+    { path: join(projectRoot, ".mcp.json"), scope: "project-file" },
+    { path: join(projectRoot, ".claude", "mcp.json"), scope: "project-file" },
+    { path: join(homeDir, ".claude", "mcp.json"), scope: "user-global" },
+    {
+      path: join(homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json"),
+      scope: "desktop",
+    },
+  ];
+
+  for (const { path, scope } of fileCandidates) {
+    const cfg = readJson(path);
+    if (cfg && hasServer(cfg.mcpServers, serverName)) {
+      return { status: "configured", scope, source: path };
+    }
+  }
+
+  // ~/.claude.json carries BOTH a global map and a per-project map.
+  const claudeJsonPath = join(homeDir, ".claude.json");
+  const claudeJson = readJson(claudeJsonPath);
+  if (claudeJson) {
+    if (hasServer(claudeJson.mcpServers, serverName)) {
+      return { status: "configured", scope: "user-global", source: claudeJsonPath };
+    }
+    const projects = claudeJson.projects;
+    if (projects && typeof projects === "object") {
+      const entries = Object.entries(projects as Record<string, unknown>);
+      // Prefer the project being checked; fall back to any other project so the
+      // user is told the server exists but is scoped elsewhere.
+      const resolvedRoot = resolve(projectRoot);
+      let fallback: McpLocation | null = null;
+      for (const [dir, value] of entries) {
+        if (!value || typeof value !== "object") continue;
+        if (!hasServer((value as Record<string, unknown>).mcpServers, serverName)) continue;
+        const hit: McpLocation = {
+          status: "configured",
+          scope: "project-scoped",
+          source: claudeJsonPath,
+          projectPath: dir,
+        };
+        if (resolve(dir) === resolvedRoot) return hit;
+        fallback ??= { ...hit, otherProject: true };
+      }
+      if (fallback) return fallback;
+    }
+  }
+
+  return { status: "missing" };
+}
+
+/**
+ * Back-compatible wrapper: "configured" if the server is registered anywhere,
+ * "missing" otherwise. Prefer `locateMcpServer` when the scope matters.
+ */
+export function checkMcpConfigured(
+  serverName: string,
+  projectRoot: string,
+  homeDir: string = homedir(),
+): "configured" | "missing" {
+  return locateMcpServer(serverName, projectRoot, homeDir).status;
 }
 
 /**
@@ -140,12 +242,32 @@ export function buildCheckReport(skillName: string, projectRoot: string): CheckR
   const meta = buildSkillMetadata(dir, "source", projectRoot);
 
   const mcps = (meta.mcpDeps ?? []).map((name) => {
-    const status = checkMcpConfigured(name, projectRoot);
-    return {
-      name,
-      status: status === "configured" ? ("ok" as const) : ("missing" as const),
-      message: status === "configured" ? "configured" : "not configured in any known Claude config",
-    };
+    const found = locateMcpServer(name, projectRoot);
+    if (found.status === "missing") {
+      return {
+        name,
+        status: "missing" as const,
+        message: "not configured in any known Claude config",
+      };
+    }
+    if (found.scope === "project-scoped") {
+      return found.otherProject
+        ? {
+            name,
+            status: "warning" as const,
+            message: `configured, but project-scoped to ${found.projectPath} — not this project`,
+          }
+        : {
+            name,
+            status: "ok" as const,
+            message: `configured (project-scoped: ${found.projectPath})`,
+          };
+    }
+    const where =
+      found.scope === "user-global" ? "user global"
+      : found.scope === "desktop" ? "Claude Desktop"
+      : found.source ?? "project";
+    return { name, status: "ok" as const, message: `configured (${where})` };
   });
 
   const secretStatuses = resolveAllCredentials(meta.secrets ?? [], dir);

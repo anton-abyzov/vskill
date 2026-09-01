@@ -9,6 +9,7 @@ import {
   findSkillDir,
   pythonVersionSatisfies,
   checkMcpConfigured,
+  locateMcpServer,
 } from "../check.js";
 
 let tmpRoot: string;
@@ -83,6 +84,88 @@ describe("checkMcpConfigured", () => {
     mkdirSync(claudeDir, { recursive: true });
     writeFileSync(join(claudeDir, "mcp.json"), "{ this is not json");
     expect(checkMcpConfigured("anything", tmpRoot)).toBe("missing");
+  });
+
+  it("finds a server registered only in ~/.claude.json projects[<dir>].mcpServers", () => {
+    // Claude Code stores `claude mcp add` servers per project, not globally.
+    const home = join(tmpRoot, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(
+      join(home, ".claude.json"),
+      JSON.stringify({
+        projects: {
+          [tmpRoot]: { mcpServers: { excalidraw: { type: "http", url: "https://x" } } },
+        },
+      }),
+    );
+    expect(checkMcpConfigured("excalidraw", tmpRoot, home)).toBe("configured");
+
+    const found = locateMcpServer("excalidraw", tmpRoot, home);
+    expect(found.scope).toBe("project-scoped");
+    expect(found.projectPath).toBe(tmpRoot);
+    expect(found.otherProject).toBeUndefined();
+  });
+});
+
+describe("locateMcpServer", () => {
+  function writeClaudeJson(home: string, cfg: unknown): void {
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, ".claude.json"), JSON.stringify(cfg));
+  }
+
+  it("reports top-level ~/.claude.json mcpServers as user-global", () => {
+    const home = join(tmpRoot, "home");
+    writeClaudeJson(home, { mcpServers: { stripe: { type: "http", url: "x" } } });
+    expect(locateMcpServer("stripe", tmpRoot, home)).toMatchObject({
+      status: "configured",
+      scope: "user-global",
+    });
+  });
+
+  it("flags a server scoped to a different project", () => {
+    const home = join(tmpRoot, "home");
+    writeClaudeJson(home, {
+      projects: { "/somewhere/else": { mcpServers: { excalidraw: {} } } },
+    });
+    expect(locateMcpServer("excalidraw", tmpRoot, home)).toMatchObject({
+      status: "configured",
+      scope: "project-scoped",
+      projectPath: "/somewhere/else",
+      otherProject: true,
+    });
+  });
+
+  it("prefers the current project over another project registering the same server", () => {
+    const home = join(tmpRoot, "home");
+    writeClaudeJson(home, {
+      projects: {
+        "/somewhere/else": { mcpServers: { excalidraw: {} } },
+        [tmpRoot]: { mcpServers: { excalidraw: {} } },
+      },
+    });
+    const found = locateMcpServer("excalidraw", tmpRoot, home);
+    expect(found.projectPath).toBe(tmpRoot);
+    expect(found.otherProject).toBeUndefined();
+  });
+
+  it("prefers a project .mcp.json over user config", () => {
+    const home = join(tmpRoot, "home");
+    writeClaudeJson(home, { mcpServers: { shared: {} } });
+    writeFileSync(join(tmpRoot, ".mcp.json"), JSON.stringify({ mcpServers: { shared: {} } }));
+    expect(locateMcpServer("shared", tmpRoot, home)).toMatchObject({ scope: "project-file" });
+  });
+
+  it("returns missing when nothing declares the server", () => {
+    const home = join(tmpRoot, "home");
+    writeClaudeJson(home, { projects: { [tmpRoot]: { mcpServers: {} } } });
+    expect(locateMcpServer("nope", tmpRoot, home)).toEqual({ status: "missing" });
+  });
+
+  it("tolerates a malformed ~/.claude.json", () => {
+    const home = join(tmpRoot, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, ".claude.json"), "{ nope");
+    expect(locateMcpServer("anything", tmpRoot, home)).toEqual({ status: "missing" });
   });
 });
 

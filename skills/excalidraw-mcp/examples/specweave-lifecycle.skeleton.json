@@ -1,0 +1,30 @@
+[
+  {"type":"cameraUpdate","width":800,"height":600,"x":0,"y":-10},
+
+  {"type":"text","id":"ttl","center":400,"y":10,"text":"SpecWeave: Increment Lifecycle","fontSize":24},
+  {"type":"text","id":"sub","center":400,"y":45,"text":"spec-driven loop, one increment at a time","fontSize":16,"strokeColor":"#757575"},
+
+  {"type":"rectangle","id":"b1","x":55,"y":180,"width":150,"height":80,"roundness":{"type":3},"backgroundColor":"#a5d8ff","fillStyle":"solid","strokeColor":"#4a9eed","label":{"text":"Idea / Issue","fontSize":18}},
+  {"type":"rectangle","id":"n1","x":55,"y":320,"width":150,"height":80,"roundness":{"type":3},"backgroundColor":"#dbe4ff","fillStyle":"solid","strokeColor":"#4a9eed","strokeWidth":1,"label":{"text":"GitHub\nJIRA / ADO","fontSize":16}},
+  {"type":"arrow","id":"v1","from":"b1","to":"n1","strokeColor":"#4a9eed","strokeWidth":1,"strokeStyle":"dashed"},
+
+  {"type":"rectangle","id":"b2","x":245,"y":180,"width":150,"height":80,"roundness":{"type":3},"backgroundColor":"#fff3bf","fillStyle":"solid","strokeColor":"#f59e0b","label":{"text":"sw:increment","fontSize":18}},
+  {"type":"arrow","id":"a1","from":"b1","to":"b2"},
+  {"type":"rectangle","id":"n2","x":245,"y":320,"width":150,"height":80,"roundness":{"type":3},"backgroundColor":"#ffd8a8","fillStyle":"solid","strokeColor":"#f59e0b","strokeWidth":1,"label":{"text":"spec.md\nplan.md\ntasks.md","fontSize":16}},
+  {"type":"arrow","id":"v2","from":"b2","to":"n2","strokeColor":"#f59e0b","strokeWidth":1,"strokeStyle":"dashed"},
+
+  {"type":"rectangle","id":"b3","x":435,"y":180,"width":150,"height":80,"roundness":{"type":3},"backgroundColor":"#d0bfff","fillStyle":"solid","strokeColor":"#8b5cf6","label":{"text":"sw:do","fontSize":18}},
+  {"type":"arrow","id":"a2","from":"b2","to":"b3"},
+  {"type":"rectangle","id":"n3","x":435,"y":320,"width":150,"height":80,"roundness":{"type":3},"backgroundColor":"#e5dbff","fillStyle":"solid","strokeColor":"#8b5cf6","strokeWidth":1,"label":{"text":"code + tests\nTDD, agents","fontSize":16}},
+  {"type":"arrow","id":"v3","from":"b3","to":"n3","strokeColor":"#8b5cf6","strokeWidth":1,"strokeStyle":"dashed"},
+
+  {"type":"rectangle","id":"b4","x":625,"y":180,"width":150,"height":80,"roundness":{"type":3},"backgroundColor":"#b2f2bb","fillStyle":"solid","strokeColor":"#22c55e","label":{"text":"sw:done","fontSize":18}},
+  {"type":"arrow","id":"a3","from":"b3","to":"b4"},
+  {"type":"rectangle","id":"n4","x":625,"y":320,"width":150,"height":80,"roundness":{"type":3},"backgroundColor":"#d3f9d8","fillStyle":"solid","strokeColor":"#22c55e","strokeWidth":1,"label":{"text":"3 gates:\nreview / grill\njudge-llm","fontSize":16}},
+  {"type":"arrow","id":"v4","from":"b4","to":"n4","strokeColor":"#22c55e","strokeWidth":1,"strokeStyle":"dashed"},
+
+  {"type":"rectangle","id":"ld","x":245,"y":470,"width":530,"height":70,"roundness":{"type":3},"backgroundColor":"#c3fae8","fillStyle":"solid","strokeColor":"#06b6d4","label":{"text":"Living docs sync: .specweave/docs/ + GitHub / JIRA / ADO","fontSize":16}},
+  {"type":"arrow","id":"v5","from":"n4","to":"ld","strokeColor":"#06b6d4","strokeWidth":2},
+
+  {"type":"arrow","id":"loop","x":700,"y":180,"points":[[0,0],[0,-70],[-380,-70],[-380,-2]],"strokeColor":"#ef4444","strokeWidth":2,"strokeStyle":"dashed","label":{"text":"next increment","fontSize":16}}
+]

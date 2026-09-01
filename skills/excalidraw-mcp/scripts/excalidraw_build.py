@@ -520,7 +520,7 @@ def main() -> int:
     ap.add_argument("--dark", action="store_true", help="dark canvas background + light default text")
     args = ap.parse_args()
 
-    raw = sys.stdin.read() if args.input == "-" else Path(args.input).read_text()
+    raw = sys.stdin.read() if args.input == "-" else Path(args.input).read_text(encoding="utf-8")
     skeleton = json.loads(raw)
     if not isinstance(skeleton, list):
         skeleton = skeleton.get("elements", [])
@@ -533,7 +533,10 @@ def main() -> int:
         out = out.with_suffix("") if out.suffix == ".md" else out
         out = Path(str(out).removesuffix(".excalidraw") + ".excalidraw.md")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(obsidian_markdown(doc) if args.obsidian else json.dumps(doc, indent=2))
+    body = obsidian_markdown(doc) if args.obsidian else json.dumps(doc, indent=2)
+    # newline="\n" so a Windows run does not bake CRLF into the scene JSON and
+    # blow up every future git diff of the drawing.
+    out.write_text(body, encoding="utf-8", newline="\n")
 
     for w in b.warnings:
         print(f"warn: {w}", file=sys.stderr)

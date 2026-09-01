@@ -68,7 +68,7 @@ def main() -> int:
     html = TEMPLATE % {"bg": "#121212" if args.dark else "#ffffff",
                        "dark": "true" if args.dark else "false"}
     tmp = Path(args.out).with_suffix(".render.html")
-    tmp.write_text(html)
+    tmp.write_text(html, encoding="utf-8")
 
     try:
         with sync_playwright() as p:
@@ -92,7 +92,7 @@ def main() -> int:
 
             if args.svg:
                 svg = page.eval_on_selector("#root svg", "el => el.outerHTML")
-                Path(args.out).write_text(svg)
+                Path(args.out).write_text(svg, encoding="utf-8", newline="\n")
             else:
                 page.locator("#root svg").screenshot(path=args.out)
             browser.close()

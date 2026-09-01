@@ -153,7 +153,10 @@ def check(elements: list[dict], skeleton: bool, want_camera: bool) -> Report:
             if not c:
                 r.err("R13-DANGLING", f"text {t['id']} points at missing container {cid}")
                 continue
-            check_label(c, t.get("text", ""), t.get("fontSize", 20))
+            # Arrow labels are laid along the path, not fitted inside a box —
+            # an arrow's width/height is its point span. R10 covers those.
+            if c["type"] in CONTAINER_TYPES:
+                check_label(c, t.get("text", ""), t.get("fontSize", 20))
             bound = c.get("boundElements") or []
             if not any(b.get("id") == t["id"] for b in bound):
                 r.err("R15-RECIPROCITY",

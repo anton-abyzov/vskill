@@ -1,7 +1,7 @@
 ---
 name: excalidraw-mcp
 description: Build Excalidraw diagrams through the official Excalidraw MCP and turn the same source into a real .excalidraw file on disk or an Obsidian .excalidraw.md drawing. Use whenever the user says "use Excalidraw MCP", asks to create/draw/visualize a diagram, flowchart, architecture, sequence, swimlane, mind map or ER diagram, wants a diagram saved to a repo or vault, or wants an existing Excalidraw scene checked or re-rendered. Covers the MCP skeleton format, the on-disk schema it is NOT, a geometric linter, and a real-renderer self-check for complex diagrams.
-version: 1.1.0
+version: 1.1.1
 license: MIT
 repository: anton-abyzov/vskill
 mcp-deps: [excalidraw]
@@ -144,6 +144,8 @@ skeleton file on disk in sync, since that file is what builds and lints.
 
 ## Changelog
 
+- **1.1.1** — linter no longer applies the box-fit rules (R1/R2) to arrow
+  containers; arrow labels are laid along the path and are covered by R10.
 - **1.1.0** — moved into the vskill monorepo at `skills/excalidraw-mcp/`, matching
   `remotion-best-practices` and the other in-repo skills. The standalone
   `anton-abyzov/excalidraw-mcp-skill` repo is deprecated.

@@ -1,0 +1,42 @@
+# Dependabot — supply-chain policy (SECURITY.md): no auto-fix agents, no
+# auto-merge. A person merges after "Supply-chain scan" (supply-chain-scan.yml)
+# and "CI" pass. `cooldown` delays new versions by 7 days so a poisoned release
+# is usually pulled from the registry before we ever open a PR for it.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    labels: ["dependencies"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+        update-types: ["minor", "patch"]
+      prod-dependencies:
+        dependency-type: "production"
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 7
+    labels: ["dependencies", "desktop"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    labels: ["dependencies", "ci/cd"]

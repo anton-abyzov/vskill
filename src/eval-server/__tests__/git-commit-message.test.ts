@@ -10,17 +10,26 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
 
 // Hoisted spawn mock — same pattern as git-routes.test.ts
-const { spawnMock, queueProcess } = vi.hoisted(() => {
+const { spawnMock, queueProcess, resetQueue, setMidRebase } = vi.hoisted(() => {
   type Queued = { stdout: string; stderr: string; exitCode: number | null; delayMs?: number };
   const queue: Queued[] = [];
+  // `/api/git/publish` opens with a mid-rebase pre-flight probe
+  // (`git rev-parse --git-path rebase-merge`). It is infrastructure, not part of
+  // any single test's intent, so it is answered out-of-band instead of eating a
+  // FIFO slot — otherwise every queued response shifts by one and the suite
+  // asserts against the wrong git invocation (exactly how these tests rotted).
+  const state = { midRebasePath: "" };
   const spawnMock = vi.fn((_cmd: string, _args: readonly string[], _opts?: unknown) => {
-    const q = queue.shift() ?? { stdout: "", stderr: "", exitCode: 0 };
+    const isRebaseProbe = _args[0] === "rev-parse" && _args[1] === "--git-path";
+    const q = isRebaseProbe
+      ? { stdout: state.midRebasePath, stderr: "", exitCode: 0 }
+      : (queue.shift() ?? { stdout: "", stderr: "", exitCode: 0 });
     const proc = new EventEmitter() as EventEmitter & {
       stdout: EventEmitter; stderr: EventEmitter; kill: (s?: string) => boolean; killed: boolean;
     };
@@ -41,7 +50,18 @@ const { spawnMock, queueProcess } = vi.hoisted(() => {
     else setImmediate(fire);
     return proc;
   });
-  return { spawnMock, queueProcess: (q: Queued) => queue.push(q) };
+  return {
+    spawnMock,
+    queueProcess: (q: Queued) => queue.push(q),
+    resetQueue: () => {
+      queue.length = 0;
+      state.midRebasePath = "";
+    },
+    // Point the probe at a path that exists to simulate an interrupted rebase.
+    setMidRebase: (absPath: string) => {
+      state.midRebasePath = absPath;
+    },
+  };
 });
 
 vi.mock("node:child_process", () => ({ spawn: spawnMock }));
@@ -98,6 +118,9 @@ class FakeRes {
 let root: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "vskill-git-cm-"));
+  // The queue is module-scoped: without this, responses left over by a failing
+  // test leak into the next one and every later assertion is meaningless.
+  resetQueue();
   spawnMock.mockClear();
   llmGenerateMock.mockReset();
   createLlmClientMock.mockClear();
@@ -322,6 +345,65 @@ describe("POST /api/git/publish (with commitMessage)", () => {
     expect(body.error).toContain("hook rejected");
     // Push must NOT have run after a failed commit.
     const callArgs = spawnMock.mock.calls.map((c) => (c as [string, string[]])[1]);
+    expect(callArgs.find((a) => a[0] === "push")).toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // Regression (release/2.0): these three tests went red on main and stayed red
+  // because ci.yml only ran 5 named test files. The route was fine; the suite
+  // was silently mis-asserting after a mid-rebase pre-flight probe was added
+  // ahead of `git status`. Pin the real invocation order so the next pre-flight
+  // step fails loudly instead of shifting every queued response by one.
+  // -------------------------------------------------------------------------
+  it("probes for an interrupted rebase BEFORE it stages or commits anything", async () => {
+    queueProcess({ stdout: " M foo.ts\n", stderr: "", exitCode: 0 }); // status (dirty)
+    queueProcess({ stdout: "", stderr: "", exitCode: 0 }); // add -A
+    queueProcess({ stdout: "[main abc] x\n", stderr: "", exitCode: 0 }); // commit
+    queueProcess({ stdout: "Pushed\n", stderr: "", exitCode: 0 }); // push
+    queueProcess({ stdout: "abc\n", stderr: "", exitCode: 0 });
+    queueProcess({ stdout: "https://github.com/o/r.git\n", stderr: "", exitCode: 0 });
+    queueProcess({ stdout: "main\n", stderr: "", exitCode: 0 });
+
+    const h = makePostGitPublishHandler(root);
+    const res = new FakeRes();
+    await h(
+      new FakeReq("POST", "/api/git/publish", { commitMessage: "feat: x" }) as never,
+      res as never,
+    );
+
+    expect(res.statusCode).toBe(200);
+    const callArgs = spawnMock.mock.calls.map((c) => (c as [string, string[]])[1]);
+    const idxProbe = callArgs.findIndex(
+      (a) => a[0] === "rev-parse" && a[1] === "--git-path",
+    );
+    const idxStatus = callArgs.findIndex((a) => a[0] === "status");
+    const idxAdd = callArgs.findIndex((a) => a[0] === "add");
+    expect(idxProbe).toBe(0);
+    expect(idxProbe).toBeLessThan(idxStatus);
+    expect(idxStatus).toBeLessThan(idxAdd);
+  });
+
+  it("refuses with 409 and never stages when the repo is mid-rebase", async () => {
+    // `git rev-parse --git-path rebase-merge` resolving to an existing dir is
+    // what an interrupted rebase looks like on disk.
+    const rebaseDir = join(root, "rebase-merge");
+    mkdirSync(rebaseDir, { recursive: true });
+    setMidRebase(rebaseDir);
+
+    const h = makePostGitPublishHandler(root);
+    const res = new FakeRes();
+    await h(
+      new FakeReq("POST", "/api/git/publish", { commitMessage: "feat: x" }) as never,
+      res as never,
+    );
+
+    expect(res.statusCode).toBe(409);
+    const body = res.json as { success: boolean; reason: string };
+    expect(body.success).toBe(false);
+    expect(body.reason).toBe("mid_rebase");
+    const callArgs = spawnMock.mock.calls.map((c) => (c as [string, string[]])[1]);
+    expect(callArgs.find((a) => a[0] === "add")).toBeUndefined();
+    expect(callArgs.find((a) => a[0] === "commit")).toBeUndefined();
     expect(callArgs.find((a) => a[0] === "push")).toBeUndefined();
   });
 

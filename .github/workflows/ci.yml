@@ -109,6 +109,24 @@ jobs:
       - run: npm run build
       - run: npx vitest run src/commands/diff.test.ts src/api/client.test.ts
 
+  # Full Vitest suite. The named-file jobs above exist for cross-OS coverage;
+  # this one exists so nothing can rot unnoticed. Three publish-route tests sat
+  # red on main for weeks because no job ever ran `vitest run` with no argument.
+  # ~60s on one runner — cheap enough to gate every PR.
+  unit-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci --ignore-scripts && npm run setup
+      - run: npm run build
+      - name: Full unit suite
+        run: npx vitest run --reporter=dot
+
   # 0702 T-032 — Cross-platform credential store + `vskill keys` CLI + first-run
   # onboarding tests. Runs on all three OS so we catch Windows-specific path
   # handling, chmod-skip, and TTY detection regressions before merge.

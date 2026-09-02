@@ -7,7 +7,8 @@
 //   2. Platform-native fallback: discover orphan processes that don't have
 //      a lock file (older CLIs, manually-spawned `node vskill-server`, etc.).
 //      macOS: `pgrep -f` + `lsof -p`. Linux: `/proc` walk. Windows:
-//      `Get-NetTCPConnection` via PowerShell.
+//      `Get-CimInstance Win32_Process` (command line contains "vskill")
+//      joined with `Get-NetTCPConnection`, via a hidden PowerShell.
 //
 // The scanner is wrapped in `tokio::time::timeout(500ms)` so a stuck
 // platform-native call never blocks the cold-launch budget. On timeout we
@@ -20,6 +21,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
+
+use crate::proc::pid_is_alive;
 
 const SCAN_TIMEOUT: Duration = Duration::from_millis(500);
 const STALE_LOCK_AGE_SECS: i64 = 24 * 60 * 60; // 1 day
@@ -280,31 +283,6 @@ fn parse_iso8601_to_unix(iso: &str) -> Option<i64> {
 }
 
 #[cfg(unix)]
-fn pid_is_alive(pid: u32) -> bool {
-    // 0832 F-003: capture errno explicitly between the kill call and
-    // last_os_error() so a future libc call inserted in between can't
-    // silently break liveness detection.
-    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    if rc == 0 {
-        return true;
-    }
-    // EPERM means the PID exists but we can't signal it (different uid).
-    // ESRCH means the PID doesn't exist. Treat EPERM as alive — the lock
-    // owner is real, we just can't kill it; that's the scanner's signal
-    // that the lock is NOT stale.
-    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-#[cfg(not(unix))]
-fn pid_is_alive(pid: u32) -> bool {
-    // Windows: `tasklist /FI "PID eq N"` — not perfect but doesn't require
-    // PowerShell. We fall back to "alive" if we can't determine — pruning is
-    // best-effort on Windows.
-    let _ = pid;
-    true
-}
-
-#[cfg(unix)]
 fn read_pid_cmdline(pid: u32) -> Option<String> {
     #[cfg(target_os = "linux")]
     {
@@ -343,6 +321,9 @@ fn read_pid_cmdline(pid: u32) -> Option<String> {
     }
 }
 
+/// Windows: reading another process's command line needs
+/// NtQueryInformationProcess + ReadProcessMemory; not worth it for the
+/// PID-reuse heuristic. `None` makes `lock_is_stale` rely on liveness alone.
 #[cfg(not(unix))]
 fn read_pid_cmdline(_pid: u32) -> Option<String> {
     None
@@ -434,39 +415,58 @@ async fn scan_linux() -> Result<Vec<ProcessRecord>, String> {
 
 #[cfg(target_os = "windows")]
 async fn scan_windows() -> Result<Vec<ProcessRecord>, String> {
-    // PowerShell Get-CimInstance — Get-NetTCPConnection joined with
-    // Get-Process by OwningProcess. Returns lines of "PID PORT".
-    let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            "Get-NetTCPConnection -State Listen | ForEach-Object { $p=Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; if ($p -and ($p.ProcessName -like '*vskill*' -or $p.ProcessName -like '*node*')) { '{0} {1}' -f $p.Id, $_.LocalPort } }",
-        ])
+    // Hidden PowerShell (CREATE_NO_WINDOW — a GUI app must not flash a
+    // console) that lists only node.exe / vskill-server.exe processes whose
+    // command line mentions "vskill", joined with the listening TCP port.
+    // Lines: "<pid>|<port>|<cmdline>". kill_on_drop: if the 500ms scan
+    // budget expires, the child must not outlive the scan.
+    const SCRIPT: &str = "$conns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue; \
+Get-CimInstance Win32_Process -Filter \"Name='node.exe' OR Name='vskill-server.exe'\" -ErrorAction SilentlyContinue | \
+Where-Object { $_.CommandLine -like '*vskill*' } | ForEach-Object { \
+$p = $_; $c = $conns | Where-Object { $_.OwningProcess -eq $p.ProcessId } | Select-Object -First 1; \
+$port = if ($c) { $c.LocalPort } else { 0 }; \
+'{0}|{1}|{2}' -f $p.ProcessId, $port, $p.CommandLine }";
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
         .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .creation_flags(crate::proc::CREATE_NO_WINDOW);
+    let output = cmd
         .output()
         .await
         .map_err(|e| format!("powershell launch failed: {e}"))?;
+    Ok(parse_windows_scan(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Parse "<pid>|<port>|<cmdline>" lines from the Windows scan. Only rows
+/// whose command line carries the vskill marker are kept.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn parse_windows_scan(text: &str) -> Vec<ProcessRecord> {
     let mut out = Vec::new();
-    let text = String::from_utf8_lossy(&output.stdout);
     for line in text.lines() {
-        let mut parts = line.split_whitespace();
-        let pid: u32 = match parts.next().and_then(|s| s.parse().ok()) {
+        let mut parts = line.trim().splitn(3, '|');
+        let pid: u32 = match parts.next().and_then(|s| s.trim().parse().ok()) {
             Some(p) => p,
             None => continue,
         };
-        let port: u16 = match parts.next().and_then(|s| s.parse().ok()) {
+        let port: u16 = match parts.next().and_then(|s| s.trim().parse().ok()) {
             Some(p) => p,
             None => continue,
         };
+        let cmdline = parts.next().unwrap_or("").trim();
+        if !cmdline.contains(VSKILL_MARKER) {
+            continue;
+        }
         out.push(ProcessRecord {
             pid,
             port,
             started_at: String::new(),
-            source: ProcessSource::NodeDirect,
-            cmdline: String::new(),
+            source: classify_source(cmdline),
+            cmdline: truncate_cmdline(cmdline),
         });
     }
-    Ok(out)
+    out
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -687,6 +687,22 @@ mod tests {
         // Anything unknown falls back to NpxCli (lock files written by the CLI
         // never set source="" but defensive default catches future variants).
         assert_eq!(ProcessSource::from_str_lossy("nope"), ProcessSource::NpxCli);
+    }
+
+    #[test]
+    fn parse_windows_scan_keeps_only_vskill_rows() {
+        let text = "\r\n1234|7077|C:\\Program Files\\Skill Studio\\vskill-server.exe --port 0\r\n\
+                    2345|3000|C:\\nodejs\\node.exe C:\\proj\\server.js\r\n\
+                    3456|0|node C:\\Users\\a\\AppData\\npm\\node_modules\\vskill\\dist\\bin.js studio\r\n\
+                    garbage line\r\n";
+        let rows = parse_windows_scan(text);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].pid, 1234);
+        assert_eq!(rows[0].port, 7077);
+        assert_eq!(rows[0].source, ProcessSource::Tauri);
+        assert_eq!(rows[1].pid, 3456);
+        assert_eq!(rows[1].port, 0);
+        assert_eq!(rows[1].source, ProcessSource::NodeDirect);
     }
 
     #[test]

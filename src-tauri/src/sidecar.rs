@@ -1,6 +1,7 @@
 // Sidecar lifecycle: spawn the bundled Node server, capture LISTEN_PORT,
 // poll /api/health, manage graceful shutdown and 3-strikes-in-60s crash recovery.
 
+use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -14,6 +15,8 @@ use tauri_plugin_shell::ShellExt;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 
+use crate::proc::{self, Signal};
+
 const SIDECAR_NAME: &str = "vskill-server";
 const HEALTH_POLL_INTERVAL_MS: u64 = 200;
 const HEALTH_TIMEOUT_MS: u64 = 10_000;
@@ -21,6 +24,8 @@ const SHUTDOWN_GRACE_MS: u64 = 2_000;
 const STRIKE_WINDOW_MS: u128 = 60_000;
 const MAX_STRIKES: u32 = 3;
 const NO_PID: u32 = 0;
+/// Sidecar stderr lines kept for the failure page / diagnostics.
+const STDERR_TAIL_LINES: usize = 50;
 
 static ACTIVE_SIDECAR_PID: AtomicU32 = AtomicU32::new(NO_PID);
 
@@ -58,6 +63,12 @@ pub struct SidecarState {
     /// Reset on every spawn so a stale token from a crashed prior sidecar
     /// can't bleed into the next process.
     pub studio_token: Option<String>,
+    /// Last `STDERR_TAIL_LINES` lines the sidecar wrote to stderr. Surfaced on
+    /// the boot-failure page so a user can see *why* the sidecar died
+    /// (e.g. a SyntaxError in the bundle) without hunting for log files.
+    pub last_stderr: VecDeque<String>,
+    /// Exit code of the most recent sidecar process, if it has terminated.
+    pub last_exit_code: Option<i32>,
 }
 
 pub type SharedSidecar = Arc<Mutex<SidecarState>>;
@@ -239,6 +250,8 @@ pub fn spawn_sidecar<'a>(
             // sidecar will emit a fresh `Studio token: <token>` banner on
             // stdout and we want the IPC to return None until that arrives.
             s.studio_token = None;
+            s.last_stderr.clear();
+            s.last_exit_code = None;
         }
 
         // Channel — port detector pushes the port the moment we see LISTEN_PORT=...
@@ -277,6 +290,11 @@ pub fn spawn_sidecar<'a>(
                     CommandEvent::Stderr(line) => {
                         let text = String::from_utf8_lossy(&line).to_string();
                         log::warn!("[sidecar stderr] {}", text.trim_end());
+                        let mut s = state_clone.lock().unwrap();
+                        if s.last_stderr.len() >= STDERR_TAIL_LINES {
+                            s.last_stderr.pop_front();
+                        }
+                        s.last_stderr.push_back(text.trim_end().to_string());
                     }
                     CommandEvent::Error(err) => {
                         log::error!("[sidecar error] {err}");
@@ -287,9 +305,26 @@ pub fn spawn_sidecar<'a>(
                             payload.code,
                             payload.signal
                         );
+                        {
+                            let mut s = state_clone.lock().unwrap();
+                            s.last_exit_code = payload.code;
+                        }
                         if mark_child_terminated(&state_clone, spawned_pid) {
                             log::info!(
                                 "sidecar pid {spawned_pid} terminated during expected shutdown"
+                            );
+                            break;
+                        }
+                        if !port_announced {
+                            // Boot failure (e.g. a bundle that does not even
+                            // parse). Re-spawning would fail identically three
+                            // more times while the failure page is already up,
+                            // so do NOT feed the crash supervisor: dropping
+                            // `port_tx` makes the awaiting spawn_sidecar
+                            // return Err and lib.rs shows the page once.
+                            log::error!(
+                                "sidecar pid {spawned_pid} exited during boot before announcing a port (code={:?})",
+                                payload.code
                             );
                             break;
                         }
@@ -306,7 +341,13 @@ pub fn spawn_sidecar<'a>(
                 .await
             {
                 Ok(Some(p)) => p,
-                Ok(None) => return Err("sidecar exited before announcing port".into()),
+                Ok(None) => {
+                    let code = state.lock().unwrap().last_exit_code;
+                    return Err(match code {
+                        Some(c) => format!("sidecar exited before announcing port (exit code {c})"),
+                        None => "sidecar exited before announcing port".to_string(),
+                    });
+                }
                 Err(_) => return Err("timed out waiting for LISTEN_PORT from sidecar".into()),
             };
 
@@ -410,42 +451,60 @@ async fn existing_studio_health_ok(port: u16) -> bool {
         .unwrap_or(false)
 }
 
-/// Graceful shutdown: POST /api/shutdown (2s budget) → SIGTERM → wait 1s → SIGKILL.
+/// Graceful shutdown: POST /api/shutdown (2s budget) → [Unix: SIGTERM] → wait 1s → kill.
 ///
 /// `child.kill()` from `tauri-plugin-shell` sends SIGKILL on Unix, but only on
 /// the exact spawned PID. On macOS Cmd+Q the runtime tears down before the kill
-/// is acknowledged, so we additionally raise SIGTERM/SIGKILL via libc against the
-/// stored PID — that gives the OS a synchronous handle that survives the runtime
-/// drop.
+/// is acknowledged, so we additionally signal the stored PID via `proc` — that
+/// gives the OS a synchronous handle that survives the runtime drop.
+///
+/// Windows has no graceful signal, so `/api/shutdown` IS the graceful stage
+/// there: we wait for the sidecar to exit on its own before `TerminateProcess`.
 pub async fn graceful_shutdown(state: SharedSidecar) {
-    let (port, child_taken, pid) = {
+    let (port, child_taken, pid, token) = {
         let mut s = state.lock().unwrap();
         if let Some(pid) = s.pid {
             s.terminating_pid = Some(pid);
         }
-        (s.port, s.child.take(), s.pid)
+        (s.port, s.child.take(), s.pid, s.studio_token.clone())
     };
 
-    // Step 1: ask the sidecar to shut itself down via /api/shutdown.
+    // Step 1: ask the sidecar to shut itself down via /api/shutdown. The
+    // route sits behind the X-Studio-Token gate (0836), so send the token we
+    // captured from the startup banner — without it the request is a 401 and
+    // the "graceful" stage silently never happens.
     if let Some(port) = port {
         let url = format!("http://127.0.0.1:{port}/api/shutdown");
         if let Ok(client) = reqwest::Client::builder()
             .timeout(Duration::from_millis(SHUTDOWN_GRACE_MS))
             .build()
         {
-            let _ = client.post(&url).send().await;
+            let mut req = client.post(&url);
+            if let Some(t) = token.as_deref() {
+                req = req.header("X-Studio-Token", t);
+            }
+            match req.send().await {
+                Ok(resp) if !resp.status().is_success() => {
+                    log::warn!("POST /api/shutdown returned {}", resp.status());
+                }
+                Err(e) => log::warn!("POST /api/shutdown failed: {e}"),
+                _ => {}
+            }
         }
     }
 
-    // Step 2: if the child is still alive, SIGTERM it and wait up to 1s.
+    // Step 2: if the child is still alive, give it up to 1s to exit
+    // (SIGTERM on Unix; on Windows the /api/shutdown above is the request).
     if let Some(pid) = pid {
-        if pid_is_alive(pid) {
-            send_signal(pid, Signal::Term);
+        if proc::pid_is_alive(pid) {
+            if cfg!(unix) {
+                proc::send_signal(pid, Signal::Term);
+            }
             let waited = wait_for_exit(pid, Duration::from_millis(1_000)).await;
-            // Step 3: still alive after grace? SIGKILL.
+            // Step 3: still alive after grace? Force-kill.
             if !waited {
-                log::warn!("sidecar pid {pid} did not exit after SIGTERM, sending SIGKILL");
-                send_signal(pid, Signal::Kill);
+                log::warn!("sidecar pid {pid} did not exit within grace, force-killing");
+                proc::send_signal(pid, Signal::Kill);
                 let _ = wait_for_exit(pid, Duration::from_millis(500)).await;
             }
         }
@@ -475,9 +534,9 @@ pub fn force_kill_pid(state: &SharedSidecar) {
     }
     .or_else(tracked_sidecar_pid);
     if let Some(pid) = pid {
-        if pid_is_alive(pid) {
-            log::warn!("RunEvent::Exit catch-all: SIGKILL on sidecar pid {pid}");
-            send_signal(pid, Signal::Kill);
+        if proc::pid_is_alive(pid) {
+            log::warn!("RunEvent::Exit catch-all: force-killing sidecar pid {pid}");
+            proc::send_signal(pid, Signal::Kill);
         }
         clear_tracked_sidecar_pid_if(pid);
     }
@@ -502,7 +561,7 @@ fn mark_child_terminated(state: &SharedSidecar, pid: u32) -> bool {
 async fn reap_orphaned_tauri_sidecars(records: &[crate::process_discovery::ProcessRecord]) {
     for record in records {
         if record.source == crate::process_discovery::ProcessSource::Tauri
-            && is_orphaned_process(record.pid)
+            && proc::is_orphaned(record.pid)
         {
             log::warn!(
                 "found orphaned Tauri sidecar pid {} on boot; terminating before spawning a new one",
@@ -513,70 +572,20 @@ async fn reap_orphaned_tauri_sidecars(records: &[crate::process_discovery::Proce
     }
 }
 
-fn is_orphaned_process(pid: u32) -> bool {
-    matches!(parent_pid(pid), Some(1))
-}
-
-#[cfg(unix)]
-fn parent_pid(pid: u32) -> Option<u32> {
-    let output = std::process::Command::new("ps")
-        .args(["-o", "ppid=", "-p", &pid.to_string()])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
-}
-
-#[cfg(not(unix))]
-fn parent_pid(_pid: u32) -> Option<u32> {
-    None
-}
-
-#[derive(Copy, Clone)]
-enum Signal {
-    Term,
-    Kill,
-}
-
-#[cfg(unix)]
-fn send_signal(pid: u32, sig: Signal) {
-    let signum = match sig {
-        Signal::Term => libc::SIGTERM,
-        Signal::Kill => libc::SIGKILL,
-    };
-    unsafe {
-        libc::kill(pid as libc::pid_t, signum);
-    }
-}
-
-#[cfg(not(unix))]
-fn send_signal(_pid: u32, _sig: Signal) {
-    // Non-Unix: the Tauri child.kill() path is the only mechanism.
-}
-
-#[cfg(unix)]
-fn pid_is_alive(pid: u32) -> bool {
-    // kill(pid, 0) returns 0 if the process exists and we can signal it,
-    // -1 with errno=ESRCH if it does not exist.
-    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
-}
-
-#[cfg(not(unix))]
-fn pid_is_alive(_pid: u32) -> bool {
-    true
-}
-
 async fn wait_for_exit(pid: u32, max: Duration) -> bool {
     let started = Instant::now();
     while started.elapsed() < max {
-        if !pid_is_alive(pid) {
+        if !proc::pid_is_alive(pid) {
             return true;
         }
         sleep(Duration::from_millis(50)).await;
     }
-    !pid_is_alive(pid)
+    !proc::pid_is_alive(pid)
+}
+
+/// Snapshot of the sidecar's recent stderr (oldest first) for diagnostics.
+pub fn last_stderr(state: &SharedSidecar) -> Vec<String> {
+    state.lock().unwrap().last_stderr.iter().cloned().collect()
 }
 
 /// 0832 helper: read `studio.lifecycleDefault` from the SettingsStore. Returns
@@ -588,37 +597,23 @@ async fn read_lifecycle_default(app: &AppHandle) -> Option<String> {
     Some(snapshot.studio.lifecycle_default)
 }
 
-/// 0832 helper: SIGTERM `pid`, wait `grace`, escalate to SIGKILL if alive.
+/// 0832 helper: signal `pid`, wait `grace`, escalate to a forced kill if alive.
 ///
-/// Cross-platform: Unix uses libc signals; Windows shells out to `taskkill`
-/// which doesn't have a separate "graceful" stage, so the grace window is
-/// honored by waiting before the forced kill. `pub(crate)` so the lifecycle
-/// IPC handlers in commands.rs can reuse this rather than duplicating the
-/// logic.
+/// Unix: SIGTERM lets a studio process close its server, then SIGKILL.
+/// Windows: there is no graceful signal — `Signal::Term` is already
+/// `TerminateProcess` (see `proc`), so `grace` only covers OS teardown. The
+/// old `taskkill /T /F` shell-out is gone. `pub(crate)` so the lifecycle IPC
+/// handlers in commands.rs reuse this rather than duplicating the logic.
 pub(crate) async fn sigterm_with_grace(pid: u32, grace: Duration) {
-    #[cfg(unix)]
-    {
-        if !pid_is_alive(pid) {
-            return;
-        }
-        send_signal(pid, Signal::Term);
-        let exited = wait_for_exit(pid, grace).await;
-        if !exited && pid_is_alive(pid) {
-            log::warn!("sigterm_with_grace: pid {pid} did not exit, sending SIGKILL");
-            send_signal(pid, Signal::Kill);
-            let _ = wait_for_exit(pid, Duration::from_millis(500)).await;
-        }
+    if !proc::pid_is_alive(pid) {
+        return;
     }
-    #[cfg(not(unix))]
-    {
-        // Windows: taskkill /T /F is the equivalent of SIGKILL. There's no
-        // SIGTERM analogue without a custom WM_CLOSE message handler in the
-        // target, so we honor `grace` by waiting before the forced kill.
-        let _ = grace; // grace is not used on Windows; suppress unused warning
-        let _ = tokio::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .output()
-            .await;
+    proc::send_signal(pid, Signal::Term);
+    let exited = wait_for_exit(pid, grace).await;
+    if !exited && proc::pid_is_alive(pid) {
+        log::warn!("sigterm_with_grace: pid {pid} did not exit, force-killing");
+        proc::send_signal(pid, Signal::Kill);
+        let _ = wait_for_exit(pid, Duration::from_millis(500)).await;
     }
 }
 
@@ -851,6 +846,21 @@ mod tests {
         assert_eq!(s.terminating_pid, None);
         assert_eq!(s.studio_token, None);
         assert_eq!(tracked_sidecar_pid(), None);
+    }
+
+    #[test]
+    fn last_stderr_returns_lines_oldest_first() {
+        let state: SharedSidecar = Arc::new(Mutex::new(SidecarState::default()));
+        {
+            let mut s = state.lock().unwrap();
+            for i in 0..3 {
+                s.last_stderr.push_back(format!("line {i}"));
+            }
+        }
+        assert_eq!(
+            super::last_stderr(&state),
+            vec!["line 0".to_string(), "line 1".to_string(), "line 2".to_string()]
+        );
     }
 
     #[test]

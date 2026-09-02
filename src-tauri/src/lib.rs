@@ -31,6 +31,9 @@ mod preferences;
 // 0832 process discovery — enumerate running studio instances via
 // ~/.vskill/runtime/*.lock + platform-native fallback (lsof / /proc / pwsh).
 mod process_discovery;
+// Cross-platform PID liveness / termination / parent lookup (Win32 on
+// Windows, libc on Unix). Shared by sidecar.rs and process_discovery.
+mod proc;
 // 0831 quota — server-authoritative quota cache + 1h background sync + force_sync IPC.
 // Owned by desktop-quota-agent (impl-0831-enterprise team). Surface lives behind
 // the `commands::quota_*` IPCs registered below + the Tauri event `quota://updated`.
@@ -43,13 +46,11 @@ static EXIT_CLEANUP_DONE: AtomicBool = AtomicBool::new(false);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .try_init();
-
     let state: SharedSidecar = Arc::new(Mutex::new(SidecarState::default()));
     sidecar::install_termination_signal_handler();
 
     tauri::Builder::default()
+        .plugin(build_log_plugin())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // Bring the running window forward when a second launch is attempted.
             lifecycle::show_or_create(app);
@@ -189,11 +190,10 @@ pub fn run() {
                     Err(e) => {
                         log::error!("sidecar boot failed: {e}");
                         if let Some(window) = boot_handle.get_webview_window("main") {
-                            let html = format!(
-                                "<html><body style=\"font:14px -apple-system,system-ui;padding:32px\">\
-                                <h2>vSkill failed to start</h2><p>{}</p>\
-                                <p>Check logs at <code>~/Library/Logs/vSkill/</code>.</p></body></html>",
-                                html_escape(&e)
+                            let html = boot_failure_page(
+                                &e,
+                                &log_file_path(),
+                                &sidecar::last_stderr(&boot_state),
                             );
                             let data = format!("data:text/html;charset=utf-8,{}", urlencoding(&html));
                             if let Ok(url) = data.parse::<tauri::Url>() {
@@ -256,6 +256,57 @@ pub fn run() {
         });
 }
 
+/// File + (debug) stdout logging into `commands::log_dir()` — the same folder
+/// the "Show Logs" menu item opens. Rotates at 10 MiB keeping one backup.
+/// Before this, env_logger wrote to stderr, which `windows_subsystem =
+/// "windows"` and Finder-launched .app bundles discard, so the log folder was
+/// always empty and the failure page pointed at a macOS path on every OS.
+fn build_log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
+    let mut targets = vec![Target::new(TargetKind::Folder {
+        path: commands::log_dir(),
+        file_name: Some(LOG_FILE_STEM.into()),
+    })];
+    if cfg!(debug_assertions) {
+        targets.push(Target::new(TargetKind::Stdout));
+    }
+    tauri_plugin_log::Builder::new()
+        .clear_targets()
+        .targets(targets)
+        .level(log::LevelFilter::Info)
+        .max_file_size(10 * 1024 * 1024)
+        .rotation_strategy(RotationStrategy::KeepOne)
+        .build()
+}
+
+const LOG_FILE_STEM: &str = "vskill";
+
+fn log_file_path() -> std::path::PathBuf {
+    commands::log_dir().join(format!("{LOG_FILE_STEM}.log"))
+}
+
+/// HTML for the boot-failure page: the error, the real per-OS log file and
+/// the sidecar's last stderr lines (the actual reason it died).
+fn boot_failure_page(error: &str, log_file: &std::path::Path, stderr_tail: &[String]) -> String {
+    let stderr_block = if stderr_tail.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<p>Last output from the server process:</p>\
+             <pre style=\"white-space:pre-wrap;background:#f4f4f4;padding:12px;border-radius:6px\">{}</pre>",
+            html_escape(&stderr_tail.join("\n"))
+        )
+    };
+    format!(
+        "<html><body style=\"font:14px -apple-system,system-ui,sans-serif;padding:32px;max-width:720px\">\
+         <h2>Skill Studio failed to start</h2><p>{}</p>{}\
+         <p>Log file: <code>{}</code></p></body></html>",
+        html_escape(error),
+        stderr_block,
+        html_escape(&log_file.display().to_string())
+    )
+}
+
 fn is_restart_exit(code: Option<i32>) -> bool {
     code == Some(RESTART_EXIT_CODE)
 }
@@ -277,6 +328,23 @@ mod tests {
         assert!(is_restart_exit(Some(RESTART_EXIT_CODE)));
         assert!(!is_restart_exit(Some(0)));
         assert!(!is_restart_exit(None));
+    }
+
+    #[test]
+    fn boot_failure_page_shows_log_path_and_stderr_tail() {
+        let page = boot_failure_page(
+            "sidecar exited before announcing port (exit code 1)",
+            std::path::Path::new("C:\\Users\\a\\AppData\\Local\\vSkill\\Logs\\vskill.log"),
+            &["SyntaxError: Unexpected end of input".to_string(), "<x>".to_string()],
+        );
+        assert!(page.contains("exit code 1"));
+        assert!(page.contains("AppData\\Local\\vSkill\\Logs\\vskill.log"));
+        assert!(page.contains("SyntaxError: Unexpected end of input"));
+        assert!(page.contains("&lt;x&gt;"), "stderr must be HTML-escaped: {page}");
+        assert!(!page.contains("~/Library/Logs"));
+
+        let bare = boot_failure_page("x", std::path::Path::new("/tmp/vskill.log"), &[]);
+        assert!(!bare.contains("<pre"));
     }
 
     #[test]

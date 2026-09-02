@@ -40,7 +40,10 @@ serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "io-util", "sync"] }
 log = "0.4"
-env_logger = "0.11"
+# File + stdout logging into commands::log_dir() (rotating). Replaces
+# env_logger, whose stderr output was discarded by windows_subsystem="windows"
+# and by Finder-launched .app bundles, leaving the "Show Logs" folder empty.
+tauri-plugin-log = "2"
 # 0831 auth: OS keychain abstraction (macOS Keychain / Windows Credential Manager
 # / Linux libsecret). Used by `auth::token_store` per ADR-0831-01.
 keyring = "3"
@@ -53,6 +56,10 @@ zeroize = { version = "1", features = ["zeroize_derive"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# proc.rs: OpenProcess/GetExitCodeProcess/TerminateProcess + Toolhelp32 parent lookup.
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"] }
 
 [dev-dependencies]
 # 0831 auth: mockito serves a controlled HTTP endpoint so device_flow tests

@@ -38,6 +38,7 @@ upstream contract.
 ```bash
 # Host arch (auto-detected from uname -m)
 bash scripts/desktop/build-sidecar.sh
+node scripts/desktop/smoke-sidecar.mjs   # boots the binary: LISTEN_PORT, /api/health, /api/shutdown
 
 # Or via npm:
 npm run desktop:sidecar:build
@@ -51,12 +52,16 @@ The script:
 1. Runs `npm run build` and `npm run build:eval-ui` so `dist/eval-server/` and
    `dist/eval-ui/` are current.
 2. Bundles `scripts/desktop/sidecar-entry.mjs` + the entire eval-server
-   module graph into `dist/sidecar/server.cjs` via esbuild
-   (`--platform=node --format=cjs --target=node22`). esbuild's `--define`
-   replaces `import.meta.url` / `.dirname` / `.filename` with synthesized
-   CJS-friendly equivalents so eval-server's source-level
-   `fileURLToPath(import.meta.url)` continues to work.
-3. Generates `dist/sidecar/eval-ui-manifest.json` listing every file under
+   module graph into `dist/sidecar/server.cjs` via esbuild's JS API
+   (`scripts/desktop/bundle-sidecar.mjs`, shared by the macOS, Linux and
+   Windows build scripts; `platform: node, format: cjs, target: node22`).
+   esbuild's `define` replaces `import.meta.url` / `.dirname` / `.filename`
+   with synthesized CJS-friendly equivalents so eval-server's source-level
+   `fileURLToPath(import.meta.url)` continues to work. The bundler asserts the
+   injected prologue is intact and runs `node --check` on the output -- the
+   Windows build used to pass a multi-line banner through `esbuild.cmd`,
+   which cmd.exe truncated, producing a bundle that failed to parse.
+3. Generates (`scripts/desktop/sidecar-assets.mjs`) `dist/sidecar/eval-ui-manifest.json` listing every file under
    `dist/eval-ui/` and writes `dist/sidecar/vskill-version.txt` with the
    current package version. Both are referenced from the SEA config.
 4. Generates `dist/sidecar/sea-config.json` with one asset per eval-ui file

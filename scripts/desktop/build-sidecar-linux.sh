@@ -83,87 +83,18 @@ fi
   echo "build-sidecar-linux.sh: dist/eval-ui/index.html missing — upstream build failed" >&2; exit 1; }
 
 # --- 2. esbuild bundle ---------------------------------------------------------
+# Shared JS-API bundler (scripts/desktop/bundle-sidecar.mjs): one source of
+# truth for banner/defines/externals across macOS, Linux and Windows. It also
+# asserts the import.meta prologue is intact and runs `node --check` on the
+# output; the explicit `node --check` below is the build-script-level gate.
 mkdir -p "$SIDECAR_DIR"
-echo "==> Bundling sidecar-entry.mjs → dist/sidecar/server.cjs (esbuild CJS)"
+echo "==> Bundling sidecar-entry.mjs → dist/sidecar/server.cjs (esbuild CJS via JS API)"
+node "$SCRIPT_DIR/bundle-sidecar.mjs" --outfile "$SIDECAR_DIR/server.cjs"
+node --check "$SIDECAR_DIR/server.cjs"
 
-# Same banner / define / external set as macOS — sidecar entry is platform-agnostic.
-read -r -d '' BANNER_JS <<'JS' || true
-const __sea_pathToFileURL = (() => {
-  try { return require('node:url').pathToFileURL; } catch { return null; }
-})();
-const __sea_import_meta_url = (() => {
-  try { return __sea_pathToFileURL ? __sea_pathToFileURL(__filename).href : ('file://' + __filename); }
-  catch { return 'file://' + __filename; }
-})();
-JS
-
-"$ROOT_DIR/node_modules/.bin/esbuild" \
-  "$SCRIPT_DIR/sidecar-entry.mjs" \
-  --bundle \
-  --platform=node \
-  --target=node22 \
-  --format=cjs \
-  --outfile="$SIDECAR_DIR/server.cjs" \
-  --external:@napi-rs/keyring \
-  --external:@napi-rs/keyring-* \
-  --define:import.meta.url=__sea_import_meta_url \
-  --define:import.meta.dirname=__dirname \
-  --define:import.meta.filename=__filename \
-  --banner:js="$BANNER_JS" \
-  --legal-comments=none \
-  --log-level=warning
-
-BUNDLE_SIZE=$(wc -c < "$SIDECAR_DIR/server.cjs" | tr -d ' ')
-echo "    bundle size: $((BUNDLE_SIZE / 1024)) KiB"
-
-# --- 3. Generate eval-ui manifest + version asset -----------------------------
-echo "==> Generating eval-ui manifest"
-node --input-type=module -e "
-import { readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
-const root = '$ROOT_DIR/dist/eval-ui';
-const out = [];
-function walk(d) {
-  for (const e of readdirSync(d)) {
-    const p = join(d, e);
-    const s = statSync(p);
-    if (s.isDirectory()) walk(p);
-    else if (s.isFile()) out.push(relative(root, p).split('\\\\').join('/'));
-  }
-}
-walk(root);
-const manifest = Object.fromEntries(out.map((rel) => [rel, true]));
-writeFileSync('$SIDECAR_DIR/eval-ui-manifest.json', JSON.stringify(manifest));
-console.error('   ' + out.length + ' eval-ui files indexed');
-"
-
-VSKILL_VERSION=$(node -p 'require("./package.json").version')
-printf '%s' "$VSKILL_VERSION" > "$SIDECAR_DIR/vskill-version.txt"
-echo "    vskill version: $VSKILL_VERSION"
-
-# --- 4. Generate sea-config.json ----------------------------------------------
-echo "==> Generating sea-config.json"
-node --input-type=module -e "
-import { readFileSync, writeFileSync } from 'node:fs';
-const manifest = JSON.parse(readFileSync('$SIDECAR_DIR/eval-ui-manifest.json', 'utf8'));
-const assets = {
-  'eval-ui-manifest.json': '$SIDECAR_DIR/eval-ui-manifest.json',
-  'vskill-version.txt':    '$SIDECAR_DIR/vskill-version.txt',
-};
-for (const rel of Object.keys(manifest)) {
-  assets['eval-ui/' + rel] = '$ROOT_DIR/dist/eval-ui/' + rel;
-}
-const cfg = {
-  main: '$SIDECAR_DIR/server.cjs',
-  output: '$SIDECAR_DIR/sea-prep.blob',
-  disableExperimentalSEAWarning: true,
-  useSnapshot: false,
-  useCodeCache: false,
-  assets,
-};
-writeFileSync('$SIDECAR_DIR/sea-config.json', JSON.stringify(cfg, null, 2));
-console.error('   sea-config.json written ('+Object.keys(assets).length+' assets)');
-"
+# --- 3. eval-ui manifest + version asset + sea-config.json --------------------
+echo "==> Generating eval-ui manifest + sea-config.json"
+node "$SCRIPT_DIR/sidecar-assets.mjs"
 
 # --- 5. Build SEA blob ---------------------------------------------------------
 echo "==> Building SEA blob"

@@ -14,15 +14,21 @@
 # Strategy mirrors build-sidecar.sh:
 #   1. Build the upstream artifacts (npm run build + npm run build:eval-ui)
 #      so dist/eval-server and dist/eval-ui are fresh.
-#   2. esbuild bundles scripts/desktop/sidecar-entry.mjs + the entire
-#      eval-server module graph into dist/sidecar/server.cjs (CJS for SEA).
-#   3. Generate dist/sidecar/eval-ui-manifest.json.
-#   4. Generate sea-config.json referencing the bundle + every eval-ui asset.
+#   2. scripts/desktop/bundle-sidecar.mjs (esbuild JS API, shared with the
+#      macOS/Linux scripts) bundles sidecar-entry.mjs + the eval-server graph
+#      into dist/sidecar/server.cjs and gates it with `node --check`.
+#   3. scripts/desktop/sidecar-assets.mjs writes eval-ui-manifest.json,
+#      vskill-version.txt and
+#   4. sea-config.json referencing the bundle + every eval-ui asset.
 #   5. node --experimental-sea-config produces sea-prep.blob.
 #   6. Copy node.exe to src-tauri\binaries\vskill-server-x86_64-pc-windows-msvc.exe,
-#      inject the blob via postject. No codesign step on Windows — Tauri's
-#      bundler runs Authenticode separately when a cert is configured (v1
-#      ships unsigned per spec AC-US06; SmartScreen "Run anyway" is documented).
+#      strip node.exe's Authenticode signature (best-effort, signtool from the
+#      Windows SDK) and inject the blob via postject. Re-signing happens in
+#      Tauri's bundler when a cert is configured (v1 ships unsigned per spec
+#      AC-US06; SmartScreen "Run anyway" is documented).
+#
+# After this script, run the runtime smoke (the release + smoke workflows do):
+#   node scripts/desktop/smoke-sidecar.mjs
 #
 # Usage (on a Windows host):
 #   pwsh scripts/desktop/build-sidecar-windows.ps1
@@ -94,130 +100,31 @@ if (-not (Test-Path (Join-Path $RootDir "dist\eval-ui\index.html"))) {
 }
 
 # --- 2. esbuild bundle ---------------------------------------------------------
+# Shared JS-API bundler. Do NOT go back to node_modules\.bin\esbuild.cmd with a
+# multi-line --banner:js: cmd.exe truncates argv at the first newline, which
+# shipped a half prologue in v1.0.62 and made vskill-server.exe die with a
+# SyntaxError before printing LISTEN_PORT ("sidecar exited before announcing
+# port"). bundle-sidecar.mjs asserts the prologue and runs `node --check`;
+# the explicit `node --check` below is the build-script-level gate.
 New-Item -ItemType Directory -Force -Path $SidecarDir | Out-Null
-Write-Host "==> Bundling sidecar-entry.mjs -> dist\sidecar\server.cjs (esbuild CJS)"
+Write-Host "==> Bundling sidecar-entry.mjs -> dist\sidecar\server.cjs (esbuild CJS via JS API)"
 
-# Banner mirrors build-sidecar.sh: synthesizes import.meta.url for CJS-bundled
-# ESM source. Keep in lockstep with the Bash script's banner.
-$BannerJs = @'
-const __sea_pathToFileURL = (() => {
-  try { return require('node:url').pathToFileURL; } catch { return null; }
-})();
-const __sea_import_meta_url = (() => {
-  try { return __sea_pathToFileURL ? __sea_pathToFileURL(__filename).href : ('file://' + __filename); }
-  catch { return 'file://' + __filename; }
-})();
-'@
-
-$EsbuildBin = Join-Path $RootDir "node_modules\.bin\esbuild.cmd"
-if (-not (Test-Path $EsbuildBin)) {
-  Write-Error "build-sidecar-windows.ps1: esbuild not found at $EsbuildBin -- run ``npm install`` first"
-  exit 1
-}
-
-# Note on `--external:@napi-rs/keyring*`: same posture as macOS build —
-# keyring is a lazy darwin-only dep behind a function-scope require() and
-# is not exercised by the startup/health/shutdown contract. On Windows the
-# fallback file-backed key store is even more important since DPAPI bindings
-# would also need separate cross-arch handling. v1 mitigates by always
-# falling back; the gap is documented in scripts/release/windows-README.md.
-$EntryFile  = Join-Path $ScriptDir "sidecar-entry.mjs"
-$OutFile    = Join-Path $SidecarDir "server.cjs"
-
-& $EsbuildBin `
-  $EntryFile `
-  --bundle `
-  --platform=node `
-  --target=node22 `
-  --format=cjs `
-  --outfile="$OutFile" `
-  --external:@napi-rs/keyring `
-  --external:@napi-rs/keyring-* `
-  --define:import.meta.url=__sea_import_meta_url `
-  --define:import.meta.dirname=__dirname `
-  --define:import.meta.filename=__filename `
-  --banner:js="$BannerJs" `
-  --legal-comments=none `
-  --log-level=warning
-if ($LASTEXITCODE -ne 0) { throw "esbuild failed (exit $LASTEXITCODE)" }
+$OutFile = Join-Path $SidecarDir "server.cjs"
+& node (Join-Path $ScriptDir "bundle-sidecar.mjs") --outfile $OutFile
+if ($LASTEXITCODE -ne 0) { throw "bundle-sidecar.mjs failed (exit $LASTEXITCODE)" }
+& node --check $OutFile
+if ($LASTEXITCODE -ne 0) { throw "dist\sidecar\server.cjs does not parse (exit $LASTEXITCODE)" }
 
 $BundleSize = (Get-Item $OutFile).Length
 Write-Host ("    bundle size: {0} KiB" -f [int]($BundleSize / 1024))
 
-# --- 3. Generate eval-ui manifest + version asset -----------------------------
-Write-Host "==> Generating eval-ui manifest"
+# --- 3. eval-ui manifest + version asset + sea-config.json --------------------
+Write-Host "==> Generating eval-ui manifest + sea-config.json"
+& node (Join-Path $ScriptDir "sidecar-assets.mjs")
+if ($LASTEXITCODE -ne 0) { throw "sidecar-assets.mjs failed (exit $LASTEXITCODE)" }
 
-$ManifestPath = Join-Path $SidecarDir "eval-ui-manifest.json"
-$VersionPath  = Join-Path $SidecarDir "vskill-version.txt"
-
-# Use Node (instead of pure PowerShell) for path-norm parity with build-sidecar.sh.
-# Inline ESM so we avoid temp files. Forward-slash separators match the macOS
-# build's manifest exactly so sidecar-entry.mjs's lookup logic works unchanged.
-$ManifestPathFwd = $ManifestPath.Replace('\','/')
-$EvalUiRootFwd   = (Join-Path $RootDir "dist\eval-ui").Replace('\','/')
-
-$Inline = @"
-import { readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
-const root = '$EvalUiRootFwd';
-const out = [];
-function walk(d) {
-  for (const e of readdirSync(d)) {
-    const p = join(d, e);
-    const s = statSync(p);
-    if (s.isDirectory()) walk(p);
-    else if (s.isFile()) out.push(relative(root, p).split('\\\\').join('/'));
-  }
-}
-walk(root);
-const manifest = Object.fromEntries(out.map((rel) => [rel, true]));
-writeFileSync('$ManifestPathFwd', JSON.stringify(manifest));
-console.error('   ' + out.length + ' eval-ui files indexed');
-"@
-
-& node --input-type=module -e $Inline
-if ($LASTEXITCODE -ne 0) { throw "eval-ui manifest generation failed" }
-
-$VskillVersion = (& node -p 'require("./package.json").version').Trim()
-[System.IO.File]::WriteAllText($VersionPath, $VskillVersion)
-Write-Host "    vskill version: $VskillVersion"
-
-# --- 4. Generate sea-config.json ----------------------------------------------
-Write-Host "==> Generating sea-config.json"
-
-$SeaConfigPath    = Join-Path $SidecarDir "sea-config.json"
-$SeaPrepBlobPath  = Join-Path $SidecarDir "sea-prep.blob"
-$ServerCjsPath    = $OutFile
-$SeaConfigPathFwd = $SeaConfigPath.Replace('\','/')
-$SeaPrepBlobFwd   = $SeaPrepBlobPath.Replace('\','/')
-$ServerCjsFwd     = $ServerCjsPath.Replace('\','/')
-$ManifestFwd      = $ManifestPath.Replace('\','/')
-$VersionFwd       = $VersionPath.Replace('\','/')
-
-$Inline2 = @"
-import { readFileSync, writeFileSync } from 'node:fs';
-const manifest = JSON.parse(readFileSync('$ManifestFwd', 'utf8'));
-const assets = {
-  'eval-ui-manifest.json': '$ManifestFwd',
-  'vskill-version.txt':    '$VersionFwd',
-};
-for (const rel of Object.keys(manifest)) {
-  assets['eval-ui/' + rel] = '$EvalUiRootFwd/' + rel;
-}
-const cfg = {
-  main: '$ServerCjsFwd',
-  output: '$SeaPrepBlobFwd',
-  disableExperimentalSEAWarning: true,
-  useSnapshot: false,
-  useCodeCache: false,
-  assets,
-};
-writeFileSync('$SeaConfigPathFwd', JSON.stringify(cfg, null, 2));
-console.error('   sea-config.json written ('+Object.keys(assets).length+' assets)');
-"@
-
-& node --input-type=module -e $Inline2
-if ($LASTEXITCODE -ne 0) { throw "sea-config.json generation failed" }
+$SeaConfigPath   = Join-Path $SidecarDir "sea-config.json"
+$SeaPrepBlobPath = Join-Path $SidecarDir "sea-prep.blob"
 
 # --- 5. Build SEA blob ---------------------------------------------------------
 Write-Host "==> Building SEA blob"
@@ -238,6 +145,32 @@ New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
 Write-Host "==> Copying $NodeBin -> $OutBin"
 Copy-Item -Force $NodeBin $OutBin
+
+# Strip node.exe's Authenticode signature before injection (Node SEA docs:
+# "remove the signature before postject"). Otherwise the blob invalidates the
+# signature in place and postject warns "The signature seems corrupted!" --
+# an invalid-signature PE that AppLocker/WDAC-style policies may refuse.
+# Best-effort: signtool ships with the Windows SDK (present on GitHub runners).
+$Signtool = $null
+$SigntoolCmd = Get-Command signtool.exe -ErrorAction SilentlyContinue
+if ($SigntoolCmd) {
+  $Signtool = $SigntoolCmd.Source
+} else {
+  $KitsRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+  if (Test-Path $KitsRoot) {
+    $Found = Get-ChildItem -Path $KitsRoot -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
+      Where-Object { $_.FullName -like "*\x64\signtool.exe" } |
+      Sort-Object FullName | Select-Object -Last 1
+    if ($Found) { $Signtool = $Found.FullName }
+  }
+}
+if ($Signtool) {
+  Write-Host "==> Stripping Authenticode signature ($Signtool)"
+  & $Signtool remove /s $OutBin
+  if ($LASTEXITCODE -ne 0) { Write-Warning "signtool remove failed (exit $LASTEXITCODE); continuing with the signed copy" }
+} else {
+  Write-Warning "signtool.exe not found; node.exe signature left in place (postject will report it as corrupted)"
+}
 
 # Resolve postject. Pin the version that build-sidecar.sh uses so macOS and
 # Windows builds inject blobs with identical sentinel-fuse semantics.

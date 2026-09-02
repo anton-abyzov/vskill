@@ -257,9 +257,12 @@ jobs:
           # built on all three platforms, then every job died on 'Bad credentials'
           # at the release step). The job already declares `permissions: write-all`,
           # so the built-in GITHUB_TOKEN can create the release and upload assets.
-          # Prefer the PAT when it is present and valid, fall back to the built-in
-          # one so an expired secret can never again waste three full Tauri builds.
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          # `secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN` does NOT work here: an
+          # expired PAT is still a non-empty string, so `||` keeps choosing it. Use
+          # the built-in token outright. Restore a PAT only if this release ever
+          # needs to trigger another workflow (the built-in token deliberately does
+          # not), and then treat its expiry as a release-blocking dependency.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # macOS codesigning + notarization
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}

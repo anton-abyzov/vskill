@@ -10,8 +10,7 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "generate:agents-json": "npx tsx scripts/generate-agents-json.ts",
-    "prebuild": "npm run generate:agents-json",
-    "build": "tsc",
+    "build": "npm run generate:agents-json && tsc",
     "build:eval-ui": "vite build --config src/eval-ui/vite.config.ts",
     "dev": "tsc --watch",
     "dev:eval-ui": "vite dev --config src/eval-ui/vite.config.ts",
@@ -28,6 +27,8 @@
     "lint:bundle-size": "npx tsx scripts/check-bundle-size.ts",
     "lint:skills-spec": "npx tsx scripts/validate-skills-spec.ts",
     "clean": "rm -rf dist",
+    "setup": "npm rebuild --ignore-scripts=false esbuild",
+    "security:scan": "node scripts/security/scan-payload.mjs --self-test",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",

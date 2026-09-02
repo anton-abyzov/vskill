@@ -66,7 +66,7 @@ jobs:
         working-directory: repositories/anton-abyzov/vskill-platform
         run: |
           if [ -f package.json ]; then
-            npm ci
+            npm ci --ignore-scripts && npm run setup
             (npm run dev > /tmp/lh-server.log 2>&1 &) && echo $! > /tmp/lh-server.pid
             # Wait up to 60s for server to come up
             for i in $(seq 1 60); do

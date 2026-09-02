@@ -165,7 +165,7 @@ The script:
 
 1. Verifies Node 22 x64, cargo, rustup, tauri-cli are present.
 2. Installs the `x86_64-pc-windows-msvc` Rust target if missing.
-3. Runs `npm ci` if `node_modules\` is absent.
+3. Runs `npm ci --ignore-scripts` + `npm run setup` if `node_modules\` is absent (install scripts are disabled repo-wide, see SECURITY.md).
 4. Builds the Node sidecar SEA binary via
    `scripts/desktop/build-sidecar-windows.ps1`. Output:
    `src-tauri\binaries\vskill-server-x86_64-pc-windows-msvc.exe`.

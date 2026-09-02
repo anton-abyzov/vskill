@@ -71,13 +71,13 @@ jobs:
             vskill/package-lock.json
             vskill-platform/package-lock.json
 
-      - name: Install root deps (vskill)
+      - name: Install root deps (vskill, no install scripts)
         working-directory: vskill
-        run: npm ci
+        run: npm ci --ignore-scripts && npm run setup
 
-      - name: Install platform deps (vskill-platform)
+      - name: Install platform deps (vskill-platform, no install scripts)
         working-directory: vskill-platform
-        run: npm ci
+        run: npm ci --ignore-scripts && npm run setup
 
       - name: Reset + seed E2E database
         working-directory: vskill-platform

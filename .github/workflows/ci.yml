@@ -26,8 +26,8 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies (no install scripts)
+        run: npm ci --ignore-scripts && npm run setup
 
       - name: Build
         run: npm run build
@@ -105,7 +105,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci
+      - run: npm ci --ignore-scripts && npm run setup
       - run: npm run build
       - run: npx vitest run src/commands/diff.test.ts src/api/client.test.ts
 
@@ -124,7 +124,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci
+      - run: npm ci --ignore-scripts && npm run setup
       - run: npm run build
       - name: FileBackedStore + keys CLI + onboarding tests
         run: npx vitest run src/eval-server/__tests__/file-backed-store.test.ts src/commands/__tests__/keys.test.ts src/__tests__/first-run-onboarding.test.ts
@@ -146,7 +146,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - run: npm ci
+      - run: npm ci --ignore-scripts && npm run setup
       - run: npm run build
 
       - name: Smoke — CLI help surface on all OS (0706 AC-US5-01)

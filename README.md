@@ -305,6 +305,8 @@ Full changelog → [github.com/anton-abyzov/vskill/releases](https://github.com/
 
 Issues and PRs welcome at [github.com/anton-abyzov/vskill](https://github.com/anton-abyzov/vskill). To submit a skill to the registry, see [verified-skill.com/docs/submitting](https://verified-skill.com/docs/submitting).
 
+Inside this repo dependency install scripts are disabled (`.npmrc`): run `npm ci`, then `npm run setup` (rebuilds esbuild), and `npm run security:scan` before pushing — see [SECURITY.md](SECURITY.md).
+
 ## License
 
 MIT

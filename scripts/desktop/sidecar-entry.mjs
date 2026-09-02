@@ -34,6 +34,22 @@ import { createRequire } from "node:module";
 
 const requireCjs = createRequire(typeof __filename !== "undefined" ? __filename : import.meta.url);
 const fs = requireCjs("node:fs");
+
+// Diagnostics must survive an immediate exit: stderr is a pipe to the desktop
+// shell (which keeps the last lines for its failure page), and an async
+// `process.stderr.write` right before `process.exit` can be lost. Write
+// synchronously, and make sure no failure mode exits silently.
+function dieWith(prefix, err) {
+  const text = err && err.stack ? err.stack : String(err);
+  try {
+    fs.writeSync(2, `${prefix}${text}\n`);
+  } catch {
+    /* nothing left to report to */
+  }
+  process.exit(1);
+}
+process.on("uncaughtException", (err) => dieWith("sidecar: uncaught exception: ", err));
+process.on("unhandledRejection", (err) => dieWith("sidecar: unhandled rejection: ", err));
 const os = requireCjs("node:os");
 const path = requireCjs("node:path");
 const { Readable } = requireCjs("node:stream");
@@ -173,7 +189,7 @@ function parsePort(argv) {
   const raw = argv[idx + 1];
   const n = Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n < 0 || n > 65535) {
-    process.stderr.write(`invalid --port value: ${raw}\n`);
+    fs.writeSync(2, `invalid --port value: ${raw}\n`);
     process.exit(2);
   }
   return n;
@@ -184,7 +200,7 @@ function parseRoot(argv) {
   if (idx === -1) return null;
   const raw = argv[idx + 1];
   if (!raw || raw.startsWith("--")) {
-    process.stderr.write("invalid --root value\n");
+    fs.writeSync(2, "invalid --root value\n");
     process.exit(2);
   }
   return raw;
@@ -219,10 +235,7 @@ async function main() {
   try {
     server = await startEvalServer(root ? { port, root } : { port });
   } catch (err) {
-    process.stderr.write(
-      `sidecar: startEvalServer failed: ${err && err.stack ? err.stack : err}\n`,
-    );
-    process.exit(1);
+    dieWith("sidecar: startEvalServer failed: ", err);
   }
 
   // startEvalServer's promise resolves only after the http.Server's
@@ -254,6 +267,9 @@ async function main() {
     );
   }
 
+  // SIGTERM/SIGINT are not deliverable to a detached process on Windows;
+  // there the desktop shell's graceful path is POST /api/shutdown (with the
+  // studio token) followed by TerminateProcess.
   const onSignal = () => {
     try {
       server.close(() => process.exit(0));
@@ -266,4 +282,4 @@ async function main() {
   process.on("SIGINT", onSignal);
 }
 
-main();
+main().catch((err) => dieWith("sidecar: boot failed: ", err));

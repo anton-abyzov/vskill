@@ -32,6 +32,7 @@
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
     "desktop:sidecar:build": "bash scripts/desktop/build-sidecar.sh",
+    "desktop:sidecar:smoke": "node scripts/desktop/smoke-sidecar.mjs",
     "preuninstall": "node scripts/preuninstall.cjs",
     "sync:readme-badges": "node scripts/sync-readme-badges.cjs",
     "prepublishOnly": "npm run build && npm run build:eval-ui && node scripts/sync-readme-badges.cjs && git diff --exit-code README.md"

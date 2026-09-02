@@ -63,9 +63,10 @@ jobs:
           xcrun notarytool store-credentials vskill \
             --key /tmp/AuthKey.p8 --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID"
 
-      - name: npm install + studio bundle
+      - name: npm install (no install scripts) + studio bundle
         run: |
-          npm ci
+          npm ci --ignore-scripts
+          npm run setup
           npm run build
           npm run build:eval-ui
 

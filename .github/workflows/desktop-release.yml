@@ -110,9 +110,10 @@ jobs:
             --key-id "$ASC_KEY_ID" \
             --issuer "$ASC_ISSUER_ID"
 
-      - name: Install npm deps + build studio bundle
+      - name: Install npm deps (no install scripts) + build studio bundle
         run: |
-          npm ci
+          npm ci --ignore-scripts
+          npm run setup
           npm run build
           npm run build:eval-ui
 

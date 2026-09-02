@@ -9,7 +9,7 @@
 # Order of operations:
 #   1. Sanity checks (Node 22 x64, Rust + cargo + tauri-cli, npm).
 #   2. Install x86_64-pc-windows-msvc Rust target if missing.
-#   3. npm ci  (install JS dependencies if not already present).
+#   3. npm ci --ignore-scripts + npm run setup (JS dependencies, if not already present).
 #   4. Build the Windows sidecar binary via build-sidecar-windows.ps1.
 #      Output: src-tauri\binaries\vskill-server-x86_64-pc-windows-msvc.exe
 #   5. cargo tauri build --target x86_64-pc-windows-msvc --bundles msi
@@ -102,9 +102,11 @@ if ($InstalledTargets -notcontains $Target) {
 
 # --- 3. JS dependencies --------------------------------------------------------
 if (-not (Test-Path (Join-Path $RootDir "node_modules"))) {
-  Write-Host "==> npm ci"
-  & npm ci
+  Write-Host "==> npm ci --ignore-scripts (supply-chain guard, see SECURITY.md)"
+  & npm ci --ignore-scripts
   if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+  & npm run setup
+  if ($LASTEXITCODE -ne 0) { throw "npm run setup failed" }
 } else {
   Write-Host "    node_modules present -- skipping npm ci (set CI=1 + delete node_modules to force)"
 }

@@ -15,8 +15,12 @@ guard as its siblings:
 - **No install scripts.** The committed `.npmrc` sets `ignore-scripts=true`
   for every install inside this repo, and CI always runs `npm ci --ignore-scripts`.
   Packages that need a build step are rebuilt explicitly with `npm run setup`
-  (`npm rebuild --ignore-scripts=false esbuild`). The published npm package does
-  not carry `.npmrc`, so end-user installs are unaffected.
+  (`npm rebuild --ignore-scripts=false esbuild`), and setup then *verifies* the
+  rebuild actually took (`scripts/desktop/verify-esbuild.mjs` runs the native
+  binary) — `npm rebuild` exits 0 when it matches nothing. Every rebuild target
+  is a declared, exactly-pinned dependency in `package.json`; relying on a
+  hoisted transitive copy would make the rebuild a silent no-op. The published
+  npm package does not carry `.npmrc`, so end-user installs are unaffected.
 - **Payload scan on every PR and push.** `.github/workflows/supply-chain-scan.yml`
   runs `scripts/security/scan-payload.mjs` (zero dependencies) and fails on:
   whitespace-padded payload lines (`^[\s});]{0,6}\s{800,}\S` — the July-2026

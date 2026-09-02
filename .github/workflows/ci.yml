@@ -124,11 +124,62 @@ jobs:
           cache: "npm"
       - run: npm ci --ignore-scripts && npm run setup
       - run: npm run build
-      # --retry=2 absorbs the handful of timing-sensitive specs (5 s default
-      # testTimeout, one of them probing an unreachable host) without hiding a
-      # real break: a genuinely failing test fails all three attempts.
+      # No --retry. A retry can mask a genuinely flaky test twice, and the
+      # suite does not need it: two consecutive local runs with no retry flag
+      # were both 621 files / 6139 passed / 3 skipped. If a spec turns flaky,
+      # fix or quarantine that spec — do not re-arm a blanket retry.
       - name: Full unit suite
-        run: npx vitest run --reporter=dot --retry=2
+        run: npx vitest run --reporter=dot
+
+  # The committed .npmrc sets ignore-scripts=true to block dependency install
+  # scripts. npm does not scope that to dependencies — it also suppresses THIS
+  # package's prepublishOnly, so a bare `npm publish` skips the build. dist/ is
+  # gitignored, so the tarball then carries zero dist/ entries while `bin` points
+  # at ./dist/bin.js, and npm uploads it with exit 0 and no warning.
+  # npm has no hook that survives ignore-scripts, so the guard lives here.
+  publish-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci --ignore-scripts && npm run setup
+
+      # Negative case first, on a deliberately unbuilt tree: the preflight has
+      # to REFUSE. If this step ever exits 0 the guard has gone vacuous.
+      - name: Preflight refuses to publish an unbuilt tree
+        run: |
+          if npm run release:preflight; then
+            echo "::error::release:preflight passed with no build — the publish guard is vacuous"
+            exit 1
+          fi
+          echo "preflight correctly refused an unbuilt tree"
+
+      # Positive case: the documented release chain produces a complete tarball.
+      - name: Build both artifacts
+        run: npm run build && npm run build:eval-ui
+
+      - name: Preflight passes on a built tree
+        run: npm run release:preflight
+
+      # And the tarball npm would upload really does carry the entrypoints.
+      - name: Tarball carries dist/bin.js, dist/index.js and dist/eval-ui
+        run: |
+          npm pack --dry-run --json > pack.json
+          node -e "
+            const files = JSON.parse(require('fs').readFileSync('pack.json','utf8'))[0].files.map(f => f.path);
+            const required = ['dist/bin.js', 'dist/index.js'];
+            const missing = required.filter(r => !files.includes(r));
+            if (!files.some(f => f.startsWith('dist/eval-ui/'))) missing.push('dist/eval-ui/**');
+            if (missing.length) { console.error('missing from tarball:', missing.join(', ')); process.exit(1); }
+            console.log('tarball ok —', files.length, 'entries');
+          "
+
+      - name: Publish-path wiring guard
+        run: npx vitest run scripts/__tests__/publish-path-guard.test.ts
 
   # 0702 T-032 — Cross-platform credential store + `vskill keys` CLI + first-run
   # onboarding tests. Runs on all three OS so we catch Windows-specific path

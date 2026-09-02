@@ -21,6 +21,20 @@ guard as its siblings:
   is a declared, exactly-pinned dependency in `package.json`; relying on a
   hoisted transitive copy would make the rebuild a silent no-op. The published
   npm package does not carry `.npmrc`, so end-user installs are unaffected.
+- **Publishing forces the package's own hooks back on.** `ignore-scripts` is not
+  scoped to dependencies: it also suppresses *this* package's lifecycle hooks, so
+  a bare `npm publish` skips `prepublishOnly` — no build, no eval-ui bundle, no
+  badge sync. `dist/` is gitignored, so on a clean checkout that ships a tarball
+  with **zero** `dist/` entries while `bin.vskill` points at `./dist/bin.js`; npm
+  uploads it with exit 0 and no warning. **Release with `npm run release`**
+  (`npm publish --ignore-scripts=false`), never bare `npm publish`.
+  `prepublishOnly` ends in `scripts/release/preflight-publish.mjs`, which
+  inspects the tarball npm would actually upload — not the working tree — and
+  refuses if an entrypoint or `dist/eval-ui/**` is missing or if `dist/` is older
+  than `src/`. The `publish-guard` job in `ci.yml` proves both directions on
+  every PR (the preflight must *fail* on an unbuilt tree and *pass* after the
+  build), and `scripts/__tests__/publish-path-guard.test.ts` fails if the wiring
+  is ever unpicked.
 - **Payload scan on every PR and push.** `.github/workflows/supply-chain-scan.yml`
   runs `scripts/security/scan-payload.mjs` (zero dependencies) and fails on:
   whitespace-padded payload lines (`^[\s});]{0,6}\s{800,}\S` — the July-2026

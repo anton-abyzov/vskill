@@ -47,14 +47,15 @@ jobs:
 
       - name: Install deps (no install scripts) + rebuild esbuild
         # `--ignore-scripts` keeps third-party postinstall hooks out of CI
-        # (supply-chain posture). esbuild is the only dependency whose install
-        # script is required for the build (it downloads/validates its native
-        # binary); fsevents is macOS-only file watching and ships prebuilt.
+        # (supply-chain posture; .npmrc pins ignore-scripts=true). esbuild is the
+        # only dependency whose install script is required for the build, so
+        # `npm run setup` rebuilds it with --ignore-scripts=false; fsevents is
+        # macOS-only file watching and ships prebuilt.
         shell: bash
         run: |
           node -p "process.arch + ' ' + process.version"
           npm ci --ignore-scripts
-          npm rebuild esbuild
+          npm run setup
           node -p "require('esbuild').version"
 
       - name: Build upstream artifacts (tsc + eval-ui)
@@ -131,7 +132,7 @@ jobs:
           SKIP_UPSTREAM_BUILD: '1'
         run: |
           npm ci --ignore-scripts
-          npm rebuild esbuild
+          npm run setup
           npm run build
           npm run build:eval-ui
           pwsh -NoProfile -File scripts/desktop/build-sidecar-windows.ps1

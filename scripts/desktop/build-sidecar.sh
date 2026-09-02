@@ -74,7 +74,7 @@ echo "==> Target: $TARGET_TRIPLE → $OUT_BIN"
 if [ "${SKIP_UPSTREAM_BUILD:-0}" != "1" ]; then
   echo "==> Building upstream artifacts (tsc + vite)..."
   if [ ! -d "$ROOT_DIR/node_modules" ]; then
-    echo "build-sidecar.sh: node_modules missing — run \`npm install\` first" >&2
+    echo "build-sidecar.sh: node_modules missing — run \`npm install && npm run setup\` first" >&2
     exit 1
   fi
   npm run build >/dev/null

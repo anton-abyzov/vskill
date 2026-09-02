@@ -81,7 +81,7 @@ Write-Host "==> Target: $TargetTriple -> $OutBin"
 if ($env:SKIP_UPSTREAM_BUILD -ne "1") {
   Write-Host "==> Building upstream artifacts (tsc + vite)..."
   if (-not (Test-Path (Join-Path $RootDir "node_modules"))) {
-    Write-Error "build-sidecar-windows.ps1: node_modules missing -- run ``npm install`` first"
+    Write-Error "build-sidecar-windows.ps1: node_modules missing -- run ``npm install && npm run setup`` first"
     exit 1
   }
   & npm run build | Out-Null

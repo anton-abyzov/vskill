@@ -253,7 +253,13 @@ jobs:
         #
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          # RELEASE_TOKEN is a PAT that has expired at least once (desktop-v1.0.63
+          # built on all three platforms, then every job died on 'Bad credentials'
+          # at the release step). The job already declares `permissions: write-all`,
+          # so the built-in GITHUB_TOKEN can create the release and upload assets.
+          # Prefer the PAT when it is present and valid, fall back to the built-in
+          # one so an expired secret can never again waste three full Tauri builds.
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           # macOS codesigning + notarization
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}

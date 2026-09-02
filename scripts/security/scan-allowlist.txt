@@ -1,0 +1,7 @@
+# Legitimate exceptions for scripts/security/scan-payload.mjs
+# Format: <path or glob> [check1,check2]   (no checks = all except padded-line)
+# Checks: long-line, base64-blob, eval-decode, test-require, padded-inline
+scripts/__tests__/sync-readme-badges.test.ts test-require        # createRequire to load package.json in a vitest file
+src/core/__tests__/fixtures/pre-extraction-snapshots/*.json long-line   # recorded prompt snapshots
+plugins/**/evals/history/*.json long-line                        # recorded eval transcripts
+test/verify/units/audit.verify.mjs eval-decode                   # malicious-skill fixture the audit must flag

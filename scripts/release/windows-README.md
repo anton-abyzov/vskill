@@ -19,9 +19,9 @@ Each release ships:
 
 | File | Purpose |
 |---|---|
-| `vskill_<version>_x64_en-US.msi` | The Windows installer. |
-| `vskill_<version>_x64_en-US.msi.sha256` | SHA256 checksum. |
-| `vskill_<version>_x64_en-US.msi.asc` | GPG detached signature. |
+| `Skill.Studio_<version>_x64-setup.exe` | NSIS installer (per-user, default download). |
+| `Skill.Studio_<version>_x64_en-US.msi` | MSI installer (per-machine). |
+| `*.sig` | Tauri updater minisign signature (verified by the in-app updater). |
 | `SHA256SUMS` + `SHA256SUMS.asc` | Aggregate checksums for all platforms (including Windows). |
 
 ### 1.2 Verify the download (recommended)
@@ -33,8 +33,8 @@ safe, verify the SHA256 and GPG signature before installing.
 
 ```powershell
 # Compare the published checksum against your downloaded file
-Get-FileHash -Algorithm SHA256 .\vskill_1.0.0_x64_en-US.msi
-# The output must match the value in vskill_1.0.0_x64_en-US.msi.sha256
+Get-FileHash -Algorithm SHA256 .\Skill.Studio_1.0.62_x64_en-US.msi
+# Compare against the SHA256 listed on the GitHub Release page
 ```
 
 #### GPG verification (optional, recommended)
@@ -45,7 +45,7 @@ Invoke-WebRequest https://verified-skill.com/.well-known/pgp-key.asc -OutFile vs
 gpg --import vskill-pubkey.asc
 
 # 2. Verify the signature
-gpg --verify .\vskill_1.0.0_x64_en-US.msi.asc .\vskill_1.0.0_x64_en-US.msi
+gpg --verify .\Skill.Studio_1.0.62_x64_en-US.msi.asc .\Skill.Studio_1.0.62_x64_en-US.msi
 # Look for: "Good signature from vSkill Releases <anton.abyzov@gmail.com>"
 ```
 
@@ -84,19 +84,24 @@ in v1.1+ once user volume justifies the cost.
 
 ### 1.5 What gets installed
 
-- **Application files**: `C:\Program Files\vSkill\` (default).
+- **Application files**: `%LOCALAPPDATA%\Skill Studio\` (NSIS `-setup.exe`,
+  per-user) or `C:\Program Files\Skill Studio\` (MSI). The app is
+  `Skill Studio.exe`; the bundled Node server is `vskill-server.exe` next to it.
 - **WebView2 runtime**: bundled in the installer (`embedBootstrapper` mode).
   If you already have Microsoft Edge / WebView2 (Windows 10 1803+ ships it),
   the bundled copy is skipped at install time. Older Windows installs the
   bundled redistributable automatically — no separate download required.
-- **Start Menu shortcut**: `vSkill` (under "All apps").
+- **Start Menu shortcut**: `Skill Studio` (under "All apps").
 - **URL protocol handler**: `vskill://` registered under
   `HKCU\Software\Classes\vskill` (per-user, no admin required).
-- **User data**: created on first launch at `%USERPROFILE%\.vskill\`.
+- **User data**: created on first launch at `%USERPROFILE%\.vskill\`
+  (settings.json, `runtime\studio-<port>.lock` for the running server).
+- **Logs**: `%LOCALAPPDATA%\vSkill\Logs\vskill.log` (rotating, 10 MiB). Also
+  reachable via the app's Help > Show Logs menu.
 
 ### 1.6 Uninstall
 
-**Settings → Apps → Installed apps → vSkill → Uninstall**
+**Settings → Apps → Installed apps → Skill Studio → Uninstall**
 
 The uninstaller removes binaries, the Start Menu entry, and the URL protocol
 registry keys. **User data at `%USERPROFILE%\.vskill\` is preserved by
@@ -175,7 +180,7 @@ src-tauri\
   target\x86_64-pc-windows-msvc\release\
     bundle\
       msi\
-        vskill_<version>_x64_en-US.msi          # the installer
+        Skill.Studio_<version>_x64_en-US.msi    # the installer
         build-summary.json                       # CI consumption
   binaries\
     vskill-server-x86_64-pc-windows-msvc.exe    # bundled sidecar
@@ -184,24 +189,46 @@ src-tauri\
 ### 2.4 Testing the build locally
 
 ```powershell
+# 0. Smoke the sidecar on its own BEFORE installing anything. This is the
+#    same check CI runs (sidecar-smoke.yml + desktop-release.yml): boots
+#    vskill-server.exe, waits for LISTEN_PORT, hits /api/health, shuts down.
+node scripts\desktop\smoke-sidecar.mjs
+
 # Install (silent — no prompts)
-msiexec /i "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\vskill_1.0.0_x64_en-US.msi" /qn
+msiexec /i "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\Skill.Studio_1.0.62_x64_en-US.msi" /qn
 
 # Verify the app launches and the sidecar HTTP server is reachable
-Start-Process "C:\Program Files\vSkill\vSkill.exe"
+Start-Process "C:\Program Files\Skill Studio\Skill Studio.exe"
 Start-Sleep -Seconds 5
-Get-Process vSkill              # should show the app process
-# The sidecar picks a free port and writes it to ~/.vskill/state/port
-$port = Get-Content "$env:USERPROFILE\.vskill\state\port" -ErrorAction SilentlyContinue
-if ($port) { Invoke-WebRequest "http://127.0.0.1:$port/api/health" }
+Get-Process "Skill Studio"      # should show the app process
+Get-Process vskill-server       # the Node sidecar spawned by the app
+# The sidecar picks a free port and writes ~/.vskill/runtime/studio-<port>.lock
+Get-ChildItem "$env:USERPROFILE\.vskill\runtime\studio-*.lock" | ForEach-Object {
+  $port = (Get-Content $_.FullName | ConvertFrom-Json).port
+  Invoke-WebRequest "http://127.0.0.1:$port/api/health"
+}
 
 # Verify the deep-link registry entry exists
 Get-ItemProperty "HKCU:\Software\Classes\vskill" | Format-List
 # Should show URL Protocol = "" and a (default) value of "URL:vSkill Protocol"
 
 # Uninstall
-msiexec /x "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\vskill_1.0.0_x64_en-US.msi" /qn
+msiexec /x "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\Skill.Studio_1.0.62_x64_en-US.msi" /qn
 ```
+
+#### Diagnosing "Skill Studio failed to start"
+
+The failure page shows the sidecar's last stderr lines and the log file path.
+To reproduce outside the app, run the sidecar by hand and read its stderr:
+
+```powershell
+& "$env:LOCALAPPDATA\Skill Studio\vskill-server.exe" --port 0     # NSIS install
+# or: & "C:\Program Files\Skill Studio\vskill-server.exe" --port 0  # MSI install
+```
+
+A healthy sidecar prints `Studio token: …` and `LISTEN_PORT=<n>` and keeps
+running (Ctrl+C to stop). Attach the output plus
+`%LOCALAPPDATA%\vSkill\Logs\vskill.log` to the issue.
 
 ### 2.5 Authenticode signing (deferred to v1.1+)
 
@@ -255,5 +282,7 @@ the same.
 - **Installer issues**: <https://github.com/anton-abyzov/vskill/issues> with
   the `windows` label. Attach the `.msi` SHA256, your Windows version
   (`winver`), and any SmartScreen / installer log output.
-- **Runtime crashes**: include `%USERPROFILE%\.vskill\logs\` if present.
+- **Runtime crashes**: include `%LOCALAPPDATA%\vSkill\Logs\vskill.log`
+  (Help > Show Logs opens the folder) and, for start failures, the output of
+  the manual `vskill-server.exe --port 0` run described in §2.4.
 - **Security concerns**: email <anton.abyzov@gmail.com>.

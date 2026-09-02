@@ -31,19 +31,16 @@ jobs:
             rustup_targets: aarch64-apple-darwin
             bundles: app,dmg
             platform: macos
-            build: scripts/release/macos-build.sh
           - os: windows-2022
             target: x86_64-pc-windows-msvc
             rustup_targets: x86_64-pc-windows-msvc
             bundles: msi,nsis
             platform: windows
-            build: scripts/release/windows-build.ps1
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             rustup_targets: x86_64-unknown-linux-gnu
             bundles: deb,rpm,appimage
             platform: linux
-            build: scripts/release/linux-build.sh
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -129,7 +126,23 @@ jobs:
       - name: Build sidecar (Windows)
         if: matrix.platform == 'windows'
         shell: pwsh
-        run: pwsh scripts/desktop/build-sidecar-windows.ps1
+        run: pwsh -NoProfile -File scripts/desktop/build-sidecar-windows.ps1
+
+      - name: Smoke the sidecar binary (boot, /api/health, /api/shutdown)
+        # The release is only as good as a sidecar that actually starts.
+        # v1.0.62 shipped a Windows sidecar that died with a SyntaxError
+        # before printing LISTEN_PORT; nothing in this pipeline ever ran the
+        # built exe. Fail the release here instead of on the user's desktop.
+        shell: bash
+        run: node scripts/desktop/smoke-sidecar.mjs --log-dir sidecar-smoke-logs
+
+      - name: Upload sidecar smoke logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidecar-smoke-logs-${{ matrix.platform }}
+          if-no-files-found: ignore
+          path: sidecar-smoke-logs/
 
       - name: Derive desktop version from git tag + sync into Cargo.toml + tauri.conf.json
         # Git tag `desktop-v1.0.14` → version `1.0.14`. This decouples the

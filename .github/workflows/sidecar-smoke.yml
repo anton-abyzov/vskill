@@ -1,0 +1,160 @@
+name: Sidecar Smoke
+
+# Builds the Node SEA sidecar exactly the way desktop-release.yml does on all
+# three desktop platforms and then RUNS it (scripts/desktop/smoke-sidecar.mjs):
+# LISTEN_PORT within 15 s, GET /api/health == 200, POST /api/shutdown, clean
+# exit. This is the gate that was missing when v1.0.62 shipped a Windows
+# sidecar that died with a SyntaxError before announcing its port.
+#
+# The rust-windows job compiles + runs the src-tauri tests on windows-latest
+# (the cfg(windows) process-control code in src-tauri/src/proc.rs cannot be
+# compiled on macOS/Linux).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/desktop/**'
+      - 'src/eval-server/**'
+      - 'src-tauri/**'
+      - '.github/workflows/sidecar-smoke.yml'
+  push:
+    branches:
+      - 'fix/**'
+
+permissions:
+  contents: read
+
+jobs:
+  sidecar-smoke:
+    name: Sidecar runtime smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # SEA injects into the host node binary; the Windows sidecar is x64.
+          architecture: ${{ runner.os == 'Windows' && 'x64' || '' }}
+          cache: npm
+
+      - name: Install deps (no install scripts) + rebuild esbuild
+        # `--ignore-scripts` keeps third-party postinstall hooks out of CI
+        # (supply-chain posture). esbuild is the only dependency whose install
+        # script is required for the build (it downloads/validates its native
+        # binary); fsevents is macOS-only file watching and ships prebuilt.
+        shell: bash
+        run: |
+          node -p "process.arch + ' ' + process.version"
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+          node -p "require('esbuild').version"
+
+      - name: Build upstream artifacts (tsc + eval-ui)
+        shell: bash
+        run: |
+          npm run build
+          npm run build:eval-ui
+
+      - name: Build sidecar (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SKIP_UPSTREAM_BUILD: '1'
+        run: pwsh -NoProfile -File scripts/desktop/build-sidecar-windows.ps1
+
+      - name: Build sidecar (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          SKIP_UPSTREAM_BUILD: '1'
+        run: bash scripts/desktop/build-sidecar.sh
+
+      - name: Build sidecar (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          SKIP_UPSTREAM_BUILD: '1'
+        run: bash scripts/desktop/build-sidecar-linux.sh
+
+      - name: Runtime smoke (LISTEN_PORT, /api/health, /api/shutdown)
+        shell: bash
+        run: node scripts/desktop/smoke-sidecar.mjs --log-dir smoke-logs
+
+      - name: Upload smoke logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidecar-smoke-logs-${{ matrix.os }}
+          if-no-files-found: ignore
+          path: |
+            smoke-logs/
+            dist/sidecar/sea-config.json
+
+  rust-windows:
+    name: cargo check + test src-tauri (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          architecture: x64
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # tauri-build (build.rs) copies bundle.externalBin
+      # (src-tauri/binaries/vskill-server-x86_64-pc-windows-msvc.exe) and
+      # generate_context! embeds frontendDist (../dist/eval-ui); both must
+      # exist or the crate does not compile. Debug profile => build.rs does
+      # not require GITHUB_OAUTH_CLIENT_ID. WebView2 + MSVC are preinstalled
+      # on windows runners.
+      - name: Build frontend + sidecar (prerequisites for tauri-build)
+        shell: bash
+        env:
+          SKIP_UPSTREAM_BUILD: '1'
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+          npm run build
+          npm run build:eval-ui
+          pwsh -NoProfile -File scripts/desktop/build-sidecar-windows.ps1
+
+      - name: cargo check
+        shell: bash
+        working-directory: src-tauri
+        env:
+          CARGO_TERM_COLOR: always
+        run: cargo check --locked
+
+      - name: cargo test --no-run
+        shell: bash
+        working-directory: src-tauri
+        env:
+          CARGO_TERM_COLOR: always
+        run: cargo test --locked --no-run
+
+      - name: cargo test
+        # Pure-Rust unit tests (no window is created); runs headless fine.
+        shell: bash
+        working-directory: src-tauri
+        env:
+          CARGO_TERM_COLOR: always
+          RUST_BACKTRACE: '1'
+        run: cargo test --locked -- --nocapture

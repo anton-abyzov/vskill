@@ -139,7 +139,7 @@ jobs:
 
       - name: Upload sidecar smoke logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sidecar-smoke-logs-${{ matrix.platform }}
           if-no-files-found: ignore
@@ -396,7 +396,7 @@ jobs:
           bash scripts/release/sign-linux-artifacts.sh src-tauri/target/${{ matrix.target }}/release/bundle/
 
       - name: Upload platform artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.os }}-artifacts
           if-no-files-found: error

@@ -4,7 +4,7 @@
 // rows and real Anthropic price via formatMetadata.
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import type { AgentEntry, ModelEntry } from "../../hooks/useAgentCatalog";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -48,6 +48,18 @@ function anthropicAgent(): AgentEntry {
   } as AgentEntry;
 }
 
+// ModelList debounces its filter with a 60 ms setTimeout. A root that is never
+// unmounted leaves that timer live past the file's teardown, and when it fires
+// React touches `window` in an already-disposed jsdom environment — an uncaught
+// "ReferenceError: window is not defined" that fails the whole run about half
+// the time. Tear every root down so the effect cleanup clears the timer.
+const mounted: Array<() => void> = [];
+
+afterEach(async () => {
+  const { act } = await import("react");
+  for (const teardown of mounted.splice(0)) act(teardown);
+});
+
 async function renderModelList(agent: AgentEntry, activeModelId: string | null = null) {
   const React = await import("react");
   const { createRoot } = await import("react-dom/client");
@@ -65,6 +77,10 @@ async function renderModelList(agent: AgentEntry, activeModelId: string | null =
         onOpenSettings: vi.fn(),
       }),
     );
+  });
+  mounted.push(() => {
+    root.unmount();
+    container.remove();
   });
   return container;
 }

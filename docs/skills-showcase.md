@@ -59,7 +59,7 @@ Gradle version catalogs (`libs.versions.toml`), Material Design 3 dynamic color 
 
 ### `/mobile:capacitor` — Capacitor 6+ Plugin Development
 
-Custom plugin development with Swift/Kotlin native bridges, live reload configuration, and Appflow Live Updates for OTA deployments. For teams that want native capabilities without ejecting from their web stack.
+Custom plugin development with Swift/Kotlin native bridges, live reload configuration, and OTA live updates (e.g. Appflow Live Updates, or [Capgo](https://capgo.app) for Capacitor-native channels/rollback). For teams that want native capabilities without ejecting from their web stack.
 
 ### `/mobile:deep-linking` — Deep Linking & Push Notifications
 

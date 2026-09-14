@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.1] - 2026-09-14
+
+### Fixed
+
+- Keep project and global plugin ownership separate during cleanup. Preserve unrelated globally installed plugins and externally managed caches.
+- Honor `remove --local` and `remove --global`, including nested project directories, mixed plugin/skill names, and legacy global lockfiles.
+
+### Release
+
+- Add a tag-driven npm release job that checks the full test suite, builds both CLI and Studio assets, and validates the publish tarball.
+
 ## [1.0.18] - 2026-05-10
 
 ### Security (0836 — Skill Studio Hardening Pass, 6 P0 findings)

@@ -1,131 +1,88 @@
-// ---------------------------------------------------------------------------
-// vskill cleanup -- remove stale plugin entries and orphaned cache
-// ---------------------------------------------------------------------------
-
-import { existsSync, readdirSync, rmSync } from "node:fs";
+// Reconcile missing plugin registrations without claiming ownership of
+// plugins installed by Claude, Codex, another project, or another installer.
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { readLockfile } from "../lockfile/index.js";
-import { listEnabledPlugins, purgeStalePlugins } from "../settings/index.js";
-import { uninstallStalePlugins } from "../utils/claude-plugin.js";
-import { healAllMarketplaceManifests } from "../marketplace/manifest-conflict.js";
+import { resolveLocalSkillRoot } from "../lockfile/local-root.js";
+import { purgeStalePlugins } from "../settings/index.js";
+import { claudePluginUninstall } from "../utils/claude-plugin.js";
 import { bold, cyan, green, dim, yellow } from "../utils/output.js";
 
-interface CleanupOptions {
-  /** 0724 T-008: dry-run preview, no subprocess. */
-  dryRun?: boolean;
+interface CleanupOptions { dryRun?: boolean }
+type Scope = "user" | "project";
+
+/** Absence from vskill.lock alone is not evidence of an orphan. */
+function registeredPluginIds(): Set<string> | null {
+  const registry = join(homedir(), ".claude", "plugins", "installed_plugins.json");
+  if (!existsSync(registry)) return new Set();
+  try {
+    const data = JSON.parse(readFileSync(registry, "utf8"));
+    if (!data?.plugins || typeof data.plugins !== "object" || Array.isArray(data.plugins)) return null;
+    return new Set(Object.keys(data.plugins));
+  } catch {
+    // Unreadable ownership data must never become a removal plan.
+    return null;
+  }
+}
+
+function hasCachedPlugin(id: string): boolean {
+  const at = id.lastIndexOf("@");
+  const name = id.slice(0, at);
+  const marketplace = id.slice(at + 1);
+  const safe = /^[a-z0-9][\w.-]*$/i;
+  if (at < 1 || !safe.test(name) || !safe.test(marketplace)) return true;
+  return existsSync(join(homedir(), ".claude", "plugins", "cache", marketplace, name));
 }
 
 export async function cleanupCommand(opts: CleanupOptions = {}): Promise<void> {
-  const lock = readLockfile();
-  const skills = lock?.skills ?? {};
-  const inSyncCount = Object.keys(skills).length;
-
-  if (opts.dryRun) {
-    // 0724 T-008 (AC-US7-02, AC-US7-03, AC-US7-04): preview-only path.
-    // Walk both scopes via the read-only `purgeStalePlugins` helper, then
-    // emit the would-be `claude plugin uninstall ...` invocations and the
-    // reconciliation summary. No subprocess, no filesystem mutation,
-    // settings.json untouched.
-    console.log(bold("Dry-run — preview of stale plugin uninstalls:\n"));
-    const userStale = purgeStalePlugins({ scope: "user" }, skills);
-    const projectStale = purgeStalePlugins(
-      { scope: "project", projectDir: process.cwd() },
-      skills,
-    );
-    if (userStale.length === 0 && projectStale.length === 0) {
-      console.log(dim("No stale plugin entries found in settings.json."));
-    } else {
-      for (const id of userStale) {
-        console.log(`  ${dim(">")} ${cyan(`claude plugin uninstall --scope user -- ${id}`)}`);
-      }
-      for (const id of projectStale) {
-        console.log(`  ${dim(">")} ${cyan(`claude plugin uninstall --scope project -- ${id}`)}`);
-      }
+  const projectRoot = resolveLocalSkillRoot();
+  const projectSkills = readLockfile(projectRoot)?.skills ?? {};
+  // Older global installs wrote ~/vskill.lock; current installs use ~/.agents.
+  const userSkills = {
+    ...(readLockfile(homedir())?.skills ?? {}),
+    ...(readLockfile(join(homedir(), ".agents"))?.skills ?? {}),
+  };
+  const registered = registeredPluginIds();
+  if (registered === null) {
+    console.log(yellow("Plugin registry unreadable. Cleanup skipped; no files or registrations changed."));
+    return;
+  }
+  const plans: Array<{ id: string; scope: Scope }> = [];
+  for (const scope of ["user", "project"] as const) {
+    const settings = scope === "user" ? { scope } : { scope, projectDir: projectRoot };
+    const skills = scope === "user" ? userSkills : projectSkills;
+    for (const id of purgeStalePlugins(settings, skills)) {
+      if (!registered.has(id) && !hasCachedPlugin(id)) plans.push({ id, scope });
     }
-    console.log(
-      `\n${green(`${userStale.length}`)} stale entries removed from user scope, ${green(`${projectStale.length}`)} from project scope, ${dim(`${inSyncCount}`)} in-sync skills left untouched.`,
-    );
+  }
+
+  const inSyncCount = new Set([...Object.keys(projectSkills), ...Object.keys(userSkills)]).size;
+  if (opts.dryRun) {
+    console.log(bold("Dry-run — preview of missing plugin registration cleanup:\n"));
+    for (const { id, scope } of plans) {
+      console.log(`  ${dim(">")} ${cyan(`claude plugin uninstall --scope ${scope} -- ${id}`)}`);
+    }
+    if (!plans.length) console.log(dim("No stale plugin entries found in settings.json."));
+    const user = plans.filter((p) => p.scope === "user").length;
+    const project = plans.filter((p) => p.scope === "project").length;
+    console.log(`\n${user} user and ${project} project entries would be removed; no changes made. ${inSyncCount} in-sync skills left untouched.`);
     return;
   }
 
-  console.log(bold("Cleaning up stale plugin entries...\n"));
-
-  // Uninstall stale plugins via claude CLI. Counts of "actually removed"
-  // come from the result list (F-002 fix): a stale id detected by
-  // purgeStalePlugins may still fail to uninstall via the CLI (e.g. the
-  // plugin was registered out-of-band and claude has no record), and we
-  // shouldn't claim it as removed in the reconciliation summary.
-  const results = uninstallStalePlugins(skills);
-  const userStaleRemoved = results.filter(
-    (r) => r.scope === "user" && r.ok,
-  ).length;
-  const projectStaleRemoved = results.filter(
-    (r) => r.scope === "project" && r.ok,
-  ).length;
-  if (results.length > 0) {
-    console.log(
-      green(`Removing ${results.length} stale plugin${results.length === 1 ? "" : "s"}:\n`),
-    );
-    for (const { id, ok } of results) {
-      console.log(`  ${dim(">")} ${id}${ok ? "" : ` ${dim("(skipped — not registered via CLI)")}`}`);
-    }
-  } else {
-    console.log(dim("No stale plugin entries found in settings.json."));
-  }
-
-  // Clean orphaned plugin cache directories
-  const cacheBase = join(homedir(), ".claude", "plugins", "cache");
-  let orphanedCount = 0;
-  if (existsSync(cacheBase)) {
+  console.log(bold("Cleaning up missing plugin registrations...\n"));
+  const removed = { user: 0, project: 0 };
+  for (const { id, scope } of plans) {
     try {
-      for (const marketplace of readdirSync(cacheBase)) {
-        const mktDir = join(cacheBase, marketplace);
-        for (const pluginName of readdirSync(mktDir)) {
-          const lockEntry = skills[pluginName];
-          if (!lockEntry || lockEntry.marketplace !== marketplace) {
-            const orphanDir = join(mktDir, pluginName);
-            try {
-              rmSync(orphanDir, { recursive: true, force: true });
-              orphanedCount++;
-              console.log(dim(`  Removed orphaned cache: ${marketplace}/${pluginName}`));
-            } catch {
-              // non-fatal
-            }
-          }
-        }
-      }
+      claudePluginUninstall(id, scope, scope === "project" ? { cwd: projectRoot } : undefined);
+      removed[scope]++;
+      console.log(dim(`  Removed missing registration: ${id} (${scope})`));
     } catch {
-      // non-fatal — cache dir may have permission issues
+      console.log(yellow(`  ${id} (${scope}) could not be uninstalled; registration retained.`));
     }
   }
-
-  if (orphanedCount > 0) {
-    console.log(green(`\nRemoved ${orphanedCount} orphaned cache director${orphanedCount === 1 ? "y" : "ies"}.`));
-  }
-
-  // 0851: heal Postiz-class manifest conflicts (marketplace entry + plugin.json
-  // both specifying components — Claude Code refuses to load such plugins).
-  const healedManifests = healAllMarketplaceManifests();
-  if (healedManifests.length > 0) {
-    console.log(green(`\nHealed ${healedManifests.length} conflicting marketplace manifest entr${healedManifests.length === 1 ? "y" : "ies"}:`));
-    for (const id of healedManifests) {
-      console.log(dim(`  Fixed: ${id} (set strict: true, removed duplicate component specs)`));
-    }
-  }
-
-  // 0724 T-008 AC-US7-03: reconciliation summary
-  console.log(
-    `\n${green(`${userStaleRemoved}`)} stale entries removed from user scope, ${green(`${projectStaleRemoved}`)} from project scope, ${dim(`${inSyncCount}`)} in-sync skills left untouched.`,
-  );
-
-  // Show remaining enabled plugins
-  const remaining = listEnabledPlugins({ scope: "user" });
-  if (remaining.length > 0) {
-    console.log(dim(`\n${remaining.length} enabled plugin${remaining.length === 1 ? "" : "s"} remaining: ${remaining.join(", ")}`));
-  }
-
-  if (results.length > 0) {
-    console.log(yellow("\nRestart Claude Code to reload its plugin settings."));
-  }
+  // Cache is shared with other projects and installers. Only a targeted
+  // uninstall can establish ownership; blanket lockfile-based GC is unsafe.
+  console.log(`\n${green(String(removed.user))} stale entries removed from user scope, ${green(String(removed.project))} from project scope, ${inSyncCount} in-sync skills left untouched.`);
+  console.log(dim("Shared plugin caches preserved. Use a targeted uninstall to remove a plugin."));
 }

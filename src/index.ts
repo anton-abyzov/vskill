@@ -351,7 +351,7 @@ program
 
 program
   .command("cleanup")
-  .description("Remove stale plugin entries from settings.json and orphaned cache")
+  .description("Reconcile missing plugin registrations while preserving shared caches")
   // 0724 T-008: preview the would-be uninstall invocations + reconciliation summary.
   .option("--dry-run", "Preview stale plugin uninstalls without executing them")
   .action(async (opts) => {

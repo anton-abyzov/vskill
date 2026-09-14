@@ -1,0 +1,42 @@
+name: npm Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: npm-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - name: Match the package to the release tag
+        run: node -e 'const p=require("./package.json");if(process.env.GITHUB_REF_NAME!==`v${p.version}`)throw new Error("Tag and package version differ")'
+      - run: npm ci --ignore-scripts && npm run setup
+      - name: Test the full package
+        run: npm test -- --maxWorkers=4
+        env:
+          PWDEBUG: '0'
+          PLAYWRIGHT_HTML_OPEN: never
+      - name: Build and validate both published artifacts
+        run: npm run build && npm run build:eval-ui && npm run release:preflight
+      - name: Publish the validated package
+        run: npm run release -- --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Create release notes
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -96,8 +96,8 @@ describe("cleanupCommand --dry-run", () => {
     await cleanupCommand({ dryRun: true });
 
     const out = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
-    expect(out).toMatch(/1 stale entries removed from user scope/);
-    expect(out).toMatch(/0 from project scope/);
+    expect(out).toMatch(/1 user and 0 project entries would be removed/);
+    expect(out).toMatch(/no changes made/);
     expect(out).toMatch(/in-sync skills left untouched/);
   });
 
@@ -120,7 +120,7 @@ describe("cleanupCommand --dry-run", () => {
 
     expect(mockUninstallStalePlugins).not.toHaveBeenCalled();
     const out = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
-    expect(out).toMatch(/0 stale entries removed/);
+    expect(out).toMatch(/0 user and 0 project entries would be removed/);
   });
 
   // ---- AC-US7-04 (explicit): lockfile-only skill name never appears -----
@@ -153,6 +153,6 @@ describe("cleanupCommand --dry-run", () => {
     const out = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
     // The protected skill must never surface as a removal candidate.
     expect(out).not.toMatch(/manually_disabled@m/);
-    expect(out).toMatch(/0 stale entries removed/);
+    expect(out).toMatch(/0 user and 0 project entries would be removed/);
   });
 });

@@ -3,11 +3,12 @@
 // ---------------------------------------------------------------------------
 
 import { existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { resolveTilde } from "../utils/paths.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { readLockfile, removeSkillFromLock } from "../lockfile/index.js";
+import { getProjectRoot } from "../lockfile/project-root.js";
 import { claudePluginUninstall } from "../utils/claude-plugin.js";
 import { isPluginEnabled } from "../settings/index.js";
 import {
@@ -41,8 +42,19 @@ export async function removeCommand(
   opts: RemoveOptions,
 ): Promise<void> {
   // Read lockfile to check if skill exists
-  const lock = readLockfile();
-  const skillEntry = lock?.skills[skillName];
+  const globalAgentsRoot = resolveTilde("~/.agents");
+  const projectRoot = getProjectRoot();
+  const lock = readLockfile(opts.global ? globalAgentsRoot : undefined);
+  const projectEntry = opts.global ? undefined : lock?.skills[skillName];
+  const globalLock = opts.local ? null : opts.global ? lock : readLockfile(globalAgentsRoot);
+  let globalEntry = globalLock?.skills[skillName];
+  let globalLockRoot = globalAgentsRoot;
+  if (!opts.local && !globalEntry) {
+    const legacyRoot = dirname(globalAgentsRoot);
+    globalEntry = readLockfile(legacyRoot)?.skills[skillName];
+    if (globalEntry) globalLockRoot = legacyRoot;
+  }
+  const skillEntry = projectEntry ?? globalEntry;
 
   if (!skillEntry && !opts.force) {
     console.error(
@@ -78,7 +90,7 @@ export async function removeCommand(
       // Local dirs
       paths.push({
         label: `${agent.displayName} (local)`,
-        dir: join(process.cwd(), agent.localSkillsDir, skillName),
+        dir: join(projectRoot, agent.localSkillsDir, skillName),
       });
     }
 
@@ -108,7 +120,7 @@ export async function removeCommand(
   }
 
   // Update lockfile
-  if (skillEntry) {
+  if (projectEntry) {
     removeSkillFromLock(skillName);
   }
 
@@ -116,25 +128,24 @@ export async function removeCommand(
   // installSymlink() writes. The loop above only deletes per-agent
   // copies/symlinks — without this, the canonical store (the symlink
   // target) is stranded on disk forever.
-  const globalAgentsRoot = resolveTilde("~/.agents");
-  if (!opts.local && readLockfile(globalAgentsRoot)?.skills[skillName]) {
+  if (!opts.local && globalEntry) {
     // Global installs keep their lockfile at ~/.agents/vskill.lock; drop the
     // entry there too since the loop above deleted the global agent files.
-    removeSkillFromLock(skillName, globalAgentsRoot);
+    removeSkillFromLock(skillName, globalLockRoot);
   }
 
   const canonicalTargets: Array<{ label: string; dir: string; lockDir?: string }> = [];
   if (!opts.global) {
     canonicalTargets.push({
       label: "canonical store (project)",
-      dir: join(process.cwd(), ".agents", "skills", skillName),
+      dir: join(projectRoot, ".agents", "skills", skillName),
     });
   }
   if (!opts.local) {
     canonicalTargets.push({
       label: "canonical store (global)",
       dir: join(globalAgentsRoot, "skills", skillName),
-      lockDir: globalAgentsRoot,
+      lockDir: globalLockRoot,
     });
   }
   for (const { label, dir, lockDir } of canonicalTargets) {
@@ -152,63 +163,35 @@ export async function removeCommand(
     }
   }
 
-  // Uninstall marketplace plugin via claude CLI (handles settings.json + cache)
-  // 0724 T-007: replace the legacy free-form "Plugin uninstalled: foo@m" log
-  // with the structured per-agent report shared with enable/disable. Behaviour
-  // (subprocess invocation, on-disk cleanup, lockfile mutation) is unchanged.
-  //
-  // F-004 fix: 0724 introduced multi-scope enable/disable, so a skill
-  // originally installed at project scope can have a separate user-scope
-  // enable. Walk both scopes during remove so we don't leave a dangling
-  // enabledPlugins entry that `vskill cleanup` would later flag as stale.
-  let pluginId: string | null = null;
-  let pluginUninstallOk: boolean | null = null;
-  let scope: "user" | "project" = "user";
-  if (skillEntry) {
-    pluginId = resolvePluginId(skillName, skillEntry);
-    scope = skillEntry.scope ?? "user";
-    if (pluginId) {
-      // F-002 fix: only walk scopes where the plugin is actually enabled
-      // (read settings.json once per scope first). This way an "uninstall
-      // failed" result truly means the claude CLI failed — not just that
-      // the plugin wasn't registered at that scope.
-      const cwd = process.cwd();
-      const scopeStates: Array<{ s: "user" | "project"; enabled: boolean }> = [
-        { s: "user", enabled: false },
-        { s: "project", enabled: false },
-      ];
-      try {
-        scopeStates[0].enabled = isPluginEnabled(pluginId, { scope: "user" });
-      } catch {
-        /* settings.json missing -> treat as not enabled */
-      }
-      try {
-        scopeStates[1].enabled = isPluginEnabled(pluginId, {
-          scope: "project",
-          projectDir: cwd,
-        });
-      } catch {
-        /* settings.json missing -> treat as not enabled */
-      }
-
-      let anyAttempted = false;
-      let allOk = true;
-      for (const { s, enabled } of scopeStates) {
-        if (!enabled) continue;
-        anyAttempted = true;
-        try {
-          claudePluginUninstall(
-            pluginId,
-            s,
-            s === "project" ? { cwd } : undefined,
-          );
-        } catch {
-          allOk = false;
-        }
-      }
-      pluginUninstallOk = anyAttempted ? allOk : null;
+  // Resolve each scope independently: the same name can come from different
+  // marketplaces, or be a plain skill in one scope and a plugin in another.
+  const scope: "user" | "project" = opts.local ? "project" : opts.global ? "user" : skillEntry?.scope ?? "user";
+  const scopedEntries = [
+    { scope: "user" as const, entry: globalEntry ?? (projectEntry?.scope === "user" ? projectEntry : undefined), allowed: !opts.local },
+    { scope: "project" as const, entry: projectEntry, allowed: !opts.global },
+  ];
+  const pluginIds: string[] = [];
+  let anyAttempted = false;
+  let allOk = true;
+  for (const target of scopedEntries) {
+    if (!target.allowed || !target.entry) continue;
+    const id = resolvePluginId(skillName, target.entry);
+    if (!id) continue;
+    pluginIds.push(id);
+    const cwd = projectRoot;
+    try {
+      const settings = target.scope === "user"
+        ? { scope: target.scope }
+        : { scope: target.scope, projectDir: cwd };
+      if (!isPluginEnabled(id, settings)) continue;
+      anyAttempted = true;
+      claudePluginUninstall(id, target.scope, target.scope === "project" ? { cwd } : undefined);
+    } catch {
+      allOk = false;
     }
   }
+  const pluginId = pluginIds[0] ?? null;
+  const pluginUninstallOk = anyAttempted ? allOk : null;
 
   const action = pluginUninstallOk === true ? "disabled" : "not-applicable";
   const perAgent = buildPerAgentReport({

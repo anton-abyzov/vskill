@@ -29,6 +29,11 @@ vi.mock("../agents/agents-registry.js", () => ({
 // ---------------------------------------------------------------------------
 const mockReadLockfile = vi.fn();
 const mockRemoveSkillFromLock = vi.fn();
+const mockProjectRoot = vi.fn();
+
+vi.mock("../lockfile/project-root.js", () => ({
+  getProjectRoot: () => mockProjectRoot(),
+}));
 
 vi.mock("../lockfile/index.js", () => ({
   readLockfile: (...args: unknown[]) => mockReadLockfile(...args),
@@ -96,6 +101,7 @@ function makeLockfile(skills: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockProjectRoot.mockReturnValue(process.cwd());
   mockDetectInstalledAgents.mockResolvedValue(MOCK_AGENTS);
   // Default: no plugin registered anywhere — auto-discovered fixtures
   // short-circuit the F-002 multi-scope path. Marketplace tests override.
@@ -103,6 +109,86 @@ beforeEach(() => {
 });
 
 describe("removeCommand", () => {
+  it("0877: --global preserves the project lock and project plugin registration", async () => {
+    const entry = { marketplace: "specweave", scope: "user" };
+    mockReadLockfile.mockReturnValue(makeLockfile({ sw: entry }));
+    mockExistsSync.mockReturnValue(false);
+    mockIsPluginEnabled.mockReturnValue(true);
+
+    await removeCommand("sw", { force: true, global: true });
+
+    expect(mockRemoveSkillFromLock).not.toHaveBeenCalledWith("sw");
+    expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("sw", "/home/testuser/.agents");
+    expect(mockClaudePluginUninstall).toHaveBeenCalledTimes(1);
+    expect(mockClaudePluginUninstall).toHaveBeenCalledWith("sw@specweave", "user", undefined);
+  });
+
+  it("0877: --local preserves global locks and global plugin registration", async () => {
+    mockReadLockfile.mockReturnValue(makeLockfile({ sw: { marketplace: "specweave" } }));
+    mockExistsSync.mockReturnValue(false);
+    mockIsPluginEnabled.mockReturnValue(true);
+
+    await removeCommand("sw", { force: true, local: true });
+
+    expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("sw");
+    expect(mockRemoveSkillFromLock).not.toHaveBeenCalledWith("sw", "/home/testuser/.agents");
+    expect(mockClaudePluginUninstall).toHaveBeenCalledTimes(1);
+    expect(mockClaudePluginUninstall).toHaveBeenCalledWith("sw@specweave", "project", { cwd: process.cwd() });
+  });
+
+  it("0877: global removal resolves plugin provenance from the global lock", async () => {
+    mockReadLockfile.mockImplementation((dir?: string) => makeLockfile({
+      sw: { marketplace: dir === "/home/testuser/.agents" ? "global-market" : "project-market" },
+    }));
+    mockExistsSync.mockReturnValue(false);
+    mockIsPluginEnabled.mockReturnValue(true);
+
+    await removeCommand("sw", { force: true, global: true });
+
+    expect(mockClaudePluginUninstall).toHaveBeenCalledWith("sw@global-market", "user", undefined);
+    expect(mockClaudePluginUninstall).not.toHaveBeenCalledWith("sw@project-market", expect.anything(), expect.anything());
+  });
+
+  it("0877: removes global marketplace plugin even when project skill is auto-discovered", async () => {
+    mockReadLockfile.mockImplementation((dir?: string) => makeLockfile({
+      sw: dir === "/home/testuser/.agents" ? { marketplace: "global-market" } : { source: "local:skill" },
+    }));
+    mockExistsSync.mockReturnValue(false);
+    mockIsPluginEnabled.mockReturnValue(true);
+
+    await removeCommand("sw", { force: true });
+
+    expect(mockClaudePluginUninstall).toHaveBeenCalledTimes(1);
+    expect(mockClaudePluginUninstall).toHaveBeenCalledWith("sw@global-market", "user", undefined);
+  });
+
+  it("0877: nested invocation removes files and plugin registration at the lockfile project root", async () => {
+    mockProjectRoot.mockReturnValue("/workspace/project");
+    mockReadLockfile.mockReturnValue(makeLockfile({ sw: { marketplace: "team" } }));
+    mockExistsSync.mockReturnValue(true);
+    mockIsPluginEnabled.mockReturnValue(true);
+
+    await removeCommand("sw", { force: true, local: true });
+
+    expect(mockRmSync).toHaveBeenCalledWith("/workspace/project/.claude/commands/sw", expect.anything());
+    expect(mockClaudePluginUninstall).toHaveBeenCalledWith("sw@team", "project", { cwd: "/workspace/project" });
+    expect(mockRmSync.mock.calls.every(([path]) => path.startsWith("/workspace/project/"))).toBe(true);
+  });
+
+  it("0877: legacy home lock supplies global provenance and is removed in that scope", async () => {
+    mockReadLockfile.mockImplementation((dir?: string) => makeLockfile(
+      dir === "/home/testuser" ? { sw: { marketplace: "legacy" } } : {},
+    ));
+    mockExistsSync.mockReturnValue(false);
+    mockIsPluginEnabled.mockReturnValue(true);
+
+    await removeCommand("sw", { force: true, global: true });
+
+    expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("sw", "/home/testuser");
+    expect(mockRemoveSkillFromLock).not.toHaveBeenCalledWith("sw");
+    expect(mockClaudePluginUninstall).toHaveBeenCalledWith("sw@legacy", "user", undefined);
+  });
+
   it("removes skill from all detected agent directories", async () => {
     mockReadLockfile.mockReturnValue(
       makeLockfile({

@@ -117,7 +117,7 @@ describe("removeCommand", () => {
 
     await removeCommand("sw", { force: true, global: true });
 
-    expect(mockRemoveSkillFromLock).not.toHaveBeenCalledWith("sw");
+    expect(mockRemoveSkillFromLock).not.toHaveBeenCalledWith("sw", process.cwd());
     expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("sw", "/home/testuser/.agents");
     expect(mockClaudePluginUninstall).toHaveBeenCalledTimes(1);
     expect(mockClaudePluginUninstall).toHaveBeenCalledWith("sw@specweave", "user", undefined);
@@ -130,7 +130,7 @@ describe("removeCommand", () => {
 
     await removeCommand("sw", { force: true, local: true });
 
-    expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("sw");
+    expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("sw", process.cwd());
     expect(mockRemoveSkillFromLock).not.toHaveBeenCalledWith("sw", "/home/testuser/.agents");
     expect(mockClaudePluginUninstall).toHaveBeenCalledTimes(1);
     expect(mockClaudePluginUninstall).toHaveBeenCalledWith("sw@specweave", "project", { cwd: process.cwd() });
@@ -185,7 +185,7 @@ describe("removeCommand", () => {
     await removeCommand("sw", { force: true, global: true });
 
     expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("sw", "/home/testuser");
-    expect(mockRemoveSkillFromLock).not.toHaveBeenCalledWith("sw");
+    expect(mockRemoveSkillFromLock).not.toHaveBeenCalledWith("sw", process.cwd());
     expect(mockClaudePluginUninstall).toHaveBeenCalledWith("sw@legacy", "user", undefined);
   });
 
@@ -208,7 +208,7 @@ describe("removeCommand", () => {
 
     // Should attempt to remove from both agents (local + global = 4 paths)
     expect(mockRmSync).toHaveBeenCalled();
-    expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("sw");
+    expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("sw", process.cwd());
   });
 
   it("errors when skill not in lockfile and no --force", async () => {
@@ -310,7 +310,7 @@ describe("removeCommand", () => {
     // rmSync should not be called since dirs don't exist
     expect(mockRmSync).not.toHaveBeenCalled();
     // But lockfile should still be updated
-    expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("sw");
+    expect(mockRemoveSkillFromLock).toHaveBeenCalledWith("sw", process.cwd());
   });
 
   // 0724 F-002 regression — marketplace plugin path (multi-scope uninstall)

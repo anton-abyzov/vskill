@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { readLockfile } from "../lockfile/index.js";
-import { getProjectRoot } from "../lockfile/project-root.js";
+import { resolveLocalSkillRoot } from "../lockfile/local-root.js";
 import { purgeStalePlugins } from "../settings/index.js";
 import { claudePluginUninstall } from "../utils/claude-plugin.js";
 import { bold, cyan, green, dim, yellow } from "../utils/output.js";
@@ -36,8 +36,8 @@ function hasCachedPlugin(id: string): boolean {
 }
 
 export async function cleanupCommand(opts: CleanupOptions = {}): Promise<void> {
-  const projectRoot = getProjectRoot();
-  const projectSkills = readLockfile()?.skills ?? {};
+  const projectRoot = resolveLocalSkillRoot();
+  const projectSkills = readLockfile(projectRoot)?.skills ?? {};
   // Older global installs wrote ~/vskill.lock; current installs use ~/.agents.
   const userSkills = {
     ...(readLockfile(homedir())?.skills ?? {}),

@@ -8,7 +8,7 @@ import { createInterface } from "node:readline";
 import { resolveTilde } from "../utils/paths.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { readLockfile, removeSkillFromLock } from "../lockfile/index.js";
-import { getProjectRoot } from "../lockfile/project-root.js";
+import { resolveLocalSkillRoot } from "../lockfile/local-root.js";
 import { claudePluginUninstall } from "../utils/claude-plugin.js";
 import { isPluginEnabled } from "../settings/index.js";
 import {
@@ -43,8 +43,8 @@ export async function removeCommand(
 ): Promise<void> {
   // Read lockfile to check if skill exists
   const globalAgentsRoot = resolveTilde("~/.agents");
-  const projectRoot = getProjectRoot();
-  const lock = readLockfile(opts.global ? globalAgentsRoot : undefined);
+  const projectRoot = resolveLocalSkillRoot();
+  const lock = readLockfile(opts.global ? globalAgentsRoot : projectRoot);
   const projectEntry = opts.global ? undefined : lock?.skills[skillName];
   const globalLock = opts.local ? null : opts.global ? lock : readLockfile(globalAgentsRoot);
   let globalEntry = globalLock?.skills[skillName];
@@ -121,7 +121,7 @@ export async function removeCommand(
 
   // Update lockfile
   if (projectEntry) {
-    removeSkillFromLock(skillName);
+    removeSkillFromLock(skillName, projectRoot);
   }
 
   // F5: clean up the canonical .agents/skills/<name> payload that
@@ -139,6 +139,7 @@ export async function removeCommand(
     canonicalTargets.push({
       label: "canonical store (project)",
       dir: join(projectRoot, ".agents", "skills", skillName),
+      lockDir: projectRoot,
     });
   }
   if (!opts.local) {

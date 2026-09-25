@@ -1,7 +1,7 @@
 {
   "name": "marketing",
   "description": "Marketing automation skills — social media content creation, posting, engagement, content distribution, audience growth across 11 platforms, Blotato batch scheduling via REST API + MCP, and Slack messaging with context-aware session management",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "author": {
     "name": "Anton Abyzov",
     "email": "anton.abyzov@gmail.com",

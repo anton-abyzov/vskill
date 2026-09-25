@@ -22,9 +22,9 @@
     },
     {
       "name": "marketing",
-      "description": "Marketing automation — social media content creation, posting, and engagement across 11 platforms, Blotato batch scheduling (X/TikTok/IG/LinkedIn/YT/FB/Threads), plus Slack messaging",
+      "description": "Marketing automation — social media content creation, posting, and engagement across 11 platforms, Blotato batch scheduling (X/TikTok/IG/LinkedIn/YT/FB/Threads), plus Slack messaging and Kie.ai image/video generation",
       "source": "./plugins/marketing",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "category": "marketing"
     },
     {
@@ -43,9 +43,9 @@
     },
     {
       "name": "frontend",
-      "description": "Frontend development — visual design with browser verification, Figma-to-code workflows, Code Connect publishing, design tokens, and design system integration across React, Vue, SwiftUI, and Compose",
+      "description": "Frontend development — visual design with browser verification, Figma-to-code workflows, Code Connect publishing, design tokens, design system integration across React, Vue, SwiftUI, and Compose, and scroll-driven layered layouts (ScrollCraft)",
       "source": "./plugins/frontend",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "category": "development"
     },
     {

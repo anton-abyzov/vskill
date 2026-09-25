@@ -1,8 +1,8 @@
 ---
 name: motion-graphics-promo
-description: "After Effects-style motion graphics for short product promos (15-45 s, vertical or landscape), built as code with HyperFrames + GSAP instead of Adobe After Effects. Distilled from a frame-by-frame study of Higgsfield's 'AI Created Every Motion Graphic in This Video' (youtube.com/watch?v=W3-RIZ-Ps64) plus a product-overview structure analysis. Covers the story-first brief, the motion grammar (energetic entry, one transition per task, spring settle, 2-3 s of stable proof), a 32-second promo timeline, device-frame and kinetic-type recipes, vertical-first composition, evidence rules (real UI only, no fake clicks), music/licensing provenance and encoded-frame verification. Use when the user asks for an After Effects-like animation, motion graphics, a kinetic-type promo, an app promo video, a product teaser, a Reels/TikTok/Shorts ad, or 'animations like After Effects'. Pairs with hyperframes-best-practices (screencast pipeline) and remotion-best-practices."
+description: "After Effects-style motion graphics for short product promos (15-45 s, vertical or landscape), built as code with HyperFrames + GSAP instead of Adobe After Effects. Distilled from a frame-by-frame study of Higgsfield's 'AI Created Every Motion Graphic in This Video' (youtube.com/watch?v=W3-RIZ-Ps64) plus a product-overview structure analysis. Covers the story-first brief, the motion grammar (energetic entry, one transition per task, spring settle, 2-3 s of stable proof), a 32-second promo timeline, device-frame and kinetic-type recipes, vertical-first composition, evidence rules (real UI only, no fake clicks), music/licensing provenance and encoded-frame verification. Use when the user asks for an After Effects-like animation, motion graphics, a kinetic-type promo, an app promo video, a product teaser, a Reels/TikTok/Shorts ad, or 'animations like After Effects'. Also covers short explainer/tutorial videos and 15-second vertical ads: a proven design kit (footage beds, condensed caps with a marker box, white device frames, falling stickers, voice-over with music ducking) and the HyperFrames render traps that silently break output. Pairs with hyperframes-best-practices (screencast pipeline) and remotion-best-practices."
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
   author: Anton Abyzov
   tags: after-effects, motion-graphics, promo-video, hyperframes, gsap, kinetic-typography, vertical-video, ads
 ---
@@ -57,14 +57,36 @@ For longer consideration-stage videos, follow the official-overview structure in
 6. **Music**: licensed track only (e.g. CC BY with credit). Record source URL, license, credit line and file hash in `audio-provenance.json`; edit to a composed ending on the CTA beat.
 7. Render at the target resolution/fps; H.264 + stereo AAC for social.
 
-## 5. Verify the encoded file, not the preview
+## 5. Explainer and ad design kit (proven in production)
+
+This kit shipped a series of product explainers and 15-second vertical ads. The first version used dark backgrounds and was rejected as "too black". What worked:
+
+- **Real footage behind every scene**: licensed stock footage of the product's real-world context (e.g. match footage for a sports app), graded with a brand-color gradient (`linear-gradient(180deg, brand 74% → transparent → ink 50%)`), plus `saturate(1.3) brightness(1.12)` on the bed.
+- **Palette**: one saturated brand color plus one high-energy accent (e.g. violet `#6c4cff` + lime `#d7ff3c`), with sky/coral as stickers only and ink `#16132e` for text on the accent.
+- **Type**: condensed display caps (Archivo, `font-stretch` 75-80%, weight 900, 74-96 px on 1080-wide). The key word of each headline sits in an accent **marker box** rotated -2°. Check glyph coverage per language: Archivo has no Cyrillic, so switch to Inter for ru/uk/bg.
+- **Device frames**: white/silver phone and browser frames with a 3D perspective stage (`perspective: 1800px`) showing real screenshots or real screen recordings. Every screen must show real content (people, logos and data), not empty states.
+- **Falling stickers**: 2-3 short uppercase labels drop in, rotate and settle next to the device (one per beat).
+- **Transitions**: an angled accent-color wipe or a 2-frame white flash between beats.
+- **Voice-over** (TTS or recorded) with music ducked under it, then the final mix normalized to **-14 LUFS** (`ffmpeg -af loudnorm=I=-14:TP=-1.5:LRA=11`).
+- **Real device capture** (macOS): iPhone Mirroring plus `screencapture -v -V <secs> -R<x,y,w,h>` records a real app. Activate the mirroring window before sending taps. The phone must be locked for Mirroring to connect.
+- **Localized variants**: keep one template with `{{placeholders}}` and generate a copy per language with a small script (see `references/vertical-ad-15s.template.html`).
+- **UTM on every link** in captions and bios: `?utm_source=<platform>&utm_medium=organic&utm_campaign=<video-slug>`.
+
+### Render traps (each one nearly shipped a broken video)
+
+- **HyperFrames can silently drop every overlay partway through the render** when a composition has many `<video>` clips (6+ beds, or beds plus phone clips). Preview snapshots still look fine. Pre-concatenate footage beds into **one** video, keep clip count low, and always inspect a contact sheet of the **rendered MP4** before scheduling.
+- GSAP `fromTo` with `autoAlpha: 1` in the *from* vars shows elements at authoring time. Use `tl.set(el, {autoAlpha: 1})` and then `fromTo` without it.
+- Uploads to social schedulers sometimes return an empty body. Retry, and confirm the hosted file's byte size matches before scheduling.
+- Real people's faces and names on screen (players, customers) need their consent before paid or public use. Flag it if it's missing.
+
+## 6. Verify the encoded file, not the preview
 
 - Extract frames from the **delivered MP4** (e.g. `ffmpeg -i out.mp4 -vf fps=2 frames/%03d.png`) and read them: is every screen readable during its hold, does any caption overlap the platform UI safe zones, does text ever appear mid-animation when it must be read?
 - Check decode completes, duration, fps, frame count, loudness and peak; record the SHA-256 of the final file.
 - Run HyperFrames lint/layout checks and a contrast sample on caption frames.
 - Keep a manifest binding every source asset (screens with build/date, B-roll license, music license) to the final hash.
 
-## 6. Boundaries
+## 7. Boundaries
 
 - Real UI only. If a flow cannot be recorded (sign-in stalls, feature not shipped), cut it; never mock it.
 - Downloaded reference videos, contact sheets and transcripts are private analysis material; never upload them with the creative.

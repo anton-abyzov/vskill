@@ -1,0 +1,103 @@
+<!-- 15-second vertical (1080x1920) HyperFrames ad template. Fill the {{placeholders}} per language/variant (e.g. with a small script),
+     put the real assets in assets/ (bg.mp4 = one pre-concatenated footage bed, screen-*.jpg = real app screenshots,
+     screen-recording.mp4 = real screen capture, archivo.ttf / inter.ttf, a local gsap.min.js), then lint and render with HyperFrames. -->
+<!doctype html>
+<html lang="{{lang}}"><head><meta charset="utf-8"><title>{{title}}</title>
+<script src="assets/gsap.min.js"></script>
+<style>
+@font-face{font-family:Archivo;src:url('assets/archivo.ttf');font-weight:100 900;font-stretch:62% 125%}
+@font-face{font-family:Inter;src:url('assets/inter.ttf');font-weight:100 900}
+:root{--violet:#6c4cff;--lime:#d7ff3c;--sky:#3cc8ff;--coral:#ff5a5f;--ink:#16132e}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#2a2360;color:#fff;font-family:Inter,sans-serif}
+#film{position:relative;width:100%;height:100%;overflow:hidden;background:linear-gradient(160deg,#5b43f0,#2a2360)}
+.bed{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:saturate(1.3) brightness(1.12) contrast(1.05)}
+.grade{position:absolute;inset:0;z-index:2;background:linear-gradient(180deg,rgba(76,52,230,.74) 0%,rgba(76,52,230,.2) 36%,rgba(22,19,46,.05) 62%,rgba(22,19,46,.5) 100%)}
+.flash{position:absolute;inset:0;background:#fff;z-index:60;opacity:0}
+.wipe{position:absolute;left:-200px;top:-400px;width:1500px;height:2800px;background:var(--lime);z-index:59;transform:rotate(18deg) translateX(-1600px)}
+.brand{position:absolute;left:80px;top:96px;z-index:40;display:flex;align-items:center;gap:14px;font:800 36px Archivo;font-stretch:80%;text-shadow:0 4px 20px rgba(0,0,0,.5)}
+.brand i{width:16px;height:16px;border-radius:4px;background:var(--lime);display:inline-block;transform:rotate(45deg)}
+.brand small{font:700 24px Inter;letter-spacing:3px;color:var(--lime)}
+.note{position:absolute;left:80px;top:146px;z-index:40;font:700 26px Inter;letter-spacing:2px;opacity:.92;text-shadow:0 2px 10px rgba(0,0,0,.5)}
+.hl{position:absolute;left:80px;top:210px;width:930px;z-index:30}
+.hl .l{display:block;font-family:{{font}};font-weight:900;font-stretch:{{stretch}};font-size:96px;line-height:1.0;text-transform:uppercase;letter-spacing:-2px;text-shadow:0 6px 28px rgba(0,0,0,.45);white-space:nowrap}
+#h2 .l{font-size:74px}
+.hl .m{display:inline-block;background:var(--lime);color:var(--ink);padding:0 18px 6px;margin-left:-6px;text-shadow:none;transform:rotate(-2deg)}
+.stage{position:absolute;inset:0;perspective:1800px;z-index:20}
+.phone{position:absolute;left:250px;top:560px;width:580px;height:1180px;padding:12px;border-radius:78px;background:linear-gradient(140deg,#f4f4f8,#c9c9d3 40%,#fafafa 60%,#bdbdc8);box-shadow:0 50px 110px rgba(10,6,40,.55);transform-style:preserve-3d}
+.screen{position:relative;width:556px;height:1156px;border-radius:66px;overflow:hidden;background:#fff}
+.screen video{position:absolute;left:0;top:0;width:556px;height:1203px;object-fit:cover}
+.island{position:absolute;left:50%;top:14px;width:160px;height:46px;margin-left:-80px;border-radius:24px;background:#0b0b10;z-index:6}
+.pg{position:absolute;left:0;top:0;width:556px}
+.sticker{position:absolute;z-index:37;padding:18px 28px;border-radius:18px;font:900 40px Inter;text-transform:uppercase;box-shadow:0 20px 44px rgba(10,6,40,.5);white-space:nowrap}
+.lime{background:var(--lime);color:var(--ink)}.white{background:#fff;color:var(--ink)}.sky{background:var(--sky);color:var(--ink)}
+.cta{position:absolute;left:80px;right:80px;top:820px;z-index:45}
+.btn{display:inline-block;background:var(--lime);color:var(--ink);font:900 60px Archivo;font-stretch:75%;padding:22px 40px;border-radius:26px;box-shadow:0 24px 60px rgba(10,6,40,.5)}
+.fine{font:700 34px Inter;margin-top:36px;line-height:1.45;text-shadow:0 2px 12px rgba(0,0,0,.6)}
+</style></head><body>
+<div id="film" data-composition-id="{{id}}" data-width="1080" data-height="1920" data-duration="15">
+ <video class="bed clip" src="assets/bg.mp4" data-start="0" data-duration="15" data-track-index="0" muted playsinline></video>
+ <div class="grade" data-layout-ignore></div>
+ <div class="brand"><i></i><span>{{brand_name}}</span><small>{{brand}}</small></div>
+ <div class="note" id="note">{{note}}</div>
+ <div class="hl" id="h1"><span class="l">{{h1_a}}</span><span class="l"><span class="m">{{h1_b}}</span></span></div>
+ <div class="hl" id="h2"><span class="l">{{h2_a}}</span><span class="l"><span class="m">{{h2_b}}</span></span></div>
+ <div class="hl" id="h3"><span class="l">{{h3_a}}</span><span class="l"><span class="m">{{h3_b}}</span></span></div>
+ <div class="stage"><div class="phone" id="ph"><div class="screen"><div class="island"></div>
+  <img class="pg" id="p1" src="assets/screen-1.jpg" alt="">
+  <video class="clip" id="vid" src="assets/screen-recording.mp4" data-start="2.6" data-duration="6.6" data-track-index="2" muted playsinline></video>
+  <img class="pg" id="p3" src="assets/screen-3.jpg" alt="">
+  <img class="pg" id="p4" src="assets/screen-4.jpg" alt="">
+ </div></div></div>
+ <div class="sticker lime" id="sk1">{{s1}}</div>
+ <div class="sticker white" id="sk2">{{s2}}</div>
+ <div class="cta" id="cta">
+  <div class="hl" style="position:relative;left:0;top:0"><span class="l">{{cta_a}}</span><span class="l"><span class="m">{{cta_b}}</span></span></div>
+  <div style="margin-top:56px"><span class="btn">{{url}}</span></div>
+  <div class="fine">{{fine}}</div>
+ </div>
+ <div class="flash" id="flash" data-layout-ignore></div>
+ <div class="wipe" id="wipe" data-layout-ignore></div>
+</div>
+<script>
+const tl=gsap.timeline({paused:true});
+const flash=t=>tl.fromTo('#flash',{opacity:.85},{opacity:0,duration:.28,ease:'power2.out',immediateRender:false},t);
+const wipe=t=>tl.fromTo('#wipe',{x:-1600},{x:1700,duration:.5,ease:'power3.inOut',immediateRender:false},t-.25);
+gsap.set('#flash',{opacity:0});
+gsap.set('.hl,#cta,.sticker',{autoAlpha:0});
+gsap.set('#ph',{autoAlpha:0});
+gsap.set('#p3,#p4',{autoAlpha:0});
+const head=(id,t)=>{tl.set(id,{autoAlpha:1},t);tl.fromTo(id+' .l',{autoAlpha:0,yPercent:90},{autoAlpha:1,yPercent:0,duration:.35,stagger:.09,ease:'back.out(1.4)',immediateRender:false},t);};
+const out=(id,t)=>tl.to(id+' .l',{autoAlpha:0,yPercent:-60,duration:.22,stagger:.04},t);
+const pop=(id,x,y,r,t)=>{tl.set(id,{left:x,top:y,rotation:r,autoAlpha:1},t);tl.fromTo(id,{scale:.2},{scale:1,duration:.45,ease:'back.out(2)',immediateRender:false},t);};
+const drop=(id,x,y,r,t)=>{tl.set(id,{left:x,top:y,rotation:r,autoAlpha:1},t);tl.fromTo(id,{y:-500},{y:0,duration:.7,ease:'bounce.out',immediateRender:false},t);};
+head('#h1',0);
+tl.fromTo('#h1 .m',{scale:1.4,rotation:-10},{scale:1,rotation:-2,duration:.45,ease:'elastic.out(1,.5)',immediateRender:false},.3);
+tl.set('#ph',{autoAlpha:1},0.4);
+tl.fromTo('#ph',{y:1000,rotationX:30,rotationZ:-10},{y:0,rotationX:0,rotationZ:-3,duration:.8,ease:'power4.out',immediateRender:false},0.4);
+out('#h1',2.35); flash(2.6);
+tl.set('#p1',{autoAlpha:0},2.6);
+head('#h2',2.7);
+tl.to('#ph',{rotationZ:2,rotationY:-8,duration:6,ease:'sine.inOut'},2.7);
+pop('#sk1',70,1180,-5,3.6);
+tl.to('#sk1',{autoAlpha:0,duration:.2},8.5);
+out('#h2',8.7); wipe(9.2);
+tl.set('#p3',{autoAlpha:1},9.2);
+head('#h3',9.3);
+tl.to('#ph',{rotationY:6,rotationZ:-2,duration:3,ease:'sine.inOut'},9.3);
+tl.to('#p3',{y:-160,duration:1.2,ease:'sine.inOut'},9.5);
+tl.set('#p4',{autoAlpha:1},10.9);
+drop('#sk2',80,1260,-4,10.2);
+tl.to('#sk2',{autoAlpha:0,duration:.2},11.9);
+out('#h3',11.9);
+tl.to('#ph',{y:1300,rotationX:30,duration:.4,ease:'power3.in'},11.9);
+tl.to('#note',{autoAlpha:0,duration:.3},12.0);
+wipe(12.3);
+tl.set('#ph',{autoAlpha:0},12.3);
+tl.set('#cta',{autoAlpha:1},12.3);tl.set('#cta .hl',{autoAlpha:1},12.3);
+tl.fromTo('#cta .l',{autoAlpha:0,yPercent:100},{autoAlpha:1,yPercent:0,duration:.4,stagger:.1,ease:'back.out(1.5)'},12.35);
+tl.fromTo('#cta .btn',{scale:0,rotation:-8},{scale:1,rotation:-2,duration:.5,ease:'back.out(2)'},12.7);
+tl.fromTo('#cta .fine',{autoAlpha:0,y:20},{autoAlpha:1,y:0,duration:.35},13.0);
+tl.to('#cta .btn',{scale:1.05,duration:.4,yoyo:true,repeat:1,ease:'sine.inOut'},13.6);
+window.__timelines=window.__timelines||{};window.__timelines['{{id}}']=tl;
+</script></body></html>

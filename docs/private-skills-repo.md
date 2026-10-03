@@ -112,12 +112,25 @@ secret:
 
 ## What stays private
 
-For skills from a private repo, vskill sends nothing to verified-skill.com:
+For skills from a private repo, vskill sends nothing to verified-skill.com,
+from the CLI or from Skill Studio: no name, repo, path, version or hash.
 
 - no install telemetry,
 - no registry lookups or name-based security checks (the local security scan
   still runs on every install and update),
-- no auto-submission for scanning.
+- no auto-submission for scanning, and `vskill submit` refuses private repos,
+- no update checks, version history or diffs (`outdated`, `versions`, `diff`,
+  `info`, and the Studio's update badges and Versions tab),
+- no GitHub token, ever: the CLI and Studio send only the verified-skill
+  `vsk_*` token. A `vskill auth login --repos` token is never exchanged.
+
+This covers skills inside a plugin from a private repo too. When GitHub does
+not confirm a repo is public (no access, a rate limit, an outage), its skills
+are treated as private. To keep public skills updating through a rate limit,
+vskill remembers repos it confirmed public in the last 30 days in
+`~/.vskill/repo-visibility.json` (public repos only; set
+`VSKILL_VISIBILITY_CACHE=0` to turn it off). Otherwise `outdated` and `update`
+list the repos they skipped.
 
 On the registry side, the catalog refuses private repositories at intake, the
 crawlers skip them, and a repo that is made private drops out of public
@@ -129,8 +142,12 @@ listings when its GitHub App webhook reports the change.
 not 403, when a token cannot read a private repo. The error adds a hint when
 this is the likely cause. Check that your token has read access (step 3).
 
-**`GitHub returned 401`.** The token expired or was revoked. Sign in again.
-Public skills keep installing anonymously in the meantime.
+**`GitHub rejected your token`.** The token expired or was revoked. Sign in
+again. Public skills keep installing and updating anonymously in the meantime.
+
+**`Skipped registry checks for skills from N repos`.** GitHub rate-limited
+vskill or could not be reached, so those repos could not be confirmed public.
+Set `GITHUB_TOKEN` or run `vskill auth login`, then retry.
 
 **Org repo works with `gh` but not after `vskill auth login`.** Run
 `vskill auth login --repos`, or the org has not approved the vskill OAuth app.

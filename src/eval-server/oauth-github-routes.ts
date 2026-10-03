@@ -231,6 +231,29 @@ async function persistGithubToken(token: string): Promise<void> {
   }
 }
 
+/**
+ * Mint the verified-skill `vsk_*` token the Studio's platform proxy sends
+ * (it never sends a GitHub token). verified-skill.com issued this GitHub
+ * token in its own OAuth callback, so exchanging it discloses nothing new;
+ * a `vskill auth login --repos` token, which the platform has never seen, is
+ * never exchanged. Best-effort: sign-in still succeeds without it.
+ */
+async function mintVskillToken(githubToken: string): Promise<void> {
+  try {
+    const client = await import("../api/client.js");
+    const resp = await client.exchangeForVskToken(githubToken);
+    if (!resp || typeof resp.token !== "string" || !resp.token) return;
+    const mod = await import("../lib/keychain.js");
+    mod.createKeychain().setVskillToken(resp.token);
+    client.invalidateAuthCache();
+    const proxy = await import("./platform-proxy.js");
+    proxy.invalidatePlatformProxyTokenCache();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[oauth-github] could not mint a verified-skill token (${(err as Error).message})`);
+  }
+}
+
 async function readUrlEncodedBody(req: http.IncomingMessage): Promise<URLSearchParams> {
   const MAX_BODY_SIZE = 64 * 1024;
   const TIMEOUT_MS = 10_000;
@@ -381,6 +404,7 @@ export function registerOauthGithubRoutes(router: Router): void {
     try {
       await persistGithubToken(accessToken);
       const user = await fetchUserProfile(accessToken);
+      await mintVskillToken(accessToken);
       flow.status = "ready";
       flow.user = user;
       respondHtml(res, 200, successPage(user.login));

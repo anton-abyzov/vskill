@@ -162,18 +162,18 @@ describe("origin-resolver — Tier 5 (bare-name fallback / unknown)", () => {
 });
 
 describe("origin-resolver — Lockfile entry without parseable source", () => {
-  it("falls through to next tier when entry.source is malformed", async () => {
+  it("treats an entry whose source cannot be parsed as private (no name-registry fallthrough)", async () => {
     mocks.readLockfile.mockImplementation((dir?: string) =>
       dir === "/proj"
         ? { skills: { "slack-messaging": { source: "weird-format", version: "1.0.0" } } }
         : null,
     );
-    mocks.parseSource.mockReturnValue({ type: "unknown" });
+    mocks.parseSource.mockReturnValue({ type: "unknown", raw: "weird-format" });
 
     const env = await resolveSkillOrigin("slack-messaging", ".claude", "/proj");
-    // Tier 4 (Anthropic registry) catches it
-    expect(env.source).toBe("anthropic-registry");
-    expect(env.provider).toBe("anthropic");
+    // No confirmed-public origin: never matched by name to the Anthropic skill.
+    expect(env.private).toBe(true);
+    expect(env.provider).toBe("local");
   });
 });
 

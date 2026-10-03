@@ -15,7 +15,8 @@ import { readLockfile, writeLockfile } from "../lockfile/lockfile.js";
 import { parseSource } from "../resolvers/source-resolver.js";
 import { resolveSkillApiName as resolveSkillApiNameImpl } from "./skill-name-resolver.js";
 import { resolveSkillOrigin } from "./origin-resolver.js";
-import { isPrivateSource } from "../lib/private-source.js";
+import { isPrivateOrUnknownRepo } from "../lib/private-source.js";
+import { isPrivateStudioSkill, isPrivateStudioSkillAt, readStudioLocks } from "./studio-privacy.js";
 import { runBenchmarkSSE, runSingleCaseSSE, assembleBulkResult } from "./benchmark-runner.js";
 import { getSkillSemaphore } from "./concurrency.js";
 import { resolveSkillDir, resolveAllowedSkillDir } from "./skill-resolver.js";
@@ -1927,14 +1928,10 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
     // overwrites currentVersion. Stamping it server-side from the lockfile
     // collapses the race so badges render their final source on first paint.
     const lockForCurrentVersion = readLockfile(root);
-    // Skills installed from a private repo (or a GitHub repo not confirmed
-    // public) are flagged so the Studio never sends them to the platform.
-    let globalLock: ReturnType<typeof readLockfile> = null;
-    try {
-      globalLock = readLockfile(join(homedir(), ".agents"));
-    } catch {
-      globalLock = null;
-    }
+    // Skills from a private repo (or one GitHub does not confirm is public)
+    // are flagged so the Studio never sends them to the platform; see
+    // studio-privacy.ts for how installed, plugin and authored skills map.
+    const studioLocks = readStudioLocks(root);
     const enriched = await Promise.all(
       skills.map(async (s) => {
         let evalCount = 0;
@@ -1957,9 +1954,7 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
         // currentVersion=null — the resolver then falls through to frontmatter,
         // preserving non-italic styling for author-declared versions.
         const currentVersion = lockForCurrentVersion?.skills?.[s.skill]?.version ?? null;
-        const lockEntry =
-          lockForCurrentVersion?.skills?.[s.skill] ?? globalLock?.skills?.[s.skill] ?? null;
-        const sourcePrivate = await isPrivateSource(lockEntry);
+        const sourcePrivate = await isPrivateStudioSkill({ ...s, origin }, studioLocks);
         return {
           ...s,
           origin,
@@ -2127,8 +2122,12 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
     plugin: string | null,
   ): Promise<{ apiPathRoot: string | null; origin: Awaited<ReturnType<typeof resolveSkillOrigin>> }> {
     const origin = await resolveSkillOrigin(skill, plugin, getRoot());
-    // Private (or unconfirmed) lockfile entries never reach the platform.
-    if (origin.private) return { apiPathRoot: null, origin };
+    // Private (or unconfirmed) skills never reach the platform: lockfile
+    // entries (incl. plugin installs), authored skills in private checkouts,
+    // and installed skills nobody recorded.
+    if (origin.private || (await isPrivateStudioSkillAt(skill, plugin, getRoot()))) {
+      return { apiPathRoot: null, origin };
+    }
     if (origin.owner && origin.repo) {
       return {
         apiPathRoot: `/api/v1/skills/${encodeURIComponent(origin.owner)}/${encodeURIComponent(origin.repo)}/${encodeURIComponent(skill)}`,
@@ -2139,6 +2138,9 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
     // whose origin comes from a git remote, not a lockfile.
     const fullName = await resolveSkillApiName(skill, plugin);
     const parts = fullName.split("/");
+    if (parts.length === 3 && (await isPrivateOrUnknownRepo(parts[0], parts[1]))) {
+      return { apiPathRoot: null, origin };
+    }
     const apiPathRoot = parts.length === 3
       ? `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}`
       : `/api/v1/skills/${encodeURIComponent(fullName)}`;
@@ -2394,8 +2396,13 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
 
     try {
       const origin = await resolveSkillOrigin(skill, plugin, root);
-      // Private (or unconfirmed) lockfile entries never reach the platform.
-      if (!origin.private && origin.owner && origin.repo) {
+      // Private (or unconfirmed) skills never reach the platform.
+      if (
+        !origin.private &&
+        origin.owner &&
+        origin.repo &&
+        !(await isPrivateStudioSkillAt(skill, plugin, root))
+      ) {
         const apiPath = `/api/v1/skills/${encodeURIComponent(origin.owner)}/${encodeURIComponent(origin.repo)}/${encodeURIComponent(skill)}/versions`;
         try {
           const fetchResp = await fetch(`${PLATFORM_BASE}${apiPath}`, {

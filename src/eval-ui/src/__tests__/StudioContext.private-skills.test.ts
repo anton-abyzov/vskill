@@ -138,4 +138,40 @@ describe("StudioContext — private skills stay local", () => {
       container.remove();
     }
   });
+  it("never sends a skill authored in a private repo to lookup-by-name", async () => {
+    const { api } = await import("../api");
+    (api.getSkills as ReturnType<typeof vi.fn>).mockResolvedValue([
+      makeSkill({ skill: "my-private-draft", origin: "source", author: "acme", sourcePrivate: true }),
+      makeSkill({ skill: "my-public-skill", origin: "source", author: "acme" }),
+    ]);
+    const lookup = api.lookupSkillsByName as ReturnType<typeof vi.fn>;
+    lookup.mockClear();
+
+    const React = await import("react");
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { StudioProvider } = await import("../StudioContext");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(React.createElement(StudioProvider, null, null));
+      });
+      await act(async () => {
+        await flushMicrotasks();
+      });
+
+      const sent = lookup.mock.calls.flatMap((c) => c[0] as Array<{ name: string }>).map((e) => e.name);
+      expect(sent).toContain("my-public-skill");
+      expect(sent).not.toContain("my-private-draft");
+      for (const c of fetchCalls) {
+        expect(c.url).not.toContain("my-private-draft");
+        expect(c.body).not.toContain("my-private-draft");
+      }
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
+  });
 });

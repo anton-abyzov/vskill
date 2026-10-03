@@ -26,6 +26,13 @@ const mocks = vi.hoisted(() => ({
   resolveSkillApiNameImpl: vi.fn(),
 }));
 
+// Privacy decisions are covered in studio-privacy.test.ts and
+// api-routes.skills-private-source.test.ts; these cases are public skills.
+vi.mock("../studio-privacy.js", () => ({
+  isPrivateStudioSkill: vi.fn(async () => false),
+  isPrivateStudioSkillAt: vi.fn(async () => false),
+  readStudioLocks: vi.fn(() => []),
+}));
 vi.mock("../router.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return { ...actual, sendJson: mocks.sendJson, readBody: mocks.readBody };

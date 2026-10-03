@@ -573,6 +573,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const sourceOrigin = state.skills.filter(
       (s): s is typeof s & { author: string } =>
         s.origin === "source" &&
+        // Skills authored in a private repo never reach the platform.
+        !s.sourcePrivate &&
         typeof s.author === "string" &&
         s.author.length > 0,
     );

@@ -94,7 +94,9 @@ afterEach(() => {
 
 describe("/api/skills sourcePrivate flag", () => {
   it("flags private and unconfirmed GitHub sources, not public or registry ones", async () => {
-    for (const n of ["resume-tuner", "hidden-skill", "flagged", "open-skill", "reg-skill", "authored"]) writeSkill(n);
+    for (const n of ["resume-tuner", "hidden-skill", "flagged", "open-skill", "reg-skill", "unrecorded", "greet", "pdf"]) {
+      writeSkill(n);
+    }
     githubVisibility.set("acme/secret-skills", "private");
     githubVisibility.set("acme/open-skills", "public");
     writeFileSync(
@@ -106,6 +108,8 @@ describe("/api/skills sourcePrivate flag", () => {
           flagged: entry("github:acme/open-skills", { sourcePrivate: true }),
           "open-skill": entry("github:acme/open-skills"),
           "reg-skill": entry("registry:reg-skill"),
+          // A private plugin install: keyed by plugin name, skill in files.
+          "acme-tools": entry("github:acme/secret-skills#plugin:acme-tools", { files: ["greet/SKILL.md"] }),
         },
         agents: ["claude-code"],
         updatedAt: "2026-01-01T00:00:00Z",
@@ -120,7 +124,11 @@ describe("/api/skills sourcePrivate flag", () => {
     expect(flag("flagged")).toBe(true);
     expect(flag("open-skill")).toBeUndefined();
     expect(flag("reg-skill")).toBeUndefined();
-    expect(flag("authored")).toBeUndefined();
+    expect(flag("greet")).toBe(true);
+    // An installed skill nobody recorded fails closed; an Anthropic registry
+    // name is public upstream.
+    expect(flag("unrecorded")).toBe(true);
+    expect(flag("pdf")).toBeUndefined();
   });
 
   it("reads the user-global lockfile for global installs", async () => {

@@ -26,6 +26,13 @@ const mocks = vi.hoisted(() => ({
   resolveSkillApiNameImpl: vi.fn(),
 }));
 
+// Privacy decisions are covered in studio-privacy.test.ts and
+// api-routes.skills-private-source.test.ts; these cases are public skills.
+vi.mock("../studio-privacy.js", () => ({
+  isPrivateStudioSkill: vi.fn(async () => false),
+  isPrivateStudioSkillAt: vi.fn(async () => false),
+  readStudioLocks: vi.fn(() => []),
+}));
 vi.mock("../router.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return { ...actual, sendJson: mocks.sendJson, readBody: mocks.readBody };
@@ -51,6 +58,20 @@ vi.mock("../../lockfile/lockfile.js", () => ({
 vi.mock("../../resolvers/source-resolver.js", () => ({
   parseSource: mocks.parseSource,
 }));
+
+// GET /repos/{owner}/{repo}: public unless listed in `githubVisibility` (the
+// real getDefaultBranch records what GitHub reports).
+const githubVisibility = vi.hoisted(() => new Map<string, "public" | "private" | "unreachable">());
+vi.mock("../../discovery/github-tree.js", async () => {
+  const visibility = await import("../../lib/repo-visibility.js");
+  return {
+    getDefaultBranch: async (owner: string, repo: string) => {
+      const v = githubVisibility.get(`${owner}/${repo}`) ?? "public";
+      if (v !== "unreachable") visibility.recordRepoVisibility(owner, repo, { visibility: v });
+      return "main";
+    },
+  };
+});
 
 vi.mock("../skill-name-resolver.js", () => ({
   resolveSkillApiName: mocks.resolveSkillApiNameImpl,
@@ -919,5 +940,93 @@ describe("T-012: POST /api/skills/batch-update", () => {
     // Clean up first call
     resolveFirst({ skills: ["architect"] });
     await firstCall;
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Private sources: the versions / diff / rescan proxies never send a skill
+// from a private repo (or one whose visibility GitHub cannot confirm) to the
+// platform.
+// ---------------------------------------------------------------------------
+
+describe("version proxies skip private lockfile entries", () => {
+  let handlers: Record<string, Record<string, any>>;
+  let skillSeq = 0;
+  let skill = "";
+
+  beforeEach(async () => {
+    vi.resetAllMocks();
+    githubVisibility.clear();
+    (await import("../../lib/repo-visibility.js"))._resetRepoVisibilityForTests();
+    // Unique name per test: the origin resolver caches per (plugin, skill).
+    skill = `resume-tuner-${++skillSeq}`;
+    mocks.readLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: { [skill]: { version: "1.0.0", sha: "x", tier: "VERIFIED", installedAt: "", source: "github:acme/secret-skills" } },
+    });
+    mocks.parseSource.mockImplementation((source: string) => {
+      const m = /^github:([^/]+)\/(.+)$/.exec(source);
+      return m ? { type: "github", owner: m[1], repo: m[2] } : { type: "unknown", raw: source };
+    });
+    mocks.resolveSkillApiNameImpl.mockImplementation(async (s: string) => `acme/secret-skills/${s}`);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ versions: [] }) }));
+    handlers = captureHandlers();
+  });
+
+  function platformUrls(): string[] {
+    return (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+  }
+
+  for (const v of ["private", "unreachable"] as const) {
+    it(`GET versions sends nothing for a ${v} repo`, async () => {
+      githubVisibility.set("acme/secret-skills", v);
+      const res = fakeRes();
+      await handlers.get["/api/skills/:plugin/:skill/versions"](
+        fakeReq(`http://localhost/api/skills/.claude/${skill}/versions`),
+        res,
+        { plugin: ".claude", skill },
+      );
+
+      expect(platformUrls()).toEqual([]);
+      const body = mocks.sendJson.mock.calls[0][1];
+      expect(body).toMatchObject({ versions: [], count: 0, source: "none", trackedForUpdates: false });
+    });
+
+    it(`GET versions/diff sends nothing for a ${v} repo`, async () => {
+      githubVisibility.set("acme/secret-skills", v);
+      await handlers.get["/api/skills/:plugin/:skill/versions/diff"](
+        fakeReq(`http://localhost/api/skills/.claude/${skill}/versions/diff?from=1.0.0&to=2.0.0`),
+        fakeRes(),
+        { plugin: ".claude", skill },
+      );
+
+      expect(platformUrls()).toEqual([]);
+      expect(mocks.sendJson.mock.calls[0][2]).toBe(404);
+    });
+
+    it(`POST rescan sends nothing for a ${v} repo`, async () => {
+      githubVisibility.set("acme/secret-skills", v);
+      await handlers.post["/api/v1/skills/:id/rescan"](
+        fakeReq(`http://localhost/api/v1/skills/.claude%2F${skill}/rescan`),
+        fakeRes(),
+        { id: `.claude%2F${skill}` },
+      );
+
+      expect(platformUrls()).toEqual([]);
+    });
+  }
+
+  it("GET versions still proxies a public repo", async () => {
+    githubVisibility.set("acme/secret-skills", "public");
+    await handlers.get["/api/skills/:plugin/:skill/versions"](
+      fakeReq(`http://localhost/api/skills/.claude/${skill}/versions`),
+      fakeRes(),
+      { plugin: ".claude", skill },
+    );
+
+    expect(platformUrls()).toEqual([
+      expect.stringContaining(`/api/v1/skills/acme/secret-skills/${skill}/versions`),
+    ]);
   });
 });

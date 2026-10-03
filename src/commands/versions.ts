@@ -5,6 +5,7 @@
 import { getVersions, getVersionDiff } from "../api/client.js";
 import { readLockfile } from "../lockfile/lockfile.js";
 import { parseSource } from "../resolvers/source-resolver.js";
+import { isPrivateSkillName } from "../lib/private-source.js";
 import { bold, dim, cyan, red, green, yellow, table } from "../utils/output.js";
 
 /**
@@ -40,6 +41,14 @@ export async function versionsCommand(
   skillName: string,
   opts: VersionsOptions,
 ): Promise<void> {
+  // Version history lives on verified-skill.com, which never hears about a
+  // skill from a private (or unconfirmed) repo.
+  if (await isPrivateSkillName(skillName)) {
+    const msg = `${skillName} comes from a private repository; its version history is not on verified-skill.com.`;
+    if (opts.json) console.log(JSON.stringify([]));
+    else console.log(dim(msg) + "\n" + dim(`Run ${cyan("vskill update " + skillName)} to pull the latest from the repo.`));
+    return;
+  }
   try {
     const resolved = resolveFullName(skillName);
 

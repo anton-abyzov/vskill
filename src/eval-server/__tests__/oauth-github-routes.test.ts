@@ -6,10 +6,18 @@ import { getStudioToken, _resetStudioTokenForTests } from "../router.js";
 import { registerOauthGithubRoutes } from "../oauth-github-routes.js";
 
 const mockSetGitHubToken = vi.hoisted(() => vi.fn());
+const mockSetVskillToken = vi.hoisted(() => vi.fn());
+const mockExchange = vi.hoisted(() => vi.fn());
+
+vi.mock("../../api/client.js", () => ({
+  exchangeForVskToken: mockExchange,
+  invalidateAuthCache: vi.fn(),
+}));
 
 vi.mock("../../lib/keychain.js", () => ({
   createKeychain: () => ({
     setGitHubToken: mockSetGitHubToken,
+    setVskillToken: mockSetVskillToken,
     getGitHubToken: vi.fn(),
     clearGitHubToken: vi.fn(),
   }),
@@ -69,6 +77,9 @@ describe("GitHub OAuth desktop routes", () => {
     _resetStudioTokenForTests();
     vi.restoreAllMocks();
     mockSetGitHubToken.mockReset();
+    mockSetVskillToken.mockReset();
+    mockExchange.mockReset();
+    mockExchange.mockResolvedValue({ token: "vsk_minted", expiresAt: "", scopes: [], userId: "u" });
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       login: "testuser",
       id: 123,
@@ -128,6 +139,10 @@ describe("GitHub OAuth desktop routes", () => {
     expect(completeRes.state.status).toBe(200);
     expect(completeRes.state.body).toContain("Signed in as");
     expect(mockSetGitHubToken).toHaveBeenCalledWith("gho_test_token");
+    // The platform issued this token in its own callback; the Studio swaps it
+    // for the vsk_* token its platform proxy sends (never the GitHub token).
+    expect(mockExchange).toHaveBeenCalledWith("gho_test_token");
+    expect(mockSetVskillToken).toHaveBeenCalledWith("vsk_minted");
 
     const statusRes = fakeRes();
     await router.handle(fakeReq({

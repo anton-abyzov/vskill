@@ -250,6 +250,7 @@ export function createGitHubFetch(opts: GitHubFetchOptions = {}): GitHubFetch {
       } catch (err) {
         if (!(err instanceof GitHubFetchError && err.status === 401)) throw err;
         // Stale or revoked token: public content still reads anonymously.
+        warnRejectedTokenOnce();
         const anonHeaders = { ...headers };
         delete anonHeaders.Authorization;
         delete anonHeaders.authorization;
@@ -259,7 +260,18 @@ export function createGitHubFetch(opts: GitHubFetchOptions = {}): GitHubFetch {
       }
     }
 
-    return send(url, { ...init, headers }, Boolean(token));
+    try {
+      return await send(url, { ...init, headers }, Boolean(token));
+    } catch (err) {
+      if (!(token && err instanceof GitHubFetchError && err.status === 401)) throw err;
+      // Expired or revoked token: public repos still answer anonymously, so
+      // visibility checks and public updates keep working. Say so once.
+      warnRejectedTokenOnce();
+      const anonHeaders = { ...headers };
+      delete anonHeaders.Authorization;
+      delete anonHeaders.authorization;
+      return send(url, { ...init, headers: anonHeaders }, false);
+    }
   };
 
   async function send(url: string, req: RequestInit, hadToken: boolean): Promise<Response> {
@@ -296,6 +308,22 @@ export function createGitHubFetch(opts: GitHubFetchOptions = {}): GitHubFetch {
     // Exhausted retries on 429/5xx — surface the last response.
     return lastResponse as Response;
   }
+}
+
+let rejectedTokenWarned = false;
+
+function warnRejectedTokenOnce(): void {
+  if (rejectedTokenWarned) return;
+  rejectedTokenWarned = true;
+  process.stderr.write(
+    "vskill: GitHub rejected your token (expired or revoked); continuing without it for public repos. " +
+      "Run `vskill auth login` (add --repos for private repos) to refresh it.\n",
+  );
+}
+
+/** @internal test-only */
+export function _resetRejectedTokenWarningForTests(): void {
+  rejectedTokenWarned = false;
 }
 
 function safeHost(url: string): string {

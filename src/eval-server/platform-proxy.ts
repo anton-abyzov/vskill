@@ -106,7 +106,7 @@ const PROXY_PREFIXES = [
   // This is deliberately distinct from the trailing-slash prefixes below so
   // private/tenant/account paths keep their exact-segment semantics.
   "/api/v1/submissions",
-  // Private (org-scoped) routes that must carry the user's GitHub bearer token
+  // Private (org-scoped) routes that must carry the user's vsk_* bearer token
   // to the platform. The browser never sees this token; injection happens here.
   "/api/v1/private/",
   "/api/v1/tenants/",
@@ -123,7 +123,7 @@ const PROXY_PREFIXES = [
 ] as const;
 
 /**
- * Path prefixes that require an `Authorization: Bearer <github-token>` header
+ * Path prefixes that require an `Authorization: Bearer <vsk_*>` header
  * to be injected at the proxy boundary. Public skill routes are intentionally
  * excluded — they must remain anonymous so unauthenticated tabs continue to
  * function in the public skill catalog.
@@ -137,7 +137,7 @@ const AUTH_REQUIRED_PREFIXES = [
   "/api/v1/tenants/",
   // 0836 US-003: every /api/v1/account/* route requires the user's bearer
   // (profile, repos, tokens, notifications, exports). Inject it here so the
-  // WebView never sees a `gho_*` value.
+  // WebView never sees a token, and the GitHub token is never sent.
   "/api/v1/account/",
 ] as const;
 
@@ -151,31 +151,19 @@ export function shouldInjectAuth(url: string | undefined): boolean {
   return AUTH_REQUIRED_PREFIXES.some((p) => url.startsWith(p));
 }
 
-// Two kinds of bearer token can be injected at the proxy boundary:
-//   - "github" (gho_*): account/private/tenant routes. The platform validates
-//     it as a GitHub OAuth token.
-//   - "vskill" (vsk_*): the in-app submission queue (0856). The platform's
-//     submissions handler attributes the submit to the signed-in user via the
-//     vsk_* API token (requireUserOrGithubBearer), so an in-app submit is NOT
-//     anonymous — injecting gho_* here would mis-attribute it.
-type TokenKind = "github" | "vskill";
+// The only bearer injected at the proxy boundary is the verified-skill
+// `vsk_*` API token. The GitHub token is never sent to verified-skill.com:
+// the Studio sign-in asks for the `repo` scope, and `vskill auth login
+// --repos` stores a token in the same keychain slot, so either can read the
+// user's private repositories. The platform accepts `vsk_*` on every route
+// that used to take the GitHub token (requireUserOrGithubBearer); the
+// tenant routes authenticate by cookie only. A Studio sign-in mints the
+// `vsk_*` token (see oauth-github-routes.ts desktop-complete).
+type TokenKind = "vskill";
 
-// Which token kind each AUTH_REQUIRED prefix needs. Default (and the only
-// non-github entry) is the submissions prefix → vskill. Everything else uses
-// the GitHub token as before. Kept as an explicit, ordered list so the
-// longest/most-specific prefix wins and the selection is obvious at a glance.
-const TOKEN_KIND_BY_PREFIX: ReadonlyArray<readonly [string, TokenKind]> = [
-  ["/api/v1/submissions", "vskill"],
-] as const;
-
-/** Select the bearer-token kind for a given upstream path. */
-export function tokenKindForPath(path: string | undefined): TokenKind {
-  if (path) {
-    for (const [prefix, kind] of TOKEN_KIND_BY_PREFIX) {
-      if (path.startsWith(prefix)) return kind;
-    }
-  }
-  return "github";
+/** Select the bearer-token kind for a given upstream path: always `vsk_*`. */
+export function tokenKindForPath(_path: string | undefined): TokenKind {
+  return "vskill";
 }
 
 // In-process token cache so a burst of proxy requests doesn't repeatedly hit
@@ -198,18 +186,16 @@ const _cachedTokens: Partial<
 > = {};
 const TOKEN_CACHE_MS = 5_000;
 
-function readKeychainToken(kind: TokenKind): string | null {
+function readKeychainToken(_kind: TokenKind): string | null {
   try {
-    return kind === "vskill"
-      ? getDefaultKeychain().getVskillToken()
-      : getDefaultKeychain().getGitHubToken();
+    return getDefaultKeychain().getVskillToken();
   } catch {
     return null;
   }
 }
 
 function readTokenForProxy(
-  kind: TokenKind = "github",
+  kind: TokenKind = "vskill",
   now: number = Date.now(),
 ): string | null {
   const cached = _cachedTokens[kind];
@@ -265,7 +251,7 @@ export function pickHeadersForUpstream(
   out["x-forwarded-for"] = xff ? `${xff}, 127.0.0.1` : "127.0.0.1";
 
   if (opts.path && shouldInjectAuth(opts.path)) {
-    // Per-prefix token kind: submissions → vsk_*, everything else → gho_*.
+    // Always the vsk_* token; the GitHub token never leaves for the platform.
     // A test-supplied tokenProvider override always wins (kind-agnostic).
     const kind = tokenKindForPath(opts.path);
     const tokenProvider = opts.tokenProvider ?? (() => readTokenForProxy(kind));

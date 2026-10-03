@@ -13,6 +13,7 @@ import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { filterAgents } from "../utils/agent-filter.js";
 import { runTier1Scan } from "../scanner/index.js";
 import { parseSource } from "../resolvers/source-resolver.js";
+import { isPrivateSource, unconfirmedSkipNote } from "../lib/private-source.js";
 import { fetchFromSource, computeSha } from "../updater/source-fetcher.js";
 import {
   resolveVersion,
@@ -239,10 +240,14 @@ export async function updateCommand(
       // 1. Try source-aware fetch first
       let result = await fetchFromSource(parsed, name, entry);
 
-      // 2. Fall back to registry for unknown/failed sources. Never for a skill
-      // from a private repo: a public skill with the same name must not
-      // replace it, and its name must not be sent to the registry.
-      if (result === null && !entry.sourcePrivate) {
+      // Private repos — and GitHub repos not confirmed public — are never
+      // looked up on the registry: their names must not leave the machine,
+      // and a public skill with the same name must not replace them.
+      const privateSource = await isPrivateSource(entry);
+
+      // 2. Fall back to registry for unknown/failed sources (never for a
+      // private source, see above).
+      if (result === null && !privateSource) {
         try {
           const remote = await getSkill(name);
           if (remote.content) {
@@ -288,7 +293,7 @@ export async function updateCommand(
       // so unchanged skills don't phantom-update.
       const legacySha = result.files ? computeSha(result.files) : null;
       if (result.sha === entry.sha || legacySha === entry.sha) {
-        const canonical = entry.sourcePrivate ? null : canonicalNameFromParsedSource(parsed, name);
+        const canonical = privateSource ? null : canonicalNameFromParsedSource(parsed, name);
         let platformResult: Awaited<ReturnType<typeof getSkill>> | null = null;
         if (canonical) {
           try {
@@ -442,4 +447,8 @@ export async function updateCommand(
   console.log(
     `\n${updated > 0 ? green(`${updated} skill${updated === 1 ? "" : "s"} updated`) : dim("No updates available")}`
   );
+  // Skills GitHub could not confirm public (rate limit, outage) missed the
+  // registry fallback this run; never let that pass silently.
+  const skipNote = unconfirmedSkipNote();
+  if (skipNote) console.error(yellow(skipNote));
 }

@@ -33,6 +33,9 @@ const {
   getCachedBlocklist,
   isBlocklistStale,
 } = await import("./blocklist.js");
+const { recordRepoVisibility, _resetRepoVisibilityForTests } = await import(
+  "../lib/repo-visibility.js"
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -332,6 +335,53 @@ describe("checkBlocklist", () => {
 
     const result = await checkBlocklist("evil-skill", "sha256:nomatch");
     expect(result).toEqual(entry);
+  });
+});
+
+describe("checkInstallSafety — private repos", () => {
+  afterEach(() => {
+    _resetRepoVisibilityForTests();
+  });
+
+  it("never calls the platform for a repo seen as private", async () => {
+    recordRepoVisibility("owner", "secret-skills", { private: true });
+    mocks.existsSync.mockReturnValue(true);
+    mocks.readFileSync.mockReturnValue(
+      JSON.stringify({ entries: [], count: 0, lastUpdated: "", fetchedAt: new Date().toISOString() }),
+    );
+
+    const result = await checkInstallSafety(
+      "resume-tuner",
+      undefined,
+      "https://github.com/owner/secret-skills",
+    );
+
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(result).toEqual({ blocked: false, entry: undefined, rejected: false });
+  });
+
+  it("still honours the local blocklist for a private repo", async () => {
+    recordRepoVisibility("owner", "secret-skills", { visibility: "private" });
+    const entry = makeEntry({ skillName: "evil-skill" });
+    mocks.existsSync.mockReturnValue(true);
+    mocks.readFileSync.mockReturnValue(
+      JSON.stringify({ entries: [entry], count: 1, lastUpdated: "", fetchedAt: new Date().toISOString() }),
+    );
+
+    const result = await checkInstallSafety("evil-skill", undefined, "owner/secret-skills");
+
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(result.blocked).toBe(true);
+    expect(result.entry).toEqual(entry);
+  });
+
+  it("queries the platform for a repo seen as public", async () => {
+    recordRepoVisibility("owner", "open-skills", { private: false, visibility: "public" });
+    mocks.fetch.mockResolvedValue({ ok: true, json: async () => ({ blocked: false, rejected: false }) });
+
+    await checkInstallSafety("my-skill", undefined, "https://github.com/owner/open-skills");
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -238,6 +238,7 @@ describe("resolveParsedSkillFromIdentifier (0845 closure fallback)", () => {
           fetchImpl,
           platformBaseUrl: "https://platform.test",
           githubTokenProvider: () => null,
+          isRepoPrivate: async () => false,
         });
         expect(resolved).not.toBeNull();
         expect(resolved!.name).toBe("qmetry");
@@ -278,6 +279,19 @@ describe("resolveParsedSkillFromIdentifier (0845 closure fallback)", () => {
 });
 
 describe("resolveParsedSkillFromPlatform", () => {
+  it("never asks verified-skill.com about a private (or unconfirmed) repo", async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }) as Response);
+    const isRepoPrivate = vi.fn(async () => true);
+    const resolved = await resolveParsedSkillFromPlatform("acme/secret-skills/greet@1.0.0", {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      platformBaseUrl: "https://platform.test",
+      isRepoPrivate,
+    });
+    expect(resolved).toBeNull();
+    expect(isRepoPrivate).toHaveBeenCalledWith("acme", "secret-skills");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("returns null for non-hierarchical identifiers", async () => {
     const resolved = await resolveParsedSkillFromPlatform("qmetry", {
       fetchImpl: vi.fn() as unknown as typeof fetch,

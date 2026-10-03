@@ -39,6 +39,32 @@ vi.mock("../api/client.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// GitHub repo visibility (GET /repos/{owner}/{repo}) and local checkouts'
+// `origin` remotes: public unless a test says otherwise.
+// ---------------------------------------------------------------------------
+const githubVisibility = vi.hoisted(() => new Map<string, "public" | "private" | "unreachable">());
+const gitOrigins = vi.hoisted(() => new Map<string, string>());
+vi.mock("../discovery/github-tree.js", async () => {
+  const visibility = await import("../lib/repo-visibility.js");
+  return {
+    getDefaultBranch: async (owner: string, repo: string) => {
+      const v = githubVisibility.get(`${owner}/${repo}`) ?? "public";
+      if (v !== "unreachable") visibility.recordRepoVisibility(owner, repo, { visibility: v });
+      return "main";
+    },
+  };
+});
+vi.mock("node:child_process", () => ({
+  execFileSync: (_cmd: string, args: string[], opts: { cwd: string }) => {
+    const origin = [...gitOrigins.entries()].find(([dir]) => opts.cwd.endsWith(dir))?.[1];
+    if (!origin) throw new Error("fatal: not a git repository");
+    // Each mapped dir is the root of its own checkout.
+    if (args[0] === "rev-parse") return Buffer.from(`${opts.cwd}\n`);
+    return Buffer.from(`${origin}\n`);
+  },
+}));
+
+// ---------------------------------------------------------------------------
 // Mock source-aware fetcher
 // ---------------------------------------------------------------------------
 const mockFetchFromSource = vi.hoisted(() => vi.fn());
@@ -145,8 +171,11 @@ const UPDATED_FETCH_RESULT = {
 };
 
 describe("updateCommand", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    githubVisibility.clear();
+    gitOrigins.clear();
+    (await import("../lib/repo-visibility.js"))._resetRepoVisibilityForTests();
     mockDetectInstalledAgents.mockResolvedValue(MOCK_AGENTS);
     mockReadLockfile.mockReturnValue({
       version: 1,
@@ -297,6 +326,8 @@ describe("updateCommand", () => {
     mockFetchFromSource.mockResolvedValue(null);
     // Registry fallback also returns nothing
     mockGetSkill.mockRejectedValue(new Error("not found"));
+    // The plugin dir is a checkout of a public GitHub repo.
+    gitOrigins.set("specweave", "https://github.com/anton-abyzov/specweave.git");
 
     const { updateCommand } = await import("./update.js");
     await updateCommand("sw", { all: false });

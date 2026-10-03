@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.2.1] - 2026-10-03
+
+### Security
+
+- Nothing about a skill from a private GitHub repo reaches verified-skill.com, from any command or from Skill Studio: no name, repo, path, version or hash. Only the anonymous blocklist download remains.
+- No GitHub token is sent to verified-skill.com. The CLI and Skill Studio send only the verified-skill `vsk_*` token; the Studio sign-in now mints one, so sign in again in Studio if account pages show you as signed out.
+- `vskill auth login` no longer exchanges a token that GitHub granted the `repo` scope (GitHub keeps scopes from an earlier `--repos` login).
+- Skills inside private plugins (lockfile entries keyed by the plugin name) are treated as private everywhere, including `info`, `versions`, `diff` and Studio.
+- A repo whose visibility GitHub cannot confirm is treated as private, as is a `--plugin-dir` that is not its own checkout of a public GitHub repo, a lockfile source vskill cannot parse, and a Studio skill installed without a lockfile entry.
+- `vskill submit` refuses private repos, and Skill Studio no longer looks up private identifiers, authored skills in private checkouts or private plugin skills on verified-skill.com.
+
+### Fixed
+
+- Public skills keep getting update checks when your GitHub token is expired or revoked: GitHub requests retry without the token, with a one-time warning to run `vskill auth login`.
+- When GitHub rate-limits or is unreachable, a repo confirmed public in the last 30 days still counts as public (remembered in `~/.vskill/repo-visibility.json`, public repos only). Otherwise `outdated` and `update` name the skipped repos and how to fix it instead of skipping them silently.
+
 ## [1.2.0] - 2026-10-03
 
 ### Added

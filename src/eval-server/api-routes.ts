@@ -15,6 +15,8 @@ import { readLockfile, writeLockfile } from "../lockfile/lockfile.js";
 import { parseSource } from "../resolvers/source-resolver.js";
 import { resolveSkillApiName as resolveSkillApiNameImpl } from "./skill-name-resolver.js";
 import { resolveSkillOrigin } from "./origin-resolver.js";
+import { isPrivateOrUnknownRepo } from "../lib/private-source.js";
+import { isPrivateStudioSkill, isPrivateStudioSkillAt, readStudioLocks } from "./studio-privacy.js";
 import { runBenchmarkSSE, runSingleCaseSSE, assembleBulkResult } from "./benchmark-runner.js";
 import { getSkillSemaphore } from "./concurrency.js";
 import { resolveSkillDir, resolveAllowedSkillDir } from "./skill-resolver.js";
@@ -1926,6 +1928,10 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
     // overwrites currentVersion. Stamping it server-side from the lockfile
     // collapses the race so badges render their final source on first paint.
     const lockForCurrentVersion = readLockfile(root);
+    // Skills from a private repo (or one GitHub does not confirm is public)
+    // are flagged so the Studio never sends them to the platform; see
+    // studio-privacy.ts for how installed, plugin and authored skills map.
+    const studioLocks = readStudioLocks(root);
     const enriched = await Promise.all(
       skills.map(async (s) => {
         let evalCount = 0;
@@ -1948,9 +1954,11 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
         // currentVersion=null — the resolver then falls through to frontmatter,
         // preserving non-italic styling for author-declared versions.
         const currentVersion = lockForCurrentVersion?.skills?.[s.skill]?.version ?? null;
+        const sourcePrivate = await isPrivateStudioSkill({ ...s, origin }, studioLocks);
         return {
           ...s,
           origin,
+          ...(sourcePrivate ? { sourcePrivate: true } : {}),
           scope: s.scope ?? (origin === "installed" ? "installed" : "own"),
           isSymlink: s.isSymlink ?? false,
           symlinkTarget: s.symlinkTarget ?? null,
@@ -2112,8 +2120,14 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
   async function buildSkillApiPath(
     skill: string,
     plugin: string | null,
-  ): Promise<{ apiPathRoot: string; origin: Awaited<ReturnType<typeof resolveSkillOrigin>> }> {
+  ): Promise<{ apiPathRoot: string | null; origin: Awaited<ReturnType<typeof resolveSkillOrigin>> }> {
     const origin = await resolveSkillOrigin(skill, plugin, getRoot());
+    // Private (or unconfirmed) skills never reach the platform: lockfile
+    // entries (incl. plugin installs), authored skills in private checkouts,
+    // and installed skills nobody recorded.
+    if (origin.private || (await isPrivateStudioSkillAt(skill, plugin, getRoot()))) {
+      return { apiPathRoot: null, origin };
+    }
     if (origin.owner && origin.repo) {
       return {
         apiPathRoot: `/api/v1/skills/${encodeURIComponent(origin.owner)}/${encodeURIComponent(origin.repo)}/${encodeURIComponent(skill)}`,
@@ -2124,6 +2138,9 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
     // whose origin comes from a git remote, not a lockfile.
     const fullName = await resolveSkillApiName(skill, plugin);
     const parts = fullName.split("/");
+    if (parts.length === 3 && (await isPrivateOrUnknownRepo(parts[0], parts[1]))) {
+      return { apiPathRoot: null, origin };
+    }
     const apiPathRoot = parts.length === 3
       ? `/api/v1/skills/${parts.map(encodeURIComponent).join("/")}`
       : `/api/v1/skills/${encodeURIComponent(fullName)}`;
@@ -2134,7 +2151,6 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
     const root = getRoot();
     // 0823: comprehensive origin resolver via shared buildSkillApiPath.
     const { apiPathRoot, origin } = await buildSkillApiPath(params.skill, params.plugin);
-    const apiPath = `${apiPathRoot}/versions`;
 
     const emptyEnvelope = () => {
       res.setHeader("X-Skill-VCS", "unavailable");
@@ -2151,6 +2167,14 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
         req,
       );
     };
+
+    // A skill from a private (or unconfirmed) repo has no platform history,
+    // and its name and repo must not be sent there.
+    if (apiPathRoot === null) {
+      emptyEnvelope();
+      return;
+    }
+    const apiPath = `${apiPathRoot}/versions`;
 
     let fetchResp: Response;
     try {
@@ -2254,6 +2278,15 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
     // so Anthropic-shipped skills (slack-messaging, pptx, etc.) get the
     // matching upstream URL for diff requests, not the legacy bare-name path.
     const { apiPathRoot } = await buildSkillApiPath(params.skill, params.plugin);
+    if (apiPathRoot === null) {
+      sendJson(
+        res,
+        { error: "This skill comes from a private repository; version diffs are not available from verified-skill.com." },
+        404,
+        req,
+      );
+      return;
+    }
     const basePath = `${apiPathRoot}/versions/diff`;
 
     try {
@@ -2363,7 +2396,13 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
 
     try {
       const origin = await resolveSkillOrigin(skill, plugin, root);
-      if (origin.owner && origin.repo) {
+      // Private (or unconfirmed) skills never reach the platform.
+      if (
+        !origin.private &&
+        origin.owner &&
+        origin.repo &&
+        !(await isPrivateStudioSkillAt(skill, plugin, root))
+      ) {
         const apiPath = `/api/v1/skills/${encodeURIComponent(origin.owner)}/${encodeURIComponent(origin.repo)}/${encodeURIComponent(skill)}/versions`;
         try {
           const fetchResp = await fetch(`${PLATFORM_BASE}${apiPath}`, {

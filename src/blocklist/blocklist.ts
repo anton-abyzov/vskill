@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { BlocklistEntry, BlocklistCache, InstallSafetyResult } from "./types.js";
+import { isKnownPrivateRepo } from "../lib/repo-visibility.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -146,6 +147,20 @@ export async function checkBlocklist(
 }
 
 /**
+ * Install safety from the local blocklist cache only. The skill name never
+ * leaves the machine (a stale cache is refreshed with the anonymous full
+ * `GET /api/v1/blocklist`). Used for skills from private or unconfirmed
+ * sources.
+ */
+export async function checkLocalInstallSafety(
+  skillName: string,
+  contentHash?: string,
+): Promise<InstallSafetyResult> {
+  const entry = await checkBlocklist(skillName, contentHash);
+  return { blocked: !!entry, entry: entry ?? undefined, rejected: false };
+}
+
+/**
  * Check install safety via the platform API (blocklist + rejection status).
  *
  * Makes a single HTTP call to GET /api/v1/blocklist/check?name=X.
@@ -155,12 +170,20 @@ export async function checkBlocklist(
  * When repoUrl is provided and the API returns a rejection from a different
  * repo, the rejection is ignored (name-only matching can produce false
  * positives across unrelated repos).
+ *
+ * A repo already seen as private is never sent to the platform: the check
+ * uses the local blocklist cache only, so neither the skill name nor the
+ * repo URL leaves the machine. Callers resolve visibility first (see
+ * checkRepoInstallSafety in commands/add.ts).
  */
 export async function checkInstallSafety(
   skillName: string,
   contentHash?: string,
   repoUrl?: string,
 ): Promise<InstallSafetyResult> {
+  if (repoUrl && isKnownPrivateRepo(repoUrl)) {
+    return checkLocalInstallSafety(skillName, contentHash);
+  }
   try {
     let url = `${getApiBaseUrl()}/api/v1/blocklist/check?name=${encodeURIComponent(skillName)}`;
     if (repoUrl) {

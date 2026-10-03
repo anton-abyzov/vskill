@@ -408,6 +408,7 @@ export function normalizeSkillInfo(raw: unknown): SkillInfo {
         : "missing",
     lastBenchmark: typeof r.lastBenchmark === "string" ? r.lastBenchmark : null,
     origin,
+    ...(r.sourcePrivate === true ? { sourcePrivate: true } : {}),
     // 0686 tri-scope + symlink fields (legacy — kept for 0688 overlap)
     scope,
     isSymlink: typeof r.isSymlink === "boolean" ? r.isSymlink : false,

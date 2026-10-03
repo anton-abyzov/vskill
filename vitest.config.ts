@@ -10,6 +10,8 @@ export default defineConfig({
     // the URLs tests assert on. Tests that need a token stub one explicitly.
     env: {
       VSKILL_NO_GH_CLI: "1",
+      // Never read or write the developer's remembered-public repo file.
+      VSKILL_VISIBILITY_CACHE: "0",
       VSKILL_GITHUB_TOKEN: "",
       GITHUB_TOKEN: "",
       GH_TOKEN: "",

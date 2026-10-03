@@ -26,6 +26,7 @@ import {
   readDiskVersion,
 } from "../eval/disk-version.js";
 import { readAuthored, removeAuthoredSkill } from "../lockfile/authored.js";
+import { filterPublicEntries, unconfirmedSkipNote } from "../lib/private-source.js";
 import { bold, dim, green, red, yellow, cyan, table } from "../utils/output.js";
 
 const TWENTY_FOUR_HOURS = 86_400_000;
@@ -67,9 +68,12 @@ export async function getOutdatedJson(): Promise<
   const reconcileWarnings = new Map<string, string>();
   const authoredNames = new Set<string>();
 
-  // Private-repo skills are never sent to the registry (see update for those).
+  // Private-repo skills (and GitHub skills whose repo is not confirmed
+  // public) are never sent to the registry; `vskill update` pulls those from
+  // their repos.
+  const publicEntries = lock ? await filterPublicEntries(Object.entries(lock.skills)) : [];
   const items: CheckUpdateItem[] = lock
-    ? Object.entries(lock.skills).filter(([, entry]) => !entry.sourcePrivate).map(([name, entry]) => {
+    ? publicEntries.map(([name, entry]) => {
         const resolvedName = resolveFullName(name, entry.source);
         const skillMdPath = resolveInstallPath({ name, entry, lockDir });
         const reconciled = reconcileLockfileVersion({
@@ -161,17 +165,27 @@ export async function outdatedCommand(opts: { json?: boolean }): Promise<void> {
     return null;
   });
 
-  const privateCount = Object.values(readLockfile()?.skills ?? {}).filter((e) => e.sourcePrivate).length;
+  const lockEntries = Object.entries(readLockfile()?.skills ?? {});
+  const privateCount = lockEntries.length - (await filterPublicEntries(lockEntries)).length;
   const privateNote =
     privateCount > 0
       ? dim(
-          `${privateCount} skill${privateCount === 1 ? "" : "s"} from private repos ` +
+          `${privateCount} skill${privateCount === 1 ? "" : "s"} from private (or unconfirmed) sources ` +
             "not checked against the registry; `vskill update` pulls them from their repos.",
         )
       : null;
+  // Public skills GitHub could not confirm (rate limit, outage) are skipped,
+  // never silently: say which and how to fix it. stderr keeps --json clean.
+  const skipNote = unconfirmedSkipNote();
+  if (skipNote) console.error(yellow(skipNote));
 
   if (programmatic === null) {
-    console.log(privateNote ?? dim("No skills installed."));
+    if (opts.json) {
+      console.log("[]");
+      if (privateNote) console.error(privateNote);
+    } else {
+      console.log(privateNote ?? dim("No skills installed."));
+    }
     return;
   }
   if (privateNote && !opts.json) console.log(privateNote);
@@ -251,8 +265,10 @@ export async function postInstallHint(
       : 0;
     if (Date.now() - lastCheck < TWENTY_FOUR_HOURS) return;
 
-    const otherItems = Object.entries(lock.skills)
-      .filter(([name, entry]) => !justInstalledNames.includes(name) && !entry.sourcePrivate)
+    const candidates = Object.entries(lock.skills).filter(
+      ([name]) => !justInstalledNames.includes(name),
+    );
+    const otherItems = (await filterPublicEntries(candidates))
       .map(([name, entry]) => ({
         name: resolveFullName(name, entry.source),
         currentVersion: entry.version,

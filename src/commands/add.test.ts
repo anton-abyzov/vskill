@@ -117,9 +117,11 @@ vi.mock("../scanner/index.js", () => ({
 // ---------------------------------------------------------------------------
 const mockCheckBlocklist = vi.fn();
 const mockCheckInstallSafety = vi.fn();
+const mockCheckLocalInstallSafety = vi.fn();
 vi.mock("../blocklist/blocklist.js", () => ({
   checkBlocklist: (...args: unknown[]) => mockCheckBlocklist(...args),
   checkInstallSafety: (...args: unknown[]) => mockCheckInstallSafety(...args),
+  checkLocalInstallSafety: (...args: unknown[]) => mockCheckLocalInstallSafety(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -233,6 +235,7 @@ vi.mock("../marketplace/index.js", async () => {
 // Import module under test AFTER mocks
 // ---------------------------------------------------------------------------
 const { addCommand, detectMarketplaceRepo } = await import("./add.js");
+const { recordRepoVisibility, _resetRepoVisibilityForTests } = await import("../lib/repo-visibility.js");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -270,6 +273,15 @@ function makeAgent(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // GitHub answers GET /repos/{owner}/{repo} with a public repo unless a test
+  // says otherwise (the real getDefaultBranch records visibility from it).
+  _resetRepoVisibilityForTests();
+  mockGetDefaultBranch.mockImplementation(async (owner: string, repo: string) => {
+    recordRepoVisibility(owner, repo, { private: false, visibility: "public" });
+    return "main";
+  });
+  // Local-only blocklist check (private / unconfirmed sources): not blocked.
+  mockCheckLocalInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
   // Suppress console output during tests
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -857,7 +869,7 @@ describe("addCommand blocklist check (GitHub path)", () => {
 
 describe("addCommand blocklist check (plugin path)", () => {
   it("blocks plugin installation when plugin is on the blocklist", async () => {
-    mockCheckInstallSafety.mockResolvedValue({
+    mockCheckLocalInstallSafety.mockResolvedValue({
       blocked: true,
       entry: {
         skillName: "evil-plugin",
@@ -892,7 +904,9 @@ describe("addCommand blocklist check (plugin path)", () => {
       addCommand("source", { plugin: "evil-plugin", pluginDir: "/tmp/test" }),
     ).rejects.toThrow("process.exit");
 
-    expect(mockCheckInstallSafety).toHaveBeenCalledWith("evil-plugin", undefined, undefined);
+    // No git remote: the plugin name never goes to the platform.
+    expect(mockCheckLocalInstallSafety).toHaveBeenCalledWith("evil-plugin");
+    expect(mockCheckInstallSafety).not.toHaveBeenCalled();
     expect(mockRunTier1Scan).not.toHaveBeenCalled();
 
     mockExit.mockRestore();
@@ -927,7 +941,8 @@ describe("addCommand blocklist check (plugin path)", () => {
 
     await addCommand("source", { plugin: "safe-plugin", pluginDir: "/tmp/test" });
 
-    expect(mockCheckInstallSafety).toHaveBeenCalledWith("safe-plugin", undefined, undefined);
+    expect(mockCheckLocalInstallSafety).toHaveBeenCalledWith("safe-plugin");
+    expect(mockCheckInstallSafety).not.toHaveBeenCalled();
     expect(mockRunTier1Scan).toHaveBeenCalled();
   });
 });
@@ -977,7 +992,7 @@ describe("addCommand --force with blocked skill", () => {
   });
 
   it("shows warning but continues with --force (plugin path)", async () => {
-    mockCheckInstallSafety.mockResolvedValue({
+    mockCheckLocalInstallSafety.mockResolvedValue({
       blocked: true,
       entry: {
         skillName: "evil-plugin",
@@ -3874,5 +3889,220 @@ describe("skill versioning (0584)", () => {
     const entry = lockArg!.skills["my-skill"];
     expect(entry).toBeDefined();
     expect(entry.version).toBe("1.0.0");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Private repos: nothing about them reaches verified-skill.com. Visibility the
+// GitHub API cannot confirm (no token, 404, rate limit) counts as private.
+// ---------------------------------------------------------------------------
+
+const client = vi.mocked(await import("../api/client.js"));
+
+describe("private repos never reach verified-skill.com", () => {
+  const originalFetch = globalThis.fetch;
+
+  /** GitHub answers GET /repos/{owner}/{repo} for these repos only. */
+  function githubVisibility(map: Record<string, "public" | "private">): void {
+    mockGetDefaultBranch.mockImplementation(async (owner: string, repo: string) => {
+      const v = map[`${owner}/${repo}`];
+      if (v) recordRepoVisibility(owner, repo, { visibility: v });
+      return "main";
+    });
+  }
+
+  function platformArgs(): string {
+    return JSON.stringify([
+      client.reportInstall.mock.calls,
+      client.reportInstallBatch.mock.calls,
+      client.submitSkill.mock.calls,
+      mockCheckInstallSafety.mock.calls,
+      mockCheckPlatformSecurity.mock.calls,
+      mockGetSkill.mock.calls,
+      mockSearchSkills.mock.calls,
+    ]);
+  }
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  describe("--plugin-dir install telemetry", () => {
+    function setupPluginDir(remote: string | null, toplevel?: string): void {
+      mockExecFileSync.mockImplementation((cmd: string, args: string[], o?: { cwd?: string }) => {
+        // The plugin dir is its own checkout unless a parent toplevel is given.
+        if (cmd === "git" && args[0] === "rev-parse") return Buffer.from(`${toplevel ?? o?.cwd ?? ""}\n`);
+        if (cmd === "git" && args[0] === "remote") {
+          if (!remote) throw new Error("fatal: No such remote 'origin'");
+          return Buffer.from(`${remote}\n`);
+        }
+        return Buffer.from("");
+      });
+      mockExistsSync.mockReturnValue(true);
+      mockReadFileSync.mockImplementation((p: string) =>
+        p.includes("marketplace.json")
+          ? JSON.stringify({
+              name: "test",
+              version: "1.0.0",
+              plugins: [{ name: "career", source: "./plugins/career", version: "1.0.0" }],
+            })
+          : "",
+      );
+      mockReaddirSync.mockImplementation((_p: string, o?: { withFileTypes?: boolean }) =>
+        o?.withFileTypes ? [{ name: "resume-tuner", isDirectory: () => true }] : ["SKILL.md"],
+      );
+      mockRunTier1Scan.mockReturnValue(makeScanResult());
+      mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+      mockEnsureLockfile.mockReturnValue({
+        version: 1,
+        agents: [],
+        skills: {},
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+    }
+
+    it("does not report a checkout of a private repo", async () => {
+      githubVisibility({ "acme/secret-skills": "private" });
+      setupPluginDir("git@github.com:acme/secret-skills.git");
+
+      await addCommand("source", { plugin: "career", pluginDir: "/tmp/secret-skills" });
+
+      expect(mockRunTier1Scan).toHaveBeenCalled(); // the install itself ran
+      expect(client.reportInstallBatch).not.toHaveBeenCalled();
+      expect(mockCheckInstallSafety).not.toHaveBeenCalled();
+      expect(platformArgs()).not.toMatch(/secret-skills|resume-tuner|career/);
+    });
+
+    it("does not report a checkout whose visibility GitHub cannot confirm", async () => {
+      githubVisibility({});
+      setupPluginDir("https://github.com/acme/secret-skills.git");
+
+      await addCommand("source", { plugin: "career", pluginDir: "/tmp/secret-skills" });
+
+      expect(client.reportInstallBatch).not.toHaveBeenCalled();
+      expect(platformArgs()).not.toMatch(/secret-skills|resume-tuner|career/);
+    });
+
+    it.each([
+      ["a non-GitHub remote", "https://gitlab.example.com/acme/secret-skills.git"],
+      ["a dir without a remote", null],
+    ])("does not report %s", async (_label, remote) => {
+      githubVisibility({ "acme/secret-skills": "public" });
+      setupPluginDir(remote);
+
+      await addCommand("source", { plugin: "career", pluginDir: "/tmp/secret-skills" });
+
+      expect(client.reportInstallBatch).not.toHaveBeenCalled();
+      expect(platformArgs()).not.toMatch(/secret-skills|resume-tuner|career/);
+    });
+
+    it("does not report a private plugin dir that sits inside a public checkout", async () => {
+      // git finds the parent repo's origin; only the dir's own checkout counts.
+      githubVisibility({ "acme/open-skills": "public" });
+      setupPluginDir("https://github.com/acme/open-skills.git", "/tmp/open-skills");
+
+      await addCommand("source", { plugin: "career", pluginDir: "/tmp/open-skills/vendor/secret-plugins" });
+
+      expect(client.reportInstallBatch).not.toHaveBeenCalled();
+      expect(mockCheckInstallSafety).not.toHaveBeenCalled();
+      expect(platformArgs()).not.toMatch(/resume-tuner|career/);
+    });
+
+    it("reports a checkout of a public GitHub repo", async () => {
+      githubVisibility({ "acme/open-skills": "public" });
+      mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
+      setupPluginDir("https://github.com/acme/open-skills.git");
+
+      await addCommand("source", { plugin: "career", pluginDir: "/tmp/open-skills" });
+
+      expect(mockCheckInstallSafety).toHaveBeenCalledWith("career", undefined, "https://github.com/acme/open-skills");
+      expect(client.reportInstallBatch).toHaveBeenCalledWith([
+        { skillName: "resume-tuner", repoUrl: "acme/open-skills" },
+      ]);
+    });
+  });
+
+  describe("unregistered marketplace plugins", () => {
+    function setupMarketplace(): void {
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ download_url: "https://raw.githubusercontent.com/acme/secret-skills/main/.claude-plugin/marketplace.json" }),
+        })
+        .mockResolvedValueOnce({ ok: true, text: async () => SAMPLE_MARKETPLACE_JSON })
+        .mockResolvedValue({
+          ok: true,
+          json: async () => [{ name: "resume-tuner", type: "dir" }],
+          text: async () => "# Skill Content",
+        }) as unknown as typeof fetch;
+      mockDiscoverUnregisteredPlugins.mockResolvedValue({
+        plugins: [{ name: "career", source: "./plugins/career" }],
+        failed: false,
+      });
+      mockIsTTY.mockReturnValue(true);
+      // Pick only the unregistered plugin (after the 3 registered ones), then
+      // decline the unverified install so nothing else runs.
+      mockPromptCheckboxList.mockResolvedValue([3]);
+      mockPromptConfirm.mockResolvedValue(false);
+      mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+      mockEnsureLockfile.mockReturnValue({
+        version: 1,
+        agents: [],
+        skills: {},
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+    }
+
+    it("never submits plugins from a repo whose visibility GitHub cannot confirm", async () => {
+      githubVisibility({});
+      setupMarketplace();
+
+      await addCommand("acme/secret-skills", {}).catch(() => {});
+
+      expect(client.submitSkill).not.toHaveBeenCalled();
+      expect(platformArgs()).not.toMatch(/secret-skills|resume-tuner|career/);
+    });
+
+    it("still submits plugins from a public repo for scanning", async () => {
+      githubVisibility({ "acme/secret-skills": "public" });
+      setupMarketplace();
+
+      await addCommand("acme/secret-skills", {}).catch(() => {});
+
+      expect(client.submitSkill).toHaveBeenCalledWith(
+        expect.objectContaining({ repoUrl: "https://github.com/acme/secret-skills", skillName: "resume-tuner" }),
+      );
+    });
+  });
+
+  describe("GitHub installs whose visibility is unknown", () => {
+    it("send no safety check, security lookup or telemetry", async () => {
+      githubVisibility({});
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        text: async () => "# Resume tuner\nNormal content",
+      }) as unknown as typeof fetch;
+      mockCheckRepoExists.mockResolvedValue(true);
+      mockDiscoverSkills.mockResolvedValue([
+        { name: "resume-tuner", path: "skills/resume-tuner/SKILL.md", rawUrl: "https://raw.githubusercontent.com/acme/secret-skills/main/skills/resume-tuner/SKILL.md" },
+      ]);
+      mockRunTier1Scan.mockReturnValue(makeScanResult());
+      mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+      mockEnsureLockfile.mockReturnValue({
+        version: 1,
+        agents: [],
+        skills: {},
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      await addCommand("acme/secret-skills/resume-tuner", { yes: true }).catch(() => {});
+
+      expect(mockRunTier1Scan).toHaveBeenCalled();
+      expect(mockCheckLocalInstallSafety).toHaveBeenCalledWith("resume-tuner");
+      expect(platformArgs()).not.toMatch(/secret-skills|resume-tuner/);
+    });
   });
 });

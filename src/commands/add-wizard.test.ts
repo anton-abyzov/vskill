@@ -72,9 +72,11 @@ vi.mock("../scanner/index.js", () => ({
 
 const mockCheckBlocklist = vi.fn();
 const mockCheckInstallSafety = vi.fn();
+const mockCheckLocalInstallSafety = vi.fn();
 vi.mock("../blocklist/blocklist.js", () => ({
   checkBlocklist: (...args: unknown[]) => mockCheckBlocklist(...args),
   checkInstallSafety: (...args: unknown[]) => mockCheckInstallSafety(...args),
+  checkLocalInstallSafety: (...args: unknown[]) => mockCheckLocalInstallSafety(...args),
 }));
 
 const mockCheckPlatformSecurity = vi.fn();
@@ -155,6 +157,7 @@ vi.mock("../installer/canonical.js", () => ({
 // Import module under test AFTER mocks
 // ---------------------------------------------------------------------------
 const { addCommand } = await import("./add.js");
+const { recordRepoVisibility, _resetRepoVisibilityForTests } = await import("../lib/repo-visibility.js");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -202,6 +205,13 @@ beforeEach(() => {
   mockRunTier1Scan.mockReturnValue(makeScanResult());
   mockCheckBlocklist.mockResolvedValue(null);
   mockCheckInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
+  mockCheckLocalInstallSafety.mockResolvedValue({ blocked: false, rejected: false });
+  // GitHub reports the repo as public (the real getDefaultBranch records it).
+  _resetRepoVisibilityForTests();
+  mockGetDefaultBranch.mockImplementation(async (owner: string, repo: string) => {
+    recordRepoVisibility(owner, repo, { private: false, visibility: "public" });
+    return "main";
+  });
   mockCheckPlatformSecurity.mockResolvedValue(null);
   mockEnsureLockfile.mockReturnValue({ skills: {}, agents: [] });
   mockFindProjectRoot.mockReturnValue("/projects/myapp");

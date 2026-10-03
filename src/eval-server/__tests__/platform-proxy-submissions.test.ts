@@ -116,51 +116,36 @@ describe("0856 per-prefix token injection (real keychain getters)", () => {
     expect(getGitHubTokenMock).not.toHaveBeenCalled();
   });
 
-  it("(b) /api/v1/account/* STILL injects the gho_* GitHub token (not vsk_*)", () => {
-    getGitHubTokenMock.mockReturnValue("gho_account_tok");
-    getVskillTokenMock.mockReturnValue("vsk_should_not_be_used");
+  // 1.2.1: the GitHub token can read private repos (Studio sign-in asks for
+  // `repo`; `vskill auth login --repos` uses the same slot), so it is never
+  // sent to verified-skill.com. Every authenticated prefix carries vsk_*.
+  for (const path of ["/api/v1/account/profile", "/api/v1/private/skills/foo", "/api/v1/tenants/abc/skills"]) {
+    it(`(b) ${path} injects the vsk_* token, never the GitHub token`, () => {
+      getGitHubTokenMock.mockReturnValue("gho_repo_scoped");
+      getVskillTokenMock.mockReturnValue("vsk_signed_in");
 
-    const headers = pickHeadersForUpstream(
-      {},
-      { path: "/api/v1/account/profile" },
-    );
+      const headers = pickHeadersForUpstream({ authorization: "Bearer gho_from_browser" }, { path });
 
-    expect(headers.authorization).toBe("Bearer gho_account_tok");
-    expect(getGitHubTokenMock).toHaveBeenCalledTimes(1);
-    expect(getVskillTokenMock).not.toHaveBeenCalled();
-  });
+      expect(headers.authorization).toBe("Bearer vsk_signed_in");
+      expect(getGitHubTokenMock).not.toHaveBeenCalled();
+    });
 
-  it("(b) /api/v1/private/* STILL injects the gho_* GitHub token", () => {
-    getGitHubTokenMock.mockReturnValue("gho_private_tok");
+    it(`(b) ${path} is anonymous when only a GitHub token is stored`, () => {
+      getGitHubTokenMock.mockReturnValue("gho_repo_scoped");
+      getVskillTokenMock.mockReturnValue(null);
 
-    const headers = pickHeadersForUpstream(
-      {},
-      { path: "/api/v1/private/skills/foo" },
-    );
+      const headers = pickHeadersForUpstream({}, { path });
 
-    expect(headers.authorization).toBe("Bearer gho_private_tok");
-    expect(getGitHubTokenMock).toHaveBeenCalled();
-    expect(getVskillTokenMock).not.toHaveBeenCalled();
-  });
+      expect(headers.authorization).toBeUndefined();
+      expect(getGitHubTokenMock).not.toHaveBeenCalled();
+    });
+  }
 
-  it("(b) /api/v1/tenants/* STILL injects the gho_* GitHub token", () => {
-    getGitHubTokenMock.mockReturnValue("gho_tenant_tok");
-
-    const headers = pickHeadersForUpstream(
-      {},
-      { path: "/api/v1/tenants/abc/skills" },
-    );
-
-    expect(headers.authorization).toBe("Bearer gho_tenant_tok");
-    expect(getGitHubTokenMock).toHaveBeenCalled();
-    expect(getVskillTokenMock).not.toHaveBeenCalled();
-  });
-
-  it("(b) tokenKindForPath maps account/private/tenant → github", () => {
-    expect(tokenKindForPath("/api/v1/account/profile")).toBe("github");
-    expect(tokenKindForPath("/api/v1/private/skills/foo")).toBe("github");
-    expect(tokenKindForPath("/api/v1/tenants/abc")).toBe("github");
-    expect(tokenKindForPath(undefined)).toBe("github");
+  it("(b) tokenKindForPath is vskill for every path", () => {
+    expect(tokenKindForPath("/api/v1/account/profile")).toBe("vskill");
+    expect(tokenKindForPath("/api/v1/private/skills/foo")).toBe("vskill");
+    expect(tokenKindForPath("/api/v1/tenants/abc")).toBe("vskill");
+    expect(tokenKindForPath(undefined)).toBe("vskill");
   });
 });
 

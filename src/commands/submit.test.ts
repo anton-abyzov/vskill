@@ -4,6 +4,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mock browser opener
 // ---------------------------------------------------------------------------
 const mockOpenBrowser = vi.fn().mockResolvedValue(undefined);
+// These cases name public skills; visibility is covered in
+// lib/__tests__/private-source-egress-1.2.1.test.ts.
+vi.mock("../lib/private-source.js", () => ({
+  isTypedRepoPrivate: vi.fn(async () => false),
+}));
+
 vi.mock("../utils/browser.js", () => ({
   openBrowser: (...args: unknown[]) => mockOpenBrowser(...args),
 }));

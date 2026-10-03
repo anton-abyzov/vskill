@@ -5,6 +5,7 @@
 import { readLockfile, writeLockfile } from "../lockfile/lockfile.js";
 import { getVersions } from "../api/client.js";
 import { parseSource } from "../resolvers/source-resolver.js";
+import { isPrivateSource } from "../lib/private-source.js";
 import { bold, dim, cyan, red, green } from "../utils/output.js";
 
 function resolveFullName(name: string, source: string): string {
@@ -34,8 +35,13 @@ export async function pinCommand(
 
   const pinVersion = version ?? entry.version;
 
-  // If a specific version is requested, validate it exists
-  if (version) {
+  // If a specific version is requested, validate it exists — on the registry,
+  // which never hears about skills from private (or unconfirmed) repos.
+  if (version && (await isPrivateSource(entry))) {
+    console.log(
+      dim(`${skill} comes from a private repository; ${version} was not checked against verified-skill.com.`),
+    );
+  } else if (version) {
     const resolved = resolveFullName(skill, entry.source);
     const versions = await getVersions(resolved);
     const exists = versions.some((v) => v.version === version);

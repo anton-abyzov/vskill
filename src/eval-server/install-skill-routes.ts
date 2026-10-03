@@ -25,6 +25,7 @@
 //   POST /api/studio/install-skill        { skill, scope, agentIds?, parsedSkill? } → 202 + { jobId }
 //   GET  /api/studio/install-skill/:id/stream             SSE progress | done
 
+import { isTypedRepoPrivate } from "../lib/private-source.js";
 import * as http from "node:http";
 import * as os from "node:os";
 import { promises as fsPromises } from "node:fs";
@@ -139,6 +140,8 @@ interface ResolveSkillOptions {
   fetchImpl?: FetchLike;
   platformBaseUrl?: string;
   githubTokenProvider?: () => string | null;
+  /** Visibility check before any platform lookup; defaults to GitHub (isTypedRepoPrivate). */
+  isRepoPrivate?: (owner: string, repo: string) => Promise<boolean>;
 }
 
 function unquoteYaml(value: string): string {
@@ -315,6 +318,11 @@ async function resolveParsedSkillFromPlatform(
 ): Promise<ParsedSkill | null> {
   const apiPath = platformApiPath(identifier);
   if (!apiPath) return null;
+  // An identifier naming a repo GitHub reports as private (or hides) is
+  // never sent to verified-skill.com; it has no listing there.
+  const [owner, repo] = stripIdentifierVersion(identifier).split("/").filter(Boolean);
+  const isRepoPrivate = opts?.isRepoPrivate ?? isTypedRepoPrivate;
+  if (await isRepoPrivate(owner, repo)) return null;
   const fetchImpl = opts?.fetchImpl ?? fetch;
   const baseUrl = platformBaseUrl(opts);
   let skill: PlatformSkillRecord | null = null;

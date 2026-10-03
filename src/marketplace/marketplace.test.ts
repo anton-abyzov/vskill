@@ -280,6 +280,20 @@ describe("discoverUnregisteredPlugins", () => {
     expect(result.plugins).toEqual([]);
   });
 
+  it("treats a missing plugins/ folder (404) as a complete, empty list", async () => {
+    const manifest = makeMarketplaceJson();
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    }) as unknown as typeof fetch;
+
+    const result = await discoverUnregisteredPlugins("owner", "repo", manifest);
+
+    expect(result.failed).toBe(false);
+    expect(result.plugins).toEqual([]);
+  });
+
   it("ignores files, only returns directories", async () => {
     const manifest = makeMarketplaceJson();
 

@@ -2,6 +2,8 @@
 // Marketplace.json parser -- parse .claude-plugin/marketplace.json
 // ---------------------------------------------------------------------------
 
+import { githubFetch } from "../lib/github-fetch.js";
+
 // ---- Types ----------------------------------------------------------------
 
 export interface MarketplacePlugin {
@@ -221,7 +223,9 @@ export async function discoverUnregisteredPlugins(
   );
 
   try {
-    const res = await fetch(
+    // githubFetch carries the user's token, so private marketplace repos
+    // list too (a bare fetch is anonymous and 404s on a private repo).
+    const res = await githubFetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/plugins`,
       {
         headers: {
@@ -231,6 +235,9 @@ export async function discoverUnregisteredPlugins(
         signal: AbortSignal.timeout(10000),
       },
     );
+    // No plugins/ folder is a normal layout (skills/ at the repo root), not a
+    // failed lookup.
+    if (res.status === 404) return { plugins: [], failed: false };
     if (!res.ok) {
       onResponse?.(res);
       return { plugins: [], failed: true };

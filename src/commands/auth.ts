@@ -39,6 +39,8 @@ export interface AuthCommandDeps {
   clientId?: string;
   /** vskill version for User-Agent stamping. */
   version?: string;
+  /** OAuth scope for login; defaults to read:user (`--repos` adds `repo`). */
+  scope?: string;
   /**
    * 0839 US-005 — exchange a `gho_*` token for a `vsk_*` token via the
    * platform `/auth/github/exchange-for-vsk-token` endpoint. Optional so
@@ -67,6 +69,9 @@ const TOKEN_URL = "https://github.com/login/oauth/access_token";
 const USER_URL = "https://api.github.com/user";
 
 const DEFAULT_SCOPE = "read:user";
+// `vskill auth login --repos`: an OAuth token only reads private repositories
+// with the `repo` scope, so installing from a private skills repo needs it.
+const PRIVATE_REPOS_SCOPE = "read:user repo";
 
 // Public OAuth client_id for the Skill Studio GitHub App
 // (github.com/settings/applications/3406130). Safe to embed: OAuth client_ids
@@ -156,7 +161,7 @@ async function loginCmd(deps: Required<Pick<AuthCommandDeps, "fetchImpl" | "slee
   try {
     dcRes = await postForm(fetchImpl, DEVICE_CODE_URL, {
       client_id: clientId,
-      scope: DEFAULT_SCOPE,
+      scope: deps.scope ?? DEFAULT_SCOPE,
     }, version);
   } catch (err) {
     io.stderr.write(`vskill auth login: network error contacting github.com (${(err as Error).message})\n`);
@@ -405,6 +410,7 @@ function usage(io: AuthCommandIO): void {
       "",
       "Subcommands:",
       "  login           Sign in via GitHub Device Flow",
+      "  login --repos   Also grant read access to your private repositories",
       "  status [--json] [--refresh]  Show current GitHub identity",
       "  logout          Clear stored GitHub credentials",
       "",
@@ -462,6 +468,7 @@ export async function authCommand(
     case "login":
       exit = await loginCmd({
         ...deps,
+        scope: deps.scope ?? (argv.includes("--repos") ? PRIVATE_REPOS_SCOPE : DEFAULT_SCOPE),
         fetchImpl,
         sleep,
         version,

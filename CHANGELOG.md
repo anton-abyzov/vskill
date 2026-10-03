@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.2.0] - 2026-10-03
+
+### Added
+
+- Private GitHub skills repos: `install`, `update` and plugin discovery read private repos through the GitHub Contents API with your token, including a skill's `references/`, `scripts/` and other bundled folders. Walkthrough in `docs/private-skills-repo.md`.
+- `vskill auth login --repos` requests the `repo` scope; the default `read:user` token cannot read private repos.
+- Token sources, in order: `VSKILL_GITHUB_TOKEN`, the `vskill auth login` keychain token, `GITHUB_TOKEN` / `GH_TOKEN`, then `gh auth token`. Set `VSKILL_NO_GH_CLI=1` to skip `gh`.
+
+### Changed
+
+- Skills installed from a private repo are marked `sourcePrivate` in `vskill.lock`. vskill sends nothing about them to verified-skill.com (no install telemetry, registry lookups, name-based security checks or auto-submission), and `update` never replaces them with a same-named registry skill.
+- "Not found" errors explain when a private repo is the likely cause.
+- A stale token no longer breaks public installs: raw reads retry anonymously after a 401.
+
+### Fixed
+
+- `vskill update` found no skills for a marketplace plugin whose `source` is `./`.
+- `vskill auth status --json` and other `auth` flags were rejected as extra arguments.
+- A repo without a `plugins/` folder no longer prints "Plugin list may be incomplete".
+
 ## [1.1.1] - 2026-09-14
 
 ### Fixed

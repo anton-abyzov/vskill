@@ -32,7 +32,8 @@ import { getSkill, searchSkills } from "../api/client.js";
 import type { SkillSearchResult } from "../api/client.js";
 import { checkPlatformSecurity } from "../security/index.js";
 import { discoverSkills, getDefaultBranch, getBranchHeadSha, checkRepoExists, warnRateLimitOnce } from "../discovery/github-tree.js";
-import { githubFetch, GitHubFetchError } from "../lib/github-fetch.js";
+import { githubFetch, GitHubFetchError, privateRepoHint } from "../lib/github-fetch.js";
+import { isKnownPrivateRepo } from "../lib/repo-visibility.js";
 import { parseGitHubSource, classifyIdentifier } from "../utils/validation.js";
 import {
   parseSkillsShUrl,
@@ -462,7 +463,15 @@ async function installMarketplaceRepo(
     let verifiedCount = 0;
     let unverifiedCount = 0;
     let blockedCount = 0;
-    for (const unreg of selectedUnregistered) {
+    // A private repo is never sent to the public registry; its unregistered
+    // plugins go straight to the unverified-install confirmation below.
+    await getDefaultBranch(owner, repo); // records visibility (cached for the install below)
+    const repoIsPrivate = isKnownPrivateRepo(repoUrl);
+    if (repoIsPrivate) {
+      unverifiedCount = selectedUnregistered.length;
+      console.log(dim("  Private repository: not submitted to verified-skill.com."));
+    }
+    for (const unreg of repoIsPrivate ? [] : selectedUnregistered) {
       const pluginPath = unreg.source.replace(/^\.\//, "");
       try {
         // Discover skills: try nested {pluginPath}/skills/ first, fall back to flat {pluginPath}/SKILL.md
@@ -1175,7 +1184,7 @@ async function fetchSkillContent(url: string): Promise<string> {
       if (res.status === 404) {
         console.error(
           red(`SKILL.md not found at ${url}\n`) +
-            dim("Make sure the repo exists and has a SKILL.md on the default branch.")
+            dim("Make sure the repo exists and has a SKILL.md on the default branch." + privateRepoHint())
         );
       } else {
         console.error(red(`Failed to fetch: ${res.status} ${res.statusText}`));
@@ -1597,9 +1606,12 @@ async function installOneGitHubSkill(
     return { skillName, installed: false, verdict: "FETCH_FAILED" };
   }
 
-  // Platform security check
-  const platformSecurity = await checkPlatformSecurity(skillName);
-  if (!platformSecurity) {
+  // Platform security check (skipped for private repos, see installSingleSkillLegacy)
+  const privateRepo = isKnownPrivateRepo(`${owner}/${repo}`);
+  const platformSecurity = privateRepo ? null : await checkPlatformSecurity(skillName);
+  if (privateRepo) {
+    console.log(dim("  Private repository: local security scan only."));
+  } else if (!platformSecurity) {
     console.log(yellow("  Platform security check unavailable -- proceeding with local scan only."));
   }
   if (platformSecurity && platformSecurity.hasCritical && !opts.force) {
@@ -1703,7 +1715,7 @@ async function installAllRepoPlugins(
       manifestSpin.stop();
       console.error(
         red(`marketplace.json not found at ${owner}/${repo}\n`) +
-          dim("Ensure the repo has .claude-plugin/marketplace.json on the default branch.")
+          dim("Ensure the repo has .claude-plugin/marketplace.json on the default branch." + privateRepoHint())
       );
       process.exit(1);
     }
@@ -1813,7 +1825,8 @@ async function installRepoPlugin(
       if (!manifestContent) {
         throw new Error(
           `"${pluginName}" not found at ${owner}/${repo}: the repo has no ` +
-            `.claude-plugin/marketplace.json and no plugins/${pluginName}/ folder.`
+            `.claude-plugin/marketplace.json and no plugins/${pluginName}/ folder.` +
+            privateRepoHint()
         );
       }
       const available = getAvailablePlugins(manifestContent).map((p) => p.name);
@@ -2255,8 +2268,9 @@ async function addCommandInner(
       const branch = await getDefaultBranch(threeOwner, threeRepo);
       const mktPlugins = getAvailablePlugins(detection.manifestContent);
       for (const plugin of mktPlugins) {
-        const pluginPath = plugin.source.replace(/^\.\//, "");
-        const subpath = `${pluginPath}/skills/${threeSkill}/SKILL.md`;
+        // "./" (repo root) normalizes to "" — no leading slash in the subpath.
+        const pluginPath = plugin.source.replace(/^\.\//, "").replace(/\/+$/, "");
+        const subpath = `${pluginPath ? `${pluginPath}/` : ""}skills/${threeSkill}/SKILL.md`;
         const probeUrl = `https://raw.githubusercontent.com/${threeOwner}/${threeRepo}/${branch}/${subpath}`;
         const probeRes = await githubFetch(probeUrl);
         if (probeRes.ok) {
@@ -2993,9 +3007,14 @@ async function installSingleSkillLegacy(
     if (legacyAgentFiles && Object.keys(legacyAgentFiles).length === 0) legacyAgentFiles = undefined;
   }
 
-  // Platform security check (best-effort, non-blocking on network error)
-  const platformSecurity = await checkPlatformSecurity(skillName);
-  if (!platformSecurity) {
+  // Platform security check (best-effort, non-blocking on network error).
+  // Skipped for private repos: the registry looks skills up by name, so it
+  // would leak the name and could match an unrelated public skill.
+  const privateRepo = isKnownPrivateRepo(`${owner}/${repo}`);
+  const platformSecurity = privateRepo ? null : await checkPlatformSecurity(skillName);
+  if (privateRepo) {
+    console.log(dim("  Private repository: local security scan only."));
+  } else if (!platformSecurity) {
     console.log(yellow("  Platform security check unavailable -- proceeding with local scan only."));
   }
 

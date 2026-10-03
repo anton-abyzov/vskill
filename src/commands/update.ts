@@ -239,8 +239,10 @@ export async function updateCommand(
       // 1. Try source-aware fetch first
       let result = await fetchFromSource(parsed, name, entry);
 
-      // 2. Fall back to registry for unknown/failed sources
-      if (result === null) {
+      // 2. Fall back to registry for unknown/failed sources. Never for a skill
+      // from a private repo: a public skill with the same name must not
+      // replace it, and its name must not be sent to the registry.
+      if (result === null && !entry.sourcePrivate) {
         try {
           const remote = await getSkill(name);
           if (remote.content) {
@@ -286,7 +288,7 @@ export async function updateCommand(
       // so unchanged skills don't phantom-update.
       const legacySha = result.files ? computeSha(result.files) : null;
       if (result.sha === entry.sha || legacySha === entry.sha) {
-        const canonical = canonicalNameFromParsedSource(parsed, name);
+        const canonical = entry.sourcePrivate ? null : canonicalNameFromParsedSource(parsed, name);
         let platformResult: Awaited<ReturnType<typeof getSkill>> | null = null;
         if (canonical) {
           try {

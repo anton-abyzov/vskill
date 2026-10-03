@@ -7,6 +7,7 @@ import { join, dirname } from "node:path";
 import type { VskillLock, SkillLockEntry } from "./types.js";
 import { getProjectRoot } from "./project-root.js";
 import { migrateLock } from "./migration.js";
+import { isKnownPrivateRepo } from "../lib/repo-visibility.js";
 
 const LOCKFILE_NAME = "vskill.lock";
 const SKILLS_SH_LOCKFILE = ".skill-lock.json";
@@ -30,11 +31,23 @@ export function readLockfile(dir?: string): VskillLock | null {
   }
 }
 
+/** "owner/repo" (or a github.com URL) for a lock entry's upstream repo. */
+export function sourceRepoRef(entry: SkillLockEntry): string | null {
+  if (entry.sourceRepoUrl) return entry.sourceRepoUrl;
+  const m = (entry.source ?? "").match(/^(?:github|github-plugin|marketplace):([^/#\s]+\/[^/#\s]+)/);
+  return m ? m[1] : null;
+}
+
 /**
  * Write a VskillLock object to disk.
  */
 export function writeLockfile(lock: VskillLock, dir?: string): void {
   lock.updatedAt = new Date().toISOString();
+  for (const entry of Object.values(lock.skills)) {
+    if (!entry.sourcePrivate && isKnownPrivateRepo(sourceRepoRef(entry))) {
+      entry.sourcePrivate = true;
+    }
+  }
   const p = lockPath(dir);
   mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, JSON.stringify(lock, null, 2) + "\n", "utf-8");

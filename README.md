@@ -12,7 +12,7 @@
   <a href="https://github.com/anton-abyzov/vskill/actions/workflows/desktop-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/anton-abyzov/vskill/desktop-release.yml?branch=main&label=desktop%20build&logo=githubactions" alt="desktop build" /></a>
   <img src="https://img.shields.io/badge/agents-54_platforms-0969DA" alt="54 agents" />
   <img src="https://img.shields.io/badge/plugins-9-8B5CF6" alt="9 plugins" />
-  <img src="https://img.shields.io/badge/skills-17-10B981" alt="17 skills" />
+  <img src="https://img.shields.io/badge/skills-19-10B981" alt="19 skills" />
   <a href="https://verified-skill.com"><img src="https://img.shields.io/badge/registry-verified--skill.com-F59E0B" alt="registry" /></a>
   <a href="https://github.com/anton-abyzov/vskill/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" /></a>
 </p>
@@ -157,7 +157,7 @@ npx vskill@latest skill new            # create a new skill (AI-assisted)
 npx vskill@latest eval sweep <skill>   # benchmark across models
 npx vskill@latest audit --ci           # SARIF v2.1.0 for CI
 npx vskill@latest keys set anthropic   # store API keys in ~/.vskill/keys.env
-npx vskill@latest auth login           # sign in to GitHub for private skills
+npx vskill@latest auth login --repos   # sign in to GitHub for private skills repos
 ```
 
 Full reference → [verified-skill.com/docs/cli-reference](https://verified-skill.com/docs/cli-reference)
@@ -261,7 +261,16 @@ npx vskill@latest add private-skill                         # private skill inst
 
 The local skill bundle on disk **never contains** your GitHub token — the token is used only at fetch time. Your project's `vskill.lock` records `source: "private"` and the org name so future updates re-authenticate correctly.
 
-Customer-facing setup walkthrough → [`.specweave/docs/external/private-repos-quickstart.md`](../../../.specweave/docs/external/private-repos-quickstart.md) (in the umbrella repo).
+### Private skills repo on GitHub
+
+A team can keep its skills in a private GitHub repo and install them like public ones. Sign in with `vskill auth login --repos` (or `gh auth login`, or `GITHUB_TOKEN`), then:
+
+```bash
+npx vskill@latest install acme/team-skills/onboarding      # one skill
+npx vskill@latest install --repo acme/team-skills --all    # everything in marketplace.json
+```
+
+Skills from a private repo are never reported to verified-skill.com, and `vskill update` only ever reads them from that repo. Walkthrough: [docs/private-skills-repo.md](docs/private-skills-repo.md).
 
 ## Security & Compliance
 

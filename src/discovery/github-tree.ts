@@ -4,6 +4,7 @@
 
 import { yellow } from "../utils/output.js";
 import { createGitHubFetch, githubFetch } from "../lib/github-fetch.js";
+import { recordRepoVisibility } from "../lib/repo-visibility.js";
 
 // ---- Rate-limit warning (deduplicated per CLI invocation) -----------------
 
@@ -168,8 +169,9 @@ export async function getDefaultBranch(
   try {
     const res = await requestGitHub(`https://api.github.com/repos/${owner}/${repo}`, {}, options);
     if (res.ok) {
-      const data = (await res.json()) as { default_branch?: string };
+      const data = (await res.json()) as { default_branch?: string; private?: boolean; visibility?: string };
       branch = data.default_branch || "main";
+      recordRepoVisibility(owner, repo, data);
     }
   } catch {
     // fall through with "main"
@@ -210,6 +212,10 @@ export async function checkRepoExists(
   try {
     const res = await requestGitHub(`https://api.github.com/repos/${owner}/${repo}`, {}, options);
     if (res.status === 404) return false;
+    if (res.ok) {
+      const data = (await res.json().catch(() => null)) as { private?: boolean; visibility?: string } | null;
+      if (data) recordRepoVisibility(owner, repo, data);
+    }
     return true;
   } catch {
     return true;

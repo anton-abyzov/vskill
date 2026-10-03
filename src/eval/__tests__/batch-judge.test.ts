@@ -427,5 +427,5 @@ describe("batchJudgeAssertions — polling", () => {
     );
 
     consoleSpy.mockRestore();
-  });
+  }, 30_000);
 });

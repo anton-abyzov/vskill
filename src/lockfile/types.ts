@@ -32,6 +32,11 @@ export interface SkillLockEntry {
   sourceCommitSha?: string;
   /** Plugin namespace that provided this skill, when installed from a plugin layout. */
   sourcePluginName?: string;
+  /**
+   * Installed from a private GitHub repo. Such skills are only ever updated
+   * from that repo: no registry fallback, no registry lookups, no telemetry.
+   */
+  sourcePrivate?: boolean;
 }
 
 export interface VskillLock {

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { _resetRepoVisibilityForTests, isKnownPrivateRepo } from "../lib/repo-visibility.js";
 
 // ---------------------------------------------------------------------------
 // Import module under test
@@ -351,6 +352,19 @@ describe("getDefaultBranch", () => {
 
     const branch = await getDefaultBranch("test-owner", "test-repo-1");
     expect(branch).toBe("develop");
+  });
+
+  it("records a private repo's visibility from the same call", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ default_branch: "main", private: true, visibility: "private" }),
+    }) as unknown as typeof fetch;
+
+    await getDefaultBranch("acme", "private-skills");
+    expect(isKnownPrivateRepo("https://github.com/acme/private-skills")).toBe(true);
+    expect(isKnownPrivateRepo("acme/private-skills")).toBe(true);
+    expect(isKnownPrivateRepo("acme/public-skills")).toBe(false);
+    _resetRepoVisibilityForTests();
   });
 
   it("falls back to main on API error", async () => {

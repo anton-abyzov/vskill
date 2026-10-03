@@ -113,6 +113,30 @@ describe("writeLockfile", () => {
     );
   });
 
+  it("marks entries from repos seen as private, leaving public ones alone", async () => {
+    const { recordRepoVisibility, _resetRepoVisibilityForTests } = await import("../lib/repo-visibility.js");
+    recordRepoVisibility("acme", "private-skills", { private: true });
+    try {
+      const lock = makeLock({
+        skills: {
+          onboarding: makeEntry({ source: "github:acme/private-skills" }),
+          team: makeEntry({ source: "marketplace:acme/private-skills#team" }),
+          viaUrl: makeEntry({ source: "github:x/y", sourceRepoUrl: "https://github.com/acme/private-skills" }),
+          pm: makeEntry({ source: "github:anton-abyzov/specweave" }),
+        },
+      });
+
+      writeLockfile(lock, TEST_DIR);
+
+      expect(lock.skills.onboarding.sourcePrivate).toBe(true);
+      expect(lock.skills.team.sourcePrivate).toBe(true);
+      expect(lock.skills.viaUrl.sourcePrivate).toBe(true);
+      expect(lock.skills.pm.sourcePrivate).toBeUndefined();
+    } finally {
+      _resetRepoVisibilityForTests();
+    }
+  });
+
   it("ensures parent directory exists before writing", () => {
     const lock = makeLock();
 

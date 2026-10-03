@@ -262,6 +262,31 @@ describe("vskill auth login (Device Flow)", () => {
   });
 });
 
+describe("vskill auth login --repos", () => {
+  async function requestedScope(argv: string[]): Promise<string | null> {
+    const f = fakeIO();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(400, { error: "test_stop" })) as unknown as typeof fetch;
+    await authCommand(argv, {
+      io: f.io,
+      keychain: fakeKeychain({ token: null }),
+      fetchImpl,
+      sleep: () => Promise.resolve(),
+    });
+    const body = ((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit).body as string;
+    return new URLSearchParams(body).get("scope");
+  }
+
+  it("asks only for read:user by default", async () => {
+    expect(await requestedScope(["login"])).toBe("read:user");
+  });
+
+  it("adds the repo scope so private skills repos are readable", async () => {
+    expect(await requestedScope(["login", "--repos"])).toBe("read:user repo");
+  });
+});
+
 describe("vskill auth status / logout", () => {
   it("status with token: validates via /user and prints login", async () => {
     const f = fakeIO();

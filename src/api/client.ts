@@ -8,6 +8,7 @@ import {
   type Keychain,
 } from "../lib/keychain.js";
 import { getActiveTenant } from "../lib/active-tenant.js";
+import { isKnownPrivateRepo } from "../lib/repo-visibility.js";
 
 // Base URL is overridable via `VSKILL_API_BASE` so tests (and hermetic CI runs)
 // can point the CLI at a mock server without touching the production host.
@@ -492,6 +493,8 @@ export async function reportInstall(
   const verbose = process.env.VSKILL_DEBUG === "1";
   try {
     if (process.env.VSKILL_NO_TELEMETRY === "1") return;
+    // Private repos stay private: never report them to the public registry.
+    if (isKnownPrivateRepo(repoUrl)) return;
 
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -655,11 +658,13 @@ export async function compareVersions(
 }
 
 export async function reportInstallBatch(
-  skills: Array<{ skillName: string; repoUrl?: string; version?: string }>,
+  allSkills: Array<{ skillName: string; repoUrl?: string; version?: string }>,
 ): Promise<void> {
   const verbose = process.env.VSKILL_DEBUG === "1";
   try {
     if (process.env.VSKILL_NO_TELEMETRY === "1") return;
+    // Private repos stay private: never report them to the public registry.
+    const skills = allSkills.filter((s) => !isKnownPrivateRepo(s.repoUrl));
     if (skills.length === 0) return;
 
     for (let attempt = 0; attempt < 2; attempt++) {

@@ -67,8 +67,9 @@ export async function getOutdatedJson(): Promise<
   const reconcileWarnings = new Map<string, string>();
   const authoredNames = new Set<string>();
 
+  // Private-repo skills are never sent to the registry (see update for those).
   const items: CheckUpdateItem[] = lock
-    ? Object.entries(lock.skills).map(([name, entry]) => {
+    ? Object.entries(lock.skills).filter(([, entry]) => !entry.sourcePrivate).map(([name, entry]) => {
         const resolvedName = resolveFullName(name, entry.source);
         const skillMdPath = resolveInstallPath({ name, entry, lockDir });
         const reconciled = reconcileLockfileVersion({
@@ -160,10 +161,20 @@ export async function outdatedCommand(opts: { json?: boolean }): Promise<void> {
     return null;
   });
 
+  const privateCount = Object.values(readLockfile()?.skills ?? {}).filter((e) => e.sourcePrivate).length;
+  const privateNote =
+    privateCount > 0
+      ? dim(
+          `${privateCount} skill${privateCount === 1 ? "" : "s"} from private repos ` +
+            "not checked against the registry; `vskill update` pulls them from their repos.",
+        )
+      : null;
+
   if (programmatic === null) {
-    console.log(dim("No skills installed."));
+    console.log(privateNote ?? dim("No skills installed."));
     return;
   }
+  if (privateNote && !opts.json) console.log(privateNote);
   const { results, pinMap } = programmatic;
 
   const outdated = results.filter((r) => r.updateAvailable);
@@ -241,7 +252,7 @@ export async function postInstallHint(
     if (Date.now() - lastCheck < TWENTY_FOUR_HOURS) return;
 
     const otherItems = Object.entries(lock.skills)
-      .filter(([name]) => !justInstalledNames.includes(name))
+      .filter(([name, entry]) => !justInstalledNames.includes(name) && !entry.sourcePrivate)
       .map(([name, entry]) => ({
         name: resolveFullName(name, entry.source),
         currentVersion: entry.version,

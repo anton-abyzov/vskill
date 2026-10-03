@@ -10,6 +10,7 @@ import {
   compareVersions,
 } from "./client.js";
 import type { SubmissionRequest, CheckUpdateItem } from "./client.js";
+import { _resetRepoVisibilityForTests, recordRepoVisibility } from "../lib/repo-visibility.js";
 
 // ---------------------------------------------------------------------------
 // Mock global fetch
@@ -543,6 +544,26 @@ describe("reportInstallBatch", () => {
     expect(body.source).toBe("cli");
     expect(body.platform).toBe(process.platform);
     expect(body.cliVersion).toBeDefined();
+  });
+
+  it("never reports skills from a private repository", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ ok: true, results: [] }));
+    recordRepoVisibility("acme", "private-skills", { private: true });
+    try {
+      await reportInstallBatch([
+        { skillName: "onboarding", repoUrl: "https://github.com/acme/private-skills" },
+        { skillName: "pm", repoUrl: "anton-abyzov/specweave" },
+      ]);
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.skills).toEqual([{ skillName: "pm", repoUrl: "anton-abyzov/specweave" }]);
+      expect(mockFetch.mock.calls[0][1].body).not.toContain("private-skills");
+
+      mockFetch.mockClear();
+      await reportInstall("onboarding", "acme/private-skills");
+      expect(mockFetch).not.toHaveBeenCalled();
+    } finally {
+      _resetRepoVisibilityForTests();
+    }
   });
 
   it("respects VSKILL_NO_TELEMETRY=1", async () => {

@@ -37,6 +37,19 @@ vi.mock("../core-skills/sync.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Hermetic GitHub auth: no keychain, env or `gh` token unless a test sets one
+// ---------------------------------------------------------------------------
+vi.mock("../lib/keychain.js", () => ({
+  getDefaultKeychain: () => ({ getGitHubToken: () => null }),
+}));
+vi.stubEnv("VSKILL_GITHUB_TOKEN", "");
+vi.stubEnv("GITHUB_TOKEN", "");
+vi.stubEnv("GH_TOKEN", "");
+vi.stubEnv("VSKILL_TEST_GITHUB_PAT", "");
+vi.stubEnv("VSKILL_TEST_PRIVATE_GITHUB_PAT", "");
+vi.stubEnv("VSKILL_NO_GH_CLI", "1");
+
+// ---------------------------------------------------------------------------
 // Mock global fetch
 // ---------------------------------------------------------------------------
 const mockFetch = vi.hoisted(() => vi.fn());
@@ -230,6 +243,69 @@ describe("fetchFromSource", () => {
 
     expect(result).not.toBeNull();
     expect(result!.version).toBe("3.0.0");
+  });
+
+  // ---- private repositories -------------------------------------------
+
+  it("updates a skill from a private repo through the Contents API with the user's token", async () => {
+    vi.stubEnv("VSKILL_GITHUB_TOKEN", "ghp_team");
+    try {
+      mockFetch.mockImplementation(async (url: string) =>
+        url ===
+        "https://api.github.com/repos/acme/private-skills/contents/skills/onboarding/SKILL.md?ref=main"
+          ? mockFetchOk("---\nversion: 1.1.0\n---\n# onboarding")
+          : mockFetchNotFound(),
+      );
+      const parsed: ParsedSource = { type: "github", owner: "acme", repo: "private-skills" };
+
+      const result = await fetchFromSource(parsed, "onboarding", MOCK_LOCK_ENTRY);
+
+      expect(result?.version).toBe("1.1.0");
+      const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect((init.headers as Record<string, string>).Authorization).toBe("Bearer ghp_team");
+      expect(mockFetch.mock.calls.some(([u]) => String(u).includes("raw.githubusercontent.com"))).toBe(false);
+    } finally {
+      vi.stubEnv("VSKILL_GITHUB_TOKEN", "");
+      mockFetch.mockReset();
+    }
+  });
+
+  it("finds skills for a plugin whose marketplace source is the repo root (\"./\")", async () => {
+    const parsed: ParsedSource = {
+      type: "marketplace",
+      owner: "acme",
+      repo: "team-skills",
+      pluginName: "team-skills",
+    };
+    const marketplaceJson = JSON.stringify({
+      name: "team-skills",
+      owner: { name: "acme" },
+      plugins: [{ name: "team-skills", source: "./", version: "2.0.0" }],
+    });
+    mockFetch.mockResolvedValueOnce(mockFetchOk(marketplaceJson));
+    mockFetch.mockResolvedValueOnce(
+      mockFetchOk(
+        JSON.stringify({
+          tree: [
+            { path: "skills/onboarding/SKILL.md", type: "blob" },
+            { path: "skills/release/SKILL.md", type: "blob" },
+            { path: "plugins/other/skills/x/SKILL.md", type: "blob" },
+          ],
+        }),
+      ),
+    );
+    mockFetch.mockResolvedValueOnce(mockFetchOk("# onboarding"));
+    mockFetch.mockResolvedValueOnce(mockFetchOk("# release"));
+    mockGetPluginSource.mockReturnValue("./");
+    mockGetPluginVersion.mockReturnValue("2.0.0");
+
+    const result = await fetchFromSource(parsed, "team-skills", { ...MOCK_LOCK_ENTRY, pluginDir: true });
+
+    expect(result).not.toBeNull();
+    expect(Object.keys(result!.files!)).toEqual([
+      "skills/onboarding/SKILL.md",
+      "skills/release/SKILL.md",
+    ]);
   });
 
   // ---- local ----------------------------------------------------------

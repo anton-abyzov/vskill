@@ -406,8 +406,9 @@ program
 // 0826: vskill auth {login|status|logout} — GitHub Device Flow for private skills.
 program
   .command("auth [subcommand]")
-  .description("Sign in to GitHub for private skill access (login|status|logout)")
+  .description("Sign in to GitHub for private skill access (login [--repos]|status|logout)")
   .allowUnknownOption(true)
+  .allowExcessArguments(true)
   .action(async (subcommand?: string, _opts?: unknown, command?: { args?: string[] }) => {
     const { authCommand } = await import("./commands/auth.js");
     const argv = command?.args ?? (subcommand ? [subcommand] : []);

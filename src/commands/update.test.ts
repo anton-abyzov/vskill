@@ -252,6 +252,32 @@ describe("updateCommand", () => {
     expect(mockInstallSymlink).toHaveBeenCalled();
   });
 
+  it("never falls back to the registry for a skill from a private repo", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: ["claude-code"],
+      skills: {
+        onboarding: {
+          version: "1.0.0",
+          sha: "aaa111bbb222",
+          tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z",
+          source: "github:acme/private-skills",
+          sourcePrivate: true,
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockFetchFromSource.mockResolvedValue(null);
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("onboarding", { all: false });
+
+    expect(mockGetSkill).not.toHaveBeenCalled();
+    expect(mockInstallSymlink).not.toHaveBeenCalled();
+  });
+
   it("falls back to registry for local source when fetchFromSource returns null (no cache)", async () => {
     mockReadLockfile.mockReturnValue({
       version: 1,

@@ -12,11 +12,17 @@
 //   5. Surface 401 with an actionable message ("Run `vskill auth login`").
 //   6. Refuse `/search/code` URLs entirely — that endpoint has a 10/min cap
 //      and burns the whole installation budget if hit by accident.
+//   7. Private repos: raw.githubusercontent.com does not reliably honor a
+//      Bearer token for private content (it answers 404). When a token is
+//      available, raw URLs are served through the Contents API
+//      (`Accept: application/vnd.github.raw`), which does. The raw host is
+//      still the fallback, and anonymous public reads never touch the API.
 //
 // Designed for dependency injection (tokenProvider, fetchImpl, sleep) so tests
 // never touch the real network or the OS keychain.
 // ---------------------------------------------------------------------------
 
+import { execFileSync } from "node:child_process";
 import { getDefaultKeychain } from "./keychain.js";
 
 const ALLOWED_HOSTS = new Set([
@@ -69,8 +75,93 @@ export function resolveGitHubEnvToken(
   );
 }
 
-function resolveDefaultGitHubToken(): string | null {
-  return getDefaultKeychain().getGitHubToken() || resolveGitHubEnvToken();
+let _ghCliToken: string | null | undefined;
+
+/**
+ * Last-resort token source: the GitHub CLI's stored login (`gh auth token`).
+ * Lets a team member who already ran `gh auth login` install from a private
+ * skills repo without a separate `vskill auth login`. Resolved once per
+ * process; set VSKILL_NO_GH_CLI=1 to skip it.
+ */
+export function readGhCliToken(
+  env: NodeJS.ProcessEnv = process.env,
+  exec: typeof execFileSync = execFileSync,
+): string | null {
+  if (env.VSKILL_NO_GH_CLI === "1") return null;
+  if (_ghCliToken !== undefined) return _ghCliToken;
+  try {
+    const out = exec("gh", ["auth", "token"], {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const token = typeof out === "string" ? out.trim() : "";
+    _ghCliToken = token || null;
+  } catch {
+    _ghCliToken = null;
+  }
+  return _ghCliToken;
+}
+
+/**
+ * Token precedence: VSKILL_GITHUB_TOKEN (explicit, e.g. CI) > `vskill auth
+ * login` keychain token > GITHUB_TOKEN / GH_TOKEN > `gh auth token`.
+ */
+export function resolveDefaultGitHubToken(): string | null {
+  return (
+    process.env.VSKILL_GITHUB_TOKEN ||
+    getDefaultKeychain().getGitHubToken() ||
+    resolveGitHubEnvToken() ||
+    readGhCliToken()
+  );
+}
+
+/**
+ * Extra line for "not found" errors: GitHub answers 404 (not 401/403) for a
+ * private repository the caller cannot read, either because no token is
+ * configured or because the token lacks access (e.g. a `read:user`-only
+ * `vskill auth login` token).
+ */
+export function privateRepoHint(
+  tokenProvider: () => string | null = resolveDefaultGitHubToken,
+): string {
+  const fix =
+    "`vskill auth login --repos`, `gh auth login`, or set VSKILL_GITHUB_TOKEN " +
+    "to a token with read access to the repo.";
+  return tokenProvider()
+    ? `\nIf this is a private repository, your GitHub token cannot read it. Use ${fix}`
+    : `\nIf this is a private repository, sign in first: ${fix}`;
+}
+
+/**
+ * Map `https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}` to the
+ * equivalent Contents API URL. A signed `?token=` download URL (what the
+ * Contents API hands out for private files) maps too: the Bearer token covers
+ * the same read, and the signed URL stays the fallback. Returns null for
+ * anything else.
+ */
+export function rawToContentsApiUrl(url: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  if (u.hostname !== "raw.githubusercontent.com") return null;
+  if ([...u.searchParams.keys()].some((k) => k !== "token")) return null;
+  const segs = u.pathname.split("/").filter(Boolean);
+  if (segs.length < 4) return null;
+  const [owner, repo, ...rest] = segs;
+  let ref = rest.shift()!;
+  if (ref === "refs" && (rest[0] === "heads" || rest[0] === "tags") && rest.length >= 3) {
+    rest.shift();
+    ref = rest.shift()!;
+  }
+  if (rest.length === 0) return null;
+  return (
+    `https://api.github.com/repos/${owner}/${repo}/contents/${rest.join("/")}` +
+    `?ref=${encodeURIComponent(decodeURIComponent(ref))}`
+  );
 }
 
 function isAllowedHost(url: string, allowed: Set<string>): boolean {
@@ -145,10 +236,37 @@ export function createGitHubFetch(opts: GitHubFetchOptions = {}): GitHubFetch {
     if (token) baseHeaders.Authorization = `Bearer ${token}`;
     const headers = mergeHeaders(baseHeaders, init);
 
+    // Private-repo path: with a token, read raw files through the Contents
+    // API first. Anything but a 200 falls back to the raw host below, so
+    // public reads behave exactly as before.
+    const apiUrl = token ? rawToContentsApiUrl(url) : null;
+    if (apiUrl) {
+      const apiHeaders: Record<string, string> = { ...headers };
+      delete apiHeaders.accept;
+      apiHeaders.Accept = "application/vnd.github.raw";
+      try {
+        const res = await send(apiUrl, { ...init, headers: apiHeaders }, Boolean(token));
+        if (res.ok) return res;
+      } catch (err) {
+        if (!(err instanceof GitHubFetchError && err.status === 401)) throw err;
+        // Stale or revoked token: public content still reads anonymously.
+        const anonHeaders = { ...headers };
+        delete anonHeaders.Authorization;
+        delete anonHeaders.authorization;
+        const anon = await fetchImpl(url, { ...init, headers: anonHeaders });
+        if (anon.ok) return anon;
+        throw err;
+      }
+    }
+
+    return send(url, { ...init, headers }, Boolean(token));
+  };
+
+  async function send(url: string, req: RequestInit, hadToken: boolean): Promise<Response> {
     let attempt = 0;
     let lastResponse: Response | null = null;
     while (attempt <= MAX_RETRIES) {
-      const res = await fetchImpl(url, { ...init, headers });
+      const res = await fetchImpl(url, req);
       lastResponse = res;
 
       if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
@@ -167,7 +285,7 @@ export function createGitHubFetch(opts: GitHubFetchOptions = {}): GitHubFetch {
         throw new GitHubFetchError(
           401,
           body,
-          token
+          hadToken
             ? "GitHub returned 401: token expired or insufficient scope. Run `vskill auth login` to re-authenticate."
             : "GitHub returned 401: this resource requires authentication. Run `vskill auth login` to sign in.",
         );
@@ -177,7 +295,7 @@ export function createGitHubFetch(opts: GitHubFetchOptions = {}): GitHubFetch {
     }
     // Exhausted retries on 429/5xx — surface the last response.
     return lastResponse as Response;
-  };
+  }
 }
 
 function safeHost(url: string): string {
@@ -202,4 +320,5 @@ export function githubFetch(url: string, init?: RequestInit): Promise<Response> 
 /** Test-only reset hook. */
 export function _resetDefaultGitHubFetchForTests(): void {
   _defaultFetch = null;
+  _ghCliToken = undefined;
 }

@@ -13,6 +13,7 @@ import { findCoreSkillsDir, listCoreSkills } from "../core-skills/sync.js";
 import type { ParsedSource } from "../resolvers/source-resolver.js";
 import type { SkillLockEntry } from "../lockfile/types.js";
 import { extractFrontmatterVersion } from "../utils/version.js";
+import { githubFetch } from "../lib/github-fetch.js";
 
 export interface FetchResult {
   /** Skill content. For plugin-dir sources: combined content of all skills. */
@@ -30,15 +31,13 @@ export interface FetchResult {
   files?: Record<string, string>;
 }
 
-function buildAuthHeader(): Record<string, string> {
-  const token = process.env["GITHUB_TOKEN"];
-  if (token) return { Authorization: `token ${token}` };
-  return {};
-}
-
+// githubFetch carries the same token resolution as install (VSKILL_GITHUB_TOKEN,
+// `vskill auth login`, GITHUB_TOKEN/GH_TOKEN, `gh auth token`) and serves
+// private-repo files through the Contents API, so update works wherever
+// install did.
 async function fetchRaw(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url, { headers: buildAuthHeader() });
+    const res = await githubFetch(url);
     if (!res.ok) return null;
     return await res.text();
   } catch {
@@ -150,15 +149,17 @@ async function fetchPlugin(
   const version = getPluginVersion(pluginName, manifestContent) ?? entry.version;
   if (!pluginSourcePath) return null;
 
-  // Normalise: "./plugins/frontend" → "plugins/frontend"
-  const normalizedPath = pluginSourcePath.replace(/^\.\//, "");
+  // Normalise: "./plugins/frontend" → "plugins/frontend"; "./" → "" (repo root)
+  const normalizedPath = pluginSourcePath
+    .replace(/^\.\/?/, "")
+    .replace(/\/+$/, "");
 
   // 3. Discover all skills under the plugin via Trees API
   let tree: Array<{ path: string; type: string }> = [];
   try {
-    const treeRes = await fetch(
+    const treeRes = await githubFetch(
       `${apiBase}/git/trees/${branch}?recursive=1`,
-      { headers: { Accept: "application/vnd.github.v3+json", ...buildAuthHeader() } },
+      { headers: { Accept: "application/vnd.github.v3+json" } },
     );
     if (treeRes.ok) {
       const data = (await treeRes.json()) as { tree?: unknown };
@@ -171,7 +172,10 @@ async function fetchPlugin(
   }
 
   // 4. Collect paths matching plugins/{name}/skills/*/SKILL.md
-  const skillPattern = new RegExp(`^${normalizedPath}/skills/([^/]+)/SKILL\\.md$`);
+  const prefix = normalizedPath
+    ? `${normalizedPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/`
+    : "";
+  const skillPattern = new RegExp(`^${prefix}skills/([^/]+)/SKILL\\.md$`);
   const skillPaths = tree
     .filter((e) => e.type === "blob" && skillPattern.test(e.path))
     .map((e) => e.path);

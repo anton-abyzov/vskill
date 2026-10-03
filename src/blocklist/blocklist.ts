@@ -147,6 +147,20 @@ export async function checkBlocklist(
 }
 
 /**
+ * Install safety from the local blocklist cache only. The skill name never
+ * leaves the machine (a stale cache is refreshed with the anonymous full
+ * `GET /api/v1/blocklist`). Used for skills from private or unconfirmed
+ * sources.
+ */
+export async function checkLocalInstallSafety(
+  skillName: string,
+  contentHash?: string,
+): Promise<InstallSafetyResult> {
+  const entry = await checkBlocklist(skillName, contentHash);
+  return { blocked: !!entry, entry: entry ?? undefined, rejected: false };
+}
+
+/**
  * Check install safety via the platform API (blocklist + rejection status).
  *
  * Makes a single HTTP call to GET /api/v1/blocklist/check?name=X.
@@ -168,8 +182,7 @@ export async function checkInstallSafety(
   repoUrl?: string,
 ): Promise<InstallSafetyResult> {
   if (repoUrl && isKnownPrivateRepo(repoUrl)) {
-    const entry = await checkBlocklist(skillName, contentHash);
-    return { blocked: !!entry, entry: entry ?? undefined, rejected: false };
+    return checkLocalInstallSafety(skillName, contentHash);
   }
   try {
     let url = `${getApiBaseUrl()}/api/v1/blocklist/check?name=${encodeURIComponent(skillName)}`;

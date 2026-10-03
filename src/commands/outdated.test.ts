@@ -37,6 +37,20 @@ vi.mock("../resolvers/source-resolver.js", () => ({
 
 const mockWriteLockfile = vi.hoisted(() => vi.fn());
 
+// GET /repos/{owner}/{repo}: public unless listed in `githubVisibility`
+// (the real getDefaultBranch records what GitHub reports).
+const githubVisibility = vi.hoisted(() => new Map<string, "public" | "private" | "unreachable">());
+vi.mock("../discovery/github-tree.js", async () => {
+  const visibility = await import("../lib/repo-visibility.js");
+  return {
+    getDefaultBranch: async (owner: string, repo: string) => {
+      const v = githubVisibility.get(`${owner}/${repo}`) ?? "public";
+      if (v !== "unreachable") visibility.recordRepoVisibility(owner, repo, { visibility: v });
+      return "main";
+    },
+  };
+});
+
 vi.mock("../lockfile/lockfile.js", () => ({
   readLockfile: mockReadLockfile,
   writeLockfile: mockWriteLockfile,
@@ -75,6 +89,26 @@ describe("outdatedCommand", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("--json with only private-repo skills prints [] and asks the registry nothing", async () => {
+    githubVisibility.set("acme/secret-skills", "private");
+    githubVisibility.set("acme/hidden", "unreachable");
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {
+        "resume-tuner": { version: "1.0.0", sha: "a", source: "github:acme/secret-skills" },
+        "hidden-skill": { version: "1.0.0", sha: "b", source: "github:acme/hidden" },
+      },
+    });
+    mockCheckUpdates.mockClear();
+
+    await outdatedCommand({ json: true });
+
+    expect(mockCheckUpdates).not.toHaveBeenCalled();
+    expect(JSON.parse(logs.join("\n"))).toEqual([]);
+    expect(errors.join("\n")).toContain("2 skills from private");
   });
 
   // T-007: Empty/missing lockfile

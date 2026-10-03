@@ -14,7 +14,6 @@ import {
   rmSync,
 } from "node:fs";
 import { join, resolve, basename } from "node:path";
-import { execSync } from "node:child_process";
 import os from "node:os";
 import { resolveTilde } from "../utils/paths.js";
 import { reportInstall, reportInstallBatch, submitSkill } from "../api/client.js";
@@ -26,14 +25,14 @@ import { buildGitHubInstallLockEntry } from "./add-lockfile.js";
 import { runTier1Scan } from "../scanner/index.js";
 import { getAvailablePlugins, getPluginSource, getPluginVersion, hasPlugin, discoverUnregisteredPlugins } from "../marketplace/index.js";
 import type { UnregisteredPlugin } from "../marketplace/index.js";
-import { checkInstallSafety } from "../blocklist/blocklist.js";
+import { checkInstallSafety, checkLocalInstallSafety } from "../blocklist/blocklist.js";
 import type { BlocklistEntry, RejectionInfo } from "../blocklist/types.js";
 import { getSkill, searchSkills } from "../api/client.js";
 import type { SkillSearchResult } from "../api/client.js";
 import { checkPlatformSecurity } from "../security/index.js";
 import { discoverSkills, getDefaultBranch, getBranchHeadSha, checkRepoExists, warnRateLimitOnce } from "../discovery/github-tree.js";
 import { githubFetch, GitHubFetchError, privateRepoHint } from "../lib/github-fetch.js";
-import { isKnownPrivateRepo } from "../lib/repo-visibility.js";
+import { isPrivateOrUnknownRepo, localDirGitHubRepo, parseGitHubRepoRef } from "../lib/private-source.js";
 import { parseGitHubSource, classifyIdentifier } from "../utils/validation.js";
 import {
   parseSkillsShUrl,
@@ -463,10 +462,10 @@ async function installMarketplaceRepo(
     let verifiedCount = 0;
     let unverifiedCount = 0;
     let blockedCount = 0;
-    // A private repo is never sent to the public registry; its unregistered
-    // plugins go straight to the unverified-install confirmation below.
-    await getDefaultBranch(owner, repo); // records visibility (cached for the install below)
-    const repoIsPrivate = isKnownPrivateRepo(repoUrl);
+    // A private repo — or one GitHub does not confirm is public — is never
+    // sent to the public registry; its unregistered plugins go straight to
+    // the unverified-install confirmation below.
+    const repoIsPrivate = await isPrivateOrUnknownRepo(owner, repo);
     if (repoIsPrivate) {
       unverifiedCount = selectedUnregistered.length;
       console.log(dim("  Private repository: not submitted to verified-skill.com."));
@@ -768,12 +767,13 @@ async function installMarketplaceRepo(
     }
   }
 
-  // Telemetry — batch report for all installed plugins (awaited to prevent process exit race)
+  // Telemetry — batch report for all installed plugins (awaited to prevent
+  // process exit race). Only for repos GitHub confirmed are public.
   const repoUrl = `${owner}/${repo}`;
   const installedSkills = results
     .filter((r) => r.installed)
     .map((r) => ({ skillName: r.name, repoUrl }));
-  if (installedSkills.length > 0) {
+  if (installedSkills.length > 0 && !(await isPrivateOrUnknownRepo(owner, repo))) {
     await reportInstallBatch(installedSkills).catch(() => {});
   }
 
@@ -1359,8 +1359,15 @@ async function installPluginDir(
     process.exit(1);
   }
 
+  // The plugin dir's origin: a GitHub repo GitHub confirms is public, or
+  // nothing. A private, unconfirmed or non-GitHub remote (or no remote at
+  // all) is never mentioned to verified-skill.com.
+  const publicRemote = await resolvePublicGitHubRemote(basePath, repoUrl);
+
   // Blocklist + rejection check (before scanning)
-  const safety = await checkInstallSafety(pluginName, undefined, repoUrl);
+  const safety = publicRemote
+    ? await checkInstallSafety(pluginName, undefined, `https://github.com/${publicRemote}`)
+    : await checkLocalInstallSafety(pluginName);
   if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
     process.exit(1);
@@ -1462,13 +1469,6 @@ async function installPluginDir(
     ? getPluginVersion(pluginName, readFileSync(mktPath, "utf-8")) || "0.0.0"
     : "0.0.0";
 
-  // Extract git remote URL for install tracking
-  let gitUrl: string | undefined;
-  try {
-    gitUrl = execSync("git remote get-url origin", { cwd: resolve(basePath), stdio: ["pipe", "pipe", "ignore"], timeout: 5_000 })
-      .toString().trim() || undefined;
-  } catch { /* not a git repo or no remote — use local path */ }
-
   // Install: recursively copy plugin directory to each agent
   const sha = computeSha(content);
   const locations: string[] = [];
@@ -1524,20 +1524,31 @@ async function installPluginDir(
   }
   console.log(dim(`\nSHA: ${sha} | Version: ${version}`));
 
-  // Report skill installs in a single batch (fire-and-forget)
-  // Derive owner/repo from gitUrl (e.g. "https://github.com/org/repo.git" → "org/repo")
-  try {
-    const ownerRepo = gitUrl
-      ? gitUrl.replace(/\.git$/, "").replace(/.*github\.com[/:]/, "")
-      : undefined;
-    const skillDirs = readdirSync(pluginDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && existsSync(join(pluginDir, d.name, "SKILL.md")));
-    const batch = skillDirs.map((d) => ({
-      skillName: d.name,
-      ...(ownerRepo ? { repoUrl: ownerRepo } : {}),
-    }));
-    if (batch.length > 0) await reportInstallBatch(batch).catch(() => {});
-  } catch { /* best-effort */ }
+  // Report skill installs in a single batch — only for a plugin dir whose
+  // origin is a GitHub repo confirmed public (see resolvePublicGitHubRemote).
+  if (publicRemote) {
+    try {
+      const skillDirs = readdirSync(pluginDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && existsSync(join(pluginDir, d.name, "SKILL.md")));
+      const batch = skillDirs.map((d) => ({ skillName: d.name, repoUrl: publicRemote }));
+      if (batch.length > 0) await reportInstallBatch(batch).catch(() => {});
+    } catch { /* best-effort */ }
+  }
+}
+
+/**
+ * "owner/repo" of a local plugin dir's origin when it is a GitHub repo that
+ * GitHub confirms is public; null otherwise (private, visibility unknown,
+ * non-GitHub remote, no remote, not a git checkout).
+ */
+async function resolvePublicGitHubRemote(
+  basePath: string,
+  explicitRepoUrl?: string,
+): Promise<string | null> {
+  const gh = explicitRepoUrl ? parseGitHubRepoRef(explicitRepoUrl) : localDirGitHubRepo(basePath);
+  if (!gh) return null;
+  if (await isPrivateOrUnknownRepo(gh.owner, gh.repo)) return null;
+  return `${gh.owner}/${gh.repo}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1607,7 +1618,7 @@ async function installOneGitHubSkill(
   }
 
   // Platform security check (skipped for private repos, see installSingleSkillLegacy)
-  const privateRepo = isKnownPrivateRepo(`${owner}/${repo}`);
+  const privateRepo = await isPrivateOrUnknownRepo(owner, repo);
   const platformSecurity = privateRepo ? null : await checkPlatformSecurity(skillName);
   if (privateRepo) {
     console.log(dim("  Private repository: local security scan only."));
@@ -2082,9 +2093,12 @@ async function installRepoPlugin(
     console.log(dim(`Skills: ${skills.map((s) => `${pluginName}:${s.name}`).join(", ")}`));
   }
 
-  // Report skill installs in a single batch (awaited to prevent process exit race)
+  // Report skill installs in a single batch (awaited to prevent process exit
+  // race) — only for repos GitHub confirmed are public.
   const batch = skills.map((s) => ({ skillName: s.name, repoUrl: ownerRepo }));
-  if (batch.length > 0) await reportInstallBatch(batch).catch(() => {});
+  if (batch.length > 0 && !(await isPrivateOrUnknownRepo(owner, repo))) {
+    await reportInstallBatch(batch).catch(() => {});
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2436,7 +2450,9 @@ async function addCommandInner(
   const discoveredBatch = results
     .filter((r) => r.installed)
     .map((r) => ({ skillName: r.skillName, repoUrl: `${owner}/${repo}` }));
-  if (discoveredBatch.length > 0) await reportInstallBatch(discoveredBatch).catch(() => {});
+  if (discoveredBatch.length > 0 && !(await isPrivateOrUnknownRepo(owner, repo))) {
+    await reportInstallBatch(discoveredBatch).catch(() => {});
+  }
   const forceRecoverable = results.some(
     (r) => !r.installed && ["FAIL", "CONCERNS", "BLOCKED", "REJECTED", "SECURITY_FAIL"].includes(r.verdict),
   );
@@ -2898,7 +2914,9 @@ async function checkRepoInstallSafety(
   owner: string,
   repo: string,
 ): Promise<Awaited<ReturnType<typeof checkInstallSafety>>> {
-  await getDefaultBranch(owner, repo);
+  // Fail closed: a repo GitHub does not confirm is public gets the local
+  // blocklist only, so neither the skill name nor the repo leaves the machine.
+  if (await isPrivateOrUnknownRepo(owner, repo)) return checkLocalInstallSafety(skillName);
   return checkInstallSafety(skillName, undefined, `https://github.com/${owner}/${repo}`);
 }
 
@@ -3026,7 +3044,7 @@ async function installSingleSkillLegacy(
   // Platform security check (best-effort, non-blocking on network error).
   // Skipped for private repos: the registry looks skills up by name, so it
   // would leak the name and could match an unrelated public skill.
-  const privateRepo = isKnownPrivateRepo(`${owner}/${repo}`);
+  const privateRepo = await isPrivateOrUnknownRepo(owner, repo);
   const platformSecurity = privateRepo ? null : await checkPlatformSecurity(skillName);
   if (privateRepo) {
     console.log(dim("  Private repository: local security scan only."));
@@ -3177,8 +3195,10 @@ async function installSingleSkillLegacy(
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock, lockDir);
 
-  // Phone home (awaited to prevent process exit race)
-  await reportInstall(skillName, `${owner}/${repo}`).catch(() => {});
+  // Phone home (awaited to prevent process exit race) — public repos only.
+  if (!(await isPrivateOrUnknownRepo(owner, repo))) {
+    await reportInstall(skillName, `${owner}/${repo}`).catch(() => {});
+  }
 
   // Print summary
   const method = opts.copy ? "copied" : "symlinked";

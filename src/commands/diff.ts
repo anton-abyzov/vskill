@@ -18,6 +18,7 @@
 
 import { minimatch } from "minimatch";
 import { compareVersions, type CompareFile, type CompareVersionsResult } from "../api/client.js";
+import { findInstalledLockEntry, isPrivateSource } from "../lib/private-source.js";
 
 export interface DiffOpts {
   stat?: boolean;
@@ -52,6 +53,15 @@ export async function diffCommand(
   to: string,
   opts: DiffOpts = {},
 ): Promise<void> {
+  // The compare data lives on verified-skill.com, which never hears about a
+  // skill from a private (or unconfirmed) repo.
+  if (await isPrivateSource(findInstalledLockEntry(skill))) {
+    process.stderr.write(
+      `vskill diff: ${skill} comes from a private repository; version diffs are not available from verified-skill.com.\n`,
+    );
+    process.exit(1);
+    return;
+  }
   let data: CompareVersionsResult;
   try {
     data = await compareVersions(skill, from, to);

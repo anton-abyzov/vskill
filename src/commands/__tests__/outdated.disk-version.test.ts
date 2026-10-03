@@ -20,6 +20,18 @@ const checkUpdatesMock = vi.hoisted(() => vi.fn());
 const readLockfileMock = vi.hoisted(() => vi.fn());
 const getProjectRootMock = vi.hoisted(() => vi.fn());
 
+// GitHub reports every repo as public (the real getDefaultBranch records the
+// visibility from GET /repos/{owner}/{repo}); keeps the suite off the network.
+vi.mock("../../discovery/github-tree.js", async () => {
+  const visibility = await import("../../lib/repo-visibility.js");
+  return {
+    getDefaultBranch: async (owner: string, repo: string) => {
+      visibility.recordRepoVisibility(owner, repo, { visibility: "public" });
+      return "main";
+    },
+  };
+});
+
 vi.mock("../../api/client.js", () => ({
   checkUpdates: checkUpdatesMock,
 }));

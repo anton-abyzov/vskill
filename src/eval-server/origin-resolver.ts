@@ -19,6 +19,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readLockfile } from "../lockfile/lockfile.js";
 import { parseSource } from "../resolvers/source-resolver.js";
+import { isPrivateSource } from "../lib/private-source.js";
+import type { SkillLockEntry } from "../lockfile/types.js";
 
 export type OriginSource = "platform" | "anthropic-registry" | "local";
 export type OriginProvider = "vskill" | "anthropic" | "local";
@@ -35,6 +37,12 @@ export interface OriginEnvelope {
   frontmatterSource?: string;
   /** Registry key when Tier 4 hits (debug). */
   registryMatch?: string;
+  /**
+   * The lockfile entry comes from a private repo (or a GitHub repo not
+   * confirmed public). Nothing about it — owner, repo, skill name — may be
+   * sent to verified-skill.com; callers skip every platform request.
+   */
+  private?: boolean;
 }
 
 /**
@@ -93,17 +101,31 @@ export function resetOriginResolverCache(): void {
   cache.clear();
 }
 
+function readLockEntry(skill: string, dir: string): SkillLockEntry | null {
+  try {
+    return readLockfile(dir)?.skills?.[skill] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function privateEnvelope(owner: string | null, repo: string | null, lockfilePath: string): OriginEnvelope {
+  return {
+    source: "local",
+    owner,
+    repo,
+    provider: "local",
+    trackedForUpdates: false,
+    lockfilePath,
+    private: true,
+  };
+}
+
 function tryLockfileTier(
   skill: string,
   dir: string,
 ): { owner: string; repo: string } | null {
-  let lock;
-  try {
-    lock = readLockfile(dir);
-  } catch {
-    return null;
-  }
-  const entry = lock?.skills?.[skill];
+  const entry = readLockEntry(skill, dir);
   if (!entry?.source) return null;
   let parsed;
   try {
@@ -139,7 +161,21 @@ export async function resolveSkillOrigin(
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
+  // A lockfile entry from a private (or unconfirmed) repo stops the walk: it
+  // must not reach the platform, nor be matched by name to a public skill.
+  const privateHit = async (dir: string): Promise<OriginEnvelope | null> => {
+    const entry = readLockEntry(skill, dir);
+    if (!entry || !(await isPrivateSource(entry))) return null;
+    const hit = tryLockfileTier(skill, dir);
+    const env = privateEnvelope(hit?.owner ?? null, hit?.repo ?? null, dir);
+    setCacheEntry(cacheKey, env);
+    return env;
+  };
+  const globalDir = join(homedir(), ".agents");
+
   // Tier 1 — project lockfile
+  const projectPrivate = await privateHit(root);
+  if (projectPrivate) return projectPrivate;
   const projectHit = tryLockfileTier(skill, root);
   if (projectHit) {
     const env: OriginEnvelope = {
@@ -155,7 +191,8 @@ export async function resolveSkillOrigin(
   }
 
   // Tier 2 — user-global lockfile (~/.agents/vskill.lock)
-  const globalDir = join(homedir(), ".agents");
+  const globalPrivate = await privateHit(globalDir);
+  if (globalPrivate) return globalPrivate;
   const globalHit = tryLockfileTier(skill, globalDir);
   if (globalHit) {
     const env: OriginEnvelope = {

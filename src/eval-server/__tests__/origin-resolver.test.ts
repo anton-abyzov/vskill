@@ -26,6 +26,20 @@ vi.mock("../../resolvers/source-resolver.js", () => ({
   parseSource: mocks.parseSource,
 }));
 
+// GET /repos/{owner}/{repo}: public unless listed in `githubVisibility` (the
+// real getDefaultBranch records what GitHub reports).
+const githubVisibility = vi.hoisted(() => new Map<string, "public" | "private" | "unreachable">());
+vi.mock("../../discovery/github-tree.js", async () => {
+  const visibility = await import("../../lib/repo-visibility.js");
+  return {
+    getDefaultBranch: async (owner: string, repo: string) => {
+      const v = githubVisibility.get(`${owner}/${repo}`) ?? "public";
+      if (v !== "unreachable") visibility.recordRepoVisibility(owner, repo, { visibility: v });
+      return "main";
+    },
+  };
+});
+
 vi.mock("node:os", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return { ...actual, homedir: mocks.homedir };
@@ -194,5 +208,60 @@ describe("origin-resolver — Cache", () => {
     const b = await resolveSkillOrigin("future-skill", ".claude", "/proj");
     expect(b.source).toBe("platform");
     expect(b.owner).toBe("owner");
+  });
+});
+
+describe("origin-resolver — private sources", () => {
+  beforeEach(async () => {
+    githubVisibility.clear();
+    (await import("../../lib/repo-visibility.js"))._resetRepoVisibilityForTests();
+  });
+
+  function lockAt(dir: string, entry: Record<string, unknown>) {
+    mocks.readLockfile.mockImplementation((d?: string) =>
+      d === dir ? { skills: { "resume-tuner": entry } } : null,
+    );
+    mocks.parseSource.mockImplementation((source: string) => {
+      const m = /^github:([^/]+)\/(.+)$/.exec(source);
+      return m ? { type: "github", owner: m[1], repo: m[2] } : { type: "unknown", raw: source };
+    });
+  }
+
+  it("marks a project-lockfile entry GitHub reports as private", async () => {
+    githubVisibility.set("acme/secret-skills", "private");
+    lockAt("/proj", { source: "github:acme/secret-skills", version: "1.0.0" });
+
+    const env = await resolveSkillOrigin("resume-tuner", ".claude", "/proj");
+    expect(env.private).toBe(true);
+    expect(env.trackedForUpdates).toBe(false);
+    expect(env.source).not.toBe("platform");
+  });
+
+  it("marks a global-lockfile entry whose visibility cannot be confirmed", async () => {
+    githubVisibility.set("acme/secret-skills", "unreachable");
+    lockAt("/Users/test/.agents", { source: "github:acme/secret-skills", version: "1.0.0" });
+
+    const env = await resolveSkillOrigin("resume-tuner", ".claude", "/proj");
+    expect(env.private).toBe(true);
+    expect(env.trackedForUpdates).toBe(false);
+  });
+
+  it("honours sourcePrivate without asking GitHub, and never falls through to the name registry", async () => {
+    lockAt("/proj", { source: "github:acme/secret-skills", version: "1.0.0", sourcePrivate: true });
+    mocks.readLockfile.mockImplementation((d?: string) =>
+      d === "/proj" ? { skills: { pdf: { source: "github:acme/secret-skills", sourcePrivate: true } } } : null,
+    );
+
+    const env = await resolveSkillOrigin("pdf", ".claude", "/proj");
+    expect(env.private).toBe(true);
+    expect(env.source).not.toBe("anthropic-registry");
+  });
+
+  it("leaves a public GitHub entry tracked on the platform", async () => {
+    lockAt("/proj", { source: "github:acme/open-skills", version: "1.0.0" });
+
+    const env = await resolveSkillOrigin("resume-tuner", ".claude", "/proj");
+    expect(env.private).toBeUndefined();
+    expect(env.source).toBe("platform");
   });
 });

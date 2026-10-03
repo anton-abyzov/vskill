@@ -427,8 +427,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   // enrichment resolves, skillIds is empty and polling covers updates.
   // 0708 wrap-up: the not-tracked dot (AC-US5-09) needs tracking state for ALL
   // visible skills — pass the wider list separately for reconciliation.
+  // Skills from private repos never reach the platform's check-updates.
   const allSkillIds = useMemo(() => {
-    return state.skills.map((s) => `${s.plugin}/${s.skill}`);
+    return state.skills.filter((s) => !s.sourcePrivate).map((s) => `${s.plugin}/${s.skill}`);
   }, [state.skills]);
 
   const resolvedSseIds = useMemo(() => {
@@ -480,7 +481,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   // effect, doubling the request load (see code-review-report F-001).
   const lastResolveSigRef = useRef<string>("");
   useEffect(() => {
-    const installed = state.skills.filter((s) => s.origin === "installed");
+    // Private-repo skills are never sent to the platform for ID resolution.
+    const installed = state.skills.filter((s) => s.origin === "installed" && !s.sourcePrivate);
     if (installed.length === 0) {
       setResolvedIdsCsv("");
       lastResolveSigRef.current = "";

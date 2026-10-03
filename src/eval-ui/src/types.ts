@@ -153,6 +153,12 @@ export interface SkillInfo {
    * Drives the sidebar OWN/INSTALLED split.
    */
   origin: "source" | "installed";
+  /**
+   * Installed from a private repo (or a GitHub repo not confirmed public).
+   * The Studio never sends such a skill to verified-skill.com: no update
+   * checks, no version lookups.
+   */
+  sourcePrivate?: boolean;
   // -------------------------------------------------------------------------
   // T-025: Frontmatter + filesystem fields — backward-compatible extension.
   //

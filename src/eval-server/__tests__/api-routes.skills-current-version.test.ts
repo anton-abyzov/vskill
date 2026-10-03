@@ -10,11 +10,23 @@
 // SKILL.md files. No HTTP server.
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { registerRoutes } from "../api-routes.js";
+// GitHub reports every repo as public (the real getDefaultBranch records the
+// visibility from GET /repos/{owner}/{repo}); keeps the suite off the network.
+vi.mock("../../discovery/github-tree.js", async () => {
+  const visibility = await import("../../lib/repo-visibility.js");
+  return {
+    getDefaultBranch: async (owner: string, repo: string) => {
+      visibility.recordRepoVisibility(owner, repo, { visibility: "public" });
+      return "main";
+    },
+  };
+});
+
+const { registerRoutes } = await import("../api-routes.js");
 
 type Handler = (
   req: unknown,

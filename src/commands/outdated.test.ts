@@ -276,7 +276,9 @@ describe("outdatedCommand", () => {
   it("keeps short name for skills with unknown source type", async () => {
     mockReadLockfile.mockReturnValue({
       version: 1, agents: [],
-      skills: { "local-skill": { version: "0.1.0", sha: "xyz", tier: "VERIFIED", installedAt: "", source: "local:my-dir" } },
+      // A legacy entry with no source at all (a local plugin dir without a
+      // confirmed-public GitHub origin is never sent; see private-source).
+      skills: { "local-skill": { version: "0.1.0", sha: "xyz", tier: "VERIFIED", installedAt: "", source: "" } },
     });
     mockCheckUpdates.mockResolvedValue([
       { name: "local-skill", installed: "0.1.0", latest: "0.1.0", updateAvailable: false },

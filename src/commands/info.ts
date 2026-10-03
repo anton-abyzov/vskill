@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { getSkill } from "../api/client.js";
+import { isPrivateSkillName } from "../lib/private-source.js";
 import { bold, green, red, yellow, dim, cyan, spinner } from "../utils/output.js";
 
 function getTrustLabel(tier: string): string {
@@ -28,6 +29,14 @@ function getTrustColor(tier: string): (s: string) => string {
 }
 
 export async function infoCommand(skillName: string): Promise<void> {
+  // Registry details live on verified-skill.com, which never hears about a
+  // skill from a private (or unconfirmed) repo.
+  if (await isPrivateSkillName(skillName)) {
+    console.log(
+      dim(`${skillName} comes from a private repository; it has no verified-skill.com listing.`),
+    );
+    return;
+  }
   const spin = spinner("Looking up skill");
 
   try {

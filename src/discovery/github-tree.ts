@@ -4,7 +4,7 @@
 
 import { yellow } from "../utils/output.js";
 import { createGitHubFetch, githubFetch } from "../lib/github-fetch.js";
-import { recordRepoVisibility } from "../lib/repo-visibility.js";
+import { recordRepoVisibility, recordRepoVisibilityFailure } from "../lib/repo-visibility.js";
 
 // ---- Rate-limit warning (deduplicated per CLI invocation) -----------------
 
@@ -172,9 +172,19 @@ export async function getDefaultBranch(
       const data = (await res.json()) as { default_branch?: string; private?: boolean; visibility?: string };
       branch = data.default_branch || "main";
       recordRepoVisibility(owner, repo, data);
+    } else {
+      // 404 means private (or gone) and stays unknown. A rate limit or an
+      // outage is remembered so callers can say why a repo is unconfirmed.
+      const failure = classifyGitHubFailure(res);
+      if (failure.code === "rate_limited" || res.status === 429) {
+        recordRepoVisibilityFailure(owner, repo, "rate_limited");
+      } else if (failure.code === "transient") {
+        recordRepoVisibilityFailure(owner, repo, "unavailable");
+      }
     }
   } catch {
-    // fall through with "main"
+    // Network error: fall through with "main".
+    recordRepoVisibilityFailure(owner, repo, "unavailable");
   }
   branchCache.set(key, branch);
   return branch;

@@ -26,7 +26,7 @@ import {
   readDiskVersion,
 } from "../eval/disk-version.js";
 import { readAuthored, removeAuthoredSkill } from "../lockfile/authored.js";
-import { filterPublicEntries } from "../lib/private-source.js";
+import { filterPublicEntries, unconfirmedSkipNote } from "../lib/private-source.js";
 import { bold, dim, green, red, yellow, cyan, table } from "../utils/output.js";
 
 const TWENTY_FOUR_HOURS = 86_400_000;
@@ -174,6 +174,10 @@ export async function outdatedCommand(opts: { json?: boolean }): Promise<void> {
             "not checked against the registry; `vskill update` pulls them from their repos.",
         )
       : null;
+  // Public skills GitHub could not confirm (rate limit, outage) are skipped,
+  // never silently: say which and how to fix it. stderr keeps --json clean.
+  const skipNote = unconfirmedSkipNote();
+  if (skipNote) console.error(yellow(skipNote));
 
   if (programmatic === null) {
     if (opts.json) {

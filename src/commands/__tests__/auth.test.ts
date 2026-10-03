@@ -713,3 +713,71 @@ describe("auth login --repos keeps the repo-scoped token away from verified-skil
     expect(f.stdoutBuf).toMatch(/never sent to verified-skill\.com/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// GitHub keeps scopes granted earlier to the same OAuth app, so a plain
+// `vskill auth login` after `--repos` can return a token that still reads
+// private repos. The exchange is skipped based on what GitHub granted.
+// ---------------------------------------------------------------------------
+
+describe("auth login checks the granted scope before minting a vsk_ token", () => {
+  function deviceFlowFetch(tokenBody: Record<string, unknown>, userHeaders: Record<string, string> = {}) {
+    return vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          device_code: "dc",
+          user_code: "ABCD1234",
+          verification_uri: "https://github.com/login/device",
+          interval: 1,
+          expires_in: 60,
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, tokenBody))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ login: "octocat", id: 1 }), {
+          status: 200,
+          headers: { "content-type": "application/json", ...userHeaders },
+        }),
+      );
+  }
+
+  async function plainLogin(fetchImpl: ReturnType<typeof vi.fn>) {
+    const ks: FakeKeychainState = { token: null, vskToken: null };
+    const exchange = vi.fn(async () => ({ token: "vsk_new" }));
+    const exit = await authCommand(["login"], {
+      io: fakeIO().io,
+      keychain: fakeKeychain(ks),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      clientId: "Iv1.test",
+      version: "test",
+      exchangeForVskToken: exchange,
+    });
+    return { exit, exchange, ks };
+  }
+
+  it("skips the exchange when the token response grants repo", async () => {
+    const { exit, exchange, ks } = await plainLogin(
+      deviceFlowFetch({ access_token: "gho_still_repo", scope: "read:user,repo" }),
+    );
+    expect(exit).toBe(0);
+    expect(exchange).not.toHaveBeenCalled();
+    expect(ks.vskToken).toBeNull();
+  });
+
+  it("skips the exchange when /user reports repo in X-OAuth-Scopes", async () => {
+    const { exchange } = await plainLogin(
+      deviceFlowFetch({ access_token: "gho_still_repo" }, { "x-oauth-scopes": "repo, read:user" }),
+    );
+    expect(exchange).not.toHaveBeenCalled();
+  });
+
+  it("still mints a vsk_ token for a read:user-only grant", async () => {
+    const { exchange, ks } = await plainLogin(
+      deviceFlowFetch({ access_token: "gho_read_user", scope: "read:user" }, { "x-oauth-scopes": "read:user" }),
+    );
+    expect(exchange).toHaveBeenCalledWith("gho_read_user");
+    expect(ks.vskToken).toBe("vsk_new");
+  });
+});

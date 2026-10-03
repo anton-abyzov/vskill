@@ -3928,8 +3928,10 @@ describe("private repos never reach verified-skill.com", () => {
   });
 
   describe("--plugin-dir install telemetry", () => {
-    function setupPluginDir(remote: string | null): void {
-      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+    function setupPluginDir(remote: string | null, toplevel?: string): void {
+      mockExecFileSync.mockImplementation((cmd: string, args: string[], o?: { cwd?: string }) => {
+        // The plugin dir is its own checkout unless a parent toplevel is given.
+        if (cmd === "git" && args[0] === "rev-parse") return Buffer.from(`${toplevel ?? o?.cwd ?? ""}\n`);
         if (cmd === "git" && args[0] === "remote") {
           if (!remote) throw new Error("fatal: No such remote 'origin'");
           return Buffer.from(`${remote}\n`);
@@ -3993,6 +3995,18 @@ describe("private repos never reach verified-skill.com", () => {
 
       expect(client.reportInstallBatch).not.toHaveBeenCalled();
       expect(platformArgs()).not.toMatch(/secret-skills|resume-tuner|career/);
+    });
+
+    it("does not report a private plugin dir that sits inside a public checkout", async () => {
+      // git finds the parent repo's origin; only the dir's own checkout counts.
+      githubVisibility({ "acme/open-skills": "public" });
+      setupPluginDir("https://github.com/acme/open-skills.git", "/tmp/open-skills");
+
+      await addCommand("source", { plugin: "career", pluginDir: "/tmp/open-skills/vendor/secret-plugins" });
+
+      expect(client.reportInstallBatch).not.toHaveBeenCalled();
+      expect(mockCheckInstallSafety).not.toHaveBeenCalled();
+      expect(platformArgs()).not.toMatch(/resume-tuner|career/);
     });
 
     it("reports a checkout of a public GitHub repo", async () => {

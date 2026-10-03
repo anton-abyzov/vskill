@@ -7,6 +7,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { diffCommand } from "./diff.js";
 
+// These cases name public skills; visibility is covered in
+// lib/__tests__/private-source-egress-1.2.1.test.ts.
+vi.mock("../lib/private-source.js", () => ({
+  isPrivateSkillName: vi.fn(async () => false),
+}));
+
 // Mock global fetch — diffCommand calls compareVersions() which uses fetch.
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);

@@ -55,9 +55,11 @@ vi.mock("../discovery/github-tree.js", async () => {
   };
 });
 vi.mock("node:child_process", () => ({
-  execFileSync: (_cmd: string, _args: string[], opts: { cwd: string }) => {
+  execFileSync: (_cmd: string, args: string[], opts: { cwd: string }) => {
     const origin = [...gitOrigins.entries()].find(([dir]) => opts.cwd.endsWith(dir))?.[1];
     if (!origin) throw new Error("fatal: not a git repository");
+    // Each mapped dir is the root of its own checkout.
+    if (args[0] === "rev-parse") return Buffer.from(`${opts.cwd}\n`);
     return Buffer.from(`${origin}\n`);
   },
 }));

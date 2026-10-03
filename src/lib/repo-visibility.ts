@@ -8,8 +8,16 @@
 
 const privateRepos = new Set<string>();
 const publicRepos = new Set<string>();
+const failures = new Map<string, VisibilityFailure>();
 
 export type RepoVisibility = "public" | "private" | "unknown";
+
+/**
+ * Why GitHub gave no visibility answer for a repo: it is rate-limiting us, or
+ * it (or the network) is unavailable. A plain 404 is not a failure: the repo
+ * is private (or gone), and stays "unknown".
+ */
+export type VisibilityFailure = "rate_limited" | "unavailable";
 
 function keyOf(ref: string): string | null {
   const m = ref
@@ -28,6 +36,7 @@ export function recordRepoVisibility(
 ): void {
   const key = keyOf(`${owner}/${repo}`);
   if (!key) return;
+  failures.delete(key);
   const isPrivate =
     data.private === true || data.visibility === "private" || data.visibility === "internal";
   if (isPrivate) {
@@ -54,6 +63,24 @@ export function getRepoVisibility(ref: string | undefined | null): RepoVisibilit
   return "unknown";
 }
 
+/** Record that GitHub could not answer the visibility lookup for a repo. */
+export function recordRepoVisibilityFailure(
+  owner: string,
+  repo: string,
+  reason: VisibilityFailure,
+): void {
+  const key = keyOf(`${owner}/${repo}`);
+  if (key) failures.set(key, reason);
+}
+
+/** Why the last visibility lookup for `ref` failed, if it did. */
+export function getRepoVisibilityFailure(
+  ref: string | undefined | null,
+): VisibilityFailure | undefined {
+  if (!ref) return undefined;
+  const key = keyOf(ref);
+  return key ? failures.get(key) : undefined;
+}
 
 /** True when `ref` ("owner/repo" or a github.com URL) was seen as private. */
 export function isKnownPrivateRepo(ref: string | undefined | null): boolean {
@@ -66,4 +93,5 @@ export function isKnownPrivateRepo(ref: string | undefined | null): boolean {
 export function _resetRepoVisibilityForTests(): void {
   privateRepos.clear();
   publicRepos.clear();
+  failures.clear();
 }

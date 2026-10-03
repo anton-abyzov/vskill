@@ -13,7 +13,7 @@ import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { filterAgents } from "../utils/agent-filter.js";
 import { runTier1Scan } from "../scanner/index.js";
 import { parseSource } from "../resolvers/source-resolver.js";
-import { isPrivateSource } from "../lib/private-source.js";
+import { isPrivateSource, unconfirmedSkipNote } from "../lib/private-source.js";
 import { fetchFromSource, computeSha } from "../updater/source-fetcher.js";
 import {
   resolveVersion,
@@ -447,4 +447,8 @@ export async function updateCommand(
   console.log(
     `\n${updated > 0 ? green(`${updated} skill${updated === 1 ? "" : "s"} updated`) : dim("No updates available")}`
   );
+  // Skills GitHub could not confirm public (rate limit, outage) missed the
+  // registry fallback this run; never let that pass silently.
+  const skipNote = unconfirmedSkipNote();
+  if (skipNote) console.error(yellow(skipNote));
 }

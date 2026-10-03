@@ -1506,7 +1506,8 @@ async function installPluginDir(
     sha,
     tier: "VERIFIED",
     installedAt: new Date().toISOString(),
-    source: `local:${basePath}`,
+    // Absolute, so later commands resolve the same checkout from any folder.
+    source: `local:${resolve(basePath)}`,
     scope: opts.global ? "user" : "project",
     files: ["SKILL.md"],
   };

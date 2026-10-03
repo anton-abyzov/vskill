@@ -89,6 +89,8 @@ interface DeviceCodeResp {
 
 interface PollSuccess {
   access_token: string;
+  /** Scopes GitHub granted, comma-separated (e.g. "repo,read:user"). */
+  scope?: string;
 }
 interface PollError {
   error: string;
@@ -133,7 +135,7 @@ async function getJson(
   url: string,
   token: string,
   version: string,
-): Promise<{ status: number; body: unknown }> {
+): Promise<{ status: number; body: unknown; scopes: string | null }> {
   const res = await fetchImpl(url, {
     method: "GET",
     headers: {
@@ -148,7 +150,12 @@ async function getJson(
   } catch {
     body = null;
   }
-  return { status: res.status, body };
+  return { status: res.status, body, scopes: res.headers?.get?.("x-oauth-scopes") ?? null };
+}
+
+/** True when a GitHub scope list ("repo, read:user" or "repo read:user") includes `repo`. */
+function scopeListHasRepo(scopes: string | null | undefined): boolean {
+  return !!scopes && scopes.split(/[\s,]+/).includes("repo");
 }
 
 async function loginCmd(deps: Required<Pick<AuthCommandDeps, "fetchImpl" | "sleep" | "version">> & AuthCommandDeps): Promise<number> {
@@ -189,6 +196,7 @@ async function loginCmd(deps: Required<Pick<AuthCommandDeps, "fetchImpl" | "slee
   let interval = Math.max(1, dc.interval);
   const deadline = Date.now() + (dc.expires_in * 1000);
   let accessToken: string | null = null;
+  let grantedScope: string | null = null;
 
   while (Date.now() < deadline) {
     await sleep(interval * 1000);
@@ -212,6 +220,7 @@ async function loginCmd(deps: Required<Pick<AuthCommandDeps, "fetchImpl" | "slee
     }
     if (!isPollError(body) && body.access_token) {
       accessToken = body.access_token;
+      grantedScope = typeof body.scope === "string" ? body.scope : null;
       break;
     }
     if (isPollError(body)) {
@@ -263,7 +272,13 @@ async function loginCmd(deps: Required<Pick<AuthCommandDeps, "fetchImpl" | "slee
   // A token that can read private repositories (`--repos`) is never sent to
   // verified-skill.com, not even to mint a vsk_* token. An existing vsk_*
   // from an earlier plain `vskill auth login` keeps working.
-  const grantsRepoAccess = (deps.scope ?? DEFAULT_SCOPE).split(/\s+/).includes("repo");
+  // GitHub keeps scopes granted earlier to the same OAuth app, so a plain
+  // login after `--repos` can still return a `repo` token: check what was
+  // granted (token response, X-OAuth-Scopes), not only what was asked for.
+  const grantsRepoAccess =
+    scopeListHasRepo(deps.scope ?? DEFAULT_SCOPE) ||
+    scopeListHasRepo(grantedScope) ||
+    scopeListHasRepo(user.scopes);
   if (grantsRepoAccess) {
     const hasVsk = (() => {
       try {

@@ -255,6 +255,16 @@ describe("public skills when GitHub cannot confirm visibility", () => {
     expectNoPrivateDataSent();
   });
 
+  it("a rate limit does not block a typed owner/repo/skill that is not installed", async () => {
+    openRepoMode = "rate_limited";
+    await versionsCommand("acme/open-skills/other-skill", { json: true });
+
+    expect(platformCalls().map((c) => c.url)).toEqual([
+      `${PLATFORM}/api/v1/skills/acme/open-skills/other-skill/versions`,
+    ]);
+    expectNoPrivateDataSent();
+  });
+
   it("a remembered entry older than 30 days is not used", async () => {
     const cacheFile = join(projectDir.path, "repo-visibility.json");
     process.env.VSKILL_VISIBILITY_CACHE = cacheFile;

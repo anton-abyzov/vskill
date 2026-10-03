@@ -220,6 +220,31 @@ async function lookUpVisibility(owner: string, repo: string): Promise<RepoVisibi
 }
 
 /**
+ * Visibility check for a repo the user named themselves (`vskill diff
+ * owner/repo/skill`, `vskill submit owner/repo`, a Studio install
+ * identifier) that is not installed. Private when GitHub says private or
+ * hides it (404). When GitHub does not answer (rate limit, outage), the
+ * user's own request goes ahead: the name came from them, and blocking it
+ * would break public lookups on shared CI runners. Installed skills never
+ * use this; they fail closed (isPrivateSource).
+ */
+export async function isTypedRepoPrivate(owner: string, repo: string): Promise<boolean> {
+  const ref = `${owner}/${repo}`;
+  if (getRepoVisibility(ref) === "unknown") {
+    try {
+      githubTree ??= import("../discovery/github-tree.js");
+      const { getDefaultBranch } = await githubTree;
+      await getDefaultBranch(owner, repo);
+    } catch {
+      // getDefaultBranch never throws today.
+    }
+  }
+  const visibility = getRepoVisibility(ref);
+  if (visibility !== "unknown") return visibility === "private";
+  return !getRepoVisibilityFailure(ref);
+}
+
+/**
  * Resolve a GitHub repo's visibility, reusing the process-wide cached
  * `GET /repos/{owner}/{repo}` call. When GitHub rate-limits or is
  * unreachable, a repo confirmed public in the last 30 days still counts as
@@ -356,16 +381,17 @@ export function findLockEntry(
 /**
  * True when a skill name the user typed must not be sent to the platform:
  * an installed skill from a private (or unconfirmed) source, or an
- * "owner/repo/skill" name whose repo GitHub does not confirm is public (that
- * covers skills inside private plugins, whose lock entries are keyed by the
- * plugin). A bare name that is not installed is a registry lookup.
+ * "owner/repo/skill" name whose repo GitHub reports as private or hides
+ * (that covers skills inside private plugins, whose lock entries are keyed
+ * by the plugin). A bare name that is not installed is a registry lookup.
  */
 export async function isPrivateSkillName(name: string): Promise<boolean> {
   const entry = findInstalledLockEntry(name);
   if (entry) return isPrivateSource(entry);
   const parts = name.split("/");
   if (parts.length === 3 && parts.every(Boolean)) {
-    return isPrivateOrUnknownRepo(parts[0], parts[1]);
+    // Not installed: the user typed this name (see isTypedRepoPrivate).
+    return isTypedRepoPrivate(parts[0], parts[1]);
   }
   return false;
 }

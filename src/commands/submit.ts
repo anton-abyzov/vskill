@@ -12,7 +12,7 @@ import { parseGitHubSource, validateSkillName } from "../utils/validation.js";
 import { upsertFrontmatterVersion, validatesAsYamlFrontmatter } from "../lib/frontmatter.js";
 import { addAuthoredSkill } from "../lockfile/authored.js";
 import { getProjectRoot } from "../lockfile/project-root.js";
-import { isPrivateOrUnknownRepo } from "../lib/private-source.js";
+import { isTypedRepoPrivate } from "../lib/private-source.js";
 
 interface SubmitOptions {
   skill?: string;
@@ -47,11 +47,11 @@ export async function submitCommand(
   const { owner, repo } = parsed;
   const repoUrl = `https://github.com/${owner}/${repo}`;
 
-  // verified-skill.com scans public repos only. A private repo (or one
-  // GitHub does not confirm is public) is never sent there, not even by name.
-  if (await isPrivateOrUnknownRepo(owner, repo)) {
+  // verified-skill.com scans public repos only. A repo GitHub reports as
+  // private (or hides) is never sent there, not even by name.
+  if (await isTypedRepoPrivate(owner, repo)) {
     console.error(
-      red(`${owner}/${repo} is private or its visibility could not be confirmed. `) +
+      red(`${owner}/${repo} is a private repository. `) +
         dim("verified-skill.com only verifies public repos, so nothing was submitted."),
     );
     process.exit(1);

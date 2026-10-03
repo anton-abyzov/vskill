@@ -643,3 +643,73 @@ describe("0839 T-007 — auth logout revokes + clears both slots", () => {
     expect(f.stdoutBuf).toMatch(/Logged out/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// `vskill auth login --repos`: the repo-scoped token never goes to the
+// platform, not even to mint a vsk_* token.
+// ---------------------------------------------------------------------------
+
+describe("auth login --repos keeps the repo-scoped token away from verified-skill.com", () => {
+  function deviceFlowFetch() {
+    return vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          device_code: "dc",
+          user_code: "ABCD1234",
+          verification_uri: "https://github.com/login/device",
+          interval: 1,
+          expires_in: 60,
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: "gho_repo_scoped" }))
+      .mockResolvedValueOnce(jsonResponse(200, { login: "octocat", id: 1 }));
+  }
+
+  it("skips the vsk_ exchange and keeps an existing vsk_ sign-in", async () => {
+    const ks: FakeKeychainState = { token: null, vskToken: "vsk_existing" };
+    const f = fakeIO();
+    const fetchImpl = deviceFlowFetch();
+    const exchange = vi.fn(async () => ({ token: "vsk_new" }));
+
+    const exit = await authCommand(["login", "--repos"], {
+      io: f.io,
+      keychain: fakeKeychain(ks),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      clientId: "Iv1.test",
+      version: "test",
+      exchangeForVskToken: exchange,
+    });
+
+    expect(exit).toBe(0);
+    expect(exchange).not.toHaveBeenCalled();
+    expect(ks.token).toBe("gho_repo_scoped");
+    expect(ks.vskToken).toBe("vsk_existing");
+    // Only GitHub was contacted.
+    for (const call of fetchImpl.mock.calls) {
+      expect(String(call[0])).toMatch(/^https:\/\/(github\.com|api\.github\.com)\//);
+    }
+    expect(f.stdoutBuf).toMatch(/Logged in as @octocat/);
+  });
+
+  it("explains how to sign in to verified-skill.com when there is no vsk_ yet", async () => {
+    const ks: FakeKeychainState = { token: null, vskToken: null };
+    const f = fakeIO();
+    const exchange = vi.fn(async () => ({ token: "vsk_new" }));
+
+    await authCommand(["login", "--repos"], {
+      io: f.io,
+      keychain: fakeKeychain(ks),
+      fetchImpl: deviceFlowFetch() as unknown as typeof fetch,
+      sleep: () => Promise.resolve(),
+      clientId: "Iv1.test",
+      version: "test",
+      exchangeForVskToken: exchange,
+    });
+
+    expect(exchange).not.toHaveBeenCalled();
+    expect(ks.vskToken).toBeNull();
+    expect(f.stdoutBuf).toMatch(/never sent to verified-skill\.com/);
+  });
+});

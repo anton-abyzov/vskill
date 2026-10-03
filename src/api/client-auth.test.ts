@@ -6,7 +6,7 @@
 //   AC-US1-02  — Anonymous when no token
 //   AC-US1-06  — Keychain hit at most once per process (caching)
 //   AC-US2-06  — `X-Vskill-Tenant: <slug>` header sent
-//   AC-US5-04  — vsk_* preferred over gho_*
+//   AC-US5-04  — vsk_* preferred over gho_*; a raw gho_* is never sent
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
@@ -130,14 +130,22 @@ describe("client.ts — Bearer interceptor (0839 T-005)", () => {
     expect(headers["Authorization"]).toBe("Bearer vsk_pref");
   });
 
-  it("AC-US5-04 fallback: gho_ used when vsk_ missing", async () => {
+  it("never sends a raw GitHub token to the platform when vsk_ is missing", async () => {
+    // A gho_ token may carry the `repo` scope (`vskill auth login --repos`),
+    // so it stays with GitHub: the request goes out anonymous instead.
     _setKeychainForTests(fakeKeychain({ gho: "gho_only" }));
     mockFetch.mockResolvedValue(jsonResponse({ results: [] }));
 
     await searchSkills("hello");
+    await getSkill("owner/repo/skill").catch(() => {});
+    buildRequestHeaders();
 
-    const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>;
-    expect(headers["Authorization"]).toBe("Bearer gho_only");
+    for (const call of mockFetch.mock.calls) {
+      const headers = call[1].headers as Record<string, string>;
+      expect(headers["Authorization"]).toBeUndefined();
+      expect(JSON.stringify(call)).not.toContain("gho_only");
+    }
+    expect(buildRequestHeaders()["Authorization"]).toBeUndefined();
   });
 
   it("AC-US2-06: active tenant => X-Vskill-Tenant header", async () => {

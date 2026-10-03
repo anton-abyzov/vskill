@@ -22,11 +22,11 @@ function resolveBaseUrl(): string {
 // 0839 US-001 / US-005 — Bearer interceptor + tenant header.
 //
 // Policy (ADR-001 + AC-US1-01..06, AC-US2-06, AC-US5-04):
-//   * Prefer the verified-skill `vsk_*` token over the raw GitHub `gho_*`.
-//     `requireUserOrGithubBearer` (vskill-platform) accepts both, but
-//     `vsk_*` is our property — scopes, TTL, revocation. Falls back to
-//     `gho_*` only when `vsk_*` is missing (legacy login or mid-rollout).
-//   * Anonymous flow preserved: when neither token is present, no
+//   * Send only the verified-skill `vsk_*` token. The raw GitHub `gho_*`
+//     is never sent to the platform: after `vskill auth login --repos` it
+//     can read the user's private repositories. A legacy (gho_-only) login
+//     is anonymous to the platform until `vskill auth login` mints a vsk_*.
+//   * Anonymous flow preserved: when no vsk_* is present, no
 //     Authorization header is sent. Public endpoints continue to work.
 //   * Token is read from the keychain at most once per process, then
 //     cached. Keychain reads are not free (libsecret on Linux is slow);
@@ -94,8 +94,10 @@ export function invalidateAuthCache(): void {
 }
 
 /**
- * Resolve the Authorization token to send. Prefers `vsk_*`, falls back to
- * `gho_*`. Returns null when nothing is stored (anonymous mode).
+ * Resolve the Authorization token to send: the verified-skill `vsk_*` token
+ * only. A raw GitHub token is never sent to the platform — after
+ * `vskill auth login --repos` it can read the user's private repositories.
+ * Returns null when no `vsk_*` is stored (anonymous mode).
  *
  * Cached for the lifetime of the process so a single command invocation
  * hits the keychain at most once (AC-US1-06).
@@ -105,8 +107,8 @@ function resolveAuthToken(): string | null {
   let token: string | null = null;
   try {
     const kc = _keychainOverride ?? getDefaultKeychain();
-    // Prefer vsk_* (ADR-001 / AC-US5-04).
-    token = kc.getVskillToken() ?? kc.getGitHubToken();
+    // vsk_* only (ADR-001 / AC-US5-04). The GitHub token stays with GitHub.
+    token = kc.getVskillToken();
   } catch {
     token = null;
   }
@@ -158,8 +160,7 @@ export function buildRequestHeaders(
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
     if (process.env.VSKILL_DEBUG === "1") {
-      const kind = token.startsWith("vsk_") ? "vsk_" : "gho_";
-      process.stderr.write(`[auth] using ${kind} token (cached)\n`);
+      process.stderr.write(`[auth] using vsk_ token (cached)\n`);
     }
   } else if (process.env.VSKILL_DEBUG === "1") {
     process.stderr.write(`[auth] no token, anonymous\n`);

@@ -260,6 +260,27 @@ async function loginCmd(deps: Required<Pick<AuthCommandDeps, "fetchImpl" | "slee
   // `requireUserOrGithubBearer` already accepts gho_*, so all features
   // continue to work; only entitlement-aware flows that strictly require
   // a vsk_* token would degrade.
+  // A token that can read private repositories (`--repos`) is never sent to
+  // verified-skill.com, not even to mint a vsk_* token. An existing vsk_*
+  // from an earlier plain `vskill auth login` keeps working.
+  const grantsRepoAccess = (deps.scope ?? DEFAULT_SCOPE).split(/\s+/).includes("repo");
+  if (grantsRepoAccess) {
+    const hasVsk = (() => {
+      try {
+        return !!keychain.getVskillToken();
+      } catch {
+        return false;
+      }
+    })();
+    io.stdout.write(
+      `\nLogged in as @${login} (private repositories readable).\n` +
+        (hasVsk
+          ? "Your existing verified-skill.com sign-in is unchanged; this token is never sent there.\n"
+          : "This token is never sent to verified-skill.com. To sign in there, run `vskill auth login` " +
+            "first, then `vskill auth login --repos`.\n"),
+    );
+    return 0;
+  }
   if (deps.exchangeForVskToken) {
     try {
       const resp = await deps.exchangeForVskToken(accessToken);

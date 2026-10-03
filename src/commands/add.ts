@@ -1579,7 +1579,7 @@ async function installOneGitHubSkill(
 ): Promise<SkillInstallResult> {
   // Blocklist + rejection check BEFORE fetching (prevents misleading 404)
   const repoUrl = `https://github.com/${owner}/${repo}`;
-  const safety = await checkInstallSafety(skillName, undefined, repoUrl);
+  const safety = await checkRepoInstallSafety(skillName, owner, repo);
   if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
     return { skillName, installed: false, verdict: "BLOCKED" };
@@ -1844,7 +1844,7 @@ async function installRepoPlugin(
 
   // Blocklist + rejection check BEFORE fetching content
   const repoUrl = `https://github.com/${ownerRepo}`;
-  const safety = await checkInstallSafety(pluginName, undefined, repoUrl);
+  const safety = await checkRepoInstallSafety(pluginName, owner, repo);
   if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
     throw new Error(`Plugin "${pluginName}" is on the blocklist`);
@@ -2886,6 +2886,22 @@ async function installFromRegistry(
   await reportInstall(detail.name || skillName, detail.repoUrl).catch(() => {});
 }
 
+/**
+ * Blocklist + rejection check for a GitHub repo that never sends a private
+ * repo to verified-skill.com. Resolves visibility first through the cached
+ * `GET /repos/{owner}/{repo}` call the install makes anyway, so
+ * checkInstallSafety can fall back to the local blocklist for private repos
+ * instead of querying the platform with the skill name and repo URL.
+ */
+async function checkRepoInstallSafety(
+  skillName: string,
+  owner: string,
+  repo: string,
+): Promise<Awaited<ReturnType<typeof checkInstallSafety>>> {
+  await getDefaultBranch(owner, repo);
+  return checkInstallSafety(skillName, undefined, `https://github.com/${owner}/${repo}`);
+}
+
 // ---------------------------------------------------------------------------
 // Legacy single-skill install (preserves original behavior exactly)
 // ---------------------------------------------------------------------------
@@ -2902,7 +2918,7 @@ async function installSingleSkillLegacy(
   // Blocklist + rejection check BEFORE fetching (prevents misleading 404)
   const skillName = skill || repo;
   const repoUrl = `https://github.com/${owner}/${repo}`;
-  const safety = await checkInstallSafety(skillName, undefined, repoUrl);
+  const safety = await checkRepoInstallSafety(skillName, owner, repo);
   if (safety.blocked && !opts.force) {
     printBlockedError(safety.entry!);
     process.exit(1);

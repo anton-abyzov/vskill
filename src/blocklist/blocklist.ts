@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { BlocklistEntry, BlocklistCache, InstallSafetyResult } from "./types.js";
+import { isKnownPrivateRepo } from "../lib/repo-visibility.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -155,12 +156,21 @@ export async function checkBlocklist(
  * When repoUrl is provided and the API returns a rejection from a different
  * repo, the rejection is ignored (name-only matching can produce false
  * positives across unrelated repos).
+ *
+ * A repo already seen as private is never sent to the platform: the check
+ * uses the local blocklist cache only, so neither the skill name nor the
+ * repo URL leaves the machine. Callers resolve visibility first (see
+ * checkRepoInstallSafety in commands/add.ts).
  */
 export async function checkInstallSafety(
   skillName: string,
   contentHash?: string,
   repoUrl?: string,
 ): Promise<InstallSafetyResult> {
+  if (repoUrl && isKnownPrivateRepo(repoUrl)) {
+    const entry = await checkBlocklist(skillName, contentHash);
+    return { blocked: !!entry, entry: entry ?? undefined, rejected: false };
+  }
   try {
     let url = `${getApiBaseUrl()}/api/v1/blocklist/check?name=${encodeURIComponent(skillName)}`;
     if (repoUrl) {

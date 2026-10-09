@@ -8,13 +8,12 @@
 // (see `pricing-staleness.test.ts`). The picker UI surfaces a soft warning
 // once the snapshot is older than 90 days.
 //
-// At runtime, `model-resolver.ts` prefers (in order):
-//   1. ENV override — VSKILL_DEFAULT_MODEL_ANTHROPIC
-//   2. Live `/v1/models` fetch (cached 24h) — only on the server, only if an
-//      ANTHROPIC_API_KEY is present
-//   3. This dated snapshot
+// `model-resolver.ts` uses an ENV override, then this snapshot.
+// Model listing is a catalog, not proof of account entitlement or a live probe.
 //
-// Source URLs (verified 2026-04-24):
+// Legacy entries below retain their existing defaults. Current explicit IDs
+// and standard pricing verified 2026-10-09; no default migration is implied.
+// Source URLs:
 // - https://platform.claude.com/docs/en/about-claude/models/overview
 // - https://platform.claude.com/docs/en/about-claude/model-deprecations
 // - https://claude.com/pricing
@@ -31,8 +30,10 @@ export interface AnthropicPricing {
   completionUsdPer1M: number;
   /** USD per 1M cache-read tokens (5-minute TTL). */
   cacheReadUsdPer1M: number;
-  /** USD per 1M cache-write tokens (5-minute TTL). 1hr-TTL writes are 2x input — not surfaced numerically by Anthropic, omitted here. */
+  /** USD per 1M cache-write tokens (5-minute TTL). 1hr-TTL rates are not used here. */
   cacheWriteUsdPer1M: number;
+  /** Standard rates for the full request above this input-token threshold. */
+  longContext?: { aboveInputTokens: number; promptUsdPer1M: number; completionUsdPer1M: number };
 }
 
 export interface AnthropicModelEntry {
@@ -65,11 +66,15 @@ export interface AnthropicCatalog {
 }
 
 // 0711 — Anthropic catalog snapshot
-// Last refreshed: 2026-04-24
+// Latest explicit model additions verified: 2026-10-09
 // Cadence: refresh every <=6 months. CI fails if snapshotDate is older.
 export const ANTHROPIC_CATALOG_SNAPSHOT: AnthropicCatalog = {
-  snapshotDate: "2026-05-30",
+  snapshotDate: "2026-10-09",
   sources: [
+    "https://platform.claude.com/docs/en/models/opus-5-5/overview",
+    "https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
+    "https://platform.claude.com/docs/en/models/haiku-5-5/overview",
+    "https://platform.claude.com/docs/en/models/fable-5-1/overview",
     "https://platform.claude.com/docs/en/about-claude/models/overview",
     "https://platform.claude.com/docs/en/about-claude/model-deprecations",
     "https://claude.com/pricing",
@@ -282,6 +287,76 @@ export const ANTHROPIC_CATALOG_SNAPSHOT: AnthropicCatalog = {
       releaseDate: "2025-10-01",
       sunsetDate: "2026-10-15",
       capabilities: ["extended_thinking", "vision"],
+    },
+    // Explicit current IDs; retained aliases and array default stay unchanged.
+    {
+      id: "claude-opus-5-5",
+      aliases: [],
+      displayName: "Claude Opus 5.5",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 128_000,
+      pricing: {
+        promptUsdPer1M: 4,
+        completionUsdPer1M: 20,
+        cacheReadUsdPer1M: 0.2,
+        cacheWriteUsdPer1M: 5,
+      },
+      status: "active",
+      releaseDate: "2026-09-22",
+      sunsetDate: null,
+      capabilities: ["adaptive_thinking", "vision", "1m_context", "modern_thinking_budget"],
+    },
+    {
+      id: "claude-sonnet-5-5",
+      aliases: [],
+      displayName: "Claude Sonnet 5.5",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 128_000,
+      pricing: {
+        promptUsdPer1M: 2,
+        completionUsdPer1M: 10,
+        cacheReadUsdPer1M: 0.1,
+        cacheWriteUsdPer1M: 2.5,
+      },
+      status: "active",
+      releaseDate: "2026-09-28",
+      sunsetDate: null,
+      capabilities: ["adaptive_thinking", "vision", "1m_context", "modern_thinking_budget"],
+    },
+    {
+      id: "claude-haiku-5-5",
+      aliases: [],
+      displayName: "Claude Haiku 5.5",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 128_000,
+      pricing: {
+        promptUsdPer1M: 0.1,
+        completionUsdPer1M: 0.5,
+        cacheReadUsdPer1M: 0.01,
+        cacheWriteUsdPer1M: 0.125,
+        longContext: { aboveInputTokens: 100_000, promptUsdPer1M: 0.5, completionUsdPer1M: 2.5 },
+      },
+      status: "active",
+      releaseDate: "2026-10-07",
+      sunsetDate: null,
+      capabilities: ["adaptive_thinking", "vision", "1m_context", "modern_thinking_budget"],
+    },
+    {
+      id: "claude-fable-5-1",
+      aliases: [],
+      displayName: "Claude Fable 5.1",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 128_000,
+      pricing: {
+        promptUsdPer1M: 10,
+        completionUsdPer1M: 50,
+        cacheReadUsdPer1M: 0.25,
+        cacheWriteUsdPer1M: 12.5,
+      },
+      status: "active",
+      releaseDate: "2026-09-01",
+      sunsetDate: null,
+      capabilities: ["adaptive_thinking", "vision", "1m_context", "modern_thinking_budget"],
     },
   ],
 };

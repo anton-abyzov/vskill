@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { ANTHROPIC_CATALOG_SNAPSHOT } from "./anthropic-catalog.js";
+import { CURRENT_OPENAI_MODELS } from "./model-catalog.js";
 
 export type BillingMode = "per-token" | "subscription" | "free";
 
@@ -15,6 +16,7 @@ export interface ModelPricing {
   inputPerMillion: number;   // $ per 1M input tokens
   outputPerMillion: number;  // $ per 1M output tokens
   updatedAt: string;         // ISO date for staleness detection
+  longContext?: { aboveInputTokens: number; inputPerMillion: number; outputPerMillion: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -28,6 +30,11 @@ function buildAnthropicPricing(): Record<string, ModelPricing> {
       inputPerMillion: m.pricing.promptUsdPer1M,
       outputPerMillion: m.pricing.completionUsdPer1M,
       updatedAt: ANTHROPIC_CATALOG_SNAPSHOT.snapshotDate,
+      ...(m.pricing.longContext ? { longContext: {
+        aboveInputTokens: m.pricing.longContext.aboveInputTokens,
+        inputPerMillion: m.pricing.longContext.promptUsdPer1M,
+        outputPerMillion: m.pricing.longContext.completionUsdPer1M,
+      } } : {}),
     };
   }
   return out;
@@ -36,6 +43,12 @@ function buildAnthropicPricing(): Record<string, ModelPricing> {
 const PRICING: Record<string, Record<string, ModelPricing>> = {
   anthropic: buildAnthropicPricing(),
   openai: {
+    ...Object.fromEntries(CURRENT_OPENAI_MODELS.map((m) => [m.id, {
+      inputPerMillion: m.inputPerMillion,
+      outputPerMillion: m.outputPerMillion,
+      updatedAt: "2026-10-09",
+      longContext: { aboveInputTokens: 272_000, inputPerMillion: 2 * m.inputPerMillion, outputPerMillion: 1.5 * m.outputPerMillion },
+    }])),
     "o4-mini": { inputPerMillion: 1.10, outputPerMillion: 4.40, updatedAt: "2025-05-01" },
     "gpt-4.1": { inputPerMillion: 2, outputPerMillion: 8, updatedAt: "2025-05-01" },
     "gpt-4.1-mini": { inputPerMillion: 0.40, outputPerMillion: 1.60, updatedAt: "2025-05-01" },
@@ -151,8 +164,10 @@ export function calculateCost(
   const pricing = getProviderPricing(provider, model);
   if (!pricing) return null;
 
-  const inputCost = (inputTokens / 1_000_000) * pricing.inputPerMillion;
-  const outputCost = (outputTokens / 1_000_000) * pricing.outputPerMillion;
+  const rates = pricing.longContext && inputTokens > pricing.longContext.aboveInputTokens
+    ? pricing.longContext : pricing;
+  const inputCost = (inputTokens / 1_000_000) * rates.inputPerMillion;
+  const outputCost = (outputTokens / 1_000_000) * rates.outputPerMillion;
   return inputCost + outputCost;
 }
 

@@ -263,12 +263,19 @@ describe("createLlmClient", () => {
       expect(result.text).toBe("CLI response");
       expect(mockSpawn).toHaveBeenCalledWith(
         "claude",
-        ["-p", "--model", "sonnet"],
+        ["-p", "--model", "sonnet", "--safe-mode", "--tools", "", "--strict-mcp-config", "--no-session-persistence"],
         expect.objectContaining({ stdio: ["pipe", "pipe", "pipe"] }),
       );
       // Verify prompt was piped via stdin
       const proc = mockSpawn.mock.results[0].value;
       expect(proc.stdin.end).toHaveBeenCalledWith("system prompt\n\nuser prompt");
+    });
+
+    it("allows tools only when intentional integration execution opts in", async () => {
+      mockSpawn.mockReturnValue(createFakeProc("integration response\n"));
+      const client = createLlmClient({ provider: "claude-cli", model: "claude-opus-5-5", allowTools: true });
+      await client.generate("integration", "perform the authorized action");
+      expect(mockSpawn).toHaveBeenCalledWith("claude", ["-p", "--model", "claude-opus-5-5"], expect.anything());
     });
 
     it("defaults to sonnet model", () => {
@@ -286,7 +293,7 @@ describe("createLlmClient", () => {
 
       expect(mockSpawn).toHaveBeenCalledWith(
         "claude",
-        ["-p", "--model", "opus"],
+        ["-p", "--model", "opus", "--safe-mode", "--tools", "", "--strict-mcp-config", "--no-session-persistence"],
         expect.anything(),
       );
     });
@@ -687,7 +694,7 @@ describe("createLlmClient", () => {
   // -------------------------------------------------------------------------
   // 0857 — claude-cli argv contract (cross-model)
   //
-  // Pins that the claude-cli adapter spawns `['-p', '--model', <model>]` and
+  // Pins that the claude-cli adapter forwards the model and stays text-only, and
   // that `client.model` equals the NORMALIZED input for both the default and a
   // non-default alias. A refactor that drops `--model` or mis-normalizes would
   // fail here — fast PR feedback before the e2e verify harness runs.
@@ -709,7 +716,7 @@ describe("createLlmClient", () => {
       await client.generate("sys", "usr");
       expect(mockSpawn).toHaveBeenCalledWith(
         "claude",
-        ["-p", "--model", normalized],
+        ["-p", "--model", normalized, "--safe-mode", "--tools", "", "--strict-mcp-config", "--no-session-persistence"],
         expect.objectContaining({ stdio: ["pipe", "pipe", "pipe"] }),
       );
     });

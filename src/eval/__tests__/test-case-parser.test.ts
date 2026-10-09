@@ -212,3 +212,36 @@ description: ""
     expect(result).toMatch(/^---\nname: foo/);
   });
 });
+
+describe("lossless author prompts", () => {
+  it.each(["Review:\n## Billing\nExplain it", "Review:\n---\nExplain it", "Review:\r\n## Billing\r\nExplain it"])(
+    "round-trips Markdown embedded in a multiline prompt: %j", (prompt) => {
+      const cases: ParsedTestCase[] = [
+        { prompt, expected: "should_activate" },
+        { prompt: "another prompt", expected: "should_not_activate" },
+      ];
+      const initial = upsertTestCasesIntoSkillMd("# Skill\n", cases) + "\n## Notes\nKeep this.\n";
+      expect(parseTestCases(initial)).toEqual(cases);
+      const replacement = [{ prompt: "new prompt", expected: "auto" as const }];
+      const updated = upsertTestCasesIntoSkillMd(initial, replacement);
+      expect(parseTestCases(updated)).toEqual(replacement);
+      expect(updated).toContain("## Notes\nKeep this.");
+      expect(updated).not.toContain("Explain it");
+      const removed = upsertTestCasesIntoSkillMd(initial, []);
+      expect(removed).toContain("## Notes\nKeep this.");
+      expect(removed).not.toContain("Explain it");
+    },
+  );
+
+  it("preserves literal replacement dollar syntax when editing an existing case", () => {
+    const original = serializeTestCases([{ prompt: "old prompt", expected: "auto" }]);
+    const cases: ParsedTestCase[] = [{ prompt: "Explain $& and $` and $' and $$", expected: "should_activate" }];
+    const updated = upsertTestCasesIntoSkillMd(original, cases);
+    expect(parseTestCases(updated)).toEqual(cases);
+    expect(updated).not.toContain("old prompt");
+  });
+
+  it("does not mistake an inline mention for the Test Cases heading", () => {
+    expect(parseTestCases('Discuss ## Test Cases\n\n- Prompt: "no"\n  Expected: "auto"')).toEqual([]);
+  });
+});

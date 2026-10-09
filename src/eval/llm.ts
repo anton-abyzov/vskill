@@ -31,6 +31,8 @@ import { resolveCliBinary, enhancedPath } from "../utils/resolve-binary.js";
 import { calculateCost, getBillingMode } from "./pricing.js";
 import { resolveOllamaBaseUrl } from "./env.js";
 import { resolveAnthropicModel } from "./model-resolver.js";
+import { findAnthropicModel } from "./anthropic-catalog.js";
+import { CURRENT_OPENAI_MODELS } from "./model-catalog.js";
 
 export type BillingMode = "per-token" | "subscription" | "free";
 
@@ -67,6 +69,8 @@ function getTimeoutMs(): number {
 export interface LlmOverrides {
   provider?: ProviderName;
   model?: string;
+  /** Internal opt-in for intentional integration execution; never exposed as a request field. */
+  allowTools?: boolean;
 }
 
 /**
@@ -107,7 +111,7 @@ export function createLlmClient(overrides?: LlmOverrides): LlmClient {
     case "anthropic":
       return createAnthropicClient(modelOverride);
     case "claude-cli":
-      return createClaudeCliClient(modelOverride);
+      return createClaudeCliClient(modelOverride, overrides?.allowTools === true);
     case "codex-cli":
       return createCodexCliClient(modelOverride);
     case "gemini-cli":
@@ -197,14 +201,26 @@ function createAnthropicClient(modelOverride?: string): LlmClient {
             model,
             system: systemPrompt,
             messages: [{ role: "user", content: userPrompt }],
-            max_tokens: 4096,
+            // Thinking shares the output budget on current models. Keep old
+            // model behavior, give current explicit IDs room for text + reasoning.
+            max_tokens: findAnthropicModel(model)?.capabilities.includes("modern_thinking_budget") ? 16_384 : 4096,
+            ...(findAnthropicModel(model)?.capabilities.includes("modern_thinking_budget")
+              ? { output_config: { effort: "medium" } } : {}),
           },
           { signal: controller.signal },
         );
         const durationMs = Date.now() - start;
 
-        const textBlock = response.content.find((b: any) => b.type === "text");
-        const text = textBlock && "text" in textBlock ? textBlock.text : "";
+        if (response.stop_reason === "max_tokens" || response.stop_reason === "model_context_window_exceeded") {
+          throw new Error(`Anthropic ${model} response was truncated (${response.stop_reason}); reduce the requested output or split the test cases.`);
+        }
+        if (response.stop_reason === "refusal") {
+          throw new Error(`Anthropic ${model} declined this request (refusal).`);
+        }
+        const text = response.content
+          .filter((b: any) => b.type === "text" && typeof b.text === "string")
+          .map((b: any) => b.text).join("");
+        if (!text.trim()) throw new Error(`Anthropic ${model} returned no text; no skill or test output was produced.`);
         const inputTokens = response.usage?.input_tokens ?? null;
         const outputTokens = response.usage?.output_tokens ?? null;
         return {
@@ -262,13 +278,23 @@ function createOpenAIClient(modelOverride?: string): LlmClient {
               { role: "system", content: systemPrompt },
               { role: "user", content: userPrompt },
             ],
-            max_tokens: 4096,
+            ...((CURRENT_OPENAI_MODELS.some((m) => m.id === model) || /^o[134](?:-|$)/.test(model))
+              ? { max_completion_tokens: 16_384, reasoning_effort: "medium" }
+              : { max_tokens: 4096 }),
           },
           { signal: controller.signal },
         );
         const durationMs = Date.now() - start;
 
-        const text = response.choices?.[0]?.message?.content ?? "";
+        const choice = response.choices?.[0];
+        if (choice?.finish_reason === "length") {
+          throw new Error(`OpenAI ${model} response was truncated; reduce the requested output or split the test cases.`);
+        }
+        if (choice?.finish_reason === "content_filter" || choice?.message?.refusal) {
+          throw new Error(`OpenAI ${model} declined this request (refusal).`);
+        }
+        const text = choice?.message?.content ?? "";
+        if (!text.trim()) throw new Error(`OpenAI ${model} returned no text; no skill or test output was produced.`);
         const inputTokens = response.usage?.prompt_tokens ?? null;
         const outputTokens = response.usage?.completion_tokens ?? null;
         return {
@@ -393,13 +419,18 @@ function createCliClient(config: CliConfig): LlmClient {
 //   does not detect a nested session. No env var is added to compensate —
 //   the CLI resolves its own auth state.
 // ---------------------------------------------------------------------------
-function createClaudeCliClient(modelOverride?: string): LlmClient {
+function createClaudeCliClient(modelOverride?: string, allowTools = false): LlmClient {
   const raw = modelOverride || process.env.VSKILL_EVAL_MODEL || "sonnet";
   const model = normalizeClaudeCliModel(raw);
   return createCliClient({
     binary: "claude",
     name: "Claude",
-    args: ["-p", "--model", model],
+    // Generation/judging must not inspect or modify the host project. Safe mode
+    // keeps subscription auth, unlike --bare (API-key only), and excludes local
+    // instructions/hooks/plugins. Explicit integration execution keeps tooling.
+    args: ["-p", "--model", model, ...(allowTools ? [] : [
+      "--safe-mode", "--tools", "", "--strict-mcp-config", "--no-session-persistence",
+    ])],
     displayModel: model,
     stripEnvPrefix: "CLAUDE",
     provider: "claude-cli",

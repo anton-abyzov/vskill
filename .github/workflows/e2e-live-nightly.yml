@@ -52,12 +52,12 @@ jobs:
       # default checkout puts vskill at $GITHUB_WORKSPACE root and
       # `working-directory: ../vskill-platform` escapes the workspace.
       - name: Checkout vskill
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: vskill
 
       - name: Checkout vskill-platform (sibling repo)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: anton-abyzov/vskill-platform
           path: vskill-platform

@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: Checkout vskill
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:

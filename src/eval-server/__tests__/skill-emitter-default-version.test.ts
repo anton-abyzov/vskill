@@ -25,7 +25,7 @@ const MINIMAL_INPUT = {
 describe("0728 — buildSkillMd version emission", () => {
   it("AC-US2-01: emits version: \"1.0.0\" when version is omitted", () => {
     const out = buildSkillMdForTest(MINIMAL_INPUT);
-    expect(out).toMatch(/^version: "1\.0\.0"$/m);
+    expect(out).toMatch(/^  version: "1\.0\.0"$/m);
   });
 
   it("AC-US2-01: emits version: \"1.0.0\" when version is an empty string", () => {
@@ -33,7 +33,7 @@ describe("0728 — buildSkillMd version emission", () => {
       ...MINIMAL_INPUT,
       version: "",
     } as typeof MINIMAL_INPUT & { version: string });
-    expect(out).toMatch(/^version: "1\.0\.0"$/m);
+    expect(out).toMatch(/^  version: "1\.0\.0"$/m);
   });
 
   it("AC-US2-01: emits version: \"1.0.0\" when version is whitespace-only", () => {
@@ -41,7 +41,7 @@ describe("0728 — buildSkillMd version emission", () => {
       ...MINIMAL_INPUT,
       version: "   ",
     } as typeof MINIMAL_INPUT & { version: string });
-    expect(out).toMatch(/^version: "1\.0\.0"$/m);
+    expect(out).toMatch(/^  version: "1\.0\.0"$/m);
   });
 
   it("AC-US2-02: emits the explicit version when provided", () => {
@@ -49,8 +49,8 @@ describe("0728 — buildSkillMd version emission", () => {
       ...MINIMAL_INPUT,
       version: "2.3.4",
     } as typeof MINIMAL_INPUT & { version: string });
-    expect(out).toMatch(/^version: "2\.3\.4"$/m);
-    expect(out).not.toMatch(/^version: "1\.0\.0"$/m);
+    expect(out).toMatch(/^  version: "2\.3\.4"$/m);
+    expect(out).not.toMatch(/^  version: "1\.0\.0"$/m);
   });
 
   it("AC-US2-02: trims whitespace around the explicit version before emitting", () => {
@@ -58,10 +58,10 @@ describe("0728 — buildSkillMd version emission", () => {
       ...MINIMAL_INPUT,
       version: "  3.1.4  ",
     } as typeof MINIMAL_INPUT & { version: string });
-    expect(out).toMatch(/^version: "3\.1\.4"$/m);
+    expect(out).toMatch(/^  version: "3\.1\.4"$/m);
   });
 
-  it("emits version line in stable position: after description, before allowed-tools / model / metadata", () => {
+  it("emits version inside metadata after other root fields", () => {
     const out = buildSkillMdForTest({
       ...MINIMAL_INPUT,
       allowedTools: "Read, Write",
@@ -75,9 +75,10 @@ describe("0728 — buildSkillMd version emission", () => {
     const modelIdx = fmBlock.indexOf("model:");
     const metaIdx = fmBlock.indexOf("metadata:");
     expect(descIdx).toBeGreaterThanOrEqual(0);
-    expect(versionIdx).toBeGreaterThan(descIdx);
-    expect(toolsIdx).toBeGreaterThan(versionIdx);
+    expect(toolsIdx).toBeGreaterThan(descIdx);
     expect(modelIdx).toBeGreaterThan(toolsIdx);
     expect(metaIdx).toBeGreaterThan(modelIdx);
+    expect(versionIdx).toBeGreaterThan(metaIdx);
+    expect(out).not.toMatch(/^version:/m);
   });
 });

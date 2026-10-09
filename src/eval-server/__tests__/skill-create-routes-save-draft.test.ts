@@ -135,7 +135,7 @@ describe("0728 — POST /api/skills/save-draft default version", () => {
     expect(res.capturedStatus).toBe(201);
     const skillDir = join(root, "plugins", "demo-plugin", "skills", "fresh-draft");
     const written = readFileSync(join(skillDir, "SKILL.md"), "utf-8");
-    expect(written).toMatch(/^version: "1\.0\.0"$/m);
+    expect(written).toMatch(/^  version: "1\.0\.0"$/m);
   });
 
   it("AC-US1-01: writes version: \"1.0.0\" when version is an empty string", async () => {
@@ -156,7 +156,7 @@ describe("0728 — POST /api/skills/save-draft default version", () => {
     expect(res.capturedStatus).toBe(201);
     const skillDir = join(root, "plugins", "demo-plugin", "skills", "empty-version-draft");
     const written = readFileSync(join(skillDir, "SKILL.md"), "utf-8");
-    expect(written).toMatch(/^version: "1\.0\.0"$/m);
+    expect(written).toMatch(/^  version: "1\.0\.0"$/m);
   });
 
   it("AC-US1-02: honours an explicit valid semver version in the request body", async () => {
@@ -177,8 +177,8 @@ describe("0728 — POST /api/skills/save-draft default version", () => {
     expect(res.capturedStatus).toBe(201);
     const skillDir = join(root, "plugins", "demo-plugin", "skills", "explicit-version-draft");
     const written = readFileSync(join(skillDir, "SKILL.md"), "utf-8");
-    expect(written).toMatch(/^version: "3\.1\.4"$/m);
-    expect(written).not.toMatch(/^version: "1\.0\.0"$/m);
+    expect(written).toMatch(/^  version: "3\.1\.4"$/m);
+    expect(written).not.toMatch(/^  version: "1\.0\.0"$/m);
   });
 
   it("AC-US1-03: re-saving over an existing draft preserves the on-disk version", async () => {
@@ -213,8 +213,8 @@ describe("0728 — POST /api/skills/save-draft default version", () => {
 
     expect(res.capturedStatus).toBe(201);
     const written = readFileSync(join(skillDir, "SKILL.md"), "utf-8");
-    expect(written).toMatch(/^version: "1\.2\.7"$/m);
-    expect(written).not.toMatch(/^version: "1\.0\.0"$/m);
+    expect(written).toMatch(/^  version: "1\.2\.7"$/m);
+    expect(written).not.toMatch(/^  version: "1\.0\.0"$/m);
     expect(written).toContain("new iteration");
   });
 });

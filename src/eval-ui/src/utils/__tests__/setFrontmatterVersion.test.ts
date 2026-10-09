@@ -33,14 +33,15 @@ description: y
 ---
 body here`;
     const out = setFrontmatterVersion(input, "1.0.0");
-    expect(out).toMatch(/^---\nversion: "1\.0\.0"\nname: x/);
+    expect(out).toContain('metadata:\n  version: "1.0.0"');
+    expect(out).not.toMatch(/^version:/m);
     expect(out).toContain("body here");
   });
 
   it("creates a new frontmatter block when none exists", () => {
     const input = `# Just a markdown body\n\nNo frontmatter at all.`;
     const out = setFrontmatterVersion(input, "1.0.0");
-    expect(out.startsWith("---\nversion: \"1.0.0\"\n---\n")).toBe(true);
+    expect(out.startsWith("---\nmetadata:\n  version: \"1.0.0\"\n---\n")).toBe(true);
     expect(out).toContain("Just a markdown body");
   });
 

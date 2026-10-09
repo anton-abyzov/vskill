@@ -3,6 +3,40 @@
 // ---------------------------------------------------------------------------
 
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
+const FRONTMATTER_RE = /^(---[ \t]*\r?\n)([\s\S]*?)(\r?\n---[ \t]*(?=\r?\n|$))/;
+
+/** Locate only direct children of a block-style metadata mapping. */
+function versionFields(lines: string[]) {
+  const root = lines.findIndex((line) => /^version[ \t]*:/.test(line));
+  const metadata = lines.findIndex((line) => /^metadata[ \t]*:[ \t]*(?:#.*)?$/.test(line));
+  let end = metadata + 1;
+  while (end < lines.length && (!lines[end].trim() || /^\s|^#/.test(lines[end]))) end++;
+  const children = metadata < 0 ? [] : lines.slice(metadata + 1, end);
+  const indents = children.filter((line) => /^ +[^ #]/.test(line))
+    .map((line) => line.length - line.trimStart().length);
+  const indent = indents.length ? Math.min(...indents) : 2;
+  const childPattern = new RegExp(`^ {${indent}}version[ \\t]*:`);
+  const nestedOffset = children.findIndex((line) => childPattern.test(line));
+  return { root, metadata, nested: nestedOffset < 0 ? -1 : metadata + 1 + nestedOffset, indent };
+}
+
+function versionCandidates(content: string): Array<string | undefined> {
+  const fm = content.match(FRONTMATTER_RE);
+  if (!fm) return [];
+  const lines = fm[2].split(/\r?\n/);
+  const { root, nested } = versionFields(lines);
+  return [root, nested].filter((index) => index >= 0).map((index) => {
+    const raw = lines[index].slice(lines[index].indexOf(":") + 1).trim();
+    const value = raw.match(/^(?:"([^"]*)"|'([^']*)'|([^#]*))/);
+    return (value?.[1] ?? value?.[2] ?? value?.[3])?.trim() || undefined;
+  });
+}
+
+/** Read metadata.version while accepting the legacy root-level field. */
+export function readFrontmatterVersion(content: string): string | undefined {
+  // Preserve precedence for existing files containing both forms.
+  return versionCandidates(content).find((version) => version !== undefined);
+}
 
 /**
  * Extract the `version` field from YAML frontmatter in SKILL.md content.
@@ -11,28 +45,7 @@ const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 export function extractFrontmatterVersion(
   content: string,
 ): string | undefined {
-  const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-  if (!fmMatch) return undefined;
-
-  const frontmatter = fmMatch[1];
-
-  // 1. Top-level `version:` wins when present (existing behavior).
-  const topLevel = frontmatter.match(/^version:\s*"?(\S+?)"?\s*$/m);
-  if (topLevel && SEMVER_RE.test(topLevel[1])) return topLevel[1];
-
-  // 2. Fall back to nested `metadata.version`. The skill-builder family of
-  //    skills uses this format (publish flow stores semver under metadata),
-  //    and without this branch resolveVersion() in the update path would
-  //    miss the upstream version and synthetically bumpPatch(currentVersion)
-  //    instead — installing 1.0.1 when upstream actually shipped 1.0.3.
-  const metaIdx = frontmatter.search(/^metadata\s*:\s*$/m);
-  if (metaIdx >= 0) {
-    const after = frontmatter.slice(metaIdx);
-    const nested = after.match(/^[ \t]+version\s*:\s*"?(\S+?)"?\s*$/m);
-    if (nested && SEMVER_RE.test(nested[1])) return nested[1];
-  }
-
-  return undefined;
+  return versionCandidates(content).find((version) => version !== undefined && SEMVER_RE.test(version));
 }
 
 /**
@@ -73,32 +86,34 @@ export function resolveVersion(opts: {
 }
 
 /**
- * Set or insert the `version:` field inside SKILL.md frontmatter.
- *
- * Behavior:
- *  - If frontmatter exists and contains `version:` → replace its value.
- *  - If frontmatter exists but has no `version:` → insert as the first field.
- *  - If no frontmatter at all → prepend a minimal `---\nversion: "X"\n---` block.
- *
- * The version is always emitted quoted to match the convention used by
- * skill-create-routes' buildSkillMd emitter and to keep YAML parsers happy
- * for non-numeric semver strings.
+ * Update a skill version in place. Existing legacy root versions retain their
+ * shape; new fields use portable metadata.version. Other metadata and body
+ * content are preserved, including CRLF and literal replacement characters.
  */
 export function setFrontmatterVersion(content: string, version: string): string {
-  const fmMatch = content.match(/^(---\s*\n)([\s\S]*?)(\n---)/);
+  const fmMatch = content.match(FRONTMATTER_RE);
+  const quoted = JSON.stringify(version);
   if (!fmMatch) {
-    return `---\nversion: "${version}"\n---\n\n${content}`;
+    return `---\nmetadata:\n  version: ${quoted}\n---\n${content}`;
   }
 
   const [, openFence, body, closeFence] = fmMatch;
-  const versionLineRe = /^version:\s*"?[^\n]*"?\s*$/m;
-  let newBody: string;
-  if (versionLineRe.test(body)) {
-    newBody = body.replace(versionLineRe, `version: "${version}"`);
+  const newline = openFence.includes("\r\n") ? "\r\n" : "\n";
+  const lines = body.split(/\r?\n/);
+  const { root, metadata, nested, indent } = versionFields(lines);
+  if (root >= 0) {
+    lines[root] = `version: ${quoted}`;
+  } else if (nested >= 0) {
+    lines[nested] = `${" ".repeat(indent)}version: ${quoted}`;
+  } else if (metadata >= 0) {
+    lines.splice(metadata + 1, 0, `${" ".repeat(indent)}version: ${quoted}`);
   } else {
-    // Insert version as the first frontmatter line so it's stable + obvious.
-    newBody = `version: "${version}"\n${body}`;
+    // Never turn an inline/scalar metadata declaration into duplicate keys.
+    // Studio emits block mappings; other shapes need a YAML-aware edit first.
+    if (lines.some((line) => /^metadata[ \t]*:/.test(line))) {
+      throw new Error("Cannot update version: metadata must use a block mapping");
+    }
+    lines.push("metadata:", `  version: ${quoted}`);
   }
-
-  return content.replace(fmMatch[0], `${openFence}${newBody}${closeFence}`);
+  return `${openFence}${lines.join(newline)}${closeFence}${content.slice(fmMatch[0].length)}`;
 }

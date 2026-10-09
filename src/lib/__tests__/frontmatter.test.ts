@@ -18,18 +18,17 @@ describe("upsertFrontmatterVersion", () => {
     expect(versionIdx).toBeLessThan(descIdx);
   });
 
-  it("inserts version after description when no version exists", () => {
+  it("inserts metadata.version when no version exists", () => {
     const input = `---\nname: foo\ndescription: a skill\n---\nbody\n`;
     const out = upsertFrontmatterVersion(input, "1.0.0");
-    const lines = out.split("\n");
-    const descLineIdx = lines.findIndex((l) => l.startsWith("description:"));
-    expect(lines[descLineIdx + 1]).toBe("version: 1.0.0");
+    expect(out).toContain('metadata:\n  version: "1.0.0"');
+    expect(out).not.toMatch(/^version:/m);
   });
 
   it("appends version when no description and no version exist", () => {
     const input = `---\nname: foo\n---\nbody\n`;
     const out = upsertFrontmatterVersion(input, "1.0.0");
-    expect(out).toMatch(/version: 1\.0\.0\n---/);
+    expect(out).toMatch(/metadata:\n  version: "1\.0\.0"\n---/);
   });
 
   it("preserves double-quoted version style", () => {
@@ -41,16 +40,16 @@ describe("upsertFrontmatterVersion", () => {
   it("synthesises frontmatter when none exists", () => {
     const input = `# heading\n\nbody only\n`;
     const out = upsertFrontmatterVersion(input, "1.0.0");
-    expect(out.startsWith("---\nversion: 1.0.0\n---\n")).toBe(true);
+    expect(out.startsWith('---\nmetadata:\n  version: "1.0.0"\n---\n')).toBe(true);
     expect(out).toContain("# heading");
   });
 
-  it("does not touch indented metadata.version", () => {
+  it("updates metadata.version without adding a conflicting root-level version", () => {
     const input = `---\nname: foo\nmetadata:\n  version: 9.9.9\n---\nbody\n`;
     const out = upsertFrontmatterVersion(input, "1.0.0");
-    expect(out).toContain("  version: 9.9.9");
-    // The new top-level version was added
-    expect(out).toMatch(/^---\nname: foo\nmetadata:\n {2}version: 9\.9\.9\nversion: 1\.0\.0\n---/);
+    expect(out).toContain('  version: "1.0.0"');
+    expect(out).not.toContain("9.9.9");
+    expect(out).not.toMatch(/^version:/m);
   });
 });
 

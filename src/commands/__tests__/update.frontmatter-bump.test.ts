@@ -146,7 +146,8 @@ describe("0765 syncFrontmatterVersionAfterUpdate", () => {
     );
 
     const after = readFileSync(path, "utf8");
-    expect(after).toMatch(/^---\s*\nversion: "1.0.3"\nname: scout/);
+    expect(after).toContain('metadata:\n  version: "1.0.3"');
+    expect(after).not.toMatch(/^version:/m);
   });
 
   it("no-op when on-disk version already matches newVersion (idempotent)", () => {

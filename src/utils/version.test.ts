@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   extractFrontmatterVersion,
+  setFrontmatterVersion,
+  readFrontmatterVersion,
   bumpPatch,
   resolveVersion,
 } from "./version.js";
@@ -9,6 +11,16 @@ import {
 // extractFrontmatterVersion
 // ---------------------------------------------------------------------------
 describe("extractFrontmatterVersion", () => {
+  it("reads single-quoted metadata versions, including after an invalid legacy version", () => {
+    const content = "---\nversion: unknown\nmetadata:\n  version: '2.3.4' # release\n---\nBody";
+    expect(extractFrontmatterVersion(content)).toBe("2.3.4");
+    expect(readFrontmatterVersion(content)).toBe("unknown");
+  });
+
+  it("does not mistake a different mapping or deeper child for metadata.version", () => {
+    expect(extractFrontmatterVersion("---\nmetadata:\n  author: example\nruntime:\n  version: 9.0.0\n---")).toBeUndefined();
+    expect(extractFrontmatterVersion("---\nmetadata:\n  details:\n    version: 9.0.0\n---")).toBeUndefined();
+  });
   it("returns version from YAML frontmatter", () => {
     const content = [
       "---",
@@ -52,6 +64,26 @@ describe("extractFrontmatterVersion", () => {
     ].join("\n");
 
     expect(extractFrontmatterVersion(content)).toBe("3.0.0");
+  });
+});
+
+describe("portable version writes", () => {
+  it("updates metadata without disturbing adjacent fields, multiline values, or CRLF", () => {
+    const content = "---\r\nname: example\r\nmetadata:\r\n  author: example\r\n  version: '1.0.0'\r\n  note: |\r\n    Keep $& and $` literal.\r\nlicense: MIT\r\n---\r\nBody $&";
+    const updated = setFrontmatterVersion(content, "1.0.1");
+    expect(updated).toBe(content.replace("  version: '1.0.0'", '  version: "1.0.1"'));
+    expect(extractFrontmatterVersion(updated)).toBe("1.0.1");
+    expect(setFrontmatterVersion(updated, "1.0.1")).toBe(updated);
+  });
+
+  it("inserts into an existing metadata mapping without replacing its other fields", () => {
+    const content = "---\nname: example\nmetadata:\n  author: example\nlicense: MIT\n---\nBody";
+    expect(setFrontmatterVersion(content, "1.0.0")).toBe(content.replace("metadata:\n", 'metadata:\n  version: "1.0.0"\n'));
+  });
+
+  it("refuses to create duplicate metadata when given an unsupported inline mapping", () => {
+    expect(() => setFrontmatterVersion("---\nmetadata: {author: example}\n---\nBody", "1.0.0"))
+      .toThrow("metadata must use a block mapping");
   });
 });
 

@@ -515,6 +515,19 @@ export async function readSettingsSnapshot(): Promise<SettingsSnapshot> {
   return normalizeSettingsSnapshot(await tauriInvoke<RawSettingsSnapshot>("get_settings"));
 }
 
+/** Shared policy for optional browser events and native count reports. */
+export async function hasTelemetryConsent(): Promise<boolean> {
+  try {
+    if (typeof window === "undefined") return false;
+    const env = import.meta.env;
+    if (env.VITE_VSKILL_DISABLE_TELEMETRY === "1" || env.VITE_VSKILL_DISABLE_TELEMETRY === "true") return false;
+    if (new URLSearchParams(window.location.search).get("disableTelemetry") === "1") return false;
+    return (await readSettingsSnapshot()).privacy.telemetryEnabled === true;
+  } catch {
+    return false;
+  }
+}
+
 export function useDesktopBridge(): DesktopBridge {
   const [mode] = useState<BridgeMode>(() => detectMode());
 
@@ -888,7 +901,7 @@ export function useDesktopBridge(): DesktopBridge {
     ) => {
       if (!available) return;
       try {
-        if ((await getSettings()).privacy.telemetryEnabled !== true) return;
+        if (!(await hasTelemetryConsent())) return;
         await tauriInvoke<void>("quota_report_count", { skillCount });
       } catch (err) {
         // Non-blocking telemetry — log but don't surface.

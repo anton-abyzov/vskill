@@ -83,6 +83,14 @@ describe("optional Studio telemetry", () => {
       enabled = true;
       await bridge.quotaReportCount(3);
       expect(invoke).toHaveBeenCalledWith("quota_report_count", { skillCount: 3 });
+      invoke.mockClear();
+      window.history.replaceState(null, "", "/?disableTelemetry=1");
+      await bridge.quotaReportCount(3);
+      expect(invoke).not.toHaveBeenCalled();
+      window.history.replaceState(null, "", "/");
+      vi.stubEnv("VITE_VSKILL_DISABLE_TELEMETRY", "1");
+      await bridge.quotaReportCount(3);
+      expect(invoke).not.toHaveBeenCalled();
     } finally {
       await act(async () => root.unmount());
     }

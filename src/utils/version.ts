@@ -100,7 +100,30 @@ export function setFrontmatterVersion(content: string, version: string): string 
   const [, openFence, body, closeFence] = fmMatch;
   const newline = openFence.includes("\r\n") ? "\r\n" : "\n";
   const lines = body.split(/\r?\n/);
+  // This narrow writer does not parse quoted YAML mapping keys (including
+  // escaped spellings). Refuse them rather than append a duplicate metadata
+  // or version key and lose fields in permissive downstream parsers.
+  if (lines.some((line) => /^[ \t]*["'][^\r\n]*["'][ \t]*:/.test(line))) {
+    throw new Error("Cannot update version: quoted keys need a YAML-aware edit");
+  }
   const { root, metadata, nested, indent } = versionFields(lines);
+  const existing = root >= 0 ? root : nested;
+  if (existing >= 0) {
+    const value = lines[existing].slice(lines[existing].indexOf(":") + 1).trim();
+    const existingIndent = root >= 0 ? 0 : indent;
+    // A one-line replacement would leave block/folded or quoted-scalar
+    // continuation lines orphaned. Detect before changing any line.
+    if (/^[|>]/.test(value)) {
+      throw new Error("Cannot update version: multiline version needs a YAML-aware edit");
+    }
+    for (let next = existing + 1; next < lines.length; next++) {
+      if (!lines[next].trim() || /^[ \t]*#/.test(lines[next])) continue;
+      if (lines[next].length - lines[next].trimStart().length > existingIndent) {
+        throw new Error("Cannot update version: multiline version needs a YAML-aware edit");
+      }
+      break;
+    }
+  }
   if (root >= 0) {
     lines[root] = `version: ${quoted}`;
   } else if (nested >= 0) {

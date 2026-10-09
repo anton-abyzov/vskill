@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { load } from "js-yaml";
 import {
   extractFrontmatterVersion,
   setFrontmatterVersion,
@@ -68,6 +69,48 @@ describe("extractFrontmatterVersion", () => {
 });
 
 describe("portable version writes", () => {
+  const yaml = (content: string) => load(content.split("---")[1]);
+
+  it.each([
+    '"metadata":\n  author: Acme\n  version: "1.0.0"',
+    "'metadata':\n  author: Acme\n  version: '1.0.0'",
+    'metadata:\n  author: Acme\n  "version": "1.0.0"',
+    "metadata:\n  author: Acme\n  'version': '1.0.0'",
+    '"version": "1.0.0"\nmetadata:\n  author: Acme',
+    "'version': '1.0.0'\nmetadata:\n  author: Acme",
+    '"meta\\u0064ata":\n  version: "1.0.0"\n  author: Acme',
+  ])("refuses quoted keys without corrupting valid YAML: %s", (fields) => {
+    const original = `---\nname: example\n${fields}\n---\nBody`;
+    const parsed = yaml(original);
+    let persisted = original;
+    expect(() => { persisted = setFrontmatterVersion(original, "1.0.1"); }).toThrow("quoted keys");
+    expect(persisted).toBe(original);
+    expect(yaml(persisted)).toEqual(parsed);
+  });
+
+  it.each(["|", "|-", "|+", ">", ">-", ">+", "|2-", ">-2"])(
+    "refuses multiline version scalar %s without discarding its continuation",
+    (indicator) => {
+      for (const scope of ["root", "metadata"]) {
+        const fields = scope === "root"
+          ? `version: ${indicator}\n  1.0.0\nmetadata:\n  author: Acme`
+          : `metadata:\n  version: ${indicator}\n    1.0.0\n  author: Acme`;
+        const original = `---\nname: example\n${fields}\n---\nBody`;
+        const parsed = yaml(original);
+        let persisted = original;
+        expect(() => { persisted = setFrontmatterVersion(original, "1.0.1"); }).toThrow("multiline version");
+        expect(persisted).toBe(original);
+        expect(yaml(persisted)).toEqual(parsed);
+      }
+    },
+  );
+
+  it("refuses a multiline quoted scalar without leaving its continuation behind", () => {
+    const original = '---\nmetadata:\n  version: "1.0.0\n    "\n  author: Acme\n---\nBody';
+    expect(yaml(original)).toEqual({ metadata: { version: "1.0.0 ", author: "Acme" } });
+    expect(() => setFrontmatterVersion(original, "1.0.1")).toThrow("multiline version");
+  });
+
   it("updates metadata without disturbing adjacent fields, multiline values, or CRLF", () => {
     const content = "---\r\nname: example\r\nmetadata:\r\n  author: example\r\n  version: '1.0.0'\r\n  note: |\r\n    Keep $& and $` literal.\r\nlicense: MIT\r\n---\r\nBody $&";
     const updated = setFrontmatterVersion(content, "1.0.1");

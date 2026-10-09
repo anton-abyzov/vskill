@@ -106,7 +106,7 @@
     },
     "crash": {
       "label": "Send anonymized crash reports",
-      "help": "Sends a small report when Skill Studio crashes so we can fix it."
+      "help": "Reserved preference. Crash reporting is not available yet."
     },
     "openLogs": {
       "label": "Open logs folder",

@@ -251,7 +251,7 @@ jobs:
         # a stale `latest.json` asset on the GitHub Release that confuses
         # consumers.
         #
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           # RELEASE_TOKEN is a PAT that has expired at least once (desktop-v1.0.63
           # built on all three platforms, then every job died on 'Bad credentials'

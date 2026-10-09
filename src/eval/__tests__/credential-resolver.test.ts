@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, statSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -128,6 +128,23 @@ describe("resolveAllCredentials", () => {
 // ---------------------------------------------------------------------------
 
 describe("writeCredential", () => {
+  it.skipIf(process.platform === "win32")("creates a credential file readable only by its owner", () => {
+    writeCredential(tmpDir, "FIXTURE_KEY", "fixture-value");
+    expect(statSync(join(tmpDir, ".env.local")).mode & 0o777).toBe(0o600);
+  });
+
+  it.skipIf(process.platform === "win32").each(["EXISTING", "ADDED"])(
+    "restricts permissions on an existing credential file when writing %s",
+    (key) => {
+      const path = join(tmpDir, ".env.local");
+      writeFileSync(path, "EXISTING=old\n");
+      chmodSync(path, 0o644);
+      writeCredential(tmpDir, key, "fixture-value");
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+      expect(readFileSync(path, "utf8")).toContain(`${key}=fixture-value`);
+    },
+  );
+
   it("creates .env.local and writes credential (TC-064)", () => {
     writeCredential(tmpDir, "X_API_KEY", "secret123");
     const content = readFileSync(join(tmpDir, ".env.local"), "utf-8");

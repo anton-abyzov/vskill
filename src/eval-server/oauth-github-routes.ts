@@ -492,14 +492,19 @@ export function registerOauthGithubRoutes(router: Router): void {
   // -------------------------------------------------------------------------
   // POST /api/auth/sign-out
   //
-  // Deletes the cached GitHub token. The next /api/auth/me will return
-  // signedIn=false. Idempotent.
+  // Deletes both local identities and their in-process authorization caches.
+  // The next /api/auth/me and platform proxy request are signed out. Idempotent.
   // -------------------------------------------------------------------------
   router.post("/api/auth/sign-out", async (_req, res) => {
     try {
       const mod = await import("../lib/keychain.js");
       const kc = mod.createKeychain();
       kc.clearGitHubToken();
+      kc.clearVskillToken();
+      const client = await import("../api/client.js");
+      client.invalidateAuthCache();
+      const proxy = await import("./platform-proxy.js");
+      proxy.invalidatePlatformProxyTokenCache();
       sendJson(res, { ok: true }, 200);
     } catch (err) {
       sendJson(res, { ok: false, error: (err as Error).message }, 500);

@@ -2,7 +2,7 @@
 // credential-resolver.ts -- resolve credentials from env -> .env.local chain
 // ---------------------------------------------------------------------------
 
-import { readFileSync, existsSync, writeFileSync, appendFileSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, appendFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 
 export interface CredentialResult {
@@ -76,6 +76,8 @@ export function writeCredential(
   // Read existing content or start fresh
   let content = "";
   if (existsSync(dotenvPath)) {
+    // Restrict an existing file before replacing or appending a secret.
+    chmodSync(dotenvPath, 0o600);
     content = readFileSync(dotenvPath, "utf-8");
   }
 
@@ -86,11 +88,11 @@ export function writeCredential(
 
   if (existingIndex >= 0) {
     lines[existingIndex] = `${key}=${value}`;
-    writeFileSync(dotenvPath, lines.join("\n"), "utf-8");
+    writeFileSync(dotenvPath, lines.join("\n"), { encoding: "utf-8", mode: 0o600 });
   } else {
     // Append new entry
     const suffix = content.endsWith("\n") || content === "" ? "" : "\n";
-    appendFileSync(dotenvPath, `${suffix}${key}=${value}\n`, "utf-8");
+    appendFileSync(dotenvPath, `${suffix}${key}=${value}\n`, { encoding: "utf-8", mode: 0o600 });
   }
 
   // Ensure .env.local is in .gitignore

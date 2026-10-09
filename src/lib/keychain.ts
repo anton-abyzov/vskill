@@ -315,11 +315,17 @@ export function createKeychain(opts: KeychainOptions = {}): Keychain {
       let removed = false;
       const r = tryKeyring((kr) => kr.deletePassword(SERVICE_NAME, GITHUB_TOKEN_KEY));
       if (r.ok && r.value) removed = true;
+      // getGitHubToken still accepts the legacy slot. Leaving it behind
+      // would restore the previous identity immediately after sign-out.
+      const legacy = tryKeyring((kr) => kr.deletePassword(LEGACY_SERVICE_NAME, LEGACY_TOKEN_KEY));
+      if (legacy.ok && legacy.value) removed = true;
       // Always also clear the fallback — defense in depth in case both backends
       // hold copies (e.g., keyring re-enabled after a fallback period).
       if (fs.existsSync(fallbackPath)) {
         const map = readFallback();
-        if (map.delete(GITHUB_TOKEN_KEY)) {
+        const removedCanonical = map.delete(GITHUB_TOKEN_KEY);
+        const removedLegacy = map.delete(LEGACY_TOKEN_KEY);
+        if (removedCanonical || removedLegacy) {
           if (map.size === 0) {
             try {
               fs.unlinkSync(fallbackPath);

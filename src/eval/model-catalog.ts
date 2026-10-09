@@ -112,4 +112,3 @@ export const PROVIDER_MODELS: Record<ProviderName, ModelOption[]> = {
   // `KNOWN_PROVIDER_NAMES`, so it never reaches /api/config or the picker.
   "stub": [],
 };
-

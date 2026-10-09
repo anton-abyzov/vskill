@@ -101,8 +101,8 @@
     "heading": "Privacy",
     "subheading": "Decide what Skill Studio shares with us.",
     "telemetry": {
-      "label": "Send anonymous usage telemetry",
-      "help": "Helps us improve Skill Studio. Disabled by default. No personal data is collected."
+      "label": "Send optional usage telemetry",
+      "help": "Disabled by default. Shares selected public skill identifiers, connection events and local skill counts. Search text, skill contents and credentials are excluded."
     },
     "crash": {
       "label": "Send anonymized crash reports",
@@ -113,7 +113,7 @@
       "help": "Inspect log files to audit what Skill Studio records on your machine.",
       "browserHidden": "Logs are stored on the desktop app only."
     },
-    "disclosure": "Skill Studio v1 does not currently emit telemetry. These switches reserve your preference for when telemetry ships."
+    "disclosure": "Optional usage telemetry is sent only when enabled. Signing in, public catalog searches and updates still contact their services to perform the requested action. Crash reporting is not implemented yet."
   },
   "advanced": {
     "heading": "Advanced",

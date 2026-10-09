@@ -83,6 +83,7 @@ async function flushMicrotasks() {
 }
 
 beforeEach(() => {
+  window.localStorage.clear();
   originalFetch = globalThis.fetch;
   try { window.sessionStorage.clear(); } catch { /* noop */ }
 });
@@ -354,6 +355,9 @@ describe("SkillDetailPanel — T-023 install command", () => {
 // T-024 + T-028: copy + telemetry
 // ---------------------------------------------------------------------------
 describe("SkillDetailPanel — T-024 copy + T-028 telemetry", () => {
+  beforeEach(() => {
+    window.localStorage.setItem("vskill:preferences:browser-shadow", JSON.stringify({ privacy: { telemetryEnabled: true } }));
+  });
   it("copies install command and dispatches studio:toast", async () => {
     const fetchSpy = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("/api/v1/studio/telemetry/install-copy")) return jsonResponse({});

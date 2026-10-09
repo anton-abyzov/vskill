@@ -1,3 +1,4 @@
+import { sendStudioTelemetry } from "../utils/studio-telemetry";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api } from "../api";
 import type { SkillUpdateInfo } from "../api";
@@ -427,20 +428,7 @@ export function useSkillUpdates(
       if (event !== "connected" && lastConnectedAtRef.current != null) {
         payload.durationSinceOpenMs = now - lastConnectedAtRef.current;
       }
-      try {
-        // Fire-and-forget; never block the SSE path on telemetry.
-        void fetch(TELEMETRY_ENDPOINT, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
-          // keepalive lets the request survive a navigation; harmless when not.
-          keepalive: true,
-        }).catch(() => {
-          // Swallow — telemetry must never surface errors.
-        });
-      } catch {
-        // Swallow — even sync errors (e.g. fetch is undefined) are non-fatal.
-      }
+      void sendStudioTelemetry(TELEMETRY_ENDPOINT, payload);
     },
     [],
   );

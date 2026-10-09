@@ -459,6 +459,7 @@ describe("useSkillUpdates — telemetry pings (T-012)", () => {
     checkUpdatesSpy.mockResolvedValue([]);
     updateStore.reset();
     window.localStorage.clear();
+    window.localStorage.setItem("vskill:preferences:browser-shadow", JSON.stringify({ privacy: { telemetryEnabled: true } }));
     window.sessionStorage.clear();
     window.history.replaceState(null, "", "/");
   });

@@ -509,6 +509,12 @@ async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
   return invoke(cmd, args) as Promise<T>;
 }
 
+/** Read current persisted consent at send time, including native preferences. */
+export async function readSettingsSnapshot(): Promise<SettingsSnapshot> {
+  if (detectMode() !== "desktop") return loadBrowserShadow();
+  return normalizeSettingsSnapshot(await tauriInvoke<RawSettingsSnapshot>("get_settings"));
+}
+
 export function useDesktopBridge(): DesktopBridge {
   const [mode] = useState<BridgeMode>(() => detectMode());
 
@@ -516,9 +522,7 @@ export function useDesktopBridge(): DesktopBridge {
     const available = mode === "desktop";
 
     const getSettings: DesktopBridge["getSettings"] = async () => {
-      if (!available) return loadBrowserShadow();
-      const raw = await tauriInvoke<RawSettingsSnapshot>("get_settings");
-      return normalizeSettingsSnapshot(raw);
+      return readSettingsSnapshot();
     };
 
     const setSetting: DesktopBridge["setSetting"] = async (path, value) => {
@@ -884,6 +888,7 @@ export function useDesktopBridge(): DesktopBridge {
     ) => {
       if (!available) return;
       try {
+        if ((await getSettings()).privacy.telemetryEnabled !== true) return;
         await tauriInvoke<void>("quota_report_count", { skillCount });
       } catch (err) {
         // Non-blocking telemetry — log but don't surface.

@@ -1,3 +1,4 @@
+import { sendStudioTelemetry } from "../../utils/studio-telemetry";
 // 0741 T-019..T-026: SkillDetailPanel — eval-ui detail overlay opened from
 // the FindSkillsPalette `onSelect` callback.
 //
@@ -201,16 +202,7 @@ function fireInstallCopyTelemetry(
   url: string,
   payload: { skillName: string; version: string; q: string; ts: number },
 ): void {
-  try {
-    fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      keepalive: true,
-    }).catch(() => { /* fire-and-forget */ });
-  } catch {
-    /* never block clipboard or toast */
-  }
+  void sendStudioTelemetry(url, payload);
 }
 
 // ---------------------------------------------------------------------------

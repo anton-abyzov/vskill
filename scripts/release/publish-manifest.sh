@@ -21,6 +21,7 @@
 # Optional env:
 #   STAGING=1     Publish to staging.json instead of latest.json (AC-US16-04).
 #   DRY_RUN=1     Print all aws-cli commands without executing.
+#   MACOS_ARCH    Required for generic macOS bundle names: aarch64, x86_64 or universal.
 #
 # Atomicity (ADR 0829-01 §3):
 #   1. Upload binaries to v<VERSION>/<artifact>     — all platforms must succeed
@@ -135,13 +136,13 @@ discover_platform() {
 # like "macos-14-artifacts", "windows-2022-artifacts", "ubuntu-22.04-artifacts".
 discover_platform "darwin-aarch64"   "*aarch64*.app.tar.gz"        "$ARTIFACTS_DIR" || true
 discover_platform "darwin-x86_64"    "*x86_64*.app.tar.gz"         "$ARTIFACTS_DIR" || true
-# If only a universal2 build is produced, both keys point at the same bundle.
+# Tauri's generic app name does not encode architecture. Never infer universal:
+# the release workflow supplies the actual macOS build target explicitly.
 if [[ -z "${PLATFORM_BUNDLE[darwin-aarch64]:-}" && -z "${PLATFORM_BUNDLE[darwin-x86_64]:-}" ]]; then
-  discover_platform "darwin-aarch64" "*.app.tar.gz" "$ARTIFACTS_DIR"
-  if [[ -n "${PLATFORM_BUNDLE[darwin-aarch64]:-}" ]]; then
-    PLATFORM_BUNDLE["darwin-x86_64"]="${PLATFORM_BUNDLE[darwin-aarch64]}"
-    PLATFORM_SIG["darwin-x86_64"]="${PLATFORM_SIG[darwin-aarch64]}"
-  fi
+  MACOS_KEYS="$(node "$REPO_ROOT/scripts/release/macos-platform-keys.mjs" "${MACOS_ARCH:-}")"
+  for key in $MACOS_KEYS; do
+    discover_platform "$key" "*.app.tar.gz" "$ARTIFACTS_DIR"
+  done
 fi
 discover_platform "windows-x86_64"   "*x64-setup.exe"              "$ARTIFACTS_DIR" \
   || discover_platform "windows-x86_64"   "*x64-setup.nsis.zip"     "$ARTIFACTS_DIR" \

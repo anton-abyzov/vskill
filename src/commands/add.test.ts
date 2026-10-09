@@ -3951,6 +3951,12 @@ describe("private repos never reach verified-skill.com", () => {
       mockReaddirSync.mockImplementation((_p: string, o?: { withFileTypes?: boolean }) =>
         o?.withFileTypes ? [{ name: "resume-tuner", isDirectory: () => true }] : ["SKILL.md"],
       );
+      // clearAllMocks preserves previous implementations. Do not inherit a
+      // directory-only stat stub: it makes SKILL.md recurse until stack overflow.
+      mockStatSync.mockImplementation((p: string) => ({
+        isDirectory: () => !p.endsWith("SKILL.md"),
+        isFile: () => p.endsWith("SKILL.md"),
+      }));
       mockRunTier1Scan.mockReturnValue(makeScanResult());
       mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
       mockEnsureLockfile.mockReturnValue({
@@ -4004,6 +4010,12 @@ describe("private repos never reach verified-skill.com", () => {
 
       await addCommand("source", { plugin: "career", pluginDir: "/tmp/open-skills/vendor/secret-plugins" });
 
+      expect(console.error).not.toHaveBeenCalledWith(
+        expect.stringContaining("Failed to install"),
+      );
+      expect(mockWriteFileSync).toHaveBeenCalledWith(
+        expect.stringContaining("SKILL.md"), expect.any(String), "utf-8",
+      );
       expect(client.reportInstallBatch).not.toHaveBeenCalled();
       expect(mockCheckInstallSafety).not.toHaveBeenCalled();
       expect(platformArgs()).not.toMatch(/resume-tuner|career/);

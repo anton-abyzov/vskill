@@ -8,10 +8,18 @@ import { registerOauthGithubRoutes } from "../oauth-github-routes.js";
 const mockSetGitHubToken = vi.hoisted(() => vi.fn());
 const mockSetVskillToken = vi.hoisted(() => vi.fn());
 const mockExchange = vi.hoisted(() => vi.fn());
+const mockClearGitHubToken = vi.hoisted(() => vi.fn());
+const mockClearVskillToken = vi.hoisted(() => vi.fn());
+const mockInvalidateAuthCache = vi.hoisted(() => vi.fn());
+const mockInvalidateProxyCache = vi.hoisted(() => vi.fn());
 
 vi.mock("../../api/client.js", () => ({
   exchangeForVskToken: mockExchange,
-  invalidateAuthCache: vi.fn(),
+  invalidateAuthCache: mockInvalidateAuthCache,
+}));
+
+vi.mock("../platform-proxy.js", () => ({
+  invalidatePlatformProxyTokenCache: mockInvalidateProxyCache,
 }));
 
 vi.mock("../../lib/keychain.js", () => ({
@@ -19,7 +27,8 @@ vi.mock("../../lib/keychain.js", () => ({
     setGitHubToken: mockSetGitHubToken,
     setVskillToken: mockSetVskillToken,
     getGitHubToken: vi.fn(),
-    clearGitHubToken: vi.fn(),
+    clearGitHubToken: mockClearGitHubToken,
+    clearVskillToken: mockClearVskillToken,
   }),
 }));
 
@@ -79,6 +88,10 @@ describe("GitHub OAuth desktop routes", () => {
     mockSetGitHubToken.mockReset();
     mockSetVskillToken.mockReset();
     mockExchange.mockReset();
+    mockClearGitHubToken.mockReset();
+    mockClearVskillToken.mockReset();
+    mockInvalidateAuthCache.mockReset();
+    mockInvalidateProxyCache.mockReset();
     mockExchange.mockResolvedValue({ token: "vsk_minted", expiresAt: "", scopes: [], userId: "u" });
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       login: "testuser",
@@ -87,6 +100,22 @@ describe("GitHub OAuth desktop routes", () => {
       email: null,
       avatar_url: "https://avatars.githubusercontent.com/u/123",
     }), { status: 200 })));
+  });
+
+  it("signs out of GitHub and the platform and invalidates cached authorization", async () => {
+    const { res, state } = fakeRes();
+    await makeRouter().handle(fakeReq({
+      method: "POST",
+      url: "/api/auth/sign-out",
+      headers: { "x-studio-token": getStudioToken() },
+    }), res);
+
+    expect(state.status).toBe(200);
+    expect(JSON.parse(state.body ?? "{}")).toEqual({ ok: true });
+    expect(mockClearGitHubToken).toHaveBeenCalledOnce();
+    expect(mockClearVskillToken).toHaveBeenCalledOnce();
+    expect(mockInvalidateAuthCache).toHaveBeenCalledOnce();
+    expect(mockInvalidateProxyCache).toHaveBeenCalledOnce();
   });
 
   it("starts desktop OAuth against the registered platform callback without PKCE", async () => {

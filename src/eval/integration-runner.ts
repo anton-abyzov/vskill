@@ -150,12 +150,12 @@ export async function runIntegrationCase(
       const pw = await import("playwright");
       if (profilePath) {
         context = await pw.chromium.launchPersistentContext(profilePath, {
-          headless: false,
+          headless: true,
           args: ["--disable-blink-features=AutomationControlled"],
         });
         browser = null; // persistent context manages its own browser
       } else {
-        browser = await pw.chromium.launch({ headless: false });
+        browser = await pw.chromium.launch({ headless: true });
         context = await browser.newContext();
       }
     });
@@ -194,8 +194,8 @@ export async function runIntegrationCase(
         return;
       }
 
-      // Create LLM client and generate
-      const client = createLlmClient();
+      // Only integration execution opts into agent tooling; its judge remains text-only.
+      const client = createLlmClient({ allowTools: true });
       const skillMdPath = join(opts.skillDir, "SKILL.md");
       let systemPrompt = "You are executing an integration test. Follow the instructions precisely.";
       if (existsSync(skillMdPath)) {

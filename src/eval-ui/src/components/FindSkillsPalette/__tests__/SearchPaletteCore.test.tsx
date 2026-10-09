@@ -80,6 +80,7 @@ function statusResponse(status: number, body: unknown = {}): Response {
 }
 
 beforeEach(() => {
+  window.localStorage.clear();
   originalFetch = globalThis.fetch;
   // jsdom default: IntersectionObserver missing — install a controllable stub.
   (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
@@ -421,6 +422,9 @@ describe("SearchPaletteCore — T-013 MiniTierBadge + BLOCKED/TAINTED rendering"
 });
 
 describe("SearchPaletteCore — telemetry + sanitized highlight", () => {
+  beforeEach(() => {
+    window.localStorage.setItem("vskill:preferences:browser-shadow", JSON.stringify({ privacy: { telemetryEnabled: true } }));
+  });
   it("fires fire-and-forget telemetry on result selection (T-027 partial)", async () => {
     const fetchSpy = mockFetchImpl(async (url) => {
       if (url.includes("/api/v1/stats")) {

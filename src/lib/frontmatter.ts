@@ -11,65 +11,41 @@
  * Increment 0794 — US-002b / T-004.
  */
 
+import { setFrontmatterVersion } from "../utils/version.js";
+
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
 const TOP_VERSION_RE = /^version\s*:\s*[^\n]*\r?\n?/m;
-const HAS_DESCRIPTION_RE = /^description\s*:/m;
 
 /**
- * Insert or replace the top-level `version:` field in YAML frontmatter.
+ * Update the published version, preserving legacy root quoting where present.
  *
  * Behaviour:
  *   - If `version:` exists at column 1: replace its value (preserves
  *     surrounding lines and quoting style of the source whenever possible).
- *   - Else if `description:` exists at column 1: insert immediately after
- *     the description block (skipping indented continuation lines).
- *   - Else: append the version line at the end of the frontmatter.
+ *   - New fields and existing metadata.version use the portable metadata shape.
  *   - If the file has no frontmatter block at all: synthesise a minimal one.
- *   - Indented `metadata.version` is never touched.
  *
  * Returns the full file content with the change applied. Pure function.
  */
 export function upsertFrontmatterVersion(content: string, newVersion: string): string {
   const match = content.match(FRONTMATTER_RE);
-  if (!match) {
-    return `---\nversion: ${newVersion}\n---\n${content}`;
+  if (!match || !TOP_VERSION_RE.test(match[1])) {
+    return setFrontmatterVersion(content, newVersion);
   }
 
   const fmBody = match[1];
 
   // Replace existing top-level `version:`
-  if (TOP_VERSION_RE.test(fmBody)) {
-    const newFm = fmBody.replace(TOP_VERSION_RE, (line) => {
-      // Preserve quoting style if present
-      const quotedMatch = line.match(/^version\s*:\s*("|')/);
-      if (quotedMatch) {
-        const quote = quotedMatch[1];
-        return `version: ${quote}${newVersion}${quote}\n`;
-      }
-      return `version: ${newVersion}\n`;
-    });
-    return content.replace(FRONTMATTER_RE, `---\n${newFm}\n---\n`);
-  }
-
-  // Insert after `description:` if present
-  const lines = fmBody.split(/\r?\n/);
-  const descIdx = lines.findIndex((line) => HAS_DESCRIPTION_RE.test(line));
-  let updatedLines: string[];
-  if (descIdx >= 0) {
-    let insertAt = descIdx + 1;
-    // Skip continuation lines (indented under description)
-    while (insertAt < lines.length && /^\s+\S/.test(lines[insertAt])) insertAt++;
-    updatedLines = [
-      ...lines.slice(0, insertAt),
-      `version: ${newVersion}`,
-      ...lines.slice(insertAt),
-    ];
-  } else {
-    updatedLines = [...lines, `version: ${newVersion}`];
-  }
-
-  const newFm = updatedLines.join("\n");
-  return content.replace(FRONTMATTER_RE, `---\n${newFm}\n---\n`);
+  const newFm = fmBody.replace(TOP_VERSION_RE, (line) => {
+    // Preserve quoting style if present
+    const quotedMatch = line.match(/^version\s*:\s*("|')/);
+    if (quotedMatch) {
+      const quote = quotedMatch[1];
+      return `version: ${quote}${newVersion}${quote}\n`;
+    }
+    return `version: ${newVersion}\n`;
+  });
+  return content.replace(FRONTMATTER_RE, () => `---\n${newFm}\n---\n`);
 }
 
 /**

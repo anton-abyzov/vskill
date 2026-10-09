@@ -110,7 +110,7 @@ describe("SKILL.md spec compliance (0679) — golden-file frontmatter shape", ()
     }
   });
 
-  it("omits metadata block when no tags and no target-agents are provided (backwards compatibility)", () => {
+  it("keeps only version in metadata when no tags or target-agents are provided", () => {
     const out = buildSkillMdForTest({
       name: "bare-skill",
       plugin: "",
@@ -118,7 +118,8 @@ describe("SKILL.md spec compliance (0679) — golden-file frontmatter shape", ()
       description: "Bare skill.",
       body: "# /bare-skill",
     });
-    expect(out).not.toContain("metadata:");
+    expect(parseFrontmatterForTest(out).metadata).toEqual({ version: "1.0.0" });
+    expect(out).not.toMatch(/^version:/m);
     expect(out).not.toContain("tags:");
     expect(out).not.toContain("target-agents:");
   });
@@ -132,7 +133,7 @@ describe("SKILL.md spec compliance (0679) — golden-file frontmatter shape", ()
       body: "# /tags-only",
       tags: ["alpha", "beta"],
     });
-    expect(out).toContain("metadata:\n  tags:\n    - alpha\n    - beta\n");
+    expect(out).toContain("metadata:\n  version: \"1.0.0\"\n  tags:\n    - alpha\n    - beta\n");
     expect(out).not.toContain("target-agents:");
   });
 
@@ -145,7 +146,7 @@ describe("SKILL.md spec compliance (0679) — golden-file frontmatter shape", ()
       body: "# /agents-only",
       targetAgents: ["claude-code"],
     });
-    expect(out).toContain("metadata:\n  target-agents:\n    - claude-code\n");
+    expect(out).toContain("metadata:\n  version: \"1.0.0\"\n  target-agents:\n    - claude-code\n");
     expect(out).not.toMatch(/^\s*tags:/m);
   });
 

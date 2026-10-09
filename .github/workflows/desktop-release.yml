@@ -461,6 +461,8 @@ jobs:
 
       - name: Publish to Cloudflare R2 + atomic latest.json
         env:
+          # Must match the macOS build matrix target. Generic .app.tar.gz is ARM only.
+          MACOS_ARCH: aarch64
           CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
           CLOUDFLARE_R2_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
           CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}

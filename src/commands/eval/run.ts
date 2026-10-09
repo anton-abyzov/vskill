@@ -167,6 +167,12 @@ export async function runEvalRun(skillDir: string, options?: EvalRunOptions): Pr
 
   await writeBenchmark(skillDir, benchmark);
   console.log(dim(`\nBenchmark written to ${skillDir}/evals/benchmark.json`));
+
+  // Preserve the report while making failed evaluations fail CI/scripts.
+  // A caller's existing nonzero status must survive even an all-pass run.
+  if ((failed > 0 || errors > 0) && Number(process.exitCode ?? 0) === 0) {
+    process.exitCode = 1;
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -93,7 +93,11 @@ const VALID_EVALS = {
 // ---------------------------------------------------------------------------
 
 describe("runEvalRun", () => {
+  let previousExitCode: typeof process.exitCode;
+
   beforeEach(() => {
+    previousExitCode = process.exitCode;
+    process.exitCode = undefined;
     vi.resetAllMocks();
     // 0857: vi.resetAllMocks() clears the hoisted createLlmClient factory impl —
     // re-establish it so each test gets a client whose model echoes any override.
@@ -111,6 +115,32 @@ describe("runEvalRun", () => {
       }
       return JSON.stringify(VALID_EVALS);
     });
+  });
+
+  afterEach(() => {
+    process.exitCode = previousExitCode;
+    vi.restoreAllMocks();
+  });
+
+  it.each([0, undefined, "0"])("sets a failing command exit code after failed assertions (initial %s)", async (initial) => {
+    process.exitCode = initial;
+    mocks.generate.mockResolvedValue({ text: JSON.stringify({ pass: false, reasoning: "fixture failure" }) });
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runEvalRun("/skills/test-skill", { noCache: true });
+
+    expect(process.exitCode).toBe(1);
+    expect(mocks.writeFileSync.mock.calls.some((call) => String(call[0]).endsWith("benchmark.json"))).toBe(true);
+  });
+
+  it.each([true, false])("preserves an existing failing exit code when assertions pass=%s", async (pass) => {
+    process.exitCode = 9;
+    mocks.generate.mockResolvedValue({ text: JSON.stringify({ pass, reasoning: "fixture result" }) });
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runEvalRun("/skills/test-skill", { noCache: true });
+
+    expect(process.exitCode).toBe(9);
   });
 
   it("prints results table on success", async () => {
@@ -168,6 +198,7 @@ describe("runEvalRun", () => {
     const writtenContent = JSON.parse(benchmarkWrite![1] as string);
     expect(writtenContent.skill_name).toBe("test-skill");
     expect(writtenContent.cases).toHaveLength(2);
+    expect(process.exitCode ?? 0).toBe(0);
 
     vi.restoreAllMocks();
   });
@@ -194,6 +225,7 @@ describe("runEvalRun", () => {
     expect(writtenContent.cases[0].status).toBe("error");
     expect(writtenContent.cases[0].error_message).toContain("API timeout");
     expect(writtenContent.cases[1].status).toBe("pass");
+    expect(process.exitCode).toBe(1);
 
     vi.restoreAllMocks();
   });

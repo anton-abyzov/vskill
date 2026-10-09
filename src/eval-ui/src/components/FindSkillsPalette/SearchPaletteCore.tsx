@@ -1,3 +1,4 @@
+import { sendStudioTelemetry } from "../../utils/studio-telemetry";
 // 0741 + 0751: SearchPaletteCore — eval-ui native command palette.
 //
 // Originally ported from vskill-platform/src/app/components/SearchPalette.tsx.
@@ -518,16 +519,7 @@ export default function SearchPaletteCore({
   ];
 
   const fireTelemetry = useCallback((skillName: string) => {
-    try {
-      fetch(telemetrySelectUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skillName, q: queryRef.current.trim(), ts: Date.now() }),
-        keepalive: true,
-      }).catch(() => { /* telemetry is fire-and-forget */ });
-    } catch {
-      /* telemetry never blocks navigation */
-    }
+    void sendStudioTelemetry(telemetrySelectUrl, { skillName, ts: Date.now() });
   }, [telemetrySelectUrl]);
 
   const navigate = useCallback((href: string, sourceResult?: SearchResult) => {

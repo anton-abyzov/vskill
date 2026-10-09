@@ -27,6 +27,12 @@ vi.mock("../llm.js", () => ({
   createLlmClient: (...args: any[]) => mockCreateLlmClient(...args),
 }));
 
+// Never start a real browser in unit tests; assert explicit headless behavior.
+const mockLaunch = vi.hoisted(() => vi.fn());
+const mockPersistent = vi.hoisted(() => vi.fn());
+const mockClose = vi.hoisted(() => vi.fn());
+vi.mock("playwright", () => ({ chromium: { launch: mockLaunch, launchPersistentContext: mockPersistent } }));
+
 // Mock require.resolve for Playwright check
 const originalResolve = require.resolve;
 
@@ -68,6 +74,9 @@ function makeOpts(overrides?: Partial<IntegrationRunOpts>): IntegrationRunOpts {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockClose.mockResolvedValue(undefined);
+  mockLaunch.mockResolvedValue({ newContext: vi.fn().mockResolvedValue({}), close: mockClose });
+  mockPersistent.mockResolvedValue({ close: mockClose });
   mockResolveAllCredentials.mockReturnValue([
     { name: "X_API_KEY", status: "ready", source: "env" },
   ]);
@@ -90,6 +99,17 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("runIntegrationCase", () => {
+  it.each([false, true])("keeps integration tools and text-only judging; headless profile=%s", async (profile) => {
+    const requirements = profile ? { chromeProfile: "Profile 1" } : {};
+    const result = await runIntegrationCase(makeEvalCase({ requirements }), makeOpts({ dryRun: false }));
+    expect(result.overallPass).toBe(true);
+    expect(mockCreateLlmClient).toHaveBeenNthCalledWith(1, { allowTools: true });
+    expect(mockCreateLlmClient).toHaveBeenNthCalledWith(2);
+    if (profile) expect(mockPersistent).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ headless: true }));
+    else expect(mockLaunch).toHaveBeenCalledWith({ headless: true });
+    expect(mockClose).toHaveBeenCalledOnce();
+  });
+
   it("executes all 5 phases in dry-run mode (TC-075, TC-076)", async () => {
     const result = await runIntegrationCase(makeEvalCase(), makeOpts());
 

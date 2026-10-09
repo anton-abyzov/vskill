@@ -82,6 +82,44 @@ describe("keychain", () => {
     vi.restoreAllMocks();
   });
 
+  it("clears canonical and legacy GitHub tokens from every readable backend", () => {
+    const kr = fakeKeyring();
+    const fsState = fakeFs();
+    const fallbackPath = "/tmp/vskill-test-keys.env";
+    const k = createKeychain({
+      keyring: kr,
+      fs: makeFsAdapter(fsState),
+      fallbackPath,
+      warn: vi.fn(),
+    });
+    kr.store.set("com.verifiedskill.desktop::github-oauth-token", "fixture-current");
+    kr.store.set("vskill-github::github_token", "fixture-legacy");
+    fsState.files.set(fallbackPath, {
+      content: "github-oauth-token=fixture-current\ngithub_token=fixture-legacy\nOTHER=keep\n",
+      mode: 0o600,
+    });
+
+    expect(k.clearGitHubToken()).toBe(true);
+    expect(k.getGitHubToken()).toBeNull();
+    expect(kr.store.size).toBe(0);
+    const remaining = fsState.files.get(fallbackPath)?.content ?? "";
+    expect(remaining).toContain("OTHER=keep\n");
+    expect(remaining).not.toContain("github-oauth-token=");
+    expect(remaining).not.toContain("github_token=");
+    expect(k.clearGitHubToken()).toBe(false);
+  });
+
+  it("clears a legacy-only fallback when the keyring is unavailable", () => {
+    const fsState = fakeFs();
+    const fallbackPath = "/tmp/vskill-test-legacy-keys.env";
+    fsState.files.set(fallbackPath, { content: "github_token=fixture-legacy\n", mode: 0o600 });
+    const k = createKeychain({ keyring: null, fs: makeFsAdapter(fsState), fallbackPath });
+
+    expect(k.clearGitHubToken()).toBe(true);
+    expect(k.getGitHubToken()).toBeNull();
+    expect(fsState.files.has(fallbackPath)).toBe(false);
+  });
+
   it("stores and retrieves GitHub token via keyring backend", () => {
     const kr = fakeKeyring();
     const fsState = fakeFs();

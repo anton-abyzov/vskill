@@ -1,10 +1,10 @@
 ---
 name: sql-formatter
 description: "Format SQL queries into canonical, readable form. Activate when the user asks to format, prettify, normalize, or clean up SQL."
-version: "1.0.0"
 allowed-tools: Read, Write, Edit
 model: sonnet
 metadata:
+  version: "1.0.0"
   tags:
     - devtools
     - cli

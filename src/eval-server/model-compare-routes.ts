@@ -56,7 +56,9 @@ export function registerModelCompareRoutes(router: Router, rootArg: string | (()
       if (aborted) return;
       sendSSE(res, "model_a_start", { model: body.modelA });
 
-      const clientA = createLlmClient(body.modelA);
+      // Pick public fields explicitly: request JSON must never enable internal
+      // client privileges such as allowTools, even when it has extra properties.
+      const clientA = createLlmClient({ provider: body.modelA.provider, model: body.modelA.model });
       const resultA = await clientA.generate(systemPrompt, evalCase.prompt);
       const totalTokensA = resultA.inputTokens != null && resultA.outputTokens != null
         ? resultA.inputTokens + resultA.outputTokens
@@ -86,7 +88,7 @@ export function registerModelCompareRoutes(router: Router, rootArg: string | (()
       if (aborted) return;
       sendSSE(res, "model_b_start", { model: body.modelB });
 
-      const clientB = createLlmClient(body.modelB);
+      const clientB = createLlmClient({ provider: body.modelB.provider, model: body.modelB.model });
       const resultB = await clientB.generate(systemPrompt, evalCase.prompt);
       const totalTokensB = resultB.inputTokens != null && resultB.outputTokens != null
         ? resultB.inputTokens + resultB.outputTokens

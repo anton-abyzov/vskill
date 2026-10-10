@@ -33,6 +33,7 @@ const { versionsCommand } = await import("../../commands/versions.js");
 const { infoCommand } = await import("../../commands/info.js");
 const { submitCommand } = await import("../../commands/submit.js");
 const { diffCommand } = await import("../../commands/diff.js");
+const { checkSubmissionRepo } = await import("../../eval-server/submission-guard.js");
 
 const PRIVATE_MARKERS = ["secret-skills", "greet", "weird-skill", GITHUB_TOKEN];
 
@@ -206,6 +207,29 @@ describe("submit", () => {
     );
     expect(platformCalls()).toEqual([]);
     expect(stderr).toMatch(/nothing was submitted/);
+  });
+});
+
+// 0874 AC-06: Studio publish goes through the eval-server proxy, which asks
+// the same fail-closed question before forwarding a submission.
+describe("Studio publish (submission guard)", () => {
+  it("refuses a private repo and makes no platform call", async () => {
+    const refusal = await checkSubmissionRepo("https://github.com/acme/secret-skills");
+    expect(refusal).toMatchObject({ status: 422, error: "private_repository" });
+    expect(refusal?.message).toMatch(/nothing was submitted/);
+    expect(platformCalls()).toEqual([]);
+  });
+
+  it("refuses a repo GitHub cannot confirm while rate-limited", async () => {
+    openRepoMode = "rate_limited";
+    const refusal = await checkSubmissionRepo("https://github.com/acme/open-skills");
+    expect(refusal).toMatchObject({ status: 422, error: "private_repository" });
+    expect(platformCalls()).toEqual([]);
+  });
+
+  it("lets a confirmed public repo through", async () => {
+    expect(await checkSubmissionRepo("git@github.com:acme/open-skills.git")).toBeNull();
+    expect(platformCalls()).toEqual([]);
   });
 });
 

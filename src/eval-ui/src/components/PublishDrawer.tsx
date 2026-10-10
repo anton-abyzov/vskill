@@ -22,6 +22,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type SubmitToQueueResult } from "../api";
+import { isSubmissionRefusal } from "../submission-queue";
 import { buildSubmitUrlFromRemote, normalizeRemoteUrl } from "../utils/normalizeRemoteUrl";
 import { openExternalUrlViaDesktop } from "../preferences/lib/useDesktopBridge";
 import { useTier } from "../hooks/useTier";
@@ -37,9 +38,12 @@ type Privacy = "public" | "private" | "decide-later";
 // 0856: structured, in-app submit outcome — drives the inline result block so
 // a submit NEVER looks like it "did nothing". Mirrors SubmitToQueueResult plus
 // a website-fallback variant for the not-logged-in / unknown-skill path.
+// 0874 AC-06: `notSubmitted` carries why nothing was sent (private or
+// unconfirmed repo); it gets no website link and no sign-in prompt.
 type SubmitOutcome =
   | { ok: true; result: SubmitToQueueResult; submitUrl: string }
-  | { ok: false; websiteUrl: string };
+  | { ok: false; websiteUrl: string }
+  | { ok: false; notSubmitted: string };
 
 function emitToast(message: string, severity: "info" | "error"): void {
   if (typeof window === "undefined") return;
@@ -247,7 +251,14 @@ export function PublishDrawer({
             privacy: privacyChoice,
             tenantId,
           });
-        } catch {
+        } catch (err) {
+          // 0874 AC-06: the repo is private or could not be confirmed public,
+          // so nothing was sent. Say so; the website or a sign-in would not help.
+          if (isSubmissionRefusal(err)) {
+            setOutcome({ ok: false, notSubmitted: err.message });
+            emitToast(`Pushed ${shortSha} on ${branch}${reconciledNote}. Not submitted to verified-skill.com.`, "info");
+            return;
+          }
           // The push already SUCCEEDED — only the in-app queue submit failed,
           // almost always because the user isn't signed in to verified-skill
           // (401) or is offline. A push success must NEVER read as "Publish
@@ -894,6 +905,23 @@ function SubmitOutcomeBlock({
   border,
   textMuted,
 }: SubmitOutcomeBlockProps): React.ReactElement {
+  // 0874 AC-06: refused before submit (private or unconfirmed repo).
+  if (!outcome.ok && "notSubmitted" in outcome) {
+    return (
+      <div
+        role="status"
+        data-testid="publish-outcome"
+        data-outcome="not-submitted"
+        style={outcomeBoxStyle(border, "#F59E0B")}
+      >
+        <strong style={{ fontWeight: 600, color: "#F59E0B" }}>Pushed to GitHub.</strong>{" "}
+        <span style={{ color: textMuted }}>
+          Nothing was submitted to verified-skill.com. {outcome.notSubmitted}
+        </span>
+      </div>
+    );
+  }
+
   // Website fallback (not logged in / non-github remote / unknown skill).
   if (!outcome.ok) {
     return (

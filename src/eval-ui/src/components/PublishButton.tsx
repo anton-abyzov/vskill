@@ -13,6 +13,7 @@
 
 import { useCallback, useState } from "react";
 import { api } from "../api";
+import { isSubmissionRefusal } from "../submission-queue";
 import { buildSubmitUrlFromRemote, normalizeRemoteUrl } from "../utils/normalizeRemoteUrl";
 import { openExternalUrlViaDesktop } from "../preferences/lib/useDesktopBridge";
 import { PublishDrawer } from "./PublishDrawer";
@@ -108,14 +109,23 @@ export function PublishButton({ remoteUrl, provider, model, skillName, skillPath
           repoUrl = null;
         }
         if (repoUrl) {
-          const submitRes = await api.submitToQueue({
-            repoUrl,
-            skillName,
-            skillPath,
-            source: "studio-submit",
-            privacy: privacy ?? "public",
-            tenantId,
-          });
+          let submitRes: import("../api").SubmitToQueueResult;
+          try {
+            submitRes = await api.submitToQueue({
+              repoUrl,
+              skillName,
+              skillPath,
+              source: "studio-submit",
+              privacy: privacy ?? "public",
+              tenantId,
+            });
+          } catch (err) {
+            // 0874 AC-06: private or unconfirmed repo — the push stands,
+            // nothing was sent, and no website or sign-in is offered.
+            if (!isSubmissionRefusal(err)) throw err;
+            emitToast(`Pushed ${shortSha} on ${branch}. Not submitted to verified-skill.com: ${err.message}`, "info");
+            return;
+          }
           emitToast(submitToastMessage(submitRes, skillName, shortSha, branch), "info");
         } else {
           // Non-normalizable remote (e.g. GitLab/self-hosted). The push already

@@ -1,6 +1,8 @@
 // API client for the eval server
 import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel, VersionEntry, VersionDiff, AgentsResponse, StudioOp, Provenance, TransferEvent, SkillScope, SkillGroup, SkillSource, DetectEnginesResponse } from "./types";
 import { resolveSkillVersion } from "./version-resolver.js";
+import type { SubmissionListResponse, SubmissionPositionsResponse, SubmitToQueueBody, SubmitToQueueResult } from "./submission-queue";
+import { rethrowSubmissionRefusal } from "./submission-queue";
 
 // ---------------------------------------------------------------------------
 // 0707 T-025: backend envelope types for the four hardened studio endpoints.
@@ -99,80 +101,15 @@ export function deriveScopeSource(scope: SkillScope): SkillSource {
   return scope.slice(idx + 1) as SkillSource;
 }
 
-// ---------------------------------------------------------------------------
-// 0856 — In-app submission queue DTOs.
-//
-// Source of truth: vskill-platform `/api/v1/submissions` (POST + GET) and
-// `/api/v1/submissions/positions`. Mirrored here so eval-ui compiles
-// standalone (same pattern as the tenant DTOs below). These ride the
-// eval-server platform proxy (`/api/v1/submissions` is in PROXY_PREFIXES),
-// so the WebView issues same-origin relative requests and the X-Studio-Token
-// bridge handles auth — no token plumbing in the UI.
-// ---------------------------------------------------------------------------
-
-/** Terminal + transient submission states (mirror of platform SubmissionState). */
-export type SubmissionState =
-  | "RECEIVED"
-  | "TIER1_SCANNING"
-  | "TIER1_FAILED"
-  | "TIER2_SCANNING"
-  | "AUTO_APPROVED"
-  | "PUBLISHED"
-  | "REJECTED"
-  | "VENDOR_APPROVED"
-  | "DEQUEUED"
-  | "RESCAN_REQUIRED"
-  | "EXPANDED"
-  | "BLOCKED";
-
-/** One row in the GET /api/v1/submissions list response. */
-export interface SubmissionRow {
-  id: string;
-  skillName: string;
-  repoUrl: string;
-  state: SubmissionState | string;
-  priority?: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** GET /api/v1/submissions response envelope (subset the Studio consumes). */
-export interface SubmissionListResponse {
-  submissions: SubmissionRow[];
-  total?: number;
-  /** Map of submissionId → queue position. Present on the active feed. */
-  queuePositions?: Record<string, number> | null;
-}
-
-/** POST /api/v1/submissions body for a single-skill in-app submit. */
-export interface SubmitToQueueBody {
-  repoUrl: string;
-  skillName: string;
-  skillPath?: string;
-  /** Free-form attribution string, e.g. "studio-submit". */
-  source?: string;
-  privacy?: "public" | "private" | "decide-later" | string;
-  /** Required by the platform when privacy === "private". */
-  tenantId?: string;
-}
-
-/**
- * Discriminated outcomes of POST /api/v1/submissions (single-skill path).
- * The platform returns a different flat JSON body per branch — the UI renders
- * a structured inline outcome from this so a submit never looks like a no-op.
- */
-export type SubmitToQueueResult =
-  | { kind: "created"; id: string; skillName: string; skillPath: string; state: string; createdAt: string }
-  | { kind: "duplicate"; id: string; state: string }
-  | { kind: "alreadyVerified"; skillId?: string; skillName?: string }
-  | { kind: "requeued"; id: string; state: string }
-  | { kind: "blocked"; submissionId: string };
-
-/** GET /api/v1/submissions/positions response. */
-export interface SubmissionPositionsResponse {
-  positions: Record<string, number>;
-  total: number;
-}
+// 0856 submission queue DTOs live in submission-queue.ts (re-exported here).
+export type {
+  SubmissionState,
+  SubmissionRow,
+  SubmissionListResponse,
+  SubmitToQueueBody,
+  SubmitToQueueResult,
+  SubmissionPositionsResponse,
+} from "./submission-queue";
 
 const BASE = "";
 
@@ -1459,7 +1396,7 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    });
+    }).catch(rethrowSubmissionRefusal);
     // The platform returns mutually-exclusive flags per branch. Order matters:
     // check the explicit flags before the bare-created shape.
     if (raw.alreadyVerified === true) {

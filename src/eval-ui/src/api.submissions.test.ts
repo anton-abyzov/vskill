@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { api, ApiError } from "./api";
+import { SubmissionRefusedError, isSubmissionRefusal } from "./submission-queue";
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
@@ -105,6 +106,41 @@ describe("api.submitToQueue", () => {
       expect(e).toBeInstanceOf(ApiError);
       expect((e as ApiError).details).toMatchObject({ error: "Validation failed" });
     }
+  });
+});
+
+describe("api.submitToQueue — not submitted (0874)", () => {
+  it("a local 422 private_repository refusal throws a typed SubmissionRefusedError", async () => {
+    mockFetch.mockResolvedValue(
+      errJson(422, {
+        error: "private_repository",
+        message: "acme/secret is private, or GitHub could not confirm it is public. Nothing was submitted.",
+      }),
+    );
+    const err = await api.submitToQueue({ repoUrl: "https://github.com/acme/secret", skillName: "x" }).catch((e) => e);
+    expect(err).toBeInstanceOf(SubmissionRefusedError);
+    expect(isSubmissionRefusal(err)).toBe(true);
+    expect(err).toMatchObject({ code: "private_repository", status: 422 });
+    expect(err.message).toContain("acme/secret is private");
+  });
+
+  it("a local 422 unsupported_repository refusal is typed too", async () => {
+    mockFetch.mockResolvedValue(errJson(422, { error: "unsupported_repository", message: "Not on GitHub." }));
+    const err = await api.submitToQueue({ repoUrl: "x", skillName: "x" }).catch((e) => e);
+    expect(isSubmissionRefusal(err)).toBe(true);
+    expect(err.code).toBe("unsupported_repository");
+  });
+
+  it("an unrelated 422 or a 401 stays a plain ApiError", async () => {
+    mockFetch.mockResolvedValue(errJson(422, { error: "Validation failed" }));
+    const err422 = await api.submitToQueue({ repoUrl: "x", skillName: "x" }).catch((e) => e);
+    expect(err422).toBeInstanceOf(ApiError);
+    expect(isSubmissionRefusal(err422)).toBe(false);
+
+    mockFetch.mockResolvedValue(errJson(401, { error: "unauthorized" }));
+    const err401 = await api.submitToQueue({ repoUrl: "x", skillName: "x" }).catch((e) => e);
+    expect(err401).toBeInstanceOf(ApiError);
+    expect(isSubmissionRefusal(err401)).toBe(false);
   });
 });
 

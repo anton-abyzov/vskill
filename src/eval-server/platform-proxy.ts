@@ -52,6 +52,7 @@ import * as http from "node:http";
 import * as https from "node:https";
 import { randomUUID } from "node:crypto";
 import { getDefaultKeychain } from "../lib/keychain.js";
+import { isSubmissionCreate, screenSubmission, sendSubmissionRefusal } from "./submission-guard.js";
 
 const DEFAULT_PLATFORM_URL = "https://verified-skill.com";
 
@@ -324,10 +325,30 @@ function isSseDebugEnabled(): boolean {
  *   When the flag is unset (or "0"), no per-request logs and no header
  *   injection — preserves the production hot path.
  */
-export function proxyToPlatform(
+export async function proxyToPlatform(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   baseUrl: string = getPlatformBaseUrl(),
+): Promise<void> {
+  // 0874 AC-06: a submission for a private or unconfirmed repo is answered
+  // here and never reaches the platform (see submission-guard.ts). A confirmed
+  // public one is forwarded with the buffered body, byte for byte.
+  if (isSubmissionCreate(req.method, req.url)) {
+    const screen = await screenSubmission(req);
+    if ("refusal" in screen) {
+      sendSubmissionRefusal(res, screen.refusal);
+      return;
+    }
+    return forwardToPlatform(req, res, baseUrl, screen.body);
+  }
+  return forwardToPlatform(req, res, baseUrl);
+}
+
+function forwardToPlatform(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  baseUrl: string,
+  bufferedBody?: Buffer,
 ): Promise<void> {
   return new Promise((resolve) => {
     const target = new URL(req.url ?? "/", baseUrl);
@@ -433,8 +454,13 @@ export function proxyToPlatform(
     // Forward the request body (if any) — req is a readable stream.
     // Contract: callers MUST NOT pre-read the body before reaching this
     // proxy, otherwise pipe sends nothing. No middleware in eval-server
-    // currently does, but new ones must respect this.
-    req.pipe(upstreamReq);
+    // currently does, but new ones must respect this. The submission guard
+    // is the one reader: it hands over the body it buffered.
+    if (bufferedBody) {
+      upstreamReq.end(bufferedBody);
+    } else {
+      req.pipe(upstreamReq);
+    }
   });
 }
 

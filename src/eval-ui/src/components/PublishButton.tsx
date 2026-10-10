@@ -17,6 +17,7 @@ import { isSubmissionRefusal } from "../submission-queue";
 import { buildSubmitUrlFromRemote, normalizeRemoteUrl } from "../utils/normalizeRemoteUrl";
 import { openExternalUrlViaDesktop } from "../preferences/lib/useDesktopBridge";
 import { PublishDrawer } from "./PublishDrawer";
+import { HOSTED_PRIVATE_PUBLISHING_AVAILABLE } from "../hosted-publishing";
 
 function emitToast(message: string, severity: "info" | "error"): void {
   if (typeof window === "undefined") return;
@@ -116,8 +117,9 @@ export function PublishButton({ remoteUrl, provider, model, skillName, skillPath
               skillName,
               skillPath,
               source: "studio-submit",
-              privacy: privacy ?? "public",
-              tenantId,
+              // 0874 AC-07: public only, with no tenant, while the gate is closed.
+              privacy: HOSTED_PRIVATE_PUBLISHING_AVAILABLE ? (privacy ?? "public") : "public",
+              tenantId: HOSTED_PRIVATE_PUBLISHING_AVAILABLE ? tenantId : undefined,
             });
           } catch (err) {
             // 0874 AC-06: private or unconfirmed repo — the push stands,

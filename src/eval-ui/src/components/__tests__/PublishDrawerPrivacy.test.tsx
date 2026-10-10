@@ -7,6 +7,10 @@
 //   - FREE: the PRIVATE option is LOCKED with an inline "Upgrade to publish
 //     privately" CTA; submitting still sends privacy:'public'.
 //   - PRO:  PRIVATE is selectable; submitToQueue receives privacy:'private'.
+//
+// 0874 AC-07: that behaviour applies only while hosted private publishing is
+// open. The three original tests run with the launch gate mocked open; the
+// closed-gate block below covers what ships today.
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -38,17 +42,27 @@ vi.mock("../../hooks/useTier", () => ({
   PRICING_URL: "https://verified-skill.com/pricing",
 }));
 
+// Launch gate — switch open/closed per test via the mutable holder.
+const gateMock = vi.hoisted(() => ({ open: true }));
+vi.mock("../../hosted-publishing", () => ({
+  get HOSTED_PRIVATE_PUBLISHING_AVAILABLE() {
+    return gateMock.open;
+  },
+  HOSTED_WAITLIST_URL: "https://verified-skill.com/pricing#hosted-waitlist",
+}));
+
 // Stub the paywall — it pulls in QuotaContext + the desktop bridge, which are
 // out of scope here. We only assert that the locked PRIVATE option opens it.
 vi.mock("../PaywallModal", () => ({
-  PaywallModal: ({ open }: { open: boolean }) => {
+  PaywallModal: ({ open, context }: { open: boolean; context?: string }) => {
     if (!open) return null;
     const React = require("react");
-    return React.createElement("div", { "data-testid": "paywall-modal" }, "Paywall");
+    return React.createElement("div", { "data-testid": "paywall-modal", "data-context": context }, "Paywall");
   },
 }));
 
 import { PublishDrawer } from "../PublishDrawer";
+import { SubmissionRefusedError } from "../../submission-queue";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -64,6 +78,7 @@ beforeEach(() => {
   mockOpenExternal.mockClear();
   tierMock.isFree = true;
   tierMock.isPro = false;
+  gateMock.open = true;
   onClose = vi.fn();
 });
 
@@ -151,6 +166,7 @@ describe("PublishDrawer privacy chooser (0874)", () => {
     });
     expect(locked?.getAttribute("aria-checked")).toBe("false");
     expect(container.querySelector('[data-testid="paywall-modal"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="paywall-modal"]')?.getAttribute("data-context")).toBe("publish");
     // Public stays selected.
     expect(
       container.querySelector('[data-testid="publish-privacy-public"]')?.getAttribute("aria-checked"),
@@ -205,5 +221,111 @@ describe("PublishDrawer privacy chooser (0874)", () => {
     });
     expect(mockSubmitToQueue).toHaveBeenCalledTimes(1);
     expect(mockSubmitToQueue.mock.calls[0][0]).toMatchObject({ privacy: "private" });
+  });
+});
+
+describe("PublishDrawer privacy chooser, launch gate closed (0874 AC-07)", () => {
+  async function renderDrawer(props: Partial<React.ComponentProps<typeof PublishDrawer>> = {}) {
+    await act(async () => {
+      root.render(
+        <PublishDrawer
+          remoteUrl="git@github.com:owner/repo.git"
+          fileCount={1}
+          onClose={onClose}
+          defaultMode="manual"
+          skillName="greet"
+          {...props}
+        />,
+      );
+      await flush();
+    });
+  }
+
+  async function commit() {
+    await act(async () => {
+      reactTypeInto(findTextarea(), "feat: greet");
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+  }
+
+  for (const tier of ["free", "pro"] as const) {
+    it(`${tier.toUpperCase()}: Public is selected, Private cannot be selected and offers the waitlist, no paywall`, async () => {
+      gateMock.open = false;
+      tierMock.isFree = tier === "free";
+      tierMock.isPro = tier === "pro";
+      await renderDrawer();
+
+      expect(
+        container.querySelector('[data-testid="publish-privacy-public"]')?.getAttribute("aria-checked"),
+      ).toBe("true");
+      const unavailable = container.querySelector('[data-testid="publish-privacy-unavailable"]');
+      expect(unavailable).toBeTruthy();
+      expect(unavailable?.getAttribute("aria-disabled")).toBe("true");
+      expect(unavailable?.textContent).toContain("not open yet");
+      // Neither the selectable nor the paywall-locked Private option renders.
+      expect(container.querySelector('[data-testid="publish-privacy-private"]')).toBeNull();
+      expect(container.querySelector('[data-testid="publish-privacy-locked"]')).toBeNull();
+      expect(container.textContent).not.toContain("Upgrade to publish privately");
+      // Decide later is gone while the gate is closed.
+      expect(container.querySelector('[data-testid="publish-privacy-decide-later"]')).toBeNull();
+
+      // Clicking the card selects nothing; the waitlist link opens the pricing waitlist.
+      await act(async () => {
+        (unavailable as HTMLElement).click();
+        await flush();
+      });
+      expect(
+        container.querySelector('[data-testid="publish-privacy-public"]')?.getAttribute("aria-checked"),
+      ).toBe("true");
+      await act(async () => {
+        (container.querySelector('[data-testid="publish-privacy-waitlist"]') as HTMLButtonElement).click();
+        await flush();
+      });
+      expect(mockOpenExternal).toHaveBeenCalledWith("https://verified-skill.com/pricing#hosted-waitlist");
+      expect(container.querySelector('[data-testid="paywall-modal"]')).toBeNull();
+    });
+  }
+
+  it("submit sends privacy 'public' and no tenantId, even when the host asked for private", async () => {
+    gateMock.open = false;
+    tierMock.isFree = false;
+    tierMock.isPro = true;
+    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
+    mockSubmitToQueue.mockResolvedValueOnce(CREATED);
+    await renderDrawer({ privacy: "private", tenantId: "t-1" });
+
+    expect(
+      container.querySelector('[data-testid="publish-privacy-public"]')?.getAttribute("aria-checked"),
+    ).toBe("true");
+    await commit();
+
+    expect(mockSubmitToQueue).toHaveBeenCalledTimes(1);
+    const body = mockSubmitToQueue.mock.calls[0][0];
+    expect(body.privacy).toBe("public");
+    expect(body.tenantId).toBeUndefined();
+  });
+
+  it("a platform 503 private_publishing_unavailable reads as not submitted, not the sign-in fallback", async () => {
+    gateMock.open = false;
+    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
+    mockSubmitToQueue.mockRejectedValueOnce(
+      new SubmissionRefusedError(
+        "private_publishing_unavailable",
+        "Hosted private publishing is not available yet. Keep private skills local.",
+        503,
+      ),
+    );
+    await renderDrawer();
+    await commit();
+
+    const outcome = container.querySelector('[data-testid="publish-outcome"]');
+    expect(outcome?.getAttribute("data-outcome")).toBe("not-submitted");
+    expect(outcome?.textContent).toContain("Hosted private publishing is not available yet.");
+    expect(container.querySelector('[data-testid="publish-open-website"]')).toBeNull();
+    expect(container.textContent?.toLowerCase()).not.toContain("sign in");
   });
 });

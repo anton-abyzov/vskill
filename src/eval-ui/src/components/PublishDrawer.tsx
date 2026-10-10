@@ -28,6 +28,7 @@ import { openExternalUrlViaDesktop } from "../preferences/lib/useDesktopBridge";
 import { useTier } from "../hooks/useTier";
 import { useAgentCatalog } from "../hooks/useAgentCatalog";
 import { PaywallModal } from "./PaywallModal";
+import { HOSTED_PRIVATE_PUBLISHING_AVAILABLE, HOSTED_WAITLIST_URL } from "../hosted-publishing";
 
 type Mode = "manual" | "ai";
 
@@ -111,6 +112,11 @@ export function PublishDrawer({
   const [privacyChoice, setPrivacyChoice] = useState<Privacy>(privacy ?? "public");
   const [paywallOpen, setPaywallOpen] = useState(false);
   const { isFree } = useTier();
+  // 0874 AC-07: while hosted private publishing is closed, every submission
+  // is public and carries no tenant, whatever the host or the chooser says.
+  const gateOpen = HOSTED_PRIVATE_PUBLISHING_AVAILABLE;
+  const submitPrivacy: Privacy = gateOpen ? privacyChoice : "public";
+  const submitTenantId = gateOpen ? tenantId : undefined;
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   // 0856: inline submit outcome — when set, the drawer shows the result block
@@ -248,8 +254,8 @@ export function PublishDrawer({
             skillName,
             skillPath,
             source: "studio-submit",
-            privacy: privacyChoice,
-            tenantId,
+            privacy: submitPrivacy,
+            tenantId: submitTenantId,
           });
         } catch (err) {
           // 0874 AC-06: the repo is private or could not be confirmed public,
@@ -291,7 +297,7 @@ export function PublishDrawer({
     } finally {
       setPublishing(false);
     }
-  }, [message, publishing, remoteUrl, skillName, skillPath, privacyChoice, tenantId]);
+  }, [message, publishing, remoteUrl, skillName, skillPath, submitPrivacy, submitTenantId]);
 
   const openWebsite = useCallback((url: string) => {
     // Reuse the tiered desktop shell-open seam (Tauri invoke → sidecar →
@@ -490,10 +496,12 @@ export function PublishDrawer({
           {/* ── Privacy chooser (0874) ────────────────────────────── */}
           <span style={labelStyle}>Visibility</span>
           <PrivacyChooser
-            value={privacyChoice}
+            value={submitPrivacy}
             onChange={setPrivacyChoice}
             isFree={isFree}
+            gateOpen={gateOpen}
             onUpgrade={() => setPaywallOpen(true)}
+            onWaitlist={() => openWebsite(HOSTED_WAITLIST_URL)}
             disabled={publishing}
             border={MODAL_BORDER}
             text={MODAL_TEXT}
@@ -768,6 +776,7 @@ export function PublishDrawer({
         onClose={() => setPaywallOpen(false)}
         onProceed={() => setPrivacyChoice("private")}
         skillName={skillName}
+        context="publish"
       />
     </>
   );
@@ -781,13 +790,20 @@ export function PublishDrawer({
 // rendered as LOCKED with an inline "Upgrade to publish privately" CTA that
 // opens the paywall; paid users can select it. The modal's dark surface tokens
 // are threaded in so the chooser reads correctly in every host theme.
+//
+// 0874 AC-07: all of that applies only while hosted private publishing is
+// open. With the launch gate closed, for every tier, Private is shown but
+// cannot be selected and points to the waitlist, and "Decide later" is gone.
 // ---------------------------------------------------------------------------
 
 interface PrivacyChooserProps {
   value: Privacy;
   onChange: (next: Privacy) => void;
   isFree: boolean;
+  /** Mirrors HOSTED_PRIVATE_PUBLISHING_AVAILABLE. */
+  gateOpen: boolean;
   onUpgrade: () => void;
+  onWaitlist: () => void;
   disabled?: boolean;
   border: string;
   text: string;
@@ -799,7 +815,9 @@ function PrivacyChooser({
   value,
   onChange,
   isFree,
+  gateOpen,
   onUpgrade,
+  onWaitlist,
   disabled,
   border,
   text,
@@ -839,7 +857,26 @@ function PrivacyChooser({
         <span style={hint}>Visible to everyone on verified-skill.com.</span>
       </button>
 
-      {isFree ? (
+      {!gateOpen ? (
+        // Hosted private publishing is not open: shown, never selectable.
+        <div
+          aria-disabled="true"
+          data-testid="publish-privacy-unavailable"
+          style={{ ...segment(false), cursor: "default", opacity: 0.85 }}
+        >
+          <span style={title}>🔒 Private</span>
+          <span style={hint}>Hosted private publishing is not open yet.</span>
+          <button
+            type="button"
+            data-testid="publish-privacy-waitlist"
+            onClick={() => !disabled && onWaitlist()}
+            disabled={disabled}
+            style={{ ...outcomeLinkStyle(), fontSize: 10.5, alignSelf: "flex-start" }}
+          >
+            Join the waitlist ↗
+          </button>
+        </div>
+      ) : isFree ? (
         // Locked PRIVATE — clicking opens the paywall instead of selecting it.
         <button
           type="button"
@@ -868,18 +905,20 @@ function PrivacyChooser({
         </button>
       )}
 
-      <button
-        type="button"
-        role="radio"
-        aria-checked={value === "decide-later"}
-        data-testid="publish-privacy-decide-later"
-        onClick={() => !disabled && onChange("decide-later")}
-        disabled={disabled}
-        style={segment(value === "decide-later")}
-      >
-        <span style={title}>Decide later</span>
-        <span style={hint}>Submit without choosing visibility yet.</span>
-      </button>
+      {gateOpen && (
+        <button
+          type="button"
+          role="radio"
+          aria-checked={value === "decide-later"}
+          data-testid="publish-privacy-decide-later"
+          onClick={() => !disabled && onChange("decide-later")}
+          disabled={disabled}
+          style={segment(value === "decide-later")}
+        >
+          <span style={title}>Decide later</span>
+          <span style={hint}>Submit without choosing visibility yet.</span>
+        </button>
+      )}
     </div>
   );
 }

@@ -45,8 +45,8 @@ export function QuotaGraceBanner({ forcedTone }: Props): ReactElement | null {
 
   const message =
     tone === "danger"
-      ? "Sign in to refresh your subscription. Some features will be locked until you reconnect."
-      : "Sync to verify your subscription — last synced 7 days ago.";
+      ? "Sign in to refresh your plan. Some features will be locked until you reconnect."
+      : "Sync to verify your plan — last synced 7 days ago.";
 
   return (
     <div

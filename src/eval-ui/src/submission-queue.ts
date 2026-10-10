@@ -90,9 +90,18 @@ export interface SubmissionPositionsResponse {
 // so callers show `message` instead of the sign-in / website fallback.
 // ---------------------------------------------------------------------------
 
-export type SubmissionRefusalCode = "private_repository" | "unsupported_repository";
+export type SubmissionRefusalCode =
+  | "private_repository"
+  | "unsupported_repository"
+  | "private_publishing_unavailable"
+  | "draft_persistence_unavailable";
 
 const LOCAL_REFUSAL_CODES: ReadonlySet<string> = new Set(["private_repository", "unsupported_repository"]);
+// verified-skill.com's launch-gate answers (see hosted-publishing.ts).
+const LAUNCH_GATE_CODES: ReadonlySet<string> = new Set([
+  "private_publishing_unavailable",
+  "draft_persistence_unavailable",
+]);
 
 export class SubmissionRefusedError extends Error {
   readonly code: string;
@@ -125,6 +134,9 @@ export function rethrowSubmissionRefusal(err: unknown): never {
   const message = typeof e?.details?.message === "string" ? e.details.message : "";
   if (e?.status === 422 && LOCAL_REFUSAL_CODES.has(code)) {
     throw new SubmissionRefusedError(code, message || "Nothing was submitted to verified-skill.com.", 422);
+  }
+  if (e?.status === 503 && LAUNCH_GATE_CODES.has(code)) {
+    throw new SubmissionRefusedError(code, message || "Hosted private publishing is not open yet.", 503);
   }
   throw err;
 }

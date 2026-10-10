@@ -131,6 +131,22 @@ describe("api.submitToQueue — not submitted (0874)", () => {
     expect(err.code).toBe("unsupported_repository");
   });
 
+  for (const code of ["private_publishing_unavailable", "draft_persistence_unavailable"]) {
+    it(`a platform 503 ${code} throws a typed refusal carrying the platform's message`, async () => {
+      mockFetch.mockResolvedValue(errJson(503, { error: code, message: "Hosted private publishing is not available yet." }));
+      const err = await api.submitToQueue({ repoUrl: "https://github.com/o/r", skillName: "x", privacy: "private" }).catch((e) => e);
+      expect(isSubmissionRefusal(err)).toBe(true);
+      expect(err).toMatchObject({ code, status: 503, message: "Hosted private publishing is not available yet." });
+    });
+  }
+
+  it("a 503 without a launch-gate code stays a plain ApiError", async () => {
+    mockFetch.mockResolvedValue(errJson(503, { error: "Service Unavailable" }));
+    const err = await api.submitToQueue({ repoUrl: "https://github.com/o/r", skillName: "x" }).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(isSubmissionRefusal(err)).toBe(false);
+  });
+
   it("an unrelated 422 or a 401 stays a plain ApiError", async () => {
     mockFetch.mockResolvedValue(errJson(422, { error: "Validation failed" }));
     const err422 = await api.submitToQueue({ repoUrl: "x", skillName: "x" }).catch((e) => e);

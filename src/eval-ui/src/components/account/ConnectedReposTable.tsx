@@ -323,8 +323,8 @@ function SummaryChip({
             lineHeight: 1.4,
           }}
         >
-          Public repositories work on Free. Private repository connections
-          require Pro and GitHub App access.
+          {/* 0874 AC-08: connecting is not tier-gated; no plan claims here. */}
+          Connect public and private repositories through the GitHub App.
         </div>
       </div>
       {showConnectAction ? (
@@ -415,8 +415,7 @@ function EmptyState() {
         }}
       >
         Click the <strong style={{ color: "var(--text-primary)" }}>Connect GitHub App</strong>
-        {" "}button above. Install the app, pick the repos to share, then
-        Skill Studio syncs public repos on Free and private repos on Pro.
+        {" "}button above, install the app, then pick the repos to share.
       </div>
     </div>
   );

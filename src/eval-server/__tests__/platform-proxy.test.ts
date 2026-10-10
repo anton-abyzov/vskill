@@ -7,8 +7,17 @@
 // IncomingMessage / ServerResponse pair so we can assert the wire-level
 // behaviour without the full eval-server stack.
 // ---------------------------------------------------------------------------
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import * as http from "node:http";
+
+// 0874 AC-06: POST /api/v1/submissions is screened for repo visibility before
+// it is forwarded. These wire-level tests treat every repo as confirmed
+// public (no GitHub lookup); the guard itself is covered in
+// platform-proxy-submission-guard.test.ts.
+vi.mock("../../lib/private-source.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/private-source.js")>()),
+  isPrivateOrUnknownRepo: async () => false,
+}));
 import {
   proxyToPlatform,
   shouldProxyToPlatform,

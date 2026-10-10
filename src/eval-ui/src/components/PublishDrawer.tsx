@@ -22,11 +22,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type SubmitToQueueResult } from "../api";
+import { isSubmissionRefusal } from "../submission-queue";
 import { buildSubmitUrlFromRemote, normalizeRemoteUrl } from "../utils/normalizeRemoteUrl";
 import { openExternalUrlViaDesktop } from "../preferences/lib/useDesktopBridge";
 import { useTier } from "../hooks/useTier";
 import { useAgentCatalog } from "../hooks/useAgentCatalog";
 import { PaywallModal } from "./PaywallModal";
+import { HOSTED_PRIVATE_PUBLISHING_AVAILABLE, HOSTED_WAITLIST_URL } from "../hosted-publishing";
 
 type Mode = "manual" | "ai";
 
@@ -37,9 +39,12 @@ type Privacy = "public" | "private" | "decide-later";
 // 0856: structured, in-app submit outcome — drives the inline result block so
 // a submit NEVER looks like it "did nothing". Mirrors SubmitToQueueResult plus
 // a website-fallback variant for the not-logged-in / unknown-skill path.
+// 0874 AC-06: `notSubmitted` carries why nothing was sent (private or
+// unconfirmed repo); it gets no website link and no sign-in prompt.
 type SubmitOutcome =
   | { ok: true; result: SubmitToQueueResult; submitUrl: string }
-  | { ok: false; websiteUrl: string };
+  | { ok: false; websiteUrl: string }
+  | { ok: false; notSubmitted: string };
 
 function emitToast(message: string, severity: "info" | "error"): void {
   if (typeof window === "undefined") return;
@@ -107,6 +112,11 @@ export function PublishDrawer({
   const [privacyChoice, setPrivacyChoice] = useState<Privacy>(privacy ?? "public");
   const [paywallOpen, setPaywallOpen] = useState(false);
   const { isFree } = useTier();
+  // 0874 AC-07: while hosted private publishing is closed, every submission
+  // is public and carries no tenant, whatever the host or the chooser says.
+  const gateOpen = HOSTED_PRIVATE_PUBLISHING_AVAILABLE;
+  const submitPrivacy: Privacy = gateOpen ? privacyChoice : "public";
+  const submitTenantId = gateOpen ? tenantId : undefined;
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   // 0856: inline submit outcome — when set, the drawer shows the result block
@@ -244,17 +254,33 @@ export function PublishDrawer({
             skillName,
             skillPath,
             source: "studio-submit",
-            privacy: privacyChoice,
-            tenantId,
+            privacy: submitPrivacy,
+            tenantId: submitTenantId,
           });
-        } catch {
+        } catch (err) {
+          // 0874 AC-06: the repo is private or could not be confirmed public,
+          // so nothing was sent. Say so; the website or a sign-in would not help.
+          if (isSubmissionRefusal(err)) {
+            setOutcome({ ok: false, notSubmitted: err.message });
+            emitToast(`Pushed ${shortSha} on ${branch}${reconciledNote}. Not submitted to verified-skill.com.`, "info");
+            return;
+          }
           // The push already SUCCEEDED — only the in-app queue submit failed,
           // almost always because the user isn't signed in to verified-skill
           // (401) or is offline. A push success must NEVER read as "Publish
           // failed". Degrade to the website submit flow, which carries the
           // ?repo= URL param so the user can sign in there and finish in one
           // click (the prior browser-submit UX).
-          setOutcome({ ok: false, websiteUrl: websiteSubmitUrl(effectiveRemote) });
+          // 0874 AC-06: prefill ?repo= only when the eval-server guard has
+          // confirmed the repo public, which any HTTP answer except its own
+          // 413 proves. A network failure or an unscreened body gets the bare
+          // submit page, so a private repo URL never rides the query string.
+          const status = (err as { status?: unknown } | null)?.status;
+          const confirmedPublic = typeof status === "number" && status !== 413;
+          setOutcome({
+            ok: false,
+            websiteUrl: confirmedPublic ? websiteSubmitUrl(effectiveRemote) : BARE_SUBMIT_URL,
+          });
           emitToast(`Pushed ${shortSha} on ${branch}${reconciledNote} — sign in or finish on the website to submit`, "info");
           return;
         }
@@ -264,10 +290,10 @@ export function PublishDrawer({
         // Drawer stays open so the inline outcome is visible. The user closes
         // it explicitly via Done / Cancel.
       } else {
-        // No skill identity → website-open fallback (legacy behavior). Same
-        // guard: a non-github remote must not turn a successful push into
-        // "Publish failed".
-        setOutcome({ ok: false, websiteUrl: websiteSubmitUrl(effectiveRemote) });
+        // No skill identity → website-open fallback (legacy behavior). Nothing
+        // confirmed the repo public, so the bare submit page is offered
+        // (0874 AC-06): a private repo URL never rides the query string.
+        setOutcome({ ok: false, websiteUrl: BARE_SUBMIT_URL });
         emitToast(`Pushed ${shortSha} on ${branch}${reconciledNote} — open the website to submit`, "info");
       }
     } catch (err) {
@@ -280,7 +306,7 @@ export function PublishDrawer({
     } finally {
       setPublishing(false);
     }
-  }, [message, publishing, remoteUrl, skillName, skillPath, privacyChoice, tenantId]);
+  }, [message, publishing, remoteUrl, skillName, skillPath, submitPrivacy, submitTenantId]);
 
   const openWebsite = useCallback((url: string) => {
     // Reuse the tiered desktop shell-open seam (Tauri invoke → sidecar →
@@ -479,10 +505,12 @@ export function PublishDrawer({
           {/* ── Privacy chooser (0874) ────────────────────────────── */}
           <span style={labelStyle}>Visibility</span>
           <PrivacyChooser
-            value={privacyChoice}
+            value={submitPrivacy}
             onChange={setPrivacyChoice}
             isFree={isFree}
+            gateOpen={gateOpen}
             onUpgrade={() => setPaywallOpen(true)}
+            onWaitlist={() => openWebsite(HOSTED_WAITLIST_URL)}
             disabled={publishing}
             border={MODAL_BORDER}
             text={MODAL_TEXT}
@@ -757,6 +785,7 @@ export function PublishDrawer({
         onClose={() => setPaywallOpen(false)}
         onProceed={() => setPrivacyChoice("private")}
         skillName={skillName}
+        context="publish"
       />
     </>
   );
@@ -770,13 +799,20 @@ export function PublishDrawer({
 // rendered as LOCKED with an inline "Upgrade to publish privately" CTA that
 // opens the paywall; paid users can select it. The modal's dark surface tokens
 // are threaded in so the chooser reads correctly in every host theme.
+//
+// 0874 AC-07: all of that applies only while hosted private publishing is
+// open. With the launch gate closed, for every tier, Private is shown but
+// cannot be selected and points to the waitlist, and "Decide later" is gone.
 // ---------------------------------------------------------------------------
 
 interface PrivacyChooserProps {
   value: Privacy;
   onChange: (next: Privacy) => void;
   isFree: boolean;
+  /** Mirrors HOSTED_PRIVATE_PUBLISHING_AVAILABLE. */
+  gateOpen: boolean;
   onUpgrade: () => void;
+  onWaitlist: () => void;
   disabled?: boolean;
   border: string;
   text: string;
@@ -788,7 +824,9 @@ function PrivacyChooser({
   value,
   onChange,
   isFree,
+  gateOpen,
   onUpgrade,
+  onWaitlist,
   disabled,
   border,
   text,
@@ -828,7 +866,26 @@ function PrivacyChooser({
         <span style={hint}>Visible to everyone on verified-skill.com.</span>
       </button>
 
-      {isFree ? (
+      {!gateOpen ? (
+        // Hosted private publishing is not open: shown, never selectable.
+        <div
+          aria-disabled="true"
+          data-testid="publish-privacy-unavailable"
+          style={{ ...segment(false), cursor: "default", opacity: 0.85 }}
+        >
+          <span style={title}>🔒 Private</span>
+          <span style={hint}>Hosted private publishing is not open yet.</span>
+          <button
+            type="button"
+            data-testid="publish-privacy-waitlist"
+            onClick={() => !disabled && onWaitlist()}
+            disabled={disabled}
+            style={{ ...outcomeLinkStyle(), fontSize: 10.5, alignSelf: "flex-start" }}
+          >
+            Join the waitlist ↗
+          </button>
+        </div>
+      ) : isFree ? (
         // Locked PRIVATE — clicking opens the paywall instead of selecting it.
         <button
           type="button"
@@ -857,18 +914,20 @@ function PrivacyChooser({
         </button>
       )}
 
-      <button
-        type="button"
-        role="radio"
-        aria-checked={value === "decide-later"}
-        data-testid="publish-privacy-decide-later"
-        onClick={() => !disabled && onChange("decide-later")}
-        disabled={disabled}
-        style={segment(value === "decide-later")}
-      >
-        <span style={title}>Decide later</span>
-        <span style={hint}>Submit without choosing visibility yet.</span>
-      </button>
+      {gateOpen && (
+        <button
+          type="button"
+          role="radio"
+          aria-checked={value === "decide-later"}
+          data-testid="publish-privacy-decide-later"
+          onClick={() => !disabled && onChange("decide-later")}
+          disabled={disabled}
+          style={segment(value === "decide-later")}
+        >
+          <span style={title}>Decide later</span>
+          <span style={hint}>Submit without choosing visibility yet.</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -894,6 +953,23 @@ function SubmitOutcomeBlock({
   border,
   textMuted,
 }: SubmitOutcomeBlockProps): React.ReactElement {
+  // 0874 AC-06: refused before submit (private or unconfirmed repo).
+  if (!outcome.ok && "notSubmitted" in outcome) {
+    return (
+      <div
+        role="status"
+        data-testid="publish-outcome"
+        data-outcome="not-submitted"
+        style={outcomeBoxStyle(border, "#F59E0B")}
+      >
+        <strong style={{ fontWeight: 600, color: "#F59E0B" }}>Pushed to GitHub.</strong>{" "}
+        <span style={{ color: textMuted }}>
+          Nothing was submitted to verified-skill.com. {outcome.notSubmitted}
+        </span>
+      </div>
+    );
+  }
+
   // Website fallback (not logged in / non-github remote / unknown skill).
   if (!outcome.ok) {
     return (

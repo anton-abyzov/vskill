@@ -51,6 +51,7 @@ vi.mock("../PaywallModal", () => ({
 }));
 
 import { PublishDrawer } from "../PublishDrawer";
+import { SubmissionRefusedError } from "../../submission-queue";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -277,6 +278,51 @@ describe("PublishDrawer — in-app submit (0856)", () => {
       .map((e) => (e.detail as { severity: string }).severity);
     expect(toasts).toContain("info");
     expect(toasts).not.toContain("error");
+  });
+
+  it("private repo refused by the proxy (0874 AC-06): push kept, says nothing was submitted and why, no website link", async () => {
+    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
+    mockSubmitToQueue.mockRejectedValueOnce(
+      new SubmissionRefusedError(
+        "private_repository",
+        "owner/repo is private, or GitHub could not confirm it is public. verified-skill.com only verifies public repos, so nothing was submitted.",
+        422,
+      ),
+    );
+
+    await act(async () => {
+      root.render(
+        <PublishDrawer remoteUrl="git@github.com:owner/repo.git" fileCount={1} onClose={onClose} defaultMode="manual" skillName="greet" />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      reactTypeInto(findTextarea(), "feat: update greet");
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+
+    expect(mockSubmitToQueue).toHaveBeenCalledTimes(1);
+    const outcome = container.querySelector('[data-testid="publish-outcome"]');
+    expect(outcome?.getAttribute("data-outcome")).toBe("not-submitted");
+    expect(outcome?.textContent).toContain("Pushed to GitHub");
+    expect(outcome?.textContent).toContain("Nothing was submitted to verified-skill.com");
+    expect(outcome?.textContent).toContain("owner/repo is private");
+    // No website submit link and no sign-in fallback for a refused repo.
+    expect(container.querySelector('[data-testid="publish-open-website"]')).toBeNull();
+    expect(container.textContent?.toLowerCase()).not.toContain("sign in");
+    expect(container.querySelector('[data-testid="publish-error-push"]')).toBeNull();
+    expect(mockOpenExternal).not.toHaveBeenCalled();
+    const toasts = dispatchEventSpy.mock.calls
+      .map((c) => c[0])
+      .filter((e): e is CustomEvent => e instanceof CustomEvent && e.type === "studio:toast")
+      .map((e) => e.detail as { severity: string; message: string });
+    expect(toasts.some((t) => t.severity === "error")).toBe(false);
+    expect(toasts.some((t) => /not submitted/i.test(t.message))).toBe(true);
+    expect(toasts.some((t) => /sign in|website/i.test(t.message))).toBe(false);
   });
 
   it("renders the duplicate outcome inline", async () => {
@@ -533,6 +579,61 @@ describe("PublishDrawer — in-app submit (0856)", () => {
       .map((c) => (c[0] as CustomEvent<{ message: string; severity: string }>).detail);
     expect(toasts.some((t) => t.severity === "error")).toBe(false);
     expect(toasts.some((t) => t.message.includes("Publish failed"))).toBe(false);
+  });
+
+  // 0874 AC-06: the website fallback prefills ?repo= only after the eval-server
+  // guard confirmed the repo public (any HTTP answer except its own 413).
+  async function websiteFallbackUrl(rejection: unknown, skillName?: string): Promise<string> {
+    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
+    if (skillName) mockSubmitToQueue.mockRejectedValueOnce(rejection);
+    await act(async () => {
+      root.render(
+        <PublishDrawer
+          remoteUrl="git@github.com:owner/repo.git"
+          fileCount={1}
+          onClose={onClose}
+          defaultMode="manual"
+          skillName={skillName}
+        />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      reactTypeInto(findTextarea(), "feat: update greet");
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+    expect(container.querySelector('[data-testid="publish-outcome"]')?.getAttribute("data-outcome")).toBe("website-fallback");
+    await act(async () => {
+      (container.querySelector('[data-testid="publish-open-website"]') as HTMLButtonElement).click();
+      await flush();
+    });
+    return String(mockOpenExternal.mock.calls.at(-1)?.[0]);
+  }
+
+  it("website fallback keeps ?repo= when the platform answered (guard confirmed public)", async () => {
+    const err = Object.assign(new Error("unauthorized"), { status: 401 });
+    expect(await websiteFallbackUrl(err, "greet")).toBe(
+      "https://verified-skill.com/submit?repo=https%3A%2F%2Fgithub.com%2Fowner%2Frepo",
+    );
+  });
+
+  it("website fallback drops ?repo= when the submit never got an HTTP answer", async () => {
+    expect(await websiteFallbackUrl(new TypeError("Failed to fetch"), "greet")).toBe(
+      "https://verified-skill.com/submit",
+    );
+  });
+
+  it("website fallback drops ?repo= when the guard refused the body as too large", async () => {
+    const err = Object.assign(new Error("too large"), { status: 413 });
+    expect(await websiteFallbackUrl(err, "greet")).toBe("https://verified-skill.com/submit");
+  });
+
+  it("website fallback without a skillName opens the bare submit page", async () => {
+    expect(await websiteFallbackUrl(undefined)).toBe("https://verified-skill.com/submit");
   });
 
   it("without a skillName: falls back to the website-open flow (no in-app submit)", async () => {

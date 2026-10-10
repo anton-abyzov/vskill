@@ -46,6 +46,7 @@ vi.mock("../PaywallModal", () => ({
 }));
 
 import { PublishButton } from "../PublishButton";
+import { SubmissionRefusedError } from "../../submission-queue";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -108,9 +109,10 @@ describe("PublishButton", () => {
 
     expect(mockSubmitToQueue).not.toHaveBeenCalled();
     expect(mockOpenExternal).toHaveBeenCalledTimes(1);
-    expect(mockOpenExternal.mock.calls[0][0]).toBe(
-      "https://verified-skill.com/submit?repo=https%3A%2F%2Fgithub.com%2Fowner%2Frepo",
-    );
+    // 0874 AC-06: nothing confirmed the repo public, so the bare submit page
+    // opens and the repo URL never rides the query string.
+    expect(mockOpenExternal.mock.calls[0][0]).toBe("https://verified-skill.com/submit");
+    expect(String(mockOpenExternal.mock.calls[0][0])).not.toContain("?repo=");
   });
 
   it("clean tree + skillName: submits IN-APP and toasts the created outcome", async () => {
@@ -176,6 +178,61 @@ describe("PublishButton", () => {
     expect(toasts.some((t) => t.severity === "error")).toBe(false);
     expect(toasts.some((t) => t.severity === "info" && t.message.toLowerCase().includes("submit"))).toBe(true);
     expect(toasts.some((t) => t.message.includes("Publish failed"))).toBe(false);
+  });
+
+  it("clean tree + private repo refused (0874 AC-06): push kept, info toast says nothing was submitted, no website", async () => {
+    mockGitPublish.mockResolvedValueOnce({
+      success: true,
+      commitSha: "abc1234def567890",
+      branch: "main",
+      remoteUrl: "git@github.com:owner/repo.git",
+    });
+    mockSubmitToQueue.mockRejectedValueOnce(
+      new SubmissionRefusedError("private_repository", "owner/repo is private, so nothing was submitted.", 422),
+    );
+
+    act(() => {
+      root.render(<PublishButton remoteUrl="git@github.com:owner/repo.git" skillName="greet" />);
+    });
+    await act(async () => {
+      getButton().click();
+      await flush();
+    });
+
+    expect(mockSubmitToQueue).toHaveBeenCalledTimes(1);
+    expect(mockOpenExternal).not.toHaveBeenCalled();
+    const toasts = dispatchEventSpy.mock.calls
+      .filter((c) => (c[0] as Event).type === "studio:toast")
+      .map((c) => (c[0] as CustomEvent<{ message: string; severity: string }>).detail);
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].severity).toBe("info");
+    expect(toasts[0].message).toContain("Pushed abc1234 on main");
+    expect(toasts[0].message).toContain("Not submitted to verified-skill.com");
+    expect(toasts[0].message).toContain("owner/repo is private");
+    expect(toasts[0].message).not.toContain("Publish failed");
+  });
+
+  it("clean tree, launch gate closed (0874 AC-07): submits privacy 'public' with no tenantId", async () => {
+    mockGitPublish.mockResolvedValueOnce({
+      success: true,
+      commitSha: "abc1234def567890",
+      branch: "main",
+      remoteUrl: "git@github.com:owner/repo.git",
+    });
+    mockSubmitToQueue.mockResolvedValueOnce({ kind: "created", id: "s1", skillName: "greet", skillPath: "p", state: "RECEIVED", createdAt: "x" });
+
+    act(() => {
+      root.render(<PublishButton remoteUrl="git@github.com:owner/repo.git" skillName="greet" privacy="private" tenantId="t-1" />);
+    });
+    await act(async () => {
+      getButton().click();
+      await flush();
+    });
+
+    expect(mockSubmitToQueue).toHaveBeenCalledTimes(1);
+    const body = mockSubmitToQueue.mock.calls[0][0];
+    expect(body.privacy).toBe("public");
+    expect(body.tenantId).toBeUndefined();
   });
 
   it("on failure: does NOT open anything and dispatches an error toast", async () => {

@@ -53,6 +53,12 @@ interface Props {
    * fine without it.
    */
   skillName?: string;
+  /**
+   * 0874: what the user was trying to do. "connect" (default) keeps the
+   * private-repo connection copy; "publish" explains private publishing
+   * (opened from the Publish drawer's Private option).
+   */
+  context?: "connect" | "publish";
 }
 
 const TITLE_ID = "paywall-modal-title";
@@ -63,6 +69,7 @@ export function PaywallModal({
   onClose,
   onProceed,
   skillName,
+  context = "connect",
 }: Props): ReactElement | null {
   const bridge = useDesktopBridge();
   const { forceSync, snapshot } = useQuota();
@@ -172,20 +179,29 @@ export function PaywallModal({
       />
       <div ref={dialogRef} style={dialogStyle}>
         <h2 id={TITLE_ID} style={titleStyle}>
-          Connect private repositories with Skill Studio Pro
+          {context === "publish"
+            ? "Publish private skills with Skill Studio Pro"
+            : "Connect private repositories with Skill Studio Pro"}
         </h2>
-        <p id={BODY_ID} style={bodyStyle}>
-          Pro adds private repo connections, priority support, and unlimited
-          skills. Free users keep all current features for public repos.
-          {skillName ? (
-            <>
-              {" "}
-              <span style={{ color: "var(--color-muted, #888)" }}>
-                ({skillName} won&rsquo;t connect until you upgrade.)
-              </span>
-            </>
-          ) : null}
-        </p>
+        {context === "publish" ? (
+          <p id={BODY_ID} style={bodyStyle}>
+            Pro lets you publish a skill privately, so only your org can see,
+            search, or install it. Publishing publicly stays free.
+          </p>
+        ) : (
+          <p id={BODY_ID} style={bodyStyle}>
+            Pro adds private repo connections, priority support, and unlimited
+            skills. Free users keep all current features for public repos.
+            {skillName ? (
+              <>
+                {" "}
+                <span style={{ color: "var(--color-muted, #888)" }}>
+                  ({skillName} won&rsquo;t connect until you upgrade.)
+                </span>
+              </>
+            ) : null}
+          </p>
+        )}
         <div style={actionsStyle}>
           <button
             type="button"

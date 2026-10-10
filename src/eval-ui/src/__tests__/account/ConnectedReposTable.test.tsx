@@ -108,8 +108,9 @@ describe("ConnectedReposTable", () => {
     )!;
     expect(connectButton).not.toBeNull();
     expect(connectButton.textContent).toMatch(/connect github app/i);
-    expect(container.textContent).toMatch(/public repos on free/i);
-    expect(container.textContent).toMatch(/private repos on pro/i);
+    // 0874 AC-08: connecting is not tier-gated, so no tier claims here.
+    expect(container.textContent).toMatch(/pick the repos to share/i);
+    expect(container.textContent).not.toMatch(/on pro|require pro/i);
     connectButton.click();
     expect(spies.onConnectNew).toHaveBeenCalled();
     unmount();
@@ -152,11 +153,43 @@ describe("ConnectedReposTable", () => {
     expect(text).toContain("3");
     expect(text).toMatch(/Public\s*1/);
     expect(text).toMatch(/Private\s*2/);
-    expect(text).toMatch(/Private repository connections require Pro/);
+    // 0874 AC-08: Studio does not tier-gate connecting a repo (the connect
+    // button opens the GitHub App flow for every plan), so the copy must not
+    // claim private connections need Pro.
+    expect(text).toMatch(/Connect public and private repositories through the GitHub App/);
+    expect(text).not.toMatch(/require Pro/i);
     expect(
       container.querySelector("[data-testid='connect-new-repo-button']"),
     ).not.toBeNull();
     unmount();
+  });
+
+  it("renders the Private section before the Public section when both exist (0874 AC-05)", async () => {
+    const repos = [
+      makeRepo({ repoId: "pub", repoFullName: "octocat/open", isPrivate: false }),
+      makeRepo({ repoId: "priv", repoFullName: "octocat/secret", isPrivate: true }),
+    ];
+    const { container, unmount } = await renderTable({ repos });
+    const sections = Array.from(container.querySelectorAll("[data-testid^='repos-section-']"));
+    expect(sections.map((s) => s.getAttribute("data-testid"))).toEqual([
+      "repos-section-private",
+      "repos-section-public",
+    ]);
+    expect(sections[0]!.querySelector("[data-testid='repo-row-priv']")).not.toBeNull();
+    expect(sections[1]!.querySelector("[data-testid='repo-row-pub']")).not.toBeNull();
+    unmount();
+  });
+
+  it("omits an empty visibility section", async () => {
+    const onlyPublic = await renderTable({ repos: [makeRepo({ repoId: "pub", isPrivate: false })] });
+    expect(onlyPublic.container.querySelector("[data-testid='repos-section-public']")).not.toBeNull();
+    expect(onlyPublic.container.querySelector("[data-testid='repos-section-private']")).toBeNull();
+    onlyPublic.unmount();
+
+    const onlyPrivate = await renderTable({ repos: [makeRepo({ repoId: "priv", isPrivate: true })] });
+    expect(onlyPrivate.container.querySelector("[data-testid='repos-section-private']")).not.toBeNull();
+    expect(onlyPrivate.container.querySelector("[data-testid='repos-section-public']")).toBeNull();
+    onlyPrivate.unmount();
   });
 
   it("kebab menu fires Open / Resync / Disconnect callbacks", async () => {

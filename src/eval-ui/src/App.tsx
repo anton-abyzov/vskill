@@ -1088,29 +1088,14 @@ function Shell() {
                   </>
                 ) : null}
                 {/* 0833 — connected-repo widget. Renders the active
-                    project's git/repo info and, for free users on a
-                    private remote, surfaces the "Pro" upgrade chip that
-                    fires the paywall. The widget internally short-circuits
-                    when there's no active project (folder = null) so the
-                    mount stays cheap. AC-US2-02 + AC-US2-04. */}
+                    project's git/repo info with a public/private cue.
+                    Connecting a private repo is free (0874), so no
+                    upgrade chip here. The widget short-circuits when
+                    there's no active project (folder = null). */}
                 {activeProject?.path ? (
                   <ConnectedRepoWidget
                     folder={activeProject.path}
                     tier={tierState.tier}
-                    onUpgradeClick={() => {
-                      // Dispatch through the same paywall bus the e2e
-                      // regression spec exercises — keeps the runtime
-                      // path identical to the test path. App.tsx listens
-                      // for `studio:request-paywall` and opens
-                      // PaywallModal with the repo name as context.
-                      try {
-                        window.dispatchEvent(
-                          new CustomEvent("studio:request-paywall", {
-                            detail: { repoName: activeProject.path },
-                          }),
-                        );
-                      } catch { /* SSR/test fallback */ }
-                    }}
                   />
                 ) : null}
               </>

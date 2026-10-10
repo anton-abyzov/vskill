@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.3] - 2026-10-10
+
+### Fixed
+
+- Skill Studio publish keeps skills from private or unconfirmed repos local: it refuses to submit them to verified-skill.com and never prefills an unconfirmed repo URL.
+- The Studio privacy chooser and paywall follow the private-skills launch gate (waitlist) instead of promising a Pro upgrade.
+- The Studio repo widget shows a "Private" badge on private repos for every plan, with no "Pro" chip: connecting a private repo is free.
+
 ## [1.2.1] - 2026-10-03
 
 ### Security

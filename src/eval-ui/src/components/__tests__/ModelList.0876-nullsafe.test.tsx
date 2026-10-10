@@ -25,6 +25,16 @@ import {
   type ModelEntry,
 } from "../../hooks/useAgentCatalog";
 
+// Unmount every root after each test so the ModelList debounce timer is
+// cleared before the jsdom environment is torn down.
+const mountedRoots: Array<{ unmount: () => void }> = [];
+afterEach(async () => {
+  const { act } = await import("react");
+  act(() => {
+    for (const r of mountedRoots.splice(0)) r.unmount();
+  });
+});
+
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // ---------------------------------------------------------------------------
@@ -54,6 +64,7 @@ async function renderModelList(agent: AgentEntry, activeModelId: string | null =
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
+  mountedRoots.push(root);
   act(() => {
     root.render(
       React.createElement(ModelList, {
@@ -167,6 +178,7 @@ async function renderHook(): Promise<{ getHandle: () => HookHandle }> {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
+  mountedRoots.push(root);
   act(() => {
     root.render(React.createElement(Harness));
   });
@@ -323,6 +335,7 @@ describe("0876 — ModelList hook order stable across agent switch", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
+  mountedRoots.push(root);
     const props = (agent: AgentEntry) => ({
       agent,
       activeModelId: null,

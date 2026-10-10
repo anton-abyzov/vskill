@@ -7,8 +7,18 @@
 //       referenced by the resolved ID (US-004, AC-US4-01..03).
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import type { AgentEntry } from "../../hooks/useAgentCatalog";
+
+// Unmount every root after each test so the ModelList debounce timer is
+// cleared before the jsdom environment is torn down.
+const mountedRoots: Array<{ unmount: () => void }> = [];
+afterEach(async () => {
+  const { act } = await import("react");
+  act(() => {
+    for (const r of mountedRoots.splice(0)) r.unmount();
+  });
+});
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -39,6 +49,7 @@ async function renderModelList(agent: AgentEntry, activeModelId: string | null =
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
+  mountedRoots.push(root);
   act(() => {
     root.render(
       React.createElement(ModelList, {

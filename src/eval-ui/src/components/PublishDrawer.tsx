@@ -271,7 +271,16 @@ export function PublishDrawer({
           // failed". Degrade to the website submit flow, which carries the
           // ?repo= URL param so the user can sign in there and finish in one
           // click (the prior browser-submit UX).
-          setOutcome({ ok: false, websiteUrl: websiteSubmitUrl(effectiveRemote) });
+          // 0874 AC-06: prefill ?repo= only when the eval-server guard has
+          // confirmed the repo public, which any HTTP answer except its own
+          // 413 proves. A network failure or an unscreened body gets the bare
+          // submit page, so a private repo URL never rides the query string.
+          const status = (err as { status?: unknown } | null)?.status;
+          const confirmedPublic = typeof status === "number" && status !== 413;
+          setOutcome({
+            ok: false,
+            websiteUrl: confirmedPublic ? websiteSubmitUrl(effectiveRemote) : BARE_SUBMIT_URL,
+          });
           emitToast(`Pushed ${shortSha} on ${branch}${reconciledNote} — sign in or finish on the website to submit`, "info");
           return;
         }
@@ -281,10 +290,10 @@ export function PublishDrawer({
         // Drawer stays open so the inline outcome is visible. The user closes
         // it explicitly via Done / Cancel.
       } else {
-        // No skill identity → website-open fallback (legacy behavior). Same
-        // guard: a non-github remote must not turn a successful push into
-        // "Publish failed".
-        setOutcome({ ok: false, websiteUrl: websiteSubmitUrl(effectiveRemote) });
+        // No skill identity → website-open fallback (legacy behavior). Nothing
+        // confirmed the repo public, so the bare submit page is offered
+        // (0874 AC-06): a private repo URL never rides the query string.
+        setOutcome({ ok: false, websiteUrl: BARE_SUBMIT_URL });
         emitToast(`Pushed ${shortSha} on ${branch}${reconciledNote} — open the website to submit`, "info");
       }
     } catch (err) {

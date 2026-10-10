@@ -339,6 +339,9 @@ export async function proxyToPlatform(
       sendSubmissionRefusal(res, screen.refusal);
       return;
     }
+    // The client may have gone away during the GitHub visibility lookup; its
+    // close event has already fired, so do not start an upstream request.
+    if (res.destroyed || res.writableEnded || req.socket?.destroyed) return;
     return forwardToPlatform(req, res, baseUrl, screen.body);
   }
   return forwardToPlatform(req, res, baseUrl);

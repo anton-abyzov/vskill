@@ -14,7 +14,7 @@
 import { useCallback, useState } from "react";
 import { api } from "../api";
 import { isSubmissionRefusal } from "../submission-queue";
-import { buildSubmitUrlFromRemote, normalizeRemoteUrl } from "../utils/normalizeRemoteUrl";
+import { normalizeRemoteUrl } from "../utils/normalizeRemoteUrl";
 import { openExternalUrlViaDesktop } from "../preferences/lib/useDesktopBridge";
 import { PublishDrawer } from "./PublishDrawer";
 import { HOSTED_PRIVATE_PUBLISHING_AVAILABLE } from "../hosted-publishing";
@@ -26,21 +26,9 @@ function emitToast(message: string, severity: "info" | "error"): void {
   );
 }
 
-/**
- * Build the website submit URL from a raw remote, degrading to the bare submit
- * page when the remote isn't a recognizable github URL. `buildSubmitUrlFrom-
- * Remote` throws on a non-normalizable remote; a successful push must NEVER be
- * reported as a failure, so we swallow that and send the user to the generic
- * submit page (where they can pick the repo manually).
- */
+// Bare website submit page. Studio never prefills ?repo= here: nothing on
+// these fallback paths has confirmed the repo public (0874 AC-06).
 const BARE_SUBMIT_URL = "https://verified-skill.com/submit";
-function websiteSubmitUrl(rawRemoteUrl: string): string {
-  try {
-    return buildSubmitUrlFromRemote(rawRemoteUrl);
-  } catch {
-    return BARE_SUBMIT_URL;
-  }
-}
 
 interface Props {
   /**
@@ -135,13 +123,14 @@ export function PublishButton({ remoteUrl, provider, model, skillName, skillPath
           // FromRemote re-runs normalizeRemoteUrl and would re-throw, so guard
           // it and degrade to the bare submit page instead of letting the throw
           // escape to the outer catch.
-          void openExternalUrlViaDesktop(websiteSubmitUrl(effectiveRemote));
+          void openExternalUrlViaDesktop(BARE_SUBMIT_URL);
           emitToast(`Pushed ${shortSha} on ${branch} — open the website to submit`, "info");
         }
       } else {
-        // No skill identity → website-open fallback. Same guard: a non-github
-        // remote must not turn a successful push into "Publish failed".
-        void openExternalUrlViaDesktop(websiteSubmitUrl(effectiveRemote));
+        // No skill identity → website-open fallback. Nothing confirmed the
+        // repo public, so open the bare submit page (0874 AC-06): a private
+        // repo URL never rides the query string to verified-skill.com.
+        void openExternalUrlViaDesktop(BARE_SUBMIT_URL);
         emitToast(`Opening verified-skill.com — ${shortSha} on ${branch}`, "info");
       }
     } catch (err) {

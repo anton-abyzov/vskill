@@ -116,6 +116,33 @@ function submit(payload: unknown) {
 }
 
 describe("POST /api/v1/submissions is screened before it leaves the machine", () => {
+  it("a client that disconnects during the visibility lookup starts no upstream request", async () => {
+    let answer: (v: boolean) => void = () => {};
+    let looked: () => void = () => {};
+    const lookupStarted = new Promise<void>((r) => { looked = r; });
+    isPrivateOrUnknownRepoMock.mockImplementation(
+      () => new Promise<boolean>((r) => { answer = r; looked(); }),
+    );
+
+    const body = JSON.stringify({ repoUrl: "https://github.com/acme/public-skills", skillName: "greet" });
+    const req = http.request({
+      hostname: "127.0.0.1",
+      port: proxyPort,
+      path: "/api/v1/submissions",
+      method: "POST",
+      headers: { "content-type": "application/json", connection: "close" },
+    });
+    req.on("error", () => {});
+    req.end(body);
+    await lookupStarted;
+    req.destroy();
+    await new Promise((r) => setTimeout(r, 50));
+    answer(false); // GitHub now says public, but the client is gone
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(upstream).toHaveLength(0);
+  });
+
   it("a private repo gets 422 private_repository and nothing goes upstream", async () => {
     isPrivateOrUnknownRepoMock.mockResolvedValue(true);
 

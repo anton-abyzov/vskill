@@ -109,9 +109,10 @@ describe("PublishButton", () => {
 
     expect(mockSubmitToQueue).not.toHaveBeenCalled();
     expect(mockOpenExternal).toHaveBeenCalledTimes(1);
-    expect(mockOpenExternal.mock.calls[0][0]).toBe(
-      "https://verified-skill.com/submit?repo=https%3A%2F%2Fgithub.com%2Fowner%2Frepo",
-    );
+    // 0874 AC-06: nothing confirmed the repo public, so the bare submit page
+    // opens and the repo URL never rides the query string.
+    expect(mockOpenExternal.mock.calls[0][0]).toBe("https://verified-skill.com/submit");
+    expect(String(mockOpenExternal.mock.calls[0][0])).not.toContain("?repo=");
   });
 
   it("clean tree + skillName: submits IN-APP and toasts the created outcome", async () => {

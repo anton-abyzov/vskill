@@ -581,6 +581,61 @@ describe("PublishDrawer — in-app submit (0856)", () => {
     expect(toasts.some((t) => t.message.includes("Publish failed"))).toBe(false);
   });
 
+  // 0874 AC-06: the website fallback prefills ?repo= only after the eval-server
+  // guard confirmed the repo public (any HTTP answer except its own 413).
+  async function websiteFallbackUrl(rejection: unknown, skillName?: string): Promise<string> {
+    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
+    if (skillName) mockSubmitToQueue.mockRejectedValueOnce(rejection);
+    await act(async () => {
+      root.render(
+        <PublishDrawer
+          remoteUrl="git@github.com:owner/repo.git"
+          fileCount={1}
+          onClose={onClose}
+          defaultMode="manual"
+          skillName={skillName}
+        />,
+      );
+      await flush();
+    });
+    await act(async () => {
+      reactTypeInto(findTextarea(), "feat: update greet");
+      await flush();
+    });
+    await act(async () => {
+      findButton("Commit & Push").click();
+      await flush();
+    });
+    expect(container.querySelector('[data-testid="publish-outcome"]')?.getAttribute("data-outcome")).toBe("website-fallback");
+    await act(async () => {
+      (container.querySelector('[data-testid="publish-open-website"]') as HTMLButtonElement).click();
+      await flush();
+    });
+    return String(mockOpenExternal.mock.calls.at(-1)?.[0]);
+  }
+
+  it("website fallback keeps ?repo= when the platform answered (guard confirmed public)", async () => {
+    const err = Object.assign(new Error("unauthorized"), { status: 401 });
+    expect(await websiteFallbackUrl(err, "greet")).toBe(
+      "https://verified-skill.com/submit?repo=https%3A%2F%2Fgithub.com%2Fowner%2Frepo",
+    );
+  });
+
+  it("website fallback drops ?repo= when the submit never got an HTTP answer", async () => {
+    expect(await websiteFallbackUrl(new TypeError("Failed to fetch"), "greet")).toBe(
+      "https://verified-skill.com/submit",
+    );
+  });
+
+  it("website fallback drops ?repo= when the guard refused the body as too large", async () => {
+    const err = Object.assign(new Error("too large"), { status: 413 });
+    expect(await websiteFallbackUrl(err, "greet")).toBe("https://verified-skill.com/submit");
+  });
+
+  it("website fallback without a skillName opens the bare submit page", async () => {
+    expect(await websiteFallbackUrl(undefined)).toBe("https://verified-skill.com/submit");
+  });
+
   it("without a skillName: falls back to the website-open flow (no in-app submit)", async () => {
     mockGitCommitMessage.mockResolvedValueOnce({ message: "x" });
     mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);

@@ -22,6 +22,8 @@
 
 import { useEffect, useImperativeHandle, useRef, useState, forwardRef } from "react";
 
+import { StudioLockIcon } from "./private/PrivateBadge";
+
 /// Sync state mirror — must match Rust `SyncState` enum's serde shape.
 type SyncState =
   | { kind: "clean" }
@@ -54,23 +56,14 @@ interface Props {
   /** Refresh poll cadence in ms. Defaults to 30 000. Test overrides. */
   pollIntervalMs?: number;
   /**
-   * 0831 T-023: tier of the signed-in user. Drives the private-repo
-   * VisibilityPill behavior:
-   *   - "free" + private repo  → "Pro" chip with upgrade tooltip;
-   *                              clicking the chip opens the pricing page.
-   *   - "pro" / "enterprise"   → existing private/public pill rendering.
-   * When undefined or null (e.g. signed-out), defaults to "free" so the
-   * UI fails closed.
+   * Tier of the signed-in user. Exposed as `data-tier` only; it does not
+   * change how private repos render. Connecting a private repo is free
+   * (0874): only publishing private skills sits behind the launch-gate
+   * waitlist, so the widget must not show a "Pro" upsell here.
    */
   tier?: "free" | "pro" | "enterprise" | null;
   /**
-   * 0831 T-023: callback invoked when the user clicks the upgrade
-   * affordance on the private-repo gate. Hosts wire this to
-   * `bridge.openExternalUrl(PRICING_URL)`.
-   */
-  onUpgradeClick?: () => void;
-  /**
-   * 0831 T-025: callback invoked when a Pro user clicks "Connect private
+   * 0831 T-025: callback invoked when the user clicks "Connect private
    * repos" on a private repo where the GitHub App isn't yet installed.
    * Hosts wire this to `bridge.openExternalUrl(GITHUB_APP_INSTALL_URL)`.
    */
@@ -128,16 +121,12 @@ export const ConnectedRepoWidget = forwardRef<ConnectedRepoWidgetHandle, Props>(
       fetchRepoInfo = defaultFetchRepoInfo,
       pollIntervalMs = DEFAULT_POLL_MS,
       tier,
-      onUpgradeClick,
       onConnectPrivateClick,
     },
     ref,
   ) {
-    // 0831 T-023: normalize tier so unsigned-in users (tier = undefined)
-    // hit the same locked-down code path as free users. Fail closed.
     const effectiveTier: "free" | "pro" | "enterprise" =
       tier === "pro" || tier === "enterprise" ? tier : "free";
-    const isPaid = effectiveTier !== "free";
     const [info, setInfo] = useState<RepoInfo | null>(null);
     const [loading, setLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
@@ -280,10 +269,8 @@ export const ConnectedRepoWidget = forwardRef<ConnectedRepoWidgetHandle, Props>(
           </span>
         ) : null}
         <SyncStatePill state={info.sync_state} />
-        <TierAwareVisibility
+        <RepoVisibility
           isPrivate={info.is_private}
-          isPaid={isPaid}
-          onUpgradeClick={onUpgradeClick}
           onConnectPrivateClick={onConnectPrivateClick}
         />
       </div>
@@ -292,64 +279,36 @@ export const ConnectedRepoWidget = forwardRef<ConnectedRepoWidgetHandle, Props>(
 );
 
 // ---------------------------------------------------------------------------
-// 0831 T-023 + T-025 — tier-aware visibility pill.
-//
-// Free + private repo  → renders "Private — Pro feature" + upgrade chip.
-// Paid + private repo  → renders the standard private pill + "Connect"
-//                          CTA when onConnectPrivateClick is wired.
-// Public / unknown     → renders the standard pill (no tier impact).
+// Visibility cue. Private repos get the same amber "Private" badge as the
+// 0874 skill-row and connected-repos cues, for every tier: connecting a
+// private repo is not plan-gated. The optional "Connect" CTA (GitHub App
+// install) shows whenever the host wires onConnectPrivateClick.
+// Public / unknown repos render the plain pill.
 // ---------------------------------------------------------------------------
-function TierAwareVisibility({
+function RepoVisibility({
   isPrivate,
-  isPaid,
-  onUpgradeClick,
   onConnectPrivateClick,
 }: {
   isPrivate: boolean | null;
-  isPaid: boolean;
-  onUpgradeClick?: () => void;
   onConnectPrivateClick?: () => void;
 }): React.ReactElement {
-  // Public or unknown → pass through.
   if (isPrivate !== true) {
     return <VisibilityPill isPrivate={isPrivate} />;
   }
-  // Private + free → show locked state with "Pro" chip. 0833: clicking
-  // the chip is the canonical "connect private repo" action for free
-  // users — the host wires `onUpgradeClick` to open PaywallModal (NOT
-  // pricing directly), and the modal's "Upgrade to Pro" CTA opens
-  // /pricing. Public repos never reach this branch (AC-US2-05).
-  if (!isPaid) {
-    return (
-      <span
-        style={{ ...pillStyle, color: "var(--color-private, #b58900)" }}
-        data-testid="visibility-pill"
-        data-visibility="private-locked"
-        aria-label="Private repository — Pro feature"
-      >
-        <LockIcon /> private
-        <button
-          type="button"
-          onClick={onUpgradeClick}
-          data-testid="repo-upgrade-chip"
-          title="Upgrade for private repo connections."
-          aria-label="Upgrade to Pro for private repository connections"
-          style={proChipStyle}
-        >
-          Pro
-        </button>
-      </span>
-    );
-  }
-  // Private + paid → standard private pill + optional connect CTA.
   return (
-    <span
-      style={{ ...pillStyle, color: "var(--color-private, #b58900)" }}
-      data-testid="visibility-pill"
-      data-visibility="private"
-      aria-label="Private repository"
-    >
-      <LockIcon /> private
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <span
+        style={privateBadgeStyle}
+        role="status"
+        title="Private GitHub repository"
+        aria-label="Private repository"
+        data-testid="visibility-pill"
+        data-visibility="private"
+        data-private="true"
+      >
+        <StudioLockIcon size={11} />
+        <span>Private</span>
+      </span>
       {onConnectPrivateClick ? (
         <button
           type="button"
@@ -389,25 +348,6 @@ function FolderIcon(): React.ReactElement {
   );
 }
 
-function LockIcon(): React.ReactElement {
-  return (
-    <svg
-      width="11"
-      height="11"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-    </svg>
-  );
-}
-
 function CheckIcon(): React.ReactElement {
   return (
     <svg
@@ -441,16 +381,7 @@ function VisibilityPill({ isPrivate }: { isPrivate: boolean | null }): React.Rea
     );
   }
   if (isPrivate) {
-    return (
-      <span
-        style={{ ...pillStyle, color: "var(--color-private, #b58900)" }}
-        data-testid="visibility-pill"
-        data-visibility="private"
-        aria-label="Private repository"
-      >
-        <LockIcon /> private
-      </span>
-    );
+    return <RepoVisibility isPrivate />;
   }
   return (
     <span
@@ -565,20 +496,25 @@ const pillStyle: React.CSSProperties = {
   fontWeight: 500,
 };
 
-// 0831 T-023 / T-025 — affordances rendered inside the visibility pill.
-const proChipStyle: React.CSSProperties = {
-  marginLeft: 4,
-  padding: "0px 5px",
-  borderRadius: 9999,
-  border: "none",
-  background: "var(--color-pro-bg, #cb4b16)",
-  color: "var(--color-pro-fg, #ffffff)",
-  fontSize: 9,
+// Matches PrivateRepoChip ("tag" variant) so the private cue reads the
+// same in the repo widget, skill rows and the connected-repos table.
+const privateBadgeStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+  height: 18,
+  padding: "0 6px",
+  borderRadius: 4,
+  color: "var(--private-fg, #92400e)",
+  backgroundColor: "var(--private-bg, rgba(245,158,11,0.12))",
+  border: "1px solid var(--private-border-soft, rgba(245,158,11,0.35))",
+  fontFamily: "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)",
+  fontSize: 10,
   fontWeight: 600,
-  letterSpacing: 0.4,
+  letterSpacing: "0.04em",
   textTransform: "uppercase",
-  cursor: "pointer",
-  fontFamily: "inherit",
+  lineHeight: 1,
+  flexShrink: 0,
 };
 
 const connectButtonStyle: React.CSSProperties = {

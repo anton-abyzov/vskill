@@ -291,7 +291,27 @@ describe("detectInstalledAgents", () => {
     const result = await detectInstalledAgents();
     // F-008: isRemoteOnly entries are short-circuited and never returned.
     const remoteOnlyCount = AGENTS_REGISTRY.filter((a) => a.isRemoteOnly === true).length;
-    expect(result.length).toBe(TOTAL_AGENTS - remoteOnlyCount);
+    // 0894: github-copilot-ext's own probe fails here (see above), and its
+    // dir fallback no longer fires on ~/.copilot/skills, which Copilot CLI
+    // shares — so it is the one local agent not detected.
+    expect(result.length).toBe(TOTAL_AGENTS - remoteOnlyCount - 1);
+    expect(result.map((a) => a.id)).not.toContain("github-copilot-ext");
+  });
+
+  it("0894: ~/.copilot/skills alone detects Copilot CLI, not VS Code Copilot", async () => {
+    mockExec.mockRejectedValue(new Error("not found")); // no `code`, no `copilot`
+    const home = process.env.HOME || process.env.USERPROFILE || "";
+    mockExistsSync.mockImplementation((p: string) => p === `${home}/.copilot/skills`);
+    const ids = (await detectInstalledAgents()).map((a) => a.id);
+    expect(ids).not.toContain("github-copilot-ext");
+  });
+
+  it("0894: Antigravity's legacy ~/.gemini/antigravity/skills alone still detects it", async () => {
+    mockExec.mockRejectedValue(new Error("not found")); // no `antigravity` binary
+    const home = process.env.HOME || process.env.USERPROFILE || "";
+    mockExistsSync.mockImplementation((p: string) => p === `${home}/.gemini/antigravity/skills`);
+    const ids = (await detectInstalledAgents()).map((a) => a.id);
+    expect(ids).toContain("antigravity");
   });
 
   it("does NOT detect agent when only parent config dir exists (no false positives)", async () => {

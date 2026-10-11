@@ -2,11 +2,12 @@
 // vskill remove -- remove an installed skill from all agents
 // ---------------------------------------------------------------------------
 
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { resolveTilde } from "../utils/paths.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
+import { agentGlobalInstallDirs } from "../agents/global-dirs.js";
 import { readLockfile, removeSkillFromLock } from "../lockfile/index.js";
 import { resolveLocalSkillRoot } from "../lockfile/local-root.js";
 import { claudePluginUninstall } from "../utils/claude-plugin.js";
@@ -23,6 +24,15 @@ interface RemoveOptions {
   force?: boolean;
   /** 0724 T-007: structured JSON output (matches enable/disable shape). */
   json?: boolean;
+}
+
+function lexists(p: string): boolean {
+  if (existsSync(p)) return true;
+  try {
+    return lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 
 async function confirm(message: string): Promise<boolean> {
@@ -100,11 +110,14 @@ export async function removeCommand(
     }
 
     if (!opts.local) {
-      // Global dirs
-      paths.push({
-        label: `${agent.displayName} (global)`,
-        dir: resolveTilde(join(agent.globalSkillsDir, skillName)),
-      });
+      // Global dirs. 0894: every dir vskill may have installed into for this
+      // agent (Antigravity's legacy ~/.gemini/antigravity/skills included).
+      for (const globalDir of agentGlobalInstallDirs(agent, resolveTilde)) {
+        paths.push({
+          label: `${agent.displayName} (global)`,
+          dir: join(globalDir, skillName),
+        });
+      }
     }
 
     for (const { label, dir } of paths) {
@@ -112,7 +125,9 @@ export async function removeCommand(
       // (Codex) is handled by the canonical-store cleanup below, which keeps
       // the lockfile guard and reports every shared-reader agent.
       if (canonicalDirs.has(dir)) continue;
-      if (existsSync(dir)) {
+      // lstat, not existsSync: a link left dangling (its target already
+      // gone) must be removed too.
+      if (lexists(dir)) {
         try {
           rmSync(dir, { recursive: true, force: true });
           removedFrom.push(label);

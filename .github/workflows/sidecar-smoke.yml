@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup Node 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
           # SEA injects into the host node binary; the Windows sidecar is x64.
@@ -91,7 +91,7 @@ jobs:
 
       - name: Upload smoke logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sidecar-smoke-logs-${{ matrix.os }}
           if-no-files-found: ignore
@@ -106,7 +106,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           architecture: x64

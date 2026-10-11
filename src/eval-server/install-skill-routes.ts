@@ -51,7 +51,7 @@ import type { ParsedSkill } from "../installer/transformers/index.js";
 import { locateSkill } from "../clone/skill-locator.js";
 import { extractDescription } from "../installer/frontmatter.js";
 import {
-  collectSkillBundleFiles,
+  collectSkillBundle,
   sanitizeSkillBundleFiles,
 } from "../installer/bundle-files.js";
 import { getDefaultKeychain } from "../lib/keychain.js";
@@ -390,8 +390,11 @@ export async function resolveParsedSkillFromIdentifier(
     try {
       const raw = await fsPromises.readFile(skillMdPath, "utf-8");
       const parsed = parseRawSkillMd(raw, source.skillName);
-      const files = await collectSkillBundleFiles(source.skillDir);
-      return { ...parsed, files };
+      // 0894: binaries as bytes and exec bits travel too (in-process only).
+      const bundle = await collectSkillBundle(source.skillDir);
+      const result: ParsedSkill = { ...parsed, files: bundle.files, executables: bundle.executables };
+      if (Object.keys(bundle.binaryFiles).length > 0) result.binaryFiles = bundle.binaryFiles;
+      return result;
     } catch {
       return null;
     }
@@ -592,6 +595,9 @@ export function registerInstallSkillRoutes(router: Router, rootArg: string | (()
           parsedSkill = {
             ...body.parsedSkill,
             files: sanitizeSkillBundleFiles(body.parsedSkill.files),
+            // Server-side only: never taken from a request body.
+            binaryFiles: undefined,
+            executables: undefined,
           };
         } else if (body.parsedSkill !== undefined) {
           sendJson(

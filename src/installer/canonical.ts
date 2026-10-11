@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync, existsSync, unlinkSync, chmodSync, readdirSync, rmdirSync } from "node:fs";
 // 0706 T-004: `relative` + `sep` (as pathSep) power the cross-platform
 // path-traversal guard. `path.relative` handles Windows backslash correctly.
 import { join, relative, dirname, sep as pathSep } from "node:path";
@@ -6,7 +6,7 @@ import os from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { resolveTilde } from "../utils/paths.js";
 import { ensureFrontmatter, stripClaudeFields } from "./frontmatter.js";
-import { resolveBundleTarget } from "./bundle-files.js";
+import { resolveBundleTarget, type BundleContent } from "./bundle-files.js";
 
 export interface InstallOptions {
   global: boolean;
@@ -42,6 +42,13 @@ export function resolveAgentSkillsDir(agent: AgentDefinition, opts: InstallOptio
   if (opts.global) {
     const override = resolveGlobalSkillsDirEnvOverride(agent);
     if (override) return override;
+    // 0894: Antigravity's registry default is ~/.gemini/config/skills, but an
+    // existing legacy IDE dir ~/.gemini/antigravity/skills keeps priority so
+    // installs land where that setup already loads skills from.
+    if (agent.id === "antigravity") {
+      const legacy = resolveTilde("~/.gemini/antigravity/skills");
+      if (existsSync(legacy)) return legacy;
+    }
     return resolveTilde(agent.globalSkillsDir);
   }
   const resolved = join(opts.projectRoot, agent.localSkillsDir);
@@ -58,6 +65,31 @@ export function resolveAgentSkillsDir(agent: AgentDefinition, opts: InstallOptio
     );
   }
   return resolved;
+}
+
+/** 0894: path of the shared canonical skills folder for a scope, without
+ *  creating it (`~/.agents/skills` or `<projectRoot>/.agents/skills`). */
+export function resolveCanonicalSkillsDir(opts: InstallOptions): string {
+  return opts.global
+    ? join(os.homedir(), ".agents", "skills")
+    : join(opts.projectRoot, ".agents", "skills");
+}
+
+/** 0894: true when the agent is satisfied by the canonical folder in this
+ *  scope — it reads the shared `.agents/skills`, so vskill writes no
+ *  agent-specific link or copy for it. */
+export function isSatisfiedByCanonical(agent: AgentDefinition, opts: InstallOptions): boolean {
+  // Read the flag directly (not via a registry helper) so callers that mock
+  // the registry module keep working.
+  return agent.readsSharedSkills?.[opts.global ? "global" : "project"] === true;
+}
+
+/** 0894: the folder an agent actually loads a skill from in this scope —
+ *  the shared canonical folder for shared readers, else its own skills dir. */
+export function resolveEffectiveSkillsDir(agent: AgentDefinition, opts: InstallOptions): string {
+  return isSatisfiedByCanonical(agent, opts)
+    ? resolveCanonicalSkillsDir(opts)
+    : resolveAgentSkillsDir(agent, opts);
 }
 
 export function ensureCanonicalDir(base: string, global: boolean): string {
@@ -124,29 +156,143 @@ export function createRelativeSymlink(target: string, linkPath: string): boolean
 }
 
 /**
- * Agents known to have unreliable symlink support.
- * These always get a direct copy even in symlink mode.
- * See: https://github.com/anthropics/claude-code/issues/14836
+ * Agents that keep a full copy when their content differs from the shared
+ * canonical copy. Claude Code is the only one: it reads Claude-only
+ * frontmatter (allowed-tools, model, context, ...) that the canonical copy
+ * strips. When nothing is stripped, Claude Code gets a link like everyone
+ * else (0894; current Claude Code follows symlinked skill folders, the old
+ * https://github.com/anthropics/claude-code/issues/14836 no longer applies).
  */
 const COPY_FALLBACK_AGENTS = new Set(["claude-code"]);
 
 /**
- * Write agent files (agents/*.md) alongside SKILL.md in a target directory.
- * Keys are relative paths (e.g., "agents/frontend.md"), values are file contents.
+ * 0894: drop a symlink at `p` (only the link, never its target) so the next
+ * mkdir + write creates a real folder there. Without this, a copy written to
+ * an agent dir that an earlier install linked to the canonical folder goes
+ * through the link and overwrites the shared copy every other agent reads.
  */
-function writeAgentFiles(targetDir: string, agentFiles: Record<string, string>): void {
-  for (const [relPath, fileContent] of Object.entries(agentFiles)) {
-    const fullPath = resolveBundleTarget(targetDir, relPath);
+function unlinkIfSymlink(p: string): void {
+  try {
+    if (lstatSync(p).isSymbolicLink()) unlinkSync(p);
+  } catch {
+    // nothing there
+  }
+}
+
+/** 0894: how a skill bundle is written over a previous install. */
+export interface BundleWriteOptions {
+  /**
+   * Paths written with mode 0755 (git mode 100755 upstream). When given,
+   * every other bundled file is set to 0644; when absent, modes are left as
+   * the filesystem makes them (an existing file keeps its mode).
+   */
+  executables?: ReadonlySet<string>;
+  /**
+   * Accept any relative path inside the skill folder. Only for a complete
+   * skill tree fetched from the skill's own GitHub folder; every other caller
+   * (Studio, `vskill update`) keeps the standard-folder policy.
+   */
+  anyPath?: boolean;
+  /**
+   * Files the previous install of this skill recorded (lockfile `files`).
+   * Those the new bundle no longer has are removed, so a reinstall leaves no
+   * orphans. Files the previous install did not record (Studio evals, user
+   * notes) are never touched.
+   */
+  previousFiles?: readonly string[];
+}
+
+function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
+  try {
+    return lstatSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/** Remove now-empty folders from `dir` up to (not including) `root`. */
+function pruneEmptyDirs(dir: string, root: string): void {
+  let cur = dir;
+  while (cur !== root && relative(root, cur) && !relative(root, cur).startsWith("..")) {
+    try {
+      if (readdirSync(cur).length > 0) return;
+      rmdirSync(cur);
+    } catch {
+      return;
+    }
+    cur = dirname(cur);
+  }
+}
+
+/**
+ * Make `fullPath` writable as a regular file inside `root`: an ancestor that
+ * is a file or a symlink (which could also point outside the skill folder) is
+ * removed, and a folder sitting where the file goes is removed. Without this,
+ * a reinstall whose tree changed shape dies half-written with EISDIR/ENOTDIR.
+ */
+function clearPathForFile(root: string, fullPath: string): void {
+  const parts = relative(root, dirname(fullPath)).split(pathSep).filter(Boolean);
+  let cur = root;
+  for (const part of parts) {
+    cur = join(cur, part);
+    const st = lstatOrNull(cur);
+    if (!st) break;
+    if (!st.isDirectory()) unlinkSync(cur);
+  }
+  const st = lstatOrNull(fullPath);
+  if (st?.isDirectory()) rmSync(fullPath, { recursive: true, force: true });
+  else if (st?.isSymbolicLink()) unlinkSync(fullPath);
+}
+
+/**
+ * Write bundled files alongside SKILL.md in a target directory.
+ * Keys are relative paths (e.g., "agents/frontend.md", "assets/font.woff2");
+ * values are text or raw bytes, written as-is. Paths were policy-checked when
+ * the bundle entered the installer, so only traversal is re-checked here.
+ */
+function writeAgentFiles(
+  targetDir: string,
+  agentFiles: Record<string, BundleContent> | undefined,
+  bundleOpts?: BundleWriteOptions,
+): void {
+  const files = agentFiles ?? {};
+  if (bundleOpts?.previousFiles) {
+    const keep = new Set(Object.keys(files));
+    for (const rel of bundleOpts.previousFiles) {
+      if (rel === "SKILL.md" || keep.has(rel)) continue;
+      let target: string;
+      try {
+        target = resolveBundleTarget(targetDir, rel, { anyPath: true });
+      } catch {
+        continue; // never act on an unsafe recorded path
+      }
+      const st = lstatOrNull(target);
+      if (st && !st.isDirectory()) {
+        unlinkSync(target);
+        pruneEmptyDirs(dirname(target), targetDir);
+      }
+    }
+  }
+  const anyPath = bundleOpts?.anyPath === true;
+  const executables = bundleOpts?.executables;
+  for (const [relPath, fileContent] of Object.entries(files)) {
+    const fullPath = resolveBundleTarget(targetDir, relPath, { anyPath });
+    clearPathForFile(targetDir, fullPath);
     mkdirSync(dirname(fullPath), { recursive: true });
     writeFileSync(fullPath, fileContent);
+    // Explicit when the caller knows the modes: writeFileSync keeps the old
+    // mode of an existing file, so a dropped exec bit would otherwise stick.
+    if (executables) chmodSync(fullPath, executables.has(relPath) ? 0o755 : 0o644);
   }
 }
 
 /**
  * Install a skill using the canonical symlink approach:
  * 1. Write SKILL.md to .agents/skills/{name}/ (canonical source of truth)
- * 2. Create relative symlinks from each agent dir to the canonical dir
- * 3. For agents with known symlink issues, fall back to direct copy
+ * 2. Agents that read the shared .agents/skills in this scope (0894) get
+ *    nothing else — the canonical folder is what they load
+ * 3. Create relative symlinks from every other agent dir to the canonical dir
+ * 4. For agents with known symlink issues, fall back to direct copy
  *
  * Optional agentFiles: additional files (e.g., agents/*.md) to install alongside SKILL.md.
  * Keys are relative paths within the skill directory.
@@ -156,7 +302,8 @@ export function installSymlink(
   content: string,
   agents: AgentDefinition[],
   opts: InstallOptions,
-  agentFiles?: Record<string, string>,
+  agentFiles?: Record<string, BundleContent>,
+  bundleOpts?: BundleWriteOptions,
 ): string[] {
   content = ensureFrontmatter(content, skillName);
   const strippedContent = stripClaudeFields(content, skillName);
@@ -169,24 +316,48 @@ export function installSymlink(
     canonicalSkillDir = join(ensureCanonicalDir(opts.projectRoot, opts.global), skillName);
     mkdirSync(canonicalSkillDir, { recursive: true });
     writeFileSync(join(canonicalSkillDir, "SKILL.md"), strippedContent);
-    if (agentFiles) writeAgentFiles(canonicalSkillDir, agentFiles);
+    writeAgentFiles(canonicalSkillDir, agentFiles, bundleOpts);
   }
 
   const installed: string[] = [];
 
   for (const agent of agents) {
-    const agentSkillsDir = resolveAgentSkillsDir(agent, opts);
-    mkdirSync(agentSkillsDir, { recursive: true });
+    // 0894 (AC-04): shared readers load the canonical folder directly.
+    if (isSatisfiedByCanonical(agent, opts) && canonicalSkillDir) {
+      if (!installed.includes(canonicalSkillDir)) installed.push(canonicalSkillDir);
+      continue;
+    }
 
+    const agentSkillsDir = resolveAgentSkillsDir(agent, opts);
     const linkPath = join(agentSkillsDir, skillName);
 
-    // Agents with known symlink issues get direct copy
+    // Never link the canonical folder onto itself (an agent whose skills dir
+    // IS the shared folder); removing the "existing" path would delete it.
+    if (canonicalSkillDir && linkPath === canonicalSkillDir) {
+      if (!installed.includes(canonicalSkillDir)) installed.push(canonicalSkillDir);
+      continue;
+    }
+
+    mkdirSync(agentSkillsDir, { recursive: true });
+
+    // Claude Code links to the canonical copy when that copy is exactly what
+    // Claude would get; otherwise it keeps a full copy with its own fields.
+    if (
+      COPY_FALLBACK_AGENTS.has(agent.id) &&
+      canonicalSkillDir &&
+      strippedContent === content &&
+      createRelativeSymlink(canonicalSkillDir, linkPath)
+    ) {
+      installed.push(linkPath);
+      continue;
+    }
     if (COPY_FALLBACK_AGENTS.has(agent.id)) {
       // Claude Code gets full content with all fields
       const agentContent = agent.id === "claude-code" ? content : strippedContent;
+      unlinkIfSymlink(linkPath);
       mkdirSync(linkPath, { recursive: true });
       writeFileSync(join(linkPath, "SKILL.md"), agentContent);
-      if (agentFiles) writeAgentFiles(linkPath, agentFiles);
+      writeAgentFiles(linkPath, agentFiles, bundleOpts);
       installed.push(linkPath);
       continue;
     }
@@ -197,9 +368,10 @@ export function installSymlink(
       installed.push(linkPath);
     } else {
       // Fallback to copy on symlink failure — use stripped content for non-Claude
+      unlinkIfSymlink(linkPath);
       mkdirSync(linkPath, { recursive: true });
       writeFileSync(join(linkPath, "SKILL.md"), strippedContent);
-      if (agentFiles) writeAgentFiles(linkPath, agentFiles);
+      writeAgentFiles(linkPath, agentFiles, bundleOpts);
       installed.push(linkPath);
     }
   }
@@ -217,7 +389,8 @@ export function installCopy(
   content: string,
   agents: AgentDefinition[],
   opts: InstallOptions,
-  agentFiles?: Record<string, string>,
+  agentFiles?: Record<string, BundleContent>,
+  bundleOpts?: BundleWriteOptions,
 ): string[] {
   content = ensureFrontmatter(content, skillName);
   const strippedContent = stripClaudeFields(content, skillName);
@@ -226,11 +399,19 @@ export function installCopy(
   for (const agent of agents) {
     // Claude Code gets full content; all others get stripped
     const agentContent = agent.id === "claude-code" ? content : strippedContent;
-    const agentSkillsDir = resolveAgentSkillsDir(agent, opts);
+    // 0894 (AC-04): shared readers get one copy in the canonical folder
+    // instead of a per-agent copy.
+    const agentSkillsDir = isSatisfiedByCanonical(agent, opts)
+      ? ensureCanonicalDir(opts.projectRoot, opts.global)
+      : resolveAgentSkillsDir(agent, opts);
     const skillDir = join(agentSkillsDir, skillName);
+    if (installed.includes(skillDir)) continue;
+    // A copy for one agent must not land in another's folder through an
+    // old link (the shared canonical folder itself is left as it is).
+    if (!isSatisfiedByCanonical(agent, opts)) unlinkIfSymlink(skillDir);
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(join(skillDir, "SKILL.md"), agentContent);
-    if (agentFiles) writeAgentFiles(skillDir, agentFiles);
+    writeAgentFiles(skillDir, agentFiles, bundleOpts);
     installed.push(skillDir);
   }
 

@@ -2,8 +2,48 @@
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-10-11
+
+1.2.5 was tagged but never reached npm (its README agent badge was stale), so 1.2.6 is the first published release with everything listed under 1.2.5.
+
+### Added
+
+- `vskill audit-webmcp <urls...>` audits the WebMCP tools a website registers, in headless Chromium, without running any tool: write actions missing `consequentialHint`, read-only claims on write tools, tool-poisoning text, third-party registrations and more, as a terminal table, JSON or JSONL for batches. Playwright stays optional.
+
+### Changed
+
+- Installing one skill from a GitHub repo (`vskill install <owner/repo> --skill <name>`) now copies the whole skill folder byte for byte: nested folders, binaries such as fonts and audio, and executable bits. Before, only SKILL.md and the top level of five folders arrived, so a skill could install with 2 of its 28 files. The lockfile lists every installed file, and a reinstall removes files the new version dropped.
+- Every file in a skill bundle now goes through the same security scan as SKILL.md; a critical finding blocks the install unless you pass `--force`, and native executables are never installed without it.
+- SKILL.md and the rest of the bundle always come from the same commit, which the lockfile records.
+- Git LFS files install as the real file, checked against the LFS pointer's size and hash.
+- When GitHub's API is rate limited or a skill is too large, vskill falls back to SKILL.md plus the standard folders and says why.
+
 ### Fixed
 
+- Skill Studio: removing a skill from one agent keeps the shared copy other agents still read, and a new "Remove from all agents" action removes it everywhere.
+- Skill Studio reinstalls keep scripts executable and binaries intact.
+- `--dry-run` is honored on every install path, and the shared `.agents/skills` folder is used on every path.
+- Antigravity installs in the legacy `.agent/skills` folder are found again; GitHub Copilot is no longer detected when only the VS Code extension folder exists.
+- `vskill doctor --fix` is safe with chained links, links across global and project scope, and locked skills.
+- A bundled `skill.md` or files whose names differ only in case can no longer overwrite the checked SKILL.md.
+- Skill Studio's Overview publish row passes the right skill identity.
+
+## [1.2.5] - 2026-10-11
+
+### Added
+
+- `vskill doctor [--global|--project] [--json] [--fix]` checks your skill folders: same-name copies that have diverged, broken or redundant links, leftovers from `migrate-to-codex`, skills whose name does not match their folder, descriptions that are too long, and two folders claiming the same skill name. `--fix` removes broken and redundant links and turns identical copies into links; it never touches copies whose content differs.
+- Grok is a supported agent.
+
+### Changed
+
+- Agent skill folders follow each agent's current docs: Codex and Antigravity use the shared `.agents/skills` (Antigravity no longer uses the old `.agent/skills`), and GitHub Copilot and Copilot CLI use `.github/skills` for project skills.
+- `vskill install` no longer adds a separate link for agents that already read the shared `.agents/skills` folder (OpenCode, Cursor, Copilot, Gemini, Grok and others), so a skill shows up once instead of two or three times. Claude Code links to the shared copy when nothing Claude-specific differs.
+
+### Fixed
+
+- `vskill install` keeps going when one agent's config file cannot be updated: the other agents still get the skill and the skipped one is named. It fails only when no agent could be installed.
+- `vskill install --dry-run` lists what it would install and writes nothing.
 - CI: the Lighthouse check audits the live verified-skill.com pages again (it had failed with INVALID_URL).
 
 ## [1.2.4] - 2026-10-11

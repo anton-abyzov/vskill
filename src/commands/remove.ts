@@ -2,11 +2,12 @@
 // vskill remove -- remove an installed skill from all agents
 // ---------------------------------------------------------------------------
 
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { resolveTilde } from "../utils/paths.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
+import { agentGlobalInstallDirs } from "../agents/global-dirs.js";
 import { readLockfile, removeSkillFromLock } from "../lockfile/index.js";
 import { resolveLocalSkillRoot } from "../lockfile/local-root.js";
 import { claudePluginUninstall } from "../utils/claude-plugin.js";
@@ -23,6 +24,15 @@ interface RemoveOptions {
   force?: boolean;
   /** 0724 T-007: structured JSON output (matches enable/disable shape). */
   json?: boolean;
+}
+
+function lexists(p: string): boolean {
+  if (existsSync(p)) return true;
+  try {
+    return lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 
 async function confirm(message: string): Promise<boolean> {
@@ -83,6 +93,11 @@ export async function removeCommand(
   // report can say "removed" instead of "not-applicable" for them.
   const removedAgentIds = new Set<string>();
 
+  const canonicalDirs = new Set([
+    join(projectRoot, ".agents", "skills", skillName),
+    join(globalAgentsRoot, "skills", skillName),
+  ]);
+
   for (const agent of agents) {
     const paths: Array<{ label: string; dir: string }> = [];
 
@@ -95,15 +110,24 @@ export async function removeCommand(
     }
 
     if (!opts.local) {
-      // Global dirs
-      paths.push({
-        label: `${agent.displayName} (global)`,
-        dir: resolveTilde(join(agent.globalSkillsDir, skillName)),
-      });
+      // Global dirs. 0894: every dir vskill may have installed into for this
+      // agent (Antigravity's legacy ~/.gemini/antigravity/skills included).
+      for (const globalDir of agentGlobalInstallDirs(agent, resolveTilde)) {
+        paths.push({
+          label: `${agent.displayName} (global)`,
+          dir: join(globalDir, skillName),
+        });
+      }
     }
 
     for (const { label, dir } of paths) {
-      if (existsSync(dir)) {
+      // 0894: an agent whose skills dir IS the shared .agents/skills folder
+      // (Codex) is handled by the canonical-store cleanup below, which keeps
+      // the lockfile guard and reports every shared-reader agent.
+      if (canonicalDirs.has(dir)) continue;
+      // lstat, not existsSync: a link left dangling (its target already
+      // gone) must be removed too.
+      if (lexists(dir)) {
         try {
           rmSync(dir, { recursive: true, force: true });
           removedFrom.push(label);
@@ -134,12 +158,13 @@ export async function removeCommand(
     removeSkillFromLock(skillName, globalLockRoot);
   }
 
-  const canonicalTargets: Array<{ label: string; dir: string; lockDir?: string }> = [];
+  const canonicalTargets: Array<{ label: string; dir: string; lockDir?: string; global: boolean }> = [];
   if (!opts.global) {
     canonicalTargets.push({
       label: "canonical store (project)",
       dir: join(projectRoot, ".agents", "skills", skillName),
       lockDir: projectRoot,
+      global: false,
     });
   }
   if (!opts.local) {
@@ -147,9 +172,10 @@ export async function removeCommand(
       label: "canonical store (global)",
       dir: join(globalAgentsRoot, "skills", skillName),
       lockDir: globalLockRoot,
+      global: true,
     });
   }
-  for (const { label, dir, lockDir } of canonicalTargets) {
+  for (const { label, dir, lockDir, global } of canonicalTargets) {
     // Only delete the payload once no lockfile entry references it.
     if (readLockfile(lockDir)?.skills[skillName]) continue;
     if (!existsSync(dir)) continue;
@@ -157,6 +183,14 @@ export async function removeCommand(
       rmSync(dir, { recursive: true, force: true });
       removedFrom.push(label);
       removedCount++;
+      // 0894: agents that read the shared .agents/skills in this scope were
+      // installed through the canonical folder alone, so removing it is what
+      // removes the skill for them.
+      for (const agent of agents) {
+        if (agent.readsSharedSkills?.[global ? "global" : "project"] === true) {
+          removedAgentIds.add(agent.id);
+        }
+      }
     } catch (err) {
       console.error(
         yellow(`Failed to remove ${label}: `) + dim((err as Error).message),

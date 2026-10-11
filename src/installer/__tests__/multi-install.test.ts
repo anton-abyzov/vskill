@@ -52,7 +52,7 @@ describe("installSkillToMultipleAgents — dispatch matrix", () => {
     expect(readFileSync(expected, "utf8")).toContain("PARA + LLM Wiki");
   });
 
-  it("Tier 2 (cursor) writes .mdc under ~/.cursor/rules/<name>.mdc (transformer path)", async () => {
+  it("cursor (reads shared ~/.agents/skills, 0894) installs through the canonical folder only", async () => {
     const result = await installSkillToMultipleAgents({
       skill,
       agentIds: ["cursor"],
@@ -60,11 +60,11 @@ describe("installSkillToMultipleAgents — dispatch matrix", () => {
       projectRoot: workDir,
     });
     expect(result.agents[0].status).toBe("installed");
-    const expected = join(workDir, ".cursor", "rules", "obsidian-brain.mdc");
-    expect(existsSync(expected)).toBe(true);
-    const content = readFileSync(expected, "utf8");
-    expect(content).toContain("alwaysApply: false");
-    expect(content).toContain(skill.body);
+    const canonical = join(workDir, ".agents", "skills", "obsidian-brain");
+    expect(result.agents[0].detail).toBe(canonical);
+    expect(readFileSync(join(canonical, "SKILL.md"), "utf8")).toContain(skill.body);
+    // No ~/.cursor link, copy or .mdc rule — Cursor would list the skill twice.
+    expect(existsSync(join(workDir, ".cursor"))).toBe(false);
   });
 
   it("Tier 2 (github-copilot-ext) project scope writes .github/instructions/<name>.instructions.md (F7)", async () => {
@@ -120,27 +120,27 @@ describe("installSkillToMultipleAgents — dispatch matrix", () => {
 
 describe("installSkillToMultipleAgents — error isolation (AC-US4-10)", () => {
   it("a transformer that throws fails only its own target", async () => {
-    // Inject a throwing transformer by overriding the cursor registry entry
+    // Inject a throwing transformer by overriding the junie registry entry (a Tier-2 agent that does not read the shared folder)
     // for this test. Cleanup is automatic — vitest module isolation per file.
     const { AGENTS_REGISTRY } = await import("../../agents/agents-registry.js");
-    const cursorAgent = AGENTS_REGISTRY.find((a) => a.id === "cursor");
+    const cursorAgent = AGENTS_REGISTRY.find((a) => a.id === "junie");
     const originalTransformer = cursorAgent?.formatTransformer;
     if (cursorAgent) {
       cursorAgent.formatTransformer = () => {
-        throw new Error("synthetic-cursor-failure");
+        throw new Error("synthetic-junie-failure");
       };
     }
     try {
       const result = await installSkillToMultipleAgents({
         skill,
-        agentIds: ["claude-code", "cursor", "windsurf"],
+        agentIds: ["claude-code", "junie", "windsurf"],
         scope: "user",
         projectRoot: workDir,
       });
       const byId = Object.fromEntries(result.agents.map((a) => [a.agentId, a]));
       expect(byId["claude-code"].status).toBe("installed");
-      expect(byId["cursor"].status).toBe("error");
-      expect(byId["cursor"].detail).toContain("synthetic-cursor-failure");
+      expect(byId["junie"].status).toBe("error");
+      expect(byId["junie"].detail).toContain("synthetic-junie-failure");
       expect(byId["windsurf"].status).toBe("installed");
       expect(result.errorCount).toBe(1);
     } finally {
@@ -167,7 +167,7 @@ describe("installSkillToMultipleAgents — error isolation (AC-US4-10)", () => {
 describe("installSkillToMultipleAgents — path traversal guard (AC-US4-11)", () => {
   it("rejects a transformer whose relativePath escapes the install root", async () => {
     const { AGENTS_REGISTRY } = await import("../../agents/agents-registry.js");
-    const cursorAgent = AGENTS_REGISTRY.find((a) => a.id === "cursor");
+    const cursorAgent = AGENTS_REGISTRY.find((a) => a.id === "junie");
     const original = cursorAgent?.formatTransformer;
     if (cursorAgent) {
       cursorAgent.formatTransformer = () => [
@@ -177,7 +177,7 @@ describe("installSkillToMultipleAgents — path traversal guard (AC-US4-11)", ()
     try {
       const result = await installSkillToMultipleAgents({
         skill,
-        agentIds: ["cursor"],
+        agentIds: ["junie"],
         scope: "user",
         projectRoot: workDir,
       });

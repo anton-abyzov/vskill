@@ -7,7 +7,8 @@
 //   4. Key present with items, value absent → insert `  - value` at end of list block, status "appended", backup written
 //   5. Key present with items, value already in list → no write, status "already-present"
 //   6. Malformed YAML (unclosed string, tab-only indent, leading garbage) → throw MalformedConfigError, file untouched
-//   7. Key present as inline list (`key: [a, b]`) or scalar → throw IncompatibleConfigError, file untouched
+//   7. Key present as a one-line scalar or flat inline list → rewritten as a block list (0894);
+//      nested flow → throw IncompatibleConfigError, file untouched
 //   8. .bak collision-safe: writes .bak first; if .bak exists, tries .bak.1, .bak.2, ...
 //
 // All tests run against a fresh tmpdir per case so they're independent and
@@ -125,25 +126,55 @@ describe("safeAppendYamlList — key-state variants", () => {
 });
 
 describe("safeAppendYamlList — error paths (file unchanged)", () => {
-  it("inline list (`read: [a, b]`) → IncompatibleConfigError, file unchanged", () => {
+  it("flat inline list (`read: [a, b]`) → rewritten as a block list keeping both (0894)", () => {
     const file = join(workDir, "conf.yml");
-    const before = "read: [/a.md, /b.md]\n";
+    writeFileSync(file, "model: x\nread: [/a.md, /b.md]\nmore: y\n");
+    const res = safeAppendYamlList(file, "read", "/c.md");
+    expect(res.status).toBe("appended");
+    expect(read(file)).toBe("model: x\nread:\n  - /a.md\n  - /b.md\n  - /c.md\nmore: y\n");
+    expect(backupFiles(workDir, "conf.yml")).toHaveLength(1);
+  });
+
+  it("scalar (`read: README.md`, as Aider allows) → rewritten as a block list (0894)", () => {
+    const file = join(workDir, "conf.yml");
+    writeFileSync(file, "read: README.md  # always\n");
+    expect(safeAppendYamlList(file, "read", "/c.md").status).toBe("appended");
+    // The trailing comment moves to the rewritten `read:` line, not dropped.
+    expect(read(file)).toBe("read: # always\n  - README.md\n  - /c.md\n");
+  });
+
+  it("quoted scalar holding ' #' → IncompatibleConfigError, file unchanged (0894)", () => {
+    const file = join(workDir, "conf.yml");
+    const before = 'read: "notes #2.md"\n';
     writeFileSync(file, before);
-    expect(() => safeAppendYamlList(file, "read", "/c.md")).toThrow(
-      IncompatibleConfigError,
-    );
+    expect(() => safeAppendYamlList(file, "read", "/c.md")).toThrow(IncompatibleConfigError);
     expect(read(file)).toBe(before);
     expect(backupFiles(workDir, "conf.yml")).toHaveLength(0);
   });
 
-  it("scalar value at the key (`read: \"single\"`) → IncompatibleConfigError", () => {
+  it("flow list with a quoted item holding a comma → IncompatibleConfigError, file unchanged (0894)", () => {
     const file = join(workDir, "conf.yml");
-    const before = `read: "single"\n`;
+    const before = 'read: ["a, b.md", c.md]\n';
     writeFileSync(file, before);
-    expect(() => safeAppendYamlList(file, "read", "/c.md")).toThrow(
-      IncompatibleConfigError,
-    );
+    expect(() => safeAppendYamlList(file, "read", "/c.md")).toThrow(IncompatibleConfigError);
     expect(read(file)).toBe(before);
+    expect(backupFiles(workDir, "conf.yml")).toHaveLength(0);
+  });
+
+  it("scalar already equal to the value → already-present, no write", () => {
+    const file = join(workDir, "conf.yml");
+    writeFileSync(file, "read: /c.md\n");
+    expect(safeAppendYamlList(file, "read", "/c.md").status).toBe("already-present");
+    expect(backupFiles(workDir, "conf.yml")).toHaveLength(0);
+  });
+
+  it("nested flow value → IncompatibleConfigError, file unchanged", () => {
+    const file = join(workDir, "conf.yml");
+    const before = "read: [[/a.md], /b.md]\n";
+    writeFileSync(file, before);
+    expect(() => safeAppendYamlList(file, "read", "/c.md")).toThrow(IncompatibleConfigError);
+    expect(read(file)).toBe(before);
+    expect(backupFiles(workDir, "conf.yml")).toHaveLength(0);
   });
 
   it("tab-indented list → MalformedConfigError (tabs are illegal in YAML indent)", () => {

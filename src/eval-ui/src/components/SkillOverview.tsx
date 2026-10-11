@@ -236,7 +236,7 @@ export function SkillOverview(props: SkillOverviewProps) {
         && !skill.pluginMarketplace
         && skill.installMethod !== "copied"
         && skill.installMethod !== "symlinked"
-        && <PublishStatusRow />}
+        && <PublishStatusRow skillName={skill.skill} skillPath={skill.skillPath ?? undefined} />}
 
       {/* Responsive 8-card grid */}
       <div

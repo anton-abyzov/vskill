@@ -22,16 +22,18 @@ vi.mock("../../hooks/useGitHubStatus", () => ({
 
 // PublishButton calls api.gitProbe internally; stub it to avoid network.
 vi.mock("../PublishButton", () => ({
-  PublishButton: ({ remoteUrl }: { remoteUrl: string }) => {
+  PublishButton: ({ remoteUrl, skillName, skillPath }: { remoteUrl: string; skillName?: string; skillPath?: string }) => {
     const React = require("react");
     return React.createElement("button", {
       "data-testid": "stub-publish-button",
       "data-remote": remoteUrl,
+      "data-skill-name": skillName ?? "",
+      "data-skill-path": skillPath ?? "",
     }, "Publish");
   },
 }));
 
-async function renderRow(props: { projectBasename?: string } = {}): Promise<{
+async function renderRow(props: { projectBasename?: string; skillName?: string; skillPath?: string } = {}): Promise<{
   container: HTMLDivElement;
   unmount: () => void;
 }> {
@@ -95,6 +97,22 @@ describe("PublishStatusRow (0772 US-005)", () => {
     const stub = container.querySelector("[data-testid='stub-publish-button']") as HTMLButtonElement;
     expect(stub).toBeTruthy();
     expect(stub.getAttribute("data-remote")).toBe("https://github.com/foo/bar");
+    unmount();
+  });
+
+  it("0874 AC-06: forwards the skill identity so the drawer submits in-app through the private-repo guard", async () => {
+    mocks.status.current = {
+      hasGit: true,
+      githubOrigin: "https://github.com/foo/private-repo",
+      status: "github",
+    };
+    const { container, unmount } = await renderRow({
+      skillName: "acc-private-skill",
+      skillPath: "skills/acc-private-skill/SKILL.md",
+    });
+    const stub = container.querySelector("[data-testid='stub-publish-button']") as HTMLButtonElement;
+    expect(stub.getAttribute("data-skill-name")).toBe("acc-private-skill");
+    expect(stub.getAttribute("data-skill-path")).toBe("skills/acc-private-skill/SKILL.md");
     unmount();
   });
 

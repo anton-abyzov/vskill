@@ -78,8 +78,11 @@ export function syncFrontmatterVersionAfterUpdate(
   name: string,
   newVersion: string,
 ): void {
-  for (const agent of agents) {
-    const skillMdPath = join(projectRoot, agent.localSkillsDir, name, "SKILL.md");
+  // 0894: agents that read the shared .agents/skills have no link of their
+  // own, so the canonical copy is synced explicitly.
+  const dirs = new Set([...agents.map((a) => a.localSkillsDir), ".agents/skills"]);
+  for (const dir of dirs) {
+    const skillMdPath = join(projectRoot, dir, name, "SKILL.md");
     if (!existsSync(skillMdPath)) continue;
     let onDisk: string;
     try {
@@ -360,9 +363,14 @@ export async function updateCommand(
       });
 
       // 7. Determine new file manifest
-      const newFileKeys = result.files
-        ? Object.keys(result.files).sort()
-        : ["SKILL.md"];
+      // 0894: installs record the whole skill folder in `files`. A fetcher
+      // that returns only SKILL.md says nothing about the rest of the folder,
+      // so those files are kept (never deleted as "ghosts").
+      const fetchedBundle = !!result.files &&
+        Object.keys(result.files).some((k) => k !== "SKILL.md");
+      const newFileKeys = fetchedBundle
+        ? Object.keys(result.files!).sort()
+        : [...new Set(["SKILL.md", ...(entry.files ?? [])])].sort();
 
       // 8. Ghost file cleanup + install via canonical installer
       const projectRoot = process.cwd();

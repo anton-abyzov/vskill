@@ -19,6 +19,12 @@ import {
   getInstallableAgents,
   type AgentDefinition,
 } from "../../agents/agents-registry.js";
+import { agentGlobalInstallDirs } from "../../agents/global-dirs.js";
+
+/** 0894: true when the agent reads the shared `.agents/skills` in a scope. */
+function readsShared(agent: AgentDefinition, global: boolean): boolean {
+  return agent.readsSharedSkills?.[global ? "global" : "project"] === true;
+}
 import { scanInstalledPluginSkills } from "../../eval/plugin-scanner.js";
 
 export type InstallLocationScope = "project" | "personal" | "plugin";
@@ -89,7 +95,11 @@ function projectAgentLocation(
   const localDir = isAbsolute(agent.localSkillsDir)
     ? agent.localSkillsDir
     : join(projectRoot, agent.localSkillsDir);
-  const skillDir = safeJoinUnder(localDir, slug);
+  let skillDir = safeJoinUnder(localDir, slug);
+  // 0894: a shared reader with no link of its own loads the canonical copy.
+  if ((!skillDir || !probeSkill(skillDir)) && readsShared(agent, false)) {
+    skillDir = safeJoinUnder(join(projectRoot, ".agents", "skills"), slug);
+  }
   if (!skillDir || !probeSkill(skillDir)) return null;
   return {
     scope: "project",
@@ -105,8 +115,17 @@ function personalAgentLocation(
   agent: AgentDefinition,
   slug: string,
 ): InstallLocation | null {
-  const globalDir = expandHome(agent.globalSkillsDir);
-  const skillDir = safeJoinUnder(globalDir, slug);
+  // 0894: every global dir vskill may have installed into (Antigravity's
+  // legacy ~/.gemini/antigravity/skills included), first hit wins.
+  let skillDir: string | null = null;
+  for (const globalDir of agentGlobalInstallDirs(agent, expandHome)) {
+    skillDir = safeJoinUnder(globalDir, slug);
+    if (skillDir && probeSkill(skillDir)) break;
+  }
+  // 0894: a shared reader with no link of its own loads the canonical copy.
+  if ((!skillDir || !probeSkill(skillDir)) && readsShared(agent, true)) {
+    skillDir = safeJoinUnder(expandHome("~/.agents/skills"), slug);
+  }
   if (!skillDir || !probeSkill(skillDir)) return null;
   return {
     scope: "personal",

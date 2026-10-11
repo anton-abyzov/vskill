@@ -6,10 +6,14 @@ import { join } from "node:path";
 // ---------------------------------------------------------------------------
 const mockExistsSync = vi.fn();
 const mockRmSync = vi.fn();
+const mockLstatSync = vi.fn((): never => {
+  throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+});
 
 vi.mock("node:fs", () => ({
   existsSync: (...args: unknown[]) => mockExistsSync(...args),
   rmSync: (...args: unknown[]) => mockRmSync(...args),
+  lstatSync: (...args: unknown[]) => (mockLstatSync as (...a: unknown[]) => unknown)(...args),
   readFileSync: vi.fn(),
   writeFileSync: vi.fn(),
 }));
@@ -496,6 +500,89 @@ describe("removeCommand", () => {
       expect(cursor.action).toBe("removed");
       expect(cc.action).toBe("not-applicable");
       logSpy.mockRestore();
+    });
+
+    it("0894: removing the canonical payload reports shared-reader agents as removed", async () => {
+      mockDetectInstalledAgents.mockResolvedValue([
+        MOCK_AGENTS[0],
+        { ...MOCK_AGENTS[1], readsSharedSkills: { project: true, global: true } },
+      ]);
+      mockReadLockfile
+        .mockReturnValueOnce(makeLockfile({ sw: ENTRY }))
+        .mockReturnValue(makeLockfile({}));
+      // Cursor has no link of its own — only the canonical folder exists.
+      mockExistsSync.mockImplementation((p: string) => p === PROJECT_CANONICAL);
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await removeCommand("sw", { force: true, local: true, json: true });
+
+      expect(mockRmSync).toHaveBeenCalledWith(PROJECT_CANONICAL, { recursive: true, force: true });
+      const parsed = JSON.parse(logSpy.mock.calls[logSpy.mock.calls.length - 1].join(" "));
+      const byId = Object.fromEntries(parsed.perAgent.map((r: { id: string; action: string }) => [r.id, r.action]));
+      expect(byId.cursor).toBe("removed");
+      expect(byId["claude-code"]).toBe("not-applicable");
+      logSpy.mockRestore();
+    });
+
+    it("0894: an agent whose skills dir IS the canonical folder keeps the lockfile guard", async () => {
+      mockDetectInstalledAgents.mockResolvedValue([
+        {
+          id: "codex",
+          displayName: "Codex CLI",
+          localSkillsDir: ".agents/skills",
+          globalSkillsDir: "~/.agents/skills",
+          readsSharedSkills: { project: true, global: true },
+        },
+      ]);
+      // Global lockfile still references the skill → global canonical stays.
+      mockReadLockfile.mockImplementation((dir?: string) =>
+        dir === GLOBAL_AGENTS_ROOT ? makeLockfile({ sw: ENTRY }) : makeLockfile({}),
+      );
+      mockExistsSync.mockImplementation((p: string) => p === GLOBAL_CANONICAL);
+
+      await removeCommand("sw", { force: true, global: true });
+
+      expect(mockRmSync).not.toHaveBeenCalledWith(GLOBAL_CANONICAL, expect.anything());
+    });
+  });
+
+  describe("0894: Antigravity legacy global dir and dangling links", () => {
+    const ANTIGRAVITY = {
+      id: "antigravity",
+      displayName: "Antigravity",
+      localSkillsDir: ".agents/skills",
+      globalSkillsDir: "~/.gemini/config/skills",
+      readsSharedSkills: { project: true, global: false },
+    };
+
+    it("removes a global install in the legacy ~/.gemini/antigravity/skills", async () => {
+      mockDetectInstalledAgents.mockResolvedValue([ANTIGRAVITY]);
+      mockReadLockfile.mockReturnValue(makeLockfile({}));
+      const legacy = "/home/testuser/.gemini/antigravity/skills";
+      mockExistsSync.mockImplementation((p: string) => p === legacy || p === `${legacy}/sw`);
+
+      await removeCommand("sw", { force: true, global: true });
+
+      expect(mockRmSync).toHaveBeenCalledWith(`${legacy}/sw`, { recursive: true, force: true });
+    });
+
+    it("removes an agent link left dangling after its target is gone", async () => {
+      mockDetectInstalledAgents.mockResolvedValue([MOCK_AGENTS[1]]);
+      mockReadLockfile.mockReturnValue(makeLockfile({}));
+      mockExistsSync.mockReturnValue(false); // existsSync follows the dead link
+      const link = "/home/testuser/.cursor/skills/sw";
+      mockLstatSync.mockImplementation(((p: string) => {
+        if (p === link) return { isSymbolicLink: () => true };
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      }) as never);
+
+      await removeCommand("sw", { force: true, global: true });
+
+      expect(mockRmSync).toHaveBeenCalledWith(link, { recursive: true, force: true });
+      mockLstatSync.mockReset();
+      mockLstatSync.mockImplementation((): never => {
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      });
     });
   });
 });

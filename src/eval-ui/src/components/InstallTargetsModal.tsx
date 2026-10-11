@@ -190,6 +190,11 @@ export function InstallTargetsModal({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [installError, setInstallError] = useState<string | null>(null);
+  // 0894: remove outcomes are shown in any phase (install errors only show
+  // after an install). A shared refusal offers "Remove from all agents".
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [sharedRefusal, setSharedRefusal] = useState<{ agentId: string; sharedWith: string[] } | null>(null);
+  const [removingAll, setRemovingAll] = useState(false);
   const [results, setResults] = useState<LiveResultMap>({});
   // 0850 — per-agent install-state for badges + Remove links.
   const [installState, setInstallState] = useState<InstallStateResponse | null>(null);
@@ -417,8 +422,22 @@ export function InstallTargetsModal({
 
   // 0850 — per-agent remove. Posts to /api/studio/remove-skill, then
   // re-fetches install-state so the badge flips back to "Not installed".
+  const afterRemove = useCallback(() => {
+    if (typeof window !== "undefined") {
+      try {
+        window.dispatchEvent(
+          new CustomEvent("studio:skill-installed", { detail: { skill, scope } }),
+        );
+      } catch { /* non-fatal */ }
+    }
+    // Trigger install-state re-fetch so the row badge updates.
+    setInstallStateNonce((n) => n + 1);
+  }, [skill, scope]);
+
   const handleRemoveAgent = useCallback(async (agentId: string) => {
     const removeFn = removeSkillImpl ?? removeSkillFromAgents;
+    setRemoveError(null);
+    setSharedRefusal(null);
     setRemovingAgents((prev) => {
       const next = new Set(prev);
       next.add(agentId);
@@ -426,20 +445,17 @@ export function InstallTargetsModal({
     });
     try {
       const resp: RemoveSkillResponse = await removeFn({ skill, agentIds: [agentId], scope });
-      if (typeof window !== "undefined") {
-        try {
-          window.dispatchEvent(
-            new CustomEvent("studio:skill-installed", { detail: { skill, scope } }),
-          );
-        } catch { /* non-fatal */ }
-      }
-      // Trigger install-state re-fetch so the row badge updates.
-      setInstallStateNonce((n) => n + 1);
+      afterRemove();
+      const shared = resp.skipped.find((s) => s.sharedWith && s.sharedWith.length > 0);
       if (resp.errors.length > 0) {
-        setInstallError(`Remove failed for ${resp.errors[0].agentId}: ${resp.errors[0].message}`);
+        setRemoveError(`Remove failed for ${resp.errors[0].agentId}: ${resp.errors[0].message}`);
+      } else if (shared) {
+        // 0894: the skill lives in the shared .agents/skills folder, which
+        // other agents still load; it can only go for all of them at once.
+        setSharedRefusal({ agentId: shared.agentId, sharedWith: shared.sharedWith! });
       }
     } catch (err) {
-      setInstallError(err instanceof Error ? err.message : String(err));
+      setRemoveError(err instanceof Error ? err.message : String(err));
     } finally {
       setRemovingAgents((prev) => {
         const next = new Set(prev);
@@ -447,7 +463,32 @@ export function InstallTargetsModal({
         return next;
       });
     }
-  }, [removeSkillImpl, skill, scope]);
+  }, [removeSkillImpl, skill, scope, afterRemove]);
+
+  // 0894: "Remove from all agents" after a shared refusal.
+  const handleRemoveAll = useCallback(async () => {
+    if (!sharedRefusal) return;
+    const removeFn = removeSkillImpl ?? removeSkillFromAgents;
+    setRemovingAll(true);
+    setRemoveError(null);
+    try {
+      const resp = await removeFn({
+        skill,
+        scope,
+        agentIds: [sharedRefusal.agentId, ...sharedRefusal.sharedWith],
+        all: true,
+      });
+      afterRemove();
+      setSharedRefusal(null);
+      if (resp.errors.length > 0) {
+        setRemoveError(`Remove failed for ${resp.errors[0].agentId}: ${resp.errors[0].message}`);
+      }
+    } catch (err) {
+      setRemoveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRemovingAll(false);
+    }
+  }, [removeSkillImpl, skill, scope, sharedRefusal, afterRemove]);
 
   const advanceClipboardQueue = useCallback(() => {
     setPendingClipboardQueue((prev) => {
@@ -717,6 +758,73 @@ export function InstallTargetsModal({
                 results={Object.values(results)}
                 agents={agents}
               />
+            )}
+
+            {sharedRefusal && (
+              <div
+                data-testid="install-targets-remove-shared"
+                role="alert"
+                style={{
+                  marginTop: "0.75rem",
+                  padding: "0.625rem 0.875rem",
+                  borderRadius: 6,
+                  background:
+                    "color-mix(in srgb, var(--color-own, #f59e0b) 12%, transparent)",
+                  border:
+                    "1px solid color-mix(in srgb, var(--color-own, #f59e0b) 45%, transparent)",
+                  color: "var(--text-primary)",
+                  fontSize: 12,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.75rem",
+                }}
+              >
+                <span style={{ flex: 1 }}>
+                  Not removed: {sharedRefusal.agentId} loads this skill from the shared .agents/skills
+                  folder, which {sharedRefusal.sharedWith.join(", ")} also
+                  {sharedRefusal.sharedWith.length === 1 ? " uses" : " use"}. It can only be removed
+                  for all of them.
+                </span>
+                <button
+                  type="button"
+                  data-testid="install-targets-remove-all"
+                  disabled={removingAll}
+                  onClick={() => { void handleRemoveAll(); }}
+                  style={{
+                    fontSize: 12,
+                    padding: "0.25rem 0.625rem",
+                    borderRadius: 6,
+                    background: "transparent",
+                    border: "1px solid var(--color-error, #dc2626)",
+                    color: "var(--color-error, #dc2626)",
+                    cursor: removingAll ? "wait" : "pointer",
+                    whiteSpace: "nowrap",
+                    fontFamily: "var(--font-sans)",
+                  }}
+                >
+                  {removingAll ? "Removing…" : "Remove from all agents"}
+                </button>
+              </div>
+            )}
+
+            {removeError && (
+              <div
+                data-testid="install-targets-remove-error"
+                role="alert"
+                style={{
+                  marginTop: "0.75rem",
+                  padding: "0.625rem 0.875rem",
+                  borderRadius: 6,
+                  background:
+                    "color-mix(in srgb, var(--color-error, #dc2626) 12%, transparent)",
+                  border:
+                    "1px solid color-mix(in srgb, var(--color-error, #dc2626) 45%, transparent)",
+                  color: "var(--text-primary)",
+                  fontSize: 12,
+                }}
+              >
+                {removeError}
+              </div>
             )}
 
             {(phase === "error" || phase === "done") && installError && (

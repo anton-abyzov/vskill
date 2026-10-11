@@ -45,6 +45,14 @@ export interface ParsedSkill {
    * `tests/`, and `.env.example`; callers validate path safety before write.
    */
   files?: Record<string, string>;
+  /**
+   * 0894: binary bundled files (fonts, images) as raw bytes, standard paths
+   * only. Set server-side from a local skill folder, never from a request
+   * body; written by Tier-1 installs, ignored by transformers.
+   */
+  binaryFiles?: Record<string, Uint8Array>;
+  /** 0894: bundled paths that are executable in the source folder. */
+  executables?: string[];
 }
 
 /**

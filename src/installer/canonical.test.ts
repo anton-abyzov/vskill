@@ -10,6 +10,7 @@ import {
   ensureCanonicalDir,
   resolveAgentSkillsDir,
   resolveAgentInstallRoot,
+  resolveEffectiveSkillsDir,
 } from "./canonical.js";
 
 // Controlled mock for symlinkSync to test symlink-failure fallback path (TC-103)
@@ -201,7 +202,7 @@ describe("canonical installer", () => {
       expect(result).toHaveLength(2);
     });
 
-    it("uses copy fallback for Claude Code (known symlink issues)", () => {
+    it("links Claude Code to the canonical copy when it has no Claude-only fields (0894)", () => {
       const agents = [
         makeAgent({ id: "claude-code", localSkillsDir: ".claude/skills" }),
         makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" }),
@@ -212,15 +213,12 @@ describe("canonical installer", () => {
         projectRoot: tempDir,
       });
 
-      // Claude Code gets a direct copy (not a symlink)
       const claudePath = join(tempDir, ".claude", "skills", "my-skill");
-      expect(lstatSync(claudePath).isDirectory()).toBe(true);
-      expect(lstatSync(claudePath).isSymbolicLink()).toBe(false);
+      expect(lstatSync(claudePath).isSymbolicLink()).toBe(true);
       const claudeContent = readFileSync(join(claudePath, "SKILL.md"), "utf-8");
       expect(claudeContent).toContain("name: my-skill");
       expect(claudeContent).toContain("# My Skill\nContent here");
 
-      // Cursor gets a symlink
       const cursorLink = join(tempDir, ".cursor", "skills", "my-skill");
       expect(lstatSync(cursorLink).isSymbolicLink()).toBe(true);
 
@@ -775,5 +773,147 @@ describe("canonical installer", () => {
         Object.defineProperty(process, "platform", { value: original });
       }
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0894 (AC-04): agents that read the shared .agents/skills get no link/copy.
+// ---------------------------------------------------------------------------
+describe("0894 shared-reader installs", () => {
+  let tempDir: string;
+  let homeDir: string;
+  let homeSpy: ReturnType<typeof vi.spyOn>;
+
+  const sharedReader = (id: string, overrides: Partial<AgentDefinition> = {}) =>
+    makeAgent({
+      id,
+      displayName: id,
+      localSkillsDir: `.${id}/skills`,
+      globalSkillsDir: `~/.${id}/skills`,
+      readsSharedSkills: { project: true, global: true },
+      ...overrides,
+    });
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "vskill-0894-proj-"));
+    homeDir = mkdtempSync(join(tmpdir(), "vskill-0894-home-"));
+    homeSpy = vi.spyOn(os, "homedir").mockReturnValue(homeDir);
+  });
+
+  afterEach(() => {
+    homeSpy.mockRestore();
+    rmSync(tempDir, { recursive: true, force: true });
+    rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it("writes the canonical folder when the only agents are shared readers (project)", () => {
+    const paths = installSymlink("my-skill", "# hi", [sharedReader("cursor"), sharedReader("opencode")], {
+      global: false,
+      projectRoot: tempDir,
+    });
+    const canonical = join(tempDir, ".agents", "skills", "my-skill");
+    expect(paths).toEqual([canonical]);
+    expect(readFileSync(join(canonical, "SKILL.md"), "utf-8")).toContain("# hi");
+    expect(existsSync(join(tempDir, ".cursor"))).toBe(false);
+    expect(existsSync(join(tempDir, ".opencode"))).toBe(false);
+  });
+
+  it("global install of a shared reader writes only ~/.agents/skills/<name>", () => {
+    const paths = installSymlink("my-skill", "# hi", [sharedReader("codex")], {
+      global: true,
+      projectRoot: tempDir,
+    });
+    const canonical = join(homeDir, ".agents", "skills", "my-skill");
+    expect(paths).toEqual([canonical]);
+    expect(existsSync(join(homeDir, ".codex"))).toBe(false);
+  });
+
+  it("honors the scope: a project-only shared reader still gets a global link", () => {
+    const grok = sharedReader("grok", { readsSharedSkills: { project: false, global: true } });
+    const ag = sharedReader("antigravity", { readsSharedSkills: { project: true, global: false } });
+
+    const projectPaths = installSymlink("s", "# s", [grok, ag], { global: false, projectRoot: tempDir });
+    expect(projectPaths).toEqual([
+      join(tempDir, ".grok", "skills", "s"),
+      join(tempDir, ".agents", "skills", "s"),
+    ]);
+    expect(lstatSync(join(tempDir, ".grok", "skills", "s")).isSymbolicLink()).toBe(true);
+
+    const globalPaths = installSymlink("s", "# s", [grok, ag], { global: true, projectRoot: tempDir });
+    expect(globalPaths).toEqual([
+      join(homeDir, ".agents", "skills", "s"),
+      join(homeDir, ".antigravity", "skills", "s"),
+    ]);
+    expect(lstatSync(join(homeDir, ".antigravity", "skills", "s")).isSymbolicLink()).toBe(true);
+  });
+
+  it("Claude Code keeps its copy alongside a shared reader", () => {
+    const claude = makeAgent({ localSkillsDir: ".claude/skills", globalSkillsDir: "~/.claude/skills" });
+    const paths = installSymlink("s", "---\nname: s\nmodel: opus\n---\n# s", [claude, sharedReader("cursor")], {
+      global: false,
+      projectRoot: tempDir,
+    });
+    const claudeDir = join(tempDir, ".claude", "skills", "s");
+    expect(paths).toEqual([claudeDir, join(tempDir, ".agents", "skills", "s")]);
+    expect(lstatSync(claudeDir).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(claudeDir, "SKILL.md"), "utf-8")).toContain("model: opus");
+  });
+
+  it("never links the canonical folder onto itself when an agent dir IS .agents/skills", () => {
+    const selfDir = makeAgent({ id: "codex-like", localSkillsDir: ".agents/skills", globalSkillsDir: "~/.agents/skills" });
+    const paths = installSymlink("s", "# s", [selfDir], { global: false, projectRoot: tempDir });
+    const canonical = join(tempDir, ".agents", "skills", "s");
+    expect(paths).toEqual([canonical]);
+    expect(lstatSync(canonical).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(canonical, "SKILL.md"), "utf-8")).toContain("# s");
+  });
+
+  it("installCopy writes one canonical copy for shared readers", () => {
+    const paths = installCopy("s", "# s", [sharedReader("cursor"), sharedReader("gemini")], {
+      global: false,
+      projectRoot: tempDir,
+    });
+    expect(paths).toEqual([join(tempDir, ".agents", "skills", "s")]);
+    expect(existsSync(join(tempDir, ".cursor"))).toBe(false);
+  });
+
+  it("resolveEffectiveSkillsDir points shared readers at the canonical folder", () => {
+    const opts = { global: false, projectRoot: tempDir };
+    expect(resolveEffectiveSkillsDir(sharedReader("cursor"), opts)).toBe(join(tempDir, ".agents", "skills"));
+    expect(resolveEffectiveSkillsDir(makeAgent({ localSkillsDir: ".claude/skills" }), opts)).toBe(
+      join(tempDir, ".claude", "skills"),
+    );
+  });
+
+  it("an update that adds Claude-only fields replaces Claude's old link with a real copy", () => {
+    const opts = { global: false, projectRoot: tempDir };
+    const claude = makeAgent({ localSkillsDir: ".claude/skills" });
+    const v1 = "---\nname: foo\ndescription: d\n---\nv1\n";
+    const v2 = "---\nname: foo\ndescription: d\nallowed-tools: Bash\n---\nv2\n";
+    installSymlink("foo", v1, [claude, sharedReader("codex")], opts);
+    const claudeDir = join(tempDir, ".claude", "skills", "foo");
+    expect(lstatSync(claudeDir).isSymbolicLink()).toBe(true);
+
+    // `vskill update` reinstalls one agent at a time (update.ts, multi-install.ts).
+    installSymlink("foo", v2, [claude], opts);
+
+    expect(lstatSync(claudeDir).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(claudeDir, "SKILL.md"), "utf-8")).toContain("allowed-tools: Bash");
+    const canonical = readFileSync(join(tempDir, ".agents", "skills", "foo", "SKILL.md"), "utf-8");
+    expect(canonical).not.toContain("allowed-tools");
+  });
+
+  it("installCopy does not write through an agent's old link into the canonical copy", () => {
+    const opts = { global: false, projectRoot: tempDir };
+    const claude = makeAgent({ localSkillsDir: ".claude/skills" });
+    installSymlink("foo", "---\nname: foo\ndescription: d\n---\nv1\n", [claude, sharedReader("codex")], opts);
+
+    installCopy("foo", "---\nname: foo\ndescription: d\nmodel: opus\n---\nv2\n", [claude, sharedReader("codex")], opts);
+
+    const claudeDir = join(tempDir, ".claude", "skills", "foo");
+    expect(lstatSync(claudeDir).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(claudeDir, "SKILL.md"), "utf-8")).toContain("model: opus");
+    const canonical = readFileSync(join(tempDir, ".agents", "skills", "foo", "SKILL.md"), "utf-8");
+    expect(canonical).not.toContain("model:");
   });
 });

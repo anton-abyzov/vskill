@@ -108,6 +108,19 @@ vi.mock("../lockfile/index.js", () => ({
 // Mock scanner
 // ---------------------------------------------------------------------------
 const mockRunTier1Scan = vi.fn();
+// 0894: the complete-skill-folder fetch has its own tests
+// (add-github-bundle.test.ts); here it returns a SKILL.md-only folder.
+const mockPrepareGitHubSkillBundle = vi.fn();
+vi.mock("./add-github-bundle.js", () => ({
+  prepareGitHubSkillBundle: (...args: unknown[]) => mockPrepareGitHubSkillBundle(...args),
+}));
+beforeEach(() => {
+  mockPrepareGitHubSkillBundle.mockResolvedValue({
+    ok: true,
+    bundle: { files: {}, executables: [], fileList: ["SKILL.md"], skipped: [], totalBytes: 0 },
+  });
+});
+
 vi.mock("../scanner/index.js", () => ({
   runTier1Scan: (...args: unknown[]) => mockRunTier1Scan(...args),
 }));
@@ -150,7 +163,9 @@ vi.mock("../api/client.js", () => ({
 // ---------------------------------------------------------------------------
 const mockDiscoverSkills = vi.fn();
 const mockGetDefaultBranch = vi.fn().mockResolvedValue("main");
-const mockGetBranchHeadSha = vi.fn().mockResolvedValue("abc1234def567890abc1234def567890abc1234d");
+// 0894: SKILL.md, bundle and lockfile are all read at the resolved commit.
+const HEAD_SHA = "abc1234def567890abc1234def567890abc1234d";
+const mockGetBranchHeadSha = vi.fn().mockResolvedValue(HEAD_SHA);
 const mockCheckRepoExists = vi.fn().mockResolvedValue(true);
 vi.mock("../discovery/github-tree.js", () => ({
   discoverSkills: (...args: unknown[]) => mockDiscoverSkills(...args),
@@ -357,6 +372,30 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
       expect(writeCall).toBeDefined();
       // The written content should contain frontmatter (name field injected by ensureFrontmatter)
       expect(writeCall![1]).toContain("name:");
+    });
+
+    it("0894: --dry-run copies nothing and writes no lockfile", async () => {
+      const localPath = "/tmp/test-repo";
+      mockExistsSync.mockImplementation((p: string) =>
+        p.includes("plugins/frontend") || p.includes(".claude-plugin/marketplace.json"));
+      mockReadFileSync.mockImplementation((p: string) =>
+        p.includes("marketplace.json")
+          ? JSON.stringify({ name: "specweave", plugins: [{ name: "frontend", source: "./plugins/frontend", version: "1.0.0" }] })
+          : "");
+      mockReaddirSync.mockImplementation((_dir: string, opts?: unknown) =>
+        typeof opts === "object" && opts !== null && (opts as Record<string, unknown>).recursive
+          ? ["skills/SKILL.md"]
+          : ["SKILL.md"]);
+      mockStatSync.mockReturnValue({ isDirectory: () => false, isFile: () => true });
+      mockRunTier1Scan.mockReturnValue(makeScanResult());
+      mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+
+      await addCommand(localPath, { plugin: "frontend", pluginDir: localPath, dryRun: true });
+
+      expect(mockWriteFileSync).not.toHaveBeenCalled();
+      expect(mockCopyFileSync).not.toHaveBeenCalled();
+      expect(mockRmSync).not.toHaveBeenCalled();
+      expect(mockWriteLockfile).not.toHaveBeenCalled();      expect((console.log as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n")).toContain("Nothing was written");
     });
   });
 
@@ -1311,9 +1350,128 @@ describe("addCommand multi-skill discovery (GitHub path)", () => {
     expect(mockDiscoverSkills).not.toHaveBeenCalled();
     // Should fetch from skills/specific/SKILL.md
     expect(globalThis.fetch).toHaveBeenCalledWith(
+      `https://raw.githubusercontent.com/owner/repo/${HEAD_SHA}/skills/specific/SKILL.md`,
+      expect.anything(),
+    );
+  });
+
+  // 0894: --skill installs the WHOLE skill folder, not SKILL.md + a few dirs.
+  it("--skill passes the complete folder (nested, binary, exec) to the installer and lockfile", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Specific skill",
+    }) as unknown as typeof fetch;
+    const font = new Uint8Array([0, 1, 0xff]);
+    mockPrepareGitHubSkillBundle.mockResolvedValue({
+      ok: true,
+      bundle: {
+        files: { "scripts/lib/a.mjs": "export {};", "sub-agents/x.md": "# x", "assets/f.woff2": font, "run.sh": "#!/bin/sh" },
+        executables: ["run.sh"],
+        fileList: ["SKILL.md", "assets/f.woff2", "run.sh", "scripts/lib/a.mjs", "sub-agents/x.md"],
+        skipped: [],
+        totalBytes: 0,
+      },
+    });
+
+    await addCommand("owner/repo", { skill: "specific" });
+
+    expect(mockPrepareGitHubSkillBundle).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "owner", repo: "repo", skillMdPath: "skills/specific/SKILL.md" }),
+    );
+    const call = mockInstallSymlink.mock.calls.at(-1)!;
+    expect(Object.keys(call[4]).sort()).toEqual(["assets/f.woff2", "run.sh", "scripts/lib/a.mjs", "sub-agents/x.md"]);
+    expect(call[4]["assets/f.woff2"]).toBe(font);
+    expect([...(call[5] as { executables: Set<string> }).executables]).toEqual(["run.sh"]);
+    const lockArg = mockWriteLockfile.mock.calls.at(-1)![0];
+    expect(lockArg.skills.specific.files).toEqual([
+      "SKILL.md", "assets/f.woff2", "run.sh", "scripts/lib/a.mjs", "sub-agents/x.md",
+    ]);
+  });
+
+  // 0894 review: SKILL.md, bundle and lockfile must come from ONE commit.
+  it("--skill reads SKILL.md and the bundle at the resolved commit and records it", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Specific skill",
+    }) as unknown as typeof fetch;
+
+    await addCommand("owner/repo", { skill: "specific" });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      `https://raw.githubusercontent.com/owner/repo/${HEAD_SHA}/skills/specific/SKILL.md`,
+      expect.anything(),
+    );
+    expect(mockPrepareGitHubSkillBundle).toHaveBeenCalledWith(expect.objectContaining({ ref: HEAD_SHA }));
+    const lockArg = mockWriteLockfile.mock.calls.at(-1)![0];
+    expect(lockArg.skills.specific.sourceCommitSha).toBe(HEAD_SHA);
+  });
+
+  it("--skill falls back to the branch for both SKILL.md and bundle when the commit is unknown", async () => {
+    mockGetBranchHeadSha.mockResolvedValueOnce(null);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Specific skill",
+    }) as unknown as typeof fetch;
+
+    await addCommand("owner/repo", { skill: "specific" });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
       "https://raw.githubusercontent.com/owner/repo/main/skills/specific/SKILL.md",
       expect.anything(),
     );
+    expect(mockPrepareGitHubSkillBundle).toHaveBeenCalledWith(expect.objectContaining({ ref: "main" }));
+  });
+
+  it("discovery installs read each SKILL.md and bundle at the one resolved commit", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      { name: "foo", path: "skills/foo/SKILL.md", rawUrl: "https://raw.githubusercontent.com/owner/repo/main/skills/foo/SKILL.md" },
+    ]);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Skill content",
+    }) as unknown as typeof fetch;
+
+    await addCommand("owner/repo", {});
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      `https://raw.githubusercontent.com/owner/repo/${HEAD_SHA}/skills/foo/SKILL.md`,
+      expect.anything(),
+    );
+    expect(mockPrepareGitHubSkillBundle).toHaveBeenCalledWith(
+      expect.objectContaining({ ref: HEAD_SHA, skillMdPath: "skills/foo/SKILL.md" }),
+    );
+    expect(mockWriteLockfile.mock.calls.at(-1)![0].skills.foo.sourceCommitSha).toBe(HEAD_SHA);
+  });
+
+  it("--skill hands the previous install's file list to the installer (orphan cleanup)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Specific skill",
+    }) as unknown as typeof fetch;
+    mockReadLockfile.mockReturnValue({
+      version: 1, agents: [], createdAt: "", updatedAt: "",
+      skills: { specific: { files: ["SKILL.md", "scripts/old.mjs"] } },
+    });
+
+    await addCommand("owner/repo", { skill: "specific" });
+
+    const call = mockInstallSymlink.mock.calls.at(-1)!;
+    expect((call[5] as { previousFiles?: string[] }).previousFiles).toEqual(["SKILL.md", "scripts/old.mjs"]);
+    mockReadLockfile.mockReturnValue(null);
+  });
+
+  it("--skill refuses to install when the skill folder cannot be fetched completely", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Specific skill",
+    }) as unknown as typeof fetch;
+    mockPrepareGitHubSkillBundle.mockResolvedValue({
+      ok: false, verdict: "BUNDLE_ERROR", message: "Skill has 5000 files, over the 1000-file install limit.",
+    });
+
+    await expect(addCommand("owner/repo", { skill: "specific" })).rejects.toThrow(/process\.exit/);
+    expect(mockInstallSymlink).not.toHaveBeenCalled();
+    expect(mockWriteLockfile).not.toHaveBeenCalled();
   });
 
   // TC-010: Failed scan for one skill does not block others
@@ -1359,7 +1517,7 @@ describe("addCommand multi-skill discovery (GitHub path)", () => {
 
     // Should fall back to fetching root SKILL.md directly
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/owner/repo/main/SKILL.md",
+      `https://raw.githubusercontent.com/owner/repo/${HEAD_SHA}/SKILL.md`,
       expect.anything(),
     );
     expect(mockRunTier1Scan).toHaveBeenCalledTimes(1);
@@ -1404,7 +1562,7 @@ describe("addCommand source format routing", () => {
 
     expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md",
+      `https://raw.githubusercontent.com/owner/repo/${HEAD_SHA}/skills/my-skill/SKILL.md`,
       expect.anything(),
     );
     expect(mockRunTier1Scan).toHaveBeenCalledTimes(1);
@@ -1460,7 +1618,7 @@ describe("addCommand source format routing", () => {
 
     expect(mockDiscoverSkills).not.toHaveBeenCalled();
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/owner/repo/main/skills/git-bisect-detective/SKILL.md",
+      `https://raw.githubusercontent.com/owner/repo/${HEAD_SHA}/skills/git-bisect-detective/SKILL.md`,
       expect.anything(),
     );
     const lockArg = mockWriteLockfile.mock.calls[0][0];
@@ -1473,7 +1631,7 @@ describe("addCommand source format routing", () => {
 
     expect(mockDiscoverSkills).not.toHaveBeenCalled();
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md",
+      `https://raw.githubusercontent.com/owner/repo/${HEAD_SHA}/skills/my-skill/SKILL.md`,
       expect.anything(),
     );
     const lockArg = mockWriteLockfile.mock.calls[0][0];
@@ -1485,7 +1643,7 @@ describe("addCommand source format routing", () => {
     await addCommand("https://github.com/owner/repo/tree/develop/skills/my-skill", {});
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/owner/repo/develop/skills/my-skill/SKILL.md",
+      `https://raw.githubusercontent.com/owner/repo/${HEAD_SHA}/skills/my-skill/SKILL.md`,
       expect.anything(),
     );
     const lockArg = mockWriteLockfile.mock.calls[0][0];
@@ -1537,7 +1695,7 @@ describe("addCommand source format routing", () => {
 
   // TC-025: 2-part + --skill is equivalent to 3-part format
   it("2-part with --skill fetches same URL as 3-part format", async () => {
-    const expectedUrl = "https://raw.githubusercontent.com/owner/repo/main/skills/specific/SKILL.md";
+    const expectedUrl = `https://raw.githubusercontent.com/owner/repo/${HEAD_SHA}/skills/specific/SKILL.md`;
 
     // 2-part with --skill flag
     await addCommand("owner/repo", { skill: "specific" });
@@ -1610,7 +1768,7 @@ describe("addCommand source format routing", () => {
 
     expect(mockDiscoverSkills).toHaveBeenCalledWith("anton-abyzov", "vskill");
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/anton-abyzov/vskill/main/plugins/skills/skills/scout/SKILL.md",
+      `https://raw.githubusercontent.com/anton-abyzov/vskill/${HEAD_SHA}/plugins/skills/skills/scout/SKILL.md`,
       expect.anything(),
     );
   });
@@ -1625,7 +1783,7 @@ describe("addCommand source format routing", () => {
 
     expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md",
+      `https://raw.githubusercontent.com/owner/repo/${HEAD_SHA}/skills/my-skill/SKILL.md`,
       expect.anything(),
     );
   });
@@ -1638,7 +1796,7 @@ describe("addCommand source format routing", () => {
 
     expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md",
+      `https://raw.githubusercontent.com/owner/repo/${HEAD_SHA}/skills/my-skill/SKILL.md`,
       expect.anything(),
     );
   });
@@ -1693,6 +1851,39 @@ describe("addCommand registry install (no slash in source)", () => {
       }),
       expect.any(String),
     );
+  });
+
+  it("0894: --dry-run writes no skill file and no lockfile", async () => {
+    mockGetSkill.mockResolvedValue({
+      name: "my-skill", author: "alice", tier: "VERIFIED", score: 90, version: "1.0.0", sha: "",
+      description: "A skill", content: "# My Skill", installs: 5, updatedAt: "2026-01-01T00:00:00Z",
+    });
+
+    await addCommand("my-skill", { dryRun: true });
+
+    expect(mockMkdirSync).not.toHaveBeenCalled();
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+    expect(mockWriteLockfile).not.toHaveBeenCalled();
+    expect((console.log as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n")).toContain("Nothing was written");
+  });
+
+  it("0894: shared readers (Cursor + Codex) get one copy in .agents/skills, none in .cursor/skills", async () => {
+    mockGetSkill.mockResolvedValue({
+      name: "my-skill", author: "alice", tier: "VERIFIED", score: 90, version: "1.0.0", sha: "",
+      description: "A skill", content: "# My Skill", installs: 5, updatedAt: "2026-01-01T00:00:00Z",
+    });
+    const shared = { project: true, global: true };
+    mockDetectInstalledAgents.mockResolvedValue([
+      makeAgent({ id: "cursor", displayName: "Cursor", localSkillsDir: ".cursor/skills", globalSkillsDir: "~/.cursor/skills", readsSharedSkills: shared }),
+      makeAgent({ id: "codex", displayName: "Codex CLI", localSkillsDir: ".agents/skills", globalSkillsDir: "~/.agents/skills", readsSharedSkills: shared }),
+    ]);
+
+    await addCommand("my-skill", {});
+
+    const written = mockWriteFileSync.mock.calls
+      .map((c: unknown[]) => c[0] as string)
+      .filter((p) => p.endsWith("SKILL.md"));
+    expect(written).toEqual([`${process.cwd()}/.agents/skills/my-skill/SKILL.md`]);
   });
 
   it("exits with error when skill is not in registry", async () => {
@@ -1883,6 +2074,22 @@ describe("addCommand --agent filter", () => {
     const agents = mockInstallSymlink.mock.calls[0][2]; // 3rd arg = agents array
     expect(agents).toHaveLength(1);
     expect(agents[0].id).toBe("claude-code");
+  });
+
+  it("--dry-run on a single skill writes nothing (0894)", async () => {
+    const claude = makeAgent({ id: "claude-code", displayName: "Claude Code" });
+    mockDetectInstalledAgents.mockResolvedValue([claude]);
+    mockFilterAgents.mockReturnValue([claude]);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await addCommand("owner/safe-repo", { skill: "my-skill", dryRun: true });
+
+    expect(mockInstallSymlink).not.toHaveBeenCalled();
+    expect(mockWriteLockfile).not.toHaveBeenCalled();
+    // 0894 review: a dry run must not download the skill folder either.
+    expect(mockPrepareGitHubSkillBundle).not.toHaveBeenCalled();
+    expect(log.mock.calls.flat().join(" ")).toContain("Nothing was written");
+    log.mockRestore();
   });
 
   // TC-015: --agent with invalid ID shows error
@@ -2292,6 +2499,9 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
     await addCommand("ignored", { repo: "anton-abyzov/vskill", plugin: "frontend", dryRun: true });
 
     expect(mockExecFileSync).not.toHaveBeenCalled();
+    // 0894: --dry-run writes no skill files and no lockfile on this path.
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+    expect(mockWriteLockfile).not.toHaveBeenCalled();
     const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
       .flat()
       .join("\n");
@@ -3320,6 +3530,43 @@ describe("addCommand marketplace integration", () => {
     await addCommand("owner/repo", { yes: true });
 
     expect(mockRemoveSkillFromLock).not.toHaveBeenCalled();
+  });
+
+  it("0894: --dry-run with an unticked installed plugin deletes, writes and records nothing", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {
+        "plugin-a": { version: "1.0.0", source: "marketplace:owner/repo#plugin-a" },
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({ ok: true, text: async () => SAMPLE_MARKETPLACE_JSON })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [{ name: "test-skill", type: "dir" }],
+        text: async () => "# Skill Content",
+      }) as unknown as typeof fetch;
+    mockIsTTY.mockReturnValue(true);
+    mockPromptCheckboxList.mockResolvedValueOnce([2]).mockResolvedValueOnce([0]);
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockExistsSync.mockReturnValue(true);
+
+    await addCommand("owner/repo", { dryRun: true });
+
+    expect(mockRmSync).not.toHaveBeenCalled();
+    expect(mockRemoveSkillFromLock).not.toHaveBeenCalled();
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+    expect(mockWriteLockfile).not.toHaveBeenCalled();
+    const out = (console.log as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
+    expect(out).toContain("would uninstall");
+    expect(out).toContain("Nothing was written");
   });
 
 });

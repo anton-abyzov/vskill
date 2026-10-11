@@ -110,17 +110,17 @@ describe("0847 T-008/T-009 -- multi-agent skill standard matrix", () => {
     });
 
     expect(result.errorCount).toBe(0);
-    expect(existsSync(join(workDir, ".codex", "skills", "standard-matrix"))).toBe(true);
+    // 0894: codex and cursor read ~/.agents/skills, so the canonical folder
+    // (with every bundled resource) is their install; no per-agent copies.
+    expect(existsSync(join(workDir, ".codex"))).toBe(false);
+    expect(existsSync(join(workDir, ".cursor"))).toBe(false);
     expect(readFileSync(join(workDir, ".agents", "skills", "standard-matrix", "agents", "openai.yaml"), "utf-8")).toContain(
       "default_prompt",
     );
-
-    const cursorRule = join(workDir, ".cursor", "rules", "standard-matrix.mdc");
-    expect(readFileSync(cursorRule, "utf-8")).toContain("Use `scripts/audit.mjs`");
-    expect(readFileSync(join(workDir, ".cursor", "skills", "standard-matrix", "scripts", "audit.mjs"), "utf-8")).toContain(
+    expect(readFileSync(join(workDir, ".agents", "skills", "standard-matrix", "scripts", "audit.mjs"), "utf-8")).toContain(
       "return 'ok'",
     );
-    expect(readFileSync(join(workDir, ".config", "github-copilot", "skills", "standard-matrix", "agents", "openai.yaml"), "utf-8")).toContain(
+    expect(readFileSync(join(workDir, ".copilot", "skills", "standard-matrix", "agents", "openai.yaml"), "utf-8")).toContain(
       "short_description",
     );
   });

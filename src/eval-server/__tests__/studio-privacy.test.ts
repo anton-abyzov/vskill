@@ -94,6 +94,19 @@ describe("findLockEntryForStudioSkill", () => {
     );
   });
 
+  it("0894: matches only a top-level <name>/SKILL.md, never one nested in another skill's folder", () => {
+    const l = [
+      lockOf({
+        recut: entry("github:acme/secret-skills", { files: ["SKILL.md", "examples/greet/SKILL.md", "x/skills/greet/SKILL.md"] }),
+      }),
+    ];
+    expect(findLockEntryForStudioSkill(l, { skill: "greet", plugin: ".claude" })).toBeNull();
+    const plugin = [
+      lockOf({ p: entry("github:acme/s#plugin:p", { files: ["plugins/p/skills/greet/SKILL.md"] }) }),
+    ];
+    expect(findLockEntryForStudioSkill(plugin, { skill: "greet", plugin: ".claude" })?.source).toBe("github:acme/s#plugin:p");
+  });
+
   it("does not take an agent dir like .claude as a plugin key", () => {
     const l = [lockOf({ ".claude": entry("github:acme/open-skills") })];
     expect(findLockEntryForStudioSkill(l, { skill: "x", plugin: ".claude" })).toBeNull();

@@ -1,5 +1,5 @@
 /**
- * Agent Registry — 53 AI coding agents with metadata.
+ * Agent Registry — 54 AI coding agents with metadata.
  *
  * Each agent has detection paths, parent company info, and feature support.
  * Used to determine which agents can install/use verified skills.
@@ -17,6 +17,11 @@ import { join as joinPath } from "node:path";
 import { existsSync as fsExistsSync, readdirSync as fsReaddirSync } from "node:fs";
 import { homedir as osHomedir } from "node:os";
 import { detectBinary } from "../utils/resolve-binary.js";
+import {
+  ANTIGRAVITY_LEGACY_GLOBAL_DIR,
+  agentGlobalInstallDirs,
+  resolveAgentGlobalSkillsDir,
+} from "./global-dirs.js";
 import type { FormatTransformer } from "../installer/transformers/index.js";
 // 0845 T-006..T-010 — per-tool format transformers wired onto Tier-2
 // entries below. Each is a pure function (parsedSkill → files).
@@ -126,7 +131,54 @@ export interface AgentDefinition {
 
   /** 0845 T-001: Tier 3 only — link to the tool's docs landing page. */
   docsUrl?: string;
+
+  /** 0894 (AC-03): whether the agent natively reads the shared skills folder
+   *  (`.agents/skills` in a project, `~/.agents/skills` globally) in each
+   *  scope. When true for the install scope, vskill writes only the canonical
+   *  folder and creates no agent-specific link or copy — the agent already
+   *  sees the skill there. Absent means false/false. */
+  readsSharedSkills?: { project: boolean; global: boolean };
+
+  /** 0894: other project-relative skills dirs the agent also scans (besides
+   *  `localSkillsDir` and the shared `.agents/skills`), e.g. Cursor reads
+   *  `.claude/skills`. Used by `vskill doctor` to spot redundant links. */
+  extraLocalSkillsDirs?: string[];
+
+  /** 0894: other global skills dirs the agent also scans (besides
+   *  `globalSkillsDir` and the shared `~/.agents/skills`), e.g. Cursor reads
+   *  `~/.claude/skills` and `~/.codex/skills`. Used by `vskill doctor`. */
+  extraGlobalSkillsDirs?: string[];
+
+  /** 0894: detect this agent only through `detectInstalled`, never through
+   *  the global-skills-dir fallback — for an agent whose global dir is owned
+   *  by another tool (VS Code Copilot shares `~/.copilot/skills` with
+   *  Copilot CLI, so that folder says nothing about the editor). */
+  noDirFallback?: boolean;
 }
+
+/** 0894: the shared, cross-agent skills folder (agentskills.io convention). */
+export const SHARED_LOCAL_SKILLS_DIR = '.agents/skills';
+export const SHARED_GLOBAL_SKILLS_DIR = '~/.agents/skills';
+
+/** 0894: true when `agent` reads the shared `.agents/skills` folder in the
+ *  given scope (`global` = user scope). */
+export function agentReadsSharedSkills(agent: AgentDefinition, global: boolean): boolean {
+  const flags = agent.readsSharedSkills;
+  if (!flags) return false;
+  return global ? flags.global : flags.project;
+}
+
+/** 0894: project-relative skills dirs an earlier registry used for agents
+ *  whose entries were corrected (Codex `.codex/skills`, Antigravity
+ *  `.agent/skills`, Copilot CLI `.copilot/skills`, VS Code Copilot
+ *  `.github/copilot/skills`). Still recognized as installed-style paths. */
+export const LEGACY_LOCAL_SKILLS_DIRS: readonly string[] = Object.freeze([
+  '.codex/skills',
+  '.agent/skills',
+  '.copilot/skills',
+  '.github/copilot/skills',
+]);
+
 
 /** 0694 (AC-US1-04): Backward-compat alias map for renamed agent ids.
  *  Consumed by `getAgent()` so existing scripts/lockfiles continue to work
@@ -138,9 +190,9 @@ export const LEGACY_AGENT_IDS: Readonly<Record<string, string>> = Object.freeze(
 });
 
 /**
- * Complete registry of 53 AI coding agents.
+ * Complete registry of 54 AI coding agents.
  *
- * 8 universal agents, 45 non-universal agents.
+ * 8 universal agents, 46 non-universal agents.
  * Use TOTAL_AGENTS for programmatic access to the count.
  */
 export const AGENTS_REGISTRY: AgentDefinition[] = [
@@ -168,12 +220,17 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
   },
   {
+    // 0894: Codex documents only `.agents/skills` (project) and
+    // `~/.agents/skills` (user); `~/.codex/skills` is legacy. The skills dir
+    // IS the shared folder, so the canonical write satisfies Codex.
     id: 'codex',
     displayName: 'Codex CLI',
-    localSkillsDir: '.codex/skills',
-    globalSkillsDir: '~/.codex/skills',
+    localSkillsDir: '.agents/skills',
+    globalSkillsDir: '~/.agents/skills',
+    readsSharedSkills: { project: true, global: true },
     isUniversal: true,
-    detectInstalled: () => detectBinary('codex'),
+    detectInstalled: async () =>
+      (await detectBinary('codex')) || fsExistsSync(joinPath(osHomedir(), '.codex')),
     parentCompany: 'OpenAI',
     featureSupport: { slashCommands: false, hooks: false, mcp: false, customSystemPrompt: true },
     // 0845 T-003 (AC-US3-04): explicit Tier 1 drop-in. Codex is a primary
@@ -188,6 +245,11 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     displayName: 'Cursor',
     localSkillsDir: '.cursor/skills',
     globalSkillsDir: '~/.cursor/skills',
+    // 0894: Cursor reads SKILL.md natively from .cursor/skills, .agents/skills
+    // and .claude/skills (project) and the ~/ equivalents plus ~/.codex/skills.
+    readsSharedSkills: { project: true, global: true },
+    extraLocalSkillsDirs: ['.claude/skills'],
+    extraGlobalSkillsDirs: ['~/.claude/skills', '~/.codex/skills'],
     isUniversal: true,
     detectInstalled: () => detectBinary('cursor'),
     parentCompany: 'Anysphere',
@@ -202,6 +264,8 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     displayName: 'Gemini CLI',
     localSkillsDir: '.gemini/skills',
     globalSkillsDir: '~/.gemini/skills',
+    // 0894: `.agents/skills` / `~/.agents/skills` are documented aliases.
+    readsSharedSkills: { project: true, global: true },
     isUniversal: true,
     detectInstalled: () => detectBinary('gemini'),
     parentCompany: 'Google',
@@ -215,10 +279,13 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     // under versioned dirs (`~/.vscode/extensions/github.copilot-<version>/`),
     // so `globalSkillsDir` uses a vskill-managed fallback. POSIX-only — a
     // Windows-equivalent extension glob is still TODO.
+    // 0894: VS Code Copilot documents `.github/skills` (project) and
+    // `~/.copilot/skills` (user) for agent skills.
     id: 'github-copilot-ext',
     displayName: 'GitHub Copilot (VS Code)',
-    localSkillsDir: '.github/copilot/skills',
-    globalSkillsDir: '~/.config/github-copilot/skills',
+    localSkillsDir: '.github/skills',
+    globalSkillsDir: '~/.copilot/skills',
+    noDirFallback: true,
     isUniversal: true,
     // 0706 T-003: pure-Node detection — the old shell pipe
     // (`which code && ls ~/.vscode/extensions/github.copilot-* 2>/dev/null`)
@@ -240,8 +307,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
     // 0845 T-003: Tier 2 — emits `.github/instructions/<name>.instructions.md`.
     // F7: VS Code reads workspace instructions from `.github/instructions/`,
-    // so the project-scope install root is `.github` — NOT the parent of
-    // localSkillsDir (`.github/copilot`).
+    // so the project-scope install root is pinned to `.github`.
     tier: 2,
     installMode: 'filesystem',
     formatTransformer: githubCopilotTransformer,
@@ -262,6 +328,11 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     displayName: 'OpenCode',
     localSkillsDir: '.opencode/skills',
     globalSkillsDir: '~/.config/opencode/skills',
+    // 0894: OpenCode also scans .claude/skills and .agents/skills (project)
+    // and ~/.claude/skills and ~/.agents/skills (user).
+    readsSharedSkills: { project: true, global: true },
+    extraLocalSkillsDirs: ['.claude/skills'],
+    extraGlobalSkillsDirs: ['~/.claude/skills'],
     isUniversal: true,
     detectInstalled: () => detectBinary('opencode'),
     parentCompany: 'Community',
@@ -271,13 +342,23 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
   },
 
   // ----------------------------------------------------------------
-  // Non-universal agents (45)
+  // Non-universal agents (46)
   // ----------------------------------------------------------------
   {
+    // 0894: project skills live in `.agents/skills` (legacy `.agent/skills`
+    // is still read). Antigravity does NOT read `~/.agents/skills`, so global
+    // installs keep a link. Global default is `~/.gemini/config/skills`
+    // (Antigravity 2.0 / IDE); `resolveAntigravityGlobalDir()` prefers the
+    // legacy IDE dir `~/.gemini/antigravity/skills` only when it already
+    // exists on disk, so existing setups keep working without a new folder.
+    // `~/.gemini/antigravity-cli/skills` (CLI) is also scanned.
     id: 'antigravity',
     displayName: 'Antigravity',
-    localSkillsDir: '.agent/skills',
-    globalSkillsDir: '~/.gemini/antigravity/skills',
+    localSkillsDir: '.agents/skills',
+    globalSkillsDir: '~/.gemini/config/skills',
+    readsSharedSkills: { project: true, global: false },
+    extraLocalSkillsDirs: ['.agent/skills'],
+    extraGlobalSkillsDirs: ['~/.gemini/antigravity-cli/skills', ANTIGRAVITY_LEGACY_GLOBAL_DIR],
     isUniversal: false,
     detectInstalled: () => detectBinary('antigravity'),
     parentCompany: 'Google',
@@ -767,14 +848,34 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
   {
     // 0694 US-001 (AC-US1-01): standalone `copilot` binary (GA Apr 2026),
     // separate from the VS Code Copilot extension above.
+    // 0894: docs list `.github/skills`, `.claude/skills`, `.agents/skills`
+    // (project) and `~/.copilot/skills`, `~/.agents/skills` (user).
     id: 'copilot-cli',
     displayName: 'GitHub Copilot CLI',
-    localSkillsDir: '.copilot/skills',
+    localSkillsDir: '.github/skills',
     globalSkillsDir: '~/.copilot/skills',
+    readsSharedSkills: { project: true, global: true },
+    extraLocalSkillsDirs: ['.claude/skills'],
     isUniversal: false,
     detectInstalled: () => detectBinary('copilot'),
     parentCompany: 'GitHub (Microsoft)',
     featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
+  },
+  {
+    // 0894: Grok CLI (xAI). User scope reads `~/.grok/skills` and
+    // `~/.agents/skills`; project scope documents only `.grok/skills`.
+    id: 'grok',
+    displayName: 'Grok CLI',
+    localSkillsDir: '.grok/skills',
+    globalSkillsDir: '~/.grok/skills',
+    readsSharedSkills: { project: false, global: true },
+    isUniversal: false,
+    detectInstalled: async () =>
+      (await detectBinary('grok')) || fsExistsSync(joinPath(osHomedir(), '.grok')),
+    parentCompany: 'xAI',
+    featureSupport: { slashCommands: true, hooks: false, mcp: true, customSystemPrompt: true },
+    tier: 1,
+    installMode: 'filesystem',
   },
   {
     // 0694 US-002 (AC-US2-01): Warp Terminal "Oz" Agent Mode.
@@ -985,6 +1086,29 @@ function expandHome(p: string): string {
  *
  * @returns Array of installed agent definitions
  */
+/**
+ * Tier 2 detection: the agent counts as installed when one of its global
+ * skills dirs exists. Guards: never on generic dirs ($HOME, $HOME/.config),
+ * never on the shared ~/.agents/skills (0894: any vskill install creates
+ * it), and never for an agent flagged `noDirFallback`. Antigravity's legacy
+ * IDE dir is checked too (0894), since installs land there while it exists.
+ */
+function globalDirFallbackDetects(
+  agent: AgentDefinition,
+  exists: (p: string) => boolean,
+  parentOf: (p: string) => string,
+): boolean {
+  if (agent.noDirFallback === true) return false;
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const shared = expandHome(SHARED_GLOBAL_SKILLS_DIR);
+  for (const globalDir of agentGlobalInstallDirs(agent)) {
+    const configDir = parentOf(globalDir);
+    if (configDir === home || configDir === `${home}/.config` || globalDir === shared) continue;
+    if (exists(globalDir)) return true;
+  }
+  return false;
+}
+
 export async function detectInstalledAgents(): Promise<AgentDefinition[]> {
   const { exec } = await import('node:child_process');
   const { promisify } = await import('node:util');
@@ -1031,14 +1155,8 @@ export async function detectInstalledAgents(): Promise<AgentDefinition[]> {
       // many tools leave config dirs behind even when not actively used,
       // leading to unwanted local skill directories being created for every detected agent.
       try {
-        const globalDir = expandHome(agent.globalSkillsDir);
-        const home = process.env.HOME || process.env.USERPROFILE || '';
-        const configDir = dirname(globalDir);
-        // Guard: don't match on generic dirs like $HOME or $HOME/.config
-        if (configDir !== home && configDir !== `${home}/.config`) {
-          if (existsSync(globalDir)) {
-            results.push(agent);
-          }
+        if (globalDirFallbackDetects(agent, existsSync, dirname)) {
+          results.push(agent);
         }
       } catch {
         // Skip on any error
@@ -1087,10 +1205,18 @@ export interface SupportedAgent {
  * registry. See AC-US3-03.
  */
 function resolveGlobalDirForAgent(agent: AgentDefinition): string {
-  if (agent.id === "antigravity" && process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR) {
-    return process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR;
-  }
-  return expandHome(agent.globalSkillsDir);
+  return resolveAgentGlobalSkillsDir(agent);
+}
+
+/**
+ * 0894: Antigravity's global skills dir. Order: `VSKILL_ANTIGRAVITY_SKILLS_DIR`
+ * env override, then the legacy IDE dir `~/.gemini/antigravity/skills` when it
+ * already exists on disk (so existing setups keep loading their skills), else
+ * the registry default `~/.gemini/config/skills` (Antigravity 2.0 / IDE).
+ */
+export function resolveAntigravityGlobalDir(): string {
+  const agent = AGENTS_REGISTRY.find((a) => a.id === "antigravity");
+  return resolveAgentGlobalSkillsDir({ id: "antigravity", globalSkillsDir: agent?.globalSkillsDir ?? "~/.gemini/config/skills" });
 }
 
 /**
@@ -1127,12 +1253,7 @@ async function probeAgentDetected(agent: AgentDefinition): Promise<boolean> {
   try {
     const { existsSync } = await import("node:fs");
     const { dirname } = await import("node:path");
-    const globalDir = expandHome(agent.globalSkillsDir);
-    const home = process.env.HOME || process.env.USERPROFILE || "";
-    const configDir = dirname(globalDir);
-    if (configDir !== home && configDir !== `${home}/.config`) {
-      if (existsSync(globalDir)) return true;
-    }
+    if (globalDirFallbackDetects(agent, existsSync, dirname)) return true;
   } catch {
     // ignore — agent is simply undetected
   }

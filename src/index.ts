@@ -148,6 +148,19 @@ program
     await removeCommand(skillName, opts);
   });
 
+// 0894: check skill folders across every agent's dirs; --fix repairs links.
+program
+  .command("doctor")
+  .description("Check skill folders across agents: duplicates, divergent copies, broken or redundant links")
+  .option("--global", "Scan global (user) skill folders only")
+  .option("--project", "Scan the current project's skill folders only")
+  .option("--json", "Output the report as JSON")
+  .option("--fix", "Remove broken and redundant links; replace byte-identical copies with links")
+  .action(async (opts: { global?: boolean; project?: boolean; json?: boolean; fix?: boolean }) => {
+    const { doctorCommand } = await import("./commands/doctor.js");
+    await doctorCommand(opts);
+  });
+
 program
   .command("find <query>")
   .alias("search")
@@ -237,6 +250,29 @@ program
       exclude: opts.exclude,
       severity: opts.severity,
       maxFiles: opts.maxFiles,
+    });
+  });
+
+program
+  .command("audit-webmcp [urls...]")
+  .description("Audit the WebMCP tools websites register (headless Chromium; never runs a tool)")
+  .option("--urls-file <path>", "File with one URL per line (# comments allowed)")
+  .option("--json", "Output JSON (JSONL, one site per line, for several URLs)")
+  .option("--out <file>", "Write the report to a file (JSON for one URL, JSONL for a batch)")
+  .option("--concurrency <n>", "Sites scanned in parallel (default: 4)")
+  .option("--timeout <ms>", "Page load timeout per site in ms (default: 30000)")
+  .option("--fail-on <severity>", "Exit 1 if any finding is at or above: critical|high|medium|low|info")
+  .option("--executable-path <path>", "Chromium or chrome-headless-shell binary to use")
+  .action(async (urls: string[], opts) => {
+    const { auditWebmcpCommand } = await import("./commands/audit-webmcp.js");
+    await auditWebmcpCommand(urls ?? [], {
+      urlsFile: opts.urlsFile,
+      json: opts.json,
+      out: opts.out,
+      concurrency: opts.concurrency,
+      timeout: opts.timeout,
+      failOn: opts.failOn,
+      executablePath: opts.executablePath,
     });
   });
 

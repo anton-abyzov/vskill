@@ -9,6 +9,8 @@ import {
   filterAgentsByFeatures,
   getAgentCreationProfile,
   NON_AGENT_CONFIG_DIRS,
+  agentReadsSharedSkills,
+  resolveAntigravityGlobalDir,
 } from "./agents-registry.js";
 
 // ---------------------------------------------------------------------------
@@ -289,7 +291,27 @@ describe("detectInstalledAgents", () => {
     const result = await detectInstalledAgents();
     // F-008: isRemoteOnly entries are short-circuited and never returned.
     const remoteOnlyCount = AGENTS_REGISTRY.filter((a) => a.isRemoteOnly === true).length;
-    expect(result.length).toBe(TOTAL_AGENTS - remoteOnlyCount);
+    // 0894: github-copilot-ext's own probe fails here (see above), and its
+    // dir fallback no longer fires on ~/.copilot/skills, which Copilot CLI
+    // shares — so it is the one local agent not detected.
+    expect(result.length).toBe(TOTAL_AGENTS - remoteOnlyCount - 1);
+    expect(result.map((a) => a.id)).not.toContain("github-copilot-ext");
+  });
+
+  it("0894: ~/.copilot/skills alone detects Copilot CLI, not VS Code Copilot", async () => {
+    mockExec.mockRejectedValue(new Error("not found")); // no `code`, no `copilot`
+    const home = process.env.HOME || process.env.USERPROFILE || "";
+    mockExistsSync.mockImplementation((p: string) => p === `${home}/.copilot/skills`);
+    const ids = (await detectInstalledAgents()).map((a) => a.id);
+    expect(ids).not.toContain("github-copilot-ext");
+  });
+
+  it("0894: Antigravity's legacy ~/.gemini/antigravity/skills alone still detects it", async () => {
+    mockExec.mockRejectedValue(new Error("not found")); // no `antigravity` binary
+    const home = process.env.HOME || process.env.USERPROFILE || "";
+    mockExistsSync.mockImplementation((p: string) => p === `${home}/.gemini/antigravity/skills`);
+    const ids = (await detectInstalledAgents()).map((a) => a.id);
+    expect(ids).toContain("antigravity");
   });
 
   it("does NOT detect agent when only parent config dir exists (no false positives)", async () => {
@@ -533,7 +555,7 @@ describe("AGENTS_REGISTRY — new CLI adapters (0694)", () => {
     const a = getAgent("copilot-cli");
     expect(a).toBeDefined();
     expect(a!.displayName).toBe("GitHub Copilot CLI");
-    expect(a!.localSkillsDir).toBe(".copilot/skills");
+    expect(a!.localSkillsDir).toBe(".github/skills");
     expect(a!.globalSkillsDir).toBe("~/.copilot/skills");
     // 0706 T-002: detectInstalled migrated from string to function.
     expect(typeof a!.detectInstalled).toBe("function");
@@ -544,7 +566,8 @@ describe("AGENTS_REGISTRY — new CLI adapters (0694)", () => {
     const a = getAgent("github-copilot-ext");
     expect(a).toBeDefined();
     expect(a!.displayName).toBe("GitHub Copilot (VS Code)");
-    expect(a!.localSkillsDir).toBe(".github/copilot/skills");
+    expect(a!.localSkillsDir).toBe(".github/skills");
+    expect(a!.globalSkillsDir).toBe("~/.copilot/skills");
   });
 
   it("AC-US2-01: warp entry exists with correct shape", () => {
@@ -665,5 +688,71 @@ describe("AGENTS_REGISTRY \u2014 0694 follow-ups", () => {
     // in double quotes while the original source uses single quotes.
     expect(src.includes("'code'") || src.includes('"code"')).toBe(true);
     expect(src).toContain("github.copilot-");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0894 (AC-03): registry matches each agent's documented skills dirs and
+// records which agents read the shared .agents/skills per scope.
+// ---------------------------------------------------------------------------
+describe("AGENTS_REGISTRY — 0894 documented skills dirs + shared readers", () => {
+  const shared = (id: string) => {
+    const a = getAgent(id)!;
+    return { project: agentReadsSharedSkills(a, false), global: agentReadsSharedSkills(a, true) };
+  };
+
+  it("codex uses .agents/skills and ~/.agents/skills (the shared folder)", () => {
+    const a = getAgent("codex")!;
+    expect(a.localSkillsDir).toBe(".agents/skills");
+    expect(a.globalSkillsDir).toBe("~/.agents/skills");
+    expect(shared("codex")).toEqual({ project: true, global: true });
+  });
+
+  it("grok is registered as Grok CLI with ~/.grok/skills and user-scope shared reads", () => {
+    const a = getAgent("grok")!;
+    expect(a).toBeDefined();
+    expect(a.displayName).toBe("Grok CLI");
+    expect(a.localSkillsDir).toBe(".grok/skills");
+    expect(a.globalSkillsDir).toBe("~/.grok/skills");
+    expect(typeof a.detectInstalled).toBe("function");
+    expect(shared("grok")).toEqual({ project: false, global: true });
+  });
+
+  it("antigravity reads shared .agents/skills only in project scope", () => {
+    expect(shared("antigravity")).toEqual({ project: true, global: false });
+  });
+
+  it("copilot-cli project dir is .github/skills and it reads the shared folder in both scopes", () => {
+    const a = getAgent("copilot-cli")!;
+    expect(a.localSkillsDir).toBe(".github/skills");
+    expect(a.extraLocalSkillsDirs).toContain(".claude/skills");
+    expect(shared("copilot-cli")).toEqual({ project: true, global: true });
+  });
+
+  it("cursor, opencode and gemini-cli read the shared folder in both scopes", () => {
+    for (const id of ["cursor", "opencode", "gemini-cli"]) {
+      expect(shared(id)).toEqual({ project: true, global: true });
+    }
+    expect(getAgent("cursor")!.extraGlobalSkillsDirs).toEqual(["~/.claude/skills", "~/.codex/skills"]);
+    expect(getAgent("opencode")!.extraGlobalSkillsDirs).toEqual(["~/.claude/skills"]);
+  });
+
+  it("claude-code does not read the shared folder", () => {
+    expect(shared("claude-code")).toEqual({ project: false, global: false });
+  });
+
+  it("agents without the field default to not reading the shared folder", () => {
+    expect(shared("windsurf")).toEqual({ project: false, global: false });
+  });
+
+  it("resolveAntigravityGlobalDir honors the env override", () => {
+    const prev = process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR;
+    process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR = "/tmp/ag-0894";
+    try {
+      expect(resolveAntigravityGlobalDir()).toBe("/tmp/ag-0894");
+    } finally {
+      if (prev === undefined) delete process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR;
+      else process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR = prev;
+    }
   });
 });

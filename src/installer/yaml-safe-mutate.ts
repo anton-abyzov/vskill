@@ -16,7 +16,9 @@
 //   4. Key present, block list:
 //        - value already present          → no-op, status="already-present"
 //        - value absent                   → insert `<indent>- <value>` at end of block, status="appended"
-//   5. Key present, inline list / scalar  → throw IncompatibleConfigError
+//   5. Key present, one-line scalar or flat inline list → rewritten as a
+//      block list keeping the existing entries; anything else (nested flow,
+//      block scalar, anchors) → throw IncompatibleConfigError
 //   6. Malformed YAML (tab indent, unclosed quoted string, etc.) → throw MalformedConfigError
 //
 // Mutations always go through a backup-write: write `<file>.bak` (or
@@ -85,9 +87,19 @@ export function safeAppendYamlList(
   const block = readListBlock(lines, keyLineIdx);
 
   if (block.shape === "inline-list" || block.shape === "scalar") {
-    throw new IncompatibleConfigError(
-      `key "${key}" is not a block-sequence (found ${block.shape})`,
-    );
+    // `read: README.md` and `read: [a, b]` are valid Aider config. Rewrite
+    // them as a block list that keeps the existing entries.
+    const existing = scalarOrFlowItems(lines[keyLineIdx], key);
+    if (existing === null) {
+      throw new IncompatibleConfigError(
+        `key "${key}" is not a block-sequence (found ${block.shape})`,
+      );
+    }
+    if (existing.items.includes(value)) return { status: "already-present" };
+    const items = [...existing.items, value].map((v) => `${DEFAULT_INDENT}- ${v}`);
+    const keyLine = existing.comment ? `${key}: ${existing.comment}` : `${key}:`;
+    const next = [...lines.slice(0, keyLineIdx), keyLine, ...items, ...lines.slice(keyLineIdx + 1)];
+    return mutateWithBackup(filePath, original, next.join("\n"));
   }
 
   if (block.shape === "empty-value") {
@@ -206,6 +218,34 @@ function readListBlock(
     return { shape: "inline-list" };
   }
   return { shape: "scalar" };
+}
+
+/**
+ * Items of a one-line `key: value` or `key: [a, b]` plus its trailing
+ * `# comment` (kept on the rewritten `key:` line), or null when the value is
+ * something we will not rewrite (nested flow, comment-only, multi-line).
+ *
+ * 0894: a value with a quote character is refused too. A quoted scalar or
+ * flow item can hold ` #` or `,` (`"notes #2.md"`, `["a, b.md"]`), and this
+ * line-based rewrite does not parse YAML quoting, so splitting it would
+ * break the file or silently change an entry.
+ */
+function scalarOrFlowItems(line: string, key: string): { items: string[]; comment: string } | null {
+  if (!line.trimStart().startsWith(`${key}:`)) return null;
+  const raw = line.slice(line.indexOf(":") + 1);
+  if (/["']/.test(raw)) return null;
+  const m = raw.match(/^(.*?)(\s+#.*)?$/);
+  const rest = (m?.[1] ?? "").trim();
+  const comment = (m?.[2] ?? "").trim();
+  if (!rest) return null;
+  if (rest.startsWith("[")) {
+    if (!rest.endsWith("]")) return null;
+    const inner = rest.slice(1, -1).trim();
+    if (/[\[\]{}]/.test(inner)) return null;
+    return { items: inner ? inner.split(",").map((v) => v.trim()).filter(Boolean) : [], comment };
+  }
+  if (/^[{|>&*!]/.test(rest)) return null;
+  return { items: [rest], comment };
 }
 
 function appendKeyAtEnd(original: string, key: string, value: string): string {

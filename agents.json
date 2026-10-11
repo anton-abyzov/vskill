@@ -1,9 +1,10 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-11T04:33:06.627Z",
+  "generatedAt": "2026-10-11T05:05:28.071Z",
   "agentPrefixes": [
     ".adal",
     ".agent",
+    ".agents",
     ".aider",
     ".amazonq",
     ".amp",
@@ -26,6 +27,7 @@
     ".github",
     ".goose",
     ".gpt-pilot",
+    ".grok",
     ".iflow",
     ".junie",
     ".kilocode",
@@ -60,6 +62,7 @@
   "agentPathPrefixes": [
     ".adal/",
     ".agent/",
+    ".agents/skills/",
     ".aider/",
     ".amazonq/",
     ".amp/",
@@ -80,8 +83,10 @@
     ".factory/",
     ".gemini/",
     ".github/copilot/",
+    ".github/skills/",
     ".goose/",
     ".gpt-pilot/",
+    ".grok/",
     ".iflow/",
     ".junie/",
     ".kilocode/",

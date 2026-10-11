@@ -10,7 +10,7 @@
   <a href="https://www.npmjs.com/package/vskill"><img src="https://img.shields.io/npm/dw/vskill?color=cb3837&logo=npm&label=downloads" alt="downloads" /></a>
   <a href="https://github.com/anton-abyzov/vskill/stargazers"><img src="https://img.shields.io/github/stars/anton-abyzov/vskill?color=FFD700&logo=github" alt="GitHub stars" /></a>
   <a href="https://github.com/anton-abyzov/vskill/actions/workflows/desktop-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/anton-abyzov/vskill/desktop-release.yml?branch=main&label=desktop%20build&logo=githubactions" alt="desktop build" /></a>
-  <img src="https://img.shields.io/badge/agents-54_platforms-0969DA" alt="54 agents" />
+  <img src="https://img.shields.io/badge/agents-56_platforms-0969DA" alt="56 agents" />
   <img src="https://img.shields.io/badge/plugins-9-8B5CF6" alt="9 plugins" />
   <img src="https://img.shields.io/badge/skills-19-10B981" alt="19 skills" />
   <a href="https://verified-skill.com"><img src="https://img.shields.io/badge/registry-verified--skill.com-F59E0B" alt="registry" /></a>

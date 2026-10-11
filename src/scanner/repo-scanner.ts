@@ -191,6 +191,9 @@ export async function scanRepository(repoUrl: string): Promise<ScanResult> {
           category: f.category,
           message: `[${file.path}] ${f.patternName}: ${f.match}`,
           line: f.lineNumber,
+          patternId: f.patternId,
+          match: f.match,
+          ...(f.downgradedFrom ? { downgradedFrom: f.downgradedFrom } : {}),
         });
       }
     }

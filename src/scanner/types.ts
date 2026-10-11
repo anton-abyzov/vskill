@@ -15,6 +15,12 @@ export interface SecurityFinding {
   message: string;
   /** Line number in the file where the finding was detected */
   line?: number;
+  /** Tier 1 pattern ID (e.g. 'CE-001', 'HC-001') when the finding came from a pattern */
+  patternId?: string;
+  /** Matched text, when known */
+  match?: string;
+  /** Original severity when Tier 1 context rules lowered it */
+  downgradedFrom?: Severity;
 }
 
 /** Result from a security scan */
@@ -59,6 +65,8 @@ export interface Tier2Result {
   rationale: string;
   /** Model identifier used for the scan */
   model: string;
+  /** Concerns raised by the judge and by the judge guards */
+  concerns?: string[];
 }
 
 /** Overall verdict for a scan */

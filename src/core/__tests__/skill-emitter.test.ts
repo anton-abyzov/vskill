@@ -210,7 +210,7 @@ describe("emitSkill — legacy id aliasing (AC-US1-04 / registry LEGACY_AGENT_ID
     expect(result.files.length).toBe(1);
     expect(result.files[0].targetId).toBe("github-copilot-ext");
     // relativePath uses canonical agent's localSkillsDir
-    expect(result.files[0].relativePath).toContain(".github/copilot/skills");
+    expect(result.files[0].relativePath).toContain(".github/skills");
   });
 });
 

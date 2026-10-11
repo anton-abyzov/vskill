@@ -1885,6 +1885,20 @@ describe("addCommand --agent filter", () => {
     expect(agents[0].id).toBe("claude-code");
   });
 
+  it("--dry-run on a single skill writes nothing (0894)", async () => {
+    const claude = makeAgent({ id: "claude-code", displayName: "Claude Code" });
+    mockDetectInstalledAgents.mockResolvedValue([claude]);
+    mockFilterAgents.mockReturnValue([claude]);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await addCommand("owner/safe-repo", { skill: "my-skill", dryRun: true });
+
+    expect(mockInstallSymlink).not.toHaveBeenCalled();
+    expect(mockWriteLockfile).not.toHaveBeenCalled();
+    expect(log.mock.calls.flat().join(" ")).toContain("Nothing was written");
+    log.mockRestore();
+  });
+
   // TC-015: --agent with invalid ID shows error
   it("exits with error when --agent specifies unknown ID", async () => {
     const claude = makeAgent();

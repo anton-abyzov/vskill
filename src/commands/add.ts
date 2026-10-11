@@ -427,17 +427,22 @@ async function installMarketplaceRepo(
     for (const skillName of toUninstall) {
       // Remove skill directories from all agents
       let removedCount = 0;
+      const dirs = new Set<string>();
       for (const agent of agents) {
-        const localDir = join(process.cwd(), agent.localSkillsDir, skillName);
-        const globalDir = resolveTilde(join(agent.globalSkillsDir, skillName));
-        for (const dir of [localDir, globalDir]) {
-          if (existsSync(dir)) {
-            try {
-              rmSync(dir, { recursive: true, force: true });
-              removedCount++;
-            } catch (err) {
-              console.warn(`[vskill] Could not remove ${dir}: ${err instanceof Error ? err.message : String(err)}`);
-            }
+        dirs.add(join(process.cwd(), agent.localSkillsDir, skillName));
+        dirs.add(resolveTilde(join(agent.globalSkillsDir, skillName)));
+      }
+      // 0894: shared readers are installed through the canonical
+      // .agents/skills folder alone, so the canonical copy for the scope this
+      // lockfile tracks goes too (symmetric with install).
+      dirs.add(join(lockDir, lockDir === join(os.homedir(), ".agents") ? "" : ".agents", "skills", skillName));
+      for (const dir of dirs) {
+        if (existsSync(dir)) {
+          try {
+            rmSync(dir, { recursive: true, force: true });
+            removedCount++;
+          } catch (err) {
+            console.warn(`[vskill] Could not remove ${dir}: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
       }
@@ -1165,9 +1170,13 @@ async function promptInstallOptions(
   console.log(dim(`  Scope: ${bold(scopeLabel)}  |  Method: ${bold(methodLabel)}`));
   console.log(dim(`  Agents (${selectedAgents.length}):`));
   for (const agent of selectedAgents) {
-    const base = useGlobal
-      ? resolveTilde(agent.globalSkillsDir)
-      : resolveSkillsPath(safeProjectRoot(), agent.localSkillsDir);
+    // 0894: shared readers load the canonical .agents/skills folder.
+    const readsShared = agent.readsSharedSkills?.[useGlobal ? "global" : "project"] === true;
+    const base = readsShared
+      ? (useGlobal ? join(os.homedir(), ".agents", "skills") : join(safeProjectRoot(), ".agents", "skills"))
+      : useGlobal
+        ? resolveTilde(agent.globalSkillsDir)
+        : resolveSkillsPath(safeProjectRoot(), agent.localSkillsDir);
     console.log(dim(`    ${agent.displayName}: ${base}/`));
   }
   console.log(dim("  ─────────────────────────────────────────────────"));
@@ -2398,6 +2407,14 @@ async function addCommandInner(
     }
   }
 
+  if (opts.dryRun) {
+    console.log(
+      `\nDry run: would install ${selectedSkills.map((s) => bold(s.name)).join(", ")} ` +
+        `(${opts.global ? "global" : "project"}) for ${selectedAgents.map((a: { id: string }) => a.id).join(", ")}. Nothing was written.`,
+    );
+    return;
+  }
+
   // Install selected skills
   const results: SkillInstallResult[] = [];
   for (const skill of selectedSkills) {
@@ -3146,6 +3163,14 @@ async function installSingleSkillLegacy(
   const selectedAgents = selections.agents;
   if (selections.global) opts.global = true;
   if (!selections.symlink) opts.copy = true;
+
+  if (opts.dryRun) {
+    console.log(
+      `\nDry run: would install ${bold(skillName)} (${opts.global ? "global" : "project"}) for ` +
+        `${selectedAgents.map((a: { id: string }) => a.id).join(", ")}. Nothing was written.`,
+    );
+    return;
+  }
 
   // Install to each agent using canonical installer (flat directory, namespaced frontmatter name)
   const namespacedName = pluginNamespace && skillName !== pluginNamespace

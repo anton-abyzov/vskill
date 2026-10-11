@@ -10,8 +10,8 @@
 // shares with installSkillToMultipleAgents — and assert the per-agent expected
 // artifact paths land on a real filesystem.
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, lstatSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -69,8 +69,8 @@ describe("installSkillToAgents — CLI shares Studio's per-agent dispatch (F9)",
     expect(locations.some((l) => l.includes(join(".claude", "skills", "obsidian-brain")))).toBe(true);
   });
 
-  it("cursor (Tier 2) writes .cursor/rules/<name>.mdc, NOT a dead-letter .cursor/skills symlink", () => {
-    installSkillToAgents({
+  it("cursor (reads shared ~/.agents/skills, 0894) gets only the canonical folder — no ~/.cursor link, rule or copy", () => {
+    const locations = installSkillToAgents({
       skillName: "obsidian-brain",
       rawContent: RAW_SKILL,
       agents: [agent("cursor")],
@@ -78,12 +78,10 @@ describe("installSkillToAgents — CLI shares Studio's per-agent dispatch (F9)",
       projectRoot: workDir,
       copy: false,
     });
-    const expected = join(workDir, ".cursor", "rules", "obsidian-brain.mdc");
-    expect(existsSync(expected)).toBe(true);
-    expect(readFileSync(expected, "utf8")).toContain("alwaysApply: false");
-    // Dead-letter location must NOT be created.
-    const deadLetter = join(workDir, ".cursor", "skills", "obsidian-brain", "SKILL.md");
-    expect(existsSync(deadLetter)).toBe(false);
+    const canonical = join(workDir, ".agents", "skills", "obsidian-brain");
+    expect(existsSync(join(canonical, "SKILL.md"))).toBe(true);
+    expect(locations).toEqual([canonical]);
+    expect(existsSync(join(workDir, ".cursor"))).toBe(false);
   });
 
   it("windsurf (Tier 2) writes rules/<name>.md under its install root", () => {
@@ -133,8 +131,42 @@ describe("installSkillToAgents — CLI shares Studio's per-agent dispatch (F9)",
     expect(readFileSync(confPath, "utf8")).toContain("obsidian-brain.md");
   });
 
-  it("codex (Tier 1) writes SKILL.md under .codex/skills/<name>/", () => {
-    installSkillToAgents({
+  it("one agent's unusable config skips that agent, not the whole install (0894)", () => {
+    writeFileSync(join(workDir, ".aider.conf.yml"), "read: [[/nested.md]]\n");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const locations = installSkillToAgents({
+        skillName: "obsidian-brain",
+        rawContent: RAW_SKILL,
+        agents: [agent("claude-code"), agent("aider")],
+        scope: "user",
+        projectRoot: workDir,
+        copy: false,
+      });
+      expect(existsSync(join(workDir, ".claude", "skills", "obsidian-brain", "SKILL.md"))).toBe(true);
+      expect(locations.length).toBeGreaterThan(0);
+      expect(warn.mock.calls.flat().join(" ")).toContain("aider");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("throws when every agent fails", () => {
+    writeFileSync(join(workDir, ".aider.conf.yml"), "read: [[/nested.md]]\n");
+    expect(() =>
+      installSkillToAgents({
+        skillName: "obsidian-brain",
+        rawContent: RAW_SKILL,
+        agents: [agent("aider")],
+        scope: "user",
+        projectRoot: workDir,
+        copy: false,
+      }),
+    ).toThrow(/aider/);
+  });
+
+  it("codex global install (0894) writes only ~/.agents/skills/<name>", () => {
+    const locations = installSkillToAgents({
       skillName: "obsidian-brain",
       rawContent: RAW_SKILL,
       agents: [agent("codex")],
@@ -142,11 +174,78 @@ describe("installSkillToAgents — CLI shares Studio's per-agent dispatch (F9)",
       projectRoot: workDir,
       copy: false,
     });
-    // Codex is a non-copy-fallback Tier-1 agent: canonical store + symlink.
-    const canonical = join(workDir, ".agents", "skills", "obsidian-brain", "SKILL.md");
-    expect(existsSync(canonical)).toBe(true);
-    const link = join(workDir, ".codex", "skills", "obsidian-brain");
-    expect(existsSync(link)).toBe(true);
+    const canonical = join(workDir, ".agents", "skills", "obsidian-brain");
+    expect(existsSync(join(canonical, "SKILL.md"))).toBe(true);
+    expect(lstatSync(canonical).isSymbolicLink()).toBe(false);
+    expect(locations).toEqual([canonical]);
+    expect(existsSync(join(workDir, ".codex"))).toBe(false);
+  });
+
+  it("codex --copy global install (0894) also writes only ~/.agents/skills/<name>", () => {
+    const locations = installSkillToAgents({
+      skillName: "obsidian-brain",
+      rawContent: RAW_SKILL,
+      agents: [agent("codex"), agent("cursor")],
+      scope: "user",
+      projectRoot: workDir,
+      copy: true,
+    });
+    const canonical = join(workDir, ".agents", "skills", "obsidian-brain");
+    expect(locations).toEqual([canonical]);
+    expect(existsSync(join(canonical, "SKILL.md"))).toBe(true);
+    expect(existsSync(join(workDir, ".cursor"))).toBe(false);
+  });
+
+  it("antigravity global install (0894) still links its own dir to the canonical folder", () => {
+    const prev = process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR;
+    delete process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR;
+    try {
+      installSkillToAgents({
+        skillName: "obsidian-brain",
+        rawContent: RAW_SKILL,
+        agents: [agent("antigravity")],
+        scope: "user",
+        projectRoot: workDir,
+        copy: false,
+      });
+    } finally {
+      if (prev !== undefined) process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR = prev;
+    }
+    const link = join(workDir, ".gemini", "config", "skills", "obsidian-brain");
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(realpathSync(link)).toBe(realpathSync(join(workDir, ".agents", "skills", "obsidian-brain")));
+  });
+
+  it("antigravity project install (0894) needs no link: .agents/skills is its project dir", () => {
+    const project = join(workDir, "project");
+    mkdirSync(project);
+    const locations = installSkillToAgents({
+      skillName: "obsidian-brain",
+      rawContent: RAW_SKILL,
+      agents: [agent("antigravity"), agent("grok")],
+      scope: "project",
+      projectRoot: project,
+      copy: false,
+    });
+    const canonical = join(project, ".agents", "skills", "obsidian-brain");
+    // grok does not read the shared folder in project scope, so it gets a link.
+    const grokLink = join(project, ".grok", "skills", "obsidian-brain");
+    expect(locations).toEqual([canonical, grokLink]);
+    expect(lstatSync(grokLink).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(project, ".agent"))).toBe(false);
+  });
+
+  it("grok global install (0894) writes only the canonical folder", () => {
+    const locations = installSkillToAgents({
+      skillName: "obsidian-brain",
+      rawContent: RAW_SKILL,
+      agents: [agent("grok")],
+      scope: "user",
+      projectRoot: workDir,
+      copy: false,
+    });
+    expect(locations).toEqual([join(workDir, ".agents", "skills", "obsidian-brain")]);
+    expect(existsSync(join(workDir, ".grok"))).toBe(false);
   });
 
   it("mixed Tier-1 + Tier-2 batch dispatches each agent to its own artifact path", () => {
@@ -159,7 +258,9 @@ describe("installSkillToAgents — CLI shares Studio's per-agent dispatch (F9)",
       copy: false,
     });
     expect(existsSync(join(workDir, ".claude", "skills", "obsidian-brain", "SKILL.md"))).toBe(true);
-    expect(existsSync(join(workDir, ".cursor", "rules", "obsidian-brain.mdc"))).toBe(true);
+    // 0894: cursor reads ~/.agents/skills, so it is served by the canonical folder.
+    expect(existsSync(join(workDir, ".agents", "skills", "obsidian-brain", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(workDir, ".cursor"))).toBe(false);
     expect(existsSync(join(workDir, ".codeium", "windsurf", "rules", "obsidian-brain.md"))).toBe(true);
   });
 });

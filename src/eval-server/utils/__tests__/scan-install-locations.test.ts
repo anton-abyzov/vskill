@@ -40,7 +40,7 @@ function makeSkillFile(dir: string, body = "# SKILL\n"): void {
 describe("scanSkillInstallLocations", () => {
   it("TC-001: returns one location per project-scope agent dir that holds the skill", () => {
     makeSkillFile(join(tmpRoot, ".claude", "skills", "greet-anton"));
-    makeSkillFile(join(tmpRoot, ".codex", "skills", "greet-anton"));
+    makeSkillFile(join(tmpRoot, ".grok", "skills", "greet-anton"));
 
     const locations = scanSkillInstallLocations(
       "anton-abyzov/greet-anton/greet-anton",
@@ -49,11 +49,30 @@ describe("scanSkillInstallLocations", () => {
 
     const projectLocations = locations.filter((l) => l.scope === "project");
     const agents = projectLocations.map((l) => l.agent).sort();
-    expect(agents).toEqual(["claude-code", "codex"]);
+    expect(agents).toEqual(["claude-code", "grok"]);
     for (const loc of projectLocations) {
       expect(loc.readonly).toBe(false);
       expect(loc.symlinked).toBe(false);
       expect(loc.dir).toContain("greet-anton");
+    }
+  });
+
+  it("TC-0894: a skill only in the shared .agents/skills counts for every project-scope shared reader", () => {
+    makeSkillFile(join(tmpRoot, ".agents", "skills", "greet-anton"));
+
+    const locations = scanSkillInstallLocations(
+      "anton-abyzov/greet-anton/greet-anton",
+      tmpRoot,
+    );
+
+    const agents = locations.filter((l) => l.scope === "project").map((l) => l.agent);
+    for (const id of ["codex", "cursor", "opencode", "gemini-cli", "antigravity", "copilot-cli"]) {
+      expect(agents).toContain(id);
+    }
+    expect(agents).not.toContain("claude-code");
+    expect(agents).not.toContain("grok");
+    for (const loc of locations.filter((l) => l.scope === "project")) {
+      expect(loc.dir).toBe(join(tmpRoot, ".agents", "skills", "greet-anton"));
     }
   });
 

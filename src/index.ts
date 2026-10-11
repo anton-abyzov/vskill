@@ -148,6 +148,19 @@ program
     await removeCommand(skillName, opts);
   });
 
+// 0894: check skill folders across every agent's dirs; --fix repairs links.
+program
+  .command("doctor")
+  .description("Check skill folders across agents: duplicates, divergent copies, broken or redundant links")
+  .option("--global", "Scan global (user) skill folders only")
+  .option("--project", "Scan the current project's skill folders only")
+  .option("--json", "Output the report as JSON")
+  .option("--fix", "Remove broken and redundant links; replace byte-identical copies with links")
+  .action(async (opts: { global?: boolean; project?: boolean; json?: boolean; fix?: boolean }) => {
+    const { doctorCommand } = await import("./commands/doctor.js");
+    await doctorCommand(opts);
+  });
+
 program
   .command("find <query>")
   .alias("search")

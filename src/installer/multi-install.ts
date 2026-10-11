@@ -134,7 +134,7 @@ export function installSkillForAgent(
     if (agent.installMode === "clipboard") {
       return dispatchTier3(agent, skill, scope);
     }
-    if (agent.formatTransformer) {
+    if (usesTransformer(agent, scope)) {
       return dispatchTier2(agent, skill, scope, projectRoot);
     }
     // Tier 1 — canonical drop-in install.
@@ -149,6 +149,17 @@ export function installSkillForAgent(
       detail: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+/**
+ * 0894 (AC-04): a Tier-2 agent that natively reads the shared `.agents/skills`
+ * folder in this scope (e.g. Cursor) loads SKILL.md from there, so it goes
+ * through the canonical Tier-1 path instead of its format transformer —
+ * otherwise the skill would load twice (once as a skill, once as a rule).
+ */
+function usesTransformer(agent: AgentDefinition, scope: "project" | "user"): boolean {
+  const readsShared = agent.readsSharedSkills?.[scope === "user" ? "global" : "project"] === true;
+  return !!agent.formatTransformer && !readsShared;
 }
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
@@ -248,13 +259,14 @@ export function installSkillToAgents(opts: InstallToAgentsOptions): string[] {
   // Tier-1 = filesystem drop-in agents with no per-tool transformer. They keep
   // the existing batch install (canonical store + symlink dedup + COPY_FALLBACK).
   const tier1 = agents.filter(
-    (a) => a.installMode !== "clipboard" && !a.formatTransformer,
+    (a) => a.installMode !== "clipboard" && !usesTransformer(a, scope),
   );
   const tier2or3 = agents.filter(
-    (a) => a.installMode === "clipboard" || !!a.formatTransformer,
+    (a) => a.installMode === "clipboard" || usesTransformer(a, scope),
   );
 
   const written: string[] = [];
+  const failures: string[] = [];
 
   if (tier1.length > 0) {
     const fn = copy ? installCopy : installSymlink;
@@ -273,10 +285,17 @@ export function installSkillToAgents(opts: InstallToAgentsOptions): string[] {
           if (part) written.push(part);
         }
       } else if (result.status === "error") {
-        throw new Error(`${agent.id}: ${result.detail}`);
+        failures.push(`${agent.id}: ${result.detail}`);
       }
       // Tier-3 (exported) contributes no on-disk path.
     }
+  }
+
+  // One agent's config problem must not cost the user every other agent.
+  // Fail only when nothing was installed at all.
+  if (failures.length > 0) {
+    if (written.length === 0) throw new Error(failures.join("; "));
+    for (const f of failures) console.warn(`  Skipped ${f}`);
   }
 
   return written;

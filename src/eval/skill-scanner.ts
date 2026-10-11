@@ -18,6 +18,7 @@ import { join, basename, dirname, relative, sep } from "node:path";
 import {
   AGENTS_REGISTRY,
   NON_AGENT_CONFIG_DIRS,
+  LEGACY_LOCAL_SKILLS_DIRS,
   type AgentDefinition,
 } from "../agents/agents-registry.js";
 import { resolveGlobalSkillsDir } from "./path-utils.js";
@@ -193,6 +194,11 @@ function getInstalledPrefixes(): Set<string> {
   }
   for (const dir of NON_AGENT_CONFIG_DIRS) {
     prefixes.add(dir);
+  }
+  // 0894: dirs older registry entries used (e.g. `.codex/skills`).
+  for (const dir of LEGACY_LOCAL_SKILLS_DIRS) {
+    const first = dir.split("/")[0];
+    if (first) prefixes.add(first);
   }
   _installedPrefixes = prefixes;
   return prefixes;

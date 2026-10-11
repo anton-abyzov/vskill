@@ -21,6 +21,7 @@ import {
   getSupportedAgents,
   detectInstalledAgents,
   type AgentDefinition,
+  resolveAntigravityGlobalDir,
 } from "../agents-registry.js";
 
 // ---------------------------------------------------------------------------
@@ -61,10 +62,12 @@ describe("0845 T-002 — Antigravity entry", () => {
     expect(ag!.installMode ?? "filesystem").toBe("filesystem");
   });
 
-  it("AC-US3-02: globalSkillsDir is ~/.gemini/antigravity/skills, local is .agent/skills", () => {
+  it("AC-US3-02 (0894): globalSkillsDir is ~/.gemini/config/skills, local is .agents/skills", () => {
     const ag = getAgent("antigravity")!;
-    expect(ag.globalSkillsDir).toBe("~/.gemini/antigravity/skills");
-    expect(ag.localSkillsDir).toBe(".agent/skills");
+    expect(ag.globalSkillsDir).toBe("~/.gemini/config/skills");
+    expect(ag.localSkillsDir).toBe(".agents/skills");
+    expect(ag.extraLocalSkillsDirs).toContain(".agent/skills");
+    expect(ag.extraGlobalSkillsDirs).toContain("~/.gemini/antigravity/skills");
   });
 
   it("AC-US3-03: VSKILL_ANTIGRAVITY_SKILLS_DIR overrides resolved global dir in getSupportedAgents", async () => {
@@ -137,7 +140,7 @@ describe("0845 T-003 — tier + installMode classification", () => {
   it("F7: github-copilot-ext pins localInstallRoot to .github and emits instructions/<name>.instructions.md", () => {
     const a = getAgent("github-copilot-ext");
     expect(a).toBeDefined();
-    expect(a!.localSkillsDir).toBe(".github/copilot/skills");
+    expect(a!.localSkillsDir).toBe(".github/skills");
     expect(a!.localInstallRoot).toBe(".github");
     expect(a!.formatTransformer).toBeTypeOf("function");
 
@@ -286,5 +289,27 @@ describe("0845 — backward compatibility", () => {
   // Side-effect-free guard: confirm vi is wired even when no mock is used.
   it("vi global is available (sentinel)", () => {
     expect(typeof vi.fn).toBe("function");
+  });
+});
+
+describe("0894 — Antigravity global dir resolution", () => {
+  it("resolveAntigravityGlobalDir prefers the legacy dir only when it exists", async () => {
+    const { mkdtempSync, mkdirSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const home = mkdtempSync(join(tmpdir(), "vskill-ag-home-"));
+    const prevHome = process.env.HOME;
+    const prevEnv = process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR;
+    delete process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR;
+    process.env.HOME = home;
+    try {
+      expect(resolveAntigravityGlobalDir()).toBe(join(home, ".gemini/config/skills"));
+      mkdirSync(join(home, ".gemini", "antigravity", "skills"), { recursive: true });
+      expect(resolveAntigravityGlobalDir()).toBe(join(home, ".gemini/antigravity/skills"));
+    } finally {
+      process.env.HOME = prevHome;
+      if (prevEnv !== undefined) process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR = prevEnv;
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

@@ -22,10 +22,12 @@ const skill: ParsedSkill = {
 };
 
 // Expected output paths per Tier-2 agent — relative to HOME.
+// 0894: Cursor reads SKILL.md from ~/.agents/skills natively, so its install
+// is the canonical folder (its .mdc transformer would load the skill twice).
 const expectedPaths: Record<string, string> = {
-  cursor: ".cursor/rules/obsidian-brain.mdc",
+  cursor: ".agents/skills/obsidian-brain/SKILL.md",
   windsurf: ".codeium/windsurf/rules/obsidian-brain.md",
-  "github-copilot-ext": ".config/github-copilot/instructions/obsidian-brain.instructions.md",
+  "github-copilot-ext": ".copilot/instructions/obsidian-brain.instructions.md",
   junie: ".junie/rules/obsidian-brain.md",
   "kiro-cli": ".kiro/steering/obsidian-brain.md",
   continue: ".continue/rules/obsidian-brain.md",

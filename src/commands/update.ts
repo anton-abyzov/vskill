@@ -78,8 +78,11 @@ export function syncFrontmatterVersionAfterUpdate(
   name: string,
   newVersion: string,
 ): void {
-  for (const agent of agents) {
-    const skillMdPath = join(projectRoot, agent.localSkillsDir, name, "SKILL.md");
+  // 0894: agents that read the shared .agents/skills have no link of their
+  // own, so the canonical copy is synced explicitly.
+  const dirs = new Set([...agents.map((a) => a.localSkillsDir), ".agents/skills"]);
+  for (const dir of dirs) {
+    const skillMdPath = join(projectRoot, dir, name, "SKILL.md");
     if (!existsSync(skillMdPath)) continue;
     let onDisk: string;
     try {

@@ -186,6 +186,16 @@ describe("SkillOverview — T-006", () => {
     expect(rows.length).toBe(1);
   });
 
+  it("0874 AC-06: passes the skill name and SKILL.md path to PublishStatusRow", () => {
+    const tree = SkillOverview({
+      skill: makeSkill({ origin: "source", skill: "acc-private-skill", skillPath: "skills/acc-private-skill/SKILL.md" }),
+    });
+    const rows = findAll(tree, (el) => el.type === PublishStatusRow);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].props.skillName).toBe("acc-private-skill");
+    expect(rows[0].props.skillPath).toBe("skills/acc-private-skill/SKILL.md");
+  });
+
   it("hides PublishStatusRow on installed-origin skills (publishing is an authoring action)", () => {
     const tree = SkillOverview({ skill: makeSkill({ origin: "installed" }) });
     const rows = findAll(tree, (el) => el.type === PublishStatusRow);

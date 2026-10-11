@@ -24,6 +24,12 @@ interface Props {
   provider?: string;
   /** Studio-configured LLM model — forwarded to PublishButton. */
   model?: string;
+  /** The skill on screen. Without it the drawer cannot submit in-app, so it
+   *  never reaches the private-repo guard and offers the website instead
+   *  (0874 AC-06). */
+  skillName?: string;
+  /** Repo-relative SKILL.md path, forwarded with the skill name. */
+  skillPath?: string;
 }
 
 function buildNoGitCommand(name: string): string {
@@ -128,6 +134,8 @@ export function PublishStatusRow(props: Props = {}): React.ReactElement | null {
             remoteUrl={status.githubOrigin ?? ""}
             provider={props.provider}
             model={props.model}
+            skillName={props.skillName}
+            skillPath={props.skillPath}
             privacy="public"
           />
         </div>

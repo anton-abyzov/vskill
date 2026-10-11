@@ -24,6 +24,7 @@ import type { AgentDefinition } from "../agents/agents-registry.js";
 import { agentGlobalInstallDirs, resolveAgentGlobalSkillsDir } from "../agents/global-dirs.js";
 import { ensureLockfile, writeLockfile, readLockfile, removeSkillFromLock } from "../lockfile/index.js";
 import { buildGitHubInstallLockEntry } from "./add-lockfile.js";
+import { prepareGitHubSkillBundle } from "./add-github-bundle.js";
 import { runTier1Scan } from "../scanner/index.js";
 import { getAvailablePlugins, getPluginSource, getPluginVersion, hasPlugin, discoverUnregisteredPlugins } from "../marketplace/index.js";
 import type { UnregisteredPlugin } from "../marketplace/index.js";
@@ -77,32 +78,9 @@ import {
 } from "../lib/skill-lifecycle.js";
 
 // ---------------------------------------------------------------------------
-/**
- * Subdirectories fetched alongside SKILL.md when installing a skill that lives
- * in a repo subdirectory. Must stay a subset of the prefixes the installer
- * accepts in installer/bundle-files.ts, or the write is rejected.
- */
-export const BUNDLE_SUBDIRS = ["agents", "references", "scripts", "assets", "tests"] as const;
-
-/**
- * Extensions carried in a skill bundle. Bundle contents are transported as
- * UTF-8 strings, so this is a text-only allowlist — binaries would be corrupted.
- */
-const BUNDLE_TEXT_EXTENSIONS = [
-  ".md", ".txt", ".json", ".jsonc", ".yaml", ".yml", ".toml", ".csv",
-  ".py", ".sh", ".bash", ".zsh", ".js", ".mjs", ".cjs", ".ts", ".sql",
-  ".excalidraw", ".svg", ".css", ".html",
-] as const;
-
-/** Per-file and per-skill ceilings, so one fat repo cannot stall an install. */
-const MAX_BUNDLE_FILE_BYTES = 512 * 1024;
-const MAX_BUNDLE_FILES = 100;
-
-export function isBundleTextFile(name: string): boolean {
-  const lower = name.toLowerCase();
-  if (lower.startsWith(".")) return false; // .DS_Store, dotfiles
-  return BUNDLE_TEXT_EXTENSIONS.some((ext) => lower.endsWith(ext));
-}
+// 0894: a GitHub skill's complete folder is fetched by
+// prepareGitHubSkillBundle (./add-github-bundle.ts) — every nested file,
+// binaries as bytes, exec bits kept, limits that fail instead of truncating.
 
 /** Validate that a download_url from GitHub Contents API points to a trusted GitHub domain. */
 function isGitHubDownloadUrl(url: string): boolean {
@@ -1640,6 +1618,8 @@ interface SkillInstallResult {
    * `sourceSkillPath` for the studio detail-header anchor.
    */
   sourceSkillPath?: string;
+  /** 0894: every installed file, relative to the skill folder. */
+  files?: string[];
 }
 
 async function installOneGitHubSkill(
@@ -1732,9 +1712,30 @@ async function installOneGitHubSkill(
     return { skillName, installed: false, verdict: scanResult.verdict, score: scanResult.score };
   }
 
-  // Fetch agent files (agents/*.md) if discovered
+  // 0894: the complete skill folder (nested dirs, binaries, exec bits).
+  let bundleFiles: Record<string, string | Uint8Array> | undefined;
+  let bundleExecutables: string[] | undefined;
+  let installedFiles: string[] | undefined;
+  if (sourceSkillPath) {
+    const prepared = await prepareGitHubSkillBundle({
+      owner,
+      repo,
+      ref: await getDefaultBranch(owner, repo),
+      skillMdPath: sourceSkillPath,
+      force: !!opts.force,
+    });
+    if (!prepared.ok) {
+      console.log(red(`  ${prepared.message}`));
+      return { skillName, installed: false, verdict: prepared.verdict, score: scanResult.score };
+    }
+    bundleFiles = Object.keys(prepared.bundle.files).length > 0 ? prepared.bundle.files : undefined;
+    bundleExecutables = prepared.bundle.executables;
+    installedFiles = prepared.bundle.fileList;
+  }
+
+  // Fetch agent files (agents/*.md) if discovered and the path is unknown
   let agentFiles: Record<string, string> | undefined;
-  if (agentRawUrls && Object.keys(agentRawUrls).length > 0) {
+  if (!sourceSkillPath && agentRawUrls && Object.keys(agentRawUrls).length > 0) {
     agentFiles = {};
     const fetches = Object.entries(agentRawUrls).map(async ([relPath, url]) => {
       try {
@@ -1760,7 +1761,8 @@ async function installOneGitHubSkill(
       scope: opts.global ? "user" : "project",
       projectRoot,
       copy: !!opts.copy,
-      bundleFiles: agentFiles,
+      bundleFiles: bundleFiles ?? agentFiles,
+      bundleExecutables,
     });
   } catch (err) {
     console.error(red(`  Failed to install skill "${skillName}": ${(err as Error).message}`));
@@ -1768,7 +1770,7 @@ async function installOneGitHubSkill(
   }
 
   const skillVersion = extractFrontmatterVersion(content) || "1.0.0";
-  return { skillName, installed: true, verdict: scanResult.verdict, score: scanResult.score, sha, version: skillVersion, sourceSkillPath };
+  return { skillName, installed: true, verdict: scanResult.verdict, score: scanResult.score, sha, version: skillVersion, sourceSkillPath, files: installedFiles };
 }
 
 // ---------------------------------------------------------------------------
@@ -2524,6 +2526,7 @@ async function addCommandInner(
         commitSha: sourceCommitSha,
         pluginName: pluginNameFromSkillPath(r.sourceSkillPath),
         global: !!opts.global,
+        files: r.files,
       });
     }
   }
@@ -3099,55 +3102,6 @@ async function installSingleSkillLegacy(
   }
   if (content === undefined) return process.exit(1);
 
-  // Fetch the skill's bundled subdirectories when the skill lives in a
-  // subdirectory of the repo. These are the skill-authoring convention and the
-  // same prefixes the installer accepts (see installer/bundle-files.ts):
-  // agents/ holds sub-agent prompts, references/ the docs SKILL.md links to,
-  // scripts/ the executable tooling, assets/ static files, tests/ its tests.
-  // A skill whose SKILL.md says "run scripts/foo.py" and installs without
-  // scripts/ is not degraded — it is broken.
-  let legacyAgentFiles: Record<string, string> | undefined;
-  if (skill) {
-    let fetched = 0;
-    for (const subdir of BUNDLE_SUBDIRS) {
-      try {
-        const basePath = skillSubpath.replace(/\/SKILL\.md$/, `/${subdir}`);
-        // ?ref= keeps the listing on the same branch as SKILL.md
-        // (deep links may pin a non-default branch).
-        const dirUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${basePath}?ref=${encodeURIComponent(branch)}`;
-        const dirRes = await githubFetch(dirUrl, { headers: { Accept: "application/vnd.github.v3+json" } });
-        if (!dirRes.ok) continue;
-        const entries = (await dirRes.json()) as Array<{
-          name: string;
-          type?: string;
-          size?: number;
-          download_url?: string;
-        }>;
-        const wanted = entries.filter(
-          (e) =>
-            e.type !== "dir" &&
-            isBundleTextFile(e.name) &&
-            (e.size ?? 0) <= MAX_BUNDLE_FILE_BYTES &&
-            e.download_url &&
-            isGitHubDownloadUrl(e.download_url),
-        );
-        if (wanted.length === 0) continue;
-        legacyAgentFiles ??= {};
-        const budget = wanted.slice(0, Math.max(0, MAX_BUNDLE_FILES - fetched));
-        fetched += budget.length;
-        const fetches = budget.map(async (entry) => {
-          try {
-            const res = await githubFetch(entry.download_url!);
-            if (res.ok) legacyAgentFiles![`${subdir}/${entry.name}`] = await res.text();
-          } catch { /* skip */ }
-        });
-        await Promise.allSettled(fetches);
-        if (fetched >= MAX_BUNDLE_FILES) break;
-      } catch { /* subdir doesn't exist or API error — fine */ }
-    }
-    if (legacyAgentFiles && Object.keys(legacyAgentFiles).length === 0) legacyAgentFiles = undefined;
-  }
-
   // Platform security check (best-effort, non-blocking on network error).
   // Skipped for private repos: the registry looks skills up by name, so it
   // would leak the name and could match an unrelated public skill.
@@ -3233,6 +3187,21 @@ async function installSingleSkillLegacy(
     console.log(yellow("\n--force: installing despite CONCERNS.\n"));
   }
 
+  // 0894: the complete skill folder — every nested file, binaries as bytes,
+  // exec bits kept — read from the same commit, scanned, never truncated.
+  const prepared = await prepareGitHubSkillBundle({
+    owner,
+    repo,
+    ref: sourceCommitSha || branch,
+    skillMdPath: skillSubpath,
+    force: !!opts.force,
+  });
+  if (!prepared.ok) {
+    console.error(red(`\n${prepared.message}`));
+    return process.exit(1);
+  }
+  const bundle = prepared.bundle;
+
   // Detect installed agents and apply --agent filter
   let agents = await detectInstalledAgents();
   if (agents.length === 0) {
@@ -3283,7 +3252,8 @@ async function installSingleSkillLegacy(
     scope: opts.global ? "user" : "project",
     projectRoot,
     copy: !!opts.copy,
-    bundleFiles: legacyAgentFiles,
+    bundleFiles: Object.keys(bundle.files).length > 0 ? bundle.files : undefined,
+    bundleExecutables: bundle.executables,
   });
 
   // Update lockfile (global → ~/.agents/, project → project root).
@@ -3303,6 +3273,7 @@ async function installSingleSkillLegacy(
     commitSha: sourceCommitSha,
     pluginName: pluginNamespace ?? pluginNameFromSkillPath(skillSubpath),
     global: !!opts.global,
+    files: bundle.fileList,
   });
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock, lockDir);

@@ -108,6 +108,19 @@ vi.mock("../lockfile/index.js", () => ({
 // Mock scanner
 // ---------------------------------------------------------------------------
 const mockRunTier1Scan = vi.fn();
+// 0894: the complete-skill-folder fetch has its own tests
+// (add-github-bundle.test.ts); here it returns a SKILL.md-only folder.
+const mockPrepareGitHubSkillBundle = vi.fn();
+vi.mock("./add-github-bundle.js", () => ({
+  prepareGitHubSkillBundle: (...args: unknown[]) => mockPrepareGitHubSkillBundle(...args),
+}));
+beforeEach(() => {
+  mockPrepareGitHubSkillBundle.mockResolvedValue({
+    ok: true,
+    bundle: { files: {}, executables: [], fileList: ["SKILL.md"], skipped: [], totalBytes: 0 },
+  });
+});
+
 vi.mock("../scanner/index.js", () => ({
   runTier1Scan: (...args: unknown[]) => mockRunTier1Scan(...args),
 }));
@@ -1338,6 +1351,53 @@ describe("addCommand multi-skill discovery (GitHub path)", () => {
       "https://raw.githubusercontent.com/owner/repo/main/skills/specific/SKILL.md",
       expect.anything(),
     );
+  });
+
+  // 0894: --skill installs the WHOLE skill folder, not SKILL.md + a few dirs.
+  it("--skill passes the complete folder (nested, binary, exec) to the installer and lockfile", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Specific skill",
+    }) as unknown as typeof fetch;
+    const font = new Uint8Array([0, 1, 0xff]);
+    mockPrepareGitHubSkillBundle.mockResolvedValue({
+      ok: true,
+      bundle: {
+        files: { "scripts/lib/a.mjs": "export {};", "sub-agents/x.md": "# x", "assets/f.woff2": font, "run.sh": "#!/bin/sh" },
+        executables: ["run.sh"],
+        fileList: ["SKILL.md", "assets/f.woff2", "run.sh", "scripts/lib/a.mjs", "sub-agents/x.md"],
+        skipped: [],
+        totalBytes: 0,
+      },
+    });
+
+    await addCommand("owner/repo", { skill: "specific" });
+
+    expect(mockPrepareGitHubSkillBundle).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "owner", repo: "repo", skillMdPath: "skills/specific/SKILL.md" }),
+    );
+    const call = mockInstallSymlink.mock.calls.at(-1)!;
+    expect(Object.keys(call[4]).sort()).toEqual(["assets/f.woff2", "run.sh", "scripts/lib/a.mjs", "sub-agents/x.md"]);
+    expect(call[4]["assets/f.woff2"]).toBe(font);
+    expect([...(call[5] as Set<string>)]).toEqual(["run.sh"]);
+    const lockArg = mockWriteLockfile.mock.calls.at(-1)![0];
+    expect(lockArg.skills.specific.files).toEqual([
+      "SKILL.md", "assets/f.woff2", "run.sh", "scripts/lib/a.mjs", "sub-agents/x.md",
+    ]);
+  });
+
+  it("--skill refuses to install when the skill folder cannot be fetched completely", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => "# Specific skill",
+    }) as unknown as typeof fetch;
+    mockPrepareGitHubSkillBundle.mockResolvedValue({
+      ok: false, verdict: "BUNDLE_ERROR", message: "Skill has 5000 files, over the 1000-file install limit.",
+    });
+
+    await expect(addCommand("owner/repo", { skill: "specific" })).rejects.toThrow(/process\.exit/);
+    expect(mockInstallSymlink).not.toHaveBeenCalled();
+    expect(mockWriteLockfile).not.toHaveBeenCalled();
   });
 
   // TC-010: Failed scan for one skill does not block others

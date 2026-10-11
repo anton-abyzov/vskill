@@ -22,7 +22,20 @@ function isStandardBundlePath(relPath: string): boolean {
   );
 }
 
-export function assertSafeBundlePath(relPath: string): string {
+export interface BundlePathOptions {
+  /**
+   * 0894: accept any relative path inside the skill folder (sub-agents/,
+   * NOTICE.md, modes/x/README.md, ...), not only the standard folders. Used
+   * for complete skill trees fetched from the skill's own repository; the
+   * traversal and SKILL.md checks still apply.
+   */
+  anyPath?: boolean;
+}
+
+/** 0894: bundle file content: text, or raw bytes for binaries (fonts, audio). */
+export type BundleContent = string | Uint8Array;
+
+export function assertSafeBundlePath(relPath: string, opts: BundlePathOptions = {}): string {
   if (typeof relPath !== "string" || relPath.trim() === "") {
     throw new Error("Bundled skill file path cannot be empty");
   }
@@ -42,7 +55,7 @@ export function assertSafeBundlePath(relPath: string): string {
   if (parts.some((part) => part === "" || part === "." || part === "..")) {
     throw new Error(`Bundled skill file path escapes the skill directory: ${relPath}`);
   }
-  if (!isStandardBundlePath(normalized)) {
+  if (!opts.anyPath && !isStandardBundlePath(normalized)) {
     throw new Error(
       `Unsupported bundled skill file path: ${relPath}. Expected agents/, scripts/, references/, assets/, tests/, or .env.example`,
     );
@@ -50,8 +63,12 @@ export function assertSafeBundlePath(relPath: string): string {
   return normalized;
 }
 
-export function resolveBundleTarget(root: string, relPath: string): string {
-  const normalized = assertSafeBundlePath(relPath);
+export function resolveBundleTarget(
+  root: string,
+  relPath: string,
+  opts: BundlePathOptions = {},
+): string {
+  const normalized = assertSafeBundlePath(relPath, opts);
   const target = join(root, ...normalized.split("/"));
   const rel = relative(root, target);
   if (rel === ".." || rel.startsWith(".." + pathSep) || rel.startsWith("../")) {
@@ -73,6 +90,45 @@ export function sanitizeSkillBundleFiles(files: unknown): Record<string, string>
       throw new Error(`Bundled skill file ${rawPath} must have string content`);
     }
     out[relPath] = content;
+  }
+  return out;
+}
+
+/**
+ * 0894: validate a complete skill tree fetched from GitHub for the CLI
+ * install path. Any safe relative path is accepted and binary content stays
+ * raw bytes. (Studio requests keep the stricter sanitizeSkillBundleFiles.)
+ */
+export function sanitizeInstallBundleFiles(
+  files: Record<string, BundleContent>,
+): Record<string, BundleContent> {
+  const out: Record<string, BundleContent> = {};
+  for (const [rawPath, content] of Object.entries(files)) {
+    const relPath = assertSafeBundlePath(rawPath, { anyPath: true });
+    if (typeof content !== "string" && !(content instanceof Uint8Array)) {
+      throw new Error(`Bundled skill file ${rawPath} must be text or bytes`);
+    }
+    out[relPath] = content;
+  }
+  return out;
+}
+
+/**
+ * 0894: the subset of an install bundle that the string-only consumers
+ * (Tier-2 transformers, clipboard export) can carry: text files on the
+ * standard paths.
+ */
+export function textOnlyStandardBundle(
+  files: Record<string, BundleContent>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [relPath, content] of Object.entries(files)) {
+    if (typeof content !== "string") continue;
+    try {
+      out[assertSafeBundlePath(relPath)] = content;
+    } catch {
+      // non-standard path: written by Tier-1 installs only
+    }
   }
   return out;
 }

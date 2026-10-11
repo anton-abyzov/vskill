@@ -38,7 +38,12 @@ import { extractDescription } from "./frontmatter.js";
 import { buildClipboardBlob } from "./clipboard-export.js";
 import { safeAppendYamlList } from "./yaml-safe-mutate.js";
 import type { ParsedSkill, TransformedFile } from "./transformers/index.js";
-import { sanitizeSkillBundleFiles } from "./bundle-files.js";
+import {
+  sanitizeSkillBundleFiles,
+  sanitizeInstallBundleFiles,
+  textOnlyStandardBundle,
+  type BundleContent,
+} from "./bundle-files.js";
 
 export type AgentInstallStatus = "installed" | "exported" | "skipped" | "error";
 
@@ -230,8 +235,14 @@ export interface InstallToAgentsOptions {
   projectRoot: string;
   /** When true, Tier-1 agents are copied instead of symlinked (CLI --copy). */
   copy?: boolean;
-  /** Optional bundled resources (agents/*, scripts/*, …). */
-  bundleFiles?: Record<string, string>;
+  /**
+   * Optional bundled resources: every file of the skill folder except
+   * SKILL.md, keyed by relative path. Text or raw bytes (0894: fonts, audio
+   * and other binaries are written byte for byte).
+   */
+  bundleFiles?: Record<string, BundleContent>;
+  /** 0894: bundle paths written with mode 0755. */
+  bundleExecutables?: string[];
 }
 
 /**
@@ -253,7 +264,10 @@ export function installSkillToAgents(opts: InstallToAgentsOptions): string[] {
   const { skillName, rawContent, agents, scope, projectRoot, copy } = opts;
   const installOpts: InstallOptions = { global: scope === "user", projectRoot };
   const bundleFiles = opts.bundleFiles
-    ? sanitizeSkillBundleFiles(opts.bundleFiles)
+    ? sanitizeInstallBundleFiles(opts.bundleFiles)
+    : undefined;
+  const executables = opts.bundleExecutables?.length
+    ? new Set(opts.bundleExecutables)
     : undefined;
 
   // Tier-1 = filesystem drop-in agents with no per-tool transformer. They keep
@@ -270,11 +284,16 @@ export function installSkillToAgents(opts: InstallToAgentsOptions): string[] {
 
   if (tier1.length > 0) {
     const fn = copy ? installCopy : installSymlink;
-    written.push(...fn(skillName, rawContent, tier1, installOpts, bundleFiles));
+    written.push(...fn(skillName, rawContent, tier1, installOpts, bundleFiles, executables));
   }
 
   if (tier2or3.length > 0) {
-    const skill = parseSkillForInstall(rawContent, skillName, bundleFiles);
+    // Transformers and clipboard export carry text on the standard paths.
+    const skill = parseSkillForInstall(
+      rawContent,
+      skillName,
+      bundleFiles ? textOnlyStandardBundle(bundleFiles) : undefined,
+    );
     for (const agent of tier2or3) {
       const result = installSkillForAgent(agent, skill, scope, projectRoot, rawContent);
       if (result.status === "installed" && result.detail) {

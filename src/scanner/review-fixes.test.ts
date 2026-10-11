@@ -261,3 +261,44 @@ describe("CI-006 stays linear on exec( without a closing parenthesis", () => {
     expect(performance.now() - start).toBeLessThan(1500);
   });
 });
+
+describe("scanContent finding caps", () => {
+  it("folds findings past 100 per pattern into the latest one and still counts them", () => {
+    const content = Array.from({ length: 5000 }, (_, i) => `step${i} = eval(input${i})`).join("\n");
+    const ce = scanContent(content).filter((f) => f.patternId === "CE-001");
+    expect(ce).toHaveLength(100);
+    expect(ce.reduce((n, f) => n + (f.occurrences ?? 1), 0)).toBe(5000);
+    expect(ce.reduce((n, f) => n + (f.foldedFindings ?? 0), 0)).toBe(4900);
+    const result = runTier1Scan(content);
+    expect(result.criticalCount).toBe(5000);
+    expect(result.verdict).toBe("FAIL");
+  });
+
+  it("lists at most 2000 findings in total, keeping one per new pattern and severity", () => {
+    const line = "eval(a); exec(b); spawn(c); system(d); new Function(e); setuid(f); new XMLHttpRequest; new WebSocket(g)";
+    const content = Array.from({ length: 400 }, () => line).join("\n") + "\nsudo rm -rf /etc/x";
+    const findings = scanContent(content);
+    expect(findings.length).toBeLessThanOrEqual(2000);
+    expect(findings.some((f) => f.patternId === "PE-001")).toBe(true);
+  });
+});
+
+describe("decoded payload rescan cap", () => {
+  it("rescans 50 payloads and reports the rest with one HC-010 marker", () => {
+    const text = "This line explains the setup in plain words and then it calls eval(userInput) to run the rest";
+    const content = Array.from({ length: 60 }, (_, i) => `blob${i}: ${btoa(`${text} ${i}`)}`).join("\n");
+    const findings = scanContent(content);
+    const marker = findings.filter((f) => f.patternId === "HC-010");
+    expect(marker).toHaveLength(1);
+    expect(marker[0].match).toBe("[vskill: 10 decoded payloads not rescanned]");
+    const rescanned = findings.filter((f) => f.match.startsWith("[hidden base64]") && f.patternId === "CE-001");
+    expect(rescanned.reduce((n, f) => n + (f.occurrences ?? 1), 0)).toBe(50);
+  });
+
+  it("stops rescanning once 64KB of decoded text has been read", () => {
+    const big = `${"Plain words about the configuration format and nothing else. ".repeat(1100)}`;
+    expect(big.length).toBeGreaterThan(64 * 1024);
+    const content = `a: ${btoa(big)}\nb: ${btoa("This is readable hidden text that calls eval(userInput) once it is decoded and run by the agent here")}`;
+    expect(scanContent(content).find((f) => f.patternId === "HC-010")?.match).toBe("[vskill: 1 decoded payload not rescanned]");
+  });
+});

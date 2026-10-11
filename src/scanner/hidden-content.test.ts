@@ -330,3 +330,17 @@ describe("hidden-content scan stays linear on hostile input", () => {
     expect(elapsed("⁦".repeat(100_000) + "⁩".repeat(100_000))).toBeLessThan(1000);
   });
 });
+
+describe("CLI: hidden findings stay bounded on huge lines", () => {
+  it("keeps match and context short and the scan fast with thousands of findings on one line", () => {
+    const line = "https://xn--pple-43d.com/​ ".repeat(8000);
+    const content = `${line}\nText ‮evil‬ ${"​".repeat(50_000)}\n${line}`;
+    const start = performance.now();
+    const { findings } = scanHiddenContent(content);
+    expect(performance.now() - start).toBeLessThan(1000);
+    expect(findings.length).toBeGreaterThan(1000);
+    expect(Math.max(...findings.map((f) => f.match.length))).toBeLessThanOrEqual(201);
+    expect(Math.max(...findings.map((f) => f.context.length))).toBeLessThanOrEqual(601);
+    expect(findings.find((f) => f.patternId === "HC-002")?.match).toContain("\\u{202E}");
+  });
+});

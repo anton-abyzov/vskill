@@ -692,14 +692,18 @@ function isInsideMarkdownLink(line: string, matchIndex: number): boolean {
 // invokes them. Example: `eval()` in "Watch for: `eval()`, `exec()`".
 
 /**
- * Returns true if the match at [matchStart, matchEnd) falls inside a
- * markdown inline code span (single or double backtick delimiters).
- * Fenced code block markers (```) are ignored — handled separately.
+ * The [contentStart, contentEnd) ranges of markdown inline code spans (single
+ * or double backtick delimiters) on a line, in order. Fenced code block
+ * markers (```) are ignored — handled separately. Computed once per line so
+ * many matches on one long line stay linear.
  */
-function isInsideInlineCode(line: string, matchStart: number, matchEnd: number): boolean {
+function inlineCodeSpans(line: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
   let i = 0;
   while (i < line.length) {
-    if (line[i] !== "`") { i++; continue; }
+    const tick = line.indexOf("`", i);
+    if (tick < 0) break;
+    i = tick;
 
     // Count opening backticks
     let openLen = 0;
@@ -714,18 +718,36 @@ function isInsideInlineCode(line: string, matchStart: number, matchEnd: number):
     const closeIdx = line.indexOf(closer, contentStart);
     if (closeIdx === -1) { i = contentStart; continue; }
 
-    // Check if match falls within this inline code span
-    if (matchStart >= contentStart && matchEnd <= closeIdx) return true;
-
+    spans.push([contentStart, closeIdx]);
     i = closeIdx + openLen;
   }
-  return false;
+  return spans;
+}
+
+// ---- Finding context ---------------------------------------------------------
+
+/** Longest slice of any one line kept in a finding's context. */
+const MAX_CONTEXT_LINE = 600;
+
+function clipContextLine(line: string): string {
+  return line.length > MAX_CONTEXT_LINE ? `${line.slice(0, MAX_CONTEXT_LINE)}…` : line;
+}
+
+/** The matched line, windowed around the match when the line is long. */
+function contextAround(line: string, start: number, end: number): string {
+  if (line.length <= MAX_CONTEXT_LINE) return line;
+  const from = Math.max(0, start - MAX_CONTEXT_LINE / 2);
+  const to = Math.min(line.length, end + MAX_CONTEXT_LINE / 2);
+  return `${from > 0 ? "…" : ""}${line.slice(from, to)}${to < line.length ? "…" : ""}`;
 }
 
 // ---- CI-010 vs CI-011 -------------------------------------------------------
 // CI-011 (PowerShell download-and-execute) is a more specific form of CI-010.
 // A CI-010 match inside a CI-011 span is dropped so the installer one-liner is
 // reported once, under the id that gets the documentation-context downgrade.
+
+/** Longest rescanned-payload match kept on a finding. */
+const MAX_PAYLOAD_MATCH = 200;
 
 const INSTALLER_SOURCE = SCAN_PATTERNS.find((p) => p.id === "CI-011")!.pattern;
 
@@ -765,6 +787,9 @@ export function scanContent(content: string): ScanFinding[] {
   const fencedLines = computeFencedCodeBlockLines(lines);
   const findings: ScanFinding[] = [];
   const installerSpanCache = new Map<number, Array<[number, number]>>();
+  const inlineCodeCache = new Map<number, Array<[number, number]>>();
+  const safeDciCache = new Map<number, boolean>();
+  const rmSeverityCache = new Map<number, PatternSeverity | null>();
 
   for (const pattern of SCAN_PATTERNS) {
     // Reset the regex lastIndex for each pattern (they use /g flag)
@@ -782,8 +807,10 @@ export function scanContent(content: string): ScanFinding[] {
         }
 
         // Suppress DCI-abuse findings for known-safe DCI patterns
-        if (pattern.category === "dci-abuse" && isSafeDciBlock(line)) {
-          continue;
+        if (pattern.category === "dci-abuse") {
+          let safe = safeDciCache.get(lineIdx);
+          if (safe === undefined) safeDciCache.set(lineIdx, (safe = isSafeDciBlock(line)));
+          if (safe) continue;
         }
 
         // HTML comments are NOT suppressed: they render invisibly to a human
@@ -803,20 +830,27 @@ export function scanContent(content: string): ScanFinding[] {
 
         // Build context: up to 1 line before and after
         const contextLines: string[] = [];
-        if (lineIdx > 0) contextLines.push(lines[lineIdx - 1]);
-        contextLines.push(line);
-        if (lineIdx < lines.length - 1) contextLines.push(lines[lineIdx + 1]);
+        if (lineIdx > 0) contextLines.push(clipContextLine(lines[lineIdx - 1]));
+        contextLines.push(contextAround(line, match.index, match.index + match[0].length));
+        if (lineIdx < lines.length - 1) contextLines.push(clipContextLine(lines[lineIdx + 1]));
 
         // Downgrade FS-001 severity based on context:
         // safe targets → info, system paths → keep high, other → low
         // Only for `rm` commands — rimraf() keeps base severity ("high")
         let severity = pattern.severity;
-        if (pattern.id === "FS-001" && /\brm\s+-/.test(line)) {
-          if (isRmTargetingSafePaths(line)) {
-            severity = "info";
-          } else if (!isRmTargetingSystemPaths(line)) {
-            severity = "low";
+        if (pattern.id === "FS-001") {
+          let rmSeverity = rmSeverityCache.get(lineIdx);
+          if (rmSeverity === undefined) {
+            rmSeverity = !/\brm\s+-/.test(line)
+              ? null
+              : isRmTargetingSafePaths(line)
+                ? "info"
+                : isRmTargetingSystemPaths(line)
+                  ? null
+                  : "low";
+            rmSeverityCache.set(lineIdx, rmSeverity);
           }
+          if (rmSeverity) severity = rmSeverity;
         }
 
         // Downgrade documentation-safe patterns inside fenced code blocks
@@ -826,8 +860,10 @@ export function scanContent(content: string): ScanFinding[] {
 
         // Downgrade non-DCI patterns inside markdown inline code to info.
         // Inline code references (e.g., `eval()`) are educational, not invocations.
-        if (pattern.category !== "dci-abuse" && isInsideInlineCode(line, match.index, match.index + match[0].length)) {
-          severity = "info";
+        if (pattern.category !== "dci-abuse") {
+          let spans = inlineCodeCache.get(lineIdx);
+          if (!spans) inlineCodeCache.set(lineIdx, (spans = inlineCodeSpans(line)));
+          if (insideSpan(spans, match.index, match.index + match[0].length)) severity = "info";
         }
 
         findings.push({
@@ -865,7 +901,7 @@ export function scanContent(content: string): ScanFinding[] {
           patternName: pattern.name,
           severity: pattern.severity,
           category: pattern.category,
-          match: `[hidden ${payload.kind}] ${match[0]}`,
+          match: `[hidden ${payload.kind}] ${match[0].slice(0, MAX_PAYLOAD_MATCH)}`,
           lineNumber: payload.lineNumber,
           context: payload.text.slice(0, 600),
         });

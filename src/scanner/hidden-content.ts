@@ -58,6 +58,8 @@ export interface HiddenScanResult {
 }
 
 const MAX_MATCH = 200;
+/** Longest context kept on a finding (CLI-only bound; see revealClipped). */
+const MAX_CONTEXT = 600;
 const MAX_PAYLOAD = 4000;
 /** Base64 characters decoded per blob; bounds work on large embedded binaries. */
 const MAX_BASE64_DECODE = 200_000;
@@ -140,6 +142,14 @@ export function revealInvisible(text: string): string {
 
 function clip(text: string, max = MAX_MATCH): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/**
+ * revealInvisible + clip, revealing only the prefix that can survive the clip
+ * (CLI-only: keeps per-finding work and storage bounded on huge lines).
+ */
+function revealClipped(text: string, max = MAX_MATCH): string {
+  return clip(revealInvisible(text.length > max ? text.slice(0, max + 1) : text), max);
 }
 
 function decodeTags(run: string): string {
@@ -453,9 +463,12 @@ export function scanHiddenContent(content: string): HiddenScanResult {
   for (let i = 0; i < content.length; i++) if (content.charCodeAt(i) === 10) lineStarts.push(i + 1);
 
   const context = (lineNumber: number): string =>
-    clip(
-      revealInvisible(lines.slice(Math.max(0, lineNumber - 2), Math.min(lines.length, lineNumber + 1)).join("\n")),
-      600,
+    revealClipped(
+      lines
+        .slice(Math.max(0, lineNumber - 2), Math.min(lines.length, lineNumber + 1))
+        .map((l) => l.slice(0, MAX_CONTEXT + 1))
+        .join("\n"),
+      MAX_CONTEXT,
     );
 
   const add = (id: string, match: string, lineNumber: number): void => {
@@ -465,7 +478,7 @@ export function scanHiddenContent(content: string): HiddenScanResult {
       patternName: rule.name,
       severity: rule.severity,
       category: "prompt-injection",
-      match: clip(match),
+      match: revealClipped(match),
       lineNumber,
       context: context(lineNumber),
     });
@@ -512,7 +525,7 @@ export function scanHiddenContent(content: string): HiddenScanResult {
       const line = lineOf(content, m.index!, lineStarts);
       if (bidiLines.has(line)) continue;
       bidiLines.add(line);
-      if (hasBidiTrick(lines[line - 1])) add("HC-002", revealInvisible(lines[line - 1].trim()), line);
+      if (hasBidiTrick(lines[line - 1])) add("HC-002", lines[line - 1].trim(), line);
     }
 
     for (let i = 0; i < lines.length; i++) {
@@ -531,14 +544,14 @@ export function scanHiddenContent(content: string): HiddenScanResult {
     if (body.trim().length < 8) continue;
     if (DIRECTIVE_RES.some((d) => d.test(body))) {
       const first = offset + (body.length - body.trimStart().length);
-      add("HC-005", revealInvisible(body.trim().replace(/\s+/g, " ")), lineOf(content, first, lineStarts));
+      add("HC-005", body.trim().slice(0, MAX_PAYLOAD).replace(/\s+/g, " "), lineOf(content, first, lineStarts));
     }
   }
   for (let i = 0; i < lines.length; i++) {
     if (covered[i] || !/^ {0,3}\[/.test(lines[i])) continue;
     const body = linkDefinitionText(lines, i, covered);
     if (body.trim().length >= 8 && DIRECTIVE_RES.some((d) => d.test(body))) {
-      add("HC-005", revealInvisible(body.trim().replace(/\s+/g, " ")), i + 1);
+      add("HC-005", body.trim().slice(0, MAX_PAYLOAD).replace(/\s+/g, " "), i + 1);
     }
   }
 
@@ -559,7 +572,7 @@ export function scanHiddenContent(content: string): HiddenScanResult {
       if (blob.length < MIN_BASE64) continue;
       const decoded = decodeBase64Text(blob);
       if (!decoded) continue;
-      add("HC-006", `decodes to: "${revealInvisible(decoded)}"`, lineNumber);
+      add("HC-006", `decodes to: "${decoded.slice(0, MAX_MATCH)}"`, lineNumber);
       payloads.push({ kind: "base64", lineNumber, text: decoded.slice(0, MAX_PAYLOAD) });
       return;
     }
@@ -610,7 +623,7 @@ export function scanHiddenContent(content: string): HiddenScanResult {
       const host = m[1].replace(/:\d+$/, "").replace(/^[^@]*@/, "");
       // eslint-disable-next-line no-control-regex
       if (/[^\x00-\x7F]/.test(host) || /(?:^|\.)xn--/i.test(host)) {
-        add("HC-007", revealInvisible(host), i + 1);
+        add("HC-007", host, i + 1);
       }
     }
   }

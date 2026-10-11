@@ -118,11 +118,15 @@ export function libraryPackage(url: string): string | undefined {
   return packageAt(segs, 0);
 }
 
-/** True when a package spec has no exact version (no @version, or a tag such as @latest). */
+/**
+ * True when a package spec has no exact version (no @version, or a tag such
+ * as @latest). A full commit SHA on a gh/ spec counts as pinned.
+ */
 export function isUnpinned(pkg: string): boolean {
   const at = pkg.lastIndexOf("@");
   if (at <= 0) return true;
   const version = pkg.slice(at + 1);
+  if (pkg.startsWith("gh/") && /^[0-9a-f]{40}$/i.test(version)) return false;
   return !/^\d+\.\d+\.\d+/.test(version);
 }
 

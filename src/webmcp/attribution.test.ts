@@ -32,6 +32,8 @@ describe("isUnpinned", () => {
     expect(isUnpinned("@scope/pkg")).toBe(true);
     expect(isUnpinned("webmcp")).toBe(true);
     expect(isUnpinned("webmcp@1")).toBe(true);
+    expect(isUnpinned("gh/owner/repo@0123456789abcdef0123456789abcdef01234567")).toBe(false);
+    expect(isUnpinned("gh/owner/repo@main")).toBe(true);
   });
 });
 

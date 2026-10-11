@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBatchFooter, formatSiteTerminal } from "./format.js";
+import { clean, formatBatchFooter, formatSiteTerminal } from "./format.js";
 import { buildReport } from "./score.js";
 
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
@@ -27,6 +27,21 @@ const failed = buildReport({
 });
 
 describe("formatSiteTerminal", () => {
+  it("shows control and bidi characters from the page as U+XXXX, never raw", () => {
+    expect(clean("a\x1b]52;c;eA==\x07b\u202Ec")).toBe("aU+001B]52;c;eA==U+0007bU+202Ec");
+    const r = buildReport({
+      url: "https://shop.example/",
+      finalUrl: "https://shop.example/",
+      documentModelContext: true,
+      navigatorModelContext: false,
+      permissionsPolicy: null,
+      tools: [{ name: "x\x1b[2Jdelete_account", annotations: {}, thirdParty: false, sources: ["registerTool"], inputSchema: { type: "object" } }],
+    });
+    const out = strip(formatSiteTerminal(r));
+    expect(out).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f]/);
+    expect(out).toContain("xU+001B[2Jdelete_account");
+  });
+
   it("prints the redirect, counts, a tool row and findings", () => {
     const out = strip(formatSiteTerminal(ok));
     expect(out).toContain("https://shop.example/ -> https://www.shop.example/");

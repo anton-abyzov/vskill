@@ -19,6 +19,15 @@ function verdictLabel(r: SiteReport): string {
   return v === "PASS" ? green(v) : v === "CONCERNS" ? yellow(v) : red(v);
 }
 
+/**
+ * Page-supplied text (tool names, matched description excerpts, script URLs)
+ * goes to the auditor's terminal: show control and bidi-override characters
+ * as U+XXXX so a site cannot send escape sequences or reorder the output.
+ */
+export function clean(s: string): string {
+  return s.replace(/[\u0000-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/g, (c) => `U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`);
+}
+
 function pad(s: string, n: number): string {
   return s.length >= n ? s : s + " ".repeat(n - s.length);
 }
@@ -28,9 +37,9 @@ function shortScript(url: string | undefined): string {
   try {
     const u = new URL(url);
     const path = u.pathname.length > 32 ? `${u.pathname.slice(0, 31)}…` : u.pathname;
-    return `${u.host}${path}`;
+    return clean(`${u.host}${path}`);
   } catch {
-    return url;
+    return clean(url);
   }
 }
 
@@ -51,10 +60,10 @@ function sourceLabel(t: WebmcpTool): string {
 export function formatSiteTerminal(r: SiteReport): string {
   const lines: string[] = [];
   const s = r.summary;
-  const target = r.finalUrl && r.finalUrl !== r.url ? `${r.url} -> ${r.finalUrl}` : r.url;
+  const target = clean(r.finalUrl && r.finalUrl !== r.url ? `${r.url} -> ${r.finalUrl}` : r.url);
   const failed = s.verdict === "ERROR";
   lines.push(`${bold(target)}  ${verdictLabel(r)}${failed ? "" : `  ${dim(`score ${s.score}`)}`}`);
-  if (r.error) lines.push(`  ${red("error:")} ${r.error}`);
+  if (r.error) lines.push(`  ${red("error:")} ${clean(r.error)}`);
   if (failed) return lines.join("\n");
 
   if (!r.webmcp.documentModelContext && !r.error) {
@@ -72,21 +81,23 @@ export function formatSiteTerminal(r: SiteReport): string {
   );
 
   if (r.tools.length > 0) {
-    const nameW = Math.min(32, Math.max(4, ...r.tools.map((t) => t.name.length)));
+    const names = r.tools.map((t) => clean(t.name));
+    const nameW = Math.min(32, Math.max(4, ...names.map((n) => n.length)));
     lines.push(dim(`  ${pad("TOOL", nameW)}  READONLY  CONSEQ  SOURCE    REGISTERED BY`));
-    for (const t of r.tools) {
-      const name = t.name.length > nameW ? `${t.name.slice(0, nameW - 1)}…` : t.name;
+    r.tools.forEach((t, i) => {
+      const full = names[i];
+      const name = full.length > nameW ? `${full.slice(0, nameW - 1)}…` : full;
       lines.push(
         `  ${pad(name, nameW)}  ${pad(yn(t.annotations.readOnlyHint), 8)}  ${pad(yn(t.annotations.consequentialHint), 6)}  ` +
           `${pad(sourceLabel(t), 8)}  ${shortScript(t.registeredBy)}`,
       );
-    }
+    });
   }
 
   if (r.findings.length > 0) {
     lines.push("");
     for (const f of r.findings) {
-      lines.push(`  ${sevLabel(f.severity)} ${f.id}  ${f.tool ? `${bold(f.tool)}: ` : ""}${f.message}`);
+      lines.push(`  ${sevLabel(f.severity)} ${f.id}  ${f.tool ? `${bold(clean(f.tool))}: ` : ""}${clean(f.message)}`);
     }
   } else if (r.tools.length > 0) {
     lines.push(green("  No findings."));

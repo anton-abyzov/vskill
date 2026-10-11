@@ -35,6 +35,9 @@ const SEVERITY_DEDUCTIONS: Record<PatternSeverity, number> = {
   info: 0,
 };
 
+/** Score ceiling when hidden Unicode tag text is present (always FAIL). */
+const HC001_SCORE_CAP = 39;
+
 // ---- Scanner --------------------------------------------------------------
 
 /**
@@ -85,6 +88,13 @@ export function runTier1Scan(content: string): Tier1Result {
   }
   // Clamp to 0-100
   score = Math.max(0, Math.min(100, score));
+
+  // Hidden Unicode tag text (HC-001) has no legitimate use in a skill and
+  // the platform judge caps it at FAIL; the CLI installs on Tier 1 alone, so
+  // apply the same cap here.
+  if (findings.some((f) => f.patternId === "HC-001" && f.severity !== "info")) {
+    score = Math.min(score, HC001_SCORE_CAP);
+  }
 
   // Determine verdict
   let verdict: ScanVerdict;

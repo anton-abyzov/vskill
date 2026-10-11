@@ -47,6 +47,11 @@ export const FIX_SUGGESTIONS: Record<string, string> = {
   "CE-001": "Replace eval() with JSON.parse() for data or Function constructor for code; never eval user input",
   "CE-002": "Avoid new Function(); use explicit function definitions instead",
   "CE-003": "Avoid dynamic imports with user-controlled paths; use a module allowlist",
+  "CE-004": "Never unpickle or exec decoded data; use a safe format such as JSON and import modules statically",
+  "CI-009": "Call subprocess with an argument list and shell=False instead of os.system/os.popen or shell=True",
+  "CI-010": "Avoid Invoke-Expression and encoded PowerShell commands; run reviewed scripts with explicit parameters",
+  "NA-004": "Do not ask users to download and run external binaries or scripts as a prerequisite; ship reviewed code with the skill or name a package-manager install",
+  "NA-005": "Do not distribute password-protected archives; publish contents that can be reviewed and scanned",
 
   // --- DCI-abuse patterns ---
   "DCI-001": "Remove DCI blocks that read credential files (~/.ssh/, ~/.aws/, .env); use a secrets manager instead",

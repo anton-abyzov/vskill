@@ -1,7 +1,10 @@
 // ---------------------------------------------------------------------------
 // Tier 1 Security Scan Patterns
-// 52 regex-based patterns for static analysis of skill content.
+// 57 regex-based patterns for static analysis of skill content, plus the
+// hidden-content checks (HC-*) in hidden-content.ts.
 // ---------------------------------------------------------------------------
+
+import { scanHiddenContent } from "./hidden-content.js";
 
 // ---- Types ----------------------------------------------------------------
 
@@ -37,9 +40,11 @@ export interface ScanFinding {
   match: string;
   lineNumber: number;
   context: string;
+  /** Original pattern severity when context rules lowered it. */
+  downgradedFrom?: PatternSeverity;
 }
 
-// ---- Patterns (52 total) --------------------------------------------------
+// ---- Patterns (57 total) --------------------------------------------------
 
 export const SCAN_PATTERNS: ScanPattern[] = [
   // --- Command Injection (1-7) ---------------------------------------------
@@ -105,6 +110,22 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     severity: "critical",
     description: "Detects curl/wget output piped directly to a shell interpreter (download-and-execute)",
     pattern: /\b(?:curl|wget)\b[^|]*\|\s*(?:(?:\/\w+)*\/)?(?:env\s+)?(?:ba|z|da|k)?sh\b/g,
+    category: "command-injection",
+  },
+  {
+    id: "CI-009",
+    name: "Python shell execution",
+    severity: "high",
+    description: "Detects os.system/os.popen and subprocess calls with shell=True",
+    pattern: /\bos\.(?:system|popen)\s*\(|\bsubprocess\.(?:run|call|Popen|check_output|check_call)\s*\([^)]{0,400}?\bshell\s*=\s*True/g,
+    category: "command-injection",
+  },
+  {
+    id: "CI-010",
+    name: "PowerShell dynamic execution",
+    severity: "high",
+    description: "Detects Invoke-Expression/iex, -EncodedCommand payloads and base64 decoding in PowerShell",
+    pattern: /\bInvoke-Expression\b|\|\s*iex\b|\biex\s*\(|\s-(?:EncodedCommand|enc|ec)\s+[A-Za-z0-9+\/=]{20,}|\[(?:System\.)?Convert\]::FromBase64String/gi,
     category: "command-injection",
   },
 
@@ -324,7 +345,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Reverse shell pattern",
     severity: "critical",
     description: "Detects reverse shell connection patterns",
-    pattern: /(?:\/dev\/tcp\/|nc\s+-[a-z]*e|ncat\s|bash\s+-i\s+>&|mkfifo|0<&\d+)/g,
+    pattern: /(?:\/dev\/tcp\/|nc\s+-[a-z]*e|\bncat\b\s+-|bash\s+-i\s+>&|mkfifo\s+\S|0<&\d+)/g,
     category: "network-access",
   },
   {
@@ -333,6 +354,22 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     severity: "medium",
     description: "Detects building URLs from variables (potential C2 communication)",
     pattern: /(?:http|https):\/\/\$\{|(?:http|https):\/\/['"]\s*\+/g,
+    category: "network-access",
+  },
+  {
+    id: "NA-004",
+    name: "Fake prerequisite download",
+    severity: "high",
+    description: "Detects instructions to download and run an external binary or script as a setup step (ClawHavoc-style)",
+    pattern: /\b(?:before (?:using|running|installing)|prerequisites?|required?|first)\b[^.\n]{0,120}?\b(?:download|install|run|execute)\b[^\n]{0,160}?(?:https?:\/\/[^\s)'"`]+\.(?:zip|exe|dmg|pkg|msi|sh|ps1|bat|cmd|command|app|scr)\b|\b(?:glot\.io|pastebin\.com|rentry\.co|paste\.ee|transfer\.sh|hastebin\.com)\/)/gi,
+    category: "network-access",
+  },
+  {
+    id: "NA-005",
+    name: "Password-protected archive",
+    severity: "high",
+    description: "Detects password-protected archives, a common way to hide payloads from scanners",
+    pattern: /\b(?:zip|archive|rar|7z)\b[^\n]{0,80}?\bpass(?:word|code)\s*(?:is\s*)?[:=]\s*\S+|\b(?:unzip|7z\s+x|unrar\s+x)\b[^\n]{0,60}?\s-p\s*\S+/gi,
     category: "network-access",
   },
 
@@ -359,6 +396,14 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     severity: "high",
     description: "Detects dynamic import of remote/variable modules",
     pattern: /import\s*\(\s*(?:`[^`]*\$\{|[a-zA-Z_]\w*\s*[\+)])/g,
+    category: "code-execution",
+  },
+  {
+    id: "CE-004",
+    name: "Python dynamic execution or deserialization",
+    severity: "high",
+    description: "Detects pickle/marshal loads and exec() of decoded or compiled code",
+    pattern: /\b(?:pickle|cPickle|_pickle|marshal|dill)\.loads?\s*\(|\bexec\s*\(\s*(?:compile|base64|codecs|zlib|bytes\.fromhex|marshal|__import__)\b|\b__import__\s*\(\s*['"](?:os|subprocess|socket|pty)['"]\s*\)/g,
     category: "code-execution",
   },
 
@@ -466,7 +511,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI home dir exfiltration",
     severity: "critical",
     description: "DCI block reads from home directory sensitive paths",
-    pattern: /^\s*!\s*`[^`]*(?:cat|less|head|tail|strings)\s+[^`]*(?:~\/\.|\/home\/[^`]*\.)/gm,
+    pattern: /^\s*!\s*`[^`]{0,400}?\b(?:cat|less|head|tail|strings)\s+[^`]{0,400}?(?:~\/\.|\/home\/[^`]{0,200}?\.)/gm,
     category: "dci-abuse",
   },
   {
@@ -474,7 +519,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI data pipe to network",
     severity: "critical",
     description: "DCI block pipes local data to a network command",
-    pattern: /^\s*!\s*`[^`]*(?:cat|tar|zip)\s+[^|`]*\|\s*(?:curl|wget|nc)\b/gm,
+    pattern: /^\s*!\s*`[^`]{0,400}?\b(?:cat|tar|zip)\s+[^|`]{0,400}\|\s*(?:curl|wget|nc)\b/gm,
     category: "dci-abuse",
   },
 ];
@@ -602,38 +647,12 @@ function computeFencedCodeBlockLines(lines: string[]): Set<number> {
   return fenced;
 }
 
-// ---- HTML comment line detection -------------------------------------------
-// Pre-compute which lines are inside HTML comments (<!-- ... -->).
-// Findings inside HTML comments are suppressed entirely.
-
-function computeHtmlCommentLines(lines: string[]): Set<number> {
-  const commented = new Set<number>();
-  let inComment = false;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (inComment) {
-      if (line.includes("-->")) {
-        // Closing line — don't mark it (content may follow -->)
-        inComment = false;
-      } else {
-        // Interior line — fully inside comment
-        commented.add(i);
-      }
-    } else if (line.includes("<!--") && !line.includes("-->")) {
-      // Multi-line comment starts — don't mark opening line
-      // (content may precede <!-- or follow on same line)
-      inComment = true;
-    }
-    // Single-line <!-- ... --> comments are NOT marked to prevent
-    // bypass via: <!-- --> eval("malicious")
-  }
-  return commented;
-}
-
 // ---- Documentation-safe patterns -------------------------------------------
 // These patterns commonly fire on installation instructions and code examples
 // inside fenced code blocks. Downgrade to "info" when in documentation context.
 
+// NA-004/NA-005 are deliberately absent: fake-prerequisite and password-archive
+// lures are written as prose, so documentation context must not hide them.
 const DOCUMENTATION_SAFE_PATTERNS = new Set(["PE-001", "PE-002", "PE-003", "FS-001", "CI-008", "CT-002", "CT-004", "NA-001", "PI-003"]);
 
 // ---- Markdown-link safe context for FS-003 ---------------------------------
@@ -697,7 +716,6 @@ function isInsideInlineCode(line: string, matchStart: number, matchEnd: number):
 export function scanContent(content: string): ScanFinding[] {
   const lines = content.split("\n");
   const fencedLines = computeFencedCodeBlockLines(lines);
-  const commentLines = computeHtmlCommentLines(lines);
   const findings: ScanFinding[] = [];
 
   for (const pattern of SCAN_PATTERNS) {
@@ -709,15 +727,20 @@ export function scanContent(content: string): ScanFinding[] {
       let match: RegExpExecArray | null;
 
       while ((match = regex.exec(line)) !== null) {
+        // Guard against zero-length matches looping forever on a /g regex.
+        if (match[0].length === 0) {
+          regex.lastIndex++;
+          continue;
+        }
+
         // Suppress DCI-abuse findings for known-safe DCI patterns
         if (pattern.category === "dci-abuse" && isSafeDciBlock(line)) {
           continue;
         }
 
-        // Suppress all findings inside HTML comments
-        if (commentLines.has(lineIdx)) {
-          continue;
-        }
+        // HTML comments are NOT suppressed: they render invisibly to a human
+        // reviewer but an agent reads them verbatim, so they are where hidden
+        // instructions go. hidden-content.ts adds HC-005 for directive bodies.
 
         // Suppress FS-003 path traversal inside markdown links
         if (pattern.id === "FS-003" && isInsideMarkdownLink(line, match.index)) {
@@ -757,10 +780,38 @@ export function scanContent(content: string): ScanFinding[] {
           patternId: pattern.id,
           patternName: pattern.name,
           severity,
+          ...(severity !== pattern.severity ? { downgradedFrom: pattern.severity } : {}),
           category: pattern.category,
           match: match[0],
           lineNumber: lineIdx + 1,
           context: contextLines.join("\n"),
+        });
+      }
+    }
+  }
+
+  // Hidden channels: invisible Unicode, comment directives, encoded text.
+  // Decoded payloads are rescanned at full severity: hidden text gets no
+  // documentation-context downgrade.
+  const hidden = scanHiddenContent(content);
+  findings.push(...hidden.findings);
+  for (const payload of hidden.payloads) {
+    for (const pattern of SCAN_PATTERNS) {
+      const regex = new RegExp(pattern.pattern.source, pattern.pattern.flags);
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(payload.text)) !== null) {
+        if (match[0].length === 0) {
+          regex.lastIndex++;
+          continue;
+        }
+        findings.push({
+          patternId: pattern.id,
+          patternName: pattern.name,
+          severity: pattern.severity,
+          category: pattern.category,
+          match: `[hidden ${payload.kind}] ${match[0]}`,
+          lineNumber: payload.lineNumber,
+          context: payload.text.slice(0, 600),
         });
       }
     }

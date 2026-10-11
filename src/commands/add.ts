@@ -2407,6 +2407,14 @@ async function addCommandInner(
     }
   }
 
+  if (opts.dryRun) {
+    console.log(
+      `\nDry run: would install ${selectedSkills.map((s) => bold(s.name)).join(", ")} ` +
+        `(${opts.global ? "global" : "project"}) for ${selectedAgents.map((a: { id: string }) => a.id).join(", ")}. Nothing was written.`,
+    );
+    return;
+  }
+
   // Install selected skills
   const results: SkillInstallResult[] = [];
   for (const skill of selectedSkills) {
@@ -3155,6 +3163,14 @@ async function installSingleSkillLegacy(
   const selectedAgents = selections.agents;
   if (selections.global) opts.global = true;
   if (!selections.symlink) opts.copy = true;
+
+  if (opts.dryRun) {
+    console.log(
+      `\nDry run: would install ${bold(skillName)} (${opts.global ? "global" : "project"}) for ` +
+        `${selectedAgents.map((a: { id: string }) => a.id).join(", ")}. Nothing was written.`,
+    );
+    return;
+  }
 
   // Install to each agent using canonical installer (flat directory, namespaced frontmatter name)
   const namespacedName = pluginNamespace && skillName !== pluginNamespace

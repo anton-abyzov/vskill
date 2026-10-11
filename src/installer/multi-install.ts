@@ -266,6 +266,7 @@ export function installSkillToAgents(opts: InstallToAgentsOptions): string[] {
   );
 
   const written: string[] = [];
+  const failures: string[] = [];
 
   if (tier1.length > 0) {
     const fn = copy ? installCopy : installSymlink;
@@ -284,10 +285,17 @@ export function installSkillToAgents(opts: InstallToAgentsOptions): string[] {
           if (part) written.push(part);
         }
       } else if (result.status === "error") {
-        throw new Error(`${agent.id}: ${result.detail}`);
+        failures.push(`${agent.id}: ${result.detail}`);
       }
       // Tier-3 (exported) contributes no on-disk path.
     }
+  }
+
+  // One agent's config problem must not cost the user every other agent.
+  // Fail only when nothing was installed at all.
+  if (failures.length > 0) {
+    if (written.length === 0) throw new Error(failures.join("; "));
+    for (const f of failures) console.warn(`  Skipped ${f}`);
   }
 
   return written;

@@ -10,8 +10,8 @@
 // shares with installSkillToMultipleAgents — and assert the per-agent expected
 // artifact paths land on a real filesystem.
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, lstatSync, realpathSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, lstatSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -129,6 +129,40 @@ describe("installSkillToAgents — CLI shares Studio's per-agent dispatch (F9)",
     const confPath = join(workDir, ".aider.conf.yml");
     expect(existsSync(confPath)).toBe(true);
     expect(readFileSync(confPath, "utf8")).toContain("obsidian-brain.md");
+  });
+
+  it("one agent's unusable config skips that agent, not the whole install (0894)", () => {
+    writeFileSync(join(workDir, ".aider.conf.yml"), "read: [[/nested.md]]\n");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const locations = installSkillToAgents({
+        skillName: "obsidian-brain",
+        rawContent: RAW_SKILL,
+        agents: [agent("claude-code"), agent("aider")],
+        scope: "user",
+        projectRoot: workDir,
+        copy: false,
+      });
+      expect(existsSync(join(workDir, ".claude", "skills", "obsidian-brain", "SKILL.md"))).toBe(true);
+      expect(locations.length).toBeGreaterThan(0);
+      expect(warn.mock.calls.flat().join(" ")).toContain("aider");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("throws when every agent fails", () => {
+    writeFileSync(join(workDir, ".aider.conf.yml"), "read: [[/nested.md]]\n");
+    expect(() =>
+      installSkillToAgents({
+        skillName: "obsidian-brain",
+        rawContent: RAW_SKILL,
+        agents: [agent("aider")],
+        scope: "user",
+        projectRoot: workDir,
+        copy: false,
+      }),
+    ).toThrow(/aider/);
   });
 
   it("codex global install (0894) writes only ~/.agents/skills/<name>", () => {

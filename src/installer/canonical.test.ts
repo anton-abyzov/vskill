@@ -884,4 +884,36 @@ describe("0894 shared-reader installs", () => {
       join(tempDir, ".claude", "skills"),
     );
   });
+
+  it("an update that adds Claude-only fields replaces Claude's old link with a real copy", () => {
+    const opts = { global: false, projectRoot: tempDir };
+    const claude = makeAgent({ localSkillsDir: ".claude/skills" });
+    const v1 = "---\nname: foo\ndescription: d\n---\nv1\n";
+    const v2 = "---\nname: foo\ndescription: d\nallowed-tools: Bash\n---\nv2\n";
+    installSymlink("foo", v1, [claude, sharedReader("codex")], opts);
+    const claudeDir = join(tempDir, ".claude", "skills", "foo");
+    expect(lstatSync(claudeDir).isSymbolicLink()).toBe(true);
+
+    // `vskill update` reinstalls one agent at a time (update.ts, multi-install.ts).
+    installSymlink("foo", v2, [claude], opts);
+
+    expect(lstatSync(claudeDir).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(claudeDir, "SKILL.md"), "utf-8")).toContain("allowed-tools: Bash");
+    const canonical = readFileSync(join(tempDir, ".agents", "skills", "foo", "SKILL.md"), "utf-8");
+    expect(canonical).not.toContain("allowed-tools");
+  });
+
+  it("installCopy does not write through an agent's old link into the canonical copy", () => {
+    const opts = { global: false, projectRoot: tempDir };
+    const claude = makeAgent({ localSkillsDir: ".claude/skills" });
+    installSymlink("foo", "---\nname: foo\ndescription: d\n---\nv1\n", [claude, sharedReader("codex")], opts);
+
+    installCopy("foo", "---\nname: foo\ndescription: d\nmodel: opus\n---\nv2\n", [claude, sharedReader("codex")], opts);
+
+    const claudeDir = join(tempDir, ".claude", "skills", "foo");
+    expect(lstatSync(claudeDir).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(claudeDir, "SKILL.md"), "utf-8")).toContain("model: opus");
+    const canonical = readFileSync(join(tempDir, ".agents", "skills", "foo", "SKILL.md"), "utf-8");
+    expect(canonical).not.toContain("model:");
+  });
 });

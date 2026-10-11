@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync, existsSync, unlinkSync } from "node:fs";
 // 0706 T-004: `relative` + `sep` (as pathSep) power the cross-platform
 // path-traversal guard. `path.relative` handles Windows backslash correctly.
 import { join, relative, dirname, sep as pathSep } from "node:path";
@@ -166,6 +166,20 @@ export function createRelativeSymlink(target: string, linkPath: string): boolean
 const COPY_FALLBACK_AGENTS = new Set(["claude-code"]);
 
 /**
+ * 0894: drop a symlink at `p` (only the link, never its target) so the next
+ * mkdir + write creates a real folder there. Without this, a copy written to
+ * an agent dir that an earlier install linked to the canonical folder goes
+ * through the link and overwrites the shared copy every other agent reads.
+ */
+function unlinkIfSymlink(p: string): void {
+  try {
+    if (lstatSync(p).isSymbolicLink()) unlinkSync(p);
+  } catch {
+    // nothing there
+  }
+}
+
+/**
  * Write agent files (agents/*.md) alongside SKILL.md in a target directory.
  * Keys are relative paths (e.g., "agents/frontend.md"), values are file contents.
  */
@@ -244,6 +258,7 @@ export function installSymlink(
     if (COPY_FALLBACK_AGENTS.has(agent.id)) {
       // Claude Code gets full content with all fields
       const agentContent = agent.id === "claude-code" ? content : strippedContent;
+      unlinkIfSymlink(linkPath);
       mkdirSync(linkPath, { recursive: true });
       writeFileSync(join(linkPath, "SKILL.md"), agentContent);
       if (agentFiles) writeAgentFiles(linkPath, agentFiles);
@@ -257,6 +272,7 @@ export function installSymlink(
       installed.push(linkPath);
     } else {
       // Fallback to copy on symlink failure — use stripped content for non-Claude
+      unlinkIfSymlink(linkPath);
       mkdirSync(linkPath, { recursive: true });
       writeFileSync(join(linkPath, "SKILL.md"), strippedContent);
       if (agentFiles) writeAgentFiles(linkPath, agentFiles);
@@ -293,6 +309,9 @@ export function installCopy(
       : resolveAgentSkillsDir(agent, opts);
     const skillDir = join(agentSkillsDir, skillName);
     if (installed.includes(skillDir)) continue;
+    // A copy for one agent must not land in another's folder through an
+    // old link (the shared canonical folder itself is left as it is).
+    if (!isSatisfiedByCanonical(agent, opts)) unlinkIfSymlink(skillDir);
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(join(skillDir, "SKILL.md"), agentContent);
     if (agentFiles) writeAgentFiles(skillDir, agentFiles);

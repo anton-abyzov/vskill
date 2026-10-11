@@ -2,8 +2,22 @@
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-10-11
+
+### Added
+
+- `vskill doctor [--global|--project] [--json] [--fix]` checks your skill folders: same-name copies that have diverged, broken or redundant links, leftovers from `migrate-to-codex`, skills whose name does not match their folder, descriptions that are too long, and two folders claiming the same skill name. `--fix` removes broken and redundant links and turns identical copies into links; it never touches copies whose content differs.
+- Grok is a supported agent.
+
+### Changed
+
+- Agent skill folders follow each agent's current docs: Codex and Antigravity use the shared `.agents/skills` (Antigravity no longer uses the old `.agent/skills`), and GitHub Copilot and Copilot CLI use `.github/skills` for project skills.
+- `vskill install` no longer adds a separate link for agents that already read the shared `.agents/skills` folder (OpenCode, Cursor, Copilot, Gemini, Grok and others), so a skill shows up once instead of two or three times. Claude Code links to the shared copy when nothing Claude-specific differs.
+
 ### Fixed
 
+- `vskill install` keeps going when one agent's config file cannot be updated: the other agents still get the skill and the skipped one is named. It fails only when no agent could be installed.
+- `vskill install --dry-run` lists what it would install and writes nothing.
 - CI: the Lighthouse check audits the live verified-skill.com pages again (it had failed with INVALID_URL).
 
 ## [1.2.4] - 2026-10-11

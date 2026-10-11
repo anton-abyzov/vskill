@@ -12,7 +12,7 @@
 // captured descriptor is the only place it survives. Pure module: no browser.
 // ---------------------------------------------------------------------------
 
-import { originOf, parseSchema } from "./score.js";
+import { originOf, parseSchema, siteOf } from "./score.js";
 import type { ToolAnnotations, ToolSource, WebmcpTool } from "./types.js";
 
 export interface CapturedTool {
@@ -111,7 +111,7 @@ function normalizeSchema(raw: unknown): unknown {
 }
 
 export function mergeTools(input: MergeInput): WebmcpTool[] {
-  const pageOrigin = originOf(input.pageUrl);
+  const pageSite = siteOf(input.pageUrl);
 
   // Latest event per name wins (a tool can be removed and re-registered).
   const cdpLive = new Map<string, CdpTool>();
@@ -162,8 +162,8 @@ export function mergeTools(input: MergeInput): WebmcpTool[] {
     }
 
     const registeredBy = firstScript.get(name) ?? c?.scriptUrl ?? (d ? cdpRegistrar(d) : undefined) ?? undefined;
-    const regOrigin = originOf(registeredBy);
-    const thirdParty = !!(regOrigin && pageOrigin && regOrigin !== pageOrigin);
+    const regSite = siteOf(registeredBy);
+    const thirdParty = !!(regSite && pageSite && regSite !== pageSite);
 
     const tool: WebmcpTool = {
       name,

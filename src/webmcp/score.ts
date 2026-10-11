@@ -65,6 +65,36 @@ export function originOf(url: string | undefined | null): string | null {
   }
 }
 
+/** Second-level labels under a two-letter country TLD that are public suffixes (example.co.uk). */
+const SLD_UNDER_CCTLD = new Set(["co", "com", "net", "org", "gov", "edu", "ac", "ne", "or", "go", "gob", "gen", "ltd", "plc", "nic", "mil"]);
+/** Hosting suffixes where each subdomain is a different site. */
+const SHARED_HOST_SUFFIXES = [
+  "github.io", "gitlab.io", "vercel.app", "netlify.app", "pages.dev", "workers.dev", "herokuapp.com",
+  "myshopify.com", "appspot.com", "web.app", "firebaseapp.com", "azurewebsites.net", "cloudfront.net",
+  "blogspot.com", "wordpress.com", "onrender.com", "fly.dev", "glitch.me", "s3.amazonaws.com",
+];
+
+/**
+ * Approximate registrable domain ("site") of a URL: www.shop.example and
+ * cdn.shop.example share one. A heuristic without the full Public Suffix
+ * List: two-letter ccTLD second levels and common shared hosts are handled.
+ */
+export function siteOf(url: string | undefined | null): string | null {
+  const origin = originOf(url);
+  if (!origin) return null;
+  const host = new URL(origin).hostname.toLowerCase().replace(/\.$/, "");
+  if (/^[\d.]+$/.test(host) || host.includes(":") || host.startsWith("[")) return host;
+  const labels = host.split(".");
+  if (labels.length <= 2) return host;
+  for (const suffix of SHARED_HOST_SUFFIXES) {
+    if (host.endsWith(`.${suffix}`)) return labels.slice(-(suffix.split(".").length + 1)).join(".");
+  }
+  const tld = labels[labels.length - 1];
+  const sld = labels[labels.length - 2];
+  const n = tld.length === 2 && SLD_UNDER_CCTLD.has(sld) ? 3 : 2;
+  return labels.slice(-n).join(".");
+}
+
 /** Parse a schema that may arrive as a JSON string (Chrome's getTools does this). */
 export function parseSchema(raw: unknown): { ok: boolean; value: unknown } {
   if (raw === undefined || raw === null || raw === "") return { ok: false, value: undefined };
@@ -123,20 +153,44 @@ const READ_VERBS = new Set([
   "validate", "verify", "inspect", "summarize", "explain", "is", "has", "can",
 ]);
 
+/** Verbs that open a read-only description ("Returns ...", "Answers ..."). Not used for names: return_item is a write. */
+const DESCRIPTION_READ_LEADS = new Set([...READ_VERBS, "return", "answer", "provide", "display", "open"]);
+
+/** Always write-shaped wherever they appear in the name. */
 const HIGH_WORDS = new Set([
-  "checkout", "pay", "payment", "purchase", "buy", "order", "delete", "destroy",
-  "erase", "transfer", "withdraw", "charge", "donate",
+  "checkout", "pay", "purchase", "buy", "delete", "destroy", "erase", "withdraw", "donate",
 ]);
+/** Noun or verb: write-shaped only as the first word or after a write verb (place_order, not order_lookup). */
+const HIGH_AMBIGUOUS = new Set(["order", "payment", "transfer", "charge"]);
 
 const MEDIUM_WORDS = new Set([
-  "remove", "cancel", "submit", "book", "reserve", "rsvp", "register", "signup",
-  "subscribe", "unsubscribe", "send", "post", "publish", "enroll",
+  "remove", "cancel", "submit", "reserve", "rsvp", "signup", "subscribe", "unsubscribe",
+  "send", "publish", "enroll",
+]);
+const MEDIUM_AMBIGUOUS = new Set(["book", "post", "register"]);
+
+/** Verbs that make a following ambiguous noun an action: cancel_order, create_post. */
+const WRITE_VERBS = new Set([
+  "place", "create", "make", "submit", "confirm", "complete", "process", "new", "start",
+  "initiate", "execute", "perform", "schedule", "add", "update", "edit", "modify", "change",
+  "amend", "cancel", "send", "write", "publish", "proceed", "finalize", "finalise", "set",
+  "save", "issue", "request", "apply", "accept", "approve", "reject",
+]);
+/** A word that turns an ambiguous noun into a read: order_status, book_details, payment_methods. */
+const NOUN_CONTEXT = new Set([
+  "status", "history", "details", "detail", "tracking", "info", "summary", "methods", "method",
+  "options", "option", "policy", "policies", "list", "lookup", "count", "total", "url", "link",
+  "page", "number", "id", "date", "estimate", "preview",
+]);
+/** UI state, not data: remove_filter, cancel_modal, submit_search. */
+const UI_STATE_NOUNS = new Set([
+  "filter", "filters", "facet", "facets", "sort", "sorting", "selection", "highlight", "highlights",
+  "tab", "tabs", "panel", "modal", "dialog", "popup", "menu", "overlay", "banner", "toast",
+  "tooltip", "view", "zoom", "search", "query",
 ]);
 
 const CART_NOUNS = new Set(["cart", "bag", "basket"]);
 const CART_VERBS = new Set(["add", "update", "remove", "set", "empty", "clear", "modify", "change", "edit", "cancel"]);
-/** "order" used as a noun in a name like order_status is a read. */
-const ORDER_NOUN_CONTEXT = new Set(["status", "history", "details", "detail", "tracking", "info", "summary"]);
 
 const DESCRIPTION_WRITE_PATTERNS: Array<{ tier: WriteTier; re: RegExp }> = [
   { tier: "high", re: /\b(?:place|submit|complete|finali[sz]e|confirm)s?\s+(?:an?\s+|the\s+|your\s+|their\s+)?(?:order|purchase|payment|checkout)\b/i },
@@ -159,6 +213,24 @@ const DESCRIPTION_WRITE_PATTERNS: Array<{ tier: WriteTier; re: RegExp }> = [
   { tier: "medium", re: /\bremoves?\s+(?:an?|the|this)\b/i },
 ];
 
+/** "Returns" -> "return", "Searches" -> "search", "Retrieves" -> "retrieve". */
+function leadVerb(description: string): string | null {
+  const m = /^\s*(?:this\s+tool\s+)?([a-z]+)/i.exec(description);
+  if (!m) return null;
+  const w = m[1].toLowerCase();
+  if (DESCRIPTION_READ_LEADS.has(w)) return w;
+  if (w.endsWith("ies")) return `${w.slice(0, -3)}y`;
+  if (w.endsWith("es") && DESCRIPTION_READ_LEADS.has(w.slice(0, -2))) return w.slice(0, -2);
+  if (w.endsWith("s")) return w.slice(0, -1);
+  return w;
+}
+
+/** An ambiguous noun/verb counts as a write when it leads the name or follows a write verb, and no read noun qualifies it. */
+function ambiguousIsWrite(tokens: string[], i: number): boolean {
+  if (tokens.some((t) => NOUN_CONTEXT.has(t))) return false;
+  return i === 0 || tokens.slice(0, i).some((t) => WRITE_VERBS.has(t));
+}
+
 /** Does the tool look like it changes state (buys, deletes, sends, books ...)? */
 export function classifyWriteShape(tool: Pick<WebmcpTool, "name" | "description">): WriteShape | null {
   const tokens = tokenizeName(tool.name);
@@ -168,24 +240,34 @@ export function classifyWriteShape(tool: Pick<WebmcpTool, "name" | "description"
   const joined = tokens.join("_");
   const words = new Set(tokens);
   if (joined.includes("sign_up")) words.add("signup");
-  if (joined.includes("add_to_cart") || joined.includes("add_to_bag")) words.add("add");
 
-  for (const t of tokens) {
-    if (!HIGH_WORDS.has(t)) continue;
-    if (t === "order" && tokens.some((x) => ORDER_NOUN_CONTEXT.has(x))) continue;
-    return { tier: "high", reason: t };
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t === "checkout" && tokens.some((x) => NOUN_CONTEXT.has(x))) continue;
+    if (HIGH_WORDS.has(t)) return { tier: "high", reason: t };
+    if (HIGH_AMBIGUOUS.has(t) && ambiguousIsWrite(tokens, i)) return { tier: "high", reason: t };
   }
   const hasCartNoun = tokens.some((t) => CART_NOUNS.has(t));
   const cartVerb = tokens.find((t) => CART_VERBS.has(t));
   if (hasCartNoun && cartVerb) return { tier: "low", reason: `${cartVerb} cart` };
+
+  if (tokens.some((t) => UI_STATE_NOUNS.has(t))) return null;
   for (const t of words) {
     if (MEDIUM_WORDS.has(t)) return { tier: "medium", reason: t };
   }
+  for (let i = 0; i < tokens.length; i++) {
+    if (MEDIUM_AMBIGUOUS.has(tokens[i]) && ambiguousIsWrite(tokens, i)) return { tier: "medium", reason: tokens[i] };
+  }
 
   const desc = tool.description ?? "";
+  const lead = leadVerb(desc);
+  if (lead && DESCRIPTION_READ_LEADS.has(lead)) return null;
   for (const { tier, re } of DESCRIPTION_WRITE_PATTERNS) {
     const m = re.exec(desc);
-    if (m) return { tier, reason: `description: "${m[0]}"` };
+    // "Does NOT add anything to the cart" describes what the tool avoids.
+    if (m && !/\b(?:not|never|no|cannot|can't|won't|doesn't|don't)\s+(?:\w+\s+)?$/i.test(desc.slice(Math.max(0, m.index - 24), m.index))) {
+      return { tier, reason: `description: "${m[0]}"` };
+    }
   }
   return null;
 }
@@ -228,6 +310,24 @@ function toolTextFields(tool: WebmcpTool): TextField[] {
   return fields;
 }
 
+/**
+ * Remove invisible characters that real text needs before WP-05 runs:
+ * emoji ZWJ sequences, subdivision flags (tag characters), ZWJ/ZWNJ in
+ * scripts that use them for shaping, LRM/RLM in right-to-left text, and a
+ * leading BOM.
+ */
+export function stripBenignInvisibles(text: string): string {
+  let t = text.replace(/^\uFEFF/, "");
+  t = t.replace(/\u{1F3F4}[\u{E0020}-\u{E007E}]+\u{E007F}/gu, "");
+  t = t.replace(/(?<=[\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0F])\u200D(?=\p{Extended_Pictographic})/gu, "");
+  t = t.replace(
+    /(?<=[\p{Script=Arabic}\p{Script=Syriac}\p{Script=Hebrew}\p{Script=Devanagari}\p{Script=Bengali}\p{Script=Gurmukhi}\p{Script=Gujarati}\p{Script=Oriya}\p{Script=Tamil}\p{Script=Telugu}\p{Script=Kannada}\p{Script=Malayalam}\p{Script=Sinhala}\p{Script=Khmer}\p{Script=Myanmar}])[\u200C\u200D]/gu,
+    "",
+  );
+  if (/[\p{Script=Hebrew}\p{Script=Arabic}]/u.test(t)) t = t.replace(/[\u200E\u200F]/g, "");
+  return t;
+}
+
 function poisoningFindings(tool: WebmcpTool): WebmcpFinding[] {
   const out: WebmcpFinding[] = [];
   const seen = new Set<string>();
@@ -250,7 +350,7 @@ function poisoningFindings(tool: WebmcpTool): WebmcpFinding[] {
       });
     }
     for (const p of POISON_PATTERNS) {
-      const m = p.re.exec(text);
+      const m = p.re.exec(p.id === "WP-05" ? stripBenignInvisibles(text) : text);
       if (!m) continue;
       const key = `${p.id}|${field}`;
       if (seen.has(key)) continue;
@@ -305,6 +405,7 @@ function piiFindings(tool: WebmcpTool): WebmcpFinding[] {
       // "giftcard_message" is not a card number: require the key to look like a field name for the kind.
       if (k.kind === "payment card or bank" && /gift|discount|business|card_?type|card_?style|rate_?card/i.test(p.key)) continue;
       if (k.kind === "address" && /e-?mail|ip_?address|wallet/i.test(p.key)) continue;
+      if (k.kind === "date of birth" && /birthstone|birthday_?(?:gift|card|cake|message)/i.test(p.key)) continue;
       if (k.purpose.test(purposeText)) continue;
       if (reported.has(k.kind)) continue;
       reported.add(k.kind);
@@ -456,10 +557,11 @@ export function computeVerdict(findings: WebmcpFinding[]): { score: number; verd
   return { score, verdict };
 }
 
-export function summarize(tools: WebmcpTool[], findings: WebmcpFinding[]): SiteSummary {
+/** `failed` (the page never loaded and no tool was found) gives score null and verdict ERROR. */
+export function summarize(tools: WebmcpTool[], findings: WebmcpFinding[], failed = false): SiteSummary {
   const findingsBySeverity = Object.fromEntries(SEVERITIES.map((s) => [s, 0])) as Record<Severity, number>;
   for (const f of findings) findingsBySeverity[f.severity]++;
-  const { score, verdict } = computeVerdict(findings);
+  const { score, verdict } = failed ? { score: null, verdict: "ERROR" as const } : computeVerdict(findings);
   return {
     toolCount: tools.length,
     readOnlyCount: tools.filter((t) => t.annotations.readOnlyHint === true).length,
@@ -487,7 +589,7 @@ export function buildReport(e: EnumerationResult, scannedAt: Date = new Date()):
     headers: { permissionsPolicy: e.permissionsPolicy },
     tools: e.tools,
     findings,
-    summary: summarize(e.tools, findings),
+    summary: summarize(e.tools, findings, !!e.error && e.tools.length === 0),
   };
   if (e.error) report.error = e.error;
   return report;

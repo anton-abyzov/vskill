@@ -165,7 +165,7 @@ Full reference → [verified-skill.com/docs/cli-reference](https://verified-skil
 
 ### Audit a site's WebMCP tools
 
-`vskill audit-webmcp` loads each URL once in headless Chromium with WebMCP turned on, lists the tools the page registers through `document.modelContext.registerTool`, and scores them. It never calls a tool and never submits a form.
+`vskill audit-webmcp` loads each URL once in headless Chromium with WebMCP turned on, lists the tools the page registers through `document.modelContext.registerTool`, and scores them. It never calls a tool, never clicks or submits a form, blocks popups and service workers, and refuses downloads.
 
 ```bash
 npx vskill@latest audit-webmcp allbirds.com
@@ -179,10 +179,10 @@ Tools are found three ways and merged by name: a wrapper around `registerTool` t
 | Rule | Severity | Finding |
 |---|---|---|
 | WMCP-001 | per pattern | Prompt-injection or tool-poisoning text in a name, title, description or parameter description (the skill scanner's patterns plus WebMCP-specific ones) |
-| WMCP-002 | high / medium / low | Write-shaped tool (checkout, pay, delete / book, send, subscribe / cart changes) without `consequentialHint` |
+| WMCP-002 | high / medium / low | Write-shaped tool (checkout, pay, delete / book, send, subscribe / cart changes) without `consequentialHint`. Names that lead with a read verb (`get_cart`), nouns qualified as reads (`order_status`, `payment_methods`) and UI state (`remove_filter`) are not write-shaped |
 | WMCP-003 | high | Write-shaped tool marked `readOnlyHint: true` |
 | WMCP-004 | info / low | Asks for email, phone, address, birth date, government ID or card details it does not need |
-| WMCP-005 | medium | Registered by a script from another origin |
+| WMCP-005 | medium | Registered by a script from another site (registrable domain; `cdn.shop.example` on `www.shop.example` is first-party) |
 | WMCP-006 | low / medium | Description over 500 characters, or more than 40 tools on the page |
 | WMCP-007 | low / medium | `inputSchema` missing, invalid, or not an object schema |
 | WMCP-008 | info | Tools registered but no `Permissions-Policy` that mentions tools |
@@ -190,7 +190,7 @@ Tools are found three ways and merged by name: a wrapper around `registerTool` t
 
 The verdict uses the skill scanner's weights and thresholds (PASS at 80 or above, CONCERNS from 50, FAIL below 50). Each rule deducts at most twice its worst finding, any critical finding is FAIL, and any high finding is at least CONCERNS.
 
-Each site produces one JSON object (`schemaVersion: 1`); a batch writes one per line and keeps going after timeouts or DNS errors, recording `error`:
+Each site produces one JSON object (`schemaVersion: 1`); a batch writes one per line and keeps going after timeouts, DNS errors, hung pages and browser crashes, recording `error`. A site that failed to load with no tools found has `summary.verdict: "ERROR"` and `summary.score: null`; a partial load that found tools is scored and keeps `error`:
 
 ```json
 {

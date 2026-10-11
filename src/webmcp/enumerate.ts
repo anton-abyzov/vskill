@@ -4,7 +4,8 @@
 // Playwright is an optional peer: we import 'playwright-core' or 'playwright'
 // at runtime and never add it as a dependency. Each URL loads once in its own
 // browser context. We read tool descriptors only: no tool is invoked or
-// executed, no form is submitted, downloads are refused and dialogs dismissed.
+// executed, no form is submitted, nothing is clicked, downloads are refused,
+// dialogs dismissed, popups closed and service workers blocked.
 // ---------------------------------------------------------------------------
 
 import { existsSync, readdirSync } from "node:fs";
@@ -36,17 +37,20 @@ interface PwPage {
   evaluate<T>(fn: (...args: any[]) => T | Promise<T>, arg?: unknown): Promise<T>;
   waitForTimeout(ms: number): Promise<void>;
   on(event: string, handler: (arg: any) => void): void;
+  close(): Promise<void>;
 }
 interface PwContext {
   newPage(): Promise<PwPage>;
   newCDPSession(page: PwPage): Promise<PwCdpSession>;
   addInitScript(script: { content: string }): Promise<void>;
+  on(event: string, handler: (arg: any) => void): void;
   close(): Promise<void>;
 }
 export interface PwBrowser {
   newContext(opts?: Record<string, unknown>): Promise<PwContext>;
   close(): Promise<void>;
   version(): string;
+  isConnected(): boolean;
 }
 interface PwChromium {
   launch(opts: Record<string, unknown>): Promise<PwBrowser>;
@@ -196,6 +200,8 @@ export const INIT_SCRIPT = `(() => {
   if (window[KEY]) return;
   const log = [];
   try { Object.defineProperty(window, KEY, { value: log, enumerable: false }); } catch (e) { return; }
+  // Crawl safety: the audit loads one page; popups (popunders, auto-opened tabs) never load.
+  try { window.open = function open() { return null; }; } catch (e) {}
   let proto = null;
   try {
     proto = (typeof ModelContext !== "undefined" && ModelContext.prototype) ||
@@ -302,6 +308,19 @@ export interface EnumerateOptions {
   /** Quiet period that ends the settle wait early (default 1500). */
   quietMs?: number;
   userAgent?: string;
+  /** Aborting closes the browser context, which ends any pending page work. */
+  signal?: AbortSignal;
+}
+
+/** Reject when `p` takes longer than `ms` (a page stuck in a busy loop never answers evaluate). */
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms}ms`)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
 }
 
 function firstLine(e: unknown): string {
@@ -340,16 +359,29 @@ export async function enumerateSite(browser: PwBrowser, url: string, opts: Enume
     tools: [],
   };
 
+  if (opts.signal?.aborted) {
+    result.error = "aborted";
+    return result;
+  }
   const ctx = await browser.newContext({
     acceptDownloads: false,
     javaScriptEnabled: true,
+    serviceWorkers: "block",
     ...(opts.userAgent ? { userAgent: opts.userAgent } : {}),
   });
+  const onAbort = () => {
+    ctx.close().catch(() => {});
+  };
+  opts.signal?.addEventListener("abort", onAbort, { once: true });
   try {
     await ctx.addInitScript({ content: INIT_SCRIPT });
     const page = await ctx.newPage();
     page.on("dialog", (d: { dismiss(): Promise<void> }) => {
       d.dismiss().catch(() => {});
+    });
+    // window.open popups would load more pages we never asked for: close them.
+    ctx.on("page", (p: PwPage) => {
+      if (p !== page) p.close().catch(() => {});
     });
 
     const cdpEvents: CdpTool[] = [];
@@ -383,12 +415,14 @@ export async function enumerateSite(browser: PwBrowser, url: string, opts: Enume
 
     // Wait for registrations to stop: at most settleMs, done early after quietMs without change.
     const countNow = async () => {
-      const captured = await page
-        .evaluate(() => {
+      const captured = await withTimeout(
+        page.evaluate(() => {
           const log = (window as any)[Symbol.for("vskill.webmcp")];
           return Array.isArray(log) ? log.length : 0;
-        })
-        .catch(() => 0);
+        }),
+        2000,
+        "page.evaluate",
+      ).catch(() => 0);
       return captured + cdpEvents.length;
     };
     const start = Date.now();
@@ -406,7 +440,17 @@ export async function enumerateSite(browser: PwBrowser, url: string, opts: Enume
     }
 
     result.finalUrl = page.url();
-    const snap = await page.evaluate(snapshotInPage);
+    const readSnapshot = () => withTimeout(page.evaluate(snapshotInPage), 10_000, "reading tools from the page");
+    let snap: PageSnapshot;
+    try {
+      snap = await readSnapshot();
+    } catch (e) {
+      // The page navigated itself (client-side redirect) mid-read: read the new document once more.
+      if (!/context was destroyed|navigat/i.test(String(e))) throw e;
+      await page.waitForTimeout(1000);
+      snap = await readSnapshot();
+    }
+    result.finalUrl = page.url();
     result.documentModelContext = snap.documentModelContext;
     result.navigatorModelContext = snap.navigatorModelContext;
     const captured: CapturedTool[] = snap.captured.map(({ stack, ...rest }) => ({
@@ -422,6 +466,7 @@ export async function enumerateSite(browser: PwBrowser, url: string, opts: Enume
   } catch (e) {
     result.error = result.error ?? firstLine(e);
   } finally {
+    opts.signal?.removeEventListener("abort", onAbort);
     await ctx.close().catch(() => {});
   }
   return result;

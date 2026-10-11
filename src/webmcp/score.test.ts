@@ -6,6 +6,8 @@ import {
   computeVerdict,
   scorePage,
   scoreTool,
+  siteOf,
+  stripBenignInvisibles,
   summarize,
   tokenizeName,
   worstSeverity,
@@ -70,7 +72,23 @@ describe("classifyWriteShape", () => {
     expect(classifyWriteShape({ name })?.tier).toBe(tier);
   });
 
-  it.each(["search_shop_catalog", "get_order_status", "list_bookings", "get_cart", "track_order", "order_status"])(
+  it.each([
+    ["cancel_order", "high"],
+    ["create_order", "high"],
+    ["order_pizza", "high"],
+    ["make_payment", "high"],
+    ["book_appointment", "medium"],
+    ["post_comment", "medium"],
+    ["remove_wishlist_item", "medium"],
+  ])("ambiguous noun/verb %s used as an action is write-shaped (%s)", (name, tier) => {
+    expect(classifyWriteShape({ name })?.tier).toBe(tier);
+  });
+
+  it.each([
+    "search_shop_catalog", "get_order_status", "list_bookings", "get_cart", "track_order", "order_status",
+    "order_lookup", "latest_order", "book_details", "blog_post", "payment_methods", "checkout_url",
+    "cart_contents", "remove_filter", "cancel_modal", "submit_search", "event_register",
+  ])(
     "%s is not write-shaped",
     (name) => {
       expect(classifyWriteShape({ name, description: "Look things up." })).toBeNull();
@@ -81,6 +99,14 @@ describe("classifyWriteShape", () => {
     expect(classifyWriteShape({ name: "do_it", description: "Places an order for the items in the bag." })?.tier).toBe("high");
     expect(classifyWriteShape({ name: "helper", description: "Adds the selected item to your cart." })?.tier).toBe("low");
     expect(classifyWriteShape({ name: "helper", description: "Explains our return policy." })).toBeNull();
+  });
+
+  it("ignores write words in a description that opens with a read verb", () => {
+    expect(classifyWriteShape({ name: "product_details", description: "Returns details for a product so the shopper can buy the right size." })).toBeNull();
+    expect(classifyWriteShape({ name: "store_policies", description: "Answers questions; to purchase an item use add_to_cart." })).toBeNull();
+    expect(classifyWriteShape({ name: "catalog", description: "Searches the catalog. Never deletes the cart." })).toBeNull();
+    expect(classifyWriteShape({ name: "collections", description: "Loads collections. Does NOT add anything to the cart." })).toBeNull();
+    expect(classifyWriteShape({ name: "collections", description: "Loads a collection, then adds the first item to the cart." })?.tier).toBe("low");
   });
 });
 
@@ -129,6 +155,25 @@ describe("scoreTool", () => {
     const f = fs.find((x) => x.message.includes("WP-05"));
     expect(f?.severity).toBe("high");
     expect(f?.message).toContain("U+200B");
+  });
+
+  it("WMCP-001: emoji ZWJ sequences, flags and Persian ZWNJ are not hidden text; bidi overrides are", () => {
+    const benign = [
+      "Find gifts for the developer \u{1F469}\u200D\u{1F4BB} in your life.",
+      "Ships to \u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F} England.",
+      "\uFEFFSearch the catalog.",
+      "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645 products",
+      "\u05E9\u05DC\u05D5\u05DD\u200F store",
+    ];
+    for (const d of benign) {
+      const fs = scoreTool(tool({ name: "search_gifts", description: d, annotations: { readOnlyHint: true } }));
+      expect(fs.filter((f) => f.message.includes("WP-05")), d).toEqual([]);
+    }
+    expect(stripBenignInvisibles("a\u200Bb")).toBe("a\u200Bb");
+    const rlo = scoreTool(tool({ name: "search_gifts", description: "Search \u202Etxt.exe", annotations: { readOnlyHint: true } }));
+    expect(rlo.some((f) => f.message.includes("WP-05") && f.message.includes("U+202E"))).toBe(true);
+    const zwjLatin = scoreTool(tool({ name: "search_gifts", description: "Search\u200Dnow", annotations: { readOnlyHint: true } }));
+    expect(zwjLatin.some((f) => f.message.includes("WP-05"))).toBe(true);
   });
 
   it("WMCP-001: telling the agent not to ask for confirmation is medium", () => {
@@ -276,6 +321,24 @@ describe("summary and verdict", () => {
     const withError = buildReport({ url: "https://x.invalid/", finalUrl: null, documentModelContext: false, navigatorModelContext: false, permissionsPolicy: null, tools: [], error: "net::ERR_NAME_NOT_RESOLVED" });
     expect(withError.error).toBe("net::ERR_NAME_NOT_RESOLVED");
     expect(withError.summary.toolCount).toBe(0);
+    // A site that never loaded is not a PASS.
+    expect(withError.summary.verdict).toBe("ERROR");
+    expect(withError.summary.score).toBeNull();
+    const partial = buildReport({ url: "https://slow.example/", finalUrl: "https://slow.example/", documentModelContext: true, navigatorModelContext: false, permissionsPolicy: "tools=(self)", tools: [SHOPIFY_LIKE[0]], error: "Timeout (partial)" });
+    expect(partial.summary.verdict).toBe("PASS");
+    expect(partial.summary.score).toBe(100);
+  });
+});
+
+describe("siteOf", () => {
+  it("groups subdomains of one registrable domain and keeps shared hosts apart", () => {
+    expect(siteOf("https://www.shop.example/")).toBe("shop.example");
+    expect(siteOf("https://cdn.static.shop.example/a.js")).toBe("shop.example");
+    expect(siteOf("https://www.example.co.uk/")).toBe("example.co.uk");
+    expect(siteOf("https://a.github.io/x")).toBe("a.github.io");
+    expect(siteOf("https://store.myshopify.com/")).toBe("store.myshopify.com");
+    expect(siteOf("http://127.0.0.1:8080/")).toBe("127.0.0.1");
+    expect(siteOf("data:text/javascript,1")).toBeNull();
   });
 });
 
@@ -327,6 +390,19 @@ describe("merge", () => {
     expect(widget.exposedTo).toEqual(["https://partner.example"]);
     expect(iframe.registeredBy).toBe("https://frame.example/t.js");
     expect(iframe.thirdParty).toBe(true);
+  });
+
+  it("a first-party CDN subdomain is not third-party; another site is", () => {
+    const tools = mergeTools({
+      pageUrl: "https://www.shop.example/",
+      captured: [
+        { name: "a", scriptUrl: "https://cdn.shop.example/app.js" },
+        { name: "b", scriptUrl: "https://cdn.shopify.com/widget.js" },
+      ],
+      cdp: [],
+      listed: null,
+    });
+    expect(tools.map((t) => [t.name, t.thirdParty])).toEqual([["a", false], ["b", true]]);
   });
 
   it("uses the capture when getTools is unavailable and honours unregister", () => {

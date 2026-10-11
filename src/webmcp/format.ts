@@ -14,8 +14,8 @@ function sevLabel(s: Severity): string {
 }
 
 function verdictLabel(r: SiteReport): string {
-  if (r.error && r.tools.length === 0) return red("ERROR");
   const v = r.summary.verdict;
+  if (v === "ERROR") return red(v);
   return v === "PASS" ? green(v) : v === "CONCERNS" ? yellow(v) : red(v);
 }
 
@@ -40,7 +40,7 @@ export function formatSiteTerminal(r: SiteReport): string {
   const lines: string[] = [];
   const s = r.summary;
   const target = r.finalUrl && r.finalUrl !== r.url ? `${r.url} -> ${r.finalUrl}` : r.url;
-  const failed = !!r.error && r.tools.length === 0;
+  const failed = s.verdict === "ERROR";
   lines.push(`${bold(target)}  ${verdictLabel(r)}${failed ? "" : `  ${dim(`score ${s.score}`)}`}`);
   if (r.error) lines.push(`  ${red("error:")} ${r.error}`);
   if (failed) return lines.join("\n");
@@ -82,8 +82,8 @@ export function formatSiteTerminal(r: SiteReport): string {
 
 export function formatBatchFooter(reports: SiteReport[]): string {
   const withTools = reports.filter((r) => r.summary.toolCount > 0).length;
-  const errors = reports.filter((r) => r.error && r.tools.length === 0).length;
-  const count = (v: string) => reports.filter((r) => !(r.error && r.tools.length === 0) && r.summary.verdict === v).length;
+  const count = (v: SiteReport["summary"]["verdict"]) => reports.filter((r) => r.summary.verdict === v).length;
+  const errors = count("ERROR");
   return bold(
     `${reports.length} sites: ${withTools} expose WebMCP tools | ` +
       `${count("PASS")} PASS, ${count("CONCERNS")} CONCERNS, ${count("FAIL")} FAIL, ${errors} errors`,

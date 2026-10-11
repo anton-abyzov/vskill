@@ -17,29 +17,60 @@ import { atOrAbove, buildReport } from "../webmcp/score.js";
 import type { SiteReport } from "../webmcp/types.js";
 import { red } from "../utils/output.js";
 
+export interface AuditSitesOptions {
+  concurrency: number;
+  timeoutMs: number;
+  settleMs?: number;
+  userAgent?: string;
+  /** Called when the browser has crashed or disconnected; returns a fresh one for the remaining sites. */
+  relaunch?: () => Promise<PwBrowser>;
+}
+
 /** Scan URLs with a bounded pool; per-site failures become reports with `error`. */
 export async function auditSites(
   browser: PwBrowser,
   urls: string[],
-  opts: { concurrency: number; timeoutMs: number; settleMs?: number; userAgent?: string },
+  opts: AuditSitesOptions,
   onReport?: (r: SiteReport, index: number) => void,
 ): Promise<SiteReport[]> {
   const reports: SiteReport[] = new Array(urls.length);
+  let current = browser;
+  let relaunching: Promise<void> | null = null;
+  const ensureBrowser = async () => {
+    if (current.isConnected() || !opts.relaunch) return;
+    relaunching ??= opts
+      .relaunch()
+      .then((b) => {
+        current = b;
+      })
+      .catch(() => {})
+      .finally(() => {
+        relaunching = null;
+      });
+    await relaunching;
+  };
   let next = 0;
   const worker = async () => {
     while (next < urls.length) {
       const i = next++;
       const url = urls[i];
+      await ensureBrowser();
       const hardLimit = opts.timeoutMs + (opts.settleMs ?? 5000) + 15_000;
       let timer: NodeJS.Timeout | undefined;
+      // On the hard limit, abort: enumerateSite closes its context so a hung page stops using CPU.
+      const abort = new AbortController();
       const enumeration = await Promise.race([
-        enumerateSite(browser, url, {
+        enumerateSite(current, url, {
           timeoutMs: opts.timeoutMs,
           settleMs: opts.settleMs,
           userAgent: opts.userAgent,
+          signal: abort.signal,
         }),
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`site scan exceeded ${hardLimit}ms`)), hardLimit);
+          timer = setTimeout(() => {
+            abort.abort();
+            reject(new Error(`site scan exceeded ${hardLimit}ms`));
+          }, hardLimit);
         }),
       ])
         .catch((e: unknown) => ({
@@ -87,6 +118,17 @@ export async function auditWebmcpCommand(positional: string[], raw: AuditWebmcpR
     throw e;
   }
 
+  // Fail on an unwritable --out before starting a browser.
+  if (opts.out) {
+    try {
+      writeFileSync(opts.out, "");
+    } catch (e) {
+      console.error(red(`Cannot write --out ${opts.out}: ${(e as Error).message}`));
+      process.exit(2);
+      return;
+    }
+  }
+
   let browser: PwBrowser;
   try {
     browser = await launchBrowser({ executablePath: opts.executablePath });
@@ -101,12 +143,18 @@ export async function auditWebmcpCommand(positional: string[], raw: AuditWebmcpR
   }
 
   const batch = opts.urls.length > 1;
-  if (opts.out) writeFileSync(opts.out, "");
 
   let reports: SiteReport[];
   try {
-    const userAgent = await userAgentFor(browser);
-    reports = await auditSites(browser, opts.urls, { concurrency: opts.concurrency, timeoutMs: opts.timeoutMs, userAgent }, (r, i) => {
+    // Identify the crawler in the UA; fall back to the browser default if that probe fails.
+    const userAgent = await userAgentFor(browser).catch(() => undefined);
+    const relaunch = async () => {
+      await browser.close().catch(() => {});
+      browser = await launchBrowser({ executablePath: opts.executablePath });
+      return browser;
+    };
+    const auditOpts = { concurrency: opts.concurrency, timeoutMs: opts.timeoutMs, userAgent, relaunch };
+    reports = await auditSites(browser, opts.urls, auditOpts, (r, i) => {
       if (opts.out && opts.outFormat === "jsonl") appendFileSync(opts.out, JSON.stringify(r) + "\n");
       if (opts.json) {
         if (batch) console.log(JSON.stringify(r));
@@ -123,5 +171,7 @@ export async function auditWebmcpCommand(positional: string[], raw: AuditWebmcpR
   if (opts.json && !batch) console.log(JSON.stringify(reports[0], null, 2));
   if (!opts.json && batch) console.log(formatBatchFooter(reports));
 
+  // process.exit can drop buffered stdout when it is a pipe (`| jq`): flush first.
+  await new Promise<void>((resolve) => process.stdout.write("", () => resolve()));
   process.exit(shouldFail(reports, opts.failOn) ? 1 : 0);
 }

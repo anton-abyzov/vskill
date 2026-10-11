@@ -30,7 +30,7 @@ export interface WebmcpTool {
   annotations: ToolAnnotations;
   /** Script URL that called registerTool (from a captured stack trace). */
   registeredBy?: string;
-  /** True when registeredBy's origin differs from the page origin. */
+  /** True when registeredBy belongs to a different site (registrable domain) than the page. */
   thirdParty: boolean;
   /** Origins the tool is exposed to, when the page passed exposedTo. */
   exposedTo?: string[];
@@ -52,8 +52,10 @@ export interface SiteSummary {
   writeShapedCount: number;
   thirdPartyCount: number;
   findingsBySeverity: Record<Severity, number>;
-  score: number;
-  verdict: ScanVerdict;
+  /** null when the site failed to load and nothing was enumerated. */
+  score: number | null;
+  /** ERROR when the site failed to load and nothing was enumerated. */
+  verdict: ScanVerdict | "ERROR";
 }
 
 export interface SiteReport {

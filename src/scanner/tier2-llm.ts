@@ -3,10 +3,24 @@
  *
  * Takes SKILL.md content + Tier 1 findings and uses Cloudflare Workers AI
  * (Llama 3.1 70B) to provide a semantic security assessment with a score,
- * verdict, and rationale.
+ * verdict, and rationale. The skill content is fenced with a per-scan nonce
+ * and the judge's verdict passes through the guards in judge-guard.ts.
  */
 
 import type { SecurityFinding, Tier2Result, ScanVerdict } from './types.js';
+import type { ScanFinding } from './patterns.js';
+import {
+  JUDGE_GUARD_RULES,
+  applyJudgeGuards,
+  buildSkillBlock,
+  criticalIdsToValidate,
+  judgeResponseSchema,
+  makeNonce,
+  unvalidatedCriticals,
+  type GuardFinding,
+  type GuardedVerdict,
+} from './judge-guard.js';
+import { revealInvisible } from './hidden-content.js';
 
 /** The Workers AI model used for Tier 2 scanning */
 const TIER2_MODEL = '@cf/meta/llama-3.1-70b-instruct';
@@ -15,8 +29,51 @@ const TIER2_MODEL = '@cf/meta/llama-3.1-70b-instruct';
 export interface AIBinding {
   run(
     model: string,
-    input: { messages: Array<{ role: string; content: string }> },
+    input: {
+      messages: Array<{ role: string; content: string }>;
+      /** JSON mode and response schema, for providers that support them. */
+      response_format?: { type: 'json_object' };
+      json_schema?: Record<string, unknown>;
+    },
   ): Promise<{ response?: string }>;
+}
+
+/** Tier 1 findings in either the shared SecurityFinding or the raw ScanFinding shape. */
+export type Tier2Finding = SecurityFinding | ScanFinding;
+
+/**
+ * Normalizes a finding for the judge guards. SecurityFindings without a
+ * pattern ID are keyed by category so critical validation still works.
+ */
+function toGuardFinding(f: Tier2Finding): GuardFinding {
+  if ('patternId' in f && typeof f.patternId === 'string' && 'patternName' in f) {
+    return {
+      patternId: f.patternId,
+      severity: f.severity,
+      match: f.match,
+      category: f.category,
+      lineNumber: f.lineNumber,
+      context: f.context,
+      ...(f.downgradedFrom ? { downgradedFrom: f.downgradedFrom } : {}),
+    };
+  }
+  const sf = f as SecurityFinding;
+  return {
+    patternId: sf.patternId ?? sf.category,
+    severity: sf.severity,
+    match: sf.match ?? sf.message ?? '',
+    category: sf.category,
+    ...(typeof sf.line === 'number' ? { lineNumber: sf.line } : {}),
+    ...(sf.downgradedFrom ? { downgradedFrom: sf.downgradedFrom } : {}),
+  };
+}
+
+function findingLine(f: Tier2Finding): number | undefined {
+  return 'lineNumber' in f ? f.lineNumber : f.line;
+}
+
+function findingText(f: Tier2Finding): string {
+  return 'patternName' in f ? `${f.patternName}: ${f.match}` : f.message;
 }
 
 /**
@@ -26,20 +83,23 @@ function buildSystemPrompt(): string {
   return `You are a security auditor for AI agent skill packages. Your job is to analyze SKILL.md files (which define AI agent capabilities) for security risks.
 
 You will receive:
-1. The full SKILL.md content
+1. The SKILL.md content (excerpted when long)
 2. Findings from an automated pattern-based scanner (Tier 1)
 
 Your task:
 - Assess the OVERALL security risk of this skill package
 - Consider both the Tier 1 findings AND your own semantic analysis
 - Look for subtle risks the pattern scanner might miss (social engineering, indirect prompt injection, data exfiltration through side channels, etc.)
+- For every critical finding listed under "CRITICAL FINDINGS TO VALIDATE", decide whether it is a real threat ("confirmed") or a false positive ("false_positive") and say why
 - Provide a score from 0 (most dangerous) to 100 (completely safe)
 
 Respond ONLY with valid JSON in this exact format:
 {
   "score": <number 0-100>,
   "verdict": "<PASS|CONCERNS|FAIL>",
-  "rationale": "<2-3 sentence explanation>"
+  "rationale": "<2-3 sentence explanation>",
+  "concerns": ["<concern>", ...],
+  "criticalValidation": [{ "patternId": "<ID>", "verdict": "<confirmed|false_positive>", "reason": "<why>" }]
 }
 
 Scoring guide:
@@ -47,41 +107,60 @@ Scoring guide:
 - 40-79: CONCERNS — Some risks worth manual review
 - 0-39: FAIL — Significant security risks detected
 
-Be strict. When in doubt, err on the side of caution.`;
+Be strict. When in doubt, err on the side of caution.
+
+${JUDGE_GUARD_RULES}`;
 }
 
 /**
- * Builds the user message containing the content and Tier 1 findings.
+ * Builds the user message containing the fenced content and Tier 1 findings.
+ * Finding text is quoted and invisible characters revealed, because matches
+ * are attacker-controlled too.
  */
-function buildUserMessage(content: string, tier1Findings: SecurityFinding[]): string {
+function buildUserMessage(
+  content: string,
+  tier1Findings: Tier2Finding[],
+  guardFindings: GuardFinding[],
+  nonce: string,
+): string {
   const findingsSummary =
     tier1Findings.length > 0
       ? tier1Findings
           .map(
-            (f) =>
-              `- [${f.severity.toUpperCase()}] ${f.category}: ${f.message} (line ${f.line ?? '?'})`,
+            (f, i) =>
+              `- [${f.severity.toUpperCase()}] [${guardFindings[i].patternId}] ${f.category}: ${JSON.stringify(revealInvisible(findingText(f)))} (line ${findingLine(f) ?? '?'})`,
           )
           .join('\n')
       : 'No findings from automated scan.';
 
-  return `## SKILL.md Content
+  const criticalIds = criticalIdsToValidate(guardFindings);
+  const criticalSection =
+    criticalIds.length > 0
+      ? `\n\n## CRITICAL FINDINGS TO VALIDATE\n\nReturn one criticalValidation entry for each of: ${criticalIds.join(', ')}`
+      : '';
 
-\`\`\`markdown
-${content}
-\`\`\`
+  return `## Tier 1 Scanner Findings
 
-## Tier 1 Scanner Findings
+${findingsSummary}${criticalSection}
 
-${findingsSummary}
+## SKILL.md Content
+
+${buildSkillBlock(content, guardFindings, nonce)}
 
 Analyze this skill package and respond with the JSON assessment.`;
 }
+
+type ParsedVerdict = Omit<Tier2Result, 'model'> & {
+  concerns: string[];
+  criticalValidation?: GuardedVerdict['criticalValidation'];
+  parsed: boolean;
+};
 
 /**
  * Parses the LLM response into a structured Tier2Result.
  * Handles cases where the LLM wraps JSON in markdown code fences.
  */
-function parseResponse(raw: string): Omit<Tier2Result, 'model'> {
+function parseResponse(raw: string): ParsedVerdict {
   // Strip markdown code fences if present
   let cleaned = raw.trim();
   if (cleaned.startsWith('```')) {
@@ -105,15 +184,87 @@ function parseResponse(raw: string): Omit<Tier2Result, 'model'> {
     const rationale =
       typeof parsed.rationale === 'string' ? parsed.rationale : 'No rationale provided.';
 
-    return { score, verdict, rationale };
+    const concerns = Array.isArray(parsed.concerns)
+      ? parsed.concerns.filter((c: unknown): c is string => typeof c === 'string')
+      : [];
+
+    const criticalValidation = Array.isArray(parsed.criticalValidation)
+      ? parsed.criticalValidation.filter(
+          (v: unknown): v is { patternId: string; verdict: 'confirmed' | 'false_positive'; reason: string } =>
+            !!v &&
+            typeof (v as { patternId?: unknown }).patternId === 'string' &&
+            ((v as { verdict?: unknown }).verdict === 'confirmed' ||
+              (v as { verdict?: unknown }).verdict === 'false_positive'),
+        )
+      : undefined;
+
+    return { score, verdict, rationale, concerns, criticalValidation, parsed: true };
   } catch {
     // If parsing fails, return a conservative FAIL
     return {
       score: 0,
       verdict: 'FAIL',
       rationale: `Failed to parse LLM response: ${raw.slice(0, 200)}`,
+      concerns: [],
+      parsed: false,
     };
   }
+}
+
+const PATTERN_ID_RE = /\b([A-Za-z]{2,4})[-_ ]?(\d{3})\b/g;
+
+/** Comparison key for a pattern id or category: "ci-001 (exec)" -> "CI-001". */
+function idKeys(raw: string): string[] {
+  const keys = [...raw.matchAll(PATTERN_ID_RE)].map((m) => `${m[1].toUpperCase()}-${m[2]}`);
+  return keys.length > 0 ? keys : [raw.trim().toLowerCase()];
+}
+
+/**
+ * Rewrites the judge's criticalValidation ids to the exact Tier 1 ids they
+ * name. Models vary the id ("ci-001", "CI-001 (exec)", " CI-001 ", or one
+ * entry listing several ids); exact matching would leave every critical
+ * "unvalidated" and cap the score. Entries naming no known id are dropped.
+ */
+export function normalizeCriticalValidation(
+  validations: GuardedVerdict['criticalValidation'],
+  findings: GuardFinding[],
+): GuardedVerdict['criticalValidation'] {
+  if (!validations) return validations;
+  const known = new Map<string, string>();
+  for (const f of findings) {
+    if (!f || typeof f.patternId !== 'string') continue;
+    for (const key of idKeys(f.patternId)) if (!known.has(key)) known.set(key, f.patternId);
+  }
+  const out: NonNullable<GuardedVerdict['criticalValidation']> = [];
+  for (const v of validations) {
+    for (const key of idKeys(v.patternId)) {
+      const id = known.get(key);
+      if (id) out.push({ ...v, patternId: id });
+    }
+  }
+  return out;
+}
+
+/**
+ * Applies the judge guards (score caps the model cannot talk its way out of)
+ * and records any guard-added concerns in the rationale.
+ */
+function guardVerdict(parsed: ParsedVerdict, guardFindings: GuardFinding[]): Omit<Tier2Result, 'model'> {
+  if (!parsed.parsed) {
+    return { score: parsed.score, verdict: parsed.verdict, rationale: parsed.rationale, concerns: parsed.concerns };
+  }
+  const guarded = applyJudgeGuards(
+    {
+      verdict: parsed.verdict,
+      score: parsed.score,
+      concerns: parsed.concerns,
+      criticalValidation: normalizeCriticalValidation(parsed.criticalValidation, guardFindings),
+    },
+    guardFindings,
+  );
+  const added = guarded.concerns.slice(parsed.concerns.length);
+  const rationale = added.length > 0 ? `${parsed.rationale} Guard: ${added.join('; ')}.` : parsed.rationale;
+  return { score: guarded.score, verdict: guarded.verdict, rationale, concerns: guarded.concerns };
 }
 
 /** Max retry attempts for transient AI API failures */
@@ -123,43 +274,53 @@ const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
 
 /**
+ * Answers accepted that skip a required criticalValidation entry before the
+ * scan fails: the first is retried, the second ends it.
+ */
+const MAX_UNVALIDATED_ANSWERS = 2;
+
+/**
  * Runs Tier 2 LLM-based security analysis.
  *
  * Retries up to MAX_RETRIES times with exponential backoff on transient
  * failures (network errors, timeouts, 5xx). Only returns FAIL after all
- * retries are exhausted.
+ * retries are exhausted. An answer that omits criticalValidation for a listed
+ * critical finding is asked once more, then the scan returns FAIL.
  *
  * @param content - The SKILL.md file content
- * @param tier1Findings - Findings from the Tier 1 pattern scanner
+ * @param tier1Findings - Findings from the Tier 1 pattern scanner (SecurityFinding or ScanFinding)
  * @param ai - The Workers AI binding (env.AI)
  * @returns Tier2Result with score, verdict, rationale, and model
  */
 export async function runTier2Scan(
   content: string,
-  tier1Findings: SecurityFinding[],
+  tier1Findings: Tier2Finding[],
   ai: AIBinding,
 ): Promise<Tier2Result> {
+  const guardFindings = tier1Findings.map(toGuardFinding);
   const systemPrompt = buildSystemPrompt();
-  const userMessage = buildUserMessage(content, tier1Findings);
+  // Fresh per scan so the content cannot forge the end of the untrusted block.
+  const userMessage = buildUserMessage(content, tier1Findings, guardFindings, makeNonce());
+
+  // When criticals are listed the schema requires their validation, and an
+  // answer without it is unusable rather than a low score.
+  const jsonSchema = judgeResponseSchema(criticalIdsToValidate(guardFindings).length > 0);
 
   let lastError: string = 'unknown error';
+  let unvalidatedAnswers = 0;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    let responseText: string;
     try {
       const result = await ai.run(TIER2_MODEL, {
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage },
         ],
+        response_format: { type: 'json_object' },
+        json_schema: jsonSchema,
       });
-
-      const responseText = result.response ?? '';
-      const parsed = parseResponse(responseText);
-
-      return {
-        ...parsed,
-        model: TIER2_MODEL,
-      };
+      responseText = result.response ?? '';
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
 
@@ -167,7 +328,36 @@ export async function runTier2Scan(
         const backoff = INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1);
         await new Promise((resolve) => setTimeout(resolve, backoff));
       }
+      continue;
     }
+
+    const parsed = parseResponse(responseText);
+    const missing = parsed.parsed
+      ? unvalidatedCriticals(
+          { criticalValidation: normalizeCriticalValidation(parsed.criticalValidation, guardFindings) },
+          guardFindings,
+        )
+      : [];
+    if (missing.length > 0) {
+      unvalidatedAnswers++;
+      if (unvalidatedAnswers < MAX_UNVALIDATED_ANSWERS) {
+        // Ask again without spending a transient-failure retry.
+        attempt--;
+        continue;
+      }
+      return {
+        score: 0,
+        verdict: 'FAIL',
+        rationale: `Tier 2 judge did not validate critical finding(s) ${missing.join(', ')} in ${unvalidatedAnswers} answers; no usable verdict.`,
+        concerns: [`Reviewer did not validate critical finding(s): ${missing.join(', ')}`],
+        model: TIER2_MODEL,
+      };
+    }
+
+    return {
+      ...guardVerdict(parsed, guardFindings),
+      model: TIER2_MODEL,
+    };
   }
 
   // All retries exhausted — return conservative FAIL

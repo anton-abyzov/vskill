@@ -18,8 +18,8 @@ function atLine(lineNumber: number, malicious: string): string {
 // SCAN_PATTERNS structure
 // ---------------------------------------------------------------------------
 describe("SCAN_PATTERNS", () => {
-  it("has exactly 52 entries", () => {
-    expect(SCAN_PATTERNS).toHaveLength(52);
+  it("has exactly 58 entries", () => {
+    expect(SCAN_PATTERNS).toHaveLength(58);
   });
 
   it("every pattern has required fields", () => {
@@ -406,9 +406,11 @@ describe("scanContent — filesystem-access patterns", () => {
     expect(findings.some((f) => f.patternId === "FS-002")).toBe(true);
   });
 
-  it("FS-003: detects path traversal", () => {
-    const findings = scanContent("../../../../../../etc/passwd");
-    expect(findings.some((f) => f.patternId === "FS-003")).toBe(true);
+  it("FS-003: detects path traversal in filesystem API call arguments", () => {
+    expect(scanContent('fs.readFileSync("../../../../../../etc/passwd")').some((f) => f.patternId === "FS-003")).toBe(true);
+    expect(scanContent('createReadStream(base + "/../../secrets")').some((f) => f.patternId === "FS-003")).toBe(true);
+    // A bare relative path is not a filesystem call.
+    expect(scanContent("../../../../../../etc/passwd").some((f) => f.patternId === "FS-003")).toBe(false);
   });
 
   it("FS-004: detects symlink manipulation", () => {
@@ -937,16 +939,18 @@ describe("scanContent — fenced code block context downgrade", () => {
 });
 
 // ---------------------------------------------------------------------------
-// HTML comment suppression
+// HTML comment handling
 // ---------------------------------------------------------------------------
-describe("scanContent — HTML comment suppression", () => {
-  it("suppresses findings on interior lines of multi-line HTML comments", () => {
+describe("scanContent — HTML comment handling", () => {
+  // Comments render invisibly to humans but agents read them, so findings
+  // inside them are kept (they used to be dropped, which hid injections).
+  it("keeps findings on interior lines of multi-line HTML comments", () => {
     const content = "safe line\n<!--\neval(badCode);\nsudo install\n-->\nsafe line";
     const findings = scanContent(content);
     const ce001 = findings.filter((f) => f.patternId === "CE-001");
     const pe001 = findings.filter((f) => f.patternId === "PE-001");
-    expect(ce001).toHaveLength(0);
-    expect(pe001).toHaveLength(0);
+    expect(ce001).toHaveLength(1);
+    expect(pe001).toHaveLength(1);
   });
 
   it("does NOT suppress findings outside HTML comments", () => {

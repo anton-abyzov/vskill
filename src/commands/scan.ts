@@ -109,7 +109,7 @@ function printFindings(findings: ScanFinding[]): void {
       sevColor(f.severity.toUpperCase()),
       f.patternName,
       dim(f.category),
-      String(f.lineNumber),
+      f.occurrences ? `${f.lineNumber} (x${f.occurrences})` : String(f.lineNumber),
       dim(f.match.substring(0, 40)),
     ];
   });

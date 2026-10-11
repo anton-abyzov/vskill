@@ -70,7 +70,7 @@ export async function shallowClone(repoUrl: string, tmpDir: string): Promise<str
 /**
  * Checks if a buffer likely contains binary content (null byte check).
  */
-function isBinary(buffer: Buffer): boolean {
+export function isBinary(buffer: Buffer): boolean {
   // Check for null bytes in the first 8KB
   const checkLength = Math.min(buffer.length, 8192);
   for (let i = 0; i < checkLength; i++) {
@@ -191,6 +191,9 @@ export async function scanRepository(repoUrl: string): Promise<ScanResult> {
           category: f.category,
           message: `[${file.path}] ${f.patternName}: ${f.match}`,
           line: f.lineNumber,
+          patternId: f.patternId,
+          match: f.match,
+          ...(f.downgradedFrom ? { downgradedFrom: f.downgradedFrom } : {}),
         });
       }
     }

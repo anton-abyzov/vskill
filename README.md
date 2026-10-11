@@ -55,7 +55,7 @@ And the ones that aren't malicious often *don't even improve the model* — they
 
 vskill is built around three problems:
 
-- **Trust** — every install runs a 3-tier scan (52 patterns → blocklist → LLM intent). No `--skip-scan`.
+- **Trust** — every install runs a 3-tier scan (58 patterns + hidden-content checks → blocklist → LLM intent). No `--skip-scan`.
 - **Proof** — Skill Studio runs A/B evals so you can *show* a skill makes a model better, not assume it.
 - **Reach** — one skill, 53 agents (Claude Code, Cursor, Copilot, Codex, Windsurf, Zed, Gemini CLI, Ollama, …).
 
@@ -87,7 +87,7 @@ CORS-free by design: the browser only ever talks to localhost. The server proxie
   ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
   │  Source  │────>│   Scan   │────>│  Verify  │────>│ Install  │
   │          │     │          │     │          │     │          │
-  │ GitHub   │     │ 52 rules │     │ LLM      │     │ Pin SHA  │
+  │ GitHub   │     │ 58 rules │     │ LLM      │     │ Pin SHA  │
   │ Registry │     │ Blocklist│     │ intent   │     │ Lock ver │
   │ Local    │     │ Patterns │     │ analysis │     │ Symlink  │
   └──────────┘     └──────────┘     └──────────┘     └──────────┘

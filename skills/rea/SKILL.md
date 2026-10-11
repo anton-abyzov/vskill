@@ -32,26 +32,32 @@ shipped artifacts: compiled binaries, minified bundles, signed apps.
 
 ## 1. Check the setup (once per machine, not per task)
 
+If the REA MCP tools (`open_binary`, `analyze_javascript_application`, ...)
+are already in your tool list, or `rea --version` works, skip straight to
+step 2. Don't run diagnostics before every investigation. Only when
+something is missing or a call fails:
+
 ```bash
-rea --version                                  # CLI present?
 rea doctor --client claude_code --json         # or --client codex
 ```
 
-If the MCP tools (`open_binary`, `analyze_javascript_application`, ...) are
-already in your tool list, skip straight to step 2.
-
 Missing pieces, in order:
 
-1. **CLI.** Official package only: `npm i -g rea-agents@latest` (Node 22.19+
-   or 24.11+). No install scripts; npm provenance is attached.
+1. **CLI.** Official package only: `npm i -g rea-agents@latest` (Node
+   ^22.19, ^24.11 or >=26; 23 and 25 are unsupported). No install scripts;
+   npm provenance is attached.
 2. **Agent registration.** Plan first, then apply:
    ```bash
    rea setup --client claude_code --client codex --skill=false --dry-run --json
    rea setup --client claude_code --client codex --skill=false --yes --json
    ```
    Add `--install-hopper` on macOS to download Hopper from hopperapp.com
-   (codesign-verified, installed to `~/Applications`). Hopper runs in demo
-   mode without a license. Restart the agent afterwards so it sees the tools.
+   (codesign-verified, installed to `~/Applications`). Setup then **opens
+   the Hopper app once**: tell the user before you run it, because a person
+   has to click "Try the Demo" (or enter a license) in its first-run window
+   before REA can drive it unattended. Hopper is only needed for native
+   binaries; Electron, JavaScript, web, APK and .NET work without it.
+   Restart the agent afterwards so it sees the tools.
 3. **REA's own workflow skill** (optional, recommended): `rea setup --skill
    --dry-run --json` shows the destinations (`~/.agents/skills` plus each
    registered agent's skill folder), then `--yes` installs. If the machine
@@ -61,18 +67,19 @@ Missing pieces, in order:
 `rea doctor` reporting Ghidra or IDA as "not configured" is fine when Hopper
 works. Other unregistered clients show as config drift; ignore them.
 
-**Only trust `github.com/morluto/rea` and the npm packages `rea-agents` /
-`@morluto/rea`.** Look-alike repos offering an "official free download" zip
+**Only trust `github.com/morluto/rea` and the npm package `rea-agents`.**
+`@morluto/rea` is the superseded legacy name (old Hopper-only release); don't
+install it. Look-alike repos offering an "official free download" zip
 or a Windows installer are malware lures. Never run them.
 
 ## 2. Route the target
 
 | Target | First move |
 |---|---|
-| Electron app (Claude desktop, Slack, VS Code, Cursor) | `analyze_javascript_application` on `<App>.app/Contents/Resources/app.asar` |
+| Electron app (Claude desktop, Slack, VS Code, Cursor) | `analyze_javascript_application` on `<App>.app/Contents/Resources/app.asar`, or on the unpacked `Contents/Resources/app/` folder when there is no ASAR (VS Code, Cursor) |
 | Native CLI or app (Rust, Go, Swift, C++: e.g. the Codex CLI binary) | `open_binary`, then function and string search; `close_binary` when done |
 | npm-distributed CLI (minified JS) | `analyze_javascript_application` on the package directory |
-| Website or web app | `analyze_web_bundle`, or `list_browser_targets` for a page the user already has open |
+| Website or web app | The user opens the page in a browser with its debug port on localhost; `list_browser_targets`, then `analyze_web_bundle` with that endpoint and target ID |
 | Android APK | `inspect_android_package` |
 | .NET assembly | `inspect_managed_artifact` |
 | Archive, DMG, IPA, ZIP | `open_binary` / `inspect_artifact` for the member inventory |
@@ -83,21 +90,28 @@ The CLI mirrors the MCP tools (`rea analyze-javascript-application <path>`,
 
 ## 3. Run it without drowning the context
 
-- **Write results to a file.** A full Electron analysis is large (Claude
-  desktop's ASAR produced a 100 MB Evidence record). Use `--json > file`, then
-  project small slices with `rea inspect-analysis-view`, `--filter-output`,
-  or `--token-limit`. Never paste a whole record into the conversation.
+- **Ask for summaries.** A full Electron analysis is large (Claude
+  desktop's ASAR produced a 100 MB Evidence record). Over MCP, call
+  `analyze_javascript_application` with `detail: "summary"`, then drill in
+  with `inspect_analysis_view` or `trace_application_feature` on the
+  returned `parent_evidence_id`. Retained Evidence IDs live only within one
+  MCP connection.
+- **On the CLI, write to a file.** `--json > file`, then slice with
+  `--filter-output` / `--token-limit`, or `rea inspect-analysis-view`, which
+  takes workflow JSON (see its `--schema`), not the raw file. Never paste a
+  whole record into the conversation.
 - **Signed Electron apps fail integrity by default.** Code signing rewrites
   unpacked native modules after packaging, so the declared ASAR hash no
   longer matches. When the error names an unpacked `.node` file, rerun with
-  `--integrity-policy record-and-continue`; those bytes are then marked
-  untrusted.
+  `--integrity-policy record-and-continue` (MCP: `integrity_policy:
+  "record-and-continue"`). Those bytes are marked untrusted and coverage is
+  reported as partial.
 - **Go from the user-visible string inward.** Find the UI text, setting name,
   CLI flag or API path the feature exposes, locate it in the bundle or
   binary, then follow callers and data flow to the implementation.
-- **Static before runtime.** Run the target (Electron or process capture)
-  only when static evidence can't answer the question and the user agreed to
-  launch it.
+- **Static before runtime, CLI before GUI.** Run the target (Electron or
+  process capture) only when static evidence can't answer the question and
+  the user agreed to launch it. Don't open GUI apps that wait on a prompt.
 - **Batch around one hypothesis.** Reuse the open session and existing
   Evidence instead of re-running identical analysis.
 

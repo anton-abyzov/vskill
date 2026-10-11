@@ -44,6 +44,8 @@ function toGuardFinding(f: Tier2Finding): GuardFinding {
       severity: f.severity,
       match: f.match,
       category: f.category,
+      lineNumber: f.lineNumber,
+      context: f.context,
       ...(f.downgradedFrom ? { downgradedFrom: f.downgradedFrom } : {}),
     };
   }
@@ -53,6 +55,7 @@ function toGuardFinding(f: Tier2Finding): GuardFinding {
     severity: sf.severity,
     match: sf.match ?? sf.message ?? '',
     category: sf.category,
+    ...(typeof sf.line === 'number' ? { lineNumber: sf.line } : {}),
     ...(sf.downgradedFrom ? { downgradedFrom: sf.downgradedFrom } : {}),
   };
 }

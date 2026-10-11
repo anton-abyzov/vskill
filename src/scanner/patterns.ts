@@ -109,7 +109,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Pipe-to-shell execution",
     severity: "critical",
     description: "Detects curl/wget output piped directly to a shell interpreter (download-and-execute)",
-    pattern: /\b(?:curl|wget)\b[^|]*\|\s*(?:(?:\/\w+)*\/)?(?:env\s+)?(?:ba|z|da|k)?sh\b/g,
+    pattern: /\b(?:curl|wget)\b[^|\n]{0,400}\|\s*(?:(?:\/\w+)*\/)?(?:env\s+)?(?:ba|z|da|k)?sh\b/g,
     category: "command-injection",
   },
   {
@@ -117,7 +117,8 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Python shell execution",
     severity: "high",
     description: "Detects os.system/os.popen and subprocess calls with shell=True",
-    pattern: /\bos\.(?:system|popen)\s*\(|\bsubprocess\.(?:run|call|Popen|check_output|check_call)\s*\([^)]{0,400}?\bshell\s*=\s*True/g,
+    // os.system( is already CI-003 ("system("); only the spaced form is added.
+    pattern: /\bos\.popen\s*\(|\bos\.system\s+\(|\bsubprocess\.(?:run|call|Popen|check_output|check_call)\s*\([^)]{0,400}?\bshell\s*=\s*True/g,
     category: "command-injection",
   },
   {
@@ -125,7 +126,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "PowerShell dynamic execution",
     severity: "high",
     description: "Detects Invoke-Expression/iex, -EncodedCommand payloads and base64 decoding in PowerShell",
-    pattern: /\bInvoke-Expression\b|\|\s*iex\b|\biex\s*\(|\s-(?:EncodedCommand|enc|ec)\s+[A-Za-z0-9+\/=]{20,}|\[(?:System\.)?Convert\]::FromBase64String/gi,
+    pattern: /\bInvoke-Expression\b|\|\s*iex\b|\biex\s*\(\s*(?:\(|\$|\[|['"]|New-Object\b|Invoke-|i(?:wr|rm)\b|Get-Content\b)|\s-(?:EncodedCommand|enc|ec)\s+[A-Za-z0-9+\/=]{20,}|\[(?:System\.)?Convert\]::FromBase64String/gi,
     category: "command-injection",
   },
 
@@ -345,7 +346,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Reverse shell pattern",
     severity: "critical",
     description: "Detects reverse shell connection patterns",
-    pattern: /(?:\/dev\/tcp\/|nc\s+-[a-z]*e|\bncat\b\s+-|bash\s+-i\s+>&|mkfifo\s+\S|0<&\d+)/g,
+    pattern: /(?:\/dev\/tcp\/|\b(?:nc|netcat)\s+-[a-z]*e|\bncat\b\s+-|\b(?:nc|ncat|netcat)\b[^\n|;]{0,160}?\s(?:-e|-c|--exec|--sh-exec)\b|bash\s+-i\s+>&|mkfifo\s+\S|0<&\d+)/g,
     category: "network-access",
   },
   {
@@ -361,7 +362,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Fake prerequisite download",
     severity: "high",
     description: "Detects instructions to download and run an external binary or script as a setup step (ClawHavoc-style)",
-    pattern: /\b(?:before (?:using|running|installing)|prerequisites?|required?|first)\b[^.\n]{0,120}?\b(?:download|install|run|execute)\b[^\n]{0,160}?(?:https?:\/\/[^\s)'"`]+\.(?:zip|exe|dmg|pkg|msi|sh|ps1|bat|cmd|command|app|scr)\b|\b(?:glot\.io|pastebin\.com|rentry\.co|paste\.ee|transfer\.sh|hastebin\.com)\/)/gi,
+    pattern: /\b(?:before (?:using|running|installing)|prerequisites?|required?|first)\b[^.\n]{0,120}?\b(?:download|install|run|execute)\b[^\n]{0,160}?(?:https?:\/\/(?!(?:brew\.sh|bun\.sh|sh\.rustup\.rs|astral\.sh|deno\.land|get\.pnpm\.io)[\/\s)'"`]|raw\.githubusercontent\.com\/(?:nvm-sh|Homebrew)\/)[^\/\s)'"`]+\/[^\s)'"`]*\.(?:zip|exe|dmg|pkg|msi|sh|ps1|bat|cmd|command|app|scr)\b|\b(?:glot\.io|pastebin\.com|rentry\.co|paste\.ee|transfer\.sh|hastebin\.com)\/)/gi,
     category: "network-access",
   },
   {
@@ -369,7 +370,8 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Password-protected archive",
     severity: "high",
     description: "Detects password-protected archives, a common way to hide payloads from scanners",
-    pattern: /\b(?:zip|archive|rar|7z)\b[^\n]{0,80}?\bpass(?:word|code)\s*(?:is\s*)?[:=]\s*\S+|\b(?:unzip|7z\s+x|unrar\s+x)\b[^\n]{0,60}?\s-p\s*\S+/gi,
+    // No /i flag: unzip -P is the password but -p pipes to stdout.
+    pattern: /\b(?:[Zz][Ii][Pp]|[Aa][Rr][Cc][Hh][Ii][Vv][Ee]|[Rr][Aa][Rr]|7[Zz])\b[^\n]{0,80}?\b[Pp][Aa][Ss][Ss](?:[Ww][Oo][Rr][Dd]|[Cc][Oo][Dd][Ee])\s*(?:[Ii][Ss]\s*)?[:=]\s*\S+|\bunzip\b[^|&;\n]{0,60}?\s-[a-zA-Z]*P\s*\S+|\b(?:7z|7za|7zz|unrar)\s+[ex]\b[^|&;\n]{0,60}?\s-[pP]\S+/g,
     category: "network-access",
   },
 

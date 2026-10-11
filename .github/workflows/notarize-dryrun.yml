@@ -33,7 +33,8 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: universal-apple-darwin
+          # rustup targets; universal-apple-darwin is a Tauri bundle target only
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2

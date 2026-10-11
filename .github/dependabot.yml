@@ -40,3 +40,8 @@ updates:
     cooldown:
       default-days: 7
     labels: ["dependencies", "ci/cd"]
+    ignore:
+      # Majors of the release-critical Tauri action change signing and
+      # updater-JSON behaviour; bump by hand alongside a desktop dry-run.
+      - dependency-name: "tauri-apps/tauri-action"
+        update-types: ["version-update:semver-major"]

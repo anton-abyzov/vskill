@@ -23,6 +23,7 @@ import type { AgentDefinition } from "../agents/agents-registry.js";
 import { ensureLockfile, writeLockfile, readLockfile, removeSkillFromLock } from "../lockfile/index.js";
 import { buildGitHubInstallLockEntry } from "./add-lockfile.js";
 import { runTier1Scan } from "../scanner/index.js";
+import { isBinary } from "../scanner/repo-scanner.js";
 import { getAvailablePlugins, getPluginSource, getPluginVersion, hasPlugin, discoverUnregisteredPlugins } from "../marketplace/index.js";
 import type { UnregisteredPlugin } from "../marketplace/index.js";
 import { checkInstallSafety, checkLocalInstallSafety } from "../blocklist/blocklist.js";
@@ -1300,17 +1301,21 @@ function listPluginDirPlugins(basePath: string): string[] {
  * Collect all file contents from a plugin directory for security scanning.
  * Concatenates content from all readable files.
  */
-function collectPluginContent(pluginDir: string): string {
+export function collectPluginContent(pluginDir: string): string {
   const files = readdirSync(pluginDir, { recursive: true }) as string[];
   const parts: string[] = [];
 
   for (const file of files) {
     const fullPath = join(pluginDir, file);
     try {
-      const content = readFileSync(fullPath, "utf-8");
-      parts.push(`--- ${file} ---\n${content}`);
+      const buffer = readFileSync(fullPath);
+      // Images and other binaries decode to junk that looks like hidden
+      // Unicode (a GIF header can spell tag characters); they are not text
+      // an agent reads, so they are not scanned as text.
+      if (isBinary(buffer)) continue;
+      parts.push(`--- ${file} ---\n${buffer.toString("utf-8")}`);
     } catch {
-      // Skip unreadable files (directories, binary, etc.)
+      // Skip unreadable files (directories, etc.)
     }
   }
 

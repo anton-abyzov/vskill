@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 
 import { scanHiddenContent } from "./hidden-content.js";
-import { OFFICIAL_INSTALLER_URL_SOURCE } from "./installer-hosts.js";
+import { OFFICIAL_INSTALLER_URL_SOURCE, URL_DOT_SEGMENT_SOURCE } from "./installer-hosts.js";
 
 // ---- Types ----------------------------------------------------------------
 
@@ -96,7 +96,9 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Shell pipe operator",
     severity: "medium",
     description: "Detects shell piping within exec-like calls",
-    pattern: /exec\s*\([^)]*\|[^)]*\)/g,
+    // Neither side may run past a later exec(, so a long line of exec( with
+    // no closing parenthesis is scanned once, not once per call.
+    pattern: /exec\s*\((?:(?!exec\s*\()[^)|])*\|(?:(?!exec\s*\()[^)])*\)/g,
     category: "command-injection",
   },
   {
@@ -112,7 +114,10 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Pipe-to-shell execution",
     severity: "critical",
     description: "Detects curl/wget output piped directly to a shell interpreter (download-and-execute)",
-    pattern: /\b(?:curl|wget)\b[^|\n]{0,400}\|\s*(?:(?:\/\w+)*\/)?(?:env\s+)?(?:ba|z|da|k)?sh\b/g,
+    // Unbounded, so padding cannot push the pipe out of reach. A match may
+    // not run past a later curl/wget: each character is scanned from at most
+    // one start, which keeps a long line without a pipe linear.
+    pattern: /\b(?:curl|wget)\b(?:(?!\b(?:curl|wget)\b)[^|\n])*\|\s*(?:(?:\/\w+)*\/)?(?:env\s+)?(?:ba|z|da|k)?sh\b/g,
     category: "command-injection",
   },
   {
@@ -361,7 +366,11 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Reverse shell pattern",
     severity: "critical",
     description: "Detects reverse shell connection patterns",
-    pattern: /(?:\/dev\/tcp\/|\b(?:nc|netcat)\s+-[a-z]*e|\bncat\b\s+-|\b(?:nc|ncat|netcat)\b[^\n|;]{0,160}?\s(?:-e|-c|--exec|--sh-exec)\b|bash\s+-i\s+>&|mkfifo\s+\S|0<&\d+)/g,
+    // The netcat forms need nc in command position (line start, after a
+    // separator, a prompt or a verb such as "run"), and the -e/-c flag or the
+    // shell pipe in the same command: `nc -z db 5432 && psql -c ...` and
+    // "the nc command ... wc -c" are not reverse shells.
+    pattern: /(?:\/dev\/tcp\/|\b(?:nc|netcat)\s+-[a-z]*e|\bncat\b\s+-|\b(?:nc|ncat|netcat)\b(?<=(?:^|[;&|(\x60:$]|\b(?:[Ss]udo|[Rr]un|[Ee]xec(?:ute)?|[Tt]hen|[Aa]nd|[Oo]r|[Tt]ype|[Tt]ry|[Uu]ntil|[Ww]hile|[Dd]o|[Ii]f|nohup)\b)\s*(?:nc|ncat|netcat))(?:[^\n|;&]{0,160}?\s(?:-e|-c|--exec|--sh-exec)\b|[^\n|;&]{0,160}\|\s*(?:(?:\/\w+)*\/)?(?:ba|z|da|k)?sh\b)|bash\s+-i\s+>&|mkfifo\s+\S|0<&\d+)/g,
     category: "network-access",
   },
   {
@@ -378,7 +387,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     severity: "high",
     description: "Detects instructions to download and run an external binary or script as a setup step (ClawHavoc-style)",
     pattern: new RegExp(
-      String.raw`\b(?:before (?:using|running|installing)|prerequisites?|required?|first)\b[^.\n]{0,120}?\b(?:download|install|run|execute)\b[^\n]{0,160}?(?:https?:\/\/(?!${OFFICIAL_INSTALLER_URL_SOURCE})[^\/\s)'"\x60]+\/[^\s)'"\x60]*\.(?:zip|exe|dmg|pkg|msi|sh|ps1|bat|cmd|command|app|scr)\b|\b(?:glot\.io|pastebin\.com|rentry\.co|paste\.ee|transfer\.sh|hastebin\.com)\/)`,
+      String.raw`\b(?:before (?:using|running|installing)|prerequisites?|required?|first)\b[^.\n]{0,120}?\b(?:download|install|run|execute)\b[^\n]{0,160}?(?:https?:\/\/(?!(?!${URL_DOT_SEGMENT_SOURCE})(?:${OFFICIAL_INSTALLER_URL_SOURCE}))[^\/\s)'"\x60]{1,253}\/[^\s)'"\x60]{0,400}?\.(?:zip|exe|dmg|pkg|msi|sh|ps1|bat|cmd|command|app|scr)\b|\b(?:glot\.io|pastebin\.com|rentry\.co|paste\.ee|transfer\.sh|hastebin\.com)\/)`,
       "gi",
     ),
     category: "network-access",
@@ -435,7 +444,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI credential file read",
     severity: "critical",
     description: "DCI block reads credential files (~/.ssh/, ~/.aws/, .env)",
-    pattern: /^\s*!\s*`[^`]*(?:~\/\.ssh\/|~\/\.aws\/|\.env\b|\.gnupg\/)/gm,
+    pattern: /^[^\S\n]*!\s*`[^`]*(?:~\/\.ssh\/|~\/\.aws\/|\.env\b|\.gnupg\/)/gm,
     category: "dci-abuse",
   },
   {
@@ -443,7 +452,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI network exfiltration",
     severity: "critical",
     description: "DCI block uses curl/wget for network access",
-    pattern: /^\s*!\s*`[^`]*\b(?:curl|wget)\b/gm,
+    pattern: /^[^\S\n]*!\s*`[^`]*\b(?:curl|wget)\b/gm,
     category: "dci-abuse",
   },
   {
@@ -451,7 +460,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI fetch/nc network call",
     severity: "critical",
     description: "DCI block uses fetch or netcat for network access",
-    pattern: /^\s*!\s*`[^`]*\b(?:fetch|nc|ncat|netcat)\b/gm,
+    pattern: /^[^\S\n]*!\s*`[^`]*\b(?:fetch|nc|ncat|netcat)\b/gm,
     category: "dci-abuse",
   },
   {
@@ -459,7 +468,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI agent config write",
     severity: "critical",
     description: "DCI block writes to agent config files (CLAUDE.md, AGENTS.md, .claude/)",
-    pattern: /^\s*!\s*`[^`]*(?:>\s*.*(?:CLAUDE\.md|AGENTS\.md|\.claude\/|\.specweave\/))/gm,
+    pattern: /^[^\S\n]*!\s*`[^`]*(?:>\s*.*(?:CLAUDE\.md|AGENTS\.md|\.claude\/|\.specweave\/))/gm,
     category: "dci-abuse",
   },
   {
@@ -467,7 +476,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI agent config modify",
     severity: "critical",
     description: "DCI block modifies agent config via tee/sed/echo append",
-    pattern: /^\s*!\s*`[^`]*(?:tee|sed\s+-i|echo\s+.*>>)\s*.*(?:CLAUDE\.md|AGENTS\.md|\.claude\/)/gm,
+    pattern: /^[^\S\n]*!\s*`[^`]*(?:tee|sed\s+-i|echo\s+.*>>)\s*.*(?:CLAUDE\.md|AGENTS\.md|\.claude\/)/gm,
     category: "dci-abuse",
   },
   {
@@ -475,7 +484,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI base64 decode",
     severity: "critical",
     description: "DCI block contains base64 decoding (obfuscation)",
-    pattern: /^\s*!\s*`[^`]*\b(?:base64\s+(?:-[dD]|--decode)|atob\s*\()/gm,
+    pattern: /^[^\S\n]*!\s*`[^`]*\b(?:base64\s+(?:-[dD]|--decode)|atob\s*\()/gm,
     category: "dci-abuse",
   },
   {
@@ -483,7 +492,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI hex escape obfuscation",
     severity: "critical",
     description: "DCI block contains hex escape sequences (obfuscation)",
-    pattern: /^\s*!\s*`[^`]*\\x[0-9a-fA-F]{2}(?:\\x[0-9a-fA-F]{2}){3,}/gm,
+    pattern: /^[^\S\n]*!\s*`[^`]*\\x[0-9a-fA-F]{2}(?:\\x[0-9a-fA-F]{2}){3,}/gm,
     category: "dci-abuse",
   },
   {
@@ -491,7 +500,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI eval execution",
     severity: "critical",
     description: "DCI block uses eval for code execution",
-    pattern: /^\s*!\s*`[^`]*\beval\b/gm,
+    pattern: /^[^\S\n]*!\s*`[^`]*\beval\b/gm,
     category: "dci-abuse",
   },
   {
@@ -499,7 +508,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI download and execute",
     severity: "critical",
     description: "DCI block pipes downloaded content to shell (download-and-execute)",
-    pattern: /^\s*!\s*`[^`]*\b(?:curl|wget)\b[^`]*\|\s*(?:ba|z|da|k)?sh\b/gm,
+    pattern: /^[^\S\n]*!\s*`[^`]*\b(?:curl|wget)\b[^`]*\|\s*(?:ba|z|da|k)?sh\b/gm,
     category: "dci-abuse",
   },
   {
@@ -507,7 +516,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI reverse shell",
     severity: "critical",
     description: "DCI block establishes a reverse shell connection",
-    pattern: /^\s*!\s*`[^`]*(?:\/dev\/tcp\/|bash\s+-i\s+>&|mkfifo|nc\s+-[a-z]*e)/gm,
+    pattern: /^[^\S\n]*!\s*`[^`]*(?:\/dev\/tcp\/|bash\s+-i\s+>&|mkfifo|nc\s+-[a-z]*e)/gm,
     category: "dci-abuse",
   },
   {
@@ -515,7 +524,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI sudo escalation",
     severity: "critical",
     description: "DCI block uses sudo for privilege escalation",
-    pattern: /^\s*!\s*`[^`]*\bsudo\b/gm,
+    pattern: /^[^\S\n]*!\s*`[^`]*\bsudo\b/gm,
     category: "dci-abuse",
   },
   {
@@ -523,7 +532,7 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI rm destructive command",
     severity: "critical",
     description: "DCI block executes destructive rm -rf command",
-    pattern: /^\s*!\s*`[^`]*\brm\s+-[a-zA-Z]*r[a-zA-Z]*f/gm,
+    pattern: /^[^\S\n]*!\s*`[^`]*\brm\s+-[a-zA-Z]*r[a-zA-Z]*f/gm,
     category: "dci-abuse",
   },
   {
@@ -531,7 +540,10 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI home dir exfiltration",
     severity: "critical",
     description: "DCI block reads from home directory sensitive paths",
-    pattern: /^\s*!\s*`[^`]{0,400}?\b(?:cat|less|head|tail|strings)\s+[^`]{0,400}?(?:~\/\.|\/home\/[^`]{0,200}?\.)/gm,
+    // Independent lookaheads with no length bound, so padding cannot hide
+    // the target. A /home/ path is scanned only up to the next /home/, which
+    // keeps a line of repeated /home/ segments linear.
+    pattern: /^[^\S\n]*!\s*`(?=[^`\n]*\b(?:cat|less|head|tail|strings)\s)(?=[^`\n]*(?:~\/\.|\/home\/(?:(?!\/home\/)[^`\s])*\.))/gm,
     category: "dci-abuse",
   },
   {
@@ -539,7 +551,8 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "DCI data pipe to network",
     severity: "critical",
     description: "DCI block pipes local data to a network command",
-    pattern: /^\s*!\s*`[^`]{0,400}?\b(?:cat|tar|zip)\s+[^|`]{0,400}\|\s*(?:curl|wget|nc)\b/gm,
+    // Each lookahead stops at the first occurrence of its own trigger.
+    pattern: /^[^\S\n]*!\s*`(?=(?:(?!\b(?:cat|tar|zip)\s)[^`\n])*\b(?:cat|tar|zip)\s)(?=(?:(?!\|\s*(?:curl|wget|nc)\b)[^`\n])*\|\s*(?:curl|wget|nc)\b)/gm,
     category: "dci-abuse",
   },
 ];
@@ -673,7 +686,23 @@ function computeFencedCodeBlockLines(lines: string[]): Set<number> {
 
 // NA-004/NA-005 are deliberately absent: fake-prerequisite and password-archive
 // lures are written as prose, so documentation context must not hide them.
-const DOCUMENTATION_SAFE_PATTERNS = new Set(["PE-001", "PE-002", "PE-003", "FS-001", "CI-008", "CI-011", "CT-002", "CT-004", "NA-001", "PI-003"]);
+const DOCUMENTATION_SAFE_PATTERNS = new Set([
+  "PE-001", "PE-002", "PE-003", "FS-001", "CI-008", "CI-009", "CI-010", "CI-011",
+  "CE-004", "CT-002", "CT-004", "NA-001", "PI-003",
+]);
+
+// CI-010 forms that run hidden or computed code keep their severity even in a
+// fenced example: an -EncodedCommand payload, base64 decoded on a line that
+// also executes, and Invoke-Expression/iex of a variable or a download.
+const CI010_ENCODED_RE = /^\s-(?:EncodedCommand|enc|ec)\s/i;
+const CI010_EXEC_SINK_RE = /\b(?:iex|Invoke-Expression|Invoke-Command|Start-Process|powershell|pwsh)\b|\[ScriptBlock\]::Create|\.Invoke\s*\(|&\s*\(/i;
+const CI010_COMPUTED_RE = /\$[\w{(:]|DownloadString|FromBase64String|GetString|\b(?:irm|iwr|Invoke-RestMethod|Invoke-WebRequest)\b/i;
+
+function ci010KeepsSeverity(match: string, line: string): boolean {
+  if (CI010_ENCODED_RE.test(match)) return true;
+  if (/FromBase64String/i.test(match)) return CI010_EXEC_SINK_RE.test(line);
+  return CI010_COMPUTED_RE.test(line);
+}
 
 // ---- Markdown-link safe context for FS-003 ---------------------------------
 
@@ -858,7 +887,11 @@ export function scanContent(content: string): ScanFinding[] {
         }
 
         // Downgrade documentation-safe patterns inside fenced code blocks
-        if (DOCUMENTATION_SAFE_PATTERNS.has(pattern.id) && fencedLines.has(lineIdx)) {
+        if (
+          DOCUMENTATION_SAFE_PATTERNS.has(pattern.id) &&
+          fencedLines.has(lineIdx) &&
+          !(pattern.id === "CI-010" && ci010KeepsSeverity(match[0], line))
+        ) {
           severity = "info";
         }
 
@@ -905,12 +938,14 @@ export function scanContent(content: string): ScanFinding[] {
   const hidden = scanHiddenContent(content);
   findings.push(...hidden.findings);
   for (const payload of hidden.payloads) {
-    const spans = installerSpans(payload.text);
+    // The whole decoded text is rescanned, not the display copy.
+    const text = payload.fullText ?? payload.text;
+    const spans = installerSpans(text);
     for (const pattern of SCAN_PATTERNS) {
       const regex = new RegExp(pattern.pattern.source, pattern.pattern.flags);
       let match: RegExpExecArray | null;
       let first: ScanFinding | null = null;
-      while ((match = regex.exec(payload.text)) !== null) {
+      while ((match = regex.exec(text)) !== null) {
         if (match[0].length === 0) {
           regex.lastIndex++;
           continue;
@@ -927,7 +962,7 @@ export function scanContent(content: string): ScanFinding[] {
           category: pattern.category,
           match: `[hidden ${payload.kind}] ${match[0].slice(0, MAX_PAYLOAD_MATCH)}`,
           lineNumber: payload.lineNumber,
-          context: payload.text.slice(0, 600),
+          context: contextWindow(text, match.index),
         };
         findings.push(first);
       }

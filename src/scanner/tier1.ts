@@ -42,13 +42,20 @@ const HC001_SCORE_CAP = 39;
 // ---- Scanner --------------------------------------------------------------
 
 /**
+ * HC-014 (visible text addressed to an AI reviewer) only asks for the LLM
+ * judge. The CLI installs on Tier 1 alone and has no judge to send it to, so
+ * it is reported but not scored. HC-009 (hidden or forged) still scores.
+ */
+const CLI_UNSCORED_IDS: ReadonlySet<string> = new Set(["HC-014"]);
+
+/**
  * Severity used for counts and the score. Advisory findings (look-alike
  * domains, mixed-script words) are common in localized docs: they are
  * reported at their own severity but score as info, so they cannot push a
  * skill below the install threshold on their own.
  */
 function scoredSeverity(finding: ScanFinding): PatternSeverity {
-  return ADVISORY_IDS.has(finding.patternId) ? "info" : finding.severity;
+  return ADVISORY_IDS.has(finding.patternId) || CLI_UNSCORED_IDS.has(finding.patternId) ? "info" : finding.severity;
 }
 
 /**

@@ -41,7 +41,13 @@ export type HiddenPayloadKind = "unicode-tags" | "variation-selectors" | "zero-w
 export interface HiddenPayload {
   kind: HiddenPayloadKind;
   lineNumber: number;
+  /** Decoded text kept for display and the judge, at most MAX_PAYLOAD characters. */
   text: string;
+  /**
+   * CLI: the whole decoded text (bounded by MAX_BASE64_DECODE), which is what
+   * scanContent rescans, so a payload cannot hide past the display cap.
+   */
+  fullText?: string;
 }
 
 export interface HiddenFinding {
@@ -118,7 +124,11 @@ const SECRET_REF = String.raw`(?:~\/\.ssh\b|\bid_rsa\b|\.aws\/credentials\b|\.en
 
 // Comment bodies that address the agent rather than the human reader.
 const DIRECTIVE_RES: RegExp[] = [
-  /\b(?:ignore|disregard|override|forget|bypass)\b[^.\n]{0,60}\b(?:instructions?|prompts?|rules?|guidelines?|polic(?:y|ies)|restrictions?|safety)\b/i,
+  // Addressed to an agent: only qualifiers such as "all previous" or "your
+  // safety" may stand between the verb and the noun, so linter and TODO
+  // comments ("ignore the line-length rules", "ignore any previous lint
+  // rules") do not match.
+  /\b(?:ignore|disregard|override|forget|bypass)\s+(?:(?:all|any|the|your|my|its|these|those|every|each|of|previous|prior|above|earlier|preceding|original|initial|system|safety|security|ethical|content|given|provided|other|existing|current|developer|operator|user)\s+){0,5}(?:instructions?|prompts?|rules?|guidelines?|polic(?:y|ies)|restrictions?|safety|directives?|guardrails?)\b/i,
   /\b(?:do\s+not|don'?t|never)\s+(?:tell|inform|mention|reveal|show|notify|alert|ask)\b[^.\n]{0,40}\b(?:user|human|operator|anyone)\b/i,
   /\bwithout\s+(?:telling|informing|asking|notifying|alerting)\b/i,
   /\b(?:silently|secretly|covertly|quietly)\s+(?:run|execute|send|upload|post|copy|read|install|fetch|download|exfiltrate)\b/i,
@@ -127,7 +137,13 @@ const DIRECTIVE_RES: RegExp[] = [
   /\b(?:curl|wget|Invoke-WebRequest|Invoke-RestMethod|iwr|irm)\b[^\n]{0,300}?(?:\s(?:-T|--upload-file|--post-file|-InFile)\b|\s(?:-d|--data(?:-[a-z]+)?|-F|--form)[\s=]*['"]?(?:[^\s'"]*@|\$\())/i,
   /\b(?:nc|ncat|netcat)\s[^\n]{0,100}?(?:<\s*[~/.$\w]|\s-e\s)/i,
   /\b(?:send|upload|post|exfiltrate|forward)\b[^.\n]{0,60}\b(?:to|at)\s+https?:\/\//i,
-  /\b(?:system\s+prompt|new\s+instructions|you\s+are\s+now|from\s+now\s+on)\b/i,
+  // "system prompt", "new instructions" and "from now on" only as orders to
+  // an agent, not in "TODO: from now on generate this" or "the system prompt
+  // lives below".
+  /\b(?:reveal|print|show|output|leak|repeat|dump|disclose|ignore|disregard|forget|override|replace)\s+(?:(?:the|your|my|its|this|that|entire|full|original|hidden|whole)\s+){0,3}system\s+prompts?\b|\b(?:new|updated|real|actual|true|override)\s+system\s+prompt\b|\bsystem\s+prompt\s*(?::|=|override\b|is\s+now\b)/i,
+  /\b(?:your|here\s+are\s+(?:your|the)|these\s+are\s+(?:your|the)|the\s+following\s+are\s+(?:your|the))\s+new\s+instructions\b|\bnew\s+instructions\s*:/i,
+  /\byou\s+are\s+now\b/i,
+  /\bfrom\s+now\s+on\s*[,:]?\s+(?:you|your|ignore|disregard|always|never|do\s+not|don'?t|respond|reply|answer|act|behave|pretend|only|treat|obey|follow)\b|\byou(?:'ll|\s+will|\s+must|\s+should|\s+shall|\s+are\s+to)\b[^.\n]{0,40}\bfrom\s+now\s+on\b/i,
   new RegExp(`${SECRET_REF}[^.\\n]{0,60}\\b(?:send|upload|post|read|copy|cat)\\b`, "i"),
   new RegExp(`\\b(?:send|upload|post|read|copy|cat)\\b[^.\\n]{0,60}${SECRET_REF}`, "i"),
 ];
@@ -596,12 +612,28 @@ export function scanHiddenContent(content: string): HiddenScanResult {
     const key = `${kind}:${lineNumber}`;
     const prev = payloadAt.get(key);
     if (!prev) {
-      const payload = { kind, lineNumber, text: safeSlice(text, 0, MAX_PAYLOAD) };
+      const full = safeSlice(text, 0, MAX_BASE64_DECODE);
+      const payload: HiddenPayload = { kind, lineNumber, text: safeSlice(full, 0, MAX_PAYLOAD), fullText: full };
       payloadAt.set(key, payload);
       payloads.push(payload);
-    } else if (prev.text.length < MAX_PAYLOAD) {
-      prev.text = safeSlice(`${prev.text}\n${text}`, 0, MAX_PAYLOAD);
+    } else if ((prev.fullText ?? prev.text).length < MAX_BASE64_DECODE) {
+      prev.fullText = safeSlice(`${prev.fullText ?? prev.text}\n${text}`, 0, MAX_BASE64_DECODE);
+      prev.text = safeSlice(prev.fullText, 0, MAX_PAYLOAD);
     }
+  };
+
+  // Binary bytes decoded as text (an image in a bundle) can form tag,
+  // selector, zero-width or bidi characters by chance. A line holding NUL or
+  // U+FFFD is undecodable data, not text an agent reads as instructions.
+  const junkLines = new Map<number, boolean>();
+  const isJunkLine = (lineNumber: number): boolean => {
+    let junk = junkLines.get(lineNumber);
+    if (junk === undefined) {
+      // eslint-disable-next-line no-control-regex
+      junk = /[\u0000\uFFFD]/.test(lines[lineNumber - 1] ?? "");
+      junkLines.set(lineNumber, junk);
+    }
+    return junk;
   };
 
   // Fast path: ASCII-only content cannot carry invisible Unicode.
@@ -621,6 +653,7 @@ export function scanHiddenContent(content: string): HiddenScanResult {
       }
       if (!run) continue;
       const line = lineOf(content, at, lineStarts);
+      if (isJunkLine(line)) continue;
       const decoded = decodeTags(run);
       add("HC-001", decoded ? `hidden text: "${decoded}"` : `${[...run].length} tag characters`, line, at - lineStarts[line - 1]);
       if (decoded) addPayload("unicode-tags", line, decoded);
@@ -628,6 +661,7 @@ export function scanHiddenContent(content: string): HiddenScanResult {
 
     for (const m of content.matchAll(VS_RUN_RE)) {
       const line = lineOf(content, m.index!, lineStarts);
+      if (isJunkLine(line)) continue;
       const decoded = decodeVariationSelectors(m[0]);
       add("HC-004", decoded ? `hidden text: "${decoded}"` : `${[...m[0]].length} variation selectors`, line, m.index! - lineStarts[line - 1]);
       if (decoded) addPayload("variation-selectors", line, decoded);
@@ -635,6 +669,7 @@ export function scanHiddenContent(content: string): HiddenScanResult {
 
     for (const m of content.matchAll(ZW_RUN_RE)) {
       const line = lineOf(content, m.index!, lineStarts);
+      if (isJunkLine(line)) continue;
       const decoded = decodeZeroWidthBinary(m[0]);
       add("HC-003", decoded ? `hidden text: "${decoded}"` : `${[...m[0]].length} zero-width characters`, line, m.index! - lineStarts[line - 1]);
       if (decoded) addPayload("zero-width", line, decoded);
@@ -645,6 +680,7 @@ export function scanHiddenContent(content: string): HiddenScanResult {
       const line = lineOf(content, m.index!, lineStarts);
       if (bidiLines.has(line)) continue;
       bidiLines.add(line);
+      if (isJunkLine(line)) continue;
       const text = lines[line - 1];
       // Balanced isolates in RTL prose are how mixed-direction text is
       // written; report them as info so they neither score nor hold.
@@ -783,7 +819,8 @@ export function scanHiddenContent(content: string): HiddenScanResult {
 
   // Judge manipulation in decoded invisible or encoded text.
   for (const payload of payloads) {
-    if (JUDGE_FORGERY_RES.some((re) => re.test(payload.text)) || JUDGE_PROSE_RES.some((re) => re.test(payload.text))) {
+    const full = payload.fullText ?? payload.text;
+    if (JUDGE_FORGERY_RES.some((re) => re.test(full)) || JUDGE_PROSE_RES.some((re) => re.test(full))) {
       add("HC-009", `[hidden ${payload.kind}] ${revealClip(payload.text.trim())}`, payload.lineNumber);
     }
   }
@@ -797,6 +834,9 @@ export function scanHiddenContent(content: string): HiddenScanResult {
   for (const [id, tally] of perRule) {
     if (tally.unlisted > 0 && tally.last) tally.last.match = `${tally.last.match} (+${tally.unlisted} more ${id} findings not listed)`;
   }
-  for (const payload of payloads) payload.text = flat(payload.text);
+  for (const payload of payloads) {
+    payload.text = flat(payload.text);
+    if (payload.fullText !== undefined) payload.fullText = flat(payload.fullText);
+  }
   return { findings, payloads };
 }

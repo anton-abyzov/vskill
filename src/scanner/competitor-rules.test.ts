@@ -127,10 +127,12 @@ describe("CLI documentation-context handling of the new rules", () => {
     expect(active(fenced("unzip -P s3cret tool.zip"))).toContain("NA-005");
   });
 
-  it("treats CI-009, CI-010 and CE-004 like CI-001..CI-007 and CE-001..CE-003 (not downgraded in fences)", () => {
-    expect(active(fenced("os.popen(cmd)"))).toContain("CI-009");
+  it("downgrades CI-009 and CE-004 in fences, and CI-010 unless it runs computed code", () => {
+    expect(active(fenced("os.popen(cmd)"))).not.toContain("CI-009");
+    expect(active(fenced("data = pickle.loads(blob)"))).not.toContain("CE-004");
     expect(active(fenced("iex($payload)"))).toContain("CI-010");
-    expect(active(fenced("data = pickle.loads(blob)"))).toContain("CE-004");
+    expect(active("os.popen(cmd)")).toContain("CI-009");
+    expect(active("data = pickle.loads(blob)")).toContain("CE-004");
   });
 });
 
@@ -191,7 +193,7 @@ describe("CLI: PowerShell installer one-liners (CI-011) are handled like curl | 
   it("keeps encoded commands, base64 decoding and iex of variables at full severity in fences", () => {
     for (const line of [
       "powershell -EncodedCommand SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoA",
-      "$b = [Convert]::FromBase64String($s)",
+      "iex ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($s)))",
       "Invoke-Expression $cmd",
       "iex($payload)",
       "irm $url | iex",

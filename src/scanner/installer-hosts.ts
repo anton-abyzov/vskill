@@ -33,11 +33,21 @@ export const OFFICIAL_INSTALLER_URL_SOURCE =
   `(?:${OFFICIAL_INSTALLER_HOSTS.map(escapeRe).join("|")})[\\/\\s)'"\`]` +
   `|raw\\.githubusercontent\\.com\\/(?:${OFFICIAL_INSTALLER_GITHUB_OWNERS.map(escapeRe).join("|")})\\/`;
 
+/**
+ * Regex source, for use inside a lookahead at the start of a URL after the
+ * scheme: true when the URL has a `.` or `..` path segment or a
+ * percent-encoded dot, slash or backslash. `nvm-sh/../attacker` would
+ * otherwise borrow an allowlisted owner.
+ */
+export const URL_DOT_SEGMENT_SOURCE = String.raw`[^\s)'"\x60]{0,700}?(?:\/\.{1,2}(?=[\/\\?#\s)'"\x60]|$)|%2[ef]|%5c)`;
+const DOT_SEGMENT_RE = /\/\.{1,2}(?:[\/\\?#]|$)|%2[ef]|%5c/i;
+
 const HOSTS = new Set(OFFICIAL_INSTALLER_HOSTS.map((h) => h.toLowerCase()));
 const OWNERS = new Set(OFFICIAL_INSTALLER_GITHUB_OWNERS.map((o) => o.toLowerCase()));
 
 /** True for an http(s) or scheme-less URL on an official installer endpoint. */
 export function isOfficialInstallerUrl(url: string): boolean {
+  if (DOT_SEGMENT_RE.test(url)) return false;
   const m = /^(?:https?:\/\/)?([^/\s?#]+)(\/[^\s]*)?$/i.exec(url);
   if (!m) return false;
   const host = m[1].toLowerCase();

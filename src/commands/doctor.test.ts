@@ -243,6 +243,13 @@ describe("vskill doctor — SKILL.md content checks", () => {
     expect(report.fixes).toEqual([]);
   });
 
+  it("does not flag a skill that only mentions the heading in prose", () => {
+    writeSkill(g(".agents/skills/migrate-to-codex"), {
+      body: "4. Fix every generated `## MANUAL MIGRATION REQUIRED` block.\n",
+    });
+    expect(ofKind(runDoctor({ home, cwd }).issues, "migration-damage")).toEqual([]);
+  });
+
   it("reports a name/folder mismatch and two folders declaring one name", () => {
     writeSkill(g(".agents/skills/social-media-posting"));
     writeSkill(g(".agents/skills/social-media-posting-skill"), { name: "social-media-posting" });

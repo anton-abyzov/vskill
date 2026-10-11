@@ -358,7 +358,13 @@ function readSkillMd(dir: string): string | null {
 }
 
 const NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-const MIGRATION_MARKERS = ["## MANUAL MIGRATION REQUIRED", ".Codex/"];
+// Residue migrate-to-codex leaves: the appended heading on its own line, and
+// `.claude/` rewritten to `.Codex/`. A skill that merely mentions the heading
+// in prose (migrate-to-codex itself does) is not damaged.
+const MIGRATION_MARKERS: Array<[string, RegExp]> = [
+  ["## MANUAL MIGRATION REQUIRED", /^## MANUAL MIGRATION REQUIRED\s*$/m],
+  [".Codex/", /(^|[\s`"'(~])\.Codex\//m],
+];
 
 // ---------------------------------------------------------------------------
 // Scan
@@ -465,7 +471,7 @@ function scanScope(scope: DoctorScope, home: string, cwd: string, platform: Node
     if (md === null) continue;
     const folder = e.isLink ? e.name : basename(e.real);
     const shown = e.isLink ? e.path : e.real;
-    const markers = MIGRATION_MARKERS.filter((m) => md.includes(m));
+    const markers = MIGRATION_MARKERS.filter(([, re]) => re.test(md)).map(([label]) => label);
     if (markers.length > 0) {
       issues.push(issue("migration-damage", scope, folder, [join(shown, "SKILL.md")],
         `SKILL.md contains ${markers.map((m) => JSON.stringify(m)).join(" and ")} (migrate-to-codex residue)`, false));

@@ -237,6 +237,18 @@ describe("fetchGitHubSkillBundle — complete skill folder", () => {
     })).rejects.toThrow(/with its Git LFS objects, over the 1000-byte install limit/);
   });
 
+  it("a degraded install caps Git LFS objects at the degraded 512 KB limit too", async () => {
+    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${"b".repeat(64)}\nsize ${600 * 1024}\n`;
+    const { fetchImpl } = mockFetch({
+      trees: { "skills/recut": treeFor({ "assets/big.mp3": pointer, "NOTICE.md": "n" }) },
+      blobs: { "skills/recut/assets/big.mp3": pointer, "skills/recut/NOTICE.md": "n" },
+    });
+    await expect(fetchGitHubSkillBundle({
+      owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl,
+      limits: { maxFiles: 2 }, // forces the degraded path
+    })).rejects.toThrow(new RegExp(`Git LFS object of ${600 * 1024} bytes is over the ${512 * 1024}-byte limit`));
+  });
+
   it("fails loudly when a Git LFS object is missing or does not match its pointer", async () => {
     const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${"a".repeat(64)}\nsize 4\n`;
     const base = {

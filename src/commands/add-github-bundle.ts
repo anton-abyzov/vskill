@@ -6,9 +6,10 @@
 // stray NUL or 0xFF byte cannot hide `curl … | bash` from the scan.
 //
 // Blocking (unless --force):
-//   - a CRITICAL finding in a text file;
-//   - a CRITICAL finding in an undecodable file that looks like a script
-//     (git mode 100755, a `#!` shebang, or a script extension);
+//   - a CRITICAL finding in any file, text or lossily decoded bytes — one
+//     stray 0xFF must not turn agents/x.md or a Makefile into a "binary";
+//   - an undecodable script-like file (mode 100755, `#!`, script extension)
+//     that cannot be decoded for scanning at all;
 //   - a native executable (ELF, Mach-O, PE, .node/.so/.dylib/.dll/.exe),
 //     which no static scan can vouch for.
 // Lower severities are reported, not blocking: skill tooling scripts
@@ -89,8 +90,8 @@ export function scanSkillBundle(
       continue;
     }
     const crit = criticalOf(text);
-    if (crit.length > 0 && scriptLike) report.critical.push({ path, findings: crit });
-    else if (crit.length > 0 || (scriptLike && hasFindings(text))) report.flagged.push(path);
+    if (crit.length > 0) report.critical.push({ path, findings: crit });
+    else if (scriptLike && hasFindings(text)) report.flagged.push(path);
   }
   return report;
 }

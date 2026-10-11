@@ -39,6 +39,7 @@ import { buildClipboardBlob } from "./clipboard-export.js";
 import { safeAppendYamlList } from "./yaml-safe-mutate.js";
 import type { ParsedSkill, TransformedFile } from "./transformers/index.js";
 import {
+  assertSafeBundlePath,
   sanitizeSkillBundleFiles,
   sanitizeInstallBundleFiles,
   textOnlyStandardBundle,
@@ -268,9 +269,11 @@ export function installSkillToAgents(opts: InstallToAgentsOptions): string[] {
   const bundleFiles = opts.bundleFiles
     ? sanitizeInstallBundleFiles(opts.bundleFiles)
     : undefined;
+  // This entry point installs GitHub skill folders: any safe path is allowed.
   const bundleOpts = {
-    executables: new Set(opts.bundleExecutables ?? []),
+    executables: opts.bundleExecutables ? new Set(opts.bundleExecutables) : undefined,
     previousFiles: opts.previousFiles,
+    anyPath: true,
   };
 
   // Tier-1 = filesystem drop-in agents with no per-tool transformer. They keep
@@ -339,8 +342,20 @@ function dispatchTier1(
     projectRoot,
   };
   const content = rawContent ?? reconstructSkillMd(skill);
-  const bundleFiles = sanitizeSkillBundleFiles(skill.files);
-  const writtenPaths = installSymlink(skill.name, content, [agent], installOpts, bundleFiles);
+  const bundleFiles: Record<string, BundleContent> = sanitizeSkillBundleFiles(skill.files);
+  // 0894: binaries (bytes) and exec bits read from a local skill folder by
+  // the server (never from a request body), on the standard paths.
+  for (const [rel, bytes] of Object.entries(skill.binaryFiles ?? {})) {
+    if (bytes instanceof Uint8Array) bundleFiles[assertSafeBundlePath(rel)] = bytes;
+  }
+  const writtenPaths = installSymlink(
+    skill.name,
+    content,
+    [agent],
+    installOpts,
+    bundleFiles,
+    skill.executables ? { executables: new Set(skill.executables) } : undefined,
+  );
   return {
     agentId: agent.id,
     status: "installed",

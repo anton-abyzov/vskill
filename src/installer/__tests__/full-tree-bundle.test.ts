@@ -6,7 +6,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, readFileSync, statSync, lstatSync, existsSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
-import { installSkillToAgents } from "../multi-install.js";
+import { installSkillToAgents, installSkillForAgent, parseSkillForInstall } from "../multi-install.js";
+import { installSymlink } from "../canonical.js";
+import { collectSkillBundle, collectSkillBundleFiles } from "../bundle-files.js";
+import { chmodSync } from "node:fs";
 import { getAgent, type AgentDefinition } from "../../agents/agents-registry.js";
 import { assertSafeBundlePath } from "../bundle-files.js";
 
@@ -175,9 +178,62 @@ describe("installSkillToAgents — complete skill tree (0894)", () => {
     it.skipIf(process.platform === "win32")("resets a stale 0755 when the new version is not executable", () => {
       install({ "scripts/run.sh": "a" }, { exec: ["scripts/run.sh"] });
       expect(statSync(join(canonical(), "scripts", "run.sh")).mode & 0o777).toBe(0o755);
-      install({ "scripts/run.sh": "b" }, { prev: ["SKILL.md", "scripts/run.sh"] });
+      // The GitHub path always knows the modes (an empty list = none executable).
+      install({ "scripts/run.sh": "b" }, { exec: [], prev: ["SKILL.md", "scripts/run.sh"] });
       expect(statSync(join(canonical(), "scripts", "run.sh")).mode & 0o777).toBe(0o644);
     });
+  });
+
+  // 0894 re-review: Studio installs a local skill folder in-process
+  // (collectSkillBundle -> dispatchTier1). Exec bits and binary bytes must
+  // survive; a string round-trip turned ff 00 80 41 into ef bf bd 00 ef bf bd 41.
+  it.skipIf(process.platform === "win32")("Studio Tier-1 install keeps exec bits and binary bytes", async () => {
+    const src = join(root, "src-skill");
+    mkdirSync(join(src, "scripts"), { recursive: true });
+    mkdirSync(join(src, "assets"), { recursive: true });
+    writeFileSync(join(src, "SKILL.md"), SKILL_MD);
+    writeFileSync(join(src, "scripts", "run.sh"), "#!/bin/sh\necho hi\n");
+    chmodSync(join(src, "scripts", "run.sh"), 0o755);
+    writeFileSync(join(src, "assets", "blob.bin"), Buffer.from([0xff, 0x00, 0x80, 0x41]));
+
+    const local = await collectSkillBundle(src);
+    expect(local.executables).toEqual(["scripts/run.sh"]);
+    expect(Array.from(local.binaryFiles["assets/blob.bin"])).toEqual([0xff, 0x00, 0x80, 0x41]);
+    // The text-only helper skips the binary instead of corrupting it.
+    expect(Object.keys(await collectSkillBundleFiles(src))).toEqual(["scripts/run.sh"]);
+
+    const skill = { ...parseSkillForInstall(SKILL_MD, "recut", local.files), binaryFiles: local.binaryFiles, executables: local.executables };
+    const project = join(root, "proj");
+    mkdirSync(project);
+    const res = installSkillForAgent(agents("codex")[0], skill, "project", project, SKILL_MD);
+    expect(res.status).toBe("installed");
+    const dest = join(project, ".agents", "skills", "recut");
+    expect(Array.from(readFileSync(join(dest, "assets", "blob.bin")))).toEqual([0xff, 0x00, 0x80, 0x41]);
+    expect(statSync(join(dest, "scripts", "run.sh")).mode & 0o111).not.toBe(0);
+  });
+
+  it.skipIf(process.platform === "win32")("without exec info, a rewrite leaves an existing file's mode alone", () => {
+    installSymlink("recut", SKILL_MD, agents("codex"), { global: false, projectRoot: root }, { "scripts/run.sh": "a" });
+    const p = join(root, ".agents", "skills", "recut", "scripts", "run.sh");
+    chmodSync(p, 0o755);
+    installSymlink("recut", SKILL_MD, agents("codex"), { global: false, projectRoot: root }, { "scripts/run.sh": "b" });
+    expect(statSync(p).mode & 0o777).toBe(0o755);
+    expect(readFileSync(p, "utf8")).toBe("b");
+  });
+
+  // 0894 re-review: only the GitHub bundle path may write arbitrary paths;
+  // `vskill update` on a plugin source passes repo paths like
+  // plugins/<p>/skills/<x>/SKILL.md and must not nest them in the skill.
+  it("keeps the standard-folder policy for every caller except the GitHub bundle install", () => {
+    const opts = { global: false, projectRoot: root };
+    expect(() =>
+      installSymlink("recut", SKILL_MD, agents("codex"), opts, { "plugins/p/skills/x/SKILL.md": "# x" }),
+    ).toThrow(/Unsupported bundled skill file path/);
+    expect(existsSync(join(root, ".agents", "skills", "recut", "plugins"))).toBe(false);
+    expect(() =>
+      installSymlink("recut", SKILL_MD, agents("codex"), opts, { "sub-agents/a.md": "# a" }, { anyPath: true }),
+    ).not.toThrow();
+    expect(existsSync(join(root, ".agents", "skills", "recut", "sub-agents", "a.md"))).toBe(true);
   });
 
   it("Studio's strict policy is unchanged: non-standard paths still need anyPath", () => {

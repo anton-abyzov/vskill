@@ -181,8 +181,18 @@ function unlinkIfSymlink(p: string): void {
 
 /** 0894: how a skill bundle is written over a previous install. */
 export interface BundleWriteOptions {
-  /** Paths written with mode 0755 (git mode 100755 upstream); all others get 0644. */
+  /**
+   * Paths written with mode 0755 (git mode 100755 upstream). When given,
+   * every other bundled file is set to 0644; when absent, modes are left as
+   * the filesystem makes them (an existing file keeps its mode).
+   */
   executables?: ReadonlySet<string>;
+  /**
+   * Accept any relative path inside the skill folder. Only for a complete
+   * skill tree fetched from the skill's own GitHub folder; every other caller
+   * (Studio, `vskill update`) keeps the standard-folder policy.
+   */
+  anyPath?: boolean;
   /**
    * Files the previous install of this skill recorded (lockfile `files`).
    * Those the new bundle no longer has are removed, so a reinstall leaves no
@@ -263,13 +273,16 @@ function writeAgentFiles(
       }
     }
   }
+  const anyPath = bundleOpts?.anyPath === true;
+  const executables = bundleOpts?.executables;
   for (const [relPath, fileContent] of Object.entries(files)) {
-    const fullPath = resolveBundleTarget(targetDir, relPath, { anyPath: true });
+    const fullPath = resolveBundleTarget(targetDir, relPath, { anyPath });
     clearPathForFile(targetDir, fullPath);
     mkdirSync(dirname(fullPath), { recursive: true });
     writeFileSync(fullPath, fileContent);
-    // Explicit: writeFileSync keeps the old mode of an existing file.
-    chmodSync(fullPath, bundleOpts?.executables?.has(relPath) ? 0o755 : 0o644);
+    // Explicit when the caller knows the modes: writeFileSync keeps the old
+    // mode of an existing file, so a dropped exec bit would otherwise stick.
+    if (executables) chmodSync(fullPath, executables.has(relPath) ? 0o755 : 0o644);
   }
 }
 

@@ -143,8 +143,27 @@ export function textOnlyStandardBundle(
   return out;
 }
 
-export async function collectSkillBundleFiles(skillDir: string): Promise<Record<string, string>> {
-  const files: Record<string, string> = {};
+/** 0894: a local skill folder read for a Studio install. */
+export interface LocalSkillBundle {
+  /** UTF-8 text files. */
+  files: Record<string, string>;
+  /** Everything that is not valid UTF-8, as raw bytes (never round-tripped through a string). */
+  binaryFiles: Record<string, Uint8Array>;
+  /** Paths with an exec bit in the source folder. */
+  executables: string[];
+}
+
+function decodeUtf8(bytes: Uint8Array): string | null {
+  if (bytes.includes(0)) return null;
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+export async function collectSkillBundle(skillDir: string): Promise<LocalSkillBundle> {
+  const out: LocalSkillBundle = { files: {}, binaryFiles: {}, executables: [] };
 
   async function walk(dir: string, relBase = ""): Promise<void> {
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -169,10 +188,23 @@ export async function collectSkillBundleFiles(skillDir: string): Promise<Record<
       } catch {
         continue;
       }
-      files[safePath] = await fs.readFile(absPath, "utf-8");
+      const [bytes, st] = await Promise.all([fs.readFile(absPath), fs.stat(absPath)]);
+      const text = decodeUtf8(bytes);
+      if (text === null) out.binaryFiles[safePath] = new Uint8Array(bytes);
+      else out.files[safePath] = text;
+      if (st.mode & 0o111) out.executables.push(safePath);
     }
   }
 
   await walk(skillDir);
-  return files;
+  out.executables.sort();
+  return out;
+}
+
+/**
+ * Text files of a local skill folder. 0894: files that are not valid UTF-8
+ * are left out rather than corrupted (use collectSkillBundle for bytes).
+ */
+export async function collectSkillBundleFiles(skillDir: string): Promise<Record<string, string>> {
+  return (await collectSkillBundle(skillDir)).files;
 }

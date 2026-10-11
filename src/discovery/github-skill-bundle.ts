@@ -364,8 +364,10 @@ export async function fetchGitHubSkillBundle(args: FetchSkillBundleArgs): Promis
     // Git LFS: the blob is a ~130-byte pointer; the real object lives on the media host.
     const pointer = parseLfsPointer(bytes);
     if (pointer) {
-      if (pointer.size > limits.maxFileBytes) {
-        failures.push(`${b.path} (Git LFS object of ${pointer.size} bytes is over the ${limits.maxFileBytes}-byte limit)`);
+      // A degraded install keeps the pre-0894 512 KB cap for LFS objects too.
+      const maxFile = degraded ? Math.min(DEGRADED_MAX_FILE_BYTES, limits.maxFileBytes) : limits.maxFileBytes;
+      if (pointer.size > maxFile) {
+        failures.push(`${b.path} (Git LFS object of ${pointer.size} bytes is over the ${maxFile}-byte limit)`);
         return;
       }
       const lfs = await download(`https://media.githubusercontent.com/media/${owner}/${repo}/${refPath}/${repoPath}`);

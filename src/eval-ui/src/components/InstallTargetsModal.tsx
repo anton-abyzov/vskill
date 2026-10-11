@@ -435,8 +435,17 @@ export function InstallTargetsModal({
       }
       // Trigger install-state re-fetch so the row badge updates.
       setInstallStateNonce((n) => n + 1);
+      const shared = resp.skipped.find((s) => s.sharedWith && s.sharedWith.length > 0);
       if (resp.errors.length > 0) {
         setInstallError(`Remove failed for ${resp.errors[0].agentId}: ${resp.errors[0].message}`);
+      } else if (shared) {
+        // 0894: the skill lives in the shared .agents/skills folder, which
+        // other agents still load; removing it for one would remove it for all.
+        setInstallError(
+          `Not removed: ${shared.agentId} loads this skill from the shared .agents/skills folder, ` +
+            `which ${shared.sharedWith!.join(", ")} also use${shared.sharedWith!.length === 1 ? "s" : ""}. ` +
+            "Run `vskill remove` to remove it for every agent.",
+        );
       }
     } catch (err) {
       setInstallError(err instanceof Error ? err.message : String(err));

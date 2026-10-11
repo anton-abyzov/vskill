@@ -12,6 +12,7 @@ import {
   chmodSync,
   readdirSync,
   rmSync,
+  lstatSync,
 } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import os from "node:os";
@@ -20,6 +21,7 @@ import { reportInstall, reportInstallBatch, submitSkill } from "../api/client.js
 import { filterAgents } from "../utils/agent-filter.js";
 import { detectInstalledAgents, AGENTS_REGISTRY } from "../agents/agents-registry.js";
 import type { AgentDefinition } from "../agents/agents-registry.js";
+import { agentGlobalInstallDirs, resolveAgentGlobalSkillsDir } from "../agents/global-dirs.js";
 import { ensureLockfile, writeLockfile, readLockfile, removeSkillFromLock } from "../lockfile/index.js";
 import { buildGitHubInstallLockEntry } from "./add-lockfile.js";
 import { runTier1Scan } from "../scanner/index.js";
@@ -420,6 +422,18 @@ async function installMarketplaceRepo(
     ? [...installedSet].filter((name) => !selectedNames.has(name))
     : [];
 
+  // 0894: --dry-run stops here, before the deselected-plugin uninstall, the
+  // registry submissions and every file or lockfile write below.
+  if (opts.dryRun) {
+    const dry = await promptInstallOptions(await detectInstalledAgents(), opts);
+    if (dry.global) opts.global = true;
+    printDryRunPlan([...selectedNames], dry.agents, opts, toUninstall);
+    for (const p of selectedPlugins) {
+      enableAfterInstall(p.name, { marketplace: marketplaceName || undefined }, opts);
+    }
+    return;
+  }
+
   if (toUninstall.length > 0) {
     console.log(dim(`\nUninstalling ${toUninstall.length} deselected plugin${toUninstall.length === 1 ? "" : "s"}...\n`));
     const agents = await detectInstalledAgents();
@@ -430,14 +444,18 @@ async function installMarketplaceRepo(
       const dirs = new Set<string>();
       for (const agent of agents) {
         dirs.add(join(process.cwd(), agent.localSkillsDir, skillName));
-        dirs.add(resolveTilde(join(agent.globalSkillsDir, skillName)));
+        // 0894: every global dir vskill may have installed into
+        // (Antigravity's legacy ~/.gemini/antigravity/skills included).
+        for (const globalDir of agentGlobalInstallDirs(agent, resolveTilde)) {
+          dirs.add(join(globalDir, skillName));
+        }
       }
       // 0894: shared readers are installed through the canonical
       // .agents/skills folder alone, so the canonical copy for the scope this
       // lockfile tracks goes too (symmetric with install).
       dirs.add(join(lockDir, lockDir === join(os.homedir(), ".agents") ? "" : ".agents", "skills", skillName));
       for (const dir of dirs) {
-        if (existsSync(dir)) {
+        if (pathPresent(dir)) {
           try {
             rmSync(dir, { recursive: true, force: true });
             removedCount++;
@@ -608,8 +626,7 @@ async function installMarketplaceRepo(
           // not mutate already-valid frontmatter (no-touch principle).
           const isRenaming = sd.name !== plugin.name;
           const processedContent = ensureFrontmatter(content, namespacedName, isRenaming);
-          for (const agent of agents) {
-            const baseDir = resolveInstallBase(opts, agent);
+          for (const baseDir of uniqueInstallBases(opts, agents)) {
             const skillDir = join(baseDir, sd.name);
             mkdirSync(skillDir, { recursive: true });
             writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
@@ -624,8 +641,7 @@ async function installMarketplaceRepo(
         if (contentRes.ok) {
           const content = await contentRes.text();
           const processedContent = ensureFrontmatter(content, plugin.name);
-          for (const agent of agents) {
-            const baseDir = resolveInstallBase(opts, agent);
+          for (const baseDir of uniqueInstallBases(opts, agents)) {
             const skillDir = join(baseDir, plugin.name);
             mkdirSync(skillDir, { recursive: true });
             writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
@@ -703,10 +719,10 @@ async function installMarketplaceRepo(
   // unenabled. The user saw the skill on disk but Claude Code didn't load
   // it. Treat --global as opt-in to the enable hook (scope = user, since
   // --global is per-machine, not per-repo).
+  // (--dry-run, also an opt-in, returned earlier with its own preview.)
   const userOptedIn =
     opts.scope !== undefined ||
     opts.global === true ||
-    opts.dryRun === true ||
     opts.enable === false;
   if (userOptedIn) {
     const enabledSoFar: Array<{ name: string; pluginId: string; scope: "user" | "project" }> = [];
@@ -1035,21 +1051,60 @@ function resolveSkillsPath(base: string, localSkillsDir: string): string {
   return join(base, localSkillsDir);
 }
 
+type InstallBaseAgent = Pick<AgentDefinition, "globalSkillsDir" | "localSkillsDir"> &
+  Partial<Pick<AgentDefinition, "id" | "readsSharedSkills">>;
+
 /**
  * Resolve the base directory for local skill installation.
  *
  * Priority:
- * 1. `--global` -> agent's globalSkillsDir
- * 2. default   -> process.cwd() + agent's localSkillsDir
+ * 1. 0894: an agent that reads the shared `.agents/skills` in this scope ->
+ *    that shared folder (same rule as the canonical installer)
+ * 2. `--global` -> agent's global skills dir (Antigravity: legacy-aware)
+ * 3. default   -> process.cwd() + agent's localSkillsDir
  */
-function resolveInstallBase(
-  opts: AddOptions,
-  agent: { globalSkillsDir: string; localSkillsDir: string },
-): string {
-  if (opts.global) {
-    return resolveTilde(agent.globalSkillsDir);
+function resolveInstallBase(opts: AddOptions, agent: InstallBaseAgent): string {
+  const global = !!opts.global;
+  if (agent.readsSharedSkills?.[global ? "global" : "project"] === true) {
+    return global ? resolveTilde("~/.agents/skills") : join(safeProjectRoot(), ".agents", "skills");
+  }
+  if (global) {
+    return resolveAgentGlobalSkillsDir({ id: agent.id ?? "", globalSkillsDir: agent.globalSkillsDir }, resolveTilde);
   }
   return resolveSkillsPath(safeProjectRoot(), agent.localSkillsDir);
+}
+
+/** 0894: each distinct install base once — shared readers (Cursor, Codex,
+ *  ...) all resolve to `.agents/skills`, which must get one copy, not one
+ *  per agent. Keeps the first agent seen for each base, in order. */
+function uniqueInstallBases(opts: AddOptions, agents: InstallBaseAgent[]): string[] {
+  return [...new Set(agents.map((a) => resolveInstallBase(opts, a)))];
+}
+
+/** 0894: true for anything at `p`, including a link whose target is gone. */
+function pathPresent(p: string): boolean {
+  if (existsSync(p)) return true;
+  try {
+    return lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/** 0894: the --dry-run report every install path prints instead of writing. */
+function printDryRunPlan(
+  names: string[],
+  agents: Array<{ id: string }>,
+  opts: AddOptions,
+  uninstall: string[] = [],
+): void {
+  if (uninstall.length > 0) {
+    console.log(`\nDry run: would uninstall ${uninstall.map((n) => bold(n)).join(", ")}.`);
+  }
+  console.log(
+    `\nDry run: would install ${names.map((n) => bold(n)).join(", ")} ` +
+      `(${opts.global ? "global" : "project"}) for ${agents.map((a) => a.id).join(", ")}. Nothing was written.`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1170,13 +1225,8 @@ async function promptInstallOptions(
   console.log(dim(`  Scope: ${bold(scopeLabel)}  |  Method: ${bold(methodLabel)}`));
   console.log(dim(`  Agents (${selectedAgents.length}):`));
   for (const agent of selectedAgents) {
-    // 0894: shared readers load the canonical .agents/skills folder.
-    const readsShared = agent.readsSharedSkills?.[useGlobal ? "global" : "project"] === true;
-    const base = readsShared
-      ? (useGlobal ? join(os.homedir(), ".agents", "skills") : join(safeProjectRoot(), ".agents", "skills"))
-      : useGlobal
-        ? resolveTilde(agent.globalSkillsDir)
-        : resolveSkillsPath(safeProjectRoot(), agent.localSkillsDir);
+    // 0894: same resolver the installs use, so the preview cannot drift.
+    const base = resolveInstallBase({ ...opts, global: useGlobal }, agent);
     console.log(dim(`    ${agent.displayName}: ${base}/`));
   }
   console.log(dim("  ─────────────────────────────────────────────────"));
@@ -1478,15 +1528,25 @@ async function installPluginDir(
     ? getPluginVersion(pluginName, readFileSync(mktPath, "utf-8")) || "0.0.0"
     : "0.0.0";
 
+  if (opts.dryRun) {
+    printDryRunPlan([pluginName], selectedAgents, opts);
+    return;
+  }
+
   // Install: recursively copy plugin directory to each agent
   const sha = computeSha(content);
   const locations: string[] = [];
+  const doneBases = new Set<string>();
 
   for (const agent of selectedAgents) {
-    const cacheDir = join(
-      resolveInstallBase(opts, agent),
-      pluginName,
-    );
+    const base = resolveInstallBase(opts, agent);
+    const cacheDir = join(base, pluginName);
+    // 0894: shared readers share one copy in .agents/skills.
+    if (doneBases.has(base)) {
+      locations.push(`${agent.displayName}: ${cacheDir}`);
+      continue;
+    }
+    doneBases.add(base);
 
     try {
       // Full clean before copy: removes stale files from older installs
@@ -2015,9 +2075,29 @@ async function installRepoPlugin(
   ).sort();
   const locations: string[] = [];
 
+  if (opts.dryRun) {
+    printDryRunPlan([pluginName], selectedAgents, opts);
+    const enableResult = enableAfterInstall(pluginName, {}, opts);
+    const report = buildPerAgentReport({
+      skill: pluginName,
+      scope: enableResult.scope,
+      action: "not-applicable",
+      agents: selectedAgents,
+    });
+    for (const line of report) console.log(`  ${dim(">")} ${line.line}`);
+    return;
+  }
+
+  const doneBases = new Set<string>();
   for (const agent of selectedAgents) {
     const baseDir = resolveInstallBase(opts, agent);
     const plugDir = basename(baseDir) === pluginName ? baseDir : join(baseDir, pluginName);
+    // 0894: shared readers share one copy in .agents/skills.
+    if (doneBases.has(baseDir)) {
+      locations.push(`${agent.displayName}: ${plugDir}`);
+      continue;
+    }
+    doneBases.add(baseDir);
 
     try {
       // Skills: {agent-dir}/{plugin-name}/{skill-name}/SKILL.md
@@ -2072,10 +2152,10 @@ async function installRepoPlugin(
   // hence no rollback wiring here) — the gate only surfaces the same
   // acknowledgement + per-agent report as the marketplace path. The identical
   // opt-in condition keeps the default flow unchanged (NFR-005).
+  // (--dry-run, also an opt-in, returned earlier with its own preview.)
   const userOptedIn =
     opts.scope !== undefined ||
     opts.global === true ||
-    opts.dryRun === true ||
     opts.enable === false;
   if (userOptedIn) {
     const enableResult = enableAfterInstall(pluginName, lock.skills[pluginName], opts);
@@ -2408,10 +2488,7 @@ async function addCommandInner(
   }
 
   if (opts.dryRun) {
-    console.log(
-      `\nDry run: would install ${selectedSkills.map((s) => bold(s.name)).join(", ")} ` +
-        `(${opts.global ? "global" : "project"}) for ${selectedAgents.map((a: { id: string }) => a.id).join(", ")}. Nothing was written.`,
-    );
+    printDryRunPlan(selectedSkills.map((s) => s.name), selectedAgents, opts);
     return;
   }
 
@@ -2879,10 +2956,22 @@ async function installFromRegistry(
   const sha = computeSha(content);
   const locations: string[] = [];
 
+  if (opts.dryRun) {
+    printDryRunPlan([skillName], selectedAgents, opts);
+    return;
+  }
+
   const processedContent = ensureFrontmatter(content, skillName);
+  const doneBases = new Set<string>();
   for (const agent of selectedAgents) {
     const baseDir = resolveInstallBase(opts, agent);
     const skillDir = join(baseDir, skillName);
+    // 0894: shared readers share one copy in .agents/skills.
+    if (doneBases.has(baseDir)) {
+      locations.push(`${agent.displayName}: ${skillDir}`);
+      continue;
+    }
+    doneBases.add(baseDir);
     try {
       mkdirSync(skillDir, { recursive: true });
       writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
@@ -3165,10 +3254,7 @@ async function installSingleSkillLegacy(
   if (!selections.symlink) opts.copy = true;
 
   if (opts.dryRun) {
-    console.log(
-      `\nDry run: would install ${bold(skillName)} (${opts.global ? "global" : "project"}) for ` +
-        `${selectedAgents.map((a: { id: string }) => a.id).join(", ")}. Nothing was written.`,
-    );
+    printDryRunPlan([skillName], selectedAgents, opts);
     return;
   }
 

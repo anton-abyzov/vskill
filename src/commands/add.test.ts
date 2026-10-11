@@ -358,6 +358,30 @@ describe("addCommand with --plugin option (plugin directory support)", () => {
       // The written content should contain frontmatter (name field injected by ensureFrontmatter)
       expect(writeCall![1]).toContain("name:");
     });
+
+    it("0894: --dry-run copies nothing and writes no lockfile", async () => {
+      const localPath = "/tmp/test-repo";
+      mockExistsSync.mockImplementation((p: string) =>
+        p.includes("plugins/frontend") || p.includes(".claude-plugin/marketplace.json"));
+      mockReadFileSync.mockImplementation((p: string) =>
+        p.includes("marketplace.json")
+          ? JSON.stringify({ name: "specweave", plugins: [{ name: "frontend", source: "./plugins/frontend", version: "1.0.0" }] })
+          : "");
+      mockReaddirSync.mockImplementation((_dir: string, opts?: unknown) =>
+        typeof opts === "object" && opts !== null && (opts as Record<string, unknown>).recursive
+          ? ["skills/SKILL.md"]
+          : ["SKILL.md"]);
+      mockStatSync.mockReturnValue({ isDirectory: () => false, isFile: () => true });
+      mockRunTier1Scan.mockReturnValue(makeScanResult());
+      mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+
+      await addCommand(localPath, { plugin: "frontend", pluginDir: localPath, dryRun: true });
+
+      expect(mockWriteFileSync).not.toHaveBeenCalled();
+      expect(mockCopyFileSync).not.toHaveBeenCalled();
+      expect(mockRmSync).not.toHaveBeenCalled();
+      expect(mockWriteLockfile).not.toHaveBeenCalled();      expect((console.log as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n")).toContain("Nothing was written");
+    });
   });
 
   // resolvePluginDir falls back to plugins/ folder when not in marketplace.json
@@ -1695,6 +1719,39 @@ describe("addCommand registry install (no slash in source)", () => {
     );
   });
 
+  it("0894: --dry-run writes no skill file and no lockfile", async () => {
+    mockGetSkill.mockResolvedValue({
+      name: "my-skill", author: "alice", tier: "VERIFIED", score: 90, version: "1.0.0", sha: "",
+      description: "A skill", content: "# My Skill", installs: 5, updatedAt: "2026-01-01T00:00:00Z",
+    });
+
+    await addCommand("my-skill", { dryRun: true });
+
+    expect(mockMkdirSync).not.toHaveBeenCalled();
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+    expect(mockWriteLockfile).not.toHaveBeenCalled();
+    expect((console.log as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n")).toContain("Nothing was written");
+  });
+
+  it("0894: shared readers (Cursor + Codex) get one copy in .agents/skills, none in .cursor/skills", async () => {
+    mockGetSkill.mockResolvedValue({
+      name: "my-skill", author: "alice", tier: "VERIFIED", score: 90, version: "1.0.0", sha: "",
+      description: "A skill", content: "# My Skill", installs: 5, updatedAt: "2026-01-01T00:00:00Z",
+    });
+    const shared = { project: true, global: true };
+    mockDetectInstalledAgents.mockResolvedValue([
+      makeAgent({ id: "cursor", displayName: "Cursor", localSkillsDir: ".cursor/skills", globalSkillsDir: "~/.cursor/skills", readsSharedSkills: shared }),
+      makeAgent({ id: "codex", displayName: "Codex CLI", localSkillsDir: ".agents/skills", globalSkillsDir: "~/.agents/skills", readsSharedSkills: shared }),
+    ]);
+
+    await addCommand("my-skill", {});
+
+    const written = mockWriteFileSync.mock.calls
+      .map((c: unknown[]) => c[0] as string)
+      .filter((p) => p.endsWith("SKILL.md"));
+    expect(written).toEqual([`${process.cwd()}/.agents/skills/my-skill/SKILL.md`]);
+  });
+
   it("exits with error when skill is not in registry", async () => {
     mockGetSkill.mockRejectedValue(new Error("API request failed: 404 Not Found"));
     const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
@@ -2306,6 +2363,9 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
     await addCommand("ignored", { repo: "anton-abyzov/vskill", plugin: "frontend", dryRun: true });
 
     expect(mockExecFileSync).not.toHaveBeenCalled();
+    // 0894: --dry-run writes no skill files and no lockfile on this path.
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+    expect(mockWriteLockfile).not.toHaveBeenCalled();
     const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
       .flat()
       .join("\n");
@@ -3334,6 +3394,43 @@ describe("addCommand marketplace integration", () => {
     await addCommand("owner/repo", { yes: true });
 
     expect(mockRemoveSkillFromLock).not.toHaveBeenCalled();
+  });
+
+  it("0894: --dry-run with an unticked installed plugin deletes, writes and records nothing", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {
+        "plugin-a": { version: "1.0.0", source: "marketplace:owner/repo#plugin-a" },
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({ ok: true, text: async () => SAMPLE_MARKETPLACE_JSON })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [{ name: "test-skill", type: "dir" }],
+        text: async () => "# Skill Content",
+      }) as unknown as typeof fetch;
+    mockIsTTY.mockReturnValue(true);
+    mockPromptCheckboxList.mockResolvedValueOnce([2]).mockResolvedValueOnce([0]);
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockExistsSync.mockReturnValue(true);
+
+    await addCommand("owner/repo", { dryRun: true });
+
+    expect(mockRmSync).not.toHaveBeenCalled();
+    expect(mockRemoveSkillFromLock).not.toHaveBeenCalled();
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+    expect(mockWriteLockfile).not.toHaveBeenCalled();
+    const out = (console.log as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
+    expect(out).toContain("would uninstall");
+    expect(out).toContain("Nothing was written");
   });
 
 });

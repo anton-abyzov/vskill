@@ -26,6 +26,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AGENTS_REGISTRY,
+  LEGACY_LOCAL_SKILLS_DIRS,
   NON_AGENT_CONFIG_DIRS,
 } from "../src/agents/agents-registry.js";
 
@@ -54,19 +55,35 @@ export interface AgentsManifest {
  *   ".agent/skills"           -> ".agent/"
  * Returns null if the dir doesn't end in "/skills" (defensive — shouldn't
  *  happen in current registry but guards future shape drift). */
+/** Config dirs that hold much more than one agent's skills. */
+const SHARED_PARENT_DIRS = new Set([".github", ".agents"]);
+
 function agentPathPrefix(localSkillsDir: string): string | null {
   if (!localSkillsDir.endsWith("/skills")) return null;
   const dir = localSkillsDir.slice(0, -"/skills".length);
-  return dir.length > 0 ? dir + "/" : null;
+  if (dir.length === 0) return null;
+  // 0894: a skills dir directly under a shared, non-agent config dir
+  // (`.github/skills`, `.agents/skills`) keeps its `/skills/` segment so the
+  // prefix does not swallow unrelated paths such as `.github/workflows/`.
+  if (SHARED_PARENT_DIRS.has(dir)) {
+    return localSkillsDir + "/";
+  }
+  return dir + "/";
+}
+
+/** Every project skills dir to classify: current registry entries plus the
+ *  legacy dirs earlier registry versions used (0894). */
+export function allLocalSkillsDirs(): string[] {
+  return [...AGENTS_REGISTRY.map((a) => a.localSkillsDir), ...LEGACY_LOCAL_SKILLS_DIRS];
 }
 
 export function buildAgentsManifest(): AgentsManifest {
   const firstSegments = new Set<string>();
   const pathPrefixes = new Set<string>();
-  for (const agent of AGENTS_REGISTRY) {
-    const first = agent.localSkillsDir.split("/")[0];
+  for (const localSkillsDir of allLocalSkillsDirs()) {
+    const first = localSkillsDir.split("/")[0];
     if (first) firstSegments.add(first);
-    const fullPrefix = agentPathPrefix(agent.localSkillsDir);
+    const fullPrefix = agentPathPrefix(localSkillsDir);
     if (fullPrefix) pathPrefixes.add(fullPrefix);
   }
   return {

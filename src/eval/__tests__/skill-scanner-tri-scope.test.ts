@@ -238,8 +238,8 @@ describe("scanSkillsTriScope — global plugin label parity (0802)", () => {
   // agent.id rather than mis-render the header. Distinct from amp because
   // amp's parent ("agents") differs from its agent id; here they match,
   // but the same fallback branch must execute.
-  it("antigravity (~/.gemini/antigravity/skills) falls back to agent.id label", async () => {
-    writeSkill(fakeHome, ".gemini/antigravity/skills/grav-skill");
+  it("antigravity (~/.gemini/config/skills) falls back to agent.id label", async () => {
+    writeSkill(fakeHome, ".gemini/config/skills/grav-skill");
 
     const skills = await scanSkillsTriScope(tmpRoot, {
       agentId: "antigravity",
@@ -249,7 +249,7 @@ describe("scanSkillsTriScope — global plugin label parity (0802)", () => {
     const s = skills.find((x) => x.skill === "grav-skill");
     expect(s).toBeDefined();
     expect(s?.scope).toBe("global");
-    // Parent basename is "antigravity" (no leading dot) → fallback to agent.id.
+    // Parent basename is "config" (no leading dot) → fallback to agent.id.
     expect(s?.plugin).toBe("antigravity");
     expect(s?.pluginDisplay).toBe("Antigravity");
   });

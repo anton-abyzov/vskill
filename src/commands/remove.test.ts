@@ -497,5 +497,48 @@ describe("removeCommand", () => {
       expect(cc.action).toBe("not-applicable");
       logSpy.mockRestore();
     });
+
+    it("0894: removing the canonical payload reports shared-reader agents as removed", async () => {
+      mockDetectInstalledAgents.mockResolvedValue([
+        MOCK_AGENTS[0],
+        { ...MOCK_AGENTS[1], readsSharedSkills: { project: true, global: true } },
+      ]);
+      mockReadLockfile
+        .mockReturnValueOnce(makeLockfile({ sw: ENTRY }))
+        .mockReturnValue(makeLockfile({}));
+      // Cursor has no link of its own — only the canonical folder exists.
+      mockExistsSync.mockImplementation((p: string) => p === PROJECT_CANONICAL);
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await removeCommand("sw", { force: true, local: true, json: true });
+
+      expect(mockRmSync).toHaveBeenCalledWith(PROJECT_CANONICAL, { recursive: true, force: true });
+      const parsed = JSON.parse(logSpy.mock.calls[logSpy.mock.calls.length - 1].join(" "));
+      const byId = Object.fromEntries(parsed.perAgent.map((r: { id: string; action: string }) => [r.id, r.action]));
+      expect(byId.cursor).toBe("removed");
+      expect(byId["claude-code"]).toBe("not-applicable");
+      logSpy.mockRestore();
+    });
+
+    it("0894: an agent whose skills dir IS the canonical folder keeps the lockfile guard", async () => {
+      mockDetectInstalledAgents.mockResolvedValue([
+        {
+          id: "codex",
+          displayName: "Codex CLI",
+          localSkillsDir: ".agents/skills",
+          globalSkillsDir: "~/.agents/skills",
+          readsSharedSkills: { project: true, global: true },
+        },
+      ]);
+      // Global lockfile still references the skill → global canonical stays.
+      mockReadLockfile.mockImplementation((dir?: string) =>
+        dir === GLOBAL_AGENTS_ROOT ? makeLockfile({ sw: ENTRY }) : makeLockfile({}),
+      );
+      mockExistsSync.mockImplementation((p: string) => p === GLOBAL_CANONICAL);
+
+      await removeCommand("sw", { force: true, global: true });
+
+      expect(mockRmSync).not.toHaveBeenCalledWith(GLOBAL_CANONICAL, expect.anything());
+    });
   });
 });

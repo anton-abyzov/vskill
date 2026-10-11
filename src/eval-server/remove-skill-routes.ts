@@ -18,7 +18,7 @@ import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import { isLocalhost } from "./install-jobs.js";
 import { getAgent } from "../agents/agents-registry.js";
-import { resolveAgentSkillsDir } from "../installer/canonical.js";
+import { resolveAgentSkillsDir, resolveEffectiveSkillsDir } from "../installer/canonical.js";
 import {
   readLockfile,
   removeSkillFromLock,
@@ -113,10 +113,21 @@ export function registerRemoveSkillRoutes(router: Router, rootArg: string | (() 
           continue;
         }
         try {
-          const dir = resolveAgentSkillsDir(agent, { global: scope === "user", projectRoot: root });
+          const installOpts = { global: scope === "user", projectRoot: root };
+          const dir = resolveAgentSkillsDir(agent, installOpts);
           // Defense in depth: only remove a basename directory under the
           // resolved agent dir. agent.id and shortName are both validated.
-          const target = join(dir, basename(shortName));
+          let target = join(dir, basename(shortName));
+          // 0894: a shared reader installed through the canonical folder alone
+          // (no link in its own dir) stops loading the skill only when the
+          // canonical copy goes.
+          if (!existsSync(target)) {
+            target = join(resolveEffectiveSkillsDir(agent, installOpts), basename(shortName));
+          }
+          if (removed.some((r) => r.path === target)) {
+            removed.push({ agentId, path: target });
+            continue;
+          }
           if (!existsSync(target)) {
             skipped.push({ agentId, reason: `not installed at ${target}` });
             continue;

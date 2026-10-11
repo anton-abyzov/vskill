@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync, existsSync } from "node:fs";
 // 0706 T-004: `relative` + `sep` (as pathSep) power the cross-platform
 // path-traversal guard. `path.relative` handles Windows backslash correctly.
 import { join, relative, dirname, sep as pathSep } from "node:path";
@@ -42,6 +42,13 @@ export function resolveAgentSkillsDir(agent: AgentDefinition, opts: InstallOptio
   if (opts.global) {
     const override = resolveGlobalSkillsDirEnvOverride(agent);
     if (override) return override;
+    // 0894: Antigravity's registry default is ~/.gemini/config/skills, but an
+    // existing legacy IDE dir ~/.gemini/antigravity/skills keeps priority so
+    // installs land where that setup already loads skills from.
+    if (agent.id === "antigravity") {
+      const legacy = resolveTilde("~/.gemini/antigravity/skills");
+      if (existsSync(legacy)) return legacy;
+    }
     return resolveTilde(agent.globalSkillsDir);
   }
   const resolved = join(opts.projectRoot, agent.localSkillsDir);
@@ -58,6 +65,31 @@ export function resolveAgentSkillsDir(agent: AgentDefinition, opts: InstallOptio
     );
   }
   return resolved;
+}
+
+/** 0894: path of the shared canonical skills folder for a scope, without
+ *  creating it (`~/.agents/skills` or `<projectRoot>/.agents/skills`). */
+export function resolveCanonicalSkillsDir(opts: InstallOptions): string {
+  return opts.global
+    ? join(os.homedir(), ".agents", "skills")
+    : join(opts.projectRoot, ".agents", "skills");
+}
+
+/** 0894: true when the agent is satisfied by the canonical folder in this
+ *  scope — it reads the shared `.agents/skills`, so vskill writes no
+ *  agent-specific link or copy for it. */
+export function isSatisfiedByCanonical(agent: AgentDefinition, opts: InstallOptions): boolean {
+  // Read the flag directly (not via a registry helper) so callers that mock
+  // the registry module keep working.
+  return agent.readsSharedSkills?.[opts.global ? "global" : "project"] === true;
+}
+
+/** 0894: the folder an agent actually loads a skill from in this scope —
+ *  the shared canonical folder for shared readers, else its own skills dir. */
+export function resolveEffectiveSkillsDir(agent: AgentDefinition, opts: InstallOptions): string {
+  return isSatisfiedByCanonical(agent, opts)
+    ? resolveCanonicalSkillsDir(opts)
+    : resolveAgentSkillsDir(agent, opts);
 }
 
 export function ensureCanonicalDir(base: string, global: boolean): string {
@@ -145,8 +177,10 @@ function writeAgentFiles(targetDir: string, agentFiles: Record<string, string>):
 /**
  * Install a skill using the canonical symlink approach:
  * 1. Write SKILL.md to .agents/skills/{name}/ (canonical source of truth)
- * 2. Create relative symlinks from each agent dir to the canonical dir
- * 3. For agents with known symlink issues, fall back to direct copy
+ * 2. Agents that read the shared .agents/skills in this scope (0894) get
+ *    nothing else — the canonical folder is what they load
+ * 3. Create relative symlinks from every other agent dir to the canonical dir
+ * 4. For agents with known symlink issues, fall back to direct copy
  *
  * Optional agentFiles: additional files (e.g., agents/*.md) to install alongside SKILL.md.
  * Keys are relative paths within the skill directory.
@@ -175,10 +209,23 @@ export function installSymlink(
   const installed: string[] = [];
 
   for (const agent of agents) {
-    const agentSkillsDir = resolveAgentSkillsDir(agent, opts);
-    mkdirSync(agentSkillsDir, { recursive: true });
+    // 0894 (AC-04): shared readers load the canonical folder directly.
+    if (isSatisfiedByCanonical(agent, opts) && canonicalSkillDir) {
+      if (!installed.includes(canonicalSkillDir)) installed.push(canonicalSkillDir);
+      continue;
+    }
 
+    const agentSkillsDir = resolveAgentSkillsDir(agent, opts);
     const linkPath = join(agentSkillsDir, skillName);
+
+    // Never link the canonical folder onto itself (an agent whose skills dir
+    // IS the shared folder); removing the "existing" path would delete it.
+    if (canonicalSkillDir && linkPath === canonicalSkillDir) {
+      if (!installed.includes(canonicalSkillDir)) installed.push(canonicalSkillDir);
+      continue;
+    }
+
+    mkdirSync(agentSkillsDir, { recursive: true });
 
     // Agents with known symlink issues get direct copy
     if (COPY_FALLBACK_AGENTS.has(agent.id)) {
@@ -226,8 +273,13 @@ export function installCopy(
   for (const agent of agents) {
     // Claude Code gets full content; all others get stripped
     const agentContent = agent.id === "claude-code" ? content : strippedContent;
-    const agentSkillsDir = resolveAgentSkillsDir(agent, opts);
+    // 0894 (AC-04): shared readers get one copy in the canonical folder
+    // instead of a per-agent copy.
+    const agentSkillsDir = isSatisfiedByCanonical(agent, opts)
+      ? ensureCanonicalDir(opts.projectRoot, opts.global)
+      : resolveAgentSkillsDir(agent, opts);
     const skillDir = join(agentSkillsDir, skillName);
+    if (installed.includes(skillDir)) continue;
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(join(skillDir, "SKILL.md"), agentContent);
     if (agentFiles) writeAgentFiles(skillDir, agentFiles);

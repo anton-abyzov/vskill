@@ -1,7 +1,7 @@
 ---
 name: rea
 description: "Find out exactly how a feature is implemented in a shipped tool or app you don't have the source for (desktop apps, Electron apps like Claude desktop, native CLIs like Codex, websites, APKs, .NET assemblies) using REA - Reverse Engineer Anything (github.com/morluto/rea). Sets REA up when it is missing (CLI, MCP registration, Hopper or Ghidra), routes the target to the right REA tool, keeps evidence out of the context window, and turns findings into a clean-room spec before any rebuild. Use when the user says 'use REA', 'reverse engineer', 'how does <app> do X', 'how is this feature implemented in <tool>', 'clone this feature', 'decompile', 'look inside the app', or asks how a closed-source competitor works. Skip it when the source is available - read the repo instead."
-version: 1.0.0
+version: 1.0.1
 license: MIT
 repository: anton-abyzov/vskill
 mcp-deps: [rea]
@@ -58,6 +58,11 @@ Missing pieces, in order:
    before REA can drive it unattended. Hopper is only needed for native
    binaries; Electron, JavaScript, web, APK and .NET work without it.
    Restart the agent afterwards so it sees the tools.
+   Setup writes `HOPPER_LAUNCHER_PATH` only into the agents' MCP entries.
+   The `rea` CLI looks in `/Applications`, so when Hopper went to
+   `~/Applications` export it in the shell profile too:
+   `export HOPPER_LAUNCHER_PATH="$HOME/Applications/Hopper Disassembler.app/Contents/MacOS/hopper"`.
+   A first open can time out while Hopper is still starting; retry once.
 3. **REA's own workflow skill** (optional, recommended): `rea setup --skill
    --dry-run --json` shows the destinations (`~/.agents/skills` plus each
    registered agent's skill folder), then `--yes` installs. If the machine

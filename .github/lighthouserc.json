@@ -1,13 +1,6 @@
 {
   "ci": {
     "collect": {
-      "url": [
-        "${LHCI_BASE_URL}/",
-        "${LHCI_BASE_URL}/desktop",
-        "${LHCI_BASE_URL}/ai-studio",
-        "${LHCI_BASE_URL}/skill-studio",
-        "${LHCI_BASE_URL}/press"
-      ],
       "numberOfRuns": 3,
       "settings": {
         "preset": "desktop",

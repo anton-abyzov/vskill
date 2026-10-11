@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.4] - 2026-10-11
+
+### Changed
+
+- Dependencies: `@anthropic-ai/sdk` 0.131 and `simple-git` 3.36; dev toolchain on esbuild 0.28.2, Tailwind 4.3 and Playwright 1.63.
+- Skill Studio desktop: Tauri crates now match the `@tauri-apps/*` packages (tauri 2.12, updater 2.13, dialog 2.8, notification 2.5, shell 2.4, autostart 2.7).
+- CI: the nightly macOS notarize dry-run builds, notarizes and staples like the real release.
+
 ## [1.2.3] - 2026-10-10
 
 ### Fixed

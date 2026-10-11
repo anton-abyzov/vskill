@@ -7,6 +7,9 @@ import {
   selectExcerpt,
   JUDGE_CONTENT_BUDGET,
   JUDGE_RESPONSE_SCHEMA,
+  criticalIdsToValidate,
+  judgeResponseSchema,
+  unvalidatedCriticals,
 } from "./judge-guard.js";
 import { runTier2Scan, type AIBinding } from "./tier2-llm.js";
 import { runTier1Scan } from "./tier1.js";
@@ -204,8 +207,11 @@ describe("selectExcerpt locates findings by position", () => {
 
   it("stays fast with tens of thousands of hidden-character findings", () => {
     const content = "\u202ex\n".repeat(50_000) + "a".repeat(400_000);
-    const findings = runTier1Scan(content).findings;
-    expect(findings.length).toBeGreaterThan(40_000);
+    // Tier 1 lists at most 100 findings per hidden-content rule, but the
+    // excerpt must stay fast on any number of findings.
+    expect(runTier1Scan(content).findings.filter((f) => f.patternId === "HC-002")).toHaveLength(100);
+    const sample = runTier1Scan("\u202ex\n\u202ex\n\u202ex").findings.find((f) => f.patternId === "HC-002" && f.lineNumber === 2)!;
+    const findings = Array.from({ length: 50_000 }, (_, i) => ({ ...sample, lineNumber: i + 1 }));
     const t0 = performance.now();
     selectExcerpt(content, findings);
     expect(performance.now() - t0).toBeLessThan(1_000);
@@ -293,26 +299,30 @@ describe("runTier2Scan judge hardening", () => {
       const result = await runTier2Scan(content, findings, ai);
       expect({ criticalValidation, score: result.score }).toEqual({ criticalValidation, score: 90 });
     }
-    // An id the scan never reported does not validate anything.
-    const { ai } = capture({
+    // An id the scan never reported does not validate anything, so the
+    // answer is unusable: asked once more, then the scan fails.
+    const { ai, calls } = capture({
       verdict: "PASS",
       score: 90,
       rationale: "Reviewed.",
       criticalValidation: [{ patternId: "CE-0011", verdict: "false_positive", reason: "x" }, { patternId: "DCI-003", verdict: "false_positive", reason: "x" }],
     });
-    const capped = await runTier2Scan(content, findings, ai);
-    expect(capped.score).toBe(64);
+    const failed = await runTier2Scan(content, findings, ai);
+    expect(calls).toHaveLength(2);
+    expect(failed).toMatchObject({ score: 0, verdict: "FAIL" });
   });
 
-  it("caps an unvalidated critical SecurityFinding keyed by its patternId", async () => {
-    const { ai } = capture({ verdict: "PASS", score: 95, rationale: "fine" });
+  it("fails an unvalidated critical SecurityFinding keyed by its patternId", async () => {
+    const { ai, calls } = capture({ verdict: "PASS", score: 95, rationale: "fine" });
     const result = await runTier2Scan(
       "x",
       [{ severity: "critical", category: "code-execution", message: "eval()", line: 1, patternId: "CE-001" }],
       ai,
     );
-    expect(result.score).toBe(64);
-    expect(result.verdict).toBe("CONCERNS");
+    expect(calls).toHaveLength(2);
+    expect(result.score).toBe(0);
+    expect(result.verdict).toBe("FAIL");
+    expect(result.rationale).toContain("CE-001");
   });
 
   it("caps tag smuggling at FAIL even when the judge passes it", async () => {
@@ -331,5 +341,60 @@ describe("runTier2Scan judge hardening", () => {
     expect(user).toContain("DECODED HIDDEN CONTENT");
     // Invisible characters never reach the judge raw.
     expect(/[\u{E0000}-\u{E007F}]/u.test(user)).toBe(false);
+  });
+});
+
+describe("selectExcerpt line-shift inference", () => {
+  it("does not re-reveal one long line for every occurrence of the anchor", () => {
+    const content = ["intro", "abc\u200b\u200b\u200b\u200b", "x", ("abc" + "\u200e".repeat(97)).repeat(2000), "end"].join("\n");
+    const findings = runTier1Scan(content).findings.map((f) => ({ ...f, file: "SKILL.md" }));
+    expect(findings.some((f) => f.patternId === "HC-003" && f.lineNumber === 2)).toBe(true);
+    const start = performance.now();
+    selectExcerpt(content, findings);
+    expect(performance.now() - start).toBeLessThan(1_500);
+  });
+
+  it("still locates a hidden-channel finding in a later file", () => {
+    const head = Array.from({ length: 600 }, (_, i) => `filler line ${i} with ordinary text`).join("\n");
+    const other = `${Array.from({ length: 300 }, (_, i) => `more ${i}`).join("\n")}\nzz hidden\u200b\u200b\u200b\u200b marker\n${head}`;
+    const content = `${head}\n\n${other}`;
+    const skillLines = head.split("\n").length + 1;
+    // File-relative line numbers, as a bundling caller reports them.
+    const findings = runTier1Scan(other).findings.map((f) => ({ ...f, file: "references/a.md" }));
+    const hc = findings.find((f) => f.patternId === "HC-003")!;
+    expect(hc.lineNumber).toBe(301);
+    expect(content.split("\n")[skillLines + hc.lineNumber - 1]).toContain("zz hidden");
+    expect(selectExcerpt(content, findings)).toContain("zz hidden");
+  });
+
+  it("does not let line-0 findings use up the text searches", () => {
+    const filler = "lorem ipsum dolor sit amet ".repeat(4_000);
+    const content = `${filler}\nNEEDLE_TARGET is here\n${filler}`;
+    const synthetic = Array.from({ length: 30 }, (_, i) => ({ patternId: `SS-${i}`, severity: "high", match: `script-wide-${i}`, lineNumber: 0 }));
+    const findings = [...synthetic, { patternId: "CE-001", severity: "medium", match: "NEEDLE_TARGET" }];
+    expect(selectExcerpt(content, findings)).toContain("NEEDLE_TARGET");
+  });
+});
+
+describe("critical validation helpers", () => {
+  const findings = [
+    { patternId: "CE-001", severity: "critical", match: "eval(" },
+    { patternId: "CE-001", severity: "critical", match: "eval(" },
+    { patternId: "CI-003", severity: "critical", match: "system(" },
+    { patternId: "CI-001", severity: "info", match: "exec(" },
+  ];
+
+  it("lists each critical id once and reports the ones the answer skipped", () => {
+    expect(criticalIdsToValidate(findings)).toEqual(["CE-001", "CI-003"]);
+    expect(unvalidatedCriticals({}, findings)).toEqual(["CE-001", "CI-003"]);
+    expect(
+      unvalidatedCriticals({ criticalValidation: [{ patternId: "CE-001", verdict: "false_positive", reason: "x" }] }, findings),
+    ).toEqual(["CI-003"]);
+  });
+
+  it("requires criticalValidation in the schema only when asked", () => {
+    expect((judgeResponseSchema(true) as { required: string[] }).required).toEqual(["verdict", "score", "rationale", "criticalValidation"]);
+    expect(judgeResponseSchema(false)).toBe(JUDGE_RESPONSE_SCHEMA);
+    expect(JUDGE_RESPONSE_SCHEMA.required).not.toContain("criticalValidation");
   });
 });

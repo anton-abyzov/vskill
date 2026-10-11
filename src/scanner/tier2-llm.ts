@@ -13,7 +13,10 @@ import {
   JUDGE_GUARD_RULES,
   applyJudgeGuards,
   buildSkillBlock,
+  criticalIdsToValidate,
+  judgeResponseSchema,
   makeNonce,
+  unvalidatedCriticals,
   type GuardFinding,
   type GuardedVerdict,
 } from './judge-guard.js';
@@ -26,7 +29,12 @@ const TIER2_MODEL = '@cf/meta/llama-3.1-70b-instruct';
 export interface AIBinding {
   run(
     model: string,
-    input: { messages: Array<{ role: string; content: string }> },
+    input: {
+      messages: Array<{ role: string; content: string }>;
+      /** JSON mode and response schema, for providers that support them. */
+      response_format?: { type: 'json_object' };
+      json_schema?: Record<string, unknown>;
+    },
   ): Promise<{ response?: string }>;
 }
 
@@ -125,9 +133,7 @@ function buildUserMessage(
           .join('\n')
       : 'No findings from automated scan.';
 
-  const criticalIds = [
-    ...new Set(guardFindings.filter((f) => f.severity === 'critical').map((f) => f.patternId)),
-  ];
+  const criticalIds = criticalIdsToValidate(guardFindings);
   const criticalSection =
     criticalIds.length > 0
       ? `\n\n## CRITICAL FINDINGS TO VALIDATE\n\nReturn one criticalValidation entry for each of: ${criticalIds.join(', ')}`
@@ -268,11 +274,18 @@ const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
 
 /**
+ * Answers accepted that skip a required criticalValidation entry before the
+ * scan fails: the first is retried, the second ends it.
+ */
+const MAX_UNVALIDATED_ANSWERS = 2;
+
+/**
  * Runs Tier 2 LLM-based security analysis.
  *
  * Retries up to MAX_RETRIES times with exponential backoff on transient
  * failures (network errors, timeouts, 5xx). Only returns FAIL after all
- * retries are exhausted.
+ * retries are exhausted. An answer that omits criticalValidation for a listed
+ * critical finding is asked once more, then the scan returns FAIL.
  *
  * @param content - The SKILL.md file content
  * @param tier1Findings - Findings from the Tier 1 pattern scanner (SecurityFinding or ScanFinding)
@@ -289,24 +302,25 @@ export async function runTier2Scan(
   // Fresh per scan so the content cannot forge the end of the untrusted block.
   const userMessage = buildUserMessage(content, tier1Findings, guardFindings, makeNonce());
 
+  // When criticals are listed the schema requires their validation, and an
+  // answer without it is unusable rather than a low score.
+  const jsonSchema = judgeResponseSchema(criticalIdsToValidate(guardFindings).length > 0);
+
   let lastError: string = 'unknown error';
+  let unvalidatedAnswers = 0;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    let responseText: string;
     try {
       const result = await ai.run(TIER2_MODEL, {
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage },
         ],
+        response_format: { type: 'json_object' },
+        json_schema: jsonSchema,
       });
-
-      const responseText = result.response ?? '';
-      const parsed = parseResponse(responseText);
-
-      return {
-        ...guardVerdict(parsed, guardFindings),
-        model: TIER2_MODEL,
-      };
+      responseText = result.response ?? '';
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
 
@@ -314,7 +328,36 @@ export async function runTier2Scan(
         const backoff = INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1);
         await new Promise((resolve) => setTimeout(resolve, backoff));
       }
+      continue;
     }
+
+    const parsed = parseResponse(responseText);
+    const missing = parsed.parsed
+      ? unvalidatedCriticals(
+          { criticalValidation: normalizeCriticalValidation(parsed.criticalValidation, guardFindings) },
+          guardFindings,
+        )
+      : [];
+    if (missing.length > 0) {
+      unvalidatedAnswers++;
+      if (unvalidatedAnswers < MAX_UNVALIDATED_ANSWERS) {
+        // Ask again without spending a transient-failure retry.
+        attempt--;
+        continue;
+      }
+      return {
+        score: 0,
+        verdict: 'FAIL',
+        rationale: `Tier 2 judge did not validate critical finding(s) ${missing.join(', ')} in ${unvalidatedAnswers} answers; no usable verdict.`,
+        concerns: [`Reviewer did not validate critical finding(s): ${missing.join(', ')}`],
+        model: TIER2_MODEL,
+      };
+    }
+
+    return {
+      ...guardVerdict(parsed, guardFindings),
+      model: TIER2_MODEL,
+    };
   }
 
   // All retries exhausted — return conservative FAIL

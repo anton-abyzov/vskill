@@ -5,6 +5,7 @@
 // ---------------------------------------------------------------------------
 
 import { scanHiddenContent } from "./hidden-content.js";
+import { OFFICIAL_INSTALLER_URL_SOURCE } from "./installer-hosts.js";
 
 // ---- Types ----------------------------------------------------------------
 
@@ -42,6 +43,8 @@ export interface ScanFinding {
   context: string;
   /** Original pattern severity when context rules lowered it. */
   downgradedFrom?: PatternSeverity;
+  /** Matches folded into this finding, when more than one (same pattern, line and severity). */
+  occurrences?: number;
 }
 
 // ---- Patterns (58 total) --------------------------------------------------
@@ -374,7 +377,10 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     name: "Fake prerequisite download",
     severity: "high",
     description: "Detects instructions to download and run an external binary or script as a setup step (ClawHavoc-style)",
-    pattern: /\b(?:before (?:using|running|installing)|prerequisites?|required?|first)\b[^.\n]{0,120}?\b(?:download|install|run|execute)\b[^\n]{0,160}?(?:https?:\/\/(?!(?:brew\.sh|bun\.sh|sh\.rustup\.rs|astral\.sh|deno\.land|get\.pnpm\.io)[\/\s)'"`]|raw\.githubusercontent\.com\/(?:nvm-sh|Homebrew)\/)[^\/\s)'"`]+\/[^\s)'"`]*\.(?:zip|exe|dmg|pkg|msi|sh|ps1|bat|cmd|command|app|scr)\b|\b(?:glot\.io|pastebin\.com|rentry\.co|paste\.ee|transfer\.sh|hastebin\.com)\/)/gi,
+    pattern: new RegExp(
+      String.raw`\b(?:before (?:using|running|installing)|prerequisites?|required?|first)\b[^.\n]{0,120}?\b(?:download|install|run|execute)\b[^\n]{0,160}?(?:https?:\/\/(?!${OFFICIAL_INSTALLER_URL_SOURCE})[^\/\s)'"\x60]+\/[^\s)'"\x60]*\.(?:zip|exe|dmg|pkg|msi|sh|ps1|bat|cmd|command|app|scr)\b|\b(?:glot\.io|pastebin\.com|rentry\.co|paste\.ee|transfer\.sh|hastebin\.com)\/)`,
+      "gi",
+    ),
     category: "network-access",
   },
   {
@@ -726,19 +732,20 @@ function inlineCodeSpans(line: string): Array<[number, number]> {
 
 // ---- Finding context ---------------------------------------------------------
 
-/** Longest slice of any one line kept in a finding's context. */
-const MAX_CONTEXT_LINE = 600;
+// Each context line is cut to a window around the match column, so a match on
+// a huge line costs O(window), not O(line).
 
-function clipContextLine(line: string): string {
-  return line.length > MAX_CONTEXT_LINE ? `${line.slice(0, MAX_CONTEXT_LINE)}…` : line;
-}
+const CONTEXT_WINDOW = 300;
 
-/** The matched line, windowed around the match when the line is long. */
-function contextAround(line: string, start: number, end: number): string {
-  if (line.length <= MAX_CONTEXT_LINE) return line;
-  const from = Math.max(0, start - MAX_CONTEXT_LINE / 2);
-  const to = Math.min(line.length, end + MAX_CONTEXT_LINE / 2);
-  return `${from > 0 ? "…" : ""}${line.slice(from, to)}${to < line.length ? "…" : ""}`;
+function contextWindow(text: string, column: number): string {
+  if (text.length <= CONTEXT_WINDOW) return text;
+  let start = Math.max(0, Math.min(column - CONTEXT_WINDOW / 2, text.length - CONTEXT_WINDOW));
+  let end = start + CONTEXT_WINDOW;
+  // Never split a surrogate pair.
+  const high = (c: number): boolean => c >= 0xd800 && c <= 0xdbff;
+  if (start > 0 && high(text.charCodeAt(start - 1))) start++;
+  if (end < text.length && high(text.charCodeAt(end - 1))) end--;
+  return text.slice(start, end);
 }
 
 // ---- CI-010 vs CI-011 -------------------------------------------------------
@@ -798,6 +805,9 @@ export function scanContent(content: string): ScanFinding[] {
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
       const line = lines[lineIdx];
       let match: RegExpExecArray | null;
+      // One finding per severity for this pattern on this line; further
+      // matches only raise its occurrence count.
+      let folded: Map<PatternSeverity, ScanFinding> | null = null;
 
       while ((match = regex.exec(line)) !== null) {
         // Guard against zero-length matches looping forever on a /g regex.
@@ -827,12 +837,6 @@ export function scanContent(content: string): ScanFinding[] {
           if (!spans) installerSpanCache.set(lineIdx, (spans = installerSpans(line)));
           if (insideSpan(spans, match.index, match.index + match[0].length)) continue;
         }
-
-        // Build context: up to 1 line before and after
-        const contextLines: string[] = [];
-        if (lineIdx > 0) contextLines.push(clipContextLine(lines[lineIdx - 1]));
-        contextLines.push(contextAround(line, match.index, match.index + match[0].length));
-        if (lineIdx < lines.length - 1) contextLines.push(clipContextLine(lines[lineIdx + 1]));
 
         // Downgrade FS-001 severity based on context:
         // safe targets → info, system paths → keep high, other → low
@@ -866,7 +870,20 @@ export function scanContent(content: string): ScanFinding[] {
           if (insideSpan(spans, match.index, match.index + match[0].length)) severity = "info";
         }
 
-        findings.push({
+        const prior = folded?.get(severity);
+        if (prior) {
+          prior.occurrences = (prior.occurrences ?? 1) + 1;
+          continue;
+        }
+
+        // Build context: up to 1 line before and after, each windowed
+        // around the match column.
+        const contextLines: string[] = [];
+        if (lineIdx > 0) contextLines.push(contextWindow(lines[lineIdx - 1], match.index));
+        contextLines.push(contextWindow(line, match.index));
+        if (lineIdx < lines.length - 1) contextLines.push(contextWindow(lines[lineIdx + 1], match.index));
+
+        const finding: ScanFinding = {
           patternId: pattern.id,
           patternName: pattern.name,
           severity,
@@ -875,7 +892,9 @@ export function scanContent(content: string): ScanFinding[] {
           match: match[0],
           lineNumber: lineIdx + 1,
           context: contextLines.join("\n"),
-        });
+        };
+        (folded ??= new Map()).set(severity, finding);
+        findings.push(finding);
       }
     }
   }
@@ -890,13 +909,18 @@ export function scanContent(content: string): ScanFinding[] {
     for (const pattern of SCAN_PATTERNS) {
       const regex = new RegExp(pattern.pattern.source, pattern.pattern.flags);
       let match: RegExpExecArray | null;
+      let first: ScanFinding | null = null;
       while ((match = regex.exec(payload.text)) !== null) {
         if (match[0].length === 0) {
           regex.lastIndex++;
           continue;
         }
         if (pattern.id === "CI-010" && insideSpan(spans, match.index, match.index + match[0].length)) continue;
-        findings.push({
+        if (first) {
+          first.occurrences = (first.occurrences ?? 1) + 1;
+          continue;
+        }
+        first = {
           patternId: pattern.id,
           patternName: pattern.name,
           severity: pattern.severity,
@@ -904,7 +928,8 @@ export function scanContent(content: string): ScanFinding[] {
           match: `[hidden ${payload.kind}] ${match[0].slice(0, MAX_PAYLOAD_MATCH)}`,
           lineNumber: payload.lineNumber,
           context: payload.text.slice(0, 600),
-        });
+        };
+        findings.push(first);
       }
     }
   }

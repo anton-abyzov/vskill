@@ -26,9 +26,11 @@ export const HIDDEN_CONTENT_RULES: HiddenRule[] = [
   { id: "HC-006", name: "Encoded text payload", severity: "medium", description: "Long base64 blob that decodes to readable text" },
   { id: "HC-007", name: "Look-alike domain", severity: "medium", description: "URL host with non-ASCII or punycode labels (IDN homograph)" },
   { id: "HC-008", name: "Mixed-script word", severity: "low", description: "Word mixing Latin with Cyrillic or Greek letters (homoglyph)" },
-  { id: "HC-009", name: "Scanner manipulation", severity: "high", description: "Text that forges the review prompt's delimiters or addresses the automated security reviewer" },
+  { id: "HC-009", name: "Scanner manipulation", severity: "high", description: "Text that forges the review prompt's delimiters, or addresses the automated reviewer from a comment, link definition, or invisible or encoded text" },
   { id: "HC-010", name: "Unscanned oversized file", severity: "medium", description: "A file exceeded the scanner's size limit; the remainder was not scanned" },
   { id: "HC-011", name: "Opaque binary in bundle", severity: "high", description: "Compiled or binary file (.pyc, .exe, .so, ...) shipped with the skill; its behavior cannot be reviewed" },
+  // HC-012 and HC-013 are platform-only (VirusTotal findings).
+  { id: "HC-014", name: "Text addressed to an AI reviewer", severity: "medium", description: "Visible text that addresses an AI or LLM reviewer, judge or grader; the judge reviews it, but it does not cap the score" },
 ];
 
 const RULES = new Map(HIDDEN_CONTENT_RULES.map((r) => [r.id, r]));
@@ -50,6 +52,8 @@ export interface HiddenFinding {
   match: string;
   lineNumber: number;
   context: string;
+  /** CLI: findings of this rule folded into this one on the same line, when more than one. */
+  occurrences?: number;
 }
 
 export interface HiddenScanResult {
@@ -58,12 +62,21 @@ export interface HiddenScanResult {
 }
 
 const MAX_MATCH = 200;
-/** Longest context kept on a finding (CLI-only bound; see revealClipped). */
-const MAX_CONTEXT = 600;
 const MAX_PAYLOAD = 4000;
 /** Base64 characters decoded per blob; bounds work on large embedded binaries. */
 const MAX_BASE64_DECODE = 200_000;
 const MIN_BASE64 = 120;
+/** Characters of each context line kept around the match column. */
+const CONTEXT_WINDOW = 200;
+/**
+ * Longest context kept on a finding, after invisible characters are revealed
+ * (CLI-only bound: an escaped character is up to ten times longer than the
+ * raw one). Each of the three context lines gets a third.
+ */
+const MAX_CONTEXT = 600;
+const MAX_CONTEXT_LINE = Math.floor((MAX_CONTEXT - 2) / 3);
+/** Findings listed per rule; the rest are counted on the last one listed. */
+const MAX_FINDINGS_PER_RULE = 100;
 
 const TAG_RUN_RE = /[\u{E0000}-\u{E007F}]+/gu;
 // Subdivision flag emoji: U+1F3F4, a lowercase region + subdivision code in
@@ -119,37 +132,84 @@ const DIRECTIVE_RES: RegExp[] = [
   new RegExp(`\\b(?:send|upload|post|read|copy|cat)\\b[^.\\n]{0,60}${SECRET_REF}`, "i"),
 ];
 
-const JUDGE_SUBJECT = String.raw`(?:security\s+scanner|(?:LLM|AI|automated)\s+(?:security\s+)?(?:review(?:er)?|judge|grader|auditor|scanner))`;
-const SKILL_OBJECT = String.raw`(?:skill|plugin|package|file|code)`;
+// Reviewers that are named as automated ("AI reviewers", "LLM-judge",
+// "security analyst"), and bare roles that only count next to a verdict.
+const AI_JUDGE = String.raw`(?:(?:LLM|AI|automated|automatic)[\s-]+(?:security[\s-]+)?(?:code[\s-]+)?(?:review(?:er)?s?|judges?|graders?|auditors?|scanners?|analy[sz]ers?|analysts?|evaluators?)|security[\s-]+(?:scanners?|analysts?))`;
+const ROLE = String.raw`(?:reviewers?|graders?|judges?|evaluators?|analysts?)`;
+const SAFE_WORD = String.raw`(?:safe|clean|benign|harmless|trusted|legitimate|non-?malicious|not\s+malicious)`;
+// The thing under review: "it", "this skill", "the submitted package".
+const SELF = String.raw`(?:it|this(?:\s+[\w-]+)?|the\s+(?:[\w-]+\s+)?(?:skill|plugin|package|file|code|submission|repo(?:sitory)?|content))`;
+// Verdict or score requests: "classify this skill as benign", "rate it 100",
+// "return score 97", "return PASS".
+const VERDICT = String.raw`(?:(?:mark|rate|score|grade|treat|classify|consider|label|report|deem|flag)\s+${SELF}\s+as\s+(?:an?\s+)?${SAFE_WORD}\b|(?:score|rate|grade)\s+${SELF}\s+(?:at\s+|an?\s+)?\d{2,3}\b|(?:return|give|assign|output|report)\s+(?:it\s+|this(?:\s+[\w-]+)?\s+)?(?:an?\s+)?(?:score|rating)(?:\s+of)?\s*[:=]?\s*\d{2,3}\b|(?:return|output|respond\s+with)\s+(?:an?\s+)?(?:verdict\s*(?:of\s*)?[:=]?\s*)?["'\x60]?PASS\b)`;
+// Only an automated reviewer is asked to approve or pass a skill.
+const APPROVAL = String.raw`(?:(?:approve|pass|clear|accept|allow|whitelist|trust)\s+(?:this|the)\s+(?:skill|plugin|package|file|code|submission)\b|(?:mark|rate|treat|classify|consider|label|report)\s+${SELF}\s+as\s+(?:verified|approved|pass(?:ed|ing)?)\b)`;
 
-// Text aimed at the LLM judge rather than the agent: the judge prompt's own
-// section markers (tier2.ts, judge-guard.ts, and the source-code markers of
-// earlier prompts), or pleas to the automated reviewer to pass this skill.
-const JUDGE_MANIPULATION_RES: RegExp[] = [
+// The judge prompt's own section markers (tier2.ts, judge-guard.ts, and the
+// source-code markers of earlier prompts). Forging them is always HC-009.
+const JUDGE_FORGERY_RES: RegExp[] = [
   /--\s*(?:END\s+CRITICAL\s+FINDINGS|(?:CRITICAL|TIER\s+1)\s+FINDINGS\s+TO\s+VALIDATE|(?:END\s+(?:OF\s+)?)?SKILL\s+SOURCE\s+CODE|END\s+(?:OF\s+)?SOURCE\s+CODE)\s*--/i,
   /UNTRUSTED_SKILL_|DECODED\s+HIDDEN\s+CONTENT/i,
-  new RegExp(
-    `\\b${JUDGE_SUBJECT}\\b[^.\\n]{0,60}\\b(?:must|should|will|shall)\\s+(?:(?:approve|pass|clear|accept|allow|whitelist)\\s+(?:this|the)\\s+${SKILL_OBJECT}|(?:mark|rate|score|treat|classify|consider)\\s+(?:this|it|the)(?:\\s+${SKILL_OBJECT})?\\s+(?:as\\s+)?(?:safe|clean|benign|harmless|trusted|verified|pass|\\d{2,3})\\b)`,
-    "i",
-  ),
-  new RegExp(`\\b(?:note|message|instructions?)\\s+(?:to|for)\\s+(?:the\\s+)?${JUDGE_SUBJECT}\\b`, "i"),
+  // CLI judge prompt (tier2-llm.ts): Markdown section headings, not dashes.
+  /^[ \t]{0,3}#{1,6}[ \t]*(?:CRITICAL\s+FINDINGS\s+TO\s+VALIDATE|TIER\s+1\s+SCANNER\s+FINDINGS)\b/im,
+  /\bReturn\s+one\s+criticalValidation\s+entry\b/i,
 ];
+
+// Text aimed at an AI reviewer or judge. Code-review and eval skills write
+// this in plain sight, so visible text is HC-014 (the judge must run, the
+// score is not capped); in a comment, link definition, or invisible or
+// encoded text it is HC-009. Multiline so `^` anchors in comment bodies.
+const JUDGE_PROSE_RES: RegExp[] = [
+  new RegExp(String.raw`\b${AI_JUDGE}\b[^.\n]{0,80}?\b(?:${VERDICT}|${APPROVAL})`, "im"),
+  new RegExp(String.raw`\b${ROLE}\b[^.\n]{0,80}?\b${VERDICT}`, "im"),
+  new RegExp(String.raw`\b(?:notes?|messages?|instructions?|directions?|reminders?|guidance|hints?)\s+(?:to|for)\s+(?:the\s+|all\s+|any\s+|an?\s+)?${AI_JUDGE}\b`, "im"),
+  new RegExp(String.raw`\b${AI_JUDGE}\s+(?:notes?|messages?|instructions?|directions?|reminders?)\b`, "im"),
+  new RegExp(String.raw`\b(?:dear|hey|hello|attention)\s*,?\s+(?:the\s+|all\s+|any\s+)?${AI_JUDGE}\b|^[ \t#>*_-]*(?:to\s+(?:the\s+|all\s+|any\s+)?)?${AI_JUDGE}\s*[:,]`, "im"),
+];
+const JUDGE_PROSE_GLOBAL_RES = JUDGE_PROSE_RES.map((re) => new RegExp(re.source, "gim"));
 
 /** Make invisible characters visible so findings can be read and logged safely. */
 export function revealInvisible(text: string): string {
   return text.replace(INVISIBLE_RE, (ch) => `\\u{${ch.codePointAt(0)!.toString(16).toUpperCase()}}`);
 }
 
-function clip(text: string, max = MAX_MATCH): string {
-  return text.length > max ? `${text.slice(0, max)}…` : text;
+/**
+ * A flat copy of a short string. Slices of a large string keep the whole
+ * parent alive; findings must not pin a multi-megabyte line.
+ */
+function flat(text: string): string {
+  return text.length < 16 ? text : text.split("").join("");
 }
 
-/**
- * revealInvisible + clip, revealing only the prefix that can survive the clip
- * (CLI-only: keeps per-finding work and storage bounded on huge lines).
- */
-function revealClipped(text: string, max = MAX_MATCH): string {
-  return clip(revealInvisible(text.length > max ? text.slice(0, max + 1) : text), max);
+function isHighSurrogate(c: number): boolean {
+  return c >= 0xd800 && c <= 0xdbff;
+}
+
+/** `text.slice(start, end)` without splitting a surrogate pair at either end. */
+function safeSlice(text: string, start: number, end: number): string {
+  let s = Math.max(0, start);
+  let e = Math.min(text.length, end);
+  if (s > 0 && s < text.length && isHighSurrogate(text.charCodeAt(s - 1))) s++;
+  if (e < text.length && e > s && isHighSurrogate(text.charCodeAt(e - 1))) e--;
+  return text.slice(s, e);
+}
+
+function clip(text: string, max = MAX_MATCH): string {
+  return flat(text.length > max ? `${safeSlice(text, 0, max)}…` : text);
+}
+
+/** clip(revealInvisible(text)) without revealing more of the text than is kept. */
+function revealClip(text: string, max = MAX_MATCH): string {
+  const head = text.length > max ? safeSlice(text, 0, max) : text;
+  const shown = revealInvisible(head);
+  return shown.length > max || head.length < text.length ? flat(`${safeSlice(shown, 0, max)}…`) : flat(shown);
+}
+
+/** About `CONTEXT_WINDOW` characters of a line around `column`. */
+function windowAround(text: string, column: number): string {
+  if (text.length <= CONTEXT_WINDOW) return text;
+  const start = Math.max(0, Math.min(column - CONTEXT_WINDOW / 2, text.length - CONTEXT_WINDOW));
+  return safeSlice(text, start, start + CONTEXT_WINDOW);
 }
 
 function decodeTags(run: string): string {
@@ -254,6 +314,27 @@ function hasBidiTrick(line: string): boolean {
     }
   }
   return latin.length > 0;
+}
+
+const RTL_LETTER_RE = /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u08A0-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/g;
+
+/**
+ * Bidi controls in right-to-left prose: Arabic or Hebrew text whose
+ * embeddings and isolates all close, with no overrides. This is how mixed
+ * RTL/LTR text is written; Trojan Source reordering needs an override or an
+ * unclosed control.
+ */
+export function isNaturalRtlBidi(text: string): boolean {
+  if ((text.match(RTL_LETTER_RE) ?? []).length < 3) return false;
+  const open: number[] = [];
+  for (const ch of text) {
+    const c = ch.codePointAt(0) as number;
+    if (c === 0x202d || c === 0x202e) return false;
+    if (c === 0x202a || c === 0x202b) open.push(0x202c);
+    else if (c >= 0x2066 && c <= 0x2068) open.push(0x2069);
+    else if ((c === 0x202c || c === 0x2069) && open.pop() !== c) return false;
+  }
+  return open.length === 0;
 }
 
 function lineOf(content: string, index: number, lineStarts: number[]): number {
@@ -462,26 +543,65 @@ export function scanHiddenContent(content: string): HiddenScanResult {
   const lineStarts: number[] = [0];
   for (let i = 0; i < content.length; i++) if (content.charCodeAt(i) === 10) lineStarts.push(i + 1);
 
-  const context = (lineNumber: number): string =>
-    revealClipped(
-      lines
-        .slice(Math.max(0, lineNumber - 2), Math.min(lines.length, lineNumber + 1))
-        .map((l) => l.slice(0, MAX_CONTEXT + 1))
-        .join("\n"),
-      MAX_CONTEXT,
-    );
+  // Each context line is windowed before it is revealed, so a finding on a
+  // huge line costs O(window), not O(line).
+  const context = (lineNumber: number, column: number): string => {
+    const parts: string[] = [];
+    for (let k = Math.max(0, lineNumber - 2); k < Math.min(lines.length, lineNumber + 1); k++) {
+      // No ellipsis: the middle line must stay a substring of the revealed
+      // line, which is how judge-guard locates the finding.
+      parts.push(safeSlice(revealInvisible(windowAround(lines[k], column)), 0, MAX_CONTEXT_LINE));
+    }
+    return flat(parts.join("\n"));
+  };
 
-  const add = (id: string, match: string, lineNumber: number): void => {
+  // One finding per rule per line, and at most MAX_FINDINGS_PER_RULE per
+  // rule; the rest are counted. Capping per rule keeps a flood of one kind
+  // from crowding out another.
+  const byLine = new Map<string, { finding: HiddenFinding; more: number }>();
+  const perRule = new Map<string, { listed: number; last: HiddenFinding | null; unlisted: number }>();
+  const add = (id: string, match: string, lineNumber: number, column = 0, severity?: HiddenFinding["severity"]): void => {
+    const key = `${id}:${lineNumber}`;
+    const seen = byLine.get(key);
+    if (seen) {
+      seen.more++;
+      return;
+    }
+    const tally = perRule.get(id) ?? { listed: 0, last: null, unlisted: 0 };
+    perRule.set(id, tally);
+    if (tally.listed >= MAX_FINDINGS_PER_RULE) {
+      tally.unlisted++;
+      return;
+    }
     const rule = RULES.get(id)!;
-    findings.push({
+    const finding: HiddenFinding = {
       patternId: rule.id,
       patternName: rule.name,
-      severity: rule.severity,
+      severity: severity ?? rule.severity,
       category: "prompt-injection",
-      match: revealClipped(match),
+      // Revealed here too (CLI): decoded selector text can carry invisibles.
+      match: revealClip(match),
       lineNumber,
-      context: context(lineNumber),
-    });
+      context: context(lineNumber, column),
+    };
+    findings.push(finding);
+    byLine.set(key, { finding, more: 0 });
+    tally.listed++;
+    tally.last = finding;
+  };
+
+  // Decoded text from the same line and channel is merged into one payload.
+  const payloadAt = new Map<string, HiddenPayload>();
+  const addPayload = (kind: HiddenPayloadKind, lineNumber: number, text: string): void => {
+    const key = `${kind}:${lineNumber}`;
+    const prev = payloadAt.get(key);
+    if (!prev) {
+      const payload = { kind, lineNumber, text: safeSlice(text, 0, MAX_PAYLOAD) };
+      payloadAt.set(key, payload);
+      payloads.push(payload);
+    } else if (prev.text.length < MAX_PAYLOAD) {
+      prev.text = safeSlice(`${prev.text}\n${text}`, 0, MAX_PAYLOAD);
+    }
   };
 
   // Fast path: ASCII-only content cannot carry invisible Unicode.
@@ -502,22 +622,22 @@ export function scanHiddenContent(content: string): HiddenScanResult {
       if (!run) continue;
       const line = lineOf(content, at, lineStarts);
       const decoded = decodeTags(run);
-      add("HC-001", decoded ? `hidden text: "${decoded}"` : `${[...run].length} tag characters`, line);
-      if (decoded) payloads.push({ kind: "unicode-tags", lineNumber: line, text: decoded.slice(0, MAX_PAYLOAD) });
+      add("HC-001", decoded ? `hidden text: "${decoded}"` : `${[...run].length} tag characters`, line, at - lineStarts[line - 1]);
+      if (decoded) addPayload("unicode-tags", line, decoded);
     }
 
     for (const m of content.matchAll(VS_RUN_RE)) {
       const line = lineOf(content, m.index!, lineStarts);
       const decoded = decodeVariationSelectors(m[0]);
-      add("HC-004", decoded ? `hidden text: "${decoded}"` : `${[...m[0]].length} variation selectors`, line);
-      if (decoded) payloads.push({ kind: "variation-selectors", lineNumber: line, text: decoded.slice(0, MAX_PAYLOAD) });
+      add("HC-004", decoded ? `hidden text: "${decoded}"` : `${[...m[0]].length} variation selectors`, line, m.index! - lineStarts[line - 1]);
+      if (decoded) addPayload("variation-selectors", line, decoded);
     }
 
     for (const m of content.matchAll(ZW_RUN_RE)) {
       const line = lineOf(content, m.index!, lineStarts);
       const decoded = decodeZeroWidthBinary(m[0]);
-      add("HC-003", decoded ? `hidden text: "${decoded}"` : `${[...m[0]].length} zero-width characters`, line);
-      if (decoded) payloads.push({ kind: "zero-width", lineNumber: line, text: decoded.slice(0, MAX_PAYLOAD) });
+      add("HC-003", decoded ? `hidden text: "${decoded}"` : `${[...m[0]].length} zero-width characters`, line, m.index! - lineStarts[line - 1]);
+      if (decoded) addPayload("zero-width", line, decoded);
     }
 
     const bidiLines = new Set<number>();
@@ -525,55 +645,88 @@ export function scanHiddenContent(content: string): HiddenScanResult {
       const line = lineOf(content, m.index!, lineStarts);
       if (bidiLines.has(line)) continue;
       bidiLines.add(line);
-      if (hasBidiTrick(lines[line - 1])) add("HC-002", lines[line - 1].trim(), line);
+      const text = lines[line - 1];
+      // Balanced isolates in RTL prose are how mixed-direction text is
+      // written; report them as info so they neither score nor hold.
+      if (hasBidiTrick(text)) {
+        add("HC-002", revealClip(text.trim()), line, m.index! - lineStarts[line - 1], isNaturalRtlBidi(text) ? "info" : undefined);
+      }
     }
 
     for (let i = 0; i < lines.length; i++) {
       for (const m of lines[i].matchAll(WORD_RE)) {
         if (LATIN_RE.test(m[0]) && CONFUSABLE_SCRIPT_RE.test(m[0])) {
-          add("HC-008", m[0], i + 1);
+          add("HC-008", m[0], i + 1, m.index!);
           break;
         }
       }
     }
   }
 
-  // HTML comments and link reference definitions render invisibly.
+  // HTML comments and link reference definitions render invisibly. Text in
+  // them aimed at the judge is HC-009; `judgeHidden` marks those lines.
+  const judgeHidden = new Set<number>();
+  const addHiddenJudge = (text: string, offset: number): void => {
+    for (const re of JUDGE_PROSE_GLOBAL_RES) {
+      re.lastIndex = 0;
+      for (let m = re.exec(text); m; m = re.exec(text)) {
+        const line = lineOf(content, offset + m.index, lineStarts);
+        if (m[0].length === 0) re.lastIndex++;
+        if (judgeHidden.has(line)) continue;
+        judgeHidden.add(line);
+        add("HC-009", revealClip(m[0].trim()), line, offset + m.index - lineStarts[line - 1]);
+      }
+    }
+  };
   const { bodies, covered } = findHiddenComments(content, lines, lineStarts);
   for (const { text: body, offset } of bodies) {
     if (body.trim().length < 8) continue;
     if (DIRECTIVE_RES.some((d) => d.test(body))) {
-      const first = offset + (body.length - body.trimStart().length);
-      add("HC-005", body.trim().slice(0, MAX_PAYLOAD).replace(/\s+/g, " "), lineOf(content, first, lineStarts));
+      const lead = body.length - body.trimStart().length;
+      const first = offset + lead;
+      const line = lineOf(content, first, lineStarts);
+      add("HC-005", revealClip(safeSlice(body, lead, lead + 4 * MAX_MATCH).replace(/\s+/g, " ").trim()), line, first - lineStarts[line - 1]);
     }
+    addHiddenJudge(body, offset);
   }
   for (let i = 0; i < lines.length; i++) {
     if (covered[i] || !/^ {0,3}\[/.test(lines[i])) continue;
     const body = linkDefinitionText(lines, i, covered);
     if (body.trim().length >= 8 && DIRECTIVE_RES.some((d) => d.test(body))) {
-      add("HC-005", body.trim().slice(0, MAX_PAYLOAD).replace(/\s+/g, " "), i + 1);
+      add("HC-005", revealClip(safeSlice(body.trim(), 0, 4 * MAX_MATCH).replace(/\s+/g, " ")), i + 1);
+    }
+    if (JUDGE_PROSE_RES.some((re) => re.test(body))) {
+      judgeHidden.add(i + 1);
+      add("HC-009", revealClip(body.trim()), i + 1);
     }
   }
 
   for (let i = 0; i < lines.length; i++) {
-    if (JUDGE_MANIPULATION_RES.some((re) => re.test(lines[i]))) add("HC-009", lines[i].trim(), i + 1);
+    const line = lines[i];
+    // Invisible characters inside the words only hide them from this check.
+    const probe = asciiOnly ? line : line.replace(INVISIBLE_RE, "");
+    if (JUDGE_FORGERY_RES.some((re) => re.test(probe))) add("HC-009", revealClip(line.trim()), i + 1);
+    else if (!judgeHidden.has(i + 1) && JUDGE_PROSE_RES.some((re) => re.test(probe))) {
+      const plain = probe === line || JUDGE_PROSE_RES.some((re) => re.test(line));
+      add(plain ? "HC-014" : "HC-009", revealClip(line.trim()), i + 1);
+    }
     // Markers written by the platform's fetcher (truncated files) and bundle
     // scanner (binary files). The CLI does not emit them yet; content that
     // carries them was fetched through the platform.
-    if (lines[i].startsWith("[vskill: file truncated at ")) add("HC-010", lines[i], i + 1);
-    if (lines[i].startsWith("[vskill: opaque binary file ")) add("HC-011", lines[i], i + 1);
+    if (line.startsWith("[vskill: file truncated at ")) add("HC-010", line, i + 1);
+    if (line.startsWith("[vskill: opaque binary file ")) add("HC-011", line, i + 1);
   }
 
   // Base64 on one line, or wrapped across consecutive lines (PEM/MIME style).
   const trimmed = lines.map((l) => l.trim());
   const pure = trimmed.map((t) => t.length > 0 && BASE64_LINE_RE.test(t));
-  const addBase64 = (candidates: string[], lineNumber: number): void => {
+  const addBase64 = (candidates: string[], lineNumber: number, column = 0): void => {
     for (const blob of candidates) {
       if (blob.length < MIN_BASE64) continue;
       const decoded = decodeBase64Text(blob);
       if (!decoded) continue;
-      add("HC-006", `decodes to: "${decoded.slice(0, MAX_MATCH)}"`, lineNumber);
-      payloads.push({ kind: "base64", lineNumber, text: decoded.slice(0, MAX_PAYLOAD) });
+      add("HC-006", `decodes to: "${revealClip(decoded)}"`, lineNumber, column);
+      addPayload("base64", lineNumber, decoded);
       return;
     }
   };
@@ -589,7 +742,7 @@ export function scanHiddenContent(content: string): HiddenScanResult {
           if (tail && m.index! + m[0].length === lineEnd) continue;
           const before = lineText.slice(Math.max(0, m.index! - 100), m.index!);
           if (DATA_URI_TAIL_RE.test(before)) continue;
-          addBase64([m[0]], i + 1);
+          addBase64([m[0]], i + 1, m.index!);
         }
       }
       if (!tail) continue;
@@ -623,10 +776,27 @@ export function scanHiddenContent(content: string): HiddenScanResult {
       const host = m[1].replace(/:\d+$/, "").replace(/^[^@]*@/, "");
       // eslint-disable-next-line no-control-regex
       if (/[^\x00-\x7F]/.test(host) || /(?:^|\.)xn--/i.test(host)) {
-        add("HC-007", host, i + 1);
+        add("HC-007", revealClip(host), i + 1, m.index!);
       }
     }
   }
 
+  // Judge manipulation in decoded invisible or encoded text.
+  for (const payload of payloads) {
+    if (JUDGE_FORGERY_RES.some((re) => re.test(payload.text)) || JUDGE_PROSE_RES.some((re) => re.test(payload.text))) {
+      add("HC-009", `[hidden ${payload.kind}] ${revealClip(payload.text.trim())}`, payload.lineNumber);
+    }
+  }
+
+  for (const { finding, more } of byLine.values()) {
+    if (more > 0) {
+      finding.match = `${finding.match} (+${more} more on this line)`;
+      finding.occurrences = more + 1;
+    }
+  }
+  for (const [id, tally] of perRule) {
+    if (tally.unlisted > 0 && tally.last) tally.last.match = `${tally.last.match} (+${tally.unlisted} more ${id} findings not listed)`;
+  }
+  for (const payload of payloads) payload.text = flat(payload.text);
   return { findings, payloads };
 }

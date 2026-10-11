@@ -474,7 +474,9 @@ describe("CLI: Tier 1 stays fast on hostile input", () => {
 
   it("keeps finding context bounded on long lines", () => {
     const { findings } = runTier1Scan("eval( ".repeat(30_000));
-    expect(findings.length).toBe(30_000);
+    // Repeated matches on one line fold into one finding with a count.
+    expect(findings.length).toBe(1);
+    expect(findings[0].occurrences).toBe(30_000);
     expect(Math.max(...findings.map((f) => f.context.length))).toBeLessThan(700);
   });
 });

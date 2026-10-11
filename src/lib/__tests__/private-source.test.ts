@@ -121,4 +121,16 @@ describe("findLockEntry", () => {
     expect(findLockEntry(lock, "other/repo/resume-tuner")).toBeNull();
     expect(findLockEntry(null, "resume-tuner")).toBeNull();
   });
+
+  it("0894: a nested <name>/SKILL.md in another skill's file list does not match", () => {
+    const l = {
+      ...lock,
+      skills: {
+        recut: entry("github:acme/secret-skills", { files: ["SKILL.md", "examples/greet/SKILL.md"] }),
+        tools: entry("github:acme/secret-skills#plugin:tools", { files: ["deploy/SKILL.md"] }),
+      },
+    };
+    expect(findLockEntry(l, "greet")).toBeNull();
+    expect(findLockEntry(l, "deploy")).toBe(l.skills.tools);
+  });
 });

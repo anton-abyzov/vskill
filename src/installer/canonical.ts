@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync, existsSync, unlinkSync, chmodSync, readdirSync, rmdirSync } from "node:fs";
 // 0706 T-004: `relative` + `sep` (as pathSep) power the cross-platform
 // path-traversal guard. `path.relative` handles Windows backslash correctly.
 import { join, relative, dirname, sep as pathSep } from "node:path";
@@ -6,7 +6,7 @@ import os from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { resolveTilde } from "../utils/paths.js";
 import { ensureFrontmatter, stripClaudeFields } from "./frontmatter.js";
-import { resolveBundleTarget } from "./bundle-files.js";
+import { resolveBundleTarget, type BundleContent } from "./bundle-files.js";
 
 export interface InstallOptions {
   global: boolean;
@@ -166,14 +166,123 @@ export function createRelativeSymlink(target: string, linkPath: string): boolean
 const COPY_FALLBACK_AGENTS = new Set(["claude-code"]);
 
 /**
- * Write agent files (agents/*.md) alongside SKILL.md in a target directory.
- * Keys are relative paths (e.g., "agents/frontend.md"), values are file contents.
+ * 0894: drop a symlink at `p` (only the link, never its target) so the next
+ * mkdir + write creates a real folder there. Without this, a copy written to
+ * an agent dir that an earlier install linked to the canonical folder goes
+ * through the link and overwrites the shared copy every other agent reads.
  */
-function writeAgentFiles(targetDir: string, agentFiles: Record<string, string>): void {
-  for (const [relPath, fileContent] of Object.entries(agentFiles)) {
-    const fullPath = resolveBundleTarget(targetDir, relPath);
+function unlinkIfSymlink(p: string): void {
+  try {
+    if (lstatSync(p).isSymbolicLink()) unlinkSync(p);
+  } catch {
+    // nothing there
+  }
+}
+
+/** 0894: how a skill bundle is written over a previous install. */
+export interface BundleWriteOptions {
+  /**
+   * Paths written with mode 0755 (git mode 100755 upstream). When given,
+   * every other bundled file is set to 0644; when absent, modes are left as
+   * the filesystem makes them (an existing file keeps its mode).
+   */
+  executables?: ReadonlySet<string>;
+  /**
+   * Accept any relative path inside the skill folder. Only for a complete
+   * skill tree fetched from the skill's own GitHub folder; every other caller
+   * (Studio, `vskill update`) keeps the standard-folder policy.
+   */
+  anyPath?: boolean;
+  /**
+   * Files the previous install of this skill recorded (lockfile `files`).
+   * Those the new bundle no longer has are removed, so a reinstall leaves no
+   * orphans. Files the previous install did not record (Studio evals, user
+   * notes) are never touched.
+   */
+  previousFiles?: readonly string[];
+}
+
+function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
+  try {
+    return lstatSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/** Remove now-empty folders from `dir` up to (not including) `root`. */
+function pruneEmptyDirs(dir: string, root: string): void {
+  let cur = dir;
+  while (cur !== root && relative(root, cur) && !relative(root, cur).startsWith("..")) {
+    try {
+      if (readdirSync(cur).length > 0) return;
+      rmdirSync(cur);
+    } catch {
+      return;
+    }
+    cur = dirname(cur);
+  }
+}
+
+/**
+ * Make `fullPath` writable as a regular file inside `root`: an ancestor that
+ * is a file or a symlink (which could also point outside the skill folder) is
+ * removed, and a folder sitting where the file goes is removed. Without this,
+ * a reinstall whose tree changed shape dies half-written with EISDIR/ENOTDIR.
+ */
+function clearPathForFile(root: string, fullPath: string): void {
+  const parts = relative(root, dirname(fullPath)).split(pathSep).filter(Boolean);
+  let cur = root;
+  for (const part of parts) {
+    cur = join(cur, part);
+    const st = lstatOrNull(cur);
+    if (!st) break;
+    if (!st.isDirectory()) unlinkSync(cur);
+  }
+  const st = lstatOrNull(fullPath);
+  if (st?.isDirectory()) rmSync(fullPath, { recursive: true, force: true });
+  else if (st?.isSymbolicLink()) unlinkSync(fullPath);
+}
+
+/**
+ * Write bundled files alongside SKILL.md in a target directory.
+ * Keys are relative paths (e.g., "agents/frontend.md", "assets/font.woff2");
+ * values are text or raw bytes, written as-is. Paths were policy-checked when
+ * the bundle entered the installer, so only traversal is re-checked here.
+ */
+function writeAgentFiles(
+  targetDir: string,
+  agentFiles: Record<string, BundleContent> | undefined,
+  bundleOpts?: BundleWriteOptions,
+): void {
+  const files = agentFiles ?? {};
+  if (bundleOpts?.previousFiles) {
+    const keep = new Set(Object.keys(files));
+    for (const rel of bundleOpts.previousFiles) {
+      if (rel === "SKILL.md" || keep.has(rel)) continue;
+      let target: string;
+      try {
+        target = resolveBundleTarget(targetDir, rel, { anyPath: true });
+      } catch {
+        continue; // never act on an unsafe recorded path
+      }
+      const st = lstatOrNull(target);
+      if (st && !st.isDirectory()) {
+        unlinkSync(target);
+        pruneEmptyDirs(dirname(target), targetDir);
+      }
+    }
+  }
+  const anyPath = bundleOpts?.anyPath === true;
+  const executables = bundleOpts?.executables;
+  for (const [relPath, fileContent] of Object.entries(files)) {
+    const fullPath = resolveBundleTarget(targetDir, relPath, { anyPath });
+    clearPathForFile(targetDir, fullPath);
     mkdirSync(dirname(fullPath), { recursive: true });
     writeFileSync(fullPath, fileContent);
+    // Explicit when the caller knows the modes: writeFileSync keeps the old
+    // mode of an existing file, so a dropped exec bit would otherwise stick.
+    if (executables) chmodSync(fullPath, executables.has(relPath) ? 0o755 : 0o644);
   }
 }
 
@@ -193,7 +302,8 @@ export function installSymlink(
   content: string,
   agents: AgentDefinition[],
   opts: InstallOptions,
-  agentFiles?: Record<string, string>,
+  agentFiles?: Record<string, BundleContent>,
+  bundleOpts?: BundleWriteOptions,
 ): string[] {
   content = ensureFrontmatter(content, skillName);
   const strippedContent = stripClaudeFields(content, skillName);
@@ -206,7 +316,7 @@ export function installSymlink(
     canonicalSkillDir = join(ensureCanonicalDir(opts.projectRoot, opts.global), skillName);
     mkdirSync(canonicalSkillDir, { recursive: true });
     writeFileSync(join(canonicalSkillDir, "SKILL.md"), strippedContent);
-    if (agentFiles) writeAgentFiles(canonicalSkillDir, agentFiles);
+    writeAgentFiles(canonicalSkillDir, agentFiles, bundleOpts);
   }
 
   const installed: string[] = [];
@@ -244,9 +354,10 @@ export function installSymlink(
     if (COPY_FALLBACK_AGENTS.has(agent.id)) {
       // Claude Code gets full content with all fields
       const agentContent = agent.id === "claude-code" ? content : strippedContent;
+      unlinkIfSymlink(linkPath);
       mkdirSync(linkPath, { recursive: true });
       writeFileSync(join(linkPath, "SKILL.md"), agentContent);
-      if (agentFiles) writeAgentFiles(linkPath, agentFiles);
+      writeAgentFiles(linkPath, agentFiles, bundleOpts);
       installed.push(linkPath);
       continue;
     }
@@ -257,9 +368,10 @@ export function installSymlink(
       installed.push(linkPath);
     } else {
       // Fallback to copy on symlink failure — use stripped content for non-Claude
+      unlinkIfSymlink(linkPath);
       mkdirSync(linkPath, { recursive: true });
       writeFileSync(join(linkPath, "SKILL.md"), strippedContent);
-      if (agentFiles) writeAgentFiles(linkPath, agentFiles);
+      writeAgentFiles(linkPath, agentFiles, bundleOpts);
       installed.push(linkPath);
     }
   }
@@ -277,7 +389,8 @@ export function installCopy(
   content: string,
   agents: AgentDefinition[],
   opts: InstallOptions,
-  agentFiles?: Record<string, string>,
+  agentFiles?: Record<string, BundleContent>,
+  bundleOpts?: BundleWriteOptions,
 ): string[] {
   content = ensureFrontmatter(content, skillName);
   const strippedContent = stripClaudeFields(content, skillName);
@@ -293,9 +406,12 @@ export function installCopy(
       : resolveAgentSkillsDir(agent, opts);
     const skillDir = join(agentSkillsDir, skillName);
     if (installed.includes(skillDir)) continue;
+    // A copy for one agent must not land in another's folder through an
+    // old link (the shared canonical folder itself is left as it is).
+    if (!isSatisfiedByCanonical(agent, opts)) unlinkIfSymlink(skillDir);
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(join(skillDir, "SKILL.md"), agentContent);
-    if (agentFiles) writeAgentFiles(skillDir, agentFiles);
+    writeAgentFiles(skillDir, agentFiles, bundleOpts);
     installed.push(skillDir);
   }
 

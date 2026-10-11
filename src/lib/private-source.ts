@@ -345,6 +345,27 @@ export async function filterPublicEntries(
 }
 
 /**
+ * 0894: does a lock entry's `files` list name skill `name`? Only the
+ * top-level `<name>/SKILL.md` of a plugin install counts (plus the repo-path
+ * form `[plugins/<p>/]skills/<name>/SKILL.md` that `vskill update` records for
+ * plugins). A nested `examples/<name>/SKILL.md` inside some other skill's
+ * folder — lockfiles now list every installed file — never matches.
+ */
+export function lockFilesNameSkill(
+  entry: Pick<SkillLockEntry, "files" | "source">,
+  name: string,
+): boolean {
+  if (!entry.files) return false;
+  const top = `${name}/SKILL.md`;
+  const isPlugin = typeof entry.source === "string" && entry.source.includes("#plugin:");
+  return entry.files.some(
+    (f) =>
+      f === top ||
+      (isPlugin && (f === `skills/${top}` || /^plugins\/[^/]+\/skills\//.test(f) && f.endsWith(`/skills/${top}`))),
+  );
+}
+
+/**
  * Find the lock entry a user-typed skill name refers to: the lock key itself,
  * or the canonical "owner/repo/skill" form of a GitHub-sourced entry.
  */
@@ -359,11 +380,10 @@ export function findLockEntry(
   if (parts.length === 1) {
     // A skill inside a plugin install (keyed by plugin name): match the
     // recorded files, then the key ignoring case.
-    const file = `${name}/SKILL.md`;
     const lower = name.toLowerCase();
     for (const [key, entry] of Object.entries(lock.skills)) {
       if (key.toLowerCase() === lower) return entry;
-      if (entry.files?.some((f) => f === file || f.endsWith(`/${file}`))) return entry;
+      if (lockFilesNameSkill(entry, name)) return entry;
     }
     return null;
   }

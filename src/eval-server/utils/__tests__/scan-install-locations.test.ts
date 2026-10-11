@@ -135,6 +135,15 @@ describe("scanSkillInstallLocations", () => {
     expect(plugin?.pluginMarketplace).toBe("anthropic-skills");
   });
 
+  it("TC-0894b: finds a personal Antigravity install in the legacy ~/.gemini/antigravity/skills", () => {
+    makeSkillFile(join(tmpHome, ".gemini", "antigravity", "skills", "greet-anton"));
+
+    const locations = scanSkillInstallLocations("anton-abyzov/greet-anton/greet-anton", tmpRoot);
+
+    const ag = locations.find((l) => l.scope === "personal" && l.agent === "antigravity");
+    expect(ag?.dir).toBe(join(tmpHome, ".gemini", "antigravity", "skills", "greet-anton"));
+  });
+
   it("TC-005: returns an empty array when no installs exist anywhere", () => {
     const locations = scanSkillInstallLocations(
       "anton-abyzov/greet-anton/greet-anton",

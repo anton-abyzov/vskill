@@ -17,6 +17,11 @@ import { join as joinPath } from "node:path";
 import { existsSync as fsExistsSync, readdirSync as fsReaddirSync } from "node:fs";
 import { homedir as osHomedir } from "node:os";
 import { detectBinary } from "../utils/resolve-binary.js";
+import {
+  ANTIGRAVITY_LEGACY_GLOBAL_DIR,
+  agentGlobalInstallDirs,
+  resolveAgentGlobalSkillsDir,
+} from "./global-dirs.js";
 import type { FormatTransformer } from "../installer/transformers/index.js";
 // 0845 T-006..T-010 — per-tool format transformers wired onto Tier-2
 // entries below. Each is a pure function (parsedSkill → files).
@@ -143,6 +148,12 @@ export interface AgentDefinition {
    *  `globalSkillsDir` and the shared `~/.agents/skills`), e.g. Cursor reads
    *  `~/.claude/skills` and `~/.codex/skills`. Used by `vskill doctor`. */
   extraGlobalSkillsDirs?: string[];
+
+  /** 0894: detect this agent only through `detectInstalled`, never through
+   *  the global-skills-dir fallback — for an agent whose global dir is owned
+   *  by another tool (VS Code Copilot shares `~/.copilot/skills` with
+   *  Copilot CLI, so that folder says nothing about the editor). */
+  noDirFallback?: boolean;
 }
 
 /** 0894: the shared, cross-agent skills folder (agentskills.io convention). */
@@ -168,8 +179,6 @@ export const LEGACY_LOCAL_SKILLS_DIRS: readonly string[] = Object.freeze([
   '.github/copilot/skills',
 ]);
 
-/** 0894: Antigravity's legacy IDE global skills folder. */
-const ANTIGRAVITY_LEGACY_GLOBAL_DIR = '~/.gemini/antigravity/skills';
 
 /** 0694 (AC-US1-04): Backward-compat alias map for renamed agent ids.
  *  Consumed by `getAgent()` so existing scripts/lockfiles continue to work
@@ -276,6 +285,7 @@ export const AGENTS_REGISTRY: AgentDefinition[] = [
     displayName: 'GitHub Copilot (VS Code)',
     localSkillsDir: '.github/skills',
     globalSkillsDir: '~/.copilot/skills',
+    noDirFallback: true,
     isUniversal: true,
     // 0706 T-003: pure-Node detection — the old shell pipe
     // (`which code && ls ~/.vscode/extensions/github.copilot-* 2>/dev/null`)
@@ -1076,6 +1086,29 @@ function expandHome(p: string): string {
  *
  * @returns Array of installed agent definitions
  */
+/**
+ * Tier 2 detection: the agent counts as installed when one of its global
+ * skills dirs exists. Guards: never on generic dirs ($HOME, $HOME/.config),
+ * never on the shared ~/.agents/skills (0894: any vskill install creates
+ * it), and never for an agent flagged `noDirFallback`. Antigravity's legacy
+ * IDE dir is checked too (0894), since installs land there while it exists.
+ */
+function globalDirFallbackDetects(
+  agent: AgentDefinition,
+  exists: (p: string) => boolean,
+  parentOf: (p: string) => string,
+): boolean {
+  if (agent.noDirFallback === true) return false;
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const shared = expandHome(SHARED_GLOBAL_SKILLS_DIR);
+  for (const globalDir of agentGlobalInstallDirs(agent)) {
+    const configDir = parentOf(globalDir);
+    if (configDir === home || configDir === `${home}/.config` || globalDir === shared) continue;
+    if (exists(globalDir)) return true;
+  }
+  return false;
+}
+
 export async function detectInstalledAgents(): Promise<AgentDefinition[]> {
   const { exec } = await import('node:child_process');
   const { promisify } = await import('node:util');
@@ -1122,20 +1155,8 @@ export async function detectInstalledAgents(): Promise<AgentDefinition[]> {
       // many tools leave config dirs behind even when not actively used,
       // leading to unwanted local skill directories being created for every detected agent.
       try {
-        const globalDir = expandHome(agent.globalSkillsDir);
-        const home = process.env.HOME || process.env.USERPROFILE || '';
-        const configDir = dirname(globalDir);
-        // Guard: don't match on generic dirs like $HOME or $HOME/.config,
-        // nor on the shared ~/.agents/skills folder (0894) — any vskill
-        // install creates it, so it says nothing about which agent is present.
-        if (
-          configDir !== home &&
-          configDir !== `${home}/.config` &&
-          globalDir !== expandHome(SHARED_GLOBAL_SKILLS_DIR)
-        ) {
-          if (existsSync(globalDir)) {
-            results.push(agent);
-          }
+        if (globalDirFallbackDetects(agent, existsSync, dirname)) {
+          results.push(agent);
         }
       } catch {
         // Skip on any error
@@ -1184,8 +1205,7 @@ export interface SupportedAgent {
  * registry. See AC-US3-03.
  */
 function resolveGlobalDirForAgent(agent: AgentDefinition): string {
-  if (agent.id === "antigravity") return resolveAntigravityGlobalDir();
-  return expandHome(agent.globalSkillsDir);
+  return resolveAgentGlobalSkillsDir(agent);
 }
 
 /**
@@ -1195,16 +1215,8 @@ function resolveGlobalDirForAgent(agent: AgentDefinition): string {
  * the registry default `~/.gemini/config/skills` (Antigravity 2.0 / IDE).
  */
 export function resolveAntigravityGlobalDir(): string {
-  const override = process.env.VSKILL_ANTIGRAVITY_SKILLS_DIR;
-  if (override && override.trim().length > 0) return override.trim();
-  const legacy = expandHome(ANTIGRAVITY_LEGACY_GLOBAL_DIR);
-  try {
-    if (fsExistsSync(legacy)) return legacy;
-  } catch {
-    // fall through to the default
-  }
   const agent = AGENTS_REGISTRY.find((a) => a.id === "antigravity");
-  return expandHome(agent?.globalSkillsDir ?? "~/.gemini/config/skills");
+  return resolveAgentGlobalSkillsDir({ id: "antigravity", globalSkillsDir: agent?.globalSkillsDir ?? "~/.gemini/config/skills" });
 }
 
 /**
@@ -1241,16 +1253,7 @@ async function probeAgentDetected(agent: AgentDefinition): Promise<boolean> {
   try {
     const { existsSync } = await import("node:fs");
     const { dirname } = await import("node:path");
-    const globalDir = expandHome(agent.globalSkillsDir);
-    const home = process.env.HOME || process.env.USERPROFILE || "";
-    const configDir = dirname(globalDir);
-    if (
-      configDir !== home &&
-      configDir !== `${home}/.config` &&
-      globalDir !== expandHome(SHARED_GLOBAL_SKILLS_DIR)
-    ) {
-      if (existsSync(globalDir)) return true;
-    }
+    if (globalDirFallbackDetects(agent, existsSync, dirname)) return true;
   } catch {
     // ignore — agent is simply undetected
   }

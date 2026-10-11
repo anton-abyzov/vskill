@@ -95,9 +95,10 @@ export function safeAppendYamlList(
         `key "${key}" is not a block-sequence (found ${block.shape})`,
       );
     }
-    if (existing.includes(value)) return { status: "already-present" };
-    const items = [...existing, value].map((v) => `${DEFAULT_INDENT}- ${v}`);
-    const next = [...lines.slice(0, keyLineIdx), `${key}:`, ...items, ...lines.slice(keyLineIdx + 1)];
+    if (existing.items.includes(value)) return { status: "already-present" };
+    const items = [...existing.items, value].map((v) => `${DEFAULT_INDENT}- ${v}`);
+    const keyLine = existing.comment ? `${key}: ${existing.comment}` : `${key}:`;
+    const next = [...lines.slice(0, keyLineIdx), keyLine, ...items, ...lines.slice(keyLineIdx + 1)];
     return mutateWithBackup(filePath, original, next.join("\n"));
   }
 
@@ -220,20 +221,31 @@ function readListBlock(
 }
 
 /**
- * Items of a one-line `key: value` or `key: [a, b]`, or null when the value
- * is something we will not rewrite (nested flow, comment-only, multi-line).
+ * Items of a one-line `key: value` or `key: [a, b]` plus its trailing
+ * `# comment` (kept on the rewritten `key:` line), or null when the value is
+ * something we will not rewrite (nested flow, comment-only, multi-line).
+ *
+ * 0894: a value with a quote character is refused too. A quoted scalar or
+ * flow item can hold ` #` or `,` (`"notes #2.md"`, `["a, b.md"]`), and this
+ * line-based rewrite does not parse YAML quoting, so splitting it would
+ * break the file or silently change an entry.
  */
-function scalarOrFlowItems(line: string, key: string): string[] | null {
-  const rest = line.slice(line.indexOf(":") + 1).replace(/\s+#.*$/, "").trim();
-  if (!rest || !line.trimStart().startsWith(`${key}:`)) return null;
+function scalarOrFlowItems(line: string, key: string): { items: string[]; comment: string } | null {
+  if (!line.trimStart().startsWith(`${key}:`)) return null;
+  const raw = line.slice(line.indexOf(":") + 1);
+  if (/["']/.test(raw)) return null;
+  const m = raw.match(/^(.*?)(\s+#.*)?$/);
+  const rest = (m?.[1] ?? "").trim();
+  const comment = (m?.[2] ?? "").trim();
+  if (!rest) return null;
   if (rest.startsWith("[")) {
     if (!rest.endsWith("]")) return null;
     const inner = rest.slice(1, -1).trim();
     if (/[\[\]{}]/.test(inner)) return null;
-    return inner ? inner.split(",").map((v) => v.trim()).filter(Boolean) : [];
+    return { items: inner ? inner.split(",").map((v) => v.trim()).filter(Boolean) : [], comment };
   }
   if (/^[{|>&*!]/.test(rest)) return null;
-  return [rest];
+  return { items: [rest], comment };
 }
 
 function appendKeyAtEnd(original: string, key: string, value: string): string {

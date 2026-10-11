@@ -592,6 +592,43 @@ describe("updateCommand", () => {
     expect(ghostDeletes.length).toBeGreaterThan(0);
   });
 
+  it("0894: keeps a full installed skill folder when the update fetched only SKILL.md", async () => {
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: ["claude-code"],
+      skills: {
+        frontend: {
+          version: "1.0.0",
+          sha: "old-sha-" + "0".repeat(56),
+          tier: "VERIFIED",
+          installedAt: "2026-01-01T00:00:00.000Z",
+          source: "github:test/repo",
+          files: ["SKILL.md", "assets/fonts/Inter.woff2", "scripts/lib/a.mjs"],
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockFetchFromSource.mockResolvedValue({
+      content: "# Updated",
+      version: "2.0.0",
+      sha: "new-sha-" + "1".repeat(56),
+      tier: "VERIFIED",
+      files: { "SKILL.md": "# Updated" },
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand("frontend", { all: false });
+
+    expect(mockUnlinkSync).not.toHaveBeenCalled();
+    const writtenLock = mockWriteLockfile.mock.calls[0][0] as {
+      skills: Record<string, { files?: string[] }>;
+    };
+    expect(writtenLock.skills["frontend"].files).toEqual([
+      "SKILL.md", "assets/fonts/Inter.woff2", "scripts/lib/a.mjs",
+    ]);
+  });
+
   it("updates lockfile files array to reflect new version's files", async () => {
     mockReadLockfile.mockReturnValue({
       version: 1,

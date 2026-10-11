@@ -37,6 +37,8 @@ export interface BuildGitHubInstallLockEntryArgs {
   global: boolean;
   /** ISO timestamp; injected for deterministic tests, defaults to `now`. */
   installedAt?: string;
+  /** 0894: every installed file relative to the skill folder (defaults to SKILL.md). */
+  files?: string[];
 }
 
 export function buildGitHubInstallLockEntry(
@@ -49,7 +51,7 @@ export function buildGitHubInstallLockEntry(
     installedAt: args.installedAt ?? new Date().toISOString(),
     source: `github:${args.owner}/${args.repo}`,
     scope: args.global ? "user" : "project",
-    files: ["SKILL.md"],
+    files: args.files && args.files.length > 0 ? [...args.files] : ["SKILL.md"],
     sourceType: "github",
     sourceRepoUrl: `https://github.com/${args.owner}/${args.repo}`,
   };

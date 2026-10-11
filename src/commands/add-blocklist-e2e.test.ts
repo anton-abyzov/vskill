@@ -63,9 +63,23 @@ const mockWriteLockfile = vi.fn();
 vi.mock("../lockfile/index.js", () => ({
   ensureLockfile: (...args: unknown[]) => mockEnsureLockfile(...args),
   writeLockfile: (...args: unknown[]) => mockWriteLockfile(...args),
+  readLockfile: () => null,
 }));
 
 const mockRunTier1Scan = vi.fn();
+// 0894: the complete-skill-folder fetch has its own tests
+// (add-github-bundle.test.ts); here it returns a SKILL.md-only folder.
+const mockPrepareGitHubSkillBundle = vi.fn();
+vi.mock("./add-github-bundle.js", () => ({
+  prepareGitHubSkillBundle: (...args: unknown[]) => mockPrepareGitHubSkillBundle(...args),
+}));
+beforeEach(() => {
+  mockPrepareGitHubSkillBundle.mockResolvedValue({
+    ok: true,
+    bundle: { files: {}, executables: [], fileList: ["SKILL.md"], skipped: [], totalBytes: 0 },
+  });
+});
+
 vi.mock("../scanner/index.js", () => ({
   runTier1Scan: (...args: unknown[]) => mockRunTier1Scan(...args),
 }));

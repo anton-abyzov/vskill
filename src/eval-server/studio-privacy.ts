@@ -21,6 +21,7 @@ import {
   isPrivateOrUnknownRepo,
   isPrivateSource,
   localDirGitHubRepo,
+  lockFilesNameSkill,
   type GitHubRepoRef,
 } from "../lib/private-source.js";
 import { classifyOrigin } from "../eval/skill-scanner.js";
@@ -71,9 +72,8 @@ export function findLockEntryForStudioSkill(
       if (s.pluginMarketplace && entry.marketplace && entry.marketplace !== s.pluginMarketplace) continue;
       return entry;
     }
-    const file = `${s.skill}/SKILL.md`;
     for (const entry of Object.values(skills)) {
-      if (entry.files?.some((f) => f === file || f.endsWith(`/${file}`))) return entry;
+      if (lockFilesNameSkill(entry, s.skill)) return entry;
     }
   }
   return null;

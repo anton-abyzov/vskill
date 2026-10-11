@@ -36,7 +36,7 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import os from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AGENTS_REGISTRY, type AgentDefinition } from "../agents/agents-registry.js";
 import { stripClaudeFields } from "../installer/frontmatter.js";
 import { bold, cyan, dim, green, red, yellow } from "../utils/output.js";
@@ -176,6 +176,19 @@ function safeRealpath(p: string): string | null {
   }
 }
 
+/** Errors that mean a link target really is gone (vs. unreadable right now:
+ *  EACCES, EIO, ETIMEDOUT, ... on a locked folder or an unreachable share). */
+const GONE_CODES = new Set(["ENOENT", "ENOTDIR", "ELOOP"]);
+
+/** Resolve a link: its real path, or null with the error code. */
+function resolveLink(p: string): { real: string | null; code?: string } {
+  try {
+    return { real: realpathSync(p) };
+  } catch (err) {
+    return { real: null, code: (err as NodeJS.ErrnoException).code ?? "EUNKNOWN" };
+  }
+}
+
 interface DirInfo {
   scope: DoctorScope;
   /** Path as configured (first one seen for this real dir). */
@@ -226,8 +239,11 @@ interface Entry {
   path: string;
   dirInfo: DirInfo;
   isLink: boolean;
-  /** Resolved real folder; null for a broken link. */
+  /** Resolved real folder; null for a broken or unreadable link. */
   real: string | null;
+  /** Set when the link target could not be read for a reason other than
+   *  being gone (EACCES, EIO, ...): reported, never removed. */
+  unreadable?: string;
 }
 
 function listEntries(info: DirInfo, home: string): Entry[] {
@@ -253,7 +269,7 @@ function listEntries(info: DirInfo, home: string): Entry[] {
       continue;
     }
     if (st.isSymbolicLink()) {
-      const real = safeRealpath(path);
+      const { real, code } = resolveLink(path);
       if (real) {
         try {
           if (!statSync(real).isDirectory()) continue;
@@ -261,7 +277,9 @@ function listEntries(info: DirInfo, home: string): Entry[] {
           continue;
         }
       }
-      out.push({ scope: info.scope, name, path, dirInfo: info, isLink: true, real });
+      const entry: Entry = { scope: info.scope, name, path, dirInfo: info, isLink: true, real };
+      if (!real && code && !GONE_CODES.has(code)) entry.unreadable = code;
+      out.push(entry);
     } else if (st.isDirectory()) {
       if (!existsSync(join(path, "SKILL.md"))) continue;
       out.push({ scope: info.scope, name, path, dirInfo: info, isLink: false, real: safeRealpath(path) ?? path });
@@ -274,9 +292,15 @@ function listEntries(info: DirInfo, home: string): Entry[] {
 // Content hashing + frontmatter
 // ---------------------------------------------------------------------------
 
-/** Hash every file in a folder (sorted by relative path), ignoring .DS_Store. */
+/** Hash every file in a folder (sorted by relative path), ignoring .DS_Store.
+ *  0894: a file's executable bit is part of its record (a copy whose script
+ *  lost +x is not identical), and a symlink inside the skill is hashed by
+ *  where it resolves — inside the skill (relative) or outside (absolute) —
+ *  not by its link text, so `assets -> ../foo-assets` in two copies that
+ *  point at different folders does not count as identical. */
 export function hashSkillFolder(dir: string, normalizeSkillMd?: (text: string) => string): string {
   const h = createHash("sha256");
+  const rootReal = safeRealpath(dir) ?? resolve(dir);
   const walk = (abs: string, rel: string) => {
     let names: string[];
     try {
@@ -295,7 +319,7 @@ export function hashSkillFolder(dir: string, normalizeSkillMd?: (text: string) =
         continue;
       }
       if (st.isSymbolicLink()) {
-        h.update(`L\0${childRel}\0${readlinkSync(childAbs)}\0`);
+        h.update(`L\0${childRel}\0${linkDestination(childAbs, rootReal)}\0`);
       } else if (st.isDirectory()) {
         h.update(`D\0${childRel}\0`);
         walk(childAbs, childRel);
@@ -303,12 +327,30 @@ export function hashSkillFolder(dir: string, normalizeSkillMd?: (text: string) =
         const raw = readFileSync(childAbs);
         const data = normalizeSkillMd && childRel === "SKILL.md" ? normalizeSkillMd(raw.toString("utf8")) : raw;
         const fh = createHash("sha256").update(data).digest("hex");
-        h.update(`F\0${childRel}\0${fh}\0`);
+        const exec = (st.mode & 0o111) !== 0 ? "x" : "-";
+        h.update(`F\0${childRel}\0${exec}\0${fh}\0`);
       }
     }
   };
   walk(dir, "");
   return h.digest("hex");
+}
+
+/** Where a symlink inside a skill folder leads, for hashing. */
+function linkDestination(linkAbs: string, rootReal: string): string {
+  const target = safeRealpath(linkAbs);
+  if (target) {
+    const rel = relative(rootReal, target);
+    const outside = rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+    return outside ? `out:${target}` : `in:${rel}`;
+  }
+  let text = "";
+  try {
+    text = readlinkSync(linkAbs);
+  } catch {
+    // unreadable link
+  }
+  return `broken:${resolve(dirname(linkAbs), text)}`;
 }
 
 export interface SkillFrontmatter {
@@ -345,7 +387,22 @@ export function parseSkillFrontmatter(content: string): SkillFrontmatter | null 
       }
       value = raw.trim().startsWith("|") ? block.join("\n").trim() : block.filter(Boolean).join(" ").trim();
     } else {
-      value = unquote(raw);
+      // A plain or quoted scalar may continue on more-indented lines
+      // (YAML folds them with a space); a blank line inside is a line break.
+      const parts = [raw.trim()];
+      while (
+        i + 1 < lines.length &&
+        (/^\s+\S/.test(lines[i + 1]) ||
+          (lines[i + 1].trim() === "" && i + 2 < lines.length && /^\s+\S/.test(lines[i + 2])))
+      ) {
+        parts.push(lines[++i].trim());
+      }
+      let folded = "";
+      for (const part of parts) {
+        if (part === "") folded += "\n";
+        else folded += folded === "" || folded.endsWith("\n") ? part : ` ${part}`;
+      }
+      value = unquote(folded);
     }
     out[key] = value;
   }
@@ -366,7 +423,7 @@ const NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 // in prose (migrate-to-codex itself does) is not damaged.
 const MIGRATION_MARKERS: Array<[string, RegExp]> = [
   ["## MANUAL MIGRATION REQUIRED", /^## MANUAL MIGRATION REQUIRED\s*$/m],
-  [".Codex/", /(^|[\s`"'(~])\.Codex\//m],
+  [".Codex/", /(^|[\s`"'(~/])\.Codex\//m],
 ];
 
 // ---------------------------------------------------------------------------
@@ -393,7 +450,37 @@ function issue(
   return out;
 }
 
-function scanScope(scope: DoctorScope, home: string, cwd: string, platform: NodeJS.Platform): ScopeScan {
+/** A path as `<real parent dir>/<name>`, so two spellings of one entry match. */
+function physicalPath(p: string): string {
+  return join(safeRealpath(dirname(p)) ?? dirname(p), basename(p));
+}
+
+/** Every path a link passes through on its way to the real folder (one
+ *  readlink hop at a time), excluding the link itself. */
+function linkChain(p: string): string[] {
+  const hops: string[] = [];
+  let cur = p;
+  for (let i = 0; i < 40; i++) {
+    let target: string;
+    try {
+      if (!lstatSync(cur).isSymbolicLink()) break;
+      target = readlinkSync(cur);
+    } catch {
+      break;
+    }
+    cur = resolve(dirname(cur), target);
+    hops.push(physicalPath(cur));
+  }
+  return hops;
+}
+
+function scanScope(
+  scope: DoctorScope,
+  home: string,
+  cwd: string,
+  platform: NodeJS.Platform,
+  globalReals: ReadonlySet<string> = new Set(),
+): ScopeScan {
   const dirs = collectDirs(scope, home, cwd);
   const entries = dirs.flatMap((d) => listEntries(d, home));
   const issues: DoctorIssue[] = [];
@@ -407,12 +494,21 @@ function scanScope(scope: DoctorScope, home: string, cwd: string, platform: Node
       } catch {
         // unreadable link — still broken
       }
-      issues.push(issue("broken-link", scope, e.name, [e.path], `link target ${target || "?"} does not exist`, true));
+      if (e.unreadable) {
+        // Locked folder, unmounted share, I/O error: it may work again, so
+        // never delete it.
+        issues.push(issue("broken-link", scope, e.name, [e.path],
+          `link target ${target || "?"} is unreadable (${e.unreadable}) — left alone`, false));
+      } else {
+        issues.push(issue("broken-link", scope, e.name, [e.path], `link target ${target || "?"} does not exist`, true));
+      }
     }
   }
 
   // 2. Same folder name as 2+ distinct real folders.
   const realByName = new Map<string, Entry[]>();
+  // Folder name → real folders check 2 compared (so check 5 can skip them).
+  const checkedPairs = new Map<string, Set<string>>();
   for (const e of entries) {
     if (e.isLink || !e.real) continue;
     const list = realByName.get(e.name) ?? [];
@@ -421,6 +517,7 @@ function scanScope(scope: DoctorScope, home: string, cwd: string, platform: Node
   }
   for (const [name, list] of realByName) {
     if (list.length < 2) continue;
+    checkedPairs.set(name, new Set(list.map((e) => e.real!)));
     const hashes = list.map((e) => hashSkillFolder(e.real!));
     if (new Set(hashes).size > 1) {
       // A Claude Code copy that only adds Claude-only frontmatter is how
@@ -455,8 +552,16 @@ function scanScope(scope: DoctorScope, home: string, cwd: string, platform: Node
       dirsByReader.set(r, list);
     }
   }
+  // A link that another scanned link passes through is load-bearing: removing
+  // it would leave that other link dangling (e.g. ~/.agents/skills/foo ->
+  // ../../.codex/skills/foo -> ~/dev/foo), so it is never redundant.
+  const throughPaths = new Set<string>();
+  for (const f of entries) {
+    if (f.isLink) for (const hop of linkChain(f.path)) throughPaths.add(hop);
+  }
   for (const e of entries) {
     if (!e.isLink || !e.real || e.dirInfo.shared) continue;
+    if (throughPaths.has(join(e.dirInfo.real, e.name))) continue;
     const readers = [...e.dirInfo.readers].sort();
     if (readers.length === 0) continue;
     const covered = readers.every((r) =>
@@ -471,6 +576,7 @@ function scanScope(scope: DoctorScope, home: string, cwd: string, platform: Node
   // 4. Per real folder: migration damage, name and description checks.
   const seenReal = new Set<string>();
   const declared = new Map<string, string>(); // real → declared name
+  const frontmatterName = new Map<string, string>(); // real → name, when declared
   for (const e of entries) {
     if (!e.real || seenReal.has(e.real)) continue;
     seenReal.add(e.real);
@@ -489,9 +595,7 @@ function scanScope(scope: DoctorScope, home: string, cwd: string, platform: Node
     if (!name) {
       issues.push(issue("bad-name", scope, folder, [join(shown, "SKILL.md")], "frontmatter has no name", false));
     } else {
-      if (name !== folder) {
-        issues.push(issue("name-mismatch", scope, folder, [shown], `frontmatter name "${name}" differs from folder "${folder}"`, false));
-      }
+      frontmatterName.set(e.real, name);
       if (name.length > 64 || !NAME_RE.test(name)) {
         issues.push(issue("bad-name", scope, folder, [join(shown, "SKILL.md")],
           `name "${name}" must be lowercase letters, digits and single hyphens, at most 64 chars`, false));
@@ -506,8 +610,27 @@ function scanScope(scope: DoctorScope, home: string, cwd: string, platform: Node
     }
   }
 
-  // 5. Two different folders (different folder names) visible to one agent
-  //    that declare the same name. Same-folder-name pairs are covered above.
+  // 4b. Name vs folder, per folder name an agent actually sees: a link
+  //     named `bar` to a folder declaring `foo` is a mismatch even when the
+  //     real folder `foo` itself is fine (0894).
+  const seenFolderName = new Set<string>();
+  for (const e of entries) {
+    if (!e.real) continue;
+    const name = frontmatterName.get(e.real);
+    const folder = e.isLink ? e.name : basename(e.real);
+    const key = `${e.real}\0${folder}`;
+    if (!name || seenFolderName.has(key)) continue;
+    seenFolderName.add(key);
+    if (name !== folder) {
+      const shown = e.isLink ? e.path : e.real;
+      issues.push(issue("name-mismatch", scope, folder, [shown], `frontmatter name "${name}" differs from folder "${folder}"`, false));
+    }
+  }
+
+  // 5. Two different folders visible to one agent that declare the same
+  //    name. Same-folder-name pairs of real folders are covered by check 2;
+  //    a pair where one side is a link to a folder outside the scanned dirs
+  //    is not, so it is reported here (0894).
   const dupes = new Map<string, { name: string; reals: Map<string, string>; agents: Set<string> }>();
   for (const [reader, readerDirs] of dirsByReader) {
     const byName = new Map<string, Map<string, string>>(); // declared → real → shown path
@@ -524,7 +647,10 @@ function scanScope(scope: DoctorScope, home: string, cwd: string, platform: Node
     for (const [n, reals] of byName) {
       if (reals.size < 2) continue;
       const folders = new Set([...reals.values()].map((p) => basename(p)));
-      if (folders.size < 2) continue;
+      if (folders.size < 2) {
+        const compared = checkedPairs.get([...folders][0]);
+        if (compared && [...reals.keys()].every((r) => compared.has(r))) continue;
+      }
       const key = `${n}\0${[...reals.keys()].sort().join("\0")}`;
       const rec = dupes.get(key) ?? { name: n, reals, agents: new Set<string>() };
       rec.agents.add(reader);
@@ -535,6 +661,21 @@ function scanScope(scope: DoctorScope, home: string, cwd: string, platform: Node
     const paths = [...rec.reals.values()].sort();
     issues.push(issue("duplicate-name", scope, rec.name, paths,
       `${paths.length} folders declare name "${rec.name}"`, false, [...rec.agents].sort()));
+  }
+
+  // A project folder that is physically a global one (a symlinked dotfiles
+  // setup): fixing it from the project would change what every other
+  // project sees, so leave the fix to the global scope.
+  if (scope === "project" && globalReals.size > 0) {
+    const inGlobal = new Set(entries.filter((e) => globalReals.has(e.dirInfo.real)).map((e) => e.path));
+    for (const i of issues) {
+      if (!i.fixable) continue;
+      const touched = i.kind === "identical-copy" ? i.paths.slice(1) : i.paths;
+      if (touched.some((p) => inGlobal.has(p))) {
+        i.fixable = false;
+        i.message += " (folder is also a global skills folder — fix it with --global)";
+      }
+    }
   }
 
   return { dirs, entries, issues };
@@ -548,6 +689,12 @@ function removeLink(path: string, kind: DoctorIssueKind): DoctorFixAction {
   try {
     if (!lstatSync(path).isSymbolicLink()) {
       return { kind, action: "remove-link", path, ok: false, error: "no longer a link — left alone" };
+    }
+    if (kind === "broken-link") {
+      const { real, code } = resolveLink(path);
+      if (real || !code || !GONE_CODES.has(code)) {
+        return { kind, action: "remove-link", path, ok: false, error: real ? "link works again — left alone" : `target unreadable (${code}) — left alone` };
+      }
     }
     unlinkSync(path);
     return { kind, action: "remove-link", path, ok: true };
@@ -567,23 +714,37 @@ function replaceWithLink(copy: string, keep: string, platform: NodeJS.Platform):
     if (st.isSymbolicLink() || !st.isDirectory()) return { ...base, error: "no longer a real folder — left alone" };
     const keepHash = hashSkillFolder(keep);
     if (hashSkillFolder(copy) !== keepHash) return { ...base, error: "content changed since the scan — left alone" };
-    const aside = `${copy}.vskill-doctor-${process.pid}`;
+    // Dot-prefixed: agents and this scan ignore it if anything below stops
+    // halfway, so it never shows up as a second copy of the skill.
+    const aside = join(dirname(copy), `.${basename(copy)}.vskill-doctor-${process.pid}`);
     renameSync(copy, aside);
-    try {
-      symlinkSync(relative(dirname(copy), keep), copy, "dir");
-      if (hashSkillFolder(copy) !== keepHash) throw new Error("new link does not resolve to the kept copy");
-    } catch (err) {
+    const undo = () => {
       try {
         if (lstatSync(copy).isSymbolicLink()) unlinkSync(copy);
       } catch {
         // nothing at copy
       }
       renameSync(aside, copy);
+    };
+    try {
+      symlinkSync(relative(dirname(copy), keep), copy, "dir");
+      if (hashSkillFolder(copy) !== keepHash) throw new Error("new link does not resolve to the kept copy");
+      // Anything written into the copy between the scan and the move is in
+      // the aside now; deleting it would lose that edit.
+      if (hashSkillFolder(aside) !== keepHash) throw new Error("content changed since the scan — left alone");
+    } catch (err) {
+      undo();
       const code = (err as NodeJS.ErrnoException).code;
       return { ...base, error: code === "EPERM" || code === "EACCES" ? "symlinks not permitted — left as a copy" : (err as Error).message };
     }
-    rmSync(aside, { recursive: true, force: true });
-    return { ...base, target: relative(dirname(copy), keep), ok: true };
+    const target = relative(dirname(copy), keep);
+    try {
+      rmSync(aside, { recursive: true, force: true });
+    } catch (err) {
+      // The link is in place; only the hidden leftover could not go.
+      return { ...base, target, ok: true, error: `linked, but could not remove ${aside}: ${(err as Error).message}` };
+    }
+    return { ...base, target, ok: true };
   } catch (err) {
     return { ...base, error: (err as Error).message };
   }
@@ -631,7 +792,10 @@ function emptySummary(): Record<DoctorIssueKind, number> {
 }
 
 function scanAll(scopes: DoctorScope[], home: string, cwd: string, platform: NodeJS.Platform) {
-  const scans = scopes.map((s) => scanScope(s, home, cwd, platform));
+  const globalReals = scopes.includes("project")
+    ? new Set(collectDirs("global", home, cwd).map((d) => d.real))
+    : new Set<string>();
+  const scans = scopes.map((s) => scanScope(s, home, cwd, platform, globalReals));
   return {
     scanned: scans.flatMap((s) =>
       s.dirs.map((d) => ({ scope: d.scope, dir: d.dir, readers: [...d.readers].sort() })),
@@ -670,7 +834,8 @@ function printReport(report: DoctorReport, fix: boolean): void {
     console.log(bold("Fixes"));
     for (const f of report.fixes) {
       const what = f.action === "remove-link" ? `removed link ${f.path}` : `linked ${f.path} -> ${f.target}`;
-      console.log(f.ok ? `  ${green("done")} ${what}` : `  ${yellow("skip")} ${f.path}: ${f.error}`);
+      const note = f.ok && f.error ? dim(` (${f.error})`) : "";
+      console.log(f.ok ? `  ${green("done")} ${what}${note}` : `  ${yellow("skip")} ${f.path}: ${f.error}`);
     }
     console.log("");
   }

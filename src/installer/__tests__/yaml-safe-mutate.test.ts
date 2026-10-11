@@ -139,7 +139,26 @@ describe("safeAppendYamlList — error paths (file unchanged)", () => {
     const file = join(workDir, "conf.yml");
     writeFileSync(file, "read: README.md  # always\n");
     expect(safeAppendYamlList(file, "read", "/c.md").status).toBe("appended");
-    expect(read(file)).toBe("read:\n  - README.md\n  - /c.md\n");
+    // The trailing comment moves to the rewritten `read:` line, not dropped.
+    expect(read(file)).toBe("read: # always\n  - README.md\n  - /c.md\n");
+  });
+
+  it("quoted scalar holding ' #' → IncompatibleConfigError, file unchanged (0894)", () => {
+    const file = join(workDir, "conf.yml");
+    const before = 'read: "notes #2.md"\n';
+    writeFileSync(file, before);
+    expect(() => safeAppendYamlList(file, "read", "/c.md")).toThrow(IncompatibleConfigError);
+    expect(read(file)).toBe(before);
+    expect(backupFiles(workDir, "conf.yml")).toHaveLength(0);
+  });
+
+  it("flow list with a quoted item holding a comma → IncompatibleConfigError, file unchanged (0894)", () => {
+    const file = join(workDir, "conf.yml");
+    const before = 'read: ["a, b.md", c.md]\n';
+    writeFileSync(file, before);
+    expect(() => safeAppendYamlList(file, "read", "/c.md")).toThrow(IncompatibleConfigError);
+    expect(read(file)).toBe(before);
+    expect(backupFiles(workDir, "conf.yml")).toHaveLength(0);
   });
 
   it("scalar already equal to the value → already-present, no write", () => {

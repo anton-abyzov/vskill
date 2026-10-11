@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `vskill audit-webmcp <urls...>` audits the WebMCP tools a website registers, in headless Chromium, without running any tool: write actions missing `consequentialHint`, read-only claims on write tools, tool-poisoning text, third-party registrations and more, as a terminal table, JSON or JSONL for batches. Playwright stays optional.
+
 ## [1.2.5] - 2026-10-11
 
 ### Added

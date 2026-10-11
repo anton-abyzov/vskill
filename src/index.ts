@@ -254,6 +254,29 @@ program
   });
 
 program
+  .command("audit-webmcp [urls...]")
+  .description("Audit the WebMCP tools websites register (headless Chromium; never runs a tool)")
+  .option("--urls-file <path>", "File with one URL per line (# comments allowed)")
+  .option("--json", "Output JSON (JSONL, one site per line, for several URLs)")
+  .option("--out <file>", "Write the report to a file (JSON for one URL, JSONL for a batch)")
+  .option("--concurrency <n>", "Sites scanned in parallel (default: 4)")
+  .option("--timeout <ms>", "Page load timeout per site in ms (default: 30000)")
+  .option("--fail-on <severity>", "Exit 1 if any finding is at or above: critical|high|medium|low|info")
+  .option("--executable-path <path>", "Chromium or chrome-headless-shell binary to use")
+  .action(async (urls: string[], opts) => {
+    const { auditWebmcpCommand } = await import("./commands/audit-webmcp.js");
+    await auditWebmcpCommand(urls ?? [], {
+      urlsFile: opts.urlsFile,
+      json: opts.json,
+      out: opts.out,
+      concurrency: opts.concurrency,
+      timeout: opts.timeout,
+      failOn: opts.failOn,
+      executablePath: opts.executablePath,
+    });
+  });
+
+program
   .command("check <skill-name> [path]")
   .description("Preflight: verify declared MCPs, secrets, runtime, and tests for a skill")
   .option("--json", "Emit machine-readable JSON instead of human output")

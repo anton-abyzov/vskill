@@ -156,11 +156,56 @@ npx vskill@latest diff <skill> v1 v2   # compare versions before upgrading
 npx vskill@latest skill new            # create a new skill (AI-assisted)
 npx vskill@latest eval sweep <skill>   # benchmark across models
 npx vskill@latest audit --ci           # SARIF v2.1.0 for CI
+npx vskill@latest audit-webmcp <url>   # score a site's WebMCP tools (headless)
 npx vskill@latest keys set anthropic   # store API keys in ~/.vskill/keys.env
 npx vskill@latest auth login --repos   # sign in to GitHub for private skills repos
 ```
 
 Full reference → [verified-skill.com/docs/cli-reference](https://verified-skill.com/docs/cli-reference)
+
+### Audit a site's WebMCP tools
+
+`vskill audit-webmcp` loads each URL once in headless Chromium with WebMCP turned on, lists the tools the page registers through `document.modelContext.registerTool`, and scores them. It never calls a tool and never submits a form.
+
+```bash
+npx vskill@latest audit-webmcp allbirds.com
+npx vskill@latest audit-webmcp --urls-file sites.txt --out report.jsonl --concurrency 4 --fail-on high
+```
+
+Playwright is not bundled. Install `playwright-core` (or `playwright`) and a Chromium build with `npx playwright install chromium-headless-shell`, or pass `--executable-path`. Without one the command exits 2 with these instructions. Options: `--urls-file <path>` (one URL per line, `#` comments), `--json`, `--out <file>` (JSON for one URL, JSONL for a batch), `--concurrency <n>` (default 4), `--timeout <ms>` (default 30000), `--fail-on <severity>` (exit 1 when any finding is at or above it), `--executable-path <path>`.
+
+Tools are found three ways and merged by name: a wrapper around `registerTool` that records the calling script, the CDP `WebMCP` domain, and `getTools()`. Chrome 153 drops `consequentialHint` from `getTools()` and CDP, so the wrapper is the only source for it.
+
+| Rule | Severity | Finding |
+|---|---|---|
+| WMCP-001 | per pattern | Prompt-injection or tool-poisoning text in a name, title, description or parameter description (the skill scanner's patterns plus WebMCP-specific ones) |
+| WMCP-002 | high / medium / low | Write-shaped tool (checkout, pay, delete / book, send, subscribe / cart changes) without `consequentialHint` |
+| WMCP-003 | high | Write-shaped tool marked `readOnlyHint: true` |
+| WMCP-004 | info / low | Asks for email, phone, address, birth date, government ID or card details it does not need |
+| WMCP-005 | medium | Registered by a script from another origin |
+| WMCP-006 | low / medium | Description over 500 characters, or more than 40 tools on the page |
+| WMCP-007 | low / medium | `inputSchema` missing, invalid, or not an object schema |
+| WMCP-008 | info | Tools registered but no `Permissions-Policy` that mentions tools |
+| WMCP-009 | info | Tool exposed to other origins via `exposedTo` |
+
+The verdict uses the skill scanner's weights and thresholds (PASS at 80 or above, CONCERNS from 50, FAIL below 50). Each rule deducts at most twice its worst finding, any critical finding is FAIL, and any high finding is at least CONCERNS.
+
+Each site produces one JSON object (`schemaVersion: 1`); a batch writes one per line and keeps going after timeouts or DNS errors, recording `error`:
+
+```json
+{
+  "schemaVersion": 1,
+  "url": "https://allbirds.com/",
+  "finalUrl": "https://www.allbirds.com/",
+  "scannedAt": "2026-10-11T06:00:40.000Z",
+  "webmcp": { "documentModelContext": true, "navigatorModelContext": false },
+  "headers": { "permissionsPolicy": null },
+  "tools": [{ "name": "proceed_to_checkout", "title": "…", "description": "…", "inputSchema": {}, "annotations": { "readOnlyHint": false }, "registeredBy": "https://www.allbirds.com/cdn/…/webmcp.js", "thirdParty": false, "sources": ["registerTool", "cdp", "getTools"] }],
+  "findings": [{ "id": "WMCP-002", "severity": "high", "tool": "proceed_to_checkout", "message": "…" }],
+  "summary": { "toolCount": 12, "readOnlyCount": 4, "consequentialCount": 0, "writeShapedCount": 4, "thirdPartyCount": 0, "findingsBySeverity": { "critical": 0, "high": 1, "medium": 2, "low": 8, "info": 1 }, "score": 65, "verdict": "CONCERNS" },
+  "error": "only present when the page failed to load"
+}
+```
 
 <br/>
 

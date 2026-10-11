@@ -82,6 +82,16 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # Mirror desktop-release.yml: it ships an aarch64-apple-darwin bundle,
+          # and build-sidecar.sh only produces the host-arch sidecar, so a
+          # universal build has no vskill-server-universal-apple-darwin to embed.
+          MACOS_BUILD_TARGET: aarch64-apple-darwin
+          # This canary checks codesign + notarization, not updater signing,
+          # and has no TAURI_SIGNING_PRIVATE_KEY; skip the .tar.gz/.sig artifacts.
+          MACOS_BUILD_NO_UPDATER: '1'
+          # build.rs refuses release builds without a real OAuth App client_id.
+          # Public value, same as desktop-release.yml.
+          GITHUB_OAUTH_CLIENT_ID: Ov23li6H8OpvPfuhyDEt
         run: |
           START=$(date +%s)
           bash scripts/release/macos-build.sh --notarize

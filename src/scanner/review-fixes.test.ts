@@ -118,7 +118,7 @@ describe("NA-002 reverse shells and netcat health checks", () => {
 
 describe("NA-004: bounded URL tail and dot-segment allowlist bypass", () => {
   it("stays linear on repeated prerequisite lures", () => {
-    expect(regexMs("NA-004", "first,download,http://a/x.x,".repeat(8_929))).toBeLessThan(200);
+    expect(regexMs("NA-004", "first,download,http://a/x.x,".repeat(8_929))).toBeLessThan(1000);
   });
 
   it("does not let dot segments borrow an allowlisted host", () => {

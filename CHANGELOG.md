@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [1.2.7] - 2026-10-11
+
+### Changed
+
+- The security scanner finds hidden instructions: invisible Unicode tag characters, zero-width and variation-selector text, bidi overrides and base64-encoded payloads. Decoded payloads are rescanned at full severity, and text inside HTML comments is scanned instead of skipped. Unicode tag smuggling fails Tier 1, so `vskill add` and `vskill update` refuse it.
+- Five new rules: Python shell execution, PowerShell, pickle or decoded `exec`, fake prerequisite downloads and password-protected archives. The scanner now has 57 rules, matching verified-skill.com.
+- The Tier 2 judge reads skill text inside a per-scan fence and applies score caps the skill text cannot override.
+
+### Fixed
+
+- Two command-injection rules no longer slow down sharply on very long lines.
+
 ## [1.2.6] - 2026-10-11
 
 1.2.5 was tagged but never reached npm (its README agent badge was stale), so 1.2.6 is the first published release with everything listed under 1.2.5.

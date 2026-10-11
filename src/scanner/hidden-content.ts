@@ -30,7 +30,7 @@ export const HIDDEN_CONTENT_RULES: HiddenRule[] = [
   { id: "HC-010", name: "Unscanned oversized file", severity: "medium", description: "A file exceeded the scanner's size limit; the remainder was not scanned" },
   { id: "HC-011", name: "Opaque binary in bundle", severity: "high", description: "Compiled or binary file (.pyc, .exe, .so, ...) shipped with the skill; its behavior cannot be reviewed" },
   // HC-012 and HC-013 are platform-only (VirusTotal findings).
-  { id: "HC-014", name: "Text addressed to an AI reviewer", severity: "medium", description: "Visible text that addresses an AI or LLM reviewer, judge or grader; the judge reviews it, but it does not cap the score" },
+  { id: "HC-014", name: "Text addressed to an AI reviewer", severity: "medium", description: "Visible text that addresses an AI or LLM reviewer, judge or grader, or a grading rubric hidden in a comment; the judge reviews it, but it does not cap the score" },
 ];
 
 const RULES = new Map(HIDDEN_CONTENT_RULES.map((r) => [r.id, r]));
@@ -41,13 +41,10 @@ export type HiddenPayloadKind = "unicode-tags" | "variation-selectors" | "zero-w
 export interface HiddenPayload {
   kind: HiddenPayloadKind;
   lineNumber: number;
-  /** Decoded text kept for display and the judge, at most MAX_PAYLOAD characters. */
+  /** All decoded text (up to MAX_PAYLOAD_SCAN characters), for rescanning. */
   text: string;
-  /**
-   * CLI: the whole decoded text (bounded by MAX_BASE64_DECODE), which is what
-   * scanContent rescans, so a payload cannot hide past the display cap.
-   */
-  fullText?: string;
+  /** The first MAX_PAYLOAD characters of `text`, for findings and the judge. */
+  display: string;
 }
 
 export interface HiddenFinding {
@@ -71,6 +68,8 @@ const MAX_MATCH = 200;
 const MAX_PAYLOAD = 4000;
 /** Base64 characters decoded per blob; bounds work on large embedded binaries. */
 const MAX_BASE64_DECODE = 200_000;
+/** Decoded characters kept per payload for rescanning; a blob decodes to fewer. */
+const MAX_PAYLOAD_SCAN = MAX_BASE64_DECODE;
 const MIN_BASE64 = 120;
 /** Characters of each context line kept around the match column. */
 const CONTEXT_WINDOW = 200;
@@ -100,6 +99,8 @@ const URL_HOST_RE = /\bhttps?:\/\/([^\s/?#)"'<>\]]+)/gi;
 const WORD_RE = /[\p{L}]{4,}/gu;
 const LATIN_RE = /\p{Script=Latin}/u;
 const CONFUSABLE_SCRIPT_RE = /[\p{Script=Cyrillic}\p{Script=Greek}]/u;
+/** Decoded hidden text that reads as words, not a few stray bytes. */
+const READABLE_RE = /[A-Za-z]{2,}[^\S\n]+[A-Za-z]{2,}/;
 const INVISIBLE_RE = /[​-‏‪-‮⁠-⁩﻿︀-️\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
 
 // Markdown structure that decides whether `<!--` opens a hidden comment.
@@ -122,13 +123,25 @@ const LINK_TITLE_LOOSE_RE = /^[ \t]+(?:"(.*)"|'(.*)'|\((.*)\))[ \t]*$/;
 
 const SECRET_REF = String.raw`(?:~\/\.ssh\b|\bid_rsa\b|\.aws\/credentials\b|\.env(?!\.(?:example|sample|template|dist)\b)(?:\.\w[\w-]*)?(?!\w|\.\w)|\bapi[_-]?keys?\b|\baccess[_-]?tokens?\b|\bprivate\s+keys?\b)`;
 
-// Comment bodies that address the agent rather than the human reader.
+// The agent reading the skill, named as such.
+const AGENT = String.raw`(?:agents?|assistants?|models?|AIs?|LLMs?|Claude|(?:Chat)?GPT|copilot|chatbots?|bots?)`;
+const OVERRIDE = String.raw`(?:ignore|disregard|override|forget|bypass)`;
+const RULESET = String.raw`(?:instructions?|prompts?|rules?|guidelines?|guidance|polic(?:y|ies)|restrictions?|directives?|guardrails?|safety)`;
+// What a directive does to the user, their secrets, or the agent's tools.
+const AGENT_TARGET = String.raw`(?:(?:the|your|any)\s+(?:users?|operators?|humans?)|secrets?|credentials?|access\s+tokens?|passwords?|api[_-]?keys?|ssh|tools?|permissions?|approvals?|confirm(?:ation)?s?|exfiltrat\w*|upload\w*|send|forward|curl|wget)`;
+// Tooling rule sets a maintainer tells a linter or formatter to skip; they
+// are not the agent's instructions ("ignore any previous lint rules").
+const TOOLING = String.raw`(?:[\w-]*lint(?:ers?|ing)?|prettier|format(?:ters?|ting)?|styles?|type-?check(?:ers?|ing)?)`;
+
+// Comment bodies that address the agent rather than the human reader. Lint
+// and TODO notes ("ignore the line-length rules", "from now on use v2")
+// address maintainers; the agent forms name the agent, its own instructions,
+// or the user, secrets, exfiltration or tools.
 const DIRECTIVE_RES: RegExp[] = [
-  // Addressed to an agent: only qualifiers such as "all previous" or "your
-  // safety" may stand between the verb and the noun, so linter and TODO
-  // comments ("ignore the line-length rules", "ignore any previous lint
-  // rules") do not match.
-  /\b(?:ignore|disregard|override|forget|bypass)\s+(?:(?:all|any|the|your|my|its|these|those|every|each|of|previous|prior|above|earlier|preceding|original|initial|system|safety|security|ethical|content|given|provided|other|existing|current|developer|operator|user)\s+){0,5}(?:instructions?|prompts?|rules?|guidelines?|polic(?:y|ies)|restrictions?|safety|directives?|guardrails?)\b/i,
+  new RegExp(String.raw`\b${OVERRIDE}\b[^.\n]{0,40}?\b(?:previous|prior|above|earlier|preceding|original|initial|your|its|system|developer|safety|security|(?:users?|operators?|humans?)(?:'s?)?)\s+(?!(?:[\w-]+\s+){0,2}?${TOOLING}\b)(?:[\w-]+\s+){0,2}?${RULESET}\b`, "i"),
+  new RegExp(String.raw`\b${OVERRIDE}\b[^.\n]{0,20}?\b(?:safety|guardrails?|content\s+polic(?:y|ies))\b`, "i"),
+  new RegExp(String.raw`\b${AGENT}\b[^.\n]{0,60}?\b${OVERRIDE}\b[^.\n]{0,60}?\b${RULESET}\b`, "i"),
+  new RegExp(String.raw`\b${OVERRIDE}\b[^.\n]{0,60}?\b${RULESET}\b[^.\n]{0,80}?\b(?:${AGENT}|${AGENT_TARGET})\b`, "i"),
   /\b(?:do\s+not|don'?t|never)\s+(?:tell|inform|mention|reveal|show|notify|alert|ask)\b[^.\n]{0,40}\b(?:user|human|operator|anyone)\b/i,
   /\bwithout\s+(?:telling|informing|asking|notifying|alerting)\b/i,
   /\b(?:silently|secretly|covertly|quietly)\s+(?:run|execute|send|upload|post|copy|read|install|fetch|download|exfiltrate)\b/i,
@@ -137,13 +150,12 @@ const DIRECTIVE_RES: RegExp[] = [
   /\b(?:curl|wget|Invoke-WebRequest|Invoke-RestMethod|iwr|irm)\b[^\n]{0,300}?(?:\s(?:-T|--upload-file|--post-file|-InFile)\b|\s(?:-d|--data(?:-[a-z]+)?|-F|--form)[\s=]*['"]?(?:[^\s'"]*@|\$\())/i,
   /\b(?:nc|ncat|netcat)\s[^\n]{0,100}?(?:<\s*[~/.$\w]|\s-e\s)/i,
   /\b(?:send|upload|post|exfiltrate|forward)\b[^.\n]{0,60}\b(?:to|at)\s+https?:\/\//i,
-  // "system prompt", "new instructions" and "from now on" only as orders to
-  // an agent, not in "TODO: from now on generate this" or "the system prompt
-  // lives below".
+  // CLI: "system prompt" and "new instructions" only as orders to an agent,
+  // not in "the system prompt lives below".
   /\b(?:reveal|print|show|output|leak|repeat|dump|disclose|ignore|disregard|forget|override|replace)\s+(?:(?:the|your|my|its|this|that|entire|full|original|hidden|whole)\s+){0,3}system\s+prompts?\b|\b(?:new|updated|real|actual|true|override)\s+system\s+prompt\b|\bsystem\s+prompt\s*(?::|=|override\b|is\s+now\b)/i,
   /\b(?:your|here\s+are\s+(?:your|the)|these\s+are\s+(?:your|the)|the\s+following\s+are\s+(?:your|the))\s+new\s+instructions\b|\bnew\s+instructions\s*:/i,
   /\byou\s+are\s+now\b/i,
-  /\bfrom\s+now\s+on\s*[,:]?\s+(?:you|your|ignore|disregard|always|never|do\s+not|don'?t|respond|reply|answer|act|behave|pretend|only|treat|obey|follow)\b|\byou(?:'ll|\s+will|\s+must|\s+should|\s+shall|\s+are\s+to)\b[^.\n]{0,40}\bfrom\s+now\s+on\b/i,
+  new RegExp(String.raw`\bfrom\s+now\s+on\b[^.\n]{0,80}?\b(?:you|your|${AGENT}|${AGENT_TARGET}|silently|secretly|never)\b|\b(?:you|${AGENT})\b[^.\n]{0,40}?\bfrom\s+now\s+on\b`, "i"),
   new RegExp(`${SECRET_REF}[^.\\n]{0,60}\\b(?:send|upload|post|read|copy|cat)\\b`, "i"),
   new RegExp(`\\b(?:send|upload|post|read|copy|cat)\\b[^.\\n]{0,60}${SECRET_REF}`, "i"),
 ];
@@ -173,8 +185,8 @@ const JUDGE_FORGERY_RES: RegExp[] = [
 
 // Text aimed at an AI reviewer or judge. Code-review and eval skills write
 // this in plain sight, so visible text is HC-014 (the judge must run, the
-// score is not capped); in a comment, link definition, or invisible or
-// encoded text it is HC-009. Multiline so `^` anchors in comment bodies.
+// score is not capped). Hidden channels use HIDDEN_JUDGE_RES below.
+// Multiline so `^` anchors in comment bodies.
 const JUDGE_PROSE_RES: RegExp[] = [
   new RegExp(String.raw`\b${AI_JUDGE}\b[^.\n]{0,80}?\b(?:${VERDICT}|${APPROVAL})`, "im"),
   new RegExp(String.raw`\b${ROLE}\b[^.\n]{0,80}?\b${VERDICT}`, "im"),
@@ -182,7 +194,84 @@ const JUDGE_PROSE_RES: RegExp[] = [
   new RegExp(String.raw`\b${AI_JUDGE}\s+(?:notes?|messages?|instructions?|directions?|reminders?)\b`, "im"),
   new RegExp(String.raw`\b(?:dear|hey|hello|attention)\s*,?\s+(?:the\s+|all\s+|any\s+)?${AI_JUDGE}\b|^[ \t#>*_-]*(?:to\s+(?:the\s+|all\s+|any\s+)?)?${AI_JUDGE}\s*[:,]`, "im"),
 ];
-const JUDGE_PROSE_GLOBAL_RES = JUDGE_PROSE_RES.map((re) => new RegExp(re.source, "gim"));
+/** The bare reviewer or grader role next to a verdict (JUDGE_PROSE_RES[1]). */
+const ROLE_VERDICT_INDEX = 1;
+const STRONG_PROSE_RES = JUDGE_PROSE_RES.filter((_, k) => k !== ROLE_VERDICT_INDEX);
+
+// Addressees of hidden text: the named automated reviewers plus the model
+// itself. Bare reviewer and grader roles are not here; eval rubrics address
+// them in comments too.
+const AI_ADDRESSEE = String.raw`(?:${AI_JUDGE}|(?:(?:reviewing|grading|evaluating|judging|scanning|scoring|auditing)\s+)?(?:(?:large\s+)?language\s+models?|models?|assistants?|LLMs?|AIs?|Claude|(?:Chat)?GPT(?:-?[\w.]+)?|Llama(?:-?[\w.]+)?|Gemini))`;
+const HIDDEN_VERDICT = String.raw`(?:${VERDICT}|${APPROVAL}|verdict\s*(?:of|is|=|:)?\s*["'\x60]?PASS\b)`;
+// A sentence that grades against criteria ("PASS or FAIL for each item",
+// "100 for an exact match and 0 otherwise") is a rubric, not a plea.
+const RUBRIC_RE =
+  /\b(?:otherwise|or\s+["'`]?(?:FAIL|REJECT|lower|less|zero|\d)|for\s+(?:each|every)|per\s+(?:item|row|test|case|question|criterion|check|answer)|(?:exact|correct|perfect|full|complete|right)\s+(?:match|answers?|solutions?|responses?|outputs?)|rubric|criteri(?:on|a)|every\s+(?:item|row|test|case|check|question|requirement|answer)|all\s+(?:the\s+)?(?:tests?|checks?|items?|rows?|criteria|requirements|cases|questions|answers))\b/i;
+
+interface HiddenJudgeRule {
+  re: RegExp;
+  /** A match inside a rubric sentence is not counted. */
+  rubricExempt: boolean;
+}
+
+// Text in a comment, link definition, or invisible or encoded text that asks
+// for a verdict is HC-009. A verdict or approval request needs no addressee
+// there, unless it is part of a grading rubric.
+const HIDDEN_JUDGE_RES: HiddenJudgeRule[] = [
+  ...STRONG_PROSE_RES.map((re) => ({ re: new RegExp(re.source, "gim"), rubricExempt: false })),
+  { re: new RegExp(String.raw`\b${AI_ADDRESSEE}\b[^.\n]{0,80}?\b${HIDDEN_VERDICT}`, "gim"), rubricExempt: true },
+  { re: new RegExp(String.raw`\b(?:${VERDICT}|${APPROVAL})`, "gim"), rubricExempt: true },
+];
+const ROLE_VERDICT_GLOBAL_RE = new RegExp(JUDGE_PROSE_RES[ROLE_VERDICT_INDEX].source, "gim");
+/** Characters searched on each side of a match for its sentence. */
+const SENTENCE_REACH = 160;
+
+function isSentenceEnd(c: number): boolean {
+  return c === 46 || c === 10 || c === 59;
+}
+
+/** Whether the sentence holding text[start, end) reads as a grading rubric. */
+function inRubric(text: string, start: number, end: number): boolean {
+  let s = start;
+  while (s > 0 && start - s < SENTENCE_REACH && !isSentenceEnd(text.charCodeAt(s - 1))) s--;
+  let e = end;
+  while (e < text.length && e - end < SENTENCE_REACH && !isSentenceEnd(text.charCodeAt(e))) e++;
+  return RUBRIC_RE.test(text.slice(s, e));
+}
+
+interface JudgeHit {
+  index: number;
+  match: string;
+  /** HC-009 when true; a bare role next to a verdict is only HC-014. */
+  strong: boolean;
+}
+
+/** Judge-directed text in a hidden channel, strong hits first. */
+function* hiddenJudgeHits(text: string): Generator<JudgeHit> {
+  for (const { re, rubricExempt } of HIDDEN_JUDGE_RES) {
+    re.lastIndex = 0;
+    for (let m = re.exec(text); m; m = re.exec(text)) {
+      if (m[0].length === 0) {
+        re.lastIndex++;
+        continue;
+      }
+      if (rubricExempt && inRubric(text, m.index, m.index + m[0].length)) continue;
+      yield { index: m.index, match: m[0], strong: true };
+    }
+  }
+  const re = ROLE_VERDICT_GLOBAL_RE;
+  re.lastIndex = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (m[0].length === 0) re.lastIndex++;
+    else yield { index: m.index, match: m[0], strong: false };
+  }
+}
+
+/** The first hit in `text`; a strong one when there is any. */
+function firstHiddenJudgeHit(text: string): JudgeHit | null {
+  const next = hiddenJudgeHits(text).next();
+  return next.done ? null : next.value;
+}
 
 /** Make invisible characters visible so findings can be read and logged safely. */
 export function revealInvisible(text: string): string {
@@ -576,8 +665,11 @@ export function scanHiddenContent(content: string): HiddenScanResult {
   // from crowding out another.
   const byLine = new Map<string, { finding: HiddenFinding; more: number }>();
   const perRule = new Map<string, { listed: number; last: HiddenFinding | null; unlisted: number }>();
+  // Every rule and line reported, listed or only counted.
+  const reported = new Set<string>();
   const add = (id: string, match: string, lineNumber: number, column = 0, severity?: HiddenFinding["severity"]): void => {
     const key = `${id}:${lineNumber}`;
+    reported.add(key);
     const seen = byLine.get(key);
     if (seen) {
       seen.more++;
@@ -612,28 +704,12 @@ export function scanHiddenContent(content: string): HiddenScanResult {
     const key = `${kind}:${lineNumber}`;
     const prev = payloadAt.get(key);
     if (!prev) {
-      const full = safeSlice(text, 0, MAX_BASE64_DECODE);
-      const payload: HiddenPayload = { kind, lineNumber, text: safeSlice(full, 0, MAX_PAYLOAD), fullText: full };
+      const payload = { kind, lineNumber, text: safeSlice(text, 0, MAX_PAYLOAD_SCAN), display: "" };
       payloadAt.set(key, payload);
       payloads.push(payload);
-    } else if ((prev.fullText ?? prev.text).length < MAX_BASE64_DECODE) {
-      prev.fullText = safeSlice(`${prev.fullText ?? prev.text}\n${text}`, 0, MAX_BASE64_DECODE);
-      prev.text = safeSlice(prev.fullText, 0, MAX_PAYLOAD);
+    } else if (prev.text.length < MAX_PAYLOAD_SCAN) {
+      prev.text = safeSlice(`${prev.text}\n${text}`, 0, MAX_PAYLOAD_SCAN);
     }
-  };
-
-  // Binary bytes decoded as text (an image in a bundle) can form tag,
-  // selector, zero-width or bidi characters by chance. A line holding NUL or
-  // U+FFFD is undecodable data, not text an agent reads as instructions.
-  const junkLines = new Map<number, boolean>();
-  const isJunkLine = (lineNumber: number): boolean => {
-    let junk = junkLines.get(lineNumber);
-    if (junk === undefined) {
-      // eslint-disable-next-line no-control-regex
-      junk = /[\u0000\uFFFD]/.test(lines[lineNumber - 1] ?? "");
-      junkLines.set(lineNumber, junk);
-    }
-    return junk;
   };
 
   // Fast path: ASCII-only content cannot carry invisible Unicode.
@@ -641,6 +717,14 @@ export function scanHiddenContent(content: string): HiddenScanResult {
   const asciiOnly = !/[^\x00-\x7F]/.test(content);
 
   if (!asciiOnly) {
+    // A binary file read as text has U+FFFD or NUL on its lines, and its
+    // bytes form stray tag, bidi, zero-width and selector characters. Those
+    // lines are skipped unless the characters decode to readable text, so a
+    // U+FFFD cannot be planted to hide a real payload.
+    const junk = new Uint8Array(lines.length);
+    for (let i = 0; i < lines.length; i++) if (lines[i].includes("\uFFFD") || lines[i].includes("\0")) junk[i] = 1;
+    const skip = (line: number, decoded: string): boolean => junk[line - 1] === 1 && !READABLE_RE.test(decoded);
+
     for (const m of content.matchAll(TAG_RUN_RE)) {
       let run = m[0];
       let at = m.index!;
@@ -653,24 +737,24 @@ export function scanHiddenContent(content: string): HiddenScanResult {
       }
       if (!run) continue;
       const line = lineOf(content, at, lineStarts);
-      if (isJunkLine(line)) continue;
       const decoded = decodeTags(run);
+      if (skip(line, decoded)) continue;
       add("HC-001", decoded ? `hidden text: "${decoded}"` : `${[...run].length} tag characters`, line, at - lineStarts[line - 1]);
       if (decoded) addPayload("unicode-tags", line, decoded);
     }
 
     for (const m of content.matchAll(VS_RUN_RE)) {
       const line = lineOf(content, m.index!, lineStarts);
-      if (isJunkLine(line)) continue;
       const decoded = decodeVariationSelectors(m[0]);
+      if (skip(line, decoded)) continue;
       add("HC-004", decoded ? `hidden text: "${decoded}"` : `${[...m[0]].length} variation selectors`, line, m.index! - lineStarts[line - 1]);
       if (decoded) addPayload("variation-selectors", line, decoded);
     }
 
     for (const m of content.matchAll(ZW_RUN_RE)) {
       const line = lineOf(content, m.index!, lineStarts);
-      if (isJunkLine(line)) continue;
       const decoded = decodeZeroWidthBinary(m[0]);
+      if (skip(line, decoded)) continue;
       add("HC-003", decoded ? `hidden text: "${decoded}"` : `${[...m[0]].length} zero-width characters`, line, m.index! - lineStarts[line - 1]);
       if (decoded) addPayload("zero-width", line, decoded);
     }
@@ -680,7 +764,7 @@ export function scanHiddenContent(content: string): HiddenScanResult {
       const line = lineOf(content, m.index!, lineStarts);
       if (bidiLines.has(line)) continue;
       bidiLines.add(line);
-      if (isJunkLine(line)) continue;
+      if (skip(line, "")) continue;
       const text = lines[line - 1];
       // Balanced isolates in RTL prose are how mixed-direction text is
       // written; report them as info so they neither score nor hold.
@@ -700,17 +784,22 @@ export function scanHiddenContent(content: string): HiddenScanResult {
   }
 
   // HTML comments and link reference definitions render invisibly. Text in
-  // them aimed at the judge is HC-009; `judgeHidden` marks those lines.
+  // them aimed at the judge is HC-009; `judgeHidden` marks those lines. A
+  // bare reviewer role next to a verdict is held in `judgeWeak` and reported
+  // as HC-014 at the end, unless its line gets HC-009.
   const judgeHidden = new Set<number>();
+  const judgeWeak = new Map<number, { match: string; column: number }>();
   const addHiddenJudge = (text: string, offset: number): void => {
-    for (const re of JUDGE_PROSE_GLOBAL_RES) {
-      re.lastIndex = 0;
-      for (let m = re.exec(text); m; m = re.exec(text)) {
-        const line = lineOf(content, offset + m.index, lineStarts);
-        if (m[0].length === 0) re.lastIndex++;
-        if (judgeHidden.has(line)) continue;
+    for (const hit of hiddenJudgeHits(text)) {
+      const line = lineOf(content, offset + hit.index, lineStarts);
+      if (judgeHidden.has(line)) continue;
+      const column = offset + hit.index - lineStarts[line - 1];
+      if (hit.strong) {
         judgeHidden.add(line);
-        add("HC-009", revealClip(m[0].trim()), line, offset + m.index - lineStarts[line - 1]);
+        judgeWeak.delete(line);
+        add("HC-009", revealClip(hit.match.trim()), line, column);
+      } else if (!judgeWeak.has(line)) {
+        judgeWeak.set(line, { match: revealClip(hit.match.trim()), column });
       }
     }
   };
@@ -731,9 +820,13 @@ export function scanHiddenContent(content: string): HiddenScanResult {
     if (body.trim().length >= 8 && DIRECTIVE_RES.some((d) => d.test(body))) {
       add("HC-005", revealClip(safeSlice(body.trim(), 0, 4 * MAX_MATCH).replace(/\s+/g, " ")), i + 1);
     }
-    if (JUDGE_PROSE_RES.some((re) => re.test(body))) {
+    const hit = firstHiddenJudgeHit(body);
+    if (hit?.strong) {
       judgeHidden.add(i + 1);
+      judgeWeak.delete(i + 1);
       add("HC-009", revealClip(body.trim()), i + 1);
+    } else if (hit && !judgeHidden.has(i + 1) && !judgeWeak.has(i + 1)) {
+      judgeWeak.set(i + 1, { match: revealClip(body.trim()), column: 0 });
     }
   }
 
@@ -743,8 +836,11 @@ export function scanHiddenContent(content: string): HiddenScanResult {
     const probe = asciiOnly ? line : line.replace(INVISIBLE_RE, "");
     if (JUDGE_FORGERY_RES.some((re) => re.test(probe))) add("HC-009", revealClip(line.trim()), i + 1);
     else if (!judgeHidden.has(i + 1) && JUDGE_PROSE_RES.some((re) => re.test(probe))) {
+      // Invisible characters that hide a named-reviewer plea make it HC-009.
       const plain = probe === line || JUDGE_PROSE_RES.some((re) => re.test(line));
-      add(plain ? "HC-014" : "HC-009", revealClip(line.trim()), i + 1);
+      const strong = !plain && STRONG_PROSE_RES.some((re) => re.test(probe));
+      add(strong ? "HC-009" : "HC-014", revealClip(line.trim()), i + 1);
+      judgeWeak.delete(i + 1);
     }
     // Markers written by the platform's fetcher (truncated files) and bundle
     // scanner (binary files). The CLI does not emit them yet; content that
@@ -819,10 +915,19 @@ export function scanHiddenContent(content: string): HiddenScanResult {
 
   // Judge manipulation in decoded invisible or encoded text.
   for (const payload of payloads) {
-    const full = payload.fullText ?? payload.text;
-    if (JUDGE_FORGERY_RES.some((re) => re.test(full)) || JUDGE_PROSE_RES.some((re) => re.test(full))) {
-      add("HC-009", `[hidden ${payload.kind}] ${revealClip(payload.text.trim())}`, payload.lineNumber);
+    const forged = JUDGE_FORGERY_RES.some((re) => re.test(payload.text));
+    const hit = forged ? null : firstHiddenJudgeHit(payload.text);
+    if (!forged && !hit) continue;
+    const shown = `[hidden ${payload.kind}] ${revealClip(payload.text.trim())}`;
+    if (forged || hit!.strong) {
+      add("HC-009", shown, payload.lineNumber);
+      judgeWeak.delete(payload.lineNumber);
+    } else if (!judgeWeak.has(payload.lineNumber)) {
+      judgeWeak.set(payload.lineNumber, { match: shown, column: 0 });
     }
+  }
+  for (const [line, { match, column }] of judgeWeak) {
+    if (!reported.has(`HC-009:${line}`) && !reported.has(`HC-014:${line}`)) add("HC-014", match, line, column);
   }
 
   for (const { finding, more } of byLine.values()) {
@@ -836,7 +941,7 @@ export function scanHiddenContent(content: string): HiddenScanResult {
   }
   for (const payload of payloads) {
     payload.text = flat(payload.text);
-    if (payload.fullText !== undefined) payload.fullText = flat(payload.fullText);
+    payload.display = flat(safeSlice(payload.text, 0, MAX_PAYLOAD));
   }
   return { findings, payloads };
 }

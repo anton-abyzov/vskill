@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   applyJudgeGuards,
   buildSkillBlock,
+  confirmedCriticals,
+  FAIL_THRESHOLD,
+  type GuardFinding,
   judgeRequiredSignals,
   makeNonce,
   selectExcerpt,
@@ -54,6 +57,34 @@ describe("buildSkillBlock", () => {
 });
 
 describe("applyJudgeGuards", () => {
+  it("fails a critical the judge confirmed, whatever score it gave", () => {
+    const out = applyJudgeGuards(
+      { verdict: "CONCERNS" as const, score: 70, concerns: [], criticalValidation: [{ patternId: "CI-003", verdict: "confirmed" as const, reason: "runs a shell" }] },
+      [{ patternId: "CI-003", severity: "critical", match: "os.system(" }],
+    );
+    expect(out.verdict).toBe("FAIL");
+    expect(out.score).toBe(FAIL_THRESHOLD - 1);
+    expect(out.concerns.join(" ")).toContain("confirmed critical finding(s): CI-003");
+  });
+
+  it("marks a confirmed critical FAIL even when the score is already below the cap", () => {
+    const out = applyJudgeGuards(
+      { verdict: "PASS" as const, score: 20, concerns: [], criticalValidation: [{ patternId: "NA-002", verdict: "confirmed" as const, reason: "reverse shell" }] },
+      [{ patternId: "NA-002", severity: "critical", match: "/dev/tcp/1.2.3.4/4444" }],
+    );
+    expect(out.verdict).toBe("FAIL");
+    expect(out.score).toBe(20);
+  });
+
+  it("does not cap on a confirmation for a pattern that is not a listed critical", () => {
+    const findings = [{ patternId: "NA-001", severity: "low", match: "curl" }, { patternId: "CE-001", severity: "critical", match: "eval(" }];
+    const result = { ...pass, criticalValidation: [{ patternId: "NA-001", verdict: "confirmed" as const, reason: "curl" }, { patternId: "CE-001", verdict: "false_positive" as const, reason: "docs" }] };
+    expect(confirmedCriticals(result, findings)).toEqual([]);
+    const out = applyJudgeGuards(result, findings);
+    expect(out.score).toBe(pass.score);
+    expect(out.verdict).toBe("PASS");
+  });
+
   it("blocks auto-approve when a critical finding was not validated", () => {
     const out = applyJudgeGuards({ ...pass }, [{ patternId: "CE-001", severity: "critical", match: "eval(" }]);
     expect(out.score).toBe(64);
@@ -199,8 +230,13 @@ describe("selectExcerpt locates findings by position", () => {
 
   it("never exceeds the budget, however many findings there are", () => {
     const content = Array.from({ length: 4000 }, (_, i) => `exec(step${i}) ${"x".repeat(40)}`).join("\n");
-    const findings = runTier1Scan(content).findings;
-    expect(findings.length).toBeGreaterThan(1000);
+    // Tier 1 caps its findings, so build one finding per line directly.
+    const findings: GuardFinding[] = Array.from({ length: 4000 }, (_, i) => ({
+      patternId: "CI-001",
+      severity: "critical",
+      match: "exec(",
+      lineNumber: i + 1,
+    }));
     const omitted = /\n\n\[\.\.\. \d+ characters omitted \.\.\.\]\n\n/g;
     expect(selectExcerpt(content, findings).replace(omitted, "").length).toBeLessThanOrEqual(JUDGE_CONTENT_BUDGET);
   });

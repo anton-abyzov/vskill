@@ -81,7 +81,9 @@ export function runTier1Scan(content: string): Tier1Result {
 
   // Repeated matches on one line are folded into one finding (see
   // scanContent); count and score each occurrence, so folding bounds the
-  // work without raising the score the CLI installs on.
+  // work without raising the score the CLI installs on. Findings folded in
+  // past scanContent's caps (foldedFindings) add their occurrences to the
+  // holder, so they are counted here too.
   for (const finding of findings) {
     const n = finding.occurrences ?? 1;
     switch (scoredSeverity(finding)) {

@@ -55,6 +55,8 @@ const MAX_VERIFY_LINE = 4_096;
 
 /** Below this the queue paths never auto-approve. */
 export const AUTO_APPROVE_FLOOR = 65;
+/** Below this both scan paths reject. */
+export const FAIL_THRESHOLD = 40;
 
 // Hidden-channel findings the judge cannot clear: smuggled tag text has no
 // legitimate use in a skill, and manipulation aimed at the judge is the attack.
@@ -93,6 +95,10 @@ const ALWAYS_JUDGE_IDS = new Set(["NA-004", "NA-005"]);
 // They are reported but scored as info, and never hold a skill on their own.
 export const ADVISORY_IDS: ReadonlySet<string> = new Set(["HC-007", "HC-008"]);
 
+// The fetchers write this marker only for a .wasm file that starts with the
+// "\0asm" version 1 header. Typed into a text file it hides nothing: that
+// text is scanned like any other.
+const WASM_MODULE_MARKER_RE = /^\[vskill: opaque binary file [^;\]\n]+\.wasm; WebAssembly module, content cannot be reviewed\]$/i;
 const ESCAPE_RE = /\\u\{([0-9A-F]+)\}/g;
 const CLIPPED = "\u2026";
 
@@ -128,7 +134,10 @@ function isRoutineDocFinding(f: GuardFinding): boolean {
     return f.severity === "info" || (line !== null && isNaturalRtlLine(line));
   }
   if (f.patternId === "HC-011") {
-    return typeof f.match === "string" && /^\[vskill: opaque binary file [^;\]\n]+\.wasm; /i.test(f.match);
+    // Only the whole marker the fetcher writes after checking the module
+    // header; a ";" in the path, a clipped match or a "(+N more)" suffix
+    // does not qualify.
+    return typeof f.match === "string" && WASM_MODULE_MARKER_RE.test(f.match);
   }
   // Every context line carrying this match must be the install command, so
   // a neighbouring line with the same text cannot borrow the exemption.
@@ -398,14 +407,32 @@ export function unvalidatedCriticals(result: Pick<GuardedVerdict, "criticalValid
   return criticalIdsToValidate(findings).filter((id) => !validated.has(id));
 }
 
+/** Critical pattern IDs the judge's answer confirms as real. */
+export function confirmedCriticals(result: Pick<GuardedVerdict, "criticalValidation">, findings: GuardFinding[]): string[] {
+  const critical = new Set(criticalIdsToValidate(findings));
+  const ids = new Set<string>();
+  for (const v of result.criticalValidation ?? []) {
+    if (v && v.verdict === "confirmed" && critical.has(v.patternId)) ids.add(v.patternId);
+  }
+  return [...ids].sort();
+}
+
 /**
  * Enforce what the judge's output cannot override:
+ *  - a critical finding the judge confirmed is a FAIL, whatever score it
+ *    gave (models return inconsistent verdict/score pairs);
  *  - every critical Tier 1 finding must be explicitly validated, otherwise
  *    the skill cannot auto-approve;
  *  - the hidden-channel caps of applyHiddenChannelCaps.
  */
 export function applyJudgeGuards<T extends GuardedVerdict>(result: T, findings: GuardFinding[]): T {
   const out: T = { ...result, concerns: [...result.concerns] };
+  const confirmed = confirmedCriticals(result, findings);
+  if (confirmed.length > 0) {
+    out.concerns.push(`Reviewer confirmed critical finding(s): ${confirmed.join(", ")}`);
+    capScore(out, FAIL_THRESHOLD - 1);
+    out.verdict = "FAIL";
+  }
   const unvalidated = unvalidatedCriticals(result, findings);
   if (unvalidated.length > 0) {
     out.concerns.push(`Reviewer did not validate critical finding(s): ${unvalidated.join(", ")}`);
@@ -424,7 +451,7 @@ export function applyHiddenChannelCaps<T extends Pick<GuardedVerdict, "verdict" 
   const ids = new Set(findings.filter((f) => f && f.severity !== "info").map((f) => f.patternId));
   if ([...FAIL_CAP_IDS].some((id) => ids.has(id))) {
     out.concerns.push("Hidden Unicode tag text found (ASCII smuggling)");
-    capScore(out, 39);
+    capScore(out, FAIL_THRESHOLD - 1);
   }
   if ([...REVIEW_CAP_IDS].some((id) => ids.has(id))) {
     out.concerns.push("Content addresses or forges the automated security review");
@@ -436,7 +463,7 @@ export function applyHiddenChannelCaps<T extends Pick<GuardedVerdict, "verdict" 
 function capScore(result: Pick<GuardedVerdict, "verdict" | "score">, cap: number): void {
   if (result.score <= cap) return;
   result.score = cap;
-  if (cap < 40) result.verdict = "FAIL";
+  if (cap < FAIL_THRESHOLD) result.verdict = "FAIL";
   else if (result.verdict === "PASS") result.verdict = "CONCERNS";
 }
 

@@ -263,7 +263,7 @@ describe("runTier1Scan — result shape", () => {
 // ---------------------------------------------------------------------------
 // FS-003: Markdown link suppression
 // ---------------------------------------------------------------------------
-describe("runTier1Scan — FS-003 markdown link suppression", () => {
+describe("runTier1Scan — FS-003 only flags filesystem API calls", () => {
   it("does not flag ../../ inside a markdown link", () => {
     const result = runTier1Scan("See [reference](../../tools/file.md)");
     const fs003 = result.findings.filter((f) => f.patternId === "FS-003");
@@ -289,15 +289,13 @@ describe("runTier1Scan — FS-003 markdown link suppression", () => {
     expect(fs003.length).toBeGreaterThan(0);
   });
 
-  it("still flags bare ../../ path traversal", () => {
-    const content = "../../secret/data";
-    const result = runTier1Scan(content);
-    const fs003 = result.findings.filter((f) => f.patternId === "FS-003");
-    expect(fs003.length).toBeGreaterThan(0);
+  it("does not flag a bare ../../ path", () => {
+    const result = runTier1Scan("../../secret/data");
+    expect(result.findings.filter((f) => f.patternId === "FS-003")).toHaveLength(0);
   });
 
-  it("still flags ../../ after a closed markdown link on the same line", () => {
-    const content = "[safe](safe.md) ../../etc/passwd";
+  it("flags a traversing filesystem call even inside a markdown link", () => {
+    const content = '[safe](safe.md) [x](readFileSync("../../etc/passwd"))';
     const result = runTier1Scan(content);
     const fs003 = result.findings.filter((f) => f.patternId === "FS-003");
     expect(fs003.length).toBeGreaterThan(0);

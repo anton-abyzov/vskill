@@ -406,9 +406,11 @@ describe("scanContent — filesystem-access patterns", () => {
     expect(findings.some((f) => f.patternId === "FS-002")).toBe(true);
   });
 
-  it("FS-003: detects path traversal", () => {
-    const findings = scanContent("../../../../../../etc/passwd");
-    expect(findings.some((f) => f.patternId === "FS-003")).toBe(true);
+  it("FS-003: detects path traversal in filesystem API call arguments", () => {
+    expect(scanContent('fs.readFileSync("../../../../../../etc/passwd")').some((f) => f.patternId === "FS-003")).toBe(true);
+    expect(scanContent('createReadStream(base + "/../../secrets")').some((f) => f.patternId === "FS-003")).toBe(true);
+    // A bare relative path is not a filesystem call.
+    expect(scanContent("../../../../../../etc/passwd").some((f) => f.patternId === "FS-003")).toBe(false);
   });
 
   it("FS-004: detects symlink manipulation", () => {

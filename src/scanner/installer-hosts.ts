@@ -34,25 +34,31 @@ export const OFFICIAL_INSTALLER_URL_SOURCE =
   `|raw\\.githubusercontent\\.com\\/(?:${OFFICIAL_INSTALLER_GITHUB_OWNERS.map(escapeRe).join("|")})\\/`;
 
 /**
- * Regex source, for use inside a lookahead at the start of a URL after the
- * scheme: true when the URL has a `.` or `..` path segment or a
- * percent-encoded dot, slash or backslash. `nvm-sh/../attacker` would
- * otherwise borrow an allowlisted owner.
+ * Regex source matching a dot segment (`/./`, `/../`, or a spelling with
+ * `%2e`, `%2f`, a backslash or `%5c`) in the URL that follows, within its
+ * first 600 characters; use with the i flag. A path such as
+ * `nvm-sh/../attacker/` leaves the allowlisted owner after normalization, so
+ * such a URL is never official.
  */
-export const URL_DOT_SEGMENT_SOURCE = String.raw`[^\s)'"\x60]{0,700}?(?:\/\.{1,2}(?=[\/\\?#\s)'"\x60]|$)|%2[ef]|%5c)`;
-const DOT_SEGMENT_RE = /\/\.{1,2}(?:[\/\\?#]|$)|%2[ef]|%5c/i;
+export const DOT_SEGMENT_URL_SOURCE = String.raw`[^\s)'"\x60]{0,600}?(?:\/|%2f|\\|%5c)(?:\.|%2e){1,2}(?=[\/?#\s)'"\x60\\]|%2f|%5c|$)`;
+
+// Dot segments, and encoded dots, slashes and backslashes, which some
+// servers normalize after the allowlist check has passed.
+const DOT_SEGMENT_RE = /(?:^|\/)(?:\.|%2e){1,2}(?:[\/?#]|$)|%2e|%2f|%5c|\\/i;
 
 const HOSTS = new Set(OFFICIAL_INSTALLER_HOSTS.map((h) => h.toLowerCase()));
 const OWNERS = new Set(OFFICIAL_INSTALLER_GITHUB_OWNERS.map((o) => o.toLowerCase()));
 
 /** True for an http(s) or scheme-less URL on an official installer endpoint. */
 export function isOfficialInstallerUrl(url: string): boolean {
-  if (DOT_SEGMENT_RE.test(url)) return false;
   const m = /^(?:https?:\/\/)?([^/\s?#]+)(\/[^\s]*)?$/i.exec(url);
   if (!m) return false;
   const host = m[1].toLowerCase();
   // Userinfo and ports are how look-alike URLs hide the real host.
   if (host.includes("@") || host.includes(":")) return false;
+  // Dot segments and encoded dots or separators can climb out of an
+  // allowlisted owner's path (raw.githubusercontent.com/nvm-sh/../x/...).
+  if (DOT_SEGMENT_RE.test(m[2] ?? "")) return false;
   if (HOSTS.has(host)) return true;
   if (host !== "raw.githubusercontent.com") return false;
   const owner = /^\/([^/]+)\//.exec(m[2] ?? "");

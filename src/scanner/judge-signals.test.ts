@@ -63,10 +63,28 @@ describe("judgeRequiredSignals: routine documentation", () => {
   });
 
   it("does not hold a bundled wasm module, but holds other opaque binaries", () => {
-    const wasm = "[vskill: opaque binary file assets/resize_bg.wasm; content cannot be reviewed]";
+    const wasm = "[vskill: opaque binary file assets/resize_bg.wasm; WebAssembly module, content cannot be reviewed]";
     const so = "[vskill: opaque binary file assets/helper.so; content cannot be reviewed]";
     expect(signals(`# Resize\n${wasm}\n`)).toEqual([]);
     expect(signals(`# Resize\n${so}\n`)).toContain("HC-011");
+  });
+
+  it("holds a .wasm file whose header was not a WebAssembly module", () => {
+    // The plain marker is what the fetchers write for an ELF or a script named x.wasm.
+    expect(signals("# Diff\n[vskill: opaque binary file bin/fastdiff.wasm; content cannot be reviewed]\n")).toContain("HC-011");
+  });
+
+  it("matches the whole wasm marker only", () => {
+    const tail = "; WebAssembly module, content cannot be reviewed]";
+    for (const match of [
+      `[vskill: opaque binary file bin/x.wasm; y.exe${tail}`,
+      `[vskill: opaque binary file bin/x.wasm; y.exe; content cannot be reviewed]`,
+      `[vskill: opaque binary file bin/x.wasm${tail} (+1 more HC-011 findings not listed)`,
+      `[vskill: opaque binary file bin/x.wasm; WebAssembly module, content cannot be r\u2026`,
+    ]) {
+      expect(judgeRequiredSignals([{ patternId: "HC-011", severity: "high", match }]), match).toEqual(["HC-011"]);
+    }
+    expect(judgeRequiredSignals([{ patternId: "HC-011", severity: "high", match: `[vskill: opaque binary file bin/x.wasm${tail}` }])).toEqual([]);
   });
 
   it("holds visible text addressed to an AI reviewer (HC-014)", () => {

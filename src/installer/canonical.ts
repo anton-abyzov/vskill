@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync, existsSync, unlinkSync, chmodSync } from "node:fs";
+import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync, existsSync, unlinkSync, chmodSync, readdirSync, rmdirSync } from "node:fs";
 // 0706 T-004: `relative` + `sep` (as pathSep) power the cross-platform
 // path-traversal guard. `path.relative` handles Windows backslash correctly.
 import { join, relative, dirname, sep as pathSep } from "node:path";
@@ -179,24 +179,97 @@ function unlinkIfSymlink(p: string): void {
   }
 }
 
+/** 0894: how a skill bundle is written over a previous install. */
+export interface BundleWriteOptions {
+  /** Paths written with mode 0755 (git mode 100755 upstream); all others get 0644. */
+  executables?: ReadonlySet<string>;
+  /**
+   * Files the previous install of this skill recorded (lockfile `files`).
+   * Those the new bundle no longer has are removed, so a reinstall leaves no
+   * orphans. Files the previous install did not record (Studio evals, user
+   * notes) are never touched.
+   */
+  previousFiles?: readonly string[];
+}
+
+function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
+  try {
+    return lstatSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/** Remove now-empty folders from `dir` up to (not including) `root`. */
+function pruneEmptyDirs(dir: string, root: string): void {
+  let cur = dir;
+  while (cur !== root && relative(root, cur) && !relative(root, cur).startsWith("..")) {
+    try {
+      if (readdirSync(cur).length > 0) return;
+      rmdirSync(cur);
+    } catch {
+      return;
+    }
+    cur = dirname(cur);
+  }
+}
+
+/**
+ * Make `fullPath` writable as a regular file inside `root`: an ancestor that
+ * is a file or a symlink (which could also point outside the skill folder) is
+ * removed, and a folder sitting where the file goes is removed. Without this,
+ * a reinstall whose tree changed shape dies half-written with EISDIR/ENOTDIR.
+ */
+function clearPathForFile(root: string, fullPath: string): void {
+  const parts = relative(root, dirname(fullPath)).split(pathSep).filter(Boolean);
+  let cur = root;
+  for (const part of parts) {
+    cur = join(cur, part);
+    const st = lstatOrNull(cur);
+    if (!st) break;
+    if (!st.isDirectory()) unlinkSync(cur);
+  }
+  const st = lstatOrNull(fullPath);
+  if (st?.isDirectory()) rmSync(fullPath, { recursive: true, force: true });
+  else if (st?.isSymbolicLink()) unlinkSync(fullPath);
+}
+
 /**
  * Write bundled files alongside SKILL.md in a target directory.
  * Keys are relative paths (e.g., "agents/frontend.md", "assets/font.woff2");
  * values are text or raw bytes, written as-is. Paths were policy-checked when
  * the bundle entered the installer, so only traversal is re-checked here.
- * 0894: `executables` get mode 0755 (git mode 100755 upstream).
  */
 function writeAgentFiles(
   targetDir: string,
-  agentFiles: Record<string, BundleContent>,
-  executables?: ReadonlySet<string>,
+  agentFiles: Record<string, BundleContent> | undefined,
+  bundleOpts?: BundleWriteOptions,
 ): void {
-  for (const [relPath, fileContent] of Object.entries(agentFiles)) {
+  const files = agentFiles ?? {};
+  if (bundleOpts?.previousFiles) {
+    const keep = new Set(Object.keys(files));
+    for (const rel of bundleOpts.previousFiles) {
+      if (rel === "SKILL.md" || keep.has(rel)) continue;
+      let target: string;
+      try {
+        target = resolveBundleTarget(targetDir, rel, { anyPath: true });
+      } catch {
+        continue; // never act on an unsafe recorded path
+      }
+      const st = lstatOrNull(target);
+      if (st && !st.isDirectory()) {
+        unlinkSync(target);
+        pruneEmptyDirs(dirname(target), targetDir);
+      }
+    }
+  }
+  for (const [relPath, fileContent] of Object.entries(files)) {
     const fullPath = resolveBundleTarget(targetDir, relPath, { anyPath: true });
+    clearPathForFile(targetDir, fullPath);
     mkdirSync(dirname(fullPath), { recursive: true });
-    unlinkIfSymlink(fullPath);
     writeFileSync(fullPath, fileContent);
-    if (executables?.has(relPath)) chmodSync(fullPath, 0o755);
+    // Explicit: writeFileSync keeps the old mode of an existing file.
+    chmodSync(fullPath, bundleOpts?.executables?.has(relPath) ? 0o755 : 0o644);
   }
 }
 
@@ -217,7 +290,7 @@ export function installSymlink(
   agents: AgentDefinition[],
   opts: InstallOptions,
   agentFiles?: Record<string, BundleContent>,
-  executables?: ReadonlySet<string>,
+  bundleOpts?: BundleWriteOptions,
 ): string[] {
   content = ensureFrontmatter(content, skillName);
   const strippedContent = stripClaudeFields(content, skillName);
@@ -230,7 +303,7 @@ export function installSymlink(
     canonicalSkillDir = join(ensureCanonicalDir(opts.projectRoot, opts.global), skillName);
     mkdirSync(canonicalSkillDir, { recursive: true });
     writeFileSync(join(canonicalSkillDir, "SKILL.md"), strippedContent);
-    if (agentFiles) writeAgentFiles(canonicalSkillDir, agentFiles, executables);
+    writeAgentFiles(canonicalSkillDir, agentFiles, bundleOpts);
   }
 
   const installed: string[] = [];
@@ -271,7 +344,7 @@ export function installSymlink(
       unlinkIfSymlink(linkPath);
       mkdirSync(linkPath, { recursive: true });
       writeFileSync(join(linkPath, "SKILL.md"), agentContent);
-      if (agentFiles) writeAgentFiles(linkPath, agentFiles, executables);
+      writeAgentFiles(linkPath, agentFiles, bundleOpts);
       installed.push(linkPath);
       continue;
     }
@@ -285,7 +358,7 @@ export function installSymlink(
       unlinkIfSymlink(linkPath);
       mkdirSync(linkPath, { recursive: true });
       writeFileSync(join(linkPath, "SKILL.md"), strippedContent);
-      if (agentFiles) writeAgentFiles(linkPath, agentFiles, executables);
+      writeAgentFiles(linkPath, agentFiles, bundleOpts);
       installed.push(linkPath);
     }
   }
@@ -304,7 +377,7 @@ export function installCopy(
   agents: AgentDefinition[],
   opts: InstallOptions,
   agentFiles?: Record<string, BundleContent>,
-  executables?: ReadonlySet<string>,
+  bundleOpts?: BundleWriteOptions,
 ): string[] {
   content = ensureFrontmatter(content, skillName);
   const strippedContent = stripClaudeFields(content, skillName);
@@ -325,7 +398,7 @@ export function installCopy(
     if (!isSatisfiedByCanonical(agent, opts)) unlinkIfSymlink(skillDir);
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(join(skillDir, "SKILL.md"), agentContent);
-    if (agentFiles) writeAgentFiles(skillDir, agentFiles, executables);
+    writeAgentFiles(skillDir, agentFiles, bundleOpts);
     installed.push(skillDir);
   }
 

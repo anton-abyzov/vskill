@@ -3,7 +3,7 @@
 // copy-mode agent folder byte for byte.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, readFileSync, statSync, lstatSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, statSync, lstatSync, existsSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
 import { installSkillToAgents } from "../multi-install.js";
@@ -89,7 +89,8 @@ describe("installSkillToAgents — complete skill tree (0894)", () => {
   });
 
   it("still refuses traversal and SKILL.md overwrites in an install bundle", () => {
-    for (const bad of ["../escape.md", "a/../../b", "/abs.md", "SKILL.md"]) {
+    // 0894 review: skill.md / SKILL.MD would overwrite SKILL.md on macOS/Windows.
+    for (const bad of ["../escape.md", "a/../../b", "/abs.md", "SKILL.md", "skill.md", "SKILL.MD", "Skill.md"]) {
       expect(() =>
         installSkillToAgents({
           skillName: "recut",
@@ -101,6 +102,82 @@ describe("installSkillToAgents — complete skill tree (0894)", () => {
         }),
       ).toThrow();
     }
+  });
+
+  it("refuses two bundle paths that collide case-insensitively", () => {
+    expect(() =>
+      installSkillToAgents({
+        skillName: "recut",
+        rawContent: SKILL_MD,
+        agents: agents("codex"),
+        scope: "project",
+        projectRoot: root,
+        bundleFiles: { "notes/A.md": "a", "notes/a.md": "b" },
+      }),
+    ).toThrow(/collide on a case-insensitive filesystem/);
+  });
+
+  describe("reinstall over an existing install (0894 review)", () => {
+    const install = (bundleFiles: Record<string, string | Uint8Array>, extra: { exec?: string[]; prev?: string[]; copy?: boolean } = {}) =>
+      installSkillToAgents({
+        skillName: "recut",
+        rawContent: SKILL_MD,
+        agents: agents("claude-code", "codex"),
+        scope: "project",
+        projectRoot: root,
+        copy: extra.copy,
+        bundleFiles,
+        bundleExecutables: extra.exec,
+        previousFiles: extra.prev,
+      });
+    const canonical = () => join(root, ".agents", "skills", "recut");
+
+    it("removes files the previous install recorded and the new version dropped, keeps untracked ones", () => {
+      install({ "scripts/old.mjs": "old", "scripts/keep.mjs": "keep", "assets/gone/x.png": new Uint8Array([1]) });
+      // A file the user (or Studio evals) added: never recorded, never removed.
+      mkdirSync(join(canonical(), "evals"), { recursive: true });
+      writeFileSync(join(canonical(), "evals", "evals.json"), "{}");
+
+      install(
+        { "scripts/keep.mjs": "keep2" },
+        { prev: ["SKILL.md", "scripts/old.mjs", "scripts/keep.mjs", "assets/gone/x.png"] },
+      );
+      expect(existsSync(join(canonical(), "scripts", "old.mjs"))).toBe(false);
+      expect(existsSync(join(canonical(), "assets"))).toBe(false); // emptied folders pruned
+      expect(readFileSync(join(canonical(), "scripts", "keep.mjs"), "utf8")).toBe("keep2");
+      expect(readFileSync(join(canonical(), "evals", "evals.json"), "utf8")).toBe("{}");
+    });
+
+    it("replaces a folder with a file and a file with a folder instead of dying with EISDIR/ENOTDIR", () => {
+      install({ "assets/font": new Uint8Array([1]), "lib/x/y.mjs": "y" }, { copy: true });
+      expect(() =>
+        install({ "assets/font/Inter.woff2": new Uint8Array([2]), "lib/x": "now a file" }, { copy: true }),
+      ).not.toThrow();
+      for (const dir of [canonical(), join(root, ".claude", "skills", "recut")]) {
+        expect(Array.from(readFileSync(join(dir, "assets", "font", "Inter.woff2")))).toEqual([2]);
+        expect(readFileSync(join(dir, "lib", "x"), "utf8")).toBe("now a file");
+      }
+    });
+
+    it("never writes through a symlinked folder inside the skill", () => {
+      const outside = mkdtempSync(join(os.tmpdir(), "vskill-outside-"));
+      try {
+        mkdirSync(canonical(), { recursive: true });
+        symlinkSync(outside, join(canonical(), "scripts"), "dir");
+        install({ "scripts/run.sh": "echo" });
+        expect(existsSync(join(outside, "run.sh"))).toBe(false);
+        expect(lstatSync(join(canonical(), "scripts")).isSymbolicLink()).toBe(false);
+      } finally {
+        rmSync(outside, { recursive: true, force: true });
+      }
+    });
+
+    it.skipIf(process.platform === "win32")("resets a stale 0755 when the new version is not executable", () => {
+      install({ "scripts/run.sh": "a" }, { exec: ["scripts/run.sh"] });
+      expect(statSync(join(canonical(), "scripts", "run.sh")).mode & 0o777).toBe(0o755);
+      install({ "scripts/run.sh": "b" }, { prev: ["SKILL.md", "scripts/run.sh"] });
+      expect(statSync(join(canonical(), "scripts", "run.sh")).mode & 0o777).toBe(0o644);
+    });
   });
 
   it("Studio's strict policy is unchanged: non-standard paths still need anyPath", () => {

@@ -44,8 +44,10 @@ export function assertSafeBundlePath(relPath: string, opts: BundlePathOptions = 
   }
 
   const normalized = normalizeBundlePath(relPath.trim());
-  if (normalized === "SKILL.md") {
-    throw new Error("Bundled skill files must not include SKILL.md");
+  // 0894: case-insensitive — a bundled skill.md would overwrite the verified
+  // SKILL.md on macOS/Windows filesystems.
+  if (normalized.toLowerCase() === "skill.md") {
+    throw new Error(`Bundled skill files must not include SKILL.md (got ${relPath})`);
   }
   if (isAbsolute(normalized) || normalized.startsWith("/")) {
     throw new Error(`Bundled skill file path must be relative: ${relPath}`);
@@ -103,8 +105,16 @@ export function sanitizeInstallBundleFiles(
   files: Record<string, BundleContent>,
 ): Record<string, BundleContent> {
   const out: Record<string, BundleContent> = {};
+  const seen = new Map<string, string>();
   for (const [rawPath, content] of Object.entries(files)) {
     const relPath = assertSafeBundlePath(rawPath, { anyPath: true });
+    // Two paths differing only in case overwrite each other on macOS/Windows.
+    const key = relPath.toLowerCase();
+    const prior = seen.get(key);
+    if (prior !== undefined) {
+      throw new Error(`Bundled skill files ${prior} and ${relPath} collide on a case-insensitive filesystem`);
+    }
+    seen.set(key, relPath);
     if (typeof content !== "string" && !(content instanceof Uint8Array)) {
       throw new Error(`Bundled skill file ${rawPath} must be text or bytes`);
     }

@@ -63,6 +63,7 @@ const mockWriteLockfile = vi.fn();
 vi.mock("../lockfile/index.js", () => ({
   ensureLockfile: (...args: unknown[]) => mockEnsureLockfile(...args),
   writeLockfile: (...args: unknown[]) => mockWriteLockfile(...args),
+  readLockfile: () => null,
 }));
 
 const mockRunTier1Scan = vi.fn();

@@ -4,8 +4,10 @@
 // These pin the complete-tree fetch against mocked GitHub responses.
 
 import { describe, it, expect } from "vitest";
+import { createHash } from "node:crypto";
 import {
   fetchGitHubSkillBundle,
+  parseLfsPointer,
   SkillBundleError,
   ROOT_SKILL_BUNDLE_DIRS,
 } from "./github-skill-bundle.js";
@@ -39,6 +41,12 @@ interface MockRepo {
   /** repo-relative path -> content */
   blobs: Record<string, string | Uint8Array>;
   failBlob?: string;
+  /** HTTP status every git-trees call returns instead (e.g. 403 rate limit). */
+  treeStatus?: number;
+  /** dir -> Contents API listing (top-level entries) for the degraded path. */
+  contents?: Record<string, Array<{ name: string; type: string; size: number }>>;
+  /** repo path -> Git LFS object served by media.githubusercontent.com */
+  lfs?: Record<string, Uint8Array>;
 }
 
 function mockFetch(repo: MockRepo) {
@@ -46,7 +54,14 @@ function mockFetch(repo: MockRepo) {
   const fetchImpl = async (url: string): Promise<Response> => {
     calls.push(url);
     const u = new URL(url);
+    if (u.hostname === "api.github.com" && u.pathname.includes("/contents/")) {
+      const dir = decodeURIComponent(u.pathname.split("/contents/")[1]);
+      const listing = repo.contents?.[dir];
+      if (!listing) return new Response("404", { status: 404 });
+      return Response.json(listing);
+    }
     if (u.hostname === "api.github.com") {
+      if (repo.treeStatus) return new Response("rate limited", { status: repo.treeStatus });
       const m = u.pathname.match(/\/git\/trees\/(.+)$/);
       if (!m || u.searchParams.get("recursive") !== "1") return new Response("bad", { status: 400 });
       const treeish = decodeURIComponent(m[1]);
@@ -64,6 +79,12 @@ function mockFetch(repo: MockRepo) {
       const body = repo.blobs[path];
       if (body === undefined) return new Response("404", { status: 404 });
       return new Response(typeof body === "string" ? body : body.slice());
+    }
+    if (u.hostname === "media.githubusercontent.com") {
+      const prefix = `/media/${OWNER}/${REPO}/${REF}/`;
+      const body = repo.lfs?.[decodeURIComponent(u.pathname.slice(prefix.length))];
+      if (!body) return new Response("404", { status: 404 });
+      return new Response(body.slice());
     }
     return new Response("host", { status: 400 });
   };
@@ -131,39 +152,119 @@ describe("fetchGitHubSkillBundle — complete skill folder", () => {
     expect(calls.some((c) => c.includes("/contents/"))).toBe(false);
   });
 
-  it("fails loudly over the file-count limit instead of truncating", async () => {
-    const { fetchImpl, calls } = mockFetch(nestedSkill());
-    await expect(
-      fetchGitHubSkillBundle({
-        owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl,
-        limits: { maxFiles: 3 },
-      }),
-    ).rejects.toThrow(/9 files, over the 3-file install limit/);
-    // Nothing downloaded before the limit check.
-    expect(calls.some((c) => c.includes("raw.githubusercontent.com"))).toBe(false);
-  });
-
-  it("fails loudly over the per-file and total size limits", async () => {
+  it("over the file-count limit: degrades to SKILL.md + standard folders, with a reason", async () => {
     const { fetchImpl } = mockFetch(nestedSkill());
-    await expect(
-      fetchGitHubSkillBundle({
-        owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl,
-        limits: { maxFileBytes: 12 },
-      }),
-    ).rejects.toThrow(SkillBundleError);
-    await expect(
-      fetchGitHubSkillBundle({
-        owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl,
-        limits: { maxTotalBytes: 20 },
-      }),
-    ).rejects.toThrow(/over the 20-byte install limit/);
+    const b = await fetchGitHubSkillBundle({
+      owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl,
+      limits: { maxFiles: 3 },
+    });
+    expect(b.degraded).toMatch(/9 files, over the 3-file install limit/);
+    // Only the standard folders survive; NOTICE.md and sub-agents/ do not.
+    expect(b.fileList).toEqual([
+      "SKILL.md",
+      "assets/audio/beep.mp3",
+      "assets/fonts/Inter.woff2",
+      "references/layouts/pip.md",
+      "scripts/lib/cut.mjs",
+      "scripts/lib/deep/more/util.mjs",
+      "scripts/run.sh",
+    ]);
   });
 
-  it("refuses a truncated tree listing", async () => {
-    const { fetchImpl } = mockFetch({ trees: { "skills/recut": "truncated" }, blobs: {} });
-    await expect(
-      fetchGitHubSkillBundle({ owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl }),
-    ).rejects.toThrow(/truncated/);
+  it("over the per-file or total size limit: degrades instead of failing", async () => {
+    const { fetchImpl } = mockFetch(nestedSkill());
+    const perFile = await fetchGitHubSkillBundle({
+      owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl,
+      limits: { maxFileBytes: 12 },
+    });
+    expect(perFile.degraded).toMatch(/over the 12-byte limit/);
+    const total = await fetchGitHubSkillBundle({
+      owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl,
+      limits: { maxTotalBytes: 20 },
+    });
+    expect(total.degraded).toMatch(/over the 20-byte install limit/);
+  });
+
+  it("a truncated listing degrades to the Contents API listing of the standard folders", async () => {
+    const { fetchImpl } = mockFetch({
+      trees: { "skills/recut": "truncated" },
+      contents: { "skills/recut/scripts": [{ name: "run.sh", type: "file", size: 5 }, { name: "lib", type: "dir", size: 0 }] },
+      blobs: { "skills/recut/scripts/run.sh": "echo\n" },
+    });
+    const b = await fetchGitHubSkillBundle({ owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl });
+    expect(b.degraded).toMatch(/truncated/);
+    expect(b.fileList).toEqual(["SKILL.md", "scripts/run.sh"]);
+  });
+
+  it("a 403 rate limit degrades (SKILL.md only when nothing else can be listed), never throws", async () => {
+    const { fetchImpl } = mockFetch({ trees: {}, blobs: {}, treeStatus: 403 });
+    const b = await fetchGitHubSkillBundle({ owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl });
+    expect(b.degraded).toMatch(/403/);
+    expect(b.fileList).toEqual(["SKILL.md"]);
+  });
+
+  it("fetches Git LFS objects from the media host instead of installing the pointer", async () => {
+    const font = new Uint8Array(4096).map((_, i) => (i * 7) % 256);
+    const oid = createHash("sha256").update(font).digest("hex");
+    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${font.byteLength}\n`;
+    const { fetchImpl, calls } = mockFetch({
+      trees: { "skills/recut": treeFor({ "assets/Inter.woff2": pointer }) },
+      blobs: { "skills/recut/assets/Inter.woff2": pointer },
+      lfs: { "skills/recut/assets/Inter.woff2": font },
+    });
+    const b = await fetchGitHubSkillBundle({ owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl });
+    expect(Array.from(b.files["assets/Inter.woff2"] as Uint8Array)).toEqual(Array.from(font));
+    expect(calls.some((c) => c.startsWith("https://media.githubusercontent.com/media/"))).toBe(true);
+    expect(parseLfsPointer(new TextEncoder().encode(pointer))).toEqual({ oid, size: font.byteLength });
+  });
+
+  it("applies the size limits to the real Git LFS object, not its pointer", async () => {
+    const big = new Uint8Array(4096);
+    const oid = createHash("sha256").update(big).digest("hex");
+    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize 4096\n`;
+    const repo = {
+      trees: { "skills/recut": treeFor({ "assets/a.bin": pointer }) } as MockRepo["trees"],
+      blobs: { "skills/recut/assets/a.bin": pointer },
+      lfs: { "skills/recut/assets/a.bin": big },
+    };
+    await expect(fetchGitHubSkillBundle({
+      owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl: mockFetch(repo).fetchImpl,
+      limits: { maxFileBytes: 1000 },
+    })).rejects.toThrow(/Git LFS object of 4096 bytes is over the 1000-byte limit/);
+    await expect(fetchGitHubSkillBundle({
+      owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl: mockFetch(repo).fetchImpl,
+      limits: { maxTotalBytes: 1000 },
+    })).rejects.toThrow(/with its Git LFS objects, over the 1000-byte install limit/);
+  });
+
+  it("fails loudly when a Git LFS object is missing or does not match its pointer", async () => {
+    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${"a".repeat(64)}\nsize 4\n`;
+    const base = {
+      trees: { "skills/recut": treeFor({ "assets/a.mp3": pointer }) } as MockRepo["trees"],
+      blobs: { "skills/recut/assets/a.mp3": pointer },
+    };
+    await expect(fetchGitHubSkillBundle({
+      owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl: mockFetch(base).fetchImpl,
+    })).rejects.toThrow(/Git LFS object: HTTP 404/);
+    await expect(fetchGitHubSkillBundle({
+      owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md",
+      fetchImpl: mockFetch({ ...base, lfs: { "skills/recut/assets/a.mp3": new Uint8Array([1, 2, 3, 4]) } }).fetchImpl,
+    })).rejects.toThrow(/does not match its pointer/);
+  });
+
+  it("refuses a bundled skill.md / SKILL.MD and case-colliding paths", async () => {
+    for (const files of [
+      { "skill.md": "# shadow" },
+      { "SKILL.MD": "# shadow" },
+      { "notes/A.md": "a", "notes/a.md": "b" },
+    ]) {
+      const blobs: Record<string, string> = {};
+      for (const [p, c] of Object.entries(files)) blobs[`skills/recut/${p}`] = c;
+      const { fetchImpl } = mockFetch({ trees: { "skills/recut": treeFor(files) }, blobs });
+      await expect(
+        fetchGitHubSkillBundle({ owner: OWNER, repo: REPO, ref: REF, skillMdPath: "skills/recut/SKILL.md", fetchImpl }),
+      ).rejects.toThrow(/case-insensitive filesystem/);
+    }
   });
 
   it("refuses to return a partial bundle when a download fails", async () => {
@@ -179,6 +280,8 @@ describe("fetchGitHubSkillBundle — complete skill folder", () => {
     const trees: MockRepo["trees"] = {
       scripts: treeFor({ "lib/a.py": "print(1)\n" }),
       assets: treeFor({ "img/logo.png": BINARY }),
+      // The repo's own test suite is not part of a root skill.
+      tests: treeFor({ "big.test.ts": "x" }),
     };
     const blobs = { "scripts/lib/a.py": "print(1)\n", "assets/img/logo.png": BINARY };
     const { fetchImpl, calls } = mockFetch({ trees, blobs });
@@ -186,5 +289,7 @@ describe("fetchGitHubSkillBundle — complete skill folder", () => {
     expect(b.fileList).toEqual(["SKILL.md", "assets/img/logo.png", "scripts/lib/a.py"]);
     expect(b.files["assets/img/logo.png"]).toBeInstanceOf(Uint8Array);
     expect(calls.filter((c) => c.includes("/git/trees/"))).toHaveLength(ROOT_SKILL_BUNDLE_DIRS.length);
+    expect(ROOT_SKILL_BUNDLE_DIRS).not.toContain("tests");
+    expect(calls.some((c) => c.includes("tests"))).toBe(false);
   });
 });

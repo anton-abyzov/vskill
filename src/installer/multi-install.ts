@@ -243,6 +243,8 @@ export interface InstallToAgentsOptions {
   bundleFiles?: Record<string, BundleContent>;
   /** 0894: bundle paths written with mode 0755. */
   bundleExecutables?: string[];
+  /** 0894: lockfile `files` of the previous install; ones now gone are removed. */
+  previousFiles?: string[];
 }
 
 /**
@@ -266,9 +268,10 @@ export function installSkillToAgents(opts: InstallToAgentsOptions): string[] {
   const bundleFiles = opts.bundleFiles
     ? sanitizeInstallBundleFiles(opts.bundleFiles)
     : undefined;
-  const executables = opts.bundleExecutables?.length
-    ? new Set(opts.bundleExecutables)
-    : undefined;
+  const bundleOpts = {
+    executables: new Set(opts.bundleExecutables ?? []),
+    previousFiles: opts.previousFiles,
+  };
 
   // Tier-1 = filesystem drop-in agents with no per-tool transformer. They keep
   // the existing batch install (canonical store + symlink dedup + COPY_FALLBACK).
@@ -284,7 +287,7 @@ export function installSkillToAgents(opts: InstallToAgentsOptions): string[] {
 
   if (tier1.length > 0) {
     const fn = copy ? installCopy : installSymlink;
-    written.push(...fn(skillName, rawContent, tier1, installOpts, bundleFiles, executables));
+    written.push(...fn(skillName, rawContent, tier1, installOpts, bundleFiles, bundleOpts));
   }
 
   if (tier2or3.length > 0) {

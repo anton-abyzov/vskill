@@ -1637,7 +1637,17 @@ async function installOneGitHubSkill(
    * the actual file (not /blob/HEAD/SKILL.md at the repo root).
    */
   sourceSkillPath?: string,
+  /**
+   * 0894: the ONE ref (commit SHA when known) that SKILL.md, the bundle and
+   * the lockfile all use, so they can never come from different commits.
+   */
+  ref?: string,
+  /** 0894: lockfile `files` of the previous install of this skill. */
+  previousFiles?: string[],
 ): Promise<SkillInstallResult> {
+  if (ref && sourceSkillPath) {
+    rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${sourceSkillPath}`;
+  }
   // Blocklist + rejection check BEFORE fetching (prevents misleading 404)
   const repoUrl = `https://github.com/${owner}/${repo}`;
   const safety = await checkRepoInstallSafety(skillName, owner, repo);
@@ -1720,7 +1730,7 @@ async function installOneGitHubSkill(
     const prepared = await prepareGitHubSkillBundle({
       owner,
       repo,
-      ref: await getDefaultBranch(owner, repo),
+      ref: ref || (await getDefaultBranch(owner, repo)),
       skillMdPath: sourceSkillPath,
       force: !!opts.force,
     });
@@ -1763,6 +1773,7 @@ async function installOneGitHubSkill(
       copy: !!opts.copy,
       bundleFiles: bundleFiles ?? agentFiles,
       bundleExecutables,
+      previousFiles,
     });
   } catch (err) {
     console.error(red(`  Failed to install skill "${skillName}": ${(err as Error).message}`));
@@ -2494,12 +2505,20 @@ async function addCommandInner(
     return;
   }
 
+  // 0894: resolve the commit ONCE; SKILL.md, bundle and lockfile all use it.
+  const sourceBranch = await getDefaultBranch(owner, repo);
+  const sourceCommitSha = await getBranchHeadSha(owner, repo, sourceBranch);
+  const priorSkills = readLockfile(lockfileRoot(opts))?.skills ?? {};
+
   // Install selected skills
   const results: SkillInstallResult[] = [];
   for (const skill of selectedSkills) {
     console.log(dim(`\nInstalling skill: ${bold(skill.name)}...`));
     try {
-      const result = await installOneGitHubSkill(owner, repo, skill.name, skill.rawUrl, opts, selectedAgents, projectRoot, skill.agentRawUrls, skill.path);
+      const result = await installOneGitHubSkill(
+        owner, repo, skill.name, skill.rawUrl, opts, selectedAgents, projectRoot, skill.agentRawUrls, skill.path,
+        sourceCommitSha || sourceBranch, priorSkills[skill.name]?.files,
+      );
       results.push(result);
     } catch (err) {
       console.error(red(`  Unexpected error installing "${skill.name}": ${(err as Error).message}`));
@@ -2512,8 +2531,6 @@ async function addCommandInner(
   // `sourceSkillPath` are persisted alongside the legacy `source` string.
   const lockDir = lockfileRoot(opts);
   const lock = ensureLockfile(lockDir);
-  const sourceBranch = await getDefaultBranch(owner, repo);
-  const sourceCommitSha = await getBranchHeadSha(owner, repo, sourceBranch);
   for (const r of results) {
     if (r.installed && r.sha) {
       lock.skills[r.skillName] = buildGitHubInstallLockEntry({
@@ -3073,6 +3090,8 @@ async function installSingleSkillLegacy(
 
   const branch = refOverride || (await getDefaultBranch(owner, repo));
   const sourceCommitSha = await getBranchHeadSha(owner, repo, branch);
+  // 0894: SKILL.md, the bundle and the lockfile all read this one commit.
+  const contentRef = sourceCommitSha || branch;
   // Candidate subpaths: explicit override wins; otherwise try the conventional
   // skills/{name}/ layout first, then root-level {name}/ (e.g. higgsfield-ai/skills).
   const subpathCandidates = skillSubpathOverride
@@ -3086,7 +3105,7 @@ async function installSingleSkillLegacy(
   let content: string | undefined;
   for (let i = 0; i < subpathCandidates.length; i++) {
     const candidate = subpathCandidates[i];
-    const candidateUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${candidate}`;
+    const candidateUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${contentRef}/${candidate}`;
     const isLast = i === subpathCandidates.length - 1;
     if (isLast) {
       content = await fetchSkillContent(candidateUrl);
@@ -3187,21 +3206,6 @@ async function installSingleSkillLegacy(
     console.log(yellow("\n--force: installing despite CONCERNS.\n"));
   }
 
-  // 0894: the complete skill folder — every nested file, binaries as bytes,
-  // exec bits kept — read from the same commit, scanned, never truncated.
-  const prepared = await prepareGitHubSkillBundle({
-    owner,
-    repo,
-    ref: sourceCommitSha || branch,
-    skillMdPath: skillSubpath,
-    force: !!opts.force,
-  });
-  if (!prepared.ok) {
-    console.error(red(`\n${prepared.message}`));
-    return process.exit(1);
-  }
-  const bundle = prepared.bundle;
-
   // Detect installed agents and apply --agent filter
   let agents = await detectInstalledAgents();
   if (agents.length === 0) {
@@ -3226,6 +3230,23 @@ async function installSingleSkillLegacy(
     printDryRunPlan([skillName], selectedAgents, opts);
     return;
   }
+
+  // 0894: the complete skill folder — every nested file, binaries as bytes,
+  // exec bits kept — read from the same commit, scanned, never truncated; not
+  // downloaded for --dry-run.
+  const prepared = await prepareGitHubSkillBundle({
+    owner,
+    repo,
+    ref: contentRef,
+    skillMdPath: skillSubpath,
+    force: !!opts.force,
+  });
+  if (!prepared.ok) {
+    console.error(red(`\n${prepared.message}`));
+    return process.exit(1);
+  }
+  const bundle = prepared.bundle;
+  const previousFiles = readLockfile(lockfileRoot(opts))?.skills[skillName]?.files;
 
   // Install to each agent using canonical installer (flat directory, namespaced frontmatter name)
   const namespacedName = pluginNamespace && skillName !== pluginNamespace
@@ -3254,6 +3275,7 @@ async function installSingleSkillLegacy(
     copy: !!opts.copy,
     bundleFiles: Object.keys(bundle.files).length > 0 ? bundle.files : undefined,
     bundleExecutables: bundle.executables,
+    previousFiles,
   });
 
   // Update lockfile (global → ~/.agents/, project → project root).

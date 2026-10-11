@@ -28,6 +28,8 @@ import { getDefaultKeychain } from "./keychain.js";
 const ALLOWED_HOSTS = new Set([
   "api.github.com",
   "raw.githubusercontent.com",
+  // 0894: Git LFS objects of skill bundles (fonts, audio) are served here.
+  "media.githubusercontent.com",
 ]);
 
 const MAX_RETRIES = 3;

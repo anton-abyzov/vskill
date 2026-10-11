@@ -472,7 +472,7 @@ jobs:
           bash scripts/release/publish-manifest.sh "$VERSION" ./release-artifacts/
 
       - name: Create / update GitHub Release (mirror)
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: 'vSkill Desktop ${{ github.ref_name }}'

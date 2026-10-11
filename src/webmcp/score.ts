@@ -1,0 +1,642 @@
+// ---------------------------------------------------------------------------
+// vskill audit-webmcp -- scoring. Pure functions: no browser, no network.
+//
+// Rules
+//   WMCP-001  prompt-injection / tool-poisoning text in name, title,
+//             description or parameter descriptions (scanContent + WebMCP
+//             specific patterns)
+//   WMCP-002  write-shaped tool without consequentialHint
+//   WMCP-003  write-shaped tool marked readOnlyHint:true
+//   WMCP-004  PII-shaped parameters the tool's purpose does not need
+//   WMCP-005  tool registered by a script from another site (medium), or by
+//             a library from a public npm CDN (info); the hosting platform's
+//             own script is not a finding (attribution.ts)
+//   WMCP-006  description over 500 chars, or more than 40 tools on the page
+//   WMCP-007  inputSchema missing or not a JSON Schema object
+//   WMCP-008  tools registered but no Permissions-Policy mentioning tools
+//   WMCP-009  tool exposed to other origins via exposedTo
+// ---------------------------------------------------------------------------
+
+import { scanContent, type ScanVerdict } from "../scanner/patterns.js";
+import { isUnpinned } from "./attribution.js";
+import {
+  SEVERITIES,
+  type EnumerationResult,
+  type Severity,
+  type SiteReport,
+  type SiteSummary,
+  type WebmcpFinding,
+  type WebmcpTool,
+} from "./types.js";
+
+export const MAX_DESCRIPTION_CHARS = 500;
+export const MAX_TOOLS_PER_PAGE = 40;
+
+// ---- Helpers ---------------------------------------------------------------
+
+/** Split a tool name into lowercase words: "proceedToCheckout" -> [proceed, to, checkout]. */
+export function tokenizeName(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+export function severityRank(s: Severity): number {
+  return SEVERITIES.indexOf(s);
+}
+
+/** True when `s` is at or above `threshold` (critical is highest). */
+export function atOrAbove(s: Severity, threshold: Severity): boolean {
+  return severityRank(s) <= severityRank(threshold);
+}
+
+function capSeverity(s: Severity, cap: Severity): Severity {
+  return severityRank(s) < severityRank(cap) ? cap : s;
+}
+
+export function originOf(url: string | undefined | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u.origin;
+  } catch {
+    return null;
+  }
+}
+
+/** Second-level labels under a two-letter country TLD that are public suffixes (example.co.uk). */
+const SLD_UNDER_CCTLD = new Set(["co", "com", "net", "org", "gov", "edu", "ac", "ne", "or", "go", "gob", "gen", "ltd", "plc", "nic", "mil"]);
+/** Hosting suffixes where each subdomain is a different site. */
+const SHARED_HOST_SUFFIXES = [
+  "github.io", "gitlab.io", "vercel.app", "netlify.app", "pages.dev", "workers.dev", "herokuapp.com",
+  "myshopify.com", "appspot.com", "web.app", "firebaseapp.com", "azurewebsites.net", "cloudfront.net",
+  "blogspot.com", "wordpress.com", "onrender.com", "fly.dev", "glitch.me", "s3.amazonaws.com",
+];
+
+/**
+ * Approximate registrable domain ("site") of a URL: www.shop.example and
+ * cdn.shop.example share one. A heuristic without the full Public Suffix
+ * List: two-letter ccTLD second levels and common shared hosts are handled.
+ */
+export function siteOf(url: string | undefined | null): string | null {
+  const origin = originOf(url);
+  if (!origin) return null;
+  const host = new URL(origin).hostname.toLowerCase().replace(/\.$/, "");
+  if (/^[\d.]+$/.test(host) || host.includes(":") || host.startsWith("[")) return host;
+  const labels = host.split(".");
+  if (labels.length <= 2) return host;
+  for (const suffix of SHARED_HOST_SUFFIXES) {
+    if (host.endsWith(`.${suffix}`)) return labels.slice(-(suffix.split(".").length + 1)).join(".");
+  }
+  const tld = labels[labels.length - 1];
+  const sld = labels[labels.length - 2];
+  const n = tld.length === 2 && SLD_UNDER_CCTLD.has(sld) ? 3 : 2;
+  return labels.slice(-n).join(".");
+}
+
+/** Parse a schema that may arrive as a JSON string (Chrome's getTools does this). */
+export function parseSchema(raw: unknown): { ok: boolean; value: unknown } {
+  if (raw === undefined || raw === null || raw === "") return { ok: false, value: undefined };
+  if (typeof raw === "string") {
+    try {
+      return { ok: true, value: JSON.parse(raw) };
+    } catch {
+      return { ok: false, value: raw };
+    }
+  }
+  return { ok: true, value: raw };
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+interface SchemaParam {
+  path: string;
+  key: string;
+  description?: string;
+}
+
+/** Walk object properties (nested objects and array items) of a JSON Schema. */
+export function schemaParams(schema: unknown, prefix = "", depth = 0): SchemaParam[] {
+  if (!isPlainObject(schema) || depth > 6) return [];
+  const out: SchemaParam[] = [];
+  const props = schema.properties;
+  if (isPlainObject(props)) {
+    for (const [key, sub] of Object.entries(props)) {
+      const path = prefix ? `${prefix}.${key}` : key;
+      const desc = isPlainObject(sub) && typeof sub.description === "string" ? sub.description : undefined;
+      out.push({ path, key, description: desc });
+      out.push(...schemaParams(sub, path, depth + 1));
+    }
+  }
+  if (isPlainObject(schema.items)) {
+    out.push(...schemaParams(schema.items, prefix ? `${prefix}[]` : "[]", depth + 1));
+  }
+  return out;
+}
+
+// ---- WMCP-002/003: write shape ---------------------------------------------
+
+export type WriteTier = "high" | "medium" | "low";
+
+export interface WriteShape {
+  tier: WriteTier;
+  reason: string;
+}
+
+const READ_VERBS = new Set([
+  "get", "list", "search", "find", "view", "show", "lookup", "look", "check", "read",
+  "fetch", "query", "browse", "describe", "preview", "estimate", "calculate", "compare",
+  "track", "retrieve", "count", "explore", "filter", "sort", "recommend", "suggest",
+  "validate", "verify", "inspect", "summarize", "explain", "is", "has", "can",
+]);
+
+/** Verbs that open a read-only description ("Returns ...", "Answers ..."). Not used for names: return_item is a write. */
+const DESCRIPTION_READ_LEADS = new Set([...READ_VERBS, "return", "answer", "provide", "display", "open"]);
+
+/** Always write-shaped wherever they appear in the name. */
+const HIGH_WORDS = new Set([
+  "checkout", "pay", "purchase", "buy", "delete", "destroy", "erase", "withdraw", "donate",
+]);
+/** Noun or verb: write-shaped only as the first word or after a write verb (place_order, not order_lookup). */
+const HIGH_AMBIGUOUS = new Set(["order", "payment", "transfer", "charge"]);
+
+const MEDIUM_WORDS = new Set([
+  "remove", "cancel", "submit", "reserve", "rsvp", "signup", "subscribe", "unsubscribe",
+  "send", "publish", "enroll",
+]);
+const MEDIUM_AMBIGUOUS = new Set(["book", "post", "register"]);
+
+/** Verbs that make a following ambiguous noun an action: cancel_order, create_post. */
+const WRITE_VERBS = new Set([
+  "place", "create", "make", "submit", "confirm", "complete", "process", "new", "start",
+  "initiate", "execute", "perform", "schedule", "add", "update", "edit", "modify", "change",
+  "amend", "cancel", "send", "write", "publish", "proceed", "finalize", "finalise", "set",
+  "save", "issue", "request", "apply", "accept", "approve", "reject",
+]);
+/** A word that turns an ambiguous noun into a read: order_status, book_details, payment_methods. */
+const NOUN_CONTEXT = new Set([
+  "status", "history", "details", "detail", "tracking", "info", "summary", "methods", "method",
+  "options", "option", "policy", "policies", "list", "lookup", "count", "total", "url", "link",
+  "page", "number", "id", "date", "estimate", "preview",
+]);
+/** UI state, not data: remove_filter, cancel_modal, submit_search. */
+const UI_STATE_NOUNS = new Set([
+  "filter", "filters", "facet", "facets", "sort", "sorting", "selection", "highlight", "highlights",
+  "tab", "tabs", "panel", "modal", "dialog", "popup", "menu", "overlay", "banner", "toast",
+  "tooltip", "view", "zoom", "search", "query",
+]);
+
+const CART_NOUNS = new Set(["cart", "bag", "basket"]);
+const CART_VERBS = new Set(["add", "update", "remove", "set", "empty", "clear", "modify", "change", "edit", "cancel"]);
+
+const DESCRIPTION_WRITE_PATTERNS: Array<{ tier: WriteTier; re: RegExp }> = [
+  { tier: "high", re: /\b(?:place|submit|complete|finali[sz]e|confirm)s?\s+(?:an?\s+|the\s+|your\s+|their\s+)?(?:order|purchase|payment|checkout)\b/i },
+  { tier: "high", re: /\b(?:proceed|go|continue)s?\s+to\s+(?:the\s+)?checkout\b/i },
+  { tier: "high", re: /\bmakes?\s+(?:a\s+)?payments?\b/i },
+  { tier: "high", re: /\b(?:purchase|buy)s?\s+(?:an?|the|this|these|your)\b/i },
+  { tier: "high", re: /\bpermanently\s+(?:delete|remove)s?\b|\bdeletes?\s+(?:an?|the|this|your|all)\b/i },
+  { tier: "high", re: /\btransfers?\s+(?:funds|money)\b/i },
+  { tier: "high", re: /\bcharges?\s+(?:the\s+)?(?:card|customer|user)\b/i },
+  { tier: "low", re: /\badds?\s+(?:an?\s+|the\s+)?(?:\w+\s+){0,2}to\s+(?:the\s+|your\s+|a\s+)?(?:cart|bag|basket)\b/i },
+  { tier: "low", re: /\b(?:updates?|modif(?:y|ies)|changes?|empt(?:y|ies)|clears?)\s+(?:the\s+|your\s+)?(?:shopping\s+)?(?:cart|bag|basket)\b/i },
+  { tier: "medium", re: /\bcancels?\s+(?:an?|the|this|your)\b/i },
+  { tier: "medium", re: /\bsends?\s+(?:an?\s+|the\s+)?(?:email|message|sms|text|invite|invitation)\b/i },
+  { tier: "medium", re: /\b(?:subscribes?|signs?\s+up|registers?)\s+(?:the\s+user\s+)?(?:to|for)\b/i },
+  { tier: "medium", re: /\b(?:books?|reserves?)\s+(?:an?|the)\s+\w+/i },
+  { tier: "medium", re: /\bpublish(?:es)?\s+(?:an?|the|this|your)\b/i },
+  { tier: "medium", re: /\bsubmits?\s+(?:an?|the|this|your)\b/i },
+  { tier: "medium", re: /\brsvps?\b/i },
+  { tier: "medium", re: /\bposts?\s+(?:an?\s+)?(?:comment|review|message|reply)\b/i },
+  { tier: "medium", re: /\bremoves?\s+(?:an?|the|this)\b/i },
+];
+
+/** "Returns" -> "return", "Searches" -> "search", "Retrieves" -> "retrieve". */
+function leadVerb(description: string): string | null {
+  const m = /^\s*(?:this\s+tool\s+)?([a-z]+)/i.exec(description);
+  if (!m) return null;
+  const w = m[1].toLowerCase();
+  if (DESCRIPTION_READ_LEADS.has(w)) return w;
+  if (w.endsWith("ies")) return `${w.slice(0, -3)}y`;
+  if (w.endsWith("es") && DESCRIPTION_READ_LEADS.has(w.slice(0, -2))) return w.slice(0, -2);
+  if (w.endsWith("s")) return w.slice(0, -1);
+  return w;
+}
+
+/** An ambiguous noun/verb counts as a write when it leads the name or follows a write verb, and no read noun qualifies it. */
+function ambiguousIsWrite(tokens: string[], i: number): boolean {
+  if (tokens.some((t) => NOUN_CONTEXT.has(t))) return false;
+  return i === 0 || tokens.slice(0, i).some((t) => WRITE_VERBS.has(t));
+}
+
+/** Does the tool look like it changes state (buys, deletes, sends, books ...)? */
+export function classifyWriteShape(tool: Pick<WebmcpTool, "name" | "description">): WriteShape | null {
+  const tokens = tokenizeName(tool.name);
+  if (tokens.length === 0) return null;
+  if (READ_VERBS.has(tokens[0])) return null;
+
+  const joined = tokens.join("_");
+  const words = new Set(tokens);
+  if (joined.includes("sign_up")) words.add("signup");
+
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t === "checkout" && tokens.some((x) => NOUN_CONTEXT.has(x))) continue;
+    if (HIGH_WORDS.has(t)) return { tier: "high", reason: t };
+    if (HIGH_AMBIGUOUS.has(t) && ambiguousIsWrite(tokens, i)) return { tier: "high", reason: t };
+  }
+  const hasCartNoun = tokens.some((t) => CART_NOUNS.has(t));
+  const cartVerb = tokens.find((t) => CART_VERBS.has(t));
+  if (hasCartNoun && cartVerb) return { tier: "low", reason: `${cartVerb} cart` };
+
+  if (tokens.some((t) => UI_STATE_NOUNS.has(t))) return null;
+  for (const t of words) {
+    if (MEDIUM_WORDS.has(t)) return { tier: "medium", reason: t };
+  }
+  for (let i = 0; i < tokens.length; i++) {
+    if (MEDIUM_AMBIGUOUS.has(tokens[i]) && ambiguousIsWrite(tokens, i)) return { tier: "medium", reason: tokens[i] };
+  }
+
+  const desc = tool.description ?? "";
+  const lead = leadVerb(desc);
+  if (lead && DESCRIPTION_READ_LEADS.has(lead)) return null;
+  for (const { tier, re } of DESCRIPTION_WRITE_PATTERNS) {
+    const m = re.exec(desc);
+    // "Does NOT add anything to the cart" describes what the tool avoids.
+    if (m && !/\b(?:not|never|no|cannot|can't|won't|doesn't|don't)\s+(?:\w+\s+)?$/i.test(desc.slice(Math.max(0, m.index - 24), m.index))) {
+      return { tier, reason: `description: "${m[0]}"` };
+    }
+  }
+  return null;
+}
+
+// ---- WMCP-001: poisoning text ----------------------------------------------
+
+interface PoisonPattern {
+  id: string;
+  name: string;
+  severity: Severity;
+  re: RegExp;
+}
+
+/** WebMCP-specific tool-poisoning shapes not covered by scanContent. */
+export const POISON_PATTERNS: PoisonPattern[] = [
+  { id: "WP-01", name: "hidden instruction tag", severity: "high", re: /<\s*\/?\s*(?:important|system|instructions?|secret|hidden)\s*>/i },
+  { id: "WP-02", name: "conceals actions from the user", severity: "high", re: /\b(?:do\s+not|don['’]?t|never)\s+(?:tell|inform|mention|reveal|show|notify|disclose)\s+(?:this\s+)?(?:to\s+)?(?:the\s+)?user\b/i },
+  { id: "WP-03", name: "overrides prior instructions", severity: "high", re: /\b(?:disregard|forget|override)\s+(?:all\s+)?(?:previous|prior|earlier|other|your)\s+(?:instructions|rules|guidelines|tools)\b/i },
+  { id: "WP-04", name: "tool shadowing", severity: "medium", re: /\b(?:instead\s+of|rather\s+than)\s+(?:using\s+)?(?:any\s+)?other\s+tools?\b|\balways\s+(?:call|use|invoke|run)\s+this\s+tool\s+(?:first|before)\b/i },
+  { id: "WP-05", name: "invisible or bidi characters", severity: "high", re: /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]|[\u{E0000}-\u{E007F}]/u },
+  { id: "WP-07", name: "tells the agent to skip user confirmation", severity: "medium", re: /\b(?:do\s+not|don['\u2019]?t|never|no\s+need\s+to)\s+(?:ask|prompt|check\s+with)\s+(?:the\s+user\s+)?(?:to\s+|for\s+)?confirm(?:ation)?\b|\bwithout\s+(?:asking|confirming\s+with|checking\s+with)\s+(?:the\s+)?user\b/i },
+  { id: "WP-06", name: "asks for conversation or secrets", severity: "high", re: /\b(?:include|send|pass|append|attach)\s+(?:the\s+)?(?:user['’]?s?\s+)?(?:full\s+)?(?:conversation|chat\s+history|previous\s+messages|system\s+prompt|cookies?|session\s+tokens?|api\s+keys?|passwords?)\b/i },
+];
+
+interface TextField {
+  field: string;
+  text: string;
+}
+
+function toolTextFields(tool: WebmcpTool): TextField[] {
+  const fields: TextField[] = [{ field: "name", text: tool.name }];
+  if (tool.title) fields.push({ field: "title", text: tool.title });
+  if (tool.description) fields.push({ field: "description", text: tool.description });
+  const parsed = parseSchema(tool.inputSchema);
+  if (parsed.ok) {
+    for (const p of schemaParams(parsed.value)) {
+      if (p.description) fields.push({ field: `param ${p.path}`, text: p.description });
+    }
+  }
+  return fields;
+}
+
+/**
+ * Remove invisible characters that real text needs before WP-05 runs:
+ * emoji ZWJ sequences, subdivision flags (tag characters), ZWJ/ZWNJ in
+ * scripts that use them for shaping, LRM/RLM in right-to-left text, and a
+ * leading BOM.
+ */
+export function stripBenignInvisibles(text: string): string {
+  let t = text.replace(/^\uFEFF/, "");
+  t = t.replace(/\u{1F3F4}[\u{E0020}-\u{E007E}]+\u{E007F}/gu, "");
+  t = t.replace(/(?<=[\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0F])\u200D(?=\p{Extended_Pictographic})/gu, "");
+  t = t.replace(
+    /(?<=[\p{Script=Arabic}\p{Script=Syriac}\p{Script=Hebrew}\p{Script=Devanagari}\p{Script=Bengali}\p{Script=Gurmukhi}\p{Script=Gujarati}\p{Script=Oriya}\p{Script=Tamil}\p{Script=Telugu}\p{Script=Kannada}\p{Script=Malayalam}\p{Script=Sinhala}\p{Script=Khmer}\p{Script=Myanmar}])[\u200C\u200D]/gu,
+    "",
+  );
+  if (/[\p{Script=Hebrew}\p{Script=Arabic}]/u.test(t)) t = t.replace(/[\u200E\u200F]/g, "");
+  return t;
+}
+
+function poisoningFindings(tool: WebmcpTool): WebmcpFinding[] {
+  const out: WebmcpFinding[] = [];
+  const seen = new Set<string>();
+  for (const { field, text } of toolTextFields(tool)) {
+    for (const f of scanContent(text)) {
+      const key = `${f.patternId}|${field}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      // Code-shaped patterns are rarely meaningful in prose; keep prompt
+      // injection and credential theft at full strength, cap the rest.
+      const severity =
+        f.category === "prompt-injection" || f.category === "credential-theft"
+          ? f.severity
+          : capSeverity(f.severity, "medium");
+      out.push({
+        id: "WMCP-001",
+        severity,
+        tool: tool.name,
+        message: `${field}: ${f.patternName} (${f.patternId}) matched "${truncate(f.match, 60)}"`,
+      });
+    }
+    for (const p of POISON_PATTERNS) {
+      const m = p.re.exec(p.id === "WP-05" ? stripBenignInvisibles(text) : text);
+      if (!m) continue;
+      const key = `${p.id}|${field}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        id: "WMCP-001",
+        severity: p.severity,
+        tool: tool.name,
+        message: `${field}: ${p.name} (${p.id}) matched "${truncate(visible(m[0]), 60)}"`,
+      });
+    }
+  }
+  return out;
+}
+
+function truncate(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
+}
+
+function visible(s: string): string {
+  return s.replace(/[^\x20-\x7E]/gu, (c) => `U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`);
+}
+
+// ---- WMCP-004: PII parameters ----------------------------------------------
+
+interface PiiKind {
+  kind: string;
+  severity: Severity;
+  key: RegExp;
+  /** Words in name/description that make the parameter expected. */
+  purpose: RegExp;
+}
+
+const PII_KINDS: PiiKind[] = [
+  { kind: "email", severity: "info", key: /e-?mail/i, purpose: /e-?mail|newsletter|subscri|sign\s*up|signup|register|contact|account|login|notify|invite|receipt|checkout|order|share|send|booking|book|reserv|rsvp|ticket/i },
+  { kind: "phone", severity: "info", key: /phone|mobile|msisdn|^tel$/i, purpose: /phone|sms|text|call|contact|whatsapp|book|reserv|deliver|ship|checkout|order|verify|appointment/i },
+  { kind: "address", severity: "info", key: /address|street|postal|zip_?code|postcode/i, purpose: /address|ship|deliver|checkout|order|store|locat|near|map|direction|tax|shipping|quote|rate/i },
+  { kind: "date of birth", severity: "low", key: /\bdob\b|^dob|birth/i, purpose: /birth|age|dob|insur|ticket|regist|account|verif|kyc|passport|visa|travel/i },
+  { kind: "government id", severity: "low", key: /\bssn\b|^ssn|social_?security|passport|national_?id|tax_?id|driver'?s?_?licen/i, purpose: /ssn|passport|identity|kyc|verif|visa|travel|tax|licen/i },
+  { kind: "payment card or bank", severity: "low", key: /card_?number|\bcard\b|^card|cvv|cvc|\biban\b|^iban|account_?number|routing/i, purpose: /pay|card|bank|checkout|billing|purchase|donat|wallet|refund|iban/i },
+];
+
+function piiFindings(tool: WebmcpTool): WebmcpFinding[] {
+  const parsed = parseSchema(tool.inputSchema);
+  if (!parsed.ok) return [];
+  const purposeText = `${tool.name} ${tool.title ?? ""} ${tool.description ?? ""}`.replace(/_/g, " ");
+  const out: WebmcpFinding[] = [];
+  const reported = new Set<string>();
+  for (const p of schemaParams(parsed.value)) {
+    for (const k of PII_KINDS) {
+      if (!k.key.test(p.key)) continue;
+      // "giftcard_message" is not a card number: require the key to look like a field name for the kind.
+      if (k.kind === "payment card or bank" && /gift|discount|business|card_?type|card_?style|rate_?card/i.test(p.key)) continue;
+      if (k.kind === "address" && /e-?mail|ip_?address|wallet/i.test(p.key)) continue;
+      if (k.kind === "date of birth" && /birthstone|birthday_?(?:gift|card|cake|message)/i.test(p.key)) continue;
+      if (k.purpose.test(purposeText)) continue;
+      if (reported.has(k.kind)) continue;
+      reported.add(k.kind);
+      out.push({
+        id: "WMCP-004",
+        severity: k.severity,
+        tool: tool.name,
+        message: `asks for ${k.kind} (parameter "${p.path}") although its name and description do not need it`,
+      });
+    }
+  }
+  return out;
+}
+
+// ---- WMCP-005: who registered the tool -------------------------------------
+
+function registrarFindings(tool: WebmcpTool): WebmcpFinding[] {
+  const kind = tool.registeredByKind ?? (tool.thirdParty ? "third-party" : undefined);
+  if (kind === "library") {
+    const pkg = tool.registeredByPackage;
+    const host = hostOf(tool.registeredBy);
+    const what = pkg ? `library ${pkg} from ${host}` : `a script from the public CDN ${host}`;
+    const pin = pkg && isUnpinned(pkg) ? "; the version is not pinned, so the tool text can change without a page change" : "";
+    return [{
+      id: "WMCP-005",
+      severity: "info",
+      tool: tool.name,
+      message: `registered by ${what} (${tool.registeredBy}); the page chose this library, review its tools as your own${pin}`,
+    }];
+  }
+  if (kind === "third-party") {
+    const origin = originOf(tool.registeredBy) ?? tool.registeredBy;
+    return [{
+      id: "WMCP-005",
+      severity: "medium",
+      tool: tool.name,
+      message:
+        `registered by a script from ${origin}, a different site from the page (${tool.registeredBy}); ` +
+        `if ${siteOf(tool.registeredBy) ?? "that domain"} is the site's own asset domain this is first-party, which the audit cannot tell`,
+    }];
+  }
+  return [];
+}
+
+function hostOf(url: string | undefined): string {
+  try {
+    return new URL(url ?? "").host;
+  } catch {
+    return url ?? "";
+  }
+}
+
+// ---- Per-tool and per-page rules -------------------------------------------
+
+export function scoreTool(tool: WebmcpTool): WebmcpFinding[] {
+  const findings: WebmcpFinding[] = [];
+  findings.push(...poisoningFindings(tool));
+
+  const shape = classifyWriteShape(tool);
+  if (shape) {
+    if (tool.annotations.readOnlyHint === true) {
+      findings.push({
+        id: "WMCP-003",
+        severity: "high",
+        tool: tool.name,
+        message: `looks like a write action (${shape.reason}) but is marked readOnlyHint: true`,
+      });
+    } else if (tool.annotations.consequentialHint !== true) {
+      findings.push({
+        id: "WMCP-002",
+        severity: shape.tier,
+        tool: tool.name,
+        message: `looks like a write action (${shape.reason}) but has no consequentialHint, so agents may run it without asking`,
+      });
+    }
+  }
+
+  findings.push(...piiFindings(tool));
+
+  findings.push(...registrarFindings(tool));
+
+  if ((tool.description ?? "").length > MAX_DESCRIPTION_CHARS) {
+    findings.push({
+      id: "WMCP-006",
+      severity: "low",
+      tool: tool.name,
+      message: `description is ${tool.description!.length} chars (guidance: ${MAX_DESCRIPTION_CHARS} or fewer)`,
+    });
+  }
+
+  const schema = parseSchema(tool.inputSchema);
+  if (tool.inputSchema === undefined || tool.inputSchema === null || tool.inputSchema === "") {
+    findings.push({ id: "WMCP-007", severity: "low", tool: tool.name, message: "has no inputSchema" });
+  } else if (!schema.ok) {
+    findings.push({ id: "WMCP-007", severity: "medium", tool: tool.name, message: "inputSchema is not valid JSON" });
+  } else if (!isPlainObject(schema.value)) {
+    findings.push({ id: "WMCP-007", severity: "medium", tool: tool.name, message: "inputSchema is not a JSON Schema object" });
+  } else if (schema.value.type !== undefined && schema.value.type !== "object") {
+    findings.push({
+      id: "WMCP-007",
+      severity: "low",
+      tool: tool.name,
+      message: `inputSchema has type "${String(schema.value.type)}"; tool inputs should be type "object"`,
+    });
+  }
+
+  if (tool.exposedTo && tool.exposedTo.length > 0) {
+    findings.push({
+      id: "WMCP-009",
+      severity: "info",
+      tool: tool.name,
+      message: `exposed to other origins: ${tool.exposedTo.join(", ")}`,
+    });
+  }
+
+  return findings;
+}
+
+export function scorePage(input: Pick<EnumerationResult, "tools" | "permissionsPolicy">): WebmcpFinding[] {
+  const findings: WebmcpFinding[] = [];
+  for (const tool of input.tools) findings.push(...scoreTool(tool));
+
+  if (input.tools.length > MAX_TOOLS_PER_PAGE) {
+    findings.push({
+      id: "WMCP-006",
+      severity: "medium",
+      tool: null,
+      message: `page registers ${input.tools.length} tools (guidance: ${MAX_TOOLS_PER_PAGE} or fewer)`,
+    });
+  }
+
+  if (input.tools.length > 0 && !/tool|model-?context|webmcp/i.test(input.permissionsPolicy ?? "")) {
+    findings.push({
+      id: "WMCP-008",
+      severity: "info",
+      tool: null,
+      message: input.permissionsPolicy
+        ? "Permissions-Policy does not mention tools; embedded frames inherit the default"
+        : "no Permissions-Policy header; embedded frames inherit the default tool policy",
+    });
+  }
+
+  return findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+}
+
+// ---- Summary and verdict ---------------------------------------------------
+
+/** Same weights as the Tier 1 skill scanner (src/scanner/tier1.ts). */
+const SEVERITY_DEDUCTIONS: Record<Severity, number> = {
+  critical: 25,
+  high: 15,
+  medium: 8,
+  low: 3,
+  info: 0,
+};
+
+/**
+ * Score starts at 100. Each rule deducts per finding, capped at twice the
+ * weight of its worst finding, so a site with 30 similar tools is not
+ * punished 30 times for one design choice. Thresholds match Tier 1
+ * (>= 80 PASS, 50-79 CONCERNS, < 50 FAIL), with two floors: any critical
+ * finding is FAIL, and any high finding is at least CONCERNS.
+ */
+export function computeVerdict(findings: WebmcpFinding[]): { score: number; verdict: ScanVerdict } {
+  const byRule = new Map<string, { total: number; worst: number }>();
+  for (const f of findings) {
+    const w = SEVERITY_DEDUCTIONS[f.severity];
+    const cur = byRule.get(f.id) ?? { total: 0, worst: 0 };
+    cur.total += w;
+    cur.worst = Math.max(cur.worst, w);
+    byRule.set(f.id, cur);
+  }
+  let score = 100;
+  for (const { total, worst } of byRule.values()) score -= Math.min(total, worst * 2);
+  score = Math.max(0, Math.min(100, score));
+
+  let verdict: ScanVerdict = score >= 80 ? "PASS" : score >= 50 ? "CONCERNS" : "FAIL";
+  if (findings.some((f) => f.severity === "critical")) verdict = "FAIL";
+  else if (verdict === "PASS" && findings.some((f) => f.severity === "high")) verdict = "CONCERNS";
+  return { score, verdict };
+}
+
+/** `failed` (the page never loaded and no tool was found) gives score null and verdict ERROR. */
+export function summarize(tools: WebmcpTool[], findings: WebmcpFinding[], failed = false): SiteSummary {
+  const findingsBySeverity = Object.fromEntries(SEVERITIES.map((s) => [s, 0])) as Record<Severity, number>;
+  for (const f of findings) findingsBySeverity[f.severity]++;
+  const { score, verdict } = failed ? { score: null, verdict: "ERROR" as const } : computeVerdict(findings);
+  return {
+    toolCount: tools.length,
+    readOnlyCount: tools.filter((t) => t.annotations.readOnlyHint === true).length,
+    consequentialCount: tools.filter((t) => t.annotations.consequentialHint === true).length,
+    writeShapedCount: tools.filter((t) => classifyWriteShape(t) !== null).length,
+    thirdPartyCount: tools.filter((t) => t.thirdParty).length,
+    platformCount: tools.filter((t) => t.registeredByKind === "platform").length,
+    libraryCount: tools.filter((t) => t.registeredByKind === "library").length,
+    findingsBySeverity,
+    score,
+    verdict,
+  };
+}
+
+/** Turn an enumeration into the schemaVersion 1 report. */
+export function buildReport(e: EnumerationResult, scannedAt: Date = new Date()): SiteReport {
+  const findings = scorePage(e);
+  const report: SiteReport = {
+    schemaVersion: 1,
+    url: e.url,
+    finalUrl: e.finalUrl,
+    scannedAt: scannedAt.toISOString(),
+    webmcp: {
+      documentModelContext: e.documentModelContext,
+      navigatorModelContext: e.navigatorModelContext,
+    },
+    headers: { permissionsPolicy: e.permissionsPolicy },
+    platforms: e.platforms ?? [],
+    tools: e.tools,
+    findings,
+    summary: summarize(e.tools, findings, !!e.error && e.tools.length === 0),
+  };
+  if (e.error) report.error = e.error;
+  return report;
+}
+
+/** Highest severity in a report, or null when there are no findings. */
+export function worstSeverity(findings: WebmcpFinding[]): Severity | null {
+  let worst: Severity | null = null;
+  for (const f of findings) {
+    if (worst === null || severityRank(f.severity) < severityRank(worst)) worst = f.severity;
+  }
+  return worst;
+}

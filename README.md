@@ -156,11 +156,59 @@ npx vskill@latest diff <skill> v1 v2   # compare versions before upgrading
 npx vskill@latest skill new            # create a new skill (AI-assisted)
 npx vskill@latest eval sweep <skill>   # benchmark across models
 npx vskill@latest audit --ci           # SARIF v2.1.0 for CI
+npx vskill@latest audit-webmcp <url>   # score a site's WebMCP tools (headless)
 npx vskill@latest keys set anthropic   # store API keys in ~/.vskill/keys.env
 npx vskill@latest auth login --repos   # sign in to GitHub for private skills repos
 ```
 
 Full reference → [verified-skill.com/docs/cli-reference](https://verified-skill.com/docs/cli-reference)
+
+### Audit a site's WebMCP tools
+
+`vskill audit-webmcp` loads each URL once in headless Chromium with WebMCP turned on, lists the tools the page registers through `document.modelContext.registerTool`, and scores them. It never calls a tool, never clicks or submits a form, blocks popups and service workers, and refuses downloads.
+
+```bash
+npx vskill@latest audit-webmcp allbirds.com
+npx vskill@latest audit-webmcp --urls-file sites.txt --out report.jsonl --concurrency 4 --fail-on high
+```
+
+Playwright is not bundled. Install `playwright-core` (or `playwright`) and a Chromium build with `npx playwright install chromium-headless-shell`, or pass `--executable-path`. Without one the command exits 2 with these instructions. Options: `--urls-file <path>` (one URL per line, `#` comments), `--json`, `--out <file>` (JSON for one URL, JSONL for a batch), `--concurrency <n>` (default 4), `--timeout <ms>` (default 30000), `--fail-on <severity>` (exit 1 when any finding is at or above it), `--executable-path <path>`.
+
+Tools are found three ways and merged by name: a wrapper around `registerTool` that records the calling script, the CDP `WebMCP` domain, and `getTools()`. Chrome 153 drops `consequentialHint` from `getTools()` and CDP, so the wrapper is the only source for it.
+
+| Rule | Severity | Finding |
+|---|---|---|
+| WMCP-001 | per pattern | Prompt-injection or tool-poisoning text in a name, title, description or parameter description (the skill scanner's patterns plus WebMCP-specific ones) |
+| WMCP-002 | high / medium / low | Write-shaped tool (checkout, pay, delete / book, send, subscribe / cart changes) without `consequentialHint`. Names that lead with a read verb (`get_cart`), nouns qualified as reads (`order_status`, `payment_methods`) and UI state (`remove_filter`) are not write-shaped |
+| WMCP-003 | high | Write-shaped tool marked `readOnlyHint: true` |
+| WMCP-004 | info / low | Asks for email, phone, address, birth date, government ID or card details it does not need |
+| WMCP-005 | medium / info | Registered by a script from another site (medium). The message names the script's origin: a brand's own asset domain (`assets.targetimg1.com` on `target.com`) looks the same as a vendor, so check whether you own it. A WebMCP library from a public npm CDN (unpkg, jsDelivr, esm.sh, cdnjs, jspm, Skypack) is info and names the package and whether its version is pinned. No finding for first-party scripts (`cdn.shop.example` on `www.shop.example`) or for the hosting platform's own code |
+| WMCP-006 | low / medium | Description over 500 characters, or more than 40 tools on the page |
+| WMCP-007 | low / medium | `inputSchema` missing, invalid, or not an object schema |
+| WMCP-008 | info | Tools registered but no `Permissions-Policy` that mentions tools |
+| WMCP-009 | info | Tool exposed to other origins via `exposedTo` |
+
+Each tool's `registeredByKind` says who registered it: `first-party` (the page's site), `platform` (the hosting platform's own script, with `registeredByPlatform`), `library` (a public npm CDN, with `registeredByPackage`) or `third-party`; `thirdParty` is true only for `third-party`. The platform list is short and only holds what a scan has shown: Shopify's `cdn.shopify.com/shopifycloud/` scripts on a page that carries a Shopify storefront marker (`window.Shopify.shop`, a `shopify-digital-wallet` or `shopify-checkout-api-token` meta, or a `myshopify.com` host). `cdn.shopify.com/extensions/` is app code and stays third-party. The report's `platforms` lists the markers found. Attribution comes from the registering call's stack trace, so it reports where a well-behaved page's code lives; a script that registers through an inline `<script>` or a `//# sourceURL` comment can make itself look first-party.
+
+The verdict uses the skill scanner's weights and thresholds (PASS at 80 or above, CONCERNS from 50, FAIL below 50). Each rule deducts at most twice its worst finding, any critical finding is FAIL, and any high finding is at least CONCERNS.
+
+Each site produces one JSON object (`schemaVersion: 1`); a batch writes one per line and keeps going after timeouts, DNS errors, hung pages and browser crashes, recording `error`. A site that failed to load with no tools found has `summary.verdict: "ERROR"` and `summary.score: null`; a partial load that found tools is scored and keeps `error`:
+
+```json
+{
+  "schemaVersion": 1,
+  "url": "https://allbirds.com/",
+  "finalUrl": "https://www.allbirds.com/",
+  "scannedAt": "2026-10-11T06:00:40.000Z",
+  "webmcp": { "documentModelContext": true, "navigatorModelContext": false },
+  "headers": { "permissionsPolicy": null },
+  "platforms": ["shopify"],
+  "tools": [{ "name": "proceed_to_checkout", "title": "…", "description": "…", "inputSchema": {}, "annotations": { "readOnlyHint": false }, "registeredBy": "https://www.allbirds.com/cdn/…/webmcp.js", "registeredByKind": "first-party", "thirdParty": false, "sources": ["registerTool", "cdp", "getTools"] }],
+  "findings": [{ "id": "WMCP-002", "severity": "high", "tool": "proceed_to_checkout", "message": "…" }],
+  "summary": { "toolCount": 12, "readOnlyCount": 4, "consequentialCount": 0, "writeShapedCount": 4, "thirdPartyCount": 0, "platformCount": 0, "libraryCount": 0, "findingsBySeverity": { "critical": 0, "high": 1, "medium": 2, "low": 8, "info": 1 }, "score": 65, "verdict": "CONCERNS" },
+  "error": "only present when the page failed to load or timed out"
+}
+```
 
 <br/>
 

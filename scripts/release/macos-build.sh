@@ -12,6 +12,13 @@
 #   --notarize  Build AND submit a real notarization request. ONLY use this
 #               on release tags or when explicitly testing the notarize path.
 #
+# Env:
+#   MACOS_BUILD_TARGET   Tauri target triple (default universal-apple-darwin).
+#                        CI sets aarch64-apple-darwin to mirror desktop-release.yml,
+#                        which builds and ships an Apple Silicon bundle only.
+#   MACOS_BUILD_NO_UPDATER=1  Skip updater artifacts (.tar.gz + minisign .sig),
+#                        for canaries that have no updater signing key.
+#
 # This script must run from the vskill repo root or the Tauri repo root that
 # contains src-tauri/. It auto-detects which one it lives in.
 
@@ -40,16 +47,22 @@ if [[ ! -d "src-tauri" ]]; then
   exit 1
 fi
 
-# Universal2 needs both arch toolchains.
+TARGET="${MACOS_BUILD_TARGET:-universal-apple-darwin}"
+if [[ "$TARGET" == "universal-apple-darwin" ]]; then
+  # Universal2 needs both arch toolchains.
+  RUSTUP_TARGETS="aarch64-apple-darwin x86_64-apple-darwin"
+else
+  RUSTUP_TARGETS="$TARGET"
+fi
 echo "==> Verifying rustup targets…"
-for target in aarch64-apple-darwin x86_64-apple-darwin; do
+for target in $RUSTUP_TARGETS; do
   if ! rustup target list --installed | grep -q "^${target}$"; then
     echo "    Adding missing target: $target"
     rustup target add "$target"
   fi
 done
 
-echo "==> Building Tauri app (target: universal-apple-darwin)…"
+echo "==> Building Tauri app (target: $TARGET)…"
 if command -v cargo-tauri >/dev/null 2>&1; then
   TAURI_CMD="cargo tauri"
 elif npx --no -- @tauri-apps/cli --version >/dev/null 2>&1; then
@@ -59,14 +72,19 @@ else
   exit 1
 fi
 
-# shellcheck disable=SC2086
-$TAURI_CMD build --target universal-apple-darwin
+BUILD_ARGS=(--target "$TARGET")
+if [[ "${MACOS_BUILD_NO_UPDATER:-0}" == "1" ]]; then
+  BUILD_ARGS+=(--bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":false}}')
+fi
 
-DMG_PATH="$(ls -1t src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg 2>/dev/null | head -1 || true)"
-APP_PATH="$(ls -1td src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app 2>/dev/null | head -1 || true)"
+# shellcheck disable=SC2086
+$TAURI_CMD build "${BUILD_ARGS[@]}"
+
+DMG_PATH="$(ls -1t src-tauri/target/$TARGET/release/bundle/dmg/*.dmg 2>/dev/null | head -1 || true)"
+APP_PATH="$(ls -1td src-tauri/target/$TARGET/release/bundle/macos/*.app 2>/dev/null | head -1 || true)"
 
 if [[ -z "$DMG_PATH" ]]; then
-  echo "ERROR: no .dmg produced under src-tauri/target/universal-apple-darwin/release/bundle/dmg/" >&2
+  echo "ERROR: no .dmg produced under src-tauri/target/$TARGET/release/bundle/dmg/" >&2
   exit 1
 fi
 

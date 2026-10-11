@@ -65,7 +65,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   echo "==> [dry-run] Would invoke:"
   echo "      xcrun notarytool submit \"$ARTIFACT\" --keychain-profile \"$PROFILE\" --wait --output-format json"
   echo "      xcrun stapler staple \"$ARTIFACT\""
-  echo "      spctl -a -vv \"$ARTIFACT\""
+  echo "      spctl -a -t open|exec -vv \"$ARTIFACT\" (open + primary-signature for .dmg)"
   exit 0
 fi
 
@@ -100,7 +100,14 @@ if ! xcrun stapler staple "$ARTIFACT"; then
 fi
 
 echo "==> Verifying with spctl…"
-if ! spctl -a -t exec -vv "$ARTIFACT" 2>&1 | tee /dev/stderr | grep -q "accepted"; then
+# A .dmg is not executable code: spctl's default exec assessment rejects it
+# ("the code is valid but does not seem to be an app"). Assess disk images
+# as "open" against their own signature, and .app bundles as "exec".
+case "$ARTIFACT" in
+  *.dmg) SPCTL_ARGS=(-a -t open --context context:primary-signature -vv) ;;
+  *)     SPCTL_ARGS=(-a -t exec -vv) ;;
+esac
+if ! spctl "${SPCTL_ARGS[@]}" "$ARTIFACT" 2>&1 | tee /dev/stderr | grep -q "accepted"; then
   echo "ERROR: spctl rejected the stapled artifact" >&2
   exit 5
 fi

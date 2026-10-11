@@ -3,8 +3,10 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  chmodSync,
   existsSync,
   lstatSync,
+  readdirSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -366,5 +368,139 @@ describe("doctorCommand", () => {
     } finally {
       log.mockRestore();
     }
+  });
+});
+
+describe("vskill doctor — 0894 review fixes", () => {
+  it("never removes a link another scanned link passes through", () => {
+    writeSkill(join(outside, "foo"));
+    link(join(outside, "foo"), g(".codex/skills/foo"));
+    link("../../.codex/skills/foo", g(".agents/skills/foo"));
+
+    const report = runDoctor({ home, cwd, global: true, fix: true });
+
+    expect(lstatSync(g(".codex/skills/foo")).isSymbolicLink()).toBe(true);
+    expect(lstatSync(g(".agents/skills/foo")).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(g(".agents/skills/foo"), "SKILL.md"))).toBe(true);
+    expect(report.fixes.filter((f) => f.ok)).toEqual([]);
+  });
+
+  it("a project folder that is physically a global one is report-only", () => {
+    writeSkill(proj(".agents/skills/foo"));
+    mkdirSync(g(".cursor/skills"), { recursive: true });
+    link(proj(".agents/skills/foo"), g(".cursor/skills/foo"));
+    link(g(".cursor/skills"), proj(".cursor/skills"));
+
+    const report = runDoctor({ home, cwd, fix: true });
+
+    expect(lstatSync(g(".cursor/skills/foo")).isSymbolicLink()).toBe(true);
+    const redundant = ofKind(report.issues, "redundant-link").filter((i) => i.scope === "project");
+    expect(redundant).toHaveLength(1);
+    expect(redundant[0].fixable).toBe(false);
+  });
+
+  it("flags ~/.Codex/ and $HOME/.Codex/ residue", () => {
+    writeSkill(g(".agents/skills/foo"), { body: "See ~/.Codex/skills/foo\n" });
+    writeSkill(g(".agents/skills/bar"), { body: "cat $HOME/.Codex/x\n" });
+
+    const dmg = ofKind(runDoctor({ home, cwd }).issues, "migration-damage");
+    expect(dmg.map((i) => i.skill).sort()).toEqual(["bar", "foo"]);
+  });
+
+  it("reports a same-name pair where one side links to a folder outside the scan", () => {
+    writeSkill(g(".claude/skills/foo"), { body: "X\n" });
+    writeSkill(join(outside, "foo"), { body: "Y\n" });
+    link(join(outside, "foo"), g(".agents/skills/foo"));
+
+    const report = runDoctor({ home, cwd, global: true });
+
+    expect(ofKind(report.issues, "duplicate-name")).toHaveLength(1);
+    expect(report.remaining).toBeGreaterThan(0);
+  });
+
+  it("copies that differ only in a script's executable bit are not identical", () => {
+    writeSkill(g(".agents/skills/foo"), { extra: { "scripts/run.sh": "echo hi\n" } });
+    writeSkill(g(".claude/skills/foo"), { extra: { "scripts/run.sh": "echo hi\n" } });
+    chmodSync(join(g(".agents/skills/foo"), "scripts/run.sh"), 0o644);
+    chmodSync(join(g(".claude/skills/foo"), "scripts/run.sh"), 0o755);
+
+    const report = runDoctor({ home, cwd, fix: true });
+
+    expect(ofKind(report.issues, "identical-copy")).toEqual([]);
+    expect(lstatSync(g(".claude/skills/foo")).isSymbolicLink()).toBe(false);
+  });
+
+  it("copies whose relative inner link escapes to different folders are not identical", () => {
+    writeSkill(g(".agents/skills/foo"));
+    writeSkill(g(".claude/skills/foo"));
+    mkdirSync(g(".claude/skills/foo-assets"), { recursive: true });
+    writeFileSync(g(".claude/skills/foo-assets/a.txt"), "hi");
+    symlinkSync("../foo-assets", join(g(".agents/skills/foo"), "assets"));
+    symlinkSync("../foo-assets", join(g(".claude/skills/foo"), "assets"));
+
+    const report = runDoctor({ home, cwd, fix: true });
+
+    expect(ofKind(report.issues, "identical-copy")).toEqual([]);
+    expect(readFileSync(g(".claude/skills/foo/assets/a.txt"), "utf8")).toBe("hi");
+  });
+
+  it("a link into an unreadable folder is reported but never removed", () => {
+    const locked = join(outside, "locked");
+    writeSkill(join(locked, "foo"));
+    link(join(locked, "foo"), g(".claude/skills/foo"));
+    chmodSync(locked, 0o000);
+    try {
+      const report = runDoctor({ home, cwd, global: true, fix: true });
+      const broken = ofKind(report.issues, "broken-link");
+      expect(broken).toHaveLength(1);
+      expect(broken[0].fixable).toBe(false);
+      expect(broken[0].message).toContain("EACCES");
+      expect(lstatSync(g(".claude/skills/foo")).isSymbolicLink()).toBe(true);
+    } finally {
+      chmodSync(locked, 0o755);
+    }
+  });
+
+  it("a copy that cannot be fully deleted after linking leaves no visible duplicate", () => {
+    writeSkill(g(".agents/skills/foo"), { extra: { "Aro/f.txt": "x" } });
+    writeSkill(g(".claude/skills/foo"), { extra: { "Aro/f.txt": "x" } });
+    chmodSync(join(g(".claude/skills/foo"), "Aro"), 0o555);
+    try {
+      const report = runDoctor({ home, cwd, global: true, fix: true });
+      const replaced = report.fixes.find((f) => f.action === "replace-with-link");
+      expect(replaced?.ok).toBe(true);
+      expect(lstatSync(g(".claude/skills/foo")).isSymbolicLink()).toBe(true);
+      const leftovers = readdirSync(g(".claude/skills")).filter((n) => n.includes("vskill-doctor"));
+      expect(leftovers.every((n) => n.startsWith("."))).toBe(true);
+      expect(ofKind(report.issues, "duplicate-name")).toEqual([]);
+      expect(ofKind(report.issues, "name-mismatch")).toEqual([]);
+    } finally {
+      for (const n of readdirSync(g(".claude/skills"))) {
+        const aro = join(g(".claude/skills"), n, "Aro");
+        if (n.includes("vskill-doctor") && existsSync(aro)) chmodSync(aro, 0o755);
+      }
+    }
+  });
+
+  it("checks the folder name of a renamed link into the shared folder", () => {
+    writeSkill(g(".agents/skills/foo"));
+    link("../../.agents/skills/foo", g(".claude/skills/bar"));
+
+    const mismatch = ofKind(runDoctor({ home, cwd, global: true }).issues, "name-mismatch");
+    expect(mismatch).toHaveLength(1);
+    expect(mismatch[0].skill).toBe("bar");
+    expect(mismatch[0].paths).toEqual([g(".claude/skills/bar")]);
+  });
+
+  it("folds a plain multi-line description so the 1024-char limit applies", () => {
+    const line = "word ".repeat(19).trim();
+    const fm = parseSkillFrontmatter(`---\nname: a\ndescription: First line\n${`  ${line}\n`.repeat(15)}---\n`);
+    expect(fm?.description?.startsWith("First line word")).toBe(true);
+    expect(fm!.description!.length).toBeGreaterThan(1024);
+    expect(parseSkillFrontmatter('---\nname: a\ndescription: "First\n  second"\n---\n')?.description).toBe("First second");
+
+    writeSkill(g(".agents/skills/wrapped"), { description: `First line\n${`  ${line}\n`.repeat(15).trimEnd()}` });
+    const desc = ofKind(runDoctor({ home, cwd, global: true }).issues, "bad-description");
+    expect(desc.map((i) => i.skill)).toEqual(["wrapped"]);
   });
 });

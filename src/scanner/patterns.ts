@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Tier 1 Security Scan Patterns
-// 57 regex-based patterns for static analysis of skill content, plus the
+// 58 regex-based patterns for static analysis of skill content, plus the
 // hidden-content checks (HC-*) in hidden-content.ts.
 // ---------------------------------------------------------------------------
 
@@ -44,7 +44,7 @@ export interface ScanFinding {
   downgradedFrom?: PatternSeverity;
 }
 
-// ---- Patterns (57 total) --------------------------------------------------
+// ---- Patterns (58 total) --------------------------------------------------
 
 export const SCAN_PATTERNS: ScanPattern[] = [
   // --- Command Injection (1-7) ---------------------------------------------
@@ -127,6 +127,18 @@ export const SCAN_PATTERNS: ScanPattern[] = [
     severity: "high",
     description: "Detects Invoke-Expression/iex, -EncodedCommand payloads and base64 decoding in PowerShell",
     pattern: /\bInvoke-Expression\b|\|\s*iex\b|\biex\s*\(\s*(?:\(|\$|\[|['"]|New-Object\b|Invoke-|i(?:wr|rm)\b|Get-Content\b)|\s-(?:EncodedCommand|enc|ec)\s+[A-Za-z0-9+\/=]{20,}|\[(?:System\.)?Convert\]::FromBase64String/gi,
+    category: "command-injection",
+  },
+  {
+    // CLI-only: the PowerShell twin of CI-008. A CI-010 match inside this
+    // span is reported as CI-011 instead, so installer docs in fenced code
+    // (irm bun.sh/install.ps1 | iex) get the same downgrade as curl | sh.
+    // The download target must be literal: a $variable URL stays CI-010.
+    id: "CI-011",
+    name: "PowerShell download-and-execute",
+    severity: "critical",
+    description: "Detects irm/iwr output piped to iex, or iex of a downloaded script (PowerShell installer one-liners)",
+    pattern: /\b(?:irm|iwr|Invoke-RestMethod|Invoke-WebRequest)\b[^|\n$]{1,400}\|\s*(?:iex|Invoke-Expression)\b|\b(?:iex|Invoke-Expression)\s*\(?\s*\(\s*(?:(?:irm|iwr|Invoke-RestMethod|Invoke-WebRequest)\b[^()\n$]{1,400}|New-Object\s+(?:System\.)?Net\.WebClient\s*\)\s*\.DownloadString\s*\(\s*['"]https?:\/\/[^()\n$'"]{1,400}['"]\s*)\)/gi,
     category: "command-injection",
   },
 
@@ -655,7 +667,7 @@ function computeFencedCodeBlockLines(lines: string[]): Set<number> {
 
 // NA-004/NA-005 are deliberately absent: fake-prerequisite and password-archive
 // lures are written as prose, so documentation context must not hide them.
-const DOCUMENTATION_SAFE_PATTERNS = new Set(["PE-001", "PE-002", "PE-003", "FS-001", "CI-008", "CT-002", "CT-004", "NA-001", "PI-003"]);
+const DOCUMENTATION_SAFE_PATTERNS = new Set(["PE-001", "PE-002", "PE-003", "FS-001", "CI-008", "CI-011", "CT-002", "CT-004", "NA-001", "PI-003"]);
 
 // ---- Markdown-link safe context for FS-003 ---------------------------------
 
@@ -710,6 +722,39 @@ function isInsideInlineCode(line: string, matchStart: number, matchEnd: number):
   return false;
 }
 
+// ---- CI-010 vs CI-011 -------------------------------------------------------
+// CI-011 (PowerShell download-and-execute) is a more specific form of CI-010.
+// A CI-010 match inside a CI-011 span is dropped so the installer one-liner is
+// reported once, under the id that gets the documentation-context downgrade.
+
+const INSTALLER_SOURCE = SCAN_PATTERNS.find((p) => p.id === "CI-011")!.pattern;
+
+function installerSpans(text: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  const re = new RegExp(INSTALLER_SOURCE.source, INSTALLER_SOURCE.flags);
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m[0].length === 0) {
+      re.lastIndex++;
+      continue;
+    }
+    spans.push([m.index, m.index + m[0].length]);
+  }
+  return spans;
+}
+
+/** True if [start, end) lies inside one of the sorted, non-overlapping spans. */
+function insideSpan(spans: Array<[number, number]>, start: number, end: number): boolean {
+  let lo = 0;
+  let hi = spans.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (spans[mid][0] <= start) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return hi >= 0 && end <= spans[hi][1];
+}
+
 // ---- Scanner function -----------------------------------------------------
 
 /**
@@ -719,6 +764,7 @@ export function scanContent(content: string): ScanFinding[] {
   const lines = content.split("\n");
   const fencedLines = computeFencedCodeBlockLines(lines);
   const findings: ScanFinding[] = [];
+  const installerSpanCache = new Map<number, Array<[number, number]>>();
 
   for (const pattern of SCAN_PATTERNS) {
     // Reset the regex lastIndex for each pattern (they use /g flag)
@@ -747,6 +793,12 @@ export function scanContent(content: string): ScanFinding[] {
         // Suppress FS-003 path traversal inside markdown links
         if (pattern.id === "FS-003" && isInsideMarkdownLink(line, match.index)) {
           continue;
+        }
+
+        if (pattern.id === "CI-010") {
+          let spans = installerSpanCache.get(lineIdx);
+          if (!spans) installerSpanCache.set(lineIdx, (spans = installerSpans(line)));
+          if (insideSpan(spans, match.index, match.index + match[0].length)) continue;
         }
 
         // Build context: up to 1 line before and after
@@ -798,6 +850,7 @@ export function scanContent(content: string): ScanFinding[] {
   const hidden = scanHiddenContent(content);
   findings.push(...hidden.findings);
   for (const payload of hidden.payloads) {
+    const spans = installerSpans(payload.text);
     for (const pattern of SCAN_PATTERNS) {
       const regex = new RegExp(pattern.pattern.source, pattern.pattern.flags);
       let match: RegExpExecArray | null;
@@ -806,6 +859,7 @@ export function scanContent(content: string): ScanFinding[] {
           regex.lastIndex++;
           continue;
         }
+        if (pattern.id === "CI-010" && insideSpan(spans, match.index, match.index + match[0].length)) continue;
         findings.push({
           patternId: pattern.id,
           patternName: pattern.name,

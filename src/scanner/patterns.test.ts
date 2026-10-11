@@ -18,8 +18,8 @@ function atLine(lineNumber: number, malicious: string): string {
 // SCAN_PATTERNS structure
 // ---------------------------------------------------------------------------
 describe("SCAN_PATTERNS", () => {
-  it("has exactly 57 entries", () => {
-    expect(SCAN_PATTERNS).toHaveLength(57);
+  it("has exactly 58 entries", () => {
+    expect(SCAN_PATTERNS).toHaveLength(58);
   });
 
   it("every pattern has required fields", () => {

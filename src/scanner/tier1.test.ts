@@ -34,9 +34,9 @@ describe("runTier1Scan — clean content", () => {
 // patternsChecked
 // ---------------------------------------------------------------------------
 describe("runTier1Scan — patternsChecked", () => {
-  it("patternsChecked is exactly 57", () => {
+  it("patternsChecked is exactly 58", () => {
     const result = runTier1Scan("const x = 1;");
-    expect(result.patternsChecked).toBe(57);
+    expect(result.patternsChecked).toBe(58);
   });
 });
 

@@ -50,6 +50,7 @@ export const FIX_SUGGESTIONS: Record<string, string> = {
   "CE-004": "Never unpickle or exec decoded data; use a safe format such as JSON and import modules statically",
   "CI-009": "Call subprocess with an argument list and shell=False instead of os.system/os.popen or shell=True",
   "CI-010": "Avoid Invoke-Expression and encoded PowerShell commands; run reviewed scripts with explicit parameters",
+  "CI-011": "Download the PowerShell script, review it, then run it by path instead of piping irm/iwr output into iex",
   "NA-004": "Do not ask users to download and run external binaries or scripts as a prerequisite; ship reviewed code with the skill or name a package-manager install",
   "NA-005": "Do not distribute password-protected archives; publish contents that can be reviewed and scanned",
 

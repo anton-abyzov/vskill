@@ -202,7 +202,7 @@ describe("canonical installer", () => {
       expect(result).toHaveLength(2);
     });
 
-    it("uses copy fallback for Claude Code (known symlink issues)", () => {
+    it("links Claude Code to the canonical copy when it has no Claude-only fields (0894)", () => {
       const agents = [
         makeAgent({ id: "claude-code", localSkillsDir: ".claude/skills" }),
         makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" }),
@@ -213,15 +213,12 @@ describe("canonical installer", () => {
         projectRoot: tempDir,
       });
 
-      // Claude Code gets a direct copy (not a symlink)
       const claudePath = join(tempDir, ".claude", "skills", "my-skill");
-      expect(lstatSync(claudePath).isDirectory()).toBe(true);
-      expect(lstatSync(claudePath).isSymbolicLink()).toBe(false);
+      expect(lstatSync(claudePath).isSymbolicLink()).toBe(true);
       const claudeContent = readFileSync(join(claudePath, "SKILL.md"), "utf-8");
       expect(claudeContent).toContain("name: my-skill");
       expect(claudeContent).toContain("# My Skill\nContent here");
 
-      // Cursor gets a symlink
       const cursorLink = join(tempDir, ".cursor", "skills", "my-skill");
       expect(lstatSync(cursorLink).isSymbolicLink()).toBe(true);
 

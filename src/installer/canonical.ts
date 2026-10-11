@@ -156,9 +156,12 @@ export function createRelativeSymlink(target: string, linkPath: string): boolean
 }
 
 /**
- * Agents known to have unreliable symlink support.
- * These always get a direct copy even in symlink mode.
- * See: https://github.com/anthropics/claude-code/issues/14836
+ * Agents that keep a full copy when their content differs from the shared
+ * canonical copy. Claude Code is the only one: it reads Claude-only
+ * frontmatter (allowed-tools, model, context, ...) that the canonical copy
+ * strips. When nothing is stripped, Claude Code gets a link like everyone
+ * else (0894; current Claude Code follows symlinked skill folders, the old
+ * https://github.com/anthropics/claude-code/issues/14836 no longer applies).
  */
 const COPY_FALLBACK_AGENTS = new Set(["claude-code"]);
 
@@ -227,7 +230,17 @@ export function installSymlink(
 
     mkdirSync(agentSkillsDir, { recursive: true });
 
-    // Agents with known symlink issues get direct copy
+    // Claude Code links to the canonical copy when that copy is exactly what
+    // Claude would get; otherwise it keeps a full copy with its own fields.
+    if (
+      COPY_FALLBACK_AGENTS.has(agent.id) &&
+      canonicalSkillDir &&
+      strippedContent === content &&
+      createRelativeSymlink(canonicalSkillDir, linkPath)
+    ) {
+      installed.push(linkPath);
+      continue;
+    }
     if (COPY_FALLBACK_AGENTS.has(agent.id)) {
       // Claude Code gets full content with all fields
       const agentContent = agent.id === "claude-code" ? content : strippedContent;

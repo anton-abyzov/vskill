@@ -231,6 +231,17 @@ describe("vskill doctor — links", () => {
 });
 
 describe("vskill doctor — SKILL.md content checks", () => {
+  it("accepts a Claude copy that only adds Claude-only frontmatter (0894)", () => {
+    writeSkill(g(".agents/skills/foo"));
+    const shared = readFileSync(join(g(".agents/skills/foo"), "SKILL.md"), "utf8");
+    mkdirSync(g(".claude/skills/foo"), { recursive: true });
+    writeFileSync(join(g(".claude/skills/foo"), "SKILL.md"), shared.replace("---\n", "---\nallowed-tools: Bash\n"));
+
+    const report = runDoctor({ home, cwd });
+    expect(ofKind(report.issues, "divergent")).toEqual([]);
+    expect(ofKind(report.issues, "identical-copy")).toEqual([]);
+  });
+
   it("reports migrate-to-codex damage without fixing it", () => {
     writeSkill(g(".agents/skills/foo"), { body: "Run .Codex/hooks\n\n## MANUAL MIGRATION REQUIRED\n" });
 

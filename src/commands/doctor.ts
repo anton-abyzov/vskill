@@ -38,6 +38,7 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { AGENTS_REGISTRY, type AgentDefinition } from "../agents/agents-registry.js";
+import { stripClaudeFields } from "../installer/frontmatter.js";
 import { bold, cyan, dim, green, red, yellow } from "../utils/output.js";
 
 export type DoctorScope = "global" | "project";
@@ -274,7 +275,7 @@ function listEntries(info: DirInfo, home: string): Entry[] {
 // ---------------------------------------------------------------------------
 
 /** Hash every file in a folder (sorted by relative path), ignoring .DS_Store. */
-export function hashSkillFolder(dir: string): string {
+export function hashSkillFolder(dir: string, normalizeSkillMd?: (text: string) => string): string {
   const h = createHash("sha256");
   const walk = (abs: string, rel: string) => {
     let names: string[];
@@ -299,7 +300,9 @@ export function hashSkillFolder(dir: string): string {
         h.update(`D\0${childRel}\0`);
         walk(childAbs, childRel);
       } else if (st.isFile()) {
-        const fh = createHash("sha256").update(readFileSync(childAbs)).digest("hex");
+        const raw = readFileSync(childAbs);
+        const data = normalizeSkillMd && childRel === "SKILL.md" ? normalizeSkillMd(raw.toString("utf8")) : raw;
+        const fh = createHash("sha256").update(data).digest("hex");
         h.update(`F\0${childRel}\0${fh}\0`);
       }
     }
@@ -420,6 +423,10 @@ function scanScope(scope: DoctorScope, home: string, cwd: string, platform: Node
     if (list.length < 2) continue;
     const hashes = list.map((e) => hashSkillFolder(e.real!));
     if (new Set(hashes).size > 1) {
+      // A Claude Code copy that only adds Claude-only frontmatter is how
+      // vskill installs such skills on purpose; it is not drift.
+      const strip = (text: string) => stripClaudeFields(text, name);
+      if (new Set(list.map((e) => hashSkillFolder(e.real!, strip))).size === 1) continue;
       issues.push(issue("divergent", scope, name, list.map((e) => e.path),
         `${list.length} real copies with different content — merge by hand`, false));
       continue;

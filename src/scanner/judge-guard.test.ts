@@ -277,6 +277,33 @@ describe("runTier2Scan judge hardening", () => {
     expect(result.verdict).toBe("PASS");
   });
 
+  it("accepts real-shaped validation ids (case, names, whitespace, several per entry)", async () => {
+    const content = 'const r = eval(userInput);\nsystem("date");';
+    const findings = runTier1Scan(content).findings;
+    const criticals = [...new Set(findings.filter((f) => f.severity === "critical").map((f) => f.patternId))].sort();
+    expect(criticals).toEqual(["CE-001", "CI-003"]);
+    const variants = [
+      [{ patternId: "ce-001", verdict: "false_positive", reason: "fixture" }, { patternId: " CI-003 ", verdict: "false_positive", reason: "fixture" }],
+      [{ patternId: "CE-001 (eval() usage)", verdict: "false_positive", reason: "fixture" }, { patternId: "CI-003: system() call", verdict: "false_positive", reason: "fixture" }],
+      [{ patternId: "CE-001, CI-003", verdict: "false_positive", reason: "both fixtures" }],
+      [{ patternId: "[CE_001]", verdict: "false_positive", reason: "fixture" }, { patternId: "ci 003", verdict: "false_positive", reason: "fixture" }],
+    ];
+    for (const criticalValidation of variants) {
+      const { ai } = capture({ verdict: "PASS", score: 90, rationale: "Reviewed.", criticalValidation });
+      const result = await runTier2Scan(content, findings, ai);
+      expect({ criticalValidation, score: result.score }).toEqual({ criticalValidation, score: 90 });
+    }
+    // An id the scan never reported does not validate anything.
+    const { ai } = capture({
+      verdict: "PASS",
+      score: 90,
+      rationale: "Reviewed.",
+      criticalValidation: [{ patternId: "CE-0011", verdict: "false_positive", reason: "x" }, { patternId: "DCI-003", verdict: "false_positive", reason: "x" }],
+    });
+    const capped = await runTier2Scan(content, findings, ai);
+    expect(capped.score).toBe(64);
+  });
+
   it("caps an unvalidated critical SecurityFinding keyed by its patternId", async () => {
     const { ai } = capture({ verdict: "PASS", score: 95, rationale: "fine" });
     const result = await runTier2Scan(

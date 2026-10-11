@@ -205,6 +205,40 @@ function parseResponse(raw: string): ParsedVerdict {
   }
 }
 
+const PATTERN_ID_RE = /\b([A-Za-z]{2,4})[-_ ]?(\d{3})\b/g;
+
+/** Comparison key for a pattern id or category: "ci-001 (exec)" -> "CI-001". */
+function idKeys(raw: string): string[] {
+  const keys = [...raw.matchAll(PATTERN_ID_RE)].map((m) => `${m[1].toUpperCase()}-${m[2]}`);
+  return keys.length > 0 ? keys : [raw.trim().toLowerCase()];
+}
+
+/**
+ * Rewrites the judge's criticalValidation ids to the exact Tier 1 ids they
+ * name. Models vary the id ("ci-001", "CI-001 (exec)", " CI-001 ", or one
+ * entry listing several ids); exact matching would leave every critical
+ * "unvalidated" and cap the score. Entries naming no known id are dropped.
+ */
+export function normalizeCriticalValidation(
+  validations: GuardedVerdict['criticalValidation'],
+  findings: GuardFinding[],
+): GuardedVerdict['criticalValidation'] {
+  if (!validations) return validations;
+  const known = new Map<string, string>();
+  for (const f of findings) {
+    if (!f || typeof f.patternId !== 'string') continue;
+    for (const key of idKeys(f.patternId)) if (!known.has(key)) known.set(key, f.patternId);
+  }
+  const out: NonNullable<GuardedVerdict['criticalValidation']> = [];
+  for (const v of validations) {
+    for (const key of idKeys(v.patternId)) {
+      const id = known.get(key);
+      if (id) out.push({ ...v, patternId: id });
+    }
+  }
+  return out;
+}
+
 /**
  * Applies the judge guards (score caps the model cannot talk its way out of)
  * and records any guard-added concerns in the rationale.
@@ -218,7 +252,7 @@ function guardVerdict(parsed: ParsedVerdict, guardFindings: GuardFinding[]): Omi
       verdict: parsed.verdict,
       score: parsed.score,
       concerns: parsed.concerns,
-      criticalValidation: parsed.criticalValidation,
+      criticalValidation: normalizeCriticalValidation(parsed.criticalValidation, guardFindings),
     },
     guardFindings,
   );

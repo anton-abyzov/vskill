@@ -147,3 +147,78 @@ describe("0894 — remove-skill for a shared reader with an old per-agent link",
     ]);
   });
 });
+
+describe("0894 — remove-skill with all: true", () => {
+  it("removes the canonical copy, every agent's link or copy, and the lock entry", async () => {
+    writeSkill(join(root, ".agents/skills/foo"));
+    link("../../.agents/skills/foo", join(root, ".windsurf/skills/foo"));
+    writeSkill(join(root, ".claude/skills/foo")); // Claude's own full copy
+    lock(["claude-code", "cursor", "codex", "windsurf"]);
+
+    const { body, status } = await post({ skill: "foo", scope: "project", all: true });
+
+    expect(status).toBe(200);
+    expect(body.errors).toEqual([]);
+    for (const p of [".agents/skills/foo", ".windsurf/skills/foo", ".claude/skills/foo"]) {
+      expect(lexists(join(root, p))).toBe(false);
+    }
+    const paths = body.removed.map((r: { path: string }) => r.path);
+    expect(paths).toEqual(expect.arrayContaining([
+      join(root, ".agents/skills/foo"),
+      join(root, ".windsurf/skills/foo"),
+      join(root, ".claude/skills/foo"),
+    ]));
+    expect(readLockfile(root)?.skills.foo).toBeUndefined();
+  });
+
+  it("resolves a shared refusal: the Remove-from-all request deletes what the per-agent one kept", async () => {
+    writeSkill(join(root, ".agents/skills/foo"));
+    lock(["cursor", "codex"]);
+
+    const refused = await post({ skill: "foo", agentIds: ["cursor"], scope: "project" });
+    expect(refused.body.skipped[0].sharedWith).toEqual(["codex"]);
+
+    const { body } = await post({ skill: "foo", agentIds: ["cursor", "codex"], scope: "project", all: true });
+    expect(body.skipped).toEqual([]);
+    expect(lexists(join(root, ".agents/skills/foo"))).toBe(false);
+  });
+
+  it("still rejects unknown agent ids when they are given", async () => {
+    const { status } = await post({ skill: "foo", agentIds: ["nope"], scope: "project", all: true });
+    expect(status).toBe(400);
+  });
+});
+
+describe("0894 — remove-skill prunes the scope lockfile agents list", () => {
+  it("drops an agent left with no skill in the scope, keeps agents that still have one", async () => {
+    writeSkill(join(root, ".agents/skills/foo"));
+    link("../../.agents/skills/foo", join(root, ".windsurf/skills/foo"));
+    lock(["codex", "windsurf"]);
+
+    await post({ skill: "foo", agentIds: ["windsurf"], scope: "project" });
+
+    expect(readLockfile(root)?.agents).toEqual(["codex"]);
+  });
+
+  it("empties the agents list once the last skill is removed for everyone", async () => {
+    writeSkill(join(root, ".agents/skills/foo"));
+    link("../../.agents/skills/foo", join(root, ".claude/skills/foo"));
+    lock(["claude-code", "cursor", "codex"]);
+
+    await post({ skill: "foo", scope: "project", all: true });
+
+    expect(readLockfile(root)?.agents).toEqual([]);
+  });
+
+  it("keeps an agent that still has another skill", async () => {
+    writeSkill(join(root, ".agents/skills/foo"));
+    link("../../.agents/skills/foo", join(root, ".windsurf/skills/foo"));
+    writeSkill(join(root, ".windsurf/skills/bar"));
+    lock(["codex", "windsurf"]);
+
+    await post({ skill: "foo", agentIds: ["windsurf"], scope: "project" });
+
+    expect(readLockfile(root)?.agents).toEqual(["codex", "windsurf"]);
+  });
+});
+

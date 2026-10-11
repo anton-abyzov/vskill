@@ -9,6 +9,9 @@ export interface RemoveSkillRequest {
   skill: string;
   agentIds: string[];
   scope: "project" | "user";
+  /** 0894: remove for every agent in the scope — the shared copy, every
+   *  agent's own link or copy, and the lockfile entry. */
+  all?: boolean;
 }
 
 export interface RemoveSkillResponse {

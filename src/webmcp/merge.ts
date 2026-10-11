@@ -12,7 +12,8 @@
 // captured descriptor is the only place it survives. Pure module: no browser.
 // ---------------------------------------------------------------------------
 
-import { originOf, parseSchema, siteOf } from "./score.js";
+import { classifyRegistrar } from "./attribution.js";
+import { originOf, parseSchema } from "./score.js";
 import type { ToolAnnotations, ToolSource, WebmcpTool } from "./types.js";
 
 export interface CapturedTool {
@@ -52,6 +53,8 @@ export interface MergeInput {
   cdp: CdpTool[];
   /** null when getTools() was unavailable or threw. */
   listed: ListedTool[] | null;
+  /** Hosting platform markers found on the page (attribution.ts PlatformMarker). */
+  platforms?: string[];
 }
 
 function bool(v: unknown): boolean | undefined {
@@ -111,8 +114,6 @@ function normalizeSchema(raw: unknown): unknown {
 }
 
 export function mergeTools(input: MergeInput): WebmcpTool[] {
-  const pageSite = siteOf(input.pageUrl);
-
   // Latest event per name wins (a tool can be removed and re-registered).
   const cdpLive = new Map<string, CdpTool>();
   for (const t of input.cdp) {
@@ -162,13 +163,12 @@ export function mergeTools(input: MergeInput): WebmcpTool[] {
     }
 
     const registeredBy = firstScript.get(name) ?? c?.scriptUrl ?? (d ? cdpRegistrar(d) : undefined) ?? undefined;
-    const regSite = siteOf(registeredBy);
-    const thirdParty = !!(regSite && pageSite && regSite !== pageSite);
+    const attribution = classifyRegistrar(registeredBy, input.pageUrl, input.platforms);
 
     const tool: WebmcpTool = {
       name,
       annotations,
-      thirdParty,
+      thirdParty: attribution?.kind === "third-party",
       sources,
     };
     const title = nonEmpty(l?.title) ?? nonEmpty(c?.title) ?? nonEmpty(d?.title);
@@ -178,6 +178,11 @@ export function mergeTools(input: MergeInput): WebmcpTool[] {
     const schema = normalizeSchema(l?.inputSchema) ?? normalizeSchema(c?.inputSchema) ?? normalizeSchema(d?.inputSchema);
     if (schema !== undefined) tool.inputSchema = schema;
     if (registeredBy) tool.registeredBy = registeredBy;
+    if (attribution) {
+      tool.registeredByKind = attribution.kind;
+      if (attribution.platform) tool.registeredByPlatform = attribution.platform;
+      if (attribution.package) tool.registeredByPackage = attribution.package;
+    }
     const exposedTo = stringList(c?.exposedTo) ?? stringList(l?.exposedTo);
     if (exposedTo) tool.exposedTo = exposedTo;
     return tool;

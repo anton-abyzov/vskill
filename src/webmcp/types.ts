@@ -18,6 +18,13 @@ export interface ToolAnnotations {
   untrustedContentHint?: boolean;
 }
 
+/**
+ * Who registered a tool, from its script URL (see attribution.ts):
+ * the page's own site, the hosting platform's own code, a library from a
+ * public npm CDN, or another site.
+ */
+export type RegistrarKind = "first-party" | "platform" | "library" | "third-party";
+
 /** Where we learned about a tool. */
 export type ToolSource = "registerTool" | "cdp" | "getTools";
 
@@ -30,7 +37,13 @@ export interface WebmcpTool {
   annotations: ToolAnnotations;
   /** Script URL that called registerTool (from a captured stack trace). */
   registeredBy?: string;
-  /** True when registeredBy belongs to a different site (registrable domain) than the page. */
+  /** Classification of registeredBy; absent when the script URL is unknown. */
+  registeredByKind?: RegistrarKind;
+  /** Platform name when registeredByKind is "platform" (e.g. "Shopify"). */
+  registeredByPlatform?: string;
+  /** Package the CDN URL names when registeredByKind is "library" (e.g. "simple-webmcp@0.3.0"). */
+  registeredByPackage?: string;
+  /** True when registeredByKind is "third-party": another site that is neither the page's platform nor a public npm CDN. */
   thirdParty: boolean;
   /** Origins the tool is exposed to, when the page passed exposedTo. */
   exposedTo?: string[];
@@ -51,6 +64,10 @@ export interface SiteSummary {
   consequentialCount: number;
   writeShapedCount: number;
   thirdPartyCount: number;
+  /** Tools registered by the hosting platform's own script. */
+  platformCount: number;
+  /** Tools registered by a library loaded from a public npm CDN. */
+  libraryCount: number;
   findingsBySeverity: Record<Severity, number>;
   /** null when the site failed to load and nothing was enumerated. */
   score: number | null;
@@ -70,6 +87,8 @@ export interface SiteReport {
   headers: {
     permissionsPolicy: string | null;
   };
+  /** Hosting platforms detected on the page (e.g. ["shopify"]). */
+  platforms: string[];
   tools: WebmcpTool[];
   findings: WebmcpFinding[];
   summary: SiteSummary;
@@ -83,6 +102,8 @@ export interface EnumerationResult {
   documentModelContext: boolean;
   navigatorModelContext: boolean;
   permissionsPolicy: string | null;
+  /** Hosting platforms detected on the page (e.g. ["shopify"]). */
+  platforms?: string[];
   tools: WebmcpTool[];
   error?: string;
 }

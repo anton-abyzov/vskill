@@ -182,11 +182,13 @@ Tools are found three ways and merged by name: a wrapper around `registerTool` t
 | WMCP-002 | high / medium / low | Write-shaped tool (checkout, pay, delete / book, send, subscribe / cart changes) without `consequentialHint`. Names that lead with a read verb (`get_cart`), nouns qualified as reads (`order_status`, `payment_methods`) and UI state (`remove_filter`) are not write-shaped |
 | WMCP-003 | high | Write-shaped tool marked `readOnlyHint: true` |
 | WMCP-004 | info / low | Asks for email, phone, address, birth date, government ID or card details it does not need |
-| WMCP-005 | medium | Registered by a script from another site (registrable domain; `cdn.shop.example` on `www.shop.example` is first-party) |
+| WMCP-005 | medium / info | Registered by a script from another site (medium). The message names the script's origin: a brand's own asset domain (`assets.targetimg1.com` on `target.com`) looks the same as a vendor, so check whether you own it. A WebMCP library from a public npm CDN (unpkg, jsDelivr, esm.sh, cdnjs, jspm, Skypack) is info and names the package and whether its version is pinned. No finding for first-party scripts (`cdn.shop.example` on `www.shop.example`) or for the hosting platform's own code |
 | WMCP-006 | low / medium | Description over 500 characters, or more than 40 tools on the page |
 | WMCP-007 | low / medium | `inputSchema` missing, invalid, or not an object schema |
 | WMCP-008 | info | Tools registered but no `Permissions-Policy` that mentions tools |
 | WMCP-009 | info | Tool exposed to other origins via `exposedTo` |
+
+Each tool's `registeredByKind` says who registered it: `first-party` (the page's site), `platform` (the hosting platform's own script, with `registeredByPlatform`), `library` (a public npm CDN, with `registeredByPackage`) or `third-party`; `thirdParty` is true only for `third-party`. The platform list is short and only holds what a scan has shown: Shopify's `cdn.shopify.com/shopifycloud/` scripts on a page that carries a Shopify storefront marker (`window.Shopify.shop`, a `shopify-digital-wallet` or `shopify-checkout-api-token` meta, or a `myshopify.com` host). `cdn.shopify.com/extensions/` is app code and stays third-party. The report's `platforms` lists the markers found.
 
 The verdict uses the skill scanner's weights and thresholds (PASS at 80 or above, CONCERNS from 50, FAIL below 50). Each rule deducts at most twice its worst finding, any critical finding is FAIL, and any high finding is at least CONCERNS.
 
@@ -200,9 +202,10 @@ Each site produces one JSON object (`schemaVersion: 1`); a batch writes one per 
   "scannedAt": "2026-10-11T06:00:40.000Z",
   "webmcp": { "documentModelContext": true, "navigatorModelContext": false },
   "headers": { "permissionsPolicy": null },
-  "tools": [{ "name": "proceed_to_checkout", "title": "…", "description": "…", "inputSchema": {}, "annotations": { "readOnlyHint": false }, "registeredBy": "https://www.allbirds.com/cdn/…/webmcp.js", "thirdParty": false, "sources": ["registerTool", "cdp", "getTools"] }],
+  "platforms": ["shopify"],
+  "tools": [{ "name": "proceed_to_checkout", "title": "…", "description": "…", "inputSchema": {}, "annotations": { "readOnlyHint": false }, "registeredBy": "https://www.allbirds.com/cdn/…/webmcp.js", "registeredByKind": "first-party", "thirdParty": false, "sources": ["registerTool", "cdp", "getTools"] }],
   "findings": [{ "id": "WMCP-002", "severity": "high", "tool": "proceed_to_checkout", "message": "…" }],
-  "summary": { "toolCount": 12, "readOnlyCount": 4, "consequentialCount": 0, "writeShapedCount": 4, "thirdPartyCount": 0, "findingsBySeverity": { "critical": 0, "high": 1, "medium": 2, "low": 8, "info": 1 }, "score": 65, "verdict": "CONCERNS" },
+  "summary": { "toolCount": 12, "readOnlyCount": 4, "consequentialCount": 0, "writeShapedCount": 4, "thirdPartyCount": 0, "platformCount": 0, "libraryCount": 0, "findingsBySeverity": { "critical": 0, "high": 1, "medium": 2, "low": 8, "info": 1 }, "score": 65, "verdict": "CONCERNS" },
   "error": "only present when the page failed to load"
 }
 ```

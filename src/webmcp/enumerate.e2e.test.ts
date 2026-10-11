@@ -55,6 +55,13 @@ beforeAll(async () => {
       </script></body></html>`);
       return;
     }
+    if (req.url?.startsWith("/shopify")) {
+      res.end(`<!doctype html><html><head><meta name="shopify-digital-wallet" content="/1/digital_wallets/dialog"></head><body><script>
+        window.Shopify = { shop: "fixture.myshopify.com" };
+        document.modelContext.registerTool({ name: "get_hours", description: "Opening hours.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true }, execute: async () => "9-5" });
+      </script></body></html>`);
+      return;
+    }
     if (req.url?.startsWith("/busy")) {
       res.end(`<!doctype html><html><body><script>for (;;) {}</script></body></html>`);
       return;
@@ -109,11 +116,14 @@ describe.skipIf(!browser)("audit-webmcp against a local page (headless Chromium)
     expect(byName.search_products.annotations.readOnlyHint).toBe(true);
     expect(byName.search_products.thirdParty).toBe(false);
     expect(byName.search_products.registeredBy).toBe(pageUrl);
+    expect(byName.search_products.registeredByKind).toBe("first-party");
     // Chrome drops consequentialHint from getTools()/CDP; the registerTool capture keeps it.
     expect(byName.proceed_to_checkout.annotations.consequentialHint).toBe(true);
     expect(byName.proceed_to_checkout.sources).toContain("registerTool");
     expect(byName.add_to_cart.thirdParty).toBe(true);
     expect(byName.add_to_cart.registeredBy).toBe(`${widgetOrigin}/widget.js`);
+    expect(byName.add_to_cart.registeredByKind).toBe("third-party");
+    expect(report.platforms).toEqual([]);
     expect(byName.search_products.inputSchema).toMatchObject({ type: "object" });
 
     const ids = report.findings.map((f) => `${f.id}:${f.tool ?? "-"}`);
@@ -129,6 +139,8 @@ describe.skipIf(!browser)("audit-webmcp against a local page (headless Chromium)
       consequentialCount: 1,
       writeShapedCount: 2,
       thirdPartyCount: 1,
+      platformCount: 0,
+      libraryCount: 0,
     });
 
     expect(executeHits).toEqual([]);
@@ -151,6 +163,12 @@ describe.skipIf(!browser)("audit-webmcp against a local page (headless Chromium)
     const [report] = await auditSites(browser!, [`${pageUrl}popup`], { concurrency: 1, timeoutMs: 10_000, settleMs: 1_000 });
     expect(report.tools.map((t) => t.name)).toEqual(["get_hours"]);
     expect(executeHits).toEqual([]);
+  }, 60_000);
+
+  it("detects the Shopify storefront marker", async () => {
+    const [report] = await auditSites(browser!, [`${pageUrl}shopify`], { concurrency: 1, timeoutMs: 10_000, settleMs: 1_000 });
+    expect(report.platforms).toEqual(["shopify"]);
+    expect(report.tools[0]?.registeredByKind).toBe("first-party");
   }, 60_000);
 
   it("a page stuck in a busy loop is recorded as an error and the batch moves on", async () => {

@@ -204,9 +204,38 @@ describe("scoreTool", () => {
     expect(scoreTool(SHOPIFY_LIKE[6]).filter((f) => f.id === "WMCP-004")).toEqual([]);
   });
 
-  it("WMCP-005: third-party registration is medium", () => {
+  it("WMCP-005: third-party registration is medium and names the script origin", () => {
     const fs = scoreTool(tool({ name: "chat", annotations: { readOnlyHint: true }, thirdParty: true, registeredBy: "https://cdn.vendor.example/w.js" }));
     expect(ids(fs)).toContain("WMCP-005:chat:medium");
+    const msg = fs.find((f) => f.id === "WMCP-005")!.message;
+    expect(msg).toContain("https://cdn.vendor.example");
+    expect(msg).toContain("vendor.example is the site's own asset domain");
+  });
+
+  it("WMCP-005: a public-CDN library is info and notes an unpinned version", () => {
+    const pinned = scoreTool(tool({
+      name: "a", annotations: { readOnlyHint: true }, registeredBy: "https://unpkg.com/simple-webmcp@0.3.0/dist/index.js",
+      registeredByKind: "library", registeredByPackage: "simple-webmcp@0.3.0",
+    })).filter((f) => f.id === "WMCP-005");
+    expect(ids(pinned)).toEqual(["WMCP-005:a:info"]);
+    expect(pinned[0].message).toContain("library simple-webmcp@0.3.0 from unpkg.com");
+    expect(pinned[0].message).not.toContain("not pinned");
+    const latest = scoreTool(tool({
+      name: "b", annotations: { readOnlyHint: true }, registeredBy: "https://cdn.jsdelivr.net/npm/@willh/agentready@latest/dist/agentready.min.js",
+      registeredByKind: "library", registeredByPackage: "@willh/agentready@latest",
+    })).filter((f) => f.id === "WMCP-005");
+    expect(ids(latest)).toEqual(["WMCP-005:b:info"]);
+    expect(latest[0].message).toContain("not pinned");
+  });
+
+  it("WMCP-005: the hosting platform's own script and first-party scripts are not findings", () => {
+    const platform = tool({
+      name: "a", annotations: { readOnlyHint: true }, registeredBy: "https://cdn.shopify.com/shopifycloud/storefront/assets/storefront/webmcp-f427de6a.js",
+      registeredByKind: "platform", registeredByPlatform: "Shopify",
+    });
+    const first = tool({ name: "b", annotations: { readOnlyHint: true }, registeredBy: "https://shop.example/x.js", registeredByKind: "first-party" });
+    expect(scoreTool(platform).some((f) => f.id === "WMCP-005")).toBe(false);
+    expect(scoreTool(first).some((f) => f.id === "WMCP-005")).toBe(false);
   });
 
   it("WMCP-006: long description", () => {
@@ -259,6 +288,8 @@ describe("summary and verdict", () => {
       consequentialCount: 0,
       writeShapedCount: 2,
       thirdPartyCount: 0,
+      platformCount: 0,
+      libraryCount: 0,
       verdict: "CONCERNS",
     });
     expect(s.findingsBySeverity.high).toBe(1);
@@ -314,10 +345,11 @@ describe("summary and verdict", () => {
       },
       new Date("2026-10-11T00:00:00Z"),
     );
-    expect(Object.keys(r)).toEqual(["schemaVersion", "url", "finalUrl", "scannedAt", "webmcp", "headers", "tools", "findings", "summary"]);
+    expect(Object.keys(r)).toEqual(["schemaVersion", "url", "finalUrl", "scannedAt", "webmcp", "headers", "platforms", "tools", "findings", "summary"]);
     expect(r.scannedAt).toBe("2026-10-11T00:00:00.000Z");
     expect(r.webmcp).toEqual({ documentModelContext: true, navigatorModelContext: false });
     expect(r.headers).toEqual({ permissionsPolicy: null });
+    expect(r.platforms).toEqual([]);
     const withError = buildReport({ url: "https://x.invalid/", finalUrl: null, documentModelContext: false, navigatorModelContext: false, permissionsPolicy: null, tools: [], error: "net::ERR_NAME_NOT_RESOLVED" });
     expect(withError.error).toBe("net::ERR_NAME_NOT_RESOLVED");
     expect(withError.summary.toolCount).toBe(0);
@@ -402,7 +434,50 @@ describe("merge", () => {
       cdp: [],
       listed: null,
     });
-    expect(tools.map((t) => [t.name, t.thirdParty])).toEqual([["a", false], ["b", true]]);
+    expect(tools.map((t) => [t.name, t.thirdParty, t.registeredByKind])).toEqual([
+      ["a", false, "first-party"],
+      ["b", true, "third-party"],
+    ]);
+  });
+
+  it("Shopify's own storefront script on a Shopify store is platform, not third-party", () => {
+    const script = "https://cdn.shopify.com/shopifycloud/storefront/assets/storefront/webmcp-f427de6a.js";
+    const onStore = mergeTools({ pageUrl: "https://www.cotopaxi.com/", captured: [{ name: "a", scriptUrl: script }], cdp: [], listed: null, platforms: ["shopify"] });
+    expect(onStore[0]).toMatchObject({ thirdParty: false, registeredByKind: "platform", registeredByPlatform: "Shopify" });
+    const store = summarize(onStore, scorePage({ tools: onStore, permissionsPolicy: null }));
+    const ownDomain = mergeTools({
+      pageUrl: "https://www.allbirds.com/",
+      captured: [{ name: "a", scriptUrl: "https://www.allbirds.com/cdn/shopifycloud/storefront/assets/storefront/webmcp-f427de6a.js" }],
+      cdp: [], listed: null, platforms: ["shopify"],
+    });
+    expect(ownDomain[0].registeredByKind).toBe("first-party");
+    expect(summarize(ownDomain, scorePage({ tools: ownDomain, permissionsPolicy: null })).score).toBe(store.score);
+    expect(store).toMatchObject({ thirdPartyCount: 0, platformCount: 1 });
+  });
+
+  it("cdn.shopify.com without a Shopify marker, or outside /shopifycloud/, stays third-party", () => {
+    const noMarker = mergeTools({
+      pageUrl: "https://www.example.com/",
+      captured: [{ name: "a", scriptUrl: "https://cdn.shopify.com/shopifycloud/x/webmcp.js" }],
+      cdp: [], listed: null,
+    });
+    expect(noMarker[0]).toMatchObject({ thirdParty: true, registeredByKind: "third-party" });
+    const appExtension = mergeTools({
+      pageUrl: "https://www.cotopaxi.com/",
+      captured: [{ name: "a", scriptUrl: "https://cdn.shopify.com/extensions/0199-abc/app-1/assets/tools.js" }],
+      cdp: [], listed: null, platforms: ["shopify"],
+    });
+    expect(appExtension[0]).toMatchObject({ thirdParty: true, registeredByKind: "third-party" });
+  });
+
+  it("a WebMCP library from a public npm CDN is library with its package", () => {
+    const tools = mergeTools({
+      pageUrl: "https://emingure.github.io/simple-webmcp/demo/",
+      captured: [{ name: "a", scriptUrl: "https://unpkg.com/simple-webmcp@0.3.0/dist/index.js" }],
+      cdp: [], listed: null,
+    });
+    expect(tools[0]).toMatchObject({ thirdParty: false, registeredByKind: "library", registeredByPackage: "simple-webmcp@0.3.0" });
+    expect(summarize(tools, scorePage({ tools, permissionsPolicy: null }))).toMatchObject({ thirdPartyCount: 0, libraryCount: 1 });
   });
 
   it("uses the capture when getTools is unavailable and honours unregister", () => {

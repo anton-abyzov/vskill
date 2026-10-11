@@ -8,7 +8,9 @@
 //   WMCP-002  write-shaped tool without consequentialHint
 //   WMCP-003  write-shaped tool marked readOnlyHint:true
 //   WMCP-004  PII-shaped parameters the tool's purpose does not need
-//   WMCP-005  tool registered by a script from another origin
+//   WMCP-005  tool registered by a script from another site (medium), or by
+//             a library from a public npm CDN (info); the hosting platform's
+//             own script is not a finding (attribution.ts)
 //   WMCP-006  description over 500 chars, or more than 40 tools on the page
 //   WMCP-007  inputSchema missing or not a JSON Schema object
 //   WMCP-008  tools registered but no Permissions-Policy mentioning tools
@@ -16,6 +18,7 @@
 // ---------------------------------------------------------------------------
 
 import { scanContent, type ScanVerdict } from "../scanner/patterns.js";
+import { isUnpinned } from "./attribution.js";
 import {
   SEVERITIES,
   type EnumerationResult,
@@ -420,6 +423,44 @@ function piiFindings(tool: WebmcpTool): WebmcpFinding[] {
   return out;
 }
 
+// ---- WMCP-005: who registered the tool -------------------------------------
+
+function registrarFindings(tool: WebmcpTool): WebmcpFinding[] {
+  const kind = tool.registeredByKind ?? (tool.thirdParty ? "third-party" : undefined);
+  if (kind === "library") {
+    const pkg = tool.registeredByPackage;
+    const host = hostOf(tool.registeredBy);
+    const what = pkg ? `library ${pkg} from ${host}` : `a script from the public CDN ${host}`;
+    const pin = pkg && isUnpinned(pkg) ? "; the version is not pinned, so the tool text can change without a page change" : "";
+    return [{
+      id: "WMCP-005",
+      severity: "info",
+      tool: tool.name,
+      message: `registered by ${what} (${tool.registeredBy}); the page chose this library, review its tools as your own${pin}`,
+    }];
+  }
+  if (kind === "third-party") {
+    const origin = originOf(tool.registeredBy) ?? tool.registeredBy;
+    return [{
+      id: "WMCP-005",
+      severity: "medium",
+      tool: tool.name,
+      message:
+        `registered by a script from ${origin}, a different site from the page (${tool.registeredBy}); ` +
+        `if ${siteOf(tool.registeredBy) ?? "that domain"} is the site's own asset domain this is first-party, which the audit cannot tell`,
+    }];
+  }
+  return [];
+}
+
+function hostOf(url: string | undefined): string {
+  try {
+    return new URL(url ?? "").host;
+  } catch {
+    return url ?? "";
+  }
+}
+
 // ---- Per-tool and per-page rules -------------------------------------------
 
 export function scoreTool(tool: WebmcpTool): WebmcpFinding[] {
@@ -447,14 +488,7 @@ export function scoreTool(tool: WebmcpTool): WebmcpFinding[] {
 
   findings.push(...piiFindings(tool));
 
-  if (tool.thirdParty) {
-    findings.push({
-      id: "WMCP-005",
-      severity: "medium",
-      tool: tool.name,
-      message: `registered by a third-party script (${tool.registeredBy})`,
-    });
-  }
+  findings.push(...registrarFindings(tool));
 
   if ((tool.description ?? "").length > MAX_DESCRIPTION_CHARS) {
     findings.push({
@@ -568,6 +602,8 @@ export function summarize(tools: WebmcpTool[], findings: WebmcpFinding[], failed
     consequentialCount: tools.filter((t) => t.annotations.consequentialHint === true).length,
     writeShapedCount: tools.filter((t) => classifyWriteShape(t) !== null).length,
     thirdPartyCount: tools.filter((t) => t.thirdParty).length,
+    platformCount: tools.filter((t) => t.registeredByKind === "platform").length,
+    libraryCount: tools.filter((t) => t.registeredByKind === "library").length,
     findingsBySeverity,
     score,
     verdict,
@@ -587,6 +623,7 @@ export function buildReport(e: EnumerationResult, scannedAt: Date = new Date()):
       navigatorModelContext: e.navigatorModelContext,
     },
     headers: { permissionsPolicy: e.permissionsPolicy },
+    platforms: e.platforms ?? [],
     tools: e.tools,
     findings,
     summary: summarize(e.tools, findings, !!e.error && e.tools.length === 0),

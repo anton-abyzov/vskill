@@ -254,6 +254,7 @@ interface PageSnapshot {
   captured: Array<CapturedTool & { stack?: string }>;
   listed: ListedTool[] | null;
   getToolsError?: string;
+  platforms: string[];
 }
 
 /** Evaluated in the page after it settles. Reads, never executes. */
@@ -266,7 +267,19 @@ function snapshotInPage(): Promise<PageSnapshot> {
     navigatorModelContext: "modelContext" in navigator,
     captured: [],
     listed: null,
+    platforms: [],
   };
+  // Hosting-platform markers (attribution.ts PLATFORM_HOSTS). Shopify storefronts
+  // set window.Shopify.shop to the store's myshopify.com name and emit these metas.
+  try {
+    const shop = w.Shopify;
+    const shopifyMeta = d.querySelector('meta[name="shopify-checkout-api-token"], meta[name="shopify-digital-wallet"]');
+    if ((shop && typeof shop === "object" && typeof shop.shop === "string") || shopifyMeta || /\.myshopify\.com$/i.test(location.hostname)) {
+      out.platforms.push("shopify");
+    }
+  } catch {
+    // markers are best effort
+  }
   const log = w[Symbol.for("vskill.webmcp")];
   if (Array.isArray(log)) out.captured = log.slice();
   if (!mc || typeof mc.getTools !== "function") return Promise.resolve(out);
@@ -356,6 +369,7 @@ export async function enumerateSite(browser: PwBrowser, url: string, opts: Enume
     documentModelContext: false,
     navigatorModelContext: false,
     permissionsPolicy: null,
+    platforms: [],
     tools: [],
   };
 
@@ -453,6 +467,7 @@ export async function enumerateSite(browser: PwBrowser, url: string, opts: Enume
     result.finalUrl = page.url();
     result.documentModelContext = snap.documentModelContext;
     result.navigatorModelContext = snap.navigatorModelContext;
+    result.platforms = snap.platforms;
     const captured: CapturedTool[] = snap.captured.map(({ stack, ...rest }) => ({
       ...rest,
       scriptUrl: rest.unregistered ? undefined : scriptUrlFromStack(stack, PROBE_NAME),
@@ -462,6 +477,7 @@ export async function enumerateSite(browser: PwBrowser, url: string, opts: Enume
       captured,
       cdp: cdpEvents,
       listed: snap.listed,
+      platforms: snap.platforms,
     });
   } catch (e) {
     result.error = result.error ?? firstLine(e);

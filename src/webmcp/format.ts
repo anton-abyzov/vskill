@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { bold, cyan, dim, green, red, yellow } from "../utils/output.js";
-import type { Severity, SiteReport } from "./types.js";
+import type { Severity, SiteReport, WebmcpTool } from "./types.js";
 
 function sevLabel(s: Severity): string {
   const label = s.toUpperCase().padEnd(8);
@@ -36,6 +36,18 @@ function shortScript(url: string | undefined): string {
 
 const yn = (b: boolean | undefined) => (b === true ? "yes" : b === false ? "no" : "-");
 
+const SOURCE_LABELS: Record<NonNullable<WebmcpTool["registeredByKind"]>, string> = {
+  "first-party": "1st",
+  platform: "platform",
+  library: "library",
+  "third-party": "3rd",
+};
+
+function sourceLabel(t: WebmcpTool): string {
+  if (t.registeredByKind) return SOURCE_LABELS[t.registeredByKind];
+  return t.thirdParty ? "3rd" : "-";
+}
+
 export function formatSiteTerminal(r: SiteReport): string {
   const lines: string[] = [];
   const s = r.summary;
@@ -54,17 +66,19 @@ export function formatSiteTerminal(r: SiteReport): string {
 
   lines.push(
     `  ${s.toolCount} tools: ${s.readOnlyCount} read-only, ${s.consequentialCount} consequential, ` +
-      `${s.writeShapedCount} write-shaped, ${s.thirdPartyCount} third-party`,
+      `${s.writeShapedCount} write-shaped, ${s.thirdPartyCount} third-party` +
+      (s.platformCount ? `, ${s.platformCount} platform` : "") +
+      (s.libraryCount ? `, ${s.libraryCount} library` : ""),
   );
 
   if (r.tools.length > 0) {
     const nameW = Math.min(32, Math.max(4, ...r.tools.map((t) => t.name.length)));
-    lines.push(dim(`  ${pad("TOOL", nameW)}  READONLY  CONSEQ  3P   REGISTERED BY`));
+    lines.push(dim(`  ${pad("TOOL", nameW)}  READONLY  CONSEQ  SOURCE    REGISTERED BY`));
     for (const t of r.tools) {
       const name = t.name.length > nameW ? `${t.name.slice(0, nameW - 1)}…` : t.name;
       lines.push(
         `  ${pad(name, nameW)}  ${pad(yn(t.annotations.readOnlyHint), 8)}  ${pad(yn(t.annotations.consequentialHint), 6)}  ` +
-          `${pad(t.thirdParty ? "yes" : "no", 3)}  ${shortScript(t.registeredBy)}`,
+          `${pad(sourceLabel(t), 8)}  ${shortScript(t.registeredBy)}`,
       );
     }
   }

@@ -224,7 +224,7 @@ describe("PublishButton", () => {
     expect(toasts[0].message).not.toContain("Publish failed");
   });
 
-  it("clean tree, launch gate closed (0874 AC-07): submits privacy 'public' with no tenantId", async () => {
+  it("closed gate requires an explicit switch to public before submitting without a tenant", async () => {
     mockGitPublish.mockResolvedValueOnce({
       success: true,
       commitSha: "abc1234def567890",
@@ -241,6 +241,18 @@ describe("PublishButton", () => {
       await flush();
     });
 
+    expect(mockGitPublish).not.toHaveBeenCalled();
+    expect(mockSubmitToQueue).not.toHaveBeenCalled();
+    await act(async () => {
+      (container.querySelector('[data-testid="publish-privacy-public"]') as HTMLButtonElement).click();
+      await flush();
+    });
+    await act(async () => {
+      const submit = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("Push & Submit"));
+      expect(submit).toBeTruthy();
+      submit!.click();
+      await flush();
+    });
     expect(mockSubmitToQueue).toHaveBeenCalledTimes(1);
     const body = mockSubmitToQueue.mock.calls[0][0];
     expect(body.privacy).toBe("public");

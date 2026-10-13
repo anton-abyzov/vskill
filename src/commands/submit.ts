@@ -47,12 +47,12 @@ export async function submitCommand(
   const { owner, repo } = parsed;
   const repoUrl = `https://github.com/${owner}/${repo}`;
 
-  // verified-skill.com scans public repos only. A repo GitHub reports as
-  // private (or hides) is never sent there, not even by name.
+  // This default path publishes publicly. A repo GitHub reports as private
+  // (or hides) requires the separate explicit --private --tenant workflow.
   if (await isTypedRepoPrivate(owner, repo)) {
     console.error(
-      red(`${owner}/${repo} is a private repository. `) +
-        dim("verified-skill.com only verifies public repos, so nothing was submitted."),
+      red(`${owner}/${repo} is a private repository, so `) +
+        dim("nothing was submitted publicly. Use --private --tenant <account> for hosted private verification."),
     );
     process.exit(1);
   }

@@ -117,10 +117,11 @@ export function PublishDrawer({
   const [privacyChoice, setPrivacyChoice] = useState<Privacy>(privacy ?? "public");
   const [paywallOpen, setPaywallOpen] = useState(false);
   const { isFree } = useTier();
-  // 0874 AC-07: while hosted private publishing is closed, every submission
-  // is public and carries no tenant, whatever the host or the chooser says.
+  // Gate closure blocks private intent; it must never change it to public.
   const gateOpen = HOSTED_PRIVATE_PUBLISHING_AVAILABLE;
-  const submitPrivacy: Privacy = gateOpen ? privacyChoice : "public";
+  const submitPrivacy: Privacy = privacyChoice;
+  const privateUnavailable = submitPrivacy === "private" && !gateOpen;
+  const missingPrivateIdentity = submitPrivacy === "private" && !skillName;
   const submitTenantId = gateOpen && submitPrivacy === "private" ? tenantId : undefined;
   const needsTenant = submitPrivacy === "private" && Boolean(!submitTenantId || tenantSelection?.loading || tenantSelection?.error);
   const [generateError, setGenerateError] = useState<string | null>(null);
@@ -196,6 +197,10 @@ export function PublishDrawer({
   const onCommitPush = useCallback(async () => {
     const trimmed = message.trim();
     if ((fileCount > 0 && !trimmed) || publishing) return;
+    if (privateUnavailable || missingPrivateIdentity) {
+      setPublishError(privateUnavailable ? "Hosted private publishing is not available yet." : "Select a skill before publishing privately.");
+      return;
+    }
     if (needsTenant) {
       setPublishError(MISSING_PUBLISH_TENANT);
       return;
@@ -248,6 +253,10 @@ export function PublishDrawer({
         try {
           repoUrl = normalizeRemoteUrl(effectiveRemote);
         } catch {
+          if (submitPrivacy === "private") {
+            setOutcome({ ok: false, notSubmitted: "Private publishing requires a GitHub repository connected to the selected account." });
+            return;
+          }
           // Non-github remote → can't submit in-app; degrade to the website.
           // buildSubmitUrlFromRemote re-runs normalizeRemoteUrl and would
           // re-throw on a non-normalizable remote, escaping to the outer catch
@@ -321,7 +330,7 @@ export function PublishDrawer({
     } finally {
       setPublishing(false);
     }
-  }, [message, publishing, remoteUrl, skillName, skillPath, submitPrivacy, submitTenantId, fileCount, needsTenant]);
+  }, [message, publishing, remoteUrl, skillName, skillPath, submitPrivacy, submitTenantId, fileCount, needsTenant, privateUnavailable, missingPrivateIdentity]);
 
   const openWebsite = useCallback((url: string) => {
     // Reuse the tiered desktop shell-open seam (Tauri invoke → sidecar →
@@ -329,7 +338,7 @@ export function PublishDrawer({
     void openExternalUrlViaDesktop(url);
   }, []);
 
-  const canCommit = (fileCount === 0 || message.trim().length > 0) && !publishing && !generating && !needsTenant;
+  const canCommit = (fileCount === 0 || message.trim().length > 0) && !publishing && !generating && !needsTenant && !privateUnavailable && !missingPrivateIdentity;
 
   // 0784 hotfix — modal always renders on a dark surface (matches the
   // backdrop-blur design intent) with hard-coded light text, so readability
@@ -534,6 +543,8 @@ export function PublishDrawer({
             textMuted={MODAL_TEXT_MUTED}
             inputBg={MODAL_INPUT_BG}
           />
+          {privateUnavailable && <p role="alert" style={{ marginTop: 12 }}>Hosted private publishing is not available yet. Your private selection has not been submitted.</p>}
+          {missingPrivateIdentity && <p role="alert" style={{ marginTop: 12 }}>Select a skill before publishing privately.</p>}
           {gateOpen && submitPrivacy === "private" && <PublishTenantPicker selection={tenantSelection} />}
 
           {/* ── Commit message field ──────────────────────────────── */}

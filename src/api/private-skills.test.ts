@@ -88,6 +88,10 @@ describe("authenticated private transport", () => {
     await expect(createPrivateSubmission(tenant, "https://github.com/acme/private", "helpful", "SKILL.md")).rejects.toThrow("private_publishing_unavailable");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+  it("rejects a different private submission identity in the same tenant", async () => {
+    fetchMock.mockResolvedValue(Response.json({ id: "psub_other", state: "PUBLISHED", privacy: "PRIVATE", tenantId: "tenant1" }));
+    await expect(getPrivateSubmission(tenant, "psub_abc")).rejects.toThrow("does not match");
+  });
   it("rejects public or foreign-tenant submission responses", async () => {
     fetchMock.mockResolvedValue(Response.json({ id: "psub_abc", state: "PUBLISHED", privacy: "PRIVATE", tenantId: "foreign" }));
     await expect(getPrivateSubmission(tenant, "psub_abc")).rejects.toThrow("does not match");

@@ -80,7 +80,7 @@ export function PublishButton({ remoteUrl, provider, model, skillName, skillPath
       // With hosted publishing available, clean trees also need an explicit
       // visibility/account choice. Publishing never silently defaults private
       // repository content into the public queue.
-      if (hasChanges || (HOSTED_PRIVATE_PUBLISHING_AVAILABLE && skillName)) {
+      if (hasChanges || privacy === "private" || (HOSTED_PRIVATE_PUBLISHING_AVAILABLE && skillName)) {
         setDrawerFileCount(fileCount);
         setDrawerOpen(true);
         return;
@@ -110,8 +110,8 @@ export function PublishButton({ remoteUrl, provider, model, skillName, skillPath
               skillName,
               skillPath,
               source: "studio-submit",
-              // 0874 AC-07: public only, with no tenant, while the gate is closed.
-              privacy: HOSTED_PRIVATE_PUBLISHING_AVAILABLE ? (privacy ?? "public") : "public",
+              // Explicit private intent always takes the guarded drawer above.
+              privacy: privacy ?? "public",
               tenantId: HOSTED_PRIVATE_PUBLISHING_AVAILABLE ? tenantId : undefined,
             });
           } catch (err) {

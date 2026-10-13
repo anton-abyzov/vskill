@@ -153,7 +153,7 @@ This workflow is release-gated. If the service returns
 `private_publishing_unavailable`, the hosted rollout is closed. Nothing is
 submitted publicly as a fallback, and direct private GitHub installs continue
 to work. These commands require a CLI release containing hosted private support;
-they are not available in vskill 1.2.7.
+they are not available in the published vskill 1.2.7 release.
 
 ```bash
 vskill auth login
@@ -188,7 +188,12 @@ share the same display name, use the account skill list's
 `repoSlug:skillSlug` identity. The CLI verifies tenant/skill/version identity,
 all raw file hashes and sizes, the normalized tree hash, and safe relative
 paths before writing. Every text file also receives a local security scan.
-Bundles preserve supporting files and executable modes.
+Bundles preserve supporting files and executable modes. Hosted installs support
+agents that natively read complete skill folders, including Codex, Claude Code,
+and Cursor. Transformer-only and clipboard agents are skipped during automatic
+detection; selecting one explicitly fails before any files are written. The
+verified source frontmatter name is replaced with the isolated installed name
+so two accounts cannot create the same agent-visible skill identity.
 
 The installed name includes the account and a stable identity suffix, for
 example `private-acme-onboarding-<identity>`. This avoids overwriting a public

@@ -174,8 +174,8 @@ export async function downloadPrivateSkill(tenant: PrivateTenant, slug: string, 
   return verifyPrivateDownload(data, tenant.tenantId, skillId, version);
 }
 
-function verifySubmission(data: PrivateSubmission, tenantId: string): PrivateSubmission {
-  if (!data?.id?.startsWith("psub_") || data.privacy !== "PRIVATE" || data.tenantId !== tenantId || typeof data.state !== "string") {
+function verifySubmission(data: PrivateSubmission, tenantId: string, expectedId?: string): PrivateSubmission {
+  if (!/^psub_[A-Za-z0-9-]+$/.test(data?.id ?? "") || (expectedId && data.id !== expectedId) || data.privacy !== "PRIVATE" || data.tenantId !== tenantId || typeof data.state !== "string") {
     throw new Error("Submission response does not match the private account request.");
   }
   return data;
@@ -189,5 +189,5 @@ export async function createPrivateSubmission(tenant: PrivateTenant, repoUrl: st
 export async function getPrivateSubmission(tenant: PrivateTenant, id: string): Promise<PrivateSubmission> {
   if (!/^psub_[A-Za-z0-9-]+$/.test(id)) throw new Error("Invalid private submission identity.");
   const data = await privateRequest<PrivateSubmission>(`/api/v1/submissions/${encodeURIComponent(id)}`, tenant.slug);
-  return verifySubmission(data, tenant.tenantId);
+  return verifySubmission(data, tenant.tenantId, id);
 }

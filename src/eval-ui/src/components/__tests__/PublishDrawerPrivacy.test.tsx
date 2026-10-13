@@ -290,23 +290,16 @@ describe("PublishDrawer privacy chooser, launch gate closed (0874 AC-07)", () =>
     });
   }
 
-  it("submit sends privacy 'public' and no tenantId, even when the host asked for private", async () => {
+  it("blocks explicit private intent when closed and never downgrades it to public", async () => {
     gateMock.open = false;
     tierMock.isFree = false;
     tierMock.isPro = true;
-    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
-    mockSubmitToQueue.mockResolvedValueOnce(CREATED);
     await renderDrawer({ privacy: "private", tenantId: "t-1" });
-
-    expect(
-      container.querySelector('[data-testid="publish-privacy-public"]')?.getAttribute("aria-checked"),
-    ).toBe("true");
+    expect(container.textContent).toContain("Your private selection has not been submitted");
     await commit();
-
-    expect(mockSubmitToQueue).toHaveBeenCalledTimes(1);
-    const body = mockSubmitToQueue.mock.calls[0][0];
-    expect(body.privacy).toBe("public");
-    expect(body.tenantId).toBeUndefined();
+    expect(findButton("Commit & Push").disabled).toBe(true);
+    expect(mockGitPublish).not.toHaveBeenCalled();
+    expect(mockSubmitToQueue).not.toHaveBeenCalled();
   });
 
   it("a platform 503 private_publishing_unavailable reads as not submitted, not the sign-in fallback", async () => {
@@ -344,6 +337,30 @@ describe("0896 private publishing account safeguards", () => {
     expect(mockGitPublish).not.toHaveBeenCalled();
     expect(mockSubmitToQueue).not.toHaveBeenCalled();
     expect(container.textContent).not.toContain("Sign in to submit");
+  });
+
+  it("missing private skill identity disables submission instead of offering the public website", async () => {
+    await act(async () => {
+      root.render(<PublishDrawer remoteUrl="git@github.com:owner/private.git" fileCount={0} onClose={onClose} privacy="private" tenantId="real-tenant" />);
+      await flush();
+    });
+    expect(findButton("Push & Submit").disabled).toBe(true);
+    expect(container.textContent).toContain("Select a skill before publishing privately");
+    expect(mockGitPublish).not.toHaveBeenCalled();
+    expect(mockOpenExternal).not.toHaveBeenCalled();
+  });
+
+  it("an unsupported private remote stays inline without a public website fallback", async () => {
+    mockGitPublish.mockResolvedValueOnce({ ...PUBLISH_OK, remoteUrl: "git@gitlab.com:owner/private.git" });
+    await act(async () => {
+      root.render(<PublishDrawer remoteUrl="git@gitlab.com:owner/private.git" fileCount={0} onClose={onClose} skillName="secret" privacy="private" tenantId="real-tenant" />);
+      await flush();
+    });
+    await act(async () => { findButton("Push & Submit").click(); await flush(); });
+    expect(container.textContent).toContain("requires a GitHub repository");
+    expect(container.querySelector('[data-testid="publish-open-website"]')).toBeNull();
+    expect(mockSubmitToQueue).not.toHaveBeenCalled();
+    expect(mockOpenExternal).not.toHaveBeenCalled();
   });
 
   it("clean tree private publish preserves tenant and does not create an empty commit", async () => {

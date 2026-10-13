@@ -19,20 +19,21 @@ let artifact: PrivateDownload;
 let server: Server;
 let calls: Array<{ path: string; auth?: string; tenant?: string }>;
 let failure = 0;
+let account = tenant;
 function bundle(version = "1.0.0", files: Record<string, string> = { "SKILL.md": "---\nname: helpful\ndescription: A helpful private skill\n---\n# Helpful\nRead references/readme.md.\n", "references/readme.md": "Synthetic private reference.\n", "scripts/check.sh": "#!/bin/sh\nprintf 'checked\\n'\n" }): PrivateDownload {
   return { skill: { id: "skill1", name: "helpful", displayName: "helpful", privacy: "PRIVATE", tenantId: "tenant1", repoUrl: "https://github.com/acme/private", skillPath: "skills/helpful/SKILL.md" }, version, gitSha: "a".repeat(40), files, contentHash: hash(files["SKILL.md"]), treeHash: computePrivateTreeHash(files), manifest: Object.entries(files).map(([path, content]) => ({ path, sha256: hash(content), size: Buffer.byteLength(content), mode: path.endsWith(".sh") ? "100755" : "100644" })) };
 }
 beforeEach(async () => {
   state.root = mkdtempSync(join(tmpdir(), "vskill-private-proof-"));
-  state.token = "vsk_synthetic_loopback"; process.exitCode = 0; artifact = bundle(); calls = []; failure = 0;
+  state.token = "vsk_synthetic_loopback"; process.exitCode = 0; artifact = bundle(); calls = []; failure = 0; account = tenant;
   vi.spyOn(console, "log").mockImplementation(() => {}); vi.spyOn(console, "error").mockImplementation(() => {});
   server = createServer((req, res) => {
     calls.push({ path: req.url!, auth: req.headers.authorization, tenant: req.headers["x-vskill-tenant"] as string });
     res.setHeader("Content-Type", "application/json");
     if (req.headers.authorization !== "Bearer vsk_synthetic_loopback") { res.statusCode = 401; res.end(JSON.stringify({ error: "auth_required" })); return; }
-    if (req.url === "/api/v1/account/tenants") { res.end(JSON.stringify({ tenants: [tenant] })); return; }
-    if (req.url === "/api/v1/tenants/tenant1/skills?limit=100&offset=0") { res.end(JSON.stringify({ skills: [row], total: 1 })); return; }
-    if (req.url?.startsWith("/api/v1/tenants/tenant1/skills/private%3Ahelpful-123/download")) {
+    if (req.url === "/api/v1/account/tenants") { res.end(JSON.stringify({ tenants: [account] })); return; }
+    if (req.url === `/api/v1/tenants/${account.tenantId}/skills?limit=100&offset=0`) { res.end(JSON.stringify({ skills: [{ ...row, tenantId: account.tenantId }], total: 1 })); return; }
+    if (req.url?.startsWith(`/api/v1/tenants/${account.tenantId}/skills/private%3Ahelpful-123/download`)) {
       res.statusCode = failure || 200; res.end(JSON.stringify(failure ? { error: "not_found" } : artifact)); return;
     }
     res.statusCode = 500; res.end(JSON.stringify({ error: "UNEXPECTED_PUBLIC_EGRESS" }));
@@ -52,6 +53,7 @@ describe("hosted private install through real loopback HTTP", () => {
     const canonical = join(state.root, ".agents/skills", name);
     expect(readFileSync(join(canonical, "references/readme.md"), "utf8")).toBe(artifact.files["references/readme.md"]);
     expect(readFileSync(join(canonical, "SKILL.md"), "utf8")).toContain("# Helpful");
+    expect(readFileSync(join(canonical, "SKILL.md"), "utf8")).toContain(`name: ${name}\n`);
     expect(realpathSync(join(state.root, ".claude/skills", name))).toBe(realpathSync(canonical));
     expect(statSync(join(canonical, "scripts/check.sh")).mode & 0o111).toBe(0o111);
     const entry = readLockfile(state.root)!.skills[name];
@@ -96,6 +98,46 @@ describe("hosted private install through real loopback HTTP", () => {
     expect(existsSync(join(canonical, "scripts/check.sh"))).toBe(false);
     expect(calls).toHaveLength(5);
   });
+  it("repairs an agent copy even when a previous filtered update already advanced the shared lock version", async () => {
+    await installPrivateCommand("helpful", { tenant: "team", agent: ["codex", "claude-code"], copy: true });
+    const name = privateInstallName(tenant, artifact);
+    const old = readLockfile(state.root)!.skills[name];
+    const claudeFile = join(state.root, ".claude/skills", name, "SKILL.md");
+    const oldClaude = readFileSync(claudeFile, "utf8");
+    artifact = bundle("1.1.0", { ...artifact.files, "SKILL.md": artifact.files["SKILL.md"] + "\nUpdated copy.\n" });
+    const agents = getInstallableAgents();
+    const advanced = await updateHostedPrivateSkill(name, old, agents.filter((agent) => agent.id === "codex"), state.root);
+    expect(advanced.version).toBe("1.1.0");
+    expect(readFileSync(claudeFile, "utf8")).toBe(oldClaude);
+    await updateHostedPrivateSkill(name, advanced, agents.filter((agent) => agent.id === "claude-code"), state.root);
+    expect(readFileSync(claudeFile, "utf8")).toContain("Updated copy.");
+  });
+
+  it("isolates two tenant bundles with identical source frontmatter for native readers", async () => {
+    await installPrivateCommand("helpful", { tenant: "team", agent: ["codex", "claude-code"] });
+    const firstName = privateInstallName(account, artifact);
+    const firstFile = join(state.root, ".agents/skills", firstName, "SKILL.md");
+    const firstBytes = readFileSync(firstFile, "utf8");
+    account = { ...tenant, tenantId: "tenant2", slug: "other" };
+    artifact = bundle("1.0.0", { ...artifact.files, "SKILL.md": artifact.files["SKILL.md"] + "\nOther account.\n" });
+    artifact.skill.tenantId = "tenant2";
+    await installPrivateCommand("helpful", { tenant: "other", agent: ["codex", "claude-code"] });
+    expect(process.exitCode).toBe(0);
+    const secondName = privateInstallName(account, artifact);
+    expect(firstName).not.toBe(secondName);
+    expect(readFileSync(firstFile, "utf8")).toBe(firstBytes);
+    expect(readFileSync(join(state.root, ".agents/skills", secondName, "SKILL.md"), "utf8")).toContain(`name: ${secondName}\n`);
+    expect(Object.keys(readLockfile(state.root)!.skills)).toHaveLength(2);
+  });
+
+  it("rejects a transformer-only agent before writing or recording a partial private bundle", async () => {
+    await installPrivateCommand("helpful", { tenant: "team", agent: ["codex", "windsurf"] });
+    expect(process.exitCode).toBe(1);
+    expect(existsSync(join(state.root, ".agents"))).toBe(false);
+    expect(existsSync(join(state.root, ".windsurf"))).toBe(false);
+    expect(readLockfile(state.root)).toBeNull();
+  });
+
   it("dry run verifies without writing", async () => {
     await installPrivateCommand("helpful", { tenant: "team", agent: ["codex"], dryRun: true });
     expect(process.exitCode).toBe(0); expect(readLockfile(state.root)).toBeNull(); expect(existsSync(join(state.root, ".agents"))).toBe(false);

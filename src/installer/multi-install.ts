@@ -246,6 +246,7 @@ export interface InstallToAgentsOptions {
   bundleExecutables?: string[];
   /** 0894: lockfile `files` of the previous install; ones now gone are removed. */
   previousFiles?: string[];
+  previousFilesByAgent?: Record<string, string[]>;
 }
 
 /**
@@ -273,6 +274,7 @@ export function installSkillToAgents(opts: InstallToAgentsOptions): string[] {
   const bundleOpts = {
     executables: opts.bundleExecutables ? new Set(opts.bundleExecutables) : undefined,
     previousFiles: opts.previousFiles,
+    previousFilesByAgent: opts.previousFilesByAgent,
     anyPath: true,
   };
 

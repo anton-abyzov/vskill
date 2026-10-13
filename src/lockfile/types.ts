@@ -45,6 +45,8 @@ export interface SkillLockEntry {
     skillSlug: string;
     treeHash: string;
     agents: string[];
+    /** Complete managed inventory per installed agent, including delayed copies. */
+    agentFiles?: Record<string, string[]>;
     copy: boolean;
   };
 }

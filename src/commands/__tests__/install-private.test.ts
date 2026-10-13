@@ -104,13 +104,24 @@ describe("hosted private install through real loopback HTTP", () => {
     const old = readLockfile(state.root)!.skills[name];
     const claudeFile = join(state.root, ".claude/skills", name, "SKILL.md");
     const oldClaude = readFileSync(claudeFile, "utf8");
-    artifact = bundle("1.1.0", { ...artifact.files, "SKILL.md": artifact.files["SKILL.md"] + "\nUpdated copy.\n" });
+    artifact = bundle("1.1.0", { "SKILL.md": artifact.files["SKILL.md"] + "\nUpdated copy.\n" });
     const agents = getInstallableAgents();
     const advanced = await updateHostedPrivateSkill(name, old, agents.filter((agent) => agent.id === "codex"), state.root);
     expect(advanced.version).toBe("1.1.0");
     expect(readFileSync(claudeFile, "utf8")).toBe(oldClaude);
-    await updateHostedPrivateSkill(name, advanced, agents.filter((agent) => agent.id === "claude-code"), state.root);
+    const staleScript = join(state.root, ".claude/skills", name, "scripts/check.sh");
+    expect(existsSync(staleScript)).toBe(true);
+    const userNote = join(state.root, ".claude/skills", name, "user-notes.txt");
+    writeFileSync(userNote, "Keep my untracked notes.");
+    artifact = bundle("1.2.0", { ...artifact.files, "references/new.md": "Third version reference." });
+    const advancedAgain = await updateHostedPrivateSkill(name, advanced, agents.filter((agent) => agent.id === "codex"), state.root);
+    const caughtUp = await updateHostedPrivateSkill(name, advancedAgain, agents.filter((agent) => agent.id === "claude-code"), state.root);
     expect(readFileSync(claudeFile, "utf8")).toContain("Updated copy.");
+    expect(existsSync(staleScript)).toBe(false);
+    expect(existsSync(join(state.root, ".claude/skills", name, "references/readme.md"))).toBe(false);
+    expect(readFileSync(userNote, "utf8")).toBe("Keep my untracked notes.");
+    expect(caughtUp.hostedPrivate?.agentFiles?.["claude-code"]).toEqual(["SKILL.md", "references/new.md"]);
+    expect(advanced.hostedPrivate?.agentFiles?.["claude-code"]).toContain("scripts/check.sh");
   });
 
   it("isolates two tenant bundles with identical source frontmatter for native readers", async () => {

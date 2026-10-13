@@ -35,7 +35,7 @@ function supportsPrivateBundle(agent: AgentDefinition, scope: "user" | "project"
   const sharedReader = agent.readsSharedSkills?.[scope === "user" ? "global" : "project"] === true;
   return !agent.isRemoteOnly && agent.installMode !== "clipboard" && (!agent.formatTransformer || sharedReader);
 }
-function installBundle(name: string, download: PrivateDownload, agents: AgentDefinition[], scope: "user" | "project", projectRoot: string, copy = false, previousFiles?: string[]): void {
+function installBundle(name: string, download: PrivateDownload, agents: AgentDefinition[], scope: "user" | "project", projectRoot: string, copy = false, previousFiles?: string[], previousFilesByAgent?: Record<string, string[]>): void {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) throw new Error("Invalid private install directory identity.");
   const unsupported = agents.filter((agent) => !supportsPrivateBundle(agent, scope));
   if (unsupported.length) throw new Error(`Hosted private bundles require native skill-folder support. Unsupported agents: ${unsupported.map((agent) => agent.id).join(", ")}. Use --agent codex or --agent claude-code.`);
@@ -43,7 +43,7 @@ function installBundle(name: string, download: PrivateDownload, agents: AgentDef
   const files = Object.fromEntries(Object.entries(download.files).filter(([path]) => path !== "SKILL.md"));
   const written = installSkillToAgents({
     skillName: name, rawContent: ensureFrontmatter(download.files["SKILL.md"], name, true), agents, scope, projectRoot, copy,
-    bundleFiles: files, bundleExecutables: download.manifest.filter((file) => file.mode === "100755").map((file) => file.path), previousFiles,
+    bundleFiles: files, bundleExecutables: download.manifest.filter((file) => file.mode === "100755").map((file) => file.path), previousFiles, previousFilesByAgent,
   });
   if (!written.length) throw new Error("No agent files were installed.");
 }
@@ -53,7 +53,7 @@ function lockEntry(tenant: PrivateTenant, slug: string, download: PrivateDownloa
     source: `hosted-private:${tenant.tenantId}/${slug}`, sourceType: "hosted-private", sourcePrivate: true,
     sourceRepoUrl: download.skill.repoUrl, sourceSkillPath: download.skill.skillPath, sourceCommitSha: download.gitSha,
     scope, files: Object.keys(download.files).sort(),
-    hostedPrivate: { tenantId: tenant.tenantId, tenantSlug: tenant.slug, skillId: download.skill.id, skillSlug: slug, treeHash: download.treeHash, agents: agents.map((agent) => agent.id), copy },
+    hostedPrivate: { tenantId: tenant.tenantId, tenantSlug: tenant.slug, skillId: download.skill.id, skillSlug: slug, treeHash: download.treeHash, agents: agents.map((agent) => agent.id), agentFiles: Object.fromEntries(agents.map((agent) => [agent.id, Object.keys(download.files).sort()])), copy },
   };
 }
 export async function installPrivateCommand(source: string | undefined, opts: PrivateInstallOptions): Promise<void> {
@@ -87,10 +87,15 @@ export async function installPrivateCommand(source: string | undefined, opts: Pr
       console.log(`Would install private ${name}@${download.version} for ${agents.map((a) => a.id).join(", ")} (${scope}).`);
       return;
     }
-    installBundle(name, download, agents, scope, projectRoot, opts.copy, old?.files);
+    const previousInventories = privateAgentFiles(old);
+    const copy = opts.copy ?? old?.hostedPrivate?.copy ?? false;
+    installBundle(name, download, agents, scope, projectRoot, copy, old?.files, previousInventories);
     const now = new Date().toISOString();
     const lock = existing ?? { version: 1 as const, agents: [], skills: {}, createdAt: now, updatedAt: now };
-    lock.skills[name] = { ...lockEntry(tenant, slug, download, scope, agents, !!opts.copy), ...(opts.version ? { pinnedVersion: opts.version } : {}) };
+    const next = lockEntry(tenant, slug, download, scope, agents, copy);
+    next.hostedPrivate!.agents = [...new Set([...(old?.hostedPrivate?.agents ?? []), ...next.hostedPrivate!.agents])];
+    next.hostedPrivate!.agentFiles = { ...previousInventories, ...next.hostedPrivate!.agentFiles };
+    lock.skills[name] = { ...next, ...(opts.version ? { pinnedVersion: opts.version } : {}) };
     lock.agents = [...new Set([...lock.agents, ...agents.map((a) => a.id)])];
     writeLockfile(lock, lockDir);
     console.log(`Installed private ${name}@${download.version} (${scope}).${opts.version ? " Version pinned." : ""}`);
@@ -98,6 +103,11 @@ export async function installPrivateCommand(source: string | undefined, opts: Pr
     console.error((error as Error).message);
     process.exitCode = 1;
   }
+}
+
+function privateAgentFiles(entry?: SkillLockEntry): Record<string, string[]> {
+  if (!entry?.hostedPrivate) return {};
+  return Object.fromEntries(entry.hostedPrivate.agents.map((id) => [id, entry.hostedPrivate!.agentFiles?.[id] ?? entry.files ?? []]));
 }
 
 /** updateCommand branches here before source parsing or any public lookup. */
@@ -110,10 +120,14 @@ export async function updateHostedPrivateSkill(name: string, entry: SkillLockEnt
   const unchanged = entry.version === download.version && provenance.treeHash === download.treeHash;
   const selected = agents.filter((agent) => provenance.agents.includes(agent.id));
   if (!selected.length) throw new Error("None of this private skill's installed agents are selected.");
-  installBundle(name, download, selected, entry.scope ?? "project", projectRoot, provenance.copy, entry.files);
+  const inventories = privateAgentFiles(entry);
+  installBundle(name, download, selected, entry.scope ?? "project", projectRoot, provenance.copy, entry.files, inventories);
+  const nextFiles = Object.keys(download.files).sort();
+  const inventoryChanged = selected.some((agent) => JSON.stringify(inventories[agent.id]) !== JSON.stringify(nextFiles));
+  const nextInventories = { ...inventories, ...Object.fromEntries(selected.map((agent) => [agent.id, nextFiles])) };
   // A shared lock version cannot prove every agent copy is current: an earlier
   // --agent update or a partial install may have left another copy behind.
-  if (unchanged) return entry;
+  if (unchanged && !inventoryChanged && provenance.agentFiles) return entry;
   return { ...entry, ...lockEntry(tenant, provenance.skillSlug, download, entry.scope ?? "project", selected, provenance.copy),
-    hostedPrivate: { ...provenance, treeHash: download.treeHash } };
+    hostedPrivate: { ...provenance, treeHash: download.treeHash, agentFiles: nextInventories } };
 }

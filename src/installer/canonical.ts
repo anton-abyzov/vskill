@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync, existsSync, unlinkSync, chmodSync, readdirSync, rmdirSync } from "node:fs";
 // 0706 T-004: `relative` + `sep` (as pathSep) power the cross-platform
 // path-traversal guard. `path.relative` handles Windows backslash correctly.
-import { join, relative, dirname, sep as pathSep } from "node:path";
+import { join, relative, dirname, resolve, sep as pathSep } from "node:path";
 import os from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { resolveTilde } from "../utils/paths.js";
@@ -95,6 +95,7 @@ export function resolveEffectiveSkillsDir(agent: AgentDefinition, opts: InstallO
 export function ensureCanonicalDir(base: string, global: boolean): string {
   if (global) {
     const dir = join(os.homedir(), ".agents", "skills");
+    assertSafeInstallParent(dir, { global, projectRoot: base });
     mkdirSync(dir, { recursive: true });
     return dir;
   }
@@ -104,6 +105,7 @@ export function ensureCanonicalDir(base: string, global: boolean): string {
     );
   }
   const dir = join(base, ".agents", "skills");
+  assertSafeInstallParent(dir, { global, projectRoot: base });
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -165,20 +167,6 @@ export function createRelativeSymlink(target: string, linkPath: string): boolean
  */
 const COPY_FALLBACK_AGENTS = new Set(["claude-code"]);
 
-/**
- * 0894: drop a symlink at `p` (only the link, never its target) so the next
- * mkdir + write creates a real folder there. Without this, a copy written to
- * an agent dir that an earlier install linked to the canonical folder goes
- * through the link and overwrites the shared copy every other agent reads.
- */
-function unlinkIfSymlink(p: string): void {
-  try {
-    if (lstatSync(p).isSymbolicLink()) unlinkSync(p);
-  } catch {
-    // nothing there
-  }
-}
-
 /** 0894: how a skill bundle is written over a previous install. */
 export interface BundleWriteOptions {
   /**
@@ -200,14 +188,53 @@ export interface BundleWriteOptions {
    * notes) are never touched.
    */
   previousFiles?: readonly string[];
+  /** Each independent agent copy can still contain an older version's files. */
+  previousFilesByAgent?: Readonly<Record<string, readonly string[]>>;
 }
 
 function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
   try {
     return lstatSync(p);
-  } catch {
-    return null;
+  } catch (error) {
+    if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return null;
+    throw error;
   }
+}
+
+/** Parent configuration folders are shared with other skills: reject links
+ * rather than replacing them. The selected project/home is the trust root. */
+function assertSafeInstallParent(dir: string, opts: InstallOptions): void {
+  const trustedRoot = resolve(opts.global ? os.homedir() : opts.projectRoot);
+  const target = resolve(dir);
+  const rel = relative(trustedRoot, target);
+  // A global directory explicitly configured outside HOME is itself a trusted
+  // install location; still reject a symlink at that selected directory.
+  const outside = rel === ".." || rel.startsWith(".." + pathSep);
+  let cur = outside ? dirname(target) : trustedRoot;
+  const parts = outside ? [relative(dirname(target), target)] : rel.split(pathSep).filter(Boolean);
+  for (const part of parts) {
+    cur = join(cur, part);
+    const st = lstatOrNull(cur);
+    if (!st) break;
+    if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(`Refusing to install through an unsafe parent directory: ${cur}`);
+  }
+}
+
+function prepareSkillDirectory(dir: string): void {
+  const st = lstatOrNull(dir);
+  if (st && !st.isDirectory()) unlinkSync(dir);
+  mkdirSync(dir, { recursive: true });
+}
+
+function writeSkillMd(dir: string, content: string): void {
+  const file = join(dir, "SKILL.md");
+  clearPathForFile(dir, file);
+  writeFileSync(file, content);
+}
+
+function bundleOptionsForAgents(opts: BundleWriteOptions | undefined, agentIds: string[]): BundleWriteOptions | undefined {
+  if (!opts?.previousFilesByAgent) return opts;
+  return { ...opts, previousFiles: [...new Set(agentIds.flatMap((id) => opts.previousFilesByAgent?.[id] ?? opts.previousFiles ?? []))] };
 }
 
 /** Remove now-empty folders from `dir` up to (not including) `root`. */
@@ -215,7 +242,8 @@ function pruneEmptyDirs(dir: string, root: string): void {
   let cur = dir;
   while (cur !== root && relative(root, cur) && !relative(root, cur).startsWith("..")) {
     try {
-      if (readdirSync(cur).length > 0) return;
+      const st = lstatOrNull(cur);
+      if (!st?.isDirectory() || st.isSymbolicLink() || readdirSync(cur).length > 0) return;
       rmdirSync(cur);
     } catch {
       return;
@@ -241,7 +269,7 @@ function clearPathForFile(root: string, fullPath: string): void {
   }
   const st = lstatOrNull(fullPath);
   if (st?.isDirectory()) rmSync(fullPath, { recursive: true, force: true });
-  else if (st?.isSymbolicLink()) unlinkSync(fullPath);
+  else if (st?.isSymbolicLink() || (st?.isFile() && st.nlink > 1)) unlinkSync(fullPath);
 }
 
 /**
@@ -255,6 +283,7 @@ function writeAgentFiles(
   agentFiles: Record<string, BundleContent> | undefined,
   bundleOpts?: BundleWriteOptions,
 ): void {
+  if (!lstatOrNull(targetDir)?.isDirectory()) throw new Error("Skill directory must be a real directory before writing files");
   const files = agentFiles ?? {};
   if (bundleOpts?.previousFiles) {
     const keep = new Set(Object.keys(files));
@@ -266,6 +295,17 @@ function writeAgentFiles(
       } catch {
         continue; // never act on an unsafe recorded path
       }
+      // Never lstat/unlink a stale leaf through a symlinked ancestor. Drop
+      // only the in-skill link; its destination belongs to someone else.
+      let parent = targetDir;
+      let safe = true;
+      for (const part of relative(targetDir, dirname(target)).split(pathSep).filter(Boolean)) {
+        parent = join(parent, part);
+        const parentStat = lstatOrNull(parent);
+        if (parentStat?.isSymbolicLink()) { unlinkSync(parent); safe = false; break; }
+        if (!parentStat?.isDirectory()) { safe = false; break; }
+      }
+      if (!safe) continue;
       const st = lstatOrNull(target);
       if (st && !st.isDirectory()) {
         unlinkSync(target);
@@ -314,9 +354,9 @@ export function installSymlink(
   let canonicalSkillDir: string | undefined;
   if (needsCanonical) {
     canonicalSkillDir = join(ensureCanonicalDir(opts.projectRoot, opts.global), skillName);
-    mkdirSync(canonicalSkillDir, { recursive: true });
-    writeFileSync(join(canonicalSkillDir, "SKILL.md"), strippedContent);
-    writeAgentFiles(canonicalSkillDir, agentFiles, bundleOpts);
+    prepareSkillDirectory(canonicalSkillDir);
+    writeSkillMd(canonicalSkillDir, strippedContent);
+    writeAgentFiles(canonicalSkillDir, agentFiles, bundleOptionsForAgents(bundleOpts, agents.filter((agent) => !COPY_FALLBACK_AGENTS.has(agent.id)).map((agent) => agent.id)));
   }
 
   const installed: string[] = [];
@@ -338,6 +378,7 @@ export function installSymlink(
       continue;
     }
 
+    assertSafeInstallParent(agentSkillsDir, opts);
     mkdirSync(agentSkillsDir, { recursive: true });
 
     // Claude Code links to the canonical copy when that copy is exactly what
@@ -354,10 +395,9 @@ export function installSymlink(
     if (COPY_FALLBACK_AGENTS.has(agent.id)) {
       // Claude Code gets full content with all fields
       const agentContent = agent.id === "claude-code" ? content : strippedContent;
-      unlinkIfSymlink(linkPath);
-      mkdirSync(linkPath, { recursive: true });
-      writeFileSync(join(linkPath, "SKILL.md"), agentContent);
-      writeAgentFiles(linkPath, agentFiles, bundleOpts);
+      prepareSkillDirectory(linkPath);
+      writeSkillMd(linkPath, agentContent);
+      writeAgentFiles(linkPath, agentFiles, bundleOptionsForAgents(bundleOpts, [agent.id]));
       installed.push(linkPath);
       continue;
     }
@@ -368,10 +408,9 @@ export function installSymlink(
       installed.push(linkPath);
     } else {
       // Fallback to copy on symlink failure — use stripped content for non-Claude
-      unlinkIfSymlink(linkPath);
-      mkdirSync(linkPath, { recursive: true });
-      writeFileSync(join(linkPath, "SKILL.md"), strippedContent);
-      writeAgentFiles(linkPath, agentFiles, bundleOpts);
+      prepareSkillDirectory(linkPath);
+      writeSkillMd(linkPath, strippedContent);
+      writeAgentFiles(linkPath, agentFiles, bundleOptionsForAgents(bundleOpts, [agent.id]));
       installed.push(linkPath);
     }
   }
@@ -406,12 +445,13 @@ export function installCopy(
       : resolveAgentSkillsDir(agent, opts);
     const skillDir = join(agentSkillsDir, skillName);
     if (installed.includes(skillDir)) continue;
-    // A copy for one agent must not land in another's folder through an
-    // old link (the shared canonical folder itself is left as it is).
-    if (!isSatisfiedByCanonical(agent, opts)) unlinkIfSymlink(skillDir);
-    mkdirSync(skillDir, { recursive: true });
-    writeFileSync(join(skillDir, "SKILL.md"), agentContent);
-    writeAgentFiles(skillDir, agentFiles, bundleOpts);
+    // No skill-level link may redirect a copy, including a shared reader's
+    // canonical skill folder. Shared parent directories are checked first.
+    assertSafeInstallParent(agentSkillsDir, opts);
+    prepareSkillDirectory(skillDir);
+    writeSkillMd(skillDir, agentContent);
+    const sharing = agents.filter((other) => resolveEffectiveSkillsDir(other, opts) === agentSkillsDir).map((other) => other.id);
+    writeAgentFiles(skillDir, agentFiles, bundleOptionsForAgents(bundleOpts, sharing));
     installed.push(skillDir);
   }
 

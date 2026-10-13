@@ -5,7 +5,8 @@
 import { unlinkSync, rmdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 // 0706 T-005: `relative` + `sep` for cross-platform ghost-file cleanup guard.
 import { join, resolve, relative, sep as pathSep } from "node:path";
-import { readLockfile, writeLockfile } from "../lockfile/index.js";
+import { homedir } from "node:os";
+import { readLockfile, writeLockfile, getProjectRoot } from "../lockfile/index.js";
 import { ensureSkillMdNaming } from "../installer/migrate.js";
 import { installSymlink } from "../installer/canonical.js";
 import { getSkill } from "../api/client.js";
@@ -171,6 +172,7 @@ function cleanupGhostFiles(
 
 interface UpdateOptions {
   all?: boolean;
+  global?: boolean;
   force?: boolean;
   agent?: string | string[];
 }
@@ -179,7 +181,8 @@ export async function updateCommand(
   skill: string | undefined,
   opts: UpdateOptions
 ): Promise<void> {
-  const lock = readLockfile();
+  const lockDir = opts.global ? join(homedir(), ".agents") : undefined;
+  const lock = readLockfile(lockDir);
   if (!lock) {
     console.error(
       yellow("No vskill.lock found. Run ") +
@@ -236,6 +239,26 @@ export async function updateCommand(
       continue;
     }
 
+    if (entry.sourceType === "hosted-private" || entry.source?.startsWith("hosted-private:") || entry.hostedPrivate) {
+      try {
+        const { updateHostedPrivateSkill } = await import("./install-private.js");
+        const next = await updateHostedPrivateSkill(name, entry, agents, getProjectRoot());
+        lock.skills[name] = next;
+        if (next !== entry) {
+          updated++;
+          console.log(`${name}: ${entry.version} -> ${next.version} (private)`);
+        } else console.log(dim(`${name}: already up to date (private)`));
+      } catch (error) {
+        console.error(`Private update failed for ${name}: ${(error as Error).message}`);
+        process.exitCode = 1;
+      }
+      continue;
+    }
+
+    if (opts.global) {
+      console.log(dim(`${name}: global update currently supports hosted private skills; skipping this source`));
+      continue;
+    }
     const parsed = parseSource(entry.source ?? "");
     const spin = spinner(`Checking ${name}`);
 
@@ -450,7 +473,7 @@ export async function updateCommand(
     }
   }
 
-  writeLockfile(lock);
+  writeLockfile(lock, lockDir);
 
   console.log(
     `\n${updated > 0 ? green(`${updated} skill${updated === 1 ? "" : "s"} updated`) : dim("No updates available")}`

@@ -44,7 +44,14 @@ program
   // 0839 T-010 / ADR-002: per-call tenant override for private-skill resolution.
   // Highest priority — beats VSKILL_TENANT env and config.json `currentTenant`.
   .option("--tenant <slug>", "Tenant slug for private-skill resolution (overrides config + env)")
+  .option("--version <version>", "Install and pin an exact hosted private version")
   .action(async (source: string | undefined, opts) => {
+    if (opts.tenant && (!source || !source.includes("/"))) {
+      const { installPrivateCommand } = await import("./commands/install-private.js");
+      await installPrivateCommand(source, opts);
+      return;
+    }
+    if (opts.version) throw new Error("--version requires a hosted private skill and --tenant.");
     const { addCommand } = await import("./commands/add.js");
     await addCommand(source, opts);
   });
@@ -174,7 +181,8 @@ program
 
 program
   .command("update [skill]")
-  .description("Update installed skills from the registry")
+  .description("Update installed skills from their source")
+  .option("--global", "Update hosted private skills from the global lockfile")
   .option("--all", "Update all installed skills")
   .option("--force", "Override version pin for this update")
   .option("--agent <id>", "Update only for specific agent (repeatable)", collect, [])
@@ -223,7 +231,17 @@ program
   .option("--skill <name>", "Skill name within a multi-skill repo")
   .option("--path <path>", "Path to SKILL.md within the repo")
   .option("--browser", "Use browser-based GitHub OAuth instead of API")
+  .option("--private", "Publish only to an authenticated private account")
+  .option("--tenant <slug>", "Account that owns the private skill")
+  .option("--no-wait", "Return after creating a private submission")
+  .option("--submission <id>", "Read or wait for an existing private submission")
   .action(async (source: string | undefined, opts) => {
+    if (opts.private) {
+      const { submitPrivateCommand } = await import("./commands/submit-private.js");
+      await submitPrivateCommand(source, opts);
+      return;
+    }
+    if (opts.tenant || opts.submission) throw new Error("--tenant and --submission require --private for publishing.");
     const { submitCommand } = await import("./commands/submit.js");
     await submitCommand(source, opts);
   });

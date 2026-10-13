@@ -9,8 +9,8 @@
 //   - PRO:  PRIVATE is selectable; submitToQueue receives privacy:'private'.
 //
 // 0874 AC-07: that behaviour applies only while hosted private publishing is
-// open. The three original tests run with the launch gate mocked open; the
-// closed-gate block below covers what ships today.
+// open. The paid private submission test uses the actual release default;
+// the closed-gate block below covers rollback behavior.
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -185,7 +185,10 @@ describe("PublishDrawer privacy chooser (0874)", () => {
     expect(mockSubmitToQueue.mock.calls[0][0]).toMatchObject({ privacy: "public" });
   });
 
-  it("PRO: PRIVATE is selectable → submitToQueue receives privacy:'private'", async () => {
+  it("PRO: release default makes PRIVATE selectable → submitToQueue receives privacy:'private'", async () => {
+    const actualGate = await vi.importActual<typeof import("../../hosted-publishing")>("../../hosted-publishing");
+    expect(actualGate.HOSTED_PRIVATE_PUBLISHING_AVAILABLE).toBe(true);
+    gateMock.open = actualGate.HOSTED_PRIVATE_PUBLISHING_AVAILABLE;
     tierMock.isFree = false;
     tierMock.isPro = true;
     mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);

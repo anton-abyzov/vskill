@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
-// 0874 AC-06 — Studio publish never sends a private repository, or one whose
-// visibility GitHub cannot confirm, to verified-skill.com.
+// 0874 AC-06 / 0896 — Studio publish never sends a private repository, or one
+// whose visibility GitHub cannot confirm, to public intake.
 //
 // The eval-server proxy screens `POST /api/v1/submissions` before anything
 // leaves the machine. A fake platform server counts every upstream request;
@@ -269,8 +269,10 @@ describe("other submission routes are untouched", () => {
 
 
 describe("0896 hosted private publishing guard", () => {
-  it("forwards explicit private intent with a tenant while open, with only platform auth", async () => {
-    hostedGate.open = true;
+  it("the release default forwards explicit private intent with a tenant, with only platform auth", async () => {
+    const actualGate = await vi.importActual<typeof import("../../lib/hosted-publishing.js")>("../../lib/hosted-publishing.js");
+    expect(actualGate.HOSTED_PRIVATE_PUBLISHING_AVAILABLE).toBe(true);
+    hostedGate.open = actualGate.HOSTED_PRIVATE_PUBLISHING_AVAILABLE;
     isPrivateOrUnknownRepoMock.mockResolvedValue(true);
     const body = { repoUrl: "https://github.com/acme/private", skillName: "secret", privacy: "private", tenantId: "tenant-1" };
     const res = await submit(body);

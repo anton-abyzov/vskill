@@ -24,6 +24,10 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+vi.mock("../../../hooks/usePublishTenant", () => ({
+  usePublishTenant: () => ({ tenantId: "live-editor-tenant", tenants: [], loading: false, error: null }),
+}));
+
 // --- Active workspace skill + the Studio SkillInfo list it resolves against ---
 const ACTIVE_PLUGIN = "vskill";
 const ACTIVE_SKILL = "greet-anton";
@@ -165,6 +169,7 @@ describe("EditorPanel — forwards active skill's skillPath to PublishButton", (
     const props = findPublishButtonProps();
     // CORE regression assertion — fails on the OLD behaviour (no skillPath prop).
     expect(props.skillPath).toBe(ACTIVE_SKILL_PATH);
+    expect(props.tenantId).toBe("live-editor-tenant");
     // skillName must also be the active skill so the in-app submit path runs.
     expect(props.skillName).toBe(ACTIVE_SKILL);
   });
@@ -195,5 +200,6 @@ describe("EditorPanel — forwards active skill's skillPath to PublishButton", (
     ];
     const props = findPublishButtonProps();
     expect(props.skillPath).toBe(ACTIVE_SKILL_PATH);
+    expect(props.tenantId).toBe("live-editor-tenant");
   });
 });

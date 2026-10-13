@@ -2,22 +2,22 @@
 // submission-guard.ts — screens Studio's `POST /api/v1/submissions` before the
 // platform proxy forwards it to verified-skill.com (0874 AC-06).
 //
-// Rule (same as `vskill submit` and the 1.2.1 egress work): nothing about a
-// private repo reaches the platform, not even its URL. A repo counts as
-// private unless GitHub confirms it is public (isPrivateOrUnknownRepo, fail
-// closed). A submission whose repo is private, unconfirmed, missing, not
-// parsable or not on GitHub is answered locally and never sent upstream.
+// Public submissions require confirmed public GitHub visibility. Private
+// submissions additionally require the hosted release gate, explicit private
+// intent and a selected tenant; the platform rechecks all authorization and
+// reads source only with that tenant's GitHub installation credential.
 // Only the create call is screened; the stream and positions sub-resources
 // carry no repo and pass through unchanged.
 // ---------------------------------------------------------------------------
 
 import type * as http from "node:http";
 import { isPrivateOrUnknownRepo, parseGitHubRepoRef } from "../lib/private-source.js";
+import { HOSTED_PRIVATE_PUBLISHING_AVAILABLE } from "../lib/hosted-publishing.js";
 
 /** Largest submission body the proxy buffers. Real bodies are a few hundred bytes. */
 export const SUBMISSION_BODY_LIMIT = 64 * 1024;
 
-export type SubmissionRefusalCode = "private_repository" | "unsupported_repository" | "request_too_large";
+export type SubmissionRefusalCode = "private_repository" | "unsupported_repository" | "request_too_large" | "missing_tenant" | "private_publishing_unavailable";
 
 export interface SubmissionRefusal {
   status: number;
@@ -45,17 +45,40 @@ function unsupported(reason: string): SubmissionRefusal {
 }
 
 /** Decide whether a submission for `repoUrl` may be sent. Null means it may. */
-export async function checkSubmissionRepo(repoUrl: unknown): Promise<SubmissionRefusal | null> {
+export async function checkSubmissionRepo(
+  repoUrl: unknown,
+  intent: { privacy?: unknown; tenantId?: unknown } = {},
+): Promise<SubmissionRefusal | null> {
   if (typeof repoUrl !== "string" || repoUrl.trim() === "") {
     return unsupported("The submission did not name a GitHub repository.");
   }
   const gh = parseGitHubRepoRef(repoUrl);
   if (!gh) return unsupported("The repository is not on GitHub.");
+  // A private request is sent only with explicit intent and a selected tenant.
+  // The platform authorizes membership, entitlement and installation access;
+  // no locally held GitHub credential is attached to this request.
+  if (HOSTED_PRIVATE_PUBLISHING_AVAILABLE && intent.privacy === "private") {
+    if (typeof intent.tenantId !== "string" || !intent.tenantId.trim()) {
+      return {
+        status: 400,
+        error: "missing_tenant",
+        message: "Select a publishing account. If none is available, connect the GitHub App to your account or organization first. Nothing was submitted.",
+      };
+    }
+    return null;
+  }
   if (await isPrivateOrUnknownRepo(gh.owner, gh.repo)) {
     return {
       status: 422,
       error: "private_repository",
       message: `${gh.owner}/${gh.repo} is private, or GitHub could not confirm it is public. ${PUBLIC_ONLY}`,
+    };
+  }
+  if (intent.privacy === "private") {
+    return {
+      status: 503,
+      error: "private_publishing_unavailable",
+      message: "Hosted private publishing is not available yet. Nothing was submitted.",
     };
   }
   return null;
@@ -98,13 +121,15 @@ export async function screenSubmission(req: http.IncomingMessage): Promise<Submi
     };
   }
   let repoUrl: unknown;
+  let intent: { privacy?: unknown; tenantId?: unknown } = {};
   try {
     const parsed = JSON.parse(body.toString("utf8")) as unknown;
     repoUrl = parsed && typeof parsed === "object" ? (parsed as { repoUrl?: unknown }).repoUrl : undefined;
+    if (parsed && typeof parsed === "object") intent = parsed;
   } catch {
     repoUrl = undefined;
   }
-  const refusal = await checkSubmissionRepo(repoUrl);
+  const refusal = await checkSubmissionRepo(repoUrl, intent);
   return refusal ? { refusal } : { body };
 }
 

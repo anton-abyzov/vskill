@@ -2,17 +2,10 @@
 //
 // Owner: desktop-quota-agent.
 //
-// Hydration:
-//   1. On mount, call `quotaGet([])` to read whatever's already on disk
-//      (cheap — no network). This is what populates the UI on cold start.
-//   2. Listen for the Tauri event `quota://updated` emitted by the 1h
-//      background sync task. Each event triggers a re-fetch of the IPC.
-//   3. Expose a `forceSync(fresh)` method the paywall race-resolution path
-//      and the QuotaGraceBanner's "Sync now" button can call.
-//
-// Browser-mode behavior: returns a synthetic "free, unsynced" snapshot so
-// the hosted studio renders without enforcement-aware features. The hosted
-// studio relies on server-side gates anyway.
+// Browser and desktop read current entitlement through the same-origin
+// platform proxy. Native on-disk quota is an offline fallback; a platform 401
+// clears the old identity. Refresh and explicit forceSync use the platform's
+// vsk_* credential, never the broader GitHub token or a stale native login.
 //
 // Why a Context instead of a hook on each consumer? The status bar, the
 // paywall, the grace banner, and ConnectedRepoWidget all need the same
@@ -28,6 +21,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type ReactElement,
 } from "react";
 
 import {
@@ -35,6 +29,7 @@ import {
   type DesktopBridge,
   type QuotaSnapshot,
 } from "../preferences/lib/useDesktopBridge";
+import { readPlatformQuota } from "../platform-quota";
 
 interface QuotaContextValue {
   /** Current snapshot, or null while the first fetch is in flight. */
@@ -111,7 +106,7 @@ function listenQuotaUpdated(handler: () => void): () => void {
 export function QuotaProvider({
   children,
   projectRoots = [],
-}: QuotaProviderProps): JSX.Element {
+}: QuotaProviderProps): ReactElement {
   const bridge = useDesktopBridge();
   const [snapshot, setSnapshot] = useState<QuotaSnapshot | null>(null);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -128,10 +123,15 @@ export function QuotaProvider({
     setRefreshing(true);
     setError(null);
     try {
-      const next = await bridgeRef.current.quotaGet(rootsRef.current);
+      const next = await readPlatformQuota();
       setSnapshot(next);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      // An expired platform session must not retain a paid cached identity.
+      if ((e as { status?: number }).status === 401) setSnapshot(null);
+      else {
+        try { setSnapshot(await bridgeRef.current.quotaGet(rootsRef.current)); } catch { /* Offline cache unavailable. */ }
+      }
     } finally {
       setRefreshing(false);
     }
@@ -142,13 +142,14 @@ export function QuotaProvider({
       setRefreshing(true);
       setError(null);
       try {
-        const next = await bridgeRef.current.quotaForceSync(
-          rootsRef.current,
-          fresh,
-        );
+        const next = await readPlatformQuota(fresh);
         setSnapshot(next);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
+        if ((e as { status?: number }).status === 401) {
+          setSnapshot(null);
+          return;
+        }
         // Fall back to a fresh on-disk read so the UI stays consistent.
         try {
           const next = await bridgeRef.current.quotaGet(rootsRef.current);

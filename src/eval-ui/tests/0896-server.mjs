@@ -8,7 +8,7 @@ const server = await createServer({
     name: "0896-test-release-gate", enforce: "pre",
     transform(code, id) {
       if (id.endsWith("/src/lib/hosted-publishing.ts")) {
-        return code.replace("= false;", '= new URLSearchParams(location.search).get("gate") === "open";');
+        return code.replace(/= (?:true|false);/, '= new URLSearchParams(location.search).get("gate") === "open";');
       }
     },
   }],

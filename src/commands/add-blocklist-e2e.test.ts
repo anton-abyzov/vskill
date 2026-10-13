@@ -33,6 +33,9 @@ vi.mock("node:fs", () => ({
   chmodSync: (...args: unknown[]) => mockChmodSync(...args),
   readdirSync: (...args: unknown[]) => mockReaddirSync(...args),
   statSync: (...args: unknown[]) => mockStatSync(...args),
+  // Installs in this fixture start with absent target paths. The real
+  // containment guard now probes them with lstat before creating anything.
+  lstatSync: vi.fn(() => { throw Object.assign(new Error("Fixture path absent"), { code: "ENOENT" }); }),
   copyFileSync: vi.fn(),
 }));
 

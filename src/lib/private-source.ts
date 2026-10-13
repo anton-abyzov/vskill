@@ -319,7 +319,8 @@ export function lockEntryGitHubRepo(entry: SkillLockEntry): GitHubRepoRef | null
 }
 
 /**
- * True when nothing about this installed skill may be sent to the platform.
+ * True when this installed skill must never enter public platform APIs.
+ * Hosted-private entries use separate authenticated tenant routes.
  * GitHub-sourced entries are checked against GitHub (fail closed).
  */
 export async function isPrivateSource(entry: SkillLockEntry | null | undefined): Promise<boolean> {

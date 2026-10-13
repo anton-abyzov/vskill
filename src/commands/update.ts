@@ -382,6 +382,22 @@ async function updateTarget(
       continue;
     }
 
+    if (entry.sourceType === "hosted-private" || entry.source?.startsWith("hosted-private:") || entry.hostedPrivate) {
+      try {
+        const { updateHostedPrivateSkill } = await import("./install-private.js");
+        const next = await updateHostedPrivateSkill(name, entry, agents, projectRoot);
+        lock.skills[name] = next;
+        if (next !== entry) {
+          updated++;
+          console.log(`${name}: ${entry.version} -> ${next.version} (private)`);
+        } else console.log(dim(`${name}: already up to date (private)`));
+      } catch (error) {
+        console.error(`Private update failed for ${name}: ${(error as Error).message}`);
+        process.exitCode = 1;
+      }
+      continue;
+    }
+
     // A user-level plugin entry (marketplace, --plugin or --plugin-dir
     // install) stands for several skill folders; this loop rewrites one
     // folder per entry. See userLevelPluginReinstallCommand.

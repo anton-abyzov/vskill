@@ -40,6 +40,7 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { api, type TenantSummary } from "../../api";
+import { TENANT_CHANGED_EVENT } from "../../hooks/usePublishTenant";
 
 export interface TenantPickerProps {
   /**
@@ -184,6 +185,7 @@ export function TenantPicker({
       try {
         const result = await apiHandle.setActiveTenant(slug);
         setState((s) => ({ ...s, activeSlug: result.currentTenant }));
+        window.dispatchEvent(new Event(TENANT_CHANGED_EVENT));
         if (result.currentTenant) onTenantChange?.(result.currentTenant);
       } catch {
         // Selection failed — revert nothing (active stays where it was).

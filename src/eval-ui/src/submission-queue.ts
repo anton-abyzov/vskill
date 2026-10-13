@@ -132,6 +132,9 @@ export function rethrowSubmissionRefusal(err: unknown): never {
   const e = err as { status?: unknown; details?: Record<string, unknown> } | null;
   const code = typeof e?.details?.error === "string" ? e.details.error : "";
   const message = typeof e?.details?.message === "string" ? e.details.message : "";
+  if (e?.status === 400 && code === "missing_tenant") {
+    throw new SubmissionRefusedError(code, message || "Select a publishing account or connect the GitHub App first.", 400);
+  }
   if (e?.status === 422 && LOCAL_REFUSAL_CODES.has(code)) {
     throw new SubmissionRefusedError(code, message || "Nothing was submitted to verified-skill.com.", 422);
   }

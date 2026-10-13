@@ -20,23 +20,23 @@ describe("platform-proxy auth injection", () => {
   it("injects Bearer for /api/v1/private/* path", () => {
     const headers = pickHeadersForUpstream(
       { "user-agent": "studio/1" },
-      { path: "/api/v1/private/skills/foo", tokenProvider: () => "ghu_secret" },
+      { path: "/api/v1/private/skills/foo", tokenProvider: () => "vsk_secret" },
     );
-    expect(headers.authorization).toBe("Bearer ghu_secret");
+    expect(headers.authorization).toBe("Bearer vsk_secret");
   });
 
   it("injects Bearer for /api/v1/tenants/* path", () => {
     const headers = pickHeadersForUpstream(
       {},
-      { path: "/api/v1/tenants/abc/skills", tokenProvider: () => "ghu_t" },
+      { path: "/api/v1/tenants/abc/skills", tokenProvider: () => "vsk_t" },
     );
-    expect(headers.authorization).toBe("Bearer ghu_t");
+    expect(headers.authorization).toBe("Bearer vsk_t");
   });
 
   it("does NOT inject Authorization on /api/v1/skills/* (public)", () => {
     const headers = pickHeadersForUpstream(
       {},
-      { path: "/api/v1/skills/list", tokenProvider: () => "ghu_secret" },
+      { path: "/api/v1/skills/list", tokenProvider: () => "vsk_secret" },
     );
     expect(headers.authorization).toBeUndefined();
     expect(headers.Authorization).toBeUndefined();
@@ -45,9 +45,9 @@ describe("platform-proxy auth injection", () => {
   it("strips client-supplied Authorization for private paths and replaces with keychain token", () => {
     const headers = pickHeadersForUpstream(
       { authorization: "Bearer browser_supplied_garbage" },
-      { path: "/api/v1/tenants/foo/skills", tokenProvider: () => "ghu_canonical" },
+      { path: "/api/v1/tenants/foo/skills", tokenProvider: () => "vsk_canonical" },
     );
-    expect(headers.authorization).toBe("Bearer ghu_canonical");
+    expect(headers.authorization).toBe("Bearer vsk_canonical");
   });
 
   it("when no token is available, no Authorization header is set", () => {
@@ -82,5 +82,18 @@ describe("platform-proxy auth injection", () => {
   it("shouldInjectAuth requires auth on the submissions prefix", () => {
     expect(shouldInjectAuth("/api/v1/submissions")).toBe(true);
     expect(shouldInjectAuth("/api/v1/submissions/positions/x")).toBe(true);
+  });
+});
+
+
+describe("0896 live billing and credential boundary", () => {
+  it("proxies billing quota with the platform credential", () => {
+    expect(shouldProxyToPlatform("/api/v1/billing/quota?fresh=1")).toBe(true);
+    const headers = pickHeadersForUpstream({ authorization: "Bearer gho_browser" }, { path: "/api/v1/billing/quota", tokenProvider: () => "vsk_live" });
+    expect(headers.authorization).toBe("Bearer vsk_live");
+  });
+  it.each(["gho_repo_token", "ghp_repo_token", "github_pat_private", "ghu_private"])("never forwards a GitHub credential placed in the platform slot: %s", (token) => {
+    const headers = pickHeadersForUpstream({ authorization: "Bearer gho_browser" }, { path: "/api/v1/submissions", tokenProvider: () => token });
+    expect(headers.authorization).toBeUndefined();
   });
 });

@@ -20,15 +20,20 @@ vi.mock("../../hooks/useGitHubStatus", () => ({
   }),
 }));
 
+vi.mock("../../hooks/usePublishTenant", () => ({
+  usePublishTenant: () => ({ tenantId: "live-overview-tenant", tenants: [], loading: false, error: null }),
+}));
+
 // PublishButton calls api.gitProbe internally; stub it to avoid network.
 vi.mock("../PublishButton", () => ({
-  PublishButton: ({ remoteUrl, skillName, skillPath }: { remoteUrl: string; skillName?: string; skillPath?: string }) => {
+  PublishButton: ({ remoteUrl, skillName, skillPath, tenantId }: { remoteUrl: string; skillName?: string; skillPath?: string; tenantId?: string }) => {
     const React = require("react");
     return React.createElement("button", {
       "data-testid": "stub-publish-button",
       "data-remote": remoteUrl,
       "data-skill-name": skillName ?? "",
       "data-skill-path": skillPath ?? "",
+      "data-tenant-id": tenantId ?? "",
     }, "Publish");
   },
 }));
@@ -97,6 +102,7 @@ describe("PublishStatusRow (0772 US-005)", () => {
     const stub = container.querySelector("[data-testid='stub-publish-button']") as HTMLButtonElement;
     expect(stub).toBeTruthy();
     expect(stub.getAttribute("data-remote")).toBe("https://github.com/foo/bar");
+    expect(stub.getAttribute("data-tenant-id")).toBe("live-overview-tenant");
     unmount();
   });
 

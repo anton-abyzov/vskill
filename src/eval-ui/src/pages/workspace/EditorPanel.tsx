@@ -14,6 +14,7 @@ import { useSkillFiles } from "./useSkillFiles";
 import { SkillFileBrowser } from "../../components/SkillFileBrowser";
 import { SecondaryFileViewer } from "../../components/SecondaryFileViewer";
 import { PublishButton } from "../../components/PublishButton";
+import { usePublishTenant } from "../../hooks/usePublishTenant";
 import { useGitRemote } from "../../hooks/useGitRemote";
 import { bumpVersion, validateVersionTransition, type BumpKind } from "../../utils/bumpVersion";
 import { getFrontmatterVersion, setFrontmatterVersion } from "../../utils/setFrontmatterVersion";
@@ -80,6 +81,7 @@ function IconSparkle({ size = 15 }: { size?: number }) {
 }
 
 export function EditorPanel() {
+  const publishTenant = usePublishTenant();
   const { state, dispatch, saveContent, isReadOnly } = useWorkspace();
   const { plugin, skill, skillContent, isDirty, improveTarget, aiEditOpen } = state;
   // 0875 — repo-relative SKILL.md path for the active skill (e.g.
@@ -524,6 +526,8 @@ export function EditorPanel() {
                 skillName={skill || undefined}
                 skillPath={activeSkillPath}
                 privacy="public"
+                tenantId={publishTenant.tenantId}
+                tenantSelection={publishTenant}
               />
             )}
           </div>

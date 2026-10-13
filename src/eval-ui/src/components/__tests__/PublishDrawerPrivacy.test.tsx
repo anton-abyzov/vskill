@@ -193,7 +193,7 @@ describe("PublishDrawer privacy chooser (0874)", () => {
 
     await act(async () => {
       root.render(
-        <PublishDrawer remoteUrl="git@github.com:owner/repo.git" fileCount={1} onClose={onClose} defaultMode="manual" skillName="greet" />,
+        <PublishDrawer remoteUrl="git@github.com:owner/repo.git" fileCount={1} onClose={onClose} defaultMode="manual" skillName="greet" tenantId="tenant-real" />,
       );
       await flush();
     });
@@ -220,7 +220,7 @@ describe("PublishDrawer privacy chooser (0874)", () => {
       await flush();
     });
     expect(mockSubmitToQueue).toHaveBeenCalledTimes(1);
-    expect(mockSubmitToQueue.mock.calls[0][0]).toMatchObject({ privacy: "private" });
+    expect(mockSubmitToQueue.mock.calls[0][0]).toMatchObject({ privacy: "private", tenantId: "tenant-real" });
   });
 });
 
@@ -327,5 +327,51 @@ describe("PublishDrawer privacy chooser, launch gate closed (0874 AC-07)", () =>
     expect(outcome?.textContent).toContain("Hosted private publishing is not available yet.");
     expect(container.querySelector('[data-testid="publish-open-website"]')).toBeNull();
     expect(container.textContent?.toLowerCase()).not.toContain("sign in");
+  });
+});
+
+
+describe("0896 private publishing account safeguards", () => {
+  beforeEach(() => { tierMock.isFree = false; tierMock.isPro = true; });
+
+  it("missing tenant offers GitHub App connection and prevents push or submission", async () => {
+    await act(async () => {
+      root.render(<PublishDrawer remoteUrl="git@github.com:owner/private.git" fileCount={0} onClose={onClose} skillName="secret" privacy="private" />);
+      await flush();
+    });
+    expect(container.textContent).toContain("connect the GitHub App");
+    expect(findButton("Push & Submit").disabled).toBe(true);
+    expect(mockGitPublish).not.toHaveBeenCalled();
+    expect(mockSubmitToQueue).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("Sign in to submit");
+  });
+
+  it("clean tree private publish preserves tenant and does not create an empty commit", async () => {
+    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
+    mockSubmitToQueue.mockResolvedValueOnce({ ...CREATED, id: "psub_123" });
+    await act(async () => {
+      root.render(<PublishDrawer remoteUrl="git@github.com:owner/private.git" fileCount={0} onClose={onClose} skillName="secret" privacy="private" tenantId="real-tenant" />);
+      await flush();
+    });
+    expect(container.querySelector("textarea")).toBeNull();
+    await act(async () => { findButton("Push & Submit").click(); await flush(); });
+    expect(mockGitPublish).toHaveBeenCalledWith(undefined);
+    expect(mockSubmitToQueue).toHaveBeenCalledWith(expect.objectContaining({ privacy: "private", tenantId: "real-tenant" }));
+    expect(container.querySelector('[data-testid="private-submission-status"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="publish-open-website"]')).toBeNull();
+  });
+
+  it("a private installation error stays in-app with its real cause", async () => {
+    mockGitPublish.mockResolvedValueOnce(PUBLISH_OK);
+    mockSubmitToQueue.mockRejectedValueOnce(new Error("Connect the GitHub App to this account before publishing."));
+    await act(async () => {
+      root.render(<PublishDrawer remoteUrl="git@github.com:owner/private.git" fileCount={0} onClose={onClose} skillName="secret" privacy="private" tenantId="real-tenant" />);
+      await flush();
+    });
+    await act(async () => { findButton("Push & Submit").click(); await flush(); });
+    expect(container.textContent).toContain("Connect the GitHub App to this account");
+    expect(container.textContent).not.toContain("Sign in to submit");
+    expect(container.querySelector('[data-testid="publish-open-website"]')).toBeNull();
+    expect(mockOpenExternal).not.toHaveBeenCalled();
   });
 });

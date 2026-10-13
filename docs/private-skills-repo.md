@@ -150,9 +150,10 @@ accounts with `vskill orgs list`. Only owners/admins can publish; downloads
 require authorized tenant access and a token with read scope.
 
 The workflow below is prepared for **vskill 1.2.8** and **Skill Studio 1.0.65**.
-These releases have not been published, and the launch gates remain closed
-pending manual acceptance and the platform rollout. Published vskill 1.2.7 and
-Skill Studio 1.0.64 do not include this hosted private workflow.
+These unpublished release candidates enable the CLI and Studio capability.
+The production service remains closed pending manual acceptance and the
+platform rollout. Published vskill 1.2.7 and Skill Studio 1.0.64 do not include
+this hosted private workflow.
 
 Updating the global npm package updates the CLI and browser-based
 `vskill studio`. The native Skill Studio app has its own desktop update.

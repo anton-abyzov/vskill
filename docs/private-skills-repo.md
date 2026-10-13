@@ -149,11 +149,19 @@ A paid plan alone does not grant repository access. Connect the GitHub App at
 accounts with `vskill orgs list`. Only owners/admins can publish; downloads
 require authorized tenant access and a token with read scope.
 
+The workflow below is prepared for **vskill 1.2.8** and **Skill Studio 1.0.65**.
+These releases have not been published, and the launch gates remain closed
+pending manual acceptance and the platform rollout. Published vskill 1.2.7 and
+Skill Studio 1.0.64 do not include this hosted private workflow.
+
+Updating the global npm package updates the CLI and browser-based
+`vskill studio`. The native Skill Studio app has its own desktop update.
+
 This workflow is release-gated. If the service returns
 `private_publishing_unavailable`, the hosted rollout is closed. Nothing is
 submitted publicly as a fallback, and direct private GitHub installs continue
-to work. These commands require a CLI release containing hosted private support;
-they are not available in the published vskill 1.2.7 release.
+to work. The commands below become usable after the CLI release and hosted
+platform rollout are available.
 
 ```bash
 vskill auth login

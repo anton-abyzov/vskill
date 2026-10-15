@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REPORT TITLE</title>
+<style>
+  /*
+   * html-report template. Every color reads a host theme variable first
+   * (SpecWithCode / SpecWeave Studio inject --background, --foreground, ...),
+   * then falls back to its own light/dark palette, so the same file looks
+   * right inside a host frame, as a Claude artifact, or opened from disk.
+   */
+  :root {
+    color-scheme: light dark;
+    --r-bg: var(--background, #faf9f7);
+    --r-fg: var(--foreground, #1f1e1c);
+    --r-muted: var(--muted-foreground, #6b6862);
+    --r-border: var(--border, #e4e1db);
+    --r-surface: var(--card, #f3f1ec);
+    --r-code-bg: var(--code-background, #efece6);
+    --r-code-fg: var(--code-foreground, #2b2a27);
+    --r-accent: var(--accent, #c96442);
+    --r-ok: var(--success-foreground, #047857);
+    --r-ok-bg: color-mix(in srgb, var(--success, #10b981) 14%, transparent);
+    --r-bad: var(--destructive-foreground, #b42318);
+    --r-bad-bg: color-mix(in srgb, var(--destructive, #ef4444) 14%, transparent);
+    --r-warn: var(--warning-foreground, #a15c07);
+    --r-warn-bg: color-mix(in srgb, var(--warning, #f59e0b) 16%, transparent);
+    --r-serif: "New York", ui-serif, "Iowan Old Style", Charter, Georgia, serif;
+    --r-sans: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
+    --r-mono: var(--font-mono, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --r-bg: var(--background, #1f1e1d);
+      --r-fg: var(--foreground, #eceae4);
+      --r-muted: var(--muted-foreground, #a19d94);
+      --r-border: var(--border, #3a3935);
+      --r-surface: var(--card, #262624);
+      --r-code-bg: var(--code-background, #2c2b28);
+      --r-code-fg: var(--code-foreground, #e6e3dc);
+      --r-ok: var(--success-foreground, #34d399);
+      --r-bad: var(--destructive-foreground, #f87171);
+      --r-warn: var(--warning-foreground, #fbbf24);
+    }
+  }
+  html { background: var(--r-bg); color: var(--r-fg); font-family: var(--r-sans); }
+  body { margin: 0; }
+  /* Opened on its own (wider than any host frame), center the page. */
+  @media (min-width: 1200px) { body { padding: 56px 0; } .report { margin: 0 auto; } }
+  .report { max-width: 680px; padding: 8px 0 32px; }
+  .report * { box-sizing: border-box; }
+
+  /* Properties: the facts a reader scans first. */
+  .props { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 10px 16px; margin: 0; font-size: 14px; }
+  .props dt { color: var(--r-muted); font-size: 13px; padding-top: 1px; }
+  .props dd { margin: 0; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+  hr { border: 0; border-top: 1px solid var(--r-border); margin: 24px 0 28px; }
+
+  h1 { font-family: var(--r-serif); font-weight: 500; font-size: 28px; line-height: 1.15; letter-spacing: -0.012em; margin: 0; text-wrap: balance; }
+  .lead, .report p, .report li { font-family: var(--r-serif); font-size: 16px; line-height: 1.6; }
+  .lead { margin: 14px 0 0; }
+  h2 { font-family: var(--r-serif); font-weight: 500; font-size: 21.5px; line-height: 1.3; margin: 32px 0 8px; }
+  .report ul { margin: 0; padding-left: 1.25rem; }
+  .report li + li { margin-top: 6px; }
+  .report p { margin: 8px 0; }
+  a { color: var(--r-accent); text-underline-offset: 2px; }
+
+  code, .chip {
+    font-family: var(--r-mono); font-size: 13px; background: var(--r-code-bg); color: var(--r-code-fg);
+    border: 1px solid var(--r-border); border-radius: 6px; padding: 1px 6px; white-space: nowrap;
+  }
+  .pill { font-family: var(--r-sans); font-size: 12.5px; font-weight: 600; border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+  .pill.ok { color: var(--r-ok); background: var(--r-ok-bg); }
+  .pill.bad { color: var(--r-bad); background: var(--r-bad-bg); }
+  .pill.warn { color: var(--r-warn); background: var(--r-warn-bg); }
+  .pill.neutral { color: var(--r-muted); background: var(--r-surface); }
+
+  /* Test or check results: one row each, status first. */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; }
+  th { text-align: left; font-weight: 500; color: var(--r-muted); font-size: 12.5px; border-bottom: 1px solid var(--r-border); padding: 6px 8px 6px 0; }
+  td { border-bottom: 1px solid var(--r-border); padding: 8px 8px 8px 0; vertical-align: top; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Screenshots: two up on wide frames, one up on phones. */
+  .shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 10px 0; }
+  figure { margin: 0; }
+  figure img { display: block; width: 100%; height: auto; border: 1px solid var(--r-border); border-radius: 10px; }
+  figcaption { font-size: 12.5px; color: var(--r-muted); margin-top: 6px; }
+
+  details { border: 1px solid var(--r-border); border-radius: 10px; padding: 8px 12px; margin: 10px 0; }
+  summary { cursor: pointer; font-size: 14px; }
+  pre { font-family: var(--r-mono); font-size: 12.5px; line-height: 1.5; overflow-x: auto; margin: 8px 0 0; white-space: pre; }
+</style>
+</head>
+<body>
+<article class="report">
+  <dl class="props">
+    <dt>Status</dt><dd><span class="pill ok">Done</span></dd>
+    <dt>Branch</dt><dd><code>feat/example</code> <span class="pill neutral">not pushed</span></dd>
+    <dt>Tests</dt><dd>262 / 262 pass</dd>
+    <dt>Blockers</dt><dd>None</dd>
+  </dl>
+  <hr>
+  <h1>REPORT TITLE</h1>
+  <p class="lead">One or two sentences: what changed, and why it matters to the reader.</p>
+
+  <h2>Evidence</h2>
+  <ul>
+    <li>Commit <code>abc1234</code> on <code>feat/example</code>.</li>
+    <li>Unit tests on the six touched files pass.</li>
+  </ul>
+
+  <h2>Checks</h2>
+  <table>
+    <thead><tr><th>Check</th><th>Result</th><th class="num">Count</th></tr></thead>
+    <tbody>
+      <tr><td><code>vp test run</code></td><td><span class="pill ok">Pass</span></td><td class="num">262</td></tr>
+      <tr><td>Full web suite</td><td><span class="pill warn">5 fail, same on main</span></td><td class="num">5</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Screenshots</h2>
+  <div class="shots">
+    <figure><img src="data:image/png;base64,..." alt="Thread list, light"><figcaption>Light</figcaption></figure>
+    <figure><img src="data:image/png;base64,..." alt="Thread list, dark"><figcaption>Dark</figcaption></figure>
+  </div>
+
+  <details><summary>Full log</summary><pre>...</pre></details>
+</article>
+</body>
+</html>

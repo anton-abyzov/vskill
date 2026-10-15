@@ -1,7 +1,7 @@
 ---
 name: html-report
 description: "Write work reports, status updates, meeting notes and review results that render as a polished document (property table, serif title, lead paragraph, sections, chips) in any host and from any model: Claude, Codex, Copilot, Gemini, Cursor, OpenCode. Picks the right form per host: structured markdown with flat frontmatter that document viewers render (Claude desktop, SpecWithCode, Obsidian), or a self-contained themed HTML page from the bundled template when the report needs screenshots, comparisons or test matrices (SpecWithCode html_render, Claude artifacts, a file on disk). Use whenever you finish delegated work and report back, write a final report, summary, handoff, review result, release note or meeting note, or the user says 'make it look good', 'pretty report', 'HTML report', 'artifact', 'format this as a document', or complains a report is a wall of text."
-version: 1.1.0
+version: 1.1.1
 license: MIT
 repository: anton-abyzov/vskill
 metadata:
@@ -14,7 +14,7 @@ A report is read, not parsed. A wall of prose with inline code chips is hard to 
 
 ## How the good-looking hosts do it
 
-Claude desktop's polished document look is not an HTML artifact. It is a **markdown file** that the app renders: flat YAML frontmatter becomes a property table (list values become chips), the `# H1` is a serif title, the first paragraph is the lead, `##` sections follow. HTML artifacts are kept for interactive or visual content. SpecWithCode (SpecWeave Studio) renders worker reports the same way, and Obsidian shows the same frontmatter as properties.
+Claude desktop's polished document look is not an HTML artifact. It is a **markdown file** that the app renders: flat YAML frontmatter becomes a property table (list values become chips), the `# H1` is a serif title, the first paragraph is the lead, `##` sections follow. HTML artifacts are kept for interactive or visual content. SpecWithCode renders worker reports the same way, and Obsidian shows the same frontmatter as properties.
 
 So the optimal path is:
 
@@ -56,6 +56,7 @@ Rules (these match what document viewers accept):
 - Use `> [!NOTE]`, `> [!WARNING]` or `> [!CAUTION]` callouts for the one thing the reader must not miss.
 - Tables only for real comparisons; numeric columns right-align on their own.
 - No raw HTML in markdown; viewers strip it.
+- Call the desktop app SpecWithCode on first mention and "the app" after that, never "Studio" or "SpecWeave Studio". Branch, repo, path and tool names stay literal (`feat/studio-plan-progress`, `studio_thread_list`).
 
 **Short worker reports** (a 5-line "Outcome / Evidence / Blockers" result) skip frontmatter and the H1. Write each part as its own paragraph opening with a bold label:
 
@@ -93,7 +94,7 @@ Start from `template.html` next to this file. `examples/worker-report.html` is a
 
 | Host | Markdown report | HTML report |
 |---|---|---|
-| SpecWithCode / SpecWeave Studio | Your final reply, as above | `html_preview`, then `html_render`, before the final reply; the reply adds only what the page doesn't say |
+| SpecWithCode | Your final reply, as above | `html_preview`, then `html_render`, before the final reply; the reply adds only what the page doesn't say |
 | Claude desktop (Cowork / Code) | Write a `.md` file, then `present_files` | Write the `.html` file, then `create_artifact` with its `html_path` |
 | claude.ai chat | A `text/markdown` artifact | A `text/html` artifact |
 | Codex, Copilot, Gemini, Cursor, OpenCode, any CLI | Your final reply, or a `.md` file whose path you print | Write the file to a scratch or reports folder, print the absolute path |

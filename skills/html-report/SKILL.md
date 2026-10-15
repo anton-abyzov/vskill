@@ -1,7 +1,7 @@
 ---
 name: html-report
 description: "Write work reports, status updates, meeting notes and review results that render as a polished document (property table, serif title, lead paragraph, sections, chips) in any host and from any model: Claude, Codex, Copilot, Gemini, Cursor, OpenCode. Picks the right form per host: structured markdown with flat frontmatter that document viewers render (Claude desktop, SpecWithCode, Obsidian), or a self-contained themed HTML page from the bundled template when the report needs screenshots, comparisons or test matrices (SpecWithCode html_render, Claude artifacts, a file on disk). Use whenever you finish delegated work and report back, write a final report, summary, handoff, review result, release note or meeting note, or the user says 'make it look good', 'pretty report', 'HTML report', 'artifact', 'format this as a document', or complains a report is a wall of text."
-version: 1.0.0
+version: 1.1.0
 license: MIT
 repository: anton-abyzov/vskill
 metadata:
@@ -69,9 +69,19 @@ Rules (these match what document viewers accept):
 
 SpecWithCode shows this as a document: the outcome as the lead, a long Evidence as a bulleted section, a short Blockers as a property.
 
+## Blockers are a question, or none
+
+`Blockers` is either `none` or **the one thing you need from the reader, asked as a question they can answer in one reply**: the decision, the options, and your recommendation.
+
+- Good: `**Blockers:** Ship 1.0.20 now without the Windows build, or wait about 2 hours for the signer? I recommend shipping now and following up.`
+- Bad: `**Blockers:** Windows signing is flaky.` (a status, not a question; the reader cannot act on it)
+- Not a blocker: problems you already worked around. Put them in Evidence.
+
+SpecWithCode reads this part: a thread whose last report names a blocker shows as **Blocked**, waits in "Waiting on you" with the question on hover and on its card, and never auto-resolves until someone writes back.
+
 ## 2. HTML page (visual evidence)
 
-Start from `template.html` next to this file. It is self-contained (inline CSS, no network), follows the host theme when one is injected (`--background`, `--foreground`, `--border`, `--accent`, ...) and falls back to its own light and dark palette, so the same file works in a host frame, as an artifact and opened from disk.
+Start from `template.html` next to this file. `examples/worker-report.html` is a finished worker report (before/after screenshots, checks table) built from it. It is self-contained (inline CSS, no network), follows the host theme when one is injected (`--background`, `--foreground`, `--border`, `--accent`, ...) and falls back to its own light and dark palette, so the same file works in a host frame, as an artifact and opened from disk.
 
 - Keep its structure: `dl.props` (facts), `h1`, `p.lead`, `h2` sections, `table` for results with `.pill.ok|bad|warn` status, `.shots` grid of `figure`s for screenshots, `details` for long logs.
 - Inline images as `data:` URLs (resize first; keep the page under about 2 MB). Never hotlink.

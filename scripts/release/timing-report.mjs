@@ -6,8 +6,9 @@
 //
 // Warn-only by design: findings become `::warning::` annotations plus a
 // markdown table in $GITHUB_STEP_SUMMARY (stdout when unset), and the exit
-// code stays 0. A GitHub API failure skips the report with a warning, so a
-// reporting hiccup never turns a finished release red. Bad arguments exit 2.
+// code stays 0. In live mode any failure, a GitHub API error or a bug in this
+// file, becomes a warning, so a reporting hiccup never turns a finished
+// release red. Bad arguments exit 2; --self-test and --fixture fail loudly.
 //
 // Usage:
 //   node scripts/release/timing-report.mjs --repo OWNER/NAME --run RUN_ID \
@@ -389,23 +390,25 @@ function usage(msg) {
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.selfTest) return selfTest();
-  let data;
-  let runLabel;
   if (opts.fixture) {
     opts.workflow = opts.workflow || "desktop-release.yml";
-    data = loadFixture(opts.fixture);
-    runLabel = `(fixture ${opts.fixture})`;
-  } else {
-    if (!opts.repo || !opts.run || !opts.workflow) usage("--repo, --run and --workflow are required");
-    try {
-      data = loadLive(opts);
-    } catch (err) {
-      if (!(err instanceof ApiError)) throw err;
-      console.log(`::warning title=Release timing::report skipped: ${err.message}`);
-      return;
-    }
-    runLabel = `run ${opts.run}`;
+    return report(opts, loadFixture(opts.fixture), `(fixture ${opts.fixture})`);
   }
+  if (!opts.repo || !opts.run || !opts.workflow) usage("--repo, --run and --workflow are required");
+  // Live mode runs as the last job of a release. The run's conclusion is what
+  // release-desktop.sh watches, so no failure of this report may turn a
+  // published release red: it becomes a warning. --self-test and --fixture
+  // still fail loudly.
+  try {
+    report(opts, loadLive(opts), `run ${opts.run}`);
+  } catch (err) {
+    const what = err instanceof ApiError ? "report skipped" : "report failed";
+    const detail = err instanceof ApiError || !err || !err.stack ? String(err && err.message ? err.message : err) : err.stack.split("\n").slice(0, 3).join(" | ");
+    console.log(`::warning title=Release timing::${what}: ${detail}`);
+  }
+}
+
+function report(opts, data, runLabel) {
   const res = analyse({ workflow: opts.workflow, ...data });
   const md = markdown({ workflow: opts.workflow, runLabel, rows: res.rows, baselineCount: res.baselineCount });
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + "\n");

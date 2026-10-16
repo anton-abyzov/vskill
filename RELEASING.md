@@ -155,7 +155,8 @@ A hand-pushed tag skips the scripts' checks, so run both `--dry-run`s first.
   the action SHAs identical in both workflows, or the cache keys stop matching.
 - **Timing report.** The Release timing report job compares job and step
   durations against the last five successful runs and fixed budgets. It also
-  flags cache misses. It only warns. To run it locally:
+  flags cache misses. It only warns, and even a failure of the report itself
+  is a warning, so it never turns a published release red. To run it locally:
   `node scripts/release/timing-report.mjs --repo anton-abyzov/vskill --run <run-id> --workflow desktop-release.yml`.
 - **Nightly health.** `nightly-health.yml` keeps one open issue,
   `<workflow> red on main` (label `nightly-red`), per failing nightly, and

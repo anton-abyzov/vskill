@@ -8,7 +8,9 @@
 //
 // Atomicity: tmp + fsync + rename. Live file is never partially written.
 // Concurrency: tokio::sync::Mutex serializes mutations. Debouncer is a single
-// background task — never two concurrent disk writes.
+// background task — never two concurrent disk writes. Every set_key takes a
+// request generation; the debouncer publishes the highest generation each
+// write covers, so a caller can wait for exactly the write it asked for.
 // Permissions (Unix): file 0600, parent dir 0700. Existing more-permissive
 // modes are tightened on next write with a warn-level log.
 //
@@ -17,12 +19,13 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, watch, Mutex};
 
 pub const SCHEMA_VERSION: u32 = 1;
 const DEBOUNCE_MS: u64 = 250;
@@ -207,7 +210,13 @@ const ALLOWED_PATHS: &[&str] = &[
 #[derive(Clone)]
 pub struct SettingsStore {
     state: Arc<Mutex<Settings>>,
-    write_tx: mpsc::UnboundedSender<()>,
+    /// Sends the request generation of each set_key to the debouncer.
+    write_tx: mpsc::UnboundedSender<u64>,
+    /// Last generation handed out by set_key. Bumped under the state lock.
+    requested: Arc<AtomicU64>,
+    /// Highest generation the debouncer has written to disk.
+    #[cfg_attr(not(test), allow(dead_code))]
+    written: watch::Receiver<u64>,
     path: PathBuf,
 }
 
@@ -219,11 +228,14 @@ impl SettingsStore {
     pub fn new_at(path: PathBuf) -> Self {
         let initial = load_from_path(&path);
         let state = Arc::new(Mutex::new(initial));
-        let (tx, rx) = mpsc::unbounded_channel::<()>();
-        spawn_debouncer(state.clone(), path.clone(), rx);
+        let (tx, rx) = mpsc::unbounded_channel::<u64>();
+        let (written_tx, written_rx) = watch::channel(0u64);
+        spawn_debouncer(state.clone(), path.clone(), rx, written_tx);
         Self {
             state,
             write_tx: tx,
+            requested: Arc::new(AtomicU64::new(0)),
+            written: written_rx,
             path,
         }
     }
@@ -238,7 +250,12 @@ impl SettingsStore {
         }
         let mut guard = self.state.lock().await;
         apply_path(&mut guard, key, value)?;
-        let _ = self.write_tx.send(());
+        // Generation and send happen under the state lock, so the debouncer
+        // (which drains the channel while holding the same lock) always sees
+        // a generation together with the mutation it stands for.
+        let generation = self.requested.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+        let _ = self.write_tx.send(generation);
+        drop(guard);
         Ok(())
     }
 
@@ -257,10 +274,17 @@ impl SettingsStore {
         Ok(())
     }
 
+    /// Wait until the debouncer has written every set_key issued so far.
+    /// The debouncer runs on tauri's runtime, not the test's, so a fixed
+    /// sleep raced it on loaded runners; waiting on the generation does not.
     #[cfg(test)]
     pub async fn flush_for_test(&self) {
-        // Wait long enough for the debouncer to fire at least once.
-        tokio::time::sleep(Duration::from_millis(DEBOUNCE_MS + 100)).await;
+        let target = self.requested.load(AtomicOrdering::SeqCst);
+        let mut rx = self.written.clone();
+        tokio::time::timeout(Duration::from_secs(10), rx.wait_for(|w| *w >= target))
+            .await
+            .expect("debounced write did not land within 10s")
+            .expect("settings debouncer exited");
     }
 }
 
@@ -447,21 +471,35 @@ fn expect_bool(value: &Value, key: &str) -> Result<bool, String> {
 fn spawn_debouncer(
     state: Arc<Mutex<Settings>>,
     path: PathBuf,
-    mut rx: mpsc::UnboundedReceiver<()>,
+    mut rx: mpsc::UnboundedReceiver<u64>,
+    written: watch::Sender<u64>,
 ) {
     tauri::async_runtime::spawn(async move {
         loop {
             // Wait for the first signal — we don't write until something asks us to.
-            if rx.recv().await.is_none() {
+            let Some(first) = rx.recv().await else {
                 return;
-            }
-            // Coalesce: drain any signals that arrive within the debounce window.
+            };
+            // Coalesce: let signals pile up within the debounce window.
             tokio::time::sleep(Duration::from_millis(DEBOUNCE_MS)).await;
-            while rx.try_recv().is_ok() {}
 
-            let snapshot = { state.lock().await.clone() };
-            if let Err(e) = atomic_write(&path, &snapshot) {
-                log::error!("settings: debounced write failed: {e}");
+            // Drain while holding the state lock. set_key sends under the same
+            // lock, so every generation drained here belongs to a mutation that
+            // is already in the snapshot, and nothing in the snapshot is
+            // reported as written without being drained.
+            let (snapshot, covered) = {
+                let guard = state.lock().await;
+                let mut covered = first;
+                while let Ok(g) = rx.try_recv() {
+                    covered = covered.max(g);
+                }
+                (guard.clone(), covered)
+            };
+            match atomic_write(&path, &snapshot) {
+                Ok(()) => {
+                    written.send_replace(covered);
+                }
+                Err(e) => log::error!("settings: debounced write failed: {e}"),
             }
         }
     });

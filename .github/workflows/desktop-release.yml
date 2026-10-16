@@ -229,7 +229,9 @@ jobs:
           fi
           # Export the cleaned value to subsequent steps via GITHUB_ENV so
           # tauri-action receives the whitespace-free base64 instead of the
-          # raw secret. It stays masked because it derives from a secret.
+          # raw secret. Once whitespace is stripped it no longer equals the
+          # secret, so the runner would not mask it on its own.
+          echo "::add-mask::${CLEAN_KEY}"
           {
             echo "TAURI_SIGNING_PRIVATE_KEY<<EOF_CLEAN_KEY"
             echo "${CLEAN_KEY}"
@@ -248,6 +250,12 @@ jobs:
             STRIPPED=$(( ${#P} - ${#CLEAN_P} ))
             echo "::warning::Stripped ${STRIPPED} whitespace char(s) from TAURI_SIGNING_PRIVATE_KEY_PASSWORD."
           fi
+          if [ -z "${CLEAN_P}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret is empty."
+            exit 1
+          fi
+          # Mask the cleaned value too: it can differ from the raw secret.
+          echo "::add-mask::${CLEAN_P}"
           {
             echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<EOF_CLEAN_P"
             echo "${CLEAN_P}"

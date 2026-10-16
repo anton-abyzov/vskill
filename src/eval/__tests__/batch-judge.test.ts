@@ -383,6 +383,11 @@ describe("batchJudgeAssertions — polling", () => {
 
     const promise = batchJudgeAssertions(requests, client, judgeClient, BASE_OPTIONS);
 
+    // batchJudgeAssertions loads the SDK with a dynamic import before it
+    // submits the batch. Wait for the submit so fake time is not advanced
+    // before the first poll timer exists (raced on loaded CI runners).
+    await vi.waitFor(() => expect(mockBatchCreate).toHaveBeenCalled());
+
     // Advance past the polling intervals — the polling backoff escalates,
     // so we advance enough fake time to cover 3 polls plus headroom.
     for (let i = 0; i < 60; i++) {
@@ -410,6 +415,11 @@ describe("batchJudgeAssertions — polling", () => {
     const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const promise = batchJudgeAssertions(requests, client, judgeClient, BASE_OPTIONS);
+
+    // batchJudgeAssertions loads the SDK with a dynamic import before it
+    // submits the batch. Wait for the submit so fake time is not advanced
+    // before the first poll timer exists (raced on loaded CI runners).
+    await vi.waitFor(() => expect(mockBatchCreate).toHaveBeenCalled());
 
     // Advance past 10 minutes
     for (let i = 0; i < 200; i++) {

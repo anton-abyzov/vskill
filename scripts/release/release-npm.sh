@@ -8,8 +8,8 @@
 # The version bump is a normal PR. Once it is merged, this script:
 #   1. Preflight (no side effects): gh is signed in with push access, v<version>
 #      is not yet a tag (locally or on GitHub), vskill@<version> is not on npm,
-#      origin/main's package.json is at <version>, and CI on that commit has
-#      not failed.
+#      origin/main's package.json is at <version>, a dry-run push of the tag
+#      authenticates, and CI on that commit has not failed.
 #   2. Tags the fetched origin/main commit v<version> and pushes the tag over
 #      HTTPS. npm-release.yml fires on the tag, waits for ci.yml on that commit
 #      and publishes.
@@ -102,6 +102,13 @@ main_version=$(git show "${SHA}:package.json" | node -e '
 [ "$main_version" = "$VERSION" ] \
   || die "origin/main (${SHA}) package.json is ${main_version}, not ${VERSION}; merge the version bump first"
 ok "origin/main ${SHA} package.json is ${VERSION}"
+
+# A dry-run push authenticates against the remote and compares refs but sends
+# no objects and no ref update, so it proves the HTTPS credentials work before
+# anything is tagged.
+git push --dry-run -q "$REMOTE_URL" "${SHA}:refs/tags/${TAG}" \
+  || die "git push --dry-run to ${REMOTE_URL} failed; check HTTPS git credentials (gh auth setup-git)"
+ok "git can push ${TAG} to ${REMOTE_URL}"
 
 # npm-release.yml waits for this run anyway; refusing here avoids pushing a
 # tag whose release is already known to fail.

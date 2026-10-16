@@ -1,0 +1,119 @@
+name: Nightly Health
+
+# Keeps one open issue per watched workflow while it is red on main, so a
+# nightly that starts failing is visible the next morning instead of on
+# release day. Failure: open the issue "<workflow> red on main" (label
+# nightly-red) or comment on it with the run URL and the first ##[error]
+# line. Success: comment and close it.
+#
+# workflow_run only fires for this file as it exists on the default branch,
+# and the names below must match each workflow's `name:` exactly.
+
+on:
+  workflow_run:
+    workflows:
+      - "Desktop Build (nightly)"
+      - "E2E Live (nightly)"
+      - "E2E Lifecycle (nightly)"
+      - "Golden Path (regression)"
+      - "Lighthouse CI"
+      - "Sidecar Smoke"
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  # One updater per watched workflow at a time, so two runs finishing
+  # together cannot open duplicate issues.
+  group: nightly-health-${{ github.event.workflow_run.workflow_id }}
+  cancel-in-progress: false
+
+jobs:
+  track:
+    name: Track ${{ github.event.workflow_run.name }}
+    if: >-
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.event != 'pull_request' &&
+      contains(fromJSON('["success","failure","timed_out","startup_failure"]'), github.event.workflow_run.conclusion)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      WF_NAME: ${{ github.event.workflow_run.name }}
+      WF_ID: ${{ github.event.workflow_run.workflow_id }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      RUN_EVENT: ${{ github.event.workflow_run.event }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+    steps:
+      - name: Open, update or close the tracking issue
+        run: |
+          set -euo pipefail
+          TITLE="${WF_NAME} red on main"
+
+          # An older run that finishes after a newer one must not reopen or
+          # close the issue: act only for the newest completed main run.
+          LATEST=$(gh run list --workflow "$WF_ID" --branch main --status completed \
+            --limit 20 --json databaseId,event \
+            -q '[.[] | select(.event != "pull_request")][0].databaseId')
+          if [ "$LATEST" != "$RUN_ID" ]; then
+            echo "Run $RUN_ID is not the newest completed main run ($LATEST); nothing to do."
+            exit 0
+          fi
+
+          gh label create nightly-red --color B60205 \
+            --description "A nightly or main-branch workflow is failing" --force
+
+          NUMBER=$(gh issue list --label nightly-red --state open --limit 100 \
+            --json number,title \
+            | jq -r --arg t "$TITLE" '[.[] | select(.title == $t)][0].number // empty')
+
+          if [ "$CONCLUSION" = "success" ]; then
+            if [ -z "$NUMBER" ]; then
+              echo "$WF_NAME is green on main and no issue is open."
+              exit 0
+            fi
+            gh issue comment "$NUMBER" --body "Green again on main: $RUN_URL"
+            gh issue close "$NUMBER" --reason completed
+            echo "Closed #$NUMBER."
+            exit 0
+          fi
+
+          # Diagnostics only: the issue is still opened or updated when the
+          # failed-step log is unavailable (expired, startup_failure).
+          ERROR_LINE=""
+          if gh run view "$RUN_ID" --log-failed > failed.log 2> view.err; then
+            ERROR_LINE=$(sed -n '/##\[error\]/{p;q;}' failed.log | cut -c1-500)
+          else
+            echo "::warning::could not read the failed-step log: $(head -c 300 view.err)"
+          fi
+          [ -n "$ERROR_LINE" ] || ERROR_LINE="(no ##[error] line in the failed-step log)"
+
+          BODY=body.md
+          {
+            echo "**${WF_NAME}** finished \`${CONCLUSION}\` on main."
+            echo ""
+            echo "- Run: ${RUN_URL}"
+            echo "- Commit: ${HEAD_SHA}"
+            echo "- Trigger: ${RUN_EVENT}"
+            echo ""
+            echo "First error:"
+            echo ""
+            # Indented, so the log text renders as code and cannot add markup.
+            printf '    %s\n' "$ERROR_LINE"
+          } > "$BODY"
+
+          if [ -n "$NUMBER" ]; then
+            gh issue comment "$NUMBER" --body-file "$BODY"
+            echo "Commented on #$NUMBER."
+          else
+            echo "" >> "$BODY"
+            echo "Closed automatically by nightly-health.yml when this workflow next passes on main." >> "$BODY"
+            gh issue create --title "$TITLE" --label nightly-red --body-file "$BODY"
+          fi

@@ -56,12 +56,26 @@ jobs:
         with:
           path: vskill
 
+      # vskill-platform is private. The built-in GITHUB_TOKEN is scoped to
+      # this repo only, so checking it out with that token fails with
+      # "Not Found - get-a-repository". It needs a fine-grained PAT with
+      # Contents: read on anton-abyzov/vskill-platform, stored here as
+      # VSKILL_PLATFORM_TOKEN.
+      - name: Require the vskill-platform read token
+        env:
+          PLATFORM_TOKEN: ${{ secrets.VSKILL_PLATFORM_TOKEN }}
+        run: |
+          if [ -z "$PLATFORM_TOKEN" ]; then
+            echo "::error::Secret VSKILL_PLATFORM_TOKEN is not set. Add a fine-grained PAT with Contents: read on anton-abyzov/vskill-platform (gh secret set VSKILL_PLATFORM_TOKEN -R anton-abyzov/vskill)."
+            exit 1
+          fi
+
       - name: Checkout vskill-platform (sibling repo)
         uses: actions/checkout@v7
         with:
           repository: anton-abyzov/vskill-platform
           path: vskill-platform
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.VSKILL_PLATFORM_TOKEN }}
 
       - uses: actions/setup-node@v7
         with:

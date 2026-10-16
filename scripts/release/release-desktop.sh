@@ -159,6 +159,15 @@ SUBJECT="$(gh api "repos/${REPO}/commits/${SHA}" -q '.commit.message | split("\n
   || die "could not read commit ${SHA}"
 ok "main is ${SHA:0:12} ${SUBJECT}"
 
+# A dry-run push authenticates and compares refs but sends nothing, so HTTPS
+# push credentials are proven before anything is tagged. The dry run has not
+# fetched main, so it proves them with the local HEAD.
+PUSH_SRC="$SHA"
+[[ "$DRY_RUN" == 1 ]] && PUSH_SRC="HEAD"
+git push --dry-run -q "$REPO_URL" "${PUSH_SRC}:refs/tags/${TAG}" \
+  || die "git push --dry-run to ${REPO_URL} failed; check HTTPS git credentials (gh auth setup-git)"
+ok "git can push ${TAG} to ${REPO_URL}"
+
 # rsign is the Rust minisign crate tauri-bundler uses (BSD minisign keys are
 # not interchangeable). It reads the password from a tty, so drive it through
 # a pty. The passphrase is never printed, and rsign's output is discarded.

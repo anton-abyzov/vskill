@@ -152,6 +152,8 @@ npx vskill@latest studio               # open local IDE
 npx vskill@latest install <skill>      # install with full security scan
 npx vskill@latest find <query>         # search verified-skill.com registry
 npx vskill@latest list --installed     # what's installed where
+npx vskill@latest update --global      # update skills installed with --global
+npx vskill@latest doctor --global      # broken links, bad names, lock entries with no files
 npx vskill@latest diff <skill> v1 v2   # compare versions before upgrading
 npx vskill@latest skill new            # create a new skill (AI-assisted)
 npx vskill@latest eval sweep <skill>   # benchmark across models

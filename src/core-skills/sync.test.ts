@@ -10,7 +10,13 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
-import { findCoreSkillsDir, listCoreSkills, syncCoreSkills } from "./sync.js";
+import {
+  findCoreSkillsDir,
+  listCoreSkills,
+  pickLatestVersionFolder,
+  pluginFolderVersion,
+  syncCoreSkills,
+} from "./sync.js";
 import { migrateStaleSkillFiles } from "../installer/migrate.js";
 import { lstatSync } from "node:fs";
 
@@ -80,6 +86,66 @@ describe("core-skills/sync", () => {
       if (result !== null) {
         expect(existsSync(result)).toBe(true);
       }
+    });
+
+    function cacheVersion(home: string, folder: string, manifestVersion?: string): string {
+      const dir = join(home, ".claude", "plugins", "cache", "specweave", "sw", folder);
+      mkdirSync(join(dir, "skills"), { recursive: true });
+      if (manifestVersion) {
+        mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
+        writeFileSync(
+          join(dir, ".claude-plugin", "plugin.json"),
+          JSON.stringify({ name: "sw", version: manifestVersion }),
+        );
+      }
+      return join(dir, "skills");
+    }
+
+    it("picks the newest cache folder by semver, not string sort (3.0.14 over 3.0.6)", () => {
+      const home = join(tempDir, "home");
+      cacheVersion(home, "2.3.0");
+      const newest = cacheVersion(home, "3.0.14");
+      cacheVersion(home, "3.0.6");
+      expect(findCoreSkillsDir({ home })).toBe(newest);
+    });
+
+    it("reads the version from plugin.json when the folder name is stale", () => {
+      const home = join(tempDir, "home");
+      // Claude Code keeps reusing a folder named 2.1.0 for later versions.
+      const reused = cacheVersion(home, "2.1.0", "3.0.12");
+      cacheVersion(home, "3.0.6");
+      expect(findCoreSkillsDir({ home })).toBe(reused);
+    });
+
+    it("ignores folders without skills/ and dot-prefixed staging folders", () => {
+      const home = join(tempDir, "home");
+      const base = join(home, ".claude", "plugins", "cache", "specweave", "sw");
+      const kept = cacheVersion(home, "3.0.2");
+      mkdirSync(join(base, "3.0.20"), { recursive: true }); // no skills/
+      cacheVersion(home, ".staging-9.9.9");
+      expect(findCoreSkillsDir({ home })).toBe(kept);
+    });
+  });
+
+  describe("pickLatestVersionFolder", () => {
+    it("returns null for no folders and breaks version ties by folder name", () => {
+      const base = join(tempDir, "versions");
+      mkdirSync(base, { recursive: true });
+      expect(pickLatestVersionFolder(base, [])).toBeNull();
+      for (const name of ["3.0.9", "3.0.10"]) {
+        mkdirSync(join(base, name, ".claude-plugin"), { recursive: true });
+        writeFileSync(join(base, name, ".claude-plugin", "plugin.json"), JSON.stringify({ version: "3.0.12" }));
+      }
+      expect(pickLatestVersionFolder(base, ["3.0.9", "3.0.10"])).toBe("3.0.10");
+    });
+
+    it("falls back to the folder name when plugin.json is unreadable", () => {
+      const base = join(tempDir, "versions");
+      mkdirSync(join(base, "3.0.14", ".claude-plugin"), { recursive: true });
+      writeFileSync(join(base, "3.0.14", ".claude-plugin", "plugin.json"), "{ not json");
+      mkdirSync(join(base, "3.0.6"), { recursive: true });
+      expect(pluginFolderVersion(join(base, "3.0.14"))).toBe("3.0.14");
+      expect(pickLatestVersionFolder(base, ["3.0.6", "3.0.14"])).toBe("3.0.14");
     });
   });
 

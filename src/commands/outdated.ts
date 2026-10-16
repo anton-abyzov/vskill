@@ -17,6 +17,7 @@ import { checkUpdates } from "../api/client.js";
 import type { CheckUpdateItem, CheckUpdateResult } from "../api/client.js";
 import { readLockfile, writeLockfile } from "../lockfile/lockfile.js";
 import { getProjectRoot } from "../lockfile/project-root.js";
+import { mergedSkills, resolveLockTargets } from "../lockfile/scope.js";
 import type { VskillLock } from "../lockfile/types.js";
 import { parseSource } from "../resolvers/source-resolver.js";
 import {
@@ -47,20 +48,73 @@ function resolveFullName(name: string, source: string): string {
 }
 
 /**
+ * Which lockfile `outdated` reads:
+ *   "project" — the project lock only (the Studio route's long-standing view)
+ *   "global"  — ~/.agents/vskill.lock plus the legacy ~/vskill.lock
+ *   "auto"    — the project lock, or the global one outside a project
+ */
+export type OutdatedScope = "project" | "global" | "auto";
+
+interface LockView {
+  /** null when no lockfile exists for the scope. */
+  skills: VskillLock["skills"] | null;
+  /** Directory of the lock each entry came from (resolves install paths). */
+  dirOf: Map<string, string>;
+  /** Where authored (self-published) skills are tracked; null for global. */
+  authoredDir: string | null;
+  fellBackToGlobal: boolean;
+  displayPath: string;
+}
+
+function readLockView(scope: OutdatedScope): LockView {
+  if (scope === "project") {
+    const lock = readLockfile();
+    const dir = getProjectRoot();
+    const skills = lock ? lock.skills : null;
+    return {
+      skills,
+      dirOf: new Map(Object.keys(skills ?? {}).map((n) => [n, dir])),
+      authoredDir: dir,
+      fellBackToGlobal: false,
+      displayPath: join(dir, "vskill.lock"),
+    };
+  }
+  const r = resolveLockTargets({ global: scope === "global", read: readLockfile });
+  const dirOf = new Map<string, string>();
+  for (const t of r.targets) for (const n of t.names) if (!dirOf.has(n)) dirOf.set(n, t.dir);
+  return {
+    skills: r.targets.length > 0 ? mergedSkills(r.targets) : null,
+    dirOf,
+    authoredDir: scope === "global" ? null : r.projectDir,
+    fellBackToGlobal: r.fellBackToGlobal && r.targets.length > 0,
+    displayPath: r.displayPath,
+  };
+}
+
+/**
  * 0740: Programmatic entry-point for "what's outdated?". Same disk-version
  * reconcile logic as `outdatedCommand`, but returns the data instead of
  * printing/exiting. Lets the eval-server's `/api/skills/updates` route
  * compute updates without shelling out to a separate `vskill` binary on
  * PATH (which may be a different version than the studio is bundling).
  *
+ * `scope` defaults to "project" so programmatic callers keep their view;
+ * the CLI passes "auto" or "global".
+ *
  * Returns null when there is no lockfile or no installed skills.
  */
-export async function getOutdatedJson(): Promise<
+export async function getOutdatedJson(opts: { scope?: OutdatedScope } = {}): Promise<
   { results: CheckUpdateResult[]; pinMap: Map<string, string>; authoredNames: Set<string> } | null
 > {
-  const lock = readLockfile();
-  const lockDir = getProjectRoot();
-  const authored = readAuthored(lockDir);
+  return outdatedFromView(readLockView(opts.scope ?? "project"));
+}
+
+async function outdatedFromView(view: LockView): Promise<
+  { results: CheckUpdateResult[]; pinMap: Map<string, string>; authoredNames: Set<string> } | null
+> {
+  const lock = view.skills ? { skills: view.skills } : null;
+  const authoredDir = view.authoredDir;
+  const authored = authoredDir ? readAuthored(authoredDir) : [];
   const lockSkillCount = lock ? Object.keys(lock.skills).length : 0;
   if (lockSkillCount === 0 && authored.length === 0) return null;
 
@@ -75,6 +129,7 @@ export async function getOutdatedJson(): Promise<
   const items: CheckUpdateItem[] = lock
     ? publicEntries.map(([name, entry]) => {
         const resolvedName = resolveFullName(name, entry.source);
+        const lockDir = view.dirOf.get(name) ?? authoredDir ?? getProjectRoot();
         const skillMdPath = resolveInstallPath({ name, entry, lockDir });
         const reconciled = reconcileLockfileVersion({
           lockfileVersion: entry.version,
@@ -103,6 +158,8 @@ export async function getOutdatedJson(): Promise<
       // Already tracked via lockfile — avoid duplicate poll entries.
       continue;
     }
+    // authored is only non-empty when authoredDir is set.
+    const lockDir = authoredDir!;
     const absSourcePath = isAbsolute(a.sourcePath)
       ? a.sourcePath
       : join(lockDir, a.sourcePath);
@@ -153,8 +210,13 @@ export async function getOutdatedJson(): Promise<
   return { results, pinMap, authoredNames };
 }
 
-export async function outdatedCommand(opts: { json?: boolean }): Promise<void> {
-  const programmatic = await getOutdatedJson().catch((err) => {
+export async function outdatedCommand(opts: { json?: boolean; global?: boolean }): Promise<void> {
+  const view = readLockView(opts.global ? "global" : "auto");
+  if (view.fellBackToGlobal) {
+    // stderr keeps --json output parseable.
+    console.error(dim(`No project vskill.lock here; checking user-level skills from ${view.displayPath}`));
+  }
+  const programmatic = await outdatedFromView(view).catch((err) => {
     const msg = err instanceof Error ? err.message : String(err);
     if (opts.json) {
       console.log(JSON.stringify({ error: msg, results: [] }, null, 2));
@@ -165,7 +227,7 @@ export async function outdatedCommand(opts: { json?: boolean }): Promise<void> {
     return null;
   });
 
-  const lockEntries = Object.entries(readLockfile()?.skills ?? {});
+  const lockEntries = Object.entries(view.skills ?? {});
   const privateCount = lockEntries.length - (await filterPublicEntries(lockEntries)).length;
   const privateNote =
     privateCount > 0
@@ -239,7 +301,7 @@ export async function outdatedCommand(opts: { json?: boolean }): Promise<void> {
 
   console.log(bold(`\n${countLabel}\n`));
   console.log(table(headers, rows));
-  console.log(dim(`\nRun ${cyan("vskill update --all")} to update.\n`));
+  console.log(dim(`\nRun ${cyan(opts.global || view.fellBackToGlobal ? "vskill update --global" : "vskill update --all")} to update.\n`));
   process.exit(1);
 }
 

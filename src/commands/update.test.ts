@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import os from "node:os";
+import { join } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Mock node:fs
@@ -830,5 +832,184 @@ describe("updateCommand", () => {
     await updateCommand("frontend", { all: false });
 
     expect(mockInstallSymlink).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// User-level installs: --global and the outside-a-project default
+// ---------------------------------------------------------------------------
+describe("updateCommand — user-level lock (~/.agents/vskill.lock)", () => {
+  const globalDir = join(os.homedir(), ".agents");
+  const lockWith = (names: string[]) => ({
+    version: 1,
+    agents: ["claude-code"],
+    skills: Object.fromEntries(names.map((n) => [n, {
+      version: "1.0.0",
+      sha: `old-${n}`,
+      tier: "VERIFIED",
+      installedAt: "2026-01-01T00:00:00.000Z",
+      source: "github:test/repo",
+    }])),
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  });
+  let logs: string[];
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    githubVisibility.clear();
+    gitOrigins.clear();
+    (await import("../lib/repo-visibility.js"))._resetRepoVisibilityForTests();
+    mockDetectInstalledAgents.mockResolvedValue(MOCK_AGENTS);
+    mockFetchFromSource.mockResolvedValue(UPDATED_FETCH_RESULT);
+    mockResolveVersion.mockReturnValue("2.0.0");
+    mockExtractFrontmatterVersion.mockReturnValue(undefined);
+    mockRunTier1Scan.mockReturnValue({ verdict: "PASS", score: 100, findings: [] });
+    mockInstallSymlink.mockReturnValue([]);
+    logs = [];
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+  });
+
+  it("--global reads and writes ~/.agents/vskill.lock and installs globally", async () => {
+    const globalLock = lockWith(["html-report"]);
+    mockReadLockfile.mockImplementation((dir?: string) =>
+      dir === globalDir ? globalLock : dir === os.homedir() ? null : lockWith(["project-skill"]));
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand(undefined, { global: true });
+
+    expect(mockInstallSymlink).toHaveBeenCalledTimes(1);
+    expect(mockInstallSymlink.mock.calls[0][0]).toBe("html-report");
+    expect(mockInstallSymlink.mock.calls[0][3]).toMatchObject({ global: true });
+    expect(mockWriteLockfile).toHaveBeenCalledTimes(1);
+    expect(mockWriteLockfile.mock.calls[0][1]).toBe(globalDir);
+    expect(mockWriteLockfile.mock.calls[0][0].skills["html-report"].sha).toBe("new-sha-12345");
+    // Project-level SKILL.md naming enforcement never runs over user dirs.
+    expect(mockEnsureSkillMdNaming).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the user-level lock when there is no project lock", async () => {
+    const globalLock = lockWith(["html-report"]);
+    mockReadLockfile.mockImplementation((dir?: string) => (dir === globalDir ? globalLock : null));
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand(undefined, {});
+
+    expect(mockInstallSymlink.mock.calls[0][3]).toMatchObject({ global: true });
+    expect(mockWriteLockfile.mock.calls[0][1]).toBe(globalDir);
+    expect(logs.join("\n")).toContain("updating user-level skills from");
+  });
+
+  it("keeps the project lock as the default inside a project", async () => {
+    mockReadLockfile.mockImplementation((dir?: string) => (dir === globalDir ? lockWith(["user-skill"]) : dir === os.homedir() ? null : lockWith(["project-skill"])));
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand(undefined, {});
+
+    expect(mockInstallSymlink).toHaveBeenCalledTimes(1);
+    expect(mockInstallSymlink.mock.calls[0][0]).toBe("project-skill");
+    expect(mockInstallSymlink.mock.calls[0][3]).toMatchObject({ global: false });
+    expect(mockWriteLockfile.mock.calls[0][1]).not.toBe(globalDir);
+  });
+
+  it("also updates entries only the legacy ~/vskill.lock records, writing each lock back to its own dir", async () => {
+    const current = lockWith(["shared"]);
+    const legacy = lockWith(["shared", "old-only"]);
+    mockReadLockfile.mockImplementation((dir?: string) =>
+      dir === globalDir ? current : dir === os.homedir() ? legacy : null);
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand(undefined, { global: true });
+
+    expect(mockInstallSymlink.mock.calls.map((c) => c[0]).sort()).toEqual(["old-only", "shared"]);
+    expect(mockWriteLockfile.mock.calls.map((c) => c[1])).toEqual([globalDir, os.homedir()]);
+    // The legacy copy of "shared" is left to the current lock.
+    expect(legacy.skills.shared.sha).toBe("old-shared");
+    expect(legacy.skills["old-only"].sha).toBe("new-sha-12345");
+  });
+
+  it("names the --global flag when a skill is not in the project lock", async () => {
+    mockReadLockfile.mockImplementation((dir?: string) => (dir === globalDir ? lockWith(["user-skill"]) : dir === os.homedir() ? null : lockWith(["project-skill"])));
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    });
+    const exit = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit");
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await expect(updateCommand("user-skill", {})).rejects.toThrow("process.exit");
+    expect(errors.join("\n")).toContain("vskill update user-skill --global");
+    exit.mockRestore();
+  });
+
+  it("keeps the old lock entry when writing the update fails", async () => {
+    const globalLock = lockWith(["html-report"]);
+    mockReadLockfile.mockImplementation((dir?: string) => (dir === globalDir ? globalLock : null));
+    mockInstallSymlink.mockImplementation(() => {
+      throw new Error("EACCES: permission denied");
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand(undefined, { global: true });
+
+    expect(mockWriteLockfile.mock.calls[0][0].skills["html-report"].sha).toBe("old-html-report");
+    expect(logs.join("\n")).toContain("could not write the update");
+  });
+});
+
+describe("updateCommand — user-level plugin entries", () => {
+  it("skips a user-level plugin entry instead of writing a folder named after the plugin", async () => {
+    vi.clearAllMocks();
+    mockDetectInstalledAgents.mockResolvedValue(MOCK_AGENTS);
+    const globalDir = join(os.homedir(), ".agents");
+    const lock = {
+      version: 1,
+      agents: [],
+      skills: {
+        frontend: {
+          version: "0.2.0", sha: "", tier: "VERIFIED", installedAt: "",
+          source: "marketplace:anton-abyzov/vskill#frontend", marketplace: "vskill", pluginDir: true,
+        },
+      },
+      createdAt: "",
+      updatedAt: "",
+    };
+    mockReadLockfile.mockImplementation((dir?: string) => (dir === globalDir ? lock : null));
+    const logs: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand(undefined, { global: true });
+
+    expect(mockFetchFromSource).not.toHaveBeenCalled();
+    expect(mockInstallSymlink).not.toHaveBeenCalled();
+    expect(logs.join("\n")).toContain("vskill install marketplace:anton-abyzov/vskill#frontend --global");
+  });
+});
+
+describe("skillInstallDirs", () => {
+  it("lists each agent's project dir plus the shared .agents/skills copy", async () => {
+    const { skillInstallDirs } = await import("./update.js");
+    expect(skillInstallDirs(MOCK_AGENTS, "/proj", "foo")).toEqual([
+      join("/proj", ".claude/skills", "foo"),
+      join("/proj", ".cursor/skills", "foo"),
+      join("/proj", ".agents/skills", "foo"),
+    ]);
+  });
+
+  it("lists each agent's global dir plus ~/.agents/skills for global scope", async () => {
+    const { skillInstallDirs } = await import("./update.js");
+    const home = os.homedir();
+    expect(skillInstallDirs(MOCK_AGENTS, "/ignored", "foo", true)).toEqual([
+      join(home, ".claude", "skills", "foo"),
+      join(home, ".cursor", "skills", "foo"),
+      join(home, ".agents", "skills", "foo"),
+    ]);
   });
 });

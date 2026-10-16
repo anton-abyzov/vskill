@@ -3,6 +3,8 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 
 const mockReadLockfile = vi.fn();
 
@@ -142,5 +144,36 @@ describe("listCommand --installed", () => {
     const out = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
     const fooLine = out.split("\n").find((l) => l.includes("foo")) ?? "";
     expect(fooLine).toMatch(/disabled/);
+  });
+});
+
+describe("listCommand — user-level lock", () => {
+  const globalDir = join(homedir(), ".agents");
+
+  it("--global lists ~/.agents/vskill.lock entries as JSON", async () => {
+    mockReadLockfile.mockImplementation((dir?: string) =>
+      dir === globalDir ? lockOf({ baz: BAZ }) : dir === homedir() ? null : lockOf({ foo: FOO }));
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await listCommand({ json: true, global: true });
+
+    const parsed = JSON.parse(logSpy.mock.calls.at(-1)!.join(" "));
+    expect(Object.keys(parsed)).toEqual(["baz"]);
+    expect(errSpy.mock.calls.map((c) => c.join(" ")).join("\n")).toContain(join(globalDir, "vskill.lock"));
+    errSpy.mockRestore();
+  });
+
+  it("falls back to the user-level lock outside a project", async () => {
+    vi.spyOn(process, "cwd").mockReturnValue(tmpdir());
+    mockReadLockfile.mockImplementation((dir?: string) => (dir === globalDir ? lockOf({ baz: BAZ }) : null));
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await listCommand({ installed: true, json: true });
+
+    const parsed = JSON.parse(logSpy.mock.calls.at(-1)!.join(" "));
+    expect(parsed.map((r: { name: string }) => r.name)).toEqual(["baz"]);
+    expect(errSpy.mock.calls.map((c) => c.join(" ")).join("\n")).toContain("listing user-level skills");
+    expect(exitSpy).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
   });
 });

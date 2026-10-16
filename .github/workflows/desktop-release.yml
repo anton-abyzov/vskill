@@ -130,14 +130,18 @@ jobs:
         run: |
           # Same path and key as setup-node's own npm cache, so the entry that
           # main writes is the one restored here.
+          PREFIX="node-cache-${RUNNER_OS}-$(node -p process.arch)-npm-"
           echo "dir=$(npm config get cache)" >> "$GITHUB_OUTPUT"
-          echo "key=node-cache-${RUNNER_OS}-$(node -p process.arch)-npm-${{ hashFiles('package-lock.json') }}" >> "$GITHUB_OUTPUT"
+          echo "prefix=${PREFIX}" >> "$GITHUB_OUTPUT"
+          echo "key=${PREFIX}${{ hashFiles('package-lock.json') }}" >> "$GITHUB_OUTPUT"
 
       - name: Restore npm cache (read-only)
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ steps.npm-cache.outputs.dir }}
           key: ${{ steps.npm-cache.outputs.key }}
+          # A lockfile change since main's last save still restores most of it.
+          restore-keys: ${{ steps.npm-cache.outputs.prefix }}
 
       - name: Setup Rust toolchain
         # Pinned: a floating stable changes the rust-cache key overnight and

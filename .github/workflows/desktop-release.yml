@@ -6,6 +6,13 @@ name: Desktop Release
 # publishes a minisign-signed `latest.json` for the Tauri Updater plugin;
 # creates a GitHub Release as a defense-in-depth mirror.
 #
+# Dry runs build and sign exactly like a release but never upload to R2,
+# promote latest.json or create a GitHub release:
+#   - pull requests from this repo that touch this workflow or scripts/release/**
+#   - workflow_dispatch with dry_run (the default)
+# A publishing dispatch (dry_run unticked) is only accepted on a desktop-v* tag.
+# The one-command release is scripts/release/release-desktop.sh (RELEASING.md).
+#
 # Owner: 0829 Track D (ci-pipeline-agent)
 # Spec ACs: AC-US13-01..06 (release pipeline), AC-US14-01..05 (updater + sig),
 #           AC-US16-01..05 (manifest hosting), AC-US17-01..05 (changelog)
@@ -16,62 +23,151 @@ on:
   push:
     tags:
       - 'desktop-v*'
+  pull_request:
+    paths:
+      - '.github/workflows/desktop-release.yml'
+      - 'scripts/release/**'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build and sign only (no R2 upload, no latest.json, no GitHub release)'
+        type: boolean
+        default: true
 
-permissions: write-all
+permissions:
+  contents: read
+
+concurrency:
+  # A newer push to the same PR cancels its older dry run. Tag runs are keyed
+  # by their own tag and never cancel each other; publish has its own group.
+  group: desktop-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # 'true' only for a real release: a desktop-v* tag push, or a dispatch on
+  # such a tag with dry_run unticked. Everything else is a dry run.
+  PUBLISH: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)) }}
 
 jobs:
   build:
     name: Build (${{ matrix.platform }})
+    # Fork PRs get no secrets and must never run this workflow. Dependabot PRs
+    # get only Dependabot secrets; dry-run those by dispatching on the branch.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: macos-14
             target: aarch64-apple-darwin
-            rustup_targets: aarch64-apple-darwin
             bundles: app,dmg
             platform: macos
+            artifact: macos-14-artifacts
+            apt_extra: ''
           - os: windows-2022
             target: x86_64-pc-windows-msvc
-            rustup_targets: x86_64-pc-windows-msvc
             bundles: msi,nsis
             platform: windows
+            artifact: windows-2022-artifacts
+            apt_extra: ''
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            rustup_targets: x86_64-unknown-linux-gnu
-            bundles: deb,rpm,appimage
+            bundles: deb,appimage
             platform: linux
+            artifact: ubuntu-22.04-artifacts
+            apt_extra: ''
+          # The RPM bundle took ~320s on every release (gzip of the 130 MiB
+          # sidecar payload) on the critical Linux leg. It is its own leg now;
+          # publish still waits for it through `needs: build`.
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: rpm
+            platform: linux-rpm
+            artifact: ubuntu-22.04-rpm-artifacts
+            apt_extra: rpm
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
         with:
+          # Full history: the ancestry guard below needs origin/main.
           fetch-depth: 0
 
-      - name: Setup Node 22
+      - name: Refuse a publishing dispatch outside a desktop-v tag
+        if: github.event_name == 'workflow_dispatch' && !inputs.dry_run && !startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: bash
+        run: |
+          echo "::error::dry_run=false is only allowed when dispatching on a desktop-v* tag (got ${GITHUB_REF})"
+          exit 1
+
+      - name: Refuse a tag that is not on main
+        # There is no bump PR: CI stamps the version from the tag, so the tag
+        # must point at a commit main already contains.
+        if: env.PUBLISH == 'true'
+        shell: bash
+        run: |
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::${GITHUB_REF_NAME} ($(git rev-parse HEAD)) is not an ancestor of origin/main. Tag a commit on main."
+            exit 1
+          fi
+          echo "${GITHUB_REF_NAME} is on main."
+
+      - name: Setup Node 22.23.3
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
-          cache: 'npm'
+          # The SEA sidecar embeds this exact Node, so every leg pins one patch.
+          node-version: '22.23.3'
+          # npm cache is restored read-only below: tag and PR refs never save.
+          package-manager-cache: false
+
+      - name: Locate npm cache
+        id: npm-cache
+        shell: bash
+        run: |
+          # Same path and key as setup-node's own npm cache, so the entry that
+          # main writes is the one restored here.
+          echo "dir=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+          echo "key=node-cache-${RUNNER_OS}-$(node -p process.arch)-npm-${{ hashFiles('package-lock.json') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore npm cache (read-only)
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ steps.npm-cache.outputs.dir }}
+          key: ${{ steps.npm-cache.outputs.key }}
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        # Pinned: a floating stable changes the rust-cache key overnight and
+        # every cache goes cold. Bump here and in notarize-dryrun.yml together.
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          targets: ${{ matrix.rustup_targets }}
+          toolchain: 1.99.1
+          targets: ${{ matrix.target }}
 
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+      - name: Restore Cargo cache (written on main by notarize-dryrun.yml)
+        # A tag run can only read caches of its own ref and of main. The
+        # nightly writes desktop-<target> on main. rust-cache hashes the
+        # CARGO_*/RUST* env into the key, so keep that env identical there.
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri -> target
+          shared-key: desktop-${{ matrix.target }}
+          save-if: false
 
       - name: Install Linux build deps
-        if: matrix.platform == 'linux'
+        if: startsWith(matrix.platform, 'linux')
         run: |
+          # Skip the man-db triggers (~20s); nothing here reads man pages.
+          sudo rm -f /var/lib/man-db/auto-update
           sudo apt-get update
+          # gnupg ships with the runner image.
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
             libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
-            patchelf libfuse2 rpm gnupg
+            patchelf libfuse2 ${{ matrix.apt_extra }}
           # minisign isn't in jammy main; download the prebuilt static binary
           MINISIGN_VERSION=0.12
           curl -fsSL "https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz" -o /tmp/minisign.tgz
@@ -94,81 +190,12 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k actions build.keychain
           rm -f /tmp/cert.p12
 
-      - name: macOS — store notarytool credentials
-        if: matrix.platform == 'macos'
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_KEY_B64: ${{ secrets.ASC_PRIVATE_KEY_BASE64 }}
-        run: |
-          echo "$ASC_KEY_B64" | base64 --decode > /tmp/AuthKey.p8
-          xcrun notarytool store-credentials vskill \
-            --key /tmp/AuthKey.p8 \
-            --key-id "$ASC_KEY_ID" \
-            --issuer "$ASC_ISSUER_ID"
-
       - name: Install npm deps (no install scripts) + build studio bundle
         run: |
           npm ci --ignore-scripts
           npm run setup
           npm run build
           npm run build:eval-ui
-
-      - name: Build sidecar (macOS/Linux)
-        if: matrix.platform != 'windows'
-        shell: bash
-        run: |
-          if [ "${{ matrix.platform }}" = "linux" ]; then
-            bash scripts/desktop/build-sidecar-linux.sh
-          else
-            bash scripts/desktop/build-sidecar.sh
-          fi
-
-      - name: Build sidecar (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: pwsh -NoProfile -File scripts/desktop/build-sidecar-windows.ps1
-
-      - name: Smoke the sidecar binary (boot, /api/health, /api/shutdown)
-        # The release is only as good as a sidecar that actually starts.
-        # v1.0.62 shipped a Windows sidecar that died with a SyntaxError
-        # before printing LISTEN_PORT; nothing in this pipeline ever ran the
-        # built exe. Fail the release here instead of on the user's desktop.
-        shell: bash
-        run: node scripts/desktop/smoke-sidecar.mjs --log-dir sidecar-smoke-logs
-
-      - name: Upload sidecar smoke logs
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: sidecar-smoke-logs-${{ matrix.platform }}
-          if-no-files-found: ignore
-          path: sidecar-smoke-logs/
-
-      - name: Derive desktop version from git tag + sync into Cargo.toml + tauri.conf.json
-        # Git tag `desktop-v1.0.14` → version `1.0.14`. This decouples the
-        # desktop release cadence from the npm CLI's `package.json` version
-        # (which ships separately). Without this step, asset filenames carry
-        # whatever was hardcoded in src-tauri/Cargo.toml at commit time, which
-        # may diverge from the tag (v1.0.13 tag with v1.0.16 filenames was the
-        # confusion that drove this fix).
-        shell: bash
-        run: |
-          TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#desktop-v}"
-          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([\.\-].*)?$ ]]; then
-            echo "::error::Tag '${TAG}' does not match desktop-vX.Y.Z; got VERSION='${VERSION}'"
-            exit 1
-          fi
-          echo "Desktop version: ${VERSION}"
-          # sed in-place — works on macOS (BSD) + Linux (GNU) when given empty
-          # backup arg differently; use the portable -i.bak then rm pattern.
-          sed -i.bak -E "s/^version = \"[^\"]+\"$/version = \"${VERSION}\"/" src-tauri/Cargo.toml && rm src-tauri/Cargo.toml.bak
-          # tauri.conf.json — use python for reliable JSON edit
-          python3 -c "import json,sys; p='src-tauri/tauri.conf.json'; d=json.load(open(p)); d['version']='${VERSION}'; json.dump(d, open(p,'w'), indent=2)"
-          # Cargo.lock — re-resolve so the locked version matches Cargo.toml
-          (cd src-tauri && cargo update -p vskill-desktop --precise "${VERSION}" 2>&1 || cargo generate-lockfile)
-          echo "version-synced=true" >> $GITHUB_OUTPUT
 
       - name: Pre-flight — verify Tauri signing key is present
         # Without this guard, tauri-action silently builds bundles WITHOUT
@@ -190,94 +217,151 @@ jobs:
           # secret was set with whitespace/newlines that tauri-action's
           # base64 decoder rejects. Strip ALL whitespace before passing
           # the value downstream so the workflow is resilient to a
-          # one-time misformatted upload (the proper long-term fix is
-          # to re-set the secret cleanly via
-          # `base64 -i minisign-priv.key | tr -d '\\n'` then `gh secret
-          # set`, but until that lands this defensive scrub keeps the
-          # release pipeline working).
+          # one-time misformatted upload.
           CLEAN_KEY="$(printf '%s' "${RAW_TAURI_SIGNING_PRIVATE_KEY}" | tr -d ' \t\r\n')"
           if [ "${#CLEAN_KEY}" -ne "${#RAW_TAURI_SIGNING_PRIVATE_KEY}" ]; then
             STRIPPED=$(( ${#RAW_TAURI_SIGNING_PRIVATE_KEY} - ${#CLEAN_KEY} ))
             echo "::warning::Stripped ${STRIPPED} whitespace char(s) from TAURI_SIGNING_PRIVATE_KEY before base64 decode."
           fi
-          echo "TAURI_SIGNING_PRIVATE_KEY present (raw_length=${#RAW_TAURI_SIGNING_PRIVATE_KEY}, clean_length=${#CLEAN_KEY})"
-          # Export the cleaned value to subsequent steps via
-          # GITHUB_ENV so tauri-action receives the whitespace-free
-          # base64 instead of the raw secret. Standard GH-Actions
-          # mechanism — the value is masked because it derives from a
-          # secret.
+          # Export the cleaned value to subsequent steps via GITHUB_ENV so
+          # tauri-action receives the whitespace-free base64 instead of the
+          # raw secret. It stays masked because it derives from a secret.
           {
             echo "TAURI_SIGNING_PRIVATE_KEY<<EOF_CLEAN_KEY"
             echo "${CLEAN_KEY}"
             echo "EOF_CLEAN_KEY"
           } >> "${GITHUB_ENV}"
 
-      - name: Diagnose passphrase encoding (non-revealing)
-        # Prints SHA-256 of the env var so we can verify what bytes GH
-        # actually stored vs what we uploaded, without leaking the value.
-        # Expected (no-newline form): 22474c7dd76281e5115a1f22975eb71d76152a3d891f1d8bac62afe040515fb5
-        # Expected (with newline):    9a2e6c3a248a7fc530f543562ec79cfd24d52566d918d12996edbc3d029669f6
+      - name: Clean signing passphrase
+        # Exports the whitespace-stripped passphrase through GITHUB_ENV. The
+        # tauri-action step deliberately does not re-pull the raw secret.
         shell: bash
         env:
           P: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          echo "Passphrase length: ${#P}"
-          echo "Passphrase SHA-256 (raw): $(printf '%s' "$P" | shasum -a 256 | awk '{print $1}')"
-          echo "Passphrase SHA-256 (with trailing newline): $(printf '%s\n' "$P" | shasum -a 256 | awk '{print $1}')"
-          # Strip whitespace defensively
           CLEAN_P=$(printf '%s' "$P" | tr -d ' \t\r\n')
-          echo "Passphrase clean length: ${#CLEAN_P}"
-          echo "Passphrase clean SHA-256: $(printf '%s' "$CLEAN_P" | shasum -a 256 | awk '{print $1}')"
           if [ "${#CLEAN_P}" -ne "${#P}" ]; then
             STRIPPED=$(( ${#P} - ${#CLEAN_P} ))
             echo "::warning::Stripped ${STRIPPED} whitespace char(s) from TAURI_SIGNING_PRIVATE_KEY_PASSWORD."
           fi
-          # Export cleaned value for the next step (overrides the raw secret).
           {
             echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<EOF_CLEAN_P"
             echo "${CLEAN_P}"
             echo "EOF_CLEAN_P"
           } >> "${GITHUB_ENV}"
 
-      - name: Build Tauri app + sign + (macOS) notarize
-        # tauri-action signs the update bundle (.tar.gz/.zip) using
-        # TAURI_SIGNING_PRIVATE_KEY (minisign Ed25519 per ADR 0829-01 §2),
-        # codesigns the .app/.dmg via APPLE_* on macOS, and emits .sig
-        # peers next to each update bundle.
-        #
-        # `includeUpdaterJson: false` — we publish our own latest.json from
-        # vskill-platform's edge route + R2 (publish-manifest.sh handles the
-        # canonical manifest). Letting tauri-action write its own creates
-        # a stale `latest.json` asset on the GitHub Release that confuses
-        # consumers.
-        #
-        uses: tauri-apps/tauri-action@v0
+      - name: Probe updater signing key
+        # Signs a probe file with the cleaned key + passphrase (from env, never
+        # argv) through the repo's @tauri-apps/cli, the signer the bundler
+        # uses. A bad key or passphrase fails here, before the compile, not at
+        # the end of tauri-action. The Linux leg also verifies the signature
+        # against plugins.updater.pubkey.
+        shell: bash
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          PROBE_DIR=.updater-signing-probe
+          rm -rf "$PROBE_DIR" && mkdir "$PROBE_DIR"
+          echo "updater signing probe ${GITHUB_RUN_ID}" > "$PROBE_DIR/probe.txt"
+          npx --no -- tauri signer sign "$PROBE_DIR/probe.txt" < /dev/null
+          if [ ! -s "$PROBE_DIR/probe.txt.sig" ]; then
+            echo "::error::tauri signer sign produced no signature"
+            exit 1
+          fi
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            python3 -c 'import base64, json, sys; sys.stdout.write(base64.b64decode(json.load(open("src-tauri/tauri.conf.json"))["plugins"]["updater"]["pubkey"]).decode())' > "$PROBE_DIR/updater.pub"
+            base64 -d "$PROBE_DIR/probe.txt.sig" > "$PROBE_DIR/probe.txt.minisig"
+            minisign -V -p "$PROBE_DIR/updater.pub" -m "$PROBE_DIR/probe.txt" -x "$PROBE_DIR/probe.txt.minisig"
+          fi
+          rm -rf "$PROBE_DIR"
+
+      - name: Build sidecar (macOS/Linux)
+        if: matrix.platform != 'windows'
+        shell: bash
         env:
-          # RELEASE_TOKEN is a PAT that has expired at least once (desktop-v1.0.63
-          # built on all three platforms, then every job died on 'Bad credentials'
-          # at the release step). The job already declares `permissions: write-all`,
-          # so the built-in GITHUB_TOKEN can create the release and upload assets.
-          # `secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN` does NOT work here: an
-          # expired PAT is still a non-empty string, so `||` keeps choosing it. Use
-          # the built-in token outright. Restore a PAT only if this release ever
-          # needs to trigger another workflow (the built-in token deliberately does
-          # not), and then treat its expiry as a release-blocking dependency.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS codesigning + notarization
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # Tauri Updater minisign keypair (all platforms). Note: we
-          # intentionally do NOT re-pull the raw secrets here — the
-          # whitespace-stripped CLEAN_KEY and CLEAN_P (passphrase) are
-          # exported into GITHUB_ENV by the pre-flight + diagnostic steps
-          # above and inherited by this step. Inheriting via GITHUB_ENV
-          # instead of `${{ secrets.X }}` is what makes the defensive
-          # scrub effective. v1.0.25 failed because the passphrase was
-          # explicitly re-pulled from secrets here, bypassing the cleanup.
+          # dist/ was built by the npm step above; skip tsc + vite here.
+          SKIP_UPSTREAM_BUILD: '1'
+        run: |
+          if [ "${{ matrix.platform }}" = "macos" ]; then
+            bash scripts/desktop/build-sidecar.sh
+          else
+            bash scripts/desktop/build-sidecar-linux.sh
+          fi
+
+      - name: Build sidecar (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          SKIP_UPSTREAM_BUILD: '1'
+        run: pwsh -NoProfile -File scripts/desktop/build-sidecar-windows.ps1
+
+      - name: Smoke the sidecar binary (boot, /api/health, /api/shutdown)
+        # The release is only as good as a sidecar that actually starts.
+        # v1.0.62 shipped a Windows sidecar that died with a SyntaxError
+        # before printing LISTEN_PORT; nothing in this pipeline ever ran the
+        # built exe. Fail the release here instead of on the user's desktop.
+        shell: bash
+        run: node scripts/desktop/smoke-sidecar.mjs --log-dir sidecar-smoke-logs
+
+      - name: Upload sidecar smoke logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sidecar-smoke-logs-${{ matrix.platform }}
+          if-no-files-found: ignore
+          path: sidecar-smoke-logs/
+
+      - name: Derive desktop version from git tag + sync into Cargo.toml + tauri.conf.json
+        # Git tag `desktop-v1.0.14` → version `1.0.14`. This decouples the
+        # desktop release cadence from the npm CLI's `package.json` version
+        # (which ships separately), and it is why a release needs no bump PR.
+        # Dry runs keep the committed version.
+        if: env.PUBLISH == 'true'
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#desktop-v}"
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([\.\-].*)?$ ]]; then
+            echo "::error::Tag '${TAG}' does not match desktop-vX.Y.Z; got VERSION='${VERSION}'"
+            exit 1
+          fi
+          echo "Desktop version: ${VERSION}"
+          # sed in-place — works on macOS (BSD) + Linux (GNU) when given empty
+          # backup arg differently; use the portable -i.bak then rm pattern.
+          sed -i.bak -E "s/^version = \"[^\"]+\"$/version = \"${VERSION}\"/" src-tauri/Cargo.toml && rm src-tauri/Cargo.toml.bak
+          # tauri.conf.json — use python for reliable JSON edit
+          python3 -c "import json,sys; p='src-tauri/tauri.conf.json'; d=json.load(open(p)); d['version']='${VERSION}'; json.dump(d, open(p,'w'), indent=2)"
+          # Cargo.lock: move only the vskill-desktop entry. Never fall back to
+          # re-resolving the whole lockfile at release time; that would ship
+          # ~200 crate versions CI never tested.
+          if ! (cd src-tauri && cargo update -p vskill-desktop --precise "${VERSION}"); then
+            echo "::error::cargo update -p vskill-desktop --precise ${VERSION} failed"
+            exit 1
+          fi
+
+      - name: Build Tauri app + sign + (macOS) notarize
+        # tauri-action signs the update bundles using TAURI_SIGNING_PRIVATE_KEY
+        # (minisign Ed25519 per ADR 0829-01 §2), codesigns and notarizes the
+        # .app via APPLE_* on macOS, and emits .sig peers next to each bundle.
+        #
+        # Build only: with no tagName/releaseId, tauri-action uploads nothing.
+        # The publish job creates the GitHub release once, after R2 succeeds
+        # (this upload once failed every leg of v1.0.63 with 'Bad credentials').
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        env:
+          # macOS codesigning + notarization (empty on the other legs)
+          APPLE_ID: ${{ matrix.platform == 'macos' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ matrix.platform == 'macos' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.platform == 'macos' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_CERTIFICATE: ${{ matrix.platform == 'macos' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ matrix.platform == 'macos' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ matrix.platform == 'macos' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          # Tauri Updater minisign keypair (all platforms). We intentionally
+          # do NOT re-pull the raw secrets here: the whitespace-stripped key
+          # and passphrase come from GITHUB_ENV (pre-flight + passphrase steps
+          # above). A step-level `${{ secrets.X }}` would override GITHUB_ENV;
+          # v1.0.25 failed exactly that way.
+          #
           # 0836 US-004: src-tauri/build.rs panics if GITHUB_OAUTH_CLIENT_ID
           # is unset or equals the placeholder `Iv1.placeholder-replace-before-ship`
           # for release builds — guards against shipping a binary that can never
@@ -295,11 +379,6 @@ jobs:
           GITHUB_OAUTH_CLIENT_ID: Ov23li6H8OpvPfuhyDEt
         with:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Skill Studio ${{ github.ref_name }}'
-          releaseDraft: true
-          prerelease: false
-          includeUpdaterJson: false
 
       - name: Verify .sig peer files were generated
         # Defensive — if tauri-action exited 0 but no .sig file landed next
@@ -348,20 +427,80 @@ jobs:
                 "$BUNDLE_DIR/appimage"/*.AppImage.sig \
                 "$BUNDLE_DIR/appimage"/*.AppImage.tar.gz.sig
               ;;
+            linux-rpm)
+              # Not an updater bundle; require only that the package exists.
+              if ! compgen -G "$BUNDLE_DIR/rpm/*.rpm" > /dev/null; then
+                echo "::error::no .rpm bundle under $BUNDLE_DIR/rpm"
+                exit 1
+              fi
+              ;;
             *)
               echo "::error::unknown platform ${{ matrix.platform }}"
               exit 1
               ;;
           esac
-          echo "All expected .sig peers present for ${{ matrix.platform }}."
+          echo "All expected bundles present for ${{ matrix.platform }}."
 
-      - name: Verify code signing (macOS)
+      - name: Notarize + staple the DMG (macOS)
+        # tauri-action notarizes and staples the .app only, so the DMG users
+        # download stayed 'Unnotarized Developer ID'. Uses the same Apple ID
+        # credential as tauri-action: one credential path, no keychain profile.
+        if: matrix.platform == 'macos'
+        shell: bash
+        timeout-minutes: 35
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_WAIT_TIMEOUT: 30m
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          DMGS=(src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
+          if [ "${#DMGS[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one DMG, found ${#DMGS[@]}"
+            exit 1
+          fi
+          bash scripts/release/notarize-macos.sh "${DMGS[0]}"
+
+      - name: Verify code signing + notarization (macOS)
+        # Gating: each check fails the job; nothing here may fail softly.
         if: matrix.platform == 'macos'
         shell: bash
         run: |
-          DMG=$(ls -1t src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg | head -1)
-          spctl -a -t open -vv --context context:primary-signature "$DMG" || true
-          codesign -dv --verbose=4 "$DMG" 2>&1 | head -20
+          set -euo pipefail
+          shopt -s nullglob
+          BUNDLE="src-tauri/target/${{ matrix.target }}/release/bundle"
+          APPS=("$BUNDLE"/macos/*.app)
+          DMGS=("$BUNDLE"/dmg/*.dmg)
+          if [ "${#APPS[@]}" -ne 1 ] || [ "${#DMGS[@]}" -ne 1 ]; then
+            echo "::error::expected one .app and one .dmg (found ${#APPS[@]} and ${#DMGS[@]})"
+            exit 1
+          fi
+          APP="${APPS[0]}"
+          DMG="${DMGS[0]}"
+          # assess <path> <spctl flags...>: spctl must accept the path AND
+          # report it as notarized.
+          assess() {
+            local target="$1" out
+            shift
+            if ! out="$(spctl "$@" "$target" 2>&1)"; then
+              echo "$out"
+              echo "::error::spctl rejected $target"
+              return 1
+            fi
+            echo "$out"
+            case "$out" in
+              *"source=Notarized Developer ID"*) ;;
+              *) echo "::error::spctl did not report 'Notarized Developer ID' for $target"; return 1 ;;
+            esac
+          }
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          xcrun stapler validate "$APP"
+          assess "$APP" -a -t exec -vv
+          codesign --verify --strict --verbose=2 "$DMG"
+          xcrun stapler validate "$DMG"
+          assess "$DMG" -a -t open --context context:primary-signature -vv
 
       - name: 0836 US-004 — assert no placeholder client_id in release binary
         # Defense-in-depth alongside src-tauri/build.rs: even if a future
@@ -396,7 +535,7 @@ jobs:
           echo "OK: placeholder string absent from all release binaries."
 
       - name: GPG sign Linux artifacts
-        if: matrix.platform == 'linux'
+        if: startsWith(matrix.platform, 'linux')
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_KEY_FPR: ${{ secrets.GPG_KEY_FPR }}
@@ -407,7 +546,7 @@ jobs:
       - name: Upload platform artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.os }}-artifacts
+          name: ${{ matrix.artifact }}
           if-no-files-found: error
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
@@ -436,8 +575,20 @@ jobs:
   publish:
     name: Publish to R2 + GitHub Release
     needs: build
+    # Real releases only. Dry runs (PRs, dispatch with dry_run) stop after the
+    # builds: no R2 upload, no latest.json promotion, no GitHub release.
+    if: >-
+      startsWith(github.ref, 'refs/tags/desktop-v') &&
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
     runs-on: ubuntu-22.04
     timeout-minutes: 20
+    permissions:
+      contents: write
+    # One latest.json promotion at a time; publish-manifest.sh also refuses
+    # to replace a newer live version.
+    concurrency:
+      group: desktop-release-publish
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
         with:
@@ -448,10 +599,11 @@ jobs:
         with:
           path: ./release-artifacts/
 
-      - name: Install jq + aws-cli + git-cliff
+      - name: Check preinstalled tools + install git-cliff
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq awscli
+          # ubuntu-22.04 images ship AWS CLI v2 and jq; no apt install needed.
+          aws --version
+          jq --version
           curl -sSL https://github.com/orhun/git-cliff/releases/download/v2.6.1/git-cliff-2.6.1-x86_64-unknown-linux-gnu.tar.gz \
             | tar xz -C /tmp
           sudo install /tmp/git-cliff-2.6.1/git-cliff /usr/local/bin/git-cliff
@@ -472,7 +624,8 @@ jobs:
           bash scripts/release/publish-manifest.sh "$VERSION" ./release-artifacts/
 
       - name: Create / update GitHub Release (mirror)
-        uses: softprops/action-gh-release@v2
+        # The only place the GitHub release is created, after R2 succeeded.
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ github.ref_name }}
           name: 'vSkill Desktop ${{ github.ref_name }}'
@@ -481,6 +634,7 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-rc') }}
           files: |
             release-artifacts/**/*.dmg
+            release-artifacts/**/*.app.tar.gz
             release-artifacts/**/*.msi
             release-artifacts/**/*-setup.exe
             release-artifacts/**/*.deb
@@ -489,12 +643,31 @@ jobs:
             release-artifacts/**/*.asc
             release-artifacts/**/*.sig
 
-      - name: Update Homebrew Cask (staging tap)
-        if: ${{ !contains(github.ref_name, '-rc') }}
-        continue-on-error: true
-        run: |
-          if [ -x scripts/release/update-brew-cask.sh ]; then
-            bash scripts/release/update-brew-cask.sh "${GITHUB_REF_NAME#desktop-v}"
-          else
-            echo "update-brew-cask.sh not found, skipping (other agent owns this script)"
-          fi
+  timing:
+    name: Release timing report
+    needs: [build, publish]
+    # Warn-only: per-job and per-step durations against the last successful
+    # releases and fixed budgets (scripts/release/timing-report.mjs).
+    if: >-
+      !cancelled() &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'))
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts/release
+
+      - name: Timing report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/release/timing-report.mjs
+          --repo "$GITHUB_REPOSITORY"
+          --run "$GITHUB_RUN_ID"
+          --workflow desktop-release.yml
+          --event push

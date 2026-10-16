@@ -17,7 +17,10 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The job waits on the whole ci.yml run for the tagged commit (its jobs
+    # have 15-minute timeouts, and macOS/Windows runners can queue), so allow
+    # more than the ~4 minutes a normal release takes.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -43,7 +46,13 @@ jobs:
             exit 1
           fi
           echo "npm user: $user"
-          if ! npm owner ls vskill --registry https://registry.npmjs.org | awk '{print $1}' | grep -qxF "$user"; then
+          # Owner lines are "<user> <email>"; only the user name is compared
+          # and nothing from this list is printed.
+          if ! owners=$(npm owner ls vskill --registry https://registry.npmjs.org); then
+            echo "::error::npm owner ls vskill failed"
+            exit 1
+          fi
+          if ! printf '%s\n' "$owners" | awk '{print $1}' | grep -qxF "$user"; then
             echo "::error::npm user '$user' is not an owner of vskill"
             exit 1
           fi
@@ -53,12 +62,18 @@ jobs:
           echo "dir=$(npm config get cache)" >> "$GITHUB_OUTPUT"
           echo "arch=$(node -p process.arch)" >> "$GITHUB_OUTPUT"
       # Same path and key as setup-node's `cache: npm` writes on main, so the
-      # tag run restores main's cache and never saves one of its own.
+      # tag run restores main's cache and never saves one of its own. The
+      # release commit bumps the version inside package-lock.json, and main's
+      # CI for that commit saves its cache only after this step has run, so the
+      # exact key usually misses on a release; the prefix then restores main's
+      # newest npm cache (content-addressed, so stale entries are harmless).
       - name: Restore the npm cache from main
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ steps.npm-cache.outputs.dir }}
           key: node-cache-${{ runner.os }}-${{ steps.npm-cache.outputs.arch }}-npm-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            node-cache-${{ runner.os }}-${{ steps.npm-cache.outputs.arch }}-npm-
       - run: npm ci --ignore-scripts && npm run setup
       # This release does not re-run the test suite. It relies on ci.yml, whose
       # sharded unit-full jobs run the whole Vitest suite (plus the cross-OS

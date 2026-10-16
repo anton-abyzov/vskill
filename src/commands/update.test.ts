@@ -838,6 +838,9 @@ describe("updateCommand", () => {
 // ---------------------------------------------------------------------------
 // User-level installs: --global and the outside-a-project default
 // ---------------------------------------------------------------------------
+const onDiskUnderHome = (p: unknown) =>
+  typeof p === "string" && p.startsWith(os.homedir()) && p.endsWith("SKILL.md");
+
 describe("updateCommand — user-level lock (~/.agents/vskill.lock)", () => {
   const globalDir = join(os.homedir(), ".agents");
   const lockWith = (names: string[]) => ({
@@ -866,6 +869,8 @@ describe("updateCommand — user-level lock (~/.agents/vskill.lock)", () => {
     mockExtractFrontmatterVersion.mockReturnValue(undefined);
     mockRunTier1Scan.mockReturnValue({ verdict: "PASS", score: 100, findings: [] });
     mockInstallSymlink.mockReturnValue([]);
+    // Every user-level skill in these tests is installed (a SKILL.md under ~).
+    mockExistsSync.mockImplementation(onDiskUnderHome);
     logs = [];
     vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
       logs.push(args.map(String).join(" "));
@@ -959,6 +964,23 @@ describe("updateCommand — user-level lock (~/.agents/vskill.lock)", () => {
     expect(mockWriteLockfile.mock.calls[0][0].skills["html-report"].sha).toBe("old-html-report");
     expect(logs.join("\n")).toContain("could not write the update");
   });
+
+  it("leaves an entry with nothing on disk alone instead of installing it again", async () => {
+    const current = lockWith(["html-report"]);
+    const legacy = lockWith(["removed-by-hand"]);
+    mockReadLockfile.mockImplementation((dir?: string) =>
+      dir === globalDir ? current : dir === os.homedir() ? legacy : null);
+    mockExistsSync.mockImplementation((p: unknown) =>
+      onDiskUnderHome(p) && !String(p).includes("removed-by-hand"));
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand(undefined, { global: true });
+
+    expect(mockInstallSymlink.mock.calls.map((c) => c[0])).toEqual(["html-report"]);
+    expect(mockFetchFromSource).toHaveBeenCalledTimes(1);
+    expect(legacy.skills["removed-by-hand"].sha).toBe("old-removed-by-hand");
+    expect(logs.join("\n")).toContain(`removed-by-hand: in ${join(os.homedir(), "vskill.lock")} but not on disk`);
+  });
 });
 
 describe("updateCommand — user-level plugin entries", () => {
@@ -989,7 +1011,111 @@ describe("updateCommand — user-level plugin entries", () => {
 
     expect(mockFetchFromSource).not.toHaveBeenCalled();
     expect(mockInstallSymlink).not.toHaveBeenCalled();
-    expect(logs.join("\n")).toContain("vskill install marketplace:anton-abyzov/vskill#frontend --global");
+    expect(logs.join("\n")).toContain("vskill install anton-abyzov/vskill/frontend --global");
+  });
+
+  const userLock = (entries: Record<string, Record<string, unknown>>) => ({
+    version: 1,
+    agents: [],
+    skills: Object.fromEntries(Object.entries(entries).map(([n, e]) => [n, {
+      version: "1.0.0", sha: "old", tier: "VERIFIED", installedAt: "", ...e,
+    }])),
+    createdAt: "",
+    updatedAt: "",
+  });
+
+  it("skips user-level --plugin and --plugin-dir installs too (no pluginDir flag)", async () => {
+    vi.clearAllMocks();
+    mockDetectInstalledAgents.mockResolvedValue(MOCK_AGENTS);
+    mockFetchFromSource.mockResolvedValue(UPDATED_FETCH_RESULT);
+    const globalDir = join(os.homedir(), ".agents");
+    const lock = userLock({
+      nanobanana: { source: "github:resciencelab/opc-skills#plugin:nanobanana", scope: "user" },
+      mine: { source: "local:/Users/me/My Plugins/mine", scope: "user", files: ["SKILL.md"] },
+    });
+    mockReadLockfile.mockImplementation((dir?: string) => (dir === globalDir ? lock : null));
+    const logs: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand(undefined, { global: true });
+
+    expect(mockFetchFromSource).not.toHaveBeenCalled();
+    expect(mockInstallSymlink).not.toHaveBeenCalled();
+    const out = logs.join("\n");
+    expect(out).toContain("vskill install resciencelab/opc-skills --plugin nanobanana --global");
+    expect(out).toContain("vskill install --plugin-dir '/Users/me/My Plugins/mine' --plugin mine --global");
+    expect(mockWriteLockfile.mock.calls[0][0].skills.nanobanana.sha).toBe("old");
+  });
+
+  it("still updates a --plugin entry in a project lock (project behaviour unchanged)", async () => {
+    vi.clearAllMocks();
+    mockDetectInstalledAgents.mockResolvedValue(MOCK_AGENTS);
+    mockFetchFromSource.mockResolvedValue(UPDATED_FETCH_RESULT);
+    mockResolveVersion.mockReturnValue("2.0.0");
+    mockRunTier1Scan.mockReturnValue({ verdict: "PASS", score: 100, findings: [] });
+    mockInstallSymlink.mockReturnValue([]);
+    const globalDir = join(os.homedir(), ".agents");
+    const lock = userLock({ frontend: { source: "github:test/repo#plugin:frontend" } });
+    mockReadLockfile.mockImplementation((dir?: string) => (dir === globalDir || dir === os.homedir() ? null : lock));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand(undefined, {});
+
+    expect(mockFetchFromSource).toHaveBeenCalledTimes(1);
+    expect(mockInstallSymlink.mock.calls[0][3]).toMatchObject({ global: false });
+  });
+
+  it("keeps lock entries another process wrote while the update ran", async () => {
+    vi.clearAllMocks();
+    mockDetectInstalledAgents.mockResolvedValue(MOCK_AGENTS);
+    mockFetchFromSource.mockResolvedValue(UPDATED_FETCH_RESULT);
+    mockResolveVersion.mockReturnValue("2.0.0");
+    mockRunTier1Scan.mockReturnValue({ verdict: "PASS", score: 100, findings: [] });
+    mockInstallSymlink.mockReturnValue([]);
+    const globalDir = join(os.homedir(), ".agents");
+    const atStart = userLock({ "html-report": { source: "github:test/repo" } });
+    const onDiskLater = userLock({
+      "html-report": { source: "github:test/repo" },
+      "installed-meanwhile": { source: "github:o/r" },
+    });
+    mockExistsSync.mockImplementation(onDiskUnderHome);
+    let reads = 0;
+    mockReadLockfile.mockImplementation((dir?: string) =>
+      dir === globalDir ? (reads++ === 0 ? atStart : onDiskLater) : null);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const { updateCommand } = await import("./update.js");
+    await updateCommand(undefined, { global: true });
+
+    const written = mockWriteLockfile.mock.calls[0][0];
+    expect(mockWriteLockfile.mock.calls[0][1]).toBe(globalDir);
+    expect(Object.keys(written.skills).sort()).toEqual(["html-report", "installed-meanwhile"]);
+    expect(written.skills["html-report"].sha).toBe("new-sha-12345");
+    expect(written.skills["installed-meanwhile"].sha).toBe("old");
+  });
+});
+
+describe("userLevelPluginReinstallCommand", () => {
+  const entry = (source: string, extra: Record<string, unknown> = {}) =>
+    ({ version: "1.0.0", sha: "", tier: "VERIFIED", installedAt: "", source, ...extra });
+
+  it("gives an install command that routes back to the same plugin install", async () => {
+    const { userLevelPluginReinstallCommand } = await import("./update.js");
+    expect(userLevelPluginReinstallCommand("frontend", entry("marketplace:o/r#frontend", { pluginDir: true })))
+      .toBe("vskill install o/r/frontend --global");
+    expect(userLevelPluginReinstallCommand("p", entry("github:o/r#plugin:p"))).toBe("vskill install o/r --plugin p --global");
+    expect(userLevelPluginReinstallCommand("sw", entry("local:specweave"))).toBe("vskill install --plugin-dir <folder> --plugin sw --global");
+  });
+
+  it("returns null for single-skill entries", async () => {
+    const { userLevelPluginReinstallCommand } = await import("./update.js");
+    expect(userLevelPluginReinstallCommand("a", entry("github:o/r"))).toBeNull();
+    expect(userLevelPluginReinstallCommand("a", entry("registry:a"))).toBeNull();
+    expect(userLevelPluginReinstallCommand("a", entry(""))).toBeNull();
   });
 });
 

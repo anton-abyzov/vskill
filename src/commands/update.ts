@@ -4,13 +4,14 @@
 
 import { unlinkSync, rmdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 // 0706 T-005: `relative` + `sep` for cross-platform ghost-file cleanup guard.
-import { join, resolve, relative, sep as pathSep } from "node:path";
+import { join, resolve, relative, isAbsolute, sep as pathSep } from "node:path";
 import os from "node:os";
 import { readLockfile, writeLockfile } from "../lockfile/index.js";
 import { resolveLockTargets, type LockTarget } from "../lockfile/scope.js";
 import { resolveAgentGlobalSkillsDir } from "../agents/global-dirs.js";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { resolveTilde } from "../utils/paths.js";
+import type { SkillLockEntry, VskillLock } from "../lockfile/types.js";
 import { ensureSkillMdNaming } from "../installer/migrate.js";
 import { installSymlink } from "../installer/canonical.js";
 import { getSkill } from "../api/client.js";
@@ -91,6 +92,69 @@ export function skillInstallDirs(
   }
   dirs.add(join(os.homedir(), ".agents", "skills", name));
   return [...dirs];
+}
+
+function shellArg(value: string): string {
+  return /^[\w@%+=:,./~-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * The `vskill install ... --global` command that refreshes a user-level
+ * plugin entry, or null when the entry is a single skill. The update loop
+ * rewrites one skill folder per entry, so for a plugin it would write the
+ * plugin's skills, joined into one SKILL.md, as a folder named after the
+ * plugin in every agent's user-level dir; a `local:` entry would be
+ * refreshed from the SpecWeave plugin cache whatever folder it came from.
+ */
+export function userLevelPluginReinstallCommand(name: string, entry: SkillLockEntry): string | null {
+  const parsed = parseSource(entry.source ?? "");
+  switch (parsed.type) {
+    case "marketplace":
+      return `vskill install ${parsed.owner}/${parsed.repo}/${parsed.pluginName} --global`;
+    case "github-plugin":
+      return `vskill install ${parsed.owner}/${parsed.repo} --plugin ${parsed.pluginName} --global`;
+    case "local":
+      return `vskill install --plugin-dir ${isAbsolute(parsed.baseName) ? shellArg(parsed.baseName) : "<folder>"} --plugin ${shellArg(name)} --global`;
+    default:
+      return entry.pluginDir || entry.marketplace ? `vskill install ${shellArg(entry.source || name)} --global` : null;
+  }
+}
+
+/**
+ * Whether a user-level skill is installed on this machine: a SKILL.md in
+ * ~/.agents/skills or any detected agent's user-level dir, or its recorded
+ * install path. A lock entry with none of these was removed by hand or is a
+ * leftover (often in the older ~/vskill.lock); `update` leaves it alone
+ * instead of installing it again. `vskill doctor --global` lists them.
+ */
+function userLevelSkillOnDisk(agents: UpdateAgent[], name: string, entry: SkillLockEntry): boolean {
+  if (entry.installedPath && existsSync(entry.installedPath)) return true;
+  return skillInstallDirs(agents, os.homedir(), name, true).some((dir) => existsSync(join(dir, "SKILL.md")));
+}
+
+/**
+ * The lock to write back after an update run: the lock as it is on disk now,
+ * with only the entries this run rewrote replaced. The fetches take a while,
+ * and another process (the Studio, a second terminal) may have installed or
+ * removed skills in the same lock meanwhile; writing the copy read at the
+ * start would undo that.
+ */
+function lockToWrite(
+  dir: string,
+  lock: VskillLock,
+  before: Map<string, SkillLockEntry | undefined>,
+): VskillLock {
+  let current: VskillLock | null = null;
+  try {
+    current = readLockfile(dir);
+  } catch {
+    current = null;
+  }
+  if (!current || current === lock || !current.skills) return lock;
+  for (const [name, entry] of before) {
+    if (lock.skills[name] !== entry && lock.skills[name]) current.skills[name] = lock.skills[name];
+  }
+  return current;
 }
 
 /**
@@ -261,6 +325,9 @@ export async function updateCommand(
     process.exit(1);
     return;
   }
+  // Every detected agent, before --agent narrows the list: a user-level
+  // skill installed for any of them counts as on disk.
+  const detectedAgents = agents;
   // Apply --agent filter (same as install command)
   try {
     agents = filterAgents(agents, opts.agent);
@@ -274,7 +341,7 @@ export async function updateCommand(
   for (const target of targets) {
     const toUpdate = skill ? target.names.filter((n) => n === skill) : target.names;
     if (toUpdate.length === 0) continue;
-    updated += await updateTarget(target, toUpdate, agents, opts);
+    updated += await updateTarget(target, toUpdate, agents, opts, detectedAgents);
   }
 
   console.log(
@@ -296,11 +363,14 @@ async function updateTarget(
   toUpdate: string[],
   agents: AgentDefinition[],
   opts: UpdateOptions,
+  detectedAgents: AgentDefinition[] = agents,
 ): Promise<number> {
   const lock = target.lock;
   const global = target.scope === "global";
   // Project scope installs where the lock lives; global scope ignores the root.
   const projectRoot = global ? os.homedir() : target.dir;
+  // Entries as read, to tell which ones this run rewrote (see lockToWrite).
+  const before = new Map(toUpdate.map((n) => [n, lock.skills[n]]));
   let updated = 0;
 
   for (const name of toUpdate) {
@@ -312,11 +382,16 @@ async function updateTarget(
       continue;
     }
 
-    // A user-level plugin entry stands for several skill folders (and a Claude
-    // Code plugin registration); this loop rewrites one folder per entry, so
-    // it would write a folder named after the plugin into every agent's dir.
-    if (global && entry.pluginDir) {
-      console.log(dim(`${name}: plugin — update it with ${cyan(`vskill install ${entry.source} --global`)}; skipping`));
+    // A user-level plugin entry (marketplace, --plugin or --plugin-dir
+    // install) stands for several skill folders; this loop rewrites one
+    // folder per entry. See userLevelPluginReinstallCommand.
+    const reinstall = global ? userLevelPluginReinstallCommand(name, entry) : null;
+    if (reinstall) {
+      console.log(dim(`${name}: plugin — update it with ${cyan(reinstall)}; skipping`));
+      continue;
+    }
+    if (global && !userLevelSkillOnDisk(detectedAgents, name, entry)) {
+      console.log(dim(`${name}: in ${join(target.dir, "vskill.lock")} but not on disk — skipping; reinstall it with ${cyan("vskill install")} or remove the entry`));
       continue;
     }
 
@@ -531,6 +606,6 @@ async function updateTarget(
     }
   }
 
-  writeLockfile(lock, target.dir);
+  writeLockfile(lockToWrite(target.dir, lock, before), target.dir);
   return updated;
 }

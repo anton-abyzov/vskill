@@ -20,7 +20,9 @@ afterEach(() => { process.exitCode = 0; vi.restoreAllMocks(); });
 describe("private update dispatch", () => {
   it("routes by provenance before source parsing and persists the authenticated update", async () => {
     await updateCommand("helpful", {});
-    expect(mocks.update).toHaveBeenCalledWith("helpful", entry, expect.any(Array), "/synthetic/project");
+    // Installs into the directory of the lock that holds the entry.
+    expect(typeof mocks.write.mock.calls[0][1]).toBe("string");
+    expect(mocks.update).toHaveBeenCalledWith("helpful", entry, expect.any(Array), mocks.write.mock.calls[0][1]);
     expect(mocks.write.mock.calls[0][0].skills.helpful).toMatchObject({ version: "1.1.0", sourcePrivate: true });
     expect(mocks.fetch).not.toHaveBeenCalled(); expect(mocks.publicLookup).not.toHaveBeenCalled();
   });

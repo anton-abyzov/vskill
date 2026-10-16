@@ -107,7 +107,7 @@ scripts/release/notarize-macos.sh path/to/vSkill_X.Y.Z_universal.dmg
 
 Or with `--dry-run` to print the commands without submitting.
 
-Credentials: with `APPLE_ID`, `APPLE_PASSWORD` (app-specific password) and `APPLE_TEAM_ID` set, the script uses that Apple ID, the same credential tauri-action notarizes the `.app` with; CI uses only this path. Otherwise it uses the keychain profile in `NOTARY_PROFILE`, or `vskill` by default.
+Credentials, first match wins: the keychain profile named in `NOTARY_PROFILE`; then `APPLE_ID`, `APPLE_PASSWORD` (app-specific password) and `APPLE_TEAM_ID`, the same Apple ID credential tauri-action notarizes the `.app` with (CI sets only these three); then the keychain profile `vskill`. Setting only some of the three `APPLE_*` variables is an error.
 
 ### Update the Homebrew Cask file
 

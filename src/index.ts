@@ -130,6 +130,7 @@ program
   // 0724 T-005: per-scope enable status table joining lockfile with settings.json reads.
   .option("--installed", "Show installed skills with enabled/disabled status per scope")
   .option("--json", "Output as JSON")
+  .option("--global", "List user-level skills (~/.agents/vskill.lock); the default outside a project")
   .action(async (opts) => {
     const { listCommand } = await import("./commands/list.js");
     await listCommand(opts);
@@ -155,7 +156,7 @@ program
   .option("--global", "Scan global (user) skill folders only")
   .option("--project", "Scan the current project's skill folders only")
   .option("--json", "Output the report as JSON")
-  .option("--fix", "Remove broken and redundant links; replace byte-identical copies with links")
+  .option("--fix", "Remove broken and redundant links; replace byte-identical copies with links (lock entries with nothing on disk are only reported)")
   .action(async (opts: { global?: boolean; project?: boolean; json?: boolean; fix?: boolean }) => {
     const { doctorCommand } = await import("./commands/doctor.js");
     await doctorCommand(opts);
@@ -178,6 +179,7 @@ program
   .option("--all", "Update all installed skills")
   .option("--force", "Override version pin for this update")
   .option("--agent <id>", "Update only for specific agent (repeatable)", collect, [])
+  .option("--global", "Update user-level skills (~/.agents/vskill.lock); the default outside a project")
   .action(async (skill: string | undefined, opts) => {
     const { updateCommand } = await import("./commands/update.js");
     await updateCommand(skill, opts);
@@ -415,7 +417,8 @@ program
   .command("outdated")
   .description("Check installed skills for available updates")
   .option("--json", "Output as JSON")
-  .action(async (opts: { json?: boolean }) => {
+  .option("--global", "Check user-level skills (~/.agents/vskill.lock); the default outside a project")
+  .action(async (opts: { json?: boolean; global?: boolean }) => {
     const { outdatedCommand } = await import("./commands/outdated.js");
     await outdatedCommand(opts);
   });

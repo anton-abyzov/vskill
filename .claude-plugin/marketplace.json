@@ -10,7 +10,7 @@
       "name": "mobile",
       "description": "Mobile development — React Native, Expo, Flutter, SwiftUI, Jetpack Compose, app store",
       "source": "./plugins/mobile",
-      "version": "2.3.0",
+      "version": "2.3.2",
       "category": "development"
     },
     {
@@ -24,7 +24,7 @@
       "name": "marketing",
       "description": "Marketing automation — social media content creation, posting, and engagement across 11 platforms, Blotato batch scheduling (X/TikTok/IG/LinkedIn/YT/FB/Threads), plus Slack messaging and Kie.ai image/video generation",
       "source": "./plugins/marketing",
-      "version": "1.5.0",
+      "version": "1.5.1",
       "category": "marketing"
     },
     {

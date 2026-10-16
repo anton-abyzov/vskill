@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [1.2.8] - 2026-10-16
+
+### Added
+
+- `vskill update`, `vskill outdated` and `vskill list` take `--global` to work on user-level installs recorded in `~/.agents/vskill.lock`. Outside a project they use that lockfile by default and say so, so `vskill update` run from your home folder now updates skills installed with `--global`. Entries that only the older `~/vskill.lock` records are included too. User-level plugin entries (marketplace, `--plugin` and `--plugin-dir` installs) are skipped with the `vskill install ... --global` command that refreshes them. User-level entries with no files on disk (skills removed by hand, leftovers in `~/vskill.lock`) are skipped and named, never installed again.
+- `vskill doctor` reports lockfile entries with nothing on disk (no skill folder and no plugin cache), for `~/.agents/vskill.lock`, the older `~/vskill.lock` and the project lockfile. It only reports them; `--fix` never edits a lockfile.
+- A test fails the build when a SKILL.md under `skills/` or `plugins/` has a description over 1,024 characters, a missing or invalid `name`, or a `name` that differs from its folder.
+
+### Changed
+
+- `vskill doctor --fix` moves broken links into `_archive/<date>/` inside the same skills folder instead of deleting them.
+- Shorter descriptions, under the 1,024-character limit, for `html-report` (1.1.3), `motion-graphics-promo` (1.1.1) and `social-media-posting` (1.0.4). Their triggers are unchanged: `html-report` still runs only when a result needs a report or the user asks for one.
+- `greet-elena` and `appstore` declare their `name` in frontmatter.
+
+### Fixed
+
+- `vskill init` and source updates pick the newest SpecWeave plugin cache by semver and read the version from `plugin.json`, so 3.0.14 wins over 3.0.6 and a folder named `2.1.0` that holds 3.0.12 counts as 3.0.12.
+- `vskill update` keeps a skill's old lockfile entry when writing the new files fails, instead of recording an update that never reached disk. In a project, files are written next to the lockfile that lists them.
+- `vskill update` re-reads the lockfile before writing it back and replaces only the entries it updated, so skills another process installed or removed during the run are not undone.
+
 ## [1.2.7] - 2026-10-11
 
 ### Changed

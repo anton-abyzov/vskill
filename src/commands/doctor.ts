@@ -15,15 +15,20 @@
 //   duplicate-name   two different folders visible to one agent declare
 //                    the same frontmatter name
 //   bad-name / bad-description  agentskills.io frontmatter limits
+//   lock-missing     vskill.lock entry with nothing on disk (no skill
+//                    folder, no plugin cache); report only
 //
-// `--fix` only removes links and replaces byte-identical copies with a
-// relative link to the copy in the shared folder. It never deletes or
-// rewrites a real folder whose content is unique.
+// `--fix` moves broken links into `<dir>/_archive/<date>/`, removes
+// redundant links (the skill stays visible through another folder) and
+// replaces byte-identical copies with a relative link to the copy in the
+// shared folder. It never deletes or rewrites a real folder whose content is
+// unique, and never edits a lockfile.
 // ---------------------------------------------------------------------------
 
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   readdirSync,
   readFileSync,
   readlinkSync,
@@ -52,7 +57,8 @@ export type DoctorIssueKind =
   | "name-mismatch"
   | "duplicate-name"
   | "bad-name"
-  | "bad-description";
+  | "bad-description"
+  | "lock-missing";
 
 export const DOCTOR_ISSUE_KINDS: readonly DoctorIssueKind[] = [
   "divergent",
@@ -64,6 +70,7 @@ export const DOCTOR_ISSUE_KINDS: readonly DoctorIssueKind[] = [
   "duplicate-name",
   "bad-name",
   "bad-description",
+  "lock-missing",
 ];
 
 const SEVERITY: Record<DoctorIssueKind, DoctorSeverity> = {
@@ -76,6 +83,7 @@ const SEVERITY: Record<DoctorIssueKind, DoctorSeverity> = {
   "duplicate-name": "error",
   "bad-name": "warning",
   "bad-description": "warning",
+  "lock-missing": "warning",
 };
 
 export interface DoctorIssue {
@@ -94,7 +102,7 @@ export interface DoctorIssue {
 
 export interface DoctorFixAction {
   kind: DoctorIssueKind;
-  action: "remove-link" | "replace-with-link";
+  action: "remove-link" | "archive-link" | "replace-with-link";
   path: string;
   target?: string;
   ok: boolean;
@@ -427,6 +435,87 @@ const MIGRATION_MARKERS: Array<[string, RegExp]> = [
 ];
 
 // ---------------------------------------------------------------------------
+// Lockfile entries
+// ---------------------------------------------------------------------------
+
+interface LockEntryLike {
+  installedPath?: string;
+  pluginDir?: boolean;
+  marketplace?: string;
+  source?: string;
+}
+
+interface LockRecord {
+  lockPath: string;
+  name: string;
+  entry: LockEntryLike;
+}
+
+/** Entries of the lockfiles for a scope. Global: ~/.agents/vskill.lock, then
+ *  the legacy ~/vskill.lock (names already seen are skipped). Project: the
+ *  lock in the scanned project dir. Unreadable locks are skipped. */
+function readScopeLocks(scope: DoctorScope, home: string, cwd: string): LockRecord[] {
+  const paths = scope === "global"
+    ? [join(home, ".agents", "vskill.lock"), join(home, "vskill.lock")]
+    : [join(cwd, "vskill.lock")];
+  const seen = new Set<string>();
+  const out: LockRecord[] = [];
+  for (const lockPath of paths) {
+    let skills: Record<string, LockEntryLike> | undefined;
+    try {
+      skills = (JSON.parse(readFileSync(lockPath, "utf8")) as { skills?: Record<string, LockEntryLike> }).skills;
+    } catch {
+      continue;
+    }
+    if (!skills || typeof skills !== "object") continue;
+    for (const [name, entry] of Object.entries(skills)) {
+      if (seen.has(name) || !entry || typeof entry !== "object") continue;
+      seen.add(name);
+      out.push({ lockPath, name, entry });
+    }
+  }
+  return out;
+}
+
+function hasEntries(dir: string): boolean {
+  try {
+    return readdirSync(dir).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether anything a lock entry installed is still on disk: its recorded
+ *  install path, a working folder of that name in a scanned dir, a folder
+ *  whose frontmatter names it as a plugin namespace (`plugin/skill`), or,
+ *  for plugins, a Claude Code plugin cache folder. */
+function lockEntryOnDisk(
+  name: string,
+  entry: LockEntryLike,
+  entries: Entry[],
+  declared: Map<string, string>,
+  home: string,
+): boolean {
+  if (entry.installedPath && existsSync(entry.installedPath)) return true;
+  const leaf = name.split("/").pop() ?? name;
+  if (entries.some((e) => e.real && e.name === leaf)) return true;
+  for (const n of declared.values()) {
+    if (n.startsWith(`${leaf}/`) || n.startsWith(`${leaf}:`)) return true;
+  }
+  const isPlugin = entry.pluginDir === true || !!entry.marketplace || (entry.source ?? "").startsWith("marketplace:");
+  if (!isPlugin) return false;
+  const cache = join(home, ".claude", "plugins", "cache");
+  if (entry.marketplace && hasEntries(join(cache, entry.marketplace, leaf))) return true;
+  let marketplaces: string[] = [];
+  try {
+    marketplaces = readdirSync(cache);
+  } catch {
+    return false;
+  }
+  return marketplaces.some((m) => hasEntries(join(cache, m, leaf)));
+}
+
+// ---------------------------------------------------------------------------
 // Scan
 // ---------------------------------------------------------------------------
 
@@ -663,6 +752,16 @@ function scanScope(
       `${paths.length} folders declare name "${rec.name}"`, false, [...rec.agents].sort()));
   }
 
+  // 6. Lock entries with nothing on disk: the lock says vskill installed it,
+  //    but no scanned folder, recorded install path or plugin cache has it,
+  //    so `update` has nothing to refresh. Report only.
+  for (const rec of readScopeLocks(scope, home, cwd)) {
+    if (lockEntryOnDisk(rec.name, rec.entry, entries, declared, home)) continue;
+    const what = rec.entry.pluginDir || rec.entry.marketplace ? "no skill folder or plugin cache" : "no skill folder";
+    issues.push(issue("lock-missing", scope, rec.name, [rec.lockPath],
+      `in ${basename(rec.lockPath)} but nothing on disk (${what}) — reinstall it or remove the entry`, false));
+  }
+
   // A project folder that is physically a global one (a symlinked dotfiles
   // setup): fixing it from the project would change what every other
   // project sees, so leave the fix to the global scope.
@@ -693,13 +792,36 @@ function removeLink(path: string, kind: DoctorIssueKind): DoctorFixAction {
     if (kind === "broken-link") {
       const { real, code } = resolveLink(path);
       if (real || !code || !GONE_CODES.has(code)) {
-        return { kind, action: "remove-link", path, ok: false, error: real ? "link works again — left alone" : `target unreadable (${code}) — left alone` };
+        return { kind, action: "archive-link", path, ok: false, error: real ? "link works again — left alone" : `target unreadable (${code}) — left alone` };
       }
+      return archiveLink(path, kind);
     }
     unlinkSync(path);
     return { kind, action: "remove-link", path, ok: true };
   } catch (err) {
-    return { kind, action: "remove-link", path, ok: false, error: (err as Error).message };
+    return { kind, action: kind === "broken-link" ? "archive-link" : "remove-link", path, ok: false, error: (err as Error).message };
+  }
+}
+
+/** Move a broken link into `<dir>/_archive/<YYYY-MM-DD>/` (never delete it):
+ *  agents and this scan skip `_`-prefixed folders, and the link text stays
+ *  readable in case its target comes back. */
+function archiveLink(path: string, kind: DoctorIssueKind): DoctorFixAction {
+  const day = new Date().toISOString().slice(0, 10);
+  const archiveDir = join(dirname(path), "_archive", day);
+  let target = join(archiveDir, basename(path));
+  for (let i = 2; lexists(target); i++) target = join(archiveDir, `${basename(path)}-${i}`);
+  mkdirSync(archiveDir, { recursive: true });
+  renameSync(path, target);
+  return { kind, action: "archive-link", path, target, ok: true };
+}
+
+function lexists(p: string): boolean {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -833,7 +955,10 @@ function printReport(report: DoctorReport, fix: boolean): void {
   if (fix && report.fixes.length > 0) {
     console.log(bold("Fixes"));
     for (const f of report.fixes) {
-      const what = f.action === "remove-link" ? `removed link ${f.path}` : `linked ${f.path} -> ${f.target}`;
+      const what =
+        f.action === "remove-link" ? `removed link ${f.path}`
+          : f.action === "archive-link" ? `moved broken link ${f.path} to ${f.target}`
+            : `linked ${f.path} -> ${f.target}`;
       const note = f.ok && f.error ? dim(` (${f.error})`) : "";
       console.log(f.ok ? `  ${green("done")} ${what}${note}` : `  ${yellow("skip")} ${f.path}: ${f.error}`);
     }

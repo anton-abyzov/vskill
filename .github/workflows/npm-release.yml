@@ -20,13 +20,45 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           registry-url: https://registry.npmjs.org
-          cache: npm
+          # No setup-node cache: it would save a cache under this tag ref that
+          # no other ref can read. The restore-only step below reads main's.
+          package-manager-cache: false
       - name: Match the package to the release tag
         run: node -e 'const p=require("./package.json");if(process.env.GITHUB_REF_NAME!==`v${p.version}`)throw new Error("Tag and package version differ")'
+      # Fail in seconds, not after the CI wait and the build, when the token is
+      # dead or belongs to an account that does not own the package. When
+      # publishing moves to an npm Trusted Publisher (no NODE_AUTH_TOKEN), this
+      # probe has to go with the token.
+      - name: Check npm credentials
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! user=$(npm whoami --registry https://registry.npmjs.org); then
+            echo "::error::npm whoami failed: NPM_TOKEN is missing, expired or revoked"
+            exit 1
+          fi
+          echo "npm user: $user"
+          if ! npm owner ls vskill --registry https://registry.npmjs.org | awk '{print $1}' | grep -qxF "$user"; then
+            echo "::error::npm user '$user' is not an owner of vskill"
+            exit 1
+          fi
+      - name: Locate the npm cache
+        id: npm-cache
+        run: |
+          echo "dir=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+          echo "arch=$(node -p process.arch)" >> "$GITHUB_OUTPUT"
+      # Same path and key as setup-node's `cache: npm` writes on main, so the
+      # tag run restores main's cache and never saves one of its own.
+      - name: Restore the npm cache from main
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.npm-cache.outputs.dir }}
+          key: node-cache-${{ runner.os }}-${{ steps.npm-cache.outputs.arch }}-npm-${{ hashFiles('package-lock.json') }}
       - run: npm ci --ignore-scripts && npm run setup
       # This release does not re-run the test suite. It relies on ci.yml, whose
       # sharded unit-full jobs run the whole Vitest suite (plus the cross-OS

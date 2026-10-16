@@ -183,7 +183,6 @@ program
 program
   .command("update [skill]")
   .description("Update installed skills from their source")
-  .option("--global", "Update hosted private skills from the global lockfile")
   .option("--all", "Update all installed skills")
   .option("--force", "Override version pin for this update")
   .option("--agent <id>", "Update only for specific agent (repeatable)", collect, [])

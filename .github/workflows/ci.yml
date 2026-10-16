@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# One group per PR (a newer push cancels the older run) and one per commit on
+# main (every merge commit keeps its own complete result; npm-release.yml waits
+# on it).
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Platform-specific smoke test for `vskill diff` — validates that the
   # command runs on Windows PowerShell (AC-US4-05). The JSON smoke uses a
@@ -17,6 +24,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -99,6 +107,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -112,10 +121,17 @@ jobs:
   # Full Vitest suite. The named-file jobs above exist for cross-OS coverage;
   # this one exists so nothing can rot unnoticed. Three publish-route tests sat
   # red on main for weeks because no job ever ran `vitest run` with no argument.
-  # ~60s on one runner — cheap enough to gate every PR.
-  unit-full:
+  # Split over three runners with vitest --shard: every test file runs in
+  # exactly one shard, so the whole suite still runs on every PR, in about a
+  # third of the wall time (one runner took ~176s for the suite alone).
+  unit-full-shard:
+    name: unit-full (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -123,13 +139,33 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci --ignore-scripts && npm run setup
+      # Some tests import dist/, so every shard builds.
       - run: npm run build
       # No --retry. A retry can mask a genuinely flaky test twice, and the
       # suite does not need it: two consecutive local runs with no retry flag
       # were both 621 files / 6139 passed / 3 skipped. If a spec turns flaky,
       # fix or quarantine that spec — do not re-arm a blanket retry.
-      - name: Full unit suite
-        run: npx vitest run --reporter=dot
+      - name: Full unit suite (shard ${{ matrix.shard }}/3)
+        run: npx vitest run --reporter=dot --shard=${{ matrix.shard }}/3
+
+  # Single check name for the sharded suite, for branch rules and anything else
+  # that looks for "unit-full". Fails unless every shard succeeded. It is
+  # skipped only when the whole run was cancelled (a newer push to the PR).
+  unit-full:
+    needs: unit-full-shard
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: All unit-full shards passed
+        env:
+          SHARDS_RESULT: ${{ needs.unit-full-shard.result }}
+        run: |
+          echo "unit-full shards: $SHARDS_RESULT"
+          if [ "$SHARDS_RESULT" != "success" ]; then
+            echo "::error::unit-full shards finished with '$SHARDS_RESULT'"
+            exit 1
+          fi
 
   # The committed .npmrc sets ignore-scripts=true to block dependency install
   # scripts. npm does not scope that to dependencies — it also suppresses THIS
@@ -190,6 +226,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -212,6 +249,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

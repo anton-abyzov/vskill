@@ -48,7 +48,7 @@ Preflight. These checks have no side effects:
 - `minisign.key` signs a test file through a pty with `minisign.passphrase`, and `minisign.pub` verifies the result.
 - `plugins.updater.pubkey` in `tauri.conf.json`, at the commit being tagged, equals `base64(minisign.pub)`.
 - Every secret the workflow reads exists. Only names are checked.
-- The newest completed main runs of `notarize-dryrun.yml` (Desktop Build (nightly)) and `sidecar-smoke.yml` succeeded. If one is red, the script refuses unless you pass `--force`.
+- The newest completed main runs of `notarize-dryrun.yml` (Desktop Build (nightly)) and `sidecar-smoke.yml` succeeded. Push runs of the nightly skip macOS, so its newest scheduled or manual run must also be green. If one is red, the script refuses unless you pass `--force`.
 
 The release steps that follow:
 1. It runs `gh secret set` for the updater key and passphrase only with `--rotate-secrets`.
@@ -159,4 +159,5 @@ A hand-pushed tag skips the scripts' checks, so run both `--dry-run`s first.
   `node scripts/release/timing-report.mjs --repo anton-abyzov/vskill --run <run-id> --workflow desktop-release.yml`.
 - **Nightly health.** `nightly-health.yml` keeps one open issue,
   `<workflow> red on main` (label `nightly-red`), per failing nightly, and
-  closes it when the workflow passes again.
+  closes it when the workflow passes again. A passing run that skipped jobs
+  (a push run of the desktop nightly skips macOS) does not close it.

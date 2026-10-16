@@ -18,7 +18,8 @@
 #   1. Preflight, no side effects: tools, gh auth, key files, rsign sign +
 #      verify through a pty, tauri.conf.json pubkey == base64(minisign.pub) at
 #      the commit being tagged, required secret names (names only), newest
-#      main runs of notarize-dryrun.yml and sidecar-smoke.yml green.
+#      main runs of notarize-dryrun.yml (and its newest full run: push runs
+#      skip macOS) and sidecar-smoke.yml green.
 #   2. --rotate-secrets only: gh secret set the updater key + passphrase.
 #   3. Tag main's HEAD on GitHub as desktop-v<version> and push the tag over
 #      HTTPS. No bump commit or PR: desktop-release.yml stamps Cargo.toml,
@@ -247,20 +248,29 @@ ok "release secrets exist (names only)"
 # The newest decided main run of each canary. Cancelled and skipped runs say
 # nothing about main, so look past them.
 RED=0
-for wf in notarize-dryrun.yml sidecar-smoke.yml; do
-  LINE="$(gh run list -R "$REPO" --workflow "$wf" --branch main --status completed --limit 30 \
+DECIDED='select(.conclusion == "success" or .conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure")'
+# canary <workflow file> <label> <jq filter on .event>
+canary() {
+  local wf="$1" label="$2" events="$3" line
+  line="$(gh run list -R "$REPO" --workflow "$wf" --branch main --status completed --limit 30 \
     --json conclusion,event,url \
-    -q '[.[] | select(.event != "pull_request") | select(.conclusion == "success" or .conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure")][0] | select(. != null) | "\(.conclusion) \(.url)"')" \
+    -q '[.[] | select('"$events"') | '"$DECIDED"'][0] | select(. != null) | "\(.conclusion) \(.url)"')" \
     || die "gh run list --workflow $wf failed"
-  if [[ -z "$LINE" ]]; then
-    warn "$wf has no completed run on main; nothing to check"
-  elif [[ "${LINE%% *}" == "success" ]]; then
-    ok "$wf is green on main"
+  if [[ -z "$line" ]]; then
+    warn "$label has no completed run on main; nothing to check"
+  elif [[ "${line%% *}" == "success" ]]; then
+    ok "$label is green on main"
   else
-    echo "   RED: $wf on main: ${LINE}" >&2
+    echo "   RED: $label on main: ${line}" >&2
     RED=1
   fi
-done
+}
+canary notarize-dryrun.yml "notarize-dryrun.yml" '.event != "pull_request"'
+# Its push runs skip the macOS notarize leg, so a green push run must not hide
+# a red notarization: the newest scheduled or manual run has to be green too.
+canary notarize-dryrun.yml "notarize-dryrun.yml full run (macOS included)" \
+  '.event == "schedule" or .event == "workflow_dispatch"'
+canary sidecar-smoke.yml "sidecar-smoke.yml" '.event != "pull_request"'
 if [[ "$RED" == 1 ]]; then
   if [[ "$FORCE" == 1 ]]; then
     warn "tagging despite a red canary (--force)"

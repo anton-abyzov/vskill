@@ -4,7 +4,8 @@ name: Nightly Health
 # nightly that starts failing is visible the next morning instead of on
 # release day. Failure: open the issue "<workflow> red on main" (label
 # nightly-red) or comment on it with the run URL and the first ##[error]
-# line. Success: comment and close it.
+# line. Success: comment and close it, unless the run skipped jobs (a push
+# run of Desktop Build skips macOS); then a full run has to pass first.
 #
 # workflow_run only fires for this file as it exists on the default branch,
 # and the names below must match each workflow's `name:` exactly.
@@ -58,12 +59,14 @@ jobs:
           TITLE="${WF_NAME} red on main"
 
           # An older run that finishes after a newer one must not reopen or
-          # close the issue: act only for the newest completed main run.
+          # close the issue: act only for the newest decided main run.
+          # Cancelled and skipped runs say nothing about main; look past them.
           LATEST=$(gh run list --workflow "$WF_ID" --branch main --status completed \
-            --limit 20 --json databaseId,event \
-            -q '[.[] | select(.event != "pull_request")][0].databaseId')
+            --limit 30 --json databaseId,event,conclusion \
+            -q '[.[] | select(.event != "pull_request")
+                     | select(.conclusion == "success" or .conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure")][0].databaseId')
           if [ "$LATEST" != "$RUN_ID" ]; then
-            echo "Run $RUN_ID is not the newest completed main run ($LATEST); nothing to do."
+            echo "Run $RUN_ID is not the newest decided main run ($LATEST); nothing to do."
             exit 0
           fi
 
@@ -77,6 +80,15 @@ jobs:
           if [ "$CONCLUSION" = "success" ]; then
             if [ -z "$NUMBER" ]; then
               echo "$WF_NAME is green on main and no issue is open."
+              exit 0
+            fi
+            # A run that skipped jobs did not exercise everything (Desktop
+            # Build's push runs skip macOS), so it cannot close an issue a
+            # full run opened. The next full run closes it.
+            SKIPPED=$(gh run view "$RUN_ID" --json jobs \
+              -q '[.jobs[] | select(.conclusion == "skipped")] | length')
+            if [ "$SKIPPED" != "0" ]; then
+              echo "Run $RUN_ID passed but skipped $SKIPPED job(s); #$NUMBER stays open until a full run passes."
               exit 0
             fi
             gh issue comment "$NUMBER" --body "Green again on main: $RUN_URL"

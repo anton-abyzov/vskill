@@ -4,8 +4,14 @@
 
 import { unlinkSync, rmdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 // 0706 T-005: `relative` + `sep` for cross-platform ghost-file cleanup guard.
-import { join, resolve, relative, sep as pathSep } from "node:path";
+import { join, resolve, relative, isAbsolute, sep as pathSep } from "node:path";
+import os from "node:os";
 import { readLockfile, writeLockfile } from "../lockfile/index.js";
+import { resolveLockTargets, type LockTarget } from "../lockfile/scope.js";
+import { resolveAgentGlobalSkillsDir } from "../agents/global-dirs.js";
+import type { AgentDefinition } from "../agents/agents-registry.js";
+import { resolveTilde } from "../utils/paths.js";
+import type { SkillLockEntry, VskillLock } from "../lockfile/types.js";
 import { ensureSkillMdNaming } from "../installer/migrate.js";
 import { installSymlink } from "../installer/canonical.js";
 import { getSkill } from "../api/client.js";
@@ -60,6 +66,97 @@ export function canonicalNameFromParsedSource(
   return null;
 }
 
+/** Agent fields the update loop needs to find a skill's folders. */
+type UpdateAgent = { localSkillsDir: string } & Partial<Pick<AgentDefinition, "id" | "globalSkillsDir">>;
+
+/**
+ * Every folder a skill lives in for one scope: each agent's skills dir plus
+ * the shared `.agents/skills` copy (0894: agents that read the shared folder
+ * have no link of their own). Project scope resolves under `root`; global
+ * scope uses each agent's global dir and ~/.agents/skills.
+ */
+export function skillInstallDirs(
+  agents: UpdateAgent[],
+  root: string,
+  name: string,
+  global = false,
+): string[] {
+  if (!global) {
+    const dirs = new Set([...agents.map((a) => a.localSkillsDir), ".agents/skills"]);
+    return [...dirs].map((dir) => join(root, dir, name));
+  }
+  const dirs = new Set<string>();
+  for (const a of agents) {
+    if (!a.globalSkillsDir) continue;
+    dirs.add(join(resolveAgentGlobalSkillsDir({ id: a.id ?? "", globalSkillsDir: a.globalSkillsDir }, resolveTilde), name));
+  }
+  dirs.add(join(os.homedir(), ".agents", "skills", name));
+  return [...dirs];
+}
+
+function shellArg(value: string): string {
+  return /^[\w@%+=:,./~-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * The `vskill install ... --global` command that refreshes a user-level
+ * plugin entry, or null when the entry is a single skill. The update loop
+ * rewrites one skill folder per entry, so for a plugin it would write the
+ * plugin's skills, joined into one SKILL.md, as a folder named after the
+ * plugin in every agent's user-level dir; a `local:` entry would be
+ * refreshed from the SpecWeave plugin cache whatever folder it came from.
+ */
+export function userLevelPluginReinstallCommand(name: string, entry: SkillLockEntry): string | null {
+  const parsed = parseSource(entry.source ?? "");
+  switch (parsed.type) {
+    case "marketplace":
+      return `vskill install ${parsed.owner}/${parsed.repo}/${parsed.pluginName} --global`;
+    case "github-plugin":
+      return `vskill install ${parsed.owner}/${parsed.repo} --plugin ${parsed.pluginName} --global`;
+    case "local":
+      return `vskill install --plugin-dir ${isAbsolute(parsed.baseName) ? shellArg(parsed.baseName) : "<folder>"} --plugin ${shellArg(name)} --global`;
+    default:
+      return entry.pluginDir || entry.marketplace ? `vskill install ${shellArg(entry.source || name)} --global` : null;
+  }
+}
+
+/**
+ * Whether a user-level skill is installed on this machine: a SKILL.md in
+ * ~/.agents/skills or any detected agent's user-level dir, or its recorded
+ * install path. A lock entry with none of these was removed by hand or is a
+ * leftover (often in the older ~/vskill.lock); `update` leaves it alone
+ * instead of installing it again. `vskill doctor --global` lists them.
+ */
+function userLevelSkillOnDisk(agents: UpdateAgent[], name: string, entry: SkillLockEntry): boolean {
+  if (entry.installedPath && existsSync(entry.installedPath)) return true;
+  return skillInstallDirs(agents, os.homedir(), name, true).some((dir) => existsSync(join(dir, "SKILL.md")));
+}
+
+/**
+ * The lock to write back after an update run: the lock as it is on disk now,
+ * with only the entries this run rewrote replaced. The fetches take a while,
+ * and another process (the Studio, a second terminal) may have installed or
+ * removed skills in the same lock meanwhile; writing the copy read at the
+ * start would undo that.
+ */
+function lockToWrite(
+  dir: string,
+  lock: VskillLock,
+  before: Map<string, SkillLockEntry | undefined>,
+): VskillLock {
+  let current: VskillLock | null = null;
+  try {
+    current = readLockfile(dir);
+  } catch {
+    current = null;
+  }
+  if (!current || current === lock || !current.skills) return lock;
+  for (const [name, entry] of before) {
+    if (lock.skills[name] !== entry && lock.skills[name]) current.skills[name] = lock.skills[name];
+  }
+  return current;
+}
+
 /**
  * 0765: Sync each agent's on-disk SKILL.md frontmatter to `newVersion`.
  * installSymlink writes the upstream content as-is, so when upstream's
@@ -70,19 +167,18 @@ export function canonicalNameFromParsedSource(
  * the old version after update — exactly the bug 0765 fixes.
  *
  * Pure-ish helper: takes the agents list + projectRoot + name + newVersion
- * and writes only when the on-disk version actually differs.
+ * and writes only when the on-disk version actually differs. `global` syncs
+ * the user-level folders instead of the project's.
  */
 export function syncFrontmatterVersionAfterUpdate(
-  agents: { localSkillsDir: string }[],
+  agents: UpdateAgent[],
   projectRoot: string,
   name: string,
   newVersion: string,
+  global = false,
 ): void {
-  // 0894: agents that read the shared .agents/skills have no link of their
-  // own, so the canonical copy is synced explicitly.
-  const dirs = new Set([...agents.map((a) => a.localSkillsDir), ".agents/skills"]);
-  for (const dir of dirs) {
-    const skillMdPath = join(projectRoot, dir, name, "SKILL.md");
+  for (const dir of skillInstallDirs(agents, projectRoot, name, global)) {
+    const skillMdPath = join(dir, "SKILL.md");
     if (!existsSync(skillMdPath)) continue;
     let onDisk: string;
     try {
@@ -173,42 +269,55 @@ interface UpdateOptions {
   all?: boolean;
   force?: boolean;
   agent?: string | string[];
+  /** Update user-level installs (~/.agents/vskill.lock) instead of the project's. */
+  global?: boolean;
 }
 
 export async function updateCommand(
   skill: string | undefined,
   opts: UpdateOptions
 ): Promise<void> {
-  const lock = readLockfile();
-  if (!lock) {
-    console.error(
-      yellow("No vskill.lock found. Run ") +
-        cyan("vskill install") +
-        yellow(" first.")
-    );
+  const resolution = resolveLockTargets({ global: opts.global, read: readLockfile });
+  const targets = resolution.targets;
+  if (targets.length === 0) {
+    if (resolution.scope === "global") {
+      console.error(
+        yellow(`No user-level vskill.lock found (${resolution.displayPath}). Run `) +
+          cyan("vskill install <source> --global") +
+          yellow(" first.")
+      );
+    } else {
+      console.error(
+        yellow("No vskill.lock found. Run ") +
+          cyan("vskill install") +
+          yellow(" first, or ") +
+          cyan("vskill update --global") +
+          yellow(" for user-level skills.")
+      );
+    }
     process.exit(1);
     return; // unreachable but satisfies TS
   }
+  if (resolution.fellBackToGlobal) {
+    console.log(dim(`No project vskill.lock here; updating user-level skills from ${resolution.displayPath}`));
+  }
 
-  const skillNames = Object.keys(lock.skills);
+  const skillNames = targets.flatMap((t) => t.names);
   if (skillNames.length === 0) {
     console.log(dim("No skills installed. Nothing to update."));
     return;
   }
 
   // Determine which skills to update
-  let toUpdate: string[];
-  if (skill) {
-    if (!lock.skills[skill]) {
-      console.error(red(`Skill "${skill}" is not installed.`));
-      process.exit(1);
-      return;
+  if (skill && !targets.some((t) => t.names.includes(skill))) {
+    console.error(red(`Skill "${skill}" is not installed.`));
+    if (resolution.scope === "project") {
+      console.error(dim(`For a user-level skill run ${cyan(`vskill update ${skill} --global`)}.`));
     }
-    toUpdate = [skill];
-  } else {
-    // Default: update all installed skills (--all is now implicit)
-    toUpdate = skillNames;
+    process.exit(1);
+    return;
   }
+  // Default: update all installed skills (--all is now implicit)
 
   let agents = await detectInstalledAgents();
   if (agents.length === 0) {
@@ -216,6 +325,9 @@ export async function updateCommand(
     process.exit(1);
     return;
   }
+  // Every detected agent, before --agent narrows the list: a user-level
+  // skill installed for any of them counts as on disk.
+  const detectedAgents = agents;
   // Apply --agent filter (same as install command)
   try {
     agents = filterAgents(agents, opts.agent);
@@ -226,6 +338,40 @@ export async function updateCommand(
   }
 
   let updated = 0;
+  for (const target of targets) {
+    const toUpdate = skill ? target.names.filter((n) => n === skill) : target.names;
+    if (toUpdate.length === 0) continue;
+    updated += await updateTarget(target, toUpdate, agents, opts, detectedAgents);
+  }
+
+  console.log(
+    `\n${updated > 0 ? green(`${updated} skill${updated === 1 ? "" : "s"} updated`) : dim("No updates available")}`
+  );
+  // Skills GitHub could not confirm public (rate limit, outage) missed the
+  // registry fallback this run; never let that pass silently.
+  const skipNote = unconfirmedSkipNote();
+  if (skipNote) console.error(yellow(skipNote));
+}
+
+/**
+ * Update the given entries of one lockfile and write it back once. Project
+ * targets install under the lock's directory; global targets install into
+ * each agent's user-level skills dir and ~/.agents/skills.
+ */
+async function updateTarget(
+  target: LockTarget,
+  toUpdate: string[],
+  agents: AgentDefinition[],
+  opts: UpdateOptions,
+  detectedAgents: AgentDefinition[] = agents,
+): Promise<number> {
+  const lock = target.lock;
+  const global = target.scope === "global";
+  // Project scope installs where the lock lives; global scope ignores the root.
+  const projectRoot = global ? os.homedir() : target.dir;
+  // Entries as read, to tell which ones this run rewrote (see lockToWrite).
+  const before = new Map(toUpdate.map((n) => [n, lock.skills[n]]));
+  let updated = 0;
 
   for (const name of toUpdate) {
     const entry = lock.skills[name];
@@ -233,6 +379,19 @@ export async function updateCommand(
     // Skip pinned skills unless --force is used
     if (entry.pinnedVersion && !opts.force) {
       console.log(dim(`${name}: pinned at ${entry.pinnedVersion} — skipping`));
+      continue;
+    }
+
+    // A user-level plugin entry (marketplace, --plugin or --plugin-dir
+    // install) stands for several skill folders; this loop rewrites one
+    // folder per entry. See userLevelPluginReinstallCommand.
+    const reinstall = global ? userLevelPluginReinstallCommand(name, entry) : null;
+    if (reinstall) {
+      console.log(dim(`${name}: plugin — update it with ${cyan(reinstall)}; skipping`));
+      continue;
+    }
+    if (global && !userLevelSkillOnDisk(detectedAgents, name, entry)) {
+      console.log(dim(`${name}: in ${join(target.dir, "vskill.lock")} but not on disk — skipping; reinstall it with ${cyan("vskill install")} or remove the entry`));
       continue;
     }
 
@@ -307,8 +466,7 @@ export async function updateCommand(
         }
 
         if (platformResult && isVersionGreater(platformResult.version, entry.version)) {
-          const projectRoot = process.cwd();
-          syncFrontmatterVersionAfterUpdate(agents, projectRoot, name, platformResult.version);
+          syncFrontmatterVersionAfterUpdate(agents, projectRoot, name, platformResult.version, global);
           lock.skills[name] = {
             ...entry,
             version: platformResult.version,
@@ -372,22 +530,14 @@ export async function updateCommand(
         ? Object.keys(result.files!).sort()
         : [...new Set(["SKILL.md", ...(entry.files ?? [])])].sort();
 
-      // 8. Ghost file cleanup + install via canonical installer
-      const projectRoot = process.cwd();
-      for (const agent of agents) {
-        const skillDir = join(projectRoot, agent.localSkillsDir, name);
+      // 8. Ghost file cleanup (every agent folder plus the canonical
+      // .agents/skills copy) + install via canonical installer
+      for (const skillDir of skillInstallDirs(agents, projectRoot, name, global)) {
         try {
           cleanupGhostFiles(skillDir, entry.files, newFileKeys);
         } catch {
           // Non-fatal — continue with install
         }
-      }
-      // Also clean ghost files in canonical dir
-      const canonicalSkillDir = join(projectRoot, ".agents", "skills", name);
-      try {
-        cleanupGhostFiles(canonicalSkillDir, entry.files, newFileKeys);
-      } catch {
-        // Non-fatal
       }
 
       // Extract agentFiles (non-SKILL.md files) from the files map
@@ -409,17 +559,23 @@ export async function updateCommand(
           name,
           result.content,
           agents,
-          { global: false, projectRoot },
+          { global, projectRoot },
           agentFiles,
         );
-      } catch {
-        // Silently skip install failures for update
+      } catch (err) {
+        // Keep the old lock entry: recording the new sha for files that were
+        // never written would report the skill as up to date next run.
+        console.log(yellow(`  ${name}: `) + dim(`could not write the update (${(err as Error).message})`));
+        continue;
       }
 
-      // Defense-in-depth: enforce SKILL.md naming after update
-      for (const agent of agents) {
-        const agentBase = join(projectRoot, agent.localSkillsDir);
-        ensureSkillMdNaming(agentBase);
+      // Defense-in-depth: enforce SKILL.md naming after update. Project
+      // scope only: the user-level dirs hold skills vskill did not install.
+      if (!global) {
+        for (const agent of agents) {
+          const agentBase = join(projectRoot, agent.localSkillsDir);
+          ensureSkillMdNaming(agentBase);
+        }
       }
 
       // 0765: sync each agent's SKILL.md frontmatter to the resolved
@@ -428,7 +584,7 @@ export async function updateCommand(
       // upstream HEAD is at 1.0.2 frontmatter but we resolved 1.0.3 from
       // the platform), the file stays stale and the Studio header keeps
       // showing the old version after update.
-      syncFrontmatterVersionAfterUpdate(agents, projectRoot, name, newVersion);
+      syncFrontmatterVersionAfterUpdate(agents, projectRoot, name, newVersion, global);
 
       // 9. Update lockfile entry — preserve source and all existing fields
       lock.skills[name] = {
@@ -450,13 +606,6 @@ export async function updateCommand(
     }
   }
 
-  writeLockfile(lock);
-
-  console.log(
-    `\n${updated > 0 ? green(`${updated} skill${updated === 1 ? "" : "s"} updated`) : dim("No updates available")}`
-  );
-  // Skills GitHub could not confirm public (rate limit, outage) missed the
-  // registry fallback this run; never let that pass silently.
-  const skipNote = unconfirmedSkipNote();
-  if (skipNote) console.error(yellow(skipNote));
+  writeLockfile(lockToWrite(target.dir, lock, before), target.dir);
+  return updated;
 }

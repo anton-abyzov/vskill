@@ -3,6 +3,8 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import os from "node:os";
+import { join } from "node:path";
 
 const mockCheckUpdates = vi.hoisted(() => vi.fn());
 const mockReadLockfile = vi.hoisted(() => vi.fn());
@@ -65,7 +67,7 @@ const logs: string[] = [];
 const errors: string[] = [];
 let exitCode: number | undefined;
 
-import { outdatedCommand, postInstallHint } from "./outdated.js";
+import { getOutdatedJson, outdatedCommand, postInstallHint } from "./outdated.js";
 import type { VskillLock } from "../lockfile/types.js";
 
 describe("outdatedCommand", () => {
@@ -354,6 +356,76 @@ describe("outdatedCommand", () => {
     expect(output).toContain("Latest");
     expect(output).toContain("Bump");
     expect(output).toContain("Tier");
+  });
+});
+
+describe("outdatedCommand — user-level lock", () => {
+  const globalDir = join(os.homedir(), ".agents");
+  const lock = (name: string, source: string) => ({
+    version: 1,
+    agents: [],
+    skills: { [name]: { version: "1.0.0", sha: "abc", tier: "VERIFIED", installedAt: "", source } },
+  });
+  const logs: string[] = [];
+  const errors: string[] = [];
+
+  beforeEach(() => {
+    logs.length = 0;
+    errors.length = 0;
+    mockReadAuthored.mockReturnValue([]);
+    mockCheckUpdates.mockReset();
+    // Outside any SpecWeave project, whatever the checkout's parents hold.
+    vi.spyOn(process, "cwd").mockReturnValue(os.tmpdir());
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    });
+    vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit");
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    mockReadLockfile.mockReset();
+  });
+
+  it("--global checks ~/.agents/vskill.lock, not the project lock", async () => {
+    mockReadLockfile.mockImplementation((dir?: string) =>
+      dir === globalDir ? lock("html-report", "github:anton-abyzov/vskill") : dir === os.homedir() ? null : lock("proj", "github:a/b"));
+    mockCheckUpdates.mockResolvedValue([
+      { name: "anton-abyzov/vskill/html-report", installed: "1.0.0", latest: "1.0.0", updateAvailable: false },
+    ]);
+
+    await outdatedCommand({ json: true, global: true });
+
+    expect(mockCheckUpdates).toHaveBeenCalledWith([
+      { name: "anton-abyzov/vskill/html-report", currentVersion: "1.0.0", sha: "abc" },
+    ]);
+    expect(JSON.parse(logs.join("\n"))[0].name).toBe("anton-abyzov/vskill/html-report");
+  });
+
+  it("falls back to the user-level lock outside a project, noting it on stderr", async () => {
+    mockReadLockfile.mockImplementation((dir?: string) =>
+      dir === globalDir ? lock("html-report", "github:anton-abyzov/vskill") : null);
+    mockCheckUpdates.mockResolvedValue([
+      { name: "anton-abyzov/vskill/html-report", installed: "1.0.0", latest: "1.1.0", updateAvailable: true },
+    ]);
+
+    await expect(outdatedCommand({})).rejects.toThrow("process.exit");
+
+    expect(errors.join("\n")).toContain("checking user-level skills from");
+    expect(logs.join("\n")).toContain("vskill update --global");
+  });
+
+  it("getOutdatedJson keeps reading only the project lock by default (Studio route)", async () => {
+    mockReadLockfile.mockImplementation((dir?: string) =>
+      dir === undefined ? null : lock("html-report", "github:anton-abyzov/vskill"));
+
+    expect(await getOutdatedJson()).toBeNull();
+    expect(mockCheckUpdates).not.toHaveBeenCalled();
   });
 });
 

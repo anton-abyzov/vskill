@@ -1,9 +1,10 @@
 ---
+name: appstore
 description: "iOS/macOS app deployment and App Store Connect automation using the `asc` CLI — a lightweight alternative to fastlane. Activates when deploying iOS apps, distributing TestFlight builds, submitting to App Store, managing certificates/profiles, uploading metadata/screenshots, checking review status, or automating any App Store Connect workflow. Use instead of fastlane for simpler, JSON-first automation. Keywords: deploy iOS app, TestFlight, App Store submission, app review status, code signing, provisioning profiles, app metadata, screenshots upload, build distribution, release iOS, publish app, ship to App Store, upload IPA, beta testing, app analytics, in-app purchases, subscriptions, Xcode Cloud, App Store Connect API, JWT token auth."
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 model: opus
 context: fork
-version: 1.0.4
+version: 1.0.5
 
 ---
 

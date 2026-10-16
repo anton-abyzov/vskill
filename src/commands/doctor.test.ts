@@ -159,7 +159,7 @@ describe("vskill doctor — same name, real folders", () => {
 });
 
 describe("vskill doctor — links", () => {
-  it("broken links are fixable and removed", () => {
+  it("broken links are fixable and moved to _archive/<date>, never deleted", () => {
     link(join(outside, "gone"), g(".gemini/antigravity/skills/find-skills"));
 
     const before = runDoctor({ home, cwd });
@@ -167,11 +167,25 @@ describe("vskill doctor — links", () => {
     expect(before.issues[0].paths).toEqual([g(".gemini/antigravity/skills/find-skills")]);
 
     const after = runDoctor({ home, cwd, fix: true });
+    const day = new Date().toISOString().slice(0, 10);
+    const archived = g(".gemini/antigravity/skills/_archive", day, "find-skills");
     expect(after.fixes).toEqual([
-      expect.objectContaining({ kind: "broken-link", action: "remove-link", ok: true }),
+      expect.objectContaining({ kind: "broken-link", action: "archive-link", ok: true, target: archived }),
     ]);
     expect(existsSync(g(".gemini/antigravity/skills/find-skills"))).toBe(false);
+    expect(lstatSync(archived).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(archived)).toBe(join(outside, "gone"));
     expect(after.remaining).toBe(0);
+  });
+
+  it("archiving a second broken link with the same name the same day keeps both", () => {
+    link(join(outside, "gone"), g(".cursor/skills/foo"));
+    runDoctor({ home, cwd, fix: true });
+    link(join(outside, "gone-again"), g(".cursor/skills/foo"));
+    const second = runDoctor({ home, cwd, fix: true });
+    const day = new Date().toISOString().slice(0, 10);
+    expect(second.fixes[0].target).toBe(g(".cursor/skills/_archive", day, "foo-2"));
+    expect(readdirSync(g(".cursor/skills/_archive", day)).sort()).toEqual(["foo", "foo-2"]);
   });
 
   it("links in agent folders whose agent already reads ~/.agents/skills are redundant", () => {
@@ -363,7 +377,7 @@ describe("doctorCommand", () => {
       await doctorCommand({ home, cwd, fix: true });
       expect(process.exitCode).toBe(0);
       const printed = log.mock.calls.map((c) => String(c[0])).join("\n");
-      expect(printed).toContain("removed link");
+      expect(printed).toContain("moved broken link");
       expect(printed).toContain("No problems found.");
     } finally {
       log.mockRestore();
@@ -502,5 +516,98 @@ describe("vskill doctor — 0894 review fixes", () => {
     writeSkill(g(".agents/skills/wrapped"), { description: `First line\n${`  ${line}\n`.repeat(15).trimEnd()}` });
     const desc = ofKind(runDoctor({ home, cwd, global: true }).issues, "bad-description");
     expect(desc.map((i) => i.skill)).toEqual(["wrapped"]);
+  });
+});
+
+describe("vskill doctor — lock entries with nothing on disk", () => {
+  function writeLock(dir: string, skills: Record<string, Record<string, unknown>>): string {
+    mkdirSync(dir, { recursive: true });
+    const p = join(dir, "vskill.lock");
+    writeFileSync(p, JSON.stringify({ version: 1, agents: [], skills, createdAt: "", updatedAt: "" }));
+    return p;
+  }
+
+  it("reports global lock entries whose skill has no folder anywhere", () => {
+    writeSkill(g(".agents/skills/present"));
+    link("../../.agents/skills/present", g(".claude/skills/present"));
+    const lockPath = writeLock(g(".agents"), {
+      present: { version: "1.0.0", source: "github:o/r" },
+      vanished: { version: "1.0.0", source: "github:o/r" },
+    });
+
+    const report = runDoctor({ home, cwd, global: true });
+    const missing = ofKind(report.issues, "lock-missing");
+    expect(missing.map((i) => i.skill)).toEqual(["vanished"]);
+    expect(missing[0]).toMatchObject({ scope: "global", severity: "warning", fixable: false, paths: [lockPath] });
+    expect(report.summary["lock-missing"]).toBe(1);
+  });
+
+  it("treats a broken link as nothing on disk (and reports the link too)", () => {
+    link(join(outside, "gone"), g(".claude/skills/dangling"));
+    writeLock(g(".agents"), { dangling: { version: "1.0.0", source: "github:o/r" } });
+
+    const report = runDoctor({ home, cwd, global: true });
+    expect(kinds(report.issues)).toEqual(["broken-link", "lock-missing"]);
+  });
+
+  it("counts a plugin as present when its Claude plugin cache folder exists", () => {
+    mkdirSync(g(".claude/plugins/cache/vskill/frontend/0.2.0"), { recursive: true });
+    writeLock(g(".agents"), {
+      frontend: { version: "0.2.0", source: "marketplace:o/vskill#frontend", marketplace: "vskill", pluginDir: true },
+      kafka: { version: "1.0.0", source: "marketplace:o/vskill#kafka", marketplace: "vskill", pluginDir: true },
+    });
+
+    const missing = ofKind(runDoctor({ home, cwd, global: true }).issues, "lock-missing");
+    expect(missing.map((i) => i.skill)).toEqual(["kafka"]);
+    expect(missing[0].message).toContain("plugin cache");
+  });
+
+  it("counts a plugin as present when a folder declares its namespace", () => {
+    writeSkill(g(".agents/skills/figma-connect"), { name: "frontend/figma-connect" });
+    writeLock(g(".agents"), {
+      frontend: { version: "0.2.0", source: "marketplace:o/vskill#frontend", marketplace: "vskill", pluginDir: true },
+    });
+
+    expect(ofKind(runDoctor({ home, cwd, global: true }).issues, "lock-missing")).toEqual([]);
+  });
+
+  it("reads the legacy ~/vskill.lock too, without double-reporting a name", () => {
+    writeLock(g(".agents"), { gone: { version: "1.0.0", source: "github:o/r" } });
+    const legacy = writeLock(home, {
+      gone: { version: "0.9.0", source: "github:o/r" },
+      "old-only": { version: "1.0.0", source: "github:o/r" },
+    });
+
+    const missing = ofKind(runDoctor({ home, cwd, global: true }).issues, "lock-missing");
+    expect(missing.map((i) => i.skill).sort()).toEqual(["gone", "old-only"]);
+    expect(missing.find((i) => i.skill === "old-only")!.paths).toEqual([legacy]);
+  });
+
+  it("checks the project lock in project scope and honors installedPath", () => {
+    writeSkill(join(outside, "elsewhere"));
+    writeLock(cwd, {
+      kept: { version: "1.0.0", source: "local:x", installedPath: join(outside, "elsewhere") },
+      lost: { version: "1.0.0", source: "github:o/r" },
+    });
+
+    const report = runDoctor({ home, cwd, project: true });
+    const missing = ofKind(report.issues, "lock-missing");
+    expect(missing.map((i) => `${i.scope}:${i.skill}`)).toEqual(["project:lost"]);
+  });
+
+  it("--fix leaves lock-missing entries and the lockfile alone", () => {
+    const lockPath = writeLock(g(".agents"), { vanished: { version: "1.0.0", source: "github:o/r" } });
+    const before = readFileSync(lockPath, "utf8");
+
+    const report = runDoctor({ home, cwd, global: true, fix: true });
+    expect(report.fixes).toEqual([]);
+    expect(ofKind(report.issues, "lock-missing")).toHaveLength(1);
+    expect(readFileSync(lockPath, "utf8")).toBe(before);
+  });
+
+  it("ignores an unreadable lockfile", () => {
+    mkdirSync(g(".agents"), { recursive: true });
+    writeFileSync(g(".agents/vskill.lock"), "{ not json");
+    expect(runDoctor({ home, cwd, global: true }).issues).toEqual([]);
   });
 });

@@ -13,13 +13,13 @@
 #       dashboard /desktop page constants.
 #   4.  Commits + pushes main + tags desktop-v<version>.
 #   5.  Polls CI until completion (default max 2 hours).
-#   6.  On green:
-#        - downloads the new minisign .sig files
-#        - rewrites vskill-platform's latest.json route + /desktop page
-#        - rebuilds vskill-platform Worker bundle + redeploys to Cloudflare
-#        - promotes the GH release from draft → published
-#        - cleans up any stale failed-release drafts
-#        - prints the live release URL
+#   6.  On green: checks the GitHub release has every updater .sig.
+#   7.  Reads https://verified-skill.com/desktop/latest.json back and requires
+#       the new version served from R2 (x-manifest-source: r2). CI's publish
+#       job writes latest.json to R2 (publish-manifest.sh); since 2026-09-03
+#       vskill-platform serves it from there, so no platform deploy is needed.
+#   8.  Promotes the release if it is still a draft and removes stale
+#       desktop-v* drafts.
 #
 # Why this specific keypair:
 #   We tried v1.0.13 → v1.0.27 with two different keypairs:
@@ -54,25 +54,51 @@ VERSION="$1"
 TAG="desktop-v${VERSION}"
 REPO="anton-abyzov/vskill"
 KEY_DIR="${HOME}/.config/skill-studio-release"
-PLATFORM_REPO_REL="repositories/anton-abyzov/vskill-platform"
 CI_TIMEOUT_SECONDS="${CI_TIMEOUT_SECONDS:-7200}"
 
 # ─── 0. Pre-flight ────────────────────────────────────────────────────────
 [[ -f "${KEY_DIR}/minisign.key" ]] || { echo "❌ missing ${KEY_DIR}/minisign.key" >&2; exit 1; }
 [[ -f "${KEY_DIR}/minisign.pub" ]] || { echo "❌ missing ${KEY_DIR}/minisign.pub" >&2; exit 1; }
 [[ -f "${KEY_DIR}/minisign.passphrase" ]] || { echo "❌ missing ${KEY_DIR}/minisign.passphrase" >&2; exit 1; }
-command -v minisign >/dev/null || { echo "❌ minisign not in PATH (brew install minisign)" >&2; exit 1; }
+RSIGN="${RSIGN:-$(command -v rsign || echo "${HOME}/.cargo/bin/rsign")}"
+[[ -x "${RSIGN}" ]] || { echo "❌ rsign not found (cargo install rsign2)" >&2; exit 1; }
+command -v python3 >/dev/null || { echo "❌ python3 not in PATH" >&2; exit 1; }
 command -v gh >/dev/null || { echo "❌ gh not in PATH (brew install gh)" >&2; exit 1; }
 command -v node >/dev/null || { echo "❌ node not in PATH" >&2; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "❌ gh not authenticated (gh auth login)" >&2; exit 1; }
 
 # ─── 1. Verify on-disk keypair signs ──────────────────────────────────────
 echo ">> [1/8] verifying on-disk minisign keypair signs..."
-echo "test data" > /tmp/_release_check.txt
+# rsign is the Rust minisign crate tauri-bundler uses (BSD minisign keys are
+# not interchangeable). It prompts for the password on a tty, so drive it
+# through a pty.
+CHECK_DIR="$(mktemp -d)"
+echo "test data" > "${CHECK_DIR}/check.txt"
+KEY_DIR="${KEY_DIR}" RSIGN="${RSIGN}" CHECK_FILE="${CHECK_DIR}/check.txt" python3 - <<'PY' >/dev/null 2>&1 || true
+import os, pty
+kd = os.environ["KEY_DIR"]
+pw = open(os.path.join(kd, "minisign.passphrase")).read().strip()
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(os.environ["RSIGN"], ["rsign", "sign", "-s", os.path.join(kd, "minisign.key"), os.environ["CHECK_FILE"]])
+buf, sent = b"", False
+while True:
+    try:
+        d = os.read(fd, 1024)
+    except OSError:
+        break
+    if not d:
+        break
+    buf += d
+    if not sent and b"assword" in buf:
+        os.write(fd, (pw + "\n").encode())
+        sent = True
+os.waitpid(pid, 0)
+PY
+"${RSIGN}" verify "${CHECK_DIR}/check.txt" -p "${KEY_DIR}/minisign.pub" >/dev/null 2>&1 \
+  || { echo "❌ rsign sign/verify failed — passphrase doesn't unlock the key. Inspect ${KEY_DIR}/." >&2; rm -rf "${CHECK_DIR}"; exit 1; }
+rm -rf "${CHECK_DIR}"
 PASSPHRASE=$(cat "${KEY_DIR}/minisign.passphrase")
-printf '%s' "${PASSPHRASE}" | minisign -S -s "${KEY_DIR}/minisign.key" -m /tmp/_release_check.txt > /dev/null 2>&1 \
-  || { echo "❌ minisign sign failed — passphrase doesn't unlock the key. Inspect ${KEY_DIR}/." >&2; unset PASSPHRASE; exit 1; }
-rm -f /tmp/_release_check.txt /tmp/_release_check.txt.minisig
 echo "   ✅ keypair OK"
 
 # Verify pubkey in tauri.conf.json is in the CORRECT FORMAT.
@@ -124,10 +150,11 @@ if git diff --cached --quiet; then
   echo "   (no version-file changes; pushing tag against existing HEAD)"
 else
   git commit -m "release: desktop ${VERSION}" >/dev/null
-  git push origin main >/dev/null
+  git push "https://github.com/${REPO}.git" HEAD:main >/dev/null
 fi
 git tag "${TAG}" 2>/dev/null || true
-git push origin "${TAG}" >/dev/null
+# https: git over SSH is not set up on every release machine.
+git push "https://github.com/${REPO}.git" "${TAG}" >/dev/null
 echo "   ✅ tag ${TAG} pushed"
 
 # ─── 5. Wait for CI ────────────────────────────────────────────────────────
@@ -154,156 +181,32 @@ if [[ "${CONCLUSION}" != "success" ]]; then
 fi
 echo "   ✅ CI green"
 
-# ─── 6. Update vskill-platform manifest ───────────────────────────────────
-echo ">> [6/8] updating vskill-platform manifest..."
-RELEASE_TMP="/tmp/release-${VERSION}"
-mkdir -p "${RELEASE_TMP}"
-rm -f "${RELEASE_TMP}"/*.sig
-gh release download "${TAG}" --repo "${REPO}" \
-  --pattern '*aarch64*.app.tar.gz.sig' \
-  --pattern '*x64-setup.exe.sig' \
-  --pattern '*amd64.AppImage.sig' \
-  --dir "${RELEASE_TMP}" >/dev/null
+# ─── 6. Check the release assets ─────────────────────────────────────────
+echo ">> [6/8] checking release assets..."
+ASSETS=$(gh release view "${TAG}" -R "${REPO}" --json assets --jq '.assets[].name')
+for pattern in '\.app\.tar\.gz\.sig$' 'x64-setup\.exe\.sig$' '\.AppImage\.sig$'; do
+  grep -qE "${pattern}" <<<"${ASSETS}" || { echo "❌ release ${TAG} has no asset matching ${pattern}" >&2; exit 1; }
+done
+echo "   ✅ updater signatures attached"
 
-read_sig() {
-  local pattern="$1"
-  local file
-  file="$(find "${RELEASE_TMP}" -type f -name "${pattern}" | head -1)"
-  [[ -f "${file}" ]] || { echo "❌ missing release signature matching ${pattern}" >&2; exit 1; }
-  tr -d '\n\r' < "${file}"
-}
-
-DARWIN_SIG="$(read_sig '*aarch64*.app.tar.gz.sig')"
-WINDOWS_SIG="$(read_sig '*x64-setup.exe.sig')"
-LINUX_SIG="$(read_sig '*amd64.AppImage.sig')"
-RELEASE_NOTES="$(gh release view "${TAG}" -R "${REPO}" --json body --jq .body 2>/dev/null || true)"
-if [[ -z "${RELEASE_NOTES//[[:space:]]/}" ]]; then
-  RELEASE_NOTES="Skill Studio v${VERSION}"
-fi
-PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-PLATFORM_DIR="${REPO_ROOT}/../../${PLATFORM_REPO_REL}"
-if [[ ! -d "${PLATFORM_DIR}" ]]; then
-  # fallback for non-umbrella checkouts
-  PLATFORM_DIR=$(find "${REPO_ROOT}/.." -maxdepth 4 -type d -name vskill-platform 2>/dev/null | head -1)
-  [[ -z "${PLATFORM_DIR}" ]] && { echo "❌ can't find vskill-platform repo"; exit 1; }
-fi
-
-ROUTE="${PLATFORM_DIR}/src/app/desktop/latest.json/route.ts"
-PAGE="${PLATFORM_DIR}/src/app/desktop/page.tsx"
-[[ -f "${ROUTE}" ]] || { echo "❌ missing ${ROUTE}" >&2; exit 1; }
-[[ -f "${PAGE}" ]] || { echo "❌ missing ${PAGE}" >&2; exit 1; }
-
-RELEASE_VERSION="${VERSION}" \
-ROUTE_PATH="${ROUTE}" \
-PAGE_PATH="${PAGE}" \
-PUB_DATE="${PUB_DATE}" \
-DARWIN_SIG="${DARWIN_SIG}" \
-WINDOWS_SIG="${WINDOWS_SIG}" \
-LINUX_SIG="${LINUX_SIG}" \
-RELEASE_NOTES="${RELEASE_NOTES}" \
-node <<'NODE'
-const fs = require("fs");
-
-const version = process.env.RELEASE_VERSION;
-const pubDate = process.env.PUB_DATE;
-const notes = process.env.RELEASE_NOTES;
-
-function replaceRequired(source, pattern, replacement, label) {
-  const next = source.replace(pattern, replacement);
-  if (next === source) {
-    throw new Error(`failed to update ${label}`);
-  }
-  return next;
-}
-
-function replaceConst(source, name, value) {
-  return replaceRequired(
-    source,
-    new RegExp(`const ${name} =\\s*\\n?\\s*"[^"]+";`, "s"),
-    `const ${name} =\n  ${JSON.stringify(value)};`,
-    name,
-  );
-}
-
-const routePath = process.env.ROUTE_PATH;
-let route = fs.readFileSync(routePath, "utf8");
-route = replaceRequired(route, /desktop-v[0-9]+\.[0-9]+\.[0-9]+/g, `desktop-v${version}`, "release base");
-route = replaceRequired(route, /Skill\.Studio_[0-9]+\.[0-9]+\.[0-9]+_x64-setup\.exe/g, `Skill.Studio_${version}_x64-setup.exe`, "windows asset URL");
-route = replaceRequired(route, /Skill\.Studio_[0-9]+\.[0-9]+\.[0-9]+_amd64\.AppImage/g, `Skill.Studio_${version}_amd64.AppImage`, "linux asset URL");
-route = replaceConst(route, "DARWIN_AARCH64_SIGNATURE", process.env.DARWIN_SIG);
-route = replaceConst(route, "WINDOWS_X86_64_SIGNATURE", process.env.WINDOWS_SIG);
-route = replaceConst(route, "LINUX_X86_64_SIGNATURE", process.env.LINUX_SIG);
-route = replaceRequired(route, /version: "[0-9]+\.[0-9]+\.[0-9]+"/, `version: ${JSON.stringify(version)}`, "manifest version");
-route = replaceRequired(route, /notes:\s*"(?:[^"\\]|\\.)*"/s, `notes: ${JSON.stringify(notes)}`, "release notes");
-route = replaceRequired(route, /pub_date: "[^"]+"/, `pub_date: ${JSON.stringify(pubDate)}`, "pub_date");
-fs.writeFileSync(routePath, route);
-
-const pagePath = process.env.PAGE_PATH;
-let page = fs.readFileSync(pagePath, "utf8");
-page = replaceRequired(page, /LATEST_VERSION = "[0-9]+\.[0-9]+\.[0-9]+"/, `LATEST_VERSION = ${JSON.stringify(version)}`, "page version");
-page = replaceRequired(page, /RELEASE_TAG = "desktop-v[0-9]+\.[0-9]+\.[0-9]+"/, `RELEASE_TAG = ${JSON.stringify(`desktop-v${version}`)}`, "page tag");
-fs.writeFileSync(pagePath, page);
-NODE
-unset DARWIN_SIG WINDOWS_SIG LINUX_SIG RELEASE_NOTES
-
-# v1.0.47 lesson: the node block above said "updated" but the disk was clean
-# when step [7/8] reached `npm run build`. Fail fast here if the writes did not
-# actually land on the platform repo working tree.
-if [[ -d "${PLATFORM_DIR}/.git" ]]; then
-  ROUTE_DIFF=$(git -C "${PLATFORM_DIR}" diff --shortstat -- src/app/desktop/latest.json/route.ts 2>/dev/null || true)
-  PAGE_DIFF=$(git -C "${PLATFORM_DIR}" diff --shortstat -- src/app/desktop/page.tsx 2>/dev/null || true)
-  if [[ -z "${ROUTE_DIFF}" && -z "${PAGE_DIFF}" ]]; then
-    echo "❌ manifest+dashboard files not modified on disk after node write." >&2
-    echo "   route: ${ROUTE}" >&2
-    echo "   page:  ${PAGE}" >&2
-    echo "   git -C ${PLATFORM_DIR} status -s:" >&2
-    git -C "${PLATFORM_DIR}" status -s -- src/app/desktop/ >&2 || true
-    exit 1
-  fi
-  echo "   ✅ manifest + dashboard updated (route:${ROUTE_DIFF:-clean} page:${PAGE_DIFF:-clean})"
-else
-  echo "   ✅ manifest + dashboard updated (platform repo not git — skipped diff verify)"
-fi
-
-# ─── 7. Rebuild + redeploy vskill-platform ────────────────────────────────
-echo ">> [7/8] rebuilding + redeploying vskill-platform to Cloudflare..."
-(
-  cd "${PLATFORM_DIR}"
-  # v1.0.47 lesson: Node 20 makes Next.js's `Collecting build traces` phase
-  # silently drop *.nft.json files, then `npx @opennextjs/cloudflare build`
-  # crashes with ENOENT. Node 22 works. Force it here regardless of the
-  # interactive shell's `nvm use`.
-  if [[ -s "${HOME}/.nvm/nvm.sh" ]]; then
-    # shellcheck disable=SC1091
-    . "${HOME}/.nvm/nvm.sh" >/dev/null 2>&1
-    nvm use 22 >/dev/null 2>&1 || echo "⚠️  nvm use 22 failed — proceeding with $(node --version)"
-  fi
-  echo "   using node $(node --version)"
-  rm -rf .next .open-next
-  npm run build >/tmp/release-${VERSION}/build.log 2>&1 || { echo "❌ npm run build failed (see /tmp/release-${VERSION}/build.log)"; exit 1; }
-  npm run build:worker >/tmp/release-${VERSION}/build-worker.log 2>&1 || { echo "❌ npm run build:worker failed (see /tmp/release-${VERSION}/build-worker.log)"; exit 1; }
-  if [[ -z "${CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE:-}" && -f .env ]]; then
-    LOCAL_HYPERDRIVE_URL="$(node -e "const fs=require('fs'); const text=fs.readFileSync('.env','utf8'); const line=text.split(/\\n/).find((entry)=>entry.startsWith('DATABASE_URL=')); if(!line) process.exit(0); let value=line.slice('DATABASE_URL='.length).trim(); if((value.startsWith('\\\"')&&value.endsWith('\\\"'))||(value.startsWith(\"'\")&&value.endsWith(\"'\"))) value=value.slice(1,-1); try{new URL(value); process.stdout.write(value);}catch{process.exit(0);}")"
-    if [[ -n "${LOCAL_HYPERDRIVE_URL}" ]]; then
-      export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="${LOCAL_HYPERDRIVE_URL}"
-    fi
-    unset LOCAL_HYPERDRIVE_URL
-  fi
-  npm run deploy >/tmp/release-${VERSION}/deploy.log 2>&1 || { echo "❌ npm run deploy failed"; exit 1; }
-)
-sleep 5
-LIVE_VERSION=$(curl -fsSL https://verified-skill.com/desktop/latest.json 2>/dev/null | node -e "let s=''; process.stdin.on('data',c=>s+=c); process.stdin.on('end',()=>console.log(JSON.parse(s).version))" 2>/dev/null || echo "?")
-if [[ "${LIVE_VERSION}" != "${VERSION}" ]]; then
-  echo "❌ live manifest still shows ${LIVE_VERSION}, expected ${VERSION}"
+# ─── 7. Read the live manifest back (served from R2) ─────────────────────
+# CI's publish job wrote desktop/latest.json to R2 (publish-manifest.sh);
+# vskill-platform serves it straight from R2, so there is nothing to deploy.
+# A "fallback" source means R2 was unreachable or the object was invalid.
+echo ">> [7/8] reading https://verified-skill.com/desktop/latest.json..."
+MANIFEST_TMP="$(mktemp)"
+SOURCE=$(curl -fsS -D - -o "${MANIFEST_TMP}" "https://verified-skill.com/desktop/latest.json?ts=$(date +%s)" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-manifest-source"{print $2}')
+LIVE_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).version)" "${MANIFEST_TMP}" 2>/dev/null || echo "?")
+rm -f "${MANIFEST_TMP}"
+if [[ "${SOURCE}" != "r2" || "${LIVE_VERSION}" != "${VERSION}" ]]; then
+  echo "❌ live manifest: version ${LIVE_VERSION}, source ${SOURCE:-?}; expected ${VERSION} from r2" >&2
   exit 1
 fi
-echo "   ✅ verified-skill.com/desktop/latest.json now serves ${VERSION}"
+echo "   ✅ latest.json serves ${VERSION} from R2"
 
 # ─── 8. Promote release + cleanup stale drafts ───────────────────────────
 echo ">> [8/8] promoting release + cleanup..."
 gh release edit "${TAG}" --draft=false -R "${REPO}" >/dev/null
-# Cleanup any stale failed-release drafts (preserve only the live one)
 STALE=$(gh release list -R "${REPO}" --json tagName,isDraft --jq '.[] | select(.isDraft == true) | select(.tagName | startswith("desktop-v")) | .tagName')
 for t in ${STALE}; do
   if [[ "${t}" != "${TAG}" ]]; then
@@ -311,31 +214,6 @@ for t in ${STALE}; do
   fi
 done
 echo "   ✅ promoted + drafts cleaned"
-
-# Commit the manifest update from the platform repo when it is independently cloned.
-if [[ -d "${PLATFORM_DIR}/.git" ]]; then
-  (
-    cd "${PLATFORM_DIR}"
-    git add src/app/desktop/latest.json/route.ts src/app/desktop/page.tsx
-    if ! git diff --cached --quiet; then
-      git commit -m "release: desktop ${VERSION} platform manifest" >/dev/null
-      git push origin main >/dev/null 2>&1 || true
-    fi
-  )
-else
-  # Fallback for monorepo checkouts that track vskill-platform from the umbrella root.
-  UMBRELLA_ROOT=$(cd "${REPO_ROOT}/../../.." && pwd)
-  if [[ -d "${UMBRELLA_ROOT}/.git" ]]; then
-  (
-    cd "${UMBRELLA_ROOT}"
-    git add "${PLATFORM_REPO_REL}/src/app/desktop/latest.json/route.ts" "${PLATFORM_REPO_REL}/src/app/desktop/page.tsx" 2>/dev/null || true
-    if ! git diff --cached --quiet; then
-      git commit -m "release: desktop ${VERSION} manifest update" >/dev/null
-      git push origin main >/dev/null 2>&1 || true
-    fi
-  )
-  fi
-fi
 
 echo ""
 echo "╔════════════════════════════════════════════════════════════╗"

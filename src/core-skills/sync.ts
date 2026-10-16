@@ -8,22 +8,53 @@ import {
   existsSync,
   statSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import os from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { installSymlink } from "../installer/canonical.js";
+import { compareVersions, parseVersion } from "../utils/semver.js";
+
+/** The version a plugin cache folder holds: its `.claude-plugin/plugin.json`
+ *  version when readable, else the folder name. Folder names are not reliable
+ *  (Claude Code reuses a folder named `2.1.0` for later plugin versions). */
+export function pluginFolderVersion(folder: string): string {
+  try {
+    const manifest = JSON.parse(
+      readFileSync(join(folder, ".claude-plugin", "plugin.json"), "utf-8"),
+    ) as { version?: unknown };
+    if (typeof manifest.version === "string" && parseVersion(manifest.version)) {
+      return manifest.version.trim();
+    }
+  } catch {
+    // No manifest or unreadable: fall back to the folder name.
+  }
+  return basename(folder);
+}
+
+/**
+ * Pick the newest plugin version folder by semver (3.0.14 beats 3.0.6),
+ * reading each folder's plugin.json version first. Ties fall back to the
+ * folder name. Returns null for an empty list.
+ */
+export function pickLatestVersionFolder(base: string, folders: string[]): string | null {
+  if (folders.length === 0) return null;
+  const ranked = folders.map((name) => ({ name, version: pluginFolderVersion(join(base, name)) }));
+  ranked.sort((a, b) => compareVersions(b.version, a.version) || compareVersions(b.name, a.name));
+  return ranked[0].name;
+}
 
 /**
  * Find the directory containing core SpecWeave skills (sw:* plugin).
  *
  * Search order:
  * 1. Claude Code plugin cache: ~/.claude/plugins/cache/specweave/sw/{version}/skills/
+ *    (newest version by semver, see pickLatestVersionFolder)
  * 2. Bundled with vskill package: {packageDir}/../skills/ (for npm distribution)
  */
-export function findCoreSkillsDir(): string | null {
+export function findCoreSkillsDir(opts: { home?: string } = {}): string | null {
   // 1. Claude Code plugin cache
   const pluginCacheBase = join(
-    os.homedir(),
+    opts.home ?? os.homedir(),
     ".claude",
     "plugins",
     "cache",
@@ -33,11 +64,12 @@ export function findCoreSkillsDir(): string | null {
   if (existsSync(pluginCacheBase)) {
     try {
       const versions = readdirSync(pluginCacheBase).filter((v) => {
+        if (v.startsWith(".")) return false;
         const p = join(pluginCacheBase, v, "skills");
         return existsSync(p) && statSync(p).isDirectory();
       });
-      if (versions.length > 0) {
-        const latestVersion = versions.sort().pop()!;
+      const latestVersion = pickLatestVersionFolder(pluginCacheBase, versions);
+      if (latestVersion) {
         return join(pluginCacheBase, latestVersion, "skills");
       }
     } catch {

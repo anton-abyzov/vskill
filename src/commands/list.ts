@@ -3,6 +3,8 @@
 // ---------------------------------------------------------------------------
 
 import { readLockfile, readSkillsShLock } from "../lockfile/index.js";
+import { globalLockDir, mergedSkills, resolveLockTargets, type LockResolution } from "../lockfile/scope.js";
+import type { VskillLock } from "../lockfile/types.js";
 import {
   detectInstalledAgents,
   AGENTS_REGISTRY,
@@ -16,18 +18,47 @@ interface ListOptions {
   /** 0724 T-005: per-scope enable status table. */
   installed?: boolean;
   json?: boolean;
+  /** List user-level installs (~/.agents/vskill.lock) instead of the project's. */
+  global?: boolean;
 }
 
 export async function listCommand(opts: ListOptions): Promise<void> {
   if (opts.installed) {
-    await listInstalledWithStatus(opts.json);
+    await listInstalledWithStatus(opts.json, opts.global);
     return;
   }
   if (opts.agents) {
     await listAgents(opts.json);
   } else {
-    await listSkills(opts.json);
+    await listSkills(opts.json, opts.global);
   }
+}
+
+/**
+ * The lock entries `list` shows: the project lock, or the user-level lock
+ * with --global or outside a project. Notes go to stderr so --json stays
+ * parseable. Exits when no lockfile exists.
+ */
+function readListLock(global?: boolean): { skills: VskillLock["skills"]; resolution: LockResolution } | null {
+  const resolution = resolveLockTargets({ global, read: readLockfile });
+  if (resolution.targets.length === 0) {
+    console.log(
+      yellow("No vskill.lock found. Run ") +
+        cyan(resolution.scope === "global" ? "vskill install <source> --global" : "vskill install") +
+        yellow(" first.")
+    );
+    if (resolution.scope === "project") {
+      console.log(dim(`User-level skills: ${cyan("vskill list --global")}`));
+    }
+    process.exit(1);
+    return null; // unreachable but satisfies TS
+  }
+  if (resolution.fellBackToGlobal) {
+    console.error(dim(`No project vskill.lock here; listing user-level skills from ${resolution.displayPath}`));
+  } else if (resolution.scope === "global") {
+    console.error(dim(`User-level skills from ${resolution.displayPath}`));
+  }
+  return { skills: mergedSkills(resolution.targets), resolution };
 }
 
 async function listAgents(json?: boolean): Promise<void> {
@@ -63,18 +94,10 @@ async function listAgents(json?: boolean): Promise<void> {
   );
 }
 
-async function listSkills(json?: boolean): Promise<void> {
-  const lock = readLockfile();
-
-  if (!lock) {
-    console.log(
-      yellow("No vskill.lock found. Run ") +
-        cyan("vskill install") +
-        yellow(" first.")
-    );
-    process.exit(1);
-    return; // unreachable but satisfies TS
-  }
+async function listSkills(json?: boolean, global?: boolean): Promise<void> {
+  const read = readListLock(global);
+  if (!read) return;
+  const lock = { skills: read.skills };
 
   const skillNames = Object.keys(lock.skills);
 
@@ -83,8 +106,11 @@ async function listSkills(json?: boolean): Promise<void> {
     return;
   }
 
-  // Also read skills.sh lock file for cross-tool visibility
-  const skillsShEntries = readSkillsShLock();
+  // Also read skills.sh lock file for cross-tool visibility (its global
+  // installs keep their lock next to ours in ~/.agents).
+  const skillsShEntries = read.resolution.scope === "global"
+    ? readSkillsShLock(globalLockDir())
+    : readSkillsShLock();
   const skillsShNames = new Set(skillsShEntries.map((e) => e.name));
 
   if (skillNames.length === 0 && skillsShNames.size === 0) {
@@ -149,18 +175,10 @@ interface InstalledRow {
   autoDiscovered: boolean;
 }
 
-async function listInstalledWithStatus(json?: boolean): Promise<void> {
-  const lock = readLockfile();
-
-  if (!lock) {
-    console.log(
-      yellow("No vskill.lock found. Run ") +
-        cyan("vskill install") +
-        yellow(" first."),
-    );
-    process.exit(1);
-    return;
-  }
+async function listInstalledWithStatus(json?: boolean, global?: boolean): Promise<void> {
+  const read = readListLock(global);
+  if (!read) return;
+  const lock = { skills: read.skills };
 
   const skillNames = Object.keys(lock.skills);
   const cwd = process.cwd();

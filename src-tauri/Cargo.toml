@@ -15,7 +15,10 @@ rust-version = "1.78"
 
 [lib]
 name = "vskill_desktop_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop only: main.rs links this rlib. staticlib/cdylib are for Tauri mobile
+# targets (none exist under src-tauri/gen), and under release LTO each of
+# them cost its own whole-program link. Add them back with a mobile target.
+crate-type = ["rlib"]
 
 [features]
 # Fault-injection for settings.rs atomic-write tests (AC-US6-03). With this

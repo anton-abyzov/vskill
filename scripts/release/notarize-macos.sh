@@ -5,17 +5,25 @@
 # Usage:
 #   scripts/release/notarize-macos.sh <path-to-.dmg-or-.app> [--dry-run]
 #
-# Requirements:
-#   - xcrun notarytool keychain profile named "vskill" (already set up
-#     per increment 0828 metadata; see scripts/release/macos-README.md
-#     for re-creation instructions if the profile is missing).
-#   - The artifact MUST already be signed with the Developer ID Application
-#     identity. Notarization will reject unsigned binaries with an explicit
-#     code-signing error.
+# Credentials (first match wins):
+#   1. NOTARY_PROFILE (or the older ASC_KEYCHAIN_PROFILE): an xcrun notarytool
+#      keychain profile.
+#   2. APPLE_ID + APPLE_PASSWORD (app-specific password) + APPLE_TEAM_ID: the
+#      same Apple ID credential tauri-action notarizes the .app with. CI
+#      (desktop-release.yml, notarize-dryrun.yml) uses only this path.
+#   3. Neither: the local keychain profile "vskill" (see
+#      scripts/release/macos-README.md to re-create it).
+#   Setting only some of the APPLE_* variables is an error.
+#
+# The artifact MUST already be signed with the Developer ID Application
+# identity. Notarization rejects unsigned binaries with a code-signing error.
+#
+# Optional env:
+#   NOTARY_WAIT_TIMEOUT  e.g. 30m — passed to `notarytool submit --timeout`.
 #
 # Exit codes:
-#   0  success (notarized + stapled + spctl accepts)
-#   1  invalid arguments
+#   0  success (notarized + stapled + spctl accepts as Notarized Developer ID)
+#   1  invalid arguments or incomplete credentials
 #   2  artifact missing or wrong file type
 #   3  notarytool submission failed
 #   4  stapler failed
@@ -23,7 +31,6 @@
 
 set -euo pipefail
 
-PROFILE="${ASC_KEYCHAIN_PROFILE:-vskill}"
 DRY_RUN=0
 
 print_usage() {
@@ -57,13 +64,42 @@ case "$ARTIFACT" in
   *) echo "ERROR: artifact must be .dmg, .app, .zip, or .pkg (got: $ARTIFACT)" >&2; exit 2 ;;
 esac
 
+# ── Credentials ──────────────────────────────────────────────────────────────
+PROFILE="${NOTARY_PROFILE:-${ASC_KEYCHAIN_PROFILE:-}}"
+APPLE_SET=0
+[[ -n "${APPLE_ID:-}" ]] && APPLE_SET=$((APPLE_SET + 1))
+[[ -n "${APPLE_PASSWORD:-}" ]] && APPLE_SET=$((APPLE_SET + 1))
+[[ -n "${APPLE_TEAM_ID:-}" ]] && APPLE_SET=$((APPLE_SET + 1))
+
+if [[ -n "$PROFILE" ]]; then
+  AUTH_ARGS=(--keychain-profile "$PROFILE")
+  AUTH_DESC="keychain profile '$PROFILE'"
+elif [[ "$APPLE_SET" == "3" ]]; then
+  # The password goes on notarytool's argv; on an ephemeral CI runner that
+  # matches what tauri-action already does for the .app.
+  AUTH_ARGS=(--apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID")
+  AUTH_DESC="Apple ID (APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID)"
+elif [[ "$APPLE_SET" != "0" ]]; then
+  echo "ERROR: APPLE_ID, APPLE_PASSWORD and APPLE_TEAM_ID must all be set (only ${APPLE_SET} of 3 are)" >&2
+  exit 1
+else
+  PROFILE="vskill"
+  AUTH_ARGS=(--keychain-profile "$PROFILE")
+  AUTH_DESC="keychain profile '$PROFILE' (default)"
+fi
+
+WAIT_ARGS=(--wait)
+if [[ -n "${NOTARY_WAIT_TIMEOUT:-}" ]]; then
+  WAIT_ARGS+=(--timeout "$NOTARY_WAIT_TIMEOUT")
+fi
+
 echo "==> Notarizing: $ARTIFACT"
-echo "    Keychain profile: $PROFILE"
+echo "    Credentials: $AUTH_DESC"
 
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "==> [dry-run] Skipping xcrun notarytool submit + stapler + spctl"
   echo "==> [dry-run] Would invoke:"
-  echo "      xcrun notarytool submit \"$ARTIFACT\" --keychain-profile \"$PROFILE\" --wait --output-format json"
+  echo "      xcrun notarytool submit \"$ARTIFACT\" <$AUTH_DESC> ${WAIT_ARGS[*]} --output-format json"
   echo "      xcrun stapler staple \"$ARTIFACT\""
   echo "      spctl -a -t open|exec -vv \"$ARTIFACT\" (open + primary-signature for .dmg)"
   exit 0
@@ -71,8 +107,8 @@ fi
 
 # notarytool submit returns JSON we can parse for the submission ID + status.
 SUBMIT_OUTPUT="$(xcrun notarytool submit "$ARTIFACT" \
-  --keychain-profile "$PROFILE" \
-  --wait \
+  "${AUTH_ARGS[@]}" \
+  "${WAIT_ARGS[@]}" \
   --output-format json 2>&1)" || {
   echo "ERROR: notarytool submit failed:"
   echo "$SUBMIT_OUTPUT"
@@ -88,7 +124,8 @@ if [[ "$STATUS" != "Accepted" ]]; then
   echo "ERROR: notarization status: $STATUS (expected Accepted)" >&2
   if [[ -n "$SUBMISSION_ID" ]]; then
     echo "==> Fetching notarization log for submission $SUBMISSION_ID:"
-    xcrun notarytool log "$SUBMISSION_ID" --keychain-profile "$PROFILE" || true
+    # Diagnostics only: the script exits 3 below whatever this prints.
+    xcrun notarytool log "$SUBMISSION_ID" "${AUTH_ARGS[@]}" || echo "(could not fetch the notarization log)"
   fi
   exit 3
 fi
@@ -107,9 +144,15 @@ case "$ARTIFACT" in
   *.dmg) SPCTL_ARGS=(-a -t open --context context:primary-signature -vv) ;;
   *)     SPCTL_ARGS=(-a -t exec -vv) ;;
 esac
-if ! spctl "${SPCTL_ARGS[@]}" "$ARTIFACT" 2>&1 | tee /dev/stderr | grep -q "accepted"; then
+if ! SPCTL_OUT="$(spctl "${SPCTL_ARGS[@]}" "$ARTIFACT" 2>&1)"; then
+  echo "$SPCTL_OUT" >&2
   echo "ERROR: spctl rejected the stapled artifact" >&2
   exit 5
 fi
+echo "$SPCTL_OUT"
+case "$SPCTL_OUT" in
+  *"source=Notarized Developer ID"*) ;;
+  *) echo "ERROR: spctl accepted the artifact but not as 'Notarized Developer ID'" >&2; exit 5 ;;
+esac
 
 echo "==> Notarized + stapled + spctl-accepted: $ARTIFACT"

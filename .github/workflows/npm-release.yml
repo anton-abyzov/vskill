@@ -4,8 +4,11 @@ on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
 
+# contents: write for `gh release create`; actions: read to find and watch the
+# CI run on the tagged commit.
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: npm-release-${{ github.ref }}
@@ -14,24 +17,94 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The job waits on the whole ci.yml run for the tagged commit (its jobs
+    # have 15-minute timeouts, and macOS/Windows runners can queue), so allow
+    # more than the ~4 minutes a normal release takes.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           registry-url: https://registry.npmjs.org
-          cache: npm
+          # No setup-node cache: it would save a cache under this tag ref that
+          # no other ref can read. The restore-only step below reads main's.
+          package-manager-cache: false
       - name: Match the package to the release tag
         run: node -e 'const p=require("./package.json");if(process.env.GITHUB_REF_NAME!==`v${p.version}`)throw new Error("Tag and package version differ")'
-      - run: npm ci --ignore-scripts && npm run setup
-      - name: Test the full package
-        run: npm test -- --maxWorkers=4
+      # Fail in seconds, not after the CI wait and the build, when the token is
+      # dead or belongs to an account that does not own the package. When
+      # publishing moves to an npm Trusted Publisher (no NODE_AUTH_TOKEN), this
+      # probe has to go with the token.
+      - name: Check npm credentials
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! user=$(npm whoami --registry https://registry.npmjs.org); then
+            echo "::error::npm whoami failed: NPM_TOKEN is missing, expired or revoked"
+            exit 1
+          fi
+          echo "npm user: $user"
+          # Owner lines are "<user> <email>"; only the user name is compared
+          # and nothing from this list is printed.
+          if ! owners=$(npm owner ls vskill --registry https://registry.npmjs.org); then
+            echo "::error::npm owner ls vskill failed"
+            exit 1
+          fi
+          if ! printf '%s\n' "$owners" | awk '{print $1}' | grep -qxF "$user"; then
+            echo "::error::npm user '$user' is not an owner of vskill"
+            exit 1
+          fi
+      - name: Locate the npm cache
+        id: npm-cache
+        run: |
+          echo "dir=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+          echo "arch=$(node -p process.arch)" >> "$GITHUB_OUTPUT"
+      # Same path and key as setup-node's `cache: npm` writes on main, so the
+      # tag run restores main's cache and never saves one of its own. The
+      # release commit bumps the version inside package-lock.json, and main's
+      # CI for that commit saves its cache only after this step has run, so the
+      # exact key usually misses on a release; the prefix then restores main's
+      # newest npm cache (content-addressed, so stale entries are harmless).
+      - name: Restore the npm cache from main
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.npm-cache.outputs.dir }}
+          key: node-cache-${{ runner.os }}-${{ steps.npm-cache.outputs.arch }}-npm-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            node-cache-${{ runner.os }}-${{ steps.npm-cache.outputs.arch }}-npm-
+      - run: npm ci --ignore-scripts && npm run setup
+      # This release does not re-run the test suite. It relies on ci.yml, whose
+      # sharded unit-full jobs run the whole Vitest suite (plus the cross-OS
+      # smoke jobs) on every push to main, and waits for that run on the tagged
+      # commit to pass. If ci.yml ever stops running the full suite on push to
+      # main, put `npm test` back here. A tag on a commit with no CI push run
+      # (not on main, or [skip ci]) falls back to running the suite here.
+      - name: Wait for CI on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
           PWDEBUG: '0'
           PLAYWRIGHT_HTML_OPEN: never
-      - name: Build and validate both published artifacts
-        run: npm run build && npm run build:eval-ui && npm run release:preflight
+        run: |
+          set -euo pipefail
+          run_id=""
+          for _ in $(seq 1 18); do
+            run_id=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" \
+              --event push --json databaseId -q '.[0].databaseId // empty')
+            [ -n "$run_id" ] && break
+            sleep 5
+          done
+          if [ -n "$run_id" ]; then
+            echo "Waiting for CI run $run_id on $GITHUB_SHA"
+            gh run watch "$run_id" -R "$GITHUB_REPOSITORY" --exit-status --interval 10
+          else
+            echo "::warning::No ci.yml push run for $GITHUB_SHA after 90s; running the full suite here"
+            npm test -- --maxWorkers=4
+          fi
+      # `npm run release` = `npm publish --ignore-scripts=false`, so
+      # prepublishOnly builds dist/ and the eval-ui bundle, syncs the README
+      # badges and runs release:preflight before anything is uploaded.
       - name: Publish the validated package
         run: npm run release -- --access public
         env:

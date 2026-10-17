@@ -22,11 +22,18 @@
 #   STAGING=1     Publish to staging.json instead of latest.json (AC-US16-04).
 #   DRY_RUN=1     Print all aws-cli commands without executing.
 #   MACOS_ARCH    Required for generic macOS bundle names: aarch64, x86_64 or universal.
+#   FORCE_ROLLBACK=1  Promote even though the live manifest has a newer version.
+#                 Prefer desktop-rollback.yml for intentional rollbacks.
+#
+# Binaries upload in parallel, each destination key once; the manifest
+# promotion stays serial. Bash 3.2 compatible (no associative arrays), so it
+# can be dry-run on a Mac as well as in CI.
 #
 # Atomicity (ADR 0829-01 §3):
 #   1. Upload binaries to v<VERSION>/<artifact>     — all platforms must succeed
 #   2. Upload v<VERSION>/latest.json                — canonical history
-#   3. Atomic copy: v<VERSION>/latest.json → /desktop/latest.json (R2 PUT is atomic)
+#   3. Atomic copy: v<VERSION>/latest.json → /desktop/latest.json (R2 PUT is atomic),
+#      refused when the live manifest already serves a newer version
 #   4. Mirror to /desktop/history/v<VERSION>.json   — for rollback
 #
 # Cache-Control:
@@ -96,6 +103,88 @@ if [[ -z "$DRY" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Downgrade guard — never promote a manifest older than the one live
+# ---------------------------------------------------------------------------
+# A re-run of an older tag, or two tags whose publish jobs finish out of
+# order, must not roll every client back. desktop-release.yml also serializes
+# publish jobs with a concurrency group; this check covers re-runs.
+
+# version_gt A B — exit 0 when A > B, 1 when A <= B, 2 when either is not
+# X.Y.Z[-prerelease]. A final release sorts above its own pre-releases.
+version_gt() {
+  python3 - "$1" "$2" <<'PY'
+import re, sys
+
+def key(v):
+    m = re.match(r'^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$', v)
+    if not m:
+        sys.exit(2)
+    pre = m.group(4) or ''
+    parts = tuple((0, int(t), '') if t.isdigit() else (1, 0, t)
+                  for t in re.findall(r'\d+|[^\d.]+', pre))
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), 0 if pre else 1, parts)
+
+sys.exit(0 if key(sys.argv[1]) > key(sys.argv[2]) else 1)
+PY
+}
+
+assert_not_downgrade() {
+  if [[ -n "$DRY" ]]; then
+    echo "==> [DRY-RUN] skipping the live-version check"
+    return 0
+  fi
+  local head_out live_json live rc
+  if ! head_out="$(aws --endpoint-url "$R2_ENDPOINT" s3api head-object \
+      --bucket "$BUCKET" --key "$DEST_PREFIX/$MANIFEST_NAME" 2>&1)"; then
+    case "$head_out" in
+      *"(404)"*|*"Not Found"*|*NoSuchKey*)
+        echo "==> No live $DEST_PREFIX/$MANIFEST_NAME yet; nothing to compare."
+        return 0
+        ;;
+      *)
+        echo "ERROR: cannot read the live $DEST_PREFIX/$MANIFEST_NAME:" >&2
+        echo "$head_out" >&2
+        exit 1
+        ;;
+    esac
+  fi
+  live_json="$(mktemp)"
+  aws --endpoint-url "$R2_ENDPOINT" s3 cp "s3://$BUCKET/$DEST_PREFIX/$MANIFEST_NAME" "$live_json" --no-progress >/dev/null
+  if ! live="$(jq -r '.version // empty' "$live_json" 2>/dev/null)"; then
+    live=""
+  fi
+  rm -f "$live_json"
+  if [[ -z "$live" ]]; then
+    echo "WARN: live $MANIFEST_NAME has no readable version; promoting $VERSION over it." >&2
+    return 0
+  fi
+  if [[ "$live" == "$VERSION" ]]; then
+    echo "==> Live $MANIFEST_NAME already serves $VERSION (re-publish)."
+    return 0
+  fi
+  rc=0
+  version_gt "$live" "$VERSION" || rc=$?
+  case "$rc" in
+    1) echo "==> Live $MANIFEST_NAME is $live; $VERSION is newer." ;;
+    0|2)
+      local why="live $MANIFEST_NAME is $live, newer than $VERSION"
+      [[ "$rc" == "2" ]] && why="cannot compare live version '$live' with '$VERSION'"
+      if [[ "${FORCE_ROLLBACK:-0}" == "1" ]]; then
+        echo "WARN: $why; FORCE_ROLLBACK=1, promoting $VERSION anyway." >&2
+        return 0
+      fi
+      echo "ERROR: $why; refusing to roll clients back." >&2
+      echo "       Use desktop-rollback.yml for an intentional rollback, or set FORCE_ROLLBACK=1." >&2
+      exit 1
+      ;;
+    *) echo "ERROR: version comparison failed (exit $rc)" >&2; exit 1 ;;
+  esac
+}
+
+# Fail fast, before uploading anything.
+assert_not_downgrade
+
+# ---------------------------------------------------------------------------
 # Step 1 — Discover artifacts + their .sig files
 # ---------------------------------------------------------------------------
 # Tauri Updater needs the signed updater artifact emitted by tauri-action.
@@ -111,8 +200,19 @@ fi
 #   v<VERSION>/macos/vSkill_<v>_aarch64.app.tar.gz.sig
 #   v<VERSION>/windows/vSkill_<v>_x64-setup.exe(.sig) etc.
 
-declare -A PLATFORM_BUNDLE   # tauri platform key -> bundle filename (relative to artifacts/)
-declare -A PLATFORM_SIG      # tauri platform key -> base64 sig (read from .sig file)
+# Discovered platforms as parallel indexed arrays: tauri platform key, bundle
+# path, base64 signature (read from the .sig file).
+PLATFORM_KEYS=()
+PLATFORM_BUNDLES=()
+PLATFORM_SIGS=()
+
+has_platform() {
+  local k
+  for k in ${PLATFORM_KEYS[@]+"${PLATFORM_KEYS[@]}"}; do
+    [[ "$k" == "$1" ]] && return 0
+  done
+  return 1
+}
 
 discover_platform() {
   local key="$1"; local pattern="$2"; local search_dir="$3"
@@ -127,9 +227,10 @@ discover_platform() {
     echo "ERROR: missing signature file: $sig" >&2
     exit 1
   fi
-  PLATFORM_BUNDLE["$key"]="$bundle"
+  PLATFORM_KEYS+=("$key")
+  PLATFORM_BUNDLES+=("$bundle")
   # tauri-action's .sig file is already the base64 minisign sig as a single line.
-  PLATFORM_SIG["$key"]="$(tr -d '\n' < "$sig")"
+  PLATFORM_SIGS+=("$(tr -d '\n' < "$sig")")
 }
 
 # Search inside the artifacts dir — agents in build matrix uploaded with names
@@ -138,7 +239,7 @@ discover_platform "darwin-aarch64"   "*aarch64*.app.tar.gz"        "$ARTIFACTS_D
 discover_platform "darwin-x86_64"    "*x86_64*.app.tar.gz"         "$ARTIFACTS_DIR" || true
 # Tauri's generic app name does not encode architecture. Never infer universal:
 # the release workflow supplies the actual macOS build target explicitly.
-if [[ -z "${PLATFORM_BUNDLE[darwin-aarch64]:-}" && -z "${PLATFORM_BUNDLE[darwin-x86_64]:-}" ]]; then
+if ! has_platform darwin-aarch64 && ! has_platform darwin-x86_64; then
   MACOS_KEYS="$(node "$REPO_ROOT/scripts/release/macos-platform-keys.mjs" "${MACOS_ARCH:-}")"
   for key in $MACOS_KEYS; do
     discover_platform "$key" "*.app.tar.gz" "$ARTIFACTS_DIR"
@@ -153,14 +254,14 @@ discover_platform "linux-x86_64"     "*amd64.AppImage"             "$ARTIFACTS_D
   || discover_platform "linux-x86_64"     "*.AppImage"             "$ARTIFACTS_DIR" \
   || discover_platform "linux-x86_64"     "*.AppImage.tar.gz"      "$ARTIFACTS_DIR"
 
-if [[ ${#PLATFORM_BUNDLE[@]} -eq 0 ]]; then
+if [[ ${#PLATFORM_KEYS[@]} -eq 0 ]]; then
   echo "ERROR: no platform bundles discovered under $ARTIFACTS_DIR" >&2
   exit 1
 fi
 
-echo "==> Discovered ${#PLATFORM_BUNDLE[@]} platform bundles:"
-for key in "${!PLATFORM_BUNDLE[@]}"; do
-  echo "    $key  →  ${PLATFORM_BUNDLE[$key]}"
+echo "==> Discovered ${#PLATFORM_KEYS[@]} platform bundles:"
+for i in "${!PLATFORM_KEYS[@]}"; do
+  echo "    ${PLATFORM_KEYS[$i]}  →  ${PLATFORM_BUNDLES[$i]}"
 done
 
 # ---------------------------------------------------------------------------
@@ -181,20 +282,64 @@ upload_with_cache() {
     --no-progress
 }
 
+# queue_upload <src> <dest> <cache> [content-type] — start the upload in the
+# background, once per destination key. On Windows/Linux the user-facing
+# installer is also the updater bundle, so the same file is queued twice.
+QUEUED_DESTS=()
+QUEUED_SRCS=()
+UPLOAD_PIDS=()
+queue_upload() {
+  local src="$1"; local dest="$2"
+  local i
+  for i in ${QUEUED_DESTS[@]+"${!QUEUED_DESTS[@]}"}; do
+    if [[ "${QUEUED_DESTS[$i]}" == "$dest" ]]; then
+      if [[ "${QUEUED_SRCS[$i]}" != "$src" ]] && ! cmp -s "${QUEUED_SRCS[$i]}" "$src"; then
+        echo "ERROR: ${QUEUED_SRCS[$i]} and $src both map to s3://$BUCKET/$dest with different content" >&2
+        exit 1
+      fi
+      echo "    already queued: $dest"
+      return 0
+    fi
+  done
+  QUEUED_DESTS+=("$dest")
+  QUEUED_SRCS+=("$src")
+  upload_with_cache "$@" &
+  UPLOAD_PIDS+=("$!")
+}
+
+# Wait for every queued upload; any failure stops the publish before
+# latest.json is touched.
+wait_for_uploads() {
+  local pid failed=0
+  for pid in ${UPLOAD_PIDS[@]+"${UPLOAD_PIDS[@]}"}; do
+    if ! wait "$pid"; then
+      failed=$((failed + 1))
+    fi
+  done
+  UPLOAD_PIDS=()
+  if [[ "$failed" -gt 0 ]]; then
+    echo "ERROR: $failed upload(s) failed; latest.json was not touched" >&2
+    exit 1
+  fi
+}
+
 echo "==> Uploading user-facing artifacts to s3://$BUCKET/$VERSION_PREFIX/ ..."
 while IFS= read -r f; do
   fname="$(basename "$f")"
-  upload_with_cache "$f" "$VERSION_PREFIX/$fname" "public, max-age=2592000, immutable"
+  queue_upload "$f" "$VERSION_PREFIX/$fname" "public, max-age=2592000, immutable"
 done < <(find "$ARTIFACTS_DIR" -type f \
   \( -name "*.dmg" -o -name "*.msi" -o -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \))
 
 echo "==> Uploading update bundles + .sig files ..."
-for key in "${!PLATFORM_BUNDLE[@]}"; do
-  bundle="${PLATFORM_BUNDLE[$key]}"
+for i in "${!PLATFORM_KEYS[@]}"; do
+  bundle="${PLATFORM_BUNDLES[$i]}"
   fname="$(basename "$bundle")"
-  upload_with_cache "$bundle" "$VERSION_PREFIX/$fname" "public, max-age=2592000, immutable"
-  upload_with_cache "${bundle}.sig" "$VERSION_PREFIX/${fname}.sig" "public, max-age=2592000, immutable" "text/plain"
+  queue_upload "$bundle" "$VERSION_PREFIX/$fname" "public, max-age=2592000, immutable"
+  queue_upload "${bundle}.sig" "$VERSION_PREFIX/${fname}.sig" "public, max-age=2592000, immutable" "text/plain"
 done
+
+echo "==> Waiting for ${#UPLOAD_PIDS[@]} parallel upload(s) ..."
+wait_for_uploads
 
 # ---------------------------------------------------------------------------
 # Step 3 — Assemble latest.json
@@ -212,11 +357,12 @@ trap 'rm -f "$MANIFEST"' EXIT
 
 # Build the platforms{} object via jq for proper escaping.
 PLATFORMS_JSON='{}'
-for key in "${!PLATFORM_BUNDLE[@]}"; do
-  bundle="${PLATFORM_BUNDLE[$key]}"
+for i in "${!PLATFORM_KEYS[@]}"; do
+  key="${PLATFORM_KEYS[$i]}"
+  bundle="${PLATFORM_BUNDLES[$i]}"
   fname="$(basename "$bundle")"
   url="https://verified-skill.com/$VERSION_PREFIX/$fname"
-  sig="${PLATFORM_SIG[$key]}"
+  sig="${PLATFORM_SIGS[$i]}"
   PLATFORMS_JSON="$(jq --arg k "$key" --arg s "$sig" --arg u "$url" \
     '. + {($k): {signature: $s, url: $u}}' <<<"$PLATFORMS_JSON")"
 done
@@ -239,6 +385,8 @@ jq . "$MANIFEST"
 echo "==> Step 4a: Upload manifest to canonical version path ..."
 upload_with_cache "$MANIFEST" "$VERSION_PREFIX/latest.json" "public, max-age=3600" "application/json"
 
+# Re-check right before the promotion: the uploads above take a while.
+assert_not_downgrade
 echo "==> Step 4b: Promote to /$DEST_PREFIX/$MANIFEST_NAME (atomic) ..."
 upload_with_cache "$MANIFEST" "$DEST_PREFIX/$MANIFEST_NAME" "public, max-age=3600" "application/json"
 

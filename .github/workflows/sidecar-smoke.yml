@@ -9,6 +9,9 @@ name: Sidecar Smoke
 # The rust-windows job compiles + runs the src-tauri tests on windows-latest
 # (the cfg(windows) process-control code in src-tauri/src/proc.rs cannot be
 # compiled on macOS/Linux).
+#
+# push to main (same paths) exists so rust-windows writes the one shared Rust
+# cache that PR runs restore; PR runs never save their own.
 
 on:
   workflow_dispatch:
@@ -19,11 +22,20 @@ on:
       - 'src-tauri/**'
       - '.github/workflows/sidecar-smoke.yml'
   push:
-    branches:
-      - 'fix/**'
+    branches: [main]
+    paths:
+      - 'scripts/desktop/**'
+      - 'src/eval-server/**'
+      - 'src-tauri/**'
+      - '.github/workflows/sidecar-smoke.yml'
 
 permissions:
   contents: read
+
+# A newer push to a PR cancels its older run; runs on main are kept.
+concurrency:
+  group: sidecar-smoke-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   sidecar-smoke:
@@ -33,14 +45,15 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
       - name: Setup Node 22
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          # Same patch on every OS: the SEA sidecar embeds the host node binary.
+          node-version: '22.23.3'
           # SEA injects into the host node binary; the Windows sidecar is x64.
           architecture: ${{ runner.os == 'Windows' && 'x64' || '' }}
           cache: npm
@@ -100,57 +113,41 @@ jobs:
             dist/sidecar/sea-config.json
 
   rust-windows:
-    name: cargo check + test src-tauri (windows-latest)
+    name: cargo test src-tauri (windows-latest)
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          node-version: '22'
-          architecture: x64
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
+          toolchain: 1.99.1
           targets: x86_64-pc-windows-msvc
 
-      - uses: Swatinem/rust-cache@v2
+      # One cache for every ref: main writes it, PRs and branches only read it.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri -> target
+          shared-key: rust-windows-debug
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # tauri-build (build.rs) copies bundle.externalBin
       # (src-tauri/binaries/vskill-server-x86_64-pc-windows-msvc.exe) and
       # generate_context! embeds frontendDist (../dist/eval-ui); both must
-      # exist or the crate does not compile. Debug profile => build.rs does
-      # not require GITHUB_OAUTH_CLIENT_ID. WebView2 + MSVC are preinstalled
-      # on windows runners.
-      - name: Build frontend + sidecar (prerequisites for tauri-build)
+      # exist or the crate does not compile. No Rust test reads either file, so
+      # stubs are enough here; the real sidecar is built and run by the
+      # sidecar-smoke job above. Debug profile => build.rs does not require
+      # GITHUB_OAUTH_CLIENT_ID. WebView2 + MSVC are preinstalled on windows
+      # runners.
+      - name: Stub frontend + sidecar (prerequisites for tauri-build)
         shell: bash
-        env:
-          SKIP_UPSTREAM_BUILD: '1'
         run: |
-          npm ci --ignore-scripts
-          npm run setup
-          npm run build
-          npm run build:eval-ui
-          pwsh -NoProfile -File scripts/desktop/build-sidecar-windows.ps1
+          mkdir -p dist/eval-ui src-tauri/binaries
+          printf '<!doctype html><title>stub</title>\n' > dist/eval-ui/index.html
+          : > src-tauri/binaries/vskill-server-x86_64-pc-windows-msvc.exe
 
-      - name: cargo check
-        shell: bash
-        working-directory: src-tauri
-        env:
-          CARGO_TERM_COLOR: always
-        run: cargo check --locked
-
-      - name: cargo test --no-run
-        shell: bash
-        working-directory: src-tauri
-        env:
-          CARGO_TERM_COLOR: always
-        run: cargo test --locked --no-run
-
+      # One cargo test covers what the old cargo check step did: src-tauri has
+      # no cfg(not(test)) code, and check's metadata was never reused by test.
       - name: cargo test
         # Pure-Rust unit tests (no window is created); runs headless fine.
         shell: bash

@@ -22,6 +22,7 @@ import urllib.request
 BASE = os.environ.get("APIFY_API_BASE", "https://api.apify.com").rstrip("/")
 KEYCHAIN_SERVICE = os.environ.get("APIFY_KEYCHAIN_SERVICE", "apify-api-token")
 TERMINAL = {"SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED"}
+MIN_CHARGE_USD = 0.5  # Apify rejects maxTotalChargeUsd below this
 
 
 def die(msg, code=1):
@@ -105,8 +106,8 @@ def fresh(path, hours):
 
 
 def cmd_run(args):
-    if args.max_usd is None or args.max_usd <= 0:
-        die("--max-usd is required and must be > 0")
+    if args.max_usd is None or args.max_usd < MIN_CHARGE_USD:
+        die(f"--max-usd is required and must be at least {MIN_CHARGE_USD} (Apify's minimum run cap)")
     out = args.out or f"apify-{args.actor.replace('/', '_')}-{time.strftime('%Y%m%d-%H%M%S')}.json"
     if args.out and fresh(out, args.cache_hours):
         print(json.dumps({"cached": out, "ageHours": round((time.time() - os.path.getmtime(out)) / 3600, 2)}))

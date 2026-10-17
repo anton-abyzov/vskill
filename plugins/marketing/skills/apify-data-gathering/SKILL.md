@@ -47,7 +47,7 @@ Rules that override the table:
 1. `python3 scripts/apify_run.py limits` shows month-to-date spend and the account cap.
 2. Find the Actor and its pricing model: `python3 scripts/apify_run.py search "<site or task>"`, then open the Actor's Pricing tab. Prefer Actors with many users and recent updates.
 3. Estimate before running: items x price per 1,000, plus compute for crawler Actors. Say the estimate out loud.
-4. Smoke run with 10 to 20 items and a $0.25 to $1 cap. Inspect fields, then scale.
+4. Smoke run with 10 to 20 items and a $0.50 cap. Apify rejects a `maxTotalChargeUsd` below $0.50 (`max-total-charge-usd-below-minimum`); the cap is a ceiling, and a small run is billed per event, typically cents. Inspect fields, then scale.
 5. Every run passes `--max-usd` (maps to `maxTotalChargeUsd`) and, for pay-per-result Actors, `--max-items`. The script refuses a run without a cap and refuses one larger than the money left this month.
 6. Reuse data: `--out` plus `--cache-hours` skips the run while the file is fresh. Dedupe on stable ids (place id, profile URL, post id), never on display text or dates.
 7. The account-wide monthly cap lives in Console > Settings > Limits. Recommend one; do not change it yourself. Free plan: $5 a month, no rollover.

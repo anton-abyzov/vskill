@@ -18,6 +18,7 @@ import { normalizeRemoteUrl } from "../utils/normalizeRemoteUrl";
 import { openExternalUrlViaDesktop } from "../preferences/lib/useDesktopBridge";
 import { PublishDrawer } from "./PublishDrawer";
 import { HOSTED_PRIVATE_PUBLISHING_AVAILABLE } from "../hosted-publishing";
+import type { PublishTenantSelection } from "../hooks/usePublishTenant";
 
 function emitToast(message: string, severity: "info" | "error"): void {
   if (typeof window === "undefined") return;
@@ -50,9 +51,10 @@ interface Props {
   privacy?: "public" | "private" | "decide-later";
   /** 0856: tenant the user is publishing under (required for private). */
   tenantId?: string;
+  tenantSelection?: PublishTenantSelection;
 }
 
-export function PublishButton({ remoteUrl, provider, model, skillName, skillPath, privacy, tenantId }: Props): React.ReactElement {
+export function PublishButton({ remoteUrl, provider, model, skillName, skillPath, privacy, tenantId, tenantSelection }: Props): React.ReactElement {
   const [publishing, setPublishing] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerFileCount, setDrawerFileCount] = useState(0);
@@ -75,7 +77,10 @@ export function PublishButton({ remoteUrl, provider, model, skillName, skillPath
         // happy-path 0759 contract.
       }
 
-      if (hasChanges) {
+      // With hosted publishing available, clean trees also need an explicit
+      // visibility/account choice. Publishing never silently defaults private
+      // repository content into the public queue.
+      if (hasChanges || privacy === "private" || (HOSTED_PRIVATE_PUBLISHING_AVAILABLE && skillName)) {
         setDrawerFileCount(fileCount);
         setDrawerOpen(true);
         return;
@@ -105,8 +110,8 @@ export function PublishButton({ remoteUrl, provider, model, skillName, skillPath
               skillName,
               skillPath,
               source: "studio-submit",
-              // 0874 AC-07: public only, with no tenant, while the gate is closed.
-              privacy: HOSTED_PRIVATE_PUBLISHING_AVAILABLE ? (privacy ?? "public") : "public",
+              // Explicit private intent always takes the guarded drawer above.
+              privacy: privacy ?? "public",
               tenantId: HOSTED_PRIVATE_PUBLISHING_AVAILABLE ? tenantId : undefined,
             });
           } catch (err) {
@@ -175,6 +180,7 @@ export function PublishButton({ remoteUrl, provider, model, skillName, skillPath
           skillPath={skillPath}
           privacy={privacy}
           tenantId={tenantId}
+          tenantSelection={tenantSelection}
           onClose={closeDrawer}
         />
       )}

@@ -10,7 +10,7 @@
 import { PRICING_URL } from "./hooks/useTier";
 
 /** Mirrors the platform's launch gate; flip both together. */
-export const HOSTED_PRIVATE_PUBLISHING_AVAILABLE = false;
+export { HOSTED_PRIVATE_PUBLISHING_AVAILABLE } from "../../lib/hosted-publishing";
 
 /** The waitlist on the pricing page, offered while the gate is closed. */
 export const HOSTED_WAITLIST_URL = `${PRICING_URL}#hosted-waitlist`;

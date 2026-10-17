@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
-// 0874 AC-06 — Studio publish never sends a private repository, or one whose
-// visibility GitHub cannot confirm, to verified-skill.com.
+// 0874 AC-06 / 0896 — Studio publish never sends a private repository, or one
+// whose visibility GitHub cannot confirm, to public intake.
 //
 // The eval-server proxy screens `POST /api/v1/submissions` before anything
 // leaves the machine. A fake platform server counts every upstream request;
@@ -10,6 +10,11 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as http from "node:http";
+
+const hostedGate = vi.hoisted(() => ({ open: false }));
+vi.mock("../../lib/hosted-publishing.js", () => ({
+  get HOSTED_PRIVATE_PUBLISHING_AVAILABLE() { return hostedGate.open; },
+}));
 
 const isPrivateOrUnknownRepoMock = vi.hoisted(() => vi.fn<[string, string], Promise<boolean>>());
 vi.mock("../../lib/private-source.js", async (importOriginal) => ({
@@ -78,6 +83,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   upstream = [];
+  hostedGate.open = false;
   isPrivateOrUnknownRepoMock.mockReset();
   invalidatePlatformProxyTokenCache();
   fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -258,5 +264,56 @@ describe("other submission routes are untouched", () => {
     expect(upstream).toHaveLength(1);
     expect(upstream[0].url).toBe("/api/v1/submissions?mine=1");
     expect(isPrivateOrUnknownRepoMock).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("0896 hosted private publishing guard", () => {
+  it("the release default forwards explicit private intent with a tenant, with only platform auth", async () => {
+    const actualGate = await vi.importActual<typeof import("../../lib/hosted-publishing.js")>("../../lib/hosted-publishing.js");
+    expect(actualGate.HOSTED_PRIVATE_PUBLISHING_AVAILABLE).toBe(true);
+    hostedGate.open = actualGate.HOSTED_PRIVATE_PUBLISHING_AVAILABLE;
+    isPrivateOrUnknownRepoMock.mockResolvedValue(true);
+    const body = { repoUrl: "https://github.com/acme/private", skillName: "secret", privacy: "private", tenantId: "tenant-1" };
+    const res = await submit(body);
+    expect(res.status).toBe(201);
+    expect(upstream).toHaveLength(1);
+    expect(JSON.parse(upstream[0].body)).toEqual(body);
+    expect(upstream[0].headers.authorization).toBe("Bearer vsk_signed_in");
+    expect(JSON.stringify(upstream)).not.toContain("gho_never_sent");
+    // Scoped repository access is checked by the platform, never a broad local token.
+    expect(isPrivateOrUnknownRepoMock).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, "", "  ", 12])("rejects missing or invalid tenant %s before egress", async (tenantId) => {
+    hostedGate.open = true;
+    const res = await submit({ repoUrl: "https://github.com/acme/private", privacy: "private", tenantId });
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body)).toMatchObject({ error: "missing_tenant", message: expect.stringContaining("connect the GitHub App") });
+    expect(upstream).toHaveLength(0);
+  });
+
+  it.each(["public", "decide-later", undefined])("never sends private repo with %s intent to the public queue", async (privacy) => {
+    hostedGate.open = true;
+    isPrivateOrUnknownRepoMock.mockResolvedValue(true);
+    const res = await submit({ repoUrl: "https://github.com/acme/private", privacy, tenantId: "tenant-1" });
+    expect(res.status).toBe(422);
+    expect(JSON.parse(res.body).error).toBe("private_repository");
+    expect(upstream).toHaveLength(0);
+  });
+
+  it("rollback refuses private intent for a public repository too", async () => {
+    isPrivateOrUnknownRepoMock.mockResolvedValue(false);
+    const res = await submit({ repoUrl: "https://github.com/acme/public", privacy: "private", tenantId: "tenant-1" });
+    expect(res.status).toBe(503);
+    expect(JSON.parse(res.body).error).toBe("private_publishing_unavailable");
+    expect(upstream).toHaveLength(0);
+  });
+
+  it("rejects a non-GitHub repository even with private intent and tenant", async () => {
+    hostedGate.open = true;
+    const res = await submit({ repoUrl: "https://example.com/acme/private", privacy: "private", tenantId: "tenant-1" });
+    expect(res.status).toBe(422);
+    expect(upstream).toHaveLength(0);
   });
 });

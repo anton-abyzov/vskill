@@ -25,7 +25,7 @@ export interface SkillLockEntry {
   /** 0737 — relative path from the source repo root to the skill's SKILL.md (e.g. "skills/foo/SKILL.md"). */
   sourceSkillPath?: string;
   /** Stable source kind for provenance-aware update checks. */
-  sourceType?: "github" | "registry" | "plugin" | "local";
+  sourceType?: "github" | "registry" | "plugin" | "local" | "hosted-private";
   /** Git ref/branch used when the skill was installed. */
   sourceBranch?: string;
   /** Upstream commit SHA at install time, when resolvable. */
@@ -37,6 +37,18 @@ export interface SkillLockEntry {
    * from that repo: no registry fallback, no registry lookups, no telemetry.
    */
   sourcePrivate?: boolean;
+  /** Authenticated tenant artifact identity; never resolve this through public APIs. */
+  hostedPrivate?: {
+    tenantId: string;
+    tenantSlug: string;
+    skillId: string;
+    skillSlug: string;
+    treeHash: string;
+    agents: string[];
+    /** Complete managed inventory per installed agent, including delayed copies. */
+    agentFiles?: Record<string, string[]>;
+    copy: boolean;
+  };
 }
 
 export interface VskillLock {

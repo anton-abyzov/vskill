@@ -2,8 +2,10 @@
 
 Keep your team's skills in a private GitHub repository and install them with
 vskill the same way you install public ones. Anyone who can read the repo on
-GitHub can install from it; nobody else can, and nothing about it reaches the
-public registry at verified-skill.com.
+GitHub can install from it; nobody else can, and nothing about a direct install reaches the
+public registry at verified-skill.com. Direct GitHub installation is free and
+does not require a paid Verified Skills plan. Hosted private publishing is a
+separate, explicit workflow described below.
 
 Requires vskill 1.2.0 or later.
 
@@ -112,13 +114,15 @@ secret:
 
 ## What stays private
 
-For skills from a private repo, vskill sends nothing to verified-skill.com,
-from the CLI or from Skill Studio: no name, repo, path, version or hash.
+For direct GitHub installs, vskill sends nothing to verified-skill.com from
+the CLI or Skill Studio: no name, repo, path, version or hash. Explicit hosted
+private publishing sends the selected repo and skill path only to authenticated
+private APIs; it does not add the skill to the public catalog.
 
 - no install telemetry,
 - no registry lookups or name-based security checks (the local security scan
   still runs on every install and update),
-- no auto-submission for scanning, and `vskill submit` refuses private repos,
+- no auto-submission for scanning; public `vskill submit` refuses private repos,
 - no update checks, version history or diffs (`outdated`, `versions`, `diff`,
   `info`, and the Studio's update badges and Versions tab),
 - no GitHub token, ever: the CLI and Studio send only the verified-skill
@@ -135,6 +139,93 @@ list the repos they skipped.
 On the registry side, the catalog refuses private repositories at intake, the
 crawlers skip them, and a repo that is made private drops out of public
 listings when its GitHub App webhook reports the change.
+
+## Hosted private publishing and verified versions
+
+Hosted publishing requires a live paid entitlement, membership in the target
+account, and a GitHub App installation that can read the selected repository.
+A paid plan alone does not grant repository access. Connect the GitHub App at
+<https://verified-skill.com/settings/integrations>, then inspect the real
+accounts with `vskill orgs list`. Only owners/admins can publish; downloads
+require authorized tenant access and a token with read scope.
+
+The workflow below is prepared for **vskill 1.2.8** and **Skill Studio 1.0.65**.
+These unpublished release candidates enable the CLI and Studio capability.
+The production service remains closed pending manual acceptance and the
+platform rollout. Published vskill 1.2.7 and Skill Studio 1.0.64 do not include
+this hosted private workflow.
+
+Updating the global npm package updates the CLI and browser-based
+`vskill studio`. The native Skill Studio app has its own desktop update.
+
+This workflow is release-gated. If the service returns
+`private_publishing_unavailable`, the hosted rollout is closed. Nothing is
+submitted publicly as a fallback, and direct private GitHub installs continue
+to work. The commands below become usable after the CLI release and hosted
+platform rollout are available.
+
+```bash
+vskill auth login
+vskill orgs list
+vskill submit acme/team-skills --skill onboarding \
+  --path skills/onboarding/SKILL.md --private --tenant acme
+```
+
+The CLI waits for private verification. Use `--no-wait` to return after creating
+the submission, then resume with the returned private submission ID:
+
+```bash
+vskill submit --private --tenant acme --submission psub_<id>
+```
+
+In Skill Studio, choose **Private** in the publish drawer and select the
+publishing account. The account list comes from your authenticated memberships.
+If none is available, connect the GitHub App and refresh accounts. A clean skill
+can be pushed and submitted without creating an empty commit. Verification
+status stays in Studio; private submissions have no public catalog link.
+
+Install a published private version by its unique display name:
+
+```bash
+vskill install --tenant acme onboarding --agent codex --agent claude-code
+vskill install --tenant acme onboarding --version 1.0.0 --global \
+  --agent codex --agent claude-code
+```
+
+`--version` requires an exact version and pins it. If multiple private skills
+share the same display name, use the account skill list's
+`repoSlug:skillSlug` identity. The CLI verifies tenant/skill/version identity,
+all raw file hashes and sizes, the normalized tree hash, and safe relative
+paths before writing. Every text file also receives a local security scan.
+Bundles preserve supporting files and executable modes. Hosted installs support
+agents that natively read complete skill folders, including Codex, Claude Code,
+and Cursor. Transformer-only and clipboard agents are skipped during automatic
+detection; selecting one explicitly fails before any files are written. The
+verified source frontmatter name is replaced with the isolated installed name
+so two accounts cannot create the same agent-visible skill identity.
+
+The installed name includes the account and a stable identity suffix, for
+example `private-acme-onboarding-<identity>`. This avoids overwriting a public
+skill or another account's skill. The success output gives the exact name.
+`vskill.lock` retains the private tenant and artifact provenance. Keep that
+lockfile private if it contains confidential repo names or paths.
+
+```bash
+vskill update private-acme-onboarding-<identity>
+vskill update --global private-acme-onboarding-<identity>
+```
+
+Pinned entries are skipped unless you explicitly use `--force`. Hosted updates
+use authenticated private download routes, recheck integrity, preserve account
+identity, and remove files deleted in the new complete manifest. Access loss,
+identity mismatch, or integrity failure never falls back to a public registry
+skill. `--global` updates hosted private entries in the global lockfile; other
+source types are skipped. Public registry commands such as `versions`, `diff`,
+and `outdated` continue to exclude private entries.
+
+Only the platform `vsk_*` credential is sent to private platform routes. GitHub
+OAuth/PAT credentials remain on the GitHub side; the service reads repositories
+through its scoped GitHub App installation.
 
 ## Troubleshooting
 

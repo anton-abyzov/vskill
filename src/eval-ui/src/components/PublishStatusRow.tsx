@@ -14,6 +14,7 @@
 import { useCallback, useState } from "react";
 import { useGitHubStatus } from "../hooks/useGitHubStatus";
 import { PublishButton } from "./PublishButton";
+import { usePublishTenant } from "../hooks/usePublishTenant";
 
 interface Props {
   /** Optional override for the project basename used to compose the
@@ -104,6 +105,7 @@ function Badge({
 
 export function PublishStatusRow(props: Props = {}): React.ReactElement | null {
   const { status, loading } = useGitHubStatus();
+  const publishTenant = usePublishTenant();
 
   // Don't render anything while the initial probe is in flight — the row
   // would otherwise flash the wrong state.
@@ -137,6 +139,8 @@ export function PublishStatusRow(props: Props = {}): React.ReactElement | null {
             skillName={props.skillName}
             skillPath={props.skillPath}
             privacy="public"
+            tenantId={publishTenant.tenantId}
+            tenantSelection={publishTenant}
           />
         </div>
       </div>

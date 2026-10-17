@@ -29,6 +29,9 @@ import { useTier } from "../hooks/useTier";
 import { useAgentCatalog } from "../hooks/useAgentCatalog";
 import { PaywallModal } from "./PaywallModal";
 import { HOSTED_PRIVATE_PUBLISHING_AVAILABLE, HOSTED_WAITLIST_URL } from "../hosted-publishing";
+import type { PublishTenantSelection } from "../hooks/usePublishTenant";
+import { PublishTenantPicker, MISSING_PUBLISH_TENANT } from "./PublishTenantPicker";
+import { PrivateSubmissionStatus } from "./PrivateSubmissionStatus";
 
 type Mode = "manual" | "ai";
 
@@ -42,7 +45,7 @@ type Privacy = "public" | "private" | "decide-later";
 // 0874 AC-06: `notSubmitted` carries why nothing was sent (private or
 // unconfirmed repo); it gets no website link and no sign-in prompt.
 type SubmitOutcome =
-  | { ok: true; result: SubmitToQueueResult; submitUrl: string }
+  | { ok: true; result: SubmitToQueueResult; submitUrl: string; private?: boolean }
   | { ok: false; websiteUrl: string }
   | { ok: false; notSubmitted: string };
 
@@ -89,6 +92,7 @@ interface Props {
   privacy?: "public" | "private" | "decide-later";
   /** 0856: tenant the user is publishing under (required for private). */
   tenantId?: string;
+  tenantSelection?: PublishTenantSelection;
 }
 
 export function PublishDrawer({
@@ -102,6 +106,7 @@ export function PublishDrawer({
   skillPath,
   privacy,
   tenantId,
+  tenantSelection,
 }: Props): React.ReactElement {
   const [mode, setMode] = useState<Mode>(defaultMode);
   const [message, setMessage] = useState("");
@@ -112,11 +117,13 @@ export function PublishDrawer({
   const [privacyChoice, setPrivacyChoice] = useState<Privacy>(privacy ?? "public");
   const [paywallOpen, setPaywallOpen] = useState(false);
   const { isFree } = useTier();
-  // 0874 AC-07: while hosted private publishing is closed, every submission
-  // is public and carries no tenant, whatever the host or the chooser says.
+  // Gate closure blocks private intent; it must never change it to public.
   const gateOpen = HOSTED_PRIVATE_PUBLISHING_AVAILABLE;
-  const submitPrivacy: Privacy = gateOpen ? privacyChoice : "public";
-  const submitTenantId = gateOpen ? tenantId : undefined;
+  const submitPrivacy: Privacy = privacyChoice;
+  const privateUnavailable = submitPrivacy === "private" && !gateOpen;
+  const missingPrivateIdentity = submitPrivacy === "private" && !skillName;
+  const submitTenantId = gateOpen && submitPrivacy === "private" ? tenantId : undefined;
+  const needsTenant = submitPrivacy === "private" && Boolean(!submitTenantId || tenantSelection?.loading || tenantSelection?.error);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   // 0856: inline submit outcome — when set, the drawer shows the result block
@@ -189,13 +196,21 @@ export function PublishDrawer({
 
   const onCommitPush = useCallback(async () => {
     const trimmed = message.trim();
-    if (!trimmed || publishing) return;
+    if ((fileCount > 0 && !trimmed) || publishing) return;
+    if (privateUnavailable || missingPrivateIdentity) {
+      setPublishError(privateUnavailable ? "Hosted private publishing is not available yet." : "Select a skill before publishing privately.");
+      return;
+    }
+    if (needsTenant) {
+      setPublishError(MISSING_PUBLISH_TENANT);
+      return;
+    }
     setPublishing(true);
     setPublishError(null);
     setOutcome(null);
     try {
       // Step 1 — commit + push (server-side `git add -A && commit && push`).
-      const result = await api.gitPublish({ commitMessage: trimmed });
+      const result = await api.gitPublish(fileCount > 0 ? { commitMessage: trimmed } : undefined);
 
       // 0875 — a non-fast-forward push that couldn't be rebased cleanly comes
       // back as HTTP 200 with { success:false, conflict:true } (so fetchJson
@@ -238,6 +253,10 @@ export function PublishDrawer({
         try {
           repoUrl = normalizeRemoteUrl(effectiveRemote);
         } catch {
+          if (submitPrivacy === "private") {
+            setOutcome({ ok: false, notSubmitted: "Private publishing requires a GitHub repository connected to the selected account." });
+            return;
+          }
           // Non-github remote → can't submit in-app; degrade to the website.
           // buildSubmitUrlFromRemote re-runs normalizeRemoteUrl and would
           // re-throw on a non-normalizable remote, escaping to the outer catch
@@ -258,6 +277,11 @@ export function PublishDrawer({
             tenantId: submitTenantId,
           });
         } catch (err) {
+          if (submitPrivacy === "private") {
+            const detail = err instanceof Error ? err.message : "Private submission could not be completed. Retry from Studio.";
+            setOutcome({ ok: false, notSubmitted: detail });
+            return;
+          }
           // 0874 AC-06: the repo is private or could not be confirmed public,
           // so nothing was sent. Say so; the website or a sign-in would not help.
           if (isSubmissionRefusal(err)) {
@@ -284,8 +308,8 @@ export function PublishDrawer({
           emitToast(`Pushed ${shortSha} on ${branch}${reconciledNote} — sign in or finish on the website to submit`, "info");
           return;
         }
-        const submitUrl = `https://verified-skill.com/submit?repo=${encodeURIComponent(repoUrl)}`;
-        setOutcome({ ok: true, result: submitRes, submitUrl });
+        const submitUrl = submitPrivacy === "private" ? "" : `https://verified-skill.com/submit?repo=${encodeURIComponent(repoUrl)}`;
+        setOutcome({ ok: true, result: submitRes, submitUrl, private: submitPrivacy === "private" });
         emitToast(`Submitted ${skillName} — ${shortSha} on ${branch}`, "info");
         // Drawer stays open so the inline outcome is visible. The user closes
         // it explicitly via Done / Cancel.
@@ -306,7 +330,7 @@ export function PublishDrawer({
     } finally {
       setPublishing(false);
     }
-  }, [message, publishing, remoteUrl, skillName, skillPath, submitPrivacy, submitTenantId]);
+  }, [message, publishing, remoteUrl, skillName, skillPath, submitPrivacy, submitTenantId, fileCount, needsTenant, privateUnavailable, missingPrivateIdentity]);
 
   const openWebsite = useCallback((url: string) => {
     // Reuse the tiered desktop shell-open seam (Tauri invoke → sidecar →
@@ -314,7 +338,7 @@ export function PublishDrawer({
     void openExternalUrlViaDesktop(url);
   }, []);
 
-  const canCommit = message.trim().length > 0 && !publishing && !generating;
+  const canCommit = (fileCount === 0 || message.trim().length > 0) && !publishing && !generating && !needsTenant && !privateUnavailable && !missingPrivateIdentity;
 
   // 0784 hotfix — modal always renders on a dark surface (matches the
   // backdrop-blur design intent) with hard-coded light text, so readability
@@ -463,6 +487,7 @@ export function PublishDrawer({
           <div style={{ height: 1, background: MODAL_BORDER, margin: "0 -24px 18px" }} />
 
           {/* ── Mode toggle (segmented) ────────────────────────────── */}
+          {fileCount > 0 && <>
           <span style={labelStyle}>Mode</span>
           <div
             role="tablist"
@@ -501,6 +526,7 @@ export function PublishDrawer({
               {generating && mode === "ai" ? "Generating…" : "Generate with AI"}
             </button>
           </div>
+          </>}
 
           {/* ── Privacy chooser (0874) ────────────────────────────── */}
           <span style={labelStyle}>Visibility</span>
@@ -517,8 +543,12 @@ export function PublishDrawer({
             textMuted={MODAL_TEXT_MUTED}
             inputBg={MODAL_INPUT_BG}
           />
+          {privateUnavailable && <p role="alert" style={{ marginTop: 12 }}>Hosted private publishing is not available yet. Your private selection has not been submitted.</p>}
+          {missingPrivateIdentity && <p role="alert" style={{ marginTop: 12 }}>Select a skill before publishing privately.</p>}
+          {gateOpen && submitPrivacy === "private" && <PublishTenantPicker selection={tenantSelection} />}
 
           {/* ── Commit message field ──────────────────────────────── */}
+          {fileCount > 0 && <>
           <label htmlFor="commit-message" style={labelStyle}>
             Commit message
           </label>
@@ -637,6 +667,7 @@ export function PublishDrawer({
             </div>
           )}
 
+          </>}
           {/* ── Inline error block (publish/push failure) ────────── */}
           {publishError && (
             <div
@@ -741,7 +772,7 @@ export function PublishDrawer({
                   </button>
                   <button
                     type="button"
-                    aria-label="Commit & Push"
+                    aria-label={fileCount > 0 ? "Commit & Push" : "Push & Submit"}
                     onClick={onCommitPush}
                     disabled={!canCommit}
                     data-testid="publish-commit-push"
@@ -757,7 +788,7 @@ export function PublishDrawer({
                       cursor: canCommit ? "pointer" : "not-allowed",
                     }}
                   >
-                    {publishing ? "Publishing…" : "Commit & Push"}
+                    {publishing ? "Publishing…" : fileCount > 0 ? "Commit & Push" : "Push & Submit"}
                   </button>
                 </>
               )}
@@ -914,20 +945,7 @@ function PrivacyChooser({
         </button>
       )}
 
-      {gateOpen && (
-        <button
-          type="button"
-          role="radio"
-          aria-checked={value === "decide-later"}
-          data-testid="publish-privacy-decide-later"
-          onClick={() => !disabled && onChange("decide-later")}
-          disabled={disabled}
-          style={segment(value === "decide-later")}
-        >
-          <span style={title}>Decide later</span>
-          <span style={hint}>Submit without choosing visibility yet.</span>
-        </button>
-      )}
+
     </div>
   );
 }
@@ -996,6 +1014,9 @@ function SubmitOutcomeBlock({
   }
 
   const { result, submitUrl } = outcome;
+  if (outcome.private && "id" in result) {
+    return <PrivateSubmissionStatus id={result.id} initialState={result.state} />;
+  }
   let tone = "#22C55E";
   let title = "Submitted to the queue.";
   let detail = "";
@@ -1036,14 +1057,14 @@ function SubmitOutcomeBlock({
     >
       <strong style={{ fontWeight: 600, color: tone }}>{title}</strong>{" "}
       <span style={{ color: textMuted }}>{detail}</span>{" "}
-      <button
+      {!outcome.private && <button
         type="button"
         data-testid="publish-open-website"
         onClick={() => onOpenWebsite(submitUrl)}
         style={outcomeLinkStyle()}
       >
         Open on website ↗
-      </button>
+      </button>}
     </div>
   );
 }

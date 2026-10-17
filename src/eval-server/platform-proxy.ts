@@ -121,6 +121,7 @@ const PROXY_PREFIXES = [
   // marketing route is added, route it under a different prefix (not
   // /api/v1/account/) so it doesn't pick up the bearer.
   "/api/v1/account/",
+  "/api/v1/billing/quota",
 ] as const;
 
 /**
@@ -140,6 +141,7 @@ const AUTH_REQUIRED_PREFIXES = [
   // (profile, repos, tokens, notifications, exports). Inject it here so the
   // WebView never sees a token, and the GitHub token is never sent.
   "/api/v1/account/",
+  "/api/v1/billing/quota",
 ] as const;
 
 export function shouldProxyToPlatform(url: string | undefined): boolean {
@@ -242,7 +244,7 @@ export function pickHeadersForUpstream(
     // Strip any client-supplied Authorization on private/tenant paths — we
     // mint our own from the keychain. On other paths we pass through (the
     // existing public proxy never carried Authorization, so this is a no-op).
-    if (k.toLowerCase() === "authorization" && opts.path && shouldInjectAuth(opts.path)) {
+    if (k.toLowerCase() === "authorization") {
       continue;
     }
     out[k] = Array.isArray(v) ? v.join(", ") : String(v);
@@ -257,7 +259,7 @@ export function pickHeadersForUpstream(
     const kind = tokenKindForPath(opts.path);
     const tokenProvider = opts.tokenProvider ?? (() => readTokenForProxy(kind));
     const token = tokenProvider();
-    if (token) {
+    if (token?.startsWith("vsk_")) {
       out["authorization"] = `Bearer ${token}`;
     }
   }

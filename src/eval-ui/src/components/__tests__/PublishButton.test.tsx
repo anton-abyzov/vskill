@@ -45,6 +45,9 @@ vi.mock("../PaywallModal", () => ({
   },
 }));
 
+// Exercise the release-closed fast path independently of the shipped gate.
+vi.mock("../../hosted-publishing", () => ({ HOSTED_PRIVATE_PUBLISHING_AVAILABLE: false, HOSTED_WAITLIST_URL: "https://verified-skill.com/pricing#hosted-waitlist" }));
+
 import { PublishButton } from "../PublishButton";
 import { SubmissionRefusedError } from "../../submission-queue";
 
@@ -89,6 +92,15 @@ describe("PublishButton", () => {
       root.render(<PublishButton remoteUrl="git@github.com:owner/repo.git" />);
     });
     expect(getButton()).toBeTruthy();
+  });
+
+  it("clean tree explicit private intent opens the fail-closed drawer even while the gate is closed", async () => {
+    act(() => { root.render(<PublishButton remoteUrl="git@github.com:owner/repo.git" skillName="secret" privacy="private" tenantId="tenant1" />); });
+    await act(async () => { getButton().click(); await flush(); });
+    expect(container.textContent).toContain("Your private selection has not been submitted");
+    expect(mockGitPublish).not.toHaveBeenCalled();
+    expect(mockSubmitToQueue).not.toHaveBeenCalled();
+    expect(mockOpenExternal).not.toHaveBeenCalled();
   });
 
   it("clean tree + no skillName: opens verified-skill.com via the desktop shell bridge", async () => {
@@ -212,7 +224,7 @@ describe("PublishButton", () => {
     expect(toasts[0].message).not.toContain("Publish failed");
   });
 
-  it("clean tree, launch gate closed (0874 AC-07): submits privacy 'public' with no tenantId", async () => {
+  it("closed gate requires an explicit switch to public before submitting without a tenant", async () => {
     mockGitPublish.mockResolvedValueOnce({
       success: true,
       commitSha: "abc1234def567890",
@@ -229,6 +241,18 @@ describe("PublishButton", () => {
       await flush();
     });
 
+    expect(mockGitPublish).not.toHaveBeenCalled();
+    expect(mockSubmitToQueue).not.toHaveBeenCalled();
+    await act(async () => {
+      (container.querySelector('[data-testid="publish-privacy-public"]') as HTMLButtonElement).click();
+      await flush();
+    });
+    await act(async () => {
+      const submit = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("Push & Submit"));
+      expect(submit).toBeTruthy();
+      submit!.click();
+      await flush();
+    });
     expect(mockSubmitToQueue).toHaveBeenCalledTimes(1);
     const body = mockSubmitToQueue.mock.calls[0][0];
     expect(body.privacy).toBe("public");

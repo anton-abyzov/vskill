@@ -23,9 +23,10 @@ const mockCpSync = vi.fn();
 const mockChmodSync = vi.fn();
 const mockReaddirSync = vi.fn();
 const mockStatSync = vi.fn();
+const mockDirectories = vi.hoisted(() => new Set<string>());
 
 vi.mock("node:fs", () => ({
-  mkdirSync: (...args: unknown[]) => mockMkdirSync(...args),
+  mkdirSync: (...args: unknown[]) => { mockDirectories.add(String(args[0])); return mockMkdirSync(...args); },
   writeFileSync: (...args: unknown[]) => mockWriteFileSync(...args),
   readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
   existsSync: (...args: unknown[]) => mockExistsSync(...args),
@@ -33,6 +34,12 @@ vi.mock("node:fs", () => ({
   chmodSync: (...args: unknown[]) => mockChmodSync(...args),
   readdirSync: (...args: unknown[]) => mockReaddirSync(...args),
   statSync: (...args: unknown[]) => mockStatSync(...args),
+  // Track mkdir so containment probes see the same synthetic filesystem
+  // as the rest of this fixture, without touching the real installation.
+  lstatSync: vi.fn((target: string) => {
+    if (mockDirectories.has(target)) return { isDirectory: () => true, isSymbolicLink: () => false };
+    throw Object.assign(new Error("Fixture path absent"), { code: "ENOENT" });
+  }),
   copyFileSync: vi.fn(),
 }));
 
@@ -208,6 +215,7 @@ const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockDirectories.clear();
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
   mockCheckPlatformSecurity.mockResolvedValue(null);

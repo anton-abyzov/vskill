@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [1.2.9] - 2026-10-17
+
+### Added
+
+- Hosted private publishing. Skill Studio offers Private publishing with an authenticated publishing-account selector; accounts without the GitHub App get a Connect GitHub App action and submission stays disabled. Private status stays inside Studio.
+- The CLI submits with explicit private intent and installs or updates frozen private versions scoped to the signed-in tenant. Downloads are checked for paths, hashes and file modes before anything is written.
+- Direct private GitHub installation keeps working without a hosted plan.
+
+### Fixed
+
+- Codex, Claude Code and Cursor folder installs keep per-agent managed inventories across staggered updates and remove only obsolete managed files.
+- Installs, updates and cleanup refuse to write or delete through symlinks or hardlinks that point outside the install directory.
+
 ## [1.2.8] - 2026-10-16
 
 ### Added

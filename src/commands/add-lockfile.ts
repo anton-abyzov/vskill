@@ -39,6 +39,8 @@ export interface BuildGitHubInstallLockEntryArgs {
   installedAt?: string;
   /** 0894: every installed file relative to the skill folder (defaults to SKILL.md). */
   files?: string[];
+  /** 0932: tier decided against the registry (lib/registry-tier.ts); UNSCANNED when unknown. */
+  tier?: "VERIFIED" | "UNSCANNED";
 }
 
 export function buildGitHubInstallLockEntry(
@@ -47,7 +49,7 @@ export function buildGitHubInstallLockEntry(
   const entry: SkillLockEntry = {
     version: args.version,
     sha: args.sha,
-    tier: "VERIFIED",
+    tier: args.tier ?? "UNSCANNED",
     installedAt: args.installedAt ?? new Date().toISOString(),
     source: `github:${args.owner}/${args.repo}`,
     scope: args.global ? "user" : "project",

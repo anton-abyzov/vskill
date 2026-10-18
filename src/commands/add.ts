@@ -33,7 +33,8 @@ import { checkInstallSafety, checkLocalInstallSafety } from "../blocklist/blockl
 import type { BlocklistEntry, RejectionInfo } from "../blocklist/types.js";
 import { getSkill, searchSkills } from "../api/client.js";
 import type { SkillSearchResult } from "../api/client.js";
-import { checkPlatformSecurity } from "../security/index.js";
+import { platformSecurityGate } from "../lib/platform-security.js";
+import { decideRegistryTier, decideRegistryTierForSkills, printTierDecision, readPluginDirSkills } from "../lib/registry-tier.js";
 import { discoverSkills, getDefaultBranch, getBranchHeadSha, checkRepoExists, warnRateLimitOnce } from "../discovery/github-tree.js";
 import { githubFetch, GitHubFetchError, privateRepoHint } from "../lib/github-fetch.js";
 import { isPrivateOrUnknownRepo, localDirGitHubRepo, parseGitHubRepoRef } from "../lib/private-source.js";
@@ -575,6 +576,8 @@ async function installMarketplaceRepo(
     })),
   ];
 
+  // 0932: SKILL.md bodies per plugin, for the registry tier decision.
+  const pluginSkillContents = new Map<string, Array<{ name: string; content: string }>>();
   for (const plugin of allPluginsToInstall) {
     // 0826: a marketplace plugin whose `source` is `"./"` lives at the repo
     // root — the previous guard (`if (!pluginPath) … failed`) short-circuited
@@ -613,6 +616,7 @@ async function installMarketplaceRepo(
             cleanStaleNesting(skillDir);
           }
           installedSkillNames.push(sd.name);
+          pluginSkillContents.set(plugin.name, [...(pluginSkillContents.get(plugin.name) ?? []), { name: sd.name, content }]);
         }
       } else {
         // Flat layout: {pluginPath}/SKILL.md directly in the plugin root
@@ -628,6 +632,7 @@ async function installMarketplaceRepo(
             cleanStaleNesting(skillDir);
           }
           installedSkillNames.push(plugin.name);
+          pluginSkillContents.set(plugin.name, [{ name: plugin.name, content }]);
         }
       }
 
@@ -649,14 +654,21 @@ async function installMarketplaceRepo(
 
   // Update lockfile
   const lockForWrite = ensureLockfile(lockDir);
+  const marketplacePrivate = await isPrivateOrUnknownRepo(owner, repo);
   for (const r of results) {
     if (r.installed) {
       const isUnregistered = r.method === "extraction-unregistered";
       const pluginVersion = isUnregistered ? "0.0.0" : (getPluginVersion(r.name, manifestContent) || "0.0.0");
+      const tierDecision = await decideRegistryTierForSkills(
+        isUnregistered ? null : `${owner}/${repo}`,
+        pluginSkillContents.get(r.name) ?? [],
+        { privateRepo: marketplacePrivate },
+      );
+      printTierDecision(r.name, tierDecision);
       lockForWrite.skills[r.name] = {
         version: pluginVersion,
         sha: "",
-        tier: isUnregistered ? "UNSCANNED" : "VERIFIED",
+        tier: tierDecision.tier,
         installedAt: new Date().toISOString(),
         source: `marketplace:${owner}/${repo}#${r.name}`,
         marketplace: marketplaceName || undefined,
@@ -1558,10 +1570,14 @@ async function installPluginDir(
 
   // Update lockfile
   const lock = ensureLockfile(lockDir);
+  const tierDecision = await decideRegistryTierForSkills(publicRemote, readPluginDirSkills(pluginDir), {
+    privateRepo: !publicRemote,
+  });
+  printTierDecision(pluginName, tierDecision);
   lock.skills[pluginName] = {
     version,
     sha,
-    tier: "VERIFIED",
+    tier: tierDecision.tier,
     installedAt: new Date().toISOString(),
     // Absolute, so later commands resolve the same checkout from any folder.
     source: `local:${resolve(basePath)}`,
@@ -1630,6 +1646,8 @@ interface SkillInstallResult {
   sourceSkillPath?: string;
   /** 0894: every installed file, relative to the skill folder. */
   files?: string[];
+  /** 0932: lock tier decided against the registry. */
+  tier?: "VERIFIED" | "UNSCANNED";
 }
 
 async function installOneGitHubSkill(
@@ -1687,25 +1705,10 @@ async function installOneGitHubSkill(
     return { skillName, installed: false, verdict: "FETCH_FAILED" };
   }
 
-  // Platform security check (skipped for private repos, see installSingleSkillLegacy)
+  // Platform security check on owner/repo/skill (skipped for private repos)
   const privateRepo = await isPrivateOrUnknownRepo(owner, repo);
-  const platformSecurity = privateRepo ? null : await checkPlatformSecurity(skillName);
-  if (privateRepo) {
-    console.log(dim("  Private repository: local security scan only."));
-  } else if (!platformSecurity) {
-    console.log(yellow("  Platform security check unavailable -- proceeding with local scan only."));
-  }
-  if (platformSecurity && platformSecurity.hasCritical && !opts.force) {
-    const criticalProviders = platformSecurity.providers
-      .filter((p) => p.status === "FAIL" && p.criticalCount > 0)
-      .map((p) => p.provider);
-    console.log(red(`  BLOCKED: External security scan found CRITICAL findings`));
-    if (criticalProviders.length > 0) {
-      console.log(dim(`  Providers: ${criticalProviders.join(", ")}`));
-    }
-    if (platformSecurity.reportUrl) {
-      console.log(dim(`  Report: https://verified-skill.com${platformSecurity.reportUrl}`));
-    }
+  const gate = await platformSecurityGate({ owner, repo, skillName, privateRepo, force: !!opts.force });
+  if (gate === "blocked") {
     return { skillName, installed: false, verdict: "SECURITY_FAIL" };
   }
 
@@ -1791,7 +1794,12 @@ async function installOneGitHubSkill(
   }
 
   const skillVersion = extractFrontmatterVersion(content) || "1.0.0";
-  return { skillName, installed: true, verdict: scanResult.verdict, score: scanResult.score, sha, version: skillVersion, sourceSkillPath, files: installedFiles };
+  const tierDecision = await decideRegistryTier(`${owner}/${repo}/${skillName}`, content, { privateRepo });
+  printTierDecision(skillName, tierDecision);
+  return {
+    skillName, installed: true, verdict: scanResult.verdict, score: scanResult.score, sha,
+    version: skillVersion, sourceSkillPath, files: installedFiles, tier: tierDecision.tier,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -2154,10 +2162,14 @@ async function installRepoPlugin(
   // Update lockfile (global → ~/.agents/, project → project root)
   const lockDir = lockfileRoot(opts);
   const lock = ensureLockfile(lockDir);
+  const tierDecision = await decideRegistryTierForSkills(`${owner}/${repo}`, skills, {
+    privateRepo: await isPrivateOrUnknownRepo(owner, repo),
+  });
+  printTierDecision(pluginName, tierDecision);
   lock.skills[pluginName] = {
     version: pluginVersion,
     sha,
-    tier: "VERIFIED",
+    tier: tierDecision.tier,
     installedAt: new Date().toISOString(),
     source: `github:${owner}/${repo}#plugin:${pluginName}`,
     scope: opts.global ? "user" : "project",
@@ -2573,6 +2585,7 @@ async function addCommandInner(
         pluginName: pluginNameFromSkillPath(r.sourceSkillPath),
         global: !!opts.global,
         files: r.files,
+        tier: r.tier ?? "UNSCANNED",
       });
     }
   }
@@ -3038,10 +3051,12 @@ async function installFromRegistry(
   const lockDir = lockfileRoot(opts);
   const lock = ensureLockfile(lockDir);
   const registryVersion = detail.version || extractFrontmatterVersion(content) || "1.0.0";
+  const tierDecision = await decideRegistryTier(skillName, content);
+  printTierDecision(skillName, tierDecision);
   lock.skills[skillName] = {
     version: registryVersion,
     sha,
-    tier: "VERIFIED",
+    tier: tierDecision.tier,
     installedAt: new Date().toISOString(),
     source: `registry:${skillName}`,
     scope: opts.global ? "user" : "project",
@@ -3155,36 +3170,8 @@ async function installSingleSkillLegacy(
   // Skipped for private repos: the registry looks skills up by name, so it
   // would leak the name and could match an unrelated public skill.
   const privateRepo = await isPrivateOrUnknownRepo(owner, repo);
-  const platformSecurity = privateRepo ? null : await checkPlatformSecurity(skillName);
-  if (privateRepo) {
-    console.log(dim("  Private repository: local security scan only."));
-  } else if (!platformSecurity) {
-    console.log(yellow("  Platform security check unavailable -- proceeding with local scan only."));
-  }
-
-  if (platformSecurity && platformSecurity.hasCritical && !opts.force) {
-    const criticalProviders = platformSecurity.providers
-      .filter((p) => p.status === "FAIL" && p.criticalCount > 0)
-      .map((p) => p.provider);
-    console.error(red("\n  BLOCKED: External security scan found CRITICAL findings"));
-    console.error(red(`  Providers: ${criticalProviders.join(", ")}`));
-    console.error(red(`  Report: https://verified-skill.com${platformSecurity.reportUrl}`));
-    console.error(dim("\n  Use --force to override (NOT recommended)"));
-    return process.exit(1);
-  }
-
-  if (platformSecurity && platformSecurity.hasCritical && opts.force) {
-    console.error(yellow("\n  WARNING: External scans found CRITICAL findings"));
-    const criticalProviders = platformSecurity.providers
-      .filter((p) => p.status === "FAIL" && p.criticalCount > 0)
-      .map((p) => p.provider);
-    console.error(yellow(`  Providers: ${criticalProviders.join(", ")}`));
-    console.error(yellow("  --force: proceeding despite CRITICAL findings\n"));
-  }
-
-  if (platformSecurity && platformSecurity.overallVerdict === "PENDING") {
-    console.log(dim("\n  External scans are pending. Proceeding with install.\n"));
-  }
+  const gate = await platformSecurityGate({ owner, repo, skillName, privateRepo, force: !!opts.force });
+  if (gate === "blocked") return process.exit(1);
 
   // Run tier1 scan
   console.log(dim("\nRunning security scan..."));
@@ -3315,6 +3302,8 @@ async function installSingleSkillLegacy(
   const lockDir = lockfileRoot(opts);
   const lock = ensureLockfile(lockDir);
   const ghVersion = opts._pinnedVersion || extractFrontmatterVersion(content) || "1.0.0";
+  const tierDecision = await decideRegistryTier(`${owner}/${repo}/${skillName}`, content, { privateRepo });
+  printTierDecision(skillName, tierDecision);
   lock.skills[skillName] = buildGitHubInstallLockEntry({
     version: ghVersion,
     sha,
@@ -3326,6 +3315,7 @@ async function installSingleSkillLegacy(
     pluginName: pluginNamespace ?? pluginNameFromSkillPath(skillSubpath),
     global: !!opts.global,
     files: bundle.fileList,
+    tier: tierDecision.tier,
   });
   if (opts._pinnedVersion) lock.skills[skillName].pinnedVersion = opts._pinnedVersion;
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];

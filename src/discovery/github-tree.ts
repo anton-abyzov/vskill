@@ -46,6 +46,10 @@ export interface GitHubDiscoveryOptions {
   token?: string | null;
   /** Fetch implementation for tests. Defaults to the shared GitHub fetch helper. */
   fetchImpl?: typeof fetch;
+  /** 0932: list the tree at this ref (a commit sha) instead of the default branch. */
+  ref?: string;
+  /** 0932: false skips the per-skill SKILL.md reads that fill `description`. */
+  descriptions?: boolean;
 }
 
 export interface GitHubDiscoveryResult {
@@ -378,7 +382,7 @@ export async function discoverSkillsDetailed(
   repo: string,
   options?: GitHubDiscoveryOptions,
 ): Promise<GitHubDiscoveryResult> {
-  const branch = await getDefaultBranch(owner, repo, options);
+  const branch = options?.ref || (await getDefaultBranch(owner, repo, options));
   const url = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
 
   let tree: Array<{ path: string; type: string }>;
@@ -520,6 +524,8 @@ export async function discoverSkillsDetailed(
     const urls = agentFilesBySkill.get(skill.name);
     if (urls) skill.agentRawUrls = urls;
   }
+
+  if (options?.descriptions === false) return { skills };
 
   // Fetch descriptions in parallel with a 3s timeout per skill
   await Promise.allSettled(

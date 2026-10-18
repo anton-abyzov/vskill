@@ -431,6 +431,8 @@ export interface SkillVersionEntry {
   certTier: string;
   createdAt: string;
   contentHash?: string;
+  /** Commit the registry scanned for this version (0932: name@version installs). */
+  gitSha?: string;
   certScore?: number;
   diffSummary?: string | null;
 }
@@ -441,9 +443,11 @@ export interface SkillVersionEntry {
  */
 export async function getVersions(
   name: string,
+  options?: { limit?: number },
 ): Promise<SkillVersionEntry[]> {
+  const query = options?.limit ? `?limit=${options.limit}` : "";
   const data = await apiRequest<{ versions?: unknown[] }>(
-    `${skillApiPath(name)}/versions`,
+    `${skillApiPath(name)}/versions${query}`,
   );
   const items = Array.isArray(data.versions) ? data.versions : [];
   return items.map((v) => v as Record<string, unknown>).map((v) => ({
@@ -451,6 +455,7 @@ export async function getVersions(
     certTier: String(v.certTier || ""),
     createdAt: String(v.createdAt || ""),
     contentHash: v.contentHash ? String(v.contentHash) : undefined,
+    gitSha: v.gitSha ? String(v.gitSha) : undefined,
     certScore: v.certScore != null ? Number(v.certScore) : undefined,
     diffSummary: v.diffSummary != null ? String(v.diffSummary) : null,
   }));

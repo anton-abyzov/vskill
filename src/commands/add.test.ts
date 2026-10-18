@@ -1560,7 +1560,7 @@ describe("addCommand source format routing", () => {
   it("3-part format uses discovery then falls back to skills/<skill>/SKILL.md", async () => {
     await addCommand("owner/repo/my-skill", {});
 
-    expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
+    expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo", expect.objectContaining({ descriptions: false }));
     expect(globalThis.fetch).toHaveBeenCalledWith(
       `https://raw.githubusercontent.com/owner/repo/${HEAD_SHA}/skills/my-skill/SKILL.md`,
       expect.anything(),
@@ -1766,7 +1766,7 @@ describe("addCommand source format routing", () => {
 
     await addCommand("anton-abyzov/vskill/scout", {});
 
-    expect(mockDiscoverSkills).toHaveBeenCalledWith("anton-abyzov", "vskill");
+    expect(mockDiscoverSkills).toHaveBeenCalledWith("anton-abyzov", "vskill", expect.objectContaining({ descriptions: false }));
     expect(globalThis.fetch).toHaveBeenCalledWith(
       `https://raw.githubusercontent.com/anton-abyzov/vskill/${HEAD_SHA}/plugins/skills/skills/scout/SKILL.md`,
       expect.anything(),
@@ -1781,7 +1781,7 @@ describe("addCommand source format routing", () => {
 
     await addCommand("owner/repo/my-skill", {});
 
-    expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
+    expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo", expect.objectContaining({ descriptions: false }));
     expect(globalThis.fetch).toHaveBeenCalledWith(
       `https://raw.githubusercontent.com/owner/repo/${HEAD_SHA}/skills/my-skill/SKILL.md`,
       expect.anything(),
@@ -1794,7 +1794,7 @@ describe("addCommand source format routing", () => {
 
     await addCommand("owner/repo/my-skill", {});
 
-    expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo");
+    expect(mockDiscoverSkills).toHaveBeenCalledWith("owner", "repo", expect.objectContaining({ descriptions: false }));
     expect(globalThis.fetch).toHaveBeenCalledWith(
       `https://raw.githubusercontent.com/owner/repo/${HEAD_SHA}/skills/my-skill/SKILL.md`,
       expect.anything(),

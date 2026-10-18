@@ -63,6 +63,7 @@ import { getMarketplaceName } from "../marketplace/index.js";
 import { rankSearchResults, formatSkillId, getSkillUrl, getTrustBadge, formatResultLine } from "../utils/skill-display.js";
 import { computeSha } from "../updater/source-fetcher.js";
 import { extractFrontmatterVersion } from "../utils/version.js";
+import { splitVersionSuffix, resolveRegistryVersionOrExit } from "../lib/registry-version.js";
 // 0724 T-006: enable-after-install path. We delegate every enabledPlugins
 // mutation to the claude CLI (ADR 0724-01), and we honour the --no-enable
 // flag to skip it. Uninstall is imported for F-003 rollback of earlier
@@ -842,6 +843,10 @@ interface AddOptions {
    * `X-Vskill-Tenant` header on every outbound request in this run.
    */
   tenant?: string;
+  /** 0932: exact registry version to install (`owner/repo/skill@x` or --version x). */
+  version?: string;
+  /** @internal 0932: registry version resolved from `version`, written to the lock as the pin. */
+  _pinnedVersion?: string;
 }
 
 /**
@@ -2374,20 +2379,39 @@ async function addCommandInner(
     source = `${parsed.owner}/${parsed.repo}`;
   }
 
+  // 0932: `owner/repo/skill@1.2.3` (also accepted here when called directly).
+  const versionSplit = splitVersionSuffix(source);
+  if (versionSplit.version) {
+    source = versionSplit.source;
+    opts.version = versionSplit.version;
+  }
+  if (opts.version && source.split("/").length !== 3) {
+    console.error(red("--version needs owner/repo/skill, or a hosted private skill with --tenant."));
+    return process.exit(1);
+  }
+
   // GitHub mode: owner/repo or owner/repo/skill
   const parts = source.split("/");
 
   // 3-part format: owner/repo/skill-name → check marketplace first, then legacy
   if (parts.length === 3) {
     const [threeOwner, threeRepo, threeSkill] = parts;
+    // 0932: a pinned version installs the commit the registry scanned for it.
+    let pinnedRef: string | undefined;
+    if (opts.version) {
+      const pinned = await resolveRegistryVersionOrExit(threeOwner, threeRepo, threeSkill, opts.version);
+      pinnedRef = pinned.gitSha ?? undefined;
+      opts._pinnedVersion = pinned.version;
+      console.log(dim(`Resolved ${threeOwner}/${threeRepo}/${threeSkill}@${pinned.version} to commit ${pinnedRef?.slice(0, 12)}`));
+    }
     const detection = await detectMarketplaceRepo(threeOwner, threeRepo);
     if (detection.isMarketplace && detection.manifestContent) {
       // Direct plugin name match (e.g. owner/repo/pluginName)
-      if (hasPlugin(threeSkill, detection.manifestContent)) {
+      if (!pinnedRef && hasPlugin(threeSkill, detection.manifestContent)) {
         return installMarketplaceRepo(threeOwner, threeRepo, detection.manifestContent, opts, [threeSkill]);
       }
       // Skill-inside-plugin: search all plugins for a skill with this name
-      const branch = await getDefaultBranch(threeOwner, threeRepo);
+      const branch = pinnedRef ?? (await getDefaultBranch(threeOwner, threeRepo));
       const mktPlugins = getAvailablePlugins(detection.manifestContent);
       for (const plugin of mktPlugins) {
         // "./" (repo root) normalizes to "" — no leading slash in the subpath.
@@ -2396,20 +2420,20 @@ async function addCommandInner(
         const probeUrl = `https://raw.githubusercontent.com/${threeOwner}/${threeRepo}/${branch}/${subpath}`;
         const probeRes = await githubFetch(probeUrl);
         if (probeRes.ok) {
-          return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts, subpath, plugin.name);
+          return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts, subpath, plugin.name, pinnedRef);
         }
       }
     }
 
     // Try discovery to find actual skill path before falling back to hardcoded pattern
-    const discovered = await discoverSkills(threeOwner, threeRepo);
+    const discovered = await discoverSkills(threeOwner, threeRepo, { ref: pinnedRef, descriptions: false });
     const discoveredMatch = discovered.find(s => s.name === threeSkill);
     if (discoveredMatch) {
-      return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts, discoveredMatch.path);
+      return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts, discoveredMatch.path, undefined, pinnedRef);
     }
 
     // Fallback: discovery didn't find the skill — try hardcoded skills/{name}/SKILL.md
-    return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts);
+    return installSingleSkillLegacy(threeOwner, threeRepo, threeSkill, opts, undefined, undefined, pinnedRef);
   }
 
   if (parts.length !== 2) {
@@ -3094,7 +3118,8 @@ async function installSingleSkillLegacy(
   }
 
   const branch = refOverride || (await getDefaultBranch(owner, repo));
-  const sourceCommitSha = await getBranchHeadSha(owner, repo, branch);
+  // 0932: a full commit sha (a pinned registry version) needs no lookup.
+  const sourceCommitSha = /^[0-9a-f]{40}$/i.test(branch) ? branch : await getBranchHeadSha(owner, repo, branch);
   // 0894: SKILL.md, the bundle and the lockfile all read this one commit.
   const contentRef = sourceCommitSha || branch;
   // Candidate subpaths: explicit override wins; otherwise try the conventional
@@ -3289,7 +3314,7 @@ async function installSingleSkillLegacy(
   // (no more 404s on `/blob/HEAD/SKILL.md` for nested-layout repos).
   const lockDir = lockfileRoot(opts);
   const lock = ensureLockfile(lockDir);
-  const ghVersion = extractFrontmatterVersion(content) || "1.0.0";
+  const ghVersion = opts._pinnedVersion || extractFrontmatterVersion(content) || "1.0.0";
   lock.skills[skillName] = buildGitHubInstallLockEntry({
     version: ghVersion,
     sha,
@@ -3302,6 +3327,7 @@ async function installSingleSkillLegacy(
     global: !!opts.global,
     files: bundle.fileList,
   });
+  if (opts._pinnedVersion) lock.skills[skillName].pinnedVersion = opts._pinnedVersion;
   lock.agents = [...new Set([...(lock.agents || []), ...selectedAgents.map((a: { id: string }) => a.id)])];
   writeLockfile(lock, lockDir);
 

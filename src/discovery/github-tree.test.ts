@@ -69,17 +69,17 @@ describe("discoverSkills", () => {
         {
           name: "repo",
           path: "SKILL.md",
-          rawUrl: "https://raw.githubusercontent.com/owner/repo/main/SKILL.md",
+          rawUrl: "https://raw.githubusercontent.com/owner/repo/HEAD/SKILL.md",
         },
         {
           name: "foo",
           path: "skills/foo/SKILL.md",
-          rawUrl: "https://raw.githubusercontent.com/owner/repo/main/skills/foo/SKILL.md",
+          rawUrl: "https://raw.githubusercontent.com/owner/repo/HEAD/skills/foo/SKILL.md",
         },
         {
           name: "bar",
           path: "skills/bar/SKILL.md",
-          rawUrl: "https://raw.githubusercontent.com/owner/repo/main/skills/bar/SKILL.md",
+          rawUrl: "https://raw.githubusercontent.com/owner/repo/HEAD/skills/bar/SKILL.md",
         },
       ])
     );
@@ -99,7 +99,7 @@ describe("discoverSkills", () => {
     expect(result[0]).toEqual({
       name: "repo",
       path: "SKILL.md",
-      rawUrl: "https://raw.githubusercontent.com/owner/repo/main/SKILL.md",
+      rawUrl: "https://raw.githubusercontent.com/owner/repo/HEAD/SKILL.md",
     });
   });
 
@@ -208,7 +208,7 @@ describe("discoverSkills", () => {
     // First call is getDefaultBranch, second is the tree API
     expect(mockFetch).toHaveBeenNthCalledWith(
       2,
-      "https://api.github.com/repos/anthropics/frontend-design/git/trees/main?recursive=1",
+      "https://api.github.com/repos/anthropics/frontend-design/git/trees/HEAD?recursive=1",
       expect.objectContaining({
         headers: expect.objectContaining({
           Accept: "application/vnd.github.v3+json",
@@ -367,23 +367,23 @@ describe("getDefaultBranch", () => {
     _resetRepoVisibilityForTests();
   });
 
-  it("falls back to main on API error", async () => {
+  it("falls back to HEAD on API error (0932: never guess main)", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
     }) as unknown as typeof fetch;
 
     const branch = await getDefaultBranch("test-owner", "test-repo-2");
-    expect(branch).toBe("main");
+    expect(branch).toBe("HEAD");
   });
 
-  it("falls back to main on network error", async () => {
+  it("falls back to HEAD on network error", async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(
       new Error("Network error")
     ) as unknown as typeof fetch;
 
     const branch = await getDefaultBranch("test-owner", "test-repo-3");
-    expect(branch).toBe("main");
+    expect(branch).toBe("HEAD");
   });
 
   it("caches results per owner/repo", async () => {
@@ -570,8 +570,8 @@ describe("discovery scope guard", () => {
     const other = result.find((s) => s.name === "other");
 
     expect(teamLead?.agentRawUrls).toEqual({
-      "agents/frontend.md": "https://raw.githubusercontent.com/owner/repo/main/skills/team-lead/agents/frontend.md",
-      "agents/backend.md": "https://raw.githubusercontent.com/owner/repo/main/skills/team-lead/agents/backend.md",
+      "agents/frontend.md": "https://raw.githubusercontent.com/owner/repo/HEAD/skills/team-lead/agents/frontend.md",
+      "agents/backend.md": "https://raw.githubusercontent.com/owner/repo/HEAD/skills/team-lead/agents/backend.md",
     });
     // Skill without agents/ has no agentRawUrls
     expect(other?.agentRawUrls).toBeUndefined();
@@ -591,7 +591,7 @@ describe("discovery scope guard", () => {
     expect(result[0]).toEqual({
       name: "pm",
       path: "skills/pm/SKILL.md",
-      rawUrl: "https://raw.githubusercontent.com/owner/repo/main/skills/pm/SKILL.md",
+      rawUrl: "https://raw.githubusercontent.com/owner/repo/HEAD/skills/pm/SKILL.md",
     });
   });
 });
@@ -625,7 +625,7 @@ describe("plugin skill discovery", () => {
     expect(result[0]).toEqual({
       name: "scout",
       path: "plugins/skills/skills/scout/SKILL.md",
-      rawUrl: "https://raw.githubusercontent.com/owner/repo/main/plugins/skills/skills/scout/SKILL.md",
+      rawUrl: "https://raw.githubusercontent.com/owner/repo/HEAD/plugins/skills/skills/scout/SKILL.md",
     });
   });
 
@@ -646,8 +646,8 @@ describe("plugin skill discovery", () => {
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe("scout");
     expect(result[0].agentRawUrls).toEqual({
-      "agents/research.md": "https://raw.githubusercontent.com/owner/repo/main/plugins/skills/skills/scout/agents/research.md",
-      "agents/helper.md": "https://raw.githubusercontent.com/owner/repo/main/plugins/skills/skills/scout/agents/helper.md",
+      "agents/research.md": "https://raw.githubusercontent.com/owner/repo/HEAD/plugins/skills/skills/scout/agents/research.md",
+      "agents/helper.md": "https://raw.githubusercontent.com/owner/repo/HEAD/plugins/skills/skills/scout/agents/helper.md",
     });
   });
 
@@ -849,7 +849,7 @@ describe("discoverSkills — root-level skill directories", () => {
     const gen = result.find((s) => s.name === "higgsfield-generate")!;
     expect(gen.path).toBe("higgsfield-generate/SKILL.md");
     expect(gen.rawUrl).toBe(
-      "https://raw.githubusercontent.com/higgsfield-ai/skills/main/higgsfield-generate/SKILL.md",
+      "https://raw.githubusercontent.com/higgsfield-ai/skills/HEAD/higgsfield-generate/SKILL.md",
     );
   });
 
@@ -895,7 +895,7 @@ describe("discoverSkills — root-level skill directories", () => {
     expect(result).toHaveLength(1);
     expect(result[0].agentRawUrls).toEqual({
       "agents/helper.md":
-        "https://raw.githubusercontent.com/owner/repo/main/my-skill/agents/helper.md",
+        "https://raw.githubusercontent.com/owner/repo/HEAD/my-skill/agents/helper.md",
     });
   });
 });

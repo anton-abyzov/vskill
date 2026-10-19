@@ -173,6 +173,7 @@ vi.mock("../discovery/github-tree.js", () => ({
   getBranchHeadSha: (...args: unknown[]) => mockGetBranchHeadSha(...args),
   checkRepoExists: (...args: unknown[]) => mockCheckRepoExists(...args),
   warnRateLimitOnce: vi.fn(),
+  wasGitHubRateLimited: () => false,
 }));
 
 // ---------------------------------------------------------------------------

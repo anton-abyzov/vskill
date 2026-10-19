@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import { checkPlatformSecurity } from "../security/index.js";
+import { getRepoVisibility, getRepoVisibilityFailure } from "./repo-visibility.js";
 import { dim, red, yellow } from "../utils/output.js";
 
 export interface PlatformSecurityGateArgs {
@@ -30,7 +31,17 @@ export function platformSkillName(owner: string, repo: string, skillName: string
  */
 export async function platformSecurityGate(args: PlatformSecurityGateArgs): Promise<PlatformSecurityGateResult> {
   if (args.privateRepo) {
-    console.log(dim("  Private repository: local security scan only."));
+    // 0932: a repo GitHub would not describe (rate limit, outage) is only
+    // treated as private; say why instead of calling it private.
+    const ref = `${args.owner}/${args.repo}`;
+    const failure = getRepoVisibility(ref) === "unknown" ? getRepoVisibilityFailure(ref) : undefined;
+    const why =
+      failure === "rate_limited"
+        ? "GitHub API rate limit hit, visibility unconfirmed"
+        : failure === "unavailable"
+          ? "GitHub unavailable, visibility unconfirmed"
+          : "Private repository";
+    console.log(dim(`  ${why}: local security scan only.`));
     return "ok";
   }
   const report = await checkPlatformSecurity(platformSkillName(args.owner, args.repo, args.skillName));

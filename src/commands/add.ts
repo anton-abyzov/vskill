@@ -36,7 +36,7 @@ import type { SkillSearchResult } from "../api/client.js";
 import { platformSecurityGate } from "../lib/platform-security.js";
 import { pickShortName, localPluginPath } from "../lib/install-resolution.js";
 import { decideRegistryTier, decideRegistryTierForSkills, printTierDecision, readPluginDirSkills } from "../lib/registry-tier.js";
-import { discoverSkills, getDefaultBranch, getBranchHeadSha, checkRepoExists, warnRateLimitOnce } from "../discovery/github-tree.js";
+import { discoverSkills, getDefaultBranch, getBranchHeadSha, checkRepoExists, warnRateLimitOnce, wasGitHubRateLimited } from "../discovery/github-tree.js";
 import { githubFetch, GitHubFetchError, privateRepoHint } from "../lib/github-fetch.js";
 import { isPrivateOrUnknownRepo, localDirGitHubRepo, parseGitHubRepoRef } from "../lib/private-source.js";
 import { parseGitHubSource, classifyIdentifier } from "../utils/validation.js";
@@ -151,10 +151,13 @@ export async function detectMarketplaceRepo(
   const headers = { Accept: "application/vnd.github.v3+json", "User-Agent": "vskill-cli" };
 
   // Attempt 1: Contents API
+  let skipRetry = false;
   try {
     const res = await githubFetch(contentsUrl, { headers });
     if (res.status === 404) return { isMarketplace: false };
-    if (res.status === 403) warnRateLimitOnce(res);
+    if (res.status === 403 || res.status === 429) warnRateLimitOnce(res);
+    // 0932: a rate limit will not clear in 1s; go straight to raw.
+    skipRetry = wasGitHubRateLimited();
     if (res.ok) {
       const data = (await res.json()) as { download_url?: string; content?: string; encoding?: string };
       const content = await parseManifestFromContentsApi(data);
@@ -165,7 +168,7 @@ export async function detectMarketplaceRepo(
   }
 
   // Attempt 2: Retry Contents API after 1s delay
-  try {
+  if (!skipRetry) try {
     await new Promise((r) => setTimeout(r, 1000));
     const res = await githubFetch(contentsUrl, { headers });
     if (res.status === 404) return { isMarketplace: false };
@@ -1246,10 +1249,13 @@ async function fetchSkillContent(url: string): Promise<string> {
     if (!res.ok) {
       spin.stop();
       if (res.status === 404) {
-        console.error(
-          red(`SKILL.md not found at ${url}\n`) +
-            dim("Make sure the repo exists and has a SKILL.md on the default branch." + privateRepoHint())
-        );
+        // 0932: after a rate limit the default branch was never read, so do
+        // not suggest the repo is private; say which limit was hit.
+        const hint = wasGitHubRateLimited()
+          ? "\nThe GitHub API rate limit was hit, so vskill could not list the repo and guessed this path. " +
+            "Set GITHUB_TOKEN or run `vskill auth login`, then retry."
+          : "Make sure the repo exists and has a SKILL.md on the default branch." + privateRepoHint();
+        console.error(red(`SKILL.md not found at ${url}\n`) + dim(hint.replace(/^\n/, "")));
       } else {
         console.error(red(`Failed to fetch: ${res.status} ${res.statusText}`));
       }

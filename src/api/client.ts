@@ -259,6 +259,10 @@ export interface SubmissionResponse {
   /** True when skill/submission is blocked */
   blocked?: boolean;
   submissionId?: string;
+  /** 0932: the SKILL.md changed, so a published skill was requeued as a new version. */
+  requeued?: boolean;
+  /** 0932: an earlier submission of this exact content was rejected. */
+  rejected?: boolean;
 }
 
 export interface SubmissionRequest {
@@ -431,6 +435,8 @@ export interface SkillVersionEntry {
   certTier: string;
   createdAt: string;
   contentHash?: string;
+  /** Commit the registry scanned for this version (0932: name@version installs). */
+  gitSha?: string;
   certScore?: number;
   diffSummary?: string | null;
 }
@@ -441,9 +447,11 @@ export interface SkillVersionEntry {
  */
 export async function getVersions(
   name: string,
+  options?: { limit?: number },
 ): Promise<SkillVersionEntry[]> {
+  const query = options?.limit ? `?limit=${options.limit}` : "";
   const data = await apiRequest<{ versions?: unknown[] }>(
-    `${skillApiPath(name)}/versions`,
+    `${skillApiPath(name)}/versions${query}`,
   );
   const items = Array.isArray(data.versions) ? data.versions : [];
   return items.map((v) => v as Record<string, unknown>).map((v) => ({
@@ -451,6 +459,7 @@ export async function getVersions(
     certTier: String(v.certTier || ""),
     createdAt: String(v.createdAt || ""),
     contentHash: v.contentHash ? String(v.contentHash) : undefined,
+    gitSha: v.gitSha ? String(v.gitSha) : undefined,
     certScore: v.certScore != null ? Number(v.certScore) : undefined,
     diffSummary: v.diffSummary != null ? String(v.diffSummary) : null,
   }));
@@ -569,6 +578,8 @@ export interface CheckUpdateResult {
    * back to the lockfile pin. UI surfaces this as a soft hint without
    * breaking the update flow. */
   warning?: string;
+  /** 0932: the GitHub source's SKILL.md differs from the installed one. */
+  sourceChanged?: boolean;
 }
 
 /**

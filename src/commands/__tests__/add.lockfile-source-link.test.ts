@@ -52,7 +52,8 @@ describe("0743: buildGitHubInstallLockEntry persists source-link provenance", ()
     expect(entry.sourceCommitSha).toBe("abc1234def567890abc1234def567890abc1234d");
     expect(entry.version).toBe("1.0.1");
     expect(entry.sha).toBe("abc123");
-    expect(entry.tier).toBe("VERIFIED");
+    // 0932: no registry decision passed -> never claims VERIFIED.
+    expect(entry.tier).toBe("UNSCANNED");
     expect(entry.scope).toBe("project");
     expect(entry.files).toEqual(["SKILL.md"]);
   });
@@ -82,6 +83,11 @@ describe("0743: buildGitHubInstallLockEntry persists source-link provenance", ()
 
     expect(entry.sourceRepoUrl).toBe("https://github.com/anton-abyzov/vskill");
     expect(entry.sourceSkillPath).toBeUndefined();
+  });
+
+  it("0932: records the registry-decided tier", () => {
+    const entry = buildGitHubInstallLockEntry({ ...baseArgs, sourceSkillPath: "SKILL.md", tier: "VERIFIED" });
+    expect(entry.tier).toBe("VERIFIED");
   });
 
   it("emits `scope: 'user'` when global install is requested", () => {

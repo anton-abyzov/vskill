@@ -35,6 +35,13 @@ vi.mock("../../discovery/github-tree.js", async () => {
 vi.mock("../../api/client.js", () => ({
   checkUpdates: checkUpdatesMock,
 }));
+// 0932: the upstream-hash check reads GitHub; these tests cover the
+// registry path, so upstream never answers.
+vi.mock("../../updater/source-fetcher.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../updater/source-fetcher.js")>()),
+  fetchGitHubSourceSkill: async () => null,
+}));
+
 vi.mock("../../lockfile/lockfile.js", () => ({
   readLockfile: readLockfileMock,
   writeLockfile: vi.fn(),

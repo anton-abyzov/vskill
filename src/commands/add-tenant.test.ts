@@ -16,7 +16,14 @@
 // testing agent (T-014).
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+// The developer's own ~/.vskill/config.json (a real `currentTenant`) must not
+// leak into the "no tenant configured" assertions below.
+vi.mock("../lib/active-tenant.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/active-tenant.js")>()),
+  getActiveTenant: () => null,
+}));
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";

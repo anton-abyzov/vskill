@@ -6,8 +6,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockOpenBrowser = vi.fn().mockResolvedValue(undefined);
 // These cases name public skills; visibility is covered in
 // lib/__tests__/private-source-egress-1.2.1.test.ts.
+const mockRepoStatus = vi.hoisted(() => ({ value: "public" as "public" | "private" | "not-found" | "unconfirmed" }));
 vi.mock("../lib/private-source.js", () => ({
   isTypedRepoPrivate: vi.fn(async () => false),
+  typedRepoStatus: vi.fn(async () => mockRepoStatus.value),
 }));
 
 vi.mock("../utils/browser.js", () => ({
@@ -49,6 +51,7 @@ const { submitCommand } = await import("./submit.js");
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockRepoStatus.value = "public";
   mockSubmitSkill.mockResolvedValue({ id: "sub_test-123", state: "RECEIVED" });
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -116,6 +119,46 @@ describe("submitCommand — API mode (default)", () => {
     expect(mockSubmitSkill).toHaveBeenCalledWith(
       expect.objectContaining({ repoUrl: "https://github.com/myorg/myskill" })
     );
+  });
+});
+
+describe("submitCommand — 0932 messages (AC-11)", () => {
+  const text = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls.map((c) => c.join(" ")).join("\n");
+
+  it("prints the full owner/repo/skill name for vskill info", async () => {
+    const log = vi.spyOn(console, "log");
+    await submitCommand("myorg/myrepo", { skill: "greet" });
+    expect(text(log)).toContain("vskill info myorg/myrepo/greet");
+  });
+
+  it("reports a rejected submission as rejected, not as a duplicate, and exits 1", async () => {
+    mockSubmitSkill.mockResolvedValue({ id: "sub_r", state: "REJECTED", duplicate: true });
+    const log = vi.spyOn(console, "log");
+    const err = vi.spyOn(console, "error");
+    const exit = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+    await expect(submitCommand("myorg/myrepo", { skill: "greet" })).rejects.toThrow("exit");
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(text(err)).toContain("Rejected");
+    expect(text(log)).not.toContain("Duplicate");
+    exit.mockRestore();
+  });
+
+  it("says a 404 repo was not found instead of calling it private", async () => {
+    mockRepoStatus.value = "not-found";
+    const err = vi.spyOn(console, "error");
+    const exit = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+    await expect(submitCommand("myorg/nope", {})).rejects.toThrow("exit");
+    expect(text(err)).toContain("myorg/nope was not found on GitHub");
+    expect(text(err)).not.toContain("is a private repository");
+    expect(mockSubmitSkill).not.toHaveBeenCalled();
+    exit.mockRestore();
+  });
+
+  it("announces a requeued (changed) skill as a resubmission", async () => {
+    mockSubmitSkill.mockResolvedValue({ id: "sub_q", state: "RECEIVED", requeued: true });
+    const log = vi.spyOn(console, "log");
+    await submitCommand("myorg/myrepo", { skill: "greet" });
+    expect(text(log)).toContain("Resubmitted!");
   });
 });
 

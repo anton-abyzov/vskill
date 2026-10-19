@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [1.2.10] - 2026-10-19
+
+### Fixed
+
+- `vskill install --tenant <t> <skill> --version 1.0.0` reaches the install command instead of printing the CLI version.
+- `vskill install owner/repo/skill@1.0.0` (or `--version 1.0.0`) installs the commit the registry scanned for that version and pins it. An unknown version exits 1 and lists the published ones. `vskill pin` prints an install command that works.
+- The lock `tier` comes from the registry: `VERIFIED` only when the installed SKILL.md matches a published version, otherwise `UNSCANNED`, with the registry's latest version named.
+- The verified-skill.com security check looks skills up by `owner/repo/skill`, so a CRITICAL finding now blocks the install.
+- `vskill install <name> -y` installs only an exact skill-name match and otherwise lists the candidates and exits 1. A marketplace plugin whose `source` points at another repo is skipped instead of crashing.
+- One `owner/repo/skill` install makes at most 5 GitHub REST calls. When the API is rate-limited, files are read from the repo's default branch (`HEAD`, not `main`) and messages name the rate limit instead of suggesting the repo is private.
+- `vskill update` records the commit it read in `sourceCommitSha`. `vskill outdated` reports a GitHub-sourced skill whose SKILL.md changed upstream, as `update` does.
+- `vskill doctor` accepts `<namespace>/<name>` frontmatter names written by plugin installs and compares only the skill part with the folder.
+- `vskill submit` prints the full name for `vskill info`, reports a rejected submission as rejected (exit 1) instead of a duplicate, says a 404 repo was not found instead of private, and announces a changed skill as a resubmission. The install summary says "copied" when folders were copied.
+
 ## [1.2.9] - 2026-10-17
 
 ### Added

@@ -29,6 +29,12 @@ export interface FetchResult {
   tier: string;
   /** Path-to-content map of all files in this skill. */
   files?: Record<string, string>;
+  /**
+   * 0932: the commit the GitHub branch pointed at when it was read, so
+   * `update` can refresh the lock's `sourceCommitSha`. Absent when GitHub
+   * could not say (rate limit, network) or for non-GitHub sources.
+   */
+  sourceCommitSha?: string;
 }
 
 // githubFetch carries the same token resolution as install (VSKILL_GITHUB_TOKEN,
@@ -43,6 +49,44 @@ async function fetchRaw(url: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+const headCommitCache = new Map<string, Promise<string | null>>();
+
+/** @internal Reset cache — for testing only */
+export function _resetHeadCommitCache(): void {
+  headCommitCache.clear();
+}
+
+/**
+ * 0932: the commit sha a branch points at, via one cheap REST call
+ * (`Accept: application/vnd.github.sha` returns the bare sha), cached per
+ * repo and branch so updating many skills from one repo costs one call. A
+ * full sha is returned as-is. Null when GitHub cannot say.
+ */
+export function resolveHeadCommit(owner: string, repo: string, ref: string): Promise<string | null> {
+  if (/^[0-9a-f]{40}$/i.test(ref)) return Promise.resolve(ref.toLowerCase());
+  const key = `${owner}/${repo}@${ref}`.toLowerCase();
+  const cached = headCommitCache.get(key);
+  if (cached) return cached;
+  const pending = (async () => {
+    try {
+      const res = await githubFetch(
+        `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}`,
+        { headers: { Accept: "application/vnd.github.sha" } },
+      );
+      if (!res?.ok) return null;
+      const body = (await res.text()).trim();
+      if (/^[0-9a-f]{40}$/i.test(body)) return body.toLowerCase();
+      // A JSON body (some proxies ignore the sha media type).
+      const sha = (JSON.parse(body) as { sha?: unknown }).sha;
+      return typeof sha === "string" && /^[0-9a-f]{40}$/i.test(sha) ? sha.toLowerCase() : null;
+    } catch {
+      return null;
+    }
+  })();
+  headCommitCache.set(key, pending);
+  return pending;
 }
 
 export function normalizeContent(content: string): string {
@@ -94,6 +138,7 @@ async function fetchGitHubFlat(
   repo: string,
   skillName: string,
   entry: SkillLockEntry,
+  opts: { resolveCommit?: boolean } = {},
 ): Promise<FetchResult | null> {
   const branch = entry.sourceBranch || await getDefaultBranch(owner, repo);
   const base = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}`;
@@ -117,6 +162,7 @@ async function fetchGitHubFlat(
   if (!content) return null;
 
   const files: Record<string, string> = { "SKILL.md": content };
+  const sourceCommitSha = opts.resolveCommit === false ? null : await resolveHeadCommit(owner, repo, branch);
   return {
     content,
     version: extractFrontmatterVersion(content) || entry.version,
@@ -124,6 +170,7 @@ async function fetchGitHubFlat(
     sha: computeSha(content),
     tier: entry.tier,
     files,
+    ...(sourceCommitSha ? { sourceCommitSha } : {}),
   };
 }
 
@@ -200,6 +247,7 @@ async function fetchPlugin(
     files[f.path] = f.content;
   }
   const combined = successful.map((f) => f.content).join("\n");
+  const sourceCommitSha = await resolveHeadCommit(owner, repo, branch);
 
   return {
     content: combined,
@@ -207,6 +255,7 @@ async function fetchPlugin(
     sha: computeSha(files),
     tier: entry.tier,
     files,
+    ...(sourceCommitSha ? { sourceCommitSha } : {}),
   };
 }
 
@@ -256,6 +305,20 @@ function fetchLocal(skillName: string, entry: SkillLockEntry): FetchResult | nul
     tier: entry.tier,
     files,
   };
+}
+
+/**
+ * 0932: the SKILL.md a single-skill GitHub entry would update to, read from
+ * raw.githubusercontent.com only (no REST call), for `vskill outdated`.
+ * Null for other source types or when the file cannot be read.
+ */
+export async function fetchGitHubSourceSkill(
+  parsed: ParsedSource,
+  skillName: string,
+  entry: SkillLockEntry,
+): Promise<FetchResult | null> {
+  if (parsed.type !== "github") return null;
+  return fetchGitHubFlat(parsed.owner, parsed.repo, skillName, entry, { resolveCommit: false });
 }
 
 // ---------------------------------------------------------------------------

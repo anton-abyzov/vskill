@@ -11,7 +11,11 @@ const program = new Command();
 program
   .name("vskill")
   .description("Secure multi-platform AI skill installer -- scan before you install")
-  .version(pkg.version, "-v, --version");
+  .version(pkg.version, "-v, --version")
+  // 0932: program options are only read before the subcommand, so
+  // `vskill install x --version 1.0.0` reaches install instead of printing
+  // the CLI version. `vskill -v` and `vskill --version` still print it.
+  .enablePositionalOptions();
 
 function collect(val: string, acc: string[]): string[] {
   acc.push(val);
@@ -44,14 +48,28 @@ program
   // 0839 T-010 / ADR-002: per-call tenant override for private-skill resolution.
   // Highest priority — beats VSKILL_TENANT env and config.json `currentTenant`.
   .option("--tenant <slug>", "Tenant slug for private-skill resolution (overrides config + env)")
-  .option("--version <version>", "Install and pin an exact hosted private version")
+  .option("--version <version>", "Install and pin an exact published version (owner/repo/skill, or a hosted private skill with --tenant)")
   .action(async (source: string | undefined, opts) => {
+    // 0932: `owner/repo/skill@1.2.3` is the same as `--version 1.2.3`.
+    const { splitVersionSuffix } = await import("./lib/registry-version.js");
+    if (source) {
+      const split = splitVersionSuffix(source);
+      if (split.version) {
+        if (opts.version && opts.version !== split.version) {
+          throw new Error(`Conflicting versions: ${source} and --version ${opts.version}.`);
+        }
+        source = split.source;
+        opts.version = split.version;
+      }
+    }
     if (opts.tenant && (!source || !source.includes("/"))) {
       const { installPrivateCommand } = await import("./commands/install-private.js");
       await installPrivateCommand(source, opts);
       return;
     }
-    if (opts.version) throw new Error("--version requires a hosted private skill and --tenant.");
+    if (opts.version && (!source || source.includes("://") || source.split("/").length !== 3)) {
+      throw new Error("--version needs owner/repo/skill, or a hosted private skill with --tenant.");
+    }
     const { addCommand } = await import("./commands/add.js");
     await addCommand(source, opts);
   });

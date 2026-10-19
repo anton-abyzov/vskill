@@ -9,10 +9,25 @@ import { recordRepoVisibility, recordRepoVisibilityFailure } from "../lib/repo-v
 // ---- Rate-limit warning (deduplicated per CLI invocation) -----------------
 
 let rateLimitWarned = false;
+let rateLimited = false;
 
 /** @internal Reset flag — for testing only */
 export function _resetRateLimitWarned(): void {
   rateLimitWarned = false;
+  rateLimited = false;
+}
+
+/**
+ * 0932: true once any GitHub API call in this process hit the rate limit, so
+ * a later "not found" can say the limit was hit instead of blaming a private
+ * repo.
+ */
+export function wasGitHubRateLimited(): boolean {
+  return rateLimited;
+}
+
+function isRateLimitResponse(res: Pick<Response, "status" | "headers">): boolean {
+  return res.status === 429 || (res.status === 403 && res.headers?.get("x-ratelimit-remaining") === "0");
 }
 
 /**
@@ -20,9 +35,9 @@ export function _resetRateLimitWarned(): void {
  * Only prints once per CLI invocation to avoid noise.
  */
 export function warnRateLimitOnce(res: Response): void {
+  if (!isRateLimitResponse(res)) return;
+  rateLimited = true;
   if (rateLimitWarned) return;
-  if (res.status !== 403) return;
-  if (res.headers.get("x-ratelimit-remaining") !== "0") return;
   rateLimitWarned = true;
   console.error(
     yellow("GitHub API rate limit reached. Set GITHUB_TOKEN for higher limits."),
@@ -46,6 +61,10 @@ export interface GitHubDiscoveryOptions {
   token?: string | null;
   /** Fetch implementation for tests. Defaults to the shared GitHub fetch helper. */
   fetchImpl?: typeof fetch;
+  /** 0932: list the tree at this ref (a commit sha) instead of the default branch. */
+  ref?: string;
+  /** 0932: false skips the per-skill SKILL.md reads that fill `description`. */
+  descriptions?: boolean;
 }
 
 export interface GitHubDiscoveryResult {
@@ -143,51 +162,67 @@ export function classifyGitHubFailure(res: Pick<Response, "status" | "headers">)
   };
 }
 
-// ---- Branch cache ---------------------------------------------------------
+// ---- Repo metadata cache ----------------------------------------------------
 
 /**
- * Fetch the default branch for a GitHub repo. Falls back to "main" on error.
- * Results are cached per owner/repo for the lifetime of the process.
+ * One `GET /repos/{owner}/{repo}` per repo per process (0932): the default
+ * branch, the existence check and the visibility record all read this one
+ * response, so an install spends a single REST call on it.
  */
-const branchCache = new Map<string, string>();
+interface RepoMeta {
+  status: number | null; // null: network error
+  defaultBranch?: string;
+}
+const repoMetaCache = new Map<string, Promise<RepoMeta>>();
 
 /** @internal Reset cache — for testing only */
 export function _resetBranchCache(): void {
-  branchCache.clear();
+  repoMetaCache.clear();
 }
 
+function fetchRepoMeta(owner: string, repo: string, options?: GitHubDiscoveryOptions): Promise<RepoMeta> {
+  const key = branchCacheKey(owner, repo, options).toLowerCase();
+  const cached = repoMetaCache.get(key);
+  if (cached) return cached;
+  const pending = (async (): Promise<RepoMeta> => {
+    try {
+      const res = await requestGitHub(`https://api.github.com/repos/${owner}/${repo}`, {}, options);
+      if (res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { default_branch?: string; private?: boolean; visibility?: string };
+        recordRepoVisibility(owner, repo, data);
+        return { status: res.status, defaultBranch: data.default_branch || undefined };
+      }
+      // 404 means private (or gone) and stays unknown. A rate limit or an
+      // outage is remembered so callers can say why a repo is unconfirmed.
+      if (isRateLimitResponse(res)) {
+        warnRateLimitOnce(res);
+        recordRepoVisibilityFailure(owner, repo, "rate_limited");
+      } else if (classifyGitHubFailure(res).code === "transient") {
+        recordRepoVisibilityFailure(owner, repo, "unavailable");
+      }
+      return { status: res.status };
+    } catch {
+      recordRepoVisibilityFailure(owner, repo, "unavailable");
+      return { status: null };
+    }
+  })();
+  repoMetaCache.set(key, pending);
+  return pending;
+}
+
+/**
+ * The default branch of a GitHub repo. When GitHub cannot say (rate limit,
+ * outage, private repo without a token) this returns "HEAD", which
+ * raw.githubusercontent.com and the REST API both resolve to the default
+ * branch, instead of guessing "main" (0932: specweave's default is develop).
+ */
 export async function getDefaultBranch(
   owner: string,
   repo: string,
   options?: GitHubDiscoveryOptions,
 ): Promise<string> {
-  const key = branchCacheKey(owner, repo, options);
-  const cached = branchCache.get(key);
-  if (cached) return cached;
-
-  let branch = "main";
-  try {
-    const res = await requestGitHub(`https://api.github.com/repos/${owner}/${repo}`, {}, options);
-    if (res.ok) {
-      const data = (await res.json()) as { default_branch?: string; private?: boolean; visibility?: string };
-      branch = data.default_branch || "main";
-      recordRepoVisibility(owner, repo, data);
-    } else {
-      // 404 means private (or gone) and stays unknown. A rate limit or an
-      // outage is remembered so callers can say why a repo is unconfirmed.
-      const failure = classifyGitHubFailure(res);
-      if (failure.code === "rate_limited" || res.status === 429) {
-        recordRepoVisibilityFailure(owner, repo, "rate_limited");
-      } else if (failure.code === "transient") {
-        recordRepoVisibilityFailure(owner, repo, "unavailable");
-      }
-    }
-  } catch {
-    // Network error: fall through with "main".
-    recordRepoVisibilityFailure(owner, repo, "unavailable");
-  }
-  branchCache.set(key, branch);
-  return branch;
+  const meta = await fetchRepoMeta(owner, repo, options);
+  return meta.defaultBranch || "HEAD";
 }
 
 export async function getBranchHeadSha(
@@ -202,7 +237,10 @@ export async function getBranchHeadSha(
       {},
       options,
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      warnRateLimitOnce(res);
+      return null;
+    }
     const data = (await res.json()) as { sha?: unknown };
     return typeof data.sha === "string" && data.sha ? data.sha : null;
   } catch {
@@ -219,17 +257,8 @@ export async function checkRepoExists(
   repo: string,
   options?: GitHubDiscoveryOptions,
 ): Promise<boolean> {
-  try {
-    const res = await requestGitHub(`https://api.github.com/repos/${owner}/${repo}`, {}, options);
-    if (res.status === 404) return false;
-    if (res.ok) {
-      const data = (await res.json().catch(() => null)) as { private?: boolean; visibility?: string } | null;
-      if (data) recordRepoVisibility(owner, repo, data);
-    }
-    return true;
-  } catch {
-    return true;
-  }
+  const meta = await fetchRepoMeta(owner, repo, options);
+  return meta.status !== 404;
 }
 
 /**
@@ -378,7 +407,7 @@ export async function discoverSkillsDetailed(
   repo: string,
   options?: GitHubDiscoveryOptions,
 ): Promise<GitHubDiscoveryResult> {
-  const branch = await getDefaultBranch(owner, repo, options);
+  const branch = options?.ref || (await getDefaultBranch(owner, repo, options));
   const url = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
 
   let tree: Array<{ path: string; type: string }>;
@@ -520,6 +549,8 @@ export async function discoverSkillsDetailed(
     const urls = agentFilesBySkill.get(skill.name);
     if (urls) skill.agentRawUrls = urls;
   }
+
+  if (options?.descriptions === false) return { skills };
 
   // Fetch descriptions in parallel with a 3s timeout per skill
   await Promise.allSettled(

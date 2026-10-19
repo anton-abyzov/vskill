@@ -265,6 +265,11 @@ function cleanupGhostFiles(
   }
 }
 
+/** 0932: `{ sourceCommitSha }` when the fetch named a commit, else nothing. */
+function commitField(sha: string | undefined): { sourceCommitSha?: string } {
+  return sha ? { sourceCommitSha: sha } : {};
+}
+
 interface UpdateOptions {
   all?: boolean;
   force?: boolean;
@@ -490,6 +495,7 @@ async function updateTarget(
             sha: result.sha,
             tier: platformResult.tier || entry.tier,
             installedAt: new Date().toISOString(),
+            ...commitField(result.sourceCommitSha),
           };
           console.log(
             `${bold(name)}: ${dim(entry.version)} -> ${green(platformResult.version)} ${dim("(metadata-only bump)")}`,
@@ -499,8 +505,11 @@ async function updateTarget(
         }
         // Heal a legacy map-mode sha to the canonical install identity
         // without reporting an update (content is unchanged).
-        if (entry.sha !== result.sha) {
-          lock.skills[name] = { ...entry, sha: result.sha };
+        // 0932: also move a stale sourceCommitSha to the commit just read,
+        // so the lock names the commit its (unchanged) content came from.
+        const commitMoved = !!result.sourceCommitSha && result.sourceCommitSha !== entry.sourceCommitSha;
+        if (entry.sha !== result.sha || commitMoved) {
+          lock.skills[name] = { ...entry, sha: result.sha, ...commitField(result.sourceCommitSha) };
         }
         console.log(dim(`${name}: already up to date`));
         continue;
@@ -610,6 +619,8 @@ async function updateTarget(
         tier: result.tier,
         installedAt: new Date().toISOString(),
         files: newFileKeys,
+        // 0932: the commit the new content came from (was left stale).
+        ...commitField(result.sourceCommitSha),
       };
 
       updated++;

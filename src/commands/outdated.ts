@@ -29,6 +29,8 @@ import {
 import { readAuthored, removeAuthoredSkill } from "../lockfile/authored.js";
 import { filterPublicEntries, unconfirmedSkipNote } from "../lib/private-source.js";
 import { bold, dim, green, red, yellow, cyan, table } from "../utils/output.js";
+import { computeSha, fetchGitHubSourceSkill } from "../updater/source-fetcher.js";
+import type { SkillLockEntry } from "../lockfile/types.js";
 
 const TWENTY_FOUR_HOURS = 86_400_000;
 
@@ -179,7 +181,13 @@ async function outdatedFromView(view: LockView): Promise<
 
   if (items.length === 0) return null;
 
-  const rawResults = await checkUpdates(items);
+  // 0932: GitHub-sourced skills update from their repo, not the registry, so
+  // a changed SKILL.md upstream is an update even when the registry (which
+  // may lag the repo) reports none. Same comparison `vskill update` makes.
+  const [rawResults, sourceChanges] = await Promise.all([
+    checkUpdates(items),
+    githubSourceChanges(publicEntries),
+  ]);
 
   const results: CheckUpdateResult[] = rawResults.map((r) => {
     const disk = diskVersions.get(r.name) ?? r.installed;
@@ -188,13 +196,27 @@ async function outdatedFromView(view: LockView): Promise<
     if (updateAvailable && r.latest && compareSemver(disk, r.latest) >= 0) {
       updateAvailable = false;
     }
+    const change = sourceChanges.get(r.name);
+    if (change) sourceChanges.delete(r.name);
     return {
       ...r,
       installed: disk,
-      updateAvailable,
+      ...(change
+        ? { updateAvailable: true, sourceChanged: true, latest: r.updateAvailable ? r.latest : change.version ?? r.latest }
+        : { updateAvailable }),
       ...(warning ? { warning } : {}),
     } as CheckUpdateResult;
   });
+  // A changed GitHub skill the registry did not answer for.
+  for (const [name, change] of sourceChanges) {
+    results.push({
+      name,
+      installed: diskVersions.get(name) ?? change.installed,
+      latest: change.version,
+      updateAvailable: true,
+      sourceChanged: true,
+    });
+  }
 
   const pinMap = new Map<string, string>();
   if (lock) {
@@ -208,6 +230,35 @@ async function outdatedFromView(view: LockView): Promise<
   }
 
   return { results, pinMap, authoredNames };
+}
+
+/**
+ * 0932: for each unpinned single-skill GitHub entry, read the SKILL.md its
+ * repo serves now (raw only, no REST call) and report the ones whose hash
+ * differs from the lock's `sha`. Keyed by the full owner/repo/skill name.
+ * Read failures are skipped: the registry answer stands.
+ */
+async function githubSourceChanges(
+  entries: Array<[string, SkillLockEntry]>,
+): Promise<Map<string, { installed: string; version: string | null }>> {
+  const changes = new Map<string, { installed: string; version: string | null }>();
+  const candidates = entries.filter(([, e]) => !e.pinnedVersion && e.sha && parseSource(e.source ?? "").type === "github");
+  await Promise.all(
+    candidates.map(async ([name, entry]) => {
+      try {
+        const fetched = await fetchGitHubSourceSkill(parseSource(entry.source), name, entry);
+        if (!fetched) return;
+        // F4: accept the legacy files-map sha too, as `update` does.
+        const legacy = fetched.files ? computeSha(fetched.files) : null;
+        if (fetched.sha === entry.sha || legacy === entry.sha) return;
+        const version = fetched.version && fetched.version !== entry.version ? fetched.version : null;
+        changes.set(resolveFullName(name, entry.source), { installed: entry.version, version });
+      } catch {
+        // Unreadable upstream: no claim either way.
+      }
+    }),
+  );
+  return changes;
 }
 
 export async function outdatedCommand(opts: { json?: boolean; global?: boolean }): Promise<void> {
@@ -288,7 +339,7 @@ export async function outdatedCommand(opts: { json?: boolean; global?: boolean }
     return [
       bold(r.name),
       red(r.installed),
-      green(r.latest ?? "unknown"),
+      green(r.latest ?? (r.sourceChanged ? "changed upstream" : "unknown")),
       r.versionBump ? cyan(r.versionBump) : dim("-"),
       r.certTier ? tierColor(r.certTier) : dim("-"),
       pinVersion ? dim(`📌 ${pinVersion}`) : "",

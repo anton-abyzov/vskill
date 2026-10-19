@@ -12,7 +12,7 @@ import { parseGitHubSource, validateSkillName } from "../utils/validation.js";
 import { upsertFrontmatterVersion, validatesAsYamlFrontmatter } from "../lib/frontmatter.js";
 import { addAuthoredSkill } from "../lockfile/authored.js";
 import { getProjectRoot } from "../lockfile/project-root.js";
-import { isTypedRepoPrivate } from "../lib/private-source.js";
+import { typedRepoStatus } from "../lib/private-source.js";
 
 interface SubmitOptions {
   skill?: string;
@@ -49,10 +49,23 @@ export async function submitCommand(
 
   // This default path publishes publicly. A repo GitHub reports as private
   // (or hides) requires the separate explicit --private --tenant workflow.
-  if (await isTypedRepoPrivate(owner, repo)) {
+  const status = await typedRepoStatus(owner, repo);
+  if (status === "private") {
     console.error(
       red(`${owner}/${repo} is a private repository, so `) +
         dim("nothing was submitted publicly. Use --private --tenant <account> for hosted private verification."),
+    );
+    process.exit(1);
+  }
+  // 0932: GitHub's 404 covers a missing repo and a private one this token
+  // cannot see; say "not found" rather than claiming either.
+  if (status === "not-found") {
+    console.error(
+      red(`${owner}/${repo} was not found on GitHub, so nothing was submitted. `) +
+        dim(
+          "Check the owner and repo name. If it is a private repo, sign in with `vskill auth login --repos` " +
+            "and use --private --tenant <account>.",
+        ),
     );
     process.exit(1);
   }
@@ -79,6 +92,7 @@ export async function submitCommand(
 
   // Default: programmatic API submission (no browser needed)
   console.log(dim(`Submitting ${bold(opts.skill || repo)} from ${owner}/${repo}...\n`));
+  const fullName = `${owner}/${repo}/${opts.skill || repo}`;
 
   try {
     const response = await submitSkill({
@@ -105,16 +119,35 @@ export async function submitCommand(
       return;
     }
 
+    // 0932: the platform answers a rejected submission with `duplicate: true`
+    // and the rejected state; that is a rejection, not a pending duplicate.
+    if (isRejectedSubmission(response)) {
+      console.error(
+        red("Rejected: ") +
+          dim(`this exact SKILL.md was already reviewed and rejected (${response.state}).`),
+      );
+      if (response.id) console.error(dim(`Submission: ${response.id}`));
+      console.error(dim("Fix the findings, push the change, then run the same submit again to have it re-evaluated."));
+      process.exit(1);
+    }
+
     if (response.duplicate) {
       console.log(yellow("Duplicate: ") + dim("An identical submission is already pending."));
-      if (response.submissionId) console.log(dim(`Existing submission: ${response.submissionId}`));
+      const existing = response.id ?? response.submissionId;
+      if (existing) console.log(dim(`Existing submission: ${existing}`));
+      console.log(dim(`Check status: vskill info ${fullName}`));
       return;
     }
 
-    console.log(green("Submitted! ") + dim(`ID: ${response.id}`));
+    console.log(
+      green(response.requeued ? "Resubmitted! " : "Submitted! ") +
+        dim(`ID: ${response.id}`) +
+        (response.requeued ? dim(" (SKILL.md changed; publishing a new version)") : ""),
+    );
     console.log(dim(`State: ${response.state}`));
     console.log(dim("\nThe skill will go through tier-1 and tier-2 scanning."));
-    console.log(dim(`Check status: vskill info ${opts.skill || repo}`));
+    // 0932: `vskill info` needs the full owner/repo/skill name.
+    console.log(dim(`Check status: vskill info ${fullName}`));
     // 0794 / T-005 — when state is already 'completed' (rare fast-path),
     // attempt write-back. For pending state the user should re-run after
     // scan completes (or use vskill outdated which will pick up the new version).
@@ -131,6 +164,13 @@ export async function submitCommand(
     }
     process.exit(1);
   }
+}
+
+const REJECTED_SUBMISSION_STATES = new Set(["REJECTED", "TIER1_FAILED", "DEQUEUED", "BLOCKED"]);
+
+/** 0932: a submission the registry already rejected for this content. */
+export function isRejectedSubmission(response: { rejected?: boolean; state?: string }): boolean {
+  return response.rejected === true || (!!response.state && REJECTED_SUBMISSION_STATES.has(response.state));
 }
 
 /**

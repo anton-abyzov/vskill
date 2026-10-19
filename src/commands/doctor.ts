@@ -43,7 +43,7 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AGENTS_REGISTRY, type AgentDefinition } from "../agents/agents-registry.js";
-import { stripClaudeFields } from "../installer/frontmatter.js";
+import { isValidNamespacedSkillName, splitSkillName, stripClaudeFields } from "../installer/frontmatter.js";
 import { bold, cyan, dim, green, red, yellow } from "../utils/output.js";
 
 export type DoctorScope = "global" | "project";
@@ -685,9 +685,12 @@ function scanScope(
       issues.push(issue("bad-name", scope, folder, [join(shown, "SKILL.md")], "frontmatter has no name", false));
     } else {
       frontmatterName.set(e.real, name);
-      if (name.length > 64 || !NAME_RE.test(name)) {
+      // 0932: plugin installs write `<namespace>/<name>`; each part follows
+      // the agentskills.io rule.
+      const parts = name.split("/");
+      if (parts.length > 2 || parts.some((p) => p.length > 64 || !NAME_RE.test(p)) || !isValidNamespacedSkillName(name)) {
         issues.push(issue("bad-name", scope, folder, [join(shown, "SKILL.md")],
-          `name "${name}" must be lowercase letters, digits and single hyphens, at most 64 chars`, false));
+          `name "${name}" must be lowercase letters, digits and single hyphens, at most 64 chars (optionally <namespace>/<name>)`, false));
       }
     }
     const desc = fm?.description?.trim() ?? "";
@@ -710,7 +713,8 @@ function scanScope(
     const key = `${e.real}\0${folder}`;
     if (!name || seenFolderName.has(key)) continue;
     seenFolderName.add(key);
-    if (name !== folder) {
+    // 0932: a namespaced name matches a folder named after its skill part.
+    if (name !== folder && splitSkillName(name).name !== folder) {
       const shown = e.isLink ? e.path : e.real;
       issues.push(issue("name-mismatch", scope, folder, [shown], `frontmatter name "${name}" differs from folder "${folder}"`, false));
     }

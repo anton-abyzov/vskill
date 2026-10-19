@@ -60,6 +60,27 @@ export function validateSkillNameStrict(name: string): boolean {
 }
 
 /**
+ * 0932: split a frontmatter name into its plugin namespace and skill name.
+ * Plugin installs write `<namespace>/<name>` (e.g.
+ * `marketing/apify-data-gathering`); a plain name has no namespace.
+ */
+export function splitSkillName(name: string): { namespace: string | null; name: string } {
+  const slash = name.indexOf("/");
+  if (slash < 0) return { namespace: null, name };
+  return { namespace: name.slice(0, slash), name: name.slice(slash + 1) };
+}
+
+/**
+ * 0932: a valid frontmatter name: a strict skill name, optionally prefixed
+ * by one strict plugin namespace (`<namespace>/<name>`).
+ */
+export function isValidNamespacedSkillName(full: string): boolean {
+  const { namespace, name } = splitSkillName(full);
+  if (namespace !== null && !validateSkillNameStrict(namespace)) return false;
+  return validateSkillNameStrict(name);
+}
+
+/**
  * Extract a description from the body of a SKILL.md file.
  * Returns the first non-heading, non-blank line, truncated to 200 chars.
  * Falls back to a humanized version of the skill name.

@@ -574,6 +574,8 @@ export interface CheckUpdateResult {
    * back to the lockfile pin. UI surfaces this as a soft hint without
    * breaking the update flow. */
   warning?: string;
+  /** 0932: the GitHub source's SKILL.md differs from the installed one. */
+  sourceChanged?: boolean;
 }
 
 /**

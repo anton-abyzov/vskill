@@ -564,10 +564,11 @@ async function installMarketplaceRepo(
   if (!selections.symlink) opts.copy = true;
 
   // Combine all selected plugins (registered + unregistered) for skill file install
-  const allPluginsToInstall: Array<{ name: string; source: string; isUnregistered: boolean }> = [
+  // 0932: a null source (object-typed, another repo) is skipped below.
+  const allPluginsToInstall: Array<{ name: string; source: string | null; isUnregistered: boolean }> = [
     ...selectedPlugins.map((p) => ({
       name: p.name,
-      source: getPluginSource(p.name, manifestContent || "") || "",
+      source: getPluginSource(p.name, manifestContent || ""),
       isUnregistered: false,
     })),
     ...selectedUnregistered.map((u) => ({

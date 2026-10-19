@@ -1,10 +1,10 @@
 // 0932 T-01: `install --version x` reaches install (AC-01), and
 // `owner/repo/skill@x` installs the commit the registry recorded (AC-02).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import { createFakeNetwork, sha256, type FakeRepo } from "./helpers/fake-network.js";
 
-const pkg = createRequire(import.meta.url)("../../../package.json") as { version: string };
+const pkg = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8")) as { version: string };
 
 const state = vi.hoisted(() => ({
   lock: null as null | { skills: Record<string, Record<string, unknown>>; agents: string[] },

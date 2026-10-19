@@ -31,6 +31,8 @@ export interface FakeNetworkOptions {
   rateLimited?: boolean;
   /** Registry unreachable (network error for verified-skill.com). */
   registryDown?: boolean;
+  /** query -> search results (`/api/v1/skills/search?q=`) */
+  search?: Record<string, Array<Record<string, unknown>>>;
 }
 
 export const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -121,6 +123,10 @@ export function createFakeNetwork(opts: FakeNetworkOptions) {
           versions: list.map((v, i) => ({ certTier: "VERIFIED", createdAt: `2026-10-${10 + i}T00:00:00Z`, ...v })),
           count: list.length,
         });
+      }
+      if (u.pathname === "/api/v1/skills/search") {
+        const results = opts.search?.[u.searchParams.get("q") ?? ""] ?? [];
+        return json({ results, pagination: { hasMore: false } });
       }
       const security = u.pathname.match(/^\/api\/v1\/skills\/([^/]+)\/([^/]+)\/([^/]+)\/security$/);
       if (security) {

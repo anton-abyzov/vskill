@@ -64,7 +64,8 @@ export function getPluginSource(
 ): string | null {
   const plugins = getAvailablePlugins(content);
   const found = plugins.find((p) => p.name === name);
-  return found?.source ?? null;
+  // 0932: an object source ({ source: "github", repo }) is not a path here.
+  return typeof found?.source === "string" ? found.source : null;
 }
 
 /**
@@ -91,7 +92,7 @@ export function getPluginVersion(
  * @returns true if the plugin exists
  */
 export function hasPlugin(name: string, content: string): boolean {
-  return getPluginSource(name, content) !== null;
+  return getAvailablePlugins(content).some((p) => p.name === name);
 }
 
 /**
@@ -218,7 +219,7 @@ export async function discoverUnregisteredPlugins(
   // Also exclude dirs that are registered under a different name but same source path
   const registeredDirs = new Set(
     getAvailablePlugins(manifestContent)
-      .map((p) => p.source.replace(/^\.\//, "").replace(/^plugins\//, ""))
+      .map((p) => (typeof p.source === "string" ? p.source.replace(/^\.\//, "").replace(/^plugins\//, "") : ""))
       .filter(Boolean),
   );
 

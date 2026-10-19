@@ -34,6 +34,7 @@ import type { BlocklistEntry, RejectionInfo } from "../blocklist/types.js";
 import { getSkill, searchSkills } from "../api/client.js";
 import type { SkillSearchResult } from "../api/client.js";
 import { platformSecurityGate } from "../lib/platform-security.js";
+import { pickShortName, localPluginPath } from "../lib/install-resolution.js";
 import { decideRegistryTier, decideRegistryTierForSkills, printTierDecision, readPluginDirSkills } from "../lib/registry-tier.js";
 import { discoverSkills, getDefaultBranch, getBranchHeadSha, checkRepoExists, warnRateLimitOnce } from "../discovery/github-tree.js";
 import { githubFetch, GitHubFetchError, privateRepoHint } from "../lib/github-fetch.js";
@@ -585,7 +586,14 @@ async function installMarketplaceRepo(
     // mean "repo root" instead of treating it as a hard failure. Build URL
     // segments with a leading-slash prefix only when there's a real path so
     // we don't emit `//` between the contents-API base and `skills`.
-    const pluginPath = plugin.source.replace(/^\.\//, "").replace(/\/$/, "");
+    // 0932: an object `source` ({ source: "github", repo }) lives in another
+    // repo; skip it instead of crashing on `.replace`.
+    const pluginPath = localPluginPath(plugin.source);
+    if (pluginPath === null) {
+      console.log(dim(`  Skipping ${bold(plugin.name)}: its source is not a folder of this repo.`));
+      results.push({ name: plugin.name, installed: false, method: "failed" });
+      continue;
+    }
     const pathSegment = pluginPath ? `/${pluginPath}` : "";
     const installSpin = spinner(`Installing skills: ${bold(plugin.name)}`);
 
@@ -2427,7 +2435,9 @@ async function addCommandInner(
       const mktPlugins = getAvailablePlugins(detection.manifestContent);
       for (const plugin of mktPlugins) {
         // "./" (repo root) normalizes to "" — no leading slash in the subpath.
-        const pluginPath = plugin.source.replace(/^\.\//, "").replace(/\/+$/, "");
+        // 0932: an object source points at another repo: skip it.
+        const pluginPath = localPluginPath(plugin.source);
+        if (pluginPath === null) continue;
         const subpath = `${pluginPath ? `${pluginPath}/` : ""}skills/${threeSkill}/SKILL.md`;
         const probeUrl = `https://raw.githubusercontent.com/${threeOwner}/${threeRepo}/${branch}/${subpath}`;
         const probeRes = await githubFetch(probeUrl);
@@ -2728,33 +2738,31 @@ async function resolveViaSearch(
     return;
   }
 
-  // Single installable result — auto-install
-  if (installable.length === 1) {
-    const r = installable[0];
-    const fullPath = `${r.ownerSlug}/${r.repoSlug}/${r.skillSlug}`;
-    console.log(dim(`Found: ${formatSkillId(r)}`));
-    return addCommand(fullPath, opts);
+  // 0932: auto-install only an exact skill-slug match (unique); a fuzzy hit
+  // (sw-do -> inbox-sweep) is never installed without the user choosing it.
+  const pick = pickShortName(installable, flatName, opts);
+  if (pick.kind === "pick") {
+    const r = pick.result;
+    console.log(dim(`${opts.yes ? "Auto-selecting exact match" : "Found"}: ${formatSkillId(r)}`));
+    return addCommand(`${r.ownerSlug}/${r.repoSlug}/${r.skillSlug}`, opts);
   }
 
-  // Multiple installable results — check --yes flag first
-  if (opts.yes) {
-    const r = installable[0];
-    const fullPath = `${r.ownerSlug}/${r.repoSlug}/${r.skillSlug}`;
-    console.log(dim(`Auto-selecting first result: ${formatSkillId(r)}`));
-    return addCommand(fullPath, opts);
-  }
-
-  // Multiple results — display them
+  // Several (or only fuzzy) matches — display them
   console.log(bold(`\nMultiple skills match "${flatName}":\n`));
   for (const r of ranked) {
     console.log(formatResultLine(r));
     console.log();
   }
 
-  // Non-TTY: print list and exit
-  if (!isTTY()) {
+  // --yes or non-TTY: list the candidates and exit
+  if (opts.yes || !isTTY()) {
+    const exactNote = pick.candidates.length > 0 && pick.candidates.every((r) => r.skillSlug?.toLowerCase() === flatName.toLowerCase())
+      ? `Several repos publish "${flatName}". `
+      : `No skill is named exactly "${flatName}". `;
     console.error(
-      red("Ambiguous match. ") +
+      red("Ambiguous match. ") + dim(exactNote) + "\n" +
+        dim("Candidates:\n") +
+        pick.candidates.map((r) => `  ${r.ownerSlug}/${r.repoSlug}/${r.skillSlug}`).join("\n") + "\n" +
         dim(`Specify the exact skill: ${cyan(`vskill install owner/repo/skill`)}`)
     );
     process.exit(1);

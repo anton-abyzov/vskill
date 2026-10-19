@@ -3943,8 +3943,8 @@ describe("resolveViaSearch (flat name search disambiguation)", () => {
     expect(mockSearchSkills).not.toHaveBeenCalled();
   });
 
-  // T-008: --yes auto-picks first ranked non-blocked result
-  it("--yes flag auto-picks first ranked non-blocked result without prompting", async () => {
+  // T-008 / 0932: --yes auto-picks only the exact skill-slug match
+  it("--yes flag auto-picks the exact slug match without prompting", async () => {
     mockSearchSkills.mockResolvedValue({
       results: [
         { name: "skill-a", author: "a", ownerSlug: "a", repoSlug: "ra", skillSlug: "skill-a", githubStars: 100, score: 90, tier: "VERIFIED", installs: 10, description: "A" },
@@ -3961,7 +3961,7 @@ describe("resolveViaSearch (flat name search disambiguation)", () => {
       text: async () => "# Content",
     }) as unknown as typeof fetch;
 
-    await addCommand("skill", { yes: true });
+    await addCommand("skill-a", { yes: true });
 
     // promptChoice should NOT be called
     expect(mockPromptChoice).not.toHaveBeenCalled();
@@ -3969,7 +3969,7 @@ describe("resolveViaSearch (flat name search disambiguation)", () => {
     const logOutput = (console.log as ReturnType<typeof vi.fn>).mock.calls
       .map((c: unknown[]) => String(c[0]))
       .join("\n");
-    expect(logOutput).toContain("Auto-selecting first result");
+    expect(logOutput).toContain("Auto-selecting exact match");
     expect(logOutput).toContain("a/ra/skill-a");
   });
 
@@ -3991,8 +3991,8 @@ describe("resolveViaSearch (flat name search disambiguation)", () => {
     mockExit.mockRestore();
   });
 
-  // T-008: --yes on non-TTY also auto-picks (does not exit 1)
-  it("--yes flag on non-TTY auto-picks first result", async () => {
+  // T-008 / 0932: --yes on non-TTY also auto-picks an exact match (does not exit 1)
+  it("--yes flag on non-TTY auto-picks the exact slug match", async () => {
     mockSearchSkills.mockResolvedValue({
       results: [
         { name: "skill-a", author: "a", ownerSlug: "a", repoSlug: "ra", skillSlug: "skill-a", githubStars: 100, score: 90, tier: "VERIFIED", installs: 10, description: "A" },
@@ -4011,7 +4011,7 @@ describe("resolveViaSearch (flat name search disambiguation)", () => {
 
     const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as () => never);
 
-    await addCommand("skill", { yes: true });
+    await addCommand("skill-b", { yes: true });
 
     // Should NOT exit 1 — --yes overrides non-TTY behavior
     expect(mockExit).not.toHaveBeenCalled();

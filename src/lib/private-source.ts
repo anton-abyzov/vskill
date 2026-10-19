@@ -220,15 +220,14 @@ async function lookUpVisibility(owner: string, repo: string): Promise<RepoVisibi
 }
 
 /**
- * Visibility check for a repo the user named themselves (`vskill diff
- * owner/repo/skill`, `vskill submit owner/repo`, a Studio install
- * identifier) that is not installed. Private when GitHub says private or
- * hides it (404). When GitHub does not answer (rate limit, outage), the
- * user's own request goes ahead: the name came from them, and blocking it
- * would break public lookups on shared CI runners. Installed skills never
- * use this; they fail closed (isPrivateSource).
+ * 0932: what GitHub says about a repo the user named themselves. GitHub
+ * answers 404 both for a repo that does not exist and for a private one the
+ * caller cannot see, so that case is "not-found", never claimed private.
+ * "unconfirmed" means GitHub did not answer (rate limit, outage).
  */
-export async function isTypedRepoPrivate(owner: string, repo: string): Promise<boolean> {
+export type TypedRepoStatus = "public" | "private" | "not-found" | "unconfirmed";
+
+export async function typedRepoStatus(owner: string, repo: string): Promise<TypedRepoStatus> {
   const ref = `${owner}/${repo}`;
   if (getRepoVisibility(ref) === "unknown") {
     try {
@@ -240,8 +239,22 @@ export async function isTypedRepoPrivate(owner: string, repo: string): Promise<b
     }
   }
   const visibility = getRepoVisibility(ref);
-  if (visibility !== "unknown") return visibility === "private";
-  return !getRepoVisibilityFailure(ref);
+  if (visibility !== "unknown") return visibility;
+  return getRepoVisibilityFailure(ref) ? "unconfirmed" : "not-found";
+}
+
+/**
+ * Visibility check for a repo the user named themselves (`vskill diff
+ * owner/repo/skill`, `vskill submit owner/repo`, a Studio install
+ * identifier) that is not installed. Private when GitHub says private or
+ * hides it (404). When GitHub does not answer (rate limit, outage), the
+ * user's own request goes ahead: the name came from them, and blocking it
+ * would break public lookups on shared CI runners. Installed skills never
+ * use this; they fail closed (isPrivateSource).
+ */
+export async function isTypedRepoPrivate(owner: string, repo: string): Promise<boolean> {
+  const status = await typedRepoStatus(owner, repo);
+  return status === "private" || status === "not-found";
 }
 
 /**

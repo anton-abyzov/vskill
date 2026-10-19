@@ -259,6 +259,10 @@ export interface SubmissionResponse {
   /** True when skill/submission is blocked */
   blocked?: boolean;
   submissionId?: string;
+  /** 0932: the SKILL.md changed, so a published skill was requeued as a new version. */
+  requeued?: boolean;
+  /** 0932: an earlier submission of this exact content was rejected. */
+  rejected?: boolean;
 }
 
 export interface SubmissionRequest {

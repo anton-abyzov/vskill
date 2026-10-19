@@ -2,6 +2,7 @@
 // 0932: helpers for turning what the user typed into one install target.
 // ---------------------------------------------------------------------------
 
+import { lstatSync } from "node:fs";
 import type { SkillSearchResult } from "../api/client.js";
 
 /**
@@ -44,4 +45,28 @@ export function pickShortName(
 export function localPluginPath(source: unknown): string | null {
   if (typeof source !== "string") return null;
   return source.replace(/^\.\//, "").replace(/\/+$/, "");
+}
+
+/**
+ * 0932: how the installed skill folders really landed, for the install
+ * summary. Claude Code gets a copy even without --copy (COPY_FALLBACK) and
+ * Tier-2 agents get written files, so "symlinked" was often untrue. Paths
+ * that cannot be inspected are left out; with none left, the requested
+ * method is reported.
+ */
+export function installMethodLabel(locations: string[], copy: boolean): string {
+  if (copy) return "copied";
+  let links = 0;
+  let copies = 0;
+  for (const loc of locations) {
+    try {
+      if (lstatSync(loc).isSymbolicLink()) links++;
+      else copies++;
+    } catch {
+      // Not on disk (dry run, test double): no claim.
+    }
+  }
+  if (copies === 0) return "symlinked";
+  if (links === 0) return "copied";
+  return `${copies} copied, ${links} symlinked`;
 }

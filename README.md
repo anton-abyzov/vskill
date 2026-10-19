@@ -12,7 +12,7 @@
   <a href="https://github.com/anton-abyzov/vskill/actions/workflows/desktop-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/anton-abyzov/vskill/desktop-release.yml?branch=main&label=desktop%20build&logo=githubactions" alt="desktop build" /></a>
   <img src="https://img.shields.io/badge/agents-56_platforms-0969DA" alt="56 agents" />
   <img src="https://img.shields.io/badge/plugins-9-8B5CF6" alt="9 plugins" />
-  <img src="https://img.shields.io/badge/skills-19-10B981" alt="19 skills" />
+  <img src="https://img.shields.io/badge/skills-20-10B981" alt="20 skills" />
   <a href="https://verified-skill.com"><img src="https://img.shields.io/badge/registry-verified--skill.com-F59E0B" alt="registry" /></a>
   <a href="https://github.com/anton-abyzov/vskill/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" /></a>
 </p>
@@ -164,6 +164,32 @@ npx vskill@latest auth login --repos   # sign in to GitHub for private skills re
 ```
 
 Full reference → [verified-skill.com/docs/cli-reference](https://verified-skill.com/docs/cli-reference)
+
+### Publish, pin and republish
+
+```bash
+# Publish a public skill (repo must be public on GitHub)
+npx vskill@latest submit owner/repo --skill my-skill
+npx vskill@latest info owner/repo/my-skill          # status, by full name
+
+# Install an exact published version (resolved through the registry to its commit)
+npx vskill@latest install owner/repo/my-skill@1.0.0
+npx vskill@latest install owner/repo/my-skill --version 1.0.0
+
+# Keep a skill on its version; `vskill pin` prints the matching install command
+npx vskill@latest pin my-skill 1.0.0
+npx vskill@latest unpin my-skill
+
+# Private publishing (hosted, visible only to your account)
+npx vskill@latest submit owner/private-repo --skill my-skill --private --tenant <account>
+npx vskill@latest install my-skill --tenant <account> --version 1.0.0
+```
+
+- `--version` (or `@version`) installs the commit the registry scanned for that version and pins it; an unknown version exits 1 and lists the published ones.
+- The lock records `tier: VERIFIED` only when the installed SKILL.md matches a published version; otherwise `UNSCANNED`, and the install names the registry's latest version.
+- `install <name> -y` installs only a skill whose name matches exactly; otherwise it lists the candidates and exits 1.
+- **Republish:** push the SKILL.md change, then run the same `vskill submit` again. A changed SKILL.md is rescanned and published as a new version; an unchanged one reports the existing result. A rejected submission stays rejected until its SKILL.md changes.
+- `vskill outdated` reports a GitHub-sourced skill as outdated when its SKILL.md upstream differs from the installed one, the same check `vskill update` makes.
 
 ### Audit a site's WebMCP tools
 

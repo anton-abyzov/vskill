@@ -34,7 +34,7 @@ import type { BlocklistEntry, RejectionInfo } from "../blocklist/types.js";
 import { getSkill, searchSkills } from "../api/client.js";
 import type { SkillSearchResult } from "../api/client.js";
 import { platformSecurityGate } from "../lib/platform-security.js";
-import { pickShortName, localPluginPath } from "../lib/install-resolution.js";
+import { pickShortName, localPluginPath, installMethodLabel } from "../lib/install-resolution.js";
 import { decideRegistryTier, decideRegistryTierForSkills, printTierDecision, readPluginDirSkills } from "../lib/registry-tier.js";
 import { discoverSkills, getDefaultBranch, getBranchHeadSha, checkRepoExists, warnRateLimitOnce, wasGitHubRateLimited } from "../discovery/github-tree.js";
 import { githubFetch, GitHubFetchError, privateRepoHint } from "../lib/github-fetch.js";
@@ -3342,7 +3342,7 @@ async function installSingleSkillLegacy(
   }
 
   // Print summary
-  const method = opts.copy ? "copied" : "symlinked";
+  const method = installMethodLabel(locations, !!opts.copy);
   console.log(green(`\nInstalled ${bold(skillName)} (${method}) to ${locations.length} agent${locations.length === 1 ? "" : "s"}:\n`));
   for (const loc of locations) {
     console.log(`  ${dim(">")} ${loc}`);

@@ -97,6 +97,10 @@ jobs:
         working-directory: vskill-platform
         run: npm run e2e:db-reset
 
+      - name: Build platform worker (wrangler dev serves .open-next)
+        working-directory: vskill-platform
+        run: npm run build:worker
+
       - name: Build vskill (CLI + eval-ui)
         working-directory: vskill
         run: |

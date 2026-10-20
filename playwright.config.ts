@@ -20,7 +20,7 @@ const baseWebServers = [
 // vskill-platform Worker. Gated on PLAYWRIGHT_RUN_LIVE=1 so default runs do
 // NOT pay the wrangler cold-start cost.
 const liveWebServer = {
-  command: "cd ../vskill-platform && npx wrangler dev --port 8788",
+  command: "cd ../vskill-platform && npx wrangler dev --local --port 8788",
   port: 8788,
   reuseExistingServer: !process.env.CI,
   timeout: 30_000,

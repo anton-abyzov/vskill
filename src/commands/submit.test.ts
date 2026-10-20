@@ -199,4 +199,19 @@ describe("submitCommand — validation", () => {
 
     mockExit.mockRestore();
   });
+
+  it.each([
+    ["--submission", { submission: "psub_00000000-0000-0000-0000-000000000000", tenant: "x" }],
+    ["--tenant", { tenant: "x" }],
+  ])("prints a usage error and exits 1 for %s without --private", async (_flag, opts) => {
+    const mockExit = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+
+    // The only rejection is the mocked exit: no usage Error escapes to Node.
+    await expect(submitCommand("myorg/myskill", opts)).rejects.toThrow(/^exit$/);
+    expect(console.error).toHaveBeenCalledWith("--tenant and --submission require --private for publishing.");
+    expect(mockExit).toHaveBeenCalledWith(1);
+    expect(mockSubmitSkill).not.toHaveBeenCalled();
+
+    mockExit.mockRestore();
+  });
 });

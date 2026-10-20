@@ -251,6 +251,8 @@ test.describe("@live 0860 — submission lifecycle (in-app)", () => {
     // Improve the skill: type into the raw editor textarea (added testid).
     const editor = page.getByTestId("skill-editor-textarea");
     await expect(editor).toBeVisible({ timeout: 15_000 });
+    // Read-only until the skill content loads; typing earlier is discarded.
+    await expect(editor).toBeEditable({ timeout: 15_000 });
     await editor.click();
     await editor.press("End");
     await editor.pressSequentially("\n<!-- 0860 e2e improvement -->");

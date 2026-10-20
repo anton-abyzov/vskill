@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { fileURLToPath } from "node:url";
 
 const RUN_LIVE = process.env.PLAYWRIGHT_RUN_LIVE === "1";
 
@@ -21,10 +22,18 @@ const baseWebServers = [
 // NOT pay the wrangler cold-start cost.
 const liveWebServer = {
   // Worker bindings come from --var, not from this process env.
+  // Fresh local KV/DO state per run, like CI: a scanner ETag or cached
+  // check-updates answer left by an earlier run would hide the new version
+  // from a freshly reset database.
   command:
-    "cd ../vskill-platform && npx wrangler dev --local --local-upstream localhost:8788 --port 8788" +
+    "cd ../vskill-platform && rm -rf .wrangler/e2e-state &&" +
+    " npx wrangler dev --local --local-upstream localhost:8788 --port 8788 --persist-to .wrangler/e2e-state" +
     ` --var DATABASE_URL:${process.env.E2E_DATABASE_URL ?? "postgresql://localhost/vskill_e2e"}` +
-    " --var GITHUB_WEBHOOK_SECRET:test-secret-for-e2e --var INTERNAL_BROADCAST_KEY:test-broadcast-key",
+    " --var GITHUB_WEBHOOK_SECRET:test-secret-for-e2e --var INTERNAL_BROADCAST_KEY:test-broadcast-key" +
+    // The update scanner reads the fixture repo through the GitHub API; a
+    // token lifts the 60 req/h unauthenticated limit. The shell expands it,
+    // so the value never appears in the command string.
+    (process.env.GITHUB_TOKEN ? ' --var "GITHUB_TOKEN:$GITHUB_TOKEN"' : ""),
   port: 8788,
   reuseExistingServer: !process.env.CI,
   timeout: 30_000,
@@ -35,6 +44,24 @@ const liveWebServer = {
       process.env.E2E_DATABASE_URL ?? "postgresql://localhost/vskill_e2e",
     GITHUB_WEBHOOK_SECRET: "test-secret-for-e2e",
     INTERNAL_BROADCAST_KEY: "test-broadcast-key",
+  },
+};
+
+// Live-only Studio for the update-pipeline spec. Its root (e2e/fixtures-live)
+// holds a vskill.lock and an installed copy of the platform fixture skill one
+// version behind upstream, and it talks to the local platform instead of
+// verified-skill.com, so a webhook-driven skill.updated event can light the
+// Studio update bell end to end.
+const liveStudioServer = {
+  command: `node ${fileURLToPath(new URL("./dist/index.js", import.meta.url))} eval serve --root . --port 3078`,
+  cwd: fileURLToPath(new URL("./e2e/fixtures-live", import.meta.url)),
+  port: 3078,
+  reuseExistingServer: !process.env.CI,
+  timeout: 10_000,
+  env: {
+    VSKILL_WORKSPACE_DIR: "/tmp/vskill-e2e-live-workspace",
+    VSKILL_PLATFORM_URL: "http://localhost:8788",
+    VSKILL_API_BASE: "http://localhost:8788",
   },
 };
 
@@ -84,5 +111,5 @@ export default defineConfig({
       testMatch: /.*\.spec\.ts$/,
     },
   ],
-  webServer: RUN_LIVE ? [...baseWebServers, liveWebServer] : baseWebServers,
+  webServer: RUN_LIVE ? [...baseWebServers, liveWebServer, liveStudioServer] : baseWebServers,
 });

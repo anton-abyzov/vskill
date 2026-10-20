@@ -19,21 +19,31 @@
 //      `PLAYWRIGHT_RUN_LIVE=1 npx playwright test --project=live`
 //
 // Notes
-//   - This spec runs against `http://localhost:8788` (the wrangler dev
-//     instance the playwright.config webServer entry boots when
-//     PLAYWRIGHT_RUN_LIVE=1).
-//   - Studio's API base override happens via window.__VSKILL_API_BASE__,
-//     which the addInitScript below installs before app code runs.
-//   - The DB-row assertion uses `expect.poll` against the API-exposed
-//     `GET /api/v1/skills/by-id/<id>/versions` endpoint. The vskill-platform
-//     team has not yet added a "list update events" admin endpoint, so we
-//     poll the versions list — a new SkillVersion row is the visible
-//     downstream artifact of the webhook scan in the live rig.
+//   - Webhook and versions calls go straight to the wrangler dev Worker on
+//     `http://localhost:8788`. The Studio is the live-only eval server on
+//     :3078 (playwright.config `liveStudioServer`), rooted at
+//     e2e/fixtures-live: its vskill.lock installs the platform fixture skill
+//     (anton-abyzov/greet-anton-test hello-skill) at 1.0.0, and its platform
+//     calls go to :8788 instead of verified-skill.com.
+//   - The fixture repo is real and public; its SKILL.md on main is 1.1.0,
+//     while the seed (vskill-platform __tests__/e2e/global-setup.ts) records
+//     1.0.0, so the webhook-triggered scan writes a 1.1.0 SkillVersion.
+//   - The DB-row assertion polls `GET /api/v1/skills/<owner>/<repo>/<skill>/versions`;
+//     a new SkillVersion row is the visible downstream artifact of the scan.
+//   - The badge assertion is the push itself: the Studio has already polled
+//     (installed 1.0.0 == latest 1.0.0, no badge) and opened its UpdateHub
+//     stream before the webhook, so only the streamed skill.updated event
+//     can raise the count.
 // ---------------------------------------------------------------------------
 import { test, expect } from "@playwright/test";
 
 const PLATFORM_BASE = "http://localhost:8788";
-const FIXTURE_REPO = "https://github.com/test-org/test-skill";
+const STUDIO_BASE = "http://localhost:3078";
+// Must match E2E_FIXTURE_REPO in vskill-platform/__tests__/e2e/global-setup.ts.
+const FIXTURE_REPO = "https://github.com/anton-abyzov/greet-anton-test";
+// Must match E2E_FIXTURE_SKILL_NAME in the platform seed.
+const FIXTURE_SKILL_NAME = "anton-abyzov/greet-anton-test/hello-skill";
+// Must match E2E_FIXTURE_SKILL_ID in the platform seed.
 const FIXTURE_SKILL_ID = "skill-e2e-live";
 const FIXTURE_SECRET = "test-secret-for-e2e";
 
@@ -53,18 +63,10 @@ async function hmacHex(secret: string, body: string): Promise<string> {
 }
 
 test.describe("@live skill-update push pipeline (live wire)", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.addInitScript(
-      ([base]) => {
-        (window as unknown as Record<string, unknown>).__VSKILL_API_BASE__ = base;
-      },
-      [PLATFORM_BASE],
-    );
-  });
-
   test("@live signed webhook → DB row → SSE → UpdateBell badge increments", async ({
     page,
   }) => {
+    test.setTimeout(60_000);
     // 1. Build a `push` payload identical to GitHub's wire shape.
     const payload = JSON.stringify({
       ref: "refs/heads/main",
@@ -73,18 +75,28 @@ test.describe("@live skill-update push pipeline (live wire)", () => {
         default_branch: "main",
       },
       head_commit: {
-        id: "abc123def456abc123def456abc123def456abcd",
+        // Informational only: the scanner reads the branch head from GitHub.
+        id: "a9b43f56e03fa30c1d9f5148f95a3371a36c77e3",
       },
     });
     const signature = `sha256=${await hmacHex(FIXTURE_SECRET, payload)}`;
 
-    // 2. Open Studio FIRST so EventSource is connected before the webhook
-    //    fires — we need to observe a push, not a poll.
-    await page.goto("/studio");
-    await page.waitForSelector(
-      '[data-testid="update-bell"], [aria-label*="updates" i]',
-      { timeout: 10_000 },
+    // 2. Open Studio FIRST and wait for its UpdateHub stream (opened only
+    //    after the installed skill resolved to its platform id) so we observe
+    //    a push, not a poll. No update is known yet, so no badge.
+    const streamOpened = page.waitForResponse(
+      // The first stream subscribes with local ids; wait for the one the
+      // Studio opens after resolving the installed skill to its platform id.
+      (r) =>
+        r.url().includes("/api/v1/skills/stream?skills=") &&
+        decodeURIComponent(r.url()).includes(FIXTURE_SKILL_ID) &&
+        r.status() === 200,
+      { timeout: 20_000 },
     );
+    await page.goto(`${STUDIO_BASE}/studio`);
+    await page.waitForSelector('[data-testid="update-bell"]', { timeout: 10_000 });
+    await streamOpened;
+    await expect(page.locator('[data-testid="update-bell-badge"]')).toHaveCount(0);
 
     // 3. POST signed webhook to the live wrangler dev Worker.
     const deliveryId = `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -108,19 +120,20 @@ test.describe("@live skill-update push pipeline (live wire)", () => {
       .poll(
         async () => {
           const res = await fetch(
-            `${PLATFORM_BASE}/api/v1/skills/by-id/${FIXTURE_SKILL_ID}/versions`,
+            `${PLATFORM_BASE}/api/v1/skills/${FIXTURE_SKILL_NAME}/versions`,
           );
-          if (!res.ok) return 0;
-          const body = (await res.json()) as { versions?: unknown[] };
-          return body.versions?.length ?? 0;
+          if (!res.ok) return [];
+          const body = (await res.json()) as { versions?: { version: string }[] };
+          return (body.versions ?? []).map((v) => v.version);
         },
-        { timeout: 5_000, intervals: [200, 400, 800] },
+        { timeout: 15_000, intervals: [200, 400, 800] },
       )
-      .toBeGreaterThan(0);
+      .toContain("1.1.0");
 
-    // 5. The Studio's UpdateBell badge increments within 2s of the SSE
-    //    delivery (the platform's UpdateHub DO broadcasts on the new
-    //    UpdateEvent row).
+    // 5. The Studio's UpdateBell badge increments within 2s of the scan:
+    //    the outbox write is published to the UpdateHub DO, which streams
+    //    skill.updated (1.1.0) to the Studio, which marks the installed
+    //    1.0.0 copy outdated.
     await expect(
       page.locator('[data-testid="update-bell-badge"]'),
     ).toContainText(/[1-9]/, { timeout: 2_000 });

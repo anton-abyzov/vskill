@@ -491,9 +491,15 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     // Build short-name → {platformName, installedVersion} lookup from polling.
     // skillUpdates.updates carries the canonical platform name (e.g. "acme/repo/skill")
     // which is required by resolveInstalledSkillIds to hit the right DB row.
+    // Rows merged by reconcileCheckUpdates are keyed by the local
+    // `<plugin>/<skill>` id; they share the short name with the canonical row
+    // and must not shadow it, or the platform can never resolve the skill.
+    const localIds = new Set(installed.map((s) => `${s.plugin}/${s.skill}`));
     const updateByShort = new Map<string, SkillUpdateInfo>();
     for (const u of skillUpdates.updates) {
-      updateByShort.set(u.name.split("/").pop() || u.name, u);
+      const short = u.name.split("/").pop() || u.name;
+      if (localIds.has(u.name) && updateByShort.has(short)) continue;
+      updateByShort.set(short, u);
     }
     const toResolve = installed.map((s) => {
       const u = updateByShort.get(s.skill);
@@ -526,7 +532,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }
     lastResolveSigRef.current = sig;
     let cancelled = false;
+    let settled = false;
     api.resolveInstalledSkillIds(toResolve).then((enriched) => {
+      settled = true;
       if (cancelled) return;
       const resolved = resolveSubscriptionIds(enriched);
       const ids = resolved.flatMap((r) => [r.uuid, r.slug].filter(Boolean) as string[]);
@@ -540,6 +548,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         setResolvedIdsCsv(csv);
       }
     }).catch((err: unknown) => {
+      settled = true;
       // Reset signature so a future input (or a successful retry on the next
       // poll cycle) can proceed. Otherwise a one-off network blip would lock
       // out resolution until the input shape itself changes.
@@ -557,7 +566,12 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         console.warn("[studio] resolveInstalledSkillIds failed (using polling fallback):", msg);
       }
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      // A re-run with the same signature would short-circuit and drop this
+      // in-flight result forever; clear the signature so it fetches again.
+      if (!settled) lastResolveSigRef.current = "";
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.skills, skillUpdates.updates]);
 

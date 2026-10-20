@@ -282,4 +282,63 @@ describe("StudioContext — resolver effect signature short-circuit (F-001)", ()
       h.unmount();
     }
   });
+  it("re-resolves when an in-flight resolve is cancelled by a same-signature re-run", async () => {
+    const { api } = await import("../api");
+    (api.getSkills as ReturnType<typeof vi.fn>).mockResolvedValue([
+      makeSkill({ plugin: "pa", skill: "greet", origin: "installed", currentVersion: "1.0.0" }),
+    ]);
+    (api.getSkillUpdates as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const updateEntry: SkillUpdateInfo = {
+      name: "pa/repo/greet",
+      installed: "1.0.0",
+      latest: "1.0.0",
+      updateAvailable: false,
+    };
+    currentUpdates = [{ ...updateEntry }];
+    let release: (v: unknown[]) => void = () => {};
+    resolveInstalledSkillIdsSpy.mockImplementationOnce(
+      () => new Promise((r) => { release = r as (v: unknown[]) => void; }) as never,
+    );
+
+    const probe: { current: ContextValue | null } = { current: null };
+    const h = await renderProvider(probe);
+    try {
+      await h.act(async () => { await flushMicrotasks(); });
+      const callsAfterMount = resolveInstalledSkillIdsSpy.mock.calls.length;
+      expect(callsAfterMount).toBeGreaterThanOrEqual(1);
+
+      const { act } = await import("react");
+      await act(async () => {
+        getSetUpdates()([{ ...updateEntry }]);
+        await flushMicrotasks();
+      });
+      expect(resolveInstalledSkillIdsSpy.mock.calls.length).toBe(callsAfterMount + 1);
+      release([]);
+    } finally {
+      h.unmount();
+    }
+  });
+  it("resolves by the canonical name even when a local-id row shares the short name", async () => {
+    const { api } = await import("../api");
+    (api.getSkills as ReturnType<typeof vi.fn>).mockResolvedValue([
+      makeSkill({ plugin: ".claude", skill: "greet", origin: "installed", currentVersion: "1.0.0" }),
+    ]);
+    (api.getSkillUpdates as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    currentUpdates = [
+      { name: "acme/repo/greet", installed: "1.0.0", latest: "1.0.0", updateAvailable: false },
+      { name: ".claude/greet", installed: "0.0.0", latest: null, updateAvailable: false },
+    ];
+
+    const probe: { current: ContextValue | null } = { current: null };
+    const h = await renderProvider(probe);
+    try {
+      await h.act(async () => { await flushMicrotasks(); });
+      const calls = resolveInstalledSkillIdsSpy.mock.calls;
+      expect(calls.length).toBeGreaterThanOrEqual(1);
+      const payload = (calls[calls.length - 1] as unknown[])[0] as Array<{ name: string }>;
+      expect(payload.map((p) => p.name)).toEqual(["acme/repo/greet"]);
+    } finally {
+      h.unmount();
+    }
+  });
 });

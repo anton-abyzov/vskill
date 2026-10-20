@@ -20,7 +20,11 @@ const baseWebServers = [
 // vskill-platform Worker. Gated on PLAYWRIGHT_RUN_LIVE=1 so default runs do
 // NOT pay the wrangler cold-start cost.
 const liveWebServer = {
-  command: "cd ../vskill-platform && npx wrangler dev --local --local-upstream localhost:8788 --port 8788",
+  // Worker bindings come from --var, not from this process env.
+  command:
+    "cd ../vskill-platform && npx wrangler dev --local --local-upstream localhost:8788 --port 8788" +
+    ` --var DATABASE_URL:${process.env.E2E_DATABASE_URL ?? "postgresql://localhost/vskill_e2e"}` +
+    " --var GITHUB_WEBHOOK_SECRET:test-secret-for-e2e --var INTERNAL_BROADCAST_KEY:test-broadcast-key",
   port: 8788,
   reuseExistingServer: !process.env.CI,
   timeout: 30_000,

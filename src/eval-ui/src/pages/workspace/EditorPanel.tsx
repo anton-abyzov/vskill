@@ -587,13 +587,14 @@ export function EditorPanel() {
               ref={textareaRef}
               data-testid="skill-editor-textarea"
               value={skillContent}
-              onChange={(e) => { if (!isReadOnly && !saving) dispatch({ type: "SET_CONTENT", content: e.target.value }); }}
+              onChange={(e) => { if (!isReadOnly && !saving && !state.loading) dispatch({ type: "SET_CONTENT", content: e.target.value }); }}
               onKeyDown={handleKeyDown}
               spellCheck={false}
               // 0779 F-001: lock the textarea while a save is in flight so a
               // user-typed edit can't race with the post-await SET_CONTENT
-              // dispatched by the auto-bump path.
-              readOnly={isReadOnly || saving}
+              // dispatched by the auto-bump path. Also locked until the first
+              // load lands, since INIT_DATA replaces the content.
+              readOnly={isReadOnly || saving || state.loading}
               className="flex-1 w-full resize-none outline-none"
               style={{
                 background: "var(--surface-0)",

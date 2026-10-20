@@ -44,6 +44,10 @@ jobs:
       GITHUB_WEBHOOK_SECRET: test-secret-for-e2e
       INTERNAL_BROADCAST_KEY: test-broadcast-key
       PLAYWRIGHT_RUN_LIVE: "1"
+      # Read-only GitHub API access for the update scanner (wrangler dev) and
+      # the Studio's repo-visibility check; the fixture repo is public, the
+      # token only lifts the unauthenticated rate limit.
+      GITHUB_TOKEN: ${{ github.token }}
 
     steps:
       # vskill is the workflow's host repo; check it out at ./vskill so that

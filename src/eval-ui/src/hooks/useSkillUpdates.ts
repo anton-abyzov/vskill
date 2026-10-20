@@ -275,6 +275,42 @@ function countOutdated(list: SkillUpdateInfo[]): number {
   return n;
 }
 
+const SLUG_PREFIX = "sk_published_";
+
+function versionGreater(a: string, b: string): boolean {
+  const pa = a.split(/[.+-]/).slice(0, 3).map((n) => Number.parseInt(n, 10) || 0);
+  const pb = b.split(/[.+-]/).slice(0, 3).map((n) => Number.parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) > (pb[i] ?? 0);
+  }
+  return false;
+}
+
+/**
+ * Apply a pushed `skill.updated` event to the polled update list so the bell
+ * lights without waiting for the next poll (the platform caches
+ * check-updates answers for minutes). Matches the installed row whose
+ * canonical name equals the event's public slug. Pinned rows are left alone.
+ * Returns the same array when nothing changes.
+ */
+export function applyPushedVersion(
+  list: SkillUpdateInfo[],
+  event: SkillUpdateEvent,
+): SkillUpdateInfo[] {
+  const slug = event.skillSlug;
+  if (!slug || !slug.startsWith(SLUG_PREFIX)) return list;
+  const name = slug.slice(SLUG_PREFIX.length);
+  let changed = false;
+  const next = list.map((u) => {
+    if (u.name !== name || u.pinned) return u;
+    if (!versionGreater(event.version, u.installed)) return u;
+    if (u.updateAvailable && u.latest && !versionGreater(event.version, u.latest)) return u;
+    changed = true;
+    return { ...u, latest: event.version, updateAvailable: true };
+  });
+  return changed ? next : list;
+}
+
 function isSkillUpdateEvent(v: unknown): v is SkillUpdateEvent {
   if (!v || typeof v !== "object") return false;
   const r = v as Record<string, unknown>;
@@ -766,6 +802,13 @@ export function useSkillUpdates(
       const outcome = updateStore.ingest(payload);
       debugSse("message", { eventId: payload.eventId, skillId: payload.skillId, outcome });
       if (outcome === "duplicate") return;
+      setUpdates((prev) => {
+        const next = applyPushedVersion(prev, payload);
+        if (next === prev) return prev;
+        setUpdatesMap(buildMap(next));
+        setUpdateCount(countOutdated(next));
+        return next;
+      });
       const isVisible =
         typeof document === "undefined" ||
         document.visibilityState !== "hidden";
@@ -877,6 +920,9 @@ export function useSkillUpdates(
       };
 
       es.onmessage = onMessage;
+      // The platform stream names its frames `event: skill.updated`, which
+      // never reach onmessage (that only sees unnamed `message` frames).
+      es.addEventListener("skill.updated", onMessage as EventListener);
       es.addEventListener("gone", onGone);
       // 0859: named SSE event carrying the user's own submission decisions.
       es.addEventListener("submission_decision", onSubmissionDecision);

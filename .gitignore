@@ -63,3 +63,4 @@ src-tauri/.cargo/
 e2e/demo-output/
 test-results/
 playwright-report/
+!e2e/fixtures-live/vskill.lock

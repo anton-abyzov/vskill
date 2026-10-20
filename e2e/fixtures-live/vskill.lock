@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "agents": ["claude-code"],
+  "skills": {
+    "hello-skill": {
+      "version": "1.0.0",
+      "sha": "",
+      "tier": "VERIFIED",
+      "installedAt": "2026-01-01T00:00:00.000Z",
+      "source": "github:anton-abyzov/greet-anton-test",
+      "sourceRepoUrl": "https://github.com/anton-abyzov/greet-anton-test",
+      "sourceSkillPath": "skills/hello-skill/SKILL.md",
+      "scope": "project"
+    }
+  },
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

@@ -1,0 +1,27 @@
+{
+  "ok": true,
+  "ranAt": "2026-10-20T13:53:01.651Z",
+  "increment": "0846-skill-studio-install-flow",
+  "commands": [
+    {
+      "cmd": "npx vitest run src/eval-ui/src/components/__tests__/InstallTargetsModal.test.tsx src/eval-ui/src/components/FindSkillsPalette/__tests__/SkillDetailPanel.test.tsx src/eval-server/__tests__/install-skill-routes.test.ts",
+      "exit": 0
+    },
+    {
+      "cmd": "npx tsc --noEmit -p .",
+      "exit": 0
+    }
+  ],
+  "acs": {
+    "total": 9,
+    "done": 9
+  },
+  "tasks": {
+    "total": 6,
+    "done": 6,
+    "skipped": 0,
+    "open": 0
+  },
+  "skipped": [],
+  "ledgerMalformed": 0
+}

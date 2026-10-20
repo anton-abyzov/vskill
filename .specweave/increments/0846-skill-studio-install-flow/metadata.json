@@ -1,9 +1,18 @@
 {
+  "id": "0846-skill-studio-install-flow",
   "increment": "0846-skill-studio-install-flow",
   "title": "Skill Studio Install Flow Reliability",
-  "type": "bugfix",
+  "type": "bug",
   "priority": "P0",
-  "status": "active",
+  "status": "completed",
   "created": "2026-05-20",
-  "project": "vskill"
+  "project": "vskill",
+  "updated": "2026-10-20T13:53:31.489Z",
+  "lastActivity": "2026-10-20T13:53:31.489Z",
+  "externalLinks": {},
+  "testMode": "test-after",
+  "coverageTarget": 80,
+  "readyForReviewAt": "2026-10-20T13:53:31.483Z",
+  "closeReason": "AC-US2-01 superseded by 0850 AC-US2-01 (19c5b98)",
+  "approvedAt": "2026-10-20T13:53:31.489Z"
 }

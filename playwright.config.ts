@@ -20,12 +20,19 @@ const baseWebServers = [
 // vskill-platform Worker. Gated on PLAYWRIGHT_RUN_LIVE=1 so default runs do
 // NOT pay the wrangler cold-start cost.
 const liveWebServer = {
-  command: "cd ../vskill-platform && npx wrangler dev --port 8788",
+  // Worker bindings come from --var, not from this process env.
+  command:
+    "cd ../vskill-platform && npx wrangler dev --local --local-upstream localhost:8788 --port 8788" +
+    ` --var DATABASE_URL:${process.env.E2E_DATABASE_URL ?? "postgresql://localhost/vskill_e2e"}` +
+    " --var GITHUB_WEBHOOK_SECRET:test-secret-for-e2e --var INTERNAL_BROADCAST_KEY:test-broadcast-key",
   port: 8788,
   reuseExistingServer: !process.env.CI,
   timeout: 30_000,
   env: {
     DATABASE_URL: process.env.E2E_DATABASE_URL ?? "postgresql://localhost/vskill_e2e",
+    // wrangler dev refuses to start without a local stand-in for the HYPERDRIVE binding.
+    CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE:
+      process.env.E2E_DATABASE_URL ?? "postgresql://localhost/vskill_e2e",
     GITHUB_WEBHOOK_SECRET: "test-secret-for-e2e",
     INTERNAL_BROADCAST_KEY: "test-broadcast-key",
   },
@@ -45,9 +52,9 @@ export default defineConfig({
   // unaffected). Without this wiring, the live spec would race against an
   // empty DB and the webhook handler's repo→skill lookup would return no
   // matches.
-  globalSetup: RUN_LIVE
-    ? require.resolve("../vskill-platform/__tests__/e2e/global-setup.ts")
-    : undefined,
+  // Plain path (resolved against this config's directory): the config loads
+  // as ESM, where `require` does not exist.
+  globalSetup: RUN_LIVE ? "../vskill-platform/__tests__/e2e/global-setup.ts" : undefined,
   // Default project skips `-live.spec.ts` files. Live project opt-in via
   // `PLAYWRIGHT_RUN_LIVE=1 npx playwright test --project=live`.
   // 0830 US-009 AC-US9-04: `desktop` project carries the auto-update smoke

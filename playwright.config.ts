@@ -26,6 +26,9 @@ const liveWebServer = {
   timeout: 30_000,
   env: {
     DATABASE_URL: process.env.E2E_DATABASE_URL ?? "postgresql://localhost/vskill_e2e",
+    // wrangler dev refuses to start without a local stand-in for the HYPERDRIVE binding.
+    CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE:
+      process.env.E2E_DATABASE_URL ?? "postgresql://localhost/vskill_e2e",
     GITHUB_WEBHOOK_SECRET: "test-secret-for-e2e",
     INTERNAL_BROADCAST_KEY: "test-broadcast-key",
   },

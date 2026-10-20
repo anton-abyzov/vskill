@@ -2,6 +2,7 @@
 
 import { Command } from "commander";
 import { createRequire } from "node:module";
+import { red } from "./utils/output.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
@@ -16,6 +17,12 @@ program
   // `vskill install x --version 1.0.0` reaches install instead of printing
   // the CLI version. `vskill -v` and `vskill --version` still print it.
   .enablePositionalOptions();
+
+/** Print a usage error to stderr and exit 1, without a stack trace. */
+function failUsage(message: string): never {
+  console.error(red(message));
+  process.exit(1);
+}
 
 function collect(val: string, acc: string[]): string[] {
   acc.push(val);
@@ -56,7 +63,7 @@ program
       const split = splitVersionSuffix(source);
       if (split.version) {
         if (opts.version && opts.version !== split.version) {
-          throw new Error(`Conflicting versions: ${source} and --version ${opts.version}.`);
+          failUsage(`Conflicting versions: ${source} and --version ${opts.version}.`);
         }
         source = split.source;
         opts.version = split.version;
@@ -68,7 +75,7 @@ program
       return;
     }
     if (opts.version && (!source || source.includes("://") || source.split("/").length !== 3)) {
-      throw new Error("--version needs owner/repo/skill, or a hosted private skill with --tenant.");
+      failUsage("--version needs owner/repo/skill, or a hosted private skill with --tenant.");
     }
     const { addCommand } = await import("./commands/add.js");
     await addCommand(source, opts);
@@ -260,7 +267,6 @@ program
       await submitPrivateCommand(source, opts);
       return;
     }
-    if (opts.tenant || opts.submission) throw new Error("--tenant and --submission require --private for publishing.");
     const { submitCommand } = await import("./commands/submit.js");
     await submitCommand(source, opts);
   });

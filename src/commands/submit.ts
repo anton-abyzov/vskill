@@ -18,12 +18,19 @@ interface SubmitOptions {
   skill?: string;
   browser?: boolean;
   path?: string;
+  tenant?: string;
+  submission?: string;
 }
 
 export async function submitCommand(
   source: string | undefined,
   opts: SubmitOptions
 ): Promise<void> {
+  if (opts.tenant || opts.submission) {
+    console.error(red("--tenant and --submission require --private for publishing."));
+    process.exit(1);
+  }
+
   if (opts.skill && !validateSkillName(opts.skill)) {
     console.error(
       red("Invalid skill name. ") + dim("Path traversal patterns are not allowed.")

@@ -397,3 +397,16 @@ describe("0845 T-005 — GET /api/studio/supported-agents", () => {
     );
   });
 });
+
+describe("0850 AC-US1-01: supported-agents carries the project-scope dir", () => {
+  it("joins each relative local dir to the project root", async () => {
+    vi.resetAllMocks();
+    const handler = captureHandlers()["/api/studio/supported-agents"];
+    mocks.getSupportedAgents.mockResolvedValue([
+      { id: "claude-code", displayName: "Claude Code", detected: true, tier: 1, installMode: "filesystem", resolvedGlobalDir: "/home/u/.claude/skills", resolvedLocalDir: ".claude/skills" },
+    ]);
+    await handler({ socket: { remoteAddress: "127.0.0.1" }, url: "/api/studio/supported-agents", method: "GET", headers: {} }, {}, {});
+    const body = mocks.sendJson.mock.calls[0][1];
+    expect(body.agents[0].resolvedProjectDir).toBe("/test-root/.claude/skills");
+  });
+});

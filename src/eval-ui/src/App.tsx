@@ -1188,6 +1188,7 @@ function Shell() {
             selectedSkill={findDetailSkill}
             activeAgentId={activeAgentId}
             onClose={() => setFindDetailSkill(null)}
+            onSkillsChanged={refreshSkills}
           />
         </Suspense>
       )}
@@ -1337,6 +1338,7 @@ function Shell() {
           }
           preCheckedAgentIds={installTargetsRequest.preCheckedAgentIds}
           onClose={() => setInstallTargetsRequest(null)}
+          onRemoved={refreshSkills}
           onSuccess={(results) => {
             refreshSkills();
             const installedCount = results.filter((result) => result.status === "installed").length;

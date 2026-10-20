@@ -208,6 +208,26 @@ function renderModal(propOverrides: {
 // Tests
 // ---------------------------------------------------------------------------
 
+describe("InstallTargetsModal — 0850 AC-US1-01/02: path matches scope", () => {
+  it("project scope shows the absolute project dir when the server sends it", async () => {
+    fetchSupportedAgentsImpl = vi.fn(async () => [
+      { ...FIXTURE_AGENTS[0], resolvedProjectDir: "/work/proj/.claude/skills" },
+    ]);
+    renderModal({ scope: "project" });
+    await flushAsync();
+    expect(getByTestId("install-targets-path-claude-code").textContent).toBe("/work/proj/.claude/skills");
+  });
+
+  it("user scope shows the global dir", async () => {
+    fetchSupportedAgentsImpl = vi.fn(async () => [
+      { ...FIXTURE_AGENTS[0], resolvedProjectDir: "/work/proj/.claude/skills" },
+    ]);
+    renderModal({ scope: "user" });
+    await flushAsync();
+    expect(getByTestId("install-targets-path-claude-code").textContent).toBe("/home/user/.claude/skills");
+  });
+});
+
 describe("InstallTargetsModal — AC-US2-02: tier-grouped sections", () => {
   it("renders Drop-in, Format-converted, and Cloud sections with title 'Install <skill name> to:'", async () => {
     renderModal();

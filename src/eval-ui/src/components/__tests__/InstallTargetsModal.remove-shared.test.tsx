@@ -56,7 +56,7 @@ async function flush(): Promise<void> {
   });
 }
 
-async function renderModal() {
+async function renderModal(onRemoved?: () => void) {
   act(() => {
     root.render(
       <InstallTargetsModal
@@ -64,6 +64,7 @@ async function renderModal() {
         scope="project"
         activeAgentId={null}
         onClose={() => {}}
+        onRemoved={onRemoved}
         fetchSupportedAgentsImpl={vi.fn(async () => AGENTS) as unknown as never}
         fetchInstallStateImpl={vi.fn(async () => INSTALL_STATE)}
         removeSkillImpl={removeSkillImpl as unknown as never}
@@ -129,5 +130,21 @@ describe("0894 — InstallTargetsModal shared remove", () => {
 
     expect(byTestId("install-targets-remove-error")?.textContent).toContain("EACCES");
     expect(byTestId("install-targets-remove-all")).toBeNull();
+  });
+
+  it("tells the caller after a remove so it can refresh its installed list", async () => {
+    removeSkillImpl.mockResolvedValueOnce({
+      skill: "o/r/foo",
+      scope: "project",
+      removed: [{ agentId: "cursor", path: "/p/.cursor/skills/foo" }],
+      skipped: [],
+      errors: [],
+    });
+    const onRemoved = vi.fn();
+    await renderModal(onRemoved);
+
+    await click(byTestId("install-targets-remove-cursor")!);
+
+    expect(onRemoved).toHaveBeenCalledTimes(1);
   });
 });

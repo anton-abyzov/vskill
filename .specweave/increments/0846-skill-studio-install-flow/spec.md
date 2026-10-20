@@ -1,10 +1,10 @@
 ---
 increment: 0846-skill-studio-install-flow
-title: "Skill Studio Install Flow Reliability"
+title: Skill Studio Install Flow Reliability
 type: bugfix
 priority: P0
 status: completed
-created: 2026-05-20
+created: 2026-05-20T00:00:00.000Z
 ---
 
 # Skill Studio Install Flow Reliability

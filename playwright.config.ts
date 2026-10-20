@@ -45,9 +45,9 @@ export default defineConfig({
   // unaffected). Without this wiring, the live spec would race against an
   // empty DB and the webhook handler's repo→skill lookup would return no
   // matches.
-  globalSetup: RUN_LIVE
-    ? require.resolve("../vskill-platform/__tests__/e2e/global-setup.ts")
-    : undefined,
+  // Plain path (resolved against this config's directory): the config loads
+  // as ESM, where `require` does not exist.
+  globalSetup: RUN_LIVE ? "../vskill-platform/__tests__/e2e/global-setup.ts" : undefined,
   // Default project skips `-live.spec.ts` files. Live project opt-in via
   // `PLAYWRIGHT_RUN_LIVE=1 npx playwright test --project=live`.
   // 0830 US-009 AC-US9-04: `desktop` project carries the auto-update smoke

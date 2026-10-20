@@ -79,6 +79,9 @@ export interface SkillDetailPanelProps {
   telemetryInstallCopyUrl?: string;
   /** Toast dispatcher — defaults to `studio:toast` CustomEvent (existing contract). */
   onToast?: (message: string, kind: "success" | "error") => void;
+  /** Called after an install or remove changes files on disk, so the
+   *  Studio sidebar re-reads its installed-skill list. */
+  onSkillsChanged?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -215,6 +218,7 @@ export function SkillDetailPanel({
   activeAgentId,
   telemetryInstallCopyUrl = DEFAULT_TELEMETRY_INSTALL_COPY,
   onToast,
+  onSkillsChanged,
 }: SkillDetailPanelProps) {
   const [meta, setMeta] = useState<SkillMetadata | null>(null);
   const [versions, setVersions] = useState<SkillVersion[]>([]);
@@ -518,6 +522,10 @@ export function SkillDetailPanel({
       }
       return;
     }
+    // The sidebar list does not watch the filesystem: refresh it now so the
+    // new skill shows up without a page reload. The modal stays open (0850
+    // AC-US2-01).
+    if (installedCount > 0) onSkillsChanged?.();
     if (typeof window !== "undefined") {
       try {
         window.dispatchEvent(
@@ -540,7 +548,7 @@ export function SkillDetailPanel({
     } else {
       dispatchToastFallback(message, "success", 5000);
     }
-  }, [publisher, slug, scope, displayName, onToast]);
+  }, [publisher, slug, scope, displayName, onToast, onSkillsChanged]);
 
   const trustTier: TrustTier = (meta?.trustTier as TrustTier | undefined) ?? "T1";
   const certTier: CertificationTier =
@@ -1026,6 +1034,7 @@ export function SkillDetailPanel({
         activeAgentId={resolvedActiveAgentId}
         onClose={() => setInstallModalOpen(false)}
         onSuccess={handleInstallModalSuccess}
+        onRemoved={onSkillsChanged}
       />
     )}
     </>

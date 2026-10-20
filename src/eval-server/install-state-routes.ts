@@ -27,8 +27,8 @@ import { readLockfile } from "../lockfile/lockfile.js";
 import {
   detectInstalledAgents,
   getSupportedAgents,
-  type SupportedAgent,
 } from "../agents/agents-registry.js";
+import { withProjectDirs, type SupportedAgentWithProjectDir } from "./supported-agents-routes.js";
 
 const SAFE_NAME = /^[a-zA-Z0-9._@/\-]+$/;
 const PLACEHOLDER_VERSION = "0.0.0";
@@ -115,7 +115,7 @@ function buildScopeState(
 }
 
 export interface SupportedAgentsResponse {
-  agents: SupportedAgent[];
+  agents: SupportedAgentWithProjectDir[];
 }
 
 export function registerInstallStateRoutes(router: Router, rootArg: string | (() => string)): void {
@@ -132,7 +132,9 @@ export function registerInstallStateRoutes(router: Router, rootArg: string | (()
         sendJson(res, { error: "localhost-only endpoint" }, 403, req);
         return;
       }
-      const agents = await getSupportedAgents();
+      // This handler registers before supported-agents-routes.ts, so it is
+      // the one that answers; keep both on the same project-dir enrichment.
+      const agents = withProjectDirs(await getSupportedAgents(), getRoot());
       const body: SupportedAgentsResponse = { agents };
       sendJson(res, body, 200, req);
     },

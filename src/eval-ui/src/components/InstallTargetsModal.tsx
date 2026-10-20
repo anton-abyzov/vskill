@@ -54,6 +54,8 @@ export interface InstallTargetsModalProps {
   preCheckedAgentIds?: string[];
   onClose: () => void;
   onSuccess?: (results: AgentInstallResult[]) => void;
+  /** Called after a Remove so the caller can refresh its installed-skill list. */
+  onRemoved?: () => void;
   /** Test-injectable hooks. */
   fetchSupportedAgentsImpl?: typeof fetchSupportedAgents;
   installToAgentsImpl?: typeof installToAgents;
@@ -177,6 +179,7 @@ export function InstallTargetsModal({
   preCheckedAgentIds,
   onClose,
   onSuccess,
+  onRemoved,
   fetchSupportedAgentsImpl,
   installToAgentsImpl,
   startInstallStreamImpl,
@@ -432,7 +435,8 @@ export function InstallTargetsModal({
     }
     // Trigger install-state re-fetch so the row badge updates.
     setInstallStateNonce((n) => n + 1);
-  }, [skill, scope]);
+    onRemoved?.();
+  }, [skill, scope, onRemoved]);
 
   const handleRemoveAgent = useCallback(async (agentId: string) => {
     const removeFn = removeSkillImpl ?? removeSkillFromAgents;
@@ -1022,7 +1026,9 @@ function TierSection({
           // clipboard label.
           const path =
             pathOverride ??
-            (scope === "project" ? agent.resolvedLocalDir : agent.resolvedGlobalDir);
+            (scope === "project"
+              ? agent.resolvedProjectDir ?? agent.resolvedLocalDir
+              : agent.resolvedGlobalDir);
           const badge = deriveBadge(agent.id, scope, installState, targetVersion);
           const isRemoving = removingAgents.has(agent.id);
           return (

@@ -32,7 +32,7 @@ export function registerScopeTransferRoutes(router: Router, rootArg: string | ((
   // 0827 — per-skill install-state for the panel's scope picker.
   registerInstallStateRoutes(router, getRoot);
   // 0845 — cross-tool install targets (every supported agent, detected or not).
-  registerSupportedAgentsRoutes(router);
+  registerSupportedAgentsRoutes(router, getRoot);
   // 0845 T-015 — Tier-3 clipboard export (ChatGPT, v0, bolt.new).
   registerExportSkillRoutes(router);
   // 0850 — per-agent skill remove from the InstallTargetsModal.

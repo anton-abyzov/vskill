@@ -47,6 +47,7 @@ async function mount(props: {
   onClose?: () => void;
   onToast?: (message: string, kind: "success" | "error") => void;
   activeAgentId?: string | null;
+  onSkillsChanged?: () => void;
 }): Promise<MountHandle> {
   const React = await import("react");
   const { createRoot } = await import("react-dom/client");
@@ -63,6 +64,7 @@ async function mount(props: {
         onClose: props.onClose ?? (() => {}),
         onToast: props.onToast,
         activeAgentId: props.activeAgentId,
+        onSkillsChanged: props.onSkillsChanged,
       }),
     );
   });
@@ -595,6 +597,7 @@ describe("SkillDetailPanel — 0845 T-022 (AC-US2-01): Install button opens Inst
 
   it("successful filesystem install keeps the overlay in done phase without reopening Find Skills", async () => {
     const onClose = vi.fn();
+    const onSkillsChanged = vi.fn();
     const onToast = vi.fn();
     const openFindSkills = vi.fn();
     window.addEventListener("openFindSkills", openFindSkills);
@@ -636,7 +639,7 @@ describe("SkillDetailPanel — 0845 T-022 (AC-US2-01): Install button opens Inst
       });
     }) as unknown as typeof fetch;
 
-    const h = await mount({ onClose, onToast, activeAgentId: "claude-code" });
+    const h = await mount({ onClose, onToast, activeAgentId: "claude-code", onSkillsChanged });
     await flushMicrotasks();
     const { act } = await import("react");
     const installBtn = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
@@ -658,6 +661,8 @@ describe("SkillDetailPanel — 0845 T-022 (AC-US2-01): Install button opens Inst
     expect(onToast).toHaveBeenCalledWith("Installed Wiki Sync to 1 target.", "success");
     expect(document.querySelector("[data-testid='install-targets-modal']")).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
+    // The Studio sidebar re-reads its installed list without a page reload.
+    expect(onSkillsChanged).toHaveBeenCalledTimes(1);
 
     window.removeEventListener("openFindSkills", openFindSkills);
     await h.unmount();

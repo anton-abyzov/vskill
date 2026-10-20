@@ -182,3 +182,19 @@ describe("0845 T-005 — GET /api/studio/supported-agents", () => {
     );
   });
 });
+
+describe("0850 AC-US1-01: project-scope paths joined to the project root", () => {
+  it("adds resolvedProjectDir for relative local dirs when a root getter is given", async () => {
+    mocks.sendJson.mockClear();
+    mocks.getSupportedAgents.mockResolvedValueOnce([
+      { id: "claude-code", displayName: "Claude Code", detected: true, tier: 1, installMode: "filesystem", resolvedGlobalDir: "/h/.claude/skills", resolvedLocalDir: ".claude/skills" },
+      { id: "chatgpt", displayName: "ChatGPT", detected: false, tier: 3, installMode: "clipboard", resolvedGlobalDir: "(clipboard)", resolvedLocalDir: "" },
+    ]);
+    let rootHandler: any;
+    registerSupportedAgentsRoutes({ get: (_p: string, h: any) => { rootHandler = h; } } as any, () => "/work/proj");
+    await rootHandler(fakeReq(), fakeRes(), {});
+    const body = mocks.sendJson.mock.calls[0][1];
+    expect(body.agents[0].resolvedProjectDir).toBe("/work/proj/.claude/skills");
+    expect(body.agents[1].resolvedProjectDir).toBeUndefined();
+  });
+});

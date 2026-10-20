@@ -377,6 +377,8 @@ export interface SupportedAgent {
   installMode: "filesystem" | "clipboard";
   resolvedGlobalDir: string;
   resolvedLocalDir: string;
+  /** Absolute project-scope dir (resolvedLocalDir joined to the project root). */
+  resolvedProjectDir?: string;
   pasteInstructionsUrl?: string;
   docsUrl?: string;
 }

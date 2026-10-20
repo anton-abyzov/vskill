@@ -17,13 +17,27 @@
 //   - No SAFE_NAME guard needed: this endpoint takes no user input.
 
 import * as http from "node:http";
+import { isAbsolute, join } from "node:path";
 
 import type { Router } from "./router.js";
 import { sendJson } from "./router.js";
 import { getSupportedAgents, type SupportedAgent } from "../agents/agents-registry.js";
 
+/** 0850 AC-US1-01: `resolvedProjectDir` is `resolvedLocalDir` joined to the
+ *  active project root, so the modal can show the exact project-scope path. */
+export type SupportedAgentWithProjectDir = SupportedAgent & { resolvedProjectDir?: string };
+
 export interface SupportedAgentsResponse {
-  agents: SupportedAgent[];
+  agents: SupportedAgentWithProjectDir[];
+}
+
+export function withProjectDirs(agents: SupportedAgent[], root: string | null): SupportedAgentWithProjectDir[] {
+  if (!root) return agents;
+  return agents.map((agent) =>
+    agent.resolvedLocalDir && !isAbsolute(agent.resolvedLocalDir)
+      ? { ...agent, resolvedProjectDir: join(root, agent.resolvedLocalDir) }
+      : agent,
+  );
 }
 
 function isLocalhost(req: http.IncomingMessage): boolean {
@@ -31,7 +45,7 @@ function isLocalhost(req: http.IncomingMessage): boolean {
   return addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1";
 }
 
-export function registerSupportedAgentsRoutes(router: Router): void {
+export function registerSupportedAgentsRoutes(router: Router, getRoot?: () => string): void {
   router.get(
     "/api/studio/supported-agents",
     async (req: http.IncomingMessage, res: http.ServerResponse) => {
@@ -41,7 +55,7 @@ export function registerSupportedAgentsRoutes(router: Router): void {
       }
 
       try {
-        const agents = await getSupportedAgents();
+        const agents = withProjectDirs(await getSupportedAgents(), getRoot?.() ?? null);
         const body: SupportedAgentsResponse = { agents };
         sendJson(res, body, 200, req);
       } catch (err) {

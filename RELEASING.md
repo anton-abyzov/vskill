@@ -15,7 +15,8 @@ checkout, and push the tag over HTTPS. Both run on macOS `/bin/bash` 3.2.
 
 During a retention hold, pass `--keep-workdir` to either script and also
 `--keep-drafts` to the desktop script, including dry runs. These options retain
-temporary installation/signature evidence and stale desktop drafts. They do
+temporary installation/signature evidence and stale desktop drafts. The npm
+script also retains its newly created local tag if pushing fails. They do
 not bypass preflight, signing, CI, publication or live verification gates.
 Retained directories may contain downloaded artifacts and should stay private.
 

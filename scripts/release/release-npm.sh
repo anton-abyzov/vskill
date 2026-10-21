@@ -4,7 +4,7 @@
 # Usage: bash scripts/release/release-npm.sh [<version>] [--dry-run] [--keep-workdir]
 #   <version>   X.Y.Z; defaults to the version in this checkout's package.json
 #   --dry-run   run every check, print what would be tagged, tag and push nothing
-#   --keep-workdir   retain the fresh-install directory, including on failure
+#   --keep-workdir   retain fresh-install files and a local tag if pushing fails
 #
 # The version bump is a normal PR. Once it is merged, this script:
 #   1. Preflight (no side effects): gh is signed in with push access, v<version>
@@ -152,6 +152,9 @@ fi
 step "Tagging ${SHA} as ${TAG}"
 git tag "$TAG" "$SHA"
 if ! git push -q "$REMOTE_URL" "refs/tags/${TAG}"; then
+  if [ "$KEEP_WORKDIR" -eq 1 ]; then
+    die "pushing ${TAG} to ${REMOTE_URL} failed; local tag retained (--keep-workdir)"
+  fi
   git tag -d "$TAG" >/dev/null
   die "pushing ${TAG} to ${REMOTE_URL} failed; local tag removed"
 fi

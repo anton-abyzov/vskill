@@ -17,6 +17,7 @@ with open(os.environ['CALLS'], 'a') as f:
     f.write(json.dumps([name, *args]) + '\n')
 sha = 'a' * 40
 if name == 'git':
+    if args[:1] == ['push'] and '--dry-run' not in args and os.environ.get('FAIL') == 'push': sys.exit(1)
     if args[:3] == ['rev-parse', '-q', '--verify']: sys.exit(1)
     if args[:1] == ['rev-parse']: print(sha)
     if args[:1] == ['show']: print('{"version":"2.0.0"}')
@@ -124,6 +125,14 @@ class RetentionTests(unittest.TestCase):
             run, calls = self.run_release('npm', failure=failure)
             self.assertEqual(run.returncode == 0, not failure)
             self.assertEqual(sum(c[0] == 'rm' for c in calls), 1)
+
+    def test_npm_push_failure_respects_retention(self):
+        for flags in [[], ['--keep-workdir']]:
+            run, calls = self.run_release('npm', flags, 'push')
+            self.assertNotEqual(run.returncode, 0)
+            deleted = [c for c in calls if c[:3] == ['git', 'tag', '-d']]
+            self.assertEqual(len(deleted), 0 if flags else 1)
+            self.assertIn('local tag retained' if flags else 'local tag removed', run.stderr)
 
     def test_desktop_retains_and_still_verifies_and_promotes(self):
         run, calls = self.run_release('desktop', ['--keep-workdir', '--keep-drafts'])

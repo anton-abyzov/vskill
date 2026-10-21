@@ -345,8 +345,11 @@ export function InstallTargetsModal({
           // Merge: prefer authoritative per-agent results from the done
           // payload, fall back to the live results we accumulated.
           const merged: LiveResultMap = {};
+          // success:false with per-agent results is a partial failure: the
+          // rows carry the outcome. Only a failure with no rows is global.
+          const hasRows = (summary.results ?? []).length > 0;
           const summaryError =
-            summary.success === false
+            summary.success === false && !hasRows
               ? (typeof summary.error === "string" && summary.error.trim())
                 || "Install failed before any target reported a result."
               : null;
@@ -761,6 +764,7 @@ export function InstallTargetsModal({
               <ResultsToast
                 results={Object.values(results)}
                 agents={agents}
+                writeClipboardImpl={writeClipboardImpl}
               />
             )}
 
@@ -863,60 +867,80 @@ export function InstallTargetsModal({
               gap: "0.5rem",
             }}
           >
-            <button
-              type="button"
-              data-testid="install-targets-modal-cancel"
-              onClick={handleCancel}
-              disabled={phase === "installing"}
-              style={{
-                padding: "0.5rem 0.875rem",
-                borderRadius: 6,
-                border: "1px solid var(--color-rule, #E8E1D6)",
-                background: "transparent",
-                color: "var(--text-primary)",
-                cursor: phase === "installing" ? "not-allowed" : "pointer",
-                fontSize: 13,
-                fontFamily: "var(--font-sans)",
-                opacity: phase === "installing" ? 0.5 : 1,
-              }}
-            >
-              {phase === "done" ? "Close" : "Cancel"}
-            </button>
-            <button
-              type="button"
-              data-testid="install-targets-modal-install"
-              onClick={handleInstall}
-              disabled={installDisabled || phase === "done"}
-              aria-disabled={installDisabled || phase === "done"}
-              title={installButtonTitle}
-              style={{
-                padding: "0.5rem 1.125rem",
-                borderRadius: 6,
-                border: "1px solid var(--text-primary, #191919)",
-                background:
-                  installDisabled || phase === "done"
-                    ? "var(--bg-surface, #FFFFFF)"
-                    : "var(--text-primary, #191919)",
-                color:
-                  installDisabled || phase === "done"
-                    ? "var(--text-secondary, #5A5651)"
-                    : "var(--bg-surface, #FFFFFF)",
-                cursor:
-                  installDisabled || phase === "done"
-                    ? "not-allowed"
-                    : "pointer",
-                fontSize: 13,
-                fontWeight: 600,
-                fontFamily: "var(--font-sans)",
-                opacity: installDisabled && phase !== "done" ? 0.6 : 1,
-              }}
-            >
-              {phase === "installing"
-                ? "Installing…"
-                : phase === "done"
-                  ? "Done"
-                  : `Install (${selected.size})`}
-            </button>
+            {phase !== "done" && (
+              <button
+                type="button"
+                data-testid="install-targets-modal-cancel"
+                onClick={handleCancel}
+                disabled={phase === "installing"}
+                style={{
+                  padding: "0.5rem 0.875rem",
+                  borderRadius: 6,
+                  border: "1px solid var(--color-rule, #E8E1D6)",
+                  background: "transparent",
+                  color: "var(--text-primary)",
+                  cursor: phase === "installing" ? "not-allowed" : "pointer",
+                  fontSize: 13,
+                  fontFamily: "var(--font-sans)",
+                  opacity: phase === "installing" ? 0.5 : 1,
+                }}
+              >
+                Cancel
+              </button>
+            )}
+            {phase === "done" ? (
+              // 0850 AC-US2-02: Done replaces Install and closes explicitly.
+              <button
+                type="button"
+                data-testid="install-targets-modal-done"
+                onClick={handleCancel}
+                style={{
+                  padding: "0.5rem 1.125rem",
+                  borderRadius: 6,
+                  border: "1px solid var(--text-primary, #191919)",
+                  background: "var(--text-primary, #191919)",
+                  color: "var(--bg-surface, #FFFFFF)",
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  fontFamily: "var(--font-sans)",
+                }}
+              >
+                Done
+              </button>
+            ) : (
+              <button
+                type="button"
+                data-testid="install-targets-modal-install"
+                onClick={handleInstall}
+                disabled={installDisabled}
+                aria-disabled={installDisabled}
+                title={installButtonTitle}
+                style={{
+                  padding: "0.5rem 1.125rem",
+                  borderRadius: 6,
+                  border: "1px solid var(--text-primary, #191919)",
+                  background:
+                    installDisabled
+                      ? "var(--bg-surface, #FFFFFF)"
+                      : "var(--text-primary, #191919)",
+                  color:
+                    installDisabled
+                      ? "var(--text-secondary, #5A5651)"
+                      : "var(--bg-surface, #FFFFFF)",
+                  cursor:
+                    installDisabled
+                      ? "not-allowed"
+                      : "pointer",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  fontFamily: "var(--font-sans)",
+                  opacity: installDisabled ? 0.6 : 1,
+                }}
+              >
+                {phase === "installing" ? "Installing…" : `Install (${selected.size})`}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1165,11 +1189,23 @@ function TierSection({
 function ResultsToast({
   results,
   agents,
+  writeClipboardImpl,
 }: {
   results: AgentInstallResult[];
   agents: SupportedAgent[];
+  writeClipboardImpl?: (text: string) => Promise<void>;
 }) {
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   if (results.length === 0) return null;
+  const copyPath = async (agentId: string, path: string) => {
+    try {
+      if (writeClipboardImpl) await writeClipboardImpl(path);
+      else await navigator.clipboard.writeText(path);
+      setCopiedId(agentId);
+    } catch {
+      setCopiedId(null);
+    }
+  };
   return (
     <div
       data-testid="install-targets-results-toast"
@@ -1259,6 +1295,26 @@ function ResultsToast({
                   {detail}
                 </span>
               )}
+              {r.status === "installed" && (r.path ?? r.detail) && (
+                <button
+                  type="button"
+                  data-testid={`install-targets-result-copy-${r.agentId}`}
+                  onClick={() => void copyPath(r.agentId, (r.path ?? r.detail)!)}
+                  style={{
+                    marginLeft: "0.5rem",
+                    fontSize: 10,
+                    padding: "1px 6px",
+                    borderRadius: 8,
+                    background: "transparent",
+                    border: "1px solid var(--color-rule, #E8E1D6)",
+                    color: "var(--text-secondary)",
+                    cursor: "pointer",
+                    fontFamily: "var(--font-sans)",
+                  }}
+                >
+                  {copiedId === r.agentId ? "Copied" : "Copy path"}
+                </button>
+              )}
               {r.status === "exported" && r.pasteInstructionsUrl && (
                 <>
                   {" "}
@@ -1308,12 +1364,12 @@ function InstallStateBadgePill({
       fg = "var(--color-ok, #22c55e)";
       break;
     case "update-available":
-      label = `Update v${badge.installed} → v${badge.target}`;
+      label = `Update available v${badge.installed} → v${badge.target}`;
       bg = "color-mix(in srgb, var(--color-own, #f59e0b) 18%, transparent)";
       fg = "var(--color-own, #f59e0b)";
       break;
     case "newer-installed":
-      label = `Newer v${badge.installed} (target v${badge.target})`;
+      label = `Newer installed v${badge.installed}`;
       bg = "color-mix(in srgb, var(--accent-text, #3b82f6) 14%, transparent)";
       fg = "var(--accent-text, #3b82f6)";
       break;

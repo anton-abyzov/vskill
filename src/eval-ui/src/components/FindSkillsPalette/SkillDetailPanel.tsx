@@ -501,6 +501,9 @@ export function SkillDetailPanel({
   // any other UI watching for it can re-fetch.
   const handleInstallModalSuccess = useCallback((results: AgentInstallResult[]) => {
     const failures = results.filter((r) => r.status === "error");
+    // The sidebar list does not watch the filesystem: refresh it whenever
+    // anything landed, even if another target failed.
+    if (results.some((r) => r.status === "installed")) onSkillsChanged?.();
     if (failures.length > 0) {
       const first = failures[0];
       const message = `Install finished with ${failures.length} error${failures.length === 1 ? "" : "s"}: ${first.detail ?? first.agentId}`;
@@ -522,10 +525,7 @@ export function SkillDetailPanel({
       }
       return;
     }
-    // The sidebar list does not watch the filesystem: refresh it now so the
-    // new skill shows up without a page reload. The modal stays open (0850
-    // AC-US2-01).
-    if (installedCount > 0) onSkillsChanged?.();
+    // The modal stays open in its done phase (0850 AC-US2-01).
     if (typeof window !== "undefined") {
       try {
         window.dispatchEvent(

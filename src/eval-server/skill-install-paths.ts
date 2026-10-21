@@ -1,4 +1,4 @@
-import { lstatSync, statSync, readlinkSync, realpathSync } from "node:fs";
+import { lstatSync, statSync, readlinkSync, realpathSync, readdirSync, type Stats } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep, dirname, basename, parse } from "node:path";
 import { homedir } from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
@@ -94,6 +94,26 @@ export function pathWithin(path: string, root: string): boolean {
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
+/** Canonical spelling of this directory entry, without following its leaf
+ * link. Native realpath respects the volume's case/normalization semantics
+ * and keeps distinct hard-link names. For a link, resolve only its parent;
+ * directory enumeration recovers the leaf spelling from its lstat identity.
+ * Ambiguous hard-linked aliases fail closed instead of merging entries. */
+export function physicalEntry(path: string, stat: Stats = lstatSync(path)): string {
+  if (!stat.isSymbolicLink()) return realpathSync.native(path);
+  const parent = realpathSync.native(dirname(path));
+  const name = basename(path);
+  const entries = readdirSync(parent, { withFileTypes: true });
+  if (entries.some((entry) => entry.name === name)) return join(parent, name);
+  const matches = entries.filter((entry) => {
+    if (!entry.isSymbolicLink()) return false;
+    const candidate = lstatSync(join(parent, entry.name));
+    return candidate.dev === stat.dev && candidate.ino === stat.ino;
+  });
+  if (matches.length !== 1) throw new Error(`Cannot identify link entry safely: ${path}`);
+  return join(parent, matches[0].name);
+}
+
 /** Entries a successful read needs: traversed directories/links and the file.
  * realpath alone loses intermediate links, so cannot describe unlink effects.
  * Process link targets component by component: `link/..` means the target's
@@ -111,10 +131,11 @@ export function skillReadEntries(path: string): string[] | null {
       if (part === "..") { current = dirname(current); continue; }
       const next = join(current, part);
       const stat = lstatSync(next);
-      entries.push(next);
+      const entry = physicalEntry(next, stat);
+      entries.push(entry);
       if (!stat.isSymbolicLink()) {
         if (pending.length > 0 && !stat.isDirectory()) return null;
-        current = next;
+        current = entry;
         continue;
       }
       if (++links > 40) throw new Error(`Too many links while resolving ${path}`);
@@ -133,7 +154,8 @@ export function skillReadEntries(path: string): string[] | null {
 /** A leaf link removes only its entry. A physical directory removes contained
  * entries, including links inside it, but never those links' outside targets. */
 export function removalAffects(path: string, readEntries: readonly string[]): boolean {
-  const entry = join(realpathSync(dirname(path)), basename(path));
-  const directory = lstatSync(path).isDirectory();
+  const stat = lstatSync(path);
+  const entry = physicalEntry(path, stat);
+  const directory = stat.isDirectory();
   return readEntries.some((read) => directory ? pathWithin(read, entry) : read === entry);
 }

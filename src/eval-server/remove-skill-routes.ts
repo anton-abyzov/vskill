@@ -34,7 +34,7 @@ import {
 import {
   assertSafeRemovalParents, convertedSkillPaths, effectiveSkillDirs, effectiveSkillFiles,
   extraSkillDirs, hasSkillFiles, isSkillFile, ownedSkillDirs, ownedSkillPaths,
-  pathWithin, skillReadEntries, removalAffects,
+  pathWithin, physicalEntry, skillReadEntries, removalAffects,
 } from "./skill-install-paths.js";
 
 const SAFE_NAME = /^[a-zA-Z0-9._@/\-]+$/;
@@ -220,7 +220,10 @@ function removeEntry(p: string, opts: InstallOptions): void {
 /** Preflight all of this agent's copies before touching any of them. */
 function prepareNativeRemoval(paths: string[], opts: InstallOptions): string[] {
   const present = paths.filter(lexists);
-  for (const path of present) assertSafeRemovalParents(path, opts);
+  for (const path of present) {
+    assertSafeRemovalParents(path, opts);
+    physicalEntry(path);
+  }
   return present;
 }
 
@@ -255,6 +258,7 @@ function prepareConvertedRemoval(agent: AgentDefinition, slug: string, opts: Ins
     assertSafeRemovalParents(path, opts);
     const stat = lstatSync(path);
     if (!stat.isFile() && !stat.isSymbolicLink()) throw new Error(`Refusing to remove non-file converted output: ${path}`);
+    physicalEntry(path, stat);
   }
   return present;
 }
@@ -332,6 +336,7 @@ function removePlanned(
       const native = prepareNativeRemoval(owned, opts);
       if (isSatisfiedByCanonical(agent, opts) && lexists(canonicalTarget) && !native.includes(canonicalTarget)) {
         assertSafeRemovalParents(canonicalTarget, opts);
+        physicalEntry(canonicalTarget);
         native.push(canonicalTarget);
       }
       const paths = [...new Set([...native, ...converted])];

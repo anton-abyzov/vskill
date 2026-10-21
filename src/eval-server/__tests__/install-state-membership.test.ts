@@ -1,7 +1,7 @@
 // 0850 F6: use real lockfiles, skill files, and remove handlers in isolated
 // fixtures. No installed user skills or real home directory are accessed.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync, linkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync, linkSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -709,6 +709,206 @@ describe.each(["project", "user"] as const)("0850 entry-level removal in %s scop
     expect(result.skipped[0].sharedWith).toContain("cline");
     expect(existsSync(join(root(scope), ".agents/skills/foo/SKILL.md"))).toBe(true);
     expect(JSON.stringify(readLockfile(lockDir(scope)))).toBe(receipt);
+  });
+
+});
+
+// These tests use the volume's actual lookup behavior. On sensitive volumes,
+// the alternate spelling is a separate physical source and must stay separate.
+describe.each(["project", "user"] as const)("0850 physical entry identity in %s scope", (scope) => {
+  function alias(path: string, target: string, directory = false) {
+    mkdirSync(join(root(scope), path, ".."), { recursive: true });
+    symlinkSync(target, join(root(scope), path), directory ? "dir" : "file");
+  }
+  function canonical() {
+    lock(scope, ["codex", "cline"]);
+    file(scope, ".agents/skills/foo/SKILL.md");
+    file(scope, ".agents/skills/bar/SKILL.md");
+  }
+  async function preserved(ids: string[], result: any) {
+    expect(result.removed).toEqual([]);
+    expect(result.skipped.length + result.errors.length).toBeGreaterThan(0);
+    expect(readFileSync(join(root(scope), ".agents/skills/foo/SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect(readFileSync(join(root(scope), ".agents/skills/bar/SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect(readLockfile(lockDir(scope))?.skills.foo).toBeDefined();
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(ids);
+  }
+
+  it.each([".AGENTS/SKILLS/foo", ".agents/skills/FOO"])("honors native directory lookup equivalence for %s", async (target) => {
+    canonical();
+    const equivalent = existsSync(join(root(scope), target, "SKILL.md"));
+    if (!equivalent) file(scope, `${target}/SKILL.md`);
+    alias(".cline/skills/foo", join(root(scope), target), true);
+    const result = await remove(scope, ["codex"]);
+    if (equivalent) await preserved(["codex", "cline"], result);
+    else {
+      expect(result.errors).toEqual([]);
+      expect(result.skipped).toEqual([]);
+      expect(existsSync(join(root(scope), ".agents/skills/foo"))).toBe(false);
+      expect(readFileSync(join(root(scope), target, "SKILL.md"), "utf8")).toContain("Fixture only.");
+      expect((await state()).scopes[scope].installedAgentTools).toEqual(["cline"]);
+    }
+  });
+
+  it("protects a physical native owner reached through differently spelled parent and leaf names", async () => {
+    lock(scope, ["codex", "cline"]);
+    file(scope, ".cline/skills/foo/SKILL.md");
+    const target = ".CLINE/SKILLS/FOO";
+    const equivalent = existsSync(join(root(scope), target, "SKILL.md"));
+    if (!equivalent) file(scope, `${target}/SKILL.md`);
+    alias(".agents/skills/foo", join(root(scope), target), true);
+    const result = await remove(scope, ["cline"]);
+    expect(readFileSync(join(root(scope), target, "SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(equivalent ? ["codex", "cline"] : ["codex"]);
+    if (equivalent) expect(result.removed).toEqual([]);
+    else expect(result.skipped).toEqual([]);
+  });
+
+  it("honors converted file lookup equivalence without conflating distinct case-sensitive names", async () => {
+    lock(scope, ["continue", "cline"]);
+    file(scope, ".continue/rules/foo.md");
+    file(scope, ".continue/rules/bar.md");
+    const alternate = ".continue/rules/FOO.MD";
+    const equivalent = existsSync(join(root(scope), alternate));
+    if (!equivalent) file(scope, alternate);
+    alias(".cline/skills/foo/SKILL.md", join(root(scope), alternate));
+    const result = await remove(scope, ["continue"]);
+    expect(readFileSync(join(root(scope), alternate), "utf8")).toContain("Fixture only.");
+    expect(existsSync(join(root(scope), ".continue/rules/bar.md"))).toBe(true);
+    expect(readLockfile(lockDir(scope))?.skills.foo).toBeDefined();
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(equivalent ? ["continue", "cline"] : ["cline"]);
+    if (equivalent) expect(result.removed).toEqual([]);
+    else expect(result.skipped).toEqual([]);
+  });
+
+  it.each(["directory", "file"] as const)("protects a differently spelled intermediate %s link, retaining its own entry identity", async (kind) => {
+    canonical();
+    lock(scope, ["codex", "cline", "continue"]);
+    file(scope, ".cline/skills/foo/SKILL.md");
+    // Use another skill leaf so no pre-existing canonical entry is replaced.
+    const installed = kind === "directory" ? ".agents/skills/alias" : ".agents/skills/foo/alias.md";
+    const target = join(root(scope), kind === "directory" ? ".cline/skills/foo" : ".cline/skills/foo/SKILL.md");
+    // The file alias is inside the removed physical directory; the directory
+    // alias is a separate canonical entry removed using its registry spelling.
+    if (kind === "file") {
+      alias(installed, target);
+      const alternate = installed.replace("alias.md", "ALIAS.MD");
+      const equivalent = existsSync(join(root(scope), alternate));
+      if (!equivalent) alias(alternate, target);
+      alias(".continue/rules/foo.md", join(root(scope), alternate));
+      await preserved(["codex", "cline", "continue"], await remove(scope, ["codex"]));
+    } else {
+      // Cline reads a case alias of a link in the canonical physical subtree.
+      alias(".agents/skills/foo/Bridge", target, true);
+      const alternate = ".agents/skills/foo/BRIDGE";
+      if (!existsSync(join(root(scope), alternate))) alias(alternate, target, true);
+      alias(".continue/rules/foo.md", join(root(scope), alternate, "SKILL.md"));
+      await preserved(["codex", "cline", "continue"], await remove(scope, ["codex"]));
+    }
+  });
+
+  it("protects a case alias of the canonical directory link itself", async () => {
+    lock(scope, ["codex", "cline", "continue"]);
+    file(scope, ".cline/skills/foo/SKILL.md");
+    alias(".agents/skills/foo", join(root(scope), ".cline/skills/foo"), true);
+    const alternate = ".agents/skills/FOO";
+    const equivalent = existsSync(join(root(scope), alternate));
+    if (!equivalent) alias(alternate, join(root(scope), ".cline/skills/foo"), true);
+    alias(".continue/rules/foo.md", join(root(scope), alternate, "SKILL.md"));
+    const result = await remove(scope, ["codex"]);
+    expect(readFileSync(join(root(scope), ".cline/skills/foo/SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(equivalent ? ["codex", "cline", "continue"] : ["cline", "continue"]);
+    if (equivalent) expect(result.removed).toEqual([]);
+    else expect(result.skipped).toEqual([]);
+  });
+
+  it("safely unlinks a differently spelled canonical leaf without deleting its physical target", async () => {
+    lock(scope, ["codex", "cline"]);
+    file(scope, ".cline/skills/foo/SKILL.md");
+    alias(".agents/skills/FOO", join(root(scope), ".cline/skills/foo"), true);
+    const equivalent = existsSync(join(root(scope), ".agents/skills/foo"));
+    if (!equivalent) alias(".agents/skills/foo", join(root(scope), ".cline/skills/foo"), true);
+    const result = await remove(scope, ["codex"]);
+    expect(result.errors).toEqual([]);
+    expect(result.skipped).toEqual([]);
+    expect(existsSync(join(root(scope), ".agents/skills/foo"))).toBe(false);
+    expect(existsSync(join(root(scope), ".agents/skills/FOO"))).toBe(!equivalent);
+    expect(readFileSync(join(root(scope), ".cline/skills/foo/SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["cline"]);
+  });
+
+  it("honors Unicode-normalized root aliases according to the fixture filesystem", async () => {
+    const unicodeRoot = join(fixture, "caf\u00e9");
+    mkdirSync(join(unicodeRoot, ".agents"), { recursive: true });
+    if (scope === "project") project = unicodeRoot;
+    else mocks.home = unicodeRoot;
+    canonical();
+    const target = join(unicodeRoot.normalize("NFD"), ".agents/skills/foo");
+    const equivalent = existsSync(join(target, "SKILL.md"));
+    if (!equivalent) {
+      mkdirSync(target, { recursive: true });
+      writeFileSync(join(target, "SKILL.md"), "DISTINCT NORMALIZATION");
+    }
+    alias(".cline/skills/foo", target, true);
+    const result = await remove(scope, ["codex"]);
+    if (equivalent) await preserved(["codex", "cline"], result);
+    else {
+      expect(result.errors).toEqual([]);
+      expect(result.skipped).toEqual([]);
+      expect(readFileSync(join(target, "SKILL.md"), "utf8")).toBe("DISTINCT NORMALIZATION");
+      expect((await state()).scopes[scope].installedAgentTools).toEqual(["cline"]);
+    }
+  });
+  it("protects a differently spelled converted link entry before following its outside target", async () => {
+    lock(scope, ["continue", "cline"]);
+    file(scope, "shared/foo.md");
+    alias(".continue/rules/foo.md", join(root(scope), "shared/foo.md"));
+    const alternate = ".continue/rules/FOO.MD";
+    const equivalent = existsSync(join(root(scope), alternate));
+    if (!equivalent) alias(alternate, join(root(scope), "shared/foo.md"));
+    alias(".cline/skills/foo/SKILL.md", join(root(scope), alternate));
+    const result = await remove(scope, ["continue"]);
+    expect(readFileSync(join(root(scope), "shared/foo.md"), "utf8")).toContain("Fixture only.");
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(equivalent ? ["continue", "cline"] : ["cline"]);
+    if (equivalent) expect(result.removed).toEqual([]);
+    else expect(result.skipped).toEqual([]);
+  });
+
+  it("keeps distinct hard-linked reader entries independent", async () => {
+    lock(scope, ["continue", "cline"]);
+    file(scope, "shared/foo.md");
+    alias(".continue/rules/foo.md", join(root(scope), "shared/foo.md"));
+    mkdirSync(join(root(scope), ".cline/skills/foo"), { recursive: true });
+    linkSync(join(root(scope), ".continue/rules/foo.md"), join(root(scope), ".cline/skills/foo/SKILL.md"));
+    const result = await remove(scope, ["continue"]);
+    expect(result.errors).toEqual([]);
+    expect(result.skipped).toEqual([]);
+    expect(existsSync(join(root(scope), ".continue/rules/foo.md"))).toBe(false);
+    expect(readFileSync(join(root(scope), ".cline/skills/foo/SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["cline"]);
+  });
+
+  it("preserves neighboring hard links with or without platform symlink following", async () => {
+    lock(scope, ["continue"]);
+    file(scope, "shared/foo.md");
+    alias(".continue/rules/FOO.MD", join(root(scope), "shared/foo.md"));
+    linkSync(join(root(scope), ".continue/rules/FOO.MD"), join(root(scope), ".continue/rules/neighbor.md"));
+    const equivalent = existsSync(join(root(scope), ".continue/rules/foo.md"));
+    const hardLinkedSymlink = lstatSync(join(root(scope), ".continue/rules/neighbor.md")).isSymbolicLink();
+    if (!equivalent) alias(".continue/rules/foo.md", join(root(scope), "shared/foo.md"));
+    const result = await remove(scope, ["continue"]);
+    expect(readFileSync(join(root(scope), ".continue/rules/neighbor.md"), "utf8")).toContain("Fixture only.");
+    if (equivalent && hardLinkedSymlink) {
+      expect(readFileSync(join(root(scope), ".continue/rules/FOO.MD"), "utf8")).toContain("Fixture only.");
+      expect(result.removed).toEqual([]);
+      expect(result.errors[0].message).toContain("Cannot identify link entry safely");
+      expect(readLockfile(lockDir(scope))?.skills.foo).toBeDefined();
+      expect((await state()).scopes[scope].installedAgentTools).toEqual(["continue"]);
+    } else {
+      expect(result.errors).toEqual([]);
+      expect(result.skipped).toEqual([]);
+      expect((await state()).scopes[scope].installed).toBe(false);
+    }
   });
 
 });

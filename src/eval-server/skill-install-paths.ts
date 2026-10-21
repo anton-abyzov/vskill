@@ -1,5 +1,5 @@
-import { lstatSync, statSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep, dirname } from "node:path";
+import { lstatSync, statSync, readlinkSync, realpathSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep, dirname, basename, parse } from "node:path";
 import { homedir } from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { agentGlobalInstallDirs } from "../agents/global-dirs.js";
@@ -87,4 +87,53 @@ export function effectiveSkillFiles(agent: AgentDefinition, slug: string, opts: 
 /** Shared by status and receipt retention, including partially remaining output. */
 export function hasSkillFiles(agent: AgentDefinition, slug: string, opts: InstallOptions): boolean {
   return effectiveSkillFiles(agent, slug, opts).some(isSkillFile);
+}
+
+export function pathWithin(path: string, root: string): boolean {
+  const rel = relative(root, path);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+/** Entries a successful read needs: traversed directories/links and the file.
+ * realpath alone loses intermediate links, so cannot describe unlink effects.
+ * Process link targets component by component: `link/..` means the target's
+ * parent, and must not be normalized before following `link`.
+ */
+export function skillReadEntries(path: string): string[] | null {
+  let current = parse(resolve(path)).root;
+  let pending = resolve(path).slice(current.length).split(sep);
+  const entries: string[] = [];
+  let links = 0;
+  try {
+    while (pending.length > 0) {
+      const part = pending.shift()!;
+      if (!part || part === ".") continue;
+      if (part === "..") { current = dirname(current); continue; }
+      const next = join(current, part);
+      const stat = lstatSync(next);
+      entries.push(next);
+      if (!stat.isSymbolicLink()) {
+        if (pending.length > 0 && !stat.isDirectory()) return null;
+        current = next;
+        continue;
+      }
+      if (++links > 40) throw new Error(`Too many links while resolving ${path}`);
+      const target = readlinkSync(next);
+      if (isAbsolute(target)) current = parse(target).root;
+      pending = [...target.slice(isAbsolute(target) ? current.length : 0).split(sep), ...pending];
+    }
+    return statSync(current).isFile() ? entries : null;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw error;
+  }
+}
+
+/** A leaf link removes only its entry. A physical directory removes contained
+ * entries, including links inside it, but never those links' outside targets. */
+export function removalAffects(path: string, readEntries: readonly string[]): boolean {
+  const entry = join(realpathSync(dirname(path)), basename(path));
+  const directory = lstatSync(path).isDirectory();
+  return readEntries.some((read) => directory ? pathWithin(read, entry) : read === entry);
 }

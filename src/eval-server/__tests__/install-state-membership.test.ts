@@ -1,7 +1,7 @@
 // 0850 F6: use real lockfiles, skill files, and remove handlers in isolated
 // fixtures. No installed user skills or real home directory are accessed.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync, linkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -482,4 +482,233 @@ describe.each(["project", "user"] as const)("0850 canonical dependencies in %s s
     expect(readLockfile(lockDir(scope))?.skills.foo).toBeUndefined();
     expect((await state()).scopes[scope].installed).toBe(false);
   });
+});
+
+// Exercise the deletion API, refreshed status and receipts together: a reader
+// depends on directory entries in its path, not just its resolved file identity.
+describe.each(["project", "user"] as const)("0850 entry-level removal in %s scope", (scope) => {
+  function alias(path: string, target: string, directory = false) {
+    mkdirSync(join(root(scope), path, ".."), { recursive: true });
+    symlinkSync(target, join(root(scope), path), directory ? "dir" : "file");
+  }
+  function reverseCanonical(kind: "directory" | "file") {
+    lock(scope, ["codex", "cline"]);
+    file(scope, ".cline/skills/foo/SKILL.md");
+    file(scope, ".cline/skills/bar/SKILL.md");
+    alias(kind === "directory" ? ".agents/skills/foo" : ".agents/skills/foo/SKILL.md",
+      join(root(scope), kind === "directory" ? ".cline/skills/foo" : ".cline/skills/foo/SKILL.md"), kind === "directory");
+  }
+
+  it.each(["directory", "file"] as const)("unlinks a canonical %s alias while preserving its unselected physical owner", async (kind) => {
+    reverseCanonical(kind);
+    const receipt = readLockfile(lockDir(scope))?.skills.foo;
+    const result = await remove(scope, ["codex"]);
+    expect(result.errors).toEqual([]);
+    expect(result.skipped).toEqual([]);
+    expect(existsSync(join(root(scope), ".agents/skills/foo"))).toBe(false);
+    expect(readFileSync(join(root(scope), ".cline/skills/foo/SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect(existsSync(join(root(scope), ".cline/skills/bar/SKILL.md"))).toBe(true);
+    expect(readLockfile(lockDir(scope))?.skills.foo).toEqual(receipt);
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["cline"]);
+  });
+
+  it.each(["directory", "file"] as const)("refuses deletion of the physical owner of an unselected canonical %s alias", async (kind) => {
+    reverseCanonical(kind);
+    const receipt = JSON.stringify(readLockfile(lockDir(scope)));
+    const result = await remove(scope, ["cline"]);
+    expect(result.removed).toEqual([]);
+    expect(result.skipped).toContainEqual(expect.objectContaining({ agentId: "cline", sharedWith: ["codex"] }));
+    expect(existsSync(join(root(scope), ".cline/skills/foo/SKILL.md"))).toBe(true);
+    expect(existsSync(join(root(scope), ".cline/skills/bar/SKILL.md"))).toBe(true);
+    expect(JSON.stringify(readLockfile(lockDir(scope)))).toBe(receipt);
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["codex", "cline"]);
+  });
+
+  for (const kind of ["directory", "file"] as const) {
+    it.each([["cline", "codex"], ["codex", "cline"], []])(`removes a selected canonical ${kind} alias before its physical owner, independent of selection order (%j)`, async (...ids) => {
+      reverseCanonical(kind);
+      const result = await remove(scope, ids, ids.length === 0);
+      expect(result.errors).toEqual([]);
+      expect(result.skipped).toEqual([]);
+      expect(existsSync(join(root(scope), ".agents/skills/foo"))).toBe(false);
+      expect(existsSync(join(root(scope), ".cline/skills/foo"))).toBe(false);
+      expect(existsSync(join(root(scope), ".cline/skills/bar/SKILL.md"))).toBe(true);
+      expect(readLockfile(lockDir(scope))?.skills.foo).toBeUndefined();
+      expect((await state()).scopes[scope].installed).toBe(false);
+    });
+  }
+
+  it.each([false, true])("retains the physical owner when its selected canonical unlink fails (all=%s)", async (all) => {
+    reverseCanonical("directory");
+    mocks.failUnlink = join(root(scope), ".agents/skills/foo");
+    const result = await remove(scope, ["cline", "codex"], all);
+    expect(result.removed).toEqual([]);
+    expect(result.errors.some((row: { message: string }) => row.message === "fixture unlink failure")).toBe(true);
+    expect(readFileSync(join(root(scope), ".cline/skills/foo/SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect(readLockfile(lockDir(scope))?.skills.foo).toBeDefined();
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["codex", "cline"]);
+  });
+
+  it("protects an intermediate directory link even when the final file is outside the removed subtree", async () => {
+    lock(scope, ["codex", "cline"]);
+    file(scope, "shared/foo/SKILL.md");
+    alias(".agents/skills/foo", join(root(scope), "shared/foo"), true);
+    alias(".cline/skills/foo", "../../.agents/skills/foo", true);
+    const result = await remove(scope, ["codex"]);
+    expect(result.removed).toEqual([]);
+    expect(result.skipped[0].sharedWith).toContain("cline");
+    expect(existsSync(join(root(scope), ".agents/skills/foo/SKILL.md"))).toBe(true);
+    expect(readFileSync(join(root(scope), "shared/foo/SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["codex", "cline"]);
+  });
+
+  it("protects an intermediate SKILL.md link before following it outside the removed directory", async () => {
+    lock(scope, ["codex", "cline"]);
+    file(scope, "shared/foo.md");
+    alias(".agents/skills/foo/SKILL.md", "../../../shared/foo.md");
+    alias(".cline/skills/foo/SKILL.md", "../../../.agents/skills/foo/SKILL.md");
+    const result = await remove(scope, ["codex"]);
+    expect(result.removed).toEqual([]);
+    expect(result.skipped[0].sharedWith).toContain("cline");
+    expect(readFileSync(join(root(scope), "shared/foo.md"), "utf8")).toContain("Fixture only.");
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["codex", "cline"]);
+  });
+
+  it("protects an intermediate resource link contained by a recursively removed directory", async () => {
+    lock(scope, ["codex", "continue"]);
+    file(scope, ".agents/skills/foo/SKILL.md");
+    file(scope, "shared/rule.md");
+    alias(".agents/skills/foo/resource.md", "../../../shared/rule.md");
+    alias(".continue/rules/foo.md", "../../.agents/skills/foo/resource.md");
+    const result = await remove(scope, ["codex"]);
+    expect(result.removed).toEqual([]);
+    expect(result.skipped[0].sharedWith).toContain("continue");
+    expect(existsSync(join(root(scope), ".agents/skills/foo/resource.md"))).toBe(true);
+    expect(readLockfile(lockDir(scope))?.skills.foo).toBeDefined();
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["codex", "continue"]);
+  });
+
+  it.each([
+    ["windsurf", ".windsurf/rules/foo.md", ".codeium/windsurf/rules/foo.md"],
+    ["cursor", ".cursor/rules/foo.mdc", ".cursor/rules/foo.mdc"],
+    ["github-copilot-ext", ".github/instructions/foo.instructions.md", ".copilot/instructions/foo.instructions.md"],
+    ["continue", ".continue/rules/foo.md", ".continue/rules/foo.md"],
+    ["junie", ".junie/rules/foo.md", ".junie/rules/foo.md"],
+    ["kiro-cli", ".kiro/steering/foo.md", ".kiro/steering/foo.md"],
+    ["trae", ".trae/foo.md", ".trae/foo.md"],
+    ["aider", ".aider/conventions/foo.md", ".aider/conventions/foo.md"],
+  ])("protects %s's physical converted output while another native tool reads it", async (agent, local, global) => {
+    const path = scope === "project" ? local : global;
+    lock(scope, [agent, "cline"]);
+    file(scope, path);
+    file(scope, path.replace("foo", "bar"));
+    alias(".cline/skills/foo/SKILL.md", join(root(scope), path));
+    const result = await remove(scope, [agent]);
+    expect(result.removed).toEqual([]);
+    expect(result.skipped[0].sharedWith).toContain("cline");
+    expect(existsSync(join(root(scope), path))).toBe(true);
+    expect(existsSync(join(root(scope), path.replace("foo", "bar")))).toBe(true);
+    expect(readLockfile(lockDir(scope))?.skills.foo).toBeDefined();
+    expect((await state()).scopes[scope].installedAgentTools).toEqual([agent, "cline"]);
+  });
+
+  it.each([false, true])("protects the other scope's reader even for an explicit all in this scope (all=%s)", async (all) => {
+    const other = scope === "project" ? "user" : "project";
+    lock(scope, ["cline"]);
+    lock(other, ["codex"]);
+    file(scope, ".cline/skills/foo/SKILL.md");
+    file(scope, ".cline/skills/bar/SKILL.md");
+    mkdirSync(join(root(other), ".agents/skills"), { recursive: true });
+    symlinkSync(join(root(scope), ".cline/skills/foo"), join(root(other), ".agents/skills/foo"), "dir");
+    const receipt = JSON.stringify(readLockfile(lockDir(other)));
+    const result = await remove(scope, ["cline"], all);
+    expect(result.removed).toEqual([]);
+    expect(result.errors.length + result.skipped.length).toBeGreaterThan(0);
+    expect(existsSync(join(root(scope), ".cline/skills/foo/SKILL.md"))).toBe(true);
+    expect(existsSync(join(root(scope), ".cline/skills/bar/SKILL.md"))).toBe(true);
+    expect(JSON.stringify(readLockfile(lockDir(other)))).toBe(receipt);
+    expect((await state()).scopes[other].installedAgentTools).toEqual(["codex"]);
+  });
+  it("protects an observed extra reader without a receipt when no registry tool owns its source", async () => {
+    lock(scope, ["codex"]);
+    file(scope, ".agents/skills/foo/SKILL.md");
+    const extra = scope === "project" ? ".agent/skills/foo" : ".gemini/antigravity-cli/skills/foo";
+    alias(extra, join(root(scope), ".agents/skills/foo"), true);
+    const result = await remove(scope, ["codex"]);
+    expect(result.removed).toEqual([]);
+    expect(result.skipped[0].sharedWith).toContain("antigravity");
+    expect(existsSync(join(root(scope), extra, "SKILL.md"))).toBe(true);
+    expect(readLockfile(lockDir(scope))?.skills.foo).toBeDefined();
+  });
+
+  it("preserves a recorded additional reader when removing its physical native owner", async () => {
+    lock(scope, ["claude-code", "cursor"]);
+    file(scope, ".claude/skills/foo/SKILL.md");
+    const result = await remove(scope, ["claude-code"]);
+    expect(result.removed).toEqual([]);
+    expect(result.skipped[0].sharedWith).toContain("cursor");
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["claude-code", "cursor"]);
+  });
+
+  it("unlinks one of two independent aliases without treating their common target as a dependency", async () => {
+    lock(scope, ["codex", "cline"]);
+    file(scope, "shared/foo/SKILL.md");
+    alias(".agents/skills/foo", join(root(scope), "shared/foo"), true);
+    alias(".cline/skills/foo", join(root(scope), "shared/foo"), true);
+    const result = await remove(scope, ["cline"]);
+    expect(result.errors).toEqual([]);
+    expect(result.skipped).toEqual([]);
+    expect(readFileSync(join(root(scope), "shared/foo/SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["codex"]);
+  });
+
+  it("does not confuse two hard-linked files with the same directory entry", async () => {
+    lock(scope, ["codex", "cline"]);
+    file(scope, ".agents/skills/foo/SKILL.md");
+    mkdirSync(join(root(scope), ".cline/skills/foo"), { recursive: true });
+    linkSync(join(root(scope), ".agents/skills/foo/SKILL.md"), join(root(scope), ".cline/skills/foo/SKILL.md"));
+    const result = await remove(scope, ["codex"]);
+    expect(result.errors).toEqual([]);
+    expect(result.skipped).toEqual([]);
+    expect(readFileSync(join(root(scope), ".cline/skills/foo/SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["cline"]);
+  });
+
+  it("keeps an intermediate directory needed before a parent traversal in a relative link", async () => {
+    lock(scope, ["codex", "cline"]);
+    file(scope, ".agents/skills/foo/SKILL.md");
+    file(scope, ".agents/skills/foo-other/SKILL.md");
+    alias(".cline/skills/foo/SKILL.md", "../../../.agents/skills/foo/../foo-other/SKILL.md");
+    const result = await remove(scope, ["codex"]);
+    expect(result.removed).toEqual([]);
+    expect(result.skipped[0].sharedWith).toContain("cline");
+    expect(existsSync(join(root(scope), ".agents/skills/foo/SKILL.md"))).toBe(true);
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["codex", "cline"]);
+  });
+
+  it("follows a link before interpreting the parent segment of its target", async () => {
+    lock(scope, ["codex", "cline"]);
+    file(scope, ".agents/skills/foo/SKILL.md");
+    mkdirSync(join(root(scope), ".agents/skills/foo/child"));
+    alias("bridge", join(root(scope), ".agents/skills/foo/child"), true);
+    alias(".cline/skills/foo/SKILL.md", "../../../bridge/../SKILL.md");
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["codex", "cline"]);
+    const result = await remove(scope, ["codex"]);
+    expect(result.removed).toEqual([]);
+    expect(result.skipped[0].sharedWith).toContain("cline");
+    expect(existsSync(join(root(scope), ".cline/skills/foo/SKILL.md"))).toBe(true);
+  });
+
+  it("fails closed for a cyclic reader and preserves the selected files and receipt", async () => {
+    lock(scope, ["codex", "cline"]);
+    file(scope, ".agents/skills/foo/SKILL.md");
+    alias(".cline/skills/foo", "foo", true);
+    const receipt = JSON.stringify(readLockfile(lockDir(scope)));
+    const result = await remove(scope, ["codex"]);
+    expect(result.removed).toEqual([]);
+    expect(result.skipped[0].sharedWith).toContain("cline");
+    expect(existsSync(join(root(scope), ".agents/skills/foo/SKILL.md"))).toBe(true);
+    expect(JSON.stringify(readLockfile(lockDir(scope)))).toBe(receipt);
+  });
+
 });

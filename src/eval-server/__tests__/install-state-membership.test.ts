@@ -5,7 +5,14 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const mocks = vi.hoisted(() => ({ home: "", sendJson: vi.fn(), readBody: vi.fn() }));
+const mocks = vi.hoisted(() => ({ home: "", failUnlink: "", sendJson: vi.fn(), readBody: vi.fn() }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, unlinkSync: (path: import("node:fs").PathLike) => {
+    if (String(path) === mocks.failUnlink) throw new Error("fixture unlink failure");
+    actual.unlinkSync(path);
+  } };
+});
 vi.mock("node:os", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:os")>();
   const homedir = () => mocks.home;
@@ -29,6 +36,7 @@ let project: string;
 const handlers: Record<string, (...args: any[]) => Promise<void>> = {};
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.failUnlink = "";
   fixture = mkdtempSync(join(tmpdir(), "vskill-0850-membership-"));
   project = join(fixture, "project");
   mocks.home = join(fixture, "home");
@@ -237,6 +245,27 @@ describe.each(["project", "user"] as const)("0850 per-agent membership in %s sco
     expect(existsSync(join(root(scope), "shared-rules/foo.md"))).toBe(true);
     expect((await state()).scopes[scope].installed).toBe(false);
   });
+
+  it.each([false, true])("never follows a parent alias into the other scope (all=%s)", async (all) => {
+    const other = scope === "project" ? "user" : "project";
+    lock(scope, ["codex", "cline"]);
+    file(scope, ".agents/skills/foo/SKILL.md");
+    file(scope, ".agents/skills/bar/SKILL.md");
+    lock(other, ["codex"]);
+    file(other, ".agents/skills/foo/SKILL.md");
+    file(other, ".agents/skills/bar/SKILL.md");
+    const otherReceipt = JSON.stringify(readLockfile(lockDir(other)));
+    mkdirSync(join(root(scope), ".cline"));
+    symlinkSync(join(root(other), ".agents/skills"), join(root(scope), ".cline/skills"), "dir");
+    const result = await remove(scope, ["codex", "cline"], all);
+    expect(result.errors).toContainEqual(expect.objectContaining({ agentId: "cline", message: expect.stringContaining("linked parent") }));
+    expect(readFileSync(join(root(other), ".agents/skills/foo/SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect(readFileSync(join(root(other), ".agents/skills/bar/SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect(JSON.stringify(readLockfile(lockDir(other)))).toBe(otherReceipt);
+    expect((await state()).scopes[other].installedAgentTools).toEqual(["codex"]);
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["cline"]);
+    expect(readLockfile(lockDir(scope))?.skills.foo).toBeDefined();
+  });
 });
 
 it("keeps user and project file evidence separate", async () => {
@@ -350,4 +379,107 @@ it.each([false, true])("0850 safety review refuses an unsafe Antigravity alterna
   expect(existsSync(join(mocks.home, ".gemini/config/skills/foo/SKILL.md"))).toBe(true);
   expect(readLockfile(lockDir("user"))?.skills.foo).toBeDefined();
   expect((await state()).scopes.user.installedAgentTools).toEqual(["antigravity"]);
+});
+
+describe.each(["project", "user"] as const)("0850 canonical dependencies in %s scope", (scope) => {
+  function alias(path: string, target: string, directory = false) {
+    mkdirSync(join(root(scope), path, ".."), { recursive: true });
+    symlinkSync(join(root(scope), target), join(root(scope), path), directory ? "dir" : "file");
+  }
+  function canonical(agents: string[]) {
+    lock(scope, ["codex", ...agents]);
+    file(scope, ".agents/skills/foo/SKILL.md");
+    file(scope, ".agents/skills/bar/SKILL.md");
+  }
+  async function preserved(agents: string[], result: any) {
+    expect(result.removed).toEqual([]);
+    expect(result.errors.length > 0 || result.skipped.length > 0).toBe(true);
+    expect(readFileSync(join(root(scope), ".agents/skills/foo/SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect(readFileSync(join(root(scope), ".agents/skills/bar/SKILL.md"), "utf8")).toContain("Fixture only.");
+    expect(readLockfile(lockDir(scope))?.skills.foo).toBeDefined();
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["codex", ...agents]);
+  }
+
+  it.each([
+    ["cline", ".cline/skills", ".agents/skills", true],
+    ["cline", ".cline/skills/foo", ".agents/skills/foo", true],
+    ["cline", ".cline/skills/foo/SKILL.md", ".agents/skills/foo/SKILL.md", false],
+    ["continue", ".continue/rules/foo.md", ".agents/skills/foo/SKILL.md", false],
+  ] as const)("protects an unselected %s reader through %s", async (agent, path, target, directory) => {
+    canonical([agent]);
+    alias(path, target, directory);
+    expect((await state()).scopes[scope].installedAgentTools).toEqual(["codex", agent]);
+    const result = await remove(scope, ["codex"]);
+    expect(result.skipped[0].sharedWith).toContain(agent);
+    await preserved([agent], result);
+  });
+
+  it("protects a converted reader of another file within the canonical skill root", async () => {
+    canonical(["continue"]);
+    file(scope, ".agents/skills/foo/rules.md");
+    alias(".continue/rules/foo.md", ".agents/skills/foo/rules.md");
+    await preserved(["continue"], await remove(scope, ["codex"]));
+  });
+
+  it.each([false, true])("rechecks a selected reader after its unlink fails (all=%s)", async (all) => {
+    canonical(["cursor"]);
+    alias(".cursor/skills/foo", ".agents/skills/foo", true);
+    mocks.failUnlink = join(root(scope), ".cursor/skills/foo");
+    const result = await remove(scope, ["codex", "cursor"], all);
+    expect(result.errors).toContainEqual({ agentId: "cursor", message: "fixture unlink failure" });
+    await preserved(["cursor"], result);
+  });
+
+  it.each([false, true])("a selected reader refused for a linked parent still protects canonical (all=%s)", async (all) => {
+    canonical(["cline"]);
+    alias(".cline/skills", ".agents/skills", true);
+    const result = await remove(scope, ["codex", "cline"], all);
+    expect(result.errors).toContainEqual(expect.objectContaining({ agentId: "cline", message: expect.stringContaining("linked parent") }));
+    await preserved(["cline"], result);
+  });
+
+  it.each([false, true])("a selected converted reader refused for shared configuration still protects canonical (all=%s)", async (all) => {
+    canonical(["aider"]);
+    alias(".aider/conventions/foo.md", ".agents/skills/foo/SKILL.md");
+    file(scope, ".aider.conf.yml");
+    const result = await remove(scope, ["codex", "aider"], all);
+    expect(result.errors).toContainEqual(expect.objectContaining({ agentId: "aider", message: expect.stringContaining("shared configuration") }));
+    await preserved(["aider"], result);
+  });
+
+  it.each([false, true])("a selected shared reader whose own removal is unsafe still protects canonical (all=%s)", async (all) => {
+    canonical(["cursor"]);
+    alias(".cursor/skills", ".agents/skills", true);
+    const result = await remove(scope, ["codex", "cursor"], all);
+    expect(result.errors).toContainEqual(expect.objectContaining({ agentId: "cursor", message: expect.stringContaining("linked parent") }));
+    await preserved(["cursor"], result);
+  });
+
+  it.each([false, true])("remaining extra read aliases protect canonical even when the reader is selected (all=%s)", async (all) => {
+    canonical(["antigravity"]);
+    alias(scope === "project" ? ".agent/skills" : ".gemini/antigravity-cli/skills", ".agents/skills", true);
+    await preserved(["antigravity"], await remove(scope, ["codex", "antigravity"], all));
+  });
+
+  it.each([
+    ["cline", ".cline/skills/foo", true, false],
+    ["cline", ".cline/skills/foo", true, true],
+    ["cline", ".cline/skills/foo/SKILL.md", false, false],
+    ["cline", ".cline/skills/foo/SKILL.md", false, true],
+    ["continue", ".continue/rules/foo.md", false, false],
+    ["continue", ".continue/rules/foo.md", false, true],
+    ["cursor", ".cursor/skills/foo", true, false],
+    ["cursor", ".cursor/skills/foo", true, true],
+  ] as const)("removes selected safe %s alias %s before canonical (directory=%s, all=%s)", async (agent, path, directory, all) => {
+    canonical([agent]);
+    alias(path, directory ? ".agents/skills/foo" : ".agents/skills/foo/SKILL.md", directory);
+    const result = await remove(scope, ["codex", agent], all);
+    expect(result.errors).toEqual([]);
+    expect(result.skipped).toEqual([]);
+    expect(existsSync(join(root(scope), ".agents/skills/foo"))).toBe(false);
+    expect(existsSync(join(root(scope), path))).toBe(false);
+    expect(existsSync(join(root(scope), ".agents/skills/bar/SKILL.md"))).toBe(true);
+    expect(readLockfile(lockDir(scope))?.skills.foo).toBeUndefined();
+    expect((await state()).scopes[scope].installed).toBe(false);
+  });
 });

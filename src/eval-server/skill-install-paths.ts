@@ -76,8 +76,15 @@ export function convertedSkillPaths(agent: AgentDefinition, slug: string, opts: 
   return { owned, sharedConfig };
 }
 
+/** One read-path set for status, canonical dependencies, and receipt retention. */
+export function effectiveSkillFiles(agent: AgentDefinition, slug: string, opts: InstallOptions): string[] {
+  return [...new Set([
+    ...effectiveSkillDirs(agent, opts).map((dir) => join(dir, slug, "SKILL.md")),
+    ...convertedSkillPaths(agent, slug, opts).owned,
+  ])];
+}
+
 /** Shared by status and receipt retention, including partially remaining output. */
 export function hasSkillFiles(agent: AgentDefinition, slug: string, opts: InstallOptions): boolean {
-  if (effectiveSkillDirs(agent, opts).some((dir) => isSkillFile(join(dir, slug, "SKILL.md")))) return true;
-  return convertedSkillPaths(agent, slug, opts).owned.some(isSkillFile);
+  return effectiveSkillFiles(agent, slug, opts).some(isSkillFile);
 }

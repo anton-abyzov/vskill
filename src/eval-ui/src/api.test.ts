@@ -12,6 +12,14 @@ beforeEach(() => {
   mockFetch.mockReset();
 });
 
+it("loads the existing skill authoring context without sending mutations", async () => {
+  const context = { name: "native", version: "2.0.0", engine: "anthropic-skill-creator" };
+  mockFetch.mockResolvedValue(okJson(context));
+  expect(await api.getSkillAuthoringContext("fixture", "native")).toEqual(context);
+  expect(mockFetch.mock.calls[0][0]).toBe("/api/skills/fixture/native/authoring");
+  expect(mockFetch.mock.calls[0][1]?.method).not.toBe("POST");
+});
+
 describe("api.getHistory", () => {
   it("appends all filter params to URL", async () => {
     mockFetch.mockResolvedValue(okJson());

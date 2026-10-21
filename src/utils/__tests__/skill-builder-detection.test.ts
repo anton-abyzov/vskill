@@ -197,3 +197,16 @@ describe("0786 — marketplace catalog is NOT installation", () => {
     expect(findSkillBuilderPath()).toBe(cacheDir);
   });
 });
+
+
+describe("0734 metadata version acceptance", () => {
+  it.each(["1.2.3-beta.1", "1.2.3+build.4"])("reads metadata.version %s", (version) => {
+    const file = installInSource(projectRoot);
+    writeFileSync(file, `---\nname: skill-builder\nmetadata:\n  version: "${version}"\n---\n`);
+    expect(isSkillBuilderInstalled(projectRoot).version).toBe(version);
+  });
+  it("rejects a non-semver version", () => {
+    installInSource(projectRoot, "bananas");
+    expect(isSkillBuilderInstalled(projectRoot).version).toBeNull();
+  });
+});

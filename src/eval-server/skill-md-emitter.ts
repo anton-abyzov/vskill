@@ -41,8 +41,8 @@ export function buildSkillMd(data: BuildSkillMdInput): string {
   const hasTags = Array.isArray(data.tags) && data.tags.length > 0;
   const hasAgents = Array.isArray(data.targetAgents) && data.targetAgents.length > 0;
   // 0734: persist authoring engine in metadata so future updates know how the
-  // skill was produced. "none" → omit entirely (caller authored raw).
-  const hasEngine = data.engine === "vskill" || data.engine === "anthropic-skill-creator";
+  // skill was produced, including explicitly unassisted authoring (none).
+  const hasEngine = data.engine === "vskill" || data.engine === "anthropic-skill-creator" || data.engine === "none";
   lines.push("metadata:");
   lines.push(`  version: "${resolvedVersion}"`);
   if (hasEngine) {
@@ -59,6 +59,8 @@ export function buildSkillMd(data: BuildSkillMdInput): string {
 
   lines.push("---");
   lines.push("");
+
+  if (data.engine === "none") return lines.join("\n") + "\n" + data.body;
 
   if (data.body.trim()) {
     lines.push(data.body.trim());

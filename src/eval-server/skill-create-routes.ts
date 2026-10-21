@@ -1,3 +1,9 @@
+import { authoringRequestError, AuthoringValidationError, readNativeSkillDocument } from "../shared/skill-authoring-document.js";
+import { registerSkillAuthoringRoute } from "./skill-authoring-route.js";
+import { AuthoringPathError, computeSkillDir, resolveAuthoringSkillPath } from "./skill-authoring-path.js";
+export { computeSkillDir } from "./skill-authoring-path.js";
+import { registerSkillGenerateRoute } from "./skill-generate-route.js";
+import { generateWithSkillCreator, mergeNativeSkillMd, readAuthoringEngine } from "./skill-authoring-engine.js";
 import { buildSkillMd } from "./skill-md-emitter.js";
 // ---------------------------------------------------------------------------
 // skill-create-routes.ts -- Skill creation & project layout detection
@@ -10,14 +16,11 @@ import type { Router } from "./router.js";
 import { isSkillCreatorInstalled } from "../utils/skill-creator-detection.js";
 import { sendJson, readBody } from "./router.js";
 import type { ProviderName } from "../eval/llm.js";
-import { detectAvailableProviders, parseSkillFrontmatter, parseGithubRemote, walkUpForGitRoot } from "./api-routes.js";
-import { initSSE, sendSSE, sendSSEDone } from "./sse-helpers.js";
-import { classifyError } from "./error-classifier.js";
+import { parseSkillFrontmatter, parseGithubRemote, walkUpForGitRoot } from "./api-routes.js";
 import { writeHistoryEntry } from "../eval/benchmark-history.js";
 import { getAgentCreationProfile } from "../agents/agents-registry.js";
 import type { AgentCreationProfile } from "../agents/agents-registry.js";
-import { generateSkill } from "../core/skill-generator.js";
-import { extractFrontmatterVersion, bumpPatch, setFrontmatterVersion } from "../utils/version.js";
+import { bumpPatch } from "../utils/version.js";
 import { submitSkillUpdateEvent } from "./platform-proxy.js";
 
 // ---------------------------------------------------------------------------
@@ -51,7 +54,7 @@ interface AiGenerationMeta {
  *   - "anthropic-skill-creator": Anthropic's built-in plugin, richer Claude-native
  *     schema, Claude-only. Requires the `skill-creator` plugin installed locally.
  *   - "none": skip engine assistance, emit the request body verbatim. The
- *     `metadata.engine` frontmatter key is omitted entirely.
+ *     `metadata.engine` records the explicit unassisted choice.
  *
  * Anthropic and VSkill are peer engines, NOT a fallback chain — the trade-off
  * is "richer Claude-native expressiveness" vs. "portable cross-tool output".
@@ -64,7 +67,7 @@ const VALID_ENGINES: ReadonlySet<string> = new Set<CreateSkillEngine>([
   "none",
 ]);
 
-interface CreateSkillRequest {
+export interface CreateSkillRequest {
   name: string;
   plugin: string;
   layout: 1 | 2 | 3;
@@ -74,6 +77,7 @@ interface CreateSkillRequest {
   body: string;
   /** Authoring engine — see CreateSkillEngine. Defaults to "vskill". */
   engine?: CreateSkillEngine;
+  nativeSkillMd?: string;
   /**
    * Explicit `metadata.version` to emit in SKILL.md frontmatter. When omitted:
    *   - mode="create" → defaults to "1.0.0"
@@ -589,14 +593,6 @@ export function buildEnvExample(secrets: string[]): string {
   return lines.join("\n") + "\n";
 }
 
-function computeSkillDir(root: string, layout: 1 | 2 | 3, plugin: string, name: string): string {
-  switch (layout) {
-    case 1: return join(root, plugin, "skills", name);
-    case 2: return join(root, "plugins", plugin, "skills", name);
-    case 3: return join(root, "skills", name);
-  }
-}
-
 /**
  * Check if a resolved path is strictly within a root directory.
  * Uses trailing separator to prevent prefix collision (e.g., /project vs /project-evil).
@@ -975,6 +971,8 @@ export function buildAgentAwareSystemPrompt(
 }
 
 export interface GenerateSkillRequest {
+  engine?: CreateSkillEngine;
+  body?: string;
   prompt: string;
   provider?: ProviderName;
   model?: string;
@@ -982,6 +980,9 @@ export interface GenerateSkillRequest {
 }
 
 export interface GenerateSkillResult {
+  nativeSkillMd?: string;
+  engine?: CreateSkillEngine;
+  emittedTargets?: string[];
   name: string;
   description: string;
   model: string;
@@ -1102,71 +1103,6 @@ function parseGenerateResponse(raw: string): GenerateSkillResult {
 }
 
 // ---------------------------------------------------------------------------
-// 0670 T-002 — transport-layer helpers for POST /api/skills/generate
-// ---------------------------------------------------------------------------
-
-/**
- * Resolve + validate { provider, model } against detectAvailableProviders()
- * (0678 contract — see AC-US2-01..05). Returns either a resolved pair or a
- * 400 payload; callers send the payload as plain JSON (NOT SSE).
- */
-interface ResolvedProviderModel {
-  ok: true;
-  provider: string;
-  model: string;
-}
-interface ProviderModelError {
-  ok: false;
-  error: "unknown_provider" | "unknown_model";
-  validProviders?: string[];
-  validModels?: string[];
-}
-
-/**
- * Merge generator output with a `suggestedPlugin` computed from the existing
- * plugins on disk. Kept out of src/core/skill-generator.ts so the generator
- * stays pure (no filesystem access for plugin suggestion).
- */
-function attachSuggestedPlugin(parsed: GenerateSkillResult, root: string) {
-  const tags = parsed.description
-    ? parsed.description.toLowerCase().split(/[,;]+/).map((s) => s.trim()).filter(Boolean)
-    : [];
-  const suggestedPlugin = matchExistingPlugin(parsed.name, parsed.description, tags, root);
-  return { ...parsed, suggestedPlugin };
-}
-
-async function resolveProviderModel(
-  requestedProvider: string | undefined,
-  requestedModel: string | undefined,
-): Promise<ResolvedProviderModel | ProviderModelError> {
-  // Both absent → legacy default (no probe).
-  if (!requestedProvider && !requestedModel) {
-    return { ok: true, provider: "claude-cli", model: "sonnet" };
-  }
-
-  const detected = await detectAvailableProviders();
-  const requested = requestedProvider || "claude-cli";
-  const match = detected.find((p) => p.id === requested);
-  if (!match) {
-    return {
-      ok: false,
-      error: "unknown_provider",
-      validProviders: detected.map((p) => p.id),
-    };
-  }
-
-  const validModelIds = match.models.map((m) => m.id);
-  if (requestedModel !== undefined) {
-    if (!validModelIds.includes(requestedModel)) {
-      return { ok: false, error: "unknown_model", validModels: validModelIds };
-    }
-    return { ok: true, provider: requested, model: requestedModel };
-  }
-  // Provider given, model omitted — pick the first model id for that provider.
-  return { ok: true, provider: requested, model: validModelIds[0] ?? "sonnet" };
-}
-
-// ---------------------------------------------------------------------------
 // Route registration
 // ---------------------------------------------------------------------------
 
@@ -1207,30 +1143,23 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
     const root = getRoot();
     const body = (await readBody(req)) as CreateSkillRequest;
 
-    // Validate name
-    if (!body.name || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(body.name)) {
-      sendJson(res, { error: "Name must be kebab-case (lowercase letters, numbers, hyphens)" }, 400, req);
-      return;
-    }
-    if (!body.description?.trim()) {
-      sendJson(res, { error: "Description is required" }, 400, req);
-      return;
-    }
-    if (!body.layout || ![1, 2, 3].includes(body.layout)) {
-      sendJson(res, { error: "Layout must be 1, 2, or 3" }, 400, req);
-      return;
-    }
-    if (body.layout !== 3 && !body.plugin?.trim()) {
-      sendJson(res, { error: "Plugin name is required for this layout" }, 400, req);
-      return;
-    }
-    if (body.plugin && !/^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/i.test(body.plugin)) {
-      sendJson(res, { error: "Plugin name contains invalid characters" }, 400, req);
-      return;
-    }
+    const validationError = authoringRequestError(body);
+    if (validationError) return sendJson(res, { error: validationError }, 400, req);
 
     // 0734: validate authoring engine. Default to "vskill" when omitted.
-    const engine: CreateSkillEngine = (body.engine ?? "vskill") as CreateSkillEngine;
+    const targetDir = computeSkillDir(root, body.layout, body.plugin || "", body.name);
+    const skillMdPath = join(targetDir, "SKILL.md");
+    if (body.mode === "update") {
+      try { resolveAuthoringSkillPath(root, body.plugin || "", body.name, body.layout); }
+      catch (error) {
+        sendJson(res, { error: (error as Error).message }, error instanceof AuthoringPathError ? error.status : 400, req);
+        return;
+      }
+    }
+    let previousEngine: CreateSkillEngine = "vskill";
+    try { if (body.mode === "update" && existsSync(skillMdPath)) previousEngine = readAuthoringEngine(readFileSync(skillMdPath, "utf8")); }
+    catch (error) { return sendJson(res, { error: (error as Error).message }, 400, req); }
+    const engine: CreateSkillEngine = body.engine ?? previousEngine;
     if (body.engine !== undefined && !VALID_ENGINES.has(body.engine)) {
       sendJson(res, {
         error: `Invalid engine: ${body.engine}. Must be one of: vskill, anthropic-skill-creator, none.`,
@@ -1244,10 +1173,6 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
       }, 400, req);
       return;
     }
-
-    const targetDir = computeSkillDir(root, body.layout, body.plugin || "", body.name);
-    const skillMdPath = join(targetDir, "SKILL.md");
-
     // Check if already exists. Three legitimate ways to overwrite:
     //   1. draft.json marker → finalizing an auto-saved draft
     //   2. mode === "update" → caller intentionally wants to overwrite
@@ -1271,6 +1196,10 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
       return;
     }
 
+    if (isUpdateMode && !skillExists) {
+      sendJson(res, { error: "Skill to update was not found" }, 404, req);
+      return;
+    }
     // Resolve the version to emit in SKILL.md.
     //   - explicit body.version always wins
     //   - update mode reads the existing version + bumps patch
@@ -1280,19 +1209,29 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
       resolvedVersion = body.version.trim();
     } else if (skillExists && isUpdateMode) {
       const existing = readFileSync(skillMdPath, "utf-8");
-      const previous = extractFrontmatterVersion(existing) ?? "1.0.0";
+      const previous = readNativeSkillDocument(existing).version ?? "1.0.0";
       resolvedVersion = bumpPatch(previous);
     } else {
       resolvedVersion = "1.0.0";
     }
 
     try {
-      // Create directories
+      // Direct Anthropic requests execute the installed engine. A preview from
+      // /generate carries the native document, so saving never generates twice.
+      const generated = engine === "anthropic-skill-creator" && !body.nativeSkillMd && !isUpdateMode
+        ? await generateWithSkillCreator({ prompt: `${body.description}\n\n${body.body}`, model: body.aiMeta?.model }, { root })
+        : undefined;
+      const native = generated?.nativeSkillMd ?? body.nativeSkillMd ?? (isUpdateMode ? readFileSync(skillMdPath, "utf8") : undefined);
+      const content = native
+        ? mergeNativeSkillMd(native, { ...body, body: generated?.body ?? body.body, version: resolvedVersion, engine })
+        : buildSkillMd({ ...body, version: resolvedVersion, engine });
+      readNativeSkillDocument(content);
+      // Create directories only after generation/validation succeeds.
+      if (isUpdateMode) resolveAuthoringSkillPath(root, body.plugin || "", body.name, body.layout);
       mkdirSync(targetDir, { recursive: true });
       mkdirSync(join(targetDir, "evals"), { recursive: true });
 
       // Write SKILL.md (with resolved version + validated engine).
-      const content = buildSkillMd({ ...body, version: resolvedVersion, engine });
       writeFileSync(skillMdPath, content, "utf-8");
 
       // Write evals.json if provided (from AI generation)
@@ -1414,7 +1353,7 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
       }, isUpdate ? 200 : 201, req);
     } catch (err) {
       // On failure, do NOT delete draftDir — preserve user's work
-      sendJson(res, { error: `Failed to create skill: ${(err as Error).message}` }, 500, req);
+      sendJson(res, { error: `Failed to create skill: ${(err as Error).message}` }, err instanceof AuthoringValidationError ? 400 : 500, req);
     }
   });
 
@@ -1423,18 +1362,8 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
     const root = getRoot();
     const body = (await readBody(req)) as SaveDraftRequest;
 
-    if (!body.name || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(body.name)) {
-      sendJson(res, { error: "Name must be kebab-case" }, 400, req);
-      return;
-    }
-    if (!body.description?.trim()) {
-      sendJson(res, { error: "Description is required" }, 400, req);
-      return;
-    }
-    if (!body.layout || ![1, 2, 3].includes(body.layout)) {
-      sendJson(res, { error: "Layout must be 1, 2, or 3" }, 400, req);
-      return;
-    }
+    const validationError = authoringRequestError(body, true);
+    if (validationError) return sendJson(res, { error: validationError }, 400, req);
 
     const targetDir = computeSkillDir(root, body.layout, body.plugin || "", body.name);
     const skillMdPath = join(targetDir, "SKILL.md");
@@ -1449,19 +1378,20 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
     if (body.version?.trim()) {
       resolvedVersion = body.version.trim();
     } else if (existsSync(skillMdPath)) {
-      resolvedVersion = extractFrontmatterVersion(readFileSync(skillMdPath, "utf-8")) ?? "1.0.0";
+      resolvedVersion = readNativeSkillDocument(readFileSync(skillMdPath, "utf-8")).version ?? "1.0.0";
     } else {
       resolvedVersion = "1.0.0";
     }
 
     try {
-      // Create directories (overwrites allowed for re-generation)
+      const content = body.nativeSkillMd
+        ? mergeNativeSkillMd(body.nativeSkillMd, { ...body, version: resolvedVersion })
+        : buildSkillMd({ ...body, version: resolvedVersion });
+      readNativeSkillDocument(content);
       mkdirSync(targetDir, { recursive: true });
       mkdirSync(join(targetDir, "evals"), { recursive: true });
       mkdirSync(join(targetDir, "evals", "history"), { recursive: true });
 
-      // Write SKILL.md
-      const content = buildSkillMd({ ...body, version: resolvedVersion });
       writeFileSync(skillMdPath, content, "utf-8");
       files.push("SKILL.md");
 
@@ -1515,7 +1445,7 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
         files,
       }, 201, req);
     } catch (err) {
-      sendJson(res, { error: `Failed to save draft: ${(err as Error).message}` }, 500, req);
+      sendJson(res, { error: `Failed to save draft: ${(err as Error).message}` }, err instanceof AuthoringValidationError ? 400 : 500, req);
     }
   });
 
@@ -1529,64 +1459,7 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
     }, 200, _req);
   });
 
-  // POST /api/skills/generate — AI-assisted skill generation (parallel body + evals)
-  // 0670 T-002: thin wrapper over src/core/skill-generator.ts:generateSkill.
-  router.post("/api/skills/generate", async (req, res) => {
-    const root = getRoot();
-    const body = (await readBody(req)) as GenerateSkillRequest;
-    if (!body.prompt || !body.prompt.trim())
-      return sendJson(res, { error: "Describe what your skill should do" }, 400, req);
-    if (body.prompt.length > 50000)
-      return sendJson(res, { error: "Prompt is too long (max 50,000 characters)" }, 400, req);
-    const resolved = await resolveProviderModel(body.provider, body.model);
-    if (!resolved.ok) {
-      const payload: Record<string, unknown> = { error: resolved.error };
-      if (resolved.validProviders) payload.validProviders = resolved.validProviders;
-      if (resolved.validModels) payload.validModels = resolved.validModels;
-      return sendJson(res, payload, 400, req);
-    }
-    const wantsSSE = req.headers.accept?.includes("text/event-stream") ||
-      (req.url ? new URL(req.url, "http://localhost").searchParams.has("sse") : false);
-    const ac = new AbortController();
-    res.on("close", () => ac.abort());
-    if (wantsSSE) initSSE(res, req);
-    try {
-      const parsed = await generateSkill(
-        { ...body, provider: resolved.provider as ProviderName, model: resolved.model },
-        {
-          root,
-          abortSignal: ac.signal,
-          onProgress: wantsSSE ? (e) => { if (!ac.signal.aborted) sendSSE(res, "progress", e); } : undefined,
-        },
-      );
-      if (ac.signal.aborted) return;
-      const result = attachSuggestedPlugin(parsed, root);
-      // 0711: emit provenance as a SEPARATE SSE event before `done` so the
-      // GenerateSkillResult schema stays clean (parity tests assert on the
-      // legacy shape). The UI's useCreateSkill listens for the `provenance`
-      // event and stamps aiMeta. Best-effort — never blocks generation.
-      if (wantsSSE && (resolved.provider === "anthropic" || resolved.provider === "claude-cli")) {
-        try {
-          const { resolveAnthropicModel } = await import("../eval/model-resolver.js");
-          const r = resolveAnthropicModel(resolved.model);
-          sendSSE(res, "provenance", {
-            resolvedModelId: r.resolvedId || null,
-            snapshotDate: r.snapshotDate,
-            source: r.source,
-          });
-        } catch {
-          /* provenance is best-effort; never block generation */
-        }
-      }
-      if (wantsSSE) sendSSEDone(res, result); else sendJson(res, result, 200, req);
-    } catch (err) {
-      if (wantsSSE && !ac.signal.aborted) {
-        sendSSE(res, "error", classifyError(err, resolved.provider));
-        res.end();
-      } else {
-        const msg = (err as Error).message;
-        sendJson(res, { error: msg }, msg.includes("not valid JSON") ? 422 : 500, req);
-      }
-    }
-  });
+  registerSkillGenerateRoute(router, getRoot);
+  registerSkillAuthoringRoute(router, getRoot);
+
 }

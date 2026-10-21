@@ -111,6 +111,7 @@ describe("POST /api/skills/create — 409 structured payload (0772 US-004)", () 
     const { status, body } = await runHandler(handler, {
       name: "hello-skill",
       description: "Hello",
+      body: "Fixture instructions",
       layout: 3,
       plugin: "",
     });

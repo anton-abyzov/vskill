@@ -64,7 +64,7 @@ describe("portable skill version lifecycle", () => {
     expect(content).not.toMatch(/^version:/m);
     expect(extractFrontmatterVersion(content)).toBe("1.0.1");
     expect(buildSkillMetadata(dir, "source", root).version).toBe("1.0.1");
-    expect(parseSkillFrontmatter(content).metadata).toEqual({ version: "1.0.1" });
+    expect(parseSkillFrontmatter(content).metadata).toEqual({ version: "1.0.1", engine: "none" });
 
     // Server improvement/update and successful registry writeback must retain
     // the portable shape created by Studio, too.
@@ -73,6 +73,6 @@ describe("portable skill version lifecycle", () => {
     expect(published).not.toMatch(/^version:/m);
     expect(extractFrontmatterVersion(published)).toBe("1.0.3");
     expect(getFrontmatterVersion(published)).toBe("1.0.3");
-    expect(parseSkillFrontmatter(published).metadata).toEqual({ version: "1.0.3" });
+    expect(parseSkillFrontmatter(published).metadata).toEqual({ version: "1.0.3", engine: "none" });
   });
 });

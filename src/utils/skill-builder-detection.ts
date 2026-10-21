@@ -1,3 +1,5 @@
+import { readFrontmatterVersion } from "./version.js";
+import { isValidSemver } from "./semver.js";
 // ---------------------------------------------------------------------------
 // Shared skill-builder detection — used by Studio detect-engines route.
 // Mirrors skill-creator-detection.ts but returns { installed, path, version }
@@ -126,12 +128,6 @@ function parseVersionAt(matchedPath: string): string | null {
     return null;
   }
 
-  // Frontmatter MUST be delimited by leading `---\n` and a closing `---` line.
-  if (!content.startsWith("---\n")) return null;
-  const closingIdx = content.indexOf("\n---", 4);
-  if (closingIdx === -1) return null;
-  const frontmatter = content.slice(4, closingIdx);
-
-  const match = frontmatter.match(/^version:\s*["']?([^"'\n]+?)["']?\s*$/m);
-  return match ? match[1] : null;
+  const version = readFrontmatterVersion(content);
+  return isValidSemver(version) ? version! : null;
 }

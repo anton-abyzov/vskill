@@ -11,6 +11,8 @@
 // ---------------------------------------------------------------------------
 
 import React from "react";
+import { authoringEngineInstallCommand } from "../../../shared/authoring-engine-commands.js";
+import type { InstallEngineState } from "../hooks/useInstallEngine";
 
 export type Engine = "vskill" | "anthropic-skill-creator" | "none";
 
@@ -94,6 +96,7 @@ export interface EngineSelectorProps {
   selected: Engine;
   onSelect: (engine: Engine) => void;
   onInstallClick: (engine: Exclude<Engine, "none">) => void;
+  installStates?: Partial<Record<Engine, InstallEngineState>>;
 }
 
 export function EngineSelector(props: EngineSelectorProps): React.ReactElement {
@@ -111,6 +114,7 @@ export function EngineSelector(props: EngineSelectorProps): React.ReactElement {
       <div role="tablist" aria-label="Authoring engine" className="flex flex-col gap-1.5">
         {options.map((opt) => {
           const isSelected = selected === opt.engine;
+          const install = props.installStates?.[opt.engine];
           const showInstall = !opt.detected && opt.installable;
           const baseClasses = [
             "flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm cursor-pointer",
@@ -131,7 +135,7 @@ export function EngineSelector(props: EngineSelectorProps): React.ReactElement {
               tabIndex={0}
               data-testid={`engine-selector-${opt.engine}`}
               aria-selected={isSelected ? "true" : "false"}
-              title={opt.tooltip}
+              title={showInstall ? `Not installed. Click [Install] to run: ${authoringEngineInstallCommand(opt.engine as Exclude<Engine, "none">)}` : opt.tooltip}
               style={style}
               className={baseClasses}
               onClick={() => onSelect(opt.engine)}
@@ -145,6 +149,14 @@ export function EngineSelector(props: EngineSelectorProps): React.ReactElement {
               <div className="flex flex-col">
                 <span className="font-medium text-gray-900">{opt.label}</span>
                 <span className="text-xs text-gray-500">{opt.caption}</span>
+                {install && install.status !== "idle" && (
+                  <span role="status" data-testid={`engine-install-status-${opt.engine}`} className="text-xs">
+                    {(install.status === "spawning" || install.status === "streaming") && <><span className={reducedMotion ? "" : "animate-spin"}>◌</span> {install.liveTail || "Installing…"}</>}
+                    {install.status === "success" && <span className="text-green-700">✓ Installed</span>}
+                    {install.status === "failure" && <span className="text-red-700">✗ Install failed</span>}
+                  </span>
+                )}
+                {install?.status === "failure" && install.stderr && <details onClick={(event) => event.stopPropagation()}><summary>stderr</summary><pre>{install.stderr}</pre></details>}
               </div>
               {showInstall && (
                 <button
@@ -156,7 +168,7 @@ export function EngineSelector(props: EngineSelectorProps): React.ReactElement {
                     onInstallClick(opt.engine as Exclude<Engine, "none">);
                   }}
                 >
-                  Install
+                  {install?.status === "failure" ? "Retry" : "Install"}
                 </button>
               )}
             </div>

@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { isValidSemver } from "../utils/semver";
+import { useAuthoringEngine } from "./useAuthoringEngine";
 import { api, ApiError } from "../api";
 import { useConfig } from "../ConfigContext";
 import type { ProjectLayoutResponse, DetectedLayout, SaveDraftRequest } from "../types";
@@ -18,6 +20,7 @@ export interface GenerateRequestInput {
   provider: string;
   model: string;
   targetAgents?: string[];
+  engine?: CreateSkillEngineUi;
 }
 
 export function buildGenerateRequestBody(input: GenerateRequestInput): Record<string, unknown> {
@@ -25,6 +28,7 @@ export function buildGenerateRequestBody(input: GenerateRequestInput): Record<st
     prompt: input.prompt,
     provider: input.provider,
     model: input.model,
+    ...(input.engine ? { engine: input.engine } : {}),
   };
   if (input.targetAgents && input.targetAgents.length > 0) {
     body.targetAgents = input.targetAgents;
@@ -123,6 +127,7 @@ export interface UseCreateSkillOptions {
    * project's first existing plugin once layout detection resolves.
    */
   forceLayout?: 1 | 2 | 3;
+  updateTarget?: { plugin: string; skill: string };
   /**
    * 0786 AC-US1-01 / AC-US1-04: invoked at the start of handleCreate (before
    * `api.createSkill`) so any pending-delete for the same skill name is
@@ -151,6 +156,9 @@ export interface EngineDetectionState {
 }
 
 export interface UseCreateSkillReturn {
+  authoringMode: "create" | "update";
+  updateLoading: boolean;
+  versionsHref?: string;
   // Mode
   mode: "manual" | "ai";
   setMode: (m: "manual" | "ai") => void;
@@ -181,6 +189,7 @@ export interface UseCreateSkillReturn {
   allowedTools: string;
   setAllowedTools: (t: string) => void;
   body: string;
+  nativeSkillMd?: string;
   setBody: (b: string) => void;
   bodyViewMode: "write" | "preview";
   setBodyViewMode: (m: "write" | "preview") => void;
@@ -213,6 +222,7 @@ export interface UseCreateSkillReturn {
 
   // 0734: engine selection + version
   engineDetection: EngineDetectionState | null;
+  engineAvailable: boolean;
   refreshEngineDetection: () => Promise<void>;
   engine: CreateSkillEngineUi;
   setEngine: (e: CreateSkillEngineUi) => void;
@@ -243,7 +253,7 @@ export interface UseCreateSkillReturn {
 // Hook
 // ---------------------------------------------------------------------------
 
-export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout, flushPendingForSkillName }: UseCreateSkillOptions): UseCreateSkillReturn {
+export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout, flushPendingForSkillName, updateTarget }: UseCreateSkillOptions): UseCreateSkillReturn {
   // Mode toggle
   const [mode, setMode] = useState<"manual" | "ai">("ai");
 
@@ -277,36 +287,34 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
   const [info, setInfo] = useState<string | null>(null);
 
   // 0734: engine selection + version
-  const [engineDetection, setEngineDetection] = useState<EngineDetectionState | null>(null);
-  const [engine, setEngine] = useState<CreateSkillEngineUi>("vskill");
+  const { engineDetection, engine, setEngine: selectEngine, refreshEngineDetection, engineAvailable } = useAuthoringEngine();
+  const setEngine = useCallback((next: CreateSkillEngineUi) => {
+    selectEngine(next);
+    if (next === "none") setMode("manual");
+  }, [selectEngine]);
   const [version, setVersion] = useState<string>("1.0.0");
-  const [versionValid, setVersionValid] = useState<boolean>(true);
-
-  const refreshEngineDetection = useCallback(async () => {
-    try {
-      const result = await api.detectEngines();
-      setEngineDetection(result);
-      // Apply default precedence on first load (don't override user's explicit pick).
-      setEngine((prev) => {
-        if (prev !== "vskill") return prev; // user has interacted, keep their choice
-        if (result.vskillSkillBuilder) return "vskill";
-        if (result.anthropicSkillCreator) return "anthropic-skill-creator";
-        return "none";
-      });
-    } catch {
-      // Fail-soft: leave detection null; UI shows "all options" with no install hints.
-      setEngineDetection({
-        vskillSkillBuilder: false,
-        anthropicSkillCreator: false,
-        vskillVersion: null,
-        anthropicPath: null,
-      });
-    }
-  }, []);
-
+  const [versionMarkedValid, setVersionValid] = useState<boolean>(true);
+  const versionValid = versionMarkedValid && isValidSemver(version);
+  const nativeSkillMdRef = useRef<string | undefined>(undefined);
+  const [updateLoading, setUpdateLoading] = useState(!!updateTarget);
+  const [versionsHref, setVersionsHref] = useState<string>();
+  const updateContext = useRef<import("../types").SkillAuthoringContext | null>(null);
+  useEffect(() => { if (engine === "none") setMode("manual"); }, [engine]);
   useEffect(() => {
-    void refreshEngineDetection();
-  }, [refreshEngineDetection]);
+    if (!updateTarget || !layout || updateContext.current) return;
+    let disposed = false;
+    setMode("manual");
+    api.getSkillAuthoringContext(updateTarget.plugin, updateTarget.skill).then((value) => {
+      if (disposed) return;
+      updateContext.current = value;
+      setName(value.name); setDescription(value.description); setBody(value.body);
+      setModel(value.model || ""); setAllowedTools(value.allowedTools || "");
+      setSelectedLayout(value.layout); setPlugin(value.plugin); setVersion(value.version);
+      setEngine(value.engine); nativeSkillMdRef.current = value.nativeSkillMd;
+      setVersionsHref(value.versionsHref); setUpdateLoading(false);
+    }).catch((error) => { if (!disposed) { setError((error as Error).message); setUpdateLoading(false); } });
+    return () => { disposed = true; };
+  }, [updateTarget?.plugin, updateTarget?.skill, layout, setEngine]);
 
   // AI generation state
   const [aiPrompt, setAiPrompt] = useState("");
@@ -448,6 +456,9 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
     setAiProgress([]);
     aiMetaRef.current = null;
     provenanceRef.current = null;
+    if (engine === "none") { setAiError("No engine selected — author the skill in Manual mode"); return; }
+    if (!engineAvailable) { setAiError("Install the selected engine before generating"); return; }
+    if (!versionValid) { setAiError("Version is not valid semver"); return; }
     if (!aiPrompt.trim()) { setAiError("Describe what your skill should do"); return; }
 
     setGenerating(true);
@@ -464,7 +475,8 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
           prompt: aiPrompt.trim(),
           provider,
           model: aiModel,
-          targetAgents,
+          targetAgents: engine === "anthropic-skill-creator" ? ["claude-code"] : targetAgents,
+          engine,
         })),
         signal: controller.signal,
       });
@@ -540,6 +552,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
                 setModel(data.model || "");
                 setAllowedTools(data.allowedTools || "");
                 setBody(data.body);
+                nativeSkillMdRef.current = data.nativeSkillMd;
                 setAiGenerated(true);
                 aiMetaRef.current = meta;
                 setMode("manual");
@@ -600,8 +613,9 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
                   allowedTools: data.allowedTools || undefined,
                   body: data.body,
                   aiMeta: meta,
+                  engine, version, nativeSkillMd: data.nativeSkillMd,
                 };
-                api.saveDraft(draftReq)
+                if (!updateTarget) api.saveDraft(draftReq)
                   .then((res) => {
                     setDraftSaved(true);
                     if (res?.dir) draftDirRef.current = res.dir;
@@ -626,7 +640,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
       setGenerating(false);
       abortRef.current = null;
     }
-  }, [aiPrompt, resolveAiConfig, selectedLayout, pluginLayoutInfo, effectivePlugin, layout, targetAgents, forceLayout]);
+  }, [aiPrompt, resolveAiConfig, selectedLayout, pluginLayoutInfo, effectivePlugin, layout, targetAgents, forceLayout, engine, engineAvailable, version, versionValid, updateTarget]);
 
   const handleCreate = useCallback(async () => {
     setError(null);
@@ -635,7 +649,9 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
     if (!description.trim()) { setError("Description is required"); return; }
     if (selectedLayout !== 3 && !effectivePlugin.trim()) { setError("Plugin name is required"); return; }
 
-    if (!versionValid) { setError("Version is not valid semver"); return; }
+    if (updateTarget && !updateContext.current) { setError("Load the existing skill before updating"); return; }
+    if (!engineAvailable) { setError("Install the selected engine before submitting"); return; }
+    if (!versionValid || !isValidSemver(version)) { setError("Version is not valid semver"); return; }
 
     setCreating(true);
     try {
@@ -661,14 +677,17 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
         }
       }
       const result = await api.createSkill({
-        name: toKebab(name),
-        plugin: effectivePlugin || "",
-        layout: selectedLayout,
+        name: updateContext.current?.name ?? toKebab(name),
+        plugin: updateContext.current?.plugin ?? effectivePlugin ?? "",
+        layout: updateContext.current?.layout ?? selectedLayout,
+        mode: updateTarget ? "update" : "create",
         description,
         model: model || undefined,
         allowedTools: allowedTools || undefined,
         body,
-        aiMeta: aiMetaRef.current || undefined,
+        aiMeta: engine === "none" ? undefined : aiMetaRef.current || undefined,
+        nativeSkillMd: updateTarget || engine === "anthropic-skill-creator" ? nativeSkillMdRef.current : undefined,
+        targetAgents: engine === "anthropic-skill-creator" ? ["claude-code"] : targetAgents,
         draftDir: draftDirRef.current || undefined,
         version: version.trim() || undefined,
         engine,
@@ -697,7 +716,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
     } finally {
       setCreating(false);
     }
-  }, [name, description, selectedLayout, effectivePlugin, model, allowedTools, body, version, versionValid, engine, onCreated, flushPendingForSkillName]);
+  }, [name, description, selectedLayout, effectivePlugin, model, allowedTools, body, version, versionValid, engine, engineAvailable, targetAgents, onCreated, flushPendingForSkillName, updateTarget]);
 
   const applyPluginRecommendation = useCallback(() => {
     if (!pluginLayoutInfo) return;
@@ -707,6 +726,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
   }, [pluginLayoutInfo]);
 
   return {
+    authoringMode: updateTarget ? "update" : "create", updateLoading, versionsHref,
     mode, setMode,
     layout, layoutLoading,
     selectedLayout, setSelectedLayout,
@@ -716,7 +736,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
     description, setDescription,
     model, setModel,
     allowedTools, setAllowedTools,
-    body, setBody,
+    body, setBody, nativeSkillMd: nativeSkillMdRef.current,
     bodyViewMode, setBodyViewMode,
     aiPrompt, setAiPrompt,
     generating, aiGenerated,
@@ -728,7 +748,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
     pluginLayoutInfo, applyPluginRecommendation,
     creating, error, info, handleCreate,
     // 0734: engine + version + detection state
-    engineDetection, refreshEngineDetection,
+    engineDetection, refreshEngineDetection, engineAvailable,
     engine, setEngine,
     version, setVersion,
     versionValid, setVersionValid,

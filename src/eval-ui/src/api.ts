@@ -541,6 +541,10 @@ export const api = {
     return fetchJson<AgentsResponse>("/api/agents");
   },
 
+  getSkillAuthoringContext(plugin: string, skill: string): Promise<import("./types").SkillAuthoringContext> {
+    return fetchJson(`/api/skills/${encodeURIComponent(plugin)}/${encodeURIComponent(skill)}/authoring`);
+  },
+
   getSkillDetail(plugin: string, skill: string): Promise<{ plugin: string; skill: string; skillContent: string }> {
     return fetchJson(`/api/skills/${plugin}/${skill}`);
   },

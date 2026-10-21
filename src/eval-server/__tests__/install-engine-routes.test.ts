@@ -315,4 +315,28 @@ describe("AC-US5-03 + AC-US5-09: SSE stream on /:jobId/stream", () => {
     expect(done!.data).toMatchObject({ success: false, exitCode: 1 });
     expect((done!.data as { stderr: string }).stderr).toContain("network unreachable");
   });
+  it("finishes at 120 seconds even when the child ignores SIGTERM, exactly once", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { captured, proc } = await startInstallAndOpenStream();
+      proc.kill = vi.fn(); // An uncooperative child never emits exit on SIGTERM.
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(captured.events.filter((e) => e.event === "done").map((e) => e.data))
+        .toEqual([{ success: false, exitCode: -1, stderr: "timeout" }]);
+      expect(captured.ended).toBe(true);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(proc.kill).toHaveBeenLastCalledWith("SIGKILL");
+      proc.emit("exit", 0, null);
+      expect(captured.events.filter((e) => e.event === "done")).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+  it("reports spawn errors as a single terminal failure", async () => {
+    const { captured, proc } = await startInstallAndOpenStream();
+    proc.emit("error", new Error("spawn permission denied"));
+    proc.emit("exit", 1, null);
+    expect(captured.events.filter((e) => e.event === "done").map((e) => e.data))
+      .toEqual([{ success: false, exitCode: -1, stderr: "spawn permission denied" }]);
+    expect(captured.ended).toBe(true);
+  });
+
 });

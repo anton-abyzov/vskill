@@ -743,6 +743,9 @@ export interface CreateSkillRequest {
   version?: string;
   /** 0734: authoring engine. Defaults to "vskill" server-side. */
   engine?: CreateSkillEngine;
+  nativeSkillMd?: string;
+  targetAgents?: string[];
+  mode?: "create" | "update";
 }
 
 export interface CreateSkillResponse {
@@ -879,4 +882,12 @@ export interface OpenRouterModel {
   name: string;
   /** USD per 1M tokens (canonical wire unit; canonicalized server-side at /api/openrouter/models — see 0710). */
   pricing: { prompt: number; completion: number };
+}
+
+
+export interface SkillAuthoringContext extends CreateSkillRequest {
+  version: string;
+  engine: CreateSkillEngine;
+  nativeSkillMd: string;
+  versionsHref?: string;
 }

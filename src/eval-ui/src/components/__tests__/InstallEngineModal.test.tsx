@@ -13,6 +13,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
+import { EngineSelector, type Engine } from "../EngineSelector";
+import { useAuthoringEngine } from "../../hooks/useAuthoringEngine";
+import { api } from "../../api";
 import { InstallEngineModal } from "../InstallEngineModal";
 
 // ---------------------------------------------------------------------------
@@ -208,4 +211,40 @@ describe("AC-US5-05: failure path — non-zero exit shows stderr + retry", () =>
     // No stream opened for a pre-flight failure.
     expect(streamControllers).toHaveLength(0);
   });
+});
+
+
+it("0734 connects missing engine consent, inline progress, detection refresh and selection", async () => {
+  const detect = vi.spyOn(api, "detectEngines");
+  detect.mockResolvedValueOnce({ vskillSkillBuilder: false, anthropicSkillCreator: false, vskillVersion: null, anthropicPath: null });
+  detect.mockResolvedValueOnce({ vskillSkillBuilder: true, anthropicSkillCreator: false, vskillVersion: "1.0.0", anthropicPath: null });
+  function Flow() {
+    const authoring = useAuthoringEngine();
+    const [installing, setInstalling] = React.useState<Exclude<Engine, "none"> | null>(null);
+    const [status, setStatus] = React.useState<any>();
+    if (!authoring.engineDetection) return null;
+    return <>
+      <EngineSelector detection={authoring.engineDetection} selected={authoring.engine} onSelect={authoring.setEngine} onInstallClick={setInstalling} installStates={{ vskill: status }} />
+      {installing && <InstallEngineModal engine={installing} hookOpts={{ fetchImpl: fakeFetch as typeof fetch }} onClose={() => setInstalling(null)} onStateChange={setStatus} onSuccess={() => { authoring.setEngine(installing); void authoring.refreshEngineDetection(); }} />}
+    </>;
+  }
+  await act(async () => root.render(<Flow />));
+  await flushAsync();
+  act(() => getByTestId("engine-selector-vskill").click());
+  expect(getByTestId("engine-selector-vskill").getAttribute("aria-selected")).toBe("true");
+  act(() => getByTestId("install-vskill").click());
+  expect(fakeFetch).not.toHaveBeenCalled();
+  expect(getByTestId("install-command-preview").textContent).toContain("vskill install");
+  act(() => getByTestId("install-run").click());
+  await flushAsync();
+  act(() => emitStreamEvent("progress", { stream: "stdout", line: "Installing engine" }));
+  await flushAsync();
+  expect(getByTestId("engine-install-status-vskill").textContent).toContain("Installing engine");
+  act(() => emitStreamEvent("done", { success: true, exitCode: 0, stderr: "" }));
+  await flushAsync();
+  expect(detect).toHaveBeenCalledTimes(2);
+  expect(getByTestId("engine-selector-vskill").getAttribute("aria-selected")).toBe("true");
+  expect(findByTestId("install-vskill")).toBeNull();
+  expect(getByTestId("engine-install-status-vskill").textContent).toContain("Installed");
+  detect.mockRestore();
 });

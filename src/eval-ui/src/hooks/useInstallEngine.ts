@@ -115,7 +115,7 @@ export function useInstallEngine(opts: UseInstallEngineOpts = {}): UseInstallEng
               const data = JSON.parse(rawData) as InstallProgressLine;
               setState((prev) => ({
                 ...prev,
-                liveTail: data.line.length > 60 ? data.line.slice(0, 60) + "…" : data.line,
+                liveTail: data.line.length > 60 ? data.line.slice(0, 59) + "…" : data.line,
                 progress: [...prev.progress, data].slice(-200), // cap memory
               }));
             } catch { /* ignore malformed frames */ }

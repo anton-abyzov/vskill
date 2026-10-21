@@ -17,6 +17,8 @@ interface Detection {
 const mocks = vi.hoisted(() => ({
   createSkillMock: vi.fn(),
   detectEnginesMock: vi.fn(),
+  authoringMock: vi.fn(),
+  saveDraftMock: vi.fn(async () => ({ dir: "/tmp/test-project/skills/native" })),
 }));
 
 vi.mock("../../api", async () => {
@@ -26,6 +28,7 @@ vi.mock("../../api", async () => {
     api: {
       createSkill: mocks.createSkillMock,
       detectEngines: mocks.detectEnginesMock,
+      getSkillAuthoringContext: mocks.authoringMock,
       getSkills: vi.fn(async () => []),
       getProjectLayout: vi.fn(async () => ({
         root: "/tmp/test-project",
@@ -35,7 +38,7 @@ vi.mock("../../api", async () => {
         suggestedLayout: 3 as const,
         existingSkills: [],
       })),
-      saveDraft: vi.fn(),
+      saveDraft: mocks.saveDraftMock,
     },
   };
 });
@@ -49,6 +52,10 @@ const { createSkillMock, detectEnginesMock } = mocks;
 interface HookHandle {
   engineDetection: Detection | null;
   engine: string;
+  setEngine: (s: "vskill" | "anthropic-skill-creator" | "none") => void;
+  setAiPrompt: (s: string) => void;
+  handleGenerate: () => Promise<void>;
+  refreshEngineDetection: () => Promise<void>;
   setName: (s: string) => void;
   setDescription: (s: string) => void;
   setSelectedLayout: (l: 1 | 2 | 3) => void;
@@ -58,6 +65,9 @@ interface HookHandle {
   setVersionValid: (b: boolean) => void;
   handleCreate: () => Promise<void> | void;
   error: string | null;
+  authoringMode: string;
+  versionsHref?: string;
+  nativeSkillMd?: string;
 }
 
 async function flushAct(fn?: () => unknown): Promise<void> {
@@ -69,7 +79,7 @@ async function flushAct(fn?: () => unknown): Promise<void> {
   });
 }
 
-async function mountHook(onCreated: (p: string, s: string) => void = vi.fn()): Promise<() => HookHandle> {
+async function mountHook(onCreated: (p: string, s: string) => void = vi.fn(), updateTarget?: {plugin: string; skill: string}): Promise<() => HookHandle> {
   const React = await import("react");
   const { createRoot } = await import("react-dom/client");
   const { act } = await import("react");
@@ -77,14 +87,15 @@ async function mountHook(onCreated: (p: string, s: string) => void = vi.fn()): P
 
   const ref: { current: HookHandle | null } = { current: null };
   const Harness: React.FC = () => {
-    ref.current = useCreateSkill({ onCreated, forceLayout: 3 }) as unknown as HookHandle;
+    ref.current = useCreateSkill({ onCreated, forceLayout: 3, updateTarget }) as unknown as HookHandle;
     return null;
   };
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
-  act(() => {
+  await act(async () => {
     root.render(React.createElement(Harness));
+    await Promise.resolve();
   });
   return () => ref.current!;
 }
@@ -204,4 +215,87 @@ describe("useCreateSkill: version in create payload (0734 T-014, AC-US4-04/06)",
     expect(onCreated).not.toHaveBeenCalled();
     expect(get().error).toMatch(/semver/i);
   });
+});
+
+
+describe("0734 engine execution guards", () => {
+  beforeEach(() => {
+    createSkillMock.mockReset();
+    detectEnginesMock.mockReset();
+    detectEnginesMock.mockResolvedValue(detection({ vskillSkillBuilder: true, anthropicSkillCreator: true }));
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 503, json: async () => ({ error: "fixture" }) })));
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("passes the selected engine to generation", async () => {
+    const get = await mountHook();
+    await flushAct();
+    await flushAct(() => { get().setEngine("anthropic-skill-creator"); get().setAiPrompt("Write a skill"); });
+    await flushAct(() => get().handleGenerate());
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string).engine).toBe("anthropic-skill-creator");
+  });
+  it("carries native generation through its autosaved draft and final save", async () => {
+    const nativeSkillMd = "---\nname: native\ndescription: Native\ncontext: fork\n---\nBody";
+    const result = { name: "native", description: "Native", model: "", allowedTools: "Read", body: "Body", nativeSkillMd, engine: "anthropic-skill-creator", emittedTargets: ["claude-code"], evals: [] };
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, body: new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode(`event: done\ndata: ${JSON.stringify(result)}\n\n`)); controller.close();
+    } }) })));
+    createSkillMock.mockResolvedValue({ plugin: "fixture", skill: "native" });
+    const get = await mountHook();
+    await flushAct(() => { get().setEngine("anthropic-skill-creator"); get().setAiPrompt("Write native"); get().setVersion("2.0.0"); });
+    await flushAct(() => get().handleGenerate());
+    expect(get().nativeSkillMd).toBe(nativeSkillMd);
+    expect(mocks.saveDraftMock).toHaveBeenCalledWith(expect.objectContaining({ engine: "anthropic-skill-creator", version: "2.0.0", nativeSkillMd }));
+    await flushAct(() => get().handleCreate());
+    expect(createSkillMock).toHaveBeenCalledWith(expect.objectContaining({ engine: "anthropic-skill-creator", nativeSkillMd, targetAgents: ["claude-code"] }));
+  });
+  it("none never starts generation", async () => {
+    const get = await mountHook();
+    await flushAct();
+    await flushAct(() => { get().setEngine("none"); get().setAiPrompt("Write a skill"); });
+    await flushAct(() => get().handleGenerate());
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("a missing preselected engine blocks both generation and submission", async () => {
+    detectEnginesMock.mockResolvedValue(detection({ vskillSkillBuilder: true }));
+    const get = await mountHook();
+    await flushAct();
+    await flushAct(() => { get().setEngine("anthropic-skill-creator"); get().setAiPrompt("Write a skill"); get().setName("test"); get().setDescription("test"); });
+    await flushAct(() => get().handleGenerate());
+    await flushAct(() => get().handleCreate());
+    expect(fetch).not.toHaveBeenCalled();
+    expect(createSkillMock).not.toHaveBeenCalled();
+  });
+  it("validates the value even if no VersionInput is mounted", async () => {
+    const get = await mountHook();
+    await flushAct();
+    await flushAct(() => { get().setName("test"); get().setDescription("test"); get().setVersion("invalid"); });
+    await flushAct(() => get().handleCreate());
+    expect(createSkillMock).not.toHaveBeenCalled();
+  });
+  it("refresh never overwrites the user's explicit vskill preselection", async () => {
+    const get = await mountHook();
+    await flushAct();
+    await flushAct(() => get().setEngine("vskill"));
+    detectEnginesMock.mockResolvedValue(detection({ anthropicSkillCreator: true }));
+    await flushAct(() => get().refreshEngineDetection());
+    expect(get().engine).toBe("vskill");
+  });
+});
+
+
+it("0734 loads the current version/engine in update mode and saves to the original skill", async () => {
+  detectEnginesMock.mockResolvedValue(detection({ vskillSkillBuilder: true, anthropicSkillCreator: true }));
+  mocks.authoringMock.mockResolvedValue({ name: "existing", plugin: "", layout: 3, description: "Existing", body: "Native body", version: "2.3.4-beta.1", engine: "anthropic-skill-creator", nativeSkillMd: "---\ncontext: fork\n---\nNative body", versionsHref: "https://verified-skill.com/skills/owner/repo/existing/versions" });
+  createSkillMock.mockReset();
+  createSkillMock.mockResolvedValue({ plugin: "fixture", skill: "existing" });
+  const get = await mountHook(vi.fn(), { plugin: "fixture", skill: "existing" });
+  await flushAct(); await flushAct();
+  expect(get().authoringMode).toBe("update");
+  expect(get().version).toBe("2.3.4-beta.1");
+  expect(get().engine).toBe("anthropic-skill-creator");
+  expect(get().versionsHref).toContain("owner/repo/existing/versions");
+  await flushAct(() => get().setVersion("2.3.4"));
+  await flushAct(() => get().handleCreate());
+  expect(createSkillMock).toHaveBeenCalledWith(expect.objectContaining({ mode: "update", name: "existing", version: "2.3.4", engine: "anthropic-skill-creator", nativeSkillMd: expect.stringContaining("context: fork") }));
 });

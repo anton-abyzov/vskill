@@ -192,6 +192,11 @@ export function SkillOverview(props: SkillOverviewProps) {
             source={skill.versionSource}
             pluginName={skill.pluginName ?? null}
           />
+          {skill.origin === "source" && !skill.pluginMarketplace && (
+            <a data-testid="authoring-update-link" href={`#/create?${new URLSearchParams({ mode: "update", skillName: skill.skill, pluginName: skill.plugin })}`}>
+              Edit version and skill
+            </a>
+          )}
           {installMethodChip(skill)}
           {testsChip(skill, onNavigate)}
         </div>

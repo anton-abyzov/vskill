@@ -1,3 +1,4 @@
+import { AUTHORING_ENGINE_COMMANDS } from "../shared/authoring-engine-commands.js";
 // ---------------------------------------------------------------------------
 // Studio install-engine routes — POST /api/studio/install-engine + SSE stream.
 // ---------------------------------------------------------------------------
@@ -36,29 +37,7 @@ import {
 
 type EngineName = "vskill" | "anthropic-skill-creator";
 
-interface EngineCommand {
-  command: string;
-  args: string[];
-  /** PATH-resolved CLI that MUST exist before we spawn `command`. */
-  prerequisite: string;
-}
-
-/**
- * Hard-coded engine→command allow-list. The HTTP request body NEVER reaches a
- * shell — only the engine *name* is read from the request, then mapped here.
- */
-const INSTALL_COMMANDS: Record<EngineName, EngineCommand> = {
-  "anthropic-skill-creator": {
-    command: "claude",
-    args: ["plugin", "install", "skill-creator"],
-    prerequisite: "claude",
-  },
-  vskill: {
-    command: "vskill",
-    args: ["install", "anton-abyzov/vskill/skill-builder"],
-    prerequisite: "vskill",
-  },
-};
+const INSTALL_COMMANDS = AUTHORING_ENGINE_COMMANDS;
 
 const INSTALL_TIMEOUT_MS = 120_000;
 

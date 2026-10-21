@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { setFrontmatterVersion } from "../../../utils/version.js";
 import { Link } from "react-router-dom";
 import { useCreateSkill, toKebab } from "../hooks/useCreateSkill";
 import { useConfig } from "../ConfigContext";
@@ -13,6 +14,7 @@ import type { InstalledAgentEntry } from "../components/AgentSelector";
 import { EngineSelector, defaultEngineFromDetection } from "../components/EngineSelector";
 import type { Engine } from "../components/EngineSelector";
 import { VersionInput } from "../components/VersionInput";
+import type { InstallEngineState } from "../hooks/useInstallEngine";
 import { InstallEngineModal } from "../components/InstallEngineModal";
 import {
   readStudioPreferences,
@@ -87,6 +89,11 @@ export function CreateSkillPage() {
   // 0734: state for the engine install modal — set when the user clicks
   // [Install] next to a missing engine in EngineSelector.
   const [installModalEngine, setInstallModalEngine] = useState<Exclude<Engine, "none"> | null>(null);
+
+  const [installStates, setInstallStates] = useState<Partial<Record<Engine, InstallEngineState>>>({});
+  const onInstallStateChange = useCallback((state: InstallEngineState) => {
+    if (installModalEngine) setInstallStates((previous) => ({ ...previous, [installModalEngine]: state }));
+  }, [installModalEngine]);
 
   // 0698 polish: accept ?mode=&skillName=&description=&pluginName= from the
   // CreateSkillModal's "Generate with AI" chain. Read from hash-based query.
@@ -272,6 +279,7 @@ export function CreateSkillPage() {
     },
     resolveAiConfigOverride,
     forceLayout,
+    updateTarget: prefill.mode === "update" && prefill.skillName ? { plugin: prefill.pluginName || "", skill: prefill.skillName } : undefined,
     // 0786 AC-US1-01: flush any 10s-Undo pending delete/uninstall for the
     // same skill name BEFORE api.createSkill runs, so a delete-then-
     // immediate-recreate flow doesn't trip the server's existsSync 409.
@@ -299,17 +307,30 @@ export function CreateSkillPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (sk.engine === "anthropic-skill-creator" && aiProvider !== "claude-cli") {
+      setAiProvider("claude-cli"); setAiModel("sonnet");
+    }
+  }, [sk.engine, aiProvider]);
+
   // Provider info for AI model picker
   const aiProviderInfo = config?.providers.find((p) => p.id === aiProvider && p.available);
 
   // SKILL.md preview (page-specific sidebar feature)
   const skillMdPreview = useMemo(() => {
+    if (sk.nativeSkillMd) {
+      try {
+        const native = setFrontmatterVersion(sk.nativeSkillMd, sk.version);
+        return native.replace(/(\n---(?:\r?\n)?)[\s\S]*$/, (_match, fence) => `${fence}\n${sk.body}`);
+      } catch { return sk.nativeSkillMd; }
+    }
     const lines: string[] = ["---"];
     if (sk.description) lines.push(`description: "${sk.description.replace(/"/g, '\\"')}"`);
     else lines.push('description: ""');
     if (sk.allowedTools.trim()) lines.push(`allowed-tools: ${sk.allowedTools.trim()}`);
     if (sk.model) lines.push(`model: ${sk.model}`);
     if (sk.targetAgents.length > 0) lines.push(`target-agents: ${sk.targetAgents.join(", ")}`);
+    lines.push(`metadata:\n  version: ${JSON.stringify(sk.version)}\n  engine: ${sk.engine}`);
     lines.push("---");
     lines.push("");
     if (sk.body.trim()) {
@@ -320,7 +341,7 @@ export function CreateSkillPage() {
       lines.push("You are a helpful assistant.");
     }
     return lines.join("\n");
-  }, [sk.name, sk.description, sk.model, sk.allowedTools, sk.body]);
+  }, [sk.name, sk.description, sk.model, sk.allowedTools, sk.body, sk.version, sk.engine, sk.nativeSkillMd]);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -339,7 +360,7 @@ export function CreateSkillPage() {
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-[22px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
-                Create a New Skill
+                {sk.authoringMode === "update" ? "Update Skill" : "Create a New Skill"}
               </h2>
               {sk.standaloneLocked && (
                 <span
@@ -402,14 +423,51 @@ export function CreateSkillPage() {
       {sk.engineDetection && (
         <div className="mb-4">
           <EngineSelector
+            installStates={installStates}
             detection={sk.engineDetection}
             selected={sk.engine as Engine}
-            onSelect={(e) => sk.setEngine(e as typeof sk.engine)}
+            onSelect={(e) => {
+              sk.setEngine(e as typeof sk.engine);
+              if (e === "anthropic-skill-creator" && aiProvider !== "claude-cli") {
+                setAiProvider("claude-cli"); setAiModel("sonnet");
+              }
+            }}
             onInstallClick={(e) => setInstallModalEngine(e)}
           />
         </div>
       )}
 
+      {!sk.engineDetection && <div className="skeleton h-24 mb-4 rounded-lg" aria-label="Detecting authoring engines" />}
+      {sk.engineAvailable === false && <p role="status">Install the selected engine before generating or saving.</p>}
+      {!sk.layoutLoading && <div className="grid grid-cols-2 gap-4 mb-4">
+                {/* Name */}
+                <div className="mb-4">
+                  <label className="text-[11px] font-medium uppercase tracking-wider mb-2 block" style={{ color: "var(--text-tertiary)" }}>
+                    Name <span style={{ color: "var(--red)" }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    disabled={sk.authoringMode === "update"}
+                    value={sk.name}
+                    onChange={(e) => sk.setName(toKebab(e.target.value, false))}
+                    placeholder="my-skill"
+                    className="w-full px-3 py-2 rounded-lg text-[13px]"
+                    style={inputStyle}
+                  />
+                </div>
+
+                {/* 0734: Version input (semver-validated). */}
+                <div className="mb-4">
+                  <VersionInput
+                    value={sk.version}
+                    onChange={sk.setVersion}
+                    onValidityChange={sk.setVersionValid}
+                    mode={sk.authoringMode ?? "create"}
+                    versionsHref={sk.versionsHref}
+                  />
+                </div>
+
+      </div>}
       {/* Loading */}
       {sk.layoutLoading && (
         <div className="space-y-3">
@@ -523,7 +581,7 @@ export function CreateSkillPage() {
                       if (p?.models[0]) setAiModel(nextModel);
                       writePersistedSelection(nextProvider, nextModel);
                     }}
-                    disabled={sk.generating || !aiProviderInfo}
+                    disabled={sk.generating || !aiProviderInfo || sk.engine === "anthropic-skill-creator"}
                     // 0704 T-013b: when NO provider is detected the install-
                     // provider copy wins. `providerCaption(aiProvider)` for
                     // claude-cli is non-empty and would otherwise short-circuit
@@ -697,7 +755,7 @@ export function CreateSkillPage() {
               ) : (
                 <button
                   onClick={sk.handleGenerate}
-                  disabled={!sk.aiPrompt.trim()}
+                  disabled={!sk.aiPrompt.trim() || sk.engineAvailable === false || sk.engine === "none" || !sk.versionValid}
                   className="px-6 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 flex items-center gap-2"
                   style={{
                     // 0703 follow-up: primary CTA uses --color-action (blue)
@@ -878,7 +936,7 @@ export function CreateSkillPage() {
 
               {/* Plugin recommendation — never shown when the user explicitly
                   chose Standalone in the modal (standaloneLocked === true). */}
-              {!sk.standaloneLocked && sk.showPluginRecommendation && sk.pluginLayoutInfo && sk.selectedLayout === 3 && (
+              {!sk.standaloneLocked && sk.authoringMode !== "update" && sk.showPluginRecommendation && sk.pluginLayoutInfo && sk.selectedLayout === 3 && (
                 <div
                   className="px-4 py-3 rounded-lg text-[12px] animate-fade-in flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
                   style={{
@@ -922,31 +980,6 @@ export function CreateSkillPage() {
                 <h3 className="text-[13px] font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
                   Skill Details
                 </h3>
-
-                {/* Name */}
-                <div className="mb-4">
-                  <label className="text-[11px] font-medium uppercase tracking-wider mb-2 block" style={{ color: "var(--text-tertiary)" }}>
-                    Name <span style={{ color: "var(--red)" }}>*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={sk.name}
-                    onChange={(e) => sk.setName(toKebab(e.target.value, false))}
-                    placeholder="my-skill"
-                    className="w-full px-3 py-2 rounded-lg text-[13px]"
-                    style={inputStyle}
-                  />
-                </div>
-
-                {/* 0734: Version input (semver-validated). */}
-                <div className="mb-4">
-                  <VersionInput
-                    value={sk.version}
-                    onChange={sk.setVersion}
-                    onValidityChange={sk.setVersionValid}
-                    mode="create"
-                  />
-                </div>
 
                 {/* Description */}
                 <div className="mb-4">
@@ -1109,7 +1142,7 @@ export function CreateSkillPage() {
               <div className="flex items-center gap-3">
                 <button
                   onClick={sk.handleCreate}
-                  disabled={sk.creating || !sk.name || !sk.description}
+                  disabled={sk.creating || sk.updateLoading || !sk.name || !sk.description || !sk.versionValid || sk.engineAvailable === false}
                   className="px-5 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150"
                   style={{
                     // 0703 follow-up: align primary CTAs on the blue action
@@ -1123,7 +1156,7 @@ export function CreateSkillPage() {
                     opacity: sk.creating ? 0.7 : 1,
                   }}
                 >
-                  {sk.creating ? "Creating..." : "Create Skill"}
+                  {sk.creating ? "Saving..." : sk.authoringMode === "update" ? "Update Skill" : "Create Skill"}
                 </button>
                 <Link
                   to="/"
@@ -1165,8 +1198,10 @@ export function CreateSkillPage() {
       {installModalEngine && (
         <InstallEngineModal
           engine={installModalEngine}
+          onStateChange={onInstallStateChange}
           onClose={() => setInstallModalEngine(null)}
           onSuccess={() => {
+            sk.setEngine(installModalEngine);
             void sk.refreshEngineDetection();
           }}
         />

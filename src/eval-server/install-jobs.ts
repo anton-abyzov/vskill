@@ -97,6 +97,7 @@ export function startSpawnJob<TMeta extends object>(
   };
 
   proc.stdout?.on("data", (chunk: Buffer) => {
+    if (job.done) return;
     const text = chunk.toString();
     job.stdoutBuffer = trimRing(job.stdoutBuffer + text, STDOUT_BUFFER_CAP);
     for (const line of text.split(/\r?\n/)) {
@@ -105,6 +106,7 @@ export function startSpawnJob<TMeta extends object>(
   });
 
   proc.stderr?.on("data", (chunk: Buffer) => {
+    if (job.done) return;
     const text = chunk.toString();
     job.stderrBuffer = trimRing(job.stderrBuffer + text, STDOUT_BUFFER_CAP);
     for (const line of text.split(/\r?\n/)) {
@@ -112,33 +114,34 @@ export function startSpawnJob<TMeta extends object>(
     }
   });
 
-  let timedOut = false;
+  let exited = false;
+  let escalation: ReturnType<typeof setTimeout> | undefined;
+  const finish = (exitCode: number | null, stderr: string) => {
+    if (job.done) return;
+    clearTimeout(timer);
+    job.exitCode = exitCode;
+    job.done = true;
+    emitToJob(job, "done", { success: exitCode === 0, exitCode, stderr });
+  };
   const timer = setTimeout(() => {
-    timedOut = true;
+    // Publish terminal state at the deadline even if the child ignores SIGTERM.
+    finish(-1, "timeout");
     try { proc.kill("SIGTERM"); } catch { /* process already gone */ }
+    escalation = setTimeout(() => {
+      if (!exited) { try { proc.kill("SIGKILL"); } catch { /* process already gone */ } }
+    }, 1000);
+    escalation.unref();
   }, opts.timeoutMs);
 
   proc.on("exit", (code) => {
-    clearTimeout(timer);
-    job.exitCode = timedOut ? -1 : code;
-    job.done = true;
-    const stderr = timedOut ? "timeout" : job.stderrBuffer.trim();
-    emitToJob(job, "done", {
-      success: !timedOut && code === 0,
-      exitCode: timedOut ? -1 : code,
-      stderr,
-    });
+    exited = true;
+    clearTimeout(escalation);
+    finish(code, job.stderrBuffer.trim());
   });
-
   proc.on("error", (err) => {
-    clearTimeout(timer);
-    job.exitCode = -1;
-    job.done = true;
-    emitToJob(job, "done", {
-      success: false,
-      exitCode: -1,
-      stderr: (err as Error).message || "spawn failed",
-    });
+    exited = true;
+    clearTimeout(escalation);
+    finish(-1, (err as Error).message || "spawn failed");
   });
 
   opts.jobs.set(job.id, job);

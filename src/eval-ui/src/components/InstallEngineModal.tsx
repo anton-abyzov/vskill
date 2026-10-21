@@ -10,13 +10,10 @@
 // ---------------------------------------------------------------------------
 
 import React from "react";
+import { authoringEngineInstallCommand } from "../../../shared/authoring-engine-commands.js";
+import type { InstallEngineState } from "../hooks/useInstallEngine";
 import type { Engine } from "./EngineSelector";
 import { useInstallEngine } from "../hooks/useInstallEngine";
-
-const COMMAND_BY_ENGINE: Record<Exclude<Engine, "none">, string> = {
-  vskill: "vskill install anton-abyzov/vskill/skill-builder",
-  "anthropic-skill-creator": "claude plugin install skill-creator",
-};
 
 const LABEL_BY_ENGINE: Record<Exclude<Engine, "none">, string> = {
   vskill: "VSkill skill-builder",
@@ -31,6 +28,7 @@ export interface InstallEngineModalProps {
   onClose: () => void;
   /** Called once after a successful install so the parent can refresh detection. */
   onSuccess: () => void;
+  onStateChange?: (state: InstallEngineState) => void;
   /** Test seam for SSE / fetch — leave undefined in prod. */
   hookOpts?: Parameters<typeof useInstallEngine>[0];
 }
@@ -38,7 +36,8 @@ export interface InstallEngineModalProps {
 export function InstallEngineModal(props: InstallEngineModalProps): React.ReactElement {
   const { engine, onClose, onSuccess, hookOpts } = props;
   const { state, install, retry } = useInstallEngine(hookOpts);
-  const command = COMMAND_BY_ENGINE[engine];
+  const command = authoringEngineInstallCommand(engine);
+  React.useEffect(() => { props.onStateChange?.(state); }, [state, props.onStateChange]);
   const label = LABEL_BY_ENGINE[engine];
   const successFiredRef = React.useRef(false);
 

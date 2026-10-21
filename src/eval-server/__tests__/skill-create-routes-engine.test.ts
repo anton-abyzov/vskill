@@ -4,19 +4,21 @@
 // ---------------------------------------------------------------------------
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const detectionMock = vi.hoisted(() => ({ skillCreatorInstalled: false }));
+const detectionMock = vi.hoisted(() => ({ skillCreatorInstalled: false, skillCreatorPath: "", generate: vi.fn(), universal: vi.fn() }));
 
 vi.mock("../../utils/skill-creator-detection.js", () => ({
   isSkillCreatorInstalled: () => detectionMock.skillCreatorInstalled,
-  findSkillCreatorPath: () => null,
+  findSkillCreatorPath: () => detectionMock.skillCreatorPath,
 }));
 
+vi.mock("../../core/skill-generator.js", () => ({ generateSkill: detectionMock.universal }));
+
 vi.mock("../../eval/llm.js", () => ({
-  createLlmClient: vi.fn(),
+  createLlmClient: vi.fn(() => ({ generate: detectionMock.generate })),
 }));
 
 vi.mock("../../eval/benchmark-history.js", () => ({
@@ -83,8 +85,9 @@ function fakeRes(): any {
   };
 }
 
-async function runHandler(handler: any, body: unknown) {
+async function runHandler(handler: any, body: unknown, sse = false) {
   const req = fakeReq(body);
+  if (sse) req.headers.accept = "text/event-stream";
   const res = fakeRes();
   await handler(req, res, {});
   await new Promise((r) => setImmediate(r));
@@ -114,6 +117,11 @@ describe("0734 — engine field on POST /api/skills/create", () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "vskill-0734-engine-"));
     detectionMock.skillCreatorInstalled = false;
+    detectionMock.skillCreatorPath = join(root, "engine");
+    mkdirSync(detectionMock.skillCreatorPath);
+    writeFileSync(join(detectionMock.skillCreatorPath, "SKILL.md"), "# Installed skill-creator instructions\nUse the custom Claude-native schema.");
+    detectionMock.generate.mockResolvedValue({ text: '---\nname: demo-skill\ndescription: "Demo skill"\ncontext: fork\nagent: Explore\nallowed-tools: [Read, "Bash(git status:*)"]\nmetadata:\n  custom: preserved\n---\n# Native result\n' });
+    detectionMock.universal.mockResolvedValue({ name: "universal", description: "Portable", model: "", allowedTools: "", body: "Portable body", evals: [], reasoning: "fixture" });
     handlers = captureHandlers(root);
   });
 
@@ -162,6 +170,12 @@ describe("0734 — engine field on POST /api/skills/create", () => {
 
     const skillMd = readFileSync(result.skillMdPath, "utf8");
     expect(skillMd).toMatch(/engine:\s*anthropic-skill-creator/);
+    expect(detectionMock.generate).toHaveBeenCalledTimes(1);
+    expect(detectionMock.generate.mock.calls[0][0]).toContain("Installed skill-creator instructions");
+    expect(skillMd).toContain("context: fork");
+    expect(skillMd).toContain("agent: Explore");
+    expect(skillMd).toContain("custom: preserved");
+    expect(skillMd).toContain("# Native result");
   });
 
   // ---- AC-US3-03 (failure path) -------------------------------------------
@@ -178,16 +192,18 @@ describe("0734 — engine field on POST /api/skills/create", () => {
   });
 
   // ---- AC-US3-04 -----------------------------------------------------------
-  it("AC-US3-04: engine='none' skips generation and emits the body verbatim with no metadata.engine", async () => {
+  it("AC-US3-04: engine='none' skips generation and emits the body verbatim with explicit unassisted provenance", async () => {
     const handler = handlers.post["/api/skills/create"];
 
-    const res = await runHandler(handler, baseRequest({ engine: "none" }));
+    const rawBody = "\n  # Raw\n\n  spaces stay  \n\n";
+    const res = await runHandler(handler, baseRequest({ engine: "none", body: rawBody }));
     expect(res.capturedStatus).toBe(201);
 
     const result = JSON.parse(res.capturedBody);
     const skillMd = readFileSync(result.skillMdPath, "utf8");
-    expect(skillMd).not.toMatch(/^\s*engine:/m);
-    expect(skillMd).toContain("Hello world.");
+    expect(skillMd).toMatch(/engine:\s*none/);
+    expect(skillMd.split("---\n").slice(2).join("---\n").slice(1)).toBe(rawBody);
+    expect(detectionMock.generate).not.toHaveBeenCalled();
   });
 
   // ---- AC-US3-05 (defensive) ---------------------------------------------
@@ -200,4 +216,63 @@ describe("0734 — engine field on POST /api/skills/create", () => {
     const result = JSON.parse(res.capturedBody);
     expect(result.error).toMatch(/engine/i);
   });
+  it("routes native generation to installed instructions and universal generation to its existing generator", async () => {
+    const universal = await runHandler(handlers.post["/api/skills/generate"], { prompt: "Portable", engine: "vskill", targetAgents: ["codex"] });
+    expect(universal.capturedStatus).toBe(200);
+    expect(detectionMock.universal).toHaveBeenCalledWith(expect.objectContaining({ targetAgents: ["codex"] }), expect.anything());
+    expect(detectionMock.generate).not.toHaveBeenCalled();
+    detectionMock.skillCreatorInstalled = true;
+    const native = await runHandler(handlers.post["/api/skills/generate"], { prompt: "Native", engine: "anthropic-skill-creator", targetAgents: ["codex"] });
+    expect(native.capturedStatus).toBe(200);
+    expect(JSON.parse(native.capturedBody)).toMatchObject({ engine: "anthropic-skill-creator", emittedTargets: ["claude-code"], nativeSkillMd: expect.stringContaining("context: fork") });
+    expect(detectionMock.generate).toHaveBeenCalledOnce();
+    expect(detectionMock.universal).toHaveBeenCalledOnce();
+  });
+  it("rejects none generation and a non-Claude provider for the native engine without making model calls", async () => {
+    detectionMock.skillCreatorInstalled = true;
+    for (const request of [{ engine: "none" }, { engine: "anthropic-skill-creator", provider: "codex-cli" }]) {
+      const res = await runHandler(handlers.post["/api/skills/generate"], { prompt: "Must not run", ...request });
+      expect(res.capturedStatus).toBe(400);
+    }
+    expect(detectionMock.generate).not.toHaveBeenCalled();
+    expect(detectionMock.universal).not.toHaveBeenCalled();
+  });
+  it("saves a native preview without regenerating or dropping custom frontmatter", async () => {
+    detectionMock.skillCreatorInstalled = true;
+    const preview = await runHandler(handlers.post["/api/skills/generate"], { prompt: "Native", engine: "anthropic-skill-creator" });
+    const generated = JSON.parse(preview.capturedBody);
+    const saved = await runHandler(handlers.post["/api/skills/create"], baseRequest({ ...generated, version: "2.0.0", targetAgents: ["codex"] }));
+    expect(saved.capturedStatus).toBe(201);
+    expect(detectionMock.generate).toHaveBeenCalledOnce();
+    const content = readFileSync(JSON.parse(saved.capturedBody).skillMdPath, "utf8");
+    expect(content).toContain("custom: preserved");
+    expect(content).toContain("target-agents: [claude-code]");
+    expect(content).not.toContain("[codex]");
+  });
+  it("streams native documents and errors without switching generators", async () => {
+    detectionMock.skillCreatorInstalled = true;
+    const generated = await runHandler(handlers.post["/api/skills/generate"], { prompt: "Native", engine: "anthropic-skill-creator" }, true);
+    expect(generated.capturedBody).toContain("event: done");
+    expect(generated.capturedBody).toContain('"emittedTargets":["claude-code"]');
+    detectionMock.generate.mockRejectedValueOnce(new Error("native engine failed"));
+    const failure = await runHandler(handlers.post["/api/skills/generate"], { prompt: "Native", engine: "anthropic-skill-creator" }, true);
+    expect(failure.capturedBody).toContain("event: error");
+    expect(failure.capturedBody).toContain("native engine failed");
+    detectionMock.generate.mockRejectedValueOnce(new Error("native engine failed"));
+    const jsonFailure = await runHandler(handlers.post["/api/skills/generate"], { prompt: "Native", engine: "anthropic-skill-creator" });
+    expect(jsonFailure.capturedStatus).toBe(500);
+    expect(detectionMock.universal).not.toHaveBeenCalled();
+  });
+  it("autosaves native drafts without regeneration and refuses update of a nonexistent skill", async () => {
+    const nativeSkillMd = '---\nname: demo-skill\ndescription: Demo\ncontext: fork\n---\nNative body';
+    const draft = await runHandler(handlers.post["/api/skills/save-draft"], baseRequest({ nativeSkillMd, engine: "anthropic-skill-creator", aiMeta: { prompt: "Native", provider: "claude-cli", model: "sonnet", reasoning: "fixture" } }));
+    expect(draft.capturedStatus).toBe(201);
+    const content = readFileSync(join(root, "demo-plugin", "skills", "demo-skill", "SKILL.md"), "utf8");
+    expect(content).toContain("context: fork");
+    expect(content).toContain("engine: anthropic-skill-creator");
+    expect(detectionMock.generate).not.toHaveBeenCalled();
+    const missing = await runHandler(handlers.post["/api/skills/create"], baseRequest({ name: "missing", mode: "update" }));
+    expect(missing.capturedStatus).toBe(404);
+  });
+
 });

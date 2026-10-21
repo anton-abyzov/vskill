@@ -1,0 +1,14 @@
+{
+  "name": "security",
+  "description": "Security response checks — php2shell-check: read-only exposure check for the October 2026 PHP emergency patch (CVE-2026-109618, CVE-2026-109619) across installed PHP binaries, project files and ini stopgaps, with a per-branch fix plan.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Anton Abyzov",
+    "email": "anton.abyzov@gmail.com",
+    "url": "https://github.com/anton-abyzov/vskill"
+  },
+  "homepage": "https://github.com/anton-abyzov/vskill",
+  "repository": "https://github.com/anton-abyzov/vskill",
+  "license": "MIT",
+  "keywords": ["security", "php", "php2shell", "cve", "CVE-2026-109618", "CVE-2026-109619", "php-fpm", "patch", "vulnerability"]
+}

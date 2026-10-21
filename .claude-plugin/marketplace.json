@@ -68,6 +68,13 @@
       "source": "./plugins/codex-bridge",
       "version": "0.1.0",
       "category": "development"
+    },
+    {
+      "name": "security",
+      "description": "Security response checks — php2shell-check: read-only exposure check and fix plan for the October 2026 PHP emergency patch (CVE-2026-109618, CVE-2026-109619)",
+      "source": "./plugins/security",
+      "version": "0.1.0",
+      "category": "security"
     }
   ],
   "metadata": {

@@ -13,6 +13,12 @@ This repo ships two products from `main`, each from its own tag:
 Both scripts tag the commit at the head of `main` on GitHub, never your local
 checkout, and push the tag over HTTPS. Both run on macOS `/bin/bash` 3.2.
 
+During a retention hold, pass `--keep-workdir` to either script and also
+`--keep-drafts` to the desktop script, including dry runs. These options retain
+temporary installation/signature evidence and stale desktop drafts. They do
+not bypass preflight, signing, CI, publication or live verification gates.
+Retained directories may contain downloaded artifacts and should stay private.
+
 ## npm: `release-npm.sh`
 
 1. Merge the PR that bumps `package.json` (and `package-lock.json`) to the new version.

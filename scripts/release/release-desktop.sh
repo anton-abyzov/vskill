@@ -2,13 +2,15 @@
 # release-desktop.sh — one-command desktop release (macOS + Windows + Linux)
 #
 # Usage:
-#   bash scripts/release/release-desktop.sh [<version>] [--dry-run] [--rotate-secrets] [--force]
+#   bash scripts/release/release-desktop.sh [<version>] [--dry-run] [--rotate-secrets] [--force] [--keep-workdir] [--keep-drafts]
 #
 #   <version>         X.Y.Z (or X.Y.Z-rcN). Default: the patch after the newest
 #                     desktop-v* tag on GitHub. Must be newer than that tag.
 #   --dry-run         Preflight, print the plan, read the live manifest and verify
 #                     its macOS bundle signature. No tag, push, secret or release
 #                     change.
+#   --keep-workdir    Retain this run's temporary files on success or failure.
+#   --keep-drafts     Preserve all stale draft releases after publication.
 #   --rotate-secrets  Re-upload TAURI_SIGNING_PRIVATE_KEY + _PASSWORD from
 #                     KEY_DIR before tagging. The only path that runs gh secret set.
 #   --force           Tag even when the newest main run of the desktop nightly
@@ -59,18 +61,22 @@ KEY_DIR="${KEY_DIR:-${HOME}/.config/skill-studio-release}"
 RSIGN="${RSIGN:-$(command -v rsign || echo "${HOME}/.cargo/bin/rsign")}"
 
 usage() {
-  echo "usage: $0 [<version>] [--dry-run] [--rotate-secrets] [--force]" >&2
+  echo "usage: $0 [<version>] [--dry-run] [--rotate-secrets] [--force] [--keep-workdir] [--keep-drafts]" >&2
 }
 
 DRY_RUN=0
 ROTATE=0
 FORCE=0
+KEEP_WORKDIR=0
+KEEP_DRAFTS=0
 VERSION=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
     --rotate-secrets) ROTATE=1 ;;
     --force) FORCE=1 ;;
+    --keep-workdir) KEEP_WORKDIR=1 ;;
+    --keep-drafts) KEEP_DRAFTS=1 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown flag: $1" >&2; usage; exit 2 ;;
     *)
@@ -88,7 +94,13 @@ ok() { echo "   OK: $*"; }
 warn() { echo "   WARN: $*" >&2; }
 
 WORK="$(mktemp -d)"
-cleanup() { rm -rf "$WORK"; }
+cleanup() {
+  if [[ "$KEEP_WORKDIR" == 1 ]]; then
+    printf 'Retained release directory: %s\n' "$WORK"
+  else
+    rm -rf "$WORK"
+  fi
+}
 trap cleanup EXIT
 
 MODE=""
@@ -398,7 +410,7 @@ verify_bundle_signature "$WORK/latest.json" \
   || die "the darwin-aarch64 bundle in latest.json does not verify against minisign.pub"
 
 # ─── 8. Promote + stale drafts ────────────────────────────────────────────
-step "[8/8] promoting the release + removing stale drafts"
+step "[8/8] promoting the release + handling stale drafts"
 IS_DRAFT="$(gh release view "$TAG" -R "$REPO" --json isDraft -q .isDraft)" \
   || die "gh release view ${TAG} failed"
 if [[ "$IS_DRAFT" == "true" ]]; then
@@ -407,18 +419,22 @@ if [[ "$IS_DRAFT" == "true" ]]; then
 else
   ok "${TAG} is already published"
 fi
-gh release list -R "$REPO" --limit 100 --json tagName,isDraft \
-  -q '.[] | select(.isDraft == true) | select(.tagName | startswith("desktop-v")) | .tagName' > "$WORK/drafts" \
-  || die "gh release list failed"
-while read -r t; do
-  [[ -z "$t" || "$t" == "$TAG" ]] && continue
-  # The release only: its git tag stays (no --cleanup-tag).
-  if gh release delete "$t" -R "$REPO" -y >/dev/null; then
-    ok "deleted stale draft ${t}"
-  else
-    warn "could not delete stale draft ${t}"
-  fi
-done < "$WORK/drafts"
+if [[ "$KEEP_DRAFTS" == 1 ]]; then
+  ok "retaining stale draft releases (--keep-drafts)"
+else
+  gh release list -R "$REPO" --limit 100 --json tagName,isDraft \
+    -q '.[] | select(.isDraft == true) | select(.tagName | startswith("desktop-v")) | .tagName' > "$WORK/drafts" \
+    || die "gh release list failed"
+  while read -r t; do
+    [[ -z "$t" || "$t" == "$TAG" ]] && continue
+    # The release only: its git tag stays (no --cleanup-tag).
+    if gh release delete "$t" -R "$REPO" -y >/dev/null; then
+      ok "deleted stale draft ${t}"
+    else
+      warn "could not delete stale draft ${t}"
+    fi
+  done < "$WORK/drafts"
+fi
 
 echo ""
 echo "DESKTOP RELEASE ${VERSION} LIVE"

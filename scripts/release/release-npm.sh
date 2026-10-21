@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # release-npm.sh — tag origin/main and follow the npm release to the registry
 #
-# Usage: bash scripts/release/release-npm.sh [<version>] [--dry-run]
+# Usage: bash scripts/release/release-npm.sh [<version>] [--dry-run] [--keep-workdir]
 #   <version>   X.Y.Z; defaults to the version in this checkout's package.json
 #   --dry-run   run every check, print what would be tagged, tag and push nothing
+#   --keep-workdir   retain fresh-install files and a local tag if pushing fails
 #
 # The version bump is a normal PR. Once it is merged, this script:
 #   1. Preflight (no side effects): gh is signed in with push access, v<version>
@@ -33,7 +34,7 @@ RUN_LOOKUP_SECONDS="${RUN_LOOKUP_SECONDS:-120}"
 REGISTRY_TIMEOUT_SECONDS="${REGISTRY_TIMEOUT_SECONDS:-300}"
 
 usage() {
-  sed -n '3,6p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,7p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 step() { printf '\n==> %s\n' "$*"; }
@@ -42,9 +43,11 @@ die() { printf 'release-npm: %s\n' "$*" >&2; exit 1; }
 
 VERSION=""
 DRY_RUN=0
+KEEP_WORKDIR=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
+    --keep-workdir) KEEP_WORKDIR=1 ;;
     -h|--help) usage; exit 0 ;;
     -*) printf 'release-npm: unknown option %s\n' "$1" >&2; usage >&2; exit 2 ;;
     *)
@@ -54,6 +57,18 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+scratch=""
+cleanup() {
+  if [ -n "$scratch" ]; then
+    if [ "$KEEP_WORKDIR" -eq 1 ]; then
+      printf 'Retained fresh-install directory: %s\n' "$scratch"
+    else
+      rm -rf "$scratch"
+    fi
+  fi
+}
+trap cleanup EXIT
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
@@ -137,6 +152,9 @@ fi
 step "Tagging ${SHA} as ${TAG}"
 git tag "$TAG" "$SHA"
 if ! git push -q "$REMOTE_URL" "refs/tags/${TAG}"; then
+  if [ "$KEEP_WORKDIR" -eq 1 ]; then
+    die "pushing ${TAG} to ${REMOTE_URL} failed; local tag retained (--keep-workdir)"
+  fi
   git tag -d "$TAG" >/dev/null
   die "pushing ${TAG} to ${REMOTE_URL} failed; local tag removed"
 fi
@@ -175,10 +193,8 @@ ok "${PACKAGE}@${VERSION} is on the registry"
 step "npx -y --prefer-online ${PACKAGE}@${VERSION} --version"
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/release-npm.XXXXXX")
 if ! printed=$(cd "$scratch" && npx -y --prefer-online "${PACKAGE}@${VERSION}" --version); then
-  rm -rf "$scratch"
   die "npx ${PACKAGE}@${VERSION} --version failed"
 fi
-rm -rf "$scratch"
 printf '%s\n' "$printed" | grep -qF "$VERSION" \
   || die "npx ${PACKAGE}@${VERSION} --version printed '${printed}', expected ${VERSION}"
 ok "npx ${PACKAGE}@${VERSION} --version -> ${VERSION}"

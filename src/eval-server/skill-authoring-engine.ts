@@ -1,28 +1,15 @@
-import { mergeNativeSkillDocument } from "../shared/skill-authoring-document.js";
+import { mergeNativeSkillDocument, readNativeSkillDocument } from "../shared/skill-authoring-document.js";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createLlmClient } from "../eval/llm.js";
 import { findSkillCreatorPath, isSkillCreatorInstalled } from "../utils/skill-creator-detection.js";
-import { readFrontmatterVersion } from "../utils/version.js";
-import { isValidSemver } from "../utils/semver.js";
-import { parseSkillFrontmatter } from "./api-routes.js";
 import type { GenerateSkillOptions } from "../core/skill-generator.js";
 import type { GenerateSkillRequest, GenerateSkillResult, CreateSkillRequest } from "./skill-create-routes.js";
 
-const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
-
 /** Read a direct metadata.engine child without assuming a YAML indent width. */
 export function readAuthoringEngine(document: string): NonNullable<CreateSkillRequest["engine"]> {
-  const lines = document.match(FRONTMATTER)?.[1].split(/\r?\n/) ?? [];
-  const metadata = lines.findIndex((line) => /^metadata:\s*(?:#.*)?$/.test(line));
-  if (metadata < 0) return "vskill";
-  const next = lines.findIndex((line, i) => i > metadata && /^[^\s#]/.test(line));
-  const children = lines.slice(metadata + 1, next < 0 ? lines.length : next);
-  const indents = children.filter((line) => /^ +[^ #]/.test(line)).map((line) => line.length - line.trimStart().length);
-  const indent = indents.length ? Math.min(...indents) : 2;
-  const value = children.find((line) => new RegExp(`^ {${indent}}engine\\s*:`).test(line))?.split(":").slice(1).join(":").trim();
-  const match = value?.match(/^(?:"([^"]*)"|'([^']*)'|([^#]*))/);
-  const engine = (match?.[1] ?? match?.[2] ?? match?.[3])?.trim();
+  const metadata = readNativeSkillDocument(document).fields.metadata as Record<string, unknown> | undefined;
+  const engine = metadata?.engine;
   return engine === "none" || engine === "anthropic-skill-creator" ? engine : "vskill";
 }
 
@@ -55,19 +42,14 @@ export async function generateWithSkillCreator(request: GenerateSkillRequest, op
   );
   options.abortSignal?.throwIfAborted();
   const nativeSkillMd = result.text.trim().replace(/^```(?:markdown|md)?\s*\n/i, "").replace(/\n```\s*$/, "") + "\n";
-  const fm = parseSkillFrontmatter(nativeSkillMd.replace(/\r\n/g, "\n"));
-  if (!FRONTMATTER.test(nativeSkillMd) || typeof fm.name !== "string" || typeof fm.description !== "string") {
-    throw new Error("skill-creator returned no valid SKILL.md name/description frontmatter");
-  }
-  const body = nativeSkillMd.replace(FRONTMATTER, "").replace(/^\r?\n/, "");
-  const generatedVersion = readFrontmatterVersion(nativeSkillMd);
+  const { fields: fm, body, version } = readNativeSkillDocument(nativeSkillMd);
   const document = mergeNativeSkillMd(nativeSkillMd, {
-    name: fm.name, description: fm.description, body,
-    version: generatedVersion && isValidSemver(generatedVersion) ? generatedVersion : "1.0.0",
+    name: fm.name as string, description: fm.description as string, body,
+    version: version ?? "1.0.0",
     engine: "anthropic-skill-creator",
   });
   return {
-    name: fm.name, description: fm.description,
+    name: fm.name as string, description: fm.description as string,
     model: typeof fm.model === "string" ? fm.model : "",
     allowedTools: Array.isArray(fm["allowed-tools"]) ? fm["allowed-tools"].join(", ") : typeof fm["allowed-tools"] === "string" ? fm["allowed-tools"] : "",
     body, nativeSkillMd: document, engine: "anthropic-skill-creator", emittedTargets: ["claude-code"],
@@ -77,5 +59,5 @@ export async function generateWithSkillCreator(request: GenerateSkillRequest, op
 
 /** Shared with the browser preview; parsing never rewrites native YAML. */
 export function mergeNativeSkillMd(native: string, data: Pick<CreateSkillRequest, "name" | "description" | "body" | "version" | "allowedTools" | "model" | "engine">): string {
-  return mergeNativeSkillDocument(native, data, parseSkillFrontmatter(native.replace(/\r\n/g, "\n")));
+  return mergeNativeSkillDocument(native, data);
 }

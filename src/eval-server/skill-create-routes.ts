@@ -1,3 +1,4 @@
+import { authoringRequestError, AuthoringValidationError, readNativeSkillDocument } from "../shared/skill-authoring-document.js";
 import { registerSkillAuthoringRoute } from "./skill-authoring-route.js";
 import { AuthoringPathError, computeSkillDir, resolveAuthoringSkillPath } from "./skill-authoring-path.js";
 export { computeSkillDir } from "./skill-authoring-path.js";
@@ -19,7 +20,7 @@ import { parseSkillFrontmatter, parseGithubRemote, walkUpForGitRoot } from "./ap
 import { writeHistoryEntry } from "../eval/benchmark-history.js";
 import { getAgentCreationProfile } from "../agents/agents-registry.js";
 import type { AgentCreationProfile } from "../agents/agents-registry.js";
-import { extractFrontmatterVersion, bumpPatch } from "../utils/version.js";
+import { bumpPatch } from "../utils/version.js";
 import { submitSkillUpdateEvent } from "./platform-proxy.js";
 
 // ---------------------------------------------------------------------------
@@ -1142,27 +1143,8 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
     const root = getRoot();
     const body = (await readBody(req)) as CreateSkillRequest;
 
-    // Validate name
-    if (!body.name || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(body.name)) {
-      sendJson(res, { error: "Name must be kebab-case (lowercase letters, numbers, hyphens)" }, 400, req);
-      return;
-    }
-    if (!body.description?.trim()) {
-      sendJson(res, { error: "Description is required" }, 400, req);
-      return;
-    }
-    if (!body.layout || ![1, 2, 3].includes(body.layout)) {
-      sendJson(res, { error: "Layout must be 1, 2, or 3" }, 400, req);
-      return;
-    }
-    if (body.layout !== 3 && !body.plugin?.trim()) {
-      sendJson(res, { error: "Plugin name is required for this layout" }, 400, req);
-      return;
-    }
-    if (body.plugin && !/^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/i.test(body.plugin)) {
-      sendJson(res, { error: "Plugin name contains invalid characters" }, 400, req);
-      return;
-    }
+    const validationError = authoringRequestError(body);
+    if (validationError) return sendJson(res, { error: validationError }, 400, req);
 
     // 0734: validate authoring engine. Default to "vskill" when omitted.
     const targetDir = computeSkillDir(root, body.layout, body.plugin || "", body.name);
@@ -1174,8 +1156,9 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
         return;
       }
     }
-    const previousEngine = body.mode === "update" && existsSync(skillMdPath)
-      ? readAuthoringEngine(readFileSync(skillMdPath, "utf8")) : "vskill";
+    let previousEngine: CreateSkillEngine = "vskill";
+    try { if (body.mode === "update" && existsSync(skillMdPath)) previousEngine = readAuthoringEngine(readFileSync(skillMdPath, "utf8")); }
+    catch (error) { return sendJson(res, { error: (error as Error).message }, 400, req); }
     const engine: CreateSkillEngine = body.engine ?? previousEngine;
     if (body.engine !== undefined && !VALID_ENGINES.has(body.engine)) {
       sendJson(res, {
@@ -1226,7 +1209,7 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
       resolvedVersion = body.version.trim();
     } else if (skillExists && isUpdateMode) {
       const existing = readFileSync(skillMdPath, "utf-8");
-      const previous = extractFrontmatterVersion(existing) ?? "1.0.0";
+      const previous = readNativeSkillDocument(existing).version ?? "1.0.0";
       resolvedVersion = bumpPatch(previous);
     } else {
       resolvedVersion = "1.0.0";
@@ -1242,6 +1225,7 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
       const content = native
         ? mergeNativeSkillMd(native, { ...body, body: generated?.body ?? body.body, version: resolvedVersion, engine })
         : buildSkillMd({ ...body, version: resolvedVersion, engine });
+      readNativeSkillDocument(content);
       // Create directories only after generation/validation succeeds.
       if (isUpdateMode) resolveAuthoringSkillPath(root, body.plugin || "", body.name, body.layout);
       mkdirSync(targetDir, { recursive: true });
@@ -1369,7 +1353,7 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
       }, isUpdate ? 200 : 201, req);
     } catch (err) {
       // On failure, do NOT delete draftDir — preserve user's work
-      sendJson(res, { error: `Failed to create skill: ${(err as Error).message}` }, 500, req);
+      sendJson(res, { error: `Failed to create skill: ${(err as Error).message}` }, err instanceof AuthoringValidationError ? 400 : 500, req);
     }
   });
 
@@ -1378,18 +1362,8 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
     const root = getRoot();
     const body = (await readBody(req)) as SaveDraftRequest;
 
-    if (!body.name || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(body.name)) {
-      sendJson(res, { error: "Name must be kebab-case" }, 400, req);
-      return;
-    }
-    if (!body.description?.trim()) {
-      sendJson(res, { error: "Description is required" }, 400, req);
-      return;
-    }
-    if (!body.layout || ![1, 2, 3].includes(body.layout)) {
-      sendJson(res, { error: "Layout must be 1, 2, or 3" }, 400, req);
-      return;
-    }
+    const validationError = authoringRequestError(body, true);
+    if (validationError) return sendJson(res, { error: validationError }, 400, req);
 
     const targetDir = computeSkillDir(root, body.layout, body.plugin || "", body.name);
     const skillMdPath = join(targetDir, "SKILL.md");
@@ -1404,21 +1378,20 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
     if (body.version?.trim()) {
       resolvedVersion = body.version.trim();
     } else if (existsSync(skillMdPath)) {
-      resolvedVersion = extractFrontmatterVersion(readFileSync(skillMdPath, "utf-8")) ?? "1.0.0";
+      resolvedVersion = readNativeSkillDocument(readFileSync(skillMdPath, "utf-8")).version ?? "1.0.0";
     } else {
       resolvedVersion = "1.0.0";
     }
 
     try {
-      // Create directories (overwrites allowed for re-generation)
+      const content = body.nativeSkillMd
+        ? mergeNativeSkillMd(body.nativeSkillMd, { ...body, version: resolvedVersion })
+        : buildSkillMd({ ...body, version: resolvedVersion });
+      readNativeSkillDocument(content);
       mkdirSync(targetDir, { recursive: true });
       mkdirSync(join(targetDir, "evals"), { recursive: true });
       mkdirSync(join(targetDir, "evals", "history"), { recursive: true });
 
-      // Write SKILL.md
-      const content = body.engine === "anthropic-skill-creator" && body.nativeSkillMd
-        ? mergeNativeSkillMd(body.nativeSkillMd, { ...body, version: resolvedVersion })
-        : buildSkillMd({ ...body, version: resolvedVersion });
       writeFileSync(skillMdPath, content, "utf-8");
       files.push("SKILL.md");
 
@@ -1472,7 +1445,7 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
         files,
       }, 201, req);
     } catch (err) {
-      sendJson(res, { error: `Failed to save draft: ${(err as Error).message}` }, 500, req);
+      sendJson(res, { error: `Failed to save draft: ${(err as Error).message}` }, err instanceof AuthoringValidationError ? 400 : 500, req);
     }
   });
 

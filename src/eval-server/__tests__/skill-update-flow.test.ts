@@ -150,7 +150,7 @@ describe("0726 — POST /api/skills/create update mode", () => {
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(
       join(skillDir, "SKILL.md"),
-      '---\nversion: "1.0.0"\ndescription: "old"\n---\n# old\n',
+      '---\nname: demo-skill\nversion: "1.0.0"\ndescription: "old"\n---\n# old\n',
       "utf-8",
     );
 
@@ -175,7 +175,7 @@ describe("0726 — POST /api/skills/create update mode", () => {
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(
       join(skillDir, "SKILL.md"),
-      '---\nversion: "1.0.0"\ndescription: "old"\n---\n# old\n',
+      '---\nname: demo-skill\nversion: "1.0.0"\ndescription: "old"\n---\n# old\n',
       "utf-8",
     );
 

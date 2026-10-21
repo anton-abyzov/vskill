@@ -73,6 +73,12 @@ describe("authoring load/edit/save over HTTP", () => {
   ])("removes explicitly cleared optional fields with %s", async (tools) => {
     seed(tools);
     expect(parseYaml(readFileSync(file, "utf8").match(/^---\n([\s\S]*?)\n---/)![1])).toHaveProperty("allowed-tools");
+    if (tools.includes("\nBash") || tools.includes("\n'Read]")) {
+      const before = readFileSync(file, "utf8");
+      const res = await post("/api/skills/create", { name: "existing", mode: "update", allowedTools: "" });
+      expect(res.status).toBe(400); expect((await res.json() as any).error).toMatch(/Invalid native YAML/);
+      expect(readFileSync(file, "utf8")).toBe(before); return;
+    }
     const { document, contextAfterSave } = await update({ model: "", allowedTools: "" }, !tools.includes("# preserve permission note"));
     expect(document).not.toMatch(/^(model|allowed-tools):/m);
     expect(parseSkillFrontmatter(document)).not.toHaveProperty("model");
@@ -90,6 +96,12 @@ describe("authoring load/edit/save over HTTP", () => {
   });
   it.each(["allowed-tools:\n    - Read\n    - Bash", "allowed-tools: [\nRead,\nBash\n]"])("preserves an untouched richer native field: %s", async (tools) => {
     seed(tools);
+    if (tools.includes("\nRead,")) {
+      const before = readFileSync(file, "utf8");
+      const res = await post("/api/skills/create", { name: "existing", mode: "update" });
+      expect(res.status).toBe(400); expect((await res.json() as any).error).toMatch(/Invalid native YAML/);
+      expect(readFileSync(file, "utf8")).toBe(before); return;
+    }
     const { document } = await update({}, false);
     expect(document).toContain(tools);
     expect(parseYaml(document.match(/^---\n([\s\S]*?)\n---/)![1])).toMatchObject({model: "opus", "allowed-tools": ["Read", "Bash"]});
@@ -164,7 +176,7 @@ describe("authoring load/edit/save over HTTP", () => {
   it("preserves reviewed work when a native draft cannot be merged", async () => {
     seed("allowed-tools: Read, Bash"); const before = readFileSync(file, "utf8");
     const res = await post("/api/skills/save-draft", {name: "existing", engine: "anthropic-skill-creator", nativeSkillMd: "---\nmetadata: invalid-scalar\n---\nBody", aiMeta: {prompt: "fixture", provider: "fixture", model: "fixture", reasoning: "fixture"}});
-    expect(res.status).toBe(500); expect((await res.json() as any).error).toMatch(/block mapping/);
+    expect(res.status).toBe(400); expect((await res.json() as any).error).toMatch(/block mapping/);
     expect(readFileSync(file, "utf8")).toBe(before);
   });
   it("finalizes a generated draft and moves it to the selected plugin with its evals", async () => {

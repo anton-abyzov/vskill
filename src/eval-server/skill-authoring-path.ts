@@ -25,9 +25,9 @@ export function resolveAuthoringSkillPath(root: string, plugin: string, skill: s
   if (!layout) throw new AuthoringPathError("Only workspace-authored skills can be updated here", 403);
   const file = join(dir, "SKILL.md");
   if (!existsSync(file)) throw new AuthoringPathError("Skill to update was not found", 404);
-  const realRoot = realpathSync(root);
+  const realRoot = realpathSync.native(root);
   for (const target of [dir, file]) {
-    const location = relative(realRoot, realpathSync(target));
+    const location = relative(realRoot, realpathSync.native(target));
     if (!location || location === ".." || location.startsWith(`..${sep}`) || isAbsolute(location)) {
       throw new AuthoringPathError("Only workspace-authored skills can be updated here", 403);
     }

@@ -1,3 +1,4 @@
+import { AuthoringValidationError } from "../shared/skill-authoring-document.js";
 import type { Router } from "./router.js";
 import { sendJson, readBody } from "./router.js";
 import { initSSE, sendSSE, sendSSEDone } from "./sse-helpers.js";
@@ -72,10 +73,12 @@ export function registerSkillGenerateRoute(router: Router, getRoot: () => string
   router.post("/api/skills/generate", async (req, res) => {
     const root = getRoot();
     const body = (await readBody(req)) as GenerateSkillRequest;
-    if (!body.prompt || !body.prompt.trim())
+    if (!body || typeof body !== "object" || typeof body.prompt !== "string" || !body.prompt.trim())
       return sendJson(res, { error: "Describe what your skill should do" }, 400, req);
     if (body.prompt.length > 50000)
       return sendJson(res, { error: "Prompt is too long (max 50,000 characters)" }, 400, req);
+    for (const key of ["provider", "model", "body"] as const)
+      if (body[key] !== undefined && typeof body[key] !== "string") return sendJson(res, { error: `${key} must be a string` }, 400, req);
     const engine = body.engine ?? "vskill";
     if (!["vskill", "anthropic-skill-creator", "none"].includes(engine))
       return sendJson(res, { error: "Invalid authoring engine" }, 400, req);
@@ -133,7 +136,7 @@ export function registerSkillGenerateRoute(router: Router, getRoot: () => string
         res.end();
       } else {
         const msg = (err as Error).message;
-        sendJson(res, { error: msg }, msg.includes("not valid JSON") ? 422 : 500, req);
+        sendJson(res, { error: msg }, err instanceof AuthoringValidationError || msg.includes("not valid JSON") ? 422 : 500, req);
       }
     }
   });

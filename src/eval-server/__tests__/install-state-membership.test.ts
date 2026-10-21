@@ -258,3 +258,96 @@ it("honors Antigravity's user override without treating its project-only shared 
   file("user", "configured-skills/foo/SKILL.md");
   expect((await state()).scopes.user.installedAgentTools).toEqual(["antigravity"]);
 });
+
+describe.each(["project", "user"] as const)("0850 safety review in %s scope", (scope) => {
+  it.each([
+    ["cline", ".cline/skills", false], ["cline", ".cline/skills", true],
+    ["codex", ".agents/skills", false], ["codex", ".agents/skills", true],
+  ] as const)("refuses %s linked parent %s (all=%s) and preserves outside bytes and receipt", async (agent, skillsDir, all) => {
+    lock(scope, [agent]);
+    const external = join(fixture, "external");
+    mkdirSync(join(external, "foo"), { recursive: true });
+    mkdirSync(join(external, "bar"));
+    writeFileSync(join(external, "foo/SKILL.md"), "OUTSIDE FOO");
+    writeFileSync(join(external, "bar/SKILL.md"), "OUTSIDE BAR");
+    mkdirSync(join(root(scope), skillsDir, ".."), { recursive: true });
+    symlinkSync(external, join(root(scope), skillsDir), "dir");
+    expect((await state()).scopes[scope].installedAgentTools).toEqual([agent]);
+    const result = await remove(scope, [agent], all);
+    expect(existsSync(join(external, "foo/SKILL.md"))).toBe(true);
+    expect(readFileSync(join(external, "foo/SKILL.md"), "utf8")).toBe("OUTSIDE FOO");
+    expect(readFileSync(join(external, "bar/SKILL.md"), "utf8")).toBe("OUTSIDE BAR");
+    expect(result.removed).toEqual([]);
+    expect(result.errors.some((error: { message: string }) => error.message.includes("linked parent"))).toBe(true);
+    expect(readLockfile(lockDir(scope))?.skills.foo).toBeDefined();
+    expect((await state()).scopes[scope].installedAgentTools).toEqual([agent]);
+  });
+
+  it.each([
+    ["cline", ".cline/skills", false], ["cline", ".cline/skills", true],
+    ["codex", ".agents/skills", false], ["codex", ".agents/skills", true],
+  ] as const)("unlinks only a valid %s leaf symlink under %s (all=%s)", async (agent, skillsDir, all) => {
+    lock(scope, [agent]);
+    const external = join(fixture, "external-leaf");
+    mkdirSync(external);
+    writeFileSync(join(external, "SKILL.md"), "PRESERVE TARGET");
+    mkdirSync(join(root(scope), skillsDir), { recursive: true });
+    symlinkSync(external, join(root(scope), skillsDir, "foo"), "dir");
+    expect((await state()).scopes[scope].installedAgentTools).toEqual([agent]);
+    const result = await remove(scope, [agent], all);
+    expect(result.errors).toEqual([]);
+    expect(existsSync(join(root(scope), skillsDir, "foo"))).toBe(false);
+    expect(readFileSync(join(external, "SKILL.md"), "utf8")).toBe("PRESERVE TARGET");
+    expect((await state()).scopes[scope].installed).toBe(false);
+  });
+});
+
+it.each([false, true])("0850 safety review removes Antigravity's effective fallback despite an empty preferred legacy dir (all=%s)", async (all) => {
+  lock("user", ["antigravity"]);
+  file("user", ".gemini/config/skills/foo/SKILL.md");
+  file("user", ".gemini/config/skills/bar/SKILL.md");
+  mkdirSync(join(mocks.home, ".gemini/antigravity/skills"), { recursive: true });
+  expect((await state()).scopes.user.installedAgentTools).toEqual(["antigravity"]);
+  const result = await remove("user", ["antigravity"], all);
+  expect(result.errors).toEqual([]);
+  expect(existsSync(join(mocks.home, ".gemini/config/skills/foo/SKILL.md"))).toBe(false);
+  expect(existsSync(join(mocks.home, ".gemini/config/skills/bar/SKILL.md"))).toBe(true);
+  expect(readLockfile(lockDir("user"))?.skills.foo).toBeUndefined();
+  expect((await state()).scopes.user.installed).toBe(false);
+  expect((await state("o/r/bar")).scopes.user.installedAgentTools).toEqual(["antigravity"]);
+});
+
+it.each([false, true])("0850 safety review removes all owned Antigravity copies, including override/default/legacy (all=%s)", async (all) => {
+  lock("user", ["antigravity"]);
+  vi.stubEnv("VSKILL_ANTIGRAVITY_SKILLS_DIR", join(mocks.home, "configured-skills"));
+  const dirs = ["configured-skills", ".gemini/config/skills", ".gemini/antigravity/skills"];
+  for (const dir of dirs) {
+    file("user", `${dir}/foo/SKILL.md`);
+    file("user", `${dir}/bar/SKILL.md`);
+  }
+  const result = await remove("user", ["antigravity"], all);
+  expect(result.errors).toEqual([]);
+  for (const dir of dirs) {
+    expect(existsSync(join(mocks.home, dir, "foo/SKILL.md"))).toBe(false);
+    expect(existsSync(join(mocks.home, dir, "bar/SKILL.md"))).toBe(true);
+  }
+  expect((await state()).scopes.user.installed).toBe(false);
+  expect((await state("o/r/bar")).scopes.user.installedAgentTools).toEqual(["antigravity"]);
+});
+
+it.each([false, true])("0850 safety review refuses an unsafe Antigravity alternative before removing a safe copy (all=%s)", async (all) => {
+  lock("user", ["antigravity"]);
+  file("user", ".gemini/config/skills/foo/SKILL.md");
+  const external = join(fixture, "external-antigravity");
+  mkdirSync(join(external, "foo"), { recursive: true });
+  writeFileSync(join(external, "foo/SKILL.md"), "PRESERVE OUTSIDE");
+  mkdirSync(join(mocks.home, ".gemini/antigravity"), { recursive: true });
+  symlinkSync(external, join(mocks.home, ".gemini/antigravity/skills"), "dir");
+  const result = await remove("user", ["antigravity"], all);
+  expect(result.removed).toEqual([]);
+  expect(result.errors[0].message).toContain("linked parent");
+  expect(readFileSync(join(external, "foo/SKILL.md"), "utf8")).toBe("PRESERVE OUTSIDE");
+  expect(existsSync(join(mocks.home, ".gemini/config/skills/foo/SKILL.md"))).toBe(true);
+  expect(readLockfile(lockDir("user"))?.skills.foo).toBeDefined();
+  expect((await state()).scopes.user.installedAgentTools).toEqual(["antigravity"]);
+});

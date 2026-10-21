@@ -1,5 +1,6 @@
-import { statSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { lstatSync, statSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep, dirname } from "node:path";
+import { homedir } from "node:os";
 import type { AgentDefinition } from "../agents/agents-registry.js";
 import { agentGlobalInstallDirs } from "../agents/global-dirs.js";
 import { resolveAgentSkillsDir, resolveEffectiveSkillsDir, resolveAgentInstallRoot, type InstallOptions } from "../installer/canonical.js";
@@ -14,6 +15,29 @@ export function ownedSkillDirs(agent: AgentDefinition, opts: InstallOptions): st
   return opts.global
     ? agentGlobalInstallDirs(agent, resolveTilde)
     : [resolveAgentSkillsDir(agent, opts)];
+}
+
+/** Every owned copy, including global fallback locations, uses the same set
+ * for status, removal planning, and receipt retention. */
+export function ownedSkillPaths(agent: AgentDefinition, slug: string, opts: InstallOptions): string[] {
+  return ownedSkillDirs(agent, opts).map((dir) => join(dir, slug));
+}
+
+/** Never follow a parent link while deleting in the selected scope. The leaf
+ * itself may be a link: removers unlink that entry, preserving its target. */
+export function assertSafeRemovalParents(path: string, opts: InstallOptions): void {
+  const root = resolve(opts.global ? homedir() : opts.projectRoot);
+  const rel = relative(root, dirname(path));
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error(`Refusing removal outside the scope root: ${path}`);
+  }
+  let parent = root;
+  for (const part of ["", ...rel.split(sep).filter(Boolean)]) {
+    parent = join(parent, part);
+    if (lstatSync(parent).isSymbolicLink()) {
+      throw new Error(`Refusing removal through linked parent: ${parent}`);
+    }
+  }
 }
 
 export function extraSkillDirs(agent: AgentDefinition, opts: InstallOptions): string[] {

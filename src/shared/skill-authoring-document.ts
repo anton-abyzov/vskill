@@ -1,4 +1,4 @@
-import { Composer, CST, isAlias, isMap, isNode, isScalar, Parser, visit, type Document, type YAMLMap } from "yaml";
+import { Composer, CST, isAlias, isMap, isNode, Parser, visit, type Document, type YAMLMap } from "yaml";
 import { isValidSemver } from "../utils/semver.js";
 
 const FRONTMATTER = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
@@ -96,7 +96,6 @@ function editField(doc: Document, map: YAMLMap, key: string, value: string | str
   const token = map.srcToken;
   if (token?.type !== "block-map") throw new AuthoringValidationError("Native skill metadata must use a block mapping");
   const pair = map.items.find((item) => object(item.key) && item.key.value === key);
-  if (!pair && value === undefined || isScalar(pair?.value) && pair.value.value === value) return;
   protectAliases(doc, pair?.value, map);
   const old = pair?.srcToken;
   const note = comments(old ? [old.sep, old.value] : []);
@@ -120,6 +119,10 @@ export function mergeNativeSkillDocument(native: string, data: NativeSkillFields
   // Reparse between structural edits so AST lookup and alias resolution always
   // describe the current CST. No unrelated node is reserialized.
   const edit = (path: string[], value: string | string[] | undefined, quoted = false) => {
+    const current = path.reduce<unknown>((field, key) => object(field) ? field[key] : undefined, parsed.fields);
+    // Compare resolved values before touching the CST: equivalent sequences and
+    // aliases are no-ops, so their original formatting and references stay intact.
+    if (current === value || Array.isArray(value) && Array.isArray(current) && current.length === value.length && current.every((item, index) => item === value[index])) return;
     const parent = path.length === 1 ? parsed.doc.contents : parsed.doc.getIn(path.slice(0, -1), true);
     if (!isMap(parent)) throw new AuthoringValidationError("Native skill metadata must use a block mapping");
     editField(parsed.doc, parent, path[path.length - 1], value, quoted);

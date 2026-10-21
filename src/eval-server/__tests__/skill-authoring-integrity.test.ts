@@ -140,3 +140,23 @@ it("refuses adding metadata when the root mapping is referenced", async () => {
   const f = setup(); const before = '---\n&root\nname: existing\ndescription: Existing\ncustom: *root\n---\nPRESERVE'; writeFileSync(f.file, before);
   const res = await f.call(post, { ...f.base, description: "Existing" }); expect(res.status).toBe(400); expect(res.result.error).toMatch(/alias/); expect(readFileSync(f.file, "utf8")).toBe(before);
 });
+
+it.each([
+  { prefix: "", targets: "  target-agents: [claude-code] # keep flow note\n" },
+  { prefix: "", targets: "  target-agents:\n    # keep block note\n    - 'claude-code'\n" },
+  { prefix: "targets: &targets [claude-code]\n", targets: "  target-agents: *targets # keep alias\n" },
+  { prefix: "target: &target claude-code\n", targets: "  target-agents: [*target]\n" },
+])("allows body-only edits with unchanged referenced Anthropic targets: %j", async ({ prefix, targets }) => {
+  const f = setup(); mocks.installed = join(fixture, "engine"); mkdirSync(mocks.installed); writeFileSync(join(mocks.installed, "SKILL.md"), "Fixture instructions");
+  const fields = `name: existing\ndescription: Existing\n${prefix}metadata: &meta\n  version: 1.0.0\n  engine: anthropic-skill-creator\n${targets}custom: *meta\n`;
+  const before = `---\n${fields}---\nPRESERVE`; writeFileSync(f.file, before);
+  const res = await f.call(post, { ...f.base, description: "Existing", version: "1.0.0", engine: "anthropic-skill-creator" });
+  expect(res.status).toBe(200); const after = readFileSync(f.file, "utf8");
+  expect(after).toBe(`---\n${fields}---\n\nReviewed body`); expect(parse(after)).toEqual(parse(before));
+});
+it.each(["[]", "[other-agent]", "[claude-code, other-agent]", "claude-code"])("still refuses changed targets in referenced metadata: %s", async (targets) => {
+  const f = setup(); mocks.installed = join(fixture, "engine"); mkdirSync(mocks.installed); writeFileSync(join(mocks.installed, "SKILL.md"), "Fixture instructions");
+  const before = `---\nname: existing\ndescription: Existing\nmetadata: &meta\n  version: 1.0.0\n  engine: anthropic-skill-creator\n  target-agents: ${targets}\ncustom: *meta\n---\nPRESERVE`; writeFileSync(f.file, before);
+  const res = await f.call(post, { ...f.base, description: "Existing", version: "1.0.0", engine: "anthropic-skill-creator" });
+  expect(res.status).toBe(400); expect(res.result.error).toMatch(/alias/); expect(readFileSync(f.file, "utf8")).toBe(before);
+});

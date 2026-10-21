@@ -352,4 +352,40 @@ test.describe("0845 InstallTargetsModal — UI smoke", () => {
     const copied = await page.evaluate(() => navigator.clipboard.readText());
     expect(copied).toContain("obsidian-brain");
   });
+
+  test("0850 AC-US2-01/02/03 — clean install stays open in done phase; Copy path, then Done closes", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await installApiMocks(page, {
+      installSummary: {
+        results: [
+          {
+            agentId: "claude-code",
+            status: "installed",
+            path: "/tmp/home/.claude/skills/obsidian-brain",
+          },
+        ],
+      },
+    });
+    await mountModalDirectly(page, {
+      skill: "anton-abyzov/vskill/obsidian-brain",
+      skillDisplayName: "obsidian-brain",
+      scope: "user",
+      activeAgentId: "claude-code",
+    });
+    await page.locator("[data-testid='install-targets-modal-install']").click();
+    await expect(
+      page.locator("[data-testid='install-targets-result-row-claude-code']"),
+    ).toHaveAttribute("data-status", "installed", { timeout: 10_000 });
+    // Stays open: no auto-close on a clean success.
+    await page.waitForTimeout(300);
+    await expect(page.locator("[data-testid='install-targets-modal']")).toHaveCount(1);
+    await expect(page.locator("[data-testid='install-targets-modal-install']")).toHaveCount(0);
+    await page.locator("[data-testid='install-targets-result-copy-claude-code']").click();
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied).toBe("/tmp/home/.claude/skills/obsidian-brain");
+    const done = page.locator("[data-testid='install-targets-modal-done']");
+    await expect(done).toBeEnabled();
+    await done.click();
+    await expect(page.locator("[data-testid='install-targets-modal']")).toHaveCount(0);
+  });
 });

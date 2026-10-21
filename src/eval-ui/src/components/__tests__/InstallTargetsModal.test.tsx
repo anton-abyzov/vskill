@@ -180,6 +180,8 @@ function renderModal(propOverrides: {
   preCheckedAgentIds?: string[];
   onClose?: () => void;
   onSuccess?: (results: AgentInstallResult[]) => void;
+  targetVersion?: string | null;
+  fetchInstallStateImpl?: (skill: string) => Promise<unknown>;
 } = {}) {
   act(() => {
     root.render(
@@ -195,6 +197,8 @@ function renderModal(propOverrides: {
         preCheckedAgentIds={propOverrides.preCheckedAgentIds}
         onClose={propOverrides.onClose ?? (() => {})}
         onSuccess={propOverrides.onSuccess}
+        targetVersion={propOverrides.targetVersion}
+        fetchInstallStateImpl={propOverrides.fetchInstallStateImpl as unknown as never}
         fetchSupportedAgentsImpl={fetchSupportedAgentsImpl as unknown as never}
         installToAgentsImpl={installToAgentsImpl as unknown as never}
         startInstallStreamImpl={startInstallStreamImpl as unknown as never}
@@ -626,5 +630,113 @@ describe("InstallTargetsModal — AC-US5-08: ClipboardExportDialog opens after S
     await flushAsync();
     expect(writeClipboardImpl).toHaveBeenCalledTimes(1);
     expect(writeClipboardImpl.mock.calls[0]?.[0]).toBe("PASTE_ME");
+  });
+});
+
+describe("InstallTargetsModal — 0850 AC-US2-02/03: done phase", () => {
+  async function installClaude(onClose = vi.fn()) {
+    renderModal({ activeAgentId: "claude-code", onClose });
+    await flushAsync();
+    act(() => getByTestId("install-targets-modal-install").click());
+    await flushAsync();
+    act(() => {
+      lastStreamCallbacks!.onDone({
+        results: [
+          { agentId: "claude-code", status: "installed", path: "/tmp/home/.claude/skills/obsidian-brain" },
+        ],
+      });
+    });
+    await flushAsync();
+    return onClose;
+  }
+
+  it("replaces the Install button with an enabled Done button that closes the modal", async () => {
+    const onClose = await installClaude();
+    expect(findByTestId("install-targets-modal-install")).toBeNull();
+    const done = getByTestId("install-targets-modal-done") as HTMLButtonElement;
+    expect(done.textContent).toBe("Done");
+    expect(done.disabled).toBe(false);
+    act(() => done.click());
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers Copy path on an installed row and copies the absolute path", async () => {
+    await installClaude();
+    const copy = getByTestId("install-targets-result-copy-claude-code");
+    await act(async () => { copy.click(); });
+    expect(writeClipboardImpl).toHaveBeenCalledWith("/tmp/home/.claude/skills/obsidian-brain");
+  });
+});
+
+describe("InstallTargetsModal — 0850 AC-US1-04/AC-US3-01..04: scope line and badges", () => {
+  function state(version: string) {
+    return async () => ({
+      skill: "anton-abyzov/vskill/obsidian-brain",
+      detectedAgentTools: [],
+      scopes: {
+        project: { installed: false, installedAgentTools: [], version: null },
+        user: { installed: true, installedAgentTools: ["claude-code"], version },
+      },
+    });
+  }
+
+  it("names the scope in the sub-line", async () => {
+    renderModal({ scope: "project" });
+    await flushAsync();
+    expect(getByTestId("install-targets-modal-scope-line").textContent).toMatch(/^Project scope/);
+    act(() => root.unmount());
+    root = createRoot(container);
+    renderModal({ scope: "user" });
+    await flushAsync();
+    expect(getByTestId("install-targets-modal-scope-line").textContent).toMatch(/^User scope/);
+  });
+
+  it("fetches install state once on mount", async () => {
+    const fetchState = vi.fn(state("1.0.0"));
+    renderModal({ scope: "user", targetVersion: "1.0.0", fetchInstallStateImpl: fetchState });
+    await flushAsync();
+    expect(fetchState).toHaveBeenCalledTimes(1);
+    expect(fetchState).toHaveBeenCalledWith("anton-abyzov/vskill/obsidian-brain");
+  });
+
+  it.each([
+    ["1.0.0", "1.0.0", "installed-current", "Installed v1.0.0"],
+    ["1.0.0", "1.2.0", "update-available", "Update available v1.0.0 → v1.2.0"],
+    ["2.0.0", "1.2.0", "newer-installed", "Newer installed v2.0.0"],
+  ])("installed %s, target %s → %s badge", async (installed, target, kind, label) => {
+    renderModal({ scope: "user", targetVersion: target, fetchInstallStateImpl: state(installed) });
+    await flushAsync();
+    const badge = getByTestId("install-targets-status-badge-claude-code");
+    expect(badge.getAttribute("data-badge-kind")).toBe(kind);
+    expect(badge.textContent).toBe(label);
+  });
+});
+
+describe("InstallTargetsModal — partial failure keeps per-agent results", () => {
+  it("shows the installed row as installed when the server reports success:false with results", async () => {
+    const onSuccess = vi.fn();
+    renderModal({ activeAgentId: "claude-code", onSuccess });
+    await flushAsync();
+    act(() => getByTestId("install-targets-checkbox-cursor").click());
+    act(() => getByTestId("install-targets-modal-install").click());
+    await flushAsync();
+    act(() => {
+      lastStreamCallbacks!.onDone({
+        success: false,
+        results: [
+          { agentId: "claude-code", status: "installed", path: "/tmp/home/.claude/skills/obsidian-brain" },
+          { agentId: "cursor", status: "error", detail: "disk full" },
+        ],
+      });
+    });
+    await flushAsync();
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(getByTestId("install-targets-result-row-claude-code").getAttribute("data-status")).toBe("installed");
+    expect(getByTestId("install-targets-result-row-cursor").getAttribute("data-status")).toBe("error");
+    expect(getByTestId("install-targets-result-row-cursor").textContent).toContain("disk full");
+    expect(onSuccess.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({ agentId: "claude-code", status: "installed" }),
+      expect.objectContaining({ agentId: "cursor", status: "error" }),
+    ]);
   });
 });

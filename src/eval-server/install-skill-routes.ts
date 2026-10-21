@@ -512,13 +512,14 @@ async function runMultiInstallJob(opts: {
         scope: opts.scope,
         projectRoot: opts.projectRoot,
       });
+      // 0850 AC-US2-04: one log line per install attempt.
+      console.log("[install]", {
+        skill: opts.identifier,
+        scope: opts.scope,
+        agentIds: opts.agentIds,
+        results: result.agents.map((r) => ({ agentId: r.agentId, status: r.status, path: r.detail })),
+      });
       for (const agentResult of result.agents) {
-        console.log("[install] result", JSON.stringify({
-          skill: opts.identifier,
-          agentId: agentResult.agentId,
-          status: agentResult.status,
-          path: agentResult.detail,
-        }));
         emitMultiJob(job, "result", agentResult);
       }
       writeMultiInstallLockfile({

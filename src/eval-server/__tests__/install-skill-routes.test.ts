@@ -391,6 +391,38 @@ describe("runMultiInstallJob — desktop SSE contract", () => {
     }
   });
 
+  it("0850 AC-US2-04: logs the attempt as [install] { skill, scope, agentIds, results }", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "multi-install-log-"));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const job = await runMultiInstallJob({
+        identifier: "o/r/log-skill",
+        skill: {
+          name: "log-skill",
+          description: "d",
+          body: "b",
+          originalFrontmatter: "name: log-skill\ndescription: d\nversion: 1.0.0",
+          version: "1.0.0",
+        },
+        agentIds: ["chatgpt"],
+        scope: "user",
+        projectRoot: tmp,
+      });
+      await waitForDone(job);
+      const calls = log.mock.calls.filter((c) => c[0] === "[install]");
+      expect(calls).toHaveLength(1);
+      expect(calls[0][1]).toEqual({
+        skill: "o/r/log-skill",
+        scope: "user",
+        agentIds: ["chatgpt"],
+        results: [expect.objectContaining({ agentId: "chatgpt", status: "exported" })],
+      });
+    } finally {
+      log.mockRestore();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("writes project vskill.lock for installed filesystem targets", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "multi-install-lock-"));
     try {

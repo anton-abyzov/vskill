@@ -667,6 +667,70 @@ describe("SkillDetailPanel — 0845 T-022 (AC-US2-01): Install button opens Inst
     window.removeEventListener("openFindSkills", openFindSkills);
     await h.unmount();
   });
+
+  it("0850: a partial success (one row installed, one errored) still refreshes the skill list", async () => {
+    const onClose = vi.fn();
+    const onSkillsChanged = vi.fn();
+    const onToast = vi.fn();
+    const openFindSkills = vi.fn();
+    window.addEventListener("openFindSkills", openFindSkills);
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (typeof url === "string" && url.includes("/api/studio/install-state")) {
+        return installStateResponse();
+      }
+      if (typeof url === "string" && url.includes("/api/studio/supported-agents")) {
+        return jsonResponse({
+          agents: [
+            {
+              id: "claude-code",
+              displayName: "Claude Code",
+              detected: true,
+              tier: 1,
+              installMode: "filesystem",
+              resolvedGlobalDir: "/home/user/.claude/skills",
+              resolvedLocalDir: ".claude/skills",
+            },
+          ],
+        });
+      }
+      if (typeof url === "string" && url.includes("/api/studio/install-skill") && init?.method === "POST") {
+        return jsonResponse({ jobId: "job-multi" });
+      }
+      if (typeof url === "string" && url.includes("/api/studio/install-skill/job-multi/stream")) {
+        return sseResponse(
+          'event: done\ndata: {"success":false,"results":[{"agentId":"claude-code","status":"installed","path":"/home/user/.claude/skills/wiki-sync/SKILL.md"},{"agentId":"cursor","status":"error","detail":"disk full"}]}\n\n',
+        );
+      }
+      if (typeof url === "string" && url.endsWith("/versions")) {
+        return jsonResponse({ versions: [{ version: "1.0.0", isLatest: true }] });
+      }
+      return jsonResponse({
+        displayName: "Wiki Sync",
+        ownerSlug: "obsidian",
+        repoSlug: "brain",
+        skillSlug: "wiki-sync",
+      });
+    }) as unknown as typeof fetch;
+
+    const h = await mount({ onClose, onToast, activeAgentId: "claude-code", onSkillsChanged });
+    await flushMicrotasks();
+    const { act } = await import("react");
+    const installBtn = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
+    await act(async () => { installBtn.click(); });
+    await flushMicrotasks();
+    const modalInstall = document.querySelector("[data-testid='install-targets-modal-install']") as HTMLButtonElement;
+    await act(async () => { modalInstall.click(); });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(document.querySelector("[data-testid='install-targets-modal']")).toBeTruthy();
+    expect(onSkillsChanged).toHaveBeenCalledTimes(1);
+
+    window.removeEventListener("openFindSkills", openFindSkills);
+    await h.unmount();
+  });
 });
 
 // ---------------------------------------------------------------------------

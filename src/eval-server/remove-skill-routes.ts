@@ -34,6 +34,14 @@ import {
 } from "../lockfile/lockfile.js";
 
 const SAFE_NAME = /^[a-zA-Z0-9._@/\-]+$/;
+
+/** SAFE_NAME allows dots, so also refuse empty, `.` and `..` segments: the
+ *  last segment becomes a folder name under the agent's skills dir, and
+ *  `foo/..` would otherwise resolve to the skills dir's parent. */
+function isSafeSkillId(skill: string): boolean {
+  if (!skill || skill.startsWith("-") || !SAFE_NAME.test(skill)) return false;
+  return skill.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+}
 const SAFE_AGENT_ID = /^[a-z0-9][a-z0-9-]*$/;
 const VALID_SCOPES: ReadonlySet<string> = new Set(["project", "user"]);
 
@@ -99,7 +107,7 @@ export function registerRemoveSkillRoutes(router: Router, rootArg: string | (() 
       const all = body?.all === true;
       const skill = typeof body?.skill === "string" ? body.skill.trim() : "";
       const scope = typeof body?.scope === "string" ? body.scope : "";
-      if (!skill || skill.startsWith("-") || !SAFE_NAME.test(skill)) {
+      if (!isSafeSkillId(skill)) {
         sendJson(res, { error: "invalid skill identifier" }, 400, req);
         return;
       }

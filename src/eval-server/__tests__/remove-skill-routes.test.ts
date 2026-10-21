@@ -222,3 +222,28 @@ describe("0894 — remove-skill prunes the scope lockfile agents list", () => {
   });
 });
 
+
+describe("0850 AC-US4-02/03 — remove-skill input guards", () => {
+  for (const skill of ["foo/..", "..", ".", "o/r/..", "o/./foo", "o//foo", "../foo"]) {
+    it(`rejects the path segment in ${JSON.stringify(skill)} and deletes nothing`, async () => {
+      writeSkill(join(root, ".claude/skills/foo"));
+      const { status } = await post({ skill, agentIds: ["claude-code"], scope: "project" });
+      expect(status).toBe(400);
+      expect(lexists(join(root, ".claude/skills/foo"))).toBe(true);
+    });
+  }
+
+  it("rejects a non-localhost caller with 403", async () => {
+    writeSkill(join(root, ".claude/skills/foo"));
+    mocks.readBody.mockResolvedValueOnce({ skill: "foo", agentIds: ["claude-code"], scope: "project" });
+    const req: any = { socket: { remoteAddress: "10.0.0.5" }, headers: {} };
+    await handler()(req, {} as any);
+    expect(mocks.sendJson.mock.calls.at(-1)![2]).toBe(403);
+    expect(lexists(join(root, ".claude/skills/foo"))).toBe(true);
+  });
+
+  it("rejects an invalid agent id with 400", async () => {
+    const { status } = await post({ skill: "foo", agentIds: ["Bad Agent"], scope: "project" });
+    expect(status).toBe(400);
+  });
+});

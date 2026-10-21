@@ -1361,10 +1361,8 @@ function Shell() {
                 severity: "success",
               });
             }
-            const needsUserAction = results.some(
-              (result) => result.status === "error" || result.status === "exported",
-            );
-            if (!needsUserAction) setInstallTargetsRequest(null);
+            // 0850 AC-US2-01: the modal stays open in its done phase; the
+            // user closes it with Done.
           }}
         />
       )}

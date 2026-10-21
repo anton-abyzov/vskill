@@ -67,12 +67,20 @@ export function readNativeSkillDocument(native: string) {
 }
 
 /** Refuse edits that would change or remove the value used by an unrelated alias. */
-function protectAliases(doc: Document, node: unknown): void {
-  if (!isNode(node)) return;
+function protectAliases(doc: Document, node: unknown, container: YAMLMap): void {
   const descendants = new Set<unknown>();
-  visit(node, (_, current) => { if (isNode(current)) descendants.add(current); });
+  if (isNode(node)) visit(node, (_, current) => { if (isNode(current)) descendants.add(current); });
+  const affected = new Set(descendants);
+  // Changing or inserting a child changes every ancestor container's value.
+  // Include those exact nodes, not their unrelated descendant fields.
+  visit(doc, (_, current, path) => {
+    if (current === container) {
+      affected.add(container);
+      for (const ancestor of path) if (isNode(ancestor)) affected.add(ancestor);
+    }
+  });
   visit(doc, (_, current) => {
-    if (isAlias(current) && !descendants.has(current) && descendants.has(current.resolve(doc)))
+    if (isAlias(current) && !descendants.has(current) && affected.has(current.resolve(doc)))
       throw new AuthoringValidationError("Cannot edit a field referenced by a YAML alias; preserve or remove its dependent aliases first");
   });
 }
@@ -89,7 +97,7 @@ function editField(doc: Document, map: YAMLMap, key: string, value: string | str
   if (token?.type !== "block-map") throw new AuthoringValidationError("Native skill metadata must use a block mapping");
   const pair = map.items.find((item) => object(item.key) && item.key.value === key);
   if (!pair && value === undefined || isScalar(pair?.value) && pair.value.value === value) return;
-  if (pair) protectAliases(doc, pair.value);
+  protectAliases(doc, pair?.value, map);
   const old = pair?.srcToken;
   const note = comments(old ? [old.sep, old.value] : []);
   const index = old ? token.items.indexOf(old as typeof token.items[number]) : token.items.length;
@@ -127,6 +135,7 @@ export function mergeNativeSkillDocument(native: string, data: NativeSkillFields
   if (!parsed.doc.has("metadata")) {
     const token = parsed.doc.contents!.srcToken;
     if (token?.type !== "block-map") throw new AuthoringValidationError("Native skill metadata must use a block mapping");
+    protectAliases(parsed.doc, undefined, parsed.doc.contents as YAMLMap);
     const fragment = [...new Parser().parse("metadata:\n  engine: vskill\n")][0] as CST.Document;
     token.items.push(...(fragment.value as CST.BlockMap).items);
     parsed = readNativeSkillDocument(`---\n${parsed.tokens.map(CST.stringify).join("")}---\n${data.body}`);

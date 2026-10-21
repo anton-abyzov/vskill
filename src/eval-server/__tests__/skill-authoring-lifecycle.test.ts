@@ -4,12 +4,11 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { createRequire } from "node:module";
+import { load as parseYaml } from "js-yaml";
 import { Router } from "../router.js";
 import { registerSkillCreateRoutes } from "../skill-create-routes.js";
 import { parseSkillFrontmatter } from "../api-routes.js";
 import { studioTokenHeaders } from "./helpers/studio-token-test-helpers.js";
-const parseYaml = createRequire(import.meta.url)("js-yaml").load as (text: string) => Record<string, unknown>;
 
 vi.mock("../platform-proxy.js", () => ({ submitSkillUpdateEvent: vi.fn(async () => ({ success: true })) }));
 vi.mock("../../eval/llm.js", () => ({ createLlmClient: () => { throw new Error("Editor updates must not call a model"); } }));

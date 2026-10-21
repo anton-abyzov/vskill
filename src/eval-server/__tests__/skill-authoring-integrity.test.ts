@@ -3,8 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlin
 import { join, basename, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
-import { createRequire } from "node:module";
-const yaml = createRequire(import.meta.url)("js-yaml");
+import { load as parseYaml } from "js-yaml";
 const mocks = vi.hoisted(() => ({ installed: "", generate: vi.fn() }));
 vi.mock("../platform-proxy.js", () => ({ submitSkillUpdateEvent: vi.fn(async () => ({ success: true })) }));
 vi.mock("../../eval/llm.js", () => ({ createLlmClient: () => ({ generate: mocks.generate }) }));
@@ -12,7 +11,7 @@ vi.mock("../../utils/skill-creator-detection.js", () => ({ isSkillCreatorInstall
 import { registerSkillCreateRoutes } from "../skill-create-routes.js";
 import { generateWithSkillCreator } from "../skill-authoring-engine.js";
 const native = '---\nname: existing\ndescription: Existing\nmetadata:\n  version: 1.0.0\n  engine: none\n---\nPRESERVE';
-const parse = (text: string) => yaml.load(text.match(/^---\r?\n([\s\S]*?)\r?\n---/)![1]);
+const parse = (text: string) => parseYaml(text.match(/^---\r?\n([\s\S]*?)\r?\n---/)![1]);
 const post = "/api/skills/create", get = "/api/skills/:plugin/:skill/authoring";
 let fixture: string;
 beforeEach(() => { fixture = mkdtempSync(join(tmpdir(), "native-integrity-")); mocks.installed = ""; mocks.generate.mockReset(); });
@@ -111,4 +110,33 @@ it("uses structural version reads for quoted keys on load, auto-bump and native 
   const saved = await f.call(post, { ...f.base, version: undefined }); expect(saved.status).toBe(200); expect(saved.result.version).toBe("4.2.4"); expect(parse(readFileSync(f.file, "utf8")).metadata.version).toBe("4.2.4");
   mocks.installed = join(fixture, "engine"); mkdirSync(mocks.installed); writeFileSync(join(mocks.installed, "SKILL.md"), "Fixture instructions"); mocks.generate.mockResolvedValue({ text: document });
   const generated = await generateWithSkillCreator({ prompt: "Fixture only" }, { root: f.root }); expect(parse(generated.nativeSkillMd!).metadata.version).toBe("4.2.3");
+});
+
+it.each(["--- \n", "---\t\n", "--- \r\n"])("round-trips the parsed body for accepted fence %j", async (opening) => {
+  const f = setup(); const before = opening + 'name: existing\ndescription: Existing\nmetadata:\n  version: 1.0.0\n  engine: none\n---\n\n# Original body\n'; writeFileSync(f.file, before);
+  const loaded = await f.call(get); expect(loaded.status).toBe(200); expect(loaded.result.body).toBe("# Original body\n");
+  const saved = await f.call(post, { ...f.base, ...loaded.result, mode: "update", version: "1.0.1" }); expect(saved.status).toBe(200);
+  const after = readFileSync(f.file, "utf8"); expect(after.match(/^name:/gm)).toHaveLength(1); expect(after.endsWith("# Original body\n")).toBe(true);
+});
+it.each([
+  { content: "  version: 1.0.0\n  engine: none", version: "1.0.1", engine: "none" },
+  { content: "  engine: none", version: "1.0.1", engine: "none" },
+  { content: "  version: 1.0.0", version: "1.0.0", engine: "none" },
+])("refuses replacing or inserting fields in a referenced ancestor: %j", async ({ content, version, engine }) => {
+  const f = setup(); const before = `---\nname: existing\ndescription: Existing\nmetadata: &meta\n${content}\ncustom: *meta\n---\nPRESERVE`; writeFileSync(f.file, before);
+  const res = await f.call(post, { ...f.base, version, engine }); expect(res.status).toBe(400); expect(res.result.error).toMatch(/alias/); expect(readFileSync(f.file, "utf8")).toBe(before);
+});
+it("allows independent edits when a referenced metadata mapping is unchanged", async () => {
+  const f = setup(); const before = native.replace("metadata:", "metadata: &meta").replace("\n---\nPRESERVE", "\ncustom: *meta\n---\nPRESERVE"); writeFileSync(f.file, before);
+  const res = await f.call(post, { ...f.base, version: "1.0.0", engine: "none" }); expect(res.status).toBe(200); expect(parse(readFileSync(f.file, "utf8")).custom).toEqual(parse(before).custom);
+});
+
+it.each(["--- \n", "---\t\r\n"])("uses the same body boundary for closing fence %j", async (closing) => {
+  const f = setup(); const before = '---\nname: existing\ndescription: Existing\nmetadata:\n  version: 1.0.0\n  engine: none\n' + closing + '\n# Original body\n'; writeFileSync(f.file, before);
+  const loaded = await f.call(get); expect(loaded.status).toBe(200); expect(loaded.result.body).toBe("# Original body\n");
+  const saved = await f.call(post, { ...f.base, ...loaded.result, mode: "update", version: "1.0.1" }); expect(saved.status).toBe(200); const after = readFileSync(f.file, "utf8"); expect(after.match(/^name:/gm)).toHaveLength(1); expect(after.endsWith("# Original body\n")).toBe(true);
+});
+it("refuses adding metadata when the root mapping is referenced", async () => {
+  const f = setup(); const before = '---\n&root\nname: existing\ndescription: Existing\ncustom: *root\n---\nPRESERVE'; writeFileSync(f.file, before);
+  const res = await f.call(post, { ...f.base, description: "Existing" }); expect(res.status).toBe(400); expect(res.result.error).toMatch(/alias/); expect(readFileSync(f.file, "utf8")).toBe(before);
 });

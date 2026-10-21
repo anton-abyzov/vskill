@@ -1,5 +1,18 @@
 import { test, expect, type Page } from "@playwright/test";
 
+// Authoring smoke fixtures never need a real account, registry, or installed
+// skill inventory. Keep background UI requests away from those surfaces.
+test.beforeEach(async ({ page }) => {
+  await page.route("**/*", (route) => {
+    const url = new URL(route.request().url());
+    if (url.protocol.startsWith("http") && !["127.0.0.1", "localhost"].includes(url.hostname)) return route.abort();
+    if (url.pathname.startsWith("/api/v1/account/")) return route.fulfill({status: 401, json: {error: "fixture signed out"}});
+    if (url.pathname.startsWith("/api/v1/")) return route.fulfill({json: {results: []}});
+    if (url.pathname === "/api/skills" || url.pathname === "/api/skills/updates") return route.fulfill({json: []});
+    return route.continue();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 0734 T-025 / T-026: engine selector, version input and [Install] on /create.
 //
@@ -150,7 +163,7 @@ test("0734 selected native engine reaches generation and preserves its document 
 
 test("0734 update route loads current version, clears optional fields and links version history", async ({ page }, testInfo) => {
   await page.route("**/api/studio/detect-engines", (route) => route.fulfill({ json: { vskillSkillBuilder: true, anthropicSkillCreator: false, vskillVersion: "1.0.0", anthropicPath: null } }));
-  const nativeSkillMd = '---\nname: existing\ndescription: Existing\nmodel: opus\nallowed-tools:\n  - Read\n  - Bash\ncontext: fork\nmetadata:\n  version: "3.2.1"\n  custom: retained\n---\nExisting body';
+  const nativeSkillMd = '---\nname: existing\ndescription: Existing\nmodel: opus\nallowed-tools:\n  - Read\n# retain permission note\n\n  - Bash\ncontext: fork\nmetadata:\n  version: "3.2.1"\n  custom: retained\n---\nExisting body';
   await page.route("**/api/skills/fixture/existing/authoring", (route) => route.fulfill({ json: { name: "existing", plugin: "", layout: 3, description: "Existing", body: "Existing body", model: "opus", allowedTools: "Read, Bash", version: "3.2.1", engine: "vskill", nativeSkillMd, versionsHref: "https://verified-skill.com/skills/owner/repo/existing/versions" } }));
   let saved: any;
   await page.route("**/api/skills/create", async (route) => { saved = route.request().postDataJSON(); await route.fulfill({ json: { ok: true, plugin: "fixture", skill: "existing" } }); });
@@ -166,6 +179,8 @@ test("0734 update route loads current version, clears optional fields and links 
   const preview = page.locator("pre").filter({ hasText: "context: fork" }).first();
   await expect(preview).not.toContainText("model: opus");
   await expect(preview).not.toContainText("allowed-tools:");
+  await expect(preview).not.toContainText("- Bash");
+  await expect(preview).toContainText("# retain permission note");
   await expect(preview).toContainText("custom: retained");
   await page.getByTestId("version-input").fill("3.2.2");
   await page.screenshot({ path: testInfo.outputPath("0734-update-version.png"), fullPage: true });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, renameSync } from "node:fs";
 import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
@@ -69,5 +69,69 @@ describe("existing-skill authoring", () => {
       const traversal = await call("/api/skills/:plugin/:skill/authoring", undefined, { plugin: "../elsewhere", skill: "existing" });
       expect(traversal.status).toBe(400);
     } finally { rmSync(outside, { recursive: true, force: true }); }
+  });
+  it.each(([1, 2, 3] as const).flatMap((layout) => ["directory", "file", "parent", "ancestor"].map((kind) => ({ layout, kind }))))("refuses $kind escapes for layout $layout before loading or updating", async ({ layout, kind }) => {
+    const outside = mkdtempSync(join(tmpdir(), "outside-authoring-update-"));
+    const parts = layout === 1 ? ["fixture-plugin", "skills", "linked"] : layout === 2 ? ["plugins", "fixture-plugin", "skills", "linked"] : ["skills", "linked"];
+    const dir = join(root, ...parts);
+    const prefix = kind === "ancestor" ? 1 : kind === "parent" ? parts.length - 1 : parts.length;
+    const externalFile = join(outside, ...parts.slice(prefix), "SKILL.md");
+    const original = "---\nname: linked\ndescription: External\nmetadata:\n  version: 1.0.0\n  engine: none\n---\nPRESERVE EXTERNAL";
+    try {
+      mkdirSync(join(externalFile, ".."), { recursive: true }); writeFileSync(externalFile, original);
+      if (kind === "file") {
+        mkdirSync(dir, { recursive: true }); symlinkSync(externalFile, join(dir, "SKILL.md"));
+      } else {
+        const link = join(root, ...parts.slice(0, prefix));
+        // The existing layout-3 fixture owns root/skills. A distinct root for
+        // this case avoids deleting or replacing any pre-existing fixture.
+        const routeRoot = kind === "ancestor" && layout === 3 || kind === "parent" && layout === 3 ? join(root, "alternate") : root;
+        mkdirSync(join(routeRoot, ...parts.slice(0, prefix), ".."), { recursive: true });
+        symlinkSync(outside, routeRoot === root ? link : join(routeRoot, ...parts.slice(0, prefix)), "dir");
+        if (routeRoot !== root) registerSkillCreateRoutes({ get: (p: string, h: any) => { handlers[p] = h; }, post: (p: string, h: any) => { handlers[p] = h; } } as any, routeRoot);
+      }
+      const params = { plugin: layout === 3 ? "project" : "fixture-plugin", skill: "linked" };
+      const load = await call("/api/skills/:plugin/:skill/authoring", undefined, params);
+      expect(load.status).toBe(403);
+      const update = await call("/api/skills/create", { name: "linked", plugin: layout === 3 ? "" : "fixture-plugin", layout, mode: "update", description: "Changed", body: "Changed body", engine: "none", version: "1.0.1" });
+      expect(update.status).toBe(403);
+      expect(readFileSync(externalFile, "utf8")).toBe(original);
+      expect(readFileSync(join(root, "skills/existing/SKILL.md"), "utf8")).toContain("Original");
+    } finally { rmSync(outside, { recursive: true, force: true }); }
+  });
+  it.each([1, 2, 3] as const)("loads and updates layout %s while retaining neighboring files", async (layout) => {
+    const dir = layout === 1 ? join(root, "fixture-plugin/skills/valid") : layout === 2 ? join(root, "plugins/fixture-plugin/skills/valid") : join(root, "skills/valid");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), "---\nname: valid\ndescription: Before\nmetadata:\n  version: 1.0.0\n  engine: none\n---\nBefore");
+    writeFileSync(join(dir, "notes.txt"), "PRESERVE NEIGHBOR");
+    const loaded = await call("/api/skills/:plugin/:skill/authoring", undefined, { plugin: layout === 3 ? basename(root) : "fixture-plugin", skill: "valid" });
+    expect(loaded.status).toBe(200); expect(loaded.result.layout).toBe(layout);
+    const saved = await call("/api/skills/create", { ...loaded.result, mode: "update", description: "After", body: "Reviewed", version: "1.0.1" });
+    expect(saved.status).toBe(200); expect(readFileSync(join(dir, "SKILL.md"), "utf8")).toContain("Reviewed");
+    expect(readFileSync(join(dir, "notes.txt"), "utf8")).toBe("PRESERVE NEIGHBOR");
+  });
+  it("rechecks the boundary when a loaded skill is replaced by an external alias before save", async () => {
+    const loaded = await call("/api/skills/:plugin/:skill/authoring"); expect(loaded.status).toBe(200);
+    const outside = mkdtempSync(join(tmpdir(), "moved-authoring-update-"));
+    try {
+      writeFileSync(join(outside, "SKILL.md"), "PRESERVE EXTERNAL");
+      renameSync(join(root, "skills/existing"), join(root, "skills/retained-original"));
+      symlinkSync(outside, join(root, "skills/existing"), "dir");
+      const saved = await call("/api/skills/create", { ...loaded.result, engine: "none", mode: "update", body: "Changed" });
+      expect(saved.status).toBe(403);
+      expect(readFileSync(join(outside, "SKILL.md"), "utf8")).toBe("PRESERVE EXTERNAL");
+      expect(readFileSync(join(root, "skills/retained-original/SKILL.md"), "utf8")).toContain("Original");
+    } finally { rmSync(outside, { recursive: true, force: true }); }
+  });
+  it.each(["directory", "file"])("allows a %s alias whose target remains inside the authoring workspace", async (kind) => {
+    const target = join(root, "internal"); mkdirSync(target);
+    writeFileSync(join(target, "SKILL.md"), "---\nname: linked\ndescription: Before\nmetadata:\n  version: 1.0.0\n  engine: none\n---\nBefore");
+    const dir = join(root, "skills/linked");
+    if (kind === "directory") symlinkSync(target, dir, "dir");
+    else { mkdirSync(dir); symlinkSync(join(target, "SKILL.md"), join(dir, "SKILL.md")); }
+    const loaded = await call("/api/skills/:plugin/:skill/authoring", undefined, { plugin: basename(root), skill: "linked" });
+    expect(loaded.status).toBe(200);
+    const saved = await call("/api/skills/create", { ...loaded.result, mode: "update", body: "Reviewed" });
+    expect(saved.status).toBe(200); expect(readFileSync(join(target, "SKILL.md"), "utf8")).toContain("Reviewed");
   });
 });

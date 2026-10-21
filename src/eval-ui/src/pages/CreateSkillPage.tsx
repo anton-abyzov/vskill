@@ -323,7 +323,7 @@ export function CreateSkillPage() {
       try {
         return mergeNativeSkillDocument(sk.nativeSkillMd, {
           name: sk.name, description: sk.description, body: sk.body,
-          version: sk.version, model: sk.model, allowedTools: sk.allowedTools, engine: sk.engine,
+          version: sk.version, ...sk.nativeFieldEdits, engine: sk.engine,
         }, parseFrontmatter(sk.nativeSkillMd.replace(/\r\n/g, "\n")).metadata);
       } catch { return sk.nativeSkillMd; }
     }
@@ -344,7 +344,7 @@ export function CreateSkillPage() {
       lines.push("You are a helpful assistant.");
     }
     return lines.join("\n");
-  }, [sk.name, sk.description, sk.model, sk.allowedTools, sk.body, sk.version, sk.engine, sk.nativeSkillMd]);
+  }, [sk.name, sk.description, sk.model, sk.allowedTools, sk.body, sk.version, sk.engine, sk.nativeSkillMd, sk.nativeFieldEdits]);
 
   // ---------------------------------------------------------------------------
   // Render

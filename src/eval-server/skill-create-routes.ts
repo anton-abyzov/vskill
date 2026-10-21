@@ -1,4 +1,6 @@
 import { registerSkillAuthoringRoute } from "./skill-authoring-route.js";
+import { AuthoringPathError, computeSkillDir, resolveAuthoringSkillPath } from "./skill-authoring-path.js";
+export { computeSkillDir } from "./skill-authoring-path.js";
 import { registerSkillGenerateRoute } from "./skill-generate-route.js";
 import { generateWithSkillCreator, mergeNativeSkillMd, readAuthoringEngine } from "./skill-authoring-engine.js";
 import { buildSkillMd } from "./skill-md-emitter.js";
@@ -590,14 +592,6 @@ export function buildEnvExample(secrets: string[]): string {
   return lines.join("\n") + "\n";
 }
 
-export function computeSkillDir(root: string, layout: 1 | 2 | 3, plugin: string, name: string): string {
-  switch (layout) {
-    case 1: return join(root, plugin, "skills", name);
-    case 2: return join(root, "plugins", plugin, "skills", name);
-    case 3: return join(root, "skills", name);
-  }
-}
-
 /**
  * Check if a resolved path is strictly within a root directory.
  * Uses trailing separator to prevent prefix collision (e.g., /project vs /project-evil).
@@ -1173,6 +1167,13 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
     // 0734: validate authoring engine. Default to "vskill" when omitted.
     const targetDir = computeSkillDir(root, body.layout, body.plugin || "", body.name);
     const skillMdPath = join(targetDir, "SKILL.md");
+    if (body.mode === "update") {
+      try { resolveAuthoringSkillPath(root, body.plugin || "", body.name, body.layout); }
+      catch (error) {
+        sendJson(res, { error: (error as Error).message }, error instanceof AuthoringPathError ? error.status : 400, req);
+        return;
+      }
+    }
     const previousEngine = body.mode === "update" && existsSync(skillMdPath)
       ? readAuthoringEngine(readFileSync(skillMdPath, "utf8")) : "vskill";
     const engine: CreateSkillEngine = body.engine ?? previousEngine;
@@ -1242,6 +1243,7 @@ export function registerSkillCreateRoutes(router: Router, rootArg: string | (() 
         ? mergeNativeSkillMd(native, { ...body, body: generated?.body ?? body.body, version: resolvedVersion, engine })
         : buildSkillMd({ ...body, version: resolvedVersion, engine });
       // Create directories only after generation/validation succeeds.
+      if (isUpdateMode) resolveAuthoringSkillPath(root, body.plugin || "", body.name, body.layout);
       mkdirSync(targetDir, { recursive: true });
       mkdirSync(join(targetDir, "evals"), { recursive: true });
 

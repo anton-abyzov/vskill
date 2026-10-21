@@ -16,7 +16,7 @@ vi.mock("../../api", async () => ({ ...(await vi.importActual<any>("../../api"))
   getProjectLayout: mocks.layout, getSkillAuthoringContext: mocks.authoring,
   detectEngines: mocks.detect, createSkill: mocks.create, saveDraft: mocks.draft,
 } }));
-const native = '---\nname: existing\ndescription: Existing\nmodel: opus\nallowed-tools:\n  - Read\n  - Bash\ncontext: fork\nmetadata:\n  engine: vskill\n  version: "1.0.0"\n  custom: retained\n---\nOriginal';
+const native = '---\nname: existing\ndescription: Existing\nmodel: opus\nallowed-tools:\n  - Read\n# retain permission note\n\n  - Bash\ncontext: fork\nmetadata:\n  engine: vskill\n  version: "1.0.0"\n  custom: retained\n---\nOriginal';
 let container: HTMLDivElement, root: Root;
 beforeEach(() => {
   vi.clearAllMocks(); localStorage.clear(); window.location.hash = "#/create";
@@ -49,11 +49,24 @@ it("previews cleared native fields and preserves custom YAML through the update 
   await edit(input("Brief description — used for auto-activation keywords"), "Edited description");
   expect(preview()).not.toMatch(/^(model|allowed-tools):/m);
   expect(preview()).not.toMatch(/^\s*- (Read|Bash)$/m);
+  expect(preview()).toContain("# retain permission note");
   expect(preview()).toContain('description: "Edited description"');
   expect(preview()).toContain("context: fork");
   expect(preview()).toContain("custom: retained");
   await flush(() => button("Update Skill").click());
   expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({model: "", allowedTools: "", description: "Edited description", nativeSkillMd: native}));
+});
+
+it.each(["allowed-tools:\n    - Read\n    - Bash", "allowed-tools: [\nRead,\nBash\n]"])("preserves an untouched native field the lightweight reader cannot represent: %s", async (tools) => {
+  const document = `---\nname: existing\ndescription: Existing\nmodel: opus\n${tools}\ncontext: fork\nmetadata:\n  version: 1.0.0\n  engine: vskill\n---\nOriginal`;
+  mocks.authoring.mockResolvedValue({name: "existing", description: "Existing", model: "opus", allowedTools: "", body: "Original", version: "1.0.0", engine: "vskill", layout: 3, plugin: "", nativeSkillMd: document});
+  window.location.hash = "#/create?mode=update&pluginName=fixture&skillName=existing";
+  await mount(); await edit(input("Brief description — used for auto-activation keywords"), "Edited description");
+  expect(preview()).toContain(tools);
+  await flush(() => button("Update Skill").click());
+  const payload = mocks.create.mock.calls[0][0];
+  expect(payload.allowedTools).toBeUndefined(); expect(payload.model).toBeUndefined();
+  expect(payload.nativeSkillMd).toBe(document);
 });
 
 function generated(result: Record<string, unknown>) {

@@ -188,6 +188,7 @@ export interface UseCreateSkillReturn {
   setModel: (m: string) => void;
   allowedTools: string;
   setAllowedTools: (t: string) => void;
+  nativeFieldEdits: { model?: string; allowedTools?: string };
   body: string;
   nativeSkillMd?: string;
   setBody: (b: string) => void;
@@ -270,8 +271,11 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
   const [plugin, setPlugin] = useState("");
   const [newPlugin, setNewPlugin] = useState("");
   const [description, setDescription] = useState("");
-  const [model, setModel] = useState("");
-  const [allowedTools, setAllowedTools] = useState("");
+  const [model, setModelValue] = useState("");
+  const [allowedTools, setAllowedToolsValue] = useState("");
+  const optionalEdits = useRef({ model: false, allowedTools: false });
+  const setModel = useCallback((value: string) => { optionalEdits.current.model = true; setModelValue(value); }, []);
+  const setAllowedTools = useCallback((value: string) => { optionalEdits.current.allowedTools = true; setAllowedToolsValue(value); }, []);
   const [body, setBody] = useState("");
 
   // Body preview toggle
@@ -308,7 +312,7 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
       if (disposed) return;
       updateContext.current = value;
       setName(value.name); setDescription(value.description); setBody(value.body);
-      setModel(value.model || ""); setAllowedTools(value.allowedTools || "");
+      setModelValue(value.model || ""); setAllowedToolsValue(value.allowedTools || "");
       setSelectedLayout(value.layout); setPlugin(value.plugin); setVersion(value.version);
       setEngine(value.engine); nativeSkillMdRef.current = value.nativeSkillMd;
       setVersionsHref(value.versionsHref); setUpdateLoading(false);
@@ -682,8 +686,10 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
         layout: updateContext.current?.layout ?? selectedLayout,
         mode: updateTarget ? "update" : "create",
         description,
-        model,
-        allowedTools,
+        // The reader intentionally exposes only editable scalar/list forms.
+        // An untouched empty control must not erase richer native YAML.
+        model: !updateTarget || optionalEdits.current.model ? model : undefined,
+        allowedTools: !updateTarget || optionalEdits.current.allowedTools ? allowedTools : undefined,
         body,
         aiMeta: engine === "none" ? undefined : aiMetaRef.current || undefined,
         nativeSkillMd: updateTarget || engine === "anthropic-skill-creator" ? nativeSkillMdRef.current : undefined,
@@ -736,6 +742,10 @@ export function useCreateSkill({ onCreated, resolveAiConfigOverride, forceLayout
     description, setDescription,
     model, setModel,
     allowedTools, setAllowedTools,
+    nativeFieldEdits: {
+      model: !updateTarget || optionalEdits.current.model ? model : undefined,
+      allowedTools: !updateTarget || optionalEdits.current.allowedTools ? allowedTools : undefined,
+    },
     body, setBody, nativeSkillMd: nativeSkillMdRef.current,
     bodyViewMode, setBodyViewMode,
     aiPrompt, setAiPrompt,

@@ -4,10 +4,12 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { createRequire } from "node:module";
 import { Router } from "../router.js";
 import { registerSkillCreateRoutes } from "../skill-create-routes.js";
 import { parseSkillFrontmatter } from "../api-routes.js";
 import { studioTokenHeaders } from "./helpers/studio-token-test-helpers.js";
+const parseYaml = createRequire(import.meta.url)("js-yaml").load as (text: string) => Record<string, unknown>;
 
 vi.mock("../platform-proxy.js", () => ({ submitSkillUpdateEvent: vi.fn(async () => ({ success: true })) }));
 vi.mock("../../eval/llm.js", () => ({ createLlmClient: () => { throw new Error("Editor updates must not call a model"); } }));
@@ -30,11 +32,12 @@ describe("authoring load/edit/save over HTTP", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  async function update(fields: Record<string, string>) {
+  async function update(fields: Record<string, string>, checkInitialTools = true) {
     const loaded = await fetch(`${url}/api/skills/${basename(root)}/existing/authoring`, { headers });
     expect(loaded.status).toBe(200);
     const context = await loaded.json() as Record<string, unknown>;
-    expect(context).toMatchObject({ model: "opus", allowedTools: "Read, Bash", engine: "vskill", version: "1.0.0" });
+    expect(context).toMatchObject({ model: "opus", engine: "vskill", version: "1.0.0" });
+    if (checkInitialTools) expect(context.allowedTools).toBe("Read, Bash");
     const saved = await fetch(`${url}/api/skills/create`, {
       method: "POST", headers,
       body: JSON.stringify({ name: context.name, plugin: context.plugin, layout: context.layout, mode: "update", nativeSkillMd: context.nativeSkillMd, description: "Reviewed description", body: "\nReviewed body  \n", version: "1.0.1", ...fields }),
@@ -42,6 +45,7 @@ describe("authoring load/edit/save over HTTP", () => {
     expect(saved.status).toBe(200);
     expect(await saved.json()).toMatchObject({ engine: "vskill", skill: "existing" });
     const document = readFileSync(file, "utf8");
+    expect(parseYaml(document.match(/^---\n([\s\S]*?)\n---/)![1])).toMatchObject({ context: "fork", agent: "Explore" });
     expect(document).toContain("context: fork\nagent: Explore\nhooks:\n  Stop:\n    - matcher: \"\"\n      command: echo fixture");
     expect(document).toContain("  custom:\n    nested: retained");
     expect(document).toContain("  engine: vskill");
@@ -58,14 +62,24 @@ describe("authoring load/edit/save over HTTP", () => {
     writeFileSync(file, `---\nname: existing\ndescription: Existing\nmodel: opus\n${tools}\ncontext: fork\nagent: Explore\nhooks:\n  Stop:\n    - matcher: ""\n      command: echo fixture\nmetadata:\n  version: "1.0.0"\n  engine: vskill\n  custom:\n    nested: retained\n---\nOriginal body\n`);
   }
 
-  it.each(["allowed-tools: Read, Bash", "allowed-tools:\n  - Read\n  - Bash", "allowed-tools:\n- Read\n- Bash"])("removes explicitly cleared optional fields with %s", async (tools) => {
+  it.each([
+    "allowed-tools: Read, Bash", "allowed-tools:\n  - Read\n  - Bash", "allowed-tools:\n- Read\n- Bash",
+    "allowed-tools:\n- Read\n# preserve permission note\n- Bash",
+    "allowed-tools:\n  - Read\n# preserve permission note\n  - Bash",
+    "allowed-tools:\n    - Read\n\n  # preserve permission note\n\n    - Bash",
+    "allowed-tools: [\n  Read,\n# preserve permission note\n  Bash\n]",
+    "allowed-tools:\n  [Read,\n# preserve permission note\nBash\n]",
+    "allowed-tools: [\n'Read]',\n# preserve permission note\n\"Bash[\"\n]",
+  ])("removes explicitly cleared optional fields with %s", async (tools) => {
     seed(tools);
-    const { document, contextAfterSave } = await update({ model: "", allowedTools: "" });
+    expect(parseYaml(readFileSync(file, "utf8").match(/^---\n([\s\S]*?)\n---/)![1])).toHaveProperty("allowed-tools");
+    const { document, contextAfterSave } = await update({ model: "", allowedTools: "" }, !tools.includes("# preserve permission note"));
     expect(document).not.toMatch(/^(model|allowed-tools):/m);
     expect(parseSkillFrontmatter(document)).not.toHaveProperty("model");
     expect(parseSkillFrontmatter(document)).not.toHaveProperty("allowed-tools");
     expect(document).not.toMatch(/^\s*- (Read|Bash)$/m);
     expect(contextAfterSave).toMatchObject({ model: "", allowedTools: "" });
+    if (tools.includes("# preserve permission note")) expect(document).toContain("# preserve permission note");
   });
 
   it("preserves omitted optional fields and the original array shape", async () => {
@@ -73,6 +87,12 @@ describe("authoring load/edit/save over HTTP", () => {
     const { document, contextAfterSave } = await update({});
     expect(document).toContain("model: opus\nallowed-tools:\n  - Read\n  - Bash");
     expect(contextAfterSave).toMatchObject({ model: "opus", allowedTools: "Read, Bash" });
+  });
+  it.each(["allowed-tools:\n    - Read\n    - Bash", "allowed-tools: [\nRead,\nBash\n]"])("preserves an untouched richer native field: %s", async (tools) => {
+    seed(tools);
+    const { document } = await update({}, false);
+    expect(document).toContain(tools);
+    expect(parseYaml(document.match(/^---\n([\s\S]*?)\n---/)![1])).toMatchObject({model: "opus", "allowed-tools": ["Read", "Bash"]});
   });
 
   it("replaces explicitly edited optional fields without reserializing custom schema", async () => {

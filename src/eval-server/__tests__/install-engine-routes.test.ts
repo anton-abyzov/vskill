@@ -212,6 +212,13 @@ describe("AC-US5-01: POST /api/studio/install-engine returns 202 with jobId", ()
 });
 
 describe("AC-US5-02: prerequisite CLI checks", () => {
+  it("returns actionable remediation without spawning when vskill CLI is missing", async () => {
+    procMock.cliPresence.vskill = false;
+    const captured = await callPost({ engine: "vskill" });
+    expect(captured.status).toBe(412);
+    expect(captured.body).toEqual({ error: "vskill-cli-missing", remediation: "Install vskill CLI first." });
+    expect(procMock.spawnCalls).toHaveLength(0);
+  });
   it("returns 412 with remediation when 'claude' CLI is missing for anthropic-skill-creator", async () => {
     procMock.cliPresence.claude = false;
     const captured = await callPost({ engine: "anthropic-skill-creator" });
@@ -259,6 +266,13 @@ describe("AC-US5-07: hard-coded command allow-list (no shell injection surface)"
 });
 
 describe("AC-US5-03 + AC-US5-09: SSE stream on /:jobId/stream", () => {
+  it.each([["10.0.0.42", 403, /localhost/], ["127.0.0.1", 404, /unknown jobId/]])("refuses stream lookup from %s with %s", async (remoteAddress, status, message) => {
+    const request = makeReqRes({ method: "GET", url: "/api/studio/install-engine/nonexistent/stream", remoteAddress: remoteAddress as string });
+    await buildRouter().handle(request.req, request.res);
+    expect(request.captured.status).toBe(status);
+    expect((request.captured.body as {error: string}).error).toMatch(message as RegExp);
+    expect(procMock.spawnCalls).toHaveLength(0);
+  });
   async function startInstallAndOpenStream(): Promise<{
     captured: CapturedRes;
     proc: ReturnType<typeof procMock.makeProc>;

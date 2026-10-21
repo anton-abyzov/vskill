@@ -58,6 +58,8 @@ interface HookHandle {
   refreshEngineDetection: () => Promise<void>;
   setName: (s: string) => void;
   setDescription: (s: string) => void;
+  setModel: (s: string) => void;
+  setAllowedTools: (s: string) => void;
   setSelectedLayout: (l: 1 | 2 | 3) => void;
   version: string;
   setVersion: (s: string) => void;
@@ -298,4 +300,19 @@ it("0734 loads the current version/engine in update mode and saves to the origin
   await flushAct(() => get().setVersion("2.3.4"));
   await flushAct(() => get().handleCreate());
   expect(createSkillMock).toHaveBeenCalledWith(expect.objectContaining({ mode: "update", name: "existing", version: "2.3.4", engine: "anthropic-skill-creator", nativeSkillMd: expect.stringContaining("context: fork") }));
+});
+
+it("0734 sends explicit empty fields when an existing model and allowed tools are cleared", async () => {
+  detectEnginesMock.mockResolvedValue(detection({ vskillSkillBuilder: true }));
+  mocks.authoringMock.mockResolvedValue({ name: "existing", plugin: "", layout: 3, description: "Existing", body: "Body", model: "opus", allowedTools: "Read, Bash", version: "1.0.0", engine: "vskill", nativeSkillMd: "---\nmodel: opus\nallowed-tools: Read, Bash\ncontext: fork\n---\nBody" });
+  createSkillMock.mockReset();
+  createSkillMock.mockResolvedValue({ plugin: "fixture", skill: "existing" });
+  const get = await mountHook(vi.fn(), { plugin: "fixture", skill: "existing" });
+  await flushAct(); await flushAct();
+  await flushAct(() => { get().setModel(""); get().setAllowedTools(""); });
+  await flushAct(() => get().handleCreate());
+  // Assert the JSON wire shape: undefined would disappear and mean preserve.
+  expect(JSON.parse(JSON.stringify(createSkillMock.mock.calls[0][0]))).toMatchObject({
+    mode: "update", model: "", allowedTools: "", nativeSkillMd: expect.stringContaining("context: fork"),
+  });
 });

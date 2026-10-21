@@ -148,17 +148,27 @@ test("0734 selected native engine reaches generation and preserves its document 
   await expect.poll(() => saved).toMatchObject({ version: "2.0.0", engine: "anthropic-skill-creator", nativeSkillMd });
 });
 
-test("0734 update route loads current version and links version history", async ({ page }, testInfo) => {
+test("0734 update route loads current version, clears optional fields and links version history", async ({ page }, testInfo) => {
   await page.route("**/api/studio/detect-engines", (route) => route.fulfill({ json: { vskillSkillBuilder: true, anthropicSkillCreator: false, vskillVersion: "1.0.0", anthropicPath: null } }));
-  await page.route("**/api/skills/fixture/existing/authoring", (route) => route.fulfill({ json: { name: "existing", plugin: "", layout: 3, description: "Existing", body: "Existing body", version: "3.2.1", engine: "vskill", nativeSkillMd: '---\nname: existing\ndescription: Existing\nmetadata:\n  version: "3.2.1"\n---\nExisting body', versionsHref: "https://verified-skill.com/skills/owner/repo/existing/versions" } }));
+  const nativeSkillMd = '---\nname: existing\ndescription: Existing\nmodel: opus\nallowed-tools:\n  - Read\n  - Bash\ncontext: fork\nmetadata:\n  version: "3.2.1"\n  custom: retained\n---\nExisting body';
+  await page.route("**/api/skills/fixture/existing/authoring", (route) => route.fulfill({ json: { name: "existing", plugin: "", layout: 3, description: "Existing", body: "Existing body", model: "opus", allowedTools: "Read, Bash", version: "3.2.1", engine: "vskill", nativeSkillMd, versionsHref: "https://verified-skill.com/skills/owner/repo/existing/versions" } }));
   let saved: any;
   await page.route("**/api/skills/create", async (route) => { saved = route.request().postDataJSON(); await route.fulfill({ json: { ok: true, plugin: "fixture", skill: "existing" } }); });
   await page.goto("/#/create?mode=update&pluginName=fixture&skillName=existing");
   await expect(page.getByTestId("version-input")).toHaveValue("3.2.1");
   await expect(page.getByTestId("version-input-versions-link")).toHaveAttribute("href", "https://verified-skill.com/skills/owner/repo/existing/versions");
   await expect(page.getByPlaceholder("my-skill", { exact: true })).toBeDisabled();
+  const model = page.locator("select").filter({ has: page.locator('option[value=""]', { hasText: "Any (default)" }) });
+  await expect(model).toHaveValue("opus");
+  await model.selectOption("");
+  await expect(page.getByPlaceholder("Read, Write, Edit, Bash, Glob, Grep")).toHaveValue("Read, Bash");
+  await page.getByPlaceholder("Read, Write, Edit, Bash, Glob, Grep").fill("");
+  const preview = page.locator("pre").filter({ hasText: "context: fork" }).first();
+  await expect(preview).not.toContainText("model: opus");
+  await expect(preview).not.toContainText("allowed-tools:");
+  await expect(preview).toContainText("custom: retained");
   await page.getByTestId("version-input").fill("3.2.2");
   await page.screenshot({ path: testInfo.outputPath("0734-update-version.png"), fullPage: true });
   await page.getByRole("button", { name: "Update Skill", exact: true }).click();
-  await expect.poll(() => saved).toMatchObject({ mode: "update", name: "existing", version: "3.2.2", engine: "vskill" });
+  await expect.poll(() => saved).toMatchObject({ mode: "update", name: "existing", version: "3.2.2", engine: "vskill", model: "", allowedTools: "", nativeSkillMd });
 });

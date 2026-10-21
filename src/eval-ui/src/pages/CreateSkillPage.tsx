@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { setFrontmatterVersion } from "../../../utils/version.js";
+import { mergeNativeSkillDocument } from "../../../shared/skill-authoring-document.js";
+import { parseFrontmatter } from "../utils/parseFrontmatter";
 import { Link } from "react-router-dom";
 import { useCreateSkill, toKebab } from "../hooks/useCreateSkill";
 import { useConfig } from "../ConfigContext";
@@ -320,8 +321,10 @@ export function CreateSkillPage() {
   const skillMdPreview = useMemo(() => {
     if (sk.nativeSkillMd) {
       try {
-        const native = setFrontmatterVersion(sk.nativeSkillMd, sk.version);
-        return native.replace(/(\n---(?:\r?\n)?)[\s\S]*$/, (_match, fence) => `${fence}\n${sk.body}`);
+        return mergeNativeSkillDocument(sk.nativeSkillMd, {
+          name: sk.name, description: sk.description, body: sk.body,
+          version: sk.version, model: sk.model, allowedTools: sk.allowedTools, engine: sk.engine,
+        }, parseFrontmatter(sk.nativeSkillMd.replace(/\r\n/g, "\n")).metadata);
       } catch { return sk.nativeSkillMd; }
     }
     const lines: string[] = ["---"];

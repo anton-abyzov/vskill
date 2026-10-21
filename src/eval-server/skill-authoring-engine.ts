@@ -1,8 +1,9 @@
+import { mergeNativeSkillDocument } from "../shared/skill-authoring-document.js";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createLlmClient } from "../eval/llm.js";
 import { findSkillCreatorPath, isSkillCreatorInstalled } from "../utils/skill-creator-detection.js";
-import { readFrontmatterVersion, setFrontmatterVersion } from "../utils/version.js";
+import { readFrontmatterVersion } from "../utils/version.js";
 import { isValidSemver } from "../utils/semver.js";
 import { parseSkillFrontmatter } from "./api-routes.js";
 import type { GenerateSkillOptions } from "../core/skill-generator.js";
@@ -74,44 +75,7 @@ export async function generateWithSkillCreator(request: GenerateSkillRequest, op
   };
 }
 
-/** Replace one mapping field without reserializing unknown native schema. */
-function replaceField(lines: string[], key: string, value: string, indent: number, start = 0, end = lines.length): void {
-  const pattern = new RegExp(`^ {${indent}}${key}:`);
-  const index = lines.findIndex((line, i) => i >= start && i < end && pattern.test(line));
-  const replacement = `${" ".repeat(indent)}${key}: ${value}`;
-  if (index < 0) { lines.splice(end, 0, replacement); return; }
-  let stop = index + 1;
-  while (stop < end && (!lines[stop].trim() || lines[stop].match(/^ */)![0].length > indent)) stop++;
-  lines.splice(index, stop - index, replacement);
-}
-
+/** Shared with the browser preview; parsing never rewrites native YAML. */
 export function mergeNativeSkillMd(native: string, data: Pick<CreateSkillRequest, "name" | "description" | "body" | "version" | "allowedTools" | "model" | "engine">): string {
-  const versioned = setFrontmatterVersion(native, data.version || "1.0.0");
-  const match = versioned.match(FRONTMATTER);
-  if (!match) throw new Error("Native skill must contain YAML frontmatter");
-  const original = parseSkillFrontmatter(native.replace(/\r\n/g, "\n"));
-  const lines = match[1].split(/\r?\n/);
-  replaceField(lines, "name", JSON.stringify(data.name), 0);
-  replaceField(lines, "description", JSON.stringify(data.description), 0);
-  const originalTools = Array.isArray(original["allowed-tools"]) ? original["allowed-tools"].join(", ") : original["allowed-tools"] || "";
-  if (data.allowedTools !== undefined && data.allowedTools !== originalTools) replaceField(lines, "allowed-tools", JSON.stringify(data.allowedTools), 0);
-  if (data.model !== undefined && data.model !== original.model) replaceField(lines, "model", JSON.stringify(data.model), 0);
-  let metadata = lines.findIndex((line) => /^metadata:\s*(?:#.*)?$/.test(line));
-  if (metadata < 0) {
-    if (lines.some((line) => /^metadata\s*:/.test(line))) throw new Error("Native skill metadata must use a block mapping");
-    metadata = lines.length;
-    lines.push("metadata:");
-  }
-  const end = () => {
-    const next = lines.findIndex((line, index) => index > metadata && /^[^\s#]/.test(line));
-    return next < 0 ? lines.length : next;
-  };
-  const indents = lines.slice(metadata + 1, end()).filter((line) => /^ +[^ #]/.test(line))
-    .map((line) => line.length - line.trimStart().length);
-  const indent = indents.length ? Math.min(...indents) : 2;
-  const engine = data.engine ?? "anthropic-skill-creator";
-  replaceField(lines, "engine", engine, indent, metadata + 1, end());
-  if (engine === "anthropic-skill-creator") replaceField(lines, "target-agents", "[claude-code]", indent, metadata + 1, end());
-  // The body is the user's reviewed/edited preview, never the generic emitter.
-  return `---\n${lines.join("\n")}\n---\n\n${data.body}`;
+  return mergeNativeSkillDocument(native, data, parseSkillFrontmatter(native.replace(/\r\n/g, "\n")));
 }

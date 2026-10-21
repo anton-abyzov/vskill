@@ -178,6 +178,75 @@ chmod +x "$cu/curl"
 run_check "$cu" --no-repo --url https://example.test
 expect "--url reads X-Powered-By" 1 "\\[VULNERABLE\\] https://example.test  PHP 8.3.12"
 
+# pre-release / branch-only strings never count as PATCHED below the fix
+for pv in 8.4.27-dev 8.4.27RC1 8.5.12RC1 8.2.35-dev 8.6.0-RC3; do
+  run_check "$EMPTY" --no-repo --version "$pv"
+  expect "--version $pv -> VULNERABLE" 1 "\\[VULNERABLE\\] --version  PHP $pv"
+done
+run_check "$EMPTY" --no-repo --version 8.6
+expect "--version 8.6 (no patch level) -> UNKNOWN" 2 "\\[UNKNOWN\\] --version  PHP 8.6"
+R3="$T/repo3"; mkdir -p "$R3"
+printf 'FROM php:8.6-rc-fpm\n' > "$R3/Dockerfile"
+printf '8.6\n' > "$R3/.php-version"
+run_check "$EMPTY" --repo "$R3"
+expect "php:8.6-rc-fpm and .php-version 8.6 -> FLOATING" 2 "\\[FLOATING\\] Dockerfile: docker-image php:8.6-rc-fpm" "\\[FLOATING\\] .php-version"
+
+# image pinned by digest keeps its tag
+R4="$T/repo4"; mkdir -p "$R4"
+printf 'FROM php:8.3.10-fpm@sha256:0123456789abcdef\n' > "$R4/Dockerfile"
+run_check "$EMPTY" --repo "$R4"
+expect "digest-pinned php:8.3.10-fpm -> VULNERABLE" 1 "\\[VULNERABLE\\] Dockerfile: docker-image php:8.3.10-fpm@sha256"
+
+# EOL distro package stays VULNERABLE (fake rpm)
+pk3="$T/bin-pkg-eol"; fake_php "$pk3" "PHP 5.4.16 (cli)"
+cat > "$pk3/rpm" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -qf) echo "php-cli-5.4.16-48.el7.x86_64" ;;
+  -q) echo "* Mon Sep 01 2020 Packager - 5.4.16-48"; echo "- rebuild" ;;
+esac
+EOF
+chmod +x "$pk3/rpm"
+run_check "$pk3" --no-repo
+expect "EOL rpm 5.4.16 -> VULNERABLE exit 1" 1 "\\[VULNERABLE\\] .*PHP 5.4.16" "pkg: rpm:php-cli-5.4.16"
+
+# warning line before the version line
+wp="$T/bin-warn"; mkdir -p "$wp"
+cat > "$wp/php" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -v) echo "PHP Warning:  PHP Startup: Unable to load dynamic library 'x.so'"; echo "PHP 8.4.26 (cli) (built: Oct 1 2026)" ;;
+  -r) echo "memory_limit=-1" ;;
+esac
+EOF
+chmod +x "$wp/php"
+run_check "$wp" --no-repo
+expect "startup warning before version line" 1 "\\[VULNERABLE\\] .*PHP 8.4.26 \\(cli\\)" "cli ini only"
+
+# FrankenPHP reads its embedded PHP version
+fp="$T/bin-franken"; mkdir -p "$fp"
+cat > "$fp/frankenphp" <<'EOF'
+#!/bin/sh
+[ "$1" = version ] && echo "FrankenPHP v1.9.0 PHP 8.4.26 Caddy v2.10.0 h1:abc"
+EOF
+chmod +x "$fp/frankenphp"
+run_check "$fp" --no-repo
+expect "frankenphp version is judged" 1 "\\[VULNERABLE\\] .*frankenphp  PHP 8.4.26 \\(frankenphp\\)"
+
+# EOL X-Powered-By with a distro suffix stays VULNERABLE
+cu2="$T/bin-curl2"; mkdir -p "$cu2"
+cat > "$cu2/curl" <<'EOF'
+#!/bin/sh
+printf 'HTTP/1.1 200 OK\r\nX-Powered-By: PHP/7.0.33-0ubuntu0.16.04.16\r\n\r\n'
+EOF
+chmod +x "$cu2/curl"
+run_check "$cu2" --no-repo --url https://example.test
+expect "--url EOL distro string -> VULNERABLE" 1 "\\[VULNERABLE\\] https://example.test  PHP 7.0.33"
+
+# default repo scan refuses $HOME
+OUT=$(cd "$T" && HOME="$T" PHP2SHELL_PATH="$EMPTY" PHP2SHELL_NO_SYSTEM_SCAN=1 PATH="/usr/bin:/bin" "$SHELL_BIN" "$CHECK" 2>&1); RC=$?
+expect "cwd = HOME is not scanned by default" 2 "skipped: current dir"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

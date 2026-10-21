@@ -2,8 +2,9 @@
 # php2shell-check: is this machine / repo exposed to php2shell
 # (CVE-2026-109618, CVE-2026-109619, disclosed 2026-10-21)?
 #
-# POSIX sh, macOS + Linux, no dependencies. Read-only: it runs `php -v`,
-# `php -r` (ini_get only), package-manager queries, and optionally one
+# POSIX sh, macOS + Linux, no dependencies. Read-only and offline: it runs
+# `php -v` (`frankenphp version`), `php -r` (ini_get only), local
+# package-manager queries and installed changelogs, and optionally one
 # `curl -sI` against a URL you pass. It never sends exploit payloads.
 #
 # Exit codes: 0 all patched, 1 any vulnerable, 2 unknown / nothing found,
@@ -31,7 +32,7 @@ Exit: 0 patched, 1 vulnerable, 2 unknown/nothing found, 3 backport possible.
 EOF
 }
 
-JSON=0; REPO="."; DO_REPO=1; DO_INI=1; URL=""; EXPLICIT_PHP=""; EXPLICIT_VER=""
+JSON=0; REPO="."; REPO_SET=0; DO_REPO=1; DO_INI=1; URL=""; EXPLICIT_PHP=""; EXPLICIT_VER=""
 NL='
 '
 while [ $# -gt 0 ]; do
@@ -43,8 +44,8 @@ while [ $# -gt 0 ]; do
            EXPLICIT_VER="${EXPLICIT_VER}$2${NL}"; shift 2 ;;
     --version=*) EXPLICIT_VER="${EXPLICIT_VER}${1#--version=}${NL}"; shift ;;
     --repo) [ $# -ge 2 ] || { echo "--repo needs a dir" >&2; exit 2; }
-            REPO="$2"; shift 2 ;;
-    --repo=*) REPO="${1#--repo=}"; shift ;;
+            REPO="$2"; REPO_SET=1; shift 2 ;;
+    --repo=*) REPO="${1#--repo=}"; REPO_SET=1; shift ;;
     --no-repo) DO_REPO=0; shift ;;
     --no-ini) DO_INI=0; shift ;;
     --url) [ $# -ge 2 ] || { echo "--url needs a URL" >&2; exit 2; }
@@ -57,7 +58,9 @@ while [ $# -gt 0 ]; do
 done
 
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t php2shell)
-trap 'rm -rf "$TMP"' EXIT INT TERM
+trap 'rm -rf "$TMP"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 RUNTIMES="$TMP/runtimes"; FINDINGS="$TMP/findings"; INI="$TMP/ini"; SEEN="$TMP/seen"
 : > "$RUNTIMES"; : > "$FINDINGS"; : > "$INI"; : > "$SEEN"
 TAB=$(printf '\t')
@@ -65,10 +68,10 @@ FS=$(printf '\037')  # record separator: empty fields survive read
 
 # ---------------------------------------------------------------- verdicts
 # verdict_for <version> -> sets V_VERDICT (PATCHED|VULNERABLE|UNKNOWN),
-# V_FIX (upgrade target), V_NOTE.
+# V_FIX (upgrade target), V_NOTE, V_EOL (1 for 5.x-7.3: no fix exists).
 verdict_for() {
   vf_v=$1
-  V_VERDICT=UNKNOWN; V_FIX=""; V_NOTE=""
+  V_VERDICT=UNKNOWN; V_FIX=""; V_NOTE=""; V_EOL=0
   vf_maj=$(printf '%s' "$vf_v" | sed -n 's/^\([0-9][0-9]*\)\..*/\1/p')
   vf_min=$(printf '%s' "$vf_v" | sed -n 's/^[0-9][0-9]*\.\([0-9][0-9]*\).*/\1/p')
   vf_pat=$(printf '%s' "$vf_v" | sed -n 's/^[0-9][0-9]*\.[0-9][0-9]*\.\([0-9][0-9]*\).*/\1/p')
@@ -77,16 +80,20 @@ verdict_for() {
     V_NOTE="cannot parse version"; return
   fi
   vf_pre=""; vf_rc=""
+  vf_rest=${vf_rest#[-._]}   # 8.6.0-RC3, 8.4.27-dev, 8.4.27.rc1
   case "$vf_rest" in
     rc[0-9]*) vf_pre=rc; vf_rc=$(printf '%s' "$vf_rest" | sed 's/^rc\([0-9]*\).*/\1/') ;;
-    alpha*|beta*|-dev*|dev*) vf_pre=early ;;
+    alpha*|beta*|dev*) vf_pre=early ;;
   esac
   if [ "$vf_maj" -ge 9 ] || { [ "$vf_maj" -eq 8 ] && [ "$vf_min" -ge 7 ]; }; then
     V_VERDICT=PATCHED; V_FIX="-"; return
   fi
   if [ "$vf_maj" -eq 8 ] && [ "$vf_min" -eq 6 ]; then
     V_FIX="8.6.0RC4"
-    if [ -z "$vf_pat" ] || [ "$vf_pat" -ge 1 ]; then V_VERDICT=PATCHED; return; fi
+    if [ -z "$vf_pat" ]; then
+      V_NOTE="branch only, exact pre-release unknown"; return
+    fi
+    if [ "$vf_pat" -ge 1 ]; then V_VERDICT=PATCHED; return; fi
     case "$vf_pre" in
       rc) if [ "${vf_rc:-0}" -ge 4 ]; then V_VERDICT=PATCHED; else
             V_VERDICT=VULNERABLE; V_NOTE="pre-release before 8.6.0RC4"; fi ;;
@@ -106,7 +113,11 @@ verdict_for() {
     if [ -z "$vf_pat" ]; then
       V_NOTE="branch only, exact patch level unknown"; return
     fi
-    if [ "$vf_pat" -ge "$vf_fixpat" ]; then V_VERDICT=PATCHED
+    if [ "$vf_pat" -gt "$vf_fixpat" ]; then V_VERDICT=PATCHED
+    elif [ "$vf_pat" -eq "$vf_fixpat" ]; then
+      if [ -n "$vf_pre" ]; then
+        V_VERDICT=VULNERABLE; V_NOTE="pre-release build before the $V_FIX release"
+      else V_VERDICT=PATCHED; fi
     else V_VERDICT=VULNERABLE; fi
     return
   fi
@@ -115,8 +126,20 @@ verdict_for() {
     V_NOTE="no official upstream release for $vf_maj.$vf_min; only distro/LTS vendor backports or the PHP security team source patches fix it"
     return
   fi
-  V_VERDICT=VULNERABLE; V_FIX="8.2.35+"
+  V_VERDICT=VULNERABLE; V_FIX="8.2.35+"; V_EOL=1
   V_NOTE="EOL branch $vf_maj.$vf_min: no fix exists, upgrade to a supported branch"
+}
+
+# run a discovered binary: no stdin (lsphp/php-cgi may wait on it), bounded time
+run_bin() {
+  if command -v timeout >/dev/null 2>&1; then timeout 10 "$@" </dev/null
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout 10 "$@" </dev/null
+  else "$@" </dev/null; fi
+}
+
+# "FrankenPHP v1.9.0 PHP 8.4.27 Caddy v2.10.0 ..." -> "8.4.27"
+version_of_frankenphp() {
+  printf '%s' "$1" | sed -n 's/.*[[:space:]]PHP[[:space:]]\{1,\}\([0-9][^[:space:]]*\).*/\1/p'
 }
 
 # strip "PHP 8.2.7-1~deb12u1 (cli) ..." -> "8.2.7-1~deb12u1"
@@ -150,9 +173,8 @@ package_check() {
       for pc_f in /usr/share/doc/"$P_PKG"/changelog.Debian.gz /usr/share/doc/"$P_PKG"/changelog.gz; do
         [ -r "$pc_f" ] && { pc_log=$(gzip -dc "$pc_f" 2>/dev/null); break; }
       done
-      if [ -z "$pc_log" ] && command -v apt-get >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
-        pc_log=$(timeout 20 apt-get changelog "$P_PKG" 2>/dev/null)
-      fi
+      # no `apt-get changelog` fallback: it is a network call and returns the
+      # newest available version's changelog, not the installed one's.
     fi
   fi
   if [ -z "$P_PKG" ] && command -v rpm >/dev/null 2>&1; then
@@ -192,9 +214,16 @@ check_binary() {
   cb_real=$(resolve_path "$cb_bin")
   if grep -qxF "$cb_real" "$SEEN" 2>/dev/null; then return; fi
   printf '%s\n' "$cb_real" >> "$SEEN"
-  cb_line=$("$cb_bin" -v 2>/dev/null | head -n 1)
-  cb_ver=$(version_of_line "$cb_line")
-  cb_sapi=$(sapi_of_line "$cb_line")
+  case "$(basename "$cb_bin")" in
+    frankenphp*)
+      cb_line=$(run_bin "$cb_bin" version 2>/dev/null | grep 'PHP[[:space:]][[:space:]]*[0-9]' | head -n 1)
+      cb_ver=$(version_of_frankenphp "$cb_line"); cb_sapi=frankenphp ;;
+    *)
+      # first "PHP x.y" line: startup warnings may come before it
+      cb_line=$(run_bin "$cb_bin" -v 2>/dev/null | grep '^PHP[[:space:]][[:space:]]*[0-9]' | head -n 1)
+      cb_ver=$(version_of_line "$cb_line")
+      cb_sapi=$(sapi_of_line "$cb_line") ;;
+  esac
   if [ -z "$cb_ver" ]; then
     add_runtime binary "$cb_bin" "$cb_sapi" "" UNKNOWN "" "" "could not read version"; return
   fi
@@ -204,7 +233,14 @@ check_binary() {
     package_check "$cb_real"
     if [ -n "$P_PKG" ]; then
       cb_pkgdesc="$P_MGR:$P_PKG"
-      case "$P_BACKPORT" in
+      cb_bp=$P_BACKPORT
+      # 5.x-7.3: EOL, no fix exists; a distro version string does not soften that
+      [ "$V_EOL" = 1 ] && cb_bp=eol
+      # Alpine packages track upstream version numbers: below the fix is below the fix
+      [ "$P_MGR" = apk ] && [ "$cb_bp" = unknown ] && cb_bp=apk
+      case "$cb_bp" in
+        eol) cb_note="$V_NOTE; the distro package does not change that" ;;
+        apk) cb_note="Alpine packages follow upstream version numbers: apk upgrade to the fixed release" ;;
         yes) cb_verdict=PATCHED-BACKPORT
              cb_note="package changelog lists $CVE_A; vendor backport under the old version string" ;;
         no)  cb_verdict=BACKPORT-POSSIBLE
@@ -217,7 +253,7 @@ check_binary() {
   add_runtime binary "$cb_bin" "$cb_sapi" "$cb_ver" "$cb_verdict" "$V_FIX" "$cb_pkgdesc" "$cb_note"
   if [ "$DO_INI" = 1 ]; then
     case "$cb_sapi" in
-      fpm*) ;; # php-fpm has no -r; pool config checked separately
+      fpm*|frankenphp) ;; # no -r here; FPM pool config checked separately
       *) check_ini "$cb_bin" "$cb_ver" ;;
     esac
   fi
@@ -263,7 +299,7 @@ to_bytes() {
 
 check_ini() {
   ci_bin=$1; ci_ver=$2
-  ci_out=$("$ci_bin" -r 'foreach(array("memory_limit","post_max_size","upload_max_filesize","session.upload_progress.enabled","fatal_error_backtraces","file_uploads") as $k){$v=ini_get($k); echo $k,"=",($v===false?"(unset)":$v),"\n";}' 2>/dev/null)
+  ci_out=$(run_bin "$ci_bin" -r 'foreach(array("memory_limit","post_max_size","upload_max_filesize","session.upload_progress.enabled","fatal_error_backtraces","file_uploads") as $k){$v=ini_get($k); echo $k,"=",($v===false?"(unset)":$v),"\n";}' 2>/dev/null)
   [ -n "$ci_out" ] || return
   ci_post=""; ci_upl=""; ci_fu=""
   printf '%s\n' "$ci_out" | while IFS='=' read -r ci_k ci_v; do
@@ -275,33 +311,34 @@ check_ini() {
   ci_mem=$(get_ini memory_limit); ci_post=$(get_ini post_max_size); ci_upl=$(get_ini upload_max_filesize)
   ci_sup=$(get_ini session.upload_progress.enabled); ci_feb=$(get_ini fatal_error_backtraces)
   ci_fu=$(get_ini file_uploads)
+  ci_src="$ci_bin, cli ini only"
   if [ -n "$ci_mem" ]; then
-    if [ "$ci_mem" = "-1" ]; then add_ini "$ci_bin" memory_limit "$ci_mem" ok "matches the $CVE_A stopgap"
-    else add_ini "$ci_bin" memory_limit "$ci_mem" stopgap "$CVE_A stopgap: php_admin_value[memory_limit] = -1 in the web SAPI config (never RLIMIT_AS/RLIMIT_DATA)"; fi
+    if [ "$ci_mem" = "-1" ]; then add_ini "$ci_src" memory_limit "$ci_mem" ok "matches the $CVE_A stopgap in the CLI ini only; the FPM pool / Apache vhost may differ"
+    else add_ini "$ci_src" memory_limit "$ci_mem" stopgap "$CVE_A stopgap: php_admin_value[memory_limit] = -1 in the web SAPI config (never RLIMIT_AS/RLIMIT_DATA)"; fi
   fi
   if [ -n "$ci_post" ]; then
     ci_pb=$(to_bytes "$ci_post")
     case "$ci_fu" in 1|On|on) ci_cap=33554432; ci_capt=32M ;; *) ci_cap=8388608; ci_capt=8M ;; esac
     if [ "$ci_pb" -eq 0 ] || [ "$ci_pb" -gt "$ci_cap" ]; then
-      add_ini "$ci_bin" post_max_size "$ci_post" stopgap "$CVE_A stopgap: post_max_size = 8M without uploads, 32M with uploads (now $ci_post)"
-    else add_ini "$ci_bin" post_max_size "$ci_post" ok "within the stopgap cap ($ci_capt)"; fi
+      add_ini "$ci_src" post_max_size "$ci_post" stopgap "$CVE_A stopgap: post_max_size = 8M without uploads, 32M with uploads (now $ci_post)"
+    else add_ini "$ci_src" post_max_size "$ci_post" ok "within the stopgap cap ($ci_capt)"; fi
     if [ -n "$ci_upl" ]; then
       ci_ub=$(to_bytes "$ci_upl")
       if [ "$ci_ub" -ge "$ci_pb" ] && [ "$ci_pb" -gt 0 ]; then
-        add_ini "$ci_bin" upload_max_filesize "$ci_upl" stopgap "keep upload_max_filesize below post_max_size"
-      else add_ini "$ci_bin" upload_max_filesize "$ci_upl" ok "below post_max_size"; fi
+        add_ini "$ci_src" upload_max_filesize "$ci_upl" stopgap "keep upload_max_filesize below post_max_size"
+      else add_ini "$ci_src" upload_max_filesize "$ci_upl" ok "below post_max_size"; fi
     fi
   fi
   case "$ci_sup" in
-    1|On|on) add_ini "$ci_bin" session.upload_progress.enabled "$ci_sup" stopgap "$CVE_B stopgap: session.upload_progress.enabled = 0 in php.ini or FPM pool php_admin_value (not ini_set/.user.ini)" ;;
+    1|On|on) add_ini "$ci_src" session.upload_progress.enabled "$ci_sup" stopgap "$CVE_B stopgap: session.upload_progress.enabled = 0 in php.ini or FPM pool php_admin_value (not ini_set/.user.ini)" ;;
     "") ;;
-    *) add_ini "$ci_bin" session.upload_progress.enabled "$ci_sup" ok "disabled" ;;
+    *) add_ini "$ci_src" session.upload_progress.enabled "$ci_sup" ok "disabled" ;;
   esac
   case "$ci_ver" in 8.5.*|8.5)
     case "$ci_feb" in
-      1|On|on) add_ini "$ci_bin" fatal_error_backtraces "$ci_feb" stopgap "$CVE_B stopgap on 8.5: fatal_error_backtraces = 0" ;;
+      1|On|on) add_ini "$ci_src" fatal_error_backtraces "$ci_feb" stopgap "$CVE_B stopgap on 8.5: fatal_error_backtraces = 0" ;;
       "(unset)"|"") ;;
-      *) add_ini "$ci_bin" fatal_error_backtraces "$ci_feb" ok "disabled" ;;
+      *) add_ini "$ci_src" fatal_error_backtraces "$ci_feb" ok "disabled" ;;
     esac ;;
   esac
 }
@@ -315,7 +352,7 @@ check_fpm_pools() {
               /opt/homebrew/etc/php/*/php-fpm.d/*.conf /usr/local/etc/php/*/php-fpm.d/*.conf \
               /etc/opt/remi/php*/php-fpm.d/*.conf; do
     [ -r "$cp_f" ] || continue
-    if grep -Eq '^[[:space:]]*php_admin_(value|flag)\[session\.upload_progress\.enabled\][[:space:]]*=[[:space:]]*(0|off|Off|false)' "$cp_f"; then
+    if grep -Eiq '^[[:space:]]*php_admin_(value|flag)\[session\.upload_progress\.enabled\][[:space:]]*=[[:space:]]*"?(0|off|false|no)"?[[:space:]]*(;.*)?$' "$cp_f"; then
       add_ini "$cp_f" session.upload_progress.enabled 0 ok "pool disables upload progress"
     else
       add_ini "$cp_f" session.upload_progress.enabled "(pool default)" stopgap "$CVE_B stopgap: add php_admin_value[session.upload_progress.enabled] = 0 and restart FPM"
@@ -346,16 +383,21 @@ judge_tag_version() {
 image_finding() {
   # image_finding <file> <image-ref>
   if_file=$1; if_img=$2
-  case "$if_img" in
+  if_ref=${if_img%%@*}   # php:8.3.10-fpm@sha256:... -> php:8.3.10-fpm
+  case "$if_ref" in
     php:*|*/php:*) ;;
-    php|*/php) judge_tag_version "$if_file" docker-image "$if_img" "" yes; return ;;
+    php|*/php)
+      if [ "$if_ref" != "$if_img" ]; then
+        add_finding "$if_file" docker-image "$if_img" UNKNOWN no "pinned by digest only: run 'docker run --rm <image> php -v' to read its version"
+      else judge_tag_version "$if_file" docker-image "$if_img" "" yes; fi
+      return ;;
     *) return ;;
   esac
-  case "$if_img" in
+  case "$if_ref" in
     php:*|library/php:*|docker.io/library/php:*|docker.io/php:*) ;;
     *) return ;;  # some other org's php image: not the official one
   esac
-  if_tag=${if_img##*:}
+  if_tag=${if_ref##*:}
   case "$if_tag" in *'$'*) add_finding "$if_file" docker-image "$if_img" UNKNOWN no "tag comes from a build ARG; resolve it and rerun"; return ;; esac
   if_ver=$(printf '%s' "$if_tag" | sed -n 's/^\([0-9][0-9.]*\)\(RC[0-9][0-9]*\)\{0,1\}.*/\1\2/p' | sed 's/\.$//')
   judge_tag_version "$if_file" docker-image "$if_img" "$if_ver" yes
@@ -460,7 +502,7 @@ check_url() {
   fi
   verdict_for "$cu_ver"
   cu_v=$V_VERDICT; cu_note="from X-Powered-By: $cu_xpb"
-  if [ "$cu_v" = VULNERABLE ]; then
+  if [ "$cu_v" = VULNERABLE ] && [ "$V_EOL" != 1 ]; then
     case "$cu_ver" in *-*|*deb*|*ubuntu*|*el[0-9]*)
       cu_v=BACKPORT-POSSIBLE; cu_note="$cu_note; distro build string, verify on the server" ;;
     esac
@@ -483,7 +525,13 @@ if [ -n "$EXPLICIT_VER" ]; then
     add_runtime manual "--version" "" "$ev" "$V_VERDICT" "$V_FIX" "" "$V_NOTE"
   done
 fi
-[ "$DO_REPO" = 1 ] && scan_repo "$(cd "$REPO" 2>/dev/null && pwd -P || printf '%s' "$REPO")"
+if [ "$DO_REPO" = 1 ]; then
+  RP=$(cd "$REPO" 2>/dev/null && pwd -P || printf '%s' "$REPO")
+  HP=$(cd "${HOME:-/nonexistent}" 2>/dev/null && pwd -P || printf '%s' "${HOME:-}")
+  if [ "$REPO_SET" = 0 ] && { [ "$RP" = / ] || [ "$RP" = "$HP" ]; }; then
+    add_finding "$RP" repo "" UNKNOWN no "skipped: current dir $RP is not a project; pass --repo <dir> or --no-repo"
+  else scan_repo "$RP"; fi
+fi
 [ -n "$URL" ] && check_url "$URL"
 
 # overall verdict: runtimes + counted repo findings

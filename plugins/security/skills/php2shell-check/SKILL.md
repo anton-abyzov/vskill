@@ -24,31 +24,33 @@ Sources: [php.net](https://www.php.net/), the two GitHub advisories above, [NCSC
 
 ## Run it
 
-Run on the machine (or inside the container) that serves PHP, from the project root:
+Run on the machine (or inside the container) that serves PHP, from the project root. `SKILL_DIR` is the folder holding this SKILL.md; use the script's full path so `--repo` defaults to the project, not the skill folder:
 
 ```bash
-sh scripts/check.sh                 # binaries + repo in cwd + ini stopgaps
-sh scripts/check.sh --repo ./app    # scan another project dir
-sh scripts/check.sh --php /usr/sbin/php-fpm8.2   # one binary only
-sh scripts/check.sh --version 8.4.26             # judge a version string
-sh scripts/check.sh --url https://your-own-site.example   # X-Powered-By only
-sh scripts/check.sh --json          # machine-readable
+sh "$SKILL_DIR/scripts/check.sh"                 # binaries + repo in cwd + ini stopgaps
+sh "$SKILL_DIR/scripts/check.sh" --repo ./app    # scan another project dir
+sh "$SKILL_DIR/scripts/check.sh" --php /usr/sbin/php-fpm8.2   # one binary only
+sh "$SKILL_DIR/scripts/check.sh" --version 8.4.26             # judge a version string
+sh "$SKILL_DIR/scripts/check.sh" --url https://your-own-site.example   # X-Powered-By only
+sh "$SKILL_DIR/scripts/check.sh" --json          # machine-readable
 docker run --rm your-image php -v   # containers: check the image, not the host
 ```
 
+Without `--repo`, a run from `$HOME` or `/` skips the project scan instead of walking the whole folder.
+
 Exit codes: `0` all patched, `1` any vulnerable, `2` unknown or nothing found, `3` backport possible only.
 
-The script is read-only: `php -v`, `php -r ini_get(...)`, `dpkg -S`/`rpm -qf`/`apk` ownership queries, package changelogs, and with `--url` one HEAD request. It sends no exploit payloads.
+The script is read-only and works offline: `php -v` (`frankenphp version`), `php -r ini_get(...)`, `dpkg -S`/`rpm -qf`/`apk` ownership queries, installed package changelogs, and with `--url` one HEAD request. It sends no exploit payloads. When a Debian/Ubuntu image has no changelog under `/usr/share/doc`, the verdict stays `BACKPORT-POSSIBLE`; check the vendor advisory.
 
 ## Read the verdicts
 
 | Verdict | Meaning | Do |
 |---|---|---|
-| `PATCHED` | At or above the fix for its branch (8.2.35, 8.3.36, 8.4.27, 8.5.12, 8.6.0RC4, 8.6+) | Confirm workers were restarted after the upgrade |
+| `PATCHED` | At or above the fix for its branch (8.2.35, 8.3.36, 8.4.27, 8.5.12, 8.6.0RC4, 8.6+). RC and `-dev` builds of a fix release (`8.4.27RC1`) are not | Confirm workers were restarted after the upgrade |
 | `PATCHED-BACKPORT` | Distro package below the upstream number whose changelog lists CVE-2026-109618 | Restart workers; done |
-| `BACKPORT-POSSIBLE` | Distro package below the fix, no CVE in its changelog yet | Update the package, check the vendor advisory, rerun |
+| `BACKPORT-POSSIBLE` | Debian/Ubuntu/RHEL-family package on 7.4-8.5 below the fix, no CVE in its changelog yet (Alpine and 5.x-7.3 packages stay `VULNERABLE`) | Update the package, check the vendor advisory, rerun |
 | `VULNERABLE` | Below the fix with no package evidence, any 7.4/8.0/8.1 build without a vendor backport, or 5.x-7.3 (EOL, no fix exists) | Follow the fix plan now |
-| `FLOATING` | Docker tag without a patch level (`php:8.4-fpm`) | Rebuild with `--pull --no-cache`, pin an exact fixed tag |
+| `FLOATING` | Docker tag or `.php-version` without a patch level (`php:8.4-fpm`, `php:8.6-rc-fpm`) | Rebuild with `--pull --no-cache`, pin an exact fixed tag |
 | `UNKNOWN` | No version found, or a branch-only string | Run where PHP actually serves, or pass `--php` / `--version` |
 | `INFO` | composer.json and CI `setup-php` hints | composer.lock and `require.php` never reveal the runtime; this is a runtime bug, not a package |
 
@@ -68,12 +70,14 @@ Upgrade, then restart every PHP worker (FPM pools, Apache with mod_php, FrankenP
 | 7.4, 8.0, 8.1 | No official release. Use your distro/LTS vendor's patched package or the PHP security team's source backports; plan a move to 8.2.35+ |
 | 5.x-7.3 | EOL, no fix. Upgrade to a supported branch or isolate the host |
 
-- **Debian**: `apt update && apt install --only-upgrade 'php*'`; status at `https://security-tracker.debian.org/tracker/CVE-2026-109618` (and `-109619`). Sury repo users: update from packages.sury.org.
-- **Ubuntu**: `apt update && apt upgrade`; `https://ubuntu.com/security/CVE-2026-109618`. Ubuntu Pro/ESM covers older releases.
-- **RHEL / Alma / Rocky**: `dnf upgrade 'php*'`; `https://access.redhat.com/security/cve/CVE-2026-109618`. Remi users: update the `php*` SCL or module stream.
-- **Alpine**: `apk upgrade`; `https://security.alpinelinux.org/vuln/CVE-2026-109618`.
+Check your distro's security tracker for CVE-2026-109618 and CVE-2026-109619 before trusting a package.
+
+- **Debian**: `apt update && apt install --only-upgrade 'php*'`. Sury repo users: update from packages.sury.org.
+- **Ubuntu**: `apt update && apt upgrade`.
+- **RHEL / Alma / Rocky**: `dnf upgrade 'php*'`. Remi users: update the `php*` SCL or module stream.
+- **Alpine**: `apk upgrade`.
 - **macOS Homebrew**: `brew update && brew upgrade php` (or `php@8.x`), then `brew services restart php`.
-- **Docker official images**: pin `php:8.5.12-*`, `php:8.4.27-*`, `php:8.3.36-*`, `php:8.2.35-*` (fpm, apache, cli, alpine variants), rebuild with `docker build --pull --no-cache`, redeploy. Official images for 7.4/8.0/8.1 are not updated.
+- **Docker official images**: pin `php:8.5.12-*`, `php:8.4.27-*`, `php:8.3.36-*`, `php:8.2.35-*` (fpm, apache, cli, alpine variants), rebuild with `docker build --pull --no-cache`, redeploy. Pin by digest too if you like; the script still reads the tag in `php:8.4.27-fpm@sha256:...`.
 - **Laravel Forge, Plesk, cPanel (EA-PHP), CloudLinux, managed hosts**: patched builds arrive through the panel's PHP packages; apply the panel update, confirm the per-site PHP version, restart PHP-FPM. On shared hosting, ask the host for their advisory.
 
 ## Stopgaps (partial; only until you can upgrade; restart workers after)
@@ -88,7 +92,7 @@ CVE-2026-109619:
 - On 8.5: `fatal_error_backtraces = 0`.
 - `pm.max_requests = 1` where performance allows.
 
-The script reads these through the CLI binary; FPM and Apache can load a different ini, so check the pool config too.
+The script reads these through the CLI binary and labels them `cli ini only`; FPM and Apache can load a different ini (Debian's CLI php.ini ships `memory_limit = -1`), so check the pool config and vhost too.
 
 ## Warnings
 

@@ -7,7 +7,7 @@
       "prompt": "Is my server vulnerable to php2shell?",
       "expected_output": "Response runs or tells the user to run scripts/check.sh on the server that serves PHP and explains the exit code and verdicts.",
       "assertions": [
-        { "id": "a1", "text": "Response invokes or instructs sh scripts/check.sh", "type": "boolean" },
+        { "id": "a1", "text": "Response invokes or instructs running scripts/check.sh", "type": "boolean" },
         { "id": "a2", "text": "Response names the fixed versions 8.2.35, 8.3.36, 8.4.27 and 8.5.12", "type": "boolean" }
       ]
     },

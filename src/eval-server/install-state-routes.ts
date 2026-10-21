@@ -19,7 +19,6 @@
 //     identifier touches any filesystem code.
 
 import * as http from "node:http";
-import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -30,11 +29,9 @@ import {
   detectInstalledAgents,
   getAgent,
   getSupportedAgents,
-  type AgentDefinition,
 } from "../agents/agents-registry.js";
-import { agentGlobalInstallDirs } from "../agents/global-dirs.js";
-import { resolveAgentSkillsDir, resolveEffectiveSkillsDir, resolveAgentInstallRoot, type InstallOptions } from "../installer/canonical.js";
-import { resolveTilde } from "../utils/paths.js";
+import type { InstallOptions } from "../installer/canonical.js";
+import { hasSkillFiles } from "./skill-install-paths.js";
 import { withProjectDirs, type SupportedAgentWithProjectDir } from "./supported-agents-routes.js";
 
 const SAFE_NAME = /^[a-zA-Z0-9._@/\-]+$/;
@@ -105,30 +102,6 @@ function findSkillEntry(
     }
   }
   return entry;
-}
-
-function isFile(path: string): boolean {
-  try { return statSync(path).isFile(); } catch { return false; }
-}
-
-/** The scope-wide agents list is a candidate list, never per-skill proof. */
-function hasSkillFiles(agent: AgentDefinition, slug: string, opts: InstallOptions): boolean {
-  const dirs = new Set([
-    resolveEffectiveSkillsDir(agent, opts),
-    ...(opts.global
-      ? [...agentGlobalInstallDirs(agent, resolveTilde), ...(agent.extraGlobalSkillsDirs ?? []).map(resolveTilde)]
-      : [resolveAgentSkillsDir(agent, opts), ...(agent.extraLocalSkillsDirs ?? []).map((dir) => join(opts.projectRoot, dir))]),
-  ]);
-  if ([...dirs].some((dir) => isFile(join(dir, slug, "SKILL.md")))) return true;
-
-  // Converted installs have a named rule/instruction file instead of SKILL.md.
-  // Reuse the pure transformer to find its paths; a shared config alone is
-  // never evidence that this particular skill is installed.
-  if (!agent.formatTransformer) return false;
-  const files = agent.formatTransformer({ name: slug, description: "", body: "", originalFrontmatter: "" }, opts.global ? "user" : "project")
-    .filter((file) => !file.op || file.op === "write");
-  const installRoot = resolveAgentInstallRoot(agent, opts);
-  return files.length > 0 && files.every((file) => isFile(join(installRoot, file.relativePath)));
 }
 
 function buildScopeState(

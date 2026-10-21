@@ -147,7 +147,9 @@ export function registerRemoveSkillRoutes(router: Router, rootArg: string | (() 
             skipped.push({ agentId, reason: "unknown agent" });
             continue;
           }
-          if (agent.installMode !== "filesystem") {
+          // Like getSupportedAgents(), legacy native entries default to
+          // filesystem. An omitted mode does not make Cline a cloud tool.
+          if ((agent.installMode ?? "filesystem") !== "filesystem" || agent.isRemoteOnly === true) {
             skipped.push({ agentId, reason: "cloud agent — nothing to remove on disk" });
             continue;
           }

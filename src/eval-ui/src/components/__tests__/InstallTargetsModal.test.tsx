@@ -703,6 +703,15 @@ describe("InstallTargetsModal — 0850 AC-US1-04/AC-US3-01..04: scope line and b
     ["1.0.0", "1.0.0", "installed-current", "Installed v1.0.0"],
     ["1.0.0", "1.2.0", "update-available", "Update available v1.0.0 → v1.2.0"],
     ["2.0.0", "1.2.0", "newer-installed", "Newer installed v2.0.0"],
+    ["1.0.0-beta.1", "1.0.0", "update-available", "Update available v1.0.0-beta.1 → v1.0.0"],
+    ["1.0.0", "1.0.0-beta.1", "newer-installed", "Newer installed v1.0.0"],
+    ["1.0.0+build.9", "1.0.0+build.2", "installed-current", "Installed v1.0.0+build.9"],
+    ["1.0.0-beta.2", "1.0.0-beta.11", "update-available", "Update available v1.0.0-beta.2 → v1.0.0-beta.11"],
+    ["1.0.0-9", "1.0.0-alpha", "update-available", "Update available v1.0.0-9 → v1.0.0-alpha"],
+    ["1.0.0-beta", "1.0.0-alpha", "newer-installed", "Newer installed v1.0.0-beta"],
+    ["unknown", "1.0.0", "installed-current", "Installed vunknown"],
+    ["1.0.0", "latest", "installed-current", "Installed v1.0.0"],
+    ["1.0.0-01", "1.0.0", "installed-current", "Installed v1.0.0-01"],
   ])("installed %s, target %s → %s badge", async (installed, target, kind, label) => {
     renderModal({ scope: "user", targetVersion: target, fetchInstallStateImpl: state(installed) });
     await flushAsync();

@@ -15,6 +15,7 @@ import {
 import { removeSkillFromAgents, type RemoveSkillResponse } from "../api/remove";
 import { api } from "../api";
 import { ClipboardExportDialog } from "./ClipboardExportDialog";
+import { compareSemver } from "../utils/compareSemver";
 
 // ---------------------------------------------------------------------------
 // 0845 T-019 + T-020 + T-021 — InstallTargetsModal
@@ -73,19 +74,6 @@ type InstallStateBadge =
   | { kind: "newer-installed"; installed: string; target: string }
   | { kind: "installed-other-scope"; otherScope: "project" | "user"; version: string | null };
 
-function compareSemverLoose(a: string, b: string): number {
-  // Loose semver compare — splits on dot, compares numerically per segment.
-  // Unknown/non-numeric segments compare as 0. Good enough for badge UX.
-  const pa = a.split(/[.-]/).map((s) => Number.parseInt(s, 10));
-  const pb = b.split(/[.-]/).map((s) => Number.parseInt(s, 10));
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = Number.isFinite(pa[i]) ? pa[i] : 0;
-    const nb = Number.isFinite(pb[i]) ? pb[i] : 0;
-    if (na !== nb) return na - nb;
-  }
-  return 0;
-}
-
 function deriveBadge(
   agentId: string,
   scope: InstallScope,
@@ -113,8 +101,8 @@ function deriveBadge(
   if (!installed || !targetVersion) {
     return { kind: "installed-current", version: installed };
   }
-  const cmp = compareSemverLoose(installed, targetVersion);
-  if (cmp === 0) return { kind: "installed-current", version: installed };
+  const cmp = compareSemver(installed, targetVersion);
+  if (cmp === null || cmp === 0) return { kind: "installed-current", version: installed };
   if (cmp < 0) return { kind: "update-available", installed, target: targetVersion };
   return { kind: "newer-installed", installed, target: targetVersion };
 }

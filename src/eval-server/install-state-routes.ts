@@ -5,8 +5,9 @@
 // installed-state-aware buttons (US-001, US-002).
 //
 // Design decisions (see .specweave/increments/0827.../plan.md §A and ADRs):
-//   - Lockfile (vskill.lock) is the single source of truth for install state.
-//     Project lockfile = project-scope; ~/.agents/vskill.lock = user-scope.
+//   - Lockfile (vskill.lock) supplies skill identity/version; files confirm
+//     membership for each recorded agent. Project lockfile = project-scope;
+//     ~/.agents/vskill.lock = user-scope.
 //   - detectInstalledAgents() (agents-registry.ts:853) drives the
 //     `detectedAgentTools` list — same heuristic used by `vskill install`,
 //     so the studio's tooltips list exactly the destinations the CLI would
@@ -18,6 +19,7 @@
 //     identifier touches any filesystem code.
 
 import * as http from "node:http";
+import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -26,8 +28,13 @@ import { sendJson } from "./router.js";
 import { readLockfile } from "../lockfile/lockfile.js";
 import {
   detectInstalledAgents,
+  getAgent,
   getSupportedAgents,
+  type AgentDefinition,
 } from "../agents/agents-registry.js";
+import { agentGlobalInstallDirs } from "../agents/global-dirs.js";
+import { resolveAgentSkillsDir, resolveEffectiveSkillsDir, resolveAgentInstallRoot, type InstallOptions } from "../installer/canonical.js";
+import { resolveTilde } from "../utils/paths.js";
 import { withProjectDirs, type SupportedAgentWithProjectDir } from "./supported-agents-routes.js";
 
 const SAFE_NAME = /^[a-zA-Z0-9._@/\-]+$/;
@@ -100,15 +107,47 @@ function findSkillEntry(
   return entry;
 }
 
+function isFile(path: string): boolean {
+  try { return statSync(path).isFile(); } catch { return false; }
+}
+
+/** The scope-wide agents list is a candidate list, never per-skill proof. */
+function hasSkillFiles(agent: AgentDefinition, slug: string, opts: InstallOptions): boolean {
+  const dirs = new Set([
+    resolveEffectiveSkillsDir(agent, opts),
+    ...(opts.global
+      ? [...agentGlobalInstallDirs(agent, resolveTilde), ...(agent.extraGlobalSkillsDirs ?? []).map(resolveTilde)]
+      : [resolveAgentSkillsDir(agent, opts), ...(agent.extraLocalSkillsDirs ?? []).map((dir) => join(opts.projectRoot, dir))]),
+  ]);
+  if ([...dirs].some((dir) => isFile(join(dir, slug, "SKILL.md")))) return true;
+
+  // Converted installs have a named rule/instruction file instead of SKILL.md.
+  // Reuse the pure transformer to find its paths; a shared config alone is
+  // never evidence that this particular skill is installed.
+  if (!agent.formatTransformer) return false;
+  const files = agent.formatTransformer({ name: slug, description: "", body: "", originalFrontmatter: "" }, opts.global ? "user" : "project")
+    .filter((file) => !file.op || file.op === "write");
+  const installRoot = resolveAgentInstallRoot(agent, opts);
+  return files.length > 0 && files.every((file) => isFile(join(installRoot, file.relativePath)));
+}
+
 function buildScopeState(
   lock: { agents?: string[]; skills?: Record<string, { version?: string; source?: string }> } | null,
   fullName: string,
+  opts: InstallOptions,
 ): InstallStateForScope {
   const entry = findSkillEntry(lock, fullName);
   if (!entry) {
     return { installed: false, installedAgentTools: [], version: null };
   }
-  const installedAgentTools = Array.isArray(lock?.agents) ? [...lock!.agents!] : [];
+  const installedAgentTools = [...new Set(Array.isArray(lock?.agents) ? lock.agents : [])]
+    .flatMap((id) => {
+      const agent = getAgent(id);
+      return agent && hasSkillFiles(agent, lastSegment(fullName), opts) ? [agent.id] : [];
+    });
+  if (installedAgentTools.length === 0) {
+    return { installed: false, installedAgentTools: [], version: null };
+  }
   const rawVersion = typeof entry.version === "string" ? entry.version : "";
   const version = rawVersion && rawVersion !== PLACEHOLDER_VERSION ? rawVersion : null;
   return { installed: true, installedAgentTools, version };
@@ -154,7 +193,8 @@ export function registerInstallStateRoutes(router: Router, rootArg: string | (()
       // Reject leading "-" in addition to the regex check so identifiers can't
       // be confused with CLI flags downstream (defense-in-depth even though
       // this handler doesn't spawn a process).
-      if (!skill || skill.startsWith("-") || !SAFE_NAME.test(skill)) {
+      if (!skill || skill.startsWith("-") || !SAFE_NAME.test(skill)
+        || skill.split("/").some((part) => !part || part === "." || part === "..")) {
         sendJson(res, { error: "invalid skill identifier" }, 400, req);
         return;
       }
@@ -174,8 +214,8 @@ export function registerInstallStateRoutes(router: Router, rootArg: string | (()
         skill,
         detectedAgentTools,
         scopes: {
-          project: buildScopeState(projectLock, skill),
-          user: buildScopeState(userLock, skill),
+          project: buildScopeState(projectLock, skill, { global: false, projectRoot: root }),
+          user: buildScopeState(userLock, skill, { global: true, projectRoot: root }),
         },
       };
 

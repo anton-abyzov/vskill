@@ -13,7 +13,7 @@
 //   → 200 { removed: [{agentId, path}], skipped: [{agentId, reason}], errors: [{agentId, message}] }
 
 import * as http from "node:http";
-import { existsSync, lstatSync, readdirSync, realpathSync, rmSync, unlinkSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync, rmSync, unlinkSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 
@@ -23,7 +23,6 @@ import { isLocalhost } from "./install-jobs.js";
 import { getAgent, getInstallableAgents, type AgentDefinition } from "../agents/agents-registry.js";
 import {
   isSatisfiedByCanonical,
-  resolveAgentSkillsDir,
   resolveCanonicalSkillsDir,
   type InstallOptions,
 } from "../installer/canonical.js";
@@ -32,6 +31,11 @@ import {
   removeSkillFromLock,
   writeLockfile,
 } from "../lockfile/lockfile.js";
+import {
+  assertSafeRemovalParents, convertedSkillPaths, effectiveSkillDirs, effectiveSkillFiles,
+  extraSkillDirs, hasSkillFiles, isSkillFile, ownedSkillDirs, ownedSkillPaths,
+  pathWithin, physicalEntry, skillReadEntries, removalAffects,
+} from "./skill-install-paths.js";
 
 const SAFE_NAME = /^[a-zA-Z0-9._@/\-]+$/;
 
@@ -133,80 +137,8 @@ export function registerRemoveSkillRoutes(router: Router, rootArg: string | (() 
       const lockDir = scope === "user" ? userLockDir() : root;
       const requested = new Set(v.ids);
       const canonicalTarget = join(resolveCanonicalSkillsDir(installOpts), slug);
-      // 0894: agents in this request that load the skill from the shared
-      // canonical folder. That folder is deleted once, after the per-agent
-      // pass, and only when no other agent still loads it.
-      const canonicalAgents: string[] = [];
-
-      if (all) {
-        removeEverywhere(slug, installOpts, canonicalTarget, requested, readLockfile(lockDir)?.agents ?? [], removed, errors);
-      } else {
-        for (const agentId of v.ids) {
-          const agent = getAgent(agentId);
-          if (!agent) {
-            skipped.push({ agentId, reason: "unknown agent" });
-            continue;
-          }
-          if (agent.installMode !== "filesystem") {
-            skipped.push({ agentId, reason: "cloud agent — nothing to remove on disk" });
-            continue;
-          }
-          try {
-            // Defense in depth: only remove a basename directory under the
-            // resolved agent dir. agent.id and shortName are both validated.
-            const own = join(resolveAgentSkillsDir(agent, installOpts), slug);
-            const readsCanonical = isSatisfiedByCanonical(agent, installOpts) || own === canonicalTarget;
-            if (readsCanonical) {
-              // A shared reader stops loading the skill only when the canonical
-              // copy goes; an old per-agent link of its own is cleaned up with it.
-              canonicalAgents.push(agentId);
-              continue;
-            }
-            if (!lexists(own)) {
-              skipped.push({ agentId, reason: `not installed at ${own}` });
-              continue;
-            }
-            removeEntry(own);
-            removed.push({ agentId, path: own });
-          } catch (err) {
-            errors.push({ agentId, message: err instanceof Error ? err.message : String(err) });
-          }
-        }
-
-        if (canonicalAgents.length > 0) {
-          const canonicalPresent = lexists(canonicalTarget);
-          const users = canonicalUsers(canonicalTarget, slug, installOpts, requested, readLockfile(lockDir)?.agents ?? []);
-          for (const agentId of canonicalAgents) {
-            const agent = getAgent(agentId)!;
-            try {
-              const own = join(resolveAgentSkillsDir(agent, installOpts), slug);
-              const hasOwn = own !== canonicalTarget && lexists(own);
-              if (!hasOwn && !canonicalPresent) {
-                skipped.push({ agentId, reason: `not installed at ${canonicalTarget}` });
-                continue;
-              }
-              if (users.length > 0) {
-                skipped.push({
-                  agentId,
-                  reason: `shared: ${canonicalTarget} is still used by ${users.join(", ")}`,
-                  sharedWith: users,
-                });
-                continue;
-              }
-              if (hasOwn) {
-                removeEntry(own);
-                removed.push({ agentId, path: own });
-              }
-              if (canonicalPresent) {
-                if (lexists(canonicalTarget)) removeEntry(canonicalTarget);
-                removed.push({ agentId, path: canonicalTarget });
-              }
-            } catch (err) {
-              errors.push({ agentId, message: err instanceof Error ? err.message : String(err) });
-            }
-          }
-        }
-      }
+      removePlanned(slug, installOpts, canonicalTarget, requested, all,
+        readLockfile(lockDir)?.agents ?? [], removed, skipped, errors);
 
       // Lockfile cleanup. The 0850 contract: drop the skills[<name>] entry
       // for this scope when at least one agent was removed OR when every
@@ -279,98 +211,230 @@ function safeRealpath(p: string): string | null {
 }
 
 /** Remove a link itself (never what it points to) or a real folder. */
-function removeEntry(p: string): void {
+function removeEntry(p: string, opts: InstallOptions): void {
+  assertSafeRemovalParents(p, opts);
   if (lstatSync(p).isSymbolicLink()) unlinkSync(p);
   else rmSync(p, { recursive: true, force: true });
+}
+
+/** Preflight all of this agent's copies before touching any of them. */
+function prepareNativeRemoval(paths: string[], opts: InstallOptions): string[] {
+  const present = paths.filter(lexists);
+  for (const path of present) {
+    assertSafeRemovalParents(path, opts);
+    physicalEntry(path);
+  }
+  return present;
 }
 
 function filesystemAgents(): AgentDefinition[] {
   return getInstallableAgents().filter((a) => (a.installMode ?? "filesystem") === "filesystem");
 }
 
-/**
- * 0894: agents outside the request that still load `canonicalTarget`: a link
- * of theirs resolves into it, or they read the shared folder in this scope
- * and the scope's lockfile lists them as installed.
- */
-function canonicalUsers(
-  canonicalTarget: string,
-  slug: string,
-  opts: InstallOptions,
-  requested: ReadonlySet<string>,
-  lockAgents: readonly string[],
-): string[] {
-  const canonicalReal = safeRealpath(canonicalTarget);
-  const users: string[] = [];
-  for (const agent of filesystemAgents()) {
-    if (requested.has(agent.id)) continue;
-    let own: string;
-    try {
-      own = join(resolveAgentSkillsDir(agent, opts), slug);
-    } catch {
-      continue;
-    }
-    let linked = false;
-    if (own !== canonicalTarget && canonicalReal) {
-      try {
-        linked = lstatSync(own).isSymbolicLink() && safeRealpath(own) === canonicalReal;
-      } catch {
-        linked = false;
-      }
-    }
-    const shared =
-      (isSatisfiedByCanonical(agent, opts) || own === canonicalTarget) && lockAgents.includes(agent.id);
-    if (linked || shared) users.push(agent.id);
-  }
-  return users;
+/** Additional reader directories belong to another tool; never erase them
+ * just to make this tool's Installed badge disappear. Return a visible error. */
+function extraSourceRefusal(agent: AgentDefinition, slug: string, opts: InstallOptions): string | null {
+  const canonicalReal = isSatisfiedByCanonical(agent, opts)
+    ? safeRealpath(join(resolveCanonicalSkillsDir(opts), slug)) : null;
+  const dir = extraSkillDirs(agent, opts).find((d) =>
+    isSkillFile(join(d, slug, "SKILL.md"))
+    // Aliases of canonical are checked by the entry-level removal plan.
+    && (!canonicalReal || safeRealpath(join(d, slug)) !== canonicalReal));
+  if (!dir) return null;
+  const readers = filesystemAgents().filter((a) => effectiveSkillDirs(a, opts).includes(dir)).map((a) => a.id);
+  const owners = filesystemAgents().filter((a) => ownedSkillDirs(a, opts).includes(dir)).map((a) => a.id);
+  return `Cannot remove a shared source at ${join(dir, slug)} (read by ${readers.join(", ")}). Remove it from ${owners.length ? owners.join(", ") : "its owning tool"} instead.`;
 }
 
-/**
- * 0894: `all: true` — remove the skill for every agent in the scope: each
- * agent's own entry (link or copy) and the shared canonical copy. The
- * canonical row is credited to the requested agents plus every shared reader
- * the lockfile lists, or to "all" when there are none.
- */
-function removeEverywhere(
+/** A named converted file may be unlinked, but never through a linked parent
+ * or by recursively deleting a directory masquerading as a rule file. */
+function prepareConvertedRemoval(agent: AgentDefinition, slug: string, opts: InstallOptions): string[] {
+  const paths = convertedSkillPaths(agent, slug, opts);
+  const present = paths.owned.filter(lexists);
+  if (!present.length) return [];
+  const config = paths.sharedConfig.find(lexists);
+  if (config) throw new Error(`Cannot safely remove ${slug}: shared configuration at ${config} must be updated by its owning tool. Skill files and receipt were preserved.`);
+  for (const path of present) {
+    assertSafeRemovalParents(path, opts);
+    const stat = lstatSync(path);
+    if (!stat.isFile() && !stat.isSymbolicLink()) throw new Error(`Refusing to remove non-file converted output: ${path}`);
+    physicalEntry(path, stat);
+  }
+  return present;
+}
+
+interface SkillReader {
+  agentId: string;
+  global: boolean;
+  path: string;
+  entries: string[] | null;
+}
+
+/** Enumerate both scopes, so all never authorizes deleting the other scope's
+ * readers. Receipts identify readers of shared registry-owned paths; native,
+ * converted and otherwise unowned extra sources are independent file evidence. */
+function skillReaders(slug: string, opts: InstallOptions): SkillReader[] {
+  const readers: SkillReader[] = [];
+  for (const global of [opts.global, !opts.global]) {
+    const scopeOpts = { ...opts, global };
+    const lockAgents = readLockfile(global ? userLockDir() : opts.projectRoot)?.agents ?? [];
+    const canonicalFile = join(resolveCanonicalSkillsDir(scopeOpts), slug, "SKILL.md");
+    const agents = filesystemAgents();
+    const filesByOwner = new Map(agents.map((agent) => [agent.id, new Set([
+      ...ownedSkillPaths(agent, slug, scopeOpts).map((path) => join(path, "SKILL.md")),
+      ...convertedSkillPaths(agent, slug, scopeOpts).owned,
+    ])]));
+    const registryOwned = new Set([...filesByOwner.values()].flatMap((files) => [...files]));
+    for (const agent of agents) {
+      for (const path of effectiveSkillFiles(agent, slug, scopeOpts)) {
+        const shared = path === canonicalFile || (!filesByOwner.get(agent.id)!.has(path) && registryOwned.has(path));
+        if (shared && !lockAgents.includes(agent.id)) continue;
+        try {
+          const entries = skillReadEntries(path);
+          if (entries) readers.push({ agentId: agent.id, global, path, entries });
+        } catch {
+          // An unreadable or cyclic observed path cannot authorize deletion.
+          readers.push({ agentId: agent.id, global, path, entries: null });
+        }
+      }
+    }
+  }
+  return readers;
+}
+
+/** All removals use one plan and one entry-level dependency graph. Planning
+ * discounts only validated, selected read paths. Execution then requires each
+ * dependent alias to be removed successfully before its physical owner.
+ * A refused or failed agent immediately becomes a protecting reader again. */
+function removePlanned(
   slug: string,
   opts: InstallOptions,
   canonicalTarget: string,
   requested: ReadonlySet<string>,
+  all: boolean,
   lockAgents: readonly string[],
   removed: RemovedRow[],
+  skipped: SkippedRow[],
   errors: ErrorRow[],
 ): void {
-  const seen = new Set<string>([canonicalTarget]);
-  for (const agent of filesystemAgents()) {
-    let own: string;
-    try {
-      own = join(resolveAgentSkillsDir(agent, opts), slug);
-    } catch {
+  const plans = new Map<string, string[]>();
+  const actions = new Map<string, Set<string>>();
+  const convertedPaths = new Set<string>();
+  const agents = all ? filesystemAgents() : [...requested].map((id) => getAgent(id)!);
+  for (const agent of agents) {
+    if ((agent.installMode ?? "filesystem") !== "filesystem" || agent.isRemoteOnly === true) {
+      skipped.push({ agentId: agent.id, reason: "cloud agent — nothing to remove on disk" });
       continue;
     }
-    if (seen.has(own)) continue;
-    seen.add(own);
-    if (!lexists(own)) continue;
     try {
-      removeEntry(own);
-      removed.push({ agentId: agent.id, path: own });
-    } catch (err) {
-      errors.push({ agentId: agent.id, message: err instanceof Error ? err.message : String(err) });
+      if (!all) {
+        const refusal = extraSourceRefusal(agent, slug, opts);
+        if (refusal) throw new Error(refusal);
+      }
+      const converted = prepareConvertedRemoval(agent, slug, opts);
+      const owned = ownedSkillPaths(agent, slug, opts);
+      const native = prepareNativeRemoval(owned, opts);
+      if (isSatisfiedByCanonical(agent, opts) && lexists(canonicalTarget) && !native.includes(canonicalTarget)) {
+        assertSafeRemovalParents(canonicalTarget, opts);
+        physicalEntry(canonicalTarget);
+        native.push(canonicalTarget);
+      }
+      const paths = [...new Set([...native, ...converted])];
+      plans.set(agent.id, paths);
+      for (const path of paths) {
+        const owners = actions.get(path) ?? new Set<string>();
+        owners.add(agent.id);
+        actions.set(path, owners);
+      }
+      for (const path of converted) convertedPaths.add(path);
+      if (!all && paths.length === 0) skipped.push({ agentId: agent.id, reason: `not installed at ${owned.join(", ")}` });
+    } catch (error) {
+      errors.push({ agentId: agent.id, message: error instanceof Error ? error.message : String(error) });
     }
   }
-  if (!lexists(canonicalTarget)) return;
-  const credited = new Set(requested);
-  for (const id of lockAgents) {
-    const agent = getAgent(id);
-    if (agent && isSatisfiedByCanonical(agent, opts)) credited.add(id);
+
+  function authorized(reader: SkillReader, paths: readonly string[]): boolean {
+    return reader.global === opts.global && plans.has(reader.agentId)
+      && paths.some((path) => pathWithin(reader.path, path));
   }
-  try {
-    removeEntry(canonicalTarget);
-    for (const agentId of credited.size > 0 ? credited : ["all"]) {
-      removed.push({ agentId, path: canonicalTarget });
+  function protecting(path: string, planning: boolean): string[] {
+    const readers = skillReaders(slug, opts);
+    return [...new Set(readers.filter((reader) => {
+      if (reader.entries !== null && !removalAffects(path, reader.entries)) return false;
+      const allowedPaths = planning
+        ? (all ? [...plans.values()].flat() : plans.get(reader.agentId) ?? [])
+        : ((all || actions.get(path)?.has(reader.agentId)) ? [path] : []);
+      return reader.entries === null || !authorized(reader, allowedPaths);
+    }).map((reader) => reader.agentId))];
+  }
+  function refuse(agentId: string, path: string, users: string[]): void {
+    const reason = `shared: ${path} is still used by ${users.join(", ")}`;
+    if (all) errors.push({ agentId, message: reason });
+    else skipped.push({ agentId, reason, sharedWith: users });
+    plans.delete(agentId);
+  }
+
+  // Refusal propagates before any mutation. This keeps all copies belonging
+  // to an agent intact when one of its actions is already known to be unsafe.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [agentId, paths] of plans) {
+      for (const path of paths) {
+        const users = protecting(path, true);
+        if (!users.length) continue;
+        refuse(agentId, path, users);
+        changed = true;
+        break;
+      }
     }
-  } catch (err) {
-    errors.push({ agentId: "all", message: err instanceof Error ? err.message : String(err) });
+  }
+
+  // Prefer owned aliases before canonical, but dependency checks decide the
+  // actual order (canonical itself can be a link to a native physical owner).
+  const pending = [...actions.keys()].sort((a, b) => Number(a === canonicalTarget) - Number(b === canonicalTarget));
+  while (pending.length > 0) {
+    let progressed = false;
+    for (const path of [...pending]) {
+      const owners = [...actions.get(path)!].filter((id) => plans.has(id));
+      if (owners.length === 0 || !lexists(path)) {
+        pending.splice(pending.indexOf(path), 1);
+        progressed = true;
+        continue;
+      }
+      if (protecting(path, false).length > 0) continue;
+      let credited = owners;
+      if (all && path === canonicalTarget) {
+        credited = [...new Set([...requested, ...lockAgents])].filter((id) => owners.includes(id));
+        if (!credited.length) credited = ["all"];
+      }
+      try {
+        if (convertedPaths.has(path)) { assertSafeRemovalParents(path, opts); unlinkSync(path); }
+        else removeEntry(path, opts);
+        for (const agentId of credited) removed.push({ agentId, path });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        for (const agentId of credited) errors.push({ agentId, message });
+        for (const id of owners) plans.delete(id);
+      }
+      pending.splice(pending.indexOf(path), 1);
+      progressed = true;
+    }
+    if (progressed) continue;
+    // A surviving failed alias or a dependency cycle cannot be bypassed.
+    for (const path of pending) {
+      const users = protecting(path, false);
+      for (const agentId of actions.get(path)!) {
+        if (plans.has(agentId)) refuse(agentId, path, users);
+      }
+    }
+    break;
+  }
+  if (all) {
+    for (const agent of filesystemAgents()) {
+      const refusal = extraSourceRefusal(agent, slug, opts);
+      if (refusal) errors.push({ agentId: agent.id, message: refusal });
+    }
   }
 }
 
@@ -385,19 +449,16 @@ function removeEverywhere(
 function pruneLockAgents(lockDir: string, opts: InstallOptions, candidates: ReadonlySet<string>): void {
   const lock = readLockfile(lockDir);
   if (!lock || !Array.isArray(lock.agents) || lock.agents.length === 0) return;
-  const canonicalDir = resolveCanonicalSkillsDir(opts);
   const keep = lock.agents.filter((id) => {
     if (!candidates.has(id)) return true;
     const agent = getAgent(id);
     if (!agent) return true;
-    let ownDir: string;
     try {
-      ownDir = resolveAgentSkillsDir(agent, opts);
+      return effectiveSkillDirs(agent, opts).some(hasAnyEntry)
+        || Object.keys(lock.skills).some((name) => hasSkillFiles(agent, lastSegment(name), opts));
     } catch {
       return true;
     }
-    const readsCanonical = isSatisfiedByCanonical(agent, opts) || ownDir === canonicalDir;
-    return hasAnyEntry(ownDir) || (readsCanonical && hasAnyEntry(canonicalDir));
   });
   if (keep.length === lock.agents.length) return;
   lock.agents = keep;
@@ -412,17 +473,16 @@ function hasAnyEntry(dir: string): boolean {
   }
 }
 
-/** 0894: true while the skill still has a SKILL.md for any agent in the scope. */
+/** Keep the receipt while any effective native, shared, or converted file remains. */
 function installedAnywhere(slug: string, opts: InstallOptions): boolean {
-  const dirs = new Set<string>([join(resolveCanonicalSkillsDir(opts), slug)]);
+  if (isSkillFile(join(resolveCanonicalSkillsDir(opts), slug, "SKILL.md"))) return true;
   for (const agent of filesystemAgents()) {
     try {
-      dirs.add(join(resolveAgentSkillsDir(agent, opts), slug));
+      if (hasSkillFiles(agent, slug, opts)) return true;
     } catch {
       // a crafted localSkillsDir that escapes the root is never an install
     }
   }
-  for (const d of dirs) if (existsSync(join(d, "SKILL.md"))) return true;
   return false;
 }
 

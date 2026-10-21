@@ -12,6 +12,12 @@ const mocks = vi.hoisted(() => ({
   readLockfile: vi.fn(),
   detectInstalledAgents: vi.fn(),
   getSupportedAgents: vi.fn(),
+  statSync: vi.fn(),
+}));
+
+vi.mock("node:fs", async (importOriginal) => ({
+  ...await importOriginal<typeof import("node:fs")>(),
+  statSync: mocks.statSync,
 }));
 
 vi.mock("../router.js", async (importOriginal) => {
@@ -21,7 +27,8 @@ vi.mock("../router.js", async (importOriginal) => {
 vi.mock("../../lockfile/lockfile.js", () => ({
   readLockfile: mocks.readLockfile,
 }));
-vi.mock("../../agents/agents-registry.js", () => ({
+vi.mock("../../agents/agents-registry.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../agents/agents-registry.js")>(),
   detectInstalledAgents: mocks.detectInstalledAgents,
   getSupportedAgents: mocks.getSupportedAgents,
 }));
@@ -90,6 +97,9 @@ describe("0827 — GET /api/studio/install-state", () => {
     handler = captureHandler();
     mocks.detectInstalledAgents.mockResolvedValue([claudeCodeAgent]);
     mocks.readLockfile.mockReturnValue(null);
+    // These contract fixtures represent a lock entry with a matching skill file.
+    // The real-filesystem membership/remove cases live in install-state-membership.test.ts.
+    mocks.statSync.mockReturnValue({ isFile: () => true });
   });
 
   it("AC-US2-01: route is registered", () => {

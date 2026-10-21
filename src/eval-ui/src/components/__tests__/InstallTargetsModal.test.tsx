@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
-import { InstallTargetsModal } from "../InstallTargetsModal";
+import { InstallTargetsModal, type InstallTargetsModalProps } from "../InstallTargetsModal";
 import type {
   AgentInstallResult,
   SupportedAgent,
@@ -182,6 +182,7 @@ function renderModal(propOverrides: {
   onSuccess?: (results: AgentInstallResult[]) => void;
   targetVersion?: string | null;
   fetchInstallStateImpl?: (skill: string) => Promise<unknown>;
+  removeSkillImpl?: InstallTargetsModalProps["removeSkillImpl"];
 } = {}) {
   act(() => {
     root.render(
@@ -199,6 +200,7 @@ function renderModal(propOverrides: {
         onSuccess={propOverrides.onSuccess}
         targetVersion={propOverrides.targetVersion}
         fetchInstallStateImpl={propOverrides.fetchInstallStateImpl as unknown as never}
+        removeSkillImpl={propOverrides.removeSkillImpl}
         fetchSupportedAgentsImpl={fetchSupportedAgentsImpl as unknown as never}
         installToAgentsImpl={installToAgentsImpl as unknown as never}
         startInstallStreamImpl={startInstallStreamImpl as unknown as never}
@@ -703,6 +705,15 @@ describe("InstallTargetsModal — 0850 AC-US1-04/AC-US3-01..04: scope line and b
     ["1.0.0", "1.0.0", "installed-current", "Installed v1.0.0"],
     ["1.0.0", "1.2.0", "update-available", "Update available v1.0.0 → v1.2.0"],
     ["2.0.0", "1.2.0", "newer-installed", "Newer installed v2.0.0"],
+    ["1.0.0-beta.1", "1.0.0", "update-available", "Update available v1.0.0-beta.1 → v1.0.0"],
+    ["1.0.0", "1.0.0-beta.1", "newer-installed", "Newer installed v1.0.0"],
+    ["1.0.0+build.9", "1.0.0+build.2", "installed-current", "Installed v1.0.0+build.9"],
+    ["1.0.0-beta.2", "1.0.0-beta.11", "update-available", "Update available v1.0.0-beta.2 → v1.0.0-beta.11"],
+    ["1.0.0-9", "1.0.0-alpha", "update-available", "Update available v1.0.0-9 → v1.0.0-alpha"],
+    ["1.0.0-beta", "1.0.0-alpha", "newer-installed", "Newer installed v1.0.0-beta"],
+    ["unknown", "1.0.0", "installed-current", "Installed vunknown"],
+    ["1.0.0", "latest", "installed-current", "Installed v1.0.0"],
+    ["1.0.0-01", "1.0.0", "installed-current", "Installed v1.0.0-01"],
   ])("installed %s, target %s → %s badge", async (installed, target, kind, label) => {
     renderModal({ scope: "user", targetVersion: target, fetchInstallStateImpl: state(installed) });
     await flushAsync();
@@ -738,5 +749,27 @@ describe("InstallTargetsModal — partial failure keeps per-agent results", () =
       expect.objectContaining({ agentId: "claude-code", status: "installed" }),
       expect.objectContaining({ agentId: "cursor", status: "error" }),
     ]);
+  });
+});
+
+describe("InstallTargetsModal — effective-source removal refusals", () => {
+  it.each(["project", "user"] as const)("shows the shared source refusal and retains the Installed badge in %s scope", async (scope) => {
+    const message = "Cannot remove a shared source at /fixture/.claude/skills/foo (read by claude-code, cursor). Remove it from claude-code instead.";
+    const fetchState = vi.fn(async () => ({
+      skill: "anton-abyzov/vskill/obsidian-brain", detectedAgentTools: [],
+      scopes: {
+        project: { installed: scope === "project", installedAgentTools: scope === "project" ? ["cursor"] : [], version: "1.0.0" },
+        user: { installed: scope === "user", installedAgentTools: scope === "user" ? ["cursor"] : [], version: "1.0.0" },
+      },
+    }));
+    const removeSkillImpl = vi.fn(async () => ({ skill: "foo", scope, removed: [], skipped: [], errors: [{ agentId: "cursor", message }] }));
+    renderModal({ scope, targetVersion: "1.0.0", fetchInstallStateImpl: fetchState, removeSkillImpl });
+    await flushAsync();
+    act(() => getByTestId("install-targets-remove-cursor").click());
+    await flushAsync();
+    expect(getByTestId("install-targets-remove-error").textContent).toContain(message);
+    expect(getByTestId("install-targets-status-badge-cursor").textContent).toBe("Installed v1.0.0");
+    expect(fetchState).toHaveBeenCalledTimes(2);
+    expect(findByTestId("install-targets-remove-all")).toBeNull();
   });
 });

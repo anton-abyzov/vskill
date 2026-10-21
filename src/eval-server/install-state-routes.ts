@@ -5,8 +5,9 @@
 // installed-state-aware buttons (US-001, US-002).
 //
 // Design decisions (see .specweave/increments/0827.../plan.md §A and ADRs):
-//   - Lockfile (vskill.lock) is the single source of truth for install state.
-//     Project lockfile = project-scope; ~/.agents/vskill.lock = user-scope.
+//   - Lockfile (vskill.lock) supplies skill identity/version; files confirm
+//     membership for each recorded agent. Project lockfile = project-scope;
+//     ~/.agents/vskill.lock = user-scope.
 //   - detectInstalledAgents() (agents-registry.ts:853) drives the
 //     `detectedAgentTools` list — same heuristic used by `vskill install`,
 //     so the studio's tooltips list exactly the destinations the CLI would
@@ -26,8 +27,11 @@ import { sendJson } from "./router.js";
 import { readLockfile } from "../lockfile/lockfile.js";
 import {
   detectInstalledAgents,
+  getAgent,
   getSupportedAgents,
 } from "../agents/agents-registry.js";
+import type { InstallOptions } from "../installer/canonical.js";
+import { hasSkillFiles } from "./skill-install-paths.js";
 import { withProjectDirs, type SupportedAgentWithProjectDir } from "./supported-agents-routes.js";
 
 const SAFE_NAME = /^[a-zA-Z0-9._@/\-]+$/;
@@ -103,12 +107,20 @@ function findSkillEntry(
 function buildScopeState(
   lock: { agents?: string[]; skills?: Record<string, { version?: string; source?: string }> } | null,
   fullName: string,
+  opts: InstallOptions,
 ): InstallStateForScope {
   const entry = findSkillEntry(lock, fullName);
   if (!entry) {
     return { installed: false, installedAgentTools: [], version: null };
   }
-  const installedAgentTools = Array.isArray(lock?.agents) ? [...lock!.agents!] : [];
+  const installedAgentTools = [...new Set(Array.isArray(lock?.agents) ? lock.agents : [])]
+    .flatMap((id) => {
+      const agent = getAgent(id);
+      return agent && hasSkillFiles(agent, lastSegment(fullName), opts) ? [agent.id] : [];
+    });
+  if (installedAgentTools.length === 0) {
+    return { installed: false, installedAgentTools: [], version: null };
+  }
   const rawVersion = typeof entry.version === "string" ? entry.version : "";
   const version = rawVersion && rawVersion !== PLACEHOLDER_VERSION ? rawVersion : null;
   return { installed: true, installedAgentTools, version };
@@ -154,7 +166,8 @@ export function registerInstallStateRoutes(router: Router, rootArg: string | (()
       // Reject leading "-" in addition to the regex check so identifiers can't
       // be confused with CLI flags downstream (defense-in-depth even though
       // this handler doesn't spawn a process).
-      if (!skill || skill.startsWith("-") || !SAFE_NAME.test(skill)) {
+      if (!skill || skill.startsWith("-") || !SAFE_NAME.test(skill)
+        || skill.split("/").some((part) => !part || part === "." || part === "..")) {
         sendJson(res, { error: "invalid skill identifier" }, 400, req);
         return;
       }
@@ -174,8 +187,8 @@ export function registerInstallStateRoutes(router: Router, rootArg: string | (()
         skill,
         detectedAgentTools,
         scopes: {
-          project: buildScopeState(projectLock, skill),
-          user: buildScopeState(userLock, skill),
+          project: buildScopeState(projectLock, skill, { global: false, projectRoot: root }),
+          user: buildScopeState(userLock, skill, { global: true, projectRoot: root }),
         },
       };
 

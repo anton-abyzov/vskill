@@ -20,6 +20,7 @@ vi.mock("../router.js", async (importOriginal) => {
 
 const { registerRemoveSkillRoutes } = await import("../remove-skill-routes.js");
 const { writeLockfile, readLockfile } = await import("../../lockfile/lockfile.js");
+const { getAgent } = await import("../../agents/agents-registry.js");
 
 let root: string;
 
@@ -224,6 +225,15 @@ describe("0894 — remove-skill prunes the scope lockfile agents list", () => {
 
 
 describe("0850 AC-US4-02/03 — remove-skill input guards", () => {
+  it.each(["chatgpt", "replit"])("keeps %s cloud/remote files untouched", async (agentId) => {
+    const dir = join(root, getAgent(agentId)!.localSkillsDir, "foo");
+    writeSkill(dir);
+    const { body } = await post({ skill: "foo", agentIds: [agentId], scope: "project" });
+    expect(body.removed).toEqual([]);
+    expect(body.skipped).toEqual([{ agentId, reason: "cloud agent — nothing to remove on disk" }]);
+    expect(existsSync(join(dir, "SKILL.md"))).toBe(true);
+  });
+
   for (const skill of ["foo/..", "..", ".", "o/r/..", "o/./foo", "o//foo", "../foo"]) {
     it(`rejects the path segment in ${JSON.stringify(skill)} and deletes nothing`, async () => {
       writeSkill(join(root, ".claude/skills/foo"));

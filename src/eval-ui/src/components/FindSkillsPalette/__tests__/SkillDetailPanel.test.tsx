@@ -892,9 +892,9 @@ describe("0827 — SkillDetailPanel install-state fetch (T-013)", () => {
   });
 });
 
-describe("0827 — SkillDetailPanel disabled-state rendering", () => {
-  // T-015: AC-US2-06 — User scope disabled when scopes.user.installed === true.
-  it("T-015: shows 'Installed ✓ User' disabled with correct title when user scope is installed", async () => {
+describe("0850 — SkillDetailPanel installed-state management", () => {
+  // 0850 supersedes the former disabled-scope behavior; retain status and tooltip.
+  it("T-015: shows 'Installed ✓ User' selectable with correct title when user scope is installed", async () => {
     const installState: InstallStateBody = {
       skill: "obsidian/brain/wiki-sync",
       detectedAgentTools: [{ id: "claude-code", displayName: "Claude Code", localDir: ".claude/skills", globalDir: "~/.claude/skills" }],
@@ -908,14 +908,14 @@ describe("0827 — SkillDetailPanel disabled-state rendering", () => {
     await flushMicrotasks();
     const userBtn = h.container.querySelector("[data-testid='skill-detail-install-scope-user']") as HTMLButtonElement;
     expect(userBtn.textContent).toBe("Installed ✓ User");
-    expect(userBtn.getAttribute("aria-disabled")).toBe("true");
-    expect(userBtn.disabled).toBe(true);
+    expect(userBtn.getAttribute("aria-disabled")).not.toBe("true");
+    expect(userBtn.disabled).toBe(false);
     expect(userBtn.getAttribute("title")).toMatch(/Installed v2\.0\.12 · claude-code/);
     await h.unmount();
   });
 
   // T-017: AC-US2-07 — same contract for project scope.
-  it("T-017: shows 'Installed ✓ Project' disabled with correct title when project scope is installed", async () => {
+  it("T-017: shows 'Installed ✓ Project' selectable with correct title when project scope is installed", async () => {
     const installState: InstallStateBody = {
       skill: "obsidian/brain/wiki-sync",
       detectedAgentTools: [{ id: "cursor", displayName: "Cursor", localDir: ".cursor/skills", globalDir: "~/.cursor/skills" }],
@@ -929,8 +929,8 @@ describe("0827 — SkillDetailPanel disabled-state rendering", () => {
     await flushMicrotasks();
     const projBtn = h.container.querySelector("[data-testid='skill-detail-install-scope-project']") as HTMLButtonElement;
     expect(projBtn.textContent).toBe("Installed ✓ Project");
-    expect(projBtn.getAttribute("aria-disabled")).toBe("true");
-    expect(projBtn.disabled).toBe(true);
+    expect(projBtn.getAttribute("aria-disabled")).not.toBe("true");
+    expect(projBtn.disabled).toBe(false);
     expect(projBtn.getAttribute("title")).toMatch(/Installed v1\.4\.0 · cursor/);
     await h.unmount();
   });
@@ -962,8 +962,8 @@ describe("0827 — SkillDetailPanel enabled-button tooltips (T-018)", () => {
 });
 
 describe("0827 — SkillDetailPanel primary CTA gating (T-020)", () => {
-  // T-020: AC-US2-08 — primary Install CTA disabled when selected scope is installed.
-  it("T-020: primary CTA disabled with 'Already installed at <scope>' tooltip when selected scope is installed", async () => {
+  // 0850: management stays reachable without a direct install side effect.
+  it("0850: primary CTA offers management at the installed scope", async () => {
     const installState: InstallStateBody = {
       skill: "obsidian/brain/wiki-sync",
       detectedAgentTools: [],
@@ -975,11 +975,12 @@ describe("0827 — SkillDetailPanel primary CTA gating (T-020)", () => {
     globalThis.fetch = makeFetchHandler({ installState }) as unknown as typeof fetch;
     const h = await mount({});
     await flushMicrotasks();
-    // Default scope is "project" — and it's installed → CTA disabled.
+    // Default scope is project and installed: show Manage.
     const cta = h.container.querySelector("[data-testid='skill-detail-install-primary']") as HTMLButtonElement;
-    expect(cta.disabled).toBe(true);
-    expect(cta.getAttribute("title")).toMatch(/Already installed at project — re-run via CLI to force/);
-    // Switching to user (not installed) re-enables the CTA.
+    expect(cta.disabled).toBe(false);
+    expect(cta.textContent).toContain("Manage");
+    expect(cta.getAttribute("title")).toMatch(/Manage installed skill at project/);
+    // Switching to user (not installed) shows Install.
     const { act } = await import("react");
     const userBtn = h.container.querySelector("[data-testid='skill-detail-install-scope-user']") as HTMLButtonElement;
     await act(async () => { userBtn.click(); });
@@ -1037,7 +1038,7 @@ describe("0827 — SkillDetailPanel re-fetch on studio:skill-installed (T-022)",
     expect(installStateCallCount).toBeGreaterThan(initialCount);
     const userBtn = h.container.querySelector("[data-testid='skill-detail-install-scope-user']") as HTMLButtonElement;
     expect(userBtn.textContent).toBe("Installed ✓ User");
-    expect(userBtn.disabled).toBe(true);
+    expect(userBtn.disabled).toBe(false);
     await h.unmount();
   });
 });

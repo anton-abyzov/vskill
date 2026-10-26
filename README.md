@@ -11,8 +11,8 @@
   <a href="https://github.com/anton-abyzov/vskill/stargazers"><img src="https://img.shields.io/github/stars/anton-abyzov/vskill?color=FFD700&logo=github" alt="GitHub stars" /></a>
   <a href="https://github.com/anton-abyzov/vskill/actions/workflows/desktop-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/anton-abyzov/vskill/desktop-release.yml?branch=main&label=desktop%20build&logo=githubactions" alt="desktop build" /></a>
   <img src="https://img.shields.io/badge/agents-56_platforms-0969DA" alt="56 agents" />
-  <img src="https://img.shields.io/badge/plugins-9-8B5CF6" alt="9 plugins" />
-  <img src="https://img.shields.io/badge/skills-20-10B981" alt="20 skills" />
+  <img src="https://img.shields.io/badge/plugins-10-8B5CF6" alt="10 plugins" />
+  <img src="https://img.shields.io/badge/skills-21-10B981" alt="21 skills" />
   <a href="https://verified-skill.com"><img src="https://img.shields.io/badge/registry-verified--skill.com-F59E0B" alt="registry" /></a>
   <a href="https://github.com/anton-abyzov/vskill/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" /></a>
 </p>

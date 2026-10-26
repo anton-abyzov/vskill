@@ -9,7 +9,8 @@
 # The version bump is a normal PR. Once it is merged, this script:
 #   1. Preflight (no side effects): gh is signed in with push access, v<version>
 #      is not yet a tag (locally or on GitHub), vskill@<version> is not on npm,
-#      origin/main's package.json is at <version>, a dry-run push of the tag
+#      origin/main's package.json is at <version>, its README badges are
+#      current, a dry-run push of the tag
 #      authenticates, and CI on that commit has not failed.
 #   2. Tags the fetched origin/main commit v<version> and pushes the tag over
 #      HTTPS. npm-release.yml fires on the tag, waits for ci.yml on that commit
@@ -117,6 +118,21 @@ main_version=$(git show "${SHA}:package.json" | node -e '
 [ "$main_version" = "$VERSION" ] \
   || die "origin/main (${SHA}) package.json is ${main_version}, not ${VERSION}; merge the version bump first"
 ok "origin/main ${SHA} package.json is ${VERSION}"
+
+# npm-release.yml publishes only if the README badges already match the
+# plugin and skill counts (prepublishOnly runs sync-readme-badges.cjs, then
+# git diff --exit-code README.md). Check that here, before anything is tagged.
+badges=$(mktemp -d)
+badges_ok=1
+if git archive "$SHA" README.md agents.json plugins scripts/sync-readme-badges.cjs | tar -x -C "$badges" \
+  && node "$badges/scripts/sync-readme-badges.cjs" "$badges" >/dev/null \
+  && git show "${SHA}:README.md" | cmp -s - "$badges/README.md"; then
+  badges_ok=0
+fi
+rm -rf "$badges"
+[ "$badges_ok" -eq 0 ] \
+  || die "README badges on origin/main (${SHA}) are stale; run node scripts/sync-readme-badges.cjs and merge the README change first"
+ok "README badges on origin/main match the plugin and skill counts"
 
 # A dry-run push authenticates against the remote and compares refs but sends
 # no objects and no ref update, so it proves the HTTPS credentials work before

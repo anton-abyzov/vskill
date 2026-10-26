@@ -232,9 +232,7 @@ export function SkillDetailPanel({
   const [error, setError] = useState<string | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
   const [scope, setScope] = useState<InstallScope>("project");
-  // 0827: per-scope install-state (null = not yet loaded). Drives the scope
-  // picker's disabled/checkmark state and the primary CTA's "Already
-  // installed" affordance.
+  // Per-scope status drives the checkmark and Install / Manage action.
   const [installState, setInstallState] = useState<InstallStateResponse | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   // 0845 T-022 (AC-US2-01): the primary Install button opens the
@@ -501,9 +499,19 @@ export function SkillDetailPanel({
   // any other UI watching for it can re-fetch.
   const handleInstallModalSuccess = useCallback((results: AgentInstallResult[]) => {
     const failures = results.filter((r) => r.status === "error");
+    const installedCount = results.filter((r) => r.status === "installed").length;
+    const exportedCount = results.filter((r) => r.status === "exported").length;
     // The sidebar list does not watch the filesystem: refresh it whenever
     // anything landed, even if another target failed.
-    if (results.some((r) => r.status === "installed")) onSkillsChanged?.();
+    if (installedCount > 0) onSkillsChanged?.();
+    if ((installedCount > 0 || exportedCount > 0) && typeof window !== "undefined") {
+      // Refresh the panel even when another selected target failed.
+      try {
+        window.dispatchEvent(new CustomEvent("studio:skill-installed", {
+          detail: { skill: `${publisher}/${slug}`, scope },
+        }));
+      } catch { /* non-fatal */ }
+    }
     if (failures.length > 0) {
       const first = failures[0];
       const message = `Install finished with ${failures.length} error${failures.length === 1 ? "" : "s"}: ${first.detail ?? first.agentId}`;
@@ -514,8 +522,6 @@ export function SkillDetailPanel({
       }
       return;
     }
-    const installedCount = results.filter((r) => r.status === "installed").length;
-    const exportedCount = results.filter((r) => r.status === "exported").length;
     if (installedCount === 0 && exportedCount === 0) {
       const message = "Install finished without writing any selected target. Check the selected tool and try again.";
       if (onToast) {
@@ -524,18 +530,6 @@ export function SkillDetailPanel({
         dispatchToastFallback(message, "error", 0);
       }
       return;
-    }
-    // The modal stays open in its done phase (0850 AC-US2-01).
-    if (typeof window !== "undefined") {
-      try {
-        window.dispatchEvent(
-          new CustomEvent("studio:skill-installed", {
-            detail: { skill: `${publisher}/${slug}`, scope },
-          }),
-        );
-      } catch {
-        // non-fatal
-      }
     }
     const message = exportedCount > 0
       ? `Installed ${displayName}; ${exportedCount} target${exportedCount === 1 ? "" : "s"} need paste.`
@@ -832,14 +826,8 @@ export function SkillDetailPanel({
                   <h3 style={{ margin: "0 0 0.5rem", fontSize: "0.8125rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-secondary, #5A5651)" }}>
                     Install
                   </h3>
-                  {/* 0827: two-scope picker (Project | User). Each pill
-                      reflects per-scope install-state from
-                      /api/studio/install-state — installed scopes are
-                      disabled with a checkmark + tooltip explaining where
-                      it's installed and how to remove it. Tooltip on User
-                      lists the detected agent tools that will receive the
-                      install (drives transparency for the `--global`
-                      fan-out). */}
+                  {/* Installed scopes remain selectable so users can manage
+                      their targets. Selecting a scope never writes files. */}
                   <div
                     role="radiogroup"
                     aria-label="Install scope"
@@ -865,7 +853,7 @@ export function SkillDetailPanel({
                       const projectDests = detectedList.map((a) => `./${a.localDir}`).join(", ");
                       const userDests = detectedList.map((a) => a.globalDir).join(", ");
                       const installedTools = scopeState?.installedAgentTools ?? [];
-                      // AC-US2-06/07: disabled tooltip is `Installed v<v> · <ids>`;
+                      // Installed tooltip is `Installed v<v> · <ids>`;
                       // omit the version segment when the lockfile entry has no
                       // recorded version.
                       const installedTooltip = scopeState?.version
@@ -885,20 +873,17 @@ export function SkillDetailPanel({
                           type="button"
                           role="radio"
                           aria-checked={checked}
-                          aria-disabled={isInstalled}
-                          disabled={isInstalled}
                           data-testid={`skill-detail-install-scope-${s}`}
                           data-installed={isInstalled ? "true" : "false"}
                           title={title}
-                          onClick={() => { if (!isInstalled) setScope(s); }}
+                          onClick={() => setScope(s)}
                           style={{
                             padding: "0.25rem 0.6rem",
                             borderRadius: 4,
                             border: `1px solid ${checked ? "var(--text-primary, #191919)" : "var(--color-rule, #E8E1D6)"}`,
                             background: checked ? "var(--text-primary, #191919)" : "transparent",
                             color: checked ? "var(--bg-surface, #FFFFFF)" : "var(--text-secondary, #5A5651)",
-                            cursor: isInstalled ? "not-allowed" : "pointer",
-                            opacity: isInstalled ? 0.55 : 1,
+                            cursor: "pointer",
                             fontFamily: "var(--font-mono, monospace)",
                             fontSize: "0.75rem",
                             fontWeight: checked ? 600 : 400,
@@ -909,33 +894,20 @@ export function SkillDetailPanel({
                       );
                     })}
                   </div>
-                  {/* 0784: primary Install CTA above the terminal block. Shares
-                      handleCopy with the per-variant Copy chips so behavior —
-                      clipboard write of the canonical npm command, toast,
-                      telemetry — is identical regardless of which button the
-                      user picks. */}
+                  {/* Both actions open target selection; only the modal's
+                      explicit Install or Remove action changes files. */}
                   {(() => {
-                    // 0827 — disable the primary CTA when the currently
-                    // selected scope already has the skill installed. The
-                    // copy of the button + its tooltip explain *why* it's
-                    // disabled, so the user can switch scope or use the
-                    // (CLI-only) uninstall path instead.
                     const selectedState = installState?.scopes?.[scope];
                     const isInstalledSelected = selectedState?.installed === true;
                     const versionSuffix = selectedState?.version ? ` (v${selectedState.version})` : "";
-                    // AC-US2-08: literal tooltip copy from spec — verbatim so
-                    // the test assertion `/Already installed at (project|user) — re-run via CLI to force/`
-                    // matches.
-                    const installedTooltip = `Already installed at ${scope} — re-run via CLI to force`;
+                    const installedTooltip = `Manage installed skill at ${scope}: reinstall, update, or remove targets`;
                     return (
                       <button
                         type="button"
                         onClick={handleInstall}
-                        disabled={isInstalledSelected}
-                        aria-disabled={isInstalledSelected}
                         data-testid="skill-detail-install-primary"
                         data-installed={isInstalledSelected ? "true" : "false"}
-                        aria-label={isInstalledSelected ? "Already installed at the selected scope" : "Install skill"}
+                        aria-label={isInstalledSelected ? "Manage installed skill" : "Install skill"}
                         title={isInstalledSelected ? installedTooltip : undefined}
                         style={{
                           display: "inline-flex",
@@ -946,14 +918,13 @@ export function SkillDetailPanel({
                           border: "1px solid var(--text-primary, #191919)",
                           background: isInstalledSelected ? "var(--bg-surface, #FFFFFF)" : "var(--text-primary, #191919)",
                           color: isInstalledSelected ? "var(--text-secondary, #5A5651)" : "var(--bg-surface, #FFFFFF)",
-                          cursor: isInstalledSelected ? "not-allowed" : "pointer",
-                          opacity: isInstalledSelected ? 0.7 : 1,
+                          cursor: "pointer",
                           fontFamily: "var(--font-mono, monospace)",
                           fontSize: "0.875rem",
                           fontWeight: 600,
                         }}
                       >
-                        {isInstalledSelected ? `✓ Installed${versionSuffix}` : "Install"}
+                        {isInstalledSelected ? `Manage${versionSuffix}` : "Install"}
                       </button>
                     );
                   })()}

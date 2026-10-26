@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
-// 0827 — SkillDetailPanel install-state-aware UI behavior.
+// 0827 install-state contracts; 0850 T-012 keeps installed scopes manageable.
 //
 // Coverage:
 //   - AC-US1-01/02: scope picker exposes Project + User only (no Global).
 //   - AC-US1-03   : User scope's copy command renders ` --global`; project
 //                   keeps `--scope project`.
-//   - AC-US2-01..04: per-scope disabled state, ✓ marker, tooltip copy.
-//   - AC-US3-01..03: primary CTA disables when selected scope is installed,
-//                   re-enables on scope switch, and updates after a
+//   - AC-US2-01..04: per-scope selectable state, ✓ marker, tooltip copy.
+//   - AC-US3-01..03: primary CTA offers Manage when selected scope is installed,
+//                   offers Install for empty scopes, and updates after a
 //                   `studio:skill-installed` event.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -183,7 +183,7 @@ describe("0827 — SkillDetailPanel scope picker (US-001)", () => {
 });
 
 describe("0827 — SkillDetailPanel installed-state UI (US-002)", () => {
-  it("AC-US2-01: Project pill is disabled with a ✓ marker when project lockfile has the skill", async () => {
+  it("AC-US2-01: 0850: Project pill stays selectable with a ✓ marker when project lockfile has the skill", async () => {
     globalThis.fetch = makeFetchMock(buildInstallState({
       project: { installed: true, version: "2.0.12", installedAgentTools: ["claude-code"] },
     }));
@@ -191,14 +191,14 @@ describe("0827 — SkillDetailPanel installed-state UI (US-002)", () => {
     await flushMicrotasks();
 
     const projectBtn = h.container.querySelector<HTMLButtonElement>("[data-testid='skill-detail-install-scope-project']");
-    expect(projectBtn?.getAttribute("aria-disabled")).toBe("true");
+    expect(projectBtn?.disabled).toBe(false);
     expect(projectBtn?.getAttribute("data-installed")).toBe("true");
     expect(projectBtn?.textContent).toMatch(/✓/);
 
     await h.unmount();
   });
 
-  it("AC-US2-02: User pill is disabled with a ✓ marker when ~/.agents/vskill.lock has the skill", async () => {
+  it("AC-US2-02: 0850: User pill stays selectable with a ✓ marker when ~/.agents/vskill.lock has the skill", async () => {
     globalThis.fetch = makeFetchMock(buildInstallState({
       user: { installed: true, version: "2.0.12", installedAgentTools: ["claude-code"] },
     }));
@@ -206,7 +206,7 @@ describe("0827 — SkillDetailPanel installed-state UI (US-002)", () => {
     await flushMicrotasks();
 
     const userBtn = h.container.querySelector<HTMLButtonElement>("[data-testid='skill-detail-install-scope-user']");
-    expect(userBtn?.getAttribute("aria-disabled")).toBe("true");
+    expect(userBtn?.disabled).toBe(false);
     expect(userBtn?.getAttribute("data-installed")).toBe("true");
     expect(userBtn?.textContent).toMatch(/✓/);
 
@@ -241,7 +241,7 @@ describe("0827 — SkillDetailPanel installed-state UI (US-002)", () => {
     await h.unmount();
   });
 
-  it("AC-US2-04: clicking a disabled pill does not change scope state", async () => {
+  it("0850: clicking an installed pill selects that scope for management", async () => {
     globalThis.fetch = makeFetchMock(buildInstallState({
       project: { installed: true, version: "1.0.0" },
     }));
@@ -252,8 +252,7 @@ describe("0827 — SkillDetailPanel installed-state UI (US-002)", () => {
     expect(npmCmdBefore).toContain("--scope project");
 
     // Default scope=project. Switch to User explicitly to start from a known
-    // state, then click the (installed) Project pill and confirm scope did
-    // not flip back.
+    // state, then select the installed Project scope for management.
     const { act } = await import("react");
     const userBtn = h.container.querySelector<HTMLButtonElement>("[data-testid='skill-detail-install-scope-user']");
     await act(async () => { userBtn!.click(); });
@@ -264,15 +263,15 @@ describe("0827 — SkillDetailPanel installed-state UI (US-002)", () => {
     await flushMicrotasks();
 
     const npmCmdAfter = h.container.querySelector<HTMLElement>("[data-testid='skill-detail-install-variant-cmd-npm']")?.textContent ?? "";
-    expect(npmCmdAfter).toContain(" --global"); // still on User
-    expect(npmCmdAfter).not.toContain("--scope project");
+    expect(npmCmdAfter).toContain("--scope project");
+    expect(npmCmdAfter).not.toContain(" --global");
 
     await h.unmount();
   });
 });
 
 describe("0827 — SkillDetailPanel primary CTA (US-003)", () => {
-  it("AC-US3-01: primary Install button is disabled with `Installed` copy when selected scope is installed", async () => {
+  it("0850: primary button offers Manage with the installed version", async () => {
     globalThis.fetch = makeFetchMock(buildInstallState({
       project: { installed: true, version: "2.0.12" },
     }));
@@ -280,15 +279,15 @@ describe("0827 — SkillDetailPanel primary CTA (US-003)", () => {
     await flushMicrotasks();
 
     const cta = h.container.querySelector<HTMLButtonElement>("[data-testid='skill-detail-install-primary']");
-    expect(cta?.disabled).toBe(true);
+    expect(cta?.disabled).toBe(false);
     expect(cta?.getAttribute("data-installed")).toBe("true");
-    expect(cta?.textContent).toMatch(/Installed/);
+    expect(cta?.textContent).toMatch(/Manage/);
     expect(cta?.textContent).toMatch(/v2\.0\.12/);
 
     await h.unmount();
   });
 
-  it("AC-US3-02: primary CTA re-enables when the user switches to a non-installed scope", async () => {
+  it("0850: primary CTA changes from Manage to Install for a non-installed scope", async () => {
     globalThis.fetch = makeFetchMock(buildInstallState({
       project: { installed: true, version: "2.0.12" },
       // user: not installed
@@ -297,7 +296,7 @@ describe("0827 — SkillDetailPanel primary CTA (US-003)", () => {
     await flushMicrotasks();
 
     let cta = h.container.querySelector<HTMLButtonElement>("[data-testid='skill-detail-install-primary']");
-    expect(cta?.disabled).toBe(true);
+    expect(cta?.disabled).toBe(false);
 
     const { act } = await import("react");
     const userBtn = h.container.querySelector<HTMLButtonElement>("[data-testid='skill-detail-install-scope-user']");

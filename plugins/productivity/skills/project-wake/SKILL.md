@@ -1,7 +1,7 @@
 ---
 name: project-wake
 description: "Manual sweep of a SpecWithCode project after an update, restart or outage: list every thread, continue only work the restart cut off and the app did not continue, never touch work a person stopped, hand off one thread at a time only through existing handoff tools, and ask owners of finished-but-unclosed work to verify, review and close it. Use only when the user types /project-wake or explicitly asks to run project wake in a project coordinator. Not for schedules, routine status questions, or outside SpecWithCode (it needs the studio-code MCP tools)."
-version: "1.0.4"
+version: "1.0.5"
 metadata:
   category: productivity
   tags: specwithcode, coordinator, restart, update, resume, handoff, threads, orchestration
@@ -26,9 +26,9 @@ Read the latest run with `studio_thread_read` (`view: "activity"`, `runLimit: 1`
 |---|---|---|
 | Running or queued | status running/starting/queued, or `studio_queue_list` shows undelivered messages that are not held | Leave alone. Never add a second executor or watcher. |
 | Already continued by the app | a newer run or a "Continue where you left off" / update-continuation message after the interrupt | Leave alone. |
-| Cut off by update or restart | interrupted with cause `service_update` or restart, "Closed to install the SpecWithCode update.", or failed with "The provider event stream closed unexpectedly" within minutes of an update | Step 3, after the wait below. |
+| Cut off by update or restart | interrupted with cause `service_update` or restart; "Closed to install the SpecWithCode update."; failed with "The provider event stream closed unexpectedly" only when the same thread's activity also shows an update or restart notice; or `cancelled` with no interrupt request and an update or restart notice in the same thread | Step 3, after the wait below. |
 | Never started | "The provider did not start this turn within 2 minutes" or "Run interrupted before provider start" | Step 3, once. The app never retries these. |
-| Stopped by a person | an interrupt the user requested, Stop or cancel | Leave it. A person's Stop is final; list it. |
+| Stopped by a person | an interrupt request from the user, Stop, or `cancelled` with an interrupt request | Leave it. A person's Stop is final; list it. A `cancelled` run with neither an interrupt request nor an update or restart notice is **unclear**. |
 | Waiting on a person | a pending question or approval in the activity, or a `studio_pending_request_list` entry | Leave it; list what is asked. |
 | Usage limit | quota or rate-limit failure text, a reset time | Step 4. |
 | Real failure | provider, tool or code error unrelated to an update | Do not retry. Report the error text and the owner. |
@@ -41,7 +41,7 @@ When the evidence does not settle it, mark the thread **unclear** and report it;
 
 These apply to every `studio_thread_send` in steps 3 and 5.
 
-- A send releases the thread's held queue. Check `studio_queue_list` first: if the queue is held and the hold does not follow an update or restart interrupt in the activity, it is a person's hold, so do not send. Never call `studio_queue_resume` on a person's hold.
+- A send releases the thread's held queue. Check `studio_queue_list` first: if the queue is held and the hold does not follow an update or restart interrupt in the activity, treat it as a person's hold (a hold after a provider failure counts as a person's too), so do not send. Never call `studio_queue_resume` on a person's hold.
 - For a thread on another machine the queue is not visible: send only when its activity shows no Stop by a person after the interrupt; otherwise mark it **unclear**.
 - Read the result: report any `releasedHeldMessages`, and if it has `queueHeld: true`, report the message as not delivered, with its `notice`.
 
@@ -56,7 +56,8 @@ These apply to every `studio_thread_send` in steps 3 and 5.
 
 - Never switch to an API-billed, pay-per-token or other paid provider, never raise a thread's permission mode, and never pass `modelSelection` to any tool.
 - If the user's configured fallback order covers this provider, the app applies it; report the reset time and leave the thread.
-- If the owning machine is offline: read `studio_handoff_ready_list` and call `studio_thread_continue_here` only for a thread it marks continuable, without `modelSelection`. To move a thread you own to a ready machine, call `studio_thread_migrate` with exactly one `threadIds` entry; omitting `threadIds` moves every running handoff-mode thread. A refusal is final; report it.
+- If the owning machine is offline: read `studio_handoff_ready_list` and call `studio_thread_continue_here` only for a thread it marks continuable, without `modelSelection`. That is the only way to continue a thread from an offline machine.
+- `studio_thread_migrate` is the alternative for a thread on this machine only (it refuses threads elsewhere): to move it to a ready machine, pass exactly one `threadIds` entry; omitting `threadIds` moves every running handoff-mode thread. A refusal is final; report it.
 - Otherwise list the thread as blocked with the provider, reset time or machine.
 
 ## 5. Finished but not closed

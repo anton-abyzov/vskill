@@ -116,18 +116,113 @@
     },
     {
       "id": 7,
-      "name": "migrates exactly one thread without a model change",
-      "prompt": "/project-wake. Thread H, a handoff-mode thread this coordinator owns, was cut off by the restart. Its machine M1 is offline, studio_handoff_ready_list lists H as continuable, and M3 is ready.",
-      "expected_output": "Response calls studio_thread_migrate with machine M3 and exactly one threadIds entry for H, and no modelSelection.",
+      "name": "offline owner continues here, not migrate",
+      "prompt": "/project-wake. Thread H, a handoff-mode thread, was cut off by the restart on M1, which is now offline. studio_handoff_ready_list lists H as continuable on this machine.",
+      "expected_output": "Response continues H with studio_thread_continue_here without modelSelection and does not call studio_thread_migrate for it.",
       "assertions": [
         {
           "id": "a1",
-          "text": "studio_thread_migrate is called with exactly one threadIds entry",
+          "text": "studio_thread_continue_here is called for H without modelSelection",
           "type": "boolean"
         },
         {
           "id": "a2",
-          "text": "No modelSelection is passed",
+          "text": "studio_thread_migrate is not called for H",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "waits on a fresh update interrupt",
+      "prompt": "/project-wake. Thread I was interrupted with cause service_update 6 minutes ago and has no newer run yet.",
+      "expected_output": "Response does not message thread I and reports that the app's own continuation gets the first chance.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Response does not send to thread I",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Response explains it is waiting for the app's continuation",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "remote thread with invisible queue is unclear",
+      "prompt": "/project-wake. Thread J on M3 shows a cancelled run with no interrupt request and no update notice; its queue cannot be read from this machine.",
+      "expected_output": "Response marks thread J unclear and sends nothing.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Response classifies thread J as unclear",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Response does not send to thread J",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "update hold versus person hold",
+      "prompt": "/project-wake. Thread K's queue is held right after a service_update interrupt 30 minutes ago. Thread L's queue is held after a provider failure.",
+      "expected_output": "Response may continue K with one message and leaves L alone as a person's hold.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Response treats L's hold as a person's and does not send to L",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Response does not call studio_queue_resume for L",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "name": "never-started run is retried once with an idempotent id",
+      "prompt": "/project-wake. Thread M shows 'Run interrupted before provider start' 40 minutes ago, latestRunId run-9.",
+      "expected_output": "Response sends one continuation to M on its own provider with clientRequestId project-wake:<M>:run-9 and no model or permission change.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Response sends exactly one message to M",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "The clientRequestId is project-wake:<threadId>:<latestRunId>",
+          "type": "boolean"
+        },
+        {
+          "id": "a3",
+          "text": "No modelSelection or permission change is made",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "name": "menu-picked invocation",
+      "prompt": "$project-wake",
+      "expected_output": "The skill runs the sweep exactly as for /project-wake.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Response performs the inventory with studio_thread_list",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Response ends with the Thread / Found / Action / Needs you table",
           "type": "boolean"
         }
       ]

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project wake"
+  short_description: "Resume project threads cut off by a restart"
+  default_prompt: "Use $project-wake to resume this project's threads after the update."

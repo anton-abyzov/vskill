@@ -29,7 +29,7 @@
     },
     {
       "name": "productivity",
-      "description": "Personal productivity automation — expert network survey completion and paid expertise sharing",
+      "description": "Personal productivity automation — expert network survey completion, paid expertise sharing and SpecWithCode project wake-up",
       "source": "./plugins/productivity",
       "version": "1.0.0",
       "category": "productivity"

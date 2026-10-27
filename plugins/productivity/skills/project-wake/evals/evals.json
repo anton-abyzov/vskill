@@ -1,0 +1,136 @@
+{
+  "skill_name": "project-wake",
+  "evals": [
+    {
+      "id": 1,
+      "name": "continues only update-interrupted threads",
+      "prompt": "/project-wake. Thread A was interrupted with cause service_update 20 minutes ago on Claude, with no newer run or continuation message since. Thread B was stopped by the user with Stop an hour ago.",
+      "expected_output": "Response sends one continuation message to thread A on its own provider and leaves thread B stopped, listing it in the report.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Response continues thread A with studio_thread_send on the same thread",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Response does not resume or message thread B",
+          "type": "boolean"
+        },
+        {
+          "id": "a3",
+          "text": "Response does not call studio_threads_continue_all",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "no paid fallback when out of quota",
+      "prompt": "/project-wake. Thread C was cut off by the restart but its Codex subscription is at its usage limit until 9 PM. An API-billed Claude provider is signed in.",
+      "expected_output": "Response does not move thread C to the API-billed provider and reports it as blocked until the 9 PM reset.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Response does not switch thread C to a paid or API-billed provider",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Response reports the reset time as what the thread is waiting for",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "routes closure to the owner",
+      "prompt": "/project-wake. Thread D finished its last task yesterday but its increment is still active and unverified.",
+      "expected_output": "Response asks thread D to verify, get a fresh-context review and complete its own increment, and does not run specweave complete from the coordinator.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Response messages thread D to verify, review and complete its increment",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Response does not close the increment itself",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "unreachable machine is unknown, not dead",
+      "prompt": "/project-wake. studio_thread_list returns partial: true and M1 is unavailable.",
+      "expected_output": "Response reports M1's threads as unknown and starts no duplicate work for them.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Response treats threads on the unavailable machine as unknown",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Response does not start replacement threads for them",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "leaves app-continued and running threads alone",
+      "prompt": "/project-wake. Thread E was interrupted by the update 5 minutes ago and the app already started a new run with 'Continue where you left off.'. Thread F is running.",
+      "expected_output": "Response sends nothing to E or F and reports them as already continued and running.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Response does not message thread E",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Response does not message thread F",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "respects a person's held queue",
+      "prompt": "/project-wake. Thread G's queue is held with two messages; its activity shows the user pressed Stop, and no update interrupt.",
+      "expected_output": "Response treats the hold as the user's, does not send to thread G and does not resume its queue.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "Response does not call studio_queue_resume for thread G",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "Response does not send a message to thread G",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "migrates exactly one thread without a model change",
+      "prompt": "/project-wake. Thread H, a handoff-mode thread this coordinator owns, was cut off by the restart. Its machine M1 is offline, studio_handoff_ready_list lists H as continuable, and M3 is ready.",
+      "expected_output": "Response calls studio_thread_migrate with machine M3 and exactly one threadIds entry for H, and no modelSelection.",
+      "assertions": [
+        {
+          "id": "a1",
+          "text": "studio_thread_migrate is called with exactly one threadIds entry",
+          "type": "boolean"
+        },
+        {
+          "id": "a2",
+          "text": "No modelSelection is passed",
+          "type": "boolean"
+        }
+      ]
+    }
+  ]
+}

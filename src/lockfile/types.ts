@@ -32,6 +32,8 @@ export interface SkillLockEntry {
   sourceCommitSha?: string;
   /** Plugin namespace that provided this skill, when installed from a plugin layout. */
   sourcePluginName?: string;
+  /** Skill folders a plugin install wrote (`pluginDir` entries); doctor finds the plugin by them. */
+  skills?: string[];
   /**
    * Installed from a private GitHub repo. Such skills are only ever updated
    * from that repo: no registry fallback, no registry lookups, no telemetry.

@@ -1,6 +1,6 @@
-// 0932 T-05 (AC-08): plugin installs write `<namespace>/<name>` into the
-// frontmatter (marketing/apify-data-gathering); doctor accepts that form and
-// compares only the skill part with the folder name.
+// 0932 T-05 (AC-08): older plugin installs wrote `<namespace>/<name>` into the
+// frontmatter (marketing/apify-data-gathering). Codex ignores that form, so
+// doctor reports it; the skill part is still compared with the folder name.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -38,12 +38,15 @@ afterEach(() => {
   process.exitCode = 0;
 });
 
-describe("AC-08: doctor accepts <namespace>/<name> frontmatter names", () => {
-  it("reports no bad-name or name-mismatch for marketing/apify-data-gathering", () => {
+describe("AC-08: doctor reads <namespace>/<name> frontmatter names", () => {
+  it("warns that Codex ignores marketing/apify-data-gathering, without a name-mismatch", () => {
     writeSkill(g(".agents/skills/apify-data-gathering"), "marketing/apify-data-gathering");
     link("../../.agents/skills/apify-data-gathering", g(".claude/skills/apify-data-gathering"));
     const report = runDoctor({ home, cwd, global: true });
-    expect(ofKind(report.issues, "bad-name")).toEqual([]);
+    const bad = ofKind(report.issues, "bad-name");
+    expect(bad.map((i) => i.skill)).toEqual(["apify-data-gathering"]);
+    expect(bad[0].message).toContain("Codex ignores it");
+    expect(bad[0].message).toContain("name: apify-data-gathering");
     expect(ofKind(report.issues, "name-mismatch")).toEqual([]);
   });
 

@@ -562,6 +562,15 @@ describe("vskill doctor — lock entries with nothing on disk", () => {
     expect(missing[0].message).toContain("plugin cache");
   });
 
+  it("counts a plugin as present when a skill folder it recorded is on disk", () => {
+    writeSkill(g(".agents/skills/figma-connect"), { name: "figma-connect" });
+    writeLock(g(".agents"), {
+      frontend: { version: "0.2.0", source: "marketplace:o/vskill#frontend", marketplace: "vskill", pluginDir: true, skills: ["figma-connect"] },
+    });
+
+    expect(ofKind(runDoctor({ home, cwd, global: true }).issues, "lock-missing")).toEqual([]);
+  });
+
   it("counts a plugin as present when a folder declares its namespace", () => {
     writeSkill(g(".agents/skills/figma-connect"), { name: "frontend/figma-connect" });
     writeLock(g(".agents"), {

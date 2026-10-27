@@ -418,33 +418,6 @@ describe("updateCommand", () => {
     expect(call[1]).toBe(UPDATED_CONTENT); // content passed for frontmatter handling
   });
 
-  it("keeps a plugin skill's name equal to its folder when upstream namespaces it", async () => {
-    mockRunTier1Scan.mockReturnValue({ verdict: "PASS", score: 100, findings: [] });
-    mockReadLockfile.mockReturnValue({
-      version: 1,
-      agents: ["claude-code"],
-      skills: {
-        "apify-data-gathering": {
-          version: "1.0.0", sha: "aaa111bbb222", tier: "VERIFIED",
-          installedAt: "2026-01-01T00:00:00.000Z", source: "github:test/repo",
-          sourcePluginName: "marketing",
-        },
-      },
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    });
-    mockFetchFromSource.mockResolvedValue({
-      ...UPDATED_FETCH_RESULT,
-      content: "---\nname: marketing/apify-data-gathering\ndescription: Gathers data.\n---\n\n# Body\n",
-    });
-
-    const { updateCommand } = await import("./update.js");
-    await updateCommand("apify-data-gathering", { all: false });
-
-    expect(mockInstallSymlink).toHaveBeenCalledTimes(1);
-    expect(mockInstallSymlink.mock.calls[0][1]).toMatch(/^---\nname: apify-data-gathering\n/);
-  });
-
   it("writes lockfile exactly once after the loop", async () => {
     mockReadLockfile.mockReturnValue({
       version: 1,

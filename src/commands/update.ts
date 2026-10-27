@@ -14,6 +14,7 @@ import { resolveTilde } from "../utils/paths.js";
 import type { SkillLockEntry, VskillLock } from "../lockfile/types.js";
 import { ensureSkillMdNaming } from "../installer/migrate.js";
 import { installSymlink } from "../installer/canonical.js";
+import { ensureFrontmatter } from "../installer/frontmatter.js";
 import { getSkill } from "../api/client.js";
 import { detectInstalledAgents } from "../agents/agents-registry.js";
 import { filterAgents } from "../utils/agent-filter.js";
@@ -579,10 +580,16 @@ async function updateTarget(
         }
       }
 
+      // A plugin skill keeps `name:` equal to its folder, as at install:
+      // Codex ignores a namespaced `plugin/skill` name.
+      const installContent = entry.sourcePluginName
+        ? ensureFrontmatter(result.content, name.split("/").pop() ?? name, true)
+        : result.content;
+
       try {
         installSymlink(
           name,
-          result.content,
+          installContent,
           agents,
           { global, projectRoot },
           agentFiles,

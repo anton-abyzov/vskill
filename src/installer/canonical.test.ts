@@ -455,6 +455,25 @@ describe("canonical installer", () => {
       expect(written).toContain("# My Skill\nThis does things.");
     });
 
+    it("sets name to the folder when the source names it otherwise (install and update)", () => {
+      const agents = [
+        makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" }),
+        makeAgent({ id: "claude-code", localSkillsDir: ".claude/skills" }),
+      ];
+      const source = "---\nname: marketing/apify-data-gathering\ndescription: Gathers data.\n---\n\n# Body\n";
+
+      installSymlink("apify-data-gathering", source, agents, { global: false, projectRoot: tempDir });
+      installCopy("apify-data-gathering", source, agents, { global: false, projectRoot: join(tempDir, "copy") });
+
+      for (const path of [
+        join(tempDir, ".agents", "skills", "apify-data-gathering", "SKILL.md"),
+        join(tempDir, ".claude", "skills", "apify-data-gathering", "SKILL.md"),
+        join(tempDir, "copy", ".cursor", "skills", "apify-data-gathering", "SKILL.md"),
+      ]) {
+        expect(readFileSync(path, "utf-8")).toMatch(/^---\nname: apify-data-gathering\n/);
+      }
+    });
+
     it("TC-102: installSymlink copy-fallback for claude-code agent gets frontmatter", () => {
       const agents = [
         makeAgent({ id: "claude-code", localSkillsDir: ".claude/skills" }),
@@ -515,7 +534,7 @@ describe("canonical installer", () => {
       expect(cursorContent).toContain("# My Skill\nThis does things.");
     });
 
-    it("TC-105: existing frontmatter name preserved, not overwritten by skillName", () => {
+    it("TC-105: a frontmatter name that differs from the folder becomes the folder name", () => {
       const agents = [
         makeAgent({ id: "cursor", localSkillsDir: ".cursor/skills" }),
       ];
@@ -529,8 +548,9 @@ describe("canonical installer", () => {
 
       const canonicalPath = join(tempDir, ".agents", "skills", "my-skill", "SKILL.md");
       const written = readFileSync(canonicalPath, "utf-8");
-      expect(written).toContain("name: custom-name");
-      expect(written).not.toContain("name: my-skill");
+      expect(written).toContain("name: my-skill");
+      expect(written).not.toContain("name: custom-name");
+      expect(written).toContain("description: Custom desc");
     });
   });
 

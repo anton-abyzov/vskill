@@ -327,6 +327,15 @@ function writeAgentFiles(
 }
 
 /**
+ * `name:` must equal the folder an agent reads: Codex and the Agent Skills
+ * spec ignore a namespaced `plugin/skill` name or one that differs from the
+ * folder. A matching name is left untouched (no-touch principle).
+ */
+function folderName(skillName: string): string {
+  return skillName.split("/").pop() || skillName;
+}
+
+/**
  * Install a skill using the canonical symlink approach:
  * 1. Write SKILL.md to .agents/skills/{name}/ (canonical source of truth)
  * 2. Agents that read the shared .agents/skills in this scope (0894) get
@@ -345,7 +354,7 @@ export function installSymlink(
   agentFiles?: Record<string, BundleContent>,
   bundleOpts?: BundleWriteOptions,
 ): string[] {
-  content = ensureFrontmatter(content, skillName);
+  content = ensureFrontmatter(content, folderName(skillName), true);
   const strippedContent = stripClaudeFields(content, skillName);
 
   // Skip canonical .agents/ dir when all agents use copy-fallback (e.g., claude-code only)
@@ -431,7 +440,7 @@ export function installCopy(
   agentFiles?: Record<string, BundleContent>,
   bundleOpts?: BundleWriteOptions,
 ): string[] {
-  content = ensureFrontmatter(content, skillName);
+  content = ensureFrontmatter(content, folderName(skillName), true);
   const strippedContent = stripClaudeFields(content, skillName);
   const installed: string[] = [];
 

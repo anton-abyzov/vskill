@@ -135,11 +135,11 @@ export function ensureFrontmatter(content: string, skillName: string, forceName 
     // Replace the WHOLE name line (not just the `name:` token) so the old value
     // is overwritten cleanly. The previous regex matched only `^name:` and left
     // the old value dangling, producing `name: foo foo` corruption.
-    const updatedFm = namesMatch ? fmBlock : fmBlock.replace(NAME_LINE_RE, `name: ${skillName}`);
+    const updatedFm = namesMatch ? fmBlock : fmBlock.replace(NAME_LINE_RE, () => `name: ${skillName}`);
 
     if (hasDescription) {
       // Description already present — preserve it verbatim, only the name changed.
-      return normalized.replace(FRONTMATTER_RE, `---\n${updatedFm}\n---`);
+      return normalized.replace(FRONTMATTER_RE, () => `---\n${updatedFm}\n---`);
     }
 
     // No description in source — extract one from the body and append.
@@ -147,7 +147,7 @@ export function ensureFrontmatter(content: string, skillName: string, forceName 
     const extractedDesc = extractDescription(body, skillName);
     return normalized.replace(
       FRONTMATTER_RE,
-      `---\n${updatedFm}\ndescription: ${quoteYAMLValue(extractedDesc)}\n---`,
+      () => `---\n${updatedFm}\ndescription: ${quoteYAMLValue(extractedDesc)}\n---`,
     );
   }
 
@@ -163,7 +163,7 @@ export function ensureFrontmatter(content: string, skillName: string, forceName 
     updatedBlock = `${updatedBlock}\ndescription: ${quoteYAMLValue(desc)}`;
   }
 
-  return normalized.replace(FRONTMATTER_RE, `---\n${updatedBlock}\n---`);
+  return normalized.replace(FRONTMATTER_RE, () => `---\n${updatedBlock}\n---`);
 }
 
 /** Detects an `author:` line in frontmatter (anchored at start of line within the block). */
@@ -190,7 +190,7 @@ function setOrAppendField(
 ): string {
   const formatted = `${key}: ${quoteYAMLValue(value)}`;
   if (lineRe.test(fmBlock)) {
-    return fmBlock.replace(lineRe, formatted);
+    return fmBlock.replace(lineRe, () => formatted);
   }
   // Append. Preserve trailing newline behaviour: if fmBlock ends with \n, keep it.
   const sep = fmBlock.endsWith("\n") || fmBlock.length === 0 ? "" : "\n";
@@ -252,7 +252,7 @@ export function applyForkMetadata(
   //    full line (not just the token) is overwritten cleanly — same shape as
   //    `ensureFrontmatter`'s force-rename branch (avoids `name: foo foo`).
   if (HAS_NAME_RE.test(fmBlock)) {
-    fmBlock = fmBlock.replace(NAME_LINE_RE, `name: ${meta.name}`);
+    fmBlock = fmBlock.replace(NAME_LINE_RE, () => `name: ${meta.name}`);
   } else {
     fmBlock = `name: ${meta.name}\n${fmBlock}`;
   }
@@ -276,7 +276,7 @@ export function applyForkMetadata(
     fmBlock = `${fmBlock}\ndescription: ${quoteYAMLValue(desc)}`;
   }
 
-  return normalized.replace(FRONTMATTER_RE, `---\n${fmBlock}\n---`);
+  return normalized.replace(FRONTMATTER_RE, () => `---\n${fmBlock}\n---`);
 }
 
 /** Detects `target-agents:` field in frontmatter */

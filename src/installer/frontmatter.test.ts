@@ -434,3 +434,26 @@ describe("stripClaudeFields", () => {
     expect(result).not.toContain("allowed-tools");
   });
 });
+
+describe("ensureFrontmatter — dollar patterns in content", () => {
+  const fm = 'description: "Costs $1 or $& per run, see $`docs`"\nmetadata:\n  price: "$$5"';
+
+  it("keeps $ sequences verbatim when renaming", () => {
+    const content = `---\nname: plugin/my-skill\n${fm}\n---\n# Body $1`;
+    const out = ensureFrontmatter(content, "my-skill", true);
+    expect(out).toBe(`---\nname: my-skill\n${fm}\n---\n# Body $1`);
+  });
+
+  it("keeps $ sequences verbatim when adding a missing name", () => {
+    const content = `---\n${fm}\n---\n# Body`;
+    const out = ensureFrontmatter(content, "my-skill");
+    expect(out).toBe(`---\nname: my-skill\n${fm}\n---\n# Body`);
+  });
+
+  it("keeps $ sequences verbatim when adding a description", () => {
+    const content = "---\nname: plugin/my-skill\ncost: \"$1 and $'\"\n---\nRuns the $& job.";
+    const out = ensureFrontmatter(content, "my-skill", true);
+    expect(out).toContain('cost: "$1 and $\'"');
+    expect(out.startsWith("---\nname: my-skill\n")).toBe(true);
+  });
+});

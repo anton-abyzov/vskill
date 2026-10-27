@@ -441,6 +441,7 @@ const MIGRATION_MARKERS: Array<[string, RegExp]> = [
 interface LockEntryLike {
   installedPath?: string;
   pluginDir?: boolean;
+  skills?: string[];
   marketplace?: string;
   source?: string;
 }
@@ -486,9 +487,10 @@ function hasEntries(dir: string): boolean {
 }
 
 /** Whether anything a lock entry installed is still on disk: its recorded
- *  install path, a working folder of that name in a scanned dir, a folder
- *  whose frontmatter names it as a plugin namespace (`plugin/skill`), or,
- *  for plugins, a Claude Code plugin cache folder. */
+ *  install path, a working folder of that name or of a skill the plugin
+ *  recorded, a folder whose frontmatter names it as a plugin namespace
+ *  (`plugin/skill`, older installs), or, for plugins, a Claude Code plugin
+ *  cache folder. */
 function lockEntryOnDisk(
   name: string,
   entry: LockEntryLike,
@@ -499,6 +501,8 @@ function lockEntryOnDisk(
   if (entry.installedPath && existsSync(entry.installedPath)) return true;
   const leaf = name.split("/").pop() ?? name;
   if (entries.some((e) => e.real && e.name === leaf)) return true;
+  const skills = new Set(Array.isArray(entry.skills) ? entry.skills : []);
+  if (entries.some((e) => e.real && skills.has(e.name))) return true;
   for (const n of declared.values()) {
     if (n.startsWith(`${leaf}/`) || n.startsWith(`${leaf}:`)) return true;
   }
@@ -685,12 +689,16 @@ function scanScope(
       issues.push(issue("bad-name", scope, folder, [join(shown, "SKILL.md")], "frontmatter has no name", false));
     } else {
       frontmatterName.set(e.real, name);
-      // 0932: plugin installs write `<namespace>/<name>`; each part follows
-      // the agentskills.io rule.
+      // Older plugin installs wrote `<namespace>/<name>` (0932). Codex and the
+      // Agent Skills spec ignore that form, so it is reported; the skill part
+      // still has to follow the agentskills.io rule.
       const parts = name.split("/");
       if (parts.length > 2 || parts.some((p) => p.length > 64 || !NAME_RE.test(p)) || !isValidNamespacedSkillName(name)) {
         issues.push(issue("bad-name", scope, folder, [join(shown, "SKILL.md")],
-          `name "${name}" must be lowercase letters, digits and single hyphens, at most 64 chars (optionally <namespace>/<name>)`, false));
+          `name "${name}" must be lowercase letters, digits and single hyphens, at most 64 chars`, false));
+      } else if (parts.length === 2) {
+        issues.push(issue("bad-name", scope, folder, [join(shown, "SKILL.md")],
+          `name "${name}" is namespaced; Codex ignores it. Set name: ${parts[1]} or reinstall the skill`, false));
       }
     }
     const desc = fm?.description?.trim() ?? "";

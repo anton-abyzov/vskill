@@ -2290,6 +2290,17 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
     expect(cmdPaths[0]).toContain("/frontend/");
   });
 
+  it("writes each skill's folder name as its frontmatter name, never plugin/skill", async () => {
+    setupHappyPath();
+
+    await addCommand("ignored-source", { repo: "anton-abyzov/vskill", plugin: "frontend" });
+
+    const writeCalls = mockWriteFileSync.mock.calls as [string, string][];
+    const nextjs = writeCalls.find(([p]) => p.endsWith("/frontend/nextjs/SKILL.md"))?.[1] ?? "";
+    expect(nextjs).toMatch(/^---\nname: nextjs\n/);
+    expect(nextjs).not.toContain("frontend/nextjs");
+  });
+
   it("writes lockfile with github source format", async () => {
     setupHappyPath();
 
@@ -3448,6 +3459,38 @@ describe("addCommand marketplace integration", () => {
     expect(lockArg.skills["plugin-a"].pluginDir).toBe(true);
     expect(lockArg.skills["plugin-a"].version).toBe("1.0.0");
     expect(lockArg.skills["plugin-b"].version).toBe("2.0.0");
+  });
+
+  it("keeps each plugin skill's name equal to its folder and records the folders in the lock", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => SAMPLE_MARKETPLACE_JSON,
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [{ name: "test-skill", type: "dir" }],
+        text: async () => "---\nname: test-skill\ndescription: Does a thing.\n---\n\n# Skill Content\n",
+      }) as unknown as typeof fetch;
+
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+
+    await addCommand("owner/repo", { yes: true });
+
+    const written = (mockWriteFileSync.mock.calls as [string, string][])
+      .filter(([p]) => p.endsWith("/test-skill/SKILL.md"))
+      .map(([, c]) => c);
+    expect(written.length).toBeGreaterThan(0);
+    for (const content of written) {
+      expect(content).toMatch(/^---\nname: test-skill\n/);
+      expect(content).not.toMatch(/name: plugin-[abc]\/test-skill/);
+    }
+    const lockArg = mockWriteLockfile.mock.calls[0][0];
+    expect(lockArg.skills["plugin-a"].skills).toEqual(["test-skill"]);
   });
 
   it("TC-017: unchecking installed plugins in interactive mode uninstalls them", async () => {

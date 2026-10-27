@@ -616,11 +616,10 @@ async function installMarketplaceRepo(
           const contentRes = await githubFetch(rawUrl);
           if (!contentRes.ok) continue;
           const content = await contentRes.text();
-          const namespacedName = sd.name === plugin.name ? plugin.name : `${plugin.name}/${sd.name}`;
-          // forceName only when actually namespacing — otherwise installs must
-          // not mutate already-valid frontmatter (no-touch principle).
-          const isRenaming = sd.name !== plugin.name;
-          const processedContent = ensureFrontmatter(content, namespacedName, isRenaming);
+          // `name:` must equal the folder: Codex and the Agent Skills spec
+          // ignore a namespaced `plugin/skill` name. A matching name is left
+          // untouched (no-touch principle).
+          const processedContent = ensureFrontmatter(content, sd.name, true);
           for (const baseDir of uniqueInstallBases(opts, agents)) {
             const skillDir = join(baseDir, sd.name);
             mkdirSync(skillDir, { recursive: true });
@@ -685,6 +684,7 @@ async function installMarketplaceRepo(
         source: `marketplace:${owner}/${repo}#${r.name}`,
         marketplace: marketplaceName || undefined,
         pluginDir: true,
+        skills: (pluginSkillContents.get(r.name) ?? []).map((s) => s.name),
         scope: opts.global ? "user" : "project",
         // 0737 — Source-repo provenance for the Studio detail header's
         // clickable GitHub anchor. `repoUrl` is the canonical GitHub root;
@@ -2154,9 +2154,7 @@ async function installRepoPlugin(
           ? plugDir
           : join(plugDir, skill.name);
         mkdirSync(skillDir, { recursive: true });
-        const namespacedSkillName = skill.name === pluginName ? pluginName : `${pluginName}/${skill.name}`;
-        const isRenamingSkill = skill.name !== pluginName;
-        writeFileSync(join(skillDir, "SKILL.md"), ensureFrontmatter(skill.content, namespacedSkillName, isRenamingSkill), "utf-8");
+        writeFileSync(join(skillDir, "SKILL.md"), ensureFrontmatter(skill.content, skill.name, true), "utf-8");
         cleanStaleNesting(skillDir);
       }
       // Commands: {agent-dir}/{plugin-name}/{command-name}.md
@@ -3280,15 +3278,12 @@ async function installSingleSkillLegacy(
   const bundle = prepared.bundle;
   const previousFiles = readLockfile(lockfileRoot(opts))?.skills[skillName]?.files;
 
-  // Install to each agent using canonical installer (flat directory, namespaced frontmatter name)
-  const namespacedName = pluginNamespace && skillName !== pluginNamespace
-    ? `${pluginNamespace}/${skillName}`
-    : skillName;
-  // forceName only when the namespaced name actually differs from the source's
-  // skill name — guarantees a no-touch install when no rename is needed.
-  const isRenamingNamespace = !!pluginNamespace && namespacedName !== skillName;
-  const namespacedContent = pluginNamespace
-    ? ensureFrontmatter(content, namespacedName, isRenamingNamespace)
+  // Install to each agent using canonical installer (flat directory). A
+  // plugin skill keeps `name:` equal to its folder: Codex and the Agent Skills
+  // spec ignore a namespaced `plugin/skill` name. A matching name is left
+  // untouched (no-touch principle).
+  const installContent = pluginNamespace
+    ? ensureFrontmatter(content, skillName, true)
     : content;
   const sha = computeSha(content);
   const projectRoot = safeProjectRoot();
@@ -3300,7 +3295,7 @@ async function installSingleSkillLegacy(
   // keep the canonical symlink/copy store + claude-code COPY_FALLBACK.
   const locations = installSkillToAgents({
     skillName,
-    rawContent: namespacedContent,
+    rawContent: installContent,
     agents: selectedAgents,
     scope: opts.global ? "user" : "project",
     projectRoot,

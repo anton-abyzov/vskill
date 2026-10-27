@@ -4,7 +4,7 @@
     {
       "id": 1,
       "name": "continues only update-interrupted threads",
-      "prompt": "/project-wake. Thread A was interrupted with cause service_update 10 minutes ago on Claude, which has usage left. Thread B was stopped by the user with Stop an hour ago.",
+      "prompt": "/project-wake. Thread A was interrupted with cause service_update 20 minutes ago on Claude, with no newer run or continuation message since. Thread B was stopped by the user with Stop an hour ago.",
       "expected_output": "Response sends one continuation message to thread A on its own provider and leaves thread B stopped, listing it in the report.",
       "assertions": [
         {
@@ -117,7 +117,7 @@
     {
       "id": 7,
       "name": "migrates exactly one thread without a model change",
-      "prompt": "/project-wake. Thread H, which this coordinator owns, was cut off by the restart, its machine M1 is offline, and M3 is ready.",
+      "prompt": "/project-wake. Thread H, a handoff-mode thread this coordinator owns, was cut off by the restart. Its machine M1 is offline, studio_handoff_ready_list lists H as continuable, and M3 is ready.",
       "expected_output": "Response calls studio_thread_migrate with machine M3 and exactly one threadIds entry for H, and no modelSelection.",
       "assertions": [
         {

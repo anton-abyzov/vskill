@@ -1,7 +1,7 @@
 ---
 name: project-wake
 description: "Manual sweep of a SpecWithCode project after an update, restart or outage: list every thread, continue only work the restart cut off and the app did not continue, never touch work a person stopped, hand off one thread at a time only through existing handoff tools, and ask owners of finished-but-unclosed work to verify, review and close it. Use only when the user types /project-wake or explicitly asks to run project wake in a project coordinator. Not for schedules, routine status questions, or outside SpecWithCode (it needs the studio-code MCP tools)."
-version: "1.0.3"
+version: "1.0.4"
 metadata:
   category: productivity
   tags: specwithcode, coordinator, restart, update, resume, handoff, threads, orchestration
@@ -13,7 +13,7 @@ One manual sweep of the current project. The user typing `/project-wake` authori
 
 ## 1. Inventory
 
-- `studio_thread_list` with no `machine` (federated), `includeArchived: false`, `limit: 100`; repeat with `cursor = nextCursor` until it is null. Keep `partial` and every unavailable or unauthorized member: their threads are **unknown**, never dead, and are never resumed or duplicated from here.
+- `studio_thread_list` with no `machine` (federated), `includeArchived: false`, `limit: 100`; repeat with `cursor = nextCursor` until it is null. Keep `partial` and every unavailable or unauthorized member: their threads are **unknown**, never dead, and are never resumed or duplicated from here, except through step 4's handoff tools when `studio_handoff_ready_list` lists them.
 - Skip the calling thread, and threads whose `settled` is true unless the user named them.
 - Remember each thread's machine. Pass that `machine` on every `studio_thread_read` and `studio_thread_send` for a thread that is not on this machine. `studio_queue_list`, `studio_queue_resume`, `studio_thread_configuration` and `studio_pending_request_list` only see this machine: for a remote thread whose state depends on them, classify it **unclear**.
 - Call `studio_machine_list` once for which machines are ready. Provider quota is not listed anywhere: treat a provider as out of quota only when the thread's own failure text or a reset time says so.
@@ -37,12 +37,19 @@ Read the latest run with `studio_thread_read` (`view: "activity"`, `runLimit: 1`
 
 When the evidence does not settle it, mark the thread **unclear** and report it; do not act.
 
+## Rules for every send
+
+These apply to every `studio_thread_send` in steps 3 and 5.
+
+- A send releases the thread's held queue. Check `studio_queue_list` first: if the queue is held and the hold does not follow an update or restart interrupt in the activity, it is a person's hold, so do not send. Never call `studio_queue_resume` on a person's hold.
+- For a thread on another machine the queue is not visible: send only when its activity shows no Stop by a person after the interrupt; otherwise mark it **unclear**.
+- Read the result: report any `releasedHeldMessages`, and if it has `queueHeld: true`, report the message as not delivered, with its `notice`.
+
 ## 3. Continue cut-off work
 
 - The app continues update-cut runs under 24 hours old on its own. Act on a cut-off run only when the interrupt is at least 15 minutes old and no newer run or continuation message exists. Re-read the thread immediately before sending; if anything changed, leave it.
 - Only on the thread's own provider and model, with no model or permission change.
 - Send one message to the same thread with `studio_thread_send`, `mode: "auto"`, `clientRequestId: "project-wake:<threadId>:<latestRunId>"` so a second sweep cannot double-send: "SpecWithCode restarted and cut this turn off. Re-read your last messages and the repository state, then continue the same task where it stopped. If it is already finished, verify that and report instead of redoing it."
-- A send releases a held queue: report any `releasedHeldMessages`. Before sending, check `studio_queue_list`. If the thread's queue is held and the hold does not follow an update or restart interrupt in the activity, it is a person's hold: do not send. Never call `studio_queue_resume` on a person's hold.
 - Never use `studio_threads_continue_all`: it also continues runs a person stopped.
 
 ## 4. Out of quota, or the machine is gone

@@ -1,6 +1,6 @@
 {
   "name": "productivity",
-  "description": "Personal productivity automation skills — expert network survey completion, time-saving automation for professional consultations and paid expertise sharing",
+  "description": "Personal productivity automation skills — expert network survey completion, and project-wake for resuming SpecWithCode project threads after an update or restart",
   "version": "1.0.0",
   "author": {
     "name": "Anton Abyzov",
@@ -10,5 +10,18 @@
   "homepage": "https://github.com/anton-abyzov/vskill",
   "repository": "https://github.com/anton-abyzov/vskill",
   "license": "MIT",
-  "keywords": ["productivity", "survey", "expert-network", "arbolus", "guidepoint", "glg", "canopy", "automation"]
+  "keywords": [
+    "productivity",
+    "survey",
+    "expert-network",
+    "arbolus",
+    "guidepoint",
+    "glg",
+    "canopy",
+    "automation",
+    "specwithcode",
+    "project-wake",
+    "resume",
+    "restart"
+  ]
 }

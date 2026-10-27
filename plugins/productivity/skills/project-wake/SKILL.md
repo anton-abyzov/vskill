@@ -1,15 +1,15 @@
 ---
 name: project-wake
-description: "Manual sweep of a SpecWithCode project after an update, restart or outage: list every thread, continue only work the restart cut off and the app did not continue, never touch work a person stopped, hand off one thread at a time only through existing handoff tools, and ask owners of finished-but-unclosed work to verify, review and close it. Use only when the user types /project-wake or explicitly asks to run project wake in a project coordinator. Not for schedules, routine status questions, or outside SpecWithCode (it needs the studio-code MCP tools)."
-version: "1.0.5"
+description: "Manual sweep of a SpecWithCode project after an update, restart or outage: list every thread, continue only work the restart cut off and the app did not continue, never touch work a person stopped, hand off one thread at a time only through existing handoff tools, and ask owners of finished-but-unclosed work to verify, review and close it. Use only when the user invokes $project-wake or /project-wake, or explicitly asks to run project wake in a project coordinator. Not for schedules, routine status questions, or outside SpecWithCode (it needs the studio-code MCP tools)."
 metadata:
+  version: "1.0.5"
   category: productivity
   tags: specwithcode, coordinator, restart, update, resume, handoff, threads, orchestration
 ---
 
 # project-wake
 
-One manual sweep of the current project. The user typing `/project-wake` authorizes continuing interrupted work inside the rules below and nothing else. The coordinator routes, it does not implement: every action is one message to the thread that already owns the work.
+One manual sweep of the current project. The user invoking `$project-wake` (or `/project-wake`) authorizes continuing interrupted work inside the rules below and nothing else. The coordinator routes, it does not implement: every action is one message to the thread that already owns the work.
 
 ## 1. Inventory
 

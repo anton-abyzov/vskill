@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync, statSync } from "node:fs";
-import { execSync, execFileSync, spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { join, resolve, dirname, basename, relative } from "node:path";
 import { homedir } from "node:os";
 import type { Router } from "./router.js";
@@ -14,6 +14,8 @@ import { classifyError } from "./error-classifier.js";
 import { readLockfile, writeLockfile } from "../lockfile/lockfile.js";
 import { parseSource } from "../resolvers/source-resolver.js";
 import { resolveSkillApiName as resolveSkillApiNameImpl } from "./skill-name-resolver.js";
+import { registerSkillUpdateRoutes } from "./skill-update-routes.js";
+import { registerSkillPinRoutes } from "./skill-pin-routes.js";
 import { resolveSkillOrigin } from "./origin-resolver.js";
 import { isPrivateOrUnknownRepo } from "../lib/private-source.js";
 import { isPrivateStudioSkill, isPrivateStudioSkillAt, readStudioLocks } from "./studio-privacy.js";
@@ -1945,52 +1947,11 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
     }
   });
 
-  router.get("/api/skills/updates", async (req, res) => {
-    const root = getRoot();
-    try {
-      const { getOutdatedJson } = await import("../commands/outdated.js");
-      const { scanSkillInstallLocations } = await import("./utils/scan-install-locations.js");
-      const programmatic = await getOutdatedJson();
-      if (!programmatic) {
-        sendJson(res, [], 200, req);
-        return;
-      }
-      // 0747 AC-US4-06 + code-review F-004: per-request memoization keyed by
-      // canonical skill name. Each unique name is scanned exactly once even
-      // if it appears in multiple rows, so the syscall cost is O(unique
-      // names × agents × scopes), not O(rows × agents × scopes). For a
-      // typical /updates response every row has a distinct name, so this
-      // matches the previous one-call-per-row behavior on the happy path
-      // while giving a correct lower bound when names ever duplicate.
-      const scanCache = new Map<string, ReturnType<typeof scanSkillInstallLocations>>();
-      const scanOnce = (name: string) => {
-        const hit = scanCache.get(name);
-        if (hit !== undefined) return hit;
-        const fresh = scanSkillInstallLocations(name, root);
-        scanCache.set(name, fresh);
-        return fresh;
-      };
-      const enriched = programmatic.results.map((r) => {
-        const locations = scanOnce(r.name);
-        const localSkill = r.name.split("/").pop();
-        // Highest-precedence install wins for the local fs pair the click
-        // handler reveals: project > personal > plugin.
-        const winner = pickHighestPrecedenceLocation(locations);
-        return {
-          ...r,
-          ...(programmatic.pinMap.has(r.name)
-            ? { pinned: true, pinnedVersion: programmatic.pinMap.get(r.name) }
-            : {}),
-          installLocations: locations,
-          localSkill,
-          ...(winner?.pluginSlug ? { localPlugin: winner.pluginSlug } : {}),
-        };
-      });
-      sendJson(res, enriched, 200, req);
-    } catch {
-      sendJson(res, [], 200, req);
-    }
-  });
+  // 1126: updates list, single and batch update live in skill-update-routes.ts;
+  // pin, install-version and fleet push in skill-pin-routes.ts. Mounted here,
+  // ahead of the /:plugin/:skill catch-all.
+  registerSkillUpdateRoutes(router, getRoot);
+  registerSkillPinRoutes(router, getRoot);
 
   // -------------------------------------------------------------------------
   // Version proxy, diff, update, and batch-update routes (Phase 2)
@@ -2356,147 +2317,6 @@ export function registerRoutes(router: Router, rootArg: string | (() => string),
     });
 
     sendJson(res, { jobId }, 200, req);
-  });
-
-  router.post("/api/skills/:plugin/:skill/update", async (req, res, params) => {
-    const root = getRoot();
-    initSSE(res, req);
-    const skillName = params.skill;
-
-    // 0747 grill F-002: reject before doing anything so a malformed slug
-    // can never reach Commander as a flag.
-    if (!isSafeSkillName(skillName)) {
-      sendSSE(res, "error", {
-        error: `Invalid skill name: ${skillName}`,
-        skill: skillName,
-      });
-      sendSSEDone(res, { status: "error", skill: skillName });
-      return;
-    }
-
-    // Parse optional ?agent=<id>
-    let agentId: string | null = null;
-    try {
-      const reqUrl = (req as { url?: string }).url ?? "";
-      const url = new URL(reqUrl, "http://localhost");
-      const raw = url.searchParams.get("agent");
-      if (raw !== null) {
-        const allowed = AGENTS_REGISTRY.some((a) => a.id === raw);
-        if (!allowed) {
-          sendSSE(res, "error", {
-            error: `Unknown agent id: ${raw}`,
-            skill: skillName,
-          });
-          sendSSEDone(res, { status: "error", skill: skillName });
-          return;
-        }
-        agentId = raw;
-      }
-    } catch {
-      // URL parse error → behave as if ?agent was omitted
-    }
-
-    sendSSE(res, "progress", {
-      status: "updating",
-      skill: skillName,
-      ...(agentId ? { agent: agentId } : {}),
-    });
-
-    try {
-      // 0747 code-review F-001: use execFileSync with argv array — never
-      // shell-interpolate user-controlled values. skillName comes from a
-      // route param and could otherwise carry shell metacharacters via
-      // decodeURIComponent. agentId is allowlisted above; we still pass it
-      // as a separate arg for defense-in-depth.
-      const args = ["update", skillName];
-      if (agentId) args.push("--agent", agentId);
-      // 0765: pin cwd to the studio root so the CLI's process.cwd()-based
-      // lockfile lookup AND its agent-dir SKILL.md sync target both land in
-      // the right tree. Without this, a studio launched with --root <X> from
-      // a different shell cwd would update the lockfile but leave on-disk
-      // SKILL.md frontmatter stale (the bell would refresh, but the version
-      // chip wouldn't).
-      execFileSync("vskill", args, {
-        env: enhancedSpawnEnv(),
-        timeout: 60_000,
-        encoding: "utf-8",
-        stdio: ["ignore", "pipe", "pipe"],
-        cwd: root,
-      });
-      sendSSE(res, "progress", {
-        status: "done",
-        skill: skillName,
-        ...(agentId ? { agent: agentId } : {}),
-      });
-      sendSSEDone(res, {
-        status: "done",
-        skill: skillName,
-        ...(agentId ? { agent: agentId } : {}),
-      });
-    } catch (err) {
-      sendSSE(res, "error", { error: (err as Error).message, skill: skillName });
-      sendSSEDone(res, { status: "error", skill: skillName });
-    }
-  });
-
-  // T-012: Batch update SSE + 409 conflict guard
-  let batchUpdateInProgress = false;
-
-  router.post("/api/skills/batch-update", async (req, res) => {
-    const root = getRoot();
-    if (batchUpdateInProgress) {
-      sendJson(res, { error: "Update already in progress" }, 409, req);
-      return;
-    }
-    batchUpdateInProgress = true;
-
-    const body = (await readBody(req)) as { skills?: string[] };
-    const skills = Array.isArray(body.skills) ? body.skills : [];
-
-    initSSE(res, req);
-
-    let updated = 0;
-    let failed = 0;
-
-    try {
-      for (const skill of skills) {
-        sendSSE(res, "skill:start", { skill });
-
-        // 0747 grill F-002: reject body.skills[] entries that could be
-        // misread by Commander as flags (e.g. `--force`).
-        if (!isSafeSkillName(skill)) {
-          sendSSE(res, "skill:error", {
-            skill,
-            error: `Invalid skill name: ${skill}`,
-          });
-          failed++;
-          continue;
-        }
-
-        try {
-          // 0747 code-review F-001 (defense-in-depth): batch endpoint also
-          // shell-interpolated body.skills[]. Switch to execFileSync argv
-          // form so request-body values can never reach the shell.
-          // 0765: pin cwd (see single-skill update handler above).
-          execFileSync("vskill", ["update", skill], {
-            env: enhancedSpawnEnv(),
-            timeout: 60_000,
-            encoding: "utf-8",
-            stdio: ["ignore", "pipe", "pipe"],
-            cwd: root,
-          });
-          sendSSE(res, "skill:done", { skill });
-          updated++;
-        } catch (err) {
-          sendSSE(res, "skill:error", { skill, error: (err as Error).message });
-          failed++;
-        }
-      }
-
-      sendSSEDone(res, { updated, failed, skipped: 0 });
-    } finally {
-      batchUpdateInProgress = false;
-    }
   });
 
   // 0769 T-008: allowlist for skill-dir resolution. Plugin-cache snapshots

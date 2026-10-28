@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   parseSource: vi.fn(),
   execSync: vi.fn(),
   execFileSync: vi.fn(),
+  runVskill: vi.fn(),
   fetch: vi.fn(),
   resolveSkillApiNameImpl: vi.fn(),
 }));
@@ -42,6 +43,17 @@ vi.mock("node:child_process", () => ({
   execSync: mocks.execSync,
   execFileSync: mocks.execFileSync,
 }));
+
+// 1126: update routes run the bundled CLI asynchronously through
+// vskill-cli-runner.ts. Mock only runVskill; the real classifier decides
+// done / skipped / error from the mocked output.
+vi.mock("../vskill-cli-runner.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, runVskill: mocks.runVskill };
+});
+const okRun = (stdout = "ok", code = 0, stderr = "") => ({
+  code, stdout, stderr, timedOut: false, bundled: true,
+});
 
 vi.mock("../../lockfile/lockfile.js", () => ({
   readLockfile: mocks.readLockfile,
@@ -212,20 +224,20 @@ describe("0747 T-003: POST /api/skills/:plugin/:skill/update?agent=<id>", () => 
   });
 
   it("TC-001: forwards a known agent id as `--agent <id>` to vskill update", async () => {
-    mocks.execFileSync.mockReturnValue("ok");
+    mocks.runVskill.mockResolvedValue(okRun());
     await handler(
       fakeReq("http://localhost/api/skills/plug/architect/update?agent=claude-code"),
       fakeRes(),
       { plugin: "plug", skill: "architect" },
     );
 
-    expect(mocks.execFileSync).toHaveBeenCalledTimes(1);
-    const callArgs = mocks.execFileSync.mock.calls[0];
-    expect(callArgs[0]).toBe("vskill");
-    expect(callArgs[1]).toEqual(["update", "architect", "--agent", "claude-code"]);
+    expect(mocks.runVskill).toHaveBeenCalledTimes(1);
+    const callArgs = mocks.runVskill.mock.calls[0];
+    expect(callArgs[1]).toEqual(expect.objectContaining({ cwd: "/tmp/fake-root" }));
+    expect(callArgs[0]).toEqual(["update", "architect", "--agent", "claude-code"]);
   });
 
-  it("TC-002: rejects an injection payload as the agent value WITHOUT calling execFileSync", async () => {
+  it("TC-002: rejects an injection payload as the agent value WITHOUT spawning vskill", async () => {
     await handler(
       fakeReq(
         `http://localhost/api/skills/plug/architect/update?agent=${encodeURIComponent("$(rm -rf /)")}`,
@@ -234,35 +246,35 @@ describe("0747 T-003: POST /api/skills/:plugin/:skill/update?agent=<id>", () => 
       { plugin: "plug", skill: "architect" },
     );
 
-    expect(mocks.execFileSync).not.toHaveBeenCalled();
+    expect(mocks.runVskill).not.toHaveBeenCalled();
     expect(mocks.execSync).not.toHaveBeenCalled();
     // SSE error path is taken (or sendJson with 400 — depends on implementation).
     // Either way, NO process spawn.
   });
 
-  it("TC-003: rejects an unknown agent id WITHOUT calling execFileSync", async () => {
+  it("TC-003: rejects an unknown agent id WITHOUT spawning vskill", async () => {
     await handler(
       fakeReq("http://localhost/api/skills/plug/architect/update?agent=not-a-real-agent"),
       fakeRes(),
       { plugin: "plug", skill: "architect" },
     );
 
-    expect(mocks.execFileSync).not.toHaveBeenCalled();
+    expect(mocks.runVskill).not.toHaveBeenCalled();
     expect(mocks.execSync).not.toHaveBeenCalled();
   });
 
   it("TC-004: omitting ?agent preserves existing behavior (no --agent flag)", async () => {
-    mocks.execFileSync.mockReturnValue("ok");
+    mocks.runVskill.mockResolvedValue(okRun());
     await handler(
       fakeReq("http://localhost/api/skills/plug/architect/update"),
       fakeRes(),
       { plugin: "plug", skill: "architect" },
     );
 
-    expect(mocks.execFileSync).toHaveBeenCalledTimes(1);
-    const callArgs = mocks.execFileSync.mock.calls[0];
-    expect(callArgs[0]).toBe("vskill");
-    expect(callArgs[1]).toEqual(["update", "architect"]);
+    expect(mocks.runVskill).toHaveBeenCalledTimes(1);
+    const callArgs = mocks.runVskill.mock.calls[0];
+    expect(callArgs[1]).toEqual(expect.objectContaining({ cwd: "/tmp/fake-root" }));
+    expect(callArgs[0]).toEqual(["update", "architect"]);
   });
 
   it("TC-005 (F-001 regression): rejects shell-metachar payload in skill name without spawning a shell", async () => {
@@ -279,7 +291,7 @@ describe("0747 T-003: POST /api/skills/:plugin/:skill/update?agent=<id>", () => 
       { plugin: "plug", skill: evilSkill },
     );
 
-    expect(mocks.execFileSync).not.toHaveBeenCalled();
+    expect(mocks.runVskill).not.toHaveBeenCalled();
     expect(mocks.execSync).not.toHaveBeenCalled();
   });
 
@@ -294,7 +306,7 @@ describe("0747 T-003: POST /api/skills/:plugin/:skill/update?agent=<id>", () => 
       { plugin: "plug", skill: flagLike },
     );
 
-    expect(mocks.execFileSync).not.toHaveBeenCalled();
+    expect(mocks.runVskill).not.toHaveBeenCalled();
     expect(mocks.execSync).not.toHaveBeenCalled();
   });
 });

@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   // update/batch-update routes no longer touch it.
   execSync: vi.fn(),
   execFileSync: vi.fn(),
+  runVskill: vi.fn(),
   fetch: vi.fn(),
   resolveSkillApiNameImpl: vi.fn(),
 }));
@@ -50,6 +51,17 @@ vi.mock("node:child_process", () => ({
   execSync: mocks.execSync,
   execFileSync: mocks.execFileSync,
 }));
+
+// 1126: update routes run the bundled CLI asynchronously through
+// vskill-cli-runner.ts. Mock only runVskill; the real classifier decides
+// done / skipped / error from the mocked output.
+vi.mock("../vskill-cli-runner.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, runVskill: mocks.runVskill };
+});
+const okRun = (stdout = "ok", code = 0, stderr = "") => ({
+  code, stdout, stderr, timedOut: false, bundled: true,
+});
 
 vi.mock("../../lockfile/lockfile.js", () => ({
   readLockfile: mocks.readLockfile,
@@ -776,8 +788,8 @@ describe("T-011: POST /api/skills/:plugin/:skill/update", () => {
   });
 
   it("streams SSE progress and done on successful update", async () => {
-    // 0747 F-001: source uses execFileSync (argv form), not execSync.
-    mocks.execFileSync.mockReturnValue("Updated architect 2.2.0 -> 2.3.0");
+    // 1126: the route runs the bundled CLI through runVskill (async argv).
+    mocks.runVskill.mockResolvedValue(okRun("architect: 2.2.0 -> 2.3.0"));
 
     const req = fakeReq("http://localhost/api/skills/myPlugin/architect/update");
     const res = fakeRes();
@@ -792,14 +804,39 @@ describe("T-011: POST /api/skills/:plugin/:skill/update", () => {
     );
     expect(mocks.sendSSEDone).toHaveBeenCalledWith(
       res,
-      expect.objectContaining({ status: "done" }),
+      expect.objectContaining({ status: "done", version: "2.3.0" }),
+    );
+  });
+
+  it("1126 P1-4: reports a pinned skip as skipped, not done", async () => {
+    mocks.runVskill.mockResolvedValue(okRun("architect: pinned at 2.2.0 — skipping\n\nNo updates available"));
+    const req = fakeReq("http://localhost/api/skills/myPlugin/architect/update");
+    const res = fakeRes();
+    await handler(req, res, { plugin: "myPlugin", skill: "architect" });
+    expect(mocks.sendSSEDone).toHaveBeenCalledWith(
+      res,
+      expect.objectContaining({ status: "skipped", reason: "pinned", pinnedVersion: "2.2.0" }),
+    );
+  });
+
+  it("1126 P0-1: an exit-0 failure line ends with done{status:error} and the error text", async () => {
+    mocks.runVskill.mockResolvedValue(okRun("  architect: could not fetch update from any source"));
+    const req = fakeReq("http://localhost/api/skills/myPlugin/architect/update");
+    const res = fakeRes();
+    await handler(req, res, { plugin: "myPlugin", skill: "architect" });
+    expect(mocks.sendSSE).toHaveBeenCalledWith(
+      res,
+      "error",
+      expect.objectContaining({ error: "could not fetch update from any source" }),
+    );
+    expect(mocks.sendSSEDone).toHaveBeenCalledWith(
+      res,
+      expect.objectContaining({ status: "error", error: "could not fetch update from any source" }),
     );
   });
 
   it("streams SSE error when update fails", async () => {
-    mocks.execFileSync.mockImplementation(() => {
-      throw new Error("scan FAILED");
-    });
+    mocks.runVskill.mockResolvedValue(okRun("", 1, "scan FAILED"));
 
     const req = fakeReq("http://localhost/api/skills/myPlugin/architect/update");
     const res = fakeRes();
@@ -812,7 +849,10 @@ describe("T-011: POST /api/skills/:plugin/:skill/update", () => {
       "error",
       expect.objectContaining({ error: expect.any(String) }),
     );
-    expect(mocks.sendSSEDone).toHaveBeenCalled();
+    expect(mocks.sendSSEDone).toHaveBeenCalledWith(
+      res,
+      expect.objectContaining({ status: "error", error: "scan FAILED" }),
+    );
   });
 });
 
@@ -838,8 +878,8 @@ describe("T-012: POST /api/skills/batch-update", () => {
     mocks.readBody.mockResolvedValue({
       skills: ["architect", "pm"],
     });
-    // 0747 F-001: batch route uses execFileSync (argv form).
-    mocks.execFileSync.mockReturnValue("ok");
+    // 1126: batch runs each skill through runVskill (async argv).
+    mocks.runVskill.mockResolvedValue(okRun());
 
     const req = fakeReq("http://localhost/api/skills/batch-update");
     const res = fakeRes();
@@ -873,12 +913,10 @@ describe("T-012: POST /api/skills/batch-update", () => {
     mocks.readBody.mockResolvedValue({
       skills: ["architect", "pm"],
     });
-    // 0747 F-001: batch route uses execFileSync. First skill fails, second succeeds.
-    mocks.execFileSync
-      .mockImplementationOnce(() => {
-        throw new Error("scan FAILED");
-      })
-      .mockReturnValueOnce("ok");
+    // 1126: the CLI exits 0 on a scan refusal; the classifier still reports it as an error.
+    mocks.runVskill
+      .mockResolvedValueOnce(okRun("  Refusing to update architect: scan FAILED"))
+      .mockResolvedValueOnce(okRun());
 
     const req = fakeReq("http://localhost/api/skills/batch-update");
     const res = fakeRes();
@@ -902,8 +940,39 @@ describe("T-012: POST /api/skills/batch-update", () => {
     // batch:done summary
     expect(mocks.sendSSEDone).toHaveBeenCalledWith(
       res,
-      expect.objectContaining({ updated: 1, failed: 1 }),
+      expect.objectContaining({ updated: 1, failed: 1, skipped: 0 }),
     );
+  });
+
+  it("1126 P0-2: counts pinned skips and emits skill:skipped", async () => {
+    mocks.readBody.mockResolvedValue({ skills: ["architect", "pm"] });
+    mocks.runVskill
+      .mockResolvedValueOnce(okRun("architect: pinned at 1.0.0 — skipping"))
+      .mockResolvedValueOnce(okRun("pm: 1.0.0 -> 1.1.0"));
+    const req = fakeReq("http://localhost/api/skills/batch-update");
+    const res = fakeRes();
+    await handler(req, res);
+    const sseEvents = mocks.sendSSE.mock.calls.map((c: any[]) => [c[1], c[2]] as [string, any]);
+    const skippedEvents = sseEvents.filter(([e]) => e === "skill:skipped");
+    expect(skippedEvents).toHaveLength(1);
+    expect(skippedEvents[0][1]).toEqual(expect.objectContaining({ skill: "architect", reason: "pinned", pinnedVersion: "1.0.0" }));
+    const doneEvents = sseEvents.filter(([e]) => e === "skill:done");
+    expect(doneEvents[0][1]).toEqual(expect.objectContaining({ skill: "pm", version: "1.1.0" }));
+    expect(mocks.sendSSEDone).toHaveBeenCalledWith(res, { updated: 1, failed: 0, skipped: 1 });
+  });
+
+  it("1126 P0-2: passes the lock key (leaf) for owner/repo/skill names", async () => {
+    mocks.readBody.mockResolvedValue({ skills: ["owner/repo/architect"] });
+    mocks.runVskill.mockResolvedValueOnce(okRun("architect: 1.0.0 -> 1.1.0"));
+    mocks.readLockfile.mockImplementation((dir: string) =>
+      dir === "/root"
+        ? { version: 1, agents: [], skills: { architect: { version: "1.0.0", sha: "", tier: "", installedAt: "", source: "github:owner/repo" } } }
+        : null,
+    );
+    const req = fakeReq("http://localhost/api/skills/batch-update");
+    const res = fakeRes();
+    await handler(req, res);
+    expect(mocks.runVskill.mock.calls[0][0]).toEqual(["update", "architect"]);
   });
 
   it("returns 409 when batch update is already in progress", async () => {
@@ -914,7 +983,7 @@ describe("T-012: POST /api/skills/batch-update", () => {
       resolveFirst = r;
     });
     mocks.readBody.mockReturnValueOnce(deferredBody);
-    mocks.execFileSync.mockReturnValue("ok");
+    mocks.runVskill.mockResolvedValue(okRun());
 
     const req1 = fakeReq("http://localhost/api/skills/batch-update");
     const res1 = fakeRes();

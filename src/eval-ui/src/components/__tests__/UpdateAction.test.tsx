@@ -36,6 +36,7 @@ vi.mock("../ChangelogViewer", () => ({
 type FetchResponse =
   | { type: "success"; version: string }
   | { type: "error"; status: number; body: string }
+  | { type: "pinned"; pinnedVersion: string }
   | { type: "network" };
 
 let nextFetchResponse: FetchResponse = { type: "success", version: "1.4.0" };
@@ -77,6 +78,18 @@ vi.mock("../../api", async (importOriginal) => {
         const resp = nextFetchResponse;
         if (resp.type === "network") {
           throw new TypeError("Failed to fetch");
+        }
+        if (resp.type === "pinned") {
+          return {
+            ok: false,
+            status: 200,
+            body: `Pinned at ${resp.pinnedVersion}; unpin it to update.`,
+            version: resp.pinnedVersion,
+            outcome: "skipped",
+            skipped: true,
+            skipReason: "pinned",
+            pinnedVersion: resp.pinnedVersion,
+          };
         }
         if (resp.type === "error") {
           return {
@@ -322,6 +335,26 @@ describe("UpdateAction — POST-based update (0736 US-001)", () => {
       expect(allText).not.toContain("Stream error");
       // Must contain status code.
       expect(allText).toMatch(/500/);
+    } finally {
+      h.unmount();
+    }
+  });
+
+  it("1126 P1-4: a pinned skill is skipped, the button shows the pin, no 'Updated' toast", async () => {
+    nextFetchResponse = { type: "pinned", pinnedVersion: "1.0.0" };
+    const h = await mountAction({ updateAvailable: true, currentVersion: "1.0.0", latestVersion: "1.4.0" });
+    try {
+      const btn = h.container.querySelector("[data-testid='update-action-button']") as HTMLButtonElement;
+      await h.act(async () => {
+        btn.click();
+        await flushMicrotasks();
+      });
+      expect(btn.textContent).toBe("📌 Pinned at 1.0.0");
+      expect(btn.disabled).toBe(true);
+      expect(onSkillUpdatedSpy).not.toHaveBeenCalled();
+      const toasts = Array.from(document.querySelectorAll("[data-testid='toast-item']")).map((t) => t.textContent).join(" | ");
+      expect(toasts).not.toMatch(/Updated skill-x/);
+      expect(toasts).toMatch(/pinned at 1\.0\.0/);
     } finally {
       h.unmount();
     }

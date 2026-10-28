@@ -7,7 +7,7 @@ import { ChangelogViewer } from "../../components/ChangelogViewer";
 import { buildSubmitUrl } from "../../utils/submit-url";
 import { formatTierLabel } from "../../components/FindSkillsPalette/components/TierBadge";
 import type { VersionEntry, VersionDiff } from "../../types";
-import type { SkillVersionsEnvelope } from "../../api";
+import type { SkillVersionsEnvelope, SkillPinState } from "../../api";
 import { ProviderChip } from "../../components/ProviderChip";
 
 const CERT_COLORS: Record<string, { bg: string; text: string }> = {
@@ -89,6 +89,49 @@ export function VersionHistoryPanel() {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // 1126 P1-3 / P2-8: pin state and per-row "Install this version".
+  const [pinState, setPinState] = useState<SkillPinState | null>(null);
+  const [keepPinned, setKeepPinned] = useState(true);
+  const [rowAction, setRowAction] = useState<{ version: string; status: "running" | "error"; error?: string } | null>(null);
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const refreshPinState = useCallback(async () => {
+    try {
+      setPinState((await api.getSkillPinState(plugin, skill)) ?? null);
+    } catch {
+      setPinState(null);
+    }
+  }, [plugin, skill]);
+  useEffect(() => {
+    if (skillInfo?.origin !== "installed") return;
+    void refreshPinState();
+  }, [skillInfo?.origin, refreshPinState]);
+
+  const handleTogglePin = useCallback(async (version?: string) => {
+    if (!pinState?.found) return;
+    setPinBusy(true);
+    setPinError(null);
+    try {
+      setPinState(pinState.pinned ? await api.unpinSkill(plugin, skill) : await api.pinSkill(plugin, skill, version));
+    } catch (err) {
+      setPinError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPinBusy(false);
+    }
+  }, [pinState, plugin, skill]);
+
+  const handleInstallVersion = useCallback(async (version: string) => {
+    setRowAction({ version, status: "running" });
+    try {
+      const out = await api.installSkillVersion(plugin, skill, version, keepPinned);
+      setPinState(out);
+      setRowAction(null);
+      onSkillUpdated(plugin, skill);
+    } catch (err) {
+      setRowAction({ version, status: "error", error: err instanceof Error ? err.message : String(err) });
+    }
+  }, [plugin, skill, keepPinned, onSkillUpdated]);
+
   // Pagination sentinel
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -160,8 +203,19 @@ export function VersionHistoryPanel() {
         // mutate(versions key) + dismissPushUpdate) so the bell, sidebar
         // arrow, and Update button all clear together with the Versions tab.
         onSkillUpdated(plugin, skill);
+      } else if (result.skipped) {
+        // 1126 P1-4: pinned is not "done".
+        setUpdateStatus("error");
+        setUpdateError(
+          result.skipReason === "pinned"
+            ? `Pinned at ${result.pinnedVersion ?? "this version"}; unpin it to update.`
+            : result.body,
+        );
+        void refreshPinState();
       } else {
-        const msg = `Update failed (HTTP ${result.status}): ${result.body || "no response body"}`;
+        // 1126 P0-1: show the server's error text.
+        const http = result.status !== 200 ? ` (HTTP ${result.status})` : "";
+        const msg = `Update failed${http}${result.body ? `: ${result.body}` : ""}`;
         setUpdateStatus("error");
         setUpdateError(msg);
       }
@@ -178,7 +232,7 @@ export function VersionHistoryPanel() {
         abortRef.current = null;
       }
     }
-  }, [plugin, skill, onSkillUpdated]);
+  }, [plugin, skill, onSkillUpdated, refreshPinState]);
 
   // Cleanup in-flight request on unmount
   useEffect(() => {
@@ -324,7 +378,22 @@ export function VersionHistoryPanel() {
               View changes since installed
             </button>
           )}
-          {showAutoLink && updateStatus !== "done" && (
+          {pinState?.pinned && (
+            <span className="flex items-center gap-1.5" data-testid="versions-pinned">
+              <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                📌 Pinned at {pinState.pinnedVersion}
+              </span>
+              <button
+                onClick={() => { void handleTogglePin(); }}
+                disabled={pinBusy}
+                className="btn btn-secondary text-[11px]"
+                data-testid="versions-unpin"
+              >
+                Unpin
+              </button>
+            </span>
+          )}
+          {showAutoLink && updateStatus !== "done" && !pinState?.pinned && (
             updateStatus === "error" ? (
               <span className="flex items-center gap-1.5">
                 <span className="text-[11px]" style={{ color: "var(--red)" }}>
@@ -362,6 +431,20 @@ export function VersionHistoryPanel() {
         </div>
       </div>
 
+      {pinState?.found && pinState.canInstallVersion && (
+        <label
+          className="flex items-center gap-2 text-[11px] mb-3"
+          style={{ color: "var(--text-tertiary)" }}
+          data-testid="versions-keep-pinned"
+        >
+          <input type="checkbox" checked={keepPinned} onChange={(e) => setKeepPinned(e.target.checked)} />
+          Pin the version I install (unchecked: unpin after install so it keeps updating)
+        </label>
+      )}
+      {pinError && (
+        <div className="text-[11px] mb-3" role="alert" style={{ color: "var(--red)" }}>{pinError}</div>
+      )}
+
       {/* Compare hint */}
       {selectedA && !selectedB && (
         <div className="text-[11px] mb-3 px-3 py-2 rounded-lg" style={{ background: "var(--accent-muted)", color: "var(--accent)" }}>
@@ -383,9 +466,12 @@ export function VersionHistoryPanel() {
             const isSelected = v.version === selectedA || v.version === selectedB;
             const isInstalled = v.isInstalled;
 
+            const canInstall = Boolean(pinState?.found && pinState.canInstallVersion);
+            const rowBusy = rowAction?.version === v.version && rowAction.status === "running";
+            const rowError = rowAction?.version === v.version && rowAction.status === "error" ? rowAction.error : null;
             return (
+              <div key={v.version} data-testid="version-row">
               <button
-                key={v.version}
                 onClick={() => handleVersionClick(v.version)}
                 className="w-full text-left pl-8 pr-4 py-3 relative rounded-lg transition-all duration-150"
                 style={{
@@ -448,6 +534,36 @@ export function VersionHistoryPanel() {
                   );
                 })()}
               </button>
+              {pinState?.found && (
+                <div className="flex items-center gap-2 pl-8 pb-2" data-testid="version-row-actions">
+                  {!isInstalled && canInstall && (
+                    <button
+                      type="button"
+                      onClick={() => { void handleInstallVersion(v.version); }}
+                      disabled={rowAction?.status === "running"}
+                      className="btn btn-ghost text-[11px]"
+                      data-testid="version-row-install"
+                    >
+                      {rowBusy ? `Installing ${v.version}…` : "Install this version"}
+                    </button>
+                  )}
+                  {isInstalled && (
+                    <button
+                      type="button"
+                      onClick={() => { void handleTogglePin(v.version); }}
+                      disabled={pinBusy}
+                      className="btn btn-ghost text-[11px]"
+                      data-testid="version-row-pin"
+                    >
+                      {pinState.pinned ? `Unpin ${pinState.pinnedVersion ?? ""}`.trim() : "Pin this version"}
+                    </button>
+                  )}
+                  {rowError && (
+                    <span className="text-[11px]" role="alert" style={{ color: "var(--red)" }}>{rowError}</span>
+                  )}
+                </div>
+              )}
+              </div>
             );
           })}
         </div>

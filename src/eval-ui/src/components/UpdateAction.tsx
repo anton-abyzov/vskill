@@ -9,7 +9,7 @@ interface Props {
   skill: SkillInfo | null;
 }
 
-type ActionStatus = "idle" | "updating" | "done" | "error";
+type ActionStatus = "idle" | "updating" | "done" | "error" | "pinned";
 
 /**
  * 0736 US-001: "Update to X.Y.Z" CTA rendered inside the RightPanel Overview
@@ -27,6 +27,8 @@ export function UpdateAction({ skill }: Props) {
   const { toast } = useToast();
   const [status, setStatus] = useState<ActionStatus>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // 1126 P1-4: set when the server reports the skill is pinned.
+  const [pinnedAt, setPinnedAt] = useState<string | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
   const [changelogDiff, setChangelogDiff] = useState<VersionDiff | null>(null);
   const [changelogLoading, setChangelogLoading] = useState(false);
@@ -47,13 +49,34 @@ export function UpdateAction({ skill }: Props) {
       if (result.ok) {
         setStatus("done");
         onSkillUpdated(skill.plugin, skill.skill);
-        toast({ message: `Updated ${skill.skill}.`, severity: "success", durationMs: 4000 });
+        toast({
+          message: result.version ? `Updated ${skill.skill} to ${result.version}.` : `Updated ${skill.skill}.`,
+          severity: "success",
+          durationMs: 4000,
+        });
+      } else if (result.skipped && result.skipReason === "pinned") {
+        // 1126 P1-4: a pinned skill is skipped, not "Updated".
+        setStatus("pinned");
+        setPinnedAt(result.pinnedVersion ?? skill.currentVersion ?? null);
+        toast({
+          message: `${skill.skill} is pinned at ${result.pinnedVersion ?? "its version"}; unpin it to update.`,
+          severity: "info",
+          durationMs: 6000,
+        });
+      } else if (result.skipped) {
+        setStatus("idle");
+        setErrorMsg(result.body);
+        toast({ message: `${skill.skill} was not updated: ${result.body}`, severity: "info", durationMs: 6000 });
       } else {
-        const msg = `Update failed (HTTP ${result.status}): ${result.body}`;
+        // 1126 P0-1: the server's error text, not just the HTTP status.
+        // The stream answers 200 even when the update failed; show the HTTP
+        // status only when it is an HTTP failure.
+        const http = result.status !== 200 ? ` (HTTP ${result.status})` : "";
+        const msg = `Update failed${http}${result.body ? `: ${result.body}` : ""}`;
         setStatus("idle");
         setErrorMsg(msg);
         toast({
-          message: `Couldn't update ${skill.skill} — HTTP ${result.status}`,
+          message: `Couldn't update ${skill.skill}: ${result.body || `HTTP ${result.status}`}`,
           severity: "error",
           durationMs: 0,
           action: { label: "Retry", onInvoke: () => { void handleUpdate(); } },
@@ -112,10 +135,12 @@ export function UpdateAction({ skill }: Props) {
   const buttonLabel =
     status === "updating"
       ? "Updating…"
-      : latest
+      : status === "pinned"
+        ? `📌 Pinned at ${pinnedAt ?? "this version"}`
+        : latest
         ? `Update to ${latest}`
         : "Update";
-  const disabled = status === "updating";
+  const disabled = status === "updating" || status === "pinned";
 
   return (
     <div

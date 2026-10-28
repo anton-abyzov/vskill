@@ -50,6 +50,163 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 // tests only and is not part of the public API surface.
 export const __test__ = { chunkArray };
 
+export interface SseFrame {
+  event: string;
+  data: unknown;
+}
+
+/** Parse complete SSE frames (`event:` / `data:` blocks split by a blank line). */
+export function parseSseFrames(text: string): SseFrame[] {
+  const frames: SseFrame[] = [];
+  for (const block of text.split(/\r?\n\r?\n/)) {
+    if (!block.trim()) continue;
+    let event = "message";
+    const dataLines: string[] = [];
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+    }
+    if (dataLines.length === 0) continue;
+    const rawData = dataLines.join("\n");
+    let data: unknown = rawData;
+    try {
+      data = JSON.parse(rawData);
+    } catch {
+      /* keep the raw string */
+    }
+    frames.push({ event, data });
+  }
+  return frames;
+}
+
+/**
+ * Read an SSE response body to the end, calling `onFrame` for each complete
+ * frame as it arrives. Returns the raw text read.
+ */
+export async function readSseStream(res: Response, onFrame: (f: SseFrame) => void): Promise<string> {
+  if (!res.body) {
+    const text = await res.text();
+    parseSseFrames(text).forEach(onFrame);
+    return text;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let all = "";
+  let pending = "";
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.value) {
+      const text = decoder.decode(chunk.value, { stream: !chunk.done });
+      all += text;
+      pending += text;
+      const lastBreak = Math.max(pending.lastIndexOf("\n\n"), pending.lastIndexOf("\r\n\r\n"));
+      if (lastBreak >= 0) {
+        parseSseFrames(pending.slice(0, lastBreak)).forEach(onFrame);
+        pending = pending.slice(lastBreak).replace(/^(\r?\n)+/, "");
+      }
+    }
+    if (chunk.done) break;
+  }
+  if (pending.trim()) parseSseFrames(pending).forEach(onFrame);
+  return all;
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === "string" && v.length > 0 ? v : undefined;
+}
+function num(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+export interface SkillUpdateResult {
+  /** True only when the server's `done` frame says status "done". */
+  ok: boolean;
+  status: number;
+  /** Error text for failures; otherwise a short excerpt of the stream. */
+  body: string;
+  /** Installed version after the run (from `done.version`). */
+  version: string | undefined;
+  /** "done" | "skipped" | "error" from the `done` frame. */
+  outcome?: "done" | "skipped" | "error";
+  /** Set when the skill was not updated on purpose (pinned, plugin-owned). */
+  skipped?: boolean;
+  skipReason?: string;
+  pinnedVersion?: string;
+  /** True when the CLI found nothing newer. */
+  upToDate?: boolean;
+  fromVersion?: string;
+}
+
+/** Turn the frames of one `/update` stream into a truthful result. */
+export function interpretUpdateFrames(
+  httpOk: boolean,
+  httpStatus: number,
+  frames: SseFrame[],
+  raw = "",
+): SkillUpdateResult {
+  const done = [...frames].reverse().find((f) => f.event === "done");
+  const doneData = (done?.data ?? {}) as Record<string, unknown>;
+  const errFrame = [...frames].reverse().find((f) => f.event === "error");
+  const errText =
+    str((errFrame?.data as Record<string, unknown> | undefined)?.error) ??
+    str(doneData.error) ??
+    str(doneData.message);
+  const outcome = doneData.status === "done" || doneData.status === "skipped" || doneData.status === "error"
+    ? (doneData.status as "done" | "skipped" | "error")
+    : undefined;
+  const version = str(doneData.version);
+  if (!httpOk) {
+    return { ok: false, status: httpStatus, body: errText ?? raw.slice(0, 200), version, outcome };
+  }
+  if (!done) {
+    return {
+      ok: false,
+      status: httpStatus,
+      body: errText ?? "The update stream ended before the result arrived.",
+      version: undefined,
+    };
+  }
+  if (outcome === "skipped") {
+    return {
+      ok: false,
+      status: httpStatus,
+      body: str(doneData.message) ?? "Skipped",
+      version,
+      outcome,
+      skipped: true,
+      skipReason: str(doneData.reason),
+      pinnedVersion: str(doneData.pinnedVersion),
+      fromVersion: str(doneData.fromVersion),
+    };
+  }
+  if (outcome !== "done") {
+    return { ok: false, status: httpStatus, body: errText ?? "Update failed", version, outcome: outcome ?? "error" };
+  }
+  return {
+    ok: true,
+    status: httpStatus,
+    body: "",
+    version,
+    outcome,
+    upToDate: doneData.reason === "up-to-date",
+    fromVersion: str(doneData.fromVersion),
+  };
+}
+
+export type BatchUpdateEvent =
+  | { type: "start"; skill: string }
+  | { type: "done"; skill: string; version?: string; fromVersion?: string; upToDate?: boolean }
+  | { type: "skipped"; skill: string; reason?: string; pinnedVersion?: string; message?: string }
+  | { type: "error"; skill: string; error: string };
+
+export interface BatchUpdateSummary {
+  updated: number;
+  failed: number;
+  skipped: number;
+  /** True when the stream ended without the final `done` frame. */
+  incomplete?: boolean;
+}
+
 export function createSkillUpdatesApi(fetchJson: FetchJson) {
   return {
   // ---------------------------------------------------------------------------
@@ -83,15 +240,72 @@ export function createSkillUpdatesApi(fetchJson: FetchJson) {
     return fetchJson(`/api/skills/${plugin}/${skill}/versions/diff?from=${from}&to=${to}`);
   },
 
-  startBatchUpdate(skills: string[]): EventSource {
-    const url = `${BASE}/api/skills/batch-update`;
-    const es = new EventSource(url);
-    fetch(url, {
+  /**
+   * 1126 P0-2: batch update over a streamed POST. The old version opened an
+   * EventSource GET against this POST-only route (it always failed) and
+   * listened for `progress` events the server never sends. This reads the
+   * POST response stream and reports each `skill:start` / `skill:done` /
+   * `skill:skipped` / `skill:error` event, then resolves with the server's
+   * real counts. A 409 (another batch running) or a network error rejects.
+   */
+  async runBatchUpdate(
+    skills: string[],
+    opts: { onEvent?: (e: BatchUpdateEvent) => void; signal?: AbortSignal } = {},
+  ): Promise<BatchUpdateSummary> {
+    const res = await fetch(`${BASE}/api/skills/batch-update`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify({ skills }),
+      signal: opts.signal,
     });
-    return es;
+    if (!res.ok) {
+      const body = await res.json().catch(() => null) as { error?: string } | null;
+      throw new Error(body?.error || `Batch update failed (HTTP ${res.status})`);
+    }
+    let summary: BatchUpdateSummary | null = null;
+    const counts = { updated: 0, failed: 0, skipped: 0 };
+    await readSseStream(res, (frame) => {
+      const data = (frame.data ?? {}) as Record<string, unknown>;
+      const skill = typeof data.skill === "string" ? data.skill : "";
+      switch (frame.event) {
+        case "skill:start":
+          opts.onEvent?.({ type: "start", skill });
+          break;
+        case "skill:done":
+          counts.updated++;
+          opts.onEvent?.({
+            type: "done",
+            skill,
+            version: str(data.version),
+            fromVersion: str(data.fromVersion),
+            upToDate: data.reason === "up-to-date",
+          });
+          break;
+        case "skill:skipped":
+          counts.skipped++;
+          opts.onEvent?.({
+            type: "skipped",
+            skill,
+            reason: str(data.reason),
+            pinnedVersion: str(data.pinnedVersion),
+            message: str(data.message),
+          });
+          break;
+        case "skill:error":
+          counts.failed++;
+          opts.onEvent?.({ type: "error", skill, error: str(data.error) ?? "Update failed" });
+          break;
+        case "done":
+          summary = {
+            updated: num(data.updated) ?? counts.updated,
+            failed: num(data.failed) ?? counts.failed,
+            skipped: num(data.skipped) ?? counts.skipped,
+          };
+          break;
+      }
+    });
+    // A stream cut before `done` still reports what the rows saw.
+    return summary ?? { ...counts, incomplete: true };
   },
 
   /**
@@ -129,12 +343,7 @@ export function createSkillUpdatesApi(fetchJson: FetchJson) {
     plugin: string,
     skill: string,
     signalOrOpts?: AbortSignal | { signal?: AbortSignal; agentId?: string },
-  ): Promise<{
-    ok: boolean;
-    status: number;
-    body: string;
-    version: string | undefined;
-  }> {
+  ): Promise<SkillUpdateResult> {
     // 0747 T-010: backwards-compat — second arg may be a plain AbortSignal
     // (legacy call sites) OR an options object with `agentId` for per-location
     // update via `?agent=<id>` query param.
@@ -154,50 +363,18 @@ export function createSkillUpdatesApi(fetchJson: FetchJson) {
       headers: { "Content-Type": "application/json" },
       signal,
     });
-    // F-010: stream SSE frames as they arrive instead of buffering the full
-    // body via res.text(). This allows the backend's per-step progress events
-    // to flow through without blocking until the connection closes. Version is
-    // extracted from the last "done" event in the stream.
-    let version: string | undefined;
-    let bodyExcerpt = "";
+    // F-010: read SSE frames as they arrive. 1126 P0-1: the route always
+    // answers HTTP 200 (it is an SSE stream), so success comes from the
+    // `done` frame's status, and failures carry the `error` frame's text.
+    const frames: SseFrame[] = [];
+    let raw = "";
     if (res.body) {
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let done = false;
-      let accumulated = "";
-      while (!done) {
-        const chunk = await reader.read();
-        done = chunk.done;
-        if (chunk.value) {
-          const text = decoder.decode(chunk.value, { stream: !done });
-          accumulated += text;
-          if (bodyExcerpt.length < 200) {
-            bodyExcerpt += text;
-          }
-        }
-      }
-      // Parse the last "done" event from the accumulated SSE frames.
-      const doneMatch = accumulated.match(/event:\s*done[\s\S]*?data:\s*(\{[^\n]+\})/);
-      if (doneMatch) {
-        try {
-          const parsed = JSON.parse(doneMatch[1]) as { version?: string };
-          version = parsed.version;
-        } catch { /* noop */ }
-      }
-      bodyExcerpt = bodyExcerpt.slice(0, 200);
+      raw = await readSseStream(res, (f) => frames.push(f));
     } else {
-      // Fallback for environments where ReadableStream body is unavailable.
-      const rawBody = await res.text();
-      bodyExcerpt = rawBody.slice(0, 200);
-      const doneMatch = rawBody.match(/event:\s*done[\s\S]*?data:\s*(\{[^\n]+\})/);
-      if (doneMatch) {
-        try {
-          const parsed = JSON.parse(doneMatch[1]) as { version?: string };
-          version = parsed.version;
-        } catch { /* noop */ }
-      }
+      raw = await res.text();
+      frames.push(...parseSseFrames(raw));
     }
-    return { ok: res.ok, status: res.status, body: bodyExcerpt, version };
+    return interpretUpdateFrames(res.ok, res.status, frames, raw);
   },
 
   /**
@@ -222,14 +399,31 @@ export function createSkillUpdatesApi(fetchJson: FetchJson) {
   // Skill updates (version awareness)
   // ---------------------------------------------------------------------------
 
-  async getSkillUpdates(): Promise<SkillUpdateInfo[]> {
+  /**
+   * Installed skills with update info. Most callers (bell, sidebar merge)
+   * degrade to `[]` on failure. 1126 P1-6: the Updates view passes
+   * `{ throwOnError: true }` so a failed check shows an error with Retry
+   * instead of "All skills are up to date".
+   */
+  async getSkillUpdates(opts: { throwOnError?: boolean } = {}): Promise<SkillUpdateInfo[]> {
+    let res: Response;
     try {
-      const res = await fetch(`${BASE}/api/skills/updates`);
-      if (!res.ok) return [];
-      return await res.json();
-    } catch {
+      res = await fetch(`${BASE}/api/skills/updates`);
+    } catch (err) {
+      if (opts.throwOnError) {
+        throw new Error(`Couldn't reach Studio: ${err instanceof Error ? err.message : String(err)}`);
+      }
       return [];
     }
+    if (!res.ok) {
+      if (!opts.throwOnError) return [];
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error || `Couldn't check for updates (HTTP ${res.status})`);
+    }
+    const data = await res.json().catch(() => null);
+    if (Array.isArray(data)) return data as SkillUpdateInfo[];
+    if (opts.throwOnError) throw new Error("Couldn't check for updates: unexpected response");
+    return [];
   },
 
   /**

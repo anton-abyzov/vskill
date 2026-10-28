@@ -1,6 +1,8 @@
 import { createSkillUpdatesApi } from "./api-skill-updates";
+import { createSkillPinsApi } from "./api-skill-pins";
 export { __test__, mergeUpdatesIntoSkills } from "./api-skill-updates";
-export type { InstallLocation, SkillUpdateInfo } from "./api-skill-updates";
+export type { InstallLocation, SkillUpdateInfo, SkillUpdateResult, BatchUpdateEvent, BatchUpdateSummary } from "./api-skill-updates";
+export type { SkillPinState, FleetStatus, FleetMachineResult, FleetPushResult } from "./api-skill-pins";
 // API client for the eval server
 import type { EvalsFile, SkillInfo, BenchmarkResult, HistorySummary, HistoryFilter, HistoryCompareResult, CaseHistoryEntry, ImproveResult, SmartEditResult, DependenciesResponse, StatsResult, ProjectLayoutResponse, CreateSkillRequest, CreateSkillResponse, SaveDraftRequest, SaveDraftResponse, SkillCreatorStatus, GenerateSkillResponse, SkillFileEntry, SkillFileContent, SweepResult, CredentialStatus, OpenRouterModel, VersionEntry, AgentsResponse, StudioOp, Provenance, TransferEvent, SkillScope, SkillGroup, SkillSource, DetectEnginesResponse } from "./types";
 import { resolveSkillVersion } from "./version-resolver.js";
@@ -771,6 +773,7 @@ export const api = {
   },
 
   ...createSkillUpdatesApi(fetchJson),
+  ...createSkillPinsApi(),
 
   /**
    * 0838 T-007/T-008/T-009: source-origin name+author lookup helper.

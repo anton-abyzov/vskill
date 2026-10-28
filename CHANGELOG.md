@@ -2,6 +2,48 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Skill Studio reports what an update really did. A single update reads the final `done` status, so a pinned skip, a scan refusal or a failed fetch (which `vskill update` exits 0 for) is shown as skipped or failed with the CLI's message, and success names the new version.
+- "Update Selected" streams the batch over POST and shows each skill's result; the summary counts updated, skipped and failed skills.
+- Pinned skills report "skipped (pinned at X)" instead of a success.
+- The Updates view shows an error with Retry when the update check fails, instead of "All skills are up to date".
+- `vskill outdated` checks the project lock of the Studio root, not the server's working directory.
+- Studio runs the bundled CLI (`node dist/index.js`) asynchronously, falling back to `vskill` on PATH, so updates no longer block the server.
+
+### Added
+
+- Pin and unpin from the skill detail, the Versions tab and the Updates view.
+- "Install this version" on each row of the Versions tab, pinned by default.
+- "Push to all machines" in the skill detail when the SpecWithCode CLI is installed, with a result per machine. SpecWithCode builds without `fleet skills` show that it is not available yet.
+
+## [1.2.15] - 2026-10-27
+
+- Added the project-wake skill (1.0.5: offline owners, cancel and hold rules; Codex `openai.yaml`, `$` invocation).
+- The installed skill name always equals its folder name.
+- The npm release checks README badges before tagging.
+
+## [1.2.14] - 2026-10-26
+
+- README badges updated; no code changes.
+
+## [1.2.13] - 2026-10-26
+
+- Installed skill management stays reachable in Skill Studio.
+- Added the php2shell-check skill in a new security plugin.
+- Dependency updates.
+
+## [1.2.12] - 2026-10-21
+
+- Skill Studio completes engine-based authoring and runs native updates safely.
+- Install status and scoped removal follow the actual skill files.
+
+## [1.2.11] - 2026-10-21
+
+- The Studio install modal stays open with Done and Copy path; remove guards skill ids; the skill list refreshes after install or remove.
+- `submit` and `install` usage errors exit 1 with a message.
+- Tauri plugin crates aligned with npm; dependency updates.
+
 ## [1.2.10] - 2026-10-19
 
 ### Fixed

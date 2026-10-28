@@ -203,6 +203,8 @@ export interface BatchUpdateSummary {
   updated: number;
   failed: number;
   skipped: number;
+  /** Runs where the CLI found nothing newer; not counted in `updated`. */
+  upToDate: number;
   /** True when the stream ended without the final `done` frame. */
   incomplete?: boolean;
 }
@@ -263,7 +265,7 @@ export function createSkillUpdatesApi(fetchJson: FetchJson) {
       throw new Error(body?.error || `Batch update failed (HTTP ${res.status})`);
     }
     let summary: BatchUpdateSummary | null = null;
-    const counts = { updated: 0, failed: 0, skipped: 0 };
+    const counts = { updated: 0, failed: 0, skipped: 0, upToDate: 0 };
     await readSseStream(res, (frame) => {
       const data = (frame.data ?? {}) as Record<string, unknown>;
       const skill = typeof data.skill === "string" ? data.skill : "";
@@ -272,7 +274,8 @@ export function createSkillUpdatesApi(fetchJson: FetchJson) {
           opts.onEvent?.({ type: "start", skill });
           break;
         case "skill:done":
-          counts.updated++;
+          if (data.reason === "up-to-date") counts.upToDate++;
+          else counts.updated++;
           opts.onEvent?.({
             type: "done",
             skill,
@@ -300,6 +303,7 @@ export function createSkillUpdatesApi(fetchJson: FetchJson) {
             updated: num(data.updated) ?? counts.updated,
             failed: num(data.failed) ?? counts.failed,
             skipped: num(data.skipped) ?? counts.skipped,
+            upToDate: num(data.upToDate) ?? counts.upToDate,
           };
           break;
       }

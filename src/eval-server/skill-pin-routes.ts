@@ -107,7 +107,14 @@ export const FLEET_SKILLS_UNAVAILABLE =
 export interface FleetDeps {
   /** Finds the CLI; default checks PATH, then ~/.local/bin. */
   findCli: () => string | null;
+  /** Short probes: `fleet --help` and `fleet list --json`. */
   run: (command: string, args: string[]) => Promise<VskillRunResult>;
+  /**
+   * The push itself: `fleet skills --all` answers only after every machine
+   * reads back its installed version, so it needs far longer than a probe.
+   * Falls back to `run` when absent.
+   */
+  runPush?: (command: string, args: string[]) => Promise<VskillRunResult>;
 }
 
 function defaultFindCli(): string | null {
@@ -119,9 +126,14 @@ function defaultFindCli(): string | null {
   return existsSync(local) ? local : null;
 }
 
-const defaultFleetDeps: FleetDeps = {
+export const FLEET_PROBE_TIMEOUT_MS = 15_000;
+/** Installs over Connect on several machines; local install-version allows 180 s. */
+export const FLEET_PUSH_TIMEOUT_MS = 300_000;
+
+export const defaultFleetDeps: FleetDeps = {
   findCli: defaultFindCli,
-  run: (command, args) => runCommand(command, args, { cwd: homedir(), timeoutMs: 15_000 }),
+  run: (command, args) => runCommand(command, args, { cwd: homedir(), timeoutMs: FLEET_PROBE_TIMEOUT_MS }),
+  runPush: (command, args) => runCommand(command, args, { cwd: homedir(), timeoutMs: FLEET_PUSH_TIMEOUT_MS }),
 };
 
 /** True when help text lists `skills` under SUBCOMMANDS. */
@@ -304,12 +316,12 @@ export async function pushSkillToFleet(
   if (status.available && !status.skillsSupported) {
     return { status: 501, body: { ok: false, notAvailable: true, error: FLEET_SKILLS_UNAVAILABLE } };
   }
-  const run = await deps.run(cli, argv);
+  const run = await (deps.runPush ?? deps.run)(cli, argv);
   if (run.spawnError) {
     return { status: 502, body: { ok: false, error: `Could not start specweave-studio: ${run.spawnError}` } };
   }
   if (run.timedOut) {
-    return { status: 504, body: { ok: false, error: "specweave-studio fleet skills timed out." } };
+    return { status: 504, body: { ok: false, error: `specweave-studio fleet skills timed out after ${Math.round(FLEET_PUSH_TIMEOUT_MS / 1000)} s; machines may still finish the install.` } };
   }
   const results = parseFleetSkillsOutput(run.stdout);
   if (!results) {

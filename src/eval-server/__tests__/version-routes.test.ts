@@ -958,7 +958,21 @@ describe("T-012: POST /api/skills/batch-update", () => {
     expect(skippedEvents[0][1]).toEqual(expect.objectContaining({ skill: "architect", reason: "pinned", pinnedVersion: "1.0.0" }));
     const doneEvents = sseEvents.filter(([e]) => e === "skill:done");
     expect(doneEvents[0][1]).toEqual(expect.objectContaining({ skill: "pm", version: "1.1.0" }));
-    expect(mocks.sendSSEDone).toHaveBeenCalledWith(res, { updated: 1, failed: 0, skipped: 1 });
+    expect(mocks.sendSSEDone).toHaveBeenCalledWith(res, { updated: 1, failed: 0, skipped: 1, upToDate: 0 });
+  });
+
+  it("review: an 'already up to date' run is counted as upToDate, not updated", async () => {
+    mocks.readBody.mockResolvedValue({ skills: ["architect", "pm"] });
+    mocks.runVskill
+      .mockResolvedValueOnce(okRun("architect: already up to date"))
+      .mockResolvedValueOnce(okRun("pm: 1.0.0 -> 1.1.0"));
+    const req = fakeReq("http://localhost/api/skills/batch-update");
+    const res = fakeRes();
+    await handler(req, res);
+    const sseEvents = mocks.sendSSE.mock.calls.map((c: any[]) => [c[1], c[2]] as [string, any]);
+    const doneEvents = sseEvents.filter(([e]) => e === "skill:done");
+    expect(doneEvents[0][1]).toEqual(expect.objectContaining({ skill: "architect", reason: "up-to-date" }));
+    expect(mocks.sendSSEDone).toHaveBeenCalledWith(res, { updated: 1, failed: 0, skipped: 0, upToDate: 1 });
   });
 
   it("1126 P0-2: passes the lock key (leaf) for owner/repo/skill names", async () => {

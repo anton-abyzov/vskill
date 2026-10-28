@@ -38,6 +38,37 @@ export interface FleetPushResult {
   results?: FleetMachineResult[];
 }
 
+/**
+ * Window event fired after a pin changes, so the views showing that skill
+ * (Update button, pin row, Versions tab) can drop stale "pinned" state.
+ */
+export const SKILL_PIN_CHANGED_EVENT = "studio:skill-pin-changed";
+
+export interface SkillPinChangedDetail {
+  plugin: string;
+  skill: string;
+  pinned: boolean;
+  pinnedVersion: string | null;
+  /** Which view made the change, so it can ignore its own event. */
+  source?: string;
+}
+
+export function emitSkillPinChanged(detail: SkillPinChangedDetail): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<SkillPinChangedDetail>(SKILL_PIN_CHANGED_EVENT, { detail }));
+}
+
+/** Subscribe to pin changes; returns the unsubscribe function. */
+export function onSkillPinChanged(handler: (detail: SkillPinChangedDetail) => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const listener = (e: Event) => {
+    const detail = (e as CustomEvent<SkillPinChangedDetail>).detail;
+    if (detail) handler(detail);
+  };
+  window.addEventListener(SKILL_PIN_CHANGED_EVENT, listener);
+  return () => window.removeEventListener(SKILL_PIN_CHANGED_EVENT, listener);
+}
+
 /** JSON body with `error` turned into a thrown Error carrying the server's text. */
 async function json<T>(res: Response): Promise<T> {
   const body = (await res.json().catch(() => null)) as (T & { error?: string }) | null;

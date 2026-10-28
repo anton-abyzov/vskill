@@ -839,8 +839,8 @@ function renderSkillDetail(
             PrivateBadge on the header for private-repo skills. */}
         <DetailHeaderWithPrivacy skill={skill} />
       </div>
-      <UpdateAction skill={skill} />
-      <SkillVersionControls skill={skill} />
+      <UpdateAction key={`update-${skill.plugin}/${skill.skill}`} skill={skill} />
+      <SkillVersionControls key={`pin-${skill.plugin}/${skill.skill}`} skill={skill} />
       {installedBanner}
       {skill.origin === "installed" && skill.scopeV2 !== "available-plugin" && (
         <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--border-default)" }}>

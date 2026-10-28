@@ -51,13 +51,25 @@ describe("api.runBatchUpdate", () => {
     expect(url).toBe("/api/skills/batch-update");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body)).toEqual({ skills: ["architect", "pm"] });
-    expect(summary).toEqual({ updated: 1, failed: 0, skipped: 1 });
+    expect(summary).toEqual({ updated: 1, failed: 0, skipped: 1, upToDate: 0 });
     expect(events).toEqual([
       { type: "start", skill: "architect" },
       { type: "done", skill: "architect", version: "2.0.0", fromVersion: undefined, upToDate: false },
       { type: "start", skill: "pm" },
       { type: "skipped", skill: "pm", reason: "pinned", pinnedVersion: "1.0.0", message: undefined },
     ]);
+  });
+
+  it("review: counts an 'already up to date' run apart from updated", async () => {
+    const sse =
+      'event: skill:start\ndata: {"skill":"architect"}\n\n' +
+      'event: skill:done\ndata: {"skill":"architect","version":"2.0.0","reason":"up-to-date"}\n\n';
+    mockFetch.mockResolvedValue(new Response(sse, { status: 200 }));
+    const events: unknown[] = [];
+    const summary = await api.runBatchUpdate(["architect"], { onEvent: (e) => events.push(e) });
+    // Stream cut before `done`: the client's own counts.
+    expect(summary).toEqual({ updated: 0, failed: 0, skipped: 0, upToDate: 1, incomplete: true });
+    expect(events[1]).toEqual(expect.objectContaining({ type: "done", upToDate: true }));
   });
 
   it("rejects with the server's message on 409", async () => {

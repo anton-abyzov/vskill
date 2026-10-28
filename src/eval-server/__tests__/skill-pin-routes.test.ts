@@ -11,6 +11,18 @@ vi.mock("node:os", async (importOriginal) => {
   return { ...actual, homedir: () => env.home };
 });
 
+const runCommandSpy = vi.hoisted(() => vi.fn());
+vi.mock("../vskill-cli-runner.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    runCommand: (...args: unknown[]) => {
+      runCommandSpy(...args);
+      return Promise.resolve({ code: 0, stdout: "", stderr: "", timedOut: false, bundled: false });
+    },
+  };
+});
+
 import {
   buildFleetSkillsArgv,
   buildInstallVersionArgv,
@@ -23,6 +35,9 @@ import {
   pushSkillToFleet,
   registerSkillPinRoutes,
   FLEET_SKILLS_UNAVAILABLE,
+  FLEET_PROBE_TIMEOUT_MS,
+  FLEET_PUSH_TIMEOUT_MS,
+  defaultFleetDeps,
   type FleetDeps,
 } from "../skill-pin-routes.js";
 import type { VskillRunResult } from "../vskill-cli-runner.js";
@@ -279,6 +294,33 @@ describe("fleet push", () => {
     const bad = await call(routes["POST /api/skills/:plugin/:skill/push-fleet"], { plugin: "p", skill: "foo" }, { version: "latest" });
     expect(bad.status).toBe(400);
     expect(run.mock.calls.filter((c) => (c[1] as string[])[1] === "skills")).toHaveLength(1);
+  });
+
+  it("review: the push runs on its own long-timeout runner, not the 15 s probe runner", async () => {
+    const run = vi.fn(async (_c: string, args: string[]) => (args[1] === "--help" ? res(helpWithSkills) : res("")));
+    const runPush = vi.fn(async () => res('[{"machine":"m1","phase":"installed","installedVersion":"1.0.0"}]'));
+    const out = await pushSkillToFleet("o/r/s", "1.0.0", true, { findCli: () => "/x/specweave-studio", run, runPush });
+    expect(out.status).toBe(200);
+    expect(runPush).toHaveBeenCalledWith("/x/specweave-studio", [
+      "fleet", "skills", "--all", "--skill", "o/r/s", "--version", "1.0.0", "--json",
+    ]);
+    expect(run.mock.calls.some((c) => (c[1] as string[])[1] === "skills")).toBe(false);
+
+    runCommandSpy.mockClear();
+    await defaultFleetDeps.run("/x/specweave-studio", ["fleet", "--help"]);
+    await defaultFleetDeps.runPush!("/x/specweave-studio", ["fleet", "skills"]);
+    expect(runCommandSpy.mock.calls[0][2]).toEqual(expect.objectContaining({ timeoutMs: FLEET_PROBE_TIMEOUT_MS }));
+    expect(runCommandSpy.mock.calls[1][2]).toEqual(expect.objectContaining({ timeoutMs: FLEET_PUSH_TIMEOUT_MS }));
+    expect(FLEET_PROBE_TIMEOUT_MS).toBe(15_000);
+    expect(FLEET_PUSH_TIMEOUT_MS).toBeGreaterThanOrEqual(180_000);
+  });
+
+  it("review: a push that outlives its timeout says the machines may still finish", async () => {
+    const run = vi.fn(async () => res(helpWithSkills));
+    const runPush = vi.fn(async () => res("", null, { timedOut: true }));
+    const out = await pushSkillToFleet("o/r/s", "1.0.0", true, { findCli: () => "/x/specweave-studio", run, runPush });
+    expect(out.status).toBe(504);
+    expect(String(out.body.error)).toMatch(/timed out after 300 s; machines may still finish/);
   });
 
   it("status route hides the CLI's absolute path", async () => {

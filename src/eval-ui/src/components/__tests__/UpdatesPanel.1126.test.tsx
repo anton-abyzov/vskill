@@ -88,6 +88,28 @@ describe("UpdatesPanel 1126", () => {
     }
   });
 
+  it("review: an up-to-date row reads 'already up to date', not 'done'", async () => {
+    m.getSkillUpdates.mockResolvedValue(rows);
+    m.runBatchUpdate.mockImplementation(async (_skills: string[], opts: { onEvent: (e: unknown) => void }) => {
+      opts.onEvent({ type: "start", skill: "owner/repo/alpha" });
+      opts.onEvent({ type: "done", skill: "owner/repo/alpha", version: "1.0.0", upToDate: true });
+      opts.onEvent({ type: "start", skill: "owner/repo/beta" });
+      opts.onEvent({ type: "done", skill: "owner/repo/beta", version: "2.1.0" });
+      return { updated: 1, failed: 0, skipped: 0, upToDate: 1 };
+    });
+    const h = await mount();
+    try {
+      await h.click(h.button("Select All"));
+      await h.click(h.button("Update Selected (2)"));
+      const text = h.container.textContent ?? "";
+      expect(text).toContain("already up to date");
+      expect(text).toContain("done 2.1.0");
+      expect(text).toContain("Updated 1, 1 already up to date, 0 failed");
+    } finally {
+      h.unmount();
+    }
+  });
+
   it("a pinned skip is shown as not updated, with the pin", async () => {
     m.getSkillUpdates.mockResolvedValue([rows[0]]);
     m.postSkillUpdate.mockResolvedValue({ ok: false, status: 200, body: "Pinned", version: "1.0.0", skipped: true, skipReason: "pinned", pinnedVersion: "1.0.0" });

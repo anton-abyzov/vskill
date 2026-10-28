@@ -212,6 +212,8 @@ export function registerSkillUpdateRoutes(router: Router, getRoot: () => string)
       let updated = 0;
       let failed = 0;
       let skipped = 0;
+      // A run that found nothing newer changed nothing: not "updated".
+      let upToDate = 0;
 
       for (const raw of skills) {
         const skill = typeof raw === "string" ? raw : String(raw);
@@ -234,7 +236,8 @@ export function registerSkillUpdateRoutes(router: Router, getRoot: () => string)
             ...(result.fromVersion ? { fromVersion: result.fromVersion } : {}),
             ...(result.reason ? { reason: result.reason } : {}),
           });
-          updated++;
+          if (result.reason === "up-to-date") upToDate++;
+          else updated++;
         } else if (result.status === "skipped") {
           sendSSE(res, "skill:skipped", {
             skill,
@@ -248,7 +251,7 @@ export function registerSkillUpdateRoutes(router: Router, getRoot: () => string)
           failed++;
         }
       }
-      sendSSEDone(res, { updated, failed, skipped });
+      sendSSEDone(res, { updated, failed, skipped, upToDate });
     } finally {
       batchUpdateInProgress = false;
     }

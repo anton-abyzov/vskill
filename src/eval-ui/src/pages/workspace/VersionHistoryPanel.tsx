@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { useWorkspace } from "./WorkspaceContext";
 import { useStudio } from "../../StudioContext";
 import { api } from "../../api";
+import { emitSkillPinChanged } from "../../api-skill-pins";
 import { useSWR, mutate } from "../../hooks/useSWR";
 import { ChangelogViewer } from "../../components/ChangelogViewer";
 import { buildSubmitUrl } from "../../utils/submit-url";
@@ -112,7 +113,9 @@ export function VersionHistoryPanel() {
     setPinBusy(true);
     setPinError(null);
     try {
-      setPinState(pinState.pinned ? await api.unpinSkill(plugin, skill) : await api.pinSkill(plugin, skill, version));
+      const next = pinState.pinned ? await api.unpinSkill(plugin, skill) : await api.pinSkill(plugin, skill, version);
+      setPinState(next);
+      emitSkillPinChanged({ plugin, skill, pinned: Boolean(next?.pinned), pinnedVersion: next?.pinnedVersion ?? null, source: "versions" });
     } catch (err) {
       setPinError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -125,6 +128,7 @@ export function VersionHistoryPanel() {
     try {
       const out = await api.installSkillVersion(plugin, skill, version, keepPinned);
       setPinState(out);
+      emitSkillPinChanged({ plugin, skill, pinned: Boolean(out?.pinned), pinnedVersion: out?.pinnedVersion ?? null, source: "versions" });
       setRowAction(null);
       onSkillUpdated(plugin, skill);
     } catch (err) {

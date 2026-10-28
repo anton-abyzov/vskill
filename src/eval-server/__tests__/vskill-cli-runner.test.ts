@@ -56,6 +56,8 @@ describe("runCommand", () => {
     expect(classifyUpdateRun(r)).toEqual(
       expect.objectContaining({ status: "error", message: expect.stringContaining("not found") }),
     );
+    // Desktop has no bundled CLI yet (1126 known gap): say how to get one.
+    expect(classifyUpdateRun(r).message).toContain("npm i -g vskill");
   }, 30_000);
 
   it("kills a run that exceeds its timeout", async () => {

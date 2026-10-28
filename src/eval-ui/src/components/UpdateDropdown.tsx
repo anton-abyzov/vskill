@@ -121,7 +121,9 @@ export default function UpdateDropdown({
         onSkillUpdated(plugin, skill);
         toast({
           severity: "success",
-          message: `Updated ${skill} in ${count} ${noun}.`,
+          message: result.upToDate
+            ? `${skill} is already up to date${result.version ? ` (${result.version})` : ""}.`
+            : `Updated ${skill} in ${count} ${noun}.`,
           durationMs: 4000,
         });
       } else if (result.skipped) {

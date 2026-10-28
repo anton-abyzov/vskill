@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { FleetMachineResult, FleetStatus, SkillPinState } from "../api";
+import { emitSkillPinChanged, onSkillPinChanged } from "../api-skill-pins";
 import type { SkillInfo, VersionEntry } from "../types";
 
 interface Props {
@@ -34,11 +35,17 @@ export function SkillVersionControls({ skill }: Props) {
   const eligible = Boolean(skill && skill.origin === "installed" && skill.scopeV2 !== "available-plugin");
 
   useEffect(() => {
-    if (!eligible) return;
-    let cancelled = false;
+    // Per-skill state must not carry over to the next skill: a stale
+    // pushVersion would push skill A's version of B to every machine.
     setPin(null);
+    setPinError(null);
+    setVersions([]);
+    setPushVersion("");
+    setPushPin(true);
     setPushResults(null);
     setPushError(null);
+    if (!eligible) return;
+    let cancelled = false;
     // Promise.resolve().then: a missing/mocked api method becomes a rejection.
     Promise.resolve().then(() => api.getSkillPinState(plugin, name))
       .then((s) => { if (!cancelled) setPin(s); })
@@ -63,12 +70,31 @@ export function SkillVersionControls({ skill }: Props) {
     if (!pushVersion && pin?.installedVersion) setPushVersion(pin.installedVersion);
   }, [pin?.installedVersion, pushVersion]);
 
+  // A pin changed elsewhere (Versions tab): re-read it.
+  useEffect(() => {
+    if (!eligible) return;
+    return onSkillPinChanged((d) => {
+      if (d.source === "controls" || d.plugin !== plugin || d.skill !== name) return;
+      Promise.resolve().then(() => api.getSkillPinState(plugin, name))
+        .then((s) => setPin(s))
+        .catch(() => { /* keep the last known state */ });
+    });
+  }, [eligible, plugin, name]);
+
   const togglePin = useCallback(async () => {
     if (!pin?.found) return;
     setPinBusy(true);
     setPinError(null);
     try {
-      setPin(pin.pinned ? await api.unpinSkill(plugin, name) : await api.pinSkill(plugin, name));
+      const next = pin.pinned ? await api.unpinSkill(plugin, name) : await api.pinSkill(plugin, name);
+      setPin(next);
+      emitSkillPinChanged({
+        plugin,
+        skill: name,
+        pinned: Boolean(next?.pinned),
+        pinnedVersion: next?.pinnedVersion ?? null,
+        source: "controls",
+      });
     } catch (err) {
       setPinError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -78,6 +104,13 @@ export function SkillVersionControls({ skill }: Props) {
 
   const push = useCallback(async () => {
     if (!pushVersion) return;
+    // One click changes every machine: name the version and the machines first.
+    const machines = fleet?.machines ?? null;
+    const where = machines && machines.length > 0
+      ? `${machines.length} machine${machines.length === 1 ? "" : "s"} (${machines.join(", ")})`
+      : "every fleet machine";
+    const question = `Install ${pin?.fullName ?? name}@${pushVersion} on ${where}${pushPin ? ", pinned" : ""}?`;
+    if (typeof window !== "undefined" && typeof window.confirm === "function" && !window.confirm(question)) return;
     setPushing(true);
     setPushError(null);
     setPushResults(null);
@@ -85,7 +118,7 @@ export function SkillVersionControls({ skill }: Props) {
     setPushing(false);
     if (out.results) setPushResults(out.results);
     if (!out.ok) setPushError(out.error ?? (out.results ? "Some machines did not install it." : "Push failed"));
-  }, [plugin, name, pushVersion, pushPin, pin?.fullName]);
+  }, [plugin, name, pushVersion, pushPin, pin?.fullName, fleet?.machines]);
 
   if (!eligible || !pin?.found) return null;
 

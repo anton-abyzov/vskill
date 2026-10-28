@@ -9,8 +9,16 @@
 //   - runs this package's own `dist/index.js` with the current Node binary
 //     (process.execPath), resolved relative to this module, so the CLI and the
 //     server are always the same version;
-//   - falls back to `vskill` on PATH when that entry is absent (desktop SEA
-//     sidecar, source checkout under tsx/vitest);
+//   - falls back to `vskill` on PATH when that entry is absent (source
+//     checkout under tsx/vitest) and in the desktop SEA sidecar;
+//
+//   Known gap (1126, left open for desktop): the desktop sidecar ships no CLI
+//   entry. Its process.execPath is the sidecar itself and esbuild maps
+//   import.meta.url to that binary, so there is no dist/index.js to run and
+//   desktop Skill Studio still runs `vskill` from PATH (or reports it
+//   missing). Closing it needs a CLI mode in scripts/desktop/sidecar-entry.mjs
+//   plus a bundled CLI that does not read ../package.json at import time;
+//   only the npm `vskill studio` path is version-matched today.
 //   - spawns asynchronously with an argv array (never a shell), a timeout and
 //     capped output buffers.
 //
@@ -210,7 +218,7 @@ export function classifyUpdateRun(run: VskillRunResult): UpdateRunOutcome {
     return {
       status: "error",
       message: notFound
-        ? "The vskill CLI was not found: Studio has no bundled CLI and none is on PATH."
+        ? "The vskill CLI was not found on PATH. Install it with `npm i -g vskill` (desktop Skill Studio does not bundle the CLI yet)."
         : `Could not start vskill: ${run.spawnError}`,
     };
   }

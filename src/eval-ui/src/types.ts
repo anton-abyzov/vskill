@@ -443,7 +443,7 @@ export interface VersionDetail {
 
 export interface BatchUpdateProgress {
   skill: string;
-  status: "pending" | "updating" | "scanning" | "installing" | "done" | "error" | "skipped";
+  status: "pending" | "updating" | "scanning" | "installing" | "done" | "up-to-date" | "error" | "skipped";
   fromVersion?: string;
   toVersion?: string;
   scanScore?: number;

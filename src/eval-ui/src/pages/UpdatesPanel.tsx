@@ -107,7 +107,9 @@ export function UpdatesPanel() {
         onEvent: (e) => {
           if (e.type === "start") setRow({ skill: e.skill, status: "updating" });
           else if (e.type === "done") {
-            setRow({ skill: e.skill, status: "done", fromVersion: e.fromVersion, toVersion: e.version });
+            setRow(e.upToDate
+              ? { skill: e.skill, status: "up-to-date", toVersion: e.version }
+              : { skill: e.skill, status: "done", fromVersion: e.fromVersion, toVersion: e.version });
           } else if (e.type === "skipped") {
             setRow({
               skill: e.skill,
@@ -118,10 +120,11 @@ export function UpdatesPanel() {
         },
       });
       const parts = [`Updated ${summary.updated}`];
+      if (summary.upToDate) parts.push(`${summary.upToDate} already up to date`);
       if (summary.skipped) parts.push(`${summary.skipped} skipped`);
       parts.push(`${summary.failed} failed`);
       setToast(summary.incomplete ? `${parts.join(", ")} (connection closed early)` : parts.join(", "));
-      if (summary.updated > 0) fetchUpdates();
+      if (summary.updated > 0 || summary.upToDate > 0) fetchUpdates();
     } catch (err) {
       setToast(`Batch update failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -152,6 +155,9 @@ export function UpdatesPanel() {
         const msg = `Update failed${http}${result.body ? `: ${result.body}` : ""}`;
         setSingleErrors((prev) => new Map(prev).set(skill.name, msg));
         setToast(`Couldn't update ${skillName}: ${result.body || `HTTP ${result.status}`}`);
+      } else if (result.upToDate) {
+        setToast(`${skillName} is already up to date${result.version ? ` (${result.version})` : ""}`);
+        fetchUpdates();
       } else {
         setToast(result.version ? `Updated ${skillName} to ${result.version}` : `Updated ${skillName}`);
         fetchUpdates();
@@ -385,17 +391,17 @@ export function UpdatesPanel() {
                   <span
                     className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
                     style={{
-                      background: batchState.status === "done" ? "var(--green-muted)" :
+                      background: batchState.status === "done" || batchState.status === "up-to-date" ? "var(--green-muted)" :
                                   batchState.status === "error" ? "var(--red-muted)" :
                                   batchState.status === "skipped" ? "var(--surface-3)" :
                                   "var(--yellow-muted)",
-                      color: batchState.status === "done" ? "var(--green)" :
+                      color: batchState.status === "done" || batchState.status === "up-to-date" ? "var(--green)" :
                              batchState.status === "error" ? "var(--red)" :
                              batchState.status === "skipped" ? "var(--text-secondary)" :
                              "var(--yellow)",
                     }}
                   >
-                    {batchState.status}
+                    {batchState.status === "up-to-date" ? "already up to date" : batchState.status}
                     {batchState.status === "done" && batchState.toVersion && ` ${batchState.toVersion}`}
                     {batchState.error && `: ${batchState.error}`}
                   </span>

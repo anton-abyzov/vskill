@@ -29,7 +29,7 @@ async function flush() {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
-async function mount() {
+async function mount(initial = skill) {
   const React = await import("react");
   const { createRoot } = await import("react-dom/client");
   const { act } = await import("react");
@@ -37,19 +37,27 @@ async function mount() {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
-  await act(async () => { root.render(React.createElement(SkillVersionControls, { skill })); });
+  await act(async () => { root.render(React.createElement(SkillVersionControls, { skill: initial })); });
   await act(async () => { await flush(); });
   const click = async (sel: string) => {
     await act(async () => { (container.querySelector(sel) as HTMLElement).click(); await flush(); });
   };
-  return { container, click, unmount: () => { act(() => root.unmount()); container.remove(); } };
+  // Same element, new props: what RightPanel does when the selection changes.
+  const rerender = async (next: typeof skill) => {
+    await act(async () => { root.render(React.createElement(SkillVersionControls, { skill: next })); });
+    await act(async () => { await flush(); });
+  };
+  return { container, click, rerender, unmount: () => { act(() => root.unmount()); container.remove(); } };
 }
 
 const pinState = { found: true, lockName: "alpha", fullName: "owner/repo/alpha", scope: "global", installedVersion: "1.2.0", pinned: false, pinnedVersion: null, canInstallVersion: true };
 
+let confirmSpy: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   Object.values(m).forEach((f) => f.mockReset());
   m.getSkillVersions.mockResolvedValue([{ version: "1.2.0" }, { version: "1.1.0" }]);
+  confirmSpy = vi.fn(() => true);
+  window.confirm = confirmSpy as unknown as typeof window.confirm;
 });
 
 describe("SkillVersionControls", () => {
@@ -91,6 +99,66 @@ describe("SkillVersionControls", () => {
       expect(results).toContain("m1: installed 1.2.0");
       expect(results).toContain("m3: vskill-missing");
     } finally {
+      h.unmount();
+    }
+  });
+
+  it("review: asks before pushing, naming the version and the machines, and a No sends nothing", async () => {
+    m.getSkillPinState.mockResolvedValue(pinState);
+    m.getFleetStatus.mockResolvedValue({ available: true, skillsSupported: true, machines: ["m1", "m3"] });
+    m.pushSkillToFleet.mockResolvedValue({ ok: true, results: [] });
+    confirmSpy.mockReturnValueOnce(false);
+    const h = await mount();
+    try {
+      await h.click("[data-testid='skill-push-fleet-button']");
+      expect(confirmSpy).toHaveBeenCalledWith("Install owner/repo/alpha@1.2.0 on 2 machines (m1, m3), pinned?");
+      expect(m.pushSkillToFleet).not.toHaveBeenCalled();
+      await h.click("[data-testid='skill-push-fleet-button']");
+      expect(m.pushSkillToFleet).toHaveBeenCalledTimes(1);
+    } finally {
+      h.unmount();
+    }
+  });
+
+  it("review: switching skills drops the old skill's push version", async () => {
+    const beta = { ...skill, skill: "beta" } as typeof skill;
+    m.getSkillPinState.mockImplementation(async (_p: string, name: string) =>
+      name === "beta"
+        ? { ...pinState, lockName: "beta", fullName: "owner/repo/beta", installedVersion: "3.0.0" }
+        : pinState,
+    );
+    m.getSkillVersions.mockImplementation(async (_p: string, name: string) =>
+      name === "beta" ? [{ version: "3.0.0" }, { version: "2.9.0" }] : [{ version: "1.2.0" }, { version: "1.1.0" }],
+    );
+    m.getFleetStatus.mockResolvedValue({ available: true, skillsSupported: true, machines: null });
+    m.pushSkillToFleet.mockResolvedValue({ ok: true, results: [] });
+    const h = await mount();
+    try {
+      await h.rerender(beta);
+      const sel = h.container.querySelector("[data-testid='skill-push-fleet-version']") as HTMLSelectElement;
+      expect(Array.from(sel.options).map((o) => o.value)).toEqual(["3.0.0", "2.9.0"]);
+      expect(sel.value).toBe("3.0.0");
+      await h.click("[data-testid='skill-push-fleet-button']");
+      expect(m.pushSkillToFleet).toHaveBeenCalledWith("repo", "beta", "3.0.0", true, "owner/repo/beta");
+    } finally {
+      h.unmount();
+    }
+  });
+
+  it("review: announces a pin change so the Update button can re-enable", async () => {
+    m.getSkillPinState.mockResolvedValue({ ...pinState, pinned: true, pinnedVersion: "1.2.0" });
+    m.getFleetStatus.mockResolvedValue({ available: false, skillsSupported: false, machines: null });
+    m.unpinSkill.mockResolvedValue({ ...pinState, pinned: false, pinnedVersion: null });
+    const { SKILL_PIN_CHANGED_EVENT } = await import("../../api-skill-pins");
+    const seen: unknown[] = [];
+    const listener = (e: Event) => seen.push((e as CustomEvent).detail);
+    window.addEventListener(SKILL_PIN_CHANGED_EVENT, listener);
+    const h = await mount();
+    try {
+      await h.click("[data-testid='skill-pin-toggle']");
+      expect(seen).toEqual([{ plugin: "repo", skill: "alpha", pinned: false, pinnedVersion: null, source: "controls" }]);
+    } finally {
+      window.removeEventListener(SKILL_PIN_CHANGED_EVENT, listener);
       h.unmount();
     }
   });

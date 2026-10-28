@@ -3,6 +3,7 @@ import { api } from "../api";
 import { useStudio } from "../StudioContext";
 import type { SkillInfo, VersionDiff } from "../types";
 import { useToast } from "./ToastProvider";
+import { onSkillPinChanged } from "../api-skill-pins";
 import { ChangelogViewer } from "./ChangelogViewer";
 
 interface Props {
@@ -50,7 +51,11 @@ export function UpdateAction({ skill }: Props) {
         setStatus("done");
         onSkillUpdated(skill.plugin, skill.skill);
         toast({
-          message: result.version ? `Updated ${skill.skill} to ${result.version}.` : `Updated ${skill.skill}.`,
+          message: result.upToDate
+            ? `${skill.skill} is already up to date${result.version ? ` (${result.version})` : ""}.`
+            : result.version
+              ? `Updated ${skill.skill} to ${result.version}.`
+              : `Updated ${skill.skill}.`,
           severity: "success",
           durationMs: 4000,
         });
@@ -127,6 +132,34 @@ export function UpdateAction({ skill }: Props) {
       abortRef.current?.abort();
     };
   }, []);
+
+  // Per-skill state: a new selection starts clean, so one skill's
+  // "Pinned at X" or error never shows on the next.
+  const plugin = skill?.plugin;
+  const skillName = skill?.skill;
+  useEffect(() => {
+    setStatus("idle");
+    setPinnedAt(null);
+    setErrorMsg(null);
+    setShowChangelog(false);
+    setChangelogDiff(null);
+  }, [plugin, skillName]);
+
+  // Unpinning (detail pin row or Versions tab) re-enables Update; pinning
+  // shows the pin straight away.
+  useEffect(() => {
+    if (!plugin || !skillName) return;
+    return onSkillPinChanged((d) => {
+      if (d.plugin !== plugin || d.skill !== skillName) return;
+      if (d.pinned) {
+        setStatus((s) => (s === "updating" ? s : "pinned"));
+        setPinnedAt(d.pinnedVersion);
+      } else {
+        setStatus((s) => (s === "pinned" ? "idle" : s));
+        setPinnedAt(null);
+      }
+    });
+  }, [plugin, skillName]);
 
   if (!skill) return null;
   if (skill.updateAvailable !== true) return null;

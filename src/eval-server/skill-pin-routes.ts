@@ -216,6 +216,7 @@ export interface FleetMachineResult {
 function toMachineResult(r: Record<string, unknown>, fallbackName: string): FleetMachineResult {
   const phase = typeof r.phase === "string" ? r.phase : undefined;
   const status = typeof r.status === "string" ? r.status : undefined;
+  const result = typeof r.result === "string" ? r.result : undefined;
   const reason =
     (typeof r.reason === "string" && r.reason) ||
     (typeof r.lastErrorReason === "string" && r.lastErrorReason) ||
@@ -229,7 +230,7 @@ function toMachineResult(r: Record<string, unknown>, fallbackName: string): Flee
   const okFlag =
     typeof r.ok === "boolean"
       ? r.ok
-      : phase === "installed" || status === "installed" || status === "ok" || status === "done";
+      : result === "installed" || phase === "installed" || status === "installed" || status === "ok" || status === "done";
   const installedVersion =
     (typeof r.installedVersion === "string" && r.installedVersion) ||
     (okFlag && typeof r.version === "string" ? r.version : undefined) ||

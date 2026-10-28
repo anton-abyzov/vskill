@@ -261,6 +261,14 @@ describe("fleet push", () => {
   });
 
   it("parses per-machine JSON results (array, envelope or JSON lines)", async () => {
+    // The fleet skills CLI returns result, rather than its worker's phase.
+    expect(parseFleetSkillsOutput(JSON.stringify([
+      { machine: "m1", label: "M1", result: "installed", installedVersion: "1.0.0", pinnedVersion: "1.0.0" },
+      { machine: "m3", result: "failed", reason: "unauthorized", error: "Grant refused" },
+    ]))).toEqual([
+      { machine: "m1", ok: true, installedVersion: "1.0.0", pinnedVersion: "1.0.0" },
+      { machine: "m3", ok: false, reason: "unauthorized", error: "Grant refused" },
+    ]);
     expect(parseFleetSkillsOutput('[{"machine":"m1","phase":"installed","installedVersion":"1.0.0"},{"machine":"m3","reason":"vskill-missing"}]')).toEqual([
       { machine: "m1", ok: true, installedVersion: "1.0.0" },
       { machine: "m3", ok: false, reason: "vskill-missing" },

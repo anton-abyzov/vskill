@@ -288,12 +288,13 @@ describe("scope transfer streamed outcomes", () => {
 });
 
 describe("single update streaming and fallback contracts", () => {
-  it("extracts the version across fragmented frames and limits the error/body excerpt", async () => {
-    const text = frame("progress", { text: "é".repeat(240) }) + frame("done", { version: "3.4.5" });
+  // 1126 P0-1: success is the `done` frame's status, not the stream's HTTP 200.
+  it("extracts the version across fragmented frames", async () => {
+    const text = frame("progress", { text: "é".repeat(240) }) + frame("done", { status: "done", version: "3.4.5" });
     fetchMock.mockResolvedValueOnce(streamResponse(text, 3));
     const signal = new AbortController().signal;
     const result = await api.postSkillUpdate("p", "s", { signal, agentId: "agent & local" });
-    expect(result).toEqual({ ok: true, status: 200, body: text.slice(0, 200), version: "3.4.5" });
+    expect(result).toEqual({ ok: true, status: 200, body: "", version: "3.4.5", outcome: "done", upToDate: false });
     expectRequest("/api/skills/p/s/update?agent=agent%20%26%20local", "POST");
     expect(fetchMock.mock.calls[0][1]?.signal).toBe(signal);
   });
@@ -305,10 +306,12 @@ describe("single update streaming and fallback contracts", () => {
   });
 
   it.each([true, false])("handles a response without ReadableStream (valid done = %s)", async valid => {
-    const text = valid ? frame("done", { version: "5.0.0" }) : "event: done\ndata: {broken}\n\n";
+    const text = valid ? frame("done", { status: "done", version: "5.0.0" }) : "event: done\ndata: {broken}\n\n";
     fetchMock.mockResolvedValueOnce({ ok: true, status: 200, body: null, text: async () => text } as Response);
     const controller = new AbortController();
-    expect(await api.postSkillUpdate("p", "s", controller.signal)).toEqual({ ok: true, status: 200, body: text, version: valid ? "5.0.0" : undefined });
+    const result = await api.postSkillUpdate("p", "s", controller.signal);
+    // A malformed `done` frame is not a success.
+    expect(result).toEqual(expect.objectContaining({ ok: valid, status: 200, version: valid ? "5.0.0" : undefined }));
     expect(fetchMock.mock.calls[0][1]?.signal).toBe(controller.signal);
   });
 

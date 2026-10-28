@@ -36,6 +36,8 @@ vi.mock("../ChangelogViewer", () => ({
 type FetchResponse =
   | { type: "success"; version: string }
   | { type: "error"; status: number; body: string }
+  | { type: "pinned"; pinnedVersion: string }
+  | { type: "upToDate"; version: string }
   | { type: "network" };
 
 let nextFetchResponse: FetchResponse = { type: "success", version: "1.4.0" };
@@ -77,6 +79,21 @@ vi.mock("../../api", async (importOriginal) => {
         const resp = nextFetchResponse;
         if (resp.type === "network") {
           throw new TypeError("Failed to fetch");
+        }
+        if (resp.type === "pinned") {
+          return {
+            ok: false,
+            status: 200,
+            body: `Pinned at ${resp.pinnedVersion}; unpin it to update.`,
+            version: resp.pinnedVersion,
+            outcome: "skipped",
+            skipped: true,
+            skipReason: "pinned",
+            pinnedVersion: resp.pinnedVersion,
+          };
+        }
+        if (resp.type === "upToDate") {
+          return { ok: true, status: 200, body: "", version: resp.version, outcome: "done", upToDate: true };
         }
         if (resp.type === "error") {
           return {
@@ -135,6 +152,14 @@ async function mountAction(skill: Partial<import("../../types").SkillInfo>) {
   return {
     container,
     act: (fn: () => void | Promise<void>) => act(async () => { await fn(); }),
+    // Same element, new props: what RightPanel does when the selection changes.
+    async rerender(next: Partial<import("../../types").SkillInfo>) {
+      await act(async () => {
+        root.render(
+          React.createElement(ToastProvider, null, React.createElement(UpdateAction, { skill: { ...merged, ...next } })),
+        );
+      });
+    },
     unmount() {
       act(() => root.unmount());
       container.remove();
@@ -322,6 +347,78 @@ describe("UpdateAction — POST-based update (0736 US-001)", () => {
       expect(allText).not.toContain("Stream error");
       // Must contain status code.
       expect(allText).toMatch(/500/);
+    } finally {
+      h.unmount();
+    }
+  });
+
+  it("1126 P1-4: a pinned skill is skipped, the button shows the pin, no 'Updated' toast", async () => {
+    nextFetchResponse = { type: "pinned", pinnedVersion: "1.0.0" };
+    const h = await mountAction({ updateAvailable: true, currentVersion: "1.0.0", latestVersion: "1.4.0" });
+    try {
+      const btn = h.container.querySelector("[data-testid='update-action-button']") as HTMLButtonElement;
+      await h.act(async () => {
+        btn.click();
+        await flushMicrotasks();
+      });
+      expect(btn.textContent).toBe("📌 Pinned at 1.0.0");
+      expect(btn.disabled).toBe(true);
+      expect(onSkillUpdatedSpy).not.toHaveBeenCalled();
+      const toasts = Array.from(document.querySelectorAll("[data-testid='toast-item']")).map((t) => t.textContent).join(" | ");
+      expect(toasts).not.toMatch(/Updated skill-x/);
+      expect(toasts).toMatch(/pinned at 1\.0\.0/);
+    } finally {
+      h.unmount();
+    }
+  });
+
+  it("review: unpinning elsewhere re-enables Update after a pinned skip", async () => {
+    nextFetchResponse = { type: "pinned", pinnedVersion: "1.0.0" };
+    const h = await mountAction({ updateAvailable: true, currentVersion: "1.0.0", latestVersion: "1.4.0" });
+    try {
+      const btn = h.container.querySelector("[data-testid='update-action-button']") as HTMLButtonElement;
+      await h.act(async () => { btn.click(); await flushMicrotasks(); });
+      expect(btn.disabled).toBe(true);
+      const { emitSkillPinChanged } = await import("../../api-skill-pins");
+      // Another skill's unpin leaves this button alone.
+      await h.act(async () => {
+        emitSkillPinChanged({ plugin: "plugin-a", skill: "other", pinned: false, pinnedVersion: null, source: "controls" });
+      });
+      expect(btn.disabled).toBe(true);
+      await h.act(async () => {
+        emitSkillPinChanged({ plugin: "plugin-a", skill: "skill-x", pinned: false, pinnedVersion: null, source: "controls" });
+      });
+      expect(btn.disabled).toBe(false);
+      expect(btn.textContent).toBe("Update to 1.4.0");
+    } finally {
+      h.unmount();
+    }
+  });
+
+  it("review: the pinned state does not follow the user to the next skill", async () => {
+    nextFetchResponse = { type: "pinned", pinnedVersion: "1.0.0" };
+    const h = await mountAction({ updateAvailable: true, currentVersion: "1.0.0", latestVersion: "1.4.0" });
+    try {
+      const btn = () => h.container.querySelector("[data-testid='update-action-button']") as HTMLButtonElement;
+      await h.act(async () => { btn().click(); await flushMicrotasks(); });
+      expect(btn().textContent).toBe("📌 Pinned at 1.0.0");
+      await h.rerender({ skill: "skill-y", currentVersion: "2.0.0", latestVersion: "2.1.0" });
+      expect(btn().disabled).toBe(false);
+      expect(btn().textContent).toBe("Update to 2.1.0");
+    } finally {
+      h.unmount();
+    }
+  });
+
+  it("review: an up-to-date run says so instead of 'Updated'", async () => {
+    nextFetchResponse = { type: "upToDate", version: "1.0.0" };
+    const h = await mountAction({ updateAvailable: true, currentVersion: "1.0.0", latestVersion: "1.4.0" });
+    try {
+      const btn = h.container.querySelector("[data-testid='update-action-button']") as HTMLButtonElement;
+      await h.act(async () => { btn.click(); await flushMicrotasks(); });
+      const toasts = Array.from(document.querySelectorAll("[data-testid='toast-item']")).map((t) => t.textContent).join(" | ");
+      expect(toasts).toMatch(/skill-x is already up to date \(1\.0\.0\)/);
+      expect(toasts).not.toMatch(/Updated skill-x/);
     } finally {
       h.unmount();
     }

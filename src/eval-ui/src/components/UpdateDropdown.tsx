@@ -121,13 +121,25 @@ export default function UpdateDropdown({
         onSkillUpdated(plugin, skill);
         toast({
           severity: "success",
-          message: `Updated ${skill} in ${count} ${noun}.`,
+          message: result.upToDate
+            ? `${skill} is already up to date${result.version ? ` (${result.version})` : ""}.`
+            : `Updated ${skill} in ${count} ${noun}.`,
           durationMs: 4000,
+        });
+      } else if (result.skipped) {
+        // 1126 P1-4: pinned skills are skipped, not "Updated".
+        toast({
+          severity: "info",
+          message:
+            result.skipReason === "pinned"
+              ? `${skill} is pinned at ${result.pinnedVersion ?? u.pinnedVersion ?? u.installed}; unpin it to update.`
+              : `${skill} was not updated: ${result.body}`,
+          durationMs: 6000,
         });
       } else {
         toast({
           severity: "error",
-          message: `Couldn't update ${skill} — HTTP ${result.status}`,
+          message: `Couldn't update ${skill}: ${result.body || `HTTP ${result.status}`}`,
           durationMs: 0,
         });
       }

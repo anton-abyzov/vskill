@@ -68,10 +68,12 @@ interface LockView {
   displayPath: string;
 }
 
-function readLockView(scope: OutdatedScope): LockView {
+function readLockView(scope: OutdatedScope, root?: string): LockView {
   if (scope === "project") {
-    const lock = readLockfile();
-    const dir = getProjectRoot();
+    // 1126 P2-7: Studio passes its --root so the list and the update action
+    // read the same lock; the CLI keeps the process.cwd() lookup.
+    const lock = root ? readLockfile(root) : readLockfile();
+    const dir = root ?? getProjectRoot();
     const skills = lock ? lock.skills : null;
     return {
       skills,
@@ -105,10 +107,13 @@ function readLockView(scope: OutdatedScope): LockView {
  *
  * Returns null when there is no lockfile or no installed skills.
  */
-export async function getOutdatedJson(opts: { scope?: OutdatedScope } = {}): Promise<
+export async function getOutdatedJson(
+  rootOrOpts: string | { scope?: OutdatedScope; root?: string } = {},
+): Promise<
   { results: CheckUpdateResult[]; pinMap: Map<string, string>; authoredNames: Set<string> } | null
 > {
-  return outdatedFromView(readLockView(opts.scope ?? "project"));
+  const opts = typeof rootOrOpts === "string" ? { root: rootOrOpts } : rootOrOpts;
+  return outdatedFromView(readLockView(opts.scope ?? "project", opts.root));
 }
 
 async function outdatedFromView(view: LockView): Promise<

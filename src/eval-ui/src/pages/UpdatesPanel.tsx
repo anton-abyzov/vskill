@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { api } from "../api";
 import type { SkillUpdateInfo } from "../api";
 import type { BatchUpdateProgress, VersionDiff } from "../types";
@@ -23,6 +23,15 @@ interface UpdateItem extends SkillUpdateInfo {
   pinnedVersion?: string;
 }
 
+// P2-9: use the server's local fs identifiers, falling back to the name.
+function localIds(skill: UpdateItem): { plugin: string; skillName: string } {
+  const parts = skill.name.split("/");
+  return {
+    plugin: skill.localPlugin ?? (parts.length >= 3 ? parts[parts.length - 2] : parts[0]),
+    skillName: skill.localSkill ?? parts[parts.length - 1],
+  };
+}
+
 export function UpdatesPanel() {
   const [updates, setUpdates] = useState<UpdateItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,17 +40,30 @@ export function UpdatesPanel() {
   const [batchRunning, setBatchRunning] = useState(false);
   const [singleUpdating, setSingleUpdating] = useState<Set<string>>(new Set());
   const [singleErrors, setSingleErrors] = useState<Map<string, string>>(new Map());
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToastState] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [pinBusy, setPinBusy] = useState<Set<string>>(new Set());
+  // P2-9: one timer for the toast, cleared on unmount.
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setToast = useCallback((msg: string | null) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToastState(msg);
+    if (msg) toastTimer.current = setTimeout(() => setToastState(null), 5000);
+  }, []);
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
   const [changelogDiff, setChangelogDiff] = useState<{ skill: UpdateItem; diff: VersionDiff } | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
 
+  // 1126 P1-6: a failed check is shown as an error with Retry, never as
+  // "All skills are up to date".
   const fetchUpdates = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.getSkillUpdates();
+      const data = await api.getSkillUpdates({ throwOnError: true });
       setUpdates(data.filter((u) => u.updateAvailable));
-    } catch {
-      setUpdates([]);
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -71,65 +93,79 @@ export function UpdatesPanel() {
     }
   }, [selected, selectableUpdates]);
 
-  // Batch update via SSE
-  const handleBatchUpdate = useCallback(() => {
+  // 1126 P0-2: batch update reads the POST's SSE stream and updates each row
+  // from skill:start / skill:done / skill:skipped / skill:error.
+  const handleBatchUpdate = useCallback(async () => {
     const skills = [...selected];
     if (!skills.length) return;
     setBatchRunning(true);
     setBatchProgress(new Map(skills.map((s) => [s, { skill: s, status: "pending" as const }])));
-
-    const es = api.startBatchUpdate(skills);
-
-    es.addEventListener("progress", (evt: MessageEvent) => {
-      try {
-        const data: BatchUpdateProgress = JSON.parse(evt.data);
-        setBatchProgress((prev) => new Map(prev).set(data.skill, data));
-      } catch {}
-    });
-
-    es.addEventListener("done", (evt: MessageEvent) => {
-      es.close();
+    const setRow = (p: BatchUpdateProgress) =>
+      setBatchProgress((prev) => new Map(prev).set(p.skill, p));
+    try {
+      const summary = await api.runBatchUpdate(skills, {
+        onEvent: (e) => {
+          if (e.type === "start") setRow({ skill: e.skill, status: "updating" });
+          else if (e.type === "done") {
+            setRow(e.upToDate
+              ? { skill: e.skill, status: "up-to-date", toVersion: e.version }
+              : { skill: e.skill, status: "done", fromVersion: e.fromVersion, toVersion: e.version });
+          } else if (e.type === "skipped") {
+            setRow({
+              skill: e.skill,
+              status: "skipped",
+              error: e.reason === "pinned" && e.pinnedVersion ? `pinned at ${e.pinnedVersion}` : e.message,
+            });
+          } else setRow({ skill: e.skill, status: "error", error: e.error });
+        },
+      });
+      const parts = [`Updated ${summary.updated}`];
+      if (summary.upToDate) parts.push(`${summary.upToDate} already up to date`);
+      if (summary.skipped) parts.push(`${summary.skipped} skipped`);
+      parts.push(`${summary.failed} failed`);
+      setToast(summary.incomplete ? `${parts.join(", ")} (connection closed early)` : parts.join(", "));
+      if (summary.updated > 0 || summary.upToDate > 0) fetchUpdates();
+    } catch (err) {
+      setToast(`Batch update failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
       setBatchRunning(false);
-      try {
-        const data = JSON.parse(evt.data);
-        setToast(`Updated ${data.updated ?? 0} skills, ${data.failed ?? 0} failed`);
-        setTimeout(() => setToast(null), 5000);
-      } catch {}
-      fetchUpdates();
-    });
+    }
+  }, [selected, fetchUpdates, setToast]);
 
-    es.addEventListener("error", () => {
-      es.close();
-      setBatchRunning(false);
-      setToast("Batch update failed");
-      setTimeout(() => setToast(null), 5000);
-    });
-  }, [selected, fetchUpdates]);
-
-  // Single skill update — uses POST (same as UpdateAction.tsx), not the broken EventSource path.
+  // Single skill update — POST (same as UpdateAction.tsx). 1126 P0-1/P1-4:
+  // the result is read from the stream's `done` frame, so failures and pinned
+  // skips are shown as such.
   const handleSingleUpdate = useCallback(async (skill: UpdateItem) => {
-    const parts = skill.name.split("/");
-    const plugin = parts.length >= 3 ? parts[parts.length - 2] : parts[0];
-    const skillName = parts[parts.length - 1];
+    const { plugin, skillName } = localIds(skill);
 
     setSingleUpdating((prev) => new Set(prev).add(skill.name));
     setSingleErrors((prev) => { const next = new Map(prev); next.delete(skill.name); return next; });
 
     try {
       const result = await api.postSkillUpdate(plugin, skillName);
-      if (!result.ok) {
-        const msg = `Update failed (HTTP ${result.status}): ${result.body}`;
+      if (result.skipped) {
+        const msg = result.skipReason === "pinned"
+          ? `Pinned at ${result.pinnedVersion ?? skill.installed}; unpin it to update.`
+          : result.body;
         setSingleErrors((prev) => new Map(prev).set(skill.name, msg));
-        setToast(`Couldn't update ${skillName} — HTTP ${result.status}`);
-        setTimeout(() => setToast(null), 5000);
+        setToast(`${skillName} was not updated: ${msg}`);
+        fetchUpdates();
+      } else if (!result.ok) {
+        const http = result.status !== 200 ? ` (HTTP ${result.status})` : "";
+        const msg = `Update failed${http}${result.body ? `: ${result.body}` : ""}`;
+        setSingleErrors((prev) => new Map(prev).set(skill.name, msg));
+        setToast(`Couldn't update ${skillName}: ${result.body || `HTTP ${result.status}`}`);
+      } else if (result.upToDate) {
+        setToast(`${skillName} is already up to date${result.version ? ` (${result.version})` : ""}`);
+        fetchUpdates();
       } else {
+        setToast(result.version ? `Updated ${skillName} to ${result.version}` : `Updated ${skillName}`);
         fetchUpdates();
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Network error";
       setSingleErrors((prev) => new Map(prev).set(skill.name, msg));
       setToast(`Couldn't update ${skillName} — ${msg}`);
-      setTimeout(() => setToast(null), 5000);
     } finally {
       setSingleUpdating((prev) => {
         const next = new Set(prev);
@@ -137,7 +173,28 @@ export function UpdatesPanel() {
         return next;
       });
     }
-  }, [fetchUpdates]);
+  }, [fetchUpdates, setToast]);
+
+  // 1126 P1-3: pin / unpin from the list.
+  const handleTogglePin = useCallback(async (skill: UpdateItem) => {
+    const { plugin, skillName } = localIds(skill);
+    setPinBusy((prev) => new Set(prev).add(skill.name));
+    try {
+      if (skill.pinned) {
+        await api.unpinSkill(plugin, skillName);
+        setToast(`Unpinned ${skillName}`);
+      } else {
+        const state = await api.pinSkill(plugin, skillName);
+        setToast(`Pinned ${skillName} at ${state.pinnedVersion ?? skill.installed}`);
+        setSelected((prev) => { const next = new Set(prev); next.delete(skill.name); return next; });
+      }
+      fetchUpdates();
+    } catch (err) {
+      setToast(`Couldn't change the pin on ${skillName}: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setPinBusy((prev) => { const next = new Set(prev); next.delete(skill.name); return next; });
+    }
+  }, [fetchUpdates, setToast]);
 
   // View Changes → load diff in modal
   const handleViewChanges = useCallback(async (skill: UpdateItem) => {
@@ -166,6 +223,28 @@ export function UpdatesPanel() {
           <div className="skeleton h-16 rounded-lg" />
           <div className="skeleton h-16 rounded-lg" />
         </div>
+      </div>
+    );
+  }
+
+  // 1126 P1-6: error state with Retry.
+  if (loadError) {
+    return (
+      <div data-testid="updates-panel" className="flex flex-col items-center justify-center h-full py-16 px-8">
+        <div className="text-[15px] font-semibold mb-2" style={{ color: "var(--text-primary)" }}>
+          Couldn't check for updates
+        </div>
+        <div
+          data-testid="updates-panel-error"
+          role="alert"
+          className="text-[12px] mb-4 text-center max-w-md"
+          style={{ color: "var(--red)", fontFamily: "var(--font-mono)" }}
+        >
+          {loadError}
+        </div>
+        <button onClick={fetchUpdates} className="btn btn-primary text-[12px]" data-testid="updates-panel-retry">
+          Retry
+        </button>
       </div>
     );
   }
@@ -292,7 +371,7 @@ export function UpdatesPanel() {
                       {shortName}
                     </span>
                     {isPinned && (
-                      <span className="text-[10px]" title="Pinned — unpin from CLI to update">📌</span>
+                      <span className="text-[10px]" title={`Pinned at ${skill.pinnedVersion || skill.installed}`}>📌</span>
                     )}
                     <span
                       className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
@@ -312,21 +391,33 @@ export function UpdatesPanel() {
                   <span
                     className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
                     style={{
-                      background: batchState.status === "done" ? "var(--green-muted)" :
+                      background: batchState.status === "done" || batchState.status === "up-to-date" ? "var(--green-muted)" :
                                   batchState.status === "error" ? "var(--red-muted)" :
+                                  batchState.status === "skipped" ? "var(--surface-3)" :
                                   "var(--yellow-muted)",
-                      color: batchState.status === "done" ? "var(--green)" :
+                      color: batchState.status === "done" || batchState.status === "up-to-date" ? "var(--green)" :
                              batchState.status === "error" ? "var(--red)" :
+                             batchState.status === "skipped" ? "var(--text-secondary)" :
                              "var(--yellow)",
                     }}
                   >
-                    {batchState.status}
+                    {batchState.status === "up-to-date" ? "already up to date" : batchState.status}
+                    {batchState.status === "done" && batchState.toVersion && ` ${batchState.toVersion}`}
                     {batchState.error && `: ${batchState.error}`}
                   </span>
                 )}
 
                 {/* Actions */}
                 <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => handleTogglePin(skill)}
+                    disabled={pinBusy.has(skill.name) || batchRunning}
+                    className="btn btn-ghost text-[11px]"
+                    data-testid="updates-panel-pin-toggle"
+                    title={isPinned ? "Unpin so this skill can update" : `Pin at ${skill.installed}`}
+                  >
+                    {isPinned ? "Unpin" : "Pin"}
+                  </button>
                   <button
                     onClick={() => handleViewChanges(skill)}
                     className="btn btn-ghost text-[11px]"
@@ -337,7 +428,7 @@ export function UpdatesPanel() {
                   <button
                     onClick={() => handleSingleUpdate(skill)}
                     disabled={isPinned || isUpdating || batchRunning}
-                    title={isPinned ? "Pinned — unpin from CLI to update" : ""}
+                    title={isPinned ? `Pinned at ${skill.pinnedVersion || skill.installed}` : ""}
                     className={`btn ${isPinned ? "btn-ghost" : "btn-primary"} text-[11px]`}
                   >
                     {isUpdating ? (
@@ -346,12 +437,24 @@ export function UpdatesPanel() {
                       </span>
                     ) : batchState?.status === "done" ? (
                       <span style={{ color: "var(--green)" }}>✓</span>
+                    ) : isPinned ? (
+                      `📌 ${skill.pinnedVersion || skill.installed}`
                     ) : (
                       "Update"
                     )}
                   </button>
                 </div>
               </div>
+              {singleErrors.get(skill.name) && (
+                <div
+                  data-testid="updates-panel-row-error"
+                  role="alert"
+                  className="text-[11px] mt-2"
+                  style={{ color: "var(--red)", fontFamily: "var(--font-mono)" }}
+                >
+                  {singleErrors.get(skill.name)}
+                </div>
+              )}
             </div>
           );
         })}

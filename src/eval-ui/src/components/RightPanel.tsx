@@ -24,6 +24,7 @@ import { DetailHeader } from "./DetailHeader";
 import { useSkillRepoVisibility } from "../hooks/useSkillRepoVisibility";
 import { SkillOverview } from "./SkillOverview";
 import { UpdateAction } from "./UpdateAction";
+import { SkillVersionControls } from "./SkillVersionControls";
 import { CheckNowButton } from "./CheckNowButton";
 // 0774 T-009: secondary tab bar nested under top-level tabs that have modes.
 import { SubTabBar } from "./SubTabBar";
@@ -838,7 +839,8 @@ function renderSkillDetail(
             PrivateBadge on the header for private-repo skills. */}
         <DetailHeaderWithPrivacy skill={skill} />
       </div>
-      <UpdateAction skill={skill} />
+      <UpdateAction key={`update-${skill.plugin}/${skill.skill}`} skill={skill} />
+      <SkillVersionControls key={`pin-${skill.plugin}/${skill.skill}`} skill={skill} />
       {installedBanner}
       {skill.origin === "installed" && skill.scopeV2 !== "available-plugin" && (
         <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--border-default)" }}>

@@ -166,22 +166,38 @@ describe("GET /api/skills/updates", () => {
     );
   });
 
-  it("returns empty array when vskill outdated exits non-zero with no stdout", async () => {
-    // Handler's catch-all returns []. Simulate by making getOutdatedJson throw.
+  // 1126 P1-6: a failed check is an error the Updates view shows with Retry,
+  // not an empty "all up to date" list.
+  it("returns 502 with the error when the update check throws", async () => {
     mocks.getOutdatedJson.mockRejectedValue(new Error("exit code 1"));
 
     await handler(fakeReq, fakeRes);
 
-    expect(mocks.sendJson).toHaveBeenCalledWith(fakeRes, [], 200, fakeReq);
+    expect(mocks.sendJson).toHaveBeenCalledWith(
+      fakeRes,
+      { error: "Couldn't check for updates: exit code 1" },
+      502,
+      fakeReq,
+    );
   });
 
-  it("returns empty array when JSON parsing fails", async () => {
-    // Simulate underlying parse failure surfacing as a thrown error.
+  it("returns 502 when JSON parsing fails", async () => {
     mocks.getOutdatedJson.mockRejectedValue(new SyntaxError("Unexpected token"));
 
     await handler(fakeReq, fakeRes);
 
-    expect(mocks.sendJson).toHaveBeenCalledWith(fakeRes, [], 200, fakeReq);
+    expect(mocks.sendJson).toHaveBeenCalledWith(
+      fakeRes,
+      { error: "Couldn't check for updates: Unexpected token" },
+      502,
+      fakeReq,
+    );
+  });
+
+  it("1126 P2-7: reads the Studio root's lock, not process.cwd()", async () => {
+    mocks.getOutdatedJson.mockResolvedValue(null);
+    await handler(fakeReq, fakeRes);
+    expect(mocks.getOutdatedJson).toHaveBeenCalledWith({ root: "/root" });
   });
 
   // SKIP REASON: 0740 retired execSync(`vskill outdated --json`) — the

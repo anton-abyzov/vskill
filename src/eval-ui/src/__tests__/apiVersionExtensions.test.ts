@@ -33,26 +33,48 @@ describe("api.getVersionDiff", () => {
   });
 });
 
-describe("api.startBatchUpdate", () => {
-  it("sends POST with correct body and returns EventSource", () => {
-    // Mock EventSource globally
-    const mockES = { addEventListener: vi.fn(), close: vi.fn() };
-    vi.stubGlobal("EventSource", vi.fn(() => mockES));
+// 1126 P0-2: batch update is one streamed POST (no EventSource GET against
+// the POST-only route).
+describe("api.runBatchUpdate", () => {
+  it("sends POST with the skill list and resolves with the server's counts", async () => {
+    const sse =
+      'event: skill:start\ndata: {"skill":"architect"}\n\n' +
+      'event: skill:done\ndata: {"skill":"architect","version":"2.0.0"}\n\n' +
+      'event: skill:start\ndata: {"skill":"pm"}\n\n' +
+      'event: skill:skipped\ndata: {"skill":"pm","reason":"pinned","pinnedVersion":"1.0.0"}\n\n' +
+      'event: done\ndata: {"updated":1,"failed":0,"skipped":1}\n\n';
+    mockFetch.mockResolvedValue(new Response(sse, { status: 200 }));
+    const events: unknown[] = [];
+    const summary = await api.runBatchUpdate(["architect", "pm"], { onEvent: (e) => events.push(e) });
 
-    // Mock fetch for the POST
-    mockFetch.mockResolvedValue(okJson({}));
-
-    const es = api.startBatchUpdate(["architect", "pm"]);
-    expect(es).toBeDefined();
-
-    // Verify POST was sent
-    expect(mockFetch).toHaveBeenCalled();
     const [url, init] = mockFetch.mock.calls[0];
     expect(url).toBe("/api/skills/batch-update");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body)).toEqual({ skills: ["architect", "pm"] });
+    expect(summary).toEqual({ updated: 1, failed: 0, skipped: 1, upToDate: 0 });
+    expect(events).toEqual([
+      { type: "start", skill: "architect" },
+      { type: "done", skill: "architect", version: "2.0.0", fromVersion: undefined, upToDate: false },
+      { type: "start", skill: "pm" },
+      { type: "skipped", skill: "pm", reason: "pinned", pinnedVersion: "1.0.0", message: undefined },
+    ]);
+  });
 
-    vi.unstubAllGlobals();
+  it("review: counts an 'already up to date' run apart from updated", async () => {
+    const sse =
+      'event: skill:start\ndata: {"skill":"architect"}\n\n' +
+      'event: skill:done\ndata: {"skill":"architect","version":"2.0.0","reason":"up-to-date"}\n\n';
+    mockFetch.mockResolvedValue(new Response(sse, { status: 200 }));
+    const events: unknown[] = [];
+    const summary = await api.runBatchUpdate(["architect"], { onEvent: (e) => events.push(e) });
+    // Stream cut before `done`: the client's own counts.
+    expect(summary).toEqual({ updated: 0, failed: 0, skipped: 0, upToDate: 1, incomplete: true });
+    expect(events[1]).toEqual(expect.objectContaining({ type: "done", upToDate: true }));
+  });
+
+  it("rejects with the server's message on 409", async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ error: "Update already in progress" }), { status: 409 }));
+    await expect(api.runBatchUpdate(["a"])).rejects.toThrow("Update already in progress");
   });
 });
 

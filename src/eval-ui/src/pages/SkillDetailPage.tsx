@@ -74,10 +74,13 @@ export function SkillDetailPage() {
           message: `Updated ${skill} in ${loc.scope} (${loc.agentLabel}).`,
           durationMs: 4000,
         });
+      } else if (result.skipped) {
+        // 1126 P1-4: pinned or plugin-owned skills are skipped, not updated.
+        toast({ severity: "info", message: `${skill} was not updated: ${result.body}`, durationMs: 6000 });
       } else {
         toast({
           severity: "error",
-          message: `Couldn't update ${loc.agentLabel} — HTTP ${result.status}`,
+          message: `Couldn't update ${loc.agentLabel}: ${result.body || `HTTP ${result.status}`}`,
           durationMs: 0,
         });
       }

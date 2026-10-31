@@ -274,6 +274,7 @@ export async function runEvalServe(
     cmdline: process.argv.join(" "),
     startedAt: new Date().toISOString(),
     source: detectSource(),
+    root: resolvedRoot,
   };
   try {
     writeLock(lock);

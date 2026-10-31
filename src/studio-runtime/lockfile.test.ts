@@ -72,6 +72,21 @@ describe("studio-runtime/lockfile — write + roundtrip", () => {
     expect(lock!.source).toBe("npx-cli");
   });
 
+  it("keeps the full root even when the command line is cut", () => {
+    const root = `/Users/someone/Projects/${"deeply-nested-folder/".repeat(6)}my-skills`;
+    writeLock({
+      pid: 4321,
+      port: 3086,
+      cmdline: `/usr/local/bin/node /usr/local/lib/node_modules/vskill/dist/index.js studio --root ${root}`,
+      startedAt: "2026-05-07T12:00:00.000Z",
+      root,
+    });
+    const raw = JSON.parse(fs.readFileSync(lockfilePath(3086), "utf8"));
+    expect(raw.cmdline.endsWith("...")).toBe(true);
+    expect(raw.root).toBe(root);
+    expect(readLock(3086)!.root).toBe(root);
+  });
+
   it("readLock returns null for a missing file", () => {
     expect(readLock(9999)).toBeNull();
   });

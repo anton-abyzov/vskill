@@ -5,7 +5,7 @@
 // `process_discovery` scanner as a fast path for enumerating running studio
 // instances. Format is a small JSON record:
 //
-//   { pid, port, cmdline, startedAt }
+//   { pid, port, cmdline, startedAt, source, root }
 //
 // Atomic write strategy: tmp-file + fsync + rename. Cleanup on SIGTERM/SIGINT
 // is registered idempotently so two signals don't double-unlink (the second
@@ -29,6 +29,11 @@ export interface StudioLock {
   startedAt: string;
   /** Optional source classification — defaults to "npx-cli" when omitted. */
   source?: StudioLockSource;
+  /**
+   * The absolute project folder the runtime serves, in full. `cmdline` is cut
+   * at 120 characters, so a long `--root` cannot be read back from it.
+   */
+  root?: string;
 }
 
 /** Returns `~/.vskill/runtime/`. Honours `$HOME` (Unix) and `$USERPROFILE` (Windows). */
@@ -81,6 +86,7 @@ export function writeLock(lock: StudioLock): string {
     cmdline: truncateCmdline(lock.cmdline),
     startedAt: lock.startedAt,
     source: lock.source ?? "npx-cli",
+    ...(lock.root ? { root: lock.root } : {}),
   });
 
   fs.writeFileSync(tmp, payload, { mode: 0o600 });
@@ -119,6 +125,7 @@ export function readLock(port: number): StudioLock | null {
       cmdline: typeof obj.cmdline === "string" ? obj.cmdline : "",
       startedAt: obj.startedAt,
       source: obj.source === "tauri" || obj.source === "node-direct" ? obj.source : "npx-cli",
+      ...(typeof obj.root === "string" && obj.root ? { root: obj.root } : {}),
     };
   } catch {
     return null;

@@ -70,6 +70,8 @@ beforeEach(async () => {
     repos: [repo()],
     registry: {
       "acme/skills/greet": [
+        // Published without bumping its SKILL.md: the file still says 1.1.0.
+        { version: "1.1.1", gitSha: SHA_V2, contentHash: sha256(skillMd("1.1.0")) },
         { version: "1.1.0", gitSha: SHA_V2, contentHash: sha256(skillMd("1.1.0")) },
         { version: "1.0.0", gitSha: SHA_V1, contentHash: sha256(skillMd("1.0.0")) },
       ],
@@ -166,11 +168,29 @@ describe("AC-02: owner/repo/skill@version installs the registry's commit", () =>
     expect(state.lock!.skills.greet.sourceCommitSha).toBe(SHA_V2);
   });
 
+  it("writes the pinned version into a SKILL.md published without a bump, keeping the source sha", async () => {
+    const { addCommand } = await import("../add.js");
+    await addCommand("acme/skills/greet@1.1.1", { yes: true });
+    expect(state.installed[0].rawContent).toMatch(/^version: "?1\.1\.1"?$/m);
+    expect(state.installed[0].rawContent).not.toMatch(/^version: "?1\.1\.0"?$/m);
+    expect(state.installed[0].rawContent).toContain("# Greet 1.1.0");
+    const entry = state.lock!.skills.greet;
+    expect(entry.version).toBe("1.1.1");
+    expect(entry.pinnedVersion).toBe("1.1.1");
+    expect(entry.sha).toBe(sha256(skillMd("1.1.0")));
+  });
+
+  it("leaves a SKILL.md that already names the pinned version untouched", async () => {
+    const { addCommand } = await import("../add.js");
+    await addCommand("acme/skills/greet@1.0.0", { yes: true });
+    expect(state.installed[0].rawContent).toBe(skillMd("1.0.0"));
+  });
+
   it("exits 1 for an unknown version and lists the available ones", async () => {
     const { addCommand } = await import("../add.js");
     await expect(addCommand("acme/skills/greet@9.9.9", { yes: true })).rejects.toThrow("exit:1");
     expect(errors.join("\n")).toContain("9.9.9");
-    expect(errors.join("\n")).toContain("Available versions: 1.1.0, 1.0.0");
+    expect(errors.join("\n")).toContain("Available versions: 1.1.1, 1.1.0, 1.0.0");
     expect(state.installed).toHaveLength(0);
   });
 });

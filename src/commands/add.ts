@@ -64,7 +64,7 @@ import { ensureSkillMdNaming, cleanStaleNesting } from "../installer/migrate.js"
 import { getMarketplaceName } from "../marketplace/index.js";
 import { rankSearchResults, formatSkillId, getSkillUrl, getTrustBadge, formatResultLine } from "../utils/skill-display.js";
 import { computeSha } from "../updater/source-fetcher.js";
-import { extractFrontmatterVersion } from "../utils/version.js";
+import { extractFrontmatterVersion, setFrontmatterVersion } from "../utils/version.js";
 import { splitVersionSuffix, resolveRegistryVersionOrExit } from "../lib/registry-version.js";
 // 0724 T-006: enable-after-install path. We delegate every enabledPlugins
 // mutation to the claude CLI (ADR 0724-01), and we honour the --no-enable
@@ -3282,9 +3282,20 @@ async function installSingleSkillLegacy(
   // plugin skill keeps `name:` equal to its folder: Codex and the Agent Skills
   // spec ignore a namespaced `plugin/skill` name. A matching name is left
   // untouched (no-touch principle).
-  const installContent = pluginNamespace
+  let installContent = pluginNamespace
     ? ensureFrontmatter(content, skillName, true)
     : content;
+  // A pinned install records the registry's version; a release published
+  // without bumping its SKILL.md would otherwise leave the file naming an
+  // older one beside a lock that names this one (as update does since 0765).
+  // The lock sha stays the downloaded content's.
+  if (opts._pinnedVersion && extractFrontmatterVersion(installContent) !== opts._pinnedVersion) {
+    try {
+      installContent = setFrontmatterVersion(installContent, opts._pinnedVersion);
+    } catch {
+      // A frontmatter the narrow writer will not edit keeps its own version.
+    }
+  }
   const sha = computeSha(content);
   const projectRoot = safeProjectRoot();
 

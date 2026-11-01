@@ -155,7 +155,7 @@ jobs:
         # A tag run can only read caches of its own ref and of main. The
         # nightly writes desktop-<target> on main. rust-cache hashes the
         # CARGO_*/RUST* env into the key, so keep that env identical there.
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: src-tauri -> target
           shared-key: desktop-${{ matrix.target }}

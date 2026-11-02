@@ -1,11 +1,14 @@
 // End-to-end: headless Chromium against two local http servers on 127.0.0.1.
-// Skips cleanly when Playwright or a Chromium build is not available.
+// Skips cleanly when Playwright or a Chromium build is not available. With
+// Playwright's pinned build missing, launchBrowser falls back to an older cached
+// one: Chrome 148-149 expose navigator.modelContext, not document.modelContext.
 
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, type TestContext } from "vitest";
 import { auditSites } from "../commands/audit-webmcp.js";
 import { launchBrowser, type PwBrowser } from "./enumerate.js";
+import type { SiteReport } from "./types.js";
 
 const browser: PwBrowser | null = await launchBrowser().catch(() => null);
 
@@ -14,6 +17,17 @@ let widgetServer: Server;
 let pageUrl = "";
 let widgetOrigin = "";
 const executeHits: string[] = [];
+
+// The registerTool capture works on both APIs, so only the getTools test needs the current one.
+const MODEL_CONTEXT = "(document.modelContext || navigator.modelContext)";
+
+// A build with neither API cannot run the fixtures. A failed page load must still fail the test.
+function skipWithoutWebmcp(report: SiteReport, ctx: TestContext): void {
+  expect(report.error).toBeUndefined();
+  if (!report.webmcp.documentModelContext && !report.webmcp.navigatorModelContext) {
+    ctx.skip("this Chromium build has no WebMCP support");
+  }
+}
 
 function listen(server: Server): Promise<number> {
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port)));
@@ -29,7 +43,7 @@ beforeAll(async () => {
     }
     res.setHeader("content-type", "text/javascript");
     res.end(`
-      document.modelContext.registerTool({
+      ${MODEL_CONTEXT}.registerTool({
         name: "add_to_cart",
         description: "Add a product to the shopping cart.",
         inputSchema: { type: "object", properties: { productId: { type: "string" }, quantity: { type: "number" } } },
@@ -51,14 +65,14 @@ beforeAll(async () => {
     if (req.url?.startsWith("/popup")) {
       res.end(`<!doctype html><html><body><script>
         window.open("/executed?popup=1", "_blank");
-        document.modelContext.registerTool({ name: "get_hours", description: "Opening hours.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true }, execute: async () => "9-5" });
+        ${MODEL_CONTEXT}.registerTool({ name: "get_hours", description: "Opening hours.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true }, execute: async () => "9-5" });
       </script></body></html>`);
       return;
     }
     if (req.url?.startsWith("/shopify")) {
       res.end(`<!doctype html><html><head><meta name="shopify-digital-wallet" content="/1/digital_wallets/dialog"></head><body><script>
         window.Shopify = { shop: "fixture.myshopify.com" };
-        document.modelContext.registerTool({ name: "get_hours", description: "Opening hours.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true }, execute: async () => "9-5" });
+        ${MODEL_CONTEXT}.registerTool({ name: "get_hours", description: "Opening hours.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true }, execute: async () => "9-5" });
       </script></body></html>`);
       return;
     }
@@ -69,14 +83,14 @@ beforeAll(async () => {
     res.end(`<!doctype html><html><head><title>WebMCP fixture</title></head><body>
       <form action="/executed?form=1" method="post"><input name="q"><button>Go</button></form>
       <script>
-        document.modelContext.registerTool({
+        ${MODEL_CONTEXT}.registerTool({
           name: "search_products",
           description: "Search the store catalog.",
           inputSchema: { type: "object", properties: { query: { type: "string", description: "Search terms" } } },
           annotations: { readOnlyHint: true },
           execute: async () => { await fetch("/executed?tool=search_products"); return []; },
         });
-        document.modelContext.registerTool({
+        ${MODEL_CONTEXT}.registerTool({
           name: "proceed_to_checkout",
           description: "Start checkout for the current cart.",
           inputSchema: { type: "object", properties: {} },
@@ -159,30 +173,32 @@ describe.skipIf(!browser)("audit-webmcp against a local page (headless Chromium)
     expect(reports[0].summary.verdict).toBe("ERROR");
   }, 60_000);
 
-  it("never opens popups the page asks for", async () => {
+  it("never opens popups the page asks for", async (ctx) => {
     const [report] = await auditSites(browser!, [`${pageUrl}popup`], { concurrency: 1, timeoutMs: 10_000, settleMs: 1_000 });
+    skipWithoutWebmcp(report, ctx);
     expect(report.tools.map((t) => t.name)).toEqual(["get_hours"]);
     expect(executeHits).toEqual([]);
   }, 60_000);
 
-  it("detects the Shopify storefront marker", async () => {
+  it("detects the Shopify storefront marker", async (ctx) => {
     const [report] = await auditSites(browser!, [`${pageUrl}shopify`], { concurrency: 1, timeoutMs: 10_000, settleMs: 1_000 });
+    skipWithoutWebmcp(report, ctx);
     expect(report.platforms).toEqual(["shopify"]);
     expect(report.tools[0]?.registeredByKind).toBe("first-party");
   }, 60_000);
 
-  it("a page stuck in a busy loop is recorded as an error and the batch moves on", async () => {
+  it("a page stuck in a busy loop is recorded as an error and the batch moves on", async (ctx) => {
     const reports = await auditSites(
       browser!,
       [`${pageUrl}busy`, pageUrl],
       { concurrency: 1, timeoutMs: 3_000, settleMs: 1_000 },
     );
     expect(reports[0].error).toBeTruthy();
-    expect(reports[1].error).toBeUndefined();
+    skipWithoutWebmcp(reports[1], ctx);
     expect(reports[1].tools).toHaveLength(3);
   }, 90_000);
 
-  it("relaunches the browser when it has crashed", async () => {
+  it("relaunches the browser when it has crashed", async (ctx) => {
     const own = await launchBrowser();
     await own.close();
     let relaunched: PwBrowser | null = null;
@@ -193,8 +209,8 @@ describe.skipIf(!browser)("audit-webmcp against a local page (headless Chromium)
       relaunch: async () => (relaunched = await launchBrowser()),
     });
     expect(relaunched).not.toBeNull();
-    expect(report.error).toBeUndefined();
-    expect(report.tools).toHaveLength(3);
     await (relaunched as PwBrowser | null)?.close();
+    skipWithoutWebmcp(report, ctx);
+    expect(report.tools).toHaveLength(3);
   }, 60_000);
 });

@@ -5,7 +5,7 @@
 
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterAll, beforeAll, describe, expect, it, type TestContext } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { auditSites } from "../commands/audit-webmcp.js";
 import { launchBrowser, type PwBrowser } from "./enumerate.js";
 import type { SiteReport } from "./types.js";
@@ -16,17 +16,17 @@ let pageServer: Server;
 let widgetServer: Server;
 let pageUrl = "";
 let widgetOrigin = "";
+let capability: Pick<SiteReport["webmcp"], "documentModelContext" | "navigatorModelContext">;
 const executeHits: string[] = [];
 
-// The registerTool capture works on both APIs, so only the getTools test needs the current one.
+// Prefer the current API and fall back to the legacy navigator API.
 const MODEL_CONTEXT = "(document.modelContext || navigator.modelContext)";
 
 // A build with neither API cannot run the fixtures. A failed page load must still fail the test.
-function skipWithoutWebmcp(report: SiteReport, ctx: TestContext): void {
+function supportsWebmcp(report: SiteReport): boolean {
   expect(report.error).toBeUndefined();
-  if (!report.webmcp.documentModelContext && !report.webmcp.navigatorModelContext) {
-    ctx.skip("this Chromium build has no WebMCP support");
-  }
+  expect(report.webmcp).toMatchObject(capability);
+  return capability.documentModelContext || capability.navigatorModelContext;
 }
 
 function listen(server: Server): Promise<number> {
@@ -43,7 +43,7 @@ beforeAll(async () => {
     }
     res.setHeader("content-type", "text/javascript");
     res.end(`
-      ${MODEL_CONTEXT}.registerTool({
+      ${MODEL_CONTEXT}?.registerTool({
         name: "add_to_cart",
         description: "Add a product to the shopping cart.",
         inputSchema: { type: "object", properties: { productId: { type: "string" }, quantity: { type: "number" } } },
@@ -62,17 +62,21 @@ beforeAll(async () => {
       return;
     }
     res.setHeader("content-type", "text/html");
+    if (req.url === "/capability") {
+      res.end("<!doctype html><title>WebMCP capability</title>");
+      return;
+    }
     if (req.url?.startsWith("/popup")) {
       res.end(`<!doctype html><html><body><script>
         window.open("/executed?popup=1", "_blank");
-        ${MODEL_CONTEXT}.registerTool({ name: "get_hours", description: "Opening hours.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true }, execute: async () => "9-5" });
+        ${MODEL_CONTEXT}?.registerTool({ name: "get_hours", description: "Opening hours.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true }, execute: async () => "9-5" });
       </script></body></html>`);
       return;
     }
     if (req.url?.startsWith("/shopify")) {
       res.end(`<!doctype html><html><head><meta name="shopify-digital-wallet" content="/1/digital_wallets/dialog"></head><body><script>
         window.Shopify = { shop: "fixture.myshopify.com" };
-        ${MODEL_CONTEXT}.registerTool({ name: "get_hours", description: "Opening hours.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true }, execute: async () => "9-5" });
+        ${MODEL_CONTEXT}?.registerTool({ name: "get_hours", description: "Opening hours.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true }, execute: async () => "9-5" });
       </script></body></html>`);
       return;
     }
@@ -83,14 +87,14 @@ beforeAll(async () => {
     res.end(`<!doctype html><html><head><title>WebMCP fixture</title></head><body>
       <form action="/executed?form=1" method="post"><input name="q"><button>Go</button></form>
       <script>
-        ${MODEL_CONTEXT}.registerTool({
+        ${MODEL_CONTEXT}?.registerTool({
           name: "search_products",
           description: "Search the store catalog.",
           inputSchema: { type: "object", properties: { query: { type: "string", description: "Search terms" } } },
           annotations: { readOnlyHint: true },
           execute: async () => { await fetch("/executed?tool=search_products"); return []; },
         });
-        ${MODEL_CONTEXT}.registerTool({
+        ${MODEL_CONTEXT}?.registerTool({
           name: "proceed_to_checkout",
           description: "Start checkout for the current cart.",
           inputSchema: { type: "object", properties: {} },
@@ -103,6 +107,17 @@ beforeAll(async () => {
   });
   const pagePort = await listen(pageServer);
   pageUrl = `http://127.0.0.1:${pagePort}/`;
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await page.goto(`${pageUrl}capability`, { waitUntil: "domcontentloaded", timeout: 5_000 });
+    capability = await page.evaluate(() => ({
+      documentModelContext: Boolean((document as Document & { modelContext?: unknown }).modelContext),
+      navigatorModelContext: Boolean((navigator as Navigator & { modelContext?: unknown }).modelContext),
+    }));
+  } finally {
+    await context.close();
+  }
 });
 
 afterAll(async () => {
@@ -114,15 +129,13 @@ afterAll(async () => {
 describe.skipIf(!browser)("audit-webmcp against a local page (headless Chromium)", () => {
   it("enumerates three tools, attributes the third-party one, and never executes a tool", async (ctx) => {
     const [report] = await auditSites(browser!, [pageUrl], { concurrency: 1, timeoutMs: 15_000, settleMs: 2_000 });
-    if (!report.webmcp.documentModelContext) {
+    if (!supportsWebmcp(report)) {
       ctx.skip("this Chromium build has no WebMCP support");
       return;
     }
 
-    expect(report.error).toBeUndefined();
     expect(report.schemaVersion).toBe(1);
     expect(report.finalUrl).toBe(pageUrl);
-    expect(report.webmcp.navigatorModelContext).toBe(false);
     expect(report.headers.permissionsPolicy).toBeNull();
     expect(report.tools.map((t) => t.name).sort()).toEqual(["add_to_cart", "proceed_to_checkout", "search_products"]);
 
@@ -173,32 +186,29 @@ describe.skipIf(!browser)("audit-webmcp against a local page (headless Chromium)
     expect(reports[0].summary.verdict).toBe("ERROR");
   }, 60_000);
 
-  it("never opens popups the page asks for", async (ctx) => {
+  it("never opens popups the page asks for", async () => {
     const [report] = await auditSites(browser!, [`${pageUrl}popup`], { concurrency: 1, timeoutMs: 10_000, settleMs: 1_000 });
-    skipWithoutWebmcp(report, ctx);
-    expect(report.tools.map((t) => t.name)).toEqual(["get_hours"]);
+    expect(report.tools.map((t) => t.name)).toEqual(supportsWebmcp(report) ? ["get_hours"] : []);
     expect(executeHits).toEqual([]);
   }, 60_000);
 
-  it("detects the Shopify storefront marker", async (ctx) => {
+  it("detects the Shopify storefront marker", async () => {
     const [report] = await auditSites(browser!, [`${pageUrl}shopify`], { concurrency: 1, timeoutMs: 10_000, settleMs: 1_000 });
-    skipWithoutWebmcp(report, ctx);
     expect(report.platforms).toEqual(["shopify"]);
-    expect(report.tools[0]?.registeredByKind).toBe("first-party");
+    expect(report.tools.map((t) => t.registeredByKind)).toEqual(supportsWebmcp(report) ? ["first-party"] : []);
   }, 60_000);
 
-  it("a page stuck in a busy loop is recorded as an error and the batch moves on", async (ctx) => {
+  it("a page stuck in a busy loop is recorded as an error and the batch moves on", async () => {
     const reports = await auditSites(
       browser!,
       [`${pageUrl}busy`, pageUrl],
       { concurrency: 1, timeoutMs: 3_000, settleMs: 1_000 },
     );
     expect(reports[0].error).toBeTruthy();
-    skipWithoutWebmcp(reports[1], ctx);
-    expect(reports[1].tools).toHaveLength(3);
+    expect(reports[1].tools).toHaveLength(supportsWebmcp(reports[1]) ? 3 : 0);
   }, 90_000);
 
-  it("relaunches the browser when it has crashed", async (ctx) => {
+  it("relaunches the browser when it has crashed", async () => {
     const own = await launchBrowser();
     await own.close();
     let relaunched: PwBrowser | null = null;
@@ -210,7 +220,6 @@ describe.skipIf(!browser)("audit-webmcp against a local page (headless Chromium)
     });
     expect(relaunched).not.toBeNull();
     await (relaunched as PwBrowser | null)?.close();
-    skipWithoutWebmcp(report, ctx);
-    expect(report.tools).toHaveLength(3);
+    expect(report.tools).toHaveLength(supportsWebmcp(report) ? 3 : 0);
   }, 60_000);
 });

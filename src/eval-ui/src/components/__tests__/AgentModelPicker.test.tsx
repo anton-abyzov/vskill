@@ -82,6 +82,11 @@ function makeCatalog(): AgentCatalog {
   };
 }
 
+// ModelList debounces its search in a timer that its effect cleanup clears. A
+// root left mounted keeps that timer live past the file's teardown, and if it
+// fires then, React throws "window is not defined" and fails the whole run.
+const mountedRoots: Array<{ unmount: () => void }> = [];
+
 async function renderPicker(): Promise<HTMLElement> {
   const React = await import("react");
   const { createRoot } = await import("react-dom/client");
@@ -90,6 +95,7 @@ async function renderPicker(): Promise<HTMLElement> {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
+  mountedRoots.push(root);
   act(() => {
     root.render(React.createElement(AgentModelPicker, { onToast: vi.fn() }));
   });
@@ -113,7 +119,11 @@ beforeEach(() => {
   };
 });
 
-afterEach(() => {
+afterEach(async () => {
+  const { act } = await import("react");
+  act(() => {
+    for (const r of mountedRoots.splice(0)) r.unmount();
+  });
   vi.restoreAllMocks();
   document.body.innerHTML = "";
 });

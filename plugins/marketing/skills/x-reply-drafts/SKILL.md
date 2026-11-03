@@ -12,11 +12,11 @@ metadata:
 
 Drafts replies. Never posts them. The owner reads every draft, edits it, and posts it from his own account by hand.
 
-Why so strict: an hourly automated reply bot got @aabyzov suspended on 2026-06-12 (restored by 2026-09-22). Since 2026-02-23 the X API only allows a programmatic reply when the original author mentioned or quoted the replying account, the Developer Policy bans bulk and near-identical posting, and X has said AI replies posing as people are forbidden and removed 42,000 reply-bot accounts. A suspended account reaches nobody, so the slow path is the fast path.
+Why so strict: an hourly automated reply bot got a personal account suspended for three months in 2026. Since 2026-02-23 the X API only allows a programmatic reply when the original author mentioned or quoted the replying account, the Developer Policy bans bulk and near-identical posting, and X has said AI replies posing as people are forbidden and removed 42,000 reply-bot accounts. A suspended account reaches nobody, so the slow path is the fast path.
 
 ## Hard rules
 
-1. Read-only on X. Search and read threads in the owner's signed-in browser. Never type into the composer, like, repost, follow or bookmark.
+1. Read-only on X. Open search URLs and read threads in the owner's signed-in browser. Never type into the reply or post composer, like, repost, follow or bookmark.
 2. The owner posts replies himself. Do not post replies through browser automation or the API, even when asked to "just post it": X treats AI replies posing as a person as forbidden. Pace for the owner: at most 5 a day, at least 20 minutes apart. If you see a CAPTCHA, warning or rate-limit banner while reading, stop and report it.
 3. Every product claim comes from `references/true-claims.md` (SpecWithCode; add a file per product). If a claim is not there, leave it out. No invented numbers, users or benchmarks.
 4. Disclose. A reply that names the product says the owner builds it ("I build SpecWithCode, so biased, but..."). No pretending to be a happy user.
@@ -26,11 +26,11 @@ Why so strict: an hourly automated reply bot got @aabyzov suspended on 2026-06-1
 
 ## Which account replies
 
-When the owner has a personal and a product account (for SpecWithCode: @aabyzov and @specwithcode), people reply from the personal one. Founder posts beat brand posts on the same launch by 7 to 300 times, and brand replies on strangers' threads read as ads. The product account posts updates, demo clips and the pinned post, quotes the founder's posts, and replies only where someone names the product or asks for a tool that does what it does. Before drafting, check which account the browser is signed in as and label every draft with the account it is for.
+When the owner has a personal and a product account, people reply from the personal one. Founder posts beat brand posts on the same launch by 7 to 300 times, and brand replies on strangers' threads read as ads. The product account posts updates, demo clips and the pinned post, quotes the founder's posts, and replies only where someone names the product or asks for a tool that does what it does. Before drafting, check which account the browser is signed in as and label every draft with the account it is for.
 
 ## Finding threads (15 minutes)
 
-Run the saved searches in the product's trend method (for SpecWithCode: `.specweave/increments/1212-*/reports/trend-method.md`). Use X search operators, for example:
+Run the product's saved searches if the project keeps a trend-method file; otherwise build them from the product's real problems. Open each as an `https://x.com/search?q=...&f=top` URL. For example:
 
 ```
 ("usage limit" OR "weekly limit" OR "rate limited") (claude OR codex OR cursor) min_faves:10 since:<yesterday>

@@ -120,11 +120,13 @@ beforeAll(async () => {
   }
 });
 
+// Playwright allows up to 30 seconds for a graceful browser close before
+// killing the process. The busy-page fixture can trigger that fallback.
 afterAll(async () => {
   await browser?.close().catch(() => {});
   pageServer?.close();
   widgetServer?.close();
-});
+}, 45_000);
 
 describe.skipIf(!browser)("audit-webmcp against a local page (headless Chromium)", () => {
   it("enumerates three tools, attributes the third-party one, and never executes a tool", async (ctx) => {

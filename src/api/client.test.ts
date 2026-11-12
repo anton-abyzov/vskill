@@ -327,7 +327,21 @@ describe("submitSkill", () => {
 
 describe("getSubmission", () => {
   it("fetches submission by ID", async () => {
-    const data = { id: "sub-456", status: "completed", result: { ok: true } };
+    // Shape of the live GET /api/v1/submissions/{id} response.
+    const data = {
+      id: "sub-456",
+      repoUrl: "https://github.com/o/r",
+      skillName: "greet",
+      skillPath: "SKILL.md",
+      state: "PUBLISHED",
+      isVendor: false,
+      createdAt: "2026-02-26T06:40:46.736Z",
+      updatedAt: "2026-05-31T20:13:25.699Z",
+      scanResult: { tier: 1, verdict: "PASS", score: 96, findings: [] },
+      stateHistory: [{ state: "RECEIVED", from: "", timestamp: "2026-02-26T06:40:46.736Z" }],
+      publishedSkillName: "o/r/greet",
+      blockInfo: null,
+    };
     mockFetch.mockResolvedValue(jsonResponse(data));
 
     const result = await getSubmission("sub-456");
@@ -342,6 +356,8 @@ describe("getSubmission", () => {
       })
     );
     expect(result).toEqual(data);
+    expect(result.state).toBe("PUBLISHED");
+    expect(result.publishedSkillName).toBe("o/r/greet");
   });
 });
 

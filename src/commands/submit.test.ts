@@ -12,6 +12,20 @@ vi.mock("../lib/private-source.js", () => ({
   typedRepoStatus: vi.fn(async () => mockRepoStatus.value),
 }));
 
+// No local checkout: these cases run without git, whatever the test cwd is.
+vi.mock("../lib/git-checkout.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/git-checkout.js")>()),
+  readLocalCheckout: () => null,
+  locateSkillFile: () => null,
+  readSkillName: () => null,
+  listTrackedSkillFiles: () => [],
+  isCommitted: () => false,
+  isOnOriginBranch: () => false,
+  toRepoPath: () => null,
+  findTrackedSkill: () => null,
+  listTrackedSkills: () => [],
+}));
+
 vi.mock("../utils/browser.js", () => ({
   openBrowser: (...args: unknown[]) => mockOpenBrowser(...args),
 }));
@@ -81,6 +95,14 @@ describe("submitCommand — API mode (default)", () => {
       expect.objectContaining({
         skillPath: "plugins/personal/skills/brain/SKILL.md",
       })
+    );
+  });
+
+  it("sends the repo name as skillName when --skill is omitted (platform requires one)", async () => {
+    await submitCommand("myorg/myskill", {});
+
+    expect(mockSubmitSkill).toHaveBeenCalledWith(
+      expect.objectContaining({ repoUrl: "https://github.com/myorg/myskill", skillName: "myskill" })
     );
   });
 
@@ -168,7 +190,8 @@ describe("submitCommand — browser mode (--browser)", () => {
 
     expect(mockOpenBrowser).toHaveBeenCalledOnce();
     const url = mockOpenBrowser.mock.calls[0][0] as string;
-    expect(url).toBe("https://verified-skill.com/submit?repo=myorg%2Fmyskill");
+    // The submit page pre-fills only a full https://github.com/ URL (repoPrefill.ts).
+    expect(url).toBe("https://verified-skill.com/submit?repo=https%3A%2F%2Fgithub.com%2Fmyorg%2Fmyskill&skill=myskill");
     expect(mockSubmitSkill).not.toHaveBeenCalled();
   });
 
@@ -176,7 +199,16 @@ describe("submitCommand — browser mode (--browser)", () => {
     await submitCommand("myorg/myskill", { browser: true, skill: "my-skill" });
 
     const url = mockOpenBrowser.mock.calls[0][0] as string;
-    expect(url).toBe("https://verified-skill.com/submit?repo=myorg%2Fmyskill&skill=my-skill");
+    expect(url).toBe("https://verified-skill.com/submit?repo=https%3A%2F%2Fgithub.com%2Fmyorg%2Fmyskill&skill=my-skill");
+  });
+
+  it("names the same skill and path as the API flow", async () => {
+    await submitCommand("myorg/myskill", { browser: true, skill: "my-skill", path: "skills/my-skill/SKILL.md" });
+
+    const url = new URL(mockOpenBrowser.mock.calls[0][0] as string);
+    expect(url.searchParams.get("repo")).toBe("https://github.com/myorg/myskill");
+    expect(url.searchParams.get("skill")).toBe("my-skill");
+    expect(url.searchParams.get("path")).toBe("skills/my-skill/SKILL.md");
   });
 });
 

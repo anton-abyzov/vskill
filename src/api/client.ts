@@ -421,13 +421,57 @@ export async function submitSkill(
   });
 }
 
+/** One scan finding as GET /api/v1/submissions/{id} returns it (tier-1 pattern or tier-2 shape). */
+export interface SubmissionFinding {
+  patternId?: string;
+  patternName?: string;
+  title?: string;
+  message?: string;
+  severity?: string;
+  category?: string;
+  file?: string;
+  lineNumber?: number;
+  match?: string;
+}
+
+/** Shape of GET /api/v1/submissions/{id} for a public (sub_) submission. */
+export interface SubmissionDetail {
+  id: string;
+  repoUrl: string;
+  skillName: string;
+  skillPath?: string | null;
+  state: string;
+  isVendor?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  scanResult?: {
+    tier?: number;
+    verdict?: string;
+    score?: number;
+    findingsCount?: number;
+    criticalCount?: number;
+    highCount?: number;
+    findings?: SubmissionFinding[];
+  } | null;
+  stateHistory?: Array<{ state: string; from?: string; timestamp: string }>;
+  stageTimings?: Record<string, string | number | null>;
+  /** Hierarchical owner/repo/skill name once published. */
+  publishedSkillName?: string | null;
+  blockInfo?: {
+    reason: string;
+    threatType?: string;
+    severity?: string;
+    evidenceUrls?: string[];
+    findings?: SubmissionFinding[];
+    commitSha?: string | null;
+  } | null;
+}
+
 /**
- * Get the status of a submission.
+ * Get the status of a public submission.
  */
-export async function getSubmission(
-  id: string
-): Promise<{ id: string; status: string; result?: unknown }> {
-  return apiRequest(`/api/v1/submissions/${encodeURIComponent(id)}`);
+export async function getSubmission(id: string): Promise<SubmissionDetail> {
+  return apiRequest<SubmissionDetail>(`/api/v1/submissions/${encodeURIComponent(id)}`);
 }
 
 export interface SkillVersionEntry {

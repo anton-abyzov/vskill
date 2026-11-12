@@ -6,7 +6,7 @@
 //   vskill skill import   — re-emit an existing SKILL.md against targets
 //   vskill skill list     — thin alias for `vskill list`
 //   vskill skill info     — show frontmatter + divergence report
-//   vskill skill publish  — alias for `vskill submit`
+//   vskill skill publish  — resolve a skill name, then run `vskill submit`
 //
 // Satisfies AC-US3-01..12, AC-US2-03, AC-US2-07, AC-US1-07.
 // ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ import type { ProviderName } from "../eval/llm.js";
 import { isSkillCreatorInstalled } from "../utils/skill-creator-detection.js";
 import { bold, cyan, dim, green, red, yellow } from "../utils/output.js";
 import { listCommand } from "./list.js";
-import { submitCommand } from "./submit.js";
+import { skillPublishCommand } from "./skill-publish.js";
 import {
   emitSkill as realEmitSkill,
   type EmitOptions,
@@ -446,16 +446,6 @@ async function skillInfoCommand(name: string): Promise<void> {
   }
 }
 
-async function skillPublishCommand(name: string): Promise<void> {
-  // `vskill submit` takes a source (owner/repo) + --skill <name>, but
-  // vskill skill publish is designed to publish an already-installed skill
-  // whose owner/repo is recorded in the lockfile. Passing the name through
-  // preserves the expected alias semantics — submit.ts either resolves it
-  // via the lockfile (future work) or errors with the same UX the user
-  // would see today.
-  await submitCommand(name, {});
-}
-
 // ---------------------------------------------------------------------------
 // Command registration
 // ---------------------------------------------------------------------------
@@ -516,8 +506,11 @@ export function registerSkillCommand(program: Command): void {
 
   skill
     .command("publish <name>")
-    .description("Publish a skill for verification (alias for 'vskill submit')")
-    .action(async (name: string) => {
-      await skillPublishCommand(name);
+    .description(
+      "Submit a skill for verification: finds its repo in vskill.authored.json or the current checkout, then runs 'vskill submit'",
+    )
+    .option("--wait", "Follow the submission until it is published or rejected")
+    .action(async (name: string, opts: { wait?: boolean }) => {
+      await skillPublishCommand(name, opts);
     });
 }

@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, readFileSync, rmSync, mkdtempSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Command } from "commander";
@@ -407,12 +407,37 @@ describe("vskill skill list / publish aliases (AC-US3-07, AC-US3-08)", () => {
     expect(mocks.listCommand).toHaveBeenCalledTimes(1);
   });
 
-  it("publish delegates to submitCommand", async () => {
+  it("publish resolves the name from vskill.authored.json and delegates to submitCommand", async () => {
+    writeFileSync(
+      join(tmpDir, "vskill.authored.json"),
+      JSON.stringify({
+        version: 1,
+        skills: { "myorg/myrepo/my-skill": { sourcePath: join(tmpDir, "SKILL.md"), publishedAt: "2026-11-01T00:00:00Z" } },
+      }),
+    );
     const { exitCode } = await invokeSkill(["publish", "my-skill"]);
     expect(exitCode ?? 0).toBe(0);
     expect(mocks.submitCommand).toHaveBeenCalledTimes(1);
-    const args = mocks.submitCommand.mock.calls[0];
-    expect(args[0]).toBe("my-skill");
+    const [source, opts] = mocks.submitCommand.mock.calls[0];
+    expect(source).toBe("myorg/myrepo");
+    expect(opts).toMatchObject({ skill: "my-skill" });
+  });
+
+  it("publish accepts a full owner/repo/skill name without any local record", async () => {
+    const { exitCode } = await invokeSkill(["publish", "myorg/myrepo/greet", "--wait"]);
+    expect(exitCode ?? 0).toBe(0);
+    const [source, opts] = mocks.submitCommand.mock.calls[0];
+    expect(source).toBe("myorg/myrepo");
+    expect(opts).toMatchObject({ skill: "greet", wait: true });
+  });
+
+  it("publish prints the exact submit command and exits 1 when the name cannot be resolved", async () => {
+    const { exitCode } = await invokeSkill(["publish", "my-skill"]);
+    expect(exitCode).toBe(1);
+    expect(mocks.submitCommand).not.toHaveBeenCalled();
+    const err = errSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(err).toContain('Could not find which repository holds the skill "my-skill"');
+    expect(err).toContain("vskill submit <owner>/<repo> --skill my-skill --path <path/to/SKILL.md>");
   });
 });
 

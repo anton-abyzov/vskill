@@ -31,12 +31,12 @@ export interface GitHubRepoRef {
   repo: string;
 }
 
-/** Parse "owner/repo", "github.com/owner/repo" URLs and git@github.com remotes. */
+/** Parse "owner/repo", "github.com/owner/repo" URLs (credentials allowed) and git@github.com remotes. */
 export function parseGitHubRepoRef(ref: string | undefined | null): GitHubRepoRef | null {
   if (!ref) return null;
   const trimmed = ref.trim();
   const url = trimmed.match(
-    /^(?:git\+)?(?:https?:\/\/|ssh:\/\/git@|git:\/\/)(?:www\.)?github\.com[/:]([^/\s]+)\/([^/\s?#]+?)(?:\.git)?\/?(?:[?#].*)?$/i,
+    /^(?:git\+)?(?:https?:\/\/(?:[^@/\s]+@)?|ssh:\/\/git@|git:\/\/)(?:www\.)?github\.com[/:]([^/\s]+)\/([^/\s?#]+?)(?:\.git)?\/?(?:[?#].*)?$/i,
   );
   if (url) return { owner: url[1], repo: url[2] };
   const scp = trimmed.match(/^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i);

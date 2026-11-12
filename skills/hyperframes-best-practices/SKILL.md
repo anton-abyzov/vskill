@@ -172,6 +172,8 @@ These two together let you make the **smart cut decision**: silence + no scene c
 
 # Phase 4 — Build the smart cut list
 
+> **Speaker who records repeated takes (Anton's rule, 2026-11-01):** when each passage is said several times and the last attempt is the clean one, that rule overrides Rules 1-2 below. Keep only the last attempt of each passage as one unbroken piece: no dead-air or silence removal inside it, no cut inside a sentence. Trim only take heads and tails at word edges (about 100-200 ms buffer), join takes with short audio crossfades (30-80 ms) and keep the ending clean. If it runs long, speed the whole edit up uniformly (about 1.1x, `atempo` plus `setpts`, pitch preserved) instead of cutting.
+
 The cut algorithm has **5 hard rules** earned the painful way:
 
 ### Rule 1 — Pure dead air gets cut, but not all of it
@@ -685,7 +687,7 @@ Three Python scripts handle the heavy lifting. Read them, copy them, adapt them.
 # Anti-patterns — never do these
 
 1. **Don't shrink the video to a PiP corner during overlays.** Float overlays on top instead. The user said "those animations must be on top, like phone hover style" — they meant it.
-2. **Don't fade between cuts with a slow crossfade.** Hard cuts (snapped to word edges with buffers) read as professional. Crossfades read as amateur.
+2. **Don't fade between cuts with a slow crossfade.** Hard cuts (snapped to word edges with buffers) read as professional; slow crossfades read as amateur. Exception: between repeated takes (Anton's rule, 2026-11-01), use short 30-80 ms audio crossfades so the joins stay smooth.
 3. **Don't use `auto-editor` to do silence cuts.** It's choppy, doesn't snap to word boundaries, doesn't handle duplicate takes, doesn't scrub beeps. Use the smart-cut algorithm.
 4. **Don't use the `con​cat` demuxer for re-encoded clips.** Use the `con​cat` filter — it sample-aligns audio. Boundary clicks are not OBS ticks; they're con​cat artifacts.
 5. **Don't fade-in every clip** to suppress beeps. Beeps inside silences (deep into a clip) won't be reached. Use surgical detection + targeted mute instead.

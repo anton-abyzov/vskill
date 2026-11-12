@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.17] - 2026-11-12
+
+### Fixed
+
+- `vskill submit owner/repo` works without `--skill`: it sends the local SKILL.md name when run inside that repo, else the repo name.
+- `vskill skill publish <name>` finds the skill in `vskill.authored.json` or the checkout and submits it. When it cannot, it prints the `vskill submit` command to run.
+- Skill Studio publish sets the upstream on the first push of a new branch.
+- The desktop build uses matching Tauri notification and shell plugin versions.
+
+### Added
+
+- `vskill submit` with no argument submits the skill in the current checkout. It stops with the command to run when the SKILL.md is uncommitted, the branch is not pushed, or the skill is not on the default branch.
+- `vskill submit --wait` follows a public submission until it is published or rejected, and `--submission <id>` checks an existing one.
+
 ## [1.2.16] - 2026-10-28
 
 ### Fixed

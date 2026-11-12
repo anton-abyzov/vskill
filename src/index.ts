@@ -253,14 +253,20 @@ program
 
 program
   .command("submit [source]")
-  .description("Submit a skill for verification on verified-skill.com")
-  .option("--skill <name>", "Skill name within a multi-skill repo")
+  .description(
+    "Submit a skill for verification on verified-skill.com (owner/repo, or no argument inside a pushed git checkout)",
+  )
+  .option("--skill <name>", "Skill name within a multi-skill repo (default: the local SKILL.md name, else the repo name)")
   .option("--path <path>", "Path to SKILL.md within the repo")
   .option("--browser", "Use browser-based GitHub OAuth instead of API")
   .option("--private", "Publish only to an authenticated private account")
   .option("--tenant <slug>", "Account that owns the private skill")
+  // --wait is declared before --no-wait so neither sets a default: a public
+  // submit returns at once unless --wait is given, a private one waits unless
+  // --no-wait is given.
+  .option("--wait", "Follow the submission until it is published or rejected (about 5 minutes at most)")
   .option("--no-wait", "Return after creating a private submission")
-  .option("--submission <id>", "Read or wait for an existing private submission")
+  .option("--submission <id>", "Show (or with --wait, follow) an existing submission")
   .action(async (source: string | undefined, opts) => {
     if (opts.private) {
       const { submitPrivateCommand } = await import("./commands/submit-private.js");

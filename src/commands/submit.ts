@@ -6,27 +6,177 @@ import * as fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import * as path from "node:path";
 import { openBrowser } from "../utils/browser.js";
-import { submitSkill, getSubmission, getVersions } from "../api/client.js";
+import { submitSkill, getVersions } from "../api/client.js";
 import { bold, green, red, dim, cyan, yellow } from "../utils/output.js";
 import { parseGitHubSource, validateSkillName } from "../utils/validation.js";
 import { upsertFrontmatterVersion, validatesAsYamlFrontmatter } from "../lib/frontmatter.js";
 import { addAuthoredSkill } from "../lockfile/authored.js";
 import { getProjectRoot } from "../lockfile/project-root.js";
 import { typedRepoStatus } from "../lib/private-source.js";
+import {
+  isCommitted,
+  isOnOriginBranch,
+  listTrackedSkillFiles,
+  locateSkillFile,
+  readLocalCheckout,
+  readSkillName,
+  toRepoPath,
+  type LocalCheckout,
+} from "../lib/git-checkout.js";
+import { followSubmission } from "./submit-status.js";
 
-interface SubmitOptions {
+export interface SubmitOptions {
   skill?: string;
   browser?: boolean;
   path?: string;
   tenant?: string;
   submission?: string;
+  /** Poll the new (or --submission) submission until it is published or rejected. */
+  wait?: boolean;
+}
+
+interface SubmitTarget {
+  owner: string;
+  repo: string;
+  skillName: string;
+  /** Repo-relative SKILL.md path sent to the platform. */
+  skillPath?: string;
+  /** Local SKILL.md file, used for the version write-back. */
+  localFile?: string;
+  /** Set when the target came from the cwd checkout (no source argument). */
+  checkout?: LocalCheckout;
+}
+
+function fail(message: string, hint?: string): never {
+  console.error(red(message) + (hint ? " " + dim(hint) : ""));
+  process.exit(1);
+}
+
+function sameRepo(checkout: LocalCheckout | null, owner: string, repo: string): checkout is LocalCheckout {
+  return !!checkout?.owner && !!checkout.repo &&
+    checkout.owner.toLowerCase() === owner.toLowerCase() &&
+    checkout.repo.toLowerCase() === repo.toLowerCase();
+}
+
+/** owner/repo given: name the skill from a local SKILL.md of that same repo, else after the repo. */
+function targetFromSource(source: string, opts: SubmitOptions): SubmitTarget {
+  const parsed = parseGitHubSource(source);
+  if (!parsed) {
+    console.error(
+      red("Invalid source. Use: ") + cyan("owner/repo") + dim(" or ") + cyan("https://github.com/owner/repo")
+    );
+    process.exit(1);
+  }
+  const { owner, repo } = parsed;
+  if (opts.skill) return { owner, repo, skillName: opts.skill, skillPath: opts.path };
+
+  const checkout = readLocalCheckout(process.cwd());
+  if (sameRepo(checkout, owner, repo)) {
+    const file = locateSkillFile({ path: opts.path, checkout });
+    const name = file ? readSkillName(file) : null;
+    if (file && name) {
+      const repoPath = toRepoPath(checkout, file);
+      const skillPath = opts.path ?? (repoPath && isCommitted(checkout, repoPath) ? repoPath : undefined);
+      return { owner, repo, skillName: name, skillPath, localFile: file };
+    }
+  }
+  return { owner, repo, skillName: repo, skillPath: opts.path };
+}
+
+/** No source: the cwd's git checkout names the repo and its SKILL.md names the skill. */
+function targetFromCheckout(opts: SubmitOptions): SubmitTarget {
+  const checkout = readLocalCheckout(process.cwd());
+  if (!checkout) {
+    fail("Not inside a git checkout.", "Run this from your skill's repository, or use: vskill submit owner/repo --skill <name>");
+  }
+  if (!checkout.remoteUrl) {
+    console.error(red("This repository has no `origin` remote, so it is not on GitHub yet."));
+    console.error(dim("Create a public GitHub repo from this folder and push it, then submit:"));
+    console.error("  " + cyan("gh repo create <owner>/<repo> --public --source=. --remote=origin --push"));
+    console.error("  " + cyan("vskill submit"));
+    process.exit(1);
+  }
+  if (!checkout.owner || !checkout.repo) {
+    fail(`origin is not a GitHub repository (${checkout.remoteUrl}).`, "verified-skill.com only reviews public GitHub repos.");
+  }
+
+  let file = locateSkillFile({ path: opts.path, checkout });
+  if (!file && !opts.path) {
+    const tracked = listTrackedSkillFiles(checkout);
+    if (tracked.length === 1) file = path.join(checkout.root, tracked[0]);
+    else if (tracked.length > 1) {
+      console.error(red("This repository has several skills; say which one with --path:"));
+      for (const t of tracked.slice(0, 20)) console.error("  " + cyan(`vskill submit --path ${t}`));
+      process.exit(1);
+    }
+  }
+  if (!file) {
+    fail(
+      opts.path ? `No SKILL.md at ${opts.path}.` : "No SKILL.md found in this folder or tracked in this repository.",
+      "Create one with `vskill skill new`, commit it, then run vskill submit again.",
+    );
+  }
+  const repoPath = toRepoPath(checkout, file);
+  if (!repoPath) fail(`${file} is outside the repository at ${checkout.root}.`);
+  if (!isCommitted(checkout, repoPath)) {
+    console.error(red(`${repoPath} is not committed yet, so GitHub cannot serve it.`));
+    console.error("  " + cyan(`git add ${repoPath} && git commit -m "Add ${path.basename(path.dirname(path.resolve(file))) || "skill"}"`));
+    console.error("  " + cyan("git push -u origin HEAD"));
+    process.exit(1);
+  }
+  const skillName = opts.skill ?? readSkillName(file) ?? checkout.repo;
+  return { owner: checkout.owner, repo: checkout.repo, skillName, skillPath: repoPath, localFile: file, checkout };
+}
+
+/** The branch must be on GitHub before the platform can read the SKILL.md. */
+function assertPushed(checkout: LocalCheckout, skillPath: string | undefined): void {
+  if (!checkout.branch) {
+    fail("HEAD is detached.", "Check out the branch that holds the skill, push it, then submit.");
+  }
+  if (!checkout.hasUpstream) {
+    console.error(red(`Branch ${checkout.branch} is not on GitHub yet. Push it first:`));
+    console.error("  " + cyan("git push -u origin HEAD"));
+    process.exit(1);
+  }
+  if (!checkout.pushed) {
+    console.error(red(`Branch ${checkout.branch} has commits that are not on GitHub yet. Push them first:`));
+    console.error("  " + cyan("git push"));
+    process.exit(1);
+  }
+  assertOnDefaultBranch(checkout, checkout.branch, skillPath);
+}
+
+/**
+ * The platform reads SKILL.md from the repository's default branch, so a
+ * skill that exists only on a pushed feature branch would not be found.
+ */
+function assertOnDefaultBranch(checkout: LocalCheckout, branch: string, skillPath: string | undefined): void {
+  const main = checkout.defaultBranch;
+  if (main) {
+    if (branch === main || !skillPath || isOnOriginBranch(checkout, main, skillPath)) return;
+    console.error(
+      red(`${skillPath} is on ${branch} but not on ${main}, the default branch verified-skill.com reads. `) +
+        dim("Merge it first, for example:"),
+    );
+    console.error("  " + cyan(`gh pr create --fill --base ${main}`) + dim(" && ") + cyan("gh pr merge --merge"));
+    console.error("  " + cyan(`git checkout ${main} && git merge ${branch} && git push`));
+    console.error(dim("Already merged on GitHub? Run ") + cyan("git fetch origin") + dim(" and submit again."));
+    process.exit(1);
+  }
+  if (branch !== "main" && branch !== "master") {
+    console.log(
+      yellow(`You are on ${branch}. `) +
+        dim("verified-skill.com reads the repository's default branch; make sure the skill is merged there."),
+    );
+  }
 }
 
 export async function submitCommand(
   source: string | undefined,
   opts: SubmitOptions
 ): Promise<void> {
-  if (opts.tenant || opts.submission) {
+  // Private submission ids (psub_) and tenants belong to --private.
+  if (opts.tenant || opts.submission?.startsWith("psub_")) {
     console.error(red("--tenant and --submission require --private for publishing."));
     process.exit(1);
   }
@@ -38,20 +188,16 @@ export async function submitCommand(
     process.exit(1);
   }
 
-  if (!source) {
-    console.error(red("Source required. ") + dim("Use: vskill submit owner/repo --skill name"));
-    process.exit(1);
+  if (opts.submission) {
+    await followSubmission(opts.submission, { wait: opts.wait === true });
+    return;
   }
 
-  const parsed = parseGitHubSource(source);
-  if (!parsed) {
-    console.error(
-      red("Invalid source. Use: ") + cyan("owner/repo") + dim(" or ") + cyan("https://github.com/owner/repo")
-    );
-    process.exit(1);
+  const target = source ? targetFromSource(source, opts) : targetFromCheckout(opts);
+  const { owner, repo, skillName } = target;
+  if (!validateSkillName(skillName)) {
+    fail(`Invalid skill name "${skillName}".`, "Pass a plain name with --skill.");
   }
-
-  const { owner, repo } = parsed;
   const repoUrl = `https://github.com/${owner}/${repo}`;
 
   // This default path publishes publicly. A repo GitHub reports as private
@@ -74,8 +220,18 @@ export async function submitCommand(
             "and use --private --tenant <account>.",
         ),
     );
+    const local = target.checkout ?? readLocalCheckout(process.cwd());
+    console.error(dim("If the repo does not exist yet, create it from this folder and submit again:"));
+    if (sameRepo(local, owner, repo)) {
+      console.error("  " + cyan(`gh repo create ${owner}/${repo} --public`) + dim(" && ") + cyan("git push -u origin HEAD"));
+    } else {
+      console.error("  " + cyan(`gh repo create ${owner}/${repo} --public --source=. --remote=origin --push`));
+    }
+    console.error("  " + cyan(source ? `vskill submit ${owner}/${repo}` : "vskill submit"));
     process.exit(1);
   }
+
+  if (target.checkout) assertPushed(target.checkout, target.skillPath);
 
   // --browser flag: use browser-based OAuth flow
   if (opts.browser) {
@@ -98,14 +254,16 @@ export async function submitCommand(
   }
 
   // Default: programmatic API submission (no browser needed)
-  console.log(dim(`Submitting ${bold(opts.skill || repo)} from ${owner}/${repo}...\n`));
-  const fullName = `${owner}/${repo}/${opts.skill || repo}`;
+  console.log(dim(`Submitting ${bold(skillName)} from ${owner}/${repo}...\n`));
+  const fullName = `${owner}/${repo}/${skillName}`;
+  const writeBackPath = target.localFile ?? opts.path;
 
+  let followId: string | undefined;
   try {
     const response = await submitSkill({
       repoUrl,
-      skillName: opts.skill,
-      skillPath: opts.path,
+      skillName,
+      skillPath: target.skillPath,
       source: "cli-submit",
     });
 
@@ -120,8 +278,8 @@ export async function submitCommand(
       // 0794 / T-005 — write registry version back to local SKILL.md frontmatter.
       // Only fires when the user has a local source path: prevents phantom
       // "update available" right after submit (project_skill_version_publish_desync.md).
-      if (response.skillName && opts.path) {
-        await tryWriteBackVersion(response.skillName, opts.path);
+      if (response.skillName && writeBackPath) {
+        await tryWriteBackVersion(response.skillName, writeBackPath);
       }
       return;
     }
@@ -133,7 +291,10 @@ export async function submitCommand(
         red("Rejected: ") +
           dim(`this exact SKILL.md was already reviewed and rejected (${response.state}).`),
       );
-      if (response.id) console.error(dim(`Submission: ${response.id}`));
+      if (response.id) {
+        console.error(dim(`Submission: ${response.id}`));
+        console.error(dim("See the findings: ") + cyan(`vskill submit --submission ${response.id}`));
+      }
       console.error(dim("Fix the findings, push the change, then run the same submit again to have it re-evaluated."));
       process.exit(1);
     }
@@ -141,25 +302,30 @@ export async function submitCommand(
     if (response.duplicate) {
       console.log(yellow("Duplicate: ") + dim("An identical submission is already pending."));
       const existing = response.id ?? response.submissionId;
-      if (existing) console.log(dim(`Existing submission: ${existing}`));
+      if (existing) {
+        console.log(dim(`Existing submission: ${existing}`));
+        if (opts.wait) followId = existing;
+        else console.log(dim("Follow it: ") + cyan(`vskill submit --submission ${existing} --wait`));
+      }
       console.log(dim(`Check status: vskill info ${fullName}`));
-      return;
-    }
-
-    console.log(
-      green(response.requeued ? "Resubmitted! " : "Submitted! ") +
-        dim(`ID: ${response.id}`) +
-        (response.requeued ? dim(" (SKILL.md changed; publishing a new version)") : ""),
-    );
-    console.log(dim(`State: ${response.state}`));
-    console.log(dim("\nThe skill will go through tier-1 and tier-2 scanning."));
-    // 0932: `vskill info` needs the full owner/repo/skill name.
-    console.log(dim(`Check status: vskill info ${fullName}`));
-    // 0794 / T-005 — when state is already 'completed' (rare fast-path),
-    // attempt write-back. For pending state the user should re-run after
-    // scan completes (or use vskill outdated which will pick up the new version).
-    if (response.state === "completed" && response.skillName && opts.path) {
-      await tryWriteBackVersion(response.skillName, opts.path);
+    } else {
+      console.log(
+        green(response.requeued ? "Resubmitted! " : "Submitted! ") +
+          dim(`ID: ${response.id}`) +
+          (response.requeued ? dim(" (SKILL.md changed; publishing a new version)") : ""),
+      );
+      console.log(dim(`State: ${response.state}`));
+      console.log(dim("\nThe skill will go through tier-1 and tier-2 scanning."));
+      if (response.id && opts.wait) followId = response.id;
+      else if (response.id) console.log(dim("Follow it: ") + cyan(`vskill submit --submission ${response.id} --wait`));
+      // 0932: `vskill info` needs the full owner/repo/skill name.
+      console.log(dim(`Check status: vskill info ${fullName}`));
+      // 0794 / T-005 — when state is already 'completed' (rare fast-path),
+      // attempt write-back. For pending state the user should re-run after
+      // scan completes (or use vskill outdated which will pick up the new version).
+      if (response.state === "completed" && response.skillName && writeBackPath) {
+        await tryWriteBackVersion(response.skillName, writeBackPath);
+      }
     }
   } catch (err) {
     const msg = (err as Error).message;
@@ -170,6 +336,12 @@ export async function submitCommand(
       console.log(dim("\nFallback: use --browser to submit via GitHub OAuth."));
     }
     process.exit(1);
+  }
+
+  if (followId) {
+    console.log("");
+    const outcome = await followSubmission(followId, { wait: true });
+    if (outcome === "published" && writeBackPath) await tryWriteBackVersion(fullName, writeBackPath);
   }
 }
 

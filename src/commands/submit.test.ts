@@ -12,6 +12,17 @@ vi.mock("../lib/private-source.js", () => ({
   typedRepoStatus: vi.fn(async () => mockRepoStatus.value),
 }));
 
+// No local checkout: these cases run without git, whatever the test cwd is.
+vi.mock("../lib/git-checkout.js", () => ({
+  readLocalCheckout: () => null,
+  locateSkillFile: () => null,
+  readSkillName: () => null,
+  listTrackedSkillFiles: () => [],
+  isCommitted: () => false,
+  isOnOriginBranch: () => false,
+  toRepoPath: () => null,
+}));
+
 vi.mock("../utils/browser.js", () => ({
   openBrowser: (...args: unknown[]) => mockOpenBrowser(...args),
 }));
@@ -81,6 +92,14 @@ describe("submitCommand — API mode (default)", () => {
       expect.objectContaining({
         skillPath: "plugins/personal/skills/brain/SKILL.md",
       })
+    );
+  });
+
+  it("sends the repo name as skillName when --skill is omitted (platform requires one)", async () => {
+    await submitCommand("myorg/myskill", {});
+
+    expect(mockSubmitSkill).toHaveBeenCalledWith(
+      expect.objectContaining({ repoUrl: "https://github.com/myorg/myskill", skillName: "myskill" })
     );
   });
 

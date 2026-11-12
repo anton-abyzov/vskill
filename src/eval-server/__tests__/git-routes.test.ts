@@ -651,3 +651,60 @@ describe("POST /api/git/publish", () => {
     expect(pushCall![2]?.cwd).toBe(root);
   });
 });
+
+describe("POST /api/git/publish — first push of a new branch", () => {
+  const pushCalls = () =>
+    spawnMock.mock.calls
+      .map((c) => c[1] as string[])
+      .filter((a) => Array.isArray(a) && a[0] === "push");
+
+  it("retries with `git push -u origin HEAD` when the branch has no upstream", async () => {
+    queueProcess({
+      stdout: "",
+      stderr:
+        "fatal: The current branch main has no upstream branch.\n" +
+        "To push the current branch and set the remote as upstream, use\n\n    git push --set-upstream origin main\n",
+      exitCode: 128,
+    });
+    queueProcess({ stdout: "", stderr: "branch 'main' set up to track 'origin/main'.\n", exitCode: 0 });
+    queueProcess({ stdout: "abc1234\n", stderr: "", exitCode: 0 });
+    queueProcess({ stdout: "https://github.com/o/r.git\n", stderr: "", exitCode: 0 });
+    queueProcess({ stdout: "main\n", stderr: "", exitCode: 0 });
+
+    const h = makePostGitPublishHandler(root);
+    const res = new FakeRes();
+    await h(new FakeReq("POST", "/api/git/publish", {}) as never, res as never);
+
+    expect(res.statusCode).toBe(200);
+    expect((res.json as { success: boolean }).success).toBe(true);
+    expect(pushCalls()).toEqual([["push"], ["push", "-u", "origin", "HEAD"]]);
+    for (const args of pushCalls()) {
+      expect(args.some((a) => a.startsWith("--force") || a === "-f")).toBe(false);
+    }
+  });
+
+  it("does not set an upstream for other push failures", async () => {
+    queueProcess({ stdout: "", stderr: "fatal: Authentication failed\n", exitCode: 128 });
+
+    const h = makePostGitPublishHandler(root);
+    const res = new FakeRes();
+    await h(new FakeReq("POST", "/api/git/publish", {}) as never, res as never);
+
+    expect(res.statusCode).toBe(500);
+    expect(pushCalls()).toEqual([["push"]]);
+  });
+
+  it("reports the -u push error when setting the upstream also fails", async () => {
+    queueProcess({ stdout: "", stderr: "fatal: The current branch dev has no upstream branch.\n", exitCode: 128 });
+    queueProcess({ stdout: "", stderr: "ERROR: Repository not found.\nfatal: Could not read from remote repository.\n", exitCode: 128 });
+
+    const h = makePostGitPublishHandler(root);
+    const res = new FakeRes();
+    await h(new FakeReq("POST", "/api/git/publish", {}) as never, res as never);
+
+    expect(res.statusCode).toBe(500);
+    const body = res.json as { success: boolean; error: string };
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Repository not found");
+  });
+});

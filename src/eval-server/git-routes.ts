@@ -377,7 +377,15 @@ export function makePostGitPublishHandler(rootArg: string | (() => string)) {
       }
     }
 
-    let push = await runGitCommand(["push"], root, timeout);
+    let pushArgs: string[] = ["push"];
+    let push = await runGitCommand(pushArgs, root, timeout);
+
+    // First push of a new branch: plain `git push` refuses because the branch
+    // has no upstream. Set it once with `-u origin HEAD` (never --force).
+    if (!push.timedOut && push.exitCode !== 0 && isNoUpstream(push)) {
+      pushArgs = ["push", "-u", "origin", "HEAD"];
+      push = await runGitCommand(pushArgs, root, timeout);
+    }
 
     if (push.timedOut) {
       const timeoutMsg = "timeout: git push exceeded GIT_PUBLISH_TIMEOUT_MS";
@@ -407,7 +415,7 @@ export function makePostGitPublishHandler(rootArg: string | (() => string)) {
         if (pull.exitCode === 0) {
           // Rebase landed cleanly — retry the push. If it still fails we fall
           // through to the generic error handler below with the retry's output.
-          push = await runGitCommand(["push"], root, timeout);
+          push = await runGitCommand(pushArgs, root, timeout);
           if (push.timedOut) {
             // Mirror the first-push timeout handling — a bare fall-through would
             // hit the generic handler with an empty `error` and surface a
@@ -508,6 +516,12 @@ export function makePostGitPublishHandler(rootArg: string | (() => string)) {
 // 0875 — a non-fast-forward push rejection. git writes the marker to stderr on
 // push, but we also scan stdout for robustness across git versions/locales.
 const NON_FAST_FORWARD_RE = /non-fast-forward|\[rejected\]|fetch first|Updates were rejected/i;
+const NO_UPSTREAM_RE = /has no upstream branch|no upstream branch|--set-upstream/i;
+
+function isNoUpstream(push: GitResult): boolean {
+  return NO_UPSTREAM_RE.test(`${push.stderr}\n${push.stdout}`);
+}
+
 function isNonFastForward(push: GitResult): boolean {
   return NON_FAST_FORWARD_RE.test(`${push.stderr}\n${push.stdout}`);
 }

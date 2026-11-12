@@ -259,6 +259,29 @@ describe("PublishButton", () => {
     expect(body.tenantId).toBeUndefined();
   });
 
+  it("clean-tree public submit never sends a tenantId, even when one is selected", async () => {
+    mockGitPublish.mockResolvedValueOnce({
+      success: true,
+      commitSha: "abc1234def567890",
+      branch: "main",
+      remoteUrl: "git@github.com:owner/repo.git",
+    });
+    mockSubmitToQueue.mockResolvedValueOnce({ kind: "created", id: "s1", skillName: "greet", skillPath: "p", state: "RECEIVED", createdAt: "x" });
+
+    act(() => {
+      root.render(<PublishButton remoteUrl="git@github.com:owner/repo.git" skillName="greet" privacy="public" tenantId="t-1" />);
+    });
+    await act(async () => {
+      getButton().click();
+      await flush();
+    });
+
+    expect(mockSubmitToQueue).toHaveBeenCalledTimes(1);
+    const body = mockSubmitToQueue.mock.calls[0][0];
+    expect(body.privacy).toBe("public");
+    expect("tenantId" in body).toBe(false);
+  });
+
   it("on failure: does NOT open anything and dispatches an error toast", async () => {
     mockGitPublish.mockRejectedValueOnce(new Error("rejected: non-fast-forward"));
 

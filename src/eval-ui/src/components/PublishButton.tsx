@@ -110,9 +110,11 @@ export function PublishButton({ remoteUrl, provider, model, skillName, skillPath
               skillName,
               skillPath,
               source: "studio-submit",
-              // Explicit private intent always takes the guarded drawer above.
+              // Private intent (and, with hosted publishing on, every known
+              // skill) takes the drawer above, so this path is public-only and
+              // never carries a tenant: a tenantId with privacy=public makes the
+              // platform check tenant membership and refuse the submission.
               privacy: privacy ?? "public",
-              tenantId: HOSTED_PRIVATE_PUBLISHING_AVAILABLE ? tenantId : undefined,
             });
           } catch (err) {
             // 0874 AC-06: private or unconfirmed repo — the push stands,
@@ -146,7 +148,7 @@ export function PublishButton({ remoteUrl, provider, model, skillName, skillPath
     } finally {
       setPublishing(false);
     }
-  }, [publishing, drawerOpen, remoteUrl, skillName, skillPath, privacy, tenantId]);
+  }, [publishing, drawerOpen, remoteUrl, skillName, skillPath, privacy]);
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 

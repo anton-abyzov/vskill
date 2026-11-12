@@ -42,7 +42,7 @@ jobs:
   macos:
     name: Build + notarize (macos)
     if: github.event_name != 'push'
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 300  # 5h hard ceiling — we alert at 4h.
     permissions:
       contents: read

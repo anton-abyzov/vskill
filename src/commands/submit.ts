@@ -14,16 +14,19 @@ import { addAuthoredSkill } from "../lockfile/authored.js";
 import { getProjectRoot } from "../lockfile/project-root.js";
 import { typedRepoStatus } from "../lib/private-source.js";
 import {
+  findTrackedSkill,
   isCommitted,
   isOnOriginBranch,
   listTrackedSkillFiles,
+  listTrackedSkills,
   locateSkillFile,
   readLocalCheckout,
   readSkillName,
+  sameRepo,
   toRepoPath,
   type LocalCheckout,
 } from "../lib/git-checkout.js";
-import { followSubmission } from "./submit-status.js";
+import { FAILED_STATES, followSubmission } from "./submit-status.js";
 
 export interface SubmitOptions {
   skill?: string;
@@ -33,6 +36,12 @@ export interface SubmitOptions {
   submission?: string;
   /** Poll the new (or --submission) submission until it is published or rejected. */
   wait?: boolean;
+  /**
+   * Internal (vskill skill publish): the skill was found in a local checkout
+   * of the source repo, so run the same committed / pushed / default-branch
+   * checks as a no-argument submit.
+   */
+  checkLocal?: boolean;
 }
 
 interface SubmitTarget {
@@ -52,13 +61,11 @@ function fail(message: string, hint?: string): never {
   process.exit(1);
 }
 
-function sameRepo(checkout: LocalCheckout | null, owner: string, repo: string): checkout is LocalCheckout {
-  return !!checkout?.owner && !!checkout.repo &&
-    checkout.owner.toLowerCase() === owner.toLowerCase() &&
-    checkout.repo.toLowerCase() === repo.toLowerCase();
-}
-
-/** owner/repo given: name the skill from a local SKILL.md of that same repo, else after the repo. */
+/**
+ * owner/repo given. When a local checkout of that same repo holds the
+ * SKILL.md (--path, else the cwd's), send its repo-relative path and name the
+ * skill from it; otherwise name the skill after --skill or the repo.
+ */
 function targetFromSource(source: string, opts: SubmitOptions): SubmitTarget {
   const parsed = parseGitHubSource(source);
   if (!parsed) {
@@ -68,19 +75,48 @@ function targetFromSource(source: string, opts: SubmitOptions): SubmitTarget {
     process.exit(1);
   }
   const { owner, repo } = parsed;
-  if (opts.skill) return { owner, repo, skillName: opts.skill, skillPath: opts.path };
-
-  const checkout = readLocalCheckout(process.cwd());
-  if (sameRepo(checkout, owner, repo)) {
-    const file = locateSkillFile({ path: opts.path, checkout });
-    const name = file ? readSkillName(file) : null;
-    if (file && name) {
-      const repoPath = toRepoPath(checkout, file);
-      const skillPath = opts.path ?? (repoPath && isCommitted(checkout, repoPath) ? repoPath : undefined);
-      return { owner, repo, skillName: name, skillPath, localFile: file };
-    }
+  // An absolute --path (skill publish) names its own checkout, whatever the cwd.
+  const from = opts.path && path.isAbsolute(opts.path) ? opts.path : process.cwd();
+  const checkout = readLocalCheckout(from);
+  const local = sameRepo(checkout, owner, repo) ? checkout : null;
+  const fallback: SubmitTarget = { owner, repo, skillName: opts.skill ?? repo, skillPath: opts.path };
+  // --skill alone names a skill the platform finds on its own.
+  if (!local || (opts.skill && !opts.path)) {
+    if (opts.checkLocal) fail(`No local checkout of ${owner}/${repo} holds this skill.`);
+    return fallback;
   }
-  return { owner, repo, skillName: repo, skillPath: opts.path };
+
+  const file = locateSkillFile({ path: opts.path, checkout: local });
+  const repoPath = file ? toRepoPath(local, file) : null;
+  if (!file || !repoPath) {
+    if (opts.checkLocal) fail(`No SKILL.md at ${opts.path ?? "this folder"} in ${local.root}.`);
+    return fallback;
+  }
+  const skillName = opts.skill ?? readSkillName(file, local.root) ?? repo;
+  if (opts.checkLocal) {
+    assertCommitted(local, repoPath, file);
+    return { owner, repo, skillName, skillPath: repoPath, localFile: file, checkout: local };
+  }
+  const skillPath = (opts.path || isCommitted(local, repoPath)) ? repoPath : undefined;
+  return { owner, repo, skillName, skillPath, localFile: file };
+}
+
+/** The tracked SKILL.md named `name`, or exit listing the skills that are there. */
+function trackedSkillNamed(checkout: LocalCheckout, name: string): string {
+  const match = findTrackedSkill(checkout, name);
+  if (match) return match.file;
+  const available = listTrackedSkills(checkout);
+  console.error(red(`No tracked SKILL.md in ${checkout.owner}/${checkout.repo} is named "${name}".`));
+  if (available.length > 0) {
+    console.error(dim("Skills in this repository:"));
+    for (const s of available.slice(0, 20)) {
+      console.error("  " + cyan(s.name ?? "(no name)") + dim(`  ${s.repoPath}`));
+    }
+    console.error(dim("Pick one with --skill <name>, or pass --path <path/to/SKILL.md>."));
+  } else {
+    console.error(dim("Create one with `vskill skill new`, commit it, then run vskill submit again."));
+  }
+  process.exit(1);
 }
 
 /** No source: the cwd's git checkout names the repo and its SKILL.md names the skill. */
@@ -100,14 +136,21 @@ function targetFromCheckout(opts: SubmitOptions): SubmitTarget {
     fail(`origin is not a GitHub repository (${checkout.remoteUrl}).`, "verified-skill.com only reviews public GitHub repos.");
   }
 
-  let file = locateSkillFile({ path: opts.path, checkout });
-  if (!file && !opts.path) {
-    const tracked = listTrackedSkillFiles(checkout);
-    if (tracked.length === 1) file = path.join(checkout.root, tracked[0]);
-    else if (tracked.length > 1) {
-      console.error(red("This repository has several skills; say which one with --path:"));
-      for (const t of tracked.slice(0, 20)) console.error("  " + cyan(`vskill submit --path ${t}`));
-      process.exit(1);
+  let file: string | null;
+  if (opts.skill && !opts.path) {
+    // --skill names the SKILL.md: never pair the cwd's file with another name.
+    const here = locateSkillFile({ checkout });
+    file = here && readSkillName(here, checkout.root) === opts.skill ? here : trackedSkillNamed(checkout, opts.skill);
+  } else {
+    file = locateSkillFile({ path: opts.path, checkout });
+    if (!file && !opts.path) {
+      const tracked = listTrackedSkillFiles(checkout);
+      if (tracked.length === 1) file = path.join(checkout.root, tracked[0]);
+      else if (tracked.length > 1) {
+        console.error(red("This repository has several skills; say which one with --path:"));
+        for (const t of tracked.slice(0, 20)) console.error("  " + cyan(`vskill submit --path ${t}`));
+        process.exit(1);
+      }
     }
   }
   if (!file) {
@@ -118,14 +161,18 @@ function targetFromCheckout(opts: SubmitOptions): SubmitTarget {
   }
   const repoPath = toRepoPath(checkout, file);
   if (!repoPath) fail(`${file} is outside the repository at ${checkout.root}.`);
-  if (!isCommitted(checkout, repoPath)) {
-    console.error(red(`${repoPath} is not committed yet, so GitHub cannot serve it.`));
-    console.error("  " + cyan(`git add ${repoPath} && git commit -m "Add ${path.basename(path.dirname(path.resolve(file))) || "skill"}"`));
-    console.error("  " + cyan("git push -u origin HEAD"));
-    process.exit(1);
-  }
-  const skillName = opts.skill ?? readSkillName(file) ?? checkout.repo;
+  assertCommitted(checkout, repoPath, file);
+  const skillName = opts.skill ?? readSkillName(file, checkout.root) ?? checkout.repo;
   return { owner: checkout.owner, repo: checkout.repo, skillName, skillPath: repoPath, localFile: file, checkout };
+}
+
+/** GitHub can only serve a SKILL.md that is committed. */
+function assertCommitted(checkout: LocalCheckout, repoPath: string, file: string): void {
+  if (isCommitted(checkout, repoPath)) return;
+  console.error(red(`${repoPath} is not committed yet, so GitHub cannot serve it.`));
+  console.error("  " + cyan(`git add ${repoPath} && git commit -m "Add ${path.basename(path.dirname(path.resolve(file))) || "skill"}"`));
+  console.error("  " + cyan("git push -u origin HEAD"));
+  process.exit(1);
 }
 
 /** The branch must be on GitHub before the platform can read the SKILL.md. */
@@ -235,9 +282,12 @@ export async function submitCommand(
 
   // --browser flag: use browser-based OAuth flow
   if (opts.browser) {
+    // The submit page pre-fills only a full https://github.com/... repo URL;
+    // skill and path name the same SKILL.md the API flow would send.
     const submitUrl = new URL("https://verified-skill.com/submit");
-    submitUrl.searchParams.set("repo", `${owner}/${repo}`);
-    if (opts.skill) submitUrl.searchParams.set("skill", opts.skill);
+    submitUrl.searchParams.set("repo", repoUrl);
+    submitUrl.searchParams.set("skill", skillName);
+    if (target.skillPath) submitUrl.searchParams.set("path", target.skillPath);
     const url = submitUrl.toString();
 
     console.log(dim(`Opening browser to submit ${bold(`${owner}/${repo}`)} for verification...\n`));
@@ -340,16 +390,16 @@ export async function submitCommand(
 
   if (followId) {
     console.log("");
-    const outcome = await followSubmission(followId, { wait: true });
-    if (outcome === "published" && writeBackPath) await tryWriteBackVersion(fullName, writeBackPath);
+    const { outcome, detail } = await followSubmission(followId, { wait: true });
+    // The platform's published name wins over the locally built one.
+    const published = detail?.publishedSkillName ?? fullName;
+    if (outcome === "published" && writeBackPath) await tryWriteBackVersion(published, writeBackPath);
   }
 }
 
-const REJECTED_SUBMISSION_STATES = new Set(["REJECTED", "TIER1_FAILED", "DEQUEUED", "BLOCKED"]);
-
 /** 0932: a submission the registry already rejected for this content. */
 export function isRejectedSubmission(response: { rejected?: boolean; state?: string }): boolean {
-  return response.rejected === true || (!!response.state && REJECTED_SUBMISSION_STATES.has(response.state));
+  return response.rejected === true || (!!response.state && FAILED_STATES.has(response.state));
 }
 
 /**

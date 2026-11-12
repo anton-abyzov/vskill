@@ -8,6 +8,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { parseGitHubRepoRef } from "./private-source.js";
 
 export interface LocalCheckout {
   /** Absolute path of the git working tree root. */
@@ -44,12 +45,21 @@ function git(args: string[], cwd: string): string | null {
   }
 }
 
-/** owner/repo of an https, ssh or scp-style github.com remote URL. */
+/**
+ * owner/repo of an https, ssh or scp-style github.com remote URL. A bare
+ * "owner/repo" is a relative local path as a remote, so only URL forms count.
+ */
 export function parseGitHubRemote(url: string): { owner: string; repo: string } | null {
-  const m =
-    url.trim().match(/^(?:git\+)?(?:https?:\/\/(?:[^@/\s]+@)?|ssh:\/\/git@|git:\/\/)(?:www\.)?github\.com[/:]([^/\s]+)\/([^/\s?#]+?)(?:\.git)?\/?$/i) ??
-    url.trim().match(/^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i);
-  return m ? { owner: m[1], repo: m[2] } : null;
+  const trimmed = url.trim();
+  if (!trimmed.includes("://") && !/^git@/i.test(trimmed)) return null;
+  return parseGitHubRepoRef(trimmed);
+}
+
+/** True when the checkout's origin is github.com/owner/repo (case-insensitive). */
+export function sameRepo(checkout: LocalCheckout | null | undefined, owner: string, repo: string): checkout is LocalCheckout {
+  return !!checkout?.owner && !!checkout.repo &&
+    checkout.owner.toLowerCase() === owner.toLowerCase() &&
+    checkout.repo.toLowerCase() === repo.toLowerCase();
 }
 
 /** The checkout that contains `dir`, or null when `dir` is not inside a git work tree. */
@@ -88,10 +98,39 @@ export function isCommitted(checkout: LocalCheckout, filePath: string): boolean 
   return git(["cat-file", "-e", `HEAD:${filePath}`], checkout.root) !== null;
 }
 
-/** Repo-relative paths of every tracked SKILL.md, POSIX separators. */
+/**
+ * Repo-relative paths of every tracked SKILL.md, POSIX separators. `-z`
+ * keeps non-ASCII paths unquoted (core.quotePath would C-quote them).
+ */
 export function listTrackedSkillFiles(checkout: LocalCheckout): string[] {
-  const out = git(["ls-files", "--", "SKILL.md", "*/SKILL.md"], checkout.root);
-  return out ? out.split("\n").map((l) => l.trim()).filter(Boolean) : [];
+  const out = git(["ls-files", "-z", "--", "SKILL.md", "*/SKILL.md"], checkout.root);
+  return out ? out.split("\0").filter(Boolean) : [];
+}
+
+export interface TrackedSkill {
+  /** Absolute path of the SKILL.md. */
+  file: string;
+  /** Repo-relative POSIX path. */
+  repoPath: string;
+  /** Frontmatter name, else folder name, else null for a nameless root SKILL.md. */
+  name: string | null;
+}
+
+/** Every tracked SKILL.md with the name it declares. */
+export function listTrackedSkills(checkout: LocalCheckout): TrackedSkill[] {
+  return listTrackedSkillFiles(checkout).map((repoPath) => {
+    const file = join(checkout.root, repoPath);
+    return { file, repoPath, name: readSkillName(file, checkout.root) };
+  });
+}
+
+/** The tracked SKILL.md whose frontmatter name or folder name is `name`, or null. */
+export function findTrackedSkill(checkout: LocalCheckout, name: string): TrackedSkill | null {
+  for (const skill of listTrackedSkills(checkout)) {
+    const folder = basename(dirname(skill.repoPath));
+    if (skill.name === name || (folder !== "." && folder === name)) return skill;
+  }
+  return null;
 }
 
 /** Repo-relative POSIX path for an absolute file inside the checkout, or null when outside. */
@@ -101,8 +140,12 @@ export function toRepoPath(checkout: LocalCheckout, absPath: string): string | n
   return rel.split(sep).join("/");
 }
 
-/** Frontmatter `name:` of a SKILL.md, falling back to its folder name. */
-export function readSkillName(skillMdPath: string): string | null {
+/**
+ * Frontmatter `name:` of a SKILL.md, falling back to its folder name. A
+ * nameless SKILL.md at the repository root returns null: its folder is just
+ * the local clone's directory, so callers fall back to the repo name.
+ */
+export function readSkillName(skillMdPath: string, repoRoot?: string): string | null {
   let raw: string;
   try {
     raw = readFileSync(skillMdPath, "utf8");
@@ -113,14 +156,16 @@ export function readSkillName(skillMdPath: string): string | null {
   const line = fm?.[1].match(/^name:\s*(.+?)\s*$/m);
   const name = line?.[1].replace(/^["']|["']$/g, "").trim();
   if (name) return name;
-  const folder = basename(dirname(resolve(skillMdPath)));
+  const dir = dirname(resolve(skillMdPath));
+  if ((repoRoot && resolve(repoRoot) === dir) || existsSync(join(dir, ".git"))) return null;
+  const folder = basename(dir);
   return folder && folder !== "." ? folder : null;
 }
 
 /**
- * The SKILL.md a submit run means: `--path` when given (repo-relative, or
- * relative to the cwd), else `SKILL.md` in the cwd. Returns the absolute path
- * when the file exists.
+ * The SKILL.md a submit run means: `--path` when given (relative to the cwd
+ * first, then to the repository root), else `SKILL.md` in the cwd. Returns
+ * the absolute path when the file exists.
  */
 export function locateSkillFile(
   opts: { path?: string; cwd?: string; checkout?: LocalCheckout | null },
@@ -130,8 +175,8 @@ export function locateSkillFile(
   if (opts.path) {
     if (isAbsolute(opts.path)) candidates.push(opts.path);
     else {
-      if (opts.checkout) candidates.push(join(opts.checkout.root, opts.path));
       candidates.push(resolve(cwd, opts.path));
+      if (opts.checkout) candidates.push(join(opts.checkout.root, opts.path));
     }
   } else {
     candidates.push(join(cwd, "SKILL.md"));

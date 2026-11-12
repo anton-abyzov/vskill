@@ -47,11 +47,12 @@ describe("parseGitHubRepoRef", () => {
     ["https://github.com/acme/repo.git", { owner: "acme", repo: "repo" }],
     ["git@github.com:acme/repo.git", { owner: "acme", repo: "repo" }],
     ["ssh://git@github.com/acme/repo.git", { owner: "acme", repo: "repo" }],
+    ["https://x-access-token@github.com/acme/repo.git", { owner: "acme", repo: "repo" }],
   ])("%s", (ref, expected) => {
     expect(parseGitHubRepoRef(ref)).toEqual(expected);
   });
 
-  it.each(["https://gitlab.com/acme/repo.git", "git@gitlab.com:acme/repo.git", "", "nope"])(
+  it.each(["https://gitlab.com/acme/repo.git", "git@gitlab.com:acme/repo.git", "https://u@evil.com/github.com/a/b", "", "nope"])(
     "rejects %s",
     (ref) => {
       expect(parseGitHubRepoRef(ref)).toBeNull();

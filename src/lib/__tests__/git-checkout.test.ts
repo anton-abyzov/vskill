@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  findTrackedSkill,
   isCommitted,
   isOnOriginBranch,
   listTrackedSkillFiles,
@@ -11,6 +12,7 @@ import {
   parseGitHubRemote,
   readLocalCheckout,
   readSkillName,
+  sameRepo,
   toRepoPath,
 } from "../git-checkout.js";
 
@@ -141,6 +143,54 @@ describe("skill file helpers", () => {
     expect(locateSkillFile({ cwd: work, checkout: c })).toBeNull();
   });
 
+  it("resolves --path against the cwd before the repo root", () => {
+    const c = readLocalCheckout(work)!;
+    // skills/greet exists under the root, and also as skills/skills/greet under the cwd.
+    mkdirSync(join(work, "skills", "skills", "greet"), { recursive: true });
+    writeFileSync(join(work, "skills", "skills", "greet", "SKILL.md"), "---\nname: nested\n---\n");
+    expect(locateSkillFile({ path: "skills/greet", cwd: join(work, "skills"), checkout: c })).toBe(
+      join(work, "skills", "skills", "greet", "SKILL.md"),
+    );
+    expect(locateSkillFile({ path: "greet", cwd: join(work, "skills"), checkout: c })).toBe(
+      join(work, "skills", "greet", "SKILL.md"),
+    );
+  });
+
+  it("returns null for a nameless SKILL.md at the repo root, so callers use the repo name", () => {
+    writeFileSync(join(work, "SKILL.md"), "# no frontmatter\n");
+    expect(readSkillName(join(work, "SKILL.md"))).toBeNull();
+    expect(readSkillName(join(work, "SKILL.md"), work)).toBeNull();
+    writeFileSync(join(work, "SKILL.md"), "---\nname: root-skill\n---\n");
+    expect(readSkillName(join(work, "SKILL.md"), work)).toBe("root-skill");
+  });
+
+  it("lists non-ASCII paths unquoted", () => {
+    mkdirSync(join(work, "skills", "café"), { recursive: true });
+    writeFileSync(join(work, "skills", "café", "SKILL.md"), "---\nname: cafe\n---\n");
+    g(work, "add", "-A");
+    g(work, "commit", "-q", "-m", "cafe");
+    const c = readLocalCheckout(work)!;
+    const files = listTrackedSkillFiles(c);
+    expect(files).toContain("skills/café/SKILL.md");
+    expect(isCommitted(c, "skills/café/SKILL.md")).toBe(true);
+  });
+
+  it("finds a tracked SKILL.md by frontmatter or folder name", () => {
+    mkdirSync(join(work, "tools", "other"), { recursive: true });
+    writeFileSync(join(work, "tools", "other", "SKILL.md"), "---\nname: renamed\n---\n");
+    g(work, "add", "-A");
+    g(work, "commit", "-q", "-m", "other");
+    const c = readLocalCheckout(work)!;
+    expect(findTrackedSkill(c, "renamed")).toEqual({
+      file: join(work, "tools", "other", "SKILL.md"),
+      repoPath: "tools/other/SKILL.md",
+      name: "renamed",
+    });
+    expect(findTrackedSkill(c, "other")?.repoPath).toBe("tools/other/SKILL.md");
+    expect(findTrackedSkill(c, "greet")?.repoPath).toBe("skills/greet/SKILL.md");
+    expect(findTrackedSkill(c, "missing")).toBeNull();
+  });
+
   it("reads the frontmatter name, falling back to the folder name", () => {
     expect(readSkillName(join(work, "skills", "greet", "SKILL.md"))).toBe("greet");
     mkdirSync(join(work, "skills", "noname"));
@@ -162,7 +212,19 @@ describe("parseGitHubRemote", () => {
     expect(parseGitHubRemote(url)).toEqual({ owner, repo });
   });
 
-  it.each(["https://gitlab.com/o/r.git", "git@bitbucket.org:o/r.git", "/tmp/remote.git"])("rejects %s", (url) => {
-    expect(parseGitHubRemote(url)).toBeNull();
+  it.each(["https://gitlab.com/o/r.git", "git@bitbucket.org:o/r.git", "/tmp/remote.git", "../sibling/repo", "myorg/repo"])(
+    "rejects %s",
+    (url) => {
+      expect(parseGitHubRemote(url)).toBeNull();
+    },
+  );
+});
+
+describe("sameRepo", () => {
+  it("matches owner and repo case-insensitively", () => {
+    const c = { ...readLocalCheckout(work)!, owner: "MyOrg", repo: "Greet-Skill" };
+    expect(sameRepo(c, "myorg", "greet-skill")).toBe(true);
+    expect(sameRepo(c, "myorg", "other")).toBe(false);
+    expect(sameRepo(null, "myorg", "greet-skill")).toBe(false);
   });
 });

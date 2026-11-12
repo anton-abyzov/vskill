@@ -7,9 +7,16 @@
 import { getSubmission, type SubmissionDetail, type SubmissionFinding } from "../api/client.js";
 import { bold, cyan, dim, green, red, yellow } from "../utils/output.js";
 
-/** States the platform treats as finished (vskill-platform submission-categories TERMINAL_STATES). */
-const SUCCESS_STATES = new Set(["AUTO_APPROVED", "PUBLISHED", "EXPANDED"]);
-const FAILED_STATES = new Set(["REJECTED", "TIER1_FAILED", "DEQUEUED", "BLOCKED"]);
+/**
+ * Final states (vskill-platform pipeline/submission-machine.ts). AUTO_APPROVED
+ * and VENDOR_APPROVED are not final: both move on to PUBLISHED (the publish
+ * step, or queue/recovery.ts for one that stalled), so polling continues
+ * through them. EXPANDED ends a multi-skill submission that was split into
+ * one submission per skill.
+ */
+const SUCCESS_STATES = new Set(["PUBLISHED", "EXPANDED"]);
+/** Rejected, failed, dequeued or blocked: never published. */
+export const FAILED_STATES: ReadonlySet<string> = new Set(["REJECTED", "TIER1_FAILED", "DEQUEUED", "BLOCKED"]);
 
 export const DEFAULT_POLL_INTERVAL_MS = 3_000;
 export const DEFAULT_WAIT_CEILING_MS = 5 * 60_000;
@@ -25,7 +32,14 @@ export interface FollowOptions {
   now?: () => number;
 }
 
-export type FollowOutcome = "published" | "rejected" | "pending";
+/** A failed result never returns: followSubmission exits 1 instead. */
+export type FollowOutcome = "published" | "expanded" | "pending";
+
+export interface FollowResult {
+  outcome: FollowOutcome;
+  /** The last submission detail read, or null when none could be read. */
+  detail: SubmissionDetail | null;
+}
 
 function isPermanentClientError(status: number | undefined): boolean {
   return status !== undefined && status >= 400 && status < 500 && status !== 408 && status !== 429;
@@ -40,7 +54,7 @@ export function isTerminalState(state: string | undefined): boolean {
  * process.exit(1) on a rejected, failed, dequeued or blocked result and when
  * the submission cannot be read at all.
  */
-export async function followSubmission(id: string, opts: FollowOptions = {}): Promise<FollowOutcome> {
+export async function followSubmission(id: string, opts: FollowOptions = {}): Promise<FollowResult> {
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const now = opts.now ?? Date.now;
   const interval = opts.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -91,14 +105,19 @@ export async function followSubmission(id: string, opts: FollowOptions = {}): Pr
         dim("Check again with: ") +
         cyan(`vskill submit --submission ${id} --wait`),
     );
-    return "pending";
+    return { outcome: "pending", detail };
+  }
+
+  if (detail.state === "EXPANDED") {
+    console.log(green("Accepted. ") + dim("The repository's skills were split into one submission each."));
+    return { outcome: "expanded", detail };
   }
 
   if (SUCCESS_STATES.has(detail.state)) {
     const name = detail.publishedSkillName ?? null;
     console.log(green("Verified. ") + (name ? dim(`Published as ${name}.`) : ""));
     if (name) console.log(dim("Install with: ") + cyan(`vskill install ${name}`));
-    return "published";
+    return { outcome: "published", detail };
   }
 
   printRejection(detail);

@@ -10,10 +10,11 @@
 import * as path from "node:path";
 import { readAuthored } from "../lockfile/authored.js";
 import { getProjectRoot } from "../lockfile/project-root.js";
+import { existsSync } from "node:fs";
 import {
-  listTrackedSkillFiles,
+  findTrackedSkill,
   readLocalCheckout,
-  readSkillName,
+  sameRepo,
   toRepoPath,
   type LocalCheckout,
 } from "../lib/git-checkout.js";
@@ -24,7 +25,10 @@ import { submitCommand } from "./submit.js";
 export interface ResolvedPublish {
   source: string;
   skill: string;
+  /** Repo-relative SKILL.md path. */
   path?: string;
+  /** Absolute SKILL.md in a local checkout of `source`, when there is one. */
+  localFile?: string;
 }
 
 function lastSegment(name: string): string {
@@ -44,24 +48,26 @@ function fromAuthored(name: string, projectRoot: string): ResolvedPublish | null
   const skill = lastSegment(match.name);
   const abs = path.isAbsolute(match.sourcePath) ? match.sourcePath : path.join(projectRoot, match.sourcePath);
   const checkout = readLocalCheckout(path.dirname(abs));
-  const sameRepo =
-    checkout?.owner?.toLowerCase() === owner.toLowerCase() && checkout?.repo?.toLowerCase() === repo.toLowerCase();
-  const repoPath = sameRepo && checkout ? toRepoPath(checkout, abs) : null;
-  return { source: `${owner}/${repo}`, skill, ...(repoPath ? { path: repoPath } : {}) };
+  const repoPath = sameRepo(checkout, owner, repo) ? toRepoPath(checkout, abs) : null;
+  return {
+    source: `${owner}/${repo}`,
+    skill,
+    ...(repoPath ? { path: repoPath } : {}),
+    ...(repoPath && existsSync(abs) ? { localFile: abs } : {}),
+  };
 }
 
 function fromCheckout(name: string, checkout: LocalCheckout | null): ResolvedPublish | null {
   if (!checkout?.owner || !checkout.repo) return null;
   const wanted = lastSegment(name);
-  for (const rel of listTrackedSkillFiles(checkout)) {
-    const abs = path.join(checkout.root, rel);
-    const skillName = readSkillName(abs);
-    const folder = path.posix.basename(path.posix.dirname(rel));
-    if (skillName === wanted || (folder !== "." && folder === wanted)) {
-      return { source: `${checkout.owner}/${checkout.repo}`, skill: skillName ?? wanted, path: rel };
-    }
-  }
-  return null;
+  const match = findTrackedSkill(checkout, wanted);
+  if (!match) return null;
+  return {
+    source: `${checkout.owner}/${checkout.repo}`,
+    skill: match.name ?? wanted,
+    path: match.repoPath,
+    localFile: match.file,
+  };
 }
 
 /** Resolve a skill name to owner/repo + skill + repo-relative SKILL.md, or null. */
@@ -97,5 +103,13 @@ export async function skillPublishCommand(name: string, opts: { wait?: boolean }
     process.exit(1);
   }
   console.log(dim(`Publishing ${target.skill} from ${target.source}${target.path ? ` (${target.path})` : ""}`));
-  await submitCommand(target.source, { skill: target.skill, path: target.path, wait: opts.wait });
+  // A local SKILL.md goes over as its absolute path, so the version write-back
+  // and authored tracking work from any subfolder, and submit runs the same
+  // committed / pushed / default-branch checks as a no-argument submit.
+  await submitCommand(target.source, {
+    skill: target.skill,
+    path: target.localFile ?? target.path,
+    wait: opts.wait,
+    ...(target.localFile ? { checkLocal: true } : {}),
+  });
 }

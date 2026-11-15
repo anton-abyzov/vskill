@@ -2363,6 +2363,48 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
     expect(mockWriteLockfile).not.toHaveBeenCalled();
   });
 
+  it("builds skill paths without an empty segment for a root (\"./\") plugin source", async () => {
+    setupHappyPath();
+    const rootJson = JSON.stringify({ name: "solo", plugins: [{ name: "solo", source: "./", version: "1.0.0" }] });
+    const urls: string[] = [];
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      urls.push(url);
+      if (url.includes("marketplace.json")) return { ok: true, text: async () => rootJson, json: async () => JSON.parse(rootJson) };
+      if (url.endsWith("/contents/skills")) return { ok: true, json: async () => [{ name: "tool", type: "dir" }] };
+      if (url.endsWith("/skills/tool/SKILL.md")) return { ok: true, text: async () => "# Tool" };
+      return { ok: false };
+    }) as unknown as typeof fetch;
+
+    await addCommand("ignored-source", { repo: "owner/solo", plugin: "solo" });
+
+    expect(urls.some((u) => u.includes("//skills") || u.includes("//SKILL.md") || u.includes("//commands"))).toBe(false);
+    expect(mockPrepareGitHubSkillBundle.mock.calls[0][0]).toMatchObject({ skillMdPath: "skills/tool/SKILL.md" });
+  });
+
+  it("passes the skill's files from the last install so removed upstream files are cleaned up", async () => {
+    setupHappyPath();
+    mockEnsureLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {
+        frontend: {
+          version: "1.0.0", sha: "x", tier: "VERIFIED", installedAt: "", source: "github:anton-abyzov/vskill#plugin:frontend",
+          files: ["nextjs/SKILL.md", "nextjs/scripts/old.py", "react/SKILL.md", "react/references/r.md"],
+        },
+      },
+      createdAt: "", updatedAt: "",
+    });
+    mockPrepareGitHubSkillBundle.mockResolvedValue({
+      ok: true,
+      bundle: { files: { "scripts/new.py": "print(1)\n" }, executables: [], fileList: ["SKILL.md", "scripts/new.py"], skipped: [], totalBytes: 9 },
+    });
+
+    await addCommand("ignored-source", { repo: "anton-abyzov/vskill", plugin: "frontend", onlySkills: "nextjs" });
+
+    expect(mockWriteAgentFiles).toHaveBeenCalledTimes(1);
+    expect(mockWriteAgentFiles.mock.calls[0][2]).toMatchObject({ previousFiles: ["scripts/old.py"] });
+  });
+
   it("writes lockfile with github source format", async () => {
     setupHappyPath();
 
@@ -3397,6 +3439,36 @@ describe("addCommand marketplace integration", () => {
     expect(mockWriteLockfile).toHaveBeenCalled();
     const lockArg = mockWriteLockfile.mock.calls[0][0];
     expect(lockArg.skills["plugin-a"].source).toBe("marketplace:owner/repo#plugin-a");
+  });
+
+  it("writes no skill of a plugin when one of its skill folders fails to fetch", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => SAMPLE_MARKETPLACE_JSON,
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [{ name: "aaa", type: "dir" }, { name: "zzz", type: "dir" }],
+        text: async () => "# Skill Content",
+      }) as unknown as typeof fetch;
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockPrepareGitHubSkillBundle.mockImplementation(async (args: { skillMdPath: string }) =>
+      args.skillMdPath.includes("skills/zzz/")
+        ? { ok: false, verdict: "BUNDLE_ERROR", message: "Could not download 1 of 1 skill file(s). Nothing was installed." }
+        : { ok: true, bundle: { files: { "scripts/a.py": "x" }, executables: [], fileList: ["SKILL.md", "scripts/a.py"], skipped: [], totalBytes: 1 } });
+
+    await addCommand("owner/repo", { yes: true });
+
+    const writeCalls = mockWriteFileSync.mock.calls as [string, string][];
+    expect(writeCalls.some(([p]) => p.endsWith("/aaa/SKILL.md"))).toBe(false);
+    expect(mockWriteAgentFiles).not.toHaveBeenCalled();
+    const lockArg = mockWriteLockfile.mock.calls[0]?.[0];
+    expect(lockArg?.skills?.["plugin-a"]).toBeUndefined();
   });
 
   it("TC-005: falls through to discovery when repo is NOT a marketplace", async () => {

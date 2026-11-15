@@ -17,10 +17,10 @@
       "id": 2,
       "name": "reference video is measured, not reused",
       "prompt": "Make my next reel feel like this one: ~/Downloads/reference-reel.mp4. Same energy.",
-      "expected_output": "Response measures the reference with analyze.py into .work/reference, carries pacing numbers into BRIEF.md as targets, and does not place the reference's footage, music or wording into the new video.",
+      "expected_output": "Response measures the reference with analyze.py into .work/reference, writes pacing numbers into .work/targets.md as targets, and does not place the reference's footage, music or wording into the new video.",
       "assertions": [
         { "id": "a1", "text": "Response runs analyze.py on the reference and reports numbers such as median shot length or cuts per minute", "type": "boolean" },
-        { "id": "a2", "text": "Response writes those numbers into the brief as targets", "type": "boolean" },
+        { "id": "a2", "text": "Response writes those numbers into .work/targets.md and does not write BRIEF.md itself", "type": "boolean" },
         { "id": "a3", "text": "Response does not copy the reference file into assets or reuse its footage, music or text", "type": "boolean" }
       ]
     },

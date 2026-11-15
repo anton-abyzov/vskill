@@ -40,6 +40,8 @@ def probe(src):
             "size_bytes": int(data["format"].get("size", 0)),
             "video": None, "audio": None}
     for s in data.get("streams", []):
+        if s.get("codec_type") == "video" and (s.get("disposition") or {}).get("attached_pic"):
+            continue  # cover art in an audio file is not a video stream
         if s.get("codec_type") == "video" and info["video"] is None:
             num, _, den = (s.get("avg_frame_rate") or "0/1").partition("/")
             fps = float(num) / float(den) if float(den or 0) else 0.0
@@ -99,7 +101,7 @@ def shots(src, threshold, duration):
     return [{"start": a, "end": b} for a, b in zip(edges, edges[1:]) if b - a > 0]
 
 
-def frames(src, out_dir, count, duration):
+def frames(src, out_dir, count, duration, width, notes):
     fdir = os.path.join(out_dir, "frames")
     os.makedirs(fdir, exist_ok=True)
     made = []
@@ -108,15 +110,19 @@ def frames(src, out_dir, count, duration):
         path = os.path.join(fdir, f"f{i + 1:03d}_{t:08.2f}s.jpg")
         code, _, _ = run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                           "-ss", f"{t:.3f}", "-i", src, "-frames:v", "1",
-                          "-vf", "scale=960:-2", "-q:v", "4", path])
+                          "-vf", f"scale={width}:-2", "-q:v", "4", path])
         if code == 0 and os.path.exists(path):
             made.append({"t": round(t, 2), "path": path})
+    if len(made) < count:
+        notes.append(f"frames: saved {len(made)} of {count}")
     return made
 
 
 def transcribe(src, out_dir, model, language):
     if not shutil.which("whisper"):
         return {"skipped": "whisper CLI not found; install openai-whisper or transcribe another way"}
+    if language and language.lower() not in ("en", "english") and model.endswith(".en"):
+        model = model[:-3]  # an English-only model would transcribe other languages as English
     wav = os.path.join(out_dir, "source.wav")
     code, _, err = run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", src,
                         "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav])
@@ -143,7 +149,7 @@ def pacing(info, shot_list, silence_list, transcript):
     silent = sum(s["end"] - s["start"] for s in silence_list)
     minutes = duration / 60 if duration else 0
     out = {"shots": len(lengths),
-           "cuts_per_min": round((len(lengths) - 1) / minutes, 2) if minutes else None,
+           "cuts_per_min": round((len(lengths) - 1) / minutes, 2) if minutes and lengths else None,
            "shot_median_s": round(statistics.median(lengths), 2) if lengths else None,
            "shot_mean_s": round(statistics.fmean(lengths), 2) if lengths else None,
            "shot_min_s": round(min(lengths), 2) if lengths else None,
@@ -165,8 +171,10 @@ def main():
                     help="screen recording: scene threshold 0.05 instead of 0.3")
     ap.add_argument("--scene-threshold", type=float, default=None)
     ap.add_argument("--silence-db", type=float, default=-30.0)
-    ap.add_argument("--silence-min", type=float, default=0.6, help="seconds")
+    ap.add_argument("--silence-min", type=float, default=1.2, help="seconds (default 1.2)")
     ap.add_argument("--frames", type=int, default=0, help="evenly spaced frames to save")
+    ap.add_argument("--frame-width", type=int, default=960,
+                    help="saved frame width; use the source width to read small text")
     ap.add_argument("--transcribe", action="store_true", help="word timestamps via whisper")
     ap.add_argument("--model", default="base.en")
     ap.add_argument("--language", default=None)
@@ -189,18 +197,32 @@ def main():
     if info["audio"]:
         result["loudness"] = loudness(args.source)
         result["silences"] = silences(args.source, args.silence_db, args.silence_min, duration)
+        adur = info["audio"]["duration_s"]
+        if adur and duration - adur > 0.05:  # no audio after the track ends: that is silence
+            sil = [s for s in result["silences"] if s["start"] < adur]
+            if sil and sil[-1]["end"] >= adur - 0.05:
+                sil[-1]["end"] = round(duration, 3)
+            else:
+                sil.append({"start": round(adur, 3), "end": round(duration, 3)})
+            result["silences"] = sil
         result["speech_spans"] = invert(result["silences"], duration)
-        if info["video"] and info["video"]["duration_s"] and info["audio"]["duration_s"]:
-            drift = abs(info["video"]["duration_s"] - info["audio"]["duration_s"])
-            if drift > 0.05:
-                notes.append(f"audio and video streams differ by {drift:.2f} s")
+        if info["video"]:
+            vdur = info["video"]["duration_s"]
+            if vdur and adur:
+                if abs(vdur - adur) > 0.05:
+                    notes.append(f"audio and video streams differ by {abs(vdur - adur):.2f} s")
+            else:
+                notes.append("container gives no per-stream durations; audio/video length not compared")
+        if result["loudness"]["integrated_lufs"] is None:
+            notes.append("loudness not measurable (silent or too short)")
     else:
         result["silences"], result["speech_spans"] = [], []
         notes.append("no audio stream")
     result["shots"] = shots(args.source, threshold, duration) if info["video"] else []
     if not info["video"]:
         notes.append("no video stream")
-    result["frames"] = frames(args.source, args.out, args.frames, duration) \
+    result["frames"] = frames(args.source, args.out, args.frames, duration,
+                              args.frame_width, notes) \
         if args.frames > 0 and info["video"] else []
     result["transcript"] = transcribe(args.source, args.out, args.model, args.language) \
         if args.transcribe and info["audio"] else None

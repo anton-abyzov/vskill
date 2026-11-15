@@ -1,6 +1,6 @@
 ---
 name: video-pipeline
-description: "Run a video from raw footage or a brief to a delivered file as one ordered pipeline: intake, measure, cut, source and generate assets, build graphics, assemble and master, deliver. It routes each stage to the skill that owns it (hyperframes and its sub-skills, hyperframes-best-practices, media-use, general-video, motion-graphics, product-launch-video, kie-gemini-omni, social-media-posting), keeps a per-video stage record so work resumes after a dropped session, and ships a script that measures footage or a reference video (shots, pacing, silences, loudness, frames, word timestamps). Use when the user asks to edit or produce a video end to end, says 'edit this recording', 'make a video from this footage', 'match the pacing of this video', 'analyze this footage', 'what is my video workflow', or names several stages at once. Not for a single stage on its own: a pure motion graphic goes to motion-graphics, a pure recut to hyperframes-best-practices, posting to social-media-posting."
+description: "Run a video end to end as one ordered pipeline: intake, measure the footage, cut, assets, graphics, master, deliver. Routes each stage to the skill that owns it (hyperframes and its sub-skills, hyperframes-best-practices, media-use, kie-gemini-omni, social-media-posting), keeps a per-video stage record so work resumes after a dropped session, and ships a script that measures footage or a reference video (shots, pacing, silences, loudness, frames, word timestamps). Use when a request spans several stages ('take this recording to a finished, posted video'), or asks to 'analyze this footage', 'match the pacing of this video' or 'what is my video workflow'. Not for one stage alone: a recut goes to hyperframes-best-practices, a new composition to hyperframes, a motion graphic to motion-graphics, posting to social-media-posting."
 metadata:
   version: "1.0.0"
   author: Anton Abyzov
@@ -14,19 +14,21 @@ This skill is a router with one tool of its own. It decides the order, names the
 
 ## Stages
 
-Skip a stage the video does not need. Never reorder 2 before 3, or 3 before 5: overlays are timed against a locked cut.
+Skip a stage the video does not need. Stage 3 never starts before 2 is done, and stage 5 never before the cut from 3 is approved: overlays are timed against a locked cut.
 
 | # | Stage | Owner | Leaves behind |
 |---|---|---|---|
-| 1 | Intake: footage or brief, target length, aspect, destination | this skill | `BRIEF.md`, `.work/pipeline.json` |
+| 1 | Intake: footage or brief, target length, aspect, destination | this skill | `.work/pipeline.json`, `.work/targets.md` |
 | 2 | Measure the footage | `scripts/analyze.py` | `.work/analysis.json`, frames, word transcript |
 | 3 | Cut | `hyperframes-best-practices` (recorded takes), `media-use` operations (other footage) | `cuts.json`, `edl.txt`, `master.mp4` |
 | 4 | Assets: find, then generate | `media-use` first, `kie-gemini-omni` for generated images and clips | files in `assets/` with their source noted |
-| 5 | Graphics and scenes | `hyperframes` picks the route: `product-launch-video`, `general-video`, `motion-graphics` | compositions, `STORYBOARD.md` |
-| 6 | Assemble and master | `hyperframes` render, `hyperframes-audio` or `media-use` mixing | `renders/<name>.mp4` |
+| 5 | Graphics and scenes | `hyperframes` picks the route: `product-launch-video`, `general-video`, `motion-graphics` | the route's own brief, plan and compositions |
+| 6 | Assemble and master | `hyperframes` render, `hyperframes-audio` or `media-use` mixing | the render the owner names (`renders/video.mp4`) |
 | 7 | Deliver | `social-media-posting` | the file, its preview, the post once approved |
 
 A video with no footage (a launch film, an explainer, a motion graphic) starts at 1, skips 2 and 3, and enters at 5 through `hyperframes`.
+
+`BRIEF.md` belongs to the HyperFrames skills: it has a set format, they treat an existing one as settled, and `hyperframes init` refuses a folder that already has files. So this skill never writes it. Its own notes (length, aspect, destination, pacing targets) go in `.work/targets.md`. When the video will have graphics, let `/hyperframes` create the project folder first, then add `.work/` inside it; the owner copies what it needs from `.work/targets.md` into its brief.
 
 ## Stage record
 
@@ -36,7 +38,7 @@ Keep `.work/pipeline.json` in the video's project folder and update it when a st
 {"video": "specwithcode-handoff-reel", "stages": {
   "measure": {"status": "done", "artifact": ".work/analysis.json"},
   "cut": {"status": "approved", "artifact": "master.mp4", "note": "6 takes kept, 1.1x"},
-  "graphics": {"status": "in_progress"}}}
+  "graphics": {"status": "in_progress", "artifact": "compositions/"}}}
 ```
 
 Statuses: `todo`, `in_progress`, `done`, `approved`, `skipped`. On pickup, read this file first and continue from the first stage that is not `done`, `approved` or `skipped`. Never redo an approved stage unless the user reopens it; a recut after approval resets every later stage to `todo`.
@@ -50,7 +52,7 @@ python3 <SKILL_DIR>/scripts/analyze.py <footage> --out .work --screencast --tran
 
 It needs `ffmpeg` and `ffprobe`; `--transcribe` needs the `whisper` CLI and is skipped with a note when it is missing. It writes `.work/analysis.json`: stream facts, integrated loudness and true peak, silences and speech spans, shots, pacing numbers, and the paths of the saved frames and the word transcript.
 
-Then read it, and look at the frames with your own eyes before proposing anything:
+Silences shorter than 1.2 s are ignored by default, the same threshold the take rules use, so a pause inside a take does not split it. Then read the file, and look at the frames with your own eyes before proposing anything:
 
 - `notes` lists problems to settle first (no audio, streams of different length).
 - `speech_spans` and `silences` locate the takes and the dead air between them. They are for finding boundaries, never for cutting inside a take.
@@ -68,7 +70,7 @@ When the user points at a video and says "like this", measure it instead of gues
 python3 <SKILL_DIR>/scripts/analyze.py <reference file> --out .work/reference --frames 12
 ```
 
-Carry the numbers into the brief, not the content: `shot_median_s`, `cuts_per_min`, `first_cut_s`, `silence_ratio`, `words_per_min_spoken` when transcribed, and what the frames show about layout (text position, caption style, how much of the frame the subject fills). State them as targets in `BRIEF.md`, for example "median shot 2.4 s, first cut by 1.5 s, about 170 spoken words a minute".
+Carry the numbers forward, not the content: `shot_median_s`, `cuts_per_min`, `first_cut_s`, `silence_ratio`, `words_per_min_spoken` when transcribed, and what the frames show about layout (text position, caption style, how much of the frame the subject fills). State them as targets in `.work/targets.md`, for example "median shot 2.4 s, first cut by 1.5 s, about 170 spoken words a minute".
 
 A reference is something to measure. Its footage, music, graphics, voice and wording stay out of the new video. Download one only to measure it, keep it under `.work/reference/`, and never place it in `assets/`.
 
@@ -83,11 +85,13 @@ Stop and get the user's answer at these points; work on anything that does not d
 
 In a no-questions run, gates 1 and 2 become decisions you record in the stage record with their reason; gates 3 and 4 still hold.
 
+These are the pipeline's gates only. Each owner keeps its own, and they still apply inside its stage: for example `hyperframes` has the person pick a storyline for a longer film and opens the preview before the delivery render.
+
 ## Stage 6: master
 
 - Target loudness: -14 LUFS integrated for YouTube and social, true peak at or below -1 dBFS. Run `analyze.py` on the render and compare; fix with the owner's mixing tools, not by re-encoding blind.
 - Video and audio stream lengths match within 0.05 s (`notes` reports a mismatch).
-- Scan the rendered frames for private strings before delivery (`--frames` at about 4 per second on a short, fewer on a long video).
+- Scan the rendered frames for private strings before delivery: `--frames` at about 4 per second on a short, fewer on a long video, with `--frame-width` set to the render's width so small text is readable.
 
 ## Inside SpecWithCode
 
@@ -101,7 +105,7 @@ These apply when the `studio-code` tools are present; elsewhere the stages run t
 
 ## What this pipeline leaves out, and why
 
-See `references/stage-map.md` for the tool-by-tool comparison with the public toolkit this ordering was checked against. In short: no timeline-editor connectors (the cut is a deterministic ffmpeg render from a reviewed cut list), no automatic silence or filler-word removal (it breaks whole takes), no cloud GPU rendering by default.
+See `references/stage-map.md` for the tool-by-tool comparison with the public toolkit this ordering was checked against. In short: no timeline-editor connectors (the cut is an ffmpeg render from a reviewed cut list, so it can be re-run), no automatic silence or filler-word removal (the take rules keep each take whole), no cloud GPU rendering by default.
 
 ## Done when
 

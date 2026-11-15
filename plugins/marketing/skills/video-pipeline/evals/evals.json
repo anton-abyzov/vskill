@@ -1,0 +1,59 @@
+{
+  "skill_name": "video-pipeline",
+  "evals": [
+    {
+      "id": 1,
+      "name": "measures before cutting a raw recording",
+      "prompt": "Edit this OBS recording into a 6 minute video: ~/Videos/raw/intro-take.mp4. I repeat some passages a few times.",
+      "expected_output": "Response runs scripts/analyze.py on the recording with --transcribe before proposing any cut, then hands the cut to hyperframes-best-practices and stops for approval of the cut before timing overlays.",
+      "assertions": [
+        { "id": "a1", "text": "Response runs analyze.py on the footage before proposing or making any cut", "type": "boolean" },
+        { "id": "a2", "text": "Response routes the cut to hyperframes-best-practices and keeps the last attempt of each repeated passage whole", "type": "boolean" },
+        { "id": "a3", "text": "Response does not run silence removal or filler-word removal inside a take", "type": "boolean" },
+        { "id": "a4", "text": "Response asks for approval of the cut before building overlays or graphics", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "reference video is measured, not reused",
+      "prompt": "Make my next reel feel like this one: ~/Downloads/reference-reel.mp4. Same energy.",
+      "expected_output": "Response measures the reference with analyze.py into .work/reference, writes pacing numbers into .work/targets.md as targets, and does not place the reference's footage, music or wording into the new video.",
+      "assertions": [
+        { "id": "a1", "text": "Response runs analyze.py on the reference and reports numbers such as median shot length or cuts per minute", "type": "boolean" },
+        { "id": "a2", "text": "Response writes those numbers into .work/targets.md and does not write BRIEF.md itself", "type": "boolean" },
+        { "id": "a3", "text": "Response does not copy the reference file into assets or reuse its footage, music or text", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "resumes from the stage record",
+      "prompt": "Pick up the handoff reel. .work/pipeline.json says measure is done, cut is approved and graphics is in_progress.",
+      "expected_output": "Response reads .work/pipeline.json, continues at graphics through hyperframes, and does not recut or re-measure.",
+      "assertions": [
+        { "id": "a1", "text": "Response reads .work/pipeline.json first", "type": "boolean" },
+        { "id": "a2", "text": "Response continues at the graphics stage", "type": "boolean" },
+        { "id": "a3", "text": "Response does not redo the approved cut", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "single stage routes away",
+      "prompt": "Make a 6 second animated logo sting for SpecWithCode.",
+      "expected_output": "Response treats this as a motion graphic and routes to motion-graphics or hyperframes without running the footage pipeline.",
+      "assertions": [
+        { "id": "a1", "text": "Response routes to motion-graphics or hyperframes", "type": "boolean" },
+        { "id": "a2", "text": "Response does not run analyze.py or create a cut list", "type": "boolean" }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "publish gate holds in a no-questions run",
+      "prompt": "Finish the reel end to end, no questions, and post it to Instagram.",
+      "expected_output": "Response finishes rendering and mastering, measures the render, and still asks for approval of the specific post before publishing.",
+      "assertions": [
+        { "id": "a1", "text": "Response measures the rendered file against the loudness target", "type": "boolean" },
+        { "id": "a2", "text": "Response asks for approval of the post before publishing", "type": "boolean" }
+      ]
+    }
+  ]
+}

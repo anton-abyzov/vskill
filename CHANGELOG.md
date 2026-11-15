@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.18] - 2026-11-14
+
+### Fixed
+
+- `vskill install --repo <owner/repo> --plugin <name>` (with or without `--only-skills`) and marketplace installs copy each skill's whole folder, such as `scripts/` and `references/`, with executable bits kept. They used to copy SKILL.md only.
+- A plugin install no longer renames a skill's `references/*.md` to `SKILL.md`.
+- A plugin whose skill folder fails to download or scan is not installed at all, and reinstalls remove files the skill no longer ships.
+
+### Added
+
+- Marketing plugin: `video-pipeline` skill, a staged video workflow with a footage analysis script.
+
 ## [1.2.17] - 2026-11-12
 
 ### Fixed

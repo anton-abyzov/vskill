@@ -228,9 +228,11 @@ vi.mock("../utils/output.js", () => ({
 // ---------------------------------------------------------------------------
 const mockInstallSymlink = vi.fn().mockReturnValue([]);
 const mockInstallCopy = vi.fn().mockReturnValue([]);
+const mockWriteAgentFiles = vi.fn();
 vi.mock("../installer/canonical.js", () => ({
   installSymlink: (...args: unknown[]) => mockInstallSymlink(...args),
   installCopy: (...args: unknown[]) => mockInstallCopy(...args),
+  writeAgentFiles: (...args: unknown[]) => mockWriteAgentFiles(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -2299,6 +2301,66 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
     const nextjs = writeCalls.find(([p]) => p.endsWith("/frontend/nextjs/SKILL.md"))?.[1] ?? "";
     expect(nextjs).toMatch(/^---\nname: nextjs\n/);
     expect(nextjs).not.toContain("frontend/nextjs");
+  });
+
+  it("installs a plugin skill's whole folder (scripts/, references/) with --only-skills", async () => {
+    setupHappyPath();
+    mockPrepareGitHubSkillBundle.mockImplementation(async (args: { skillMdPath: string }) => ({
+      ok: true,
+      bundle: args.skillMdPath === "plugins/frontend/skills/nextjs/SKILL.md"
+        ? {
+            files: {
+              "scripts/analyze.py": "#!/usr/bin/env python3\nprint('hi')\n",
+              "references/stage-map.md": "# Stage map\n",
+            },
+            executables: ["scripts/analyze.py"],
+            fileList: ["SKILL.md", "references/stage-map.md", "scripts/analyze.py"],
+            skipped: [],
+            totalBytes: 40,
+          }
+        : { files: {}, executables: [], fileList: ["SKILL.md"], skipped: [], totalBytes: 0 },
+    }));
+
+    await addCommand("ignored-source", { repo: "anton-abyzov/vskill", plugin: "frontend", onlySkills: "nextjs" });
+
+    expect(mockPrepareGitHubSkillBundle).toHaveBeenCalledTimes(1);
+    expect(mockPrepareGitHubSkillBundle.mock.calls[0][0]).toMatchObject({
+      owner: "anton-abyzov",
+      repo: "vskill",
+      skillMdPath: "plugins/frontend/skills/nextjs/SKILL.md",
+    });
+    expect(mockWriteAgentFiles).toHaveBeenCalledTimes(1);
+    const [dir, files, bundleOpts] = mockWriteAgentFiles.mock.calls[0] as [string, Record<string, string>, { executables: Set<string>; anyPath: boolean }];
+    expect(dir).toMatch(/\/frontend\/nextjs$/);
+    expect(Object.keys(files).sort()).toEqual(["references/stage-map.md", "scripts/analyze.py"]);
+    expect(bundleOpts.anyPath).toBe(true);
+    expect([...bundleOpts.executables]).toEqual(["scripts/analyze.py"]);
+
+    const lock = mockWriteLockfile.mock.calls[0][0];
+    expect(lock.skills.frontend.files).toEqual([
+      "nextjs/SKILL.md",
+      "nextjs/references/stage-map.md",
+      "nextjs/scripts/analyze.py",
+    ]);
+  });
+
+  it("refuses the plugin when a skill folder cannot be fetched", async () => {
+    setupHappyPath();
+    mockPrepareGitHubSkillBundle.mockResolvedValue({
+      ok: false,
+      verdict: "BUNDLE_ERROR",
+      message: "Could not download 1 of 2 skill file(s): scripts/analyze.py (HTTP 500). Nothing was installed.",
+    });
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+    try {
+      await addCommand("ignored-source", { repo: "anton-abyzov/vskill", plugin: "frontend", onlySkills: "nextjs" });
+    } catch { /* expected */ }
+    exitSpy.mockRestore();
+
+    const writeCalls = mockWriteFileSync.mock.calls as [string, string][];
+    expect(writeCalls.some(([p]) => p.endsWith("SKILL.md"))).toBe(false);
+    expect(mockWriteAgentFiles).not.toHaveBeenCalled();
+    expect(mockWriteLockfile).not.toHaveBeenCalled();
   });
 
   it("writes lockfile with github source format", async () => {

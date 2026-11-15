@@ -25,6 +25,8 @@ import { agentGlobalInstallDirs, resolveAgentGlobalSkillsDir } from "../agents/g
 import { ensureLockfile, writeLockfile, readLockfile, removeSkillFromLock } from "../lockfile/index.js";
 import { buildGitHubInstallLockEntry } from "./add-lockfile.js";
 import { prepareGitHubSkillBundle } from "./add-github-bundle.js";
+import { writeAgentFiles } from "../installer/canonical.js";
+import type { GitHubSkillBundle } from "../discovery/github-skill-bundle.js";
 import { runTier1Scan } from "../scanner/index.js";
 import { isBinary } from "../scanner/repo-scanner.js";
 import { getAvailablePlugins, getPluginSource, getPluginVersion, hasPlugin, discoverUnregisteredPlugins } from "../marketplace/index.js";
@@ -616,6 +618,9 @@ async function installMarketplaceRepo(
           const contentRes = await githubFetch(rawUrl);
           if (!contentRes.ok) continue;
           const content = await contentRes.text();
+          const bundle = await fetchPluginSkillBundle(
+            owner, repo, branch, `${pluginPath ? `${pluginPath}/` : ""}skills/${sd.name}/SKILL.md`, !!opts.force,
+          );
           // `name:` must equal the folder: Codex and the Agent Skills spec
           // ignore a namespaced `plugin/skill` name. A matching name is left
           // untouched (no-touch principle).
@@ -624,6 +629,7 @@ async function installMarketplaceRepo(
             const skillDir = join(baseDir, sd.name);
             mkdirSync(skillDir, { recursive: true });
             writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
+            writePluginSkillBundle(skillDir, bundle);
             cleanStaleNesting(skillDir);
           }
           installedSkillNames.push(sd.name);
@@ -635,11 +641,15 @@ async function installMarketplaceRepo(
         const contentRes = await githubFetch(rawUrl);
         if (contentRes.ok) {
           const content = await contentRes.text();
+          const bundle = await fetchPluginSkillBundle(
+            owner, repo, branch, `${pluginPath ? `${pluginPath}/` : ""}SKILL.md`, !!opts.force,
+          );
           const processedContent = ensureFrontmatter(content, plugin.name);
           for (const baseDir of uniqueInstallBases(opts, agents)) {
             const skillDir = join(baseDir, plugin.name);
             mkdirSync(skillDir, { recursive: true });
             writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
+            writePluginSkillBundle(skillDir, bundle);
             cleanStaleNesting(skillDir);
           }
           installedSkillNames.push(plugin.name);
@@ -1897,6 +1907,34 @@ async function installAllRepoPlugins(
 // Remote plugin installation from a GitHub repository with marketplace.json
 // ---------------------------------------------------------------------------
 
+/**
+ * A plugin skill's complete folder (scripts/, references/, assets/, nested
+ * dirs), fetched and scanned like a single-skill install. Plugin installs
+ * used to write SKILL.md only, so a skill whose SKILL.md runs
+ * scripts/x.py arrived broken. A failed fetch or blocking finding throws:
+ * the plugin is never installed half-copied.
+ */
+async function fetchPluginSkillBundle(
+  owner: string,
+  repo: string,
+  ref: string,
+  skillMdPath: string,
+  force: boolean,
+): Promise<GitHubSkillBundle> {
+  const prepared = await prepareGitHubSkillBundle({ owner, repo, ref, skillMdPath, force });
+  if (!prepared.ok) throw new Error(prepared.message);
+  return prepared.bundle;
+}
+
+/** Write a plugin skill's bundled files (everything but SKILL.md) into skillDir. */
+function writePluginSkillBundle(skillDir: string, bundle: GitHubSkillBundle | undefined): void {
+  if (!bundle || Object.keys(bundle.files).length === 0) return;
+  writeAgentFiles(skillDir, bundle.files, {
+    executables: new Set(bundle.executables),
+    anyPath: true,
+  });
+}
+
 async function installRepoPlugin(
   ownerRepo: string,
   pluginName: string,
@@ -2046,19 +2084,22 @@ async function installRepoPlugin(
 
   // Fetch all skill and command content
   const allContent: string[] = [];
-  const skills: Array<{ name: string; content: string }> = [];
+  const skills: Array<{ name: string; content: string; bundle?: GitHubSkillBundle }> = [];
   for (const entry of skillEntries) {
-    const rawUrl = flatLayout
-      ? `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/SKILL.md`
-      : `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/skills/${entry.name}/SKILL.md`;
+    const skillMdPath = flatLayout
+      ? `${pluginPath}/SKILL.md`
+      : `${pluginPath}/skills/${entry.name}/SKILL.md`;
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${skillMdPath}`;
+    let content: string | null = null;
     try {
       const res = await githubFetch(rawUrl);
-      if (res.ok) {
-        const content = await res.text();
-        skills.push({ name: entry.name, content });
-        allContent.push(content);
-      }
+      if (res.ok) content = await res.text();
     } catch { /* skip unavailable skills */ }
+    if (content === null) continue;
+    // Throws on a failed download or a blocking finding in a bundled file.
+    const bundle = await fetchPluginSkillBundle(owner, repo, branch, skillMdPath, !!opts.force);
+    skills.push({ name: entry.name, content, bundle });
+    allContent.push(content);
   }
 
   const commands: Array<{ name: string; content: string }> = [];
@@ -2116,9 +2157,11 @@ async function installRepoPlugin(
 
   // Install skills and commands with namespace prefix
   const sha = computeSha(combined);
-  const skillFileNames = skills.map((s) =>
-    s.name === pluginName ? "SKILL.md" : `${s.name}/SKILL.md`
-  ).sort();
+  const skillFileNames = skills.flatMap((s) => {
+    const prefix = s.name === pluginName ? "" : `${s.name}/`;
+    const files = s.bundle?.fileList?.length ? s.bundle.fileList : ["SKILL.md"];
+    return files.map((f) => `${prefix}${f}`);
+  }).sort();
   const locations: string[] = [];
 
   if (opts.dryRun) {
@@ -2155,6 +2198,7 @@ async function installRepoPlugin(
           : join(plugDir, skill.name);
         mkdirSync(skillDir, { recursive: true });
         writeFileSync(join(skillDir, "SKILL.md"), ensureFrontmatter(skill.content, skill.name, true), "utf-8");
+        writePluginSkillBundle(skillDir, skill.bundle);
         cleanStaleNesting(skillDir);
       }
       // Commands: {agent-dir}/{plugin-name}/{command-name}.md

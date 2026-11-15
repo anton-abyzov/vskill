@@ -278,7 +278,7 @@ function clearPathForFile(root: string, fullPath: string): void {
  * values are text or raw bytes, written as-is. Paths were policy-checked when
  * the bundle entered the installer, so only traversal is re-checked here.
  */
-function writeAgentFiles(
+export function writeAgentFiles(
   targetDir: string,
   agentFiles: Record<string, BundleContent> | undefined,
   bundleOpts?: BundleWriteOptions,

@@ -523,6 +523,37 @@ describe("ensureSkillMdNaming", () => {
     expect(existsSync(join(skillDir, "architect.md"))).toBe(false);
     expect(result.renamedCount).toBe(1);
   });
+
+  it("never renames .md files inside an installed skill's subfolders", () => {
+    // {plugin}/{skill}/references/stage-map.md: references/ is part of the
+    // skill, not a skill missing its SKILL.md.
+    const skillDir = join(skillsDir, "video-pipeline");
+    mkdirSync(join(skillDir, "references"), { recursive: true });
+    mkdirSync(join(skillDir, "scripts"), { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), "---\nname: video-pipeline\n---\n# VP");
+    writeFileSync(join(skillDir, "references", "stage-map.md"), "# Stage map");
+    writeFileSync(join(skillDir, "scripts", "notes.md"), "# Notes");
+
+    const result = ensureSkillMdNaming(skillsDir);
+
+    expect(readFileSync(join(skillDir, "references", "stage-map.md"), "utf-8")).toBe("# Stage map");
+    expect(existsSync(join(skillDir, "references", "SKILL.md"))).toBe(false);
+    expect(existsSync(join(skillDir, "scripts", "notes.md"))).toBe(true);
+    expect(result.renamedCount).toBe(0);
+  });
+
+  it("leaves a single skill's own folder alone when called on it directly", () => {
+    const skillDir = join(skillsDir, "frontend-design");
+    mkdirSync(join(skillDir, "references"), { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), "# FD");
+    writeFileSync(join(skillDir, "references", "palette.md"), "# Palette");
+
+    const result = ensureSkillMdNaming(skillDir);
+
+    expect(existsSync(join(skillDir, "references", "palette.md"))).toBe(true);
+    expect(existsSync(join(skillDir, "references", "SKILL.md"))).toBe(false);
+    expect(result.renamedCount).toBe(0);
+  });
 });
 
 // =========================================================================

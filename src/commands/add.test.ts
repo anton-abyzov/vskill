@@ -228,9 +228,11 @@ vi.mock("../utils/output.js", () => ({
 // ---------------------------------------------------------------------------
 const mockInstallSymlink = vi.fn().mockReturnValue([]);
 const mockInstallCopy = vi.fn().mockReturnValue([]);
+const mockWriteAgentFiles = vi.fn();
 vi.mock("../installer/canonical.js", () => ({
   installSymlink: (...args: unknown[]) => mockInstallSymlink(...args),
   installCopy: (...args: unknown[]) => mockInstallCopy(...args),
+  writeAgentFiles: (...args: unknown[]) => mockWriteAgentFiles(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -2301,6 +2303,157 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
     expect(nextjs).not.toContain("frontend/nextjs");
   });
 
+  it("installs a plugin skill's whole folder (scripts/, references/) with --only-skills", async () => {
+    setupHappyPath();
+    mockPrepareGitHubSkillBundle.mockImplementation(async (args: { skillMdPath: string }) => ({
+      ok: true,
+      bundle: args.skillMdPath === "plugins/frontend/skills/nextjs/SKILL.md"
+        ? {
+            files: {
+              "scripts/analyze.py": "#!/usr/bin/env python3\nprint('hi')\n",
+              "references/stage-map.md": "# Stage map\n",
+            },
+            executables: ["scripts/analyze.py"],
+            fileList: ["SKILL.md", "references/stage-map.md", "scripts/analyze.py"],
+            skipped: [],
+            totalBytes: 40,
+          }
+        : { files: {}, executables: [], fileList: ["SKILL.md"], skipped: [], totalBytes: 0 },
+    }));
+
+    await addCommand("ignored-source", { repo: "anton-abyzov/vskill", plugin: "frontend", onlySkills: "nextjs" });
+
+    expect(mockPrepareGitHubSkillBundle).toHaveBeenCalledTimes(1);
+    expect(mockPrepareGitHubSkillBundle.mock.calls[0][0]).toMatchObject({
+      owner: "anton-abyzov",
+      repo: "vskill",
+      skillMdPath: "plugins/frontend/skills/nextjs/SKILL.md",
+    });
+    expect(mockWriteAgentFiles).toHaveBeenCalledTimes(1);
+    const [dir, files, bundleOpts] = mockWriteAgentFiles.mock.calls[0] as [string, Record<string, string>, { executables: Set<string>; anyPath: boolean }];
+    expect(dir).toMatch(/\/frontend\/nextjs$/);
+    expect(Object.keys(files).sort()).toEqual(["references/stage-map.md", "scripts/analyze.py"]);
+    expect(bundleOpts.anyPath).toBe(true);
+    expect([...bundleOpts.executables]).toEqual(["scripts/analyze.py"]);
+
+    const lock = mockWriteLockfile.mock.calls[0][0];
+    expect(lock.skills.frontend.files).toEqual([
+      "nextjs/SKILL.md",
+      "nextjs/references/stage-map.md",
+      "nextjs/scripts/analyze.py",
+    ]);
+  });
+
+  it("refuses the plugin when a skill folder cannot be fetched", async () => {
+    setupHappyPath();
+    mockPrepareGitHubSkillBundle.mockResolvedValue({
+      ok: false,
+      verdict: "BUNDLE_ERROR",
+      message: "Could not download 1 of 2 skill file(s): scripts/analyze.py (HTTP 500). Nothing was installed.",
+    });
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+    try {
+      await addCommand("ignored-source", { repo: "anton-abyzov/vskill", plugin: "frontend", onlySkills: "nextjs" });
+    } catch { /* expected */ }
+    exitSpy.mockRestore();
+
+    const writeCalls = mockWriteFileSync.mock.calls as [string, string][];
+    expect(writeCalls.some(([p]) => p.endsWith("SKILL.md"))).toBe(false);
+    expect(mockWriteAgentFiles).not.toHaveBeenCalled();
+    expect(mockWriteLockfile).not.toHaveBeenCalled();
+  });
+
+  it("builds skill paths without an empty segment for a root (\"./\") plugin source", async () => {
+    setupHappyPath();
+    const rootJson = JSON.stringify({ name: "solo", plugins: [{ name: "solo", source: "./", version: "1.0.0" }] });
+    const urls: string[] = [];
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      urls.push(url);
+      if (url.includes("marketplace.json")) return { ok: true, text: async () => rootJson, json: async () => JSON.parse(rootJson) };
+      if (url.endsWith("/contents/skills")) return { ok: true, json: async () => [{ name: "tool", type: "dir" }] };
+      if (url.endsWith("/skills/tool/SKILL.md")) return { ok: true, text: async () => "# Tool" };
+      return { ok: false };
+    }) as unknown as typeof fetch;
+
+    await addCommand("ignored-source", { repo: "owner/solo", plugin: "solo" });
+
+    expect(urls.some((u) => u.includes("//skills") || u.includes("//SKILL.md") || u.includes("//commands"))).toBe(false);
+    expect(mockPrepareGitHubSkillBundle.mock.calls[0][0]).toMatchObject({ skillMdPath: "skills/tool/SKILL.md" });
+  });
+
+  it("passes the skill's files from the last install so removed upstream files are cleaned up", async () => {
+    setupHappyPath();
+    mockReadLockfile.mockReturnValue({
+      version: 1,
+      agents: [],
+      skills: {
+        frontend: {
+          version: "1.0.0", sha: "x", tier: "VERIFIED", installedAt: "", source: "github:anton-abyzov/vskill#plugin:frontend",
+          files: ["nextjs/SKILL.md", "nextjs/scripts/old.py", "react/SKILL.md", "react/references/r.md"],
+        },
+      },
+      createdAt: "", updatedAt: "",
+    });
+    mockPrepareGitHubSkillBundle.mockResolvedValue({
+      ok: true,
+      bundle: { files: { "scripts/new.py": "print(1)\n" }, executables: [], fileList: ["SKILL.md", "scripts/new.py"], skipped: [], totalBytes: 9 },
+    });
+
+    await addCommand("ignored-source", { repo: "anton-abyzov/vskill", plugin: "frontend", onlySkills: "nextjs" });
+
+    expect(mockWriteAgentFiles).toHaveBeenCalledTimes(1);
+    expect(mockWriteAgentFiles.mock.calls[0][2]).toMatchObject({ previousFiles: ["scripts/old.py"] });
+    mockReadLockfile.mockReturnValue(null);
+  });
+
+  it("never hands a plugin-named skill its filtered-out siblings' files", async () => {
+    setupHappyPath();
+    const json = JSON.stringify({ name: "x", plugins: [{ name: "kit", source: "./plugins/kit", version: "1.0.0" }] });
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("marketplace.json")) return { ok: true, text: async () => json, json: async () => JSON.parse(json) };
+      if (url.endsWith("/contents/plugins/kit/skills")) return { ok: true, json: async () => [{ name: "kit", type: "dir" }, { name: "react", type: "dir" }] };
+      if (url.endsWith("/skills/kit/SKILL.md")) return { ok: true, text: async () => "# Kit" };
+      return { ok: false };
+    }) as unknown as typeof fetch;
+    mockReadLockfile.mockReturnValue({
+      version: 1, agents: [], createdAt: "", updatedAt: "",
+      skills: { kit: { version: "1.0.0", sha: "x", tier: "VERIFIED", installedAt: "", source: "github:o/r#plugin:kit",
+        files: ["SKILL.md", "notes/old.md", "react/SKILL.md", "react/references/r.md", "vue/SKILL.md", "vue/x.md"] } },
+    });
+    mockPrepareGitHubSkillBundle.mockResolvedValue({
+      ok: true,
+      bundle: { files: { "scripts/k.py": "x" }, executables: [], fileList: ["SKILL.md", "scripts/k.py"], skipped: [], totalBytes: 1 },
+    });
+
+    await addCommand("ignored-source", { repo: "o/r", plugin: "kit", onlySkills: "kit" });
+
+    expect(mockWriteAgentFiles).toHaveBeenCalledTimes(1);
+    expect(mockWriteAgentFiles.mock.calls[0][2]).toMatchObject({ previousFiles: ["notes/old.md"] });
+    mockReadLockfile.mockReturnValue(null);
+  });
+
+  it("writes no lockfile when the only (shared) install base fails for every agent", async () => {
+    setupHappyPath();
+    mockDetectInstalledAgents.mockResolvedValue([
+      makeAgent({ id: "codex", displayName: "Codex", readsSharedSkills: { global: true, project: true } }),
+      makeAgent({ id: "cursor", displayName: "Cursor", readsSharedSkills: { global: true, project: true } }),
+    ]);
+    mockPrepareGitHubSkillBundle.mockResolvedValue({
+      ok: true,
+      bundle: { files: { "scripts/a.py": "x" }, executables: [], fileList: ["SKILL.md", "scripts/a.py"], skipped: [], totalBytes: 1 },
+    });
+    mockWriteAgentFiles.mockImplementation(() => { throw new Error("disk full"); });
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+    try {
+      await addCommand("ignored-source", { repo: "anton-abyzov/vskill", plugin: "frontend", onlySkills: "nextjs" });
+    } catch { /* expected */ }
+    exitSpy.mockRestore();
+    mockWriteAgentFiles.mockReset();
+
+    expect(mockWriteLockfile).not.toHaveBeenCalled();
+    expect(mockEnsureLockfile).not.toHaveBeenCalled();
+  });
+
   it("writes lockfile with github source format", async () => {
     setupHappyPath();
 
@@ -3335,6 +3488,36 @@ describe("addCommand marketplace integration", () => {
     expect(mockWriteLockfile).toHaveBeenCalled();
     const lockArg = mockWriteLockfile.mock.calls[0][0];
     expect(lockArg.skills["plugin-a"].source).toBe("marketplace:owner/repo#plugin-a");
+  });
+
+  it("writes no skill of a plugin when one of its skill folders fails to fetch", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ download_url: "https://raw.githubusercontent.com/owner/repo/main/.claude-plugin/marketplace.json" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => SAMPLE_MARKETPLACE_JSON,
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => [{ name: "aaa", type: "dir" }, { name: "zzz", type: "dir" }],
+        text: async () => "# Skill Content",
+      }) as unknown as typeof fetch;
+    mockDetectInstalledAgents.mockResolvedValue([makeAgent()]);
+    mockPrepareGitHubSkillBundle.mockImplementation(async (args: { skillMdPath: string }) =>
+      args.skillMdPath.includes("skills/zzz/")
+        ? { ok: false, verdict: "BUNDLE_ERROR", message: "Could not download 1 of 1 skill file(s). Nothing was installed." }
+        : { ok: true, bundle: { files: { "scripts/a.py": "x" }, executables: [], fileList: ["SKILL.md", "scripts/a.py"], skipped: [], totalBytes: 1 } });
+
+    await addCommand("owner/repo", { yes: true });
+
+    const writeCalls = mockWriteFileSync.mock.calls as [string, string][];
+    expect(writeCalls.some(([p]) => p.endsWith("/aaa/SKILL.md"))).toBe(false);
+    expect(mockWriteAgentFiles).not.toHaveBeenCalled();
+    const lockArg = mockWriteLockfile.mock.calls[0]?.[0];
+    expect(lockArg?.skills?.["plugin-a"]).toBeUndefined();
   });
 
   it("TC-005: falls through to discovery when repo is NOT a marketplace", async () => {

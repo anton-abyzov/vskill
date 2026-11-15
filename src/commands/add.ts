@@ -13,6 +13,7 @@ import {
   readdirSync,
   rmSync,
   lstatSync,
+  unlinkSync,
 } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import os from "node:os";
@@ -25,6 +26,8 @@ import { agentGlobalInstallDirs, resolveAgentGlobalSkillsDir } from "../agents/g
 import { ensureLockfile, writeLockfile, readLockfile, removeSkillFromLock } from "../lockfile/index.js";
 import { buildGitHubInstallLockEntry } from "./add-lockfile.js";
 import { prepareGitHubSkillBundle } from "./add-github-bundle.js";
+import { writeAgentFiles } from "../installer/canonical.js";
+import type { GitHubSkillBundle } from "../discovery/github-skill-bundle.js";
 import { runTier1Scan } from "../scanner/index.js";
 import { isBinary } from "../scanner/repo-scanner.js";
 import { getAvailablePlugins, getPluginSource, getPluginVersion, hasPlugin, discoverUnregisteredPlugins } from "../marketplace/index.js";
@@ -611,23 +614,29 @@ async function installMarketplaceRepo(
         // Nested layout: {pluginPath}/skills/{skillName}/SKILL.md
         const skillDirs = ((await skillsRes.json()) as Array<{ name: string; type: string }>)
           .filter((e) => e.type === "dir");
+        // Fetch and scan every skill of the plugin before writing any, so a
+        // failed or blocked folder leaves nothing of this plugin on disk.
+        const fetched: Array<{ name: string; content: string; bundle: GitHubSkillBundle }> = [];
         for (const sd of skillDirs) {
           const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}${pathSegment}/skills/${sd.name}/SKILL.md`;
           const contentRes = await githubFetch(rawUrl);
           if (!contentRes.ok) continue;
           const content = await contentRes.text();
+          const bundle = await fetchPluginSkillBundle(
+            owner, repo, branch, `${pluginPath ? `${pluginPath}/` : ""}skills/${sd.name}/SKILL.md`, !!opts.force,
+          );
+          fetched.push({ name: sd.name, content, bundle });
+        }
+        for (const { name, content, bundle } of fetched) {
           // `name:` must equal the folder: Codex and the Agent Skills spec
           // ignore a namespaced `plugin/skill` name. A matching name is left
           // untouched (no-touch principle).
-          const processedContent = ensureFrontmatter(content, sd.name, true);
+          const processedContent = ensureFrontmatter(content, name, true);
           for (const baseDir of uniqueInstallBases(opts, agents)) {
-            const skillDir = join(baseDir, sd.name);
-            mkdirSync(skillDir, { recursive: true });
-            writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
-            cleanStaleNesting(skillDir);
+            writePluginSkill(join(baseDir, name), processedContent, bundle);
           }
-          installedSkillNames.push(sd.name);
-          pluginSkillContents.set(plugin.name, [...(pluginSkillContents.get(plugin.name) ?? []), { name: sd.name, content }]);
+          installedSkillNames.push(name);
+          pluginSkillContents.set(plugin.name, [...(pluginSkillContents.get(plugin.name) ?? []), { name, content }]);
         }
       } else {
         // Flat layout: {pluginPath}/SKILL.md directly in the plugin root
@@ -635,12 +644,12 @@ async function installMarketplaceRepo(
         const contentRes = await githubFetch(rawUrl);
         if (contentRes.ok) {
           const content = await contentRes.text();
+          const bundle = await fetchPluginSkillBundle(
+            owner, repo, branch, `${pluginPath ? `${pluginPath}/` : ""}SKILL.md`, !!opts.force,
+          );
           const processedContent = ensureFrontmatter(content, plugin.name);
           for (const baseDir of uniqueInstallBases(opts, agents)) {
-            const skillDir = join(baseDir, plugin.name);
-            mkdirSync(skillDir, { recursive: true });
-            writeFileSync(join(skillDir, "SKILL.md"), processedContent, "utf-8");
-            cleanStaleNesting(skillDir);
+            writePluginSkill(join(baseDir, plugin.name), processedContent, bundle);
           }
           installedSkillNames.push(plugin.name);
           pluginSkillContents.set(plugin.name, [{ name: plugin.name, content }]);
@@ -1897,6 +1906,54 @@ async function installAllRepoPlugins(
 // Remote plugin installation from a GitHub repository with marketplace.json
 // ---------------------------------------------------------------------------
 
+/**
+ * A plugin skill's complete folder (scripts/, references/, assets/, nested
+ * dirs), fetched and scanned like a single-skill install. Plugin installs
+ * used to write SKILL.md only, so a skill whose SKILL.md runs
+ * scripts/x.py arrived broken. A failed fetch or blocking finding throws:
+ * the plugin is never installed half-copied.
+ */
+async function fetchPluginSkillBundle(
+  owner: string,
+  repo: string,
+  ref: string,
+  skillMdPath: string,
+  force: boolean,
+): Promise<GitHubSkillBundle> {
+  const prepared = await prepareGitHubSkillBundle({ owner, repo, ref, skillMdPath, force });
+  if (!prepared.ok) throw new Error(prepared.message);
+  return prepared.bundle;
+}
+
+/**
+ * Write one plugin skill into skillDir: SKILL.md, then its bundled files.
+ * A symlink left at skillDir by an older install is replaced by a real
+ * folder (unlinking never touches the link's target), so nothing is written
+ * through it. previousFiles are this skill's files from the last install;
+ * those the new bundle no longer has are removed.
+ */
+function writePluginSkill(
+  skillDir: string,
+  skillMd: string,
+  bundle: GitHubSkillBundle | undefined,
+  previousFiles?: readonly string[],
+): void {
+  try {
+    if (lstatSync(skillDir).isSymbolicLink()) unlinkSync(skillDir);
+  } catch { /* nothing there yet */ }
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(join(skillDir, "SKILL.md"), skillMd, "utf-8");
+  // Before the bundle: a bundled folder named after the skill is not stale nesting.
+  cleanStaleNesting(skillDir);
+  if (!bundle) return;
+  if (Object.keys(bundle.files).length === 0 && !previousFiles?.length) return;
+  writeAgentFiles(skillDir, bundle.files, {
+    executables: new Set(bundle.executables),
+    anyPath: true,
+    previousFiles,
+  });
+}
+
 async function installRepoPlugin(
   ownerRepo: string,
   pluginName: string,
@@ -1967,7 +2024,9 @@ async function installRepoPlugin(
     overrideSource || !manifestContent
       ? "0.0.0"
       : getPluginVersion(pluginName, manifestContent) || "0.0.0";
-  const pluginPath = pluginSource.replace(/^\.\//, "");
+  // "./" or a trailing slash would put an empty segment in every path below.
+  const pluginPath = pluginSource.replace(/^\.\//, "").replace(/\/+$/, "");
+  const pathPrefix = pluginPath ? `${pluginPath}/` : "";
 
   // Blocklist + rejection check BEFORE fetching content
   const repoUrl = `https://github.com/${ownerRepo}`;
@@ -1994,7 +2053,7 @@ async function installRepoPlugin(
   let flatLayout = false;
   try {
     const res = await githubFetch(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${pluginPath}/skills`,
+      `https://api.github.com/repos/${owner}/${repo}/contents/${pathPrefix}skills`,
       { headers: { "User-Agent": "vskill-cli" } },
     );
     if (res.ok) {
@@ -2006,7 +2065,7 @@ async function installRepoPlugin(
   if (skillEntries.length === 0) {
     try {
       const res = await githubFetch(
-        `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/SKILL.md`,
+        `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pathPrefix}SKILL.md`,
       );
       if (res.ok) {
         flatLayout = true;
@@ -2018,7 +2077,7 @@ async function installRepoPlugin(
   let cmdEntries: GHEntry[] = [];
   try {
     const res = await githubFetch(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${pluginPath}/commands`,
+      `https://api.github.com/repos/${owner}/${repo}/contents/${pathPrefix}commands`,
       { headers: { "User-Agent": "vskill-cli" } },
     );
     if (res.ok) {
@@ -2031,6 +2090,9 @@ async function installRepoPlugin(
   if (skillEntries.length === 0 && cmdEntries.length === 0) {
     throw new Error(`No skills or commands found in plugin "${pluginName}"`);
   }
+
+  // Every skill folder the plugin has, before --only-skills narrows the list.
+  const discoveredSkillNames = skillEntries.map((e) => e.name);
 
   // Filter skills by --only-skills if provided
   if (opts.onlySkills) {
@@ -2046,24 +2108,27 @@ async function installRepoPlugin(
 
   // Fetch all skill and command content
   const allContent: string[] = [];
-  const skills: Array<{ name: string; content: string }> = [];
+  const skills: Array<{ name: string; content: string; bundle?: GitHubSkillBundle }> = [];
   for (const entry of skillEntries) {
-    const rawUrl = flatLayout
-      ? `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/SKILL.md`
-      : `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/skills/${entry.name}/SKILL.md`;
+    const skillMdPath = flatLayout
+      ? `${pathPrefix}SKILL.md`
+      : `${pathPrefix}skills/${entry.name}/SKILL.md`;
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${skillMdPath}`;
+    let content: string | null = null;
     try {
       const res = await githubFetch(rawUrl);
-      if (res.ok) {
-        const content = await res.text();
-        skills.push({ name: entry.name, content });
-        allContent.push(content);
-      }
+      if (res.ok) content = await res.text();
     } catch { /* skip unavailable skills */ }
+    if (content === null) continue;
+    // Throws on a failed download or a blocking finding in a bundled file.
+    const bundle = await fetchPluginSkillBundle(owner, repo, branch, skillMdPath, !!opts.force);
+    skills.push({ name: entry.name, content, bundle });
+    allContent.push(content);
   }
 
   const commands: Array<{ name: string; content: string }> = [];
   for (const entry of cmdEntries) {
-    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pluginPath}/commands/${entry.name}`;
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${pathPrefix}commands/${entry.name}`;
     try {
       const res = await githubFetch(rawUrl);
       if (res.ok) {
@@ -2116,9 +2181,11 @@ async function installRepoPlugin(
 
   // Install skills and commands with namespace prefix
   const sha = computeSha(combined);
-  const skillFileNames = skills.map((s) =>
-    s.name === pluginName ? "SKILL.md" : `${s.name}/SKILL.md`
-  ).sort();
+  const skillFileNames = skills.flatMap((s) => {
+    const prefix = s.name === pluginName ? "" : `${s.name}/`;
+    const files = s.bundle?.fileList?.length ? s.bundle.fileList : ["SKILL.md"];
+    return files.map((f) => `${prefix}${f}`);
+  }).sort();
   const locations: string[] = [];
 
   if (opts.dryRun) {
@@ -2134,16 +2201,33 @@ async function installRepoPlugin(
     return;
   }
 
-  const doneBases = new Set<string>();
+  // This plugin's files from the last install, to drop what upstream removed.
+  // readLockfile, not ensureLockfile: nothing is written before the install succeeds.
+  const previousPluginFiles: string[] = readLockfile(lockfileRoot(opts))?.skills?.[pluginName]?.files ?? [];
+  // A plugin-named skill sits in the plugin folder itself, beside its sibling
+  // skills: every sibling folder, installed now or not (--only-skills), and
+  // every folder the last install recorded a SKILL.md in, is not its own.
+  const otherSkillDirs = [...new Set([
+    ...discoveredSkillNames.filter((n) => n !== pluginName),
+    ...previousPluginFiles.filter((f) => /^[^/]+\/SKILL\.md$/.test(f)).map((f) => f.split("/")[0]),
+  ])].map((n) => `${n}/`);
+  const previousFilesFor = (prefix: string): string[] =>
+    previousPluginFiles
+      .filter((f) => f.startsWith(prefix))
+      .filter((f) => prefix !== "" || !otherSkillDirs.some((d) => f.startsWith(d)))
+      .map((f) => f.slice(prefix.length))
+      .filter((f) => f !== "SKILL.md");
+  // baseDir -> whether its one shared copy was written.
+  const doneBases = new Map<string, boolean>();
   for (const agent of selectedAgents) {
     const baseDir = resolveInstallBase(opts, agent);
     const plugDir = basename(baseDir) === pluginName ? baseDir : join(baseDir, pluginName);
     // 0894: shared readers share one copy in .agents/skills.
     if (doneBases.has(baseDir)) {
-      locations.push(`${agent.displayName}: ${plugDir}`);
+      if (doneBases.get(baseDir)) locations.push(`${agent.displayName}: ${plugDir}`);
       continue;
     }
-    doneBases.add(baseDir);
+    doneBases.set(baseDir, false);
 
     try {
       // Skills: {agent-dir}/{plugin-name}/{skill-name}/SKILL.md
@@ -2153,9 +2237,12 @@ async function installRepoPlugin(
         const skillDir = skill.name === pluginName
           ? plugDir
           : join(plugDir, skill.name);
-        mkdirSync(skillDir, { recursive: true });
-        writeFileSync(join(skillDir, "SKILL.md"), ensureFrontmatter(skill.content, skill.name, true), "utf-8");
-        cleanStaleNesting(skillDir);
+        writePluginSkill(
+          skillDir,
+          ensureFrontmatter(skill.content, skill.name, true),
+          skill.bundle,
+          previousFilesFor(skill.name === pluginName ? "" : `${skill.name}/`),
+        );
       }
       // Commands: {agent-dir}/{plugin-name}/{command-name}.md
       for (const cmd of commands) {
@@ -2163,6 +2250,7 @@ async function installRepoPlugin(
         writeFileSync(join(plugDir, cmd.name), cmd.content, "utf-8");
       }
       ensureSkillMdNaming(plugDir);
+      doneBases.set(baseDir, true);
       locations.push(`${agent.displayName}: ${plugDir}`);
     } catch (err) {
       console.error(
@@ -2170,6 +2258,10 @@ async function installRepoPlugin(
           dim((err as Error).message)
       );
     }
+  }
+
+  if (locations.length === 0) {
+    throw new Error(`Could not install ${pluginName} to any agent; the lockfile was not changed.`);
   }
 
   // Update lockfile (global → ~/.agents/, project → project root)

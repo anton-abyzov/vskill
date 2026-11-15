@@ -96,11 +96,16 @@ const SKIP_FILES = new Set([
  *   - If candidates exist, sort alphabetically, take first → rename to SKILL.md with frontmatter
  *
  * Also recurses one level into namespace directories (e.g., sw/).
+ *
+ * A directory that already holds SKILL.md is a skill, never a namespace:
+ * its subfolders (references/, scripts/, assets/) are the skill's own files
+ * and are never searched, so references/guide.md is not renamed to SKILL.md.
  */
 export function ensureSkillMdNaming(skillsDir: string): NamingResult {
   const result: NamingResult = { renamedCount: 0, errors: [] };
 
   if (!existsSync(skillsDir)) return result;
+  if (existsSync(join(skillsDir, "SKILL.md"))) return result;
 
   enforceSkillMdInDir(skillsDir, result);
 
@@ -118,7 +123,7 @@ export function ensureSkillMdNaming(skillsDir: string): NamingResult {
     try {
       const stat = lstatSync(entryPath);
       if (stat.isSymbolicLink()) continue;
-      if (stat.isDirectory()) {
+      if (stat.isDirectory() && !existsSync(join(entryPath, "SKILL.md"))) {
         enforceSkillMdInDir(entryPath, result);
       }
     } catch {

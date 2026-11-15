@@ -2091,6 +2091,9 @@ async function installRepoPlugin(
     throw new Error(`No skills or commands found in plugin "${pluginName}"`);
   }
 
+  // Every skill folder the plugin has, before --only-skills narrows the list.
+  const discoveredSkillNames = skillEntries.map((e) => e.name);
+
   // Filter skills by --only-skills if provided
   if (opts.onlySkills) {
     const allowed = new Set(opts.onlySkills.split(",").map((s) => s.trim().toLowerCase()));
@@ -2199,25 +2202,32 @@ async function installRepoPlugin(
   }
 
   // This plugin's files from the last install, to drop what upstream removed.
-  const previousPluginFiles: string[] = ensureLockfile(lockfileRoot(opts)).skills?.[pluginName]?.files ?? [];
-  const otherSkillDirs = skills.filter((s) => s.name !== pluginName).map((s) => `${s.name}/`);
+  // readLockfile, not ensureLockfile: nothing is written before the install succeeds.
+  const previousPluginFiles: string[] = readLockfile(lockfileRoot(opts))?.skills?.[pluginName]?.files ?? [];
+  // A plugin-named skill sits in the plugin folder itself, beside its sibling
+  // skills: every sibling folder, installed now or not (--only-skills), and
+  // every folder the last install recorded a SKILL.md in, is not its own.
+  const otherSkillDirs = [...new Set([
+    ...discoveredSkillNames.filter((n) => n !== pluginName),
+    ...previousPluginFiles.filter((f) => /^[^/]+\/SKILL\.md$/.test(f)).map((f) => f.split("/")[0]),
+  ])].map((n) => `${n}/`);
   const previousFilesFor = (prefix: string): string[] =>
     previousPluginFiles
       .filter((f) => f.startsWith(prefix))
-      // A plugin-named skill sits in the plugin folder itself: its siblings' files are not its own.
       .filter((f) => prefix !== "" || !otherSkillDirs.some((d) => f.startsWith(d)))
       .map((f) => f.slice(prefix.length))
       .filter((f) => f !== "SKILL.md");
-  const doneBases = new Set<string>();
+  // baseDir -> whether its one shared copy was written.
+  const doneBases = new Map<string, boolean>();
   for (const agent of selectedAgents) {
     const baseDir = resolveInstallBase(opts, agent);
     const plugDir = basename(baseDir) === pluginName ? baseDir : join(baseDir, pluginName);
     // 0894: shared readers share one copy in .agents/skills.
     if (doneBases.has(baseDir)) {
-      locations.push(`${agent.displayName}: ${plugDir}`);
+      if (doneBases.get(baseDir)) locations.push(`${agent.displayName}: ${plugDir}`);
       continue;
     }
-    doneBases.add(baseDir);
+    doneBases.set(baseDir, false);
 
     try {
       // Skills: {agent-dir}/{plugin-name}/{skill-name}/SKILL.md
@@ -2240,6 +2250,7 @@ async function installRepoPlugin(
         writeFileSync(join(plugDir, cmd.name), cmd.content, "utf-8");
       }
       ensureSkillMdNaming(plugDir);
+      doneBases.set(baseDir, true);
       locations.push(`${agent.displayName}: ${plugDir}`);
     } catch (err) {
       console.error(

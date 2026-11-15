@@ -2383,7 +2383,7 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
 
   it("passes the skill's files from the last install so removed upstream files are cleaned up", async () => {
     setupHappyPath();
-    mockEnsureLockfile.mockReturnValue({
+    mockReadLockfile.mockReturnValue({
       version: 1,
       agents: [],
       skills: {
@@ -2403,6 +2403,55 @@ describe("addCommand with --repo flag (remote plugin install)", () => {
 
     expect(mockWriteAgentFiles).toHaveBeenCalledTimes(1);
     expect(mockWriteAgentFiles.mock.calls[0][2]).toMatchObject({ previousFiles: ["scripts/old.py"] });
+    mockReadLockfile.mockReturnValue(null);
+  });
+
+  it("never hands a plugin-named skill its filtered-out siblings' files", async () => {
+    setupHappyPath();
+    const json = JSON.stringify({ name: "x", plugins: [{ name: "kit", source: "./plugins/kit", version: "1.0.0" }] });
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("marketplace.json")) return { ok: true, text: async () => json, json: async () => JSON.parse(json) };
+      if (url.endsWith("/contents/plugins/kit/skills")) return { ok: true, json: async () => [{ name: "kit", type: "dir" }, { name: "react", type: "dir" }] };
+      if (url.endsWith("/skills/kit/SKILL.md")) return { ok: true, text: async () => "# Kit" };
+      return { ok: false };
+    }) as unknown as typeof fetch;
+    mockReadLockfile.mockReturnValue({
+      version: 1, agents: [], createdAt: "", updatedAt: "",
+      skills: { kit: { version: "1.0.0", sha: "x", tier: "VERIFIED", installedAt: "", source: "github:o/r#plugin:kit",
+        files: ["SKILL.md", "notes/old.md", "react/SKILL.md", "react/references/r.md", "vue/SKILL.md", "vue/x.md"] } },
+    });
+    mockPrepareGitHubSkillBundle.mockResolvedValue({
+      ok: true,
+      bundle: { files: { "scripts/k.py": "x" }, executables: [], fileList: ["SKILL.md", "scripts/k.py"], skipped: [], totalBytes: 1 },
+    });
+
+    await addCommand("ignored-source", { repo: "o/r", plugin: "kit", onlySkills: "kit" });
+
+    expect(mockWriteAgentFiles).toHaveBeenCalledTimes(1);
+    expect(mockWriteAgentFiles.mock.calls[0][2]).toMatchObject({ previousFiles: ["notes/old.md"] });
+    mockReadLockfile.mockReturnValue(null);
+  });
+
+  it("writes no lockfile when the only (shared) install base fails for every agent", async () => {
+    setupHappyPath();
+    mockDetectInstalledAgents.mockResolvedValue([
+      makeAgent({ id: "codex", displayName: "Codex", readsSharedSkills: { global: true, project: true } }),
+      makeAgent({ id: "cursor", displayName: "Cursor", readsSharedSkills: { global: true, project: true } }),
+    ]);
+    mockPrepareGitHubSkillBundle.mockResolvedValue({
+      ok: true,
+      bundle: { files: { "scripts/a.py": "x" }, executables: [], fileList: ["SKILL.md", "scripts/a.py"], skipped: [], totalBytes: 1 },
+    });
+    mockWriteAgentFiles.mockImplementation(() => { throw new Error("disk full"); });
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+    try {
+      await addCommand("ignored-source", { repo: "anton-abyzov/vskill", plugin: "frontend", onlySkills: "nextjs" });
+    } catch { /* expected */ }
+    exitSpy.mockRestore();
+    mockWriteAgentFiles.mockReset();
+
+    expect(mockWriteLockfile).not.toHaveBeenCalled();
+    expect(mockEnsureLockfile).not.toHaveBeenCalled();
   });
 
   it("writes lockfile with github source format", async () => {
